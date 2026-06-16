@@ -11,9 +11,9 @@ use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
-    parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr, parse_if_expr,
-    parse_let_expr, parse_module_expr, parse_quote_expr, parse_struct_expr, parse_try_expr,
-    parse_while_expr,
+    KwStmt, parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr, parse_if_expr,
+    parse_keyword_stmt, parse_let_expr, parse_module_expr, parse_quote_expr, parse_struct_expr,
+    parse_try_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -67,6 +67,87 @@ fn parse_expr_in(
         }
         Some(TokKind::ModuleKw | TokKind::BaremoduleKw) => {
             return parse_module_expr(tokens, start, diagnostics);
+        }
+        Some(TokKind::ReturnKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::RETURN_EXPR,
+                KwStmt::Expr,
+                diagnostics,
+            );
+        }
+        Some(TokKind::BreakKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::BREAK_EXPR,
+                KwStmt::Bare,
+                diagnostics,
+            );
+        }
+        Some(TokKind::ContinueKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::CONTINUE_EXPR,
+                KwStmt::Bare,
+                diagnostics,
+            );
+        }
+        Some(TokKind::ConstKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::CONST_STMT,
+                KwStmt::Expr,
+                diagnostics,
+            );
+        }
+        Some(TokKind::GlobalKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::GLOBAL_STMT,
+                KwStmt::Expr,
+                diagnostics,
+            );
+        }
+        Some(TokKind::LocalKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::LOCAL_STMT,
+                KwStmt::Expr,
+                diagnostics,
+            );
+        }
+        Some(TokKind::ImportKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::IMPORT_STMT,
+                KwStmt::Path,
+                diagnostics,
+            );
+        }
+        Some(TokKind::UsingKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::USING_STMT,
+                KwStmt::Path,
+                diagnostics,
+            );
+        }
+        Some(TokKind::ExportKw) => {
+            return parse_keyword_stmt(
+                tokens,
+                start,
+                SyntaxKind::EXPORT_STMT,
+                KwStmt::Path,
+                diagnostics,
+            );
         }
         _ => {}
     }

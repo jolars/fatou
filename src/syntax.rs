@@ -46,6 +46,15 @@ pub enum SyntaxKind {
     MODULE_DEF,
     DO_EXPR,
     DO_PARAMS,
+    RETURN_EXPR,
+    BREAK_EXPR,
+    CONTINUE_EXPR,
+    CONST_STMT,
+    GLOBAL_STMT,
+    LOCAL_STMT,
+    IMPORT_STMT,
+    USING_STMT,
+    EXPORT_STMT,
 
     // --- Trivia tokens ---
     WHITESPACE,
@@ -81,6 +90,15 @@ pub enum SyntaxKind {
     MODULE_KW,
     BAREMODULE_KW,
     DO_KW,
+    RETURN_KW,
+    BREAK_KW,
+    CONTINUE_KW,
+    CONST_KW,
+    GLOBAL_KW,
+    LOCAL_KW,
+    IMPORT_KW,
+    USING_KW,
+    EXPORT_KW,
 
     // --- Operator tokens ---
     EQ,

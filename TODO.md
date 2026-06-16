@@ -27,8 +27,13 @@ through), so the grammar can grow incrementally.
   (`DO_PARAMS`) and the shared block/`end` helpers. Same-line only (`do` must sit
   on the call's line); terminal in the chain, so calling its result needs
   explicit parens.
-- [ ] `return`, `break`, `continue`, `const`, `global`, `local`, `import`,
-  `using`, `export`.
+- [x] `return`, `break`, `continue`, `const`, `global`, `local`, `import`,
+  `using`, `export`. Leading-keyword statement forms (no `… end`), parsed by
+  the shared `parse_keyword_stmt` in `structural.rs`: control flow is bare or
+  takes an optional operand; `const`/`global`/`local` parse their first operand
+  as an expression then carry the rest of the line through; `import`/`using`/
+  `export` carry the whole clause through verbatim (dedicated `:`/`.` path trees
+  come with the operators below).
 - [ ] Anonymous functions and `->`; short-form function definitions
   (`f(x) = …`).
 - [ ] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command

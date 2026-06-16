@@ -49,6 +49,15 @@ pub(crate) enum TokKind {
     MutableKw,
     ModuleKw,
     BaremoduleKw,
+    ReturnKw,
+    BreakKw,
+    ContinueKw,
+    ConstKw,
+    GlobalKw,
+    LocalKw,
+    ImportKw,
+    UsingKw,
+    ExportKw,
 
     // Operators
     Eq,
@@ -443,6 +452,15 @@ fn keyword_kind(text: &str) -> Option<TokKind> {
         "mutable" => TokKind::MutableKw,
         "module" => TokKind::ModuleKw,
         "baremodule" => TokKind::BaremoduleKw,
+        "return" => TokKind::ReturnKw,
+        "break" => TokKind::BreakKw,
+        "continue" => TokKind::ContinueKw,
+        "const" => TokKind::ConstKw,
+        "global" => TokKind::GlobalKw,
+        "local" => TokKind::LocalKw,
+        "import" => TokKind::ImportKw,
+        "using" => TokKind::UsingKw,
+        "export" => TokKind::ExportKw,
         _ => return None,
     })
 }

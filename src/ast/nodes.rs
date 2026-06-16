@@ -60,6 +60,15 @@ ast_node!(StructDef, SyntaxKind::STRUCT_DEF);
 ast_node!(ModuleDef, SyntaxKind::MODULE_DEF);
 ast_node!(DoExpr, SyntaxKind::DO_EXPR);
 ast_node!(DoParams, SyntaxKind::DO_PARAMS);
+ast_node!(ReturnExpr, SyntaxKind::RETURN_EXPR);
+ast_node!(BreakExpr, SyntaxKind::BREAK_EXPR);
+ast_node!(ContinueExpr, SyntaxKind::CONTINUE_EXPR);
+ast_node!(ConstStmt, SyntaxKind::CONST_STMT);
+ast_node!(GlobalStmt, SyntaxKind::GLOBAL_STMT);
+ast_node!(LocalStmt, SyntaxKind::LOCAL_STMT);
+ast_node!(ImportStmt, SyntaxKind::IMPORT_STMT);
+ast_node!(UsingStmt, SyntaxKind::USING_STMT);
+ast_node!(ExportStmt, SyntaxKind::EXPORT_STMT);
 
 impl Name {
     /// The identifier token.

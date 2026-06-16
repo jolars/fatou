@@ -6,6 +6,11 @@
 //! The `do` block (`f(x) do y … end`) is the one form not opened by a leading
 //! keyword: it is postfix on a call, so [`parse_do_block`] wraps an
 //! already-parsed expression and is driven from the postfix chain in `expr`.
+//!
+//! Two more leading-keyword families live here even though they have no `end`:
+//! the simple statement forms parsed by [`parse_keyword_stmt`] — control flow
+//! (`return`/`break`/`continue`), declarations (`const`/`global`/`local`), and
+//! module directives (`import`/`using`/`export`).
 
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
@@ -321,6 +326,65 @@ pub(crate) fn parse_module_expr(
     );
     i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+/// The shape of a simple keyword statement's body — the part (if any) that
+/// follows the keyword on its line.
+pub(crate) enum KwStmt {
+    /// Just the keyword (`break`, `continue`); any trailing trivia is left to
+    /// the enclosing block loop, exactly like a single-token atom.
+    Bare,
+    /// An optional leading expression, then verbatim passthrough of the rest of
+    /// the line (`return [expr]`, `const x = 1`, `global a, b`).
+    Expr,
+    /// Pure verbatim passthrough of the rest of the line (`import A: b`,
+    /// `using A.B`, `export a, b`). The module-path/name grammar uses `:`/`.`/`,`
+    /// that have no dedicated trees yet, so parsing it as an expression would
+    /// misread `:` as a range and `.` as field access (see `TODO.md`).
+    Path,
+}
+
+/// Parse a simple keyword-led statement that is not a `… end` block form. The
+/// keyword at `start` opens `node_kind`; `body` selects what follows it on the
+/// line. Losslessness holds: every same-line token is either parsed into a
+/// subtree or carried through verbatim.
+pub(crate) fn parse_keyword_stmt(
+    tokens: &[Token],
+    start: usize,
+    node_kind: SyntaxKind,
+    body: KwStmt,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
+
+    let mut i = start + 1;
+    if !matches!(body, KwStmt::Bare) {
+        let operand_start = ctx.skip_ws(i);
+        push_range(&mut events, i, operand_start);
+        i = operand_start;
+
+        if matches!(body, KwStmt::Expr)
+            && !header_ends(&ctx, i)
+            && let Some(expr) = parse_expr(tokens, i, 0, diagnostics)
+        {
+            events.extend(expr.events);
+            i = expr.end;
+        }
+
+        // Carry any remaining same-line tokens through verbatim.
+        while !header_ends(&ctx, i) {
+            events.push(Event::Tok(i));
+            i += 1;
+        }
+    }
+
     events.push(Event::Finish);
     Some(ExprParse {
         start,
