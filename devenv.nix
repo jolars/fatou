@@ -46,9 +46,7 @@
           "Test"
           "JuliaSyntax"
           "JET"
-          "Lint"
           "StaticLint"
-          "JuliaLowering"
         ]
       );
     };
