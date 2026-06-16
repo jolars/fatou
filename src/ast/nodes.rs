@@ -58,6 +58,8 @@ ast_node!(CatchClause, SyntaxKind::CATCH_CLAUSE);
 ast_node!(FinallyClause, SyntaxKind::FINALLY_CLAUSE);
 ast_node!(StructDef, SyntaxKind::STRUCT_DEF);
 ast_node!(ModuleDef, SyntaxKind::MODULE_DEF);
+ast_node!(DoExpr, SyntaxKind::DO_EXPR);
+ast_node!(DoParams, SyntaxKind::DO_PARAMS);
 
 impl Name {
     /// The identifier token.
@@ -96,6 +98,14 @@ impl IfExpr {
 impl FunctionDef {
     /// The function signature, e.g. `g(x)`.
     pub fn signature(&self) -> Option<Signature> {
+        support::child(&self.0)
+    }
+}
+
+impl DoExpr {
+    /// The parameters on the `do` line, e.g. `x, y` in `f(a) do x, y`. Absent for
+    /// a bare `do`.
+    pub fn params(&self) -> Option<DoParams> {
         support::child(&self.0)
     }
 }

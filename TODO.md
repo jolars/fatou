@@ -21,8 +21,12 @@ through), so the grammar can grow incrementally.
   operators and parametric-type bullets below. **Known limitation:**
   `mutable` is lexed as a keyword, so it cannot currently be used as a bare
   identifier (it is contextual in Julia, special only before `struct`).
-- [ ] `do` blocks — postfix on a call (`f(x) do y … end`), so they need
-  different plumbing than the leading-keyword forms above.
+- [x] `do` blocks — postfix on a call (`f(x) do y … end`). Attached in the
+  postfix chain (`parse_postfix_chain`) and parsed by `parse_do_block`, which
+  reuses the generic header passthrough for the `do`-line parameters
+  (`DO_PARAMS`) and the shared block/`end` helpers. Same-line only (`do` must sit
+  on the call's line); terminal in the chain, so calling its result needs
+  explicit parens.
 - [ ] `return`, `break`, `continue`, `const`, `global`, `local`, `import`,
   `using`, `export`.
 - [ ] Anonymous functions and `->`; short-form function definitions

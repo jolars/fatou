@@ -49,6 +49,7 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::FalseKw => SyntaxKind::FALSE_KW,
         TokKind::WhileKw => SyntaxKind::WHILE_KW,
         TokKind::ForKw => SyntaxKind::FOR_KW,
+        TokKind::DoKw => SyntaxKind::DO_KW,
         TokKind::LetKw => SyntaxKind::LET_KW,
         TokKind::QuoteKw => SyntaxKind::QUOTE_KW,
         TokKind::TryKw => SyntaxKind::TRY_KW,

@@ -44,6 +44,8 @@ pub enum SyntaxKind {
     FINALLY_CLAUSE,
     STRUCT_DEF,
     MODULE_DEF,
+    DO_EXPR,
+    DO_PARAMS,
 
     // --- Trivia tokens ---
     WHITESPACE,
@@ -78,6 +80,7 @@ pub enum SyntaxKind {
     MUTABLE_KW,
     MODULE_KW,
     BAREMODULE_KW,
+    DO_KW,
 
     // --- Operator tokens ---
     EQ,

@@ -1,0 +1,158 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..143
+  DO_EXPR@0..26
+    CALL_EXPR@0..7
+      NAME@0..3
+        IDENT@0..3 "map"
+      ARG_LIST@3..7
+        LPAREN@3..4 "("
+        ARG@4..6
+          NAME@4..6
+            IDENT@4..6 "xs"
+        RPAREN@6..7 ")"
+    WHITESPACE@7..8 " "
+    DO_KW@8..10 "do"
+    WHITESPACE@10..11 " "
+    DO_PARAMS@11..12
+      NAME@11..12
+        IDENT@11..12 "x"
+    BLOCK@12..23
+      NEWLINE@12..13 "\n"
+      WHITESPACE@13..17 "    "
+      BINARY_EXPR@17..22
+        NAME@17..18
+          IDENT@17..18 "x"
+        WHITESPACE@18..19 " "
+        PLUS@19..20 "+"
+        WHITESPACE@20..21 " "
+        LITERAL@21..22
+          INTEGER@21..22 "1"
+      NEWLINE@22..23 "\n"
+    END_KW@23..26 "end"
+  NEWLINE@26..27 "\n"
+  NEWLINE@27..28 "\n"
+  DO_EXPR@28..53
+    CALL_EXPR@28..35
+      NAME@28..29
+        IDENT@28..29 "f"
+      ARG_LIST@29..35
+        LPAREN@29..30 "("
+        ARG@30..31
+          NAME@30..31
+            IDENT@30..31 "a"
+        COMMA@31..32 ","
+        WHITESPACE@32..33 " "
+        ARG@33..34
+          NAME@33..34
+            IDENT@33..34 "b"
+        RPAREN@34..35 ")"
+    WHITESPACE@35..36 " "
+    DO_KW@36..38 "do"
+    WHITESPACE@38..39 " "
+    DO_PARAMS@39..43
+      NAME@39..40
+        IDENT@39..40 "x"
+      COMMA@40..41 ","
+      WHITESPACE@41..42 " "
+      IDENT@42..43 "y"
+    BLOCK@43..50
+      NEWLINE@43..44 "\n"
+      WHITESPACE@44..48 "    "
+      NAME@48..49
+        IDENT@48..49 "x"
+      NEWLINE@49..50 "\n"
+    END_KW@50..53 "end"
+  NEWLINE@53..54 "\n"
+  NEWLINE@54..55 "\n"
+  DO_EXPR@55..82
+    CALL_EXPR@55..64
+      NAME@55..59
+        IDENT@55..59 "open"
+      ARG_LIST@59..64
+        LPAREN@59..60 "("
+        ARG@60..63
+          LITERAL@60..63
+            STRING@60..63 "\"f\""
+        RPAREN@63..64 ")"
+    WHITESPACE@64..65 " "
+    DO_KW@65..67 "do"
+    BLOCK@67..79
+      NEWLINE@67..68 "\n"
+      WHITESPACE@68..72 "    "
+      CALL_EXPR@72..78
+        NAME@72..76
+          IDENT@72..76 "read"
+        ARG_LIST@76..78
+          LPAREN@76..77 "("
+          RPAREN@77..78 ")"
+      NEWLINE@78..79 "\n"
+    END_KW@79..82 "end"
+  NEWLINE@82..83 "\n"
+  NEWLINE@83..84 "\n"
+  ASSIGNMENT_EXPR@84..125
+    NAME@84..90
+      IDENT@84..90 "result"
+    WHITESPACE@90..91 " "
+    EQ@91..92 "="
+    WHITESPACE@92..93 " "
+    DO_EXPR@93..125
+      CALL_EXPR@93..103
+        NAME@93..97
+          IDENT@93..97 "sort"
+        ARG_LIST@97..103
+          LPAREN@97..98 "("
+          ARG@98..102
+            NAME@98..102
+              IDENT@98..102 "data"
+          RPAREN@102..103 ")"
+      WHITESPACE@103..104 " "
+      DO_KW@104..106 "do"
+      WHITESPACE@106..107 " "
+      DO_PARAMS@107..111
+        NAME@107..108
+          IDENT@107..108 "a"
+        COMMA@108..109 ","
+        WHITESPACE@109..110 " "
+        IDENT@110..111 "b"
+      BLOCK@111..122
+        NEWLINE@111..112 "\n"
+        WHITESPACE@112..116 "    "
+        BINARY_EXPR@116..121
+          NAME@116..117
+            IDENT@116..117 "a"
+          WHITESPACE@117..118 " "
+          LT@118..119 "<"
+          WHITESPACE@119..120 " "
+          NAME@120..121
+            IDENT@120..121 "b"
+        NEWLINE@121..122 "\n"
+      END_KW@122..125 "end"
+  NEWLINE@125..126 "\n"
+  NEWLINE@126..127 "\n"
+  DO_EXPR@127..143
+    CALL_EXPR@127..131
+      NAME@127..128
+        IDENT@127..128 "g"
+      ARG_LIST@128..131
+        LPAREN@128..129 "("
+        ARG@129..130
+          NAME@129..130
+            IDENT@129..130 "z"
+        RPAREN@130..131 ")"
+    WHITESPACE@131..132 " "
+    DO_KW@132..134 "do"
+    WHITESPACE@134..135 " "
+    DO_PARAMS@135..136
+      NAME@135..136
+        IDENT@135..136 "w"
+    BLOCK@136..143
+      NEWLINE@136..137 "\n"
+      WHITESPACE@137..141 "    "
+      NAME@141..142
+        IDENT@141..142 "w"
+      NEWLINE@142..143 "\n"
+
+diagnostic [132..134]: expected `end`

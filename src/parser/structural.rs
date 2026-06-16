@@ -2,6 +2,10 @@
 //! `function`, `begin`, `quote`, `while`, `for`, `let`, `try/catch/else/finally`,
 //! `struct`/`mutable struct`, and `module`/`baremodule`. Each keyword opens a
 //! node, parses its clauses/header and a statement block, and closes on `end`.
+//!
+//! The `do` block (`f(x) do y … end`) is the one form not opened by a leading
+//! keyword: it is postfix on a call, so [`parse_do_block`] wraps an
+//! already-parsed expression and is driven from the postfix chain in `expr`.
 
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
@@ -323,6 +327,41 @@ pub(crate) fn parse_module_expr(
         end: i,
         events,
     })
+}
+
+/// Wrap an already-parsed call expression `lhs` in a `DO_EXPR` for the postfix
+/// `do` block form (`f(x) do y … end`). `do_idx` is the `do` keyword's token
+/// index (the caller has verified it sits on `lhs`'s line). The optional
+/// parameters on the `do` line reuse the generic header passthrough, and the
+/// body is a plain statement block closed by `end`.
+pub(crate) fn parse_do_block(
+    ctx: &ParserCtx<'_>,
+    lhs: ExprParse,
+    do_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let mut events = vec![Event::Start(SyntaxKind::DO_EXPR)];
+    events.extend(lhs.events);
+    // Whitespace between the call and `do`, then the `do` keyword itself.
+    push_range(&mut events, lhs.end, do_idx);
+    events.push(Event::Tok(do_idx));
+
+    let mut i = parse_header(
+        ctx,
+        &mut events,
+        do_idx + 1,
+        SyntaxKind::DO_PARAMS,
+        true,
+        diagnostics,
+    );
+    i = run_block(ctx, &mut events, i, END_ONLY, diagnostics);
+    i = expect_end(ctx, &mut events, i, do_idx, diagnostics);
+    events.push(Event::Finish);
+    ExprParse {
+        start: lhs.start,
+        end: i,
+        events,
+    }
 }
 
 /// Parse a `CONDITION` node (the test of an `if`/`elseif`). The condition lives

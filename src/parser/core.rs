@@ -75,6 +75,8 @@ mod tests {
             "function g(x)\n    x ^ 2\nend\n",
             "if a >= b\n    a\nelseif c\n    c\nelse\n    b\nend\n",
             "begin\n    a\n    b\nend\n",
+            "map(xs) do x\n    x + 1\nend\n",
+            "open(\"f\") do\n    read()\nend\n",
             "# a comment\nx = 1  # trailing\n",
             "#= block =#\nq = 2\n",
             "obj.field\n",

@@ -11,8 +11,9 @@ use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
-    parse_begin_expr, parse_for_expr, parse_function_expr, parse_if_expr, parse_let_expr,
-    parse_module_expr, parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
+    parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr, parse_if_expr,
+    parse_let_expr, parse_module_expr, parse_quote_expr, parse_struct_expr, parse_try_expr,
+    parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -260,6 +261,13 @@ fn parse_postfix_chain(
             }
             _ => break,
         }
+    }
+
+    // A `do` block can follow a call on the same line: `f(x) do y … end`. It is
+    // terminal in the postfix chain — to call its result you parenthesize.
+    let next = ctx.skip_ws(lhs.end);
+    if ctx.token(next).map(|t| t.kind) == Some(TokKind::DoKw) {
+        lhs = parse_do_block(ctx, lhs, next, diagnostics);
     }
     lhs
 }
