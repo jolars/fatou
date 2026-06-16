@@ -1,0 +1,102 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..95
+  FOR_EXPR@0..32
+    FOR_KW@0..3 "for"
+    WHITESPACE@3..4 " "
+    FOR_BINDING@4..13
+      NAME@4..5
+        IDENT@4..5 "i"
+      WHITESPACE@5..6 " "
+      IDENT@6..8 "in"
+      WHITESPACE@8..9 " "
+      INTEGER@9..10 "1"
+      COLON@10..11 ":"
+      INTEGER@11..13 "10"
+    BLOCK@13..29
+      NEWLINE@13..14 "\n"
+      WHITESPACE@14..18 "    "
+      CALL_EXPR@18..28
+        NAME@18..25
+          IDENT@18..25 "println"
+        ARG_LIST@25..28
+          LPAREN@25..26 "("
+          ARG@26..27
+            NAME@26..27
+              IDENT@26..27 "i"
+          RPAREN@27..28 ")"
+      NEWLINE@28..29 "\n"
+    END_KW@29..32 "end"
+  NEWLINE@32..33 "\n"
+  NEWLINE@33..34 "\n"
+  FOR_EXPR@34..63
+    FOR_KW@34..37 "for"
+    WHITESPACE@37..38 " "
+    FOR_BINDING@38..45
+      ASSIGNMENT_EXPR@38..45
+        NAME@38..39
+          IDENT@38..39 "j"
+        WHITESPACE@39..40 " "
+        EQ@40..41 "="
+        WHITESPACE@41..42 " "
+        BINARY_EXPR@42..45
+          LITERAL@42..43
+            INTEGER@42..43 "1"
+          COLON@43..44 ":"
+          LITERAL@44..45
+            INTEGER@44..45 "3"
+    BLOCK@45..60
+      NEWLINE@45..46 "\n"
+      WHITESPACE@46..50 "    "
+      ASSIGNMENT_EXPR@50..59
+        NAME@50..51
+          IDENT@50..51 "s"
+        WHITESPACE@51..52 " "
+        EQ@52..53 "="
+        WHITESPACE@53..54 " "
+        BINARY_EXPR@54..59
+          NAME@54..55
+            IDENT@54..55 "s"
+          WHITESPACE@55..56 " "
+          PLUS@56..57 "+"
+          WHITESPACE@57..58 " "
+          NAME@58..59
+            IDENT@58..59 "j"
+      NEWLINE@59..60 "\n"
+    END_KW@60..63 "end"
+  NEWLINE@63..64 "\n"
+  NEWLINE@64..65 "\n"
+  WHILE_EXPR@65..94
+    WHILE_KW@65..70 "while"
+    WHITESPACE@70..71 " "
+    CONDITION@71..76
+      BINARY_EXPR@71..76
+        NAME@71..72
+          IDENT@71..72 "x"
+        WHITESPACE@72..73 " "
+        GT@73..74 ">"
+        WHITESPACE@74..75 " "
+        LITERAL@75..76
+          INTEGER@75..76 "0"
+    BLOCK@76..91
+      NEWLINE@76..77 "\n"
+      WHITESPACE@77..81 "    "
+      ASSIGNMENT_EXPR@81..90
+        NAME@81..82
+          IDENT@81..82 "x"
+        WHITESPACE@82..83 " "
+        EQ@83..84 "="
+        WHITESPACE@84..85 " "
+        BINARY_EXPR@85..90
+          NAME@85..86
+            IDENT@85..86 "x"
+          WHITESPACE@86..87 " "
+          MINUS@87..88 "-"
+          WHITESPACE@88..89 " "
+          LITERAL@89..90
+            INTEGER@89..90 "1"
+      NEWLINE@90..91 "\n"
+    END_KW@91..94 "end"
+  NEWLINE@94..95 "\n"

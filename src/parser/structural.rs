@@ -1,6 +1,7 @@
-//! Recursive-descent parsing for Julia's block forms: `if/elseif/else … end`,
-//! `function … end`, and `begin … end`. Each keyword opens a node, parses its
-//! clauses and a statement block, and closes on `end`.
+//! Recursive-descent parsing for Julia's `… end` block forms: `if/elseif/else`,
+//! `function`, `begin`, `quote`, `while`, `for`, `let`, `try/catch/else/finally`,
+//! `struct`/`mutable struct`, and `module`/`baremodule`. Each keyword opens a
+//! node, parses its clauses/header and a statement block, and closes on `end`.
 
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
@@ -12,6 +13,12 @@ use crate::syntax::SyntaxKind;
 /// Keywords that terminate a statement block.
 const IF_TERMINATORS: &[TokKind] = &[TokKind::EndKw, TokKind::ElseifKw, TokKind::ElseKw];
 const END_ONLY: &[TokKind] = &[TokKind::EndKw];
+const TRY_TERMINATORS: &[TokKind] = &[
+    TokKind::EndKw,
+    TokKind::CatchKw,
+    TokKind::ElseKw,
+    TokKind::FinallyKw,
+];
 
 pub(crate) fn parse_if_expr(
     tokens: &[Token],
@@ -88,10 +95,227 @@ pub(crate) fn parse_begin_expr(
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
+    parse_block_only(tokens, start, SyntaxKind::BEGIN_EXPR, diagnostics)
+}
+
+pub(crate) fn parse_quote_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    parse_block_only(tokens, start, SyntaxKind::QUOTE_EXPR, diagnostics)
+}
+
+/// A keyword form whose body is a bare statement block: `begin … end` and
+/// `quote … end`. The keyword opens `node_kind`, a block runs to `end`.
+fn parse_block_only(
+    tokens: &[Token],
+    start: usize,
+    node_kind: SyntaxKind,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
     let ctx = ParserCtx::new(tokens);
-    let mut events = vec![Event::Start(SyntaxKind::BEGIN_EXPR), Event::Tok(start)];
+    let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
     let mut i = run_block(&ctx, &mut events, start + 1, END_ONLY, diagnostics);
+    i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+pub(crate) fn parse_while_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::WHILE_EXPR), Event::Tok(start)];
+
+    let mut i = parse_condition(&ctx, &mut events, start + 1, diagnostics);
+    i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
+    i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+pub(crate) fn parse_for_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::FOR_EXPR), Event::Tok(start)];
+
+    let mut i = parse_header(
+        &ctx,
+        &mut events,
+        start + 1,
+        SyntaxKind::FOR_BINDING,
+        true,
+        diagnostics,
+    );
+    i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
+    i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+pub(crate) fn parse_let_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::LET_EXPR), Event::Tok(start)];
+
+    let mut i = parse_header(
+        &ctx,
+        &mut events,
+        start + 1,
+        SyntaxKind::LET_BINDINGS,
+        true,
+        diagnostics,
+    );
+    i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
+    i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+pub(crate) fn parse_try_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::TRY_EXPR), Event::Tok(start)];
+
+    let mut i = run_block(&ctx, &mut events, start + 1, TRY_TERMINATORS, diagnostics);
+
+    loop {
+        match ctx.token(i).map(|t| t.kind) {
+            Some(TokKind::CatchKw) => {
+                events.push(Event::Start(SyntaxKind::CATCH_CLAUSE));
+                events.push(Event::Tok(i));
+                // Optional exception variable on the `catch` line (`catch e`).
+                let var_start = ctx.skip_ws(i + 1);
+                push_range(&mut events, i + 1, var_start);
+                let mut j = var_start;
+                if !header_ends(&ctx, var_start)
+                    && let Some(var) = parse_expr(tokens, var_start, 0, diagnostics)
+                {
+                    events.extend(var.events);
+                    j = var.end;
+                }
+                i = run_block(&ctx, &mut events, j, TRY_TERMINATORS, diagnostics);
+                events.push(Event::Finish);
+            }
+            Some(TokKind::ElseKw) => {
+                events.push(Event::Start(SyntaxKind::ELSE_CLAUSE));
+                events.push(Event::Tok(i));
+                i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
+                events.push(Event::Finish);
+            }
+            Some(TokKind::FinallyKw) => {
+                events.push(Event::Start(SyntaxKind::FINALLY_CLAUSE));
+                events.push(Event::Tok(i));
+                i = run_block(&ctx, &mut events, i + 1, END_ONLY, diagnostics);
+                events.push(Event::Finish);
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+/// `struct Name … end` and `mutable struct Name … end`. Dispatched on either the
+/// `struct` or the (contextual) `mutable` keyword.
+pub(crate) fn parse_struct_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::STRUCT_DEF)];
+
+    // Optional leading `mutable`.
+    let mut i = start;
+    if ctx.token(i).map(|t| t.kind) == Some(TokKind::MutableKw) {
+        events.push(Event::Tok(i));
+        let next = ctx.skip_ws(i + 1);
+        push_range(&mut events, i + 1, next);
+        i = next;
+    }
+
+    // The `struct` keyword.
+    if ctx.token(i).map(|t| t.kind) == Some(TokKind::StructKw) {
+        events.push(Event::Tok(i));
+        i += 1;
+    } else {
+        let kw = &ctx.tokens()[start];
+        push_diagnostic(diagnostics, "expected `struct`", kw.start, kw.end);
+    }
+
+    i = parse_header(
+        &ctx,
+        &mut events,
+        i,
+        SyntaxKind::SIGNATURE,
+        false,
+        diagnostics,
+    );
+    i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
+    i = expect_end(&ctx, &mut events, i, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+/// `module Name … end` and `baremodule Name … end`.
+pub(crate) fn parse_module_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::MODULE_DEF), Event::Tok(start)];
+
+    let mut i = parse_header(
+        &ctx,
+        &mut events,
+        start + 1,
+        SyntaxKind::SIGNATURE,
+        false,
+        diagnostics,
+    );
+    i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
     events.push(Event::Finish);
     Some(ExprParse {
@@ -123,6 +347,62 @@ fn parse_condition(
             let tok = &ctx.tokens()[after_kw.min(ctx.tokens().len() - 1)];
             push_diagnostic(diagnostics, "expected a condition", tok.start, tok.end);
             cond_start
+        }
+    }
+}
+
+/// Parse the header that sits on a block keyword's line, wrapping it in
+/// `node_kind`. When `run_expr` is set, an expression is parsed first (so
+/// `for i = 1:10` yields an assignment); any remaining tokens on the line are
+/// then carried through verbatim. This keeps losslessness without committing to
+/// dedicated `in`/`∈`/`<:` operators yet (those land with the operators and
+/// parametric-type work; see `TODO.md`). An empty header emits no node. Returns
+/// the index after the header.
+fn parse_header(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    after_kw: usize,
+    node_kind: SyntaxKind,
+    run_expr: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let header_start = ctx.skip_ws(after_kw);
+    push_range(events, after_kw, header_start);
+
+    if header_ends(ctx, header_start) {
+        return header_start;
+    }
+
+    events.push(Event::Start(node_kind));
+    let mut i = header_start;
+    if run_expr && let Some(expr) = parse_expr(ctx.tokens(), header_start, 0, diagnostics) {
+        events.extend(expr.events);
+        i = expr.end;
+    }
+    while !header_ends(ctx, i) {
+        events.push(Event::Tok(i));
+        i += 1;
+    }
+    events.push(Event::Finish);
+    i
+}
+
+/// Whether the keyword-line header ends at `i`: at a newline, a `;`, a block
+/// terminator keyword (so one-liners like `struct Foo end` stop correctly), or
+/// end of input.
+fn header_ends(ctx: &ParserCtx<'_>, i: usize) -> bool {
+    match ctx.token(i).map(|t| t.kind) {
+        None => true,
+        Some(k) => {
+            matches!(k, TokKind::Newline | TokKind::Semicolon)
+                || matches!(
+                    k,
+                    TokKind::EndKw
+                        | TokKind::ElseifKw
+                        | TokKind::ElseKw
+                        | TokKind::CatchKw
+                        | TokKind::FinallyKw
+                )
         }
     }
 }

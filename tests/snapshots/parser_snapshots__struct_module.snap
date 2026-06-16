@@ -1,0 +1,94 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..157
+  STRUCT_DEF@0..28
+    STRUCT_KW@0..6 "struct"
+    WHITESPACE@6..7 " "
+    SIGNATURE@7..12
+      IDENT@7..12 "Point"
+    BLOCK@12..25
+      NEWLINE@12..13 "\n"
+      WHITESPACE@13..17 "    "
+      NAME@17..18
+        IDENT@17..18 "x"
+      NEWLINE@18..19 "\n"
+      WHITESPACE@19..23 "    "
+      NAME@23..24
+        IDENT@23..24 "y"
+      NEWLINE@24..25 "\n"
+    END_KW@25..28 "end"
+  NEWLINE@28..29 "\n"
+  NEWLINE@29..30 "\n"
+  STRUCT_DEF@30..62
+    MUTABLE_KW@30..37 "mutable"
+    WHITESPACE@37..38 " "
+    STRUCT_KW@38..44 "struct"
+    WHITESPACE@44..45 " "
+    SIGNATURE@45..52
+      IDENT@45..52 "Counter"
+    BLOCK@52..59
+      NEWLINE@52..53 "\n"
+      WHITESPACE@53..57 "    "
+      NAME@57..58
+        IDENT@57..58 "n"
+      NEWLINE@58..59 "\n"
+    END_KW@59..62 "end"
+  NEWLINE@62..63 "\n"
+  NEWLINE@63..64 "\n"
+  STRUCT_DEF@64..111
+    STRUCT_KW@64..70 "struct"
+    WHITESPACE@70..71 " "
+    SIGNATURE@71..97
+      IDENT@71..78 "Wrapper"
+      WHITESPACE@78..79 " "
+      LT@79..80 "<"
+      COLON@80..81 ":"
+      WHITESPACE@81..82 " "
+      IDENT@82..97 "AbstractWrapper"
+    BLOCK@97..108
+      NEWLINE@97..98 "\n"
+      WHITESPACE@98..102 "    "
+      NAME@102..107
+        IDENT@102..107 "value"
+      NEWLINE@107..108 "\n"
+    END_KW@108..111 "end"
+  NEWLINE@111..112 "\n"
+  NEWLINE@112..113 "\n"
+  MODULE_DEF@113..138
+    MODULE_KW@113..119 "module"
+    WHITESPACE@119..120 " "
+    SIGNATURE@120..121
+      IDENT@120..121 "M"
+    BLOCK@121..135
+      NEWLINE@121..122 "\n"
+      WHITESPACE@122..126 "    "
+      ASSIGNMENT_EXPR@126..134
+        CALL_EXPR@126..130
+          NAME@126..127
+            IDENT@126..127 "f"
+          ARG_LIST@127..130
+            LPAREN@127..128 "("
+            ARG@128..129
+              NAME@128..129
+                IDENT@128..129 "x"
+            RPAREN@129..130 ")"
+        WHITESPACE@130..131 " "
+        EQ@131..132 "="
+        WHITESPACE@132..133 " "
+        NAME@133..134
+          IDENT@133..134 "x"
+      NEWLINE@134..135 "\n"
+    END_KW@135..138 "end"
+  NEWLINE@138..139 "\n"
+  NEWLINE@139..140 "\n"
+  MODULE_DEF@140..156
+    BAREMODULE_KW@140..150 "baremodule"
+    WHITESPACE@150..151 " "
+    SIGNATURE@151..152
+      IDENT@151..152 "B"
+    BLOCK@152..153
+      NEWLINE@152..153 "\n"
+    END_KW@153..156 "end"
+  NEWLINE@156..157 "\n"

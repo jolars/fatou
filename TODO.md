@@ -13,9 +13,16 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried through),
 so the grammar can grow incrementally.
 
-- [ ] More block/keyword forms: `for … end`, `while … end`, `let … end`,
-  `try/catch/finally`, `struct`/`mutable struct`, `module`/`baremodule`,
-  `quote … end`, `do` blocks.
+- [x] More leading-keyword block forms: `for … end`, `while … end`,
+  `let … end`, `try/catch/else/finally`, `struct`/`mutable struct`,
+  `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
+  `struct Foo <: Bar`) use a generic lossless passthrough for now — dedicated
+  `in`/`∈`/`<:` operators and richer header trees come with the operators and
+  parametric-type bullets below. **Known limitation:** `mutable` is lexed as a
+  keyword, so it cannot currently be used as a bare identifier (it is contextual
+  in Julia, special only before `struct`).
+- [ ] `do` blocks — postfix on a call (`f(x) do y … end`), so they need
+  different plumbing than the leading-keyword forms above.
 - [ ] `return`, `break`, `continue`, `const`, `global`, `local`, `import`,
   `using`, `export`.
 - [ ] Anonymous functions and `->`; short-form function definitions

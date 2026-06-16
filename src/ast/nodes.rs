@@ -47,6 +47,17 @@ ast_node!(FunctionDef, SyntaxKind::FUNCTION_DEF);
 ast_node!(Signature, SyntaxKind::SIGNATURE);
 ast_node!(Block, SyntaxKind::BLOCK);
 ast_node!(BeginExpr, SyntaxKind::BEGIN_EXPR);
+ast_node!(QuoteExpr, SyntaxKind::QUOTE_EXPR);
+ast_node!(WhileExpr, SyntaxKind::WHILE_EXPR);
+ast_node!(ForExpr, SyntaxKind::FOR_EXPR);
+ast_node!(ForBinding, SyntaxKind::FOR_BINDING);
+ast_node!(LetExpr, SyntaxKind::LET_EXPR);
+ast_node!(LetBindings, SyntaxKind::LET_BINDINGS);
+ast_node!(TryExpr, SyntaxKind::TRY_EXPR);
+ast_node!(CatchClause, SyntaxKind::CATCH_CLAUSE);
+ast_node!(FinallyClause, SyntaxKind::FINALLY_CLAUSE);
+ast_node!(StructDef, SyntaxKind::STRUCT_DEF);
+ast_node!(ModuleDef, SyntaxKind::MODULE_DEF);
 
 impl Name {
     /// The identifier token.

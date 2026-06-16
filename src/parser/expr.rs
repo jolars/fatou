@@ -10,7 +10,10 @@ use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
-use crate::parser::structural::{parse_begin_expr, parse_function_expr, parse_if_expr};
+use crate::parser::structural::{
+    parse_begin_expr, parse_for_expr, parse_function_expr, parse_if_expr, parse_let_expr,
+    parse_module_expr, parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
+};
 use crate::syntax::SyntaxKind;
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -53,6 +56,17 @@ fn parse_expr_in(
         Some(TokKind::IfKw) => return parse_if_expr(tokens, start, diagnostics),
         Some(TokKind::FunctionKw) => return parse_function_expr(tokens, start, diagnostics),
         Some(TokKind::BeginKw) => return parse_begin_expr(tokens, start, diagnostics),
+        Some(TokKind::QuoteKw) => return parse_quote_expr(tokens, start, diagnostics),
+        Some(TokKind::WhileKw) => return parse_while_expr(tokens, start, diagnostics),
+        Some(TokKind::ForKw) => return parse_for_expr(tokens, start, diagnostics),
+        Some(TokKind::LetKw) => return parse_let_expr(tokens, start, diagnostics),
+        Some(TokKind::TryKw) => return parse_try_expr(tokens, start, diagnostics),
+        Some(TokKind::StructKw | TokKind::MutableKw) => {
+            return parse_struct_expr(tokens, start, diagnostics);
+        }
+        Some(TokKind::ModuleKw | TokKind::BaremoduleKw) => {
+            return parse_module_expr(tokens, start, diagnostics);
+        }
         _ => {}
     }
 
