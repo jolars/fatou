@@ -1,0 +1,115 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..143
+  FUNCTION_DEF@0..119
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..13
+      CALL_EXPR@9..13
+        NAME@9..10
+          IDENT@9..10 "g"
+        ARG_LIST@10..13
+          LPAREN@10..11 "("
+          ARG@11..12
+            NAME@11..12
+              IDENT@11..12 "x"
+          RPAREN@12..13 ")"
+    BLOCK@13..116
+      NEWLINE@13..14 "\n"
+      WHITESPACE@14..18 "    "
+      ASSIGNMENT_EXPR@18..31
+        NAME@18..19
+          IDENT@18..19 "y"
+        WHITESPACE@19..20 " "
+        EQ@20..21 "="
+        WHITESPACE@21..22 " "
+        BINARY_EXPR@22..31
+          BINARY_EXPR@22..27
+            NAME@22..23
+              IDENT@22..23 "x"
+            WHITESPACE@23..24 " "
+            CARET@24..25 "^"
+            WHITESPACE@25..26 " "
+            LITERAL@26..27
+              INTEGER@26..27 "2"
+          WHITESPACE@27..28 " "
+          PLUS@28..29 "+"
+          WHITESPACE@29..30 " "
+          LITERAL@30..31
+            INTEGER@30..31 "1"
+      NEWLINE@31..32 "\n"
+      WHITESPACE@32..36 "    "
+      IF_EXPR@36..115
+        IF_KW@36..38 "if"
+        WHITESPACE@38..39 " "
+        CONDITION@39..46
+          BINARY_EXPR@39..46
+            NAME@39..40
+              IDENT@39..40 "y"
+            WHITESPACE@40..41 " "
+            GE@41..43 ">="
+            WHITESPACE@43..44 " "
+            LITERAL@44..46
+              INTEGER@44..46 "10"
+        BLOCK@46..61
+          NEWLINE@46..47 "\n"
+          WHITESPACE@47..55 "        "
+          NAME@55..56
+            IDENT@55..56 "y"
+          NEWLINE@56..57 "\n"
+          WHITESPACE@57..61 "    "
+        ELSEIF_CLAUSE@61..93
+          ELSEIF_KW@61..67 "elseif"
+          WHITESPACE@67..68 " "
+          CONDITION@68..74
+            BINARY_EXPR@68..74
+              NAME@68..69
+                IDENT@68..69 "y"
+              WHITESPACE@69..70 " "
+              GE@70..72 ">="
+              WHITESPACE@72..73 " "
+              LITERAL@73..74
+                INTEGER@73..74 "5"
+          BLOCK@74..93
+            NEWLINE@74..75 "\n"
+            WHITESPACE@75..83 "        "
+            BINARY_EXPR@83..88
+              NAME@83..84
+                IDENT@83..84 "y"
+              WHITESPACE@84..85 " "
+              MINUS@85..86 "-"
+              WHITESPACE@86..87 " "
+              LITERAL@87..88
+                INTEGER@87..88 "1"
+            NEWLINE@88..89 "\n"
+            WHITESPACE@89..93 "    "
+        ELSE_CLAUSE@93..112
+          ELSE_KW@93..97 "else"
+          BLOCK@97..112
+            NEWLINE@97..98 "\n"
+            WHITESPACE@98..106 "        "
+            NAME@106..107
+              IDENT@106..107 "x"
+            NEWLINE@107..108 "\n"
+            WHITESPACE@108..112 "    "
+        END_KW@112..115 "end"
+      NEWLINE@115..116 "\n"
+    END_KW@116..119 "end"
+  NEWLINE@119..120 "\n"
+  NEWLINE@120..121 "\n"
+  BEGIN_EXPR@121..142
+    BEGIN_KW@121..126 "begin"
+    BLOCK@126..139
+      NEWLINE@126..127 "\n"
+      WHITESPACE@127..131 "    "
+      NAME@131..132
+        IDENT@131..132 "a"
+      NEWLINE@132..133 "\n"
+      WHITESPACE@133..137 "    "
+      NAME@137..138
+        IDENT@137..138 "b"
+      NEWLINE@138..139 "\n"
+    END_KW@139..142 "end"
+  NEWLINE@142..143 "\n"

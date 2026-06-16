@@ -1,0 +1,59 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..53
+  ASSIGNMENT_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    LITERAL@4..5
+      INTEGER@4..5 "1"
+  NEWLINE@5..6 "\n"
+  ASSIGNMENT_EXPR@6..14
+    NAME@6..7
+      IDENT@6..7 "y"
+    WHITESPACE@7..8 " "
+    EQ@8..9 "="
+    WHITESPACE@9..10 " "
+    LITERAL@10..14
+      FLOAT@10..14 "3.14"
+  NEWLINE@14..15 "\n"
+  ASSIGNMENT_EXPR@15..26
+    NAME@15..16
+      IDENT@15..16 "s"
+    WHITESPACE@16..17 " "
+    EQ@17..18 "="
+    WHITESPACE@18..19 " "
+    LITERAL@19..26
+      STRING@19..26 "\"hello\""
+  NEWLINE@26..27 "\n"
+  ASSIGNMENT_EXPR@27..34
+    NAME@27..28
+      IDENT@27..28 "c"
+    WHITESPACE@28..29 " "
+    EQ@29..30 "="
+    WHITESPACE@30..31 " "
+    LITERAL@31..34
+      CHAR@31..34 "'a'"
+  NEWLINE@34..35 "\n"
+  ASSIGNMENT_EXPR@35..43
+    NAME@35..36
+      IDENT@35..36 "b"
+    WHITESPACE@36..37 " "
+    EQ@37..38 "="
+    WHITESPACE@38..39 " "
+    LITERAL@39..43
+      TRUE_KW@39..43 "true"
+  NEWLINE@43..44 "\n"
+  ASSIGNMENT_EXPR@44..52
+    NAME@44..45
+      IDENT@44..45 "h"
+    WHITESPACE@45..46 " "
+    EQ@46..47 "="
+    WHITESPACE@47..48 " "
+    LITERAL@48..52
+      INTEGER@48..52 "0x1f"
+  NEWLINE@52..53 "\n"

@@ -1,0 +1,43 @@
+[package]
+name = "fatou"
+version = "0.1.0"
+edition = "2024"
+readme = "README.md"
+description = "A language server, formatter, and linter for Julia"
+license = "MIT"
+repository = "https://github.com/jolars/fatou"
+authors = ["Johan Larsson <johan@jolars.co>"]
+keywords = ["julia", "language-server", "formatter", "linter"]
+categories = [
+  "command-line-utilities",
+  "text-processing",
+  "parsing",
+  "parser-implementations",
+]
+
+[lib]
+name = "fatou"
+
+[[bin]]
+name = "fatou"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+crossbeam-channel = "0.5"
+env_logger = "0.11.10"
+ignore = "0.4.26"
+log = { version = "0.4.32", features = ["release_max_level_info"] }
+lsp-server = "0.7"
+lsp-types = "0.97"
+rowan = "0.16.1"
+salsa = "0.27.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+similar = { version = "3.1.1", features = ["text"] }
+toml = "1.1.2"
+# Slated for later phases (noted in TODO.md): `annotate-snippets` for rich
+# pretty-printed lint diagnostics, `smol_str` for interned symbol names.
+
+[dev-dependencies]
+insta = "1.47.2"

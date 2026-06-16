@@ -1,0 +1,79 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..50
+  CALL_EXPR@0..10
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARG_LIST@1..10
+      LPAREN@1..2 "("
+      ARG@2..3
+        NAME@2..3
+          IDENT@2..3 "a"
+      COMMA@3..4 ","
+      WHITESPACE@4..5 " "
+      ARG@5..6
+        NAME@5..6
+          IDENT@5..6 "b"
+      COMMA@6..7 ","
+      WHITESPACE@7..8 " "
+      ARG@8..9
+        NAME@8..9
+          IDENT@8..9 "c"
+      RPAREN@9..10 ")"
+  NEWLINE@10..11 "\n"
+  INDEX_EXPR@11..15
+    NAME@11..12
+      IDENT@11..12 "v"
+    ARG_LIST@12..15
+      LBRACKET@12..13 "["
+      ARG@13..14
+        LITERAL@13..14
+          INTEGER@13..14 "1"
+      RBRACKET@14..15 "]"
+  NEWLINE@15..16 "\n"
+  INDEX_EXPR@16..23
+    NAME@16..17
+      IDENT@16..17 "m"
+    ARG_LIST@17..23
+      LBRACKET@17..18 "["
+      ARG@18..19
+        NAME@18..19
+          IDENT@18..19 "i"
+      COMMA@19..20 ","
+      WHITESPACE@20..21 " "
+      ARG@21..22
+        NAME@21..22
+          IDENT@21..22 "j"
+      RBRACKET@22..23 "]"
+  NEWLINE@23..24 "\n"
+  BINARY_EXPR@24..33
+    NAME@24..27
+      IDENT@24..27 "obj"
+    DOT@27..28 "."
+    NAME@28..33
+      IDENT@28..33 "field"
+  NEWLINE@33..34 "\n"
+  CALL_EXPR@34..49
+    NAME@34..40
+      IDENT@34..40 "nested"
+    ARG_LIST@40..49
+      LPAREN@40..41 "("
+      ARG@41..45
+        CALL_EXPR@41..45
+          NAME@41..42
+            IDENT@41..42 "g"
+          ARG_LIST@42..45
+            LPAREN@42..43 "("
+            ARG@43..44
+              NAME@43..44
+                IDENT@43..44 "x"
+            RPAREN@44..45 ")"
+      COMMA@45..46 ","
+      WHITESPACE@46..47 " "
+      ARG@47..48
+        NAME@47..48
+          IDENT@47..48 "y"
+      RPAREN@48..49 ")"
+  NEWLINE@49..50 "\n"

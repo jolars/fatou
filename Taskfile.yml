@@ -1,0 +1,48 @@
+version: "3"
+
+tasks:
+  lint:
+    desc: Run clippy with warnings as errors
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  format:
+    desc: Format the code with rustfmt
+    cmds:
+      - cargo fmt --
+
+  format-check:
+    desc: Check rustfmt formatting
+    cmds:
+      - cargo fmt -- --check
+
+  build-release:
+    desc: Build the release binary
+    cmds:
+      - cargo build --release
+
+  test:
+    desc: Run the test suite
+    cmds:
+      - cargo test
+
+  test-debug:
+    desc: Run tests with debug logging
+    cmds:
+      - RUST_LOG=debug cargo test
+
+  audit:
+    desc: Run a security audit of dependencies
+    cmds:
+      - cargo audit
+
+  deny:
+    desc: Check licenses, advisories, and sources
+    cmds:
+      - cargo deny check
+
+  # Placeholder until the Runic.jl differential gauge lands (see TODO.md).
+  # runic-compat:
+  #   desc: Measure soft Runic.jl compatibility (writes RUNIC_COMPAT.md)
+  #   cmds:
+  #     - cargo test --test runic_compat -- --ignored --nocapture

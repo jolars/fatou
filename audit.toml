@@ -1,0 +1,4 @@
+[advisories]
+# Advisory IDs to ignore, with a rationale, when a transitive dependency has no
+# fixed release yet and is not exploitable in our usage. None currently.
+ignore = []
