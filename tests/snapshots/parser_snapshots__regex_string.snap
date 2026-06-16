@@ -1,0 +1,18 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..19
+  ASSIGNMENT_EXPR@0..18
+    NAME@0..1
+      IDENT@0..1 "m"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..18
+      STRING_PREFIX@4..5 "r"
+      STRING_DELIM_OPEN@5..6 "\""
+      STRING_CONTENT@6..14 "\\d+\\.\\d*"
+      STRING_DELIM_CLOSE@14..15 "\""
+      STRING_SUFFIX@15..18 "ims"
+  NEWLINE@18..19 "\n"

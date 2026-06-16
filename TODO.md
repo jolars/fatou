@@ -44,8 +44,13 @@ through), so the grammar can grow incrementally.
   anonymous functions `(x, y) -> …` await tuple-literal parsing (the array/tuple
   bullet below) — the parenthesized parameter list trips the "unclosed `(`" path
   for now; `x -> …`, `(x) -> …`, and `() -> …` work.
-- [ ] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
+- [x] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
+  Structured into `STRING_LITERAL`/`CMD_LITERAL` nodes with `INTERPOLATION`
+  children whose `$(expr)` interiors are fully parsed sub-expressions; prefixes
+  (`r`, `raw`, `b`, `v`) and suffix flags (`r"…"ims`) are represented as tokens.
+  Known limitation: a `\"` immediately before a raw-string closing quote is not
+  yet handled (the raw body is kept as one content chunk).
 - [ ] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat

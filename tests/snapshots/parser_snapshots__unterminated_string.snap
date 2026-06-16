@@ -1,0 +1,24 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..17
+  ASSIGNMENT_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "s"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..9
+      STRING_DELIM_OPEN@4..5 "\""
+      STRING_CONTENT@5..9 "oops"
+  NEWLINE@9..10 "\n"
+  ASSIGNMENT_EXPR@10..16
+    NAME@10..12
+      IDENT@10..12 "ok"
+    WHITESPACE@12..13 " "
+    EQ@13..14 "="
+    WHITESPACE@14..15 " "
+    LITERAL@15..16
+      INTEGER@15..16 "1"
+  NEWLINE@16..17 "\n"

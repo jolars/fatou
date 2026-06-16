@@ -261,13 +261,136 @@ fn parse_prefix(
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
         TokKind::LBrace => parse_braces(ctx, start, diagnostics),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
-        TokKind::Integer
-        | TokKind::Float
-        | TokKind::String
-        | TokKind::Char
-        | TokKind::TrueKw
-        | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
+        TokKind::StringPrefix | TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
+            Some(parse_string_literal(ctx, start, diagnostics))
+        }
+        TokKind::Integer | TokKind::Float | TokKind::Char | TokKind::TrueKw | TokKind::FalseKw => {
+            Some(atom(SyntaxKind::LITERAL, start))
+        }
         _ => None,
+    }
+}
+
+/// Assemble a string (`"..."`) or command (`` `...` ``) literal from its flat
+/// token run into a `STRING_LITERAL`/`CMD_LITERAL` node. The run is: an optional
+/// prefix, an open delimiter, a sequence of content chunks and interpolations,
+/// the close delimiter, and an optional suffix. An unterminated literal (no close
+/// delimiter) simply stops early — every consumed token is still emitted.
+fn parse_string_literal(
+    ctx: &ParserCtx<'_>,
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let mut i = start;
+
+    // Optional non-standard literal prefix (`r`, `raw`, …).
+    if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix) {
+        i += 1;
+    }
+
+    let node = match ctx.token(i).map(|t| t.kind) {
+        Some(TokKind::CmdDelimOpen) => SyntaxKind::CMD_LITERAL,
+        _ => SyntaxKind::STRING_LITERAL,
+    };
+    let close_kind = if node == SyntaxKind::CMD_LITERAL {
+        TokKind::CmdDelimClose
+    } else {
+        TokKind::StringDelimClose
+    };
+
+    let mut events = vec![Event::Start(node)];
+    for idx in start..=i {
+        events.push(Event::Tok(idx));
+    }
+    i += 1; // past the open delimiter
+
+    loop {
+        match ctx.token(i).map(|t| t.kind) {
+            Some(TokKind::StringContent) => {
+                events.push(Event::Tok(i));
+                i += 1;
+            }
+            Some(TokKind::Dollar) => {
+                i = parse_interpolation(ctx, &mut events, i, diagnostics);
+            }
+            Some(k) if k == close_kind => {
+                events.push(Event::Tok(i));
+                i += 1;
+                // Optional suffix flags (`r"pat"ims`).
+                if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringSuffix) {
+                    events.push(Event::Tok(i));
+                    i += 1;
+                }
+                break;
+            }
+            // Unterminated: anything else (incl. EOF) ends the literal.
+            _ => break,
+        }
+    }
+
+    events.push(Event::Finish);
+    ExprParse {
+        start,
+        end: i,
+        events,
+    }
+}
+
+/// Parse one `$ident` or `$(expr)` interpolation into an `INTERPOLATION` node,
+/// returning the token index just past it. `$(...)` interiors reuse the Pratt
+/// parser, so they become real expression subtrees.
+fn parse_interpolation(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    dollar: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    events.push(Event::Start(SyntaxKind::INTERPOLATION));
+    events.push(Event::Tok(dollar)); // `$`
+    let next = dollar + 1;
+
+    match ctx.token(next).map(|t| t.kind) {
+        Some(TokKind::LParen) => {
+            events.push(Event::Tok(next)); // `(`
+            let inner_start = ctx.skip_trivia(next + 1);
+            push_range(events, next + 1, inner_start);
+
+            if ctx.token(inner_start).map(|t| t.kind) == Some(TokKind::RParen) {
+                events.push(Event::Tok(inner_start)); // empty `$()`
+                events.push(Event::Finish);
+                return inner_start + 1;
+            }
+
+            let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, diagnostics)
+            else {
+                events.push(Event::Finish);
+                return inner_start;
+            };
+            events.extend(inner.events);
+
+            let close = ctx.skip_trivia(inner.end);
+            if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
+                push_range(events, inner.end, close);
+                events.push(Event::Tok(close)); // `)`
+                events.push(Event::Finish);
+                close + 1
+            } else {
+                push_range(events, inner.end, close);
+                events.push(Event::Finish);
+                close
+            }
+        }
+        Some(TokKind::Ident) => {
+            events.push(Event::Tok(next));
+            events.push(Event::Finish);
+            next + 1
+        }
+        // A lone `$` (the lexer folds non-operand dollars into content, so this
+        // is unreachable in practice) — emit just the sigil.
+        _ => {
+            events.push(Event::Finish);
+            next
+        }
     }
 }
 

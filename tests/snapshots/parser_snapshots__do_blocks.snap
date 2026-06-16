@@ -74,8 +74,10 @@ ROOT@0..143
       ARG_LIST@59..64
         LPAREN@59..60 "("
         ARG@60..63
-          LITERAL@60..63
-            STRING@60..63 "\"f\""
+          STRING_LITERAL@60..63
+            STRING_DELIM_OPEN@60..61 "\""
+            STRING_CONTENT@61..62 "f"
+            STRING_DELIM_CLOSE@62..63 "\""
         RPAREN@63..64 ")"
     WHITESPACE@64..65 " "
     DO_KW@65..67 "do"

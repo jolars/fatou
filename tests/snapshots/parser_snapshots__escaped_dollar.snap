@@ -1,0 +1,19 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..26
+  ASSIGNMENT_EXPR@0..25
+    NAME@0..1
+      IDENT@0..1 "s"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..25
+      STRING_DELIM_OPEN@4..5 "\""
+      STRING_CONTENT@5..20 "price: \\$5 and "
+      INTERPOLATION@20..24
+        DOLLAR@20..21 "$"
+        IDENT@21..24 "qty"
+      STRING_DELIM_CLOSE@24..25 "\""
+  NEWLINE@25..26 "\n"

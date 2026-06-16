@@ -1,0 +1,19 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..17
+  ASSIGNMENT_EXPR@0..16
+    NAME@0..1
+      IDENT@0..1 "c"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    CMD_LITERAL@4..16
+      CMD_DELIM_OPEN@4..5 "`"
+      STRING_CONTENT@5..11 "ls -l "
+      INTERPOLATION@11..15
+        DOLLAR@11..12 "$"
+        IDENT@12..15 "dir"
+      CMD_DELIM_CLOSE@15..16 "`"
+  NEWLINE@16..17 "\n"

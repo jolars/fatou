@@ -25,8 +25,21 @@ pub(crate) enum TokKind {
     Ident,
     Integer,
     Float,
-    String,
     Char,
+
+    // String / command literal pieces. A single literal is lexed as a run of
+    // these (plus `Dollar`/`Ident` and, inside `$(...)`, normal-mode tokens),
+    // which the parser reassembles into a `STRING_LITERAL`/`CMD_LITERAL` node.
+    StringDelimOpen,
+    StringDelimClose,
+    CmdDelimOpen,
+    CmdDelimClose,
+    /// A run of literal characters inside a string/command (escapes included).
+    StringContent,
+    /// A non-standard literal prefix immediately before a quote, e.g. `r`, `raw`.
+    StringPrefix,
+    /// Suffix flag letters immediately after a prefixed literal, e.g. `ims`.
+    StringSuffix,
 
     // Keywords
     FunctionKw,
@@ -128,11 +141,36 @@ pub(crate) fn lex(input: &str) -> Vec<Token> {
     Lexer::new(input).run()
 }
 
+/// The lexer's context stack. The base context is normal Julia code; opening a
+/// string/command delimiter pushes a `Str`/`Cmd` frame, and a `$(` interpolation
+/// inside one pushes an `Interp` frame (back to normal lexing) until its matching
+/// `)` pops it. A nested string inside `$(...)` simply pushes another `Str` frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Inside a `"..."` / `"""..."""` string body.
+    Str {
+        triple: bool,
+        /// Non-standard (prefixed) literal: body is taken verbatim, no `$`/escape
+        /// splitting, and a trailing flag run is lexed as a suffix.
+        raw: bool,
+        prefixed: bool,
+    },
+    /// Inside a `` `...` `` / ` ```...``` ` command body.
+    Cmd {
+        triple: bool,
+        raw: bool,
+        prefixed: bool,
+    },
+    /// Inside a `$( ... )` interpolation; `depth` counts unbalanced `(`.
+    Interp { depth: usize },
+}
+
 struct Lexer<'a> {
     input: &'a str,
     bytes: &'a [u8],
     pos: usize,
     tokens: Vec<Token>,
+    mode_stack: Vec<Mode>,
 }
 
 impl<'a> Lexer<'a> {
@@ -142,6 +180,7 @@ impl<'a> Lexer<'a> {
             bytes: input.as_bytes(),
             pos: 0,
             tokens: Vec::new(),
+            mode_stack: Vec::new(),
         }
     }
 
@@ -166,14 +205,48 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_token(&mut self) {
+        // Inside a string/command body, the body lexer owns the bytes until the
+        // closing delimiter (or an interpolation, which pushes its own frame).
+        if matches!(
+            self.mode_stack.last(),
+            Some(Mode::Str { .. } | Mode::Cmd { .. })
+        ) {
+            self.lex_in_string_mode();
+            return;
+        }
+
         let start = self.pos;
         let b = self.bytes[self.pos];
+
+        // Inside a `$( ... )` interpolation, track paren nesting so the matching
+        // `)` returns us to the enclosing string/command body.
+        if matches!(self.mode_stack.last(), Some(Mode::Interp { .. })) {
+            if b == b'(' {
+                self.pos += 1;
+                self.push(TokKind::LParen, start, self.pos);
+                if let Some(Mode::Interp { depth }) = self.mode_stack.last_mut() {
+                    *depth += 1;
+                }
+                return;
+            }
+            if b == b')' {
+                self.pos += 1;
+                self.push(TokKind::RParen, start, self.pos);
+                if matches!(self.mode_stack.last(), Some(Mode::Interp { depth }) if *depth == 1) {
+                    self.mode_stack.pop();
+                } else if let Some(Mode::Interp { depth }) = self.mode_stack.last_mut() {
+                    *depth -= 1;
+                }
+                return;
+            }
+        }
 
         match b {
             b' ' | b'\t' => self.lex_whitespace(start),
             b'\r' | b'\n' => self.lex_newline(start),
             b'#' => self.lex_comment(start),
-            b'"' => self.lex_string(start),
+            b'"' => self.lex_open_string(start, false),
+            b'`' => self.lex_open_cmd(start, false),
             b'\'' => self.lex_char_or_unknown(start),
             b'0'..=b'9' => self.lex_number(start),
             b'.' if self.peek(1).is_some_and(|c| c.is_ascii_digit()) => self.lex_number(start),
@@ -242,42 +315,165 @@ impl<'a> Lexer<'a> {
         self.push(TokKind::BlockComment, start, self.pos);
     }
 
-    fn lex_string(&mut self, start: usize) {
+    /// Open a `"..."` / `"""..."""` string: emit the opening delimiter token and
+    /// push a `Str` body frame. `prefixed` is set when a non-standard literal
+    /// prefix (`r`, `raw`, …) directly precedes the quote, which makes the body
+    /// raw (no `$`/escape processing) and enables a trailing suffix scan.
+    fn lex_open_string(&mut self, start: usize, prefixed: bool) {
         let triple = self.peek(1) == Some(b'"') && self.peek(2) == Some(b'"');
-        if triple {
-            self.pos += 3;
-            while self.pos < self.bytes.len() {
-                if self.peek(0) == Some(b'"')
-                    && self.peek(1) == Some(b'"')
-                    && self.peek(2) == Some(b'"')
-                {
-                    self.pos += 3;
-                    break;
-                }
-                self.consume_string_byte();
-            }
-        } else {
-            self.pos += 1;
-            while self.pos < self.bytes.len() {
-                match self.peek(0) {
-                    Some(b'"') => {
-                        self.pos += 1;
-                        break;
-                    }
-                    Some(b'\n') => break, // unterminated; stop at the line break
-                    _ => self.consume_string_byte(),
-                }
-            }
-        }
-        self.push(TokKind::String, start, self.pos);
+        self.pos += if triple { 3 } else { 1 };
+        self.push(TokKind::StringDelimOpen, start, self.pos);
+        self.mode_stack.push(Mode::Str {
+            triple,
+            raw: prefixed,
+            prefixed,
+        });
     }
 
-    /// Consume one byte inside a string, honoring a backslash escape.
-    fn consume_string_byte(&mut self) {
-        if self.peek(0) == Some(b'\\') && self.pos + 1 < self.bytes.len() {
+    /// Open a `` `...` `` / ` ```...``` ` command literal, analogous to a string.
+    fn lex_open_cmd(&mut self, start: usize, prefixed: bool) {
+        let triple = self.peek(1) == Some(b'`') && self.peek(2) == Some(b'`');
+        self.pos += if triple { 3 } else { 1 };
+        self.push(TokKind::CmdDelimOpen, start, self.pos);
+        self.mode_stack.push(Mode::Cmd {
+            triple,
+            raw: prefixed,
+            prefixed,
+        });
+    }
+
+    /// Lex one token inside a string/command body: a literal-content chunk, a
+    /// closing delimiter (plus optional suffix), or an interpolation sigil.
+    fn lex_in_string_mode(&mut self) {
+        let frame = *self.mode_stack.last().expect("string mode frame");
+        let (quote, triple, raw, prefixed) = match frame {
+            Mode::Str {
+                triple,
+                raw,
+                prefixed,
+            } => (b'"', triple, raw, prefixed),
+            Mode::Cmd {
+                triple,
+                raw,
+                prefixed,
+            } => (b'`', triple, raw, prefixed),
+            Mode::Interp { .. } => unreachable!("lex_in_string_mode called in interp mode"),
+        };
+        let close_kind = if quote == b'"' {
+            TokKind::StringDelimClose
+        } else {
+            TokKind::CmdDelimClose
+        };
+
+        let start = self.pos;
+
+        // Closing delimiter at the very start of this call: empty trailing chunk.
+        if self.at_close_delim(quote, triple) {
+            self.pos += if triple { 3 } else { 1 };
+            self.push(close_kind, start, self.pos);
+            self.mode_stack.pop();
+            if prefixed {
+                self.lex_suffix();
+            }
+            return;
+        }
+
+        // Accumulate a content chunk until the close delimiter, an interpolation,
+        // EOF, or (for single-quoted strings) an unterminating newline.
+        while self.pos < self.bytes.len() {
+            if self.at_close_delim(quote, triple) {
+                break;
+            }
+            if !raw && self.peek(0) == Some(b'$') && self.is_interp_start(1) {
+                break;
+            }
+            if !triple && quote == b'"' && self.peek(0) == Some(b'\n') {
+                // Unterminated single-line string: stop before the newline.
+                break;
+            }
+            self.consume_body_byte(raw);
+        }
+
+        if self.pos > start {
+            self.push(TokKind::StringContent, start, self.pos);
+        }
+
+        // Decide what stopped the chunk.
+        if self.at_close_delim(quote, triple) {
+            let delim_start = self.pos;
+            self.pos += if triple { 3 } else { 1 };
+            self.push(close_kind, delim_start, self.pos);
+            self.mode_stack.pop();
+            if prefixed {
+                self.lex_suffix();
+            }
+        } else if !raw && self.peek(0) == Some(b'$') && self.is_interp_start(1) {
+            self.lex_interp_sigil();
+        } else {
+            // Unterminated (newline or EOF): leave the body frame; the parser
+            // assembles whatever was emitted. Losslessness still holds.
+            self.mode_stack.pop();
+        }
+    }
+
+    /// Whether a closing delimiter (`triple` → three of `quote`) begins at `pos`.
+    fn at_close_delim(&self, quote: u8, triple: bool) -> bool {
+        if triple {
+            self.peek(0) == Some(quote)
+                && self.peek(1) == Some(quote)
+                && self.peek(2) == Some(quote)
+        } else {
+            self.peek(0) == Some(quote)
+        }
+    }
+
+    /// Whether the byte at `self.pos + ahead` begins an interpolation operand
+    /// (an identifier-start char or an opening paren).
+    fn is_interp_start(&self, ahead: usize) -> bool {
+        match self.peek(ahead) {
+            Some(b'(') => true,
+            Some(_) => is_ident_start(self.char_at(self.pos + ahead)),
+            None => false,
+        }
+    }
+
+    /// Emit the `$` sigil and set up the interpolation operand: either a bare
+    /// identifier (lexed inline) or a `(` that opens an `Interp` frame.
+    fn lex_interp_sigil(&mut self) {
+        let dollar = self.pos;
+        self.pos += 1;
+        self.push(TokKind::Dollar, dollar, self.pos);
+        if self.peek(0) == Some(b'(') {
+            let paren = self.pos;
+            self.pos += 1;
+            self.push(TokKind::LParen, paren, self.pos);
+            self.mode_stack.push(Mode::Interp { depth: 1 });
+        } else {
+            // `$ident`: lex the longest identifier (so `$foo.bar` interpolates
+            // `foo` and `.bar` stays content).
+            self.lex_interp_ident();
+        }
+    }
+
+    /// Consume one body byte. In non-raw mode a backslash escapes the next byte
+    /// (so `\"`, `\$`, `\n` stay inside the content chunk).
+    fn consume_body_byte(&mut self, raw: bool) {
+        if !raw && self.peek(0) == Some(b'\\') && self.pos + 1 < self.bytes.len() {
             self.pos += 2;
         } else {
+            self.pos += self.char_at(self.pos).len_utf8();
+        }
+    }
+
+    /// After a prefixed literal closes, lex a run of ASCII-alpha flag letters as
+    /// a single suffix token (e.g. the `ims` in `r"pat"ims`).
+    fn lex_suffix(&mut self) {
+        let start = self.pos;
+        while matches!(self.peek(0), Some(c) if c.is_ascii_alphabetic()) {
             self.pos += 1;
+        }
+        if self.pos > start {
+            self.push(TokKind::StringSuffix, start, self.pos);
         }
     }
 
@@ -355,7 +551,39 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_ident_or_keyword(&mut self, start: usize) {
-        // First char already known to be an identifier start.
+        self.scan_ident();
+        // Non-standard literal: an identifier immediately before `"`/`` ` `` with
+        // no intervening whitespace is a prefix (`r"..."`, `raw"..."`, `` v`...` ``).
+        // Keywords are never prefixes.
+        if matches!(self.peek(0), Some(b'"' | b'`'))
+            && keyword_kind(&self.input[start..self.pos]).is_none()
+        {
+            self.push(TokKind::StringPrefix, start, self.pos);
+            let open = self.pos;
+            if self.peek(0) == Some(b'"') {
+                self.lex_open_string(open, true);
+            } else {
+                self.lex_open_cmd(open, true);
+            }
+            return;
+        }
+        let text = &self.input[start..self.pos];
+        let kind = keyword_kind(text).unwrap_or(TokKind::Ident);
+        self.push(kind, start, self.pos);
+    }
+
+    /// Lex a bare `$ident` interpolation operand. Unlike [`Self::lex_ident_or_keyword`]
+    /// this never treats a following quote as a prefix, so the closing quote of
+    /// `"$x"` is not mistaken for the start of a non-standard literal.
+    fn lex_interp_ident(&mut self) {
+        let start = self.pos;
+        self.scan_ident();
+        self.push(TokKind::Ident, start, self.pos);
+    }
+
+    /// Advance `pos` over a full identifier (the first char is already known to
+    /// be an identifier start).
+    fn scan_ident(&mut self) {
         self.pos += self.char_at(self.pos).len_utf8();
         loop {
             let c = self.char_at(self.pos);
@@ -365,9 +593,6 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        let text = &self.input[start..self.pos];
-        let kind = keyword_kind(text).unwrap_or(TokKind::Ident);
-        self.push(kind, start, self.pos);
     }
 
     fn lex_operator_or_unknown(&mut self, start: usize) {
@@ -523,9 +748,154 @@ mod tests {
             "module M\nend\n",
             "α = β + 1\n",
             "0x1f + 0b1010\n",
+            "s = \"a$x b\"\n",
+            "s = \"a$(f(x))b\"\n",
+            "s = \"\"\"x$(y)\"\"\"\n",
+            "c = `echo $x`\n",
+            "r = raw\"\\d+\"\n",
+            "m = r\"pat\"ims\n",
+            "v = v\"1.2.3\"\n",
+            "b = b\"\\x00\"\n",
+            "s = \"$foo.bar\"\n",
+            "s = \"\\$lit\"\n",
+            "s = \"$$\"\n",
+            "s = \"unterminated\n",
+            "s = \"$(g(\"nested\"))\"\n",
         ] {
             assert!(roundtrips(input), "did not round-trip: {input:?}");
         }
+    }
+
+    #[test]
+    fn interpolation_with_bare_ident() {
+        assert_eq!(
+            kinds("\"a$x\""),
+            vec![
+                TokKind::StringDelimOpen,
+                TokKind::StringContent,
+                TokKind::Dollar,
+                TokKind::Ident,
+                TokKind::StringDelimClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn interpolation_with_parenthesized_expr() {
+        assert_eq!(
+            kinds("\"$(y)\""),
+            vec![
+                TokKind::StringDelimOpen,
+                TokKind::Dollar,
+                TokKind::LParen,
+                TokKind::Ident,
+                TokKind::RParen,
+                TokKind::StringDelimClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_parens_in_interpolation() {
+        // `$(f(x))`: the inner `)` must not close the interpolation early.
+        assert_eq!(
+            kinds("\"$(f(x))\""),
+            vec![
+                TokKind::StringDelimOpen,
+                TokKind::Dollar,
+                TokKind::LParen,
+                TokKind::Ident,
+                TokKind::LParen,
+                TokKind::Ident,
+                TokKind::RParen,
+                TokKind::RParen,
+                TokKind::StringDelimClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_literal_does_not_interpolate() {
+        // `raw"..."` keeps `$x` and the backslash as literal content.
+        assert_eq!(
+            kinds("raw\"$x\\d\""),
+            vec![
+                TokKind::StringPrefix,
+                TokKind::StringDelimOpen,
+                TokKind::StringContent,
+                TokKind::StringDelimClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn prefix_and_suffix_flags() {
+        assert_eq!(
+            kinds("r\"pat\"ims"),
+            vec![
+                TokKind::StringPrefix,
+                TokKind::StringDelimOpen,
+                TokKind::StringContent,
+                TokKind::StringDelimClose,
+                TokKind::StringSuffix,
+            ]
+        );
+    }
+
+    #[test]
+    fn command_literal_interpolates() {
+        assert_eq!(
+            kinds("`cmd $x`"),
+            vec![
+                TokKind::CmdDelimOpen,
+                TokKind::StringContent,
+                TokKind::Dollar,
+                TokKind::Ident,
+                TokKind::CmdDelimClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn escaped_dollar_is_content() {
+        // `\$` does not introduce an interpolation.
+        assert_eq!(
+            kinds("\"\\$x\""),
+            vec![
+                TokKind::StringDelimOpen,
+                TokKind::StringContent,
+                TokKind::StringDelimClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn plain_string_adjacent_ident_is_not_a_suffix() {
+        // Only prefixed literals take a suffix; `"a"b` is a string then an ident.
+        assert_eq!(
+            kinds("\"a\"b"),
+            vec![
+                TokKind::StringDelimOpen,
+                TokKind::StringContent,
+                TokKind::StringDelimClose,
+                TokKind::Ident,
+            ]
+        );
+    }
+
+    #[test]
+    fn prefix_requires_adjacent_quote() {
+        // A space between the ident and the quote means it is a plain variable.
+        assert_eq!(
+            kinds("r \"x\""),
+            vec![
+                TokKind::Ident,
+                TokKind::Whitespace,
+                TokKind::StringDelimOpen,
+                TokKind::StringContent,
+                TokKind::StringDelimClose,
+            ]
+        );
     }
 
     #[test]

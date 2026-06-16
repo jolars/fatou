@@ -16,6 +16,9 @@ pub enum SyntaxKind {
     // --- Nodes ---
     ROOT,
     LITERAL,
+    STRING_LITERAL,
+    CMD_LITERAL,
+    INTERPOLATION,
     NAME,
     BINARY_EXPR,
     UNARY_EXPR,
@@ -74,8 +77,14 @@ pub enum SyntaxKind {
     IDENT,
     INTEGER,
     FLOAT,
-    STRING,
     CHAR,
+    STRING_DELIM_OPEN,
+    STRING_DELIM_CLOSE,
+    CMD_DELIM_OPEN,
+    CMD_DELIM_CLOSE,
+    STRING_CONTENT,
+    STRING_PREFIX,
+    STRING_SUFFIX,
 
     // --- Keyword tokens ---
     FUNCTION_KW,
@@ -196,7 +205,9 @@ mod tests {
     fn kind_round_trips_through_raw() {
         for kind in [
             SyntaxKind::ROOT,
+            SyntaxKind::STRING_LITERAL,
             SyntaxKind::IDENT,
+            SyntaxKind::STRING_CONTENT,
             SyntaxKind::FUNCTION_KW,
             SyntaxKind::DOLLAR,
             SyntaxKind::ERROR,

@@ -27,8 +27,10 @@ ROOT@0..53
     WHITESPACE@16..17 " "
     EQ@17..18 "="
     WHITESPACE@18..19 " "
-    LITERAL@19..26
-      STRING@19..26 "\"hello\""
+    STRING_LITERAL@19..26
+      STRING_DELIM_OPEN@19..20 "\""
+      STRING_CONTENT@20..25 "hello"
+      STRING_DELIM_CLOSE@25..26 "\""
   NEWLINE@26..27 "\n"
   ASSIGNMENT_EXPR@27..34
     NAME@27..28

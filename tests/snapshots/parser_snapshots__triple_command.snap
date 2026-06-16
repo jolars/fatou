@@ -1,0 +1,20 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..27
+  ASSIGNMENT_EXPR@0..26
+    NAME@0..1
+      IDENT@0..1 "c"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    CMD_LITERAL@4..26
+      CMD_DELIM_OPEN@4..7 "```"
+      STRING_CONTENT@7..12 "echo "
+      INTERPOLATION@12..14
+        DOLLAR@12..13 "$"
+        IDENT@13..14 "x"
+      STRING_CONTENT@14..23 " | grep y"
+      CMD_DELIM_CLOSE@23..26 "```"
+  NEWLINE@26..27 "\n"

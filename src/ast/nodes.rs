@@ -31,6 +31,9 @@ macro_rules! ast_node {
 
 ast_node!(Root, SyntaxKind::ROOT);
 ast_node!(Literal, SyntaxKind::LITERAL);
+ast_node!(StringLiteral, SyntaxKind::STRING_LITERAL);
+ast_node!(CmdLiteral, SyntaxKind::CMD_LITERAL);
+ast_node!(Interpolation, SyntaxKind::INTERPOLATION);
 ast_node!(Name, SyntaxKind::NAME);
 ast_node!(BinaryExpr, SyntaxKind::BINARY_EXPR);
 ast_node!(UnaryExpr, SyntaxKind::UNARY_EXPR);
@@ -85,6 +88,52 @@ impl Name {
             .children_with_tokens()
             .filter_map(|e| e.into_token())
             .find(|t| t.kind() == SyntaxKind::IDENT)
+    }
+}
+
+impl StringLiteral {
+    /// The non-standard literal prefix token, e.g. `r` in `r"..."`.
+    pub fn prefix(&self) -> Option<SyntaxToken> {
+        support::token(&self.0, SyntaxKind::STRING_PREFIX)
+    }
+
+    /// The suffix flag token, e.g. `ims` in `r"pat"ims`.
+    pub fn suffix(&self) -> Option<SyntaxToken> {
+        support::token(&self.0, SyntaxKind::STRING_SUFFIX)
+    }
+
+    /// The interpolations embedded in the string, in source order.
+    pub fn interpolations(&self) -> impl Iterator<Item = Interpolation> {
+        support::children(&self.0)
+    }
+}
+
+impl CmdLiteral {
+    /// The non-standard literal prefix token, e.g. `` v `` in `` v`...` ``.
+    pub fn prefix(&self) -> Option<SyntaxToken> {
+        support::token(&self.0, SyntaxKind::STRING_PREFIX)
+    }
+
+    /// The suffix flag token following the closing backtick.
+    pub fn suffix(&self) -> Option<SyntaxToken> {
+        support::token(&self.0, SyntaxKind::STRING_SUFFIX)
+    }
+
+    /// The interpolations embedded in the command, in source order.
+    pub fn interpolations(&self) -> impl Iterator<Item = Interpolation> {
+        support::children(&self.0)
+    }
+}
+
+impl Interpolation {
+    /// The bare interpolated identifier token for `$ident` (absent for `$(expr)`).
+    pub fn ident(&self) -> Option<SyntaxToken> {
+        support::token(&self.0, SyntaxKind::IDENT)
+    }
+
+    /// The interpolated expression node for `$(expr)` (absent for `$ident`).
+    pub fn expr(&self) -> Option<SyntaxNode> {
+        self.0.children().next()
     }
 }
 

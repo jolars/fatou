@@ -1,0 +1,17 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..26
+  ASSIGNMENT_EXPR@0..25
+    NAME@0..1
+      IDENT@0..1 "r"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..25
+      STRING_PREFIX@4..7 "raw"
+      STRING_DELIM_OPEN@7..8 "\""
+      STRING_CONTENT@8..24 "C:\\path\\to\\$file"
+      STRING_DELIM_CLOSE@24..25 "\""
+  NEWLINE@25..26 "\n"

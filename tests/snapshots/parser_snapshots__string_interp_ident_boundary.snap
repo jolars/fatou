@@ -1,0 +1,22 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..24
+  ASSIGNMENT_EXPR@0..23
+    NAME@0..1
+      IDENT@0..1 "s"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..23
+      STRING_DELIM_OPEN@4..5 "\""
+      INTERPOLATION@5..9
+        DOLLAR@5..6 "$"
+        IDENT@6..9 "foo"
+      STRING_CONTENT@9..18 ".bar and "
+      INTERPOLATION@18..22
+        DOLLAR@18..19 "$"
+        IDENT@19..22 "baz"
+      STRING_DELIM_CLOSE@22..23 "\""
+  NEWLINE@23..24 "\n"
