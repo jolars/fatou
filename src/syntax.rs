@@ -25,6 +25,7 @@ pub enum SyntaxKind {
     ARG_LIST,
     ARG,
     ASSIGNMENT_EXPR,
+    ARROW_EXPR,
     IF_EXPR,
     ELSEIF_CLAUSE,
     ELSE_CLAUSE,

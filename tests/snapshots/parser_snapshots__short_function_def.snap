@@ -1,0 +1,52 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..27
+  ASSIGNMENT_EXPR@0..10
+    CALL_EXPR@0..4
+      NAME@0..1
+        IDENT@0..1 "f"
+      ARG_LIST@1..4
+        LPAREN@1..2 "("
+        ARG@2..3
+          NAME@2..3
+            IDENT@2..3 "x"
+        RPAREN@3..4 ")"
+    WHITESPACE@4..5 " "
+    EQ@5..6 "="
+    WHITESPACE@6..7 " "
+    BINARY_EXPR@7..10
+      NAME@7..8
+        IDENT@7..8 "x"
+      CARET@8..9 "^"
+      LITERAL@9..10
+        INTEGER@9..10 "2"
+  NEWLINE@10..11 "\n"
+  ASSIGNMENT_EXPR@11..26
+    CALL_EXPR@11..18
+      NAME@11..12
+        IDENT@11..12 "g"
+      ARG_LIST@12..18
+        LPAREN@12..13 "("
+        ARG@13..14
+          NAME@13..14
+            IDENT@13..14 "x"
+        COMMA@14..15 ","
+        WHITESPACE@15..16 " "
+        ARG@16..17
+          NAME@16..17
+            IDENT@16..17 "y"
+        RPAREN@17..18 ")"
+    WHITESPACE@18..19 " "
+    EQ@19..20 "="
+    WHITESPACE@20..21 " "
+    BINARY_EXPR@21..26
+      NAME@21..22
+        IDENT@21..22 "x"
+      WHITESPACE@22..23 " "
+      PLUS@23..24 "+"
+      WHITESPACE@24..25 " "
+      NAME@25..26
+        IDENT@25..26 "y"
+  NEWLINE@26..27 "\n"

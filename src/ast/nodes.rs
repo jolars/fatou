@@ -39,6 +39,7 @@ ast_node!(CallExpr, SyntaxKind::CALL_EXPR);
 ast_node!(IndexExpr, SyntaxKind::INDEX_EXPR);
 ast_node!(ArgList, SyntaxKind::ARG_LIST);
 ast_node!(AssignmentExpr, SyntaxKind::ASSIGNMENT_EXPR);
+ast_node!(ArrowExpr, SyntaxKind::ARROW_EXPR);
 ast_node!(IfExpr, SyntaxKind::IF_EXPR);
 ast_node!(ElseifClause, SyntaxKind::ELSEIF_CLAUSE);
 ast_node!(ElseClause, SyntaxKind::ELSE_CLAUSE);
@@ -138,7 +139,6 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::OR_OR
             | SyntaxKind::COLON
             | SyntaxKind::COLON_COLON
-            | SyntaxKind::ARROW
             | SyntaxKind::DOT
             | SyntaxKind::PIPE_GT
     )

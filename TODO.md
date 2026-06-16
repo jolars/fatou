@@ -34,8 +34,16 @@ through), so the grammar can grow incrementally.
   as an expression then carry the rest of the line through; `import`/`using`/
   `export` carry the whole clause through verbatim (dedicated `:`/`.` path trees
   come with the operators below).
-- [ ] Anonymous functions and `->`; short-form function definitions
-  (`f(x) = …`).
+- [x] Anonymous functions and `->`; short-form function definitions
+  (`f(x) = …`). The `->` operator (already lexed, Julia precedence `(4, 3)` —
+  right-associative, tighter than `=`) builds a dedicated `ARROW_EXPR` in the
+  Pratt loop (`expr.rs`). Short-form defs need no special node: `f(x) = …`
+  parses as an `ASSIGNMENT_EXPR` over a `CALL_EXPR` left-hand side, matching the
+  JuliaSyntax oracle (head `=`); a definition is distinguished from a plain
+  assignment later in the semantic layer. **Known limitation:** multi-parameter
+  anonymous functions `(x, y) -> …` await tuple-literal parsing (the array/tuple
+  bullet below) — the parenthesized parameter list trips the "unclosed `(`" path
+  for now; `x -> …`, `(x) -> …`, and `() -> …` work.
 - [ ] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
 - [ ] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.

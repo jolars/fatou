@@ -187,10 +187,10 @@ fn parse_expr_in(
             return Some(error_expr_to_line_end(tokens, lhs.start, op_idx + 1));
         };
 
-        let node = if op_kind == TokKind::Eq {
-            SyntaxKind::ASSIGNMENT_EXPR
-        } else {
-            SyntaxKind::BINARY_EXPR
+        let node = match op_kind {
+            TokKind::Eq => SyntaxKind::ASSIGNMENT_EXPR,
+            TokKind::Arrow => SyntaxKind::ARROW_EXPR,
+            _ => SyntaxKind::BINARY_EXPR,
         };
         lhs = build_binary(node, lhs, rhs);
     }
