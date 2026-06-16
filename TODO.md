@@ -47,9 +47,19 @@ through), so the grammar can grow incrementally.
 - [ ] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
 - [ ] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.
-- [ ] Parametric types and braces (`Vector{T}`, `where`), type annotations
+- [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
-  (`x...`).
+  (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside
+  call/index); standalone `{…}` (e.g. `where {T, S}`) builds a `BRACES` node via
+  the prefix path. `::` is a dedicated `TYPE_ANNOTATION` (binary `x::T` and unary
+  `::T` in method args like `f(::Int)`). `where` is a low-precedence
+  left-associative operator `(8, 9)` → `WHERE_EXPR`, sitting below the comparison
+  tier (so its RHS captures a `<:`/`>:` bound) and above `->`/`=` (so
+  `f(x)::T where U` groups as `((f(x)::T) where U)`); `<:`/`>:` are now lexed as
+  `SUBTYPE`/`SUPERTYPE` comparison operators (infix and prefix). In call/index
+  argument lists, a `;` opens a `PARAMETERS` node for the keyword section and
+  `name = value` builds a `KEYWORD_ARG` (`kw`-style); splat `x...` (lexed as a
+  single `...` token) is a terminal postfix `SPLAT_EXPR`.
 - [ ] Array/tuple/comprehension literals (`[1, 2; 3 4]`, `(a, b)`,
   `[x for x in xs]`), ranges, broadcasting dots, ternary `a ? b : c`.
 - [ ] Transpose/adjoint postfix `'` (currently `'` only lexes as a char literal;

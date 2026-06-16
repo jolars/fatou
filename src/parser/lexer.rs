@@ -58,6 +58,7 @@ pub(crate) enum TokKind {
     ImportKw,
     UsingKw,
     ExportKw,
+    WhereKw,
 
     // Operators
     Eq,
@@ -77,8 +78,11 @@ pub(crate) enum TokKind {
     OrOr,
     Colon,
     ColonColon,
+    Subtype,
+    Supertype,
     Arrow,
     Dot,
+    DotDotDot,
     PipeGt,
     Bang,
     Amp,
@@ -370,7 +374,14 @@ impl<'a> Lexer<'a> {
         let b0 = self.peek(0);
         let b1 = self.peek(1);
 
-        // Two-char operators first (longest match).
+        // Three-char operators first (longest match): the `...` splat/vararg.
+        if (b0, b1, self.peek(2)) == (Some(b'.'), Some(b'.'), Some(b'.')) {
+            self.pos += 3;
+            self.push(TokKind::DotDotDot, start, self.pos);
+            return;
+        }
+
+        // Two-char operators next (longest match).
         let two = match (b0, b1) {
             (Some(b'='), Some(b'=')) => Some(TokKind::EqEq),
             (Some(b'!'), Some(b'=')) => Some(TokKind::NotEq),
@@ -379,6 +390,8 @@ impl<'a> Lexer<'a> {
             (Some(b'&'), Some(b'&')) => Some(TokKind::AndAnd),
             (Some(b'|'), Some(b'|')) => Some(TokKind::OrOr),
             (Some(b':'), Some(b':')) => Some(TokKind::ColonColon),
+            (Some(b'<'), Some(b':')) => Some(TokKind::Subtype),
+            (Some(b'>'), Some(b':')) => Some(TokKind::Supertype),
             (Some(b'-'), Some(b'>')) => Some(TokKind::Arrow),
             (Some(b'|'), Some(b'>')) => Some(TokKind::PipeGt),
             _ => None,
@@ -461,6 +474,7 @@ fn keyword_kind(text: &str) -> Option<TokKind> {
         "import" => TokKind::ImportKw,
         "using" => TokKind::UsingKw,
         "export" => TokKind::ExportKw,
+        "where" => TokKind::WhereKw,
         _ => return None,
     })
 }
@@ -533,5 +547,34 @@ mod tests {
     #[test]
     fn bang_in_identifier() {
         assert_eq!(kinds("push!"), vec![TokKind::Ident]);
+    }
+
+    #[test]
+    fn subtype_and_supertype_operators() {
+        assert_eq!(
+            kinds("T<:U"),
+            vec![TokKind::Ident, TokKind::Subtype, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("T>:U"),
+            vec![TokKind::Ident, TokKind::Supertype, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn splat_is_three_dots() {
+        assert_eq!(kinds("x..."), vec![TokKind::Ident, TokKind::DotDotDot]);
+        // Two dots stay two single dots (no `..` operator yet); a lone dot too.
+        assert_eq!(kinds(".."), vec![TokKind::Dot, TokKind::Dot]);
+        assert_eq!(
+            kinds("a.b"),
+            vec![TokKind::Ident, TokKind::Dot, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn where_is_a_keyword() {
+        assert_eq!(keyword_kind("where"), Some(TokKind::WhereKw));
+        assert_eq!(kinds("where"), vec![TokKind::WhereKw]);
     }
 }

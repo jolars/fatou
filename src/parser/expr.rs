@@ -190,6 +190,8 @@ fn parse_expr_in(
         let node = match op_kind {
             TokKind::Eq => SyntaxKind::ASSIGNMENT_EXPR,
             TokKind::Arrow => SyntaxKind::ARROW_EXPR,
+            TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
+            TokKind::WhereKw => SyntaxKind::WHERE_EXPR,
             _ => SyntaxKind::BINARY_EXPR,
         };
         lhs = build_binary(node, lhs, rhs);
@@ -221,7 +223,20 @@ fn parse_prefix(
 ) -> Option<ExprParse> {
     let tok = ctx.token(start)?;
     match tok.kind {
-        TokKind::Plus | TokKind::Minus | TokKind::Bang => {
+        // Prefix operators: arithmetic/logical unary (`-x`, `!x`), lower-bound
+        // type expressions (`<:Real` in `Array{<:Real}`), and unary `::`
+        // declarations (`::Int` in a method signature `f(::Int)`).
+        TokKind::Plus
+        | TokKind::Minus
+        | TokKind::Bang
+        | TokKind::Subtype
+        | TokKind::Supertype
+        | TokKind::ColonColon => {
+            let node = if tok.kind == TokKind::ColonColon {
+                SyntaxKind::TYPE_ANNOTATION
+            } else {
+                SyntaxKind::UNARY_EXPR
+            };
             let operand_start = ctx.skip_trivia(start + 1);
             let Some(operand) = parse_expr_in(
                 ctx.tokens(),
@@ -233,7 +248,7 @@ fn parse_prefix(
                 // A bare prefix operator with no operand: wrap it as an error.
                 return Some(error_expr_with_range(start, start + 1));
             };
-            let mut events = vec![Event::Start(SyntaxKind::UNARY_EXPR)];
+            let mut events = vec![Event::Start(node)];
             push_range(&mut events, start, operand.start);
             events.extend(operand.events);
             events.push(Event::Finish);
@@ -244,6 +259,7 @@ fn parse_prefix(
             })
         }
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
+        TokKind::LBrace => parse_braces(ctx, start, diagnostics),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
         TokKind::Integer
         | TokKind::Float
@@ -340,6 +356,31 @@ fn parse_postfix_chain(
                     diagnostics,
                 )
             }
+            // Parametric type application: `Vector{T}`, `Dict{K, V}`.
+            Some(TokKind::LBrace) => {
+                lhs = parse_postfix(
+                    ctx,
+                    lhs,
+                    next,
+                    TokKind::RBrace,
+                    SyntaxKind::CURLY_EXPR,
+                    diagnostics,
+                )
+            }
+            // Splat/vararg `x...` is postfix and terminal: wrap and re-loop (the
+            // next pass finds nothing more to chain).
+            Some(TokKind::DotDotDot) => {
+                let mut events = vec![Event::Start(SyntaxKind::SPLAT_EXPR)];
+                events.extend(lhs.events);
+                push_range(&mut events, lhs.end, next);
+                events.push(Event::Tok(next));
+                events.push(Event::Finish);
+                lhs = ExprParse {
+                    start: lhs.start,
+                    end: next + 1,
+                    events,
+                };
+            }
             _ => break,
         }
     }
@@ -363,7 +404,8 @@ fn parse_postfix(
     node: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
-    let (list_events, end) = parse_arg_list(ctx, open_idx, close, diagnostics);
+    let (list_events, end) =
+        parse_arg_list(ctx, open_idx, close, SyntaxKind::ARG_LIST, diagnostics);
     let mut events = vec![Event::Start(node)];
     events.extend(lhs.events);
     push_range(&mut events, lhs.end, open_idx);
@@ -376,21 +418,40 @@ fn parse_postfix(
     }
 }
 
-/// Parse a comma-separated, bracket-delimited argument list into an `ARG_LIST`
-/// node. Each argument is wrapped in an `ARG`. Returns the events and the index
-/// just past the closing bracket.
+/// Parse a standalone `{ … }` brace expression into a `BRACES` node — the
+/// type-variable list of a bare `where {T, S}`. Like `PAREN_EXPR`, the braces
+/// node directly holds its comma-separated items (no wrapping `ARG_LIST`).
+fn parse_braces(
+    ctx: &ParserCtx<'_>,
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let (events, end) =
+        parse_arg_list(ctx, start, TokKind::RBrace, SyntaxKind::BRACES, diagnostics);
+    Some(ExprParse { start, end, events })
+}
+
+/// Parse a comma-separated, bracket-delimited argument list into a `list_kind`
+/// node (`ARG_LIST` for calls/indices/curlies, `BRACES` for bare braces). Each
+/// positional argument is wrapped in an `ARG`, each `name = value` in a
+/// `KEYWORD_ARG`. A `;` opens a `PARAMETERS` node that holds the remaining
+/// keyword parameters. Returns the events and the index just past the closing
+/// bracket.
 fn parse_arg_list(
     ctx: &ParserCtx<'_>,
     open_idx: usize,
     close: TokKind,
+    list_kind: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> (Vec<Event>, usize) {
     let tokens = ctx.tokens();
-    let mut events = vec![Event::Start(SyntaxKind::ARG_LIST), Event::Tok(open_idx)];
+    let mut events = vec![Event::Start(list_kind), Event::Tok(open_idx)];
     let mut i = open_idx + 1;
+    let mut in_params = false;
 
     loop {
-        // Interior trivia belongs to the arg list, not to any argument.
+        // Interior trivia belongs to the current container (the list, or the
+        // `PARAMETERS` section once a `;` has opened one).
         while matches!(tokens.get(i).map(|t| t.kind), Some(k) if k.is_trivia()) {
             events.push(Event::Tok(i));
             i += 1;
@@ -398,6 +459,10 @@ fn parse_arg_list(
         match tokens.get(i).map(|t| t.kind) {
             None => break, // unterminated list; still lossless
             Some(k) if k == close => {
+                if in_params {
+                    events.push(Event::Finish); // close PARAMETERS
+                    in_params = false;
+                }
                 events.push(Event::Tok(i));
                 i += 1;
                 break;
@@ -406,22 +471,76 @@ fn parse_arg_list(
                 events.push(Event::Tok(i));
                 i += 1;
             }
-            Some(_) => {
-                if let Some(arg) = parse_expr_in_brackets(tokens, i, 0, diagnostics) {
-                    events.push(Event::Start(SyntaxKind::ARG));
-                    events.extend(arg.events);
-                    events.push(Event::Finish);
-                    i = arg.end;
-                } else {
-                    events.push(Event::Tok(i));
-                    i += 1;
+            // `;` splits positional arguments from keyword parameters; the first
+            // one opens a `PARAMETERS` node holding the rest of the list.
+            Some(TokKind::Semicolon) => {
+                if !in_params {
+                    events.push(Event::Start(SyntaxKind::PARAMETERS));
+                    in_params = true;
                 }
+                events.push(Event::Tok(i));
+                i += 1;
             }
+            Some(_) => i = parse_one_arg(ctx, &mut events, i, diagnostics),
         }
     }
 
-    events.push(Event::Finish);
+    if in_params {
+        events.push(Event::Finish); // close PARAMETERS on an unterminated list
+    }
+    events.push(Event::Finish); // close the list node
     (events, i)
+}
+
+/// Parse one argument starting at `i` into `events`, as a `KEYWORD_ARG`
+/// (`name = value`) when it is a keyword argument and an `ARG` otherwise.
+/// Returns the index just past the argument.
+fn parse_one_arg(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    i: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let tokens = ctx.tokens();
+    if let Some(eq_idx) = kwarg_eq(ctx, i) {
+        events.push(Event::Start(SyntaxKind::KEYWORD_ARG));
+        events.push(Event::Start(SyntaxKind::NAME));
+        events.push(Event::Tok(i));
+        events.push(Event::Finish);
+        // Whitespace + `=` between the name and the value.
+        push_range(events, i + 1, eq_idx);
+        events.push(Event::Tok(eq_idx));
+        let val_start = ctx.skip_trivia(eq_idx + 1);
+        push_range(events, eq_idx + 1, val_start);
+        let end = match parse_expr_in_brackets(tokens, val_start, 0, diagnostics) {
+            Some(val) => {
+                events.extend(val.events);
+                val.end
+            }
+            None => val_start,
+        };
+        events.push(Event::Finish);
+        end
+    } else if let Some(arg) = parse_expr_in_brackets(tokens, i, 0, diagnostics) {
+        events.push(Event::Start(SyntaxKind::ARG));
+        events.extend(arg.events);
+        events.push(Event::Finish);
+        arg.end
+    } else {
+        events.push(Event::Tok(i));
+        i + 1
+    }
+}
+
+/// If the argument at `i` is a keyword argument (`name = value` — a bare
+/// identifier followed on the same line by a single `=`, not `==`), return the
+/// `=` token's index.
+fn kwarg_eq(ctx: &ParserCtx<'_>, i: usize) -> Option<usize> {
+    if ctx.token(i).map(|t| t.kind) != Some(TokKind::Ident) {
+        return None;
+    }
+    let eq = ctx.skip_ws(i + 1);
+    (ctx.token(eq).map(|t| t.kind) == Some(TokKind::Eq)).then_some(eq)
 }
 
 /// Find the next infix/assignment operator after `from`, honoring newline
@@ -456,9 +575,18 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         TokKind::Arrow => (4, 3),
         TokKind::OrOr => (5, 6),
         TokKind::AndAnd => (7, 8),
-        TokKind::EqEq | TokKind::NotEq | TokKind::Lt | TokKind::Le | TokKind::Gt | TokKind::Ge => {
-            (10, 11)
-        }
+        // `where` sits below the comparison tier so its right-hand side captures
+        // a `<:`/`>:` bound (`A where T<:Real` → `A where (T<:Real)`), and above
+        // `->`/`=` so `f(x)::T where U` groups as `((f(x)::T) where U)`.
+        TokKind::WhereKw => (8, 9),
+        TokKind::EqEq
+        | TokKind::NotEq
+        | TokKind::Lt
+        | TokKind::Le
+        | TokKind::Gt
+        | TokKind::Ge
+        | TokKind::Subtype
+        | TokKind::Supertype => (10, 11),
         TokKind::PipeGt => (12, 13),
         TokKind::Colon => (14, 15),
         TokKind::Plus | TokKind::Minus => (20, 21),

@@ -80,6 +80,11 @@ mod tests {
             "# a comment\nx = 1  # trailing\n",
             "#= block =#\nq = 2\n",
             "obj.field\n",
+            "x::Int\n",
+            "Vector{T}\n",
+            "foo(x::T) where {T<:Number} = x\n",
+            "f(a, b; c=1, d=2)\n",
+            "g(args...; kwargs...)\n",
         ] {
             assert_lossless(input);
         }

@@ -1,0 +1,95 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..96
+  TYPE_ANNOTATION@0..6
+    NAME@0..1
+      IDENT@0..1 "x"
+    COLON_COLON@1..3 "::"
+    NAME@3..6
+      IDENT@3..6 "Int"
+  NEWLINE@6..7 "\n"
+  ASSIGNMENT_EXPR@7..29
+    TYPE_ANNOTATION@7..25
+      NAME@7..8
+        IDENT@7..8 "y"
+      COLON_COLON@8..10 "::"
+      CURLY_EXPR@10..25
+        NAME@10..16
+          IDENT@10..16 "Vector"
+        ARG_LIST@16..25
+          LBRACE@16..17 "{"
+          ARG@17..24
+            NAME@17..24
+              IDENT@17..24 "Float64"
+          RBRACE@24..25 "}"
+    WHITESPACE@25..26 " "
+    EQ@26..27 "="
+    WHITESPACE@27..28 " "
+    NAME@28..29
+      IDENT@28..29 "v"
+  NEWLINE@29..30 "\n"
+  FUNCTION_DEF@30..78
+    FUNCTION_KW@30..38 "function"
+    WHITESPACE@38..39 " "
+    SIGNATURE@39..68
+      TYPE_ANNOTATION@39..68
+        CALL_EXPR@39..59
+          NAME@39..40
+            IDENT@39..40 "f"
+          ARG_LIST@40..59
+            LPAREN@40..41 "("
+            ARG@41..47
+              TYPE_ANNOTATION@41..47
+                NAME@41..42
+                  IDENT@41..42 "x"
+                COLON_COLON@42..44 "::"
+                NAME@44..47
+                  IDENT@44..47 "Int"
+            COMMA@47..48 ","
+            WHITESPACE@48..49 " "
+            ARG@49..58
+              TYPE_ANNOTATION@49..58
+                NAME@49..50
+                  IDENT@49..50 "y"
+                COLON_COLON@50..52 "::"
+                NAME@52..58
+                  IDENT@52..58 "String"
+            RPAREN@58..59 ")"
+        COLON_COLON@59..61 "::"
+        NAME@61..68
+          IDENT@61..68 "Float64"
+    BLOCK@68..75
+      NEWLINE@68..69 "\n"
+      WHITESPACE@69..73 "    "
+      NAME@73..74
+        IDENT@73..74 "x"
+      NEWLINE@74..75 "\n"
+    END_KW@75..78 "end"
+  NEWLINE@78..79 "\n"
+  ASSIGNMENT_EXPR@79..95
+    CALL_EXPR@79..91
+      NAME@79..80
+        IDENT@79..80 "g"
+      ARG_LIST@80..91
+        LPAREN@80..81 "("
+        ARG@81..90
+          TYPE_ANNOTATION@81..90
+            COLON_COLON@81..83 "::"
+            CURLY_EXPR@83..90
+              NAME@83..87
+                IDENT@83..87 "Type"
+              ARG_LIST@87..90
+                LBRACE@87..88 "{"
+                ARG@88..89
+                  NAME@88..89
+                    IDENT@88..89 "T"
+                RBRACE@89..90 "}"
+        RPAREN@90..91 ")"
+    WHITESPACE@91..92 " "
+    EQ@92..93 "="
+    WHITESPACE@93..94 " "
+    NAME@94..95
+      IDENT@94..95 "T"
+  NEWLINE@95..96 "\n"

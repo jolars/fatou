@@ -43,8 +43,7 @@ ROOT@0..157
     SIGNATURE@71..97
       IDENT@71..78 "Wrapper"
       WHITESPACE@78..79 " "
-      LT@79..80 "<"
-      COLON@80..81 ":"
+      SUBTYPE@79..81 "<:"
       WHITESPACE@81..82 " "
       IDENT@82..97 "AbstractWrapper"
     BLOCK@97..108

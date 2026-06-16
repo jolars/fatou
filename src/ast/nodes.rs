@@ -37,7 +37,14 @@ ast_node!(UnaryExpr, SyntaxKind::UNARY_EXPR);
 ast_node!(ParenExpr, SyntaxKind::PAREN_EXPR);
 ast_node!(CallExpr, SyntaxKind::CALL_EXPR);
 ast_node!(IndexExpr, SyntaxKind::INDEX_EXPR);
+ast_node!(CurlyExpr, SyntaxKind::CURLY_EXPR);
+ast_node!(Braces, SyntaxKind::BRACES);
 ast_node!(ArgList, SyntaxKind::ARG_LIST);
+ast_node!(KeywordArg, SyntaxKind::KEYWORD_ARG);
+ast_node!(Parameters, SyntaxKind::PARAMETERS);
+ast_node!(TypeAnnotation, SyntaxKind::TYPE_ANNOTATION);
+ast_node!(WhereExpr, SyntaxKind::WHERE_EXPR);
+ast_node!(SplatExpr, SyntaxKind::SPLAT_EXPR);
 ast_node!(AssignmentExpr, SyntaxKind::ASSIGNMENT_EXPR);
 ast_node!(ArrowExpr, SyntaxKind::ARROW_EXPR);
 ast_node!(IfExpr, SyntaxKind::IF_EXPR);
@@ -98,6 +105,30 @@ impl CallExpr {
     }
 }
 
+impl CurlyExpr {
+    /// The type-parameter list, e.g. `{T}` in `Vector{T}`.
+    pub fn arg_list(&self) -> Option<ArgList> {
+        support::child(&self.0)
+    }
+}
+
+impl TypeAnnotation {
+    /// The `::` operator token.
+    pub fn op_token(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .find(|t| t.kind() == SyntaxKind::COLON_COLON)
+    }
+}
+
+impl KeywordArg {
+    /// The keyword name (the left of `=`).
+    pub fn name(&self) -> Option<Name> {
+        support::child(&self.0)
+    }
+}
+
 impl IfExpr {
     /// The `if` test condition.
     pub fn condition(&self) -> Option<Condition> {
@@ -139,6 +170,8 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::OR_OR
             | SyntaxKind::COLON
             | SyntaxKind::COLON_COLON
+            | SyntaxKind::SUBTYPE
+            | SyntaxKind::SUPERTYPE
             | SyntaxKind::DOT
             | SyntaxKind::PIPE_GT
     )

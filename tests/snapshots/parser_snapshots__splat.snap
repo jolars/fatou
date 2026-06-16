@@ -1,0 +1,66 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..58
+  CALL_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARG_LIST@1..7
+      LPAREN@1..2 "("
+      ARG@2..6
+        SPLAT_EXPR@2..6
+          NAME@2..3
+            IDENT@2..3 "x"
+          DOT_DOT_DOT@3..6 "..."
+      RPAREN@6..7 ")"
+  NEWLINE@7..8 "\n"
+  CALL_EXPR@8..19
+    NAME@8..9
+      IDENT@8..9 "g"
+    ARG_LIST@9..19
+      LPAREN@9..10 "("
+      ARG@10..11
+        NAME@10..11
+          IDENT@10..11 "a"
+      COMMA@11..12 ","
+      WHITESPACE@12..13 " "
+      ARG@13..18
+        SPLAT_EXPR@13..18
+          NAME@13..15
+            IDENT@13..15 "xs"
+          DOT_DOT_DOT@15..18 "..."
+      RPAREN@18..19 ")"
+  NEWLINE@19..20 "\n"
+  CALL_EXPR@20..41
+    NAME@20..21
+      IDENT@20..21 "h"
+    ARG_LIST@21..41
+      LPAREN@21..22 "("
+      ARG@22..29
+        SPLAT_EXPR@22..29
+          NAME@22..26
+            IDENT@22..26 "args"
+          DOT_DOT_DOT@26..29 "..."
+      PARAMETERS@29..40
+        SEMICOLON@29..30 ";"
+        WHITESPACE@30..31 " "
+        ARG@31..40
+          SPLAT_EXPR@31..40
+            NAME@31..37
+              IDENT@31..37 "kwargs"
+            DOT_DOT_DOT@37..40 "..."
+      RPAREN@40..41 ")"
+  NEWLINE@41..42 "\n"
+  CALL_EXPR@42..57
+    NAME@42..47
+      IDENT@42..47 "print"
+    ARG_LIST@47..57
+      LPAREN@47..48 "("
+      ARG@48..56
+        SPLAT_EXPR@48..56
+          NAME@48..53
+            IDENT@48..53 "items"
+          DOT_DOT_DOT@53..56 "..."
+      RPAREN@56..57 ")"
+  NEWLINE@57..58 "\n"
