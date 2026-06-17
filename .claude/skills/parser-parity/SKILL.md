@@ -156,6 +156,24 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
     public API = `feat(parser)`; test-infra-only = `test(parser)`. The pre-commit
     hook runs clippy + rustfmt — never `--no-verify`. Don't push unless asked.
 
+## Session boundaries
+
+A committed target with `RECAP.md` updated (the end of step 12) **is a clean
+stop** — `RECAP.md` is the handoff, so nothing valuable lives only in the chat
+context. When the user asks to keep going, recommend by where you are:
+
+- **Fresh session** — default at a committed boundary. The next session re-reads
+  `RECAP.md` (step 1) and continues; a fresh, lean context keeps attention on the
+  new target (exploration dumps, snapshot reviews, and triage reports from the
+  finished target are pure ballast for the next one).
+- **Compact & continue** — when the user wants the *next* target immediately and
+  doesn't want to re-establish the green baseline. RECAP still protects the work.
+- **Continue as-is** — only mid-target: uncommitted work, a half-applied fix, or a
+  failing test you're chasing. Don't span more than one target in a context.
+
+So: one target per context window is the intended cadence — the rolling log exists
+precisely so you don't have to.
+
 ## Key files
 
 - `src/parser/sexpr.rs` — projector (`to_juliasyntax_sexpr`, `normalize_sexpr`,
