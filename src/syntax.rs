@@ -42,6 +42,7 @@ pub enum SyntaxKind {
     TYPE_ANNOTATION,
     WHERE_EXPR,
     SPLAT_EXPR,
+    POSTFIX_EXPR,
     ASSIGNMENT_EXPR,
     ARROW_EXPR,
     TERNARY_EXPR,
@@ -157,6 +158,7 @@ pub enum SyntaxKind {
     AMP,
     PIPE,
     QUESTION,
+    TRANSPOSE,
 
     // --- Broadcasting (dotted) operator tokens ---
     DOT_PLUS,

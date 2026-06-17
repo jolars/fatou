@@ -102,6 +102,7 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::Amp => SyntaxKind::AMP,
         TokKind::Pipe => SyntaxKind::PIPE,
         TokKind::Question => SyntaxKind::QUESTION,
+        TokKind::Transpose => SyntaxKind::TRANSPOSE,
         TokKind::DotPlus => SyntaxKind::DOT_PLUS,
         TokKind::DotMinus => SyntaxKind::DOT_MINUS,
         TokKind::DotStar => SyntaxKind::DOT_STAR,

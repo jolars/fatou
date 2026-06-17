@@ -935,6 +935,22 @@ fn parse_postfix_chain(
                     events,
                 };
             }
+            // Postfix transpose/adjoint `A'`. Wraps the operand and re-loops, so
+            // it chains (`A''`) and composes with later suffixes (`A'[i]`). The
+            // lexer only emits `Transpose` when it directly abuts a value, so the
+            // operator is always adjacent (no newline between operand and `'`).
+            Some(TokKind::Transpose) => {
+                let mut events = vec![Event::Start(SyntaxKind::POSTFIX_EXPR)];
+                events.extend(lhs.events);
+                push_range(&mut events, lhs.end, next);
+                events.push(Event::Tok(next));
+                events.push(Event::Finish);
+                lhs = ExprParse {
+                    start: lhs.start,
+                    end: next + 1,
+                    events,
+                };
+            }
             // Splat/vararg `x...` is postfix and terminal: wrap and re-loop (the
             // next pass finds nothing more to chain).
             Some(TokKind::DotDotDot) => {

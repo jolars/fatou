@@ -1,0 +1,89 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..50
+  POSTFIX_EXPR@0..2
+    NAME@0..1
+      IDENT@0..1 "A"
+    TRANSPOSE@1..2 "'"
+  NEWLINE@2..3 "\n"
+  POSTFIX_EXPR@3..6
+    POSTFIX_EXPR@3..5
+      NAME@3..4
+        IDENT@3..4 "A"
+      TRANSPOSE@4..5 "'"
+    TRANSPOSE@5..6 "'"
+  NEWLINE@6..7 "\n"
+  POSTFIX_EXPR@7..13
+    MATRIX_EXPR@7..12
+      LBRACKET@7..8 "["
+      MATRIX_ROW@8..11
+        ARG@8..9
+          LITERAL@8..9
+            INTEGER@8..9 "1"
+        WHITESPACE@9..10 " "
+        ARG@10..11
+          LITERAL@10..11
+            INTEGER@10..11 "2"
+      RBRACKET@11..12 "]"
+    TRANSPOSE@12..13 "'"
+  NEWLINE@13..14 "\n"
+  BINARY_EXPR@14..20
+    POSTFIX_EXPR@14..16
+      NAME@14..15
+        IDENT@14..15 "M"
+      TRANSPOSE@15..16 "'"
+    WHITESPACE@16..17 " "
+    STAR@17..18 "*"
+    WHITESPACE@18..19 " "
+    NAME@19..20
+      IDENT@19..20 "v"
+  NEWLINE@20..21 "\n"
+  POSTFIX_EXPR@21..29
+    PAREN_EXPR@21..28
+      LPAREN@21..22 "("
+      BINARY_EXPR@22..27
+        NAME@22..23
+          IDENT@22..23 "a"
+        WHITESPACE@23..24 " "
+        PLUS@24..25 "+"
+        WHITESPACE@25..26 " "
+        NAME@26..27
+          IDENT@26..27 "b"
+      RPAREN@27..28 ")"
+    TRANSPOSE@28..29 "'"
+  NEWLINE@29..30 "\n"
+  POSTFIX_EXPR@30..35
+    CALL_EXPR@30..34
+      NAME@30..31
+        IDENT@30..31 "f"
+      ARG_LIST@31..34
+        LPAREN@31..32 "("
+        ARG@32..33
+          NAME@32..33
+            IDENT@32..33 "x"
+        RPAREN@33..34 ")"
+    TRANSPOSE@34..35 "'"
+  NEWLINE@35..36 "\n"
+  ASSIGNMENT_EXPR@36..43
+    NAME@36..37
+      IDENT@36..37 "x"
+    WHITESPACE@37..38 " "
+    EQ@38..39 "="
+    WHITESPACE@39..40 " "
+    LITERAL@40..43
+      CHAR@40..43 "'a'"
+  NEWLINE@43..44 "\n"
+  INDEX_EXPR@44..49
+    POSTFIX_EXPR@44..46
+      NAME@44..45
+        IDENT@44..45 "B"
+      TRANSPOSE@45..46 "'"
+    ARG_LIST@46..49
+      LBRACKET@46..47 "["
+      ARG@47..48
+        LITERAL@47..48
+          INTEGER@47..48 "1"
+      RBRACKET@48..49 "]"
+  NEWLINE@49..50 "\n"

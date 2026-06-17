@@ -101,6 +101,9 @@ pub(crate) enum TokKind {
     Amp,
     Pipe,
     Question,
+    /// Postfix transpose/adjoint `'` (only when it follows a value; otherwise a
+    /// `'` opens a [`TokKind::Char`] literal).
+    Transpose,
 
     // Broadcasting (dotted) operators: a `.` fused to a following operator.
     DotPlus,
@@ -263,6 +266,10 @@ impl<'a> Lexer<'a> {
             b'#' => self.lex_comment(start),
             b'"' => self.lex_open_string(start, false),
             b'`' => self.lex_open_cmd(start, false),
+            b'\'' if self.prev_ends_value() => {
+                self.pos += 1;
+                self.push(TokKind::Transpose, start, self.pos);
+            }
             b'\'' => self.lex_char_or_unknown(start),
             b'0'..=b'9' => self.lex_number(start),
             b'.' if self.peek(1).is_some_and(|c| c.is_ascii_digit()) => self.lex_number(start),
@@ -493,10 +500,36 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// `'` begins a char literal when it is *not* a postfix adjoint/transpose.
-    /// We lex it as a char when a closing `'` is found within a short window
-    /// (one char, or a backslash escape); otherwise it is an [`TokKind::Unknown`]
-    /// single byte (transpose support is a TODO).
+    /// Whether the immediately preceding token ends a value, making a following
+    /// `'` a postfix transpose/adjoint rather than the start of a char literal.
+    /// The check is on the *immediately* preceding token (not skipping trivia),
+    /// which mirrors Julia's whitespace sensitivity: `A'` is transpose but `A '`
+    /// is `A` followed by a (here unterminated) char literal.
+    fn prev_ends_value(&self) -> bool {
+        matches!(
+            self.tokens.last().map(|t| t.kind),
+            Some(
+                TokKind::Ident
+                    | TokKind::Integer
+                    | TokKind::Float
+                    | TokKind::Char
+                    | TokKind::TrueKw
+                    | TokKind::FalseKw
+                    | TokKind::RParen
+                    | TokKind::RBracket
+                    | TokKind::RBrace
+                    | TokKind::StringDelimClose
+                    | TokKind::CmdDelimClose
+                    | TokKind::StringSuffix
+                    | TokKind::Transpose
+            )
+        )
+    }
+
+    /// `'` begins a char literal when it is *not* a postfix adjoint/transpose
+    /// (see [`Self::prev_ends_value`]). We lex it as a char when a closing `'`
+    /// is found within a short window (one char, or a backslash escape);
+    /// otherwise it is an [`TokKind::Unknown`] single byte.
     fn lex_char_or_unknown(&mut self, start: usize) {
         let after_open = self.pos + 1;
         // Try `'\x'` (escape) or `'c'` (single char), then a closing quote.

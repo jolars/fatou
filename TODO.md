@@ -92,8 +92,14 @@ through), so the grammar can grow incrementally.
   multi-clause comprehensions (`for … for … if …`) and multi-variable bindings
   (`for i, j in …`), bare call-argument generators (`sum(x for x in xs)`),
   v1.7 matrix-row syntax (`[1, 2; 3, 4]`), and unicode dotted operators.
-- [ ] Transpose/adjoint postfix `'` (currently `'` only lexes as a char literal;
-  the postfix operator case is unhandled).
+- [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the
+  *immediately* preceding token (`prev_ends_value` in `lexer.rs`): when it abuts
+  a value-ending token (ident, literal, closing `)`/`]`/`}`, string/cmd close,
+  another `'`, …) it lexes as a `Transpose` operator, otherwise it opens a
+  `Char` literal — matching Julia's whitespace sensitivity (`A'` transpose vs
+  `A '` char). The postfix chain (`parse_postfix_chain`) wraps the operand in a
+  `POSTFIX_EXPR` and re-loops, so it chains (`A''`) and composes with later
+  suffixes (`A'[i]`, mirroring JuliaSyntax's `(ref (call A ') i)`).
 - [ ] Bare `end` inside indexing (`a[end]`) — currently `end` always terminates
   a block, so `a[end]` is mis-handled.
 - [ ] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
