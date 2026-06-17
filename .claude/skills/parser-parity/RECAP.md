@@ -22,47 +22,64 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **274 allowlisted**, 274 divergence, 27 unsupported.
-Dir corpus: **41 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "range `..`" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **282 allowlisted**, 266 divergence, 27 unsupported.
+Dir corpus: **42 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "richer `import`/`using`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-17e)
+## Latest session (2026-06-17f)
 
-**Range operator `..`.** 5-file recipe + a number-lexer fix. `DotDot` lexed as a
-2-char op placed *after* the `...` splat check and *before* the broadcast-`.`
-block (longest match `...` > `..` > `.`). Critically, `lex_number`'s fractional
-`.` is now guarded `&& peek(1) != Some(b'.')` so `1..n` lexes `1 .. n` (not the
-float `1.` + `.n`); `1.0..2`, `1.`, `1.e3`, `.5` all still lex right. Shares the
-colon tier `(14,15)` (left-assoc, `Colon | DotDot`), builds an ordinary
-`BINARY_EXPR`, projects to `(call-i a .. b)` (`CallI("..")` + `is_operator` +
-`is_operator_kind`). Fixture `range_operator` (parser + dir corpus).
+**Richer `import`/`using` path trees.** Replaced the verbatim passthrough with a
+dedicated `parse_import_stmt` (`structural.rs`) that builds real nodes; the
+projector now *reads* them (no reconstruction). New `SyntaxKind`s `IMPORT_PATH`
+(leading `.`/`..`/`...` dots + dot-separated names) and `IMPORT_ALIAS` (`as`
+rename wrapping a path; `as` is a contextual `Ident`, matched by text). A
+top-level `:` token switches from base path to a comma-separated name list; `,`/`:`
+kept as tokens so `project_import` groups base-vs-names by presence of the colon.
+`project_import_path` expands each leading-dot token to one `.` per char and skips
+the *separator* dots (only pre-first-name dots carry meaning); `project_import_alias`
+emits `(as <importpath> <name>)`. Fixtures `import_paths` (parser + dir corpus).
 
-JS allow **273 → 274** (`a..b`); unsupported 29 → 27, divergence 273 → 274. The
-new FAIL is `x..y...` (now parses; `...`-splat binds looser than `..` in Julia:
-`(... (.. x y))` vs Fatou `(.. x (... y))` — a separate splat-precedence gap, not
-a `..` bug). Dir allow 40 → 41. Zero regressions; green, clippy/fmt clean.
+JS allow **274 → 282** (+8: `import .A`/`..A`/`...A`/`....A`, `import A as B`,
+`import A, y`, `import A: x as y`, `using A: x as y`); divergence 274 → 266,
+unsupported unchanged (27). Dir allow 41 → 42. Zero regressions; green,
+clippy/fmt clean.
 
-**Trap learned:** adding a low-precedence operator (`-->` prec 4, `<|` prec 8) is
-blocked by Fatou's *cramped* low-tier numbers — no integer gap between `=>`(4) and
-`||`(5), nor between cmp(11) and `|>`(12). Inserting one forces a renumber cascade
-through `||`/`&&`/`where`/comparisons. `..`(prec 10) was clean because it *shares*
-the colon tier. Do the renumber as its own infra step before `-->`/`<|`.
+**Trap learned:** a clause parser that emits leading whitespace via `push_range`
+*before* deciding the clause is unrecognized will double-emit it (caller's verbatim
+passthrough re-emits) → losslessness break on the deferred forms (`import @x`,
+`import A: +`). Fix: parse the path into a scratch event buffer first, commit the
+whitespace only on success. Always `--verify` the deferred/edge forms, not just the
+happy path.
+
+**Deferred (still divergences, carried verbatim):** operator-symbol names
+(`import A.==`, `import A: +, ==`), `@macro`/`$interp` paths (`import @x`,
+`import $A`), the `. .A` space-separated-dots form, and `import A; B` (`;` splits
+statements). `export`'s name list is untouched (still passthrough).
 
 **Suggested next targets (ranked):**
-1. **Richer `import`/`using`** — `import .A`, `import A: x as y`, `using A.B: c`.
-   ~21 corpus cases + ubiquitous; needs a real import-path tree. No precedence work.
-2. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
+1. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
    ~9 corpus cases (a coherent cluster).
-3. **Precedence-table renumber** (infra), then arrow `-->`/`<-->` (prec 4, special
+2. **Precedence-table renumber** (infra), then arrow `-->`/`<-->` (prec 4, special
    head `(--> a b)`, dotted `.-->` → `dotcall-i`) and left-pipe `<|` (prec 8).
-4. **Splat postfix precedence** — fix `x..y...` → `(... (.. x y))` (also `x:y...`).
+   Blocked by cramped low-tier numbers (no integer gap at `=>`(4)/`||`(5) or
+   cmp(11)/`|>`(12)) — do the renumber first.
+3. **Splat postfix precedence** — fix `x..y...` → `(... (.. x y))` (also `x:y...`).
+4. **Operator-symbol import names** (`import A: +`, `import A.==`) — extend the
+   import-path grammar to accept operator tokens as name components.
 
 ## Earlier sessions
+
+- **2026-06-17e** — Range operator `..`: `DotDot` 2-char op (longest match `...` >
+  `..` > `.`), placed after the splat check, before the broadcast-`.` block; a
+  `lex_number` guard (`peek(1) != Some(b'.')`) keeps `1..n` from lexing as float
+  `1.` + `.n`. Shares colon tier `(14,15)`, ordinary `BINARY_EXPR` → `(call-i a ..
+  b)`. JS allow 273 → 274. New FAIL `x..y...` (splat-precedence gap, deferred).
+  Fixture `range_operator`.
 
 - **2026-06-17d** — Broadcast short-circuit `.&&`/`.||`: 5-file recipe (infix-only,
   no prefix); `DotAndAnd`/`DotOrOr` in the 3-char dotted table, share `&&`/`||`

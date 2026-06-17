@@ -12,8 +12,8 @@ use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
     KwStmt, parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr, parse_if_expr,
-    parse_keyword_stmt, parse_let_expr, parse_module_expr, parse_quote_expr, parse_struct_expr,
-    parse_try_expr, parse_while_expr,
+    parse_import_stmt, parse_keyword_stmt, parse_let_expr, parse_module_expr, parse_quote_expr,
+    parse_struct_expr, parse_try_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -176,22 +176,10 @@ fn parse_expr_in(
             );
         }
         Some(TokKind::ImportKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::IMPORT_STMT,
-                KwStmt::Path,
-                diagnostics,
-            );
+            return parse_import_stmt(tokens, start, SyntaxKind::IMPORT_STMT, diagnostics);
         }
         Some(TokKind::UsingKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::USING_STMT,
-                KwStmt::Path,
-                diagnostics,
-            );
+            return parse_import_stmt(tokens, start, SyntaxKind::USING_STMT, diagnostics);
         }
         Some(TokKind::ExportKw) => {
             return parse_keyword_stmt(

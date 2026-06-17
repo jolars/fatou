@@ -17,6 +17,7 @@ control_flow
 dot_logical_operator
 escaped_dollar
 generators
+import_paths
 keyword_args
 keyword_statements
 let_quote

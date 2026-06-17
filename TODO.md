@@ -31,9 +31,9 @@ through), so the grammar can grow incrementally.
   `using`, `export`. Leading-keyword statement forms (no `… end`), parsed by
   the shared `parse_keyword_stmt` in `structural.rs`: control flow is bare or
   takes an optional operand; `const`/`global`/`local` parse their first operand
-  as an expression then carry the rest of the line through; `import`/`using`/
-  `export` carry the whole clause through verbatim (dedicated `:`/`.` path trees
-  come with the operators below).
+  as an expression then carry the rest of the line through; `export` carries the
+  whole clause through verbatim. `import`/`using` now build a real path tree (see
+  the dedicated bullet below); `export`'s richer name list stays passthrough.
 - [x] Anonymous functions and `->`; short-form function definitions
   (`f(x) = …`). The `->` operator (already lexed, Julia precedence `(4, 3)` —
   right-associative, tighter than `=`) builds a dedicated `ARROW_EXPR` in the
@@ -180,6 +180,20 @@ through), so the grammar can grow incrementally.
   `(call-i a .. b)`. The `...`-splat-vs-`..` postfix precedence (`x..y...`) stays
   a divergence (separate splat-precedence gap).
 
+- [x] Richer `import`/`using` path trees. A dedicated `parse_import_stmt`
+  (`structural.rs`) replaces the verbatim passthrough: each clause is an
+  `IMPORT_PATH` node (leading relative dots `.`/`..`/`...` then dot-separated name
+  components), optionally wrapped in an `IMPORT_ALIAS` for an `as` rename (`as` is
+  a contextual identifier). A top-level `:` switches from the base path to a
+  comma-separated list of imported names; `,`/`:` separators are kept as tokens so
+  the projector groups base-vs-names. Projects to `(import (importpath . A))`,
+  `(import (as (importpath A) B))`, and `(import (: (importpath A) (as (importpath
+  x) y)))` — faithfully, reading the real nodes (no projector reconstruction).
+  **Deferred (still divergences):** operator-symbol names (`import A.==`,
+  `import A: +`), `@macro`/`$interp` paths, and the `. .A` (space-separated dots)
+  form — each is carried through verbatim, keeping losslessness. `export`'s name
+  list is untouched (still passthrough).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -251,8 +265,8 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`), richer import/`using` (`import .A`, `x as y`), multi-clause and
-  comma generators, and assorted operators (`-->`, `<|`, `.|>`).
+  (`a*b*c`), multi-clause and comma generators, and assorted operators (`-->`,
+  `<|`, `.|>`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

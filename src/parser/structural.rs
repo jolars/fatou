@@ -393,6 +393,158 @@ pub(crate) fn parse_keyword_stmt(
     })
 }
 
+/// Parse an `import`/`using` directive into a real path tree. The keyword at
+/// `start` opens `node_kind`; what follows is a comma-separated list of clauses,
+/// optionally split by a top-level `:` into a base path and a list of imported
+/// names (`import A: x, y`). Each clause is an [`IMPORT_PATH`](SyntaxKind) —
+/// leading relative dots plus dot-separated name components — optionally wrapped
+/// in an [`IMPORT_ALIAS`](SyntaxKind) for an `as` rename. The `:`/`,` separators
+/// are kept as tokens so the projector can group base-vs-names. Anything the path
+/// grammar doesn't recognize (operator names, `@macro`/`$interp` paths) is carried
+/// through verbatim to preserve losslessness; those remain divergences for now.
+pub(crate) fn parse_import_stmt(
+    tokens: &[Token],
+    start: usize,
+    node_kind: SyntaxKind,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
+
+    let mut i = parse_import_clause(&ctx, &mut events, start + 1, diagnostics);
+
+    // Comma-separated further clauses, plus an optional single `:` that switches
+    // from the base path to the list of imported names. Both separators feed the
+    // same clause parser; the projector reads the `:` to group base vs. names.
+    loop {
+        let sep = ctx.skip_ws(i);
+        match ctx.token(sep).map(|t| t.kind) {
+            Some(TokKind::Comma | TokKind::Colon) => {
+                push_range(&mut events, i, sep);
+                events.push(Event::Tok(sep));
+                i = parse_import_clause(&ctx, &mut events, sep + 1, diagnostics);
+            }
+            _ => break,
+        }
+    }
+
+    // Carry any remaining same-line tokens through verbatim (unrecognized path
+    // forms), keeping losslessness.
+    while !header_ends(&ctx, i) {
+        events.push(Event::Tok(i));
+        i += 1;
+    }
+
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+/// Parse one import clause: an [`IMPORT_PATH`](SyntaxKind), optionally followed by
+/// `as <name>` (wrapping the path in an [`IMPORT_ALIAS`](SyntaxKind)). Emits the
+/// leading whitespace before the path, then the path subtree. Returns the index
+/// after the clause (unchanged if no path is recognized, so the caller's verbatim
+/// passthrough takes over).
+fn parse_import_clause(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    after_sep: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let path_start = ctx.skip_ws(after_sep);
+
+    let mut path_events = Vec::new();
+    let path_end = parse_import_path(ctx, &mut path_events, path_start, diagnostics);
+    if path_end == path_start {
+        // Nothing recognized as a path; leave it (and its leading whitespace) to
+        // the caller's verbatim passthrough.
+        return after_sep;
+    }
+    // Commit the leading whitespace only now that a path was recognized, so the
+    // failure path above doesn't double-emit it.
+    push_range(events, after_sep, path_start);
+
+    // `as <name>` rename — `as` is a contextual identifier.
+    let as_idx = ctx.skip_ws(path_end);
+    if is_as_kw(ctx, as_idx) {
+        let alias_start = ctx.skip_ws(as_idx + 1);
+        if matches!(ctx.token(alias_start).map(|t| t.kind), Some(TokKind::Ident)) {
+            events.push(Event::Start(SyntaxKind::IMPORT_ALIAS));
+            events.extend(path_events);
+            push_range(events, path_end, as_idx);
+            events.push(Event::Tok(as_idx)); // `as`
+            push_range(events, as_idx + 1, alias_start);
+            events.push(Event::Tok(alias_start)); // alias name
+            events.push(Event::Finish);
+            return alias_start + 1;
+        }
+    }
+
+    events.extend(path_events);
+    path_end
+}
+
+/// Parse a single dotted import path into an [`IMPORT_PATH`](SyntaxKind) node:
+/// leading relative dots (`.`/`..`/`...`) followed by dot-separated identifier
+/// components (`A.B.C`). Returns the index after the path; equal to `start` when
+/// no path is recognized.
+fn parse_import_path(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    start: usize,
+    _diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let mut i = start;
+    let mut body = Vec::new();
+
+    // Leading relative dots: `.`/`..`/`...`, consumed greedily before any name.
+    while matches!(
+        ctx.token(i).map(|t| t.kind),
+        Some(TokKind::Dot | TokKind::DotDot | TokKind::DotDotDot)
+    ) {
+        body.push(Event::Tok(i));
+        i += 1;
+    }
+
+    // First name component.
+    if !matches!(ctx.token(i).map(|t| t.kind), Some(TokKind::Ident)) {
+        // No name: a bare relative path (`import .`) keeps just the dots; nothing
+        // at all means no path here.
+        if body.is_empty() {
+            return start;
+        }
+        events.push(Event::Start(SyntaxKind::IMPORT_PATH));
+        events.extend(body);
+        events.push(Event::Finish);
+        return i;
+    }
+    body.push(Event::Tok(i));
+    i += 1;
+
+    // Further `.name` components, kept tight (no internal whitespace).
+    while matches!(ctx.token(i).map(|t| t.kind), Some(TokKind::Dot))
+        && matches!(ctx.token(i + 1).map(|t| t.kind), Some(TokKind::Ident))
+    {
+        body.push(Event::Tok(i)); // separating `.`
+        body.push(Event::Tok(i + 1)); // name
+        i += 2;
+    }
+
+    events.push(Event::Start(SyntaxKind::IMPORT_PATH));
+    events.extend(body);
+    events.push(Event::Finish);
+    i
+}
+
+/// Whether the token at `i` is the contextual `as` keyword (a plain identifier
+/// whose text is `as`).
+fn is_as_kw(ctx: &ParserCtx<'_>, i: usize) -> bool {
+    matches!(ctx.token(i), Some(t) if t.kind == TokKind::Ident && t.text == "as")
+}
+
 /// Wrap an already-parsed call expression `lhs` in a `DO_EXPR` for the postfix
 /// `do` block form (`f(x) do y … end`). `do_idx` is the `do` keyword's token
 /// index (the caller has verified it sits on `lhs`'s line). The optional

@@ -151,6 +151,8 @@ fn project(node: &SyntaxNode) -> String {
         IMPORT_STMT => project_import("import", node),
         USING_STMT => project_import("using", node),
         EXPORT_STMT => project_export(node),
+        IMPORT_PATH => project_import_path(node),
+        IMPORT_ALIAS => project_import_alias(node),
 
         MACRO_CALL => project_macrocall(node),
 
@@ -715,43 +717,76 @@ fn project_export(node: &SyntaxNode) -> String {
 }
 
 fn project_import(head: &str, node: &SyntaxNode) -> String {
-    // `import A` / `using A.B` / `import A: b, c`. Split on a top-level `:` into
-    // a base path and the imported names; each becomes an `(importpath …)`. The
-    // `:`/`,`/`.` separators are load-bearing here, so collect them explicitly
-    // rather than via `significant` (which drops delimiters).
-    let elems: Vec<SyntaxElement> = node
-        .children_with_tokens()
-        .filter(|el| match el {
-            NodeOrToken::Node(n) => n.kind() == NAME,
-            NodeOrToken::Token(t) => matches!(t.kind(), IDENT | COLON | COMMA | DOT),
-        })
+    // `import A` / `using A.B` / `import A: b, c as d`. The path tree is built by
+    // the parser: each clause is an `IMPORT_PATH` or `IMPORT_ALIAS` node, and a
+    // top-level `:` token (when present) splits the base path from the list of
+    // imported names. Read those nodes directly.
+    let has_colon = node.children_with_tokens().any(|el| el.kind() == COLON);
+    let clauses: Vec<String> = node
+        .children()
+        .filter(|c| matches!(c.kind(), IMPORT_PATH | IMPORT_ALIAS))
+        .map(|c| project(&c))
         .collect();
-    let colon = elems
-        .iter()
-        .position(|el| matches!(el, NodeOrToken::Token(t) if t.kind() == COLON));
-    match colon {
-        Some(idx) => {
-            let base = importpath(&elems[..idx]);
-            let mut parts = vec![base];
-            for group in split_on_comma(&elems[idx + 1..]) {
-                parts.push(importpath(&group));
-            }
-            format!("({head} {})", sexp(":", parts))
-        }
-        None => format!("({head} {})", importpath(&elems)),
+
+    if has_colon && !clauses.is_empty() {
+        // `(: <base> <name> …)` — the first clause is the base path.
+        format!("({head} {})", sexp(":", clauses))
+    } else {
+        format!("({head} {})", clauses.join(" "))
     }
 }
 
-fn importpath(elems: &[SyntaxElement]) -> String {
-    let parts: Vec<String> = elems
-        .iter()
+/// `(importpath . . A B)` — leading relative dots (each `.`/`..`/`...` token
+/// expands to one dot per character) followed by the dotted name components. The
+/// dots that *separate* name components carry no meaning in JuliaSyntax's shape,
+/// so only the leading dots (before the first name) are emitted.
+fn project_import_path(node: &SyntaxNode) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut seen_name = false;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(t) => match t.kind() {
+                DOT if !seen_name => parts.push(".".to_string()),
+                DOT_DOT if !seen_name => parts.extend([".".to_string(), ".".to_string()]),
+                DOT_DOT_DOT if !seen_name => {
+                    parts.extend([".".to_string(), ".".to_string(), ".".to_string()])
+                }
+                IDENT => {
+                    parts.push(t.text().to_string());
+                    seen_name = true;
+                }
+                _ => {}
+            },
+            NodeOrToken::Node(n) if n.kind() == NAME => {
+                parts.push(name_text(&n));
+                seen_name = true;
+            }
+            _ => {}
+        }
+    }
+    sexp("importpath", parts)
+}
+
+/// `(as (importpath …) <name>)` — an `as` rename wrapping an import path.
+fn project_import_alias(node: &SyntaxNode) -> String {
+    let path = node
+        .children()
+        .find(|c| c.kind() == IMPORT_PATH)
+        .map(|c| project_import_path(&c))
+        .unwrap_or_default();
+    // The alias is the bare identifier after the `as` keyword (the path's own
+    // identifiers are nested inside the `IMPORT_PATH` child, not direct tokens).
+    let alias = node
+        .children_with_tokens()
         .filter_map(|el| match el {
-            NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
-            NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(n)),
+            NodeOrToken::Token(t) if t.kind() == IDENT && t.text() != "as" => {
+                Some(t.text().to_string())
+            }
             _ => None,
         })
-        .collect();
-    sexp("importpath", parts)
+        .last()
+        .unwrap_or_default();
+    format!("(as {path} {alias})")
 }
 
 // --- Macros ----------------------------------------------------------------
@@ -1108,20 +1143,4 @@ fn is_keyword(kind: SyntaxKind) -> bool {
             | EXPORT_KW
             | WHERE_KW
     )
-}
-
-fn split_on_comma(elems: &[SyntaxElement]) -> Vec<Vec<SyntaxElement>> {
-    let mut groups = Vec::new();
-    let mut current = Vec::new();
-    for el in elems {
-        if matches!(el, NodeOrToken::Token(t) if t.kind() == COMMA) {
-            groups.push(std::mem::take(&mut current));
-        } else {
-            current.push(el.clone());
-        }
-    }
-    if !current.is_empty() {
-        groups.push(current);
-    }
-    groups
 }
