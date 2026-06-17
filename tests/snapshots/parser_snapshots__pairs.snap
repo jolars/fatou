@@ -1,0 +1,94 @@
+---
+source: tests/parser_snapshots.rs
+assertion_line: 41
+expression: rendered
+---
+ROOT@0..67
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    FAT_ARROW@2..4 "=>"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+  NEWLINE@6..7 "\n"
+  CALL_EXPR@7..29
+    NAME@7..11
+      IDENT@7..11 "Dict"
+    ARG_LIST@11..29
+      LPAREN@11..12 "("
+      ARG@12..19
+        BINARY_EXPR@12..19
+          QUOTE_SYM@12..14
+            COLON@12..13 ":"
+            NAME@13..14
+              IDENT@13..14 "a"
+          WHITESPACE@14..15 " "
+          FAT_ARROW@15..17 "=>"
+          WHITESPACE@17..18 " "
+          LITERAL@18..19
+            INTEGER@18..19 "1"
+      COMMA@19..20 ","
+      WHITESPACE@20..21 " "
+      ARG@21..28
+        BINARY_EXPR@21..28
+          QUOTE_SYM@21..23
+            COLON@21..22 ":"
+            NAME@22..23
+              IDENT@22..23 "b"
+          WHITESPACE@23..24 " "
+          FAT_ARROW@24..26 "=>"
+          WHITESPACE@26..27 " "
+          LITERAL@27..28
+            INTEGER@27..28 "2"
+      RPAREN@28..29 ")"
+  NEWLINE@29..30 "\n"
+  BINARY_EXPR@30..41
+    NAME@30..31
+      IDENT@30..31 "a"
+    WHITESPACE@31..32 " "
+    FAT_ARROW@32..34 "=>"
+    WHITESPACE@34..35 " "
+    BINARY_EXPR@35..41
+      NAME@35..36
+        IDENT@35..36 "b"
+      WHITESPACE@36..37 " "
+      FAT_ARROW@37..39 "=>"
+      WHITESPACE@39..40 " "
+      NAME@40..41
+        IDENT@40..41 "c"
+  NEWLINE@41..42 "\n"
+  VECT_EXPR@42..58
+    LBRACKET@42..43 "["
+    ARG@43..49
+      BINARY_EXPR@43..49
+        NAME@43..44
+          IDENT@43..44 "a"
+        WHITESPACE@44..45 " "
+        FAT_ARROW@45..47 "=>"
+        WHITESPACE@47..48 " "
+        NAME@48..49
+          IDENT@48..49 "b"
+    COMMA@49..50 ","
+    WHITESPACE@50..51 " "
+    ARG@51..57
+      BINARY_EXPR@51..57
+        NAME@51..52
+          IDENT@51..52 "c"
+        WHITESPACE@52..53 " "
+        FAT_ARROW@53..55 "=>"
+        WHITESPACE@55..56 " "
+        NAME@56..57
+          IDENT@56..57 "d"
+    RBRACKET@57..58 "]"
+  NEWLINE@58..59 "\n"
+  BINARY_EXPR@59..66
+    NAME@59..60
+      IDENT@59..60 "x"
+    WHITESPACE@60..61 " "
+    DOT_FAT_ARROW@61..64 ".=>"
+    WHITESPACE@64..65 " "
+    NAME@65..66
+      IDENT@65..66 "y"
+  NEWLINE@66..67 "\n"

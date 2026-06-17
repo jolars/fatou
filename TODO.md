@@ -126,6 +126,11 @@ through), so the grammar can grow incrementally.
   the index colon in `a[:]` is untouched. **Known limitations:** the bare-`:`
   Colon value (`a[:]` → `(ref a :)`) and operator symbols (`:+`, `:(=)`) are
   deferred (still divergences).
+- [x] Pair operator `=>` (and broadcast `.=>`). Lexed as `FatArrow`/`DotFatArrow`
+  (a new two-/three-char operator), parsed as a `BINARY_EXPR` on the arrow tier
+  `(4, 3)` — right-associative, looser than `||`, tighter than `=` — and
+  projected to `(call-i a => b)`/`(dotcall-i a => b)`. Unblocks `Dict(:a => 1)`
+  shapes (composing with the symbol quoting above).
 - [x] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
   `lex_number` (`lexer.rs`) now splits the base-prefixed integers into distinct
   `HEX_INT`/`OCT_INT`/`BIN_INT` kinds (with per-base digit classes and
@@ -214,9 +219,9 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`), the pair operator `=>`, richer import/`using` (`import .A`,
-  `x as y`), multi-clause generators, and assorted operators (`-->`, `<|`,
-  `.&&`). **Follow-ups:** work the backlog up the allowlist;
+  (`a*b*c`), richer import/`using` (`import .A`, `x as y`), multi-clause and
+  comma generators, and assorted operators (`-->`, `<|`, `.&&`, `.||`).
+  **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.

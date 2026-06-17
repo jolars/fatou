@@ -22,6 +22,7 @@ literals
 loops
 macros
 nested_string_interp
+pairs
 parametric_types
 raw_string
 regex_string

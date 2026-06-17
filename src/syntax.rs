@@ -159,6 +159,7 @@ pub enum SyntaxKind {
     SUBTYPE,
     SUPERTYPE,
     ARROW,
+    FAT_ARROW,
     DOT,
     DOT_DOT_DOT,
     PIPE_GT,
@@ -183,6 +184,7 @@ pub enum SyntaxKind {
     DOT_LE,
     DOT_GT,
     DOT_GE,
+    DOT_FAT_ARROW,
 
     // --- Delimiter / punctuation tokens ---
     LPAREN,

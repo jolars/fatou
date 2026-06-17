@@ -99,6 +99,8 @@ pub(crate) enum TokKind {
     Subtype,
     Supertype,
     Arrow,
+    /// The pair operator `=>`.
+    FatArrow,
     Dot,
     DotDotDot,
     PipeGt,
@@ -125,6 +127,8 @@ pub(crate) enum TokKind {
     DotLe,
     DotGt,
     DotGe,
+    /// The broadcast pair operator `.=>`.
+    DotFatArrow,
 
     // Delimiters / punctuation
     LParen,
@@ -761,6 +765,7 @@ impl<'a> Lexer<'a> {
                 (Some(b'<'), Some(b'=')) => Some(TokKind::DotLe),
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
+                (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
                 _ => None,
             };
             if let Some(kind) = dotted3 {
@@ -792,6 +797,7 @@ impl<'a> Lexer<'a> {
         let two = match (b0, b1) {
             (Some(b'/'), Some(b'/')) => Some(TokKind::SlashSlash),
             (Some(b'='), Some(b'=')) => Some(TokKind::EqEq),
+            (Some(b'='), Some(b'>')) => Some(TokKind::FatArrow),
             (Some(b'!'), Some(b'=')) => Some(TokKind::NotEq),
             (Some(b'<'), Some(b'=')) => Some(TokKind::Le),
             (Some(b'>'), Some(b'=')) => Some(TokKind::Ge),

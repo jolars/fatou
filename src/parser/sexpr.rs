@@ -186,6 +186,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         CARET => CallI("^"),
         PERCENT => CallI("%"),
         COLON => CallI(":"),
+        FAT_ARROW => CallI("=>"),
         PIPE_GT => CallI("|>"),
         AMP => CallI("&"),
         PIPE => CallI("|"),
@@ -218,6 +219,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_LE => DotCallI("<="),
         DOT_GT => DotCallI(">"),
         DOT_GE => DotCallI(">="),
+        DOT_FAT_ARROW => DotCallI("=>"),
 
         // Fallback: treat as an ordinary infix call using the raw text. Leaked
         // in faithfully so an unmapped operator surfaces as a divergence.
@@ -248,6 +250,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | SUBTYPE
             | SUPERTYPE
             | ARROW
+            | FAT_ARROW
             | DOT
             | PIPE_GT
             | BANG
@@ -267,6 +270,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_LE
             | DOT_GT
             | DOT_GE
+            | DOT_FAT_ARROW
     )
 }
 

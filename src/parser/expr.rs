@@ -1524,7 +1524,9 @@ fn parse_ternary(
 /// left_bp + 1`.
 fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
     Some(match kind {
-        TokKind::Arrow => (4, 3),
+        // The pair `=>` shares the arrow/ternary tier: right-associative, looser
+        // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
+        TokKind::Arrow | TokKind::FatArrow | TokKind::DotFatArrow => (4, 3),
         TokKind::OrOr => (5, 6),
         TokKind::AndAnd => (7, 8),
         // `where` sits below the comparison tier so its right-hand side captures
