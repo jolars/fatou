@@ -190,8 +190,17 @@ through), so the grammar can grow incrementally.
   triage report, and `tests/oracle/{allowlist,blocked}.txt` (keyed by slug)
   partition the corpus — 6 blocked with rationales (numeric-literal display
   normalization, triple-string dedent, `end`/`[1 +2]`/unterminated-string and
-  incomplete-`do` error shapes). **Follow-ups:** grow the corpus by porting
-  JuliaSyntax's own test cases; design error-shape parity to promote the
-  blocked recovery cases; wire `oracle_allowlist` into CI.
+  incomplete-`do` error shapes). A harvested **JuliaSyntax sub-corpus**
+  (`scripts/harvest-juliasyntax-corpus.jl` → `tests/fixtures/oracle/juliasyntax.jsonl`,
+  575 micro-cases extracted from JuliaSyntax's own `test/parser.jl`, expected
+  regenerated via our pinned `parseall`) is gated opt-in by `oracle_juliasyntax`
+  against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
+  `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
+  **prioritized parser-growth backlog** — e.g. associative n-ary flattening
+  (`a*b*c`), symbols/quotes (`:T`), richer import/`using` (`import .A`,
+  `x as y`), `a[begin]`, multi-clause generators, and assorted operators
+  (`-->`, `<|`, `.&&`). **Follow-ups:** work the backlog up the allowlist;
+  design error-shape parity to promote the blocked recovery cases; wire the
+  oracle gates into CI.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.
 - [ ] `smol_str` interning for symbol names once the semantic model lands.

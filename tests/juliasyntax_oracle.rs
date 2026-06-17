@@ -29,6 +29,15 @@ const ALLOWLIST_REL: &str = "tests/oracle/allowlist.txt";
 const BLOCKED_REL: &str = "tests/oracle/blocked.txt";
 const REPORT_REL: &str = "tests/oracle/report.txt";
 
+/// The harvested JuliaSyntax sub-corpus (`scripts/harvest-juliasyntax-corpus.jl`):
+/// ~575 micro-cases from JuliaSyntax's own `test/parser.jl`, one JSON object per
+/// line. Gated **opt-in** (like the dir corpus): every allowlisted slug must
+/// match Julia, guarding against regression. The full report's divergence and
+/// unsupported buckets are the prioritizable backlog for growing parser parity.
+const JS_CORPUS_REL: &str = "tests/fixtures/oracle/juliasyntax.jsonl";
+const JS_ALLOWLIST_REL: &str = "tests/oracle/juliasyntax-allowlist.txt";
+const JS_REPORT_REL: &str = "tests/oracle/juliasyntax-report.txt";
+
 struct Case {
     slug: String,
     input: String,
@@ -61,6 +70,45 @@ fn read_corpus() -> Vec<Case> {
     }
     cases.sort_by(|a, b| a.slug.cmp(&b.slug));
     cases
+}
+
+fn read_js_corpus() -> Vec<Case> {
+    let path = manifest_path(JS_CORPUS_REL);
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let v: serde_json::Value =
+                serde_json::from_str(line).expect("parse juliasyntax.jsonl line");
+            Case {
+                slug: v["slug"].as_str().expect("slug").to_string(),
+                input: v["input"].as_str().expect("input").to_string(),
+                expected: v["expected"].as_str().expect("expected").to_string(),
+            }
+        })
+        .collect()
+}
+
+/// Outcome of projecting one case against its pinned expected s-expression.
+#[derive(PartialEq, Eq)]
+enum Outcome {
+    /// Fatou parses cleanly and the projection matches Julia.
+    Pass,
+    /// Fatou parses cleanly but the projection diverges from Julia.
+    Fail,
+    /// Fatou reports parse diagnostics — unsupported syntax (the growth frontier).
+    Unsupported,
+}
+
+fn outcome(case: &Case) -> Outcome {
+    match render(case) {
+        None => Outcome::Unsupported,
+        Some(rendered) if rendered == normalize_sexpr(&case.expected) => Outcome::Pass,
+        Some(_) => Outcome::Fail,
+    }
 }
 
 /// Project the case's CST to a normalized s-expression. `None` if Fatou reports
@@ -142,6 +190,100 @@ fn oracle_allowlist() {
         "allowlisted oracle cases regressed: {regressions:?}\n\
          re-run `cargo test --test juliasyntax_oracle -- --ignored oracle_full_report` to triage"
     );
+}
+
+/// Opt-in parity gate over the harvested JuliaSyntax sub-corpus: every
+/// allowlisted slug must still match Julia. Also guards the allowlist's own
+/// hygiene (no slugs absent from the corpus). CI-safe — the corpus is pinned, so
+/// no Julia is needed.
+#[test]
+fn oracle_juliasyntax() {
+    let allowed = read_slug_file(JS_ALLOWLIST_REL);
+    if allowed.is_empty() {
+        return; // baseline still being seeded
+    }
+    let cases = read_js_corpus();
+    let by_slug: std::collections::HashMap<&str, &Case> =
+        cases.iter().map(|c| (c.slug.as_str(), c)).collect();
+
+    let mut regressions = Vec::new();
+    let mut missing = Vec::new();
+    for slug in &allowed {
+        match by_slug.get(slug.as_str()) {
+            Some(case) if outcome(case) != Outcome::Pass => regressions.push(slug.clone()),
+            Some(_) => {}
+            None => missing.push(slug.clone()),
+        }
+    }
+
+    let mut problems = String::new();
+    if !regressions.is_empty() {
+        problems.push_str(&format!(
+            "\n  {} allowlisted case(s) regressed: {regressions:?}",
+            regressions.len()
+        ));
+    }
+    if !missing.is_empty() {
+        problems.push_str(&format!(
+            "\n  {} allowlisted slug(s) absent from the corpus: {missing:?}",
+            missing.len()
+        ));
+    }
+    assert!(
+        problems.is_empty(),
+        "JuliaSyntax parity gate:{problems}\n\
+         re-run `cargo test --test juliasyntax_oracle -- --ignored juliasyntax_full_report` to triage"
+    );
+}
+
+/// Triage run for the harvested JuliaSyntax sub-corpus (ignored by default):
+/// writes a per-case report and a summary (pass / divergence / unsupported), so
+/// divergences can be blocked and the unsupported frontier prioritized.
+#[test]
+#[ignore = "diagnostic/triage run; writes tests/oracle/juliasyntax-report.txt"]
+fn juliasyntax_full_report() {
+    let cases = read_js_corpus();
+    let allowed = read_slug_file(JS_ALLOWLIST_REL);
+
+    let (mut pass, mut fail, mut unsupported) = (0u32, 0u32, 0u32);
+    let mut lines = Vec::new();
+    for case in &cases {
+        let status = match outcome(case) {
+            Outcome::Pass => {
+                pass += 1;
+                "PASS"
+            }
+            Outcome::Fail => {
+                fail += 1;
+                "FAIL"
+            }
+            Outcome::Unsupported => {
+                unsupported += 1;
+                "UNSUPPORTED"
+            }
+        };
+        let tag = if allowed.contains(&case.slug) {
+            " [allow]"
+        } else {
+            ""
+        };
+        // Keep the input on the line (escaped) so divergences are diagnosable.
+        lines.push(format!(
+            "{status:<12} {}{tag}  {:?}",
+            case.slug,
+            case.input.replace('\n', "\\n")
+        ));
+    }
+    lines.sort();
+
+    let mut report = lines.join("\n");
+    report.push_str(&format!(
+        "\n\n{} cases: {pass} pass ({} allowlisted), {fail} divergence, {unsupported} unsupported (frontier)\n",
+        cases.len(),
+        allowed.len(),
+    ));
+    fs::write(manifest_path(JS_REPORT_REL), &report).expect("write juliasyntax-report.txt");
+    eprint!("{report}");
 }
 
 /// Full triage run (ignored by default): renders every case, writes a report,
