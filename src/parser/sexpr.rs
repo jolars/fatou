@@ -186,6 +186,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         CARET => CallI("^"),
         PERCENT => CallI("%"),
         COLON => CallI(":"),
+        DOT_DOT => CallI(".."),
         FAT_ARROW => CallI("=>"),
         PIPE_GT => CallI("|>"),
         AMP => CallI("&"),
@@ -252,6 +253,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_AND_AND
             | DOT_OR_OR
             | COLON
+            | DOT_DOT
             | COLON_COLON
             | TILDE
             | DOT_TILDE

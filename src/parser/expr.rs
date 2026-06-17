@@ -1583,7 +1583,10 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::DotGt
         | TokKind::DotGe => (10, 11),
         TokKind::PipeGt => (12, 13),
-        TokKind::Colon => (14, 15),
+        // The range operator `..` shares the colon tier (Julia gives both
+        // precedence 10) and is left-associative, building an ordinary
+        // `(call-i a .. b)`.
+        TokKind::Colon | TokKind::DotDot => (14, 15),
         TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus => (20, 21),
         TokKind::Star
         | TokKind::Slash

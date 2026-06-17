@@ -173,6 +173,13 @@ through), so the grammar can grow incrementally.
   `Special` heads, not `dotcall-i`). Mixed chains like `x .&& y .|| z` match Julia;
   same-operator chains inherit the existing left-nesting divergence of `&&`/`||`.
 
+- [x] Range operator `..`. Lexed as `DotDot` (longest match after `...`, before
+  the broadcast-dot block); the number lexer no longer eats a `.` followed by `.`
+  so `1..n` is `1 .. n`. Shares the colon precedence tier `(14, 15)`
+  (left-associative), built as an ordinary `BINARY_EXPR` and projected to
+  `(call-i a .. b)`. The `...`-splat-vs-`..` postfix precedence (`x..y...`) stays
+  a divergence (separate splat-precedence gap).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -245,7 +252,7 @@ through), so the grammar can grow incrementally.
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
   (`a*b*c`), richer import/`using` (`import .A`, `x as y`), multi-clause and
-  comma generators, and assorted operators (`-->`, `<|`).
+  comma generators, and assorted operators (`-->`, `<|`, `.|>`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

@@ -111,6 +111,7 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::PipeEq => SyntaxKind::PIPE_EQ,
         TokKind::AmpEq => SyntaxKind::AMP_EQ,
         TokKind::Dot => SyntaxKind::DOT,
+        TokKind::DotDot => SyntaxKind::DOT_DOT,
         TokKind::DotDotDot => SyntaxKind::DOT_DOT_DOT,
         TokKind::PipeGt => SyntaxKind::PIPE_GT,
         TokKind::Bang => SyntaxKind::BANG,

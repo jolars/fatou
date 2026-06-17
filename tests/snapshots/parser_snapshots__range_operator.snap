@@ -1,0 +1,74 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..42
+  BINARY_EXPR@0..4
+    NAME@0..1
+      IDENT@0..1 "a"
+    DOT_DOT@1..3 ".."
+    NAME@3..4
+      IDENT@3..4 "b"
+  NEWLINE@4..5 "\n"
+  BINARY_EXPR@5..9
+    LITERAL@5..6
+      INTEGER@5..6 "1"
+    DOT_DOT@6..8 ".."
+    NAME@8..9
+      IDENT@8..9 "n"
+  NEWLINE@9..10 "\n"
+  BINARY_EXPR@10..20
+    CALL_EXPR@10..14
+      NAME@10..11
+        IDENT@10..11 "f"
+      ARG_LIST@11..14
+        LPAREN@11..12 "("
+        ARG@12..13
+          NAME@12..13
+            IDENT@12..13 "x"
+        RPAREN@13..14 ")"
+    DOT_DOT@14..16 ".."
+    CALL_EXPR@16..20
+      NAME@16..17
+        IDENT@16..17 "g"
+      ARG_LIST@17..20
+        LPAREN@17..18 "("
+        ARG@18..19
+          NAME@18..19
+            IDENT@18..19 "y"
+        RPAREN@19..20 ")"
+  NEWLINE@20..21 "\n"
+  BINARY_EXPR@21..27
+    NAME@21..22
+      IDENT@21..22 "a"
+    DOT_DOT@22..24 ".."
+    BINARY_EXPR@24..27
+      NAME@24..25
+        IDENT@24..25 "b"
+      PLUS@25..26 "+"
+      NAME@26..27
+        IDENT@26..27 "c"
+  NEWLINE@27..28 "\n"
+  BINARY_EXPR@28..33
+    UNARY_EXPR@28..30
+      MINUS@28..29 "-"
+      NAME@29..30
+        IDENT@29..30 "a"
+    DOT_DOT@30..32 ".."
+    NAME@32..33
+      IDENT@32..33 "b"
+  NEWLINE@33..34 "\n"
+  INDEX_EXPR@34..41
+    NAME@34..35
+      IDENT@34..35 "x"
+    ARG_LIST@35..41
+      LBRACKET@35..36 "["
+      ARG@36..40
+        BINARY_EXPR@36..40
+          NAME@36..37
+            IDENT@36..37 "i"
+          DOT_DOT@37..39 ".."
+          NAME@39..40
+            IDENT@39..40 "j"
+      RBRACKET@40..41 "]"
+  NEWLINE@41..42 "\n"

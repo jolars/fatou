@@ -26,6 +26,7 @@ macros
 nested_string_interp
 pairs
 parametric_types
+range_operator
 raw_string
 regex_string
 short_function_def

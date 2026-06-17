@@ -171,6 +171,7 @@ pub enum SyntaxKind {
     PIPE_EQ,
     AMP_EQ,
     DOT,
+    DOT_DOT,
     DOT_DOT_DOT,
     PIPE_GT,
     BANG,

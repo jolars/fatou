@@ -113,6 +113,8 @@ pub(crate) enum TokKind {
     PipeEq,
     AmpEq,
     Dot,
+    /// The `..` range/interval operator (infix `a..b`).
+    DotDot,
     DotDotDot,
     PipeGt,
     Bang,
@@ -683,8 +685,10 @@ impl<'a> Lexer<'a> {
         let mut is_float = false;
         let mut is_f32 = false;
         self.consume_digits(|c| c.is_ascii_digit());
-        // Fractional part: a `.` followed by a digit, or a trailing `.`.
-        if self.peek(0) == Some(b'.') {
+        // Fractional part: a `.` followed by a digit, or a trailing `.`. A `.`
+        // that is itself followed by another `.` belongs to the `..` range
+        // operator (`1..n` is `1 .. n`), so it is not consumed as a decimal point.
+        if self.peek(0) == Some(b'.') && self.peek(1) != Some(b'.') {
             is_float = true;
             self.pos += 1;
             self.consume_digits(|c| c.is_ascii_digit());
@@ -777,6 +781,14 @@ impl<'a> Lexer<'a> {
         if (b0, b1, self.peek(2)) == (Some(b'.'), Some(b'.'), Some(b'.')) {
             self.pos += 3;
             self.push(TokKind::DotDotDot, start, self.pos);
+            return;
+        }
+
+        // The `..` range operator (after `...`, before the broadcast-dot block
+        // so a bare `..` isn't mistaken for a dotted operator or two lone dots).
+        if (b0, b1) == (Some(b'.'), Some(b'.')) {
+            self.pos += 2;
+            self.push(TokKind::DotDot, start, self.pos);
             return;
         }
 
@@ -1244,8 +1256,8 @@ mod tests {
     #[test]
     fn splat_is_three_dots() {
         assert_eq!(kinds("x..."), vec![TokKind::Ident, TokKind::DotDotDot]);
-        // Two dots stay two single dots (no `..` operator yet); a lone dot too.
-        assert_eq!(kinds(".."), vec![TokKind::Dot, TokKind::Dot]);
+        // Longest match: `...` is the splat, `..` is the range operator.
+        assert_eq!(kinds(".."), vec![TokKind::DotDot]);
         assert_eq!(
             kinds("a.b"),
             vec![TokKind::Ident, TokKind::Dot, TokKind::Ident]
@@ -1268,12 +1280,13 @@ mod tests {
         assert_eq!(kinds("x .== y").get(2), Some(&TokKind::DotEqEq));
         assert_eq!(kinds("x .= y").get(2), Some(&TokKind::DotEq));
         assert_eq!(kinds("a .<= b").get(2), Some(&TokKind::DotLe));
-        // A `.` fused only to operators: field access and `..` stay lone dots.
+        // A `.` fuses to operators but never to an ident (`a.b` field access).
         assert_eq!(
             kinds("a.b"),
             vec![TokKind::Ident, TokKind::Dot, TokKind::Ident]
         );
-        assert_eq!(kinds(".."), vec![TokKind::Dot, TokKind::Dot]);
+        // `..` is its own range operator, not two lone dots or a broadcast `.`.
+        assert_eq!(kinds(".."), vec![TokKind::DotDot]);
         // `f.(` stays `Dot LParen` so the parser can form a broadcast call.
         assert_eq!(
             kinds("f.(x)"),
