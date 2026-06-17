@@ -1,0 +1,7 @@
+t = (a, b)
+single = (a,)
+empty = ()
+nt = (a = 1, b = 2)
+mixed = (a, b; c = 3)
+grouped = (a + b)
+nested = ((a, b), c)

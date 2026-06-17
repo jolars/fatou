@@ -423,22 +423,57 @@ fn parse_paren(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let inner_start = ctx.skip_trivia(start + 1);
-    let mut events = vec![Event::Start(SyntaxKind::PAREN_EXPR)];
 
-    // Empty parens `()`.
-    if ctx.token(inner_start).map(|t| t.kind) == Some(TokKind::RParen) {
-        push_range(&mut events, start, inner_start + 1);
-        events.push(Event::Finish);
-        return Some(ExprParse {
-            start,
-            end: inner_start + 1,
-            events,
-        });
+    // Empty `()` is the empty tuple; a leading `;` (`(; a=1)`) is a named-tuple
+    // parameter section. Both are tuples, handled by the arg-list machinery.
+    match ctx.token(inner_start).map(|t| t.kind) {
+        Some(TokKind::RParen) => {
+            let mut events = vec![Event::Start(SyntaxKind::TUPLE_EXPR)];
+            push_range(&mut events, start, inner_start + 1);
+            events.push(Event::Finish);
+            return Some(ExprParse {
+                start,
+                end: inner_start + 1,
+                events,
+            });
+        }
+        Some(TokKind::Semicolon) => {
+            let (events, end) = parse_arg_list(
+                ctx,
+                start,
+                TokKind::RParen,
+                SyntaxKind::TUPLE_EXPR,
+                diagnostics,
+            );
+            return Some(ExprParse { start, end, events });
+        }
+        _ => {}
     }
 
     let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, diagnostics) else {
         return Some(error_expr_with_range(start, inner_start));
     };
+
+    // A `,` or `;` after the first element makes this a tuple (or named tuple).
+    // Re-parse the whole parenthesized run as an argument list so each element
+    // becomes an `ARG`/`KEYWORD_ARG` and `;` opens a `PARAMETERS` section.
+    let sep = ctx.skip_trivia(inner.end);
+    if matches!(
+        ctx.token(sep).map(|t| t.kind),
+        Some(TokKind::Comma | TokKind::Semicolon)
+    ) {
+        let (events, end) = parse_arg_list(
+            ctx,
+            start,
+            TokKind::RParen,
+            SyntaxKind::TUPLE_EXPR,
+            diagnostics,
+        );
+        return Some(ExprParse { start, end, events });
+    }
+
+    // Otherwise a single parenthesized expression: `(a)` grouping.
+    let mut events = vec![Event::Start(SyntaxKind::PAREN_EXPR)];
     push_range(&mut events, start, inner.start);
     events.extend(inner.events);
 

@@ -29,7 +29,7 @@ ROOT@0..65
     EQ@15..16 "="
     WHITESPACE@16..17 " "
     ARROW_EXPR@17..24
-      PAREN_EXPR@17..19
+      TUPLE_EXPR@17..19
         LPAREN@17..18 "("
         RPAREN@18..19 ")"
       WHITESPACE@19..20 " "

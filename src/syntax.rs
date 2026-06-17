@@ -23,6 +23,7 @@ pub enum SyntaxKind {
     BINARY_EXPR,
     UNARY_EXPR,
     PAREN_EXPR,
+    TUPLE_EXPR,
     CALL_EXPR,
     INDEX_EXPR,
     DOT_CALL_EXPR,

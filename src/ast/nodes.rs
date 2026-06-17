@@ -38,6 +38,7 @@ ast_node!(Name, SyntaxKind::NAME);
 ast_node!(BinaryExpr, SyntaxKind::BINARY_EXPR);
 ast_node!(UnaryExpr, SyntaxKind::UNARY_EXPR);
 ast_node!(ParenExpr, SyntaxKind::PAREN_EXPR);
+ast_node!(TupleExpr, SyntaxKind::TUPLE_EXPR);
 ast_node!(CallExpr, SyntaxKind::CALL_EXPR);
 ast_node!(IndexExpr, SyntaxKind::INDEX_EXPR);
 ast_node!(DotCallExpr, SyntaxKind::DOT_CALL_EXPR);

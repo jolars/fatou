@@ -88,6 +88,10 @@ mod tests {
             "y = a .+ b .* c\n",
             "z = .-x\n",
             "a .= f.(b, c)\n",
+            "t = (a, b)\n",
+            "u = (a,)\n",
+            "e = ()\n",
+            "nt = (x = 1, y = 2)\n",
         ] {
             assert_lossless(input);
         }
