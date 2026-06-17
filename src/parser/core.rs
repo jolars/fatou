@@ -92,6 +92,9 @@ mod tests {
             "u = (a,)\n",
             "e = ()\n",
             "nt = (x = 1, y = 2)\n",
+            "y = a ? b : c\n",
+            "z = a == b ? x + 1 : x - 1\n",
+            "w = a ? b : c ? d : e\n",
         ] {
             assert_lossless(input);
         }

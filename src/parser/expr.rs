@@ -21,6 +21,14 @@ use crate::syntax::SyntaxKind;
 /// binary arithmetic operators so `-a + b` parses as `(-a) + b`.
 const PREFIX_BP: u8 = 28;
 
+/// Binding powers for the ternary `? :`. Right-associative (`l == r`) and just
+/// above assignment (`Eq` at `(2, 1)`), so a whole ternary can be an
+/// assignment's right-hand side while keeping `=` out of an unparenthesized
+/// branch. Both branches parse at `TERNARY_R`, capturing everything tighter than
+/// the ternary (including `||`/`&&`/comparisons) and nesting right-associatively.
+const TERNARY_L: u8 = 3;
+const TERNARY_R: u8 = 3;
+
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
@@ -29,7 +37,7 @@ pub(crate) fn parse_expr(
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, min_bp, diagnostics, false)
+    parse_expr_in(tokens, start, min_bp, diagnostics, false, false)
 }
 
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
@@ -40,7 +48,7 @@ pub(crate) fn parse_expr_in_brackets(
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, min_bp, diagnostics, true)
+    parse_expr_in(tokens, start, min_bp, diagnostics, true, false)
 }
 
 fn parse_expr_in(
@@ -49,6 +57,10 @@ fn parse_expr_in(
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
+    // When set, a bare `:` terminates the expression instead of being parsed as a
+    // range operator. Used for a ternary's true-branch so `a ? b : c` reads the
+    // `:` as the ternary separator (a real range there must be parenthesized).
+    no_range: bool,
 ) -> Option<ExprParse> {
     let ctx = ParserCtx::new(tokens);
 
@@ -171,6 +183,25 @@ fn parse_expr_in(
             continue;
         }
 
+        // In a ternary true-branch a bare `:` is the separator, not a range.
+        if no_range && op_kind == TokKind::Colon {
+            break;
+        }
+
+        // Ternary `cond ? then : else` — right-associative, just above
+        // assignment and below `||`. Handled specially (like assignment) so the
+        // `:` separator is consumed here rather than parsed as a range operator.
+        if op_kind == TokKind::Question {
+            if TERNARY_L < min_bp {
+                break;
+            }
+            lhs = match parse_ternary(&ctx, lhs, op_idx, diagnostics, inside_brackets, no_range) {
+                Ok(node) => node,
+                Err(done) => return Some(done),
+            };
+            continue;
+        }
+
         // Assignment (and broadcast assignment `.=`) is right-associative and
         // the loosest operator.
         let (l_bp, r_bp) = if op_kind == TokKind::Eq || op_kind == TokKind::DotEq {
@@ -186,8 +217,14 @@ fn parse_expr_in(
         }
 
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
-        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, inside_brackets)
-        else {
+        let Some(rhs) = parse_expr_in(
+            tokens,
+            rhs_operand,
+            r_bp,
+            diagnostics,
+            inside_brackets,
+            no_range,
+        ) else {
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
@@ -257,6 +294,9 @@ fn parse_prefix(
                 PREFIX_BP,
                 diagnostics,
                 inside_brackets,
+                // PREFIX_BP is above the range colon, so a `:` already ends the
+                // operand here regardless; no_range never matters.
+                false,
             ) else {
                 // A bare prefix operator with no operand: wrap it as an error.
                 return Some(error_expr_with_range(start, start + 1));
@@ -745,7 +785,7 @@ fn parse_macro_args(
             ) => break,
             _ => {
                 push_range(events, pos, next);
-                match parse_expr_in(ctx.tokens(), next, 0, diagnostics, inside_brackets) {
+                match parse_expr_in(ctx.tokens(), next, 0, diagnostics, inside_brackets, false) {
                     Some(arg) => {
                         events.extend(arg.events);
                         pos = arg.end;
@@ -904,7 +944,111 @@ fn next_operator(
 }
 
 fn is_operator(kind: TokKind) -> bool {
-    matches!(kind, TokKind::Eq | TokKind::DotEq) || infix_binding_power(kind).is_some()
+    matches!(kind, TokKind::Eq | TokKind::DotEq | TokKind::Question)
+        || infix_binding_power(kind).is_some()
+}
+
+/// Parse the `then : else` tail of a ternary whose `?` sits at `q_idx`, given the
+/// already-parsed condition `cond`. Returns `Ok(node)` with the assembled
+/// `TERNARY_EXPR` (the caller continues its operator loop), or `Err(recovered)`
+/// when a branch or the `:` separator is missing (the caller returns it as-is).
+fn parse_ternary(
+    ctx: &ParserCtx<'_>,
+    cond: ExprParse,
+    q_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    inside_brackets: bool,
+    no_range: bool,
+) -> Result<ExprParse, ExprParse> {
+    let tokens = ctx.tokens();
+
+    // True-branch: `no_range` so a bare `:` ends it (the ternary separator). A
+    // real range in the true-branch must therefore be parenthesized, as in Julia.
+    let then_start = ctx.skip_trivia(q_idx + 1);
+    let Some(then_br) = parse_expr_in(
+        tokens,
+        then_start,
+        TERNARY_R,
+        diagnostics,
+        inside_brackets,
+        true,
+    ) else {
+        let op = &tokens[q_idx];
+        push_diagnostic(
+            diagnostics,
+            "expected expression after `?`",
+            op.start,
+            op.end,
+        );
+        return Err(error_expr_to_line_end(tokens, cond.start, q_idx + 1));
+    };
+
+    // The `:` separator (newlines insignificant inside brackets, like operators).
+    let colon = if inside_brackets {
+        ctx.skip_ws_and_newlines(then_br.end)
+    } else {
+        ctx.skip_ws(then_br.end)
+    };
+    if ctx.token(colon).map(|t| t.kind) != Some(TokKind::Colon) {
+        let op = &tokens[q_idx];
+        push_diagnostic(
+            diagnostics,
+            "expected `:` in ternary expression",
+            op.start,
+            op.end,
+        );
+        // Recover: a ternary holding the condition, `?`, and true-branch only.
+        let mut events = vec![Event::Start(SyntaxKind::TERNARY_EXPR)];
+        events.extend(cond.events);
+        push_range(&mut events, cond.end, q_idx);
+        events.push(Event::Tok(q_idx));
+        push_range(&mut events, q_idx + 1, then_br.start);
+        events.extend(then_br.events);
+        events.push(Event::Finish);
+        return Ok(ExprParse {
+            start: cond.start,
+            end: then_br.end,
+            events,
+        });
+    }
+
+    // False-branch: inherit `no_range` so an enclosing ternary's `:` still ends
+    // it (`a ? b ? c : d : e`), while a top-level else may hold a range.
+    let else_start = ctx.skip_trivia(colon + 1);
+    let Some(else_br) = parse_expr_in(
+        tokens,
+        else_start,
+        TERNARY_R,
+        diagnostics,
+        inside_brackets,
+        no_range,
+    ) else {
+        let op = &tokens[colon];
+        push_diagnostic(
+            diagnostics,
+            "expected expression after `:`",
+            op.start,
+            op.end,
+        );
+        return Err(error_expr_to_line_end(tokens, cond.start, colon + 1));
+    };
+
+    let mut events = vec![Event::Start(SyntaxKind::TERNARY_EXPR)];
+    events.extend(cond.events);
+    push_range(&mut events, cond.end, q_idx);
+    events.push(Event::Tok(q_idx)); // `?`
+    push_range(&mut events, q_idx + 1, then_br.start);
+    events.extend(then_br.events);
+    push_range(&mut events, then_br.end, colon);
+    events.push(Event::Tok(colon)); // `:`
+    push_range(&mut events, colon + 1, else_br.start);
+    events.extend(else_br.events);
+    events.push(Event::Finish);
+    Ok(ExprParse {
+        start: cond.start,
+        end: else_br.end,
+        events,
+    })
 }
 
 /// `(left_bp, right_bp)` for binary operators. A right-associative operator has

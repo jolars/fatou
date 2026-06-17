@@ -52,6 +52,7 @@ ast_node!(WhereExpr, SyntaxKind::WHERE_EXPR);
 ast_node!(SplatExpr, SyntaxKind::SPLAT_EXPR);
 ast_node!(AssignmentExpr, SyntaxKind::ASSIGNMENT_EXPR);
 ast_node!(ArrowExpr, SyntaxKind::ARROW_EXPR);
+ast_node!(TernaryExpr, SyntaxKind::TERNARY_EXPR);
 ast_node!(IfExpr, SyntaxKind::IF_EXPR);
 ast_node!(ElseifClause, SyntaxKind::ELSEIF_CLAUSE);
 ast_node!(ElseClause, SyntaxKind::ELSE_CLAUSE);

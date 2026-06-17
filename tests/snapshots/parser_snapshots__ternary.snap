@@ -1,0 +1,155 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..109
+  ASSIGNMENT_EXPR@0..13
+    NAME@0..1
+      IDENT@0..1 "y"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    TERNARY_EXPR@4..13
+      NAME@4..5
+        IDENT@4..5 "a"
+      WHITESPACE@5..6 " "
+      QUESTION@6..7 "?"
+      WHITESPACE@7..8 " "
+      NAME@8..9
+        IDENT@8..9 "b"
+      WHITESPACE@9..10 " "
+      COLON@10..11 ":"
+      WHITESPACE@11..12 " "
+      NAME@12..13
+        IDENT@12..13 "c"
+  NEWLINE@13..14 "\n"
+  ASSIGNMENT_EXPR@14..35
+    NAME@14..15
+      IDENT@14..15 "z"
+    WHITESPACE@15..16 " "
+    EQ@16..17 "="
+    WHITESPACE@17..18 " "
+    TERNARY_EXPR@18..35
+      NAME@18..19
+        IDENT@18..19 "x"
+      WHITESPACE@19..20 " "
+      QUESTION@20..21 "?"
+      WHITESPACE@21..22 " "
+      NAME@22..23
+        IDENT@22..23 "y"
+      WHITESPACE@23..24 " "
+      COLON@24..25 ":"
+      WHITESPACE@25..26 " "
+      TERNARY_EXPR@26..35
+        NAME@26..27
+          IDENT@26..27 "p"
+        WHITESPACE@27..28 " "
+        QUESTION@28..29 "?"
+        WHITESPACE@29..30 " "
+        NAME@30..31
+          IDENT@30..31 "q"
+        WHITESPACE@31..32 " "
+        COLON@32..33 ":"
+        WHITESPACE@33..34 " "
+        NAME@34..35
+          IDENT@34..35 "r"
+  NEWLINE@35..36 "\n"
+  ASSIGNMENT_EXPR@36..58
+    NAME@36..37
+      IDENT@36..37 "w"
+    WHITESPACE@37..38 " "
+    EQ@38..39 "="
+    WHITESPACE@39..40 " "
+    TERNARY_EXPR@40..58
+      NAME@40..44
+        IDENT@40..44 "cond"
+      WHITESPACE@44..45 " "
+      QUESTION@45..46 "?"
+      WHITESPACE@46..47 " "
+      CALL_EXPR@47..51
+        NAME@47..48
+          IDENT@47..48 "f"
+        ARG_LIST@48..51
+          LPAREN@48..49 "("
+          ARG@49..50
+            NAME@49..50
+              IDENT@49..50 "x"
+          RPAREN@50..51 ")"
+      WHITESPACE@51..52 " "
+      COLON@52..53 ":"
+      WHITESPACE@53..54 " "
+      CALL_EXPR@54..58
+        NAME@54..55
+          IDENT@54..55 "g"
+        ARG_LIST@55..58
+          LPAREN@55..56 "("
+          ARG@56..57
+            NAME@56..57
+              IDENT@56..57 "y"
+          RPAREN@57..58 ")"
+  NEWLINE@58..59 "\n"
+  ASSIGNMENT_EXPR@59..85
+    NAME@59..60
+      IDENT@59..60 "e"
+    WHITESPACE@60..61 " "
+    EQ@61..62 "="
+    WHITESPACE@62..63 " "
+    TERNARY_EXPR@63..85
+      BINARY_EXPR@63..69
+        NAME@63..64
+          IDENT@63..64 "a"
+        WHITESPACE@64..65 " "
+        EQ_EQ@65..67 "=="
+        WHITESPACE@67..68 " "
+        NAME@68..69
+          IDENT@68..69 "b"
+      WHITESPACE@69..70 " "
+      QUESTION@70..71 "?"
+      WHITESPACE@71..72 " "
+      BINARY_EXPR@72..77
+        NAME@72..73
+          IDENT@72..73 "x"
+        WHITESPACE@73..74 " "
+        PLUS@74..75 "+"
+        WHITESPACE@75..76 " "
+        LITERAL@76..77
+          INTEGER@76..77 "1"
+      WHITESPACE@77..78 " "
+      COLON@78..79 ":"
+      WHITESPACE@79..80 " "
+      BINARY_EXPR@80..85
+        NAME@80..81
+          IDENT@80..81 "x"
+        WHITESPACE@81..82 " "
+        MINUS@82..83 "-"
+        WHITESPACE@83..84 " "
+        LITERAL@84..85
+          INTEGER@84..85 "1"
+  NEWLINE@85..86 "\n"
+  ASSIGNMENT_EXPR@86..108
+    NAME@86..92
+      IDENT@86..92 "nested"
+    WHITESPACE@92..93 " "
+    EQ@93..94 "="
+    WHITESPACE@94..95 " "
+    TERNARY_EXPR@95..108
+      NAME@95..96
+        IDENT@95..96 "a"
+      WHITESPACE@96..97 " "
+      QUESTION@97..98 "?"
+      WHITESPACE@98..99 " "
+      PAREN_EXPR@99..104
+        LPAREN@99..100 "("
+        BINARY_EXPR@100..103
+          LITERAL@100..101
+            INTEGER@100..101 "1"
+          COLON@101..102 ":"
+          LITERAL@102..103
+            INTEGER@102..103 "2"
+        RPAREN@103..104 ")"
+      WHITESPACE@104..105 " "
+      COLON@105..106 ":"
+      WHITESPACE@106..107 " "
+      LITERAL@107..108
+        INTEGER@107..108 "3"
+  NEWLINE@108..109 "\n"

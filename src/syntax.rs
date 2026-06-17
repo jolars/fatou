@@ -38,6 +38,7 @@ pub enum SyntaxKind {
     SPLAT_EXPR,
     ASSIGNMENT_EXPR,
     ARROW_EXPR,
+    TERNARY_EXPR,
     IF_EXPR,
     ELSEIF_CLAUSE,
     ELSE_CLAUSE,
@@ -149,6 +150,7 @@ pub enum SyntaxKind {
     BANG,
     AMP,
     PIPE,
+    QUESTION,
 
     // --- Broadcasting (dotted) operator tokens ---
     DOT_PLUS,

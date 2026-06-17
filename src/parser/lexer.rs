@@ -100,6 +100,7 @@ pub(crate) enum TokKind {
     Bang,
     Amp,
     Pipe,
+    Question,
 
     // Broadcasting (dotted) operators: a `.` fused to a following operator.
     DotPlus,
@@ -695,6 +696,7 @@ impl<'a> Lexer<'a> {
             Some(b'!') => Some(TokKind::Bang),
             Some(b'&') => Some(TokKind::Amp),
             Some(b'|') => Some(TokKind::Pipe),
+            Some(b'?') => Some(TokKind::Question),
             Some(b'(') => Some(TokKind::LParen),
             Some(b')') => Some(TokKind::RParen),
             Some(b'[') => Some(TokKind::LBracket),
