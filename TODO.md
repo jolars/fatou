@@ -81,8 +81,17 @@ through), so the grammar can grow incrementally.
   argument lists, a `;` opens a `PARAMETERS` node for the keyword section and
   `name = value` builds a `KEYWORD_ARG` (`kw`-style); splat `x...` (lexed as a
   single `...` token) is a terminal postfix `SPLAT_EXPR`.
-- [ ] Array/tuple/comprehension literals (`[1, 2; 3 4]`, `(a, b)`,
-  `[x for x in xs]`), ranges, broadcasting dots, ternary `a ? b : c`.
+- [x] Array/tuple/comprehension literals (`[1, 2; 3 4]`, `(a, b)`,
+  `[x for x in xs]`), ranges, broadcasting dots, ternary `a ? b : c`. Vectors
+  (`VECT_EXPR`), matrices (`MATRIX_EXPR`/`MATRIX_ROW`, with significant
+  whitespace for hcat columns and `;`/newline for vcat rows), tuples and named
+  tuples (`TUPLE_EXPR`), comprehensions (`COMPREHENSION`/`COMPREHENSION_IF`) and
+  generators (`GENERATOR`) reusing `FOR_BINDING`, broadcasting operators
+  (`.+`/`.*`/… and `f.(x)` as `DOT_CALL_EXPR`), and the ternary `? :`
+  (`TERNARY_EXPR`). Ranges already parsed via the `:` infix operator. Follow-ups:
+  multi-clause comprehensions (`for … for … if …`) and multi-variable bindings
+  (`for i, j in …`), bare call-argument generators (`sum(x for x in xs)`),
+  v1.7 matrix-row syntax (`[1, 2; 3, 4]`), and unicode dotted operators.
 - [ ] Transpose/adjoint postfix `'` (currently `'` only lexes as a char literal;
   the postfix operator case is unhandled).
 - [ ] Bare `end` inside indexing (`a[end]`) — currently `end` always terminates

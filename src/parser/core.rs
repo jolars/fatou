@@ -100,6 +100,9 @@ mod tests {
             "m = [1 2; 3 4]\n",
             "s = [1 +2]\n",
             "c = [1; 2; 3]\n",
+            "q = [x for x in xs]\n",
+            "r = [x^2 for x in 1:10 if x > 2]\n",
+            "g = (x for x in xs)\n",
         ] {
             assert_lossless(input);
         }

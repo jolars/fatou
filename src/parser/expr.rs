@@ -509,10 +509,22 @@ fn parse_paren(
         return Some(error_expr_with_range(start, inner_start));
     };
 
+    // `(x for x in xs)` is a generator expression.
+    let sep = ctx.skip_trivia(inner.end);
+    if ctx.token(sep).map(|t| t.kind) == Some(TokKind::ForKw) {
+        return Some(parse_comprehension(
+            ctx,
+            start,
+            inner,
+            SyntaxKind::GENERATOR,
+            TokKind::RParen,
+            diagnostics,
+        ));
+    }
+
     // A `,` or `;` after the first element makes this a tuple (or named tuple).
     // Re-parse the whole parenthesized run as an argument list so each element
     // becomes an `ARG`/`KEYWORD_ARG` and `;` opens a `PARAMETERS` section.
-    let sep = ctx.skip_trivia(inner.end);
     if matches!(
         ctx.token(sep).map(|t| t.kind),
         Some(TokKind::Comma | TokKind::Semicolon)
@@ -635,6 +647,14 @@ fn parse_bracket_literal(
         look += 1;
     }
     match ctx.token(look).map(|t| t.kind) {
+        Some(TokKind::ForKw) => parse_comprehension(
+            ctx,
+            lbrk,
+            first,
+            SyntaxKind::COMPREHENSION,
+            TokKind::RBracket,
+            diagnostics,
+        ),
         None | Some(TokKind::RBracket | TokKind::Comma) => vect(diagnostics),
         _ => parse_matrix(ctx, lbrk, first, diagnostics),
     }
@@ -743,6 +763,108 @@ fn parse_matrix(
                 };
             }
         }
+    }
+}
+
+/// Parse a comprehension `[elem for v in iter if cond]` or generator
+/// `(elem for v in iter)` given the already-parsed `elem` and the open delimiter
+/// at `open` (closing kind `close`). The binding becomes a `FOR_BINDING` and an
+/// optional filter a `COMPREHENSION_IF`. Only a single `for` (plus one optional
+/// `if`) is handled; multiple clauses are a follow-up. `in` is matched as a bare
+/// `in` identifier, mirroring `for`/`while` loops.
+fn parse_comprehension(
+    ctx: &ParserCtx<'_>,
+    open: usize,
+    elem: ExprParse,
+    node_kind: SyntaxKind,
+    close: TokKind,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let tokens = ctx.tokens();
+    let mut events = vec![Event::Start(node_kind), Event::Tok(open)];
+    push_range(&mut events, open + 1, elem.start);
+    let mut pos = elem.end;
+    events.extend(elem.events);
+
+    // `for <var> in <iter>` binding.
+    let for_idx = ctx.skip_trivia(pos);
+    push_range(&mut events, pos, for_idx);
+    events.push(Event::Start(SyntaxKind::FOR_BINDING));
+    events.push(Event::Tok(for_idx)); // `for`
+    pos = for_idx + 1;
+
+    let var_start = ctx.skip_trivia(pos);
+    push_range(&mut events, pos, var_start);
+    if let Some(var) = parse_expr_in_brackets(tokens, var_start, 0, diagnostics) {
+        events.extend(var.events);
+        pos = var.end;
+    } else {
+        pos = var_start;
+    }
+
+    // `in` is lexed as a bare identifier (not a keyword), as in `for` loops.
+    let in_idx = ctx.skip_trivia(pos);
+    push_range(&mut events, pos, in_idx);
+    if ctx
+        .token(in_idx)
+        .is_some_and(|t| t.kind == TokKind::Ident && t.text == "in")
+    {
+        events.push(Event::Tok(in_idx));
+        pos = in_idx + 1;
+    } else {
+        let tok = &tokens[for_idx];
+        push_diagnostic(
+            diagnostics,
+            "expected `in` in comprehension",
+            tok.start,
+            tok.end,
+        );
+    }
+
+    let iter_start = ctx.skip_trivia(pos);
+    push_range(&mut events, pos, iter_start);
+    if let Some(iter) = parse_expr_in_brackets(tokens, iter_start, 0, diagnostics) {
+        events.extend(iter.events);
+        pos = iter.end;
+    } else {
+        pos = iter_start;
+    }
+    events.push(Event::Finish); // FOR_BINDING
+
+    // Optional `if <cond>` filter.
+    let if_idx = ctx.skip_trivia(pos);
+    if ctx.token(if_idx).map(|t| t.kind) == Some(TokKind::IfKw) {
+        push_range(&mut events, pos, if_idx);
+        events.push(Event::Start(SyntaxKind::COMPREHENSION_IF));
+        events.push(Event::Tok(if_idx)); // `if`
+        pos = if_idx + 1;
+        let cond_start = ctx.skip_trivia(pos);
+        push_range(&mut events, pos, cond_start);
+        if let Some(cond) = parse_expr_in_brackets(tokens, cond_start, 0, diagnostics) {
+            events.extend(cond.events);
+            pos = cond.end;
+        } else {
+            pos = cond_start;
+        }
+        events.push(Event::Finish); // COMPREHENSION_IF
+    }
+
+    // Closing delimiter.
+    let close_idx = ctx.skip_trivia(pos);
+    push_range(&mut events, pos, close_idx);
+    let end = if ctx.token(close_idx).map(|t| t.kind) == Some(close) {
+        events.push(Event::Tok(close_idx));
+        close_idx + 1
+    } else {
+        let tok = &tokens[open];
+        push_diagnostic(diagnostics, "unclosed comprehension", tok.start, tok.end);
+        close_idx
+    };
+    events.push(Event::Finish); // node_kind
+    ExprParse {
+        start: open,
+        end,
+        events,
     }
 }
 
