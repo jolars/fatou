@@ -68,12 +68,19 @@ own inconsistencies.
 
 The harness itself is deferred (`TODO.md`).
 
-## Parser oracle (planned)
+## Parser oracle
 
-The intended differential oracle for the parser is **JuliaSyntax.jl** (the
-official Julia parser, itself a lossless green-tree design). Cases will be
-ported into the parser fixtures as hardening input once the grammar is
-substantial enough to compare. Not yet wired up (`TODO.md`).
+The differential oracle for the parser is **JuliaSyntax.jl** (the official Julia
+parser, itself a lossless green-tree design). A *projector*
+(`src/parser/sexpr.rs`, also `fatou parse --to sexpr`) walks the CST and emits
+JuliaSyntax's s-expression shape; the harness (`tests/juliasyntax_oracle.rs`)
+diffs each fixture against a pinned `expected.sexpr` and gates regressions via
+allowlists (no Julia needed at test time → CI-safe). A curated dir corpus
+(`tests/fixtures/oracle/`) and a harvested JuliaSyntax sub-corpus
+(`juliasyntax.jsonl`) feed it. **To grow parser parity against the oracle, use
+the `parser-parity` skill** (`.claude/skills/parser-parity/`) — it documents the
+loop (probe → grammar + projector → fixture → re-triage → allowlist) and keeps a
+rolling `RECAP.md`. See `TODO.md` for the current standing and backlog.
 
 ## Commands
 
