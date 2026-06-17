@@ -109,6 +109,14 @@ through), so the grammar can grow incrementally.
   `end`-symbol scope (so `f(end)` keeps `end` as a bare token). It propagates
   through operators, ranges, prefix operands, and ternary branches, so
   `a[end-1]`, `a[2:end]`, and `m[end, end]` all parse correctly.
+- [x] Bare `begin` inside indexing (`a[begin]`). Mirrors the `end` marker with a
+  `begin_marker` flag, but scoped to *indexing* position only — derived as
+  `close == ]` *and* `list_kind == ARG_LIST` in `parse_arg_list`, so a vector
+  literal's `[begin … end]` stays a block (`(vect (block …))`), matching Julia
+  (`begin` is a first-index marker only in `ref` position). A leading `begin`
+  there parses as a `BEGIN_MARKER` atom (the leading-keyword block dispatch is
+  skipped when `begin_marker` is set), composing through ranges/operators so
+  `a[begin:end]`, `a[begin+1]`, and `m[begin, end]` all parse correctly.
 - [x] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
   `lex_number` (`lexer.rs`) now splits the base-prefixed integers into distinct
   `HEX_INT`/`OCT_INT`/`BIN_INT` kinds (with per-base digit classes and
@@ -198,8 +206,8 @@ through), so the grammar can grow incrementally.
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
   (`a*b*c`), symbols/quotes (`:T`), richer import/`using` (`import .A`,
-  `x as y`), `a[begin]`, multi-clause generators, and assorted operators
-  (`-->`, `<|`, `.&&`). **Follow-ups:** work the backlog up the allowlist;
+  `x as y`), multi-clause generators, and assorted operators (`-->`, `<|`,
+  `.&&`). **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.

@@ -4,6 +4,7 @@
 
 anonymous_functions
 array_literals
+begin_index
 binary_precedence
 broadcasting
 byte_string

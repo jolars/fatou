@@ -1,0 +1,92 @@
+---
+source: tests/parser_snapshots.rs
+assertion_line: 41
+expression: rendered
+---
+ROOT@0..77
+  INDEX_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "a"
+    ARG_LIST@1..8
+      LBRACKET@1..2 "["
+      ARG@2..7
+        BEGIN_MARKER@2..7
+          BEGIN_KW@2..7 "begin"
+      RBRACKET@7..8 "]"
+  NEWLINE@8..9 "\n"
+  INDEX_EXPR@9..19
+    NAME@9..10
+      IDENT@9..10 "a"
+    ARG_LIST@10..19
+      LBRACKET@10..11 "["
+      ARG@11..18
+        BINARY_EXPR@11..18
+          BEGIN_MARKER@11..16
+            BEGIN_KW@11..16 "begin"
+          PLUS@16..17 "+"
+          LITERAL@17..18
+            INTEGER@17..18 "1"
+      RBRACKET@18..19 "]"
+  NEWLINE@19..20 "\n"
+  INDEX_EXPR@20..32
+    NAME@20..21
+      IDENT@20..21 "a"
+    ARG_LIST@21..32
+      LBRACKET@21..22 "["
+      ARG@22..31
+        BINARY_EXPR@22..31
+          BEGIN_MARKER@22..27
+            BEGIN_KW@22..27 "begin"
+          COLON@27..28 ":"
+          END_MARKER@28..31
+            END_KW@28..31 "end"
+      RBRACKET@31..32 "]"
+  NEWLINE@32..33 "\n"
+  INDEX_EXPR@33..46
+    NAME@33..34
+      IDENT@33..34 "m"
+    ARG_LIST@34..46
+      LBRACKET@34..35 "["
+      ARG@35..40
+        BEGIN_MARKER@35..40
+          BEGIN_KW@35..40 "begin"
+      COMMA@40..41 ","
+      WHITESPACE@41..42 " "
+      ARG@42..45
+        END_MARKER@42..45
+          END_KW@42..45 "end"
+      RBRACKET@45..46 "]"
+  NEWLINE@46..47 "\n"
+  ASSIGNMENT_EXPR@47..59
+    INDEX_EXPR@47..55
+      NAME@47..48
+        IDENT@47..48 "a"
+      ARG_LIST@48..55
+        LBRACKET@48..49 "["
+        ARG@49..54
+          BEGIN_MARKER@49..54
+            BEGIN_KW@49..54 "begin"
+        RBRACKET@54..55 "]"
+    WHITESPACE@55..56 " "
+    EQ@56..57 "="
+    WHITESPACE@57..58 " "
+    LITERAL@58..59
+      INTEGER@58..59 "1"
+  NEWLINE@59..60 "\n"
+  INDEX_EXPR@60..76
+    NAME@60..66
+      IDENT@60..66 "nested"
+    ARG_LIST@66..76
+      LBRACKET@66..67 "["
+      ARG@67..75
+        INDEX_EXPR@67..75
+          NAME@67..68
+            IDENT@67..68 "a"
+          ARG_LIST@68..75
+            LBRACKET@68..69 "["
+            ARG@69..74
+              BEGIN_MARKER@69..74
+                BEGIN_KW@69..74 "begin"
+            RBRACKET@74..75 "]"
+      RBRACKET@75..76 "]"
+  NEWLINE@76..77 "\n"

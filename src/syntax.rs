@@ -44,6 +44,7 @@ pub enum SyntaxKind {
     SPLAT_EXPR,
     POSTFIX_EXPR,
     END_MARKER,
+    BEGIN_MARKER,
     ASSIGNMENT_EXPR,
     ARROW_EXPR,
     TERNARY_EXPR,

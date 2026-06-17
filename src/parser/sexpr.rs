@@ -154,6 +154,7 @@ fn project(node: &SyntaxNode) -> String {
         MACRO_CALL => project_macrocall(node),
 
         END_MARKER => "end".to_string(),
+        BEGIN_MARKER => "begin".to_string(),
 
         other => format!("(unsupported {other:?})"),
     }

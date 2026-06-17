@@ -36,6 +36,11 @@ struct ExprFlags {
     /// block terminator. Enabled only inside square brackets (`a[end]`, `[end]`);
     /// parens and braces leave it off, matching Julia's `end`-symbol scope.
     end_marker: bool,
+    /// A bare `begin` is the index-begin marker (a `BEGIN_MARKER` atom) rather
+    /// than a block opener. Enabled only inside an *indexing* `a[…]` (not vector
+    /// literals, where `[begin … end]` is a block), matching Julia: `begin` is a
+    /// first-index marker only in `ref` position.
+    begin_marker: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -92,14 +97,19 @@ fn parse_expr_in(
         no_range,
         array_mode,
         end_marker: _,
+        begin_marker,
     } = flags;
     let ctx = ParserCtx::new(tokens);
 
-    // Leading keywords open a structural (block) form.
+    // Leading keywords open a structural (block) form. Inside an indexing `a[…]`
+    // a leading `begin` is instead the index-begin marker (handled in
+    // `parse_prefix`), so skip the block dispatch there.
     match ctx.token(start).map(|t| t.kind) {
         Some(TokKind::IfKw) => return parse_if_expr(tokens, start, diagnostics),
         Some(TokKind::FunctionKw) => return parse_function_expr(tokens, start, diagnostics),
-        Some(TokKind::BeginKw) => return parse_begin_expr(tokens, start, diagnostics),
+        Some(TokKind::BeginKw) if !begin_marker => {
+            return parse_begin_expr(tokens, start, diagnostics);
+        }
         Some(TokKind::QuoteKw) => return parse_quote_expr(tokens, start, diagnostics),
         Some(TokKind::WhileKw) => return parse_while_expr(tokens, start, diagnostics),
         Some(TokKind::ForKw) => return parse_for_expr(tokens, start, diagnostics),
@@ -305,6 +315,9 @@ fn parse_prefix(
         // A bare `end` inside square brackets is the index-end marker (`a[end]`,
         // `a[end - 1]`); elsewhere `end` is a block terminator and not an atom.
         TokKind::EndKw if flags.end_marker => Some(atom(SyntaxKind::END_MARKER, start)),
+        // A bare `begin` inside an indexing `a[…]` is the index-begin marker
+        // (`a[begin]`, `a[begin + 1]`); elsewhere `begin` opens a block.
+        TokKind::BeginKw if flags.begin_marker => Some(atom(SyntaxKind::BEGIN_MARKER, start)),
         // Prefix operators: arithmetic/logical unary (`-x`, `!x`), lower-bound
         // type expressions (`<:Real` in `Array{<:Real}`), and unary `::`
         // declarations (`::Int` in a method signature `f(::Int)`).
@@ -1214,6 +1227,10 @@ fn parse_arg_list(
     // `end` is the index marker only inside square brackets — indexing (`a[end]`)
     // and vector literals (`[end]`), both of which close with `]`.
     let end_marker = close == TokKind::RBracket;
+    // `begin` is the index marker only in *indexing* position, which is the sole
+    // `ARG_LIST` closed by `]` (vector literals build a `VECT_EXPR`, calls close
+    // with `)`); a vector literal's `[begin … end]` stays a block.
+    let begin_marker = end_marker && list_kind == SyntaxKind::ARG_LIST;
     let mut events = vec![Event::Start(list_kind), Event::Tok(open_idx)];
     let mut i = open_idx + 1;
     let mut in_params = false;
@@ -1250,7 +1267,9 @@ fn parse_arg_list(
                 events.push(Event::Tok(i));
                 i += 1;
             }
-            Some(_) => i = parse_one_arg(ctx, &mut events, i, end_marker, diagnostics),
+            Some(_) => {
+                i = parse_one_arg(ctx, &mut events, i, end_marker, begin_marker, diagnostics)
+            }
         }
     }
 
@@ -1269,12 +1288,14 @@ fn parse_one_arg(
     events: &mut Vec<Event>,
     i: usize,
     end_marker: bool,
+    begin_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
     let flags = ExprFlags {
         inside_brackets: true,
         end_marker,
+        begin_marker,
         ..ExprFlags::default()
     };
     let parse_arg_expr = |tokens: &[Token], start, diagnostics: &mut Vec<ParseDiagnostic>| {
