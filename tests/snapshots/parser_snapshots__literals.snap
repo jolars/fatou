@@ -57,5 +57,5 @@ ROOT@0..53
     EQ@46..47 "="
     WHITESPACE@47..48 " "
     LITERAL@48..52
-      INTEGER@48..52 "0x1f"
+      HEX_INT@48..52 "0x1f"
   NEWLINE@52..53 "\n"

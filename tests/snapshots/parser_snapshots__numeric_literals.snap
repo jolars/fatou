@@ -1,0 +1,210 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..253
+  ASSIGNMENT_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "i"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    LITERAL@4..7
+      INTEGER@4..7 "123"
+  NEWLINE@7..8 "\n"
+  ASSIGNMENT_EXPR@8..43
+    NAME@8..11
+      IDENT@8..11 "big"
+    WHITESPACE@11..12 " "
+    EQ@12..13 "="
+    WHITESPACE@13..14 " "
+    LITERAL@14..43
+      INTEGER@14..43 "123456789012345678901 ..."
+  NEWLINE@43..44 "\n"
+  ASSIGNMENT_EXPR@44..53
+    NAME@44..45
+      IDENT@44..45 "u"
+    WHITESPACE@45..46 " "
+    EQ@46..47 "="
+    WHITESPACE@47..48 " "
+    LITERAL@48..53
+      INTEGER@48..53 "1_000"
+  NEWLINE@53..54 "\n"
+  ASSIGNMENT_EXPR@54..68
+    NAME@54..55
+      IDENT@54..55 "h"
+    WHITESPACE@55..56 " "
+    EQ@56..57 "="
+    WHITESPACE@57..58 " "
+    LITERAL@58..68
+      HEX_INT@58..68 "0xdeadbeef"
+  NEWLINE@68..69 "\n"
+  ASSIGNMENT_EXPR@69..78
+    NAME@69..70
+      IDENT@69..70 "o"
+    WHITESPACE@70..71 " "
+    EQ@71..72 "="
+    WHITESPACE@72..73 " "
+    LITERAL@73..78
+      OCT_INT@73..78 "0o755"
+  NEWLINE@78..79 "\n"
+  ASSIGNMENT_EXPR@79..89
+    NAME@79..80
+      IDENT@79..80 "b"
+    WHITESPACE@80..81 " "
+    EQ@81..82 "="
+    WHITESPACE@82..83 " "
+    LITERAL@83..89
+      BIN_INT@83..89 "0b1010"
+  NEWLINE@89..90 "\n"
+  ASSIGNMENT_EXPR@90..98
+    NAME@90..91
+      IDENT@90..91 "f"
+    WHITESPACE@91..92 " "
+    EQ@92..93 "="
+    WHITESPACE@93..94 " "
+    LITERAL@94..98
+      FLOAT@94..98 "3.14"
+  NEWLINE@98..99 "\n"
+  ASSIGNMENT_EXPR@99..108
+    NAME@99..103
+      IDENT@99..103 "lead"
+    WHITESPACE@103..104 " "
+    EQ@104..105 "="
+    WHITESPACE@105..106 " "
+    LITERAL@106..108
+      FLOAT@106..108 ".5"
+  NEWLINE@108..109 "\n"
+  ASSIGNMENT_EXPR@109..119
+    NAME@109..114
+      IDENT@109..114 "trail"
+    WHITESPACE@114..115 " "
+    EQ@115..116 "="
+    WHITESPACE@116..117 " "
+    LITERAL@117..119
+      FLOAT@117..119 "2."
+  NEWLINE@119..120 "\n"
+  ASSIGNMENT_EXPR@120..132
+    NAME@120..123
+      IDENT@120..123 "sci"
+    WHITESPACE@123..124 " "
+    EQ@124..125 "="
+    WHITESPACE@125..126 " "
+    LITERAL@126..132
+      FLOAT@126..132 "1.5e-3"
+  NEWLINE@132..133 "\n"
+  ASSIGNMENT_EXPR@133..142
+    NAME@133..136
+      IDENT@133..136 "f32"
+    WHITESPACE@136..137 " "
+    EQ@137..138 "="
+    WHITESPACE@138..139 " "
+    LITERAL@139..142
+      FLOAT32@139..142 "1f0"
+  NEWLINE@142..143 "\n"
+  ASSIGNMENT_EXPR@143..157
+    NAME@143..147
+      IDENT@143..147 "hexf"
+    WHITESPACE@147..148 " "
+    EQ@148..149 "="
+    WHITESPACE@149..150 " "
+    LITERAL@150..157
+      FLOAT@150..157 "0x1.8p3"
+  NEWLINE@157..158 "\n"
+  ASSIGNMENT_EXPR@158..168
+    NAME@158..161
+      IDENT@158..161 "rat"
+    WHITESPACE@161..162 " "
+    EQ@162..163 "="
+    WHITESPACE@163..164 " "
+    BINARY_EXPR@164..168
+      LITERAL@164..165
+        INTEGER@164..165 "3"
+      SLASH_SLASH@165..167 "//"
+      LITERAL@167..168
+        INTEGER@167..168 "4"
+  NEWLINE@168..169 "\n"
+  ASSIGNMENT_EXPR@169..183
+    NAME@169..173
+      IDENT@169..173 "brat"
+    WHITESPACE@173..174 " "
+    EQ@174..175 "="
+    WHITESPACE@175..176 " "
+    BINARY_EXPR@176..183
+      NAME@176..177
+        IDENT@176..177 "a"
+      WHITESPACE@177..178 " "
+      DOT_SLASH_SLASH@178..181 ".//"
+      WHITESPACE@181..182 " "
+      NAME@182..183
+        IDENT@182..183 "b"
+  NEWLINE@183..184 "\n"
+  ASSIGNMENT_EXPR@184..197
+    NAME@184..188
+      IDENT@184..188 "prec"
+    WHITESPACE@188..189 " "
+    EQ@189..190 "="
+    WHITESPACE@190..191 " "
+    BINARY_EXPR@191..197
+      BINARY_EXPR@191..195
+        LITERAL@191..192
+          INTEGER@191..192 "1"
+        SLASH_SLASH@192..194 "//"
+        LITERAL@194..195
+          INTEGER@194..195 "2"
+      STAR@195..196 "*"
+      LITERAL@196..197
+        INTEGER@196..197 "3"
+  NEWLINE@197..198 "\n"
+  ASSIGNMENT_EXPR@198..213
+    NAME@198..203
+      IDENT@198..203 "chain"
+    WHITESPACE@203..204 " "
+    EQ@204..205 "="
+    WHITESPACE@205..206 " "
+    BINARY_EXPR@206..213
+      BINARY_EXPR@206..210
+        NAME@206..207
+          IDENT@206..207 "a"
+        SLASH_SLASH@207..209 "//"
+        NAME@209..210
+          IDENT@209..210 "b"
+      SLASH_SLASH@210..212 "//"
+      NAME@212..213
+        IDENT@212..213 "c"
+  NEWLINE@213..214 "\n"
+  ASSIGNMENT_EXPR@214..226
+    NAME@214..217
+      IDENT@214..217 "pow"
+    WHITESPACE@217..218 " "
+    EQ@218..219 "="
+    WHITESPACE@219..220 " "
+    BINARY_EXPR@220..226
+      LITERAL@220..221
+        INTEGER@220..221 "1"
+      SLASH_SLASH@221..223 "//"
+      BINARY_EXPR@223..226
+        LITERAL@223..224
+          INTEGER@223..224 "2"
+        CARET@224..225 "^"
+        LITERAL@225..226
+          INTEGER@225..226 "3"
+  NEWLINE@226..227 "\n"
+  ASSIGNMENT_EXPR@227..239
+    NAME@227..233
+      IDENT@227..233 "posinf"
+    WHITESPACE@233..234 " "
+    EQ@234..235 "="
+    WHITESPACE@235..236 " "
+    NAME@236..239
+      IDENT@236..239 "Inf"
+  NEWLINE@239..240 "\n"
+  ASSIGNMENT_EXPR@240..252
+    NAME@240..246
+      IDENT@240..246 "notnum"
+    WHITESPACE@246..247 " "
+    EQ@247..248 "="
+    WHITESPACE@248..249 " "
+    NAME@249..252
+      IDENT@249..252 "NaN"
+  NEWLINE@252..253 "\n"

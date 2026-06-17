@@ -109,7 +109,22 @@ through), so the grammar can grow incrementally.
   `end`-symbol scope (so `f(end)` keeps `end` as a bare token). It propagates
   through operators, ranges, prefix operands, and ternary branches, so
   `a[end-1]`, `a[2:end]`, and `m[end, end]` all parse correctly.
-- [ ] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
+- [x] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
+  `lex_number` (`lexer.rs`) now splits the base-prefixed integers into distinct
+  `HEX_INT`/`OCT_INT`/`BIN_INT` kinds (with per-base digit classes and
+  lowercase-only `0x`/`0o`/`0b` prefixes, matching Julia — `0X1` is `0` then
+  `X1`), lexes hex floats (`0x1.8p3`, always `FLOAT`/Float64), and distinguishes
+  the `f` exponent marker as `FLOAT32` from `e`/`E` `FLOAT` — mirroring
+  JuliaSyntax's `Integer`/`BinInt`/`OctInt`/`HexInt`/`Float`/`Float32` leaf
+  taxonomy. Rationals `//` and broadcast `.//` are now lexed as operators
+  (`SLASH_SLASH`/`DOT_SLASH_SLASH`) at a new left-associative tier `(28, 29)`
+  between times and power (`1//2*3` ⇒ `(1//2)*3`; `1//2^3` ⇒ `1//(2^3)`).
+  **No-ops by design:** `Inf`/`NaN`/`Inf32`/… are ordinary identifiers in Julia,
+  not literals, so they stay `NAME`; oversized "big" integer literals remain
+  plain `INTEGER` tokens (type promotion is a lowering concern, not the
+  parser's). **Deferred:** numeric juxtaposition / implicit multiplication
+  (`2x`, `2π`, `1im`) is a separate parser feature — the literal there is just
+  the number and `im`/`x` are identifiers.
 
 ## Incremental reparse
 

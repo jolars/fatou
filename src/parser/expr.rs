@@ -358,9 +358,15 @@ fn parse_prefix(
         TokKind::StringPrefix | TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
             Some(parse_string_literal(ctx, start, diagnostics))
         }
-        TokKind::Integer | TokKind::Float | TokKind::Char | TokKind::TrueKw | TokKind::FalseKw => {
-            Some(atom(SyntaxKind::LITERAL, start))
-        }
+        TokKind::Integer
+        | TokKind::BinInt
+        | TokKind::OctInt
+        | TokKind::HexInt
+        | TokKind::Float
+        | TokKind::Float32
+        | TokKind::Char
+        | TokKind::TrueKw
+        | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
         _ => None,
     }
 }
@@ -1475,6 +1481,9 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::DotStar
         | TokKind::DotSlash
         | TokKind::DotPercent => (24, 25),
+        // Rational `//` (and broadcast `.//`) bind tighter than `*`/`/` but
+        // looser than `^`, and are left-associative (`a//b//c` ⇒ `(a//b)//c`).
+        TokKind::SlashSlash | TokKind::DotSlashSlash => (28, 29),
         TokKind::Caret | TokKind::DotCaret => (32, 31),
         TokKind::ColonColon => (36, 37),
         TokKind::Dot => (40, 41),

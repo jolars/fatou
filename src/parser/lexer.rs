@@ -24,7 +24,11 @@ pub(crate) enum TokKind {
     // Literals / identifiers
     Ident,
     Integer,
+    BinInt,
+    OctInt,
+    HexInt,
     Float,
+    Float32,
     Char,
 
     // String / command literal pieces. A single literal is lexed as a run of
@@ -79,6 +83,7 @@ pub(crate) enum TokKind {
     Minus,
     Star,
     Slash,
+    SlashSlash,
     Caret,
     Percent,
     EqEq,
@@ -110,6 +115,7 @@ pub(crate) enum TokKind {
     DotMinus,
     DotStar,
     DotSlash,
+    DotSlashSlash,
     DotCaret,
     DotPercent,
     DotEq,
@@ -557,31 +563,71 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_number(&mut self, start: usize) {
-        // Hex / binary / octal integer prefixes.
-        if self.peek(0) == Some(b'0') && matches!(self.peek(1), Some(b'x' | b'X' | b'b' | b'o')) {
-            self.pos += 2;
-            while matches!(self.peek(0), Some(c) if c.is_ascii_hexdigit() || c == b'_') {
-                self.pos += 1;
+        // Base-prefixed integers (`0x`, `0o`, `0b`). Julia's prefixes are
+        // lowercase only, so `0X1` is *not* a hex literal — it falls through to
+        // the decimal path and lexes as `0` followed by the identifier `X1`.
+        if self.peek(0) == Some(b'0') {
+            match self.peek(1) {
+                Some(b'x') => {
+                    self.pos += 2;
+                    self.consume_digits(|c| c.is_ascii_hexdigit());
+                    // A `.`-fraction or `p`/`P` binary exponent turns the hex
+                    // literal into a (always Float64) hex float.
+                    let mut is_float = false;
+                    if self.peek(0) == Some(b'.') {
+                        is_float = true;
+                        self.pos += 1;
+                        self.consume_digits(|c| c.is_ascii_hexdigit());
+                    }
+                    if matches!(self.peek(0), Some(b'p' | b'P')) {
+                        is_float = true;
+                        self.pos += 1;
+                        if matches!(self.peek(0), Some(b'+' | b'-')) {
+                            self.pos += 1;
+                        }
+                        self.consume_digits(|c| c.is_ascii_digit());
+                    }
+                    let kind = if is_float {
+                        TokKind::Float
+                    } else {
+                        TokKind::HexInt
+                    };
+                    self.push(kind, start, self.pos);
+                    return;
+                }
+                Some(b'o') => {
+                    self.pos += 2;
+                    self.consume_digits(|c| (b'0'..=b'7').contains(&c));
+                    self.push(TokKind::OctInt, start, self.pos);
+                    return;
+                }
+                Some(b'b') => {
+                    self.pos += 2;
+                    self.consume_digits(|c| matches!(c, b'0' | b'1'));
+                    self.push(TokKind::BinInt, start, self.pos);
+                    return;
+                }
+                _ => {}
             }
-            self.push(TokKind::Integer, start, self.pos);
-            return;
         }
 
         let mut is_float = false;
-        while matches!(self.peek(0), Some(c) if c.is_ascii_digit() || c == b'_') {
-            self.pos += 1;
-        }
+        let mut is_f32 = false;
+        self.consume_digits(|c| c.is_ascii_digit());
         // Fractional part: a `.` followed by a digit, or a trailing `.`.
         if self.peek(0) == Some(b'.') {
             is_float = true;
             self.pos += 1;
-            while matches!(self.peek(0), Some(c) if c.is_ascii_digit() || c == b'_') {
-                self.pos += 1;
-            }
+            self.consume_digits(|c| c.is_ascii_digit());
         }
-        // Exponent: `e`/`E`/`f` with an optional sign.
+        // Exponent: `e`/`E` mark a `Float`, `f` marks a `Float32`; both take an
+        // optional sign.
         if matches!(self.peek(0), Some(b'e' | b'E' | b'f')) {
-            is_float = true;
+            if self.peek(0) == Some(b'f') {
+                is_f32 = true;
+            } else {
+                is_float = true;
+            }
             self.pos += 1;
             if matches!(self.peek(0), Some(b'+' | b'-')) {
                 self.pos += 1;
@@ -591,12 +637,22 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let kind = if is_float {
+        let kind = if is_f32 {
+            TokKind::Float32
+        } else if is_float {
             TokKind::Float
         } else {
             TokKind::Integer
         };
         self.push(kind, start, self.pos);
+    }
+
+    /// Advance past a run of digits accepted by `is_digit`, with `_` allowed as
+    /// a digit separator anywhere within the run.
+    fn consume_digits(&mut self, is_digit: impl Fn(u8) -> bool) {
+        while matches!(self.peek(0), Some(c) if is_digit(c) || c == b'_') {
+            self.pos += 1;
+        }
     }
 
     fn lex_ident_or_keyword(&mut self, start: usize) {
@@ -666,6 +722,7 @@ impl<'a> Lexer<'a> {
                 (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
                 (Some(b'<'), Some(b'=')) => Some(TokKind::DotLe),
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
+                (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
                 _ => None,
             };
             if let Some(kind) = dotted3 {
@@ -695,6 +752,7 @@ impl<'a> Lexer<'a> {
 
         // Two-char operators next (longest match).
         let two = match (b0, b1) {
+            (Some(b'/'), Some(b'/')) => Some(TokKind::SlashSlash),
             (Some(b'='), Some(b'=')) => Some(TokKind::EqEq),
             (Some(b'!'), Some(b'=')) => Some(TokKind::NotEq),
             (Some(b'<'), Some(b'=')) => Some(TokKind::Le),
@@ -836,6 +894,9 @@ mod tests {
             "module M\nend\n",
             "α = β + 1\n",
             "0x1f + 0b1010\n",
+            "x = 0o755\ny = 0x1.8p3\nz = 1f0\n",
+            "r = 3//4 + 1_000\nq = a .// b\n",
+            "n = 1.5e-3\nm = .5\nk = 2.\n",
             "s = \"a$x b\"\n",
             "s = \"a$(f(x))b\"\n",
             "s = \"\"\"x$(y)\"\"\"\n",
@@ -1005,6 +1066,63 @@ mod tests {
     #[test]
     fn bang_in_identifier() {
         assert_eq!(kinds("push!"), vec![TokKind::Ident]);
+    }
+
+    #[test]
+    fn numeric_literal_kinds() {
+        // Decimal int, big int (still a plain integer token), and underscores.
+        assert_eq!(kinds("123"), vec![TokKind::Integer]);
+        assert_eq!(kinds("1_000"), vec![TokKind::Integer]);
+        assert_eq!(
+            kinds("12345678901234567890123456789"),
+            vec![TokKind::Integer]
+        );
+        // Base-prefixed integers.
+        assert_eq!(kinds("0x1f"), vec![TokKind::HexInt]);
+        assert_eq!(kinds("0o755"), vec![TokKind::OctInt]);
+        assert_eq!(kinds("0b1010"), vec![TokKind::BinInt]);
+        // Floats: fractional, leading/trailing dot, scientific.
+        assert_eq!(kinds("3.14"), vec![TokKind::Float]);
+        assert_eq!(kinds(".5"), vec![TokKind::Float]);
+        assert_eq!(kinds("2."), vec![TokKind::Float]);
+        assert_eq!(kinds("1.5e-3"), vec![TokKind::Float]);
+        // `f` exponent marks Float32; hex floats are Float64.
+        assert_eq!(kinds("1f0"), vec![TokKind::Float32]);
+        assert_eq!(kinds("2.5f-3"), vec![TokKind::Float32]);
+        assert_eq!(kinds("0x1p0"), vec![TokKind::Float]);
+        assert_eq!(kinds("0x1.8p3"), vec![TokKind::Float]);
+    }
+
+    #[test]
+    fn rational_operators() {
+        assert_eq!(
+            kinds("3//4"),
+            vec![TokKind::Integer, TokKind::SlashSlash, TokKind::Integer]
+        );
+        assert_eq!(
+            kinds("a .// b"),
+            vec![
+                TokKind::Ident,
+                TokKind::Whitespace,
+                TokKind::DotSlashSlash,
+                TokKind::Whitespace,
+                TokKind::Ident,
+            ]
+        );
+    }
+
+    #[test]
+    fn uppercase_hex_prefix_is_not_a_literal() {
+        // Julia's base prefixes are lowercase only: `0X1` is `0` then ident `X1`.
+        assert_eq!(kinds("0X1"), vec![TokKind::Integer, TokKind::Ident]);
+    }
+
+    #[test]
+    fn inf_and_nan_are_identifiers() {
+        // `Inf`/`NaN` are ordinary identifiers in Julia, not numeric literals.
+        assert_eq!(kinds("Inf"), vec![TokKind::Ident]);
+        assert_eq!(kinds("NaN"), vec![TokKind::Ident]);
+        assert_eq!(kinds("Inf32"), vec![TokKind::Ident]);
     }
 
     #[test]
