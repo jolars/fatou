@@ -160,6 +160,16 @@ pub enum SyntaxKind {
     SUPERTYPE,
     ARROW,
     FAT_ARROW,
+    // Augmented (compound) assignment operators `op=`.
+    PLUS_EQ,
+    MINUS_EQ,
+    STAR_EQ,
+    SLASH_EQ,
+    SLASH_SLASH_EQ,
+    CARET_EQ,
+    PERCENT_EQ,
+    PIPE_EQ,
+    AMP_EQ,
     DOT,
     DOT_DOT_DOT,
     PIPE_GT,
@@ -185,6 +195,14 @@ pub enum SyntaxKind {
     DOT_GT,
     DOT_GE,
     DOT_FAT_ARROW,
+    // Broadcast augmented assignment `.op=`.
+    DOT_PLUS_EQ,
+    DOT_MINUS_EQ,
+    DOT_STAR_EQ,
+    DOT_SLASH_EQ,
+    DOT_SLASH_SLASH_EQ,
+    DOT_CARET_EQ,
+    DOT_PERCENT_EQ,
 
     // --- Delimiter / punctuation tokens ---
     LPAREN,

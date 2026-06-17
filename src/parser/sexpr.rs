@@ -271,6 +271,22 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_GT
             | DOT_GE
             | DOT_FAT_ARROW
+            | PLUS_EQ
+            | MINUS_EQ
+            | STAR_EQ
+            | SLASH_EQ
+            | SLASH_SLASH_EQ
+            | CARET_EQ
+            | PERCENT_EQ
+            | PIPE_EQ
+            | AMP_EQ
+            | DOT_PLUS_EQ
+            | DOT_MINUS_EQ
+            | DOT_STAR_EQ
+            | DOT_SLASH_EQ
+            | DOT_SLASH_SLASH_EQ
+            | DOT_CARET_EQ
+            | DOT_PERCENT_EQ
     )
 }
 
@@ -296,11 +312,13 @@ fn project_binary(node: &SyntaxNode) -> String {
 }
 
 fn project_assignment(node: &SyntaxNode) -> String {
+    // The operator's own text is its JuliaSyntax head verbatim: `=`, `.=`, `+=`,
+    // `.+=`, … all project as `(<op> lhs rhs)`.
     let head = match operator_token(node) {
-        Some(t) if t.kind() == DOT_EQ => ".=",
-        _ => "=",
+        Some(t) => t.text().to_string(),
+        None => "=".to_string(),
     };
-    sexp(head, project_each(child_nodes(node)))
+    sexp(&head, project_each(child_nodes(node)))
 }
 
 fn project_unary(node: &SyntaxNode) -> String {

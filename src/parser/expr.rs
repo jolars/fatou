@@ -250,9 +250,9 @@ fn parse_expr_in(
             continue;
         }
 
-        // Assignment (and broadcast assignment `.=`) is right-associative and
-        // the loosest operator.
-        let (l_bp, r_bp) = if op_kind == TokKind::Eq || op_kind == TokKind::DotEq {
+        // Assignment (`=`, `.=`, and augmented `+=`/`.+=`/…) is right-associative
+        // and the loosest operator.
+        let (l_bp, r_bp) = if is_assignment_op(op_kind) {
             (2, 1)
         } else {
             match infix_binding_power(op_kind) {
@@ -277,7 +277,7 @@ fn parse_expr_in(
         };
 
         let node = match op_kind {
-            TokKind::Eq | TokKind::DotEq => SyntaxKind::ASSIGNMENT_EXPR,
+            k if is_assignment_op(k) => SyntaxKind::ASSIGNMENT_EXPR,
             TokKind::Arrow => SyntaxKind::ARROW_EXPR,
             TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
             TokKind::WhereKw => SyntaxKind::WHERE_EXPR,
@@ -1415,8 +1415,35 @@ fn next_operator(
 }
 
 fn is_operator(kind: TokKind) -> bool {
-    matches!(kind, TokKind::Eq | TokKind::DotEq | TokKind::Question)
+    matches!(kind, TokKind::Question)
+        || is_assignment_op(kind)
         || infix_binding_power(kind).is_some()
+}
+
+/// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,
+/// …): the loosest, right-associative tier, all modeled as `ASSIGNMENT_EXPR`.
+fn is_assignment_op(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::Eq
+            | TokKind::DotEq
+            | TokKind::PlusEq
+            | TokKind::MinusEq
+            | TokKind::StarEq
+            | TokKind::SlashEq
+            | TokKind::SlashSlashEq
+            | TokKind::CaretEq
+            | TokKind::PercentEq
+            | TokKind::PipeEq
+            | TokKind::AmpEq
+            | TokKind::DotPlusEq
+            | TokKind::DotMinusEq
+            | TokKind::DotStarEq
+            | TokKind::DotSlashEq
+            | TokKind::DotSlashSlashEq
+            | TokKind::DotCaretEq
+            | TokKind::DotPercentEq
+    )
 }
 
 /// Parse the `then : else` tail of a ternary whose `?` sits at `q_idx`, given the

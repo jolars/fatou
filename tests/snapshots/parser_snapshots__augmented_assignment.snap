@@ -1,0 +1,171 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..141
+  ASSIGNMENT_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PLUS_EQ@2..4 "+="
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+  NEWLINE@6..7 "\n"
+  ASSIGNMENT_EXPR@7..13
+    NAME@7..8
+      IDENT@7..8 "a"
+    WHITESPACE@8..9 " "
+    MINUS_EQ@9..11 "-="
+    WHITESPACE@11..12 " "
+    NAME@12..13
+      IDENT@12..13 "b"
+  NEWLINE@13..14 "\n"
+  ASSIGNMENT_EXPR@14..20
+    NAME@14..15
+      IDENT@14..15 "a"
+    WHITESPACE@15..16 " "
+    STAR_EQ@16..18 "*="
+    WHITESPACE@18..19 " "
+    NAME@19..20
+      IDENT@19..20 "b"
+  NEWLINE@20..21 "\n"
+  ASSIGNMENT_EXPR@21..27
+    NAME@21..22
+      IDENT@21..22 "a"
+    WHITESPACE@22..23 " "
+    SLASH_EQ@23..25 "/="
+    WHITESPACE@25..26 " "
+    NAME@26..27
+      IDENT@26..27 "b"
+  NEWLINE@27..28 "\n"
+  ASSIGNMENT_EXPR@28..35
+    NAME@28..29
+      IDENT@28..29 "a"
+    WHITESPACE@29..30 " "
+    SLASH_SLASH_EQ@30..33 "//="
+    WHITESPACE@33..34 " "
+    NAME@34..35
+      IDENT@34..35 "b"
+  NEWLINE@35..36 "\n"
+  ASSIGNMENT_EXPR@36..42
+    NAME@36..37
+      IDENT@36..37 "a"
+    WHITESPACE@37..38 " "
+    CARET_EQ@38..40 "^="
+    WHITESPACE@40..41 " "
+    NAME@41..42
+      IDENT@41..42 "b"
+  NEWLINE@42..43 "\n"
+  ASSIGNMENT_EXPR@43..49
+    NAME@43..44
+      IDENT@43..44 "a"
+    WHITESPACE@44..45 " "
+    PERCENT_EQ@45..47 "%="
+    WHITESPACE@47..48 " "
+    NAME@48..49
+      IDENT@48..49 "b"
+  NEWLINE@49..50 "\n"
+  ASSIGNMENT_EXPR@50..56
+    NAME@50..51
+      IDENT@50..51 "a"
+    WHITESPACE@51..52 " "
+    PIPE_EQ@52..54 "|="
+    WHITESPACE@54..55 " "
+    NAME@55..56
+      IDENT@55..56 "b"
+  NEWLINE@56..57 "\n"
+  ASSIGNMENT_EXPR@57..63
+    NAME@57..58
+      IDENT@57..58 "a"
+    WHITESPACE@58..59 " "
+    AMP_EQ@59..61 "&="
+    WHITESPACE@61..62 " "
+    NAME@62..63
+      IDENT@62..63 "b"
+  NEWLINE@63..64 "\n"
+  ASSIGNMENT_EXPR@64..71
+    NAME@64..65
+      IDENT@64..65 "a"
+    WHITESPACE@65..66 " "
+    DOT_PLUS_EQ@66..69 ".+="
+    WHITESPACE@69..70 " "
+    NAME@70..71
+      IDENT@70..71 "b"
+  NEWLINE@71..72 "\n"
+  ASSIGNMENT_EXPR@72..79
+    NAME@72..73
+      IDENT@72..73 "a"
+    WHITESPACE@73..74 " "
+    DOT_STAR_EQ@74..77 ".*="
+    WHITESPACE@77..78 " "
+    NAME@78..79
+      IDENT@78..79 "b"
+  NEWLINE@79..80 "\n"
+  ASSIGNMENT_EXPR@80..88
+    NAME@80..81
+      IDENT@80..81 "a"
+    WHITESPACE@81..82 " "
+    DOT_SLASH_SLASH_EQ@82..86 ".//="
+    WHITESPACE@86..87 " "
+    NAME@87..88
+      IDENT@87..88 "b"
+  NEWLINE@88..89 "\n"
+  ASSIGNMENT_EXPR@89..100
+    NAME@89..90
+      IDENT@89..90 "a"
+    WHITESPACE@90..91 " "
+    PLUS_EQ@91..93 "+="
+    WHITESPACE@93..94 " "
+    ASSIGNMENT_EXPR@94..100
+      NAME@94..95
+        IDENT@94..95 "b"
+      WHITESPACE@95..96 " "
+      PLUS_EQ@96..98 "+="
+      WHITESPACE@98..99 " "
+      NAME@99..100
+        IDENT@99..100 "c"
+  NEWLINE@100..101 "\n"
+  ASSIGNMENT_EXPR@101..111
+    NAME@101..102
+      IDENT@101..102 "a"
+    WHITESPACE@102..103 " "
+    EQ@103..104 "="
+    WHITESPACE@104..105 " "
+    ASSIGNMENT_EXPR@105..111
+      NAME@105..106
+        IDENT@105..106 "b"
+      WHITESPACE@106..107 " "
+      PLUS_EQ@107..109 "+="
+      WHITESPACE@109..110 " "
+      NAME@110..111
+        IDENT@110..111 "c"
+  NEWLINE@111..112 "\n"
+  GLOBAL_STMT@112..125
+    GLOBAL_KW@112..118 "global"
+    WHITESPACE@118..119 " "
+    ASSIGNMENT_EXPR@119..125
+      NAME@119..120
+        IDENT@119..120 "x"
+      WHITESPACE@120..121 " "
+      PLUS_EQ@121..123 "+="
+      WHITESPACE@123..124 " "
+      LITERAL@124..125
+        INTEGER@124..125 "1"
+  NEWLINE@125..126 "\n"
+  LET_EXPR@126..140
+    LET_KW@126..129 "let"
+    WHITESPACE@129..130 " "
+    LET_BINDINGS@130..136
+      ASSIGNMENT_EXPR@130..136
+        NAME@130..131
+          IDENT@130..131 "x"
+        WHITESPACE@131..132 " "
+        PLUS_EQ@132..134 "+="
+        WHITESPACE@134..135 " "
+        LITERAL@135..136
+          INTEGER@135..136 "1"
+    BLOCK@136..137
+      NEWLINE@136..137 "\n"
+    END_KW@137..140 "end"
+  NEWLINE@140..141 "\n"

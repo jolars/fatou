@@ -147,6 +147,15 @@ through), so the grammar can grow incrementally.
   parser's). **Deferred:** numeric juxtaposition / implicit multiplication
   (`2x`, `2π`, `1im`) is a separate parser feature — the literal there is just
   the number and `im`/`x` are identifiers.
+- [x] Augmented (compound) assignment operators `op=` (parity-driven ASCII set):
+  `+= -= *= /= //= ^= %= |= &=` plus broadcast `.+= .-= .*= ./= .//= .^= .%=`.
+  Lexed as single tokens (longest-match: `.//=` 4-char and `//=` 3-char beat their
+  prefixes), parsed via `is_assignment_op` into an `ASSIGNMENT_EXPR` on the
+  loosest right-associative tier `(2, 1)` (same as `=`/`.=`), and projected with
+  the operator's own text as head (`(+= a b)`, `(.+= a b)`). `global x += 1` and
+  `let x += 1` come along for free. **Deferred:** shift/`\`/`:`/`$`/unicode
+  augmented forms (`<<= >>= >>>= \= := $= ÷= ⊻=`), operator-symbol quoting
+  (`:+=`), and the `~`/`.~` operator (a regular `call-i`, not `op=`).
 
 ## Incremental reparse
 

@@ -101,6 +101,17 @@ pub(crate) enum TokKind {
     Arrow,
     /// The pair operator `=>`.
     FatArrow,
+    // Augmented (compound) assignment operators `op=`. Right-associative and at
+    // the same precedence as `=`; modeled as `ASSIGNMENT_EXPR`.
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    SlashSlashEq,
+    CaretEq,
+    PercentEq,
+    PipeEq,
+    AmpEq,
     Dot,
     DotDotDot,
     PipeGt,
@@ -129,6 +140,15 @@ pub(crate) enum TokKind {
     DotGe,
     /// The broadcast pair operator `.=>`.
     DotFatArrow,
+    // Broadcast augmented assignment `.op=` (e.g. `.+=`). Same precedence and
+    // modeling as the undotted forms.
+    DotPlusEq,
+    DotMinusEq,
+    DotStarEq,
+    DotSlashEq,
+    DotSlashSlashEq,
+    DotCaretEq,
+    DotPercentEq,
 
     // Delimiters / punctuation
     LParen,
@@ -759,6 +779,12 @@ impl<'a> Lexer<'a> {
         // field access, the `@.` macro, and splat are all untouched. Longest
         // match: try the 3-char dotted comparisons before the 2-char ops.
         if b0 == Some(b'.') {
+            // The lone 4-char dotted op `.//=` must beat the 3-char `.//`.
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
+                self.pos += 4;
+                self.push(TokKind::DotSlashSlashEq, start, self.pos);
+                return;
+            }
             let dotted3 = match (b1, self.peek(2)) {
                 (Some(b'='), Some(b'=')) => Some(TokKind::DotEqEq),
                 (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
@@ -766,6 +792,13 @@ impl<'a> Lexer<'a> {
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
                 (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
+                // Broadcast augmented assignment `.op=`.
+                (Some(b'+'), Some(b'=')) => Some(TokKind::DotPlusEq),
+                (Some(b'-'), Some(b'=')) => Some(TokKind::DotMinusEq),
+                (Some(b'*'), Some(b'=')) => Some(TokKind::DotStarEq),
+                (Some(b'/'), Some(b'=')) => Some(TokKind::DotSlashEq),
+                (Some(b'^'), Some(b'=')) => Some(TokKind::DotCaretEq),
+                (Some(b'%'), Some(b'=')) => Some(TokKind::DotPercentEq),
                 _ => None,
             };
             if let Some(kind) = dotted3 {
@@ -793,6 +826,13 @@ impl<'a> Lexer<'a> {
             // A lone `.` (or `..`) falls through to the single-char table below.
         }
 
+        // The lone 3-char ASCII op `//=` must beat the 2-char `//`.
+        if (b0, b1, self.peek(2)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
+            self.pos += 3;
+            self.push(TokKind::SlashSlashEq, start, self.pos);
+            return;
+        }
+
         // Two-char operators next (longest match).
         let two = match (b0, b1) {
             (Some(b'/'), Some(b'/')) => Some(TokKind::SlashSlash),
@@ -808,6 +848,15 @@ impl<'a> Lexer<'a> {
             (Some(b'>'), Some(b':')) => Some(TokKind::Supertype),
             (Some(b'-'), Some(b'>')) => Some(TokKind::Arrow),
             (Some(b'|'), Some(b'>')) => Some(TokKind::PipeGt),
+            // Augmented assignment `op=`.
+            (Some(b'+'), Some(b'=')) => Some(TokKind::PlusEq),
+            (Some(b'-'), Some(b'=')) => Some(TokKind::MinusEq),
+            (Some(b'*'), Some(b'=')) => Some(TokKind::StarEq),
+            (Some(b'/'), Some(b'=')) => Some(TokKind::SlashEq),
+            (Some(b'^'), Some(b'=')) => Some(TokKind::CaretEq),
+            (Some(b'%'), Some(b'=')) => Some(TokKind::PercentEq),
+            (Some(b'|'), Some(b'=')) => Some(TokKind::PipeEq),
+            (Some(b'&'), Some(b'=')) => Some(TokKind::AmpEq),
             _ => None,
         };
         if let Some(kind) = two {
