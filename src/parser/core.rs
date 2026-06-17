@@ -85,6 +85,9 @@ mod tests {
             "foo(x::T) where {T<:Number} = x\n",
             "f(a, b; c=1, d=2)\n",
             "g(args...; kwargs...)\n",
+            "y = a .+ b .* c\n",
+            "z = .-x\n",
+            "a .= f.(b, c)\n",
         ] {
             assert_lossless(input);
         }

@@ -40,6 +40,7 @@ ast_node!(UnaryExpr, SyntaxKind::UNARY_EXPR);
 ast_node!(ParenExpr, SyntaxKind::PAREN_EXPR);
 ast_node!(CallExpr, SyntaxKind::CALL_EXPR);
 ast_node!(IndexExpr, SyntaxKind::INDEX_EXPR);
+ast_node!(DotCallExpr, SyntaxKind::DOT_CALL_EXPR);
 ast_node!(CurlyExpr, SyntaxKind::CURLY_EXPR);
 ast_node!(Braces, SyntaxKind::BRACES);
 ast_node!(ArgList, SyntaxKind::ARG_LIST);
@@ -188,6 +189,13 @@ impl CurlyExpr {
     }
 }
 
+impl DotCallExpr {
+    /// The argument list of the broadcast call, e.g. `(x, y)` in `f.(x, y)`.
+    pub fn arg_list(&self) -> Option<ArgList> {
+        support::child(&self.0)
+    }
+}
+
 impl TypeAnnotation {
     /// The `::` operator token.
     pub fn op_token(&self) -> Option<SyntaxToken> {
@@ -250,5 +258,17 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::SUPERTYPE
             | SyntaxKind::DOT
             | SyntaxKind::PIPE_GT
+            | SyntaxKind::DOT_PLUS
+            | SyntaxKind::DOT_MINUS
+            | SyntaxKind::DOT_STAR
+            | SyntaxKind::DOT_SLASH
+            | SyntaxKind::DOT_CARET
+            | SyntaxKind::DOT_PERCENT
+            | SyntaxKind::DOT_EQ_EQ
+            | SyntaxKind::DOT_NOT_EQ
+            | SyntaxKind::DOT_LT
+            | SyntaxKind::DOT_LE
+            | SyntaxKind::DOT_GT
+            | SyntaxKind::DOT_GE
     )
 }

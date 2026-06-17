@@ -25,6 +25,7 @@ pub enum SyntaxKind {
     PAREN_EXPR,
     CALL_EXPR,
     INDEX_EXPR,
+    DOT_CALL_EXPR,
     CURLY_EXPR,
     BRACES,
     ARG_LIST,
@@ -147,6 +148,21 @@ pub enum SyntaxKind {
     BANG,
     AMP,
     PIPE,
+
+    // --- Broadcasting (dotted) operator tokens ---
+    DOT_PLUS,
+    DOT_MINUS,
+    DOT_STAR,
+    DOT_SLASH,
+    DOT_CARET,
+    DOT_PERCENT,
+    DOT_EQ,
+    DOT_EQ_EQ,
+    DOT_NOT_EQ,
+    DOT_LT,
+    DOT_LE,
+    DOT_GT,
+    DOT_GE,
 
     // --- Delimiter / punctuation tokens ---
     LPAREN,

@@ -101,6 +101,21 @@ pub(crate) enum TokKind {
     Amp,
     Pipe,
 
+    // Broadcasting (dotted) operators: a `.` fused to a following operator.
+    DotPlus,
+    DotMinus,
+    DotStar,
+    DotSlash,
+    DotCaret,
+    DotPercent,
+    DotEq,
+    DotEqEq,
+    DotNotEq,
+    DotLt,
+    DotLe,
+    DotGt,
+    DotGe,
+
     // Delimiters / punctuation
     LParen,
     RParen,
@@ -606,6 +621,44 @@ impl<'a> Lexer<'a> {
             return;
         }
 
+        // Broadcasting (dotted) operators: a `.` immediately followed by an
+        // operator char. We merge only `.`+operator — never `.`+ident (`a.b`),
+        // `.(` (`f.(x)` stays `Dot LParen`), `..`, or `...` (matched above) — so
+        // field access, the `@.` macro, and splat are all untouched. Longest
+        // match: try the 3-char dotted comparisons before the 2-char ops.
+        if b0 == Some(b'.') {
+            let dotted3 = match (b1, self.peek(2)) {
+                (Some(b'='), Some(b'=')) => Some(TokKind::DotEqEq),
+                (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
+                (Some(b'<'), Some(b'=')) => Some(TokKind::DotLe),
+                (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
+                _ => None,
+            };
+            if let Some(kind) = dotted3 {
+                self.pos += 3;
+                self.push(kind, start, self.pos);
+                return;
+            }
+            let dotted2 = match b1 {
+                Some(b'+') => Some(TokKind::DotPlus),
+                Some(b'-') => Some(TokKind::DotMinus),
+                Some(b'*') => Some(TokKind::DotStar),
+                Some(b'/') => Some(TokKind::DotSlash),
+                Some(b'^') => Some(TokKind::DotCaret),
+                Some(b'%') => Some(TokKind::DotPercent),
+                Some(b'=') => Some(TokKind::DotEq),
+                Some(b'<') => Some(TokKind::DotLt),
+                Some(b'>') => Some(TokKind::DotGt),
+                _ => None,
+            };
+            if let Some(kind) = dotted2 {
+                self.pos += 2;
+                self.push(kind, start, self.pos);
+                return;
+            }
+            // A lone `.` (or `..`) falls through to the single-char table below.
+        }
+
         // Two-char operators next (longest match).
         let two = match (b0, b1) {
             (Some(b'='), Some(b'=')) => Some(TokKind::EqEq),
@@ -939,6 +992,41 @@ mod tests {
         assert_eq!(
             kinds("a.b"),
             vec![TokKind::Ident, TokKind::Dot, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn broadcasting_operators() {
+        assert_eq!(
+            kinds("a .+ b"),
+            vec![
+                TokKind::Ident,
+                TokKind::Whitespace,
+                TokKind::DotPlus,
+                TokKind::Whitespace,
+                TokKind::Ident
+            ]
+        );
+        // Longest match: `.==` is `DotEqEq`, `.=` is `DotEq`.
+        assert_eq!(kinds("x .== y").get(2), Some(&TokKind::DotEqEq));
+        assert_eq!(kinds("x .= y").get(2), Some(&TokKind::DotEq));
+        assert_eq!(kinds("a .<= b").get(2), Some(&TokKind::DotLe));
+        // A `.` fused only to operators: field access and `..` stay lone dots.
+        assert_eq!(
+            kinds("a.b"),
+            vec![TokKind::Ident, TokKind::Dot, TokKind::Ident]
+        );
+        assert_eq!(kinds(".."), vec![TokKind::Dot, TokKind::Dot]);
+        // `f.(` stays `Dot LParen` so the parser can form a broadcast call.
+        assert_eq!(
+            kinds("f.(x)"),
+            vec![
+                TokKind::Ident,
+                TokKind::Dot,
+                TokKind::LParen,
+                TokKind::Ident,
+                TokKind::RParen
+            ]
         );
     }
 

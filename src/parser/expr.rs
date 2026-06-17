@@ -171,8 +171,9 @@ fn parse_expr_in(
             continue;
         }
 
-        // Assignment is right-associative and the loosest operator.
-        let (l_bp, r_bp) = if op_kind == TokKind::Eq {
+        // Assignment (and broadcast assignment `.=`) is right-associative and
+        // the loosest operator.
+        let (l_bp, r_bp) = if op_kind == TokKind::Eq || op_kind == TokKind::DotEq {
             (2, 1)
         } else {
             match infix_binding_power(op_kind) {
@@ -198,7 +199,7 @@ fn parse_expr_in(
         };
 
         let node = match op_kind {
-            TokKind::Eq => SyntaxKind::ASSIGNMENT_EXPR,
+            TokKind::Eq | TokKind::DotEq => SyntaxKind::ASSIGNMENT_EXPR,
             TokKind::Arrow => SyntaxKind::ARROW_EXPR,
             TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
             TokKind::WhereKw => SyntaxKind::WHERE_EXPR,
@@ -238,6 +239,8 @@ fn parse_prefix(
         // declarations (`::Int` in a method signature `f(::Int)`).
         TokKind::Plus
         | TokKind::Minus
+        | TokKind::DotPlus
+        | TokKind::DotMinus
         | TokKind::Bang
         | TokKind::Subtype
         | TokKind::Supertype
@@ -500,6 +503,33 @@ fn parse_postfix_chain(
                     SyntaxKind::CURLY_EXPR,
                     diagnostics,
                 )
+            }
+            // Broadcast call `f.(args)`: a `.` whose next non-space token is `(`.
+            // (A `.` before an identifier is field access, handled by the infix
+            // loop; before `@` it is a qualified macro — neither matches here.)
+            Some(TokKind::Dot)
+                if ctx.token(ctx.skip_ws(next + 1)).map(|t| t.kind) == Some(TokKind::LParen) =>
+            {
+                let lparen = ctx.skip_ws(next + 1);
+                let (list_events, end) = parse_arg_list(
+                    ctx,
+                    lparen,
+                    TokKind::RParen,
+                    SyntaxKind::ARG_LIST,
+                    diagnostics,
+                );
+                let mut events = vec![Event::Start(SyntaxKind::DOT_CALL_EXPR)];
+                events.extend(lhs.events);
+                push_range(&mut events, lhs.end, next);
+                events.push(Event::Tok(next)); // `.`
+                push_range(&mut events, next + 1, lparen);
+                events.extend(list_events);
+                events.push(Event::Finish);
+                lhs = ExprParse {
+                    start: lhs.start,
+                    end,
+                    events,
+                };
             }
             // Splat/vararg `x...` is postfix and terminal: wrap and re-loop (the
             // next pass finds nothing more to chain).
@@ -839,7 +869,7 @@ fn next_operator(
 }
 
 fn is_operator(kind: TokKind) -> bool {
-    kind == TokKind::Eq || infix_binding_power(kind).is_some()
+    matches!(kind, TokKind::Eq | TokKind::DotEq) || infix_binding_power(kind).is_some()
 }
 
 /// `(left_bp, right_bp)` for binary operators. A right-associative operator has
@@ -861,12 +891,23 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::Gt
         | TokKind::Ge
         | TokKind::Subtype
-        | TokKind::Supertype => (10, 11),
+        | TokKind::Supertype
+        | TokKind::DotEqEq
+        | TokKind::DotNotEq
+        | TokKind::DotLt
+        | TokKind::DotLe
+        | TokKind::DotGt
+        | TokKind::DotGe => (10, 11),
         TokKind::PipeGt => (12, 13),
         TokKind::Colon => (14, 15),
-        TokKind::Plus | TokKind::Minus => (20, 21),
-        TokKind::Star | TokKind::Slash | TokKind::Percent => (24, 25),
-        TokKind::Caret => (32, 31),
+        TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus => (20, 21),
+        TokKind::Star
+        | TokKind::Slash
+        | TokKind::Percent
+        | TokKind::DotStar
+        | TokKind::DotSlash
+        | TokKind::DotPercent => (24, 25),
+        TokKind::Caret | TokKind::DotCaret => (32, 31),
         TokKind::ColonColon => (36, 37),
         TokKind::Dot => (40, 41),
         _ => return None,
