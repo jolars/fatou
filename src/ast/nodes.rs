@@ -80,6 +80,8 @@ ast_node!(LocalStmt, SyntaxKind::LOCAL_STMT);
 ast_node!(ImportStmt, SyntaxKind::IMPORT_STMT);
 ast_node!(UsingStmt, SyntaxKind::USING_STMT);
 ast_node!(ExportStmt, SyntaxKind::EXPORT_STMT);
+ast_node!(MacroCall, SyntaxKind::MACRO_CALL);
+ast_node!(MacroName, SyntaxKind::MACRO_NAME);
 
 impl Name {
     /// The identifier token.
@@ -151,6 +153,31 @@ impl CallExpr {
     /// The argument list of the call.
     pub fn arg_list(&self) -> Option<ArgList> {
         support::child(&self.0)
+    }
+}
+
+impl MacroCall {
+    /// The macro name, e.g. `@m`, `@.`, or `Base.@time`.
+    pub fn name(&self) -> Option<MacroName> {
+        support::child(&self.0)
+    }
+
+    /// The parenthesized argument list for the call form `@m(a, b)` (absent for
+    /// the space-separated and bare forms).
+    pub fn arg_list(&self) -> Option<ArgList> {
+        support::child(&self.0)
+    }
+}
+
+impl MacroName {
+    /// The macro's simple-name token: the final `IDENT` (e.g. `time` in
+    /// `Base.@time`), or the `DOT` for the broadcast macro `@.`.
+    pub fn macro_token(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| matches!(t.kind(), SyntaxKind::IDENT | SyntaxKind::DOT))
+            .last()
     }
 }
 

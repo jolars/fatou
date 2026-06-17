@@ -51,7 +51,23 @@ through), so the grammar can grow incrementally.
   (`r`, `raw`, `b`, `v`) and suffix flags (`r"…"ims`) are represented as tokens.
   Known limitation: a `\"` immediately before a raw-string closing quote is not
   yet handled (the raw body is kept as one content chunk).
-- [ ] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.
+- [x] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.
+  A leading `@` builds a `MACRO_CALL` wrapping a `MACRO_NAME` (`parse_macro` in
+  `expr.rs`, dispatched from `parse_prefix`). The name body
+  (`parse_macro_name_body`) is either the lone `.` of the broadcast macro `@.` or
+  an identifier with a trailing adjacent `.ident` chain (qualified `@Mod.mac`).
+  `parse_macro_args` handles both forms: a `(` adjacent to the name opens a
+  comma-separated `ARG_LIST` (reusing `parse_arg_list`, so `ARG`/`KEYWORD_ARG`/
+  `PARAMETERS`/splat come for free); otherwise the args are space-separated
+  expressions consumed to end of line (or to a closing delimiter inside
+  brackets). The `prefix.@mac` form (`Base.@time f()`) is caught in the Pratt
+  loop: a `.` whose RHS begins with `@` is rerouted to `parse_qualified_macro`,
+  which folds `Base.@time` into the `MACRO_NAME` and takes `f()` as an argument
+  (matching the JuliaSyntax `(macrocall (. Base @time) …)` shape). **Known
+  limitations:** whitespace-sensitive operator nuances in the space-arg form
+  (Julia's `@m a +b` vs `@m a + b`) are not modeled — each space arg is a plain
+  `parse_expr`; and string/cmd macros (`@m"…"`, `` @m`…` ``) are not yet a
+  dedicated form.
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside

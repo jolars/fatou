@@ -161,6 +161,16 @@ fn parse_expr_in(
             break;
         };
 
+        // A `.` whose right-hand side begins with `@` is a qualified macro call
+        // (`Base.@time f()`): the whole `Base.@time` is the macro name and the
+        // rest are its arguments — not a field access wrapping a macro call.
+        if op_kind == TokKind::Dot
+            && ctx.token(ctx.skip_trivia(op_idx + 1)).map(|t| t.kind) == Some(TokKind::At)
+        {
+            lhs = parse_qualified_macro(&ctx, lhs, op_idx, diagnostics, inside_brackets);
+            continue;
+        }
+
         // Assignment is right-associative and the loosest operator.
         let (l_bp, r_bp) = if op_kind == TokKind::Eq {
             (2, 1)
@@ -258,6 +268,7 @@ fn parse_prefix(
                 events,
             })
         }
+        TokKind::At => Some(parse_macro(ctx, start, diagnostics, inside_brackets)),
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
         TokKind::LBrace => parse_braces(ctx, start, diagnostics),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
@@ -539,6 +550,147 @@ fn parse_postfix(
         end,
         events,
     }
+}
+
+/// Parse a macro call introduced by a leading `@` (`@m`, `@m(a, b)`, `@m a b`,
+/// `@.`, `@Mod.mac x`) into a `MACRO_CALL` wrapping a `MACRO_NAME` and the
+/// arguments. The `@` sits at `at_idx`.
+fn parse_macro(
+    ctx: &ParserCtx<'_>,
+    at_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    inside_brackets: bool,
+) -> ExprParse {
+    let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
+    events.push(Event::Start(SyntaxKind::MACRO_NAME));
+    events.push(Event::Tok(at_idx)); // `@`
+    let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1);
+    events.push(Event::Finish); // close MACRO_NAME
+
+    let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, inside_brackets);
+    events.push(Event::Finish); // close MACRO_CALL
+    ExprParse {
+        start: at_idx,
+        end,
+        events,
+    }
+}
+
+/// Parse a qualified macro call `lhs.@mac args` (`Base.@time f()`). `lhs` is the
+/// already-parsed module path; `dot_idx` is the `.` before the `@`. The
+/// `MACRO_NAME` spans `lhs`, the `.`, the `@`, and the macro name body.
+fn parse_qualified_macro(
+    ctx: &ParserCtx<'_>,
+    lhs: ExprParse,
+    dot_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    inside_brackets: bool,
+) -> ExprParse {
+    let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
+    events.push(Event::Start(SyntaxKind::MACRO_NAME));
+    events.extend(lhs.events);
+    push_range(&mut events, lhs.end, dot_idx);
+    events.push(Event::Tok(dot_idx)); // `.`
+    let at_idx = ctx.skip_trivia(dot_idx + 1);
+    push_range(&mut events, dot_idx + 1, at_idx);
+    events.push(Event::Tok(at_idx)); // `@`
+    let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1);
+    events.push(Event::Finish); // close MACRO_NAME
+
+    let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, inside_brackets);
+    events.push(Event::Finish); // close MACRO_CALL
+    ExprParse {
+        start: lhs.start,
+        end,
+        events,
+    }
+}
+
+/// Emit the tokens of a macro name following the `@` sigil, starting at `start`:
+/// either a lone `.` (the broadcast macro `@.`) or an identifier followed by a
+/// trailing adjacent `.ident` chain (`@Mod.mac`). Returns the index just past
+/// the name.
+fn parse_macro_name_body(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, start: usize) -> usize {
+    match ctx.token(start).map(|t| t.kind) {
+        // The broadcast macro `@.` — the name is the single `.` token.
+        Some(TokKind::Dot) => {
+            events.push(Event::Tok(start));
+            start + 1
+        }
+        Some(TokKind::Ident) => {
+            events.push(Event::Tok(start));
+            let mut i = start + 1;
+            // Adjacent `.ident` chain: `@Mod.mac`. No whitespace skipping — a
+            // space before a `.` makes it a (broadcast) argument, not the name.
+            while ctx.token(i).map(|t| t.kind) == Some(TokKind::Dot)
+                && ctx.token(i + 1).map(|t| t.kind) == Some(TokKind::Ident)
+            {
+                events.push(Event::Tok(i)); // `.`
+                events.push(Event::Tok(i + 1)); // ident
+                i += 2;
+            }
+            i
+        }
+        // A bare `@` with no name — emit nothing more; the MACRO_NAME holds just
+        // the sigil (still lossless).
+        _ => start,
+    }
+}
+
+/// Parse the arguments of a macro call after its name (which ends at `name_end`)
+/// into `events`, returning the index just past the last argument. Two forms: a
+/// `(` adjacent to the name opens a comma-separated `ARG_LIST` (call-like);
+/// otherwise the arguments are space-separated expressions consumed to the end
+/// of the line (or until a closing delimiter / separator inside brackets).
+fn parse_macro_args(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    name_end: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    inside_brackets: bool,
+) -> usize {
+    // Paren form `@m(a, b)`: the `(` must be adjacent (no whitespace), otherwise
+    // `@m (a, b)` is the space form with a single parenthesized argument.
+    if ctx.token(name_end).map(|t| t.kind) == Some(TokKind::LParen) {
+        let (list_events, end) = parse_arg_list(
+            ctx,
+            name_end,
+            TokKind::RParen,
+            SyntaxKind::ARG_LIST,
+            diagnostics,
+        );
+        events.extend(list_events);
+        return end;
+    }
+
+    // Space form `@m a b`: each argument is a full expression. Stop at a newline,
+    // end of input, or a delimiter that closes/separates an enclosing list.
+    let mut pos = name_end;
+    loop {
+        let next = ctx.skip_ws(pos);
+        match ctx.token(next).map(|t| t.kind) {
+            None
+            | Some(
+                TokKind::Newline
+                | TokKind::Comma
+                | TokKind::RParen
+                | TokKind::RBracket
+                | TokKind::RBrace
+                | TokKind::Semicolon,
+            ) => break,
+            _ => {
+                push_range(events, pos, next);
+                match parse_expr_in(ctx.tokens(), next, 0, diagnostics, inside_brackets) {
+                    Some(arg) => {
+                        events.extend(arg.events);
+                        pos = arg.end;
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    pos
 }
 
 /// Parse a standalone `{ … }` brace expression into a `BRACES` node — the

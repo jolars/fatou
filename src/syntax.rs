@@ -66,6 +66,8 @@ pub enum SyntaxKind {
     IMPORT_STMT,
     USING_STMT,
     EXPORT_STMT,
+    MACRO_CALL,
+    MACRO_NAME,
 
     // --- Trivia tokens ---
     WHITESPACE,
