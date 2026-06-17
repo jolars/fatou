@@ -37,7 +37,7 @@ pub(crate) fn parse_expr(
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, min_bp, diagnostics, false, false)
+    parse_expr_in(tokens, start, min_bp, diagnostics, false, false, false)
 }
 
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
@@ -48,7 +48,7 @@ pub(crate) fn parse_expr_in_brackets(
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, min_bp, diagnostics, true, false)
+    parse_expr_in(tokens, start, min_bp, diagnostics, true, false, false)
 }
 
 fn parse_expr_in(
@@ -61,6 +61,10 @@ fn parse_expr_in(
     // range operator. Used for a ternary's true-branch so `a ? b : c` reads the
     // `:` as the ternary separator (a real range there must be parenthesized).
     no_range: bool,
+    // When set (parsing one element of an array literal), an operator with
+    // whitespace before it but none after begins a new element — so `[1 +2]` is
+    // two elements while `[1 + 2]` is one. See `array_element_boundary`.
+    array_mode: bool,
 ) -> Option<ExprParse> {
     let ctx = ParserCtx::new(tokens);
 
@@ -173,6 +177,13 @@ fn parse_expr_in(
             break;
         };
 
+        // Inside an array literal, an operator glued to the start of the next
+        // operand (space before, none after) is that operand's prefix, marking a
+        // new element rather than an infix operator. End this element here.
+        if array_mode && array_element_boundary(&ctx, lhs.end, op_idx) {
+            break;
+        }
+
         // A `.` whose right-hand side begins with `@` is a qualified macro call
         // (`Base.@time f()`): the whole `Base.@time` is the macro name and the
         // rest are its arguments — not a field access wrapping a macro call.
@@ -224,6 +235,7 @@ fn parse_expr_in(
             diagnostics,
             inside_brackets,
             no_range,
+            array_mode,
         ) else {
             let op = &tokens[op_idx];
             push_diagnostic(
@@ -294,8 +306,10 @@ fn parse_prefix(
                 PREFIX_BP,
                 diagnostics,
                 inside_brackets,
-                // PREFIX_BP is above the range colon, so a `:` already ends the
-                // operand here regardless; no_range never matters.
+                // PREFIX_BP is above the range colon and the array-element
+                // boundary only matters at low binding powers, so neither flag
+                // changes the operand here.
+                false,
                 false,
             ) else {
                 // A bare prefix operator with no operand: wrap it as an error.
@@ -313,6 +327,7 @@ fn parse_prefix(
         }
         TokKind::At => Some(parse_macro(ctx, start, diagnostics, inside_brackets)),
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
+        TokKind::LBracket => Some(parse_bracket_literal(ctx, start, diagnostics)),
         TokKind::LBrace => parse_braces(ctx, start, diagnostics),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
         TokKind::StringPrefix | TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
@@ -536,6 +551,198 @@ fn parse_paren(
             end: close,
             events,
         })
+    }
+}
+
+/// Whether the operator at `op_idx` begins a new array element: there is
+/// whitespace between the previous operand (ending at `operand_end`) and the
+/// operator, but the operator is glued to its own operand (no whitespace after).
+/// That makes it a prefix of the next element rather than an infix operator, so
+/// `[1 +2]` is two elements while `[1 + 2]` is one.
+fn array_element_boundary(ctx: &ParserCtx<'_>, operand_end: usize, op_idx: usize) -> bool {
+    let space_before = op_idx > operand_end;
+    space_before
+        && !matches!(
+            ctx.token(op_idx + 1).map(|t| t.kind),
+            Some(TokKind::Whitespace | TokKind::Newline) | None
+        )
+}
+
+/// Parse one element of an array literal: a full expression in array mode (a
+/// space-glued operator ends it) at statement-newline sensitivity (a newline is a
+/// row separator handled by the caller, not part of the element).
+fn parse_element(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    parse_expr_in(tokens, start, 0, diagnostics, false, false, true)
+}
+
+/// Wrap a parsed element in an `ARG` node, returning the index just past it.
+fn push_element_arg(events: &mut Vec<Event>, el: ExprParse) -> usize {
+    let end = el.end;
+    events.push(Event::Start(SyntaxKind::ARG));
+    events.extend(el.events);
+    events.push(Event::Finish);
+    end
+}
+
+/// Parse a `[...]` literal at prefix position (postfix `[` is indexing). A `,`
+/// after the first element (or an empty/single `[x]`) is a `VECT_EXPR`, reusing
+/// the arg-list machinery; a space-, `;`-, or newline-separated layout is a
+/// `MATRIX_EXPR` of `MATRIX_ROW`s.
+fn parse_bracket_literal(
+    ctx: &ParserCtx<'_>,
+    lbrk: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let tokens = ctx.tokens();
+    let vect = |diagnostics: &mut Vec<ParseDiagnostic>| {
+        let (events, end) = parse_arg_list(
+            ctx,
+            lbrk,
+            TokKind::RBracket,
+            SyntaxKind::VECT_EXPR,
+            diagnostics,
+        );
+        ExprParse {
+            start: lbrk,
+            end,
+            events,
+        }
+    };
+
+    let first_start = ctx.skip_trivia(lbrk + 1);
+    // Empty `[]`, or a first element we cannot parse: the comma-list parser
+    // handles both losslessly.
+    if ctx.token(first_start).map(|t| t.kind) == Some(TokKind::RBracket) {
+        return vect(diagnostics);
+    }
+    let Some(first) = parse_element(tokens, first_start, diagnostics) else {
+        return vect(diagnostics);
+    };
+
+    // Look at the first separator (past horizontal whitespace and comments, but
+    // not a newline — a newline is a significant row separator). A `,`, `]`, or
+    // end means a vector; anything else (`;`, newline, or another element) means
+    // a matrix.
+    let mut look = first.end;
+    while matches!(
+        ctx.token(look).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
+    ) {
+        look += 1;
+    }
+    match ctx.token(look).map(|t| t.kind) {
+        None | Some(TokKind::RBracket | TokKind::Comma) => vect(diagnostics),
+        _ => parse_matrix(ctx, lbrk, first, diagnostics),
+    }
+}
+
+/// Parse the matrix form of a `[...]` literal given its already-parsed first
+/// element. Elements within a row are space-separated; rows are separated by `;`
+/// or a newline. Each element is an `ARG` inside a `MATRIX_ROW`.
+fn parse_matrix(
+    ctx: &ParserCtx<'_>,
+    lbrk: usize,
+    first: ExprParse,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let tokens = ctx.tokens();
+    let mut events = vec![Event::Start(SyntaxKind::MATRIX_EXPR), Event::Tok(lbrk)];
+    push_range(&mut events, lbrk + 1, first.start);
+    events.push(Event::Start(SyntaxKind::MATRIX_ROW));
+    let mut pos = push_element_arg(&mut events, first);
+
+    loop {
+        // Scan past horizontal whitespace and comments to the next significant
+        // token (a newline stays significant as a row separator).
+        let mut look = pos;
+        while matches!(
+            ctx.token(look).map(|t| t.kind),
+            Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
+        ) {
+            look += 1;
+        }
+
+        match ctx.token(look).map(|t| t.kind) {
+            // End of the literal: close the open row, emit trailing trivia + `]`.
+            None | Some(TokKind::RBracket) => {
+                events.push(Event::Finish); // MATRIX_ROW
+                push_range(&mut events, pos, look);
+                let end = if ctx.token(look).map(|t| t.kind) == Some(TokKind::RBracket) {
+                    events.push(Event::Tok(look));
+                    look + 1
+                } else {
+                    look
+                };
+                events.push(Event::Finish); // MATRIX_EXPR
+                return ExprParse {
+                    start: lbrk,
+                    end,
+                    events,
+                };
+            }
+            // Row separator: close the row, consume the `;`/newline/trivia run,
+            // then either close (a trailing separator) or open the next row.
+            Some(TokKind::Semicolon | TokKind::Newline) => {
+                events.push(Event::Finish); // MATRIX_ROW
+                let mut q = pos;
+                loop {
+                    while matches!(ctx.token(q).map(|t| t.kind), Some(k) if k.is_trivia()) {
+                        events.push(Event::Tok(q));
+                        q += 1;
+                    }
+                    if ctx.token(q).map(|t| t.kind) == Some(TokKind::Semicolon) {
+                        events.push(Event::Tok(q));
+                        q += 1;
+                        continue;
+                    }
+                    break;
+                }
+                match ctx.token(q).map(|t| t.kind) {
+                    None => {
+                        events.push(Event::Finish); // MATRIX_EXPR
+                        return ExprParse {
+                            start: lbrk,
+                            end: q,
+                            events,
+                        };
+                    }
+                    Some(TokKind::RBracket) => {
+                        events.push(Event::Tok(q));
+                        events.push(Event::Finish); // MATRIX_EXPR
+                        return ExprParse {
+                            start: lbrk,
+                            end: q + 1,
+                            events,
+                        };
+                    }
+                    _ => {
+                        events.push(Event::Start(SyntaxKind::MATRIX_ROW));
+                        pos = match parse_element(tokens, q, diagnostics) {
+                            Some(el) => push_element_arg(&mut events, el),
+                            None => {
+                                events.push(Event::Tok(q));
+                                q + 1
+                            }
+                        };
+                    }
+                }
+            }
+            // Another element in the current row (whitespace is the separator).
+            _ => {
+                push_range(&mut events, pos, look);
+                pos = match parse_element(tokens, look, diagnostics) {
+                    Some(el) => push_element_arg(&mut events, el),
+                    None => {
+                        events.push(Event::Tok(look));
+                        look + 1
+                    }
+                };
+            }
+        }
     }
 }
 
@@ -785,7 +992,15 @@ fn parse_macro_args(
             ) => break,
             _ => {
                 push_range(events, pos, next);
-                match parse_expr_in(ctx.tokens(), next, 0, diagnostics, inside_brackets, false) {
+                match parse_expr_in(
+                    ctx.tokens(),
+                    next,
+                    0,
+                    diagnostics,
+                    inside_brackets,
+                    false,
+                    false,
+                ) {
                     Some(arg) => {
                         events.extend(arg.events);
                         pos = arg.end;
@@ -972,6 +1187,7 @@ fn parse_ternary(
         diagnostics,
         inside_brackets,
         true,
+        false,
     ) else {
         let op = &tokens[q_idx];
         push_diagnostic(
@@ -1022,6 +1238,7 @@ fn parse_ternary(
         diagnostics,
         inside_brackets,
         no_range,
+        false,
     ) else {
         let op = &tokens[colon];
         push_diagnostic(

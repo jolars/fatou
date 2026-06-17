@@ -1,0 +1,136 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..78
+  ASSIGNMENT_EXPR@0..13
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    VECT_EXPR@4..13
+      LBRACKET@4..5 "["
+      ARG@5..6
+        LITERAL@5..6
+          INTEGER@5..6 "1"
+      COMMA@6..7 ","
+      WHITESPACE@7..8 " "
+      ARG@8..9
+        LITERAL@8..9
+          INTEGER@8..9 "2"
+      COMMA@9..10 ","
+      WHITESPACE@10..11 " "
+      ARG@11..12
+        LITERAL@11..12
+          INTEGER@11..12 "3"
+      RBRACKET@12..13 "]"
+  NEWLINE@13..14 "\n"
+  ASSIGNMENT_EXPR@14..20
+    NAME@14..15
+      IDENT@14..15 "b"
+    WHITESPACE@15..16 " "
+    EQ@16..17 "="
+    WHITESPACE@17..18 " "
+    VECT_EXPR@18..20
+      LBRACKET@18..19 "["
+      RBRACKET@19..20 "]"
+  NEWLINE@20..21 "\n"
+  ASSIGNMENT_EXPR@21..28
+    NAME@21..22
+      IDENT@21..22 "c"
+    WHITESPACE@22..23 " "
+    EQ@23..24 "="
+    WHITESPACE@24..25 " "
+    VECT_EXPR@25..28
+      LBRACKET@25..26 "["
+      ARG@26..27
+        NAME@26..27
+          IDENT@26..27 "x"
+      RBRACKET@27..28 "]"
+  NEWLINE@28..29 "\n"
+  ASSIGNMENT_EXPR@29..42
+    NAME@29..30
+      IDENT@29..30 "d"
+    WHITESPACE@30..31 " "
+    EQ@31..32 "="
+    WHITESPACE@32..33 " "
+    VECT_EXPR@33..42
+      LBRACKET@33..34 "["
+      ARG@34..35
+        NAME@34..35
+          IDENT@34..35 "a"
+      COMMA@35..36 ","
+      WHITESPACE@36..37 " "
+      ARG@37..38
+        NAME@37..38
+          IDENT@37..38 "b"
+      PARAMETERS@38..41
+        SEMICOLON@38..39 ";"
+        WHITESPACE@39..40 " "
+        ARG@40..41
+          NAME@40..41
+            IDENT@40..41 "c"
+      RBRACKET@41..42 "]"
+  NEWLINE@42..43 "\n"
+  ASSIGNMENT_EXPR@43..62
+    NAME@43..44
+      IDENT@43..44 "e"
+    WHITESPACE@44..45 " "
+    EQ@45..46 "="
+    WHITESPACE@46..47 " "
+    VECT_EXPR@47..62
+      LBRACKET@47..48 "["
+      ARG@48..52
+        CALL_EXPR@48..52
+          NAME@48..49
+            IDENT@48..49 "f"
+          ARG_LIST@49..52
+            LPAREN@49..50 "("
+            ARG@50..51
+              NAME@50..51
+                IDENT@50..51 "x"
+            RPAREN@51..52 ")"
+      COMMA@52..53 ","
+      WHITESPACE@53..54 " "
+      ARG@54..58
+        CALL_EXPR@54..58
+          NAME@54..55
+            IDENT@54..55 "g"
+          ARG_LIST@55..58
+            LPAREN@55..56 "("
+            ARG@56..57
+              NAME@56..57
+                IDENT@56..57 "y"
+            RPAREN@57..58 ")"
+      COMMA@58..59 ","
+      WHITESPACE@59..60 " "
+      ARG@60..61
+        NAME@60..61
+          IDENT@60..61 "z"
+      RBRACKET@61..62 "]"
+  NEWLINE@62..63 "\n"
+  ASSIGNMENT_EXPR@63..77
+    NAME@63..64
+      IDENT@63..64 "n"
+    WHITESPACE@64..65 " "
+    EQ@65..66 "="
+    WHITESPACE@66..67 " "
+    VECT_EXPR@67..77
+      LBRACKET@67..68 "["
+      ARG@68..69
+        LITERAL@68..69
+          INTEGER@68..69 "1"
+      COMMA@69..70 ","
+      WHITESPACE@70..71 " "
+      ARG@71..72
+        LITERAL@71..72
+          INTEGER@71..72 "2"
+      COMMA@72..73 ","
+      WHITESPACE@73..74 " "
+      ARG@74..75
+        LITERAL@74..75
+          INTEGER@74..75 "3"
+      COMMA@75..76 ","
+      RBRACKET@76..77 "]"
+  NEWLINE@77..78 "\n"

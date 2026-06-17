@@ -95,6 +95,11 @@ mod tests {
             "y = a ? b : c\n",
             "z = a == b ? x + 1 : x - 1\n",
             "w = a ? b : c ? d : e\n",
+            "v = [1, 2, 3]\n",
+            "e = []\n",
+            "m = [1 2; 3 4]\n",
+            "s = [1 +2]\n",
+            "c = [1; 2; 3]\n",
         ] {
             assert_lossless(input);
         }
