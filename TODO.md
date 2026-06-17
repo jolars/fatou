@@ -100,8 +100,15 @@ through), so the grammar can grow incrementally.
   `A '` char). The postfix chain (`parse_postfix_chain`) wraps the operand in a
   `POSTFIX_EXPR` and re-loops, so it chains (`A''`) and composes with later
   suffixes (`A'[i]`, mirroring JuliaSyntax's `(ref (call A ') i)`).
-- [ ] Bare `end` inside indexing (`a[end]`) — currently `end` always terminates
-  a block, so `a[end]` is mis-handled.
+- [x] Bare `end` inside indexing (`a[end]`). An `end_marker` flag, threaded
+  through the Pratt parser alongside `inside_brackets`/`no_range`/`array_mode`,
+  enables a bare `end` to parse as an `END_MARKER` atom rather than a block
+  terminator. It is turned on only inside square brackets — indexing and vector
+  literals (both close with `]`, set in `parse_arg_list`; array/matrix elements
+  via `parse_element`) — and stays off inside `(…)`/`{…}`, matching Julia's
+  `end`-symbol scope (so `f(end)` keeps `end` as a bare token). It propagates
+  through operators, ranges, prefix operands, and ternary branches, so
+  `a[end-1]`, `a[2:end]`, and `m[end, end]` all parse correctly.
 - [ ] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
 
 ## Incremental reparse

@@ -43,6 +43,7 @@ pub enum SyntaxKind {
     WHERE_EXPR,
     SPLAT_EXPR,
     POSTFIX_EXPR,
+    END_MARKER,
     ASSIGNMENT_EXPR,
     ARROW_EXPR,
     TERNARY_EXPR,

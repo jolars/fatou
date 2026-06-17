@@ -56,6 +56,7 @@ ast_node!(Parameters, SyntaxKind::PARAMETERS);
 ast_node!(TypeAnnotation, SyntaxKind::TYPE_ANNOTATION);
 ast_node!(WhereExpr, SyntaxKind::WHERE_EXPR);
 ast_node!(SplatExpr, SyntaxKind::SPLAT_EXPR);
+ast_node!(EndMarker, SyntaxKind::END_MARKER);
 ast_node!(AssignmentExpr, SyntaxKind::ASSIGNMENT_EXPR);
 ast_node!(ArrowExpr, SyntaxKind::ARROW_EXPR);
 ast_node!(TernaryExpr, SyntaxKind::TERNARY_EXPR);

@@ -17,6 +17,27 @@ use crate::parser::structural::{
 };
 use crate::syntax::SyntaxKind;
 
+/// Context flags threaded through the Pratt parser. All default to `false`, the
+/// statement-scope context; bracketed, array, ternary, and indexing contexts flip
+/// the relevant ones as they recurse.
+#[derive(Clone, Copy, Default)]
+struct ExprFlags {
+    /// Inside `(…)`/`[…]`/`{…}`: newlines are insignificant and an operator may
+    /// continue onto the next line (see [`next_operator`]).
+    inside_brackets: bool,
+    /// A bare `:` terminates the expression (a ternary true-branch separator)
+    /// rather than being parsed as a range operator.
+    no_range: bool,
+    /// Parsing one element of an array literal: an operator with whitespace before
+    /// it but none after begins a new element, so `[1 +2]` is two elements while
+    /// `[1 + 2]` is one (see [`array_element_boundary`]).
+    array_mode: bool,
+    /// A bare `end` is the index-end marker (an `END_MARKER` atom) rather than a
+    /// block terminator. Enabled only inside square brackets (`a[end]`, `[end]`);
+    /// parens and braces leave it off, matching Julia's `end`-symbol scope.
+    end_marker: bool,
+}
+
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
 /// binary arithmetic operators so `-a + b` parses as `(-a) + b`.
 const PREFIX_BP: u8 = 28;
@@ -37,18 +58,24 @@ pub(crate) fn parse_expr(
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, min_bp, diagnostics, false, false, false)
+    parse_expr_in(tokens, start, min_bp, diagnostics, ExprFlags::default())
 }
 
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
-/// insignificant and an operator may continue onto the next line.
+/// insignificant and an operator may continue onto the next line. Note: this does
+/// *not* enable the `end` index marker — that is specific to square brackets and
+/// is threaded separately (see [`ExprFlags::end_marker`]).
 pub(crate) fn parse_expr_in_brackets(
     tokens: &[Token],
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, min_bp, diagnostics, true, false, false)
+    let flags = ExprFlags {
+        inside_brackets: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, min_bp, diagnostics, flags)
 }
 
 fn parse_expr_in(
@@ -56,16 +83,16 @@ fn parse_expr_in(
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
-    inside_brackets: bool,
-    // When set, a bare `:` terminates the expression instead of being parsed as a
-    // range operator. Used for a ternary's true-branch so `a ? b : c` reads the
-    // `:` as the ternary separator (a real range there must be parenthesized).
-    no_range: bool,
-    // When set (parsing one element of an array literal), an operator with
-    // whitespace before it but none after begins a new element — so `[1 +2]` is
-    // two elements while `[1 + 2]` is one. See `array_element_boundary`.
-    array_mode: bool,
+    flags: ExprFlags,
 ) -> Option<ExprParse> {
+    // `end_marker` is consumed by `parse_prefix` (via `flags`); the rest steer the
+    // operator loop directly.
+    let ExprFlags {
+        inside_brackets,
+        no_range,
+        array_mode,
+        end_marker: _,
+    } = flags;
     let ctx = ParserCtx::new(tokens);
 
     // Leading keywords open a structural (block) form.
@@ -168,7 +195,7 @@ fn parse_expr_in(
         _ => {}
     }
 
-    let mut lhs = parse_prefix(&ctx, start, diagnostics, inside_brackets)?;
+    let mut lhs = parse_prefix(&ctx, start, diagnostics, flags)?;
 
     loop {
         lhs = parse_postfix_chain(&ctx, lhs, diagnostics);
@@ -206,7 +233,7 @@ fn parse_expr_in(
             if TERNARY_L < min_bp {
                 break;
             }
-            lhs = match parse_ternary(&ctx, lhs, op_idx, diagnostics, inside_brackets, no_range) {
+            lhs = match parse_ternary(&ctx, lhs, op_idx, diagnostics, flags) {
                 Ok(node) => node,
                 Err(done) => return Some(done),
             };
@@ -228,15 +255,7 @@ fn parse_expr_in(
         }
 
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
-        let Some(rhs) = parse_expr_in(
-            tokens,
-            rhs_operand,
-            r_bp,
-            diagnostics,
-            inside_brackets,
-            no_range,
-            array_mode,
-        ) else {
+        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
@@ -279,10 +298,13 @@ fn parse_prefix(
     ctx: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
-    inside_brackets: bool,
+    flags: ExprFlags,
 ) -> Option<ExprParse> {
     let tok = ctx.token(start)?;
     match tok.kind {
+        // A bare `end` inside square brackets is the index-end marker (`a[end]`,
+        // `a[end - 1]`); elsewhere `end` is a block terminator and not an atom.
+        TokKind::EndKw if flags.end_marker => Some(atom(SyntaxKind::END_MARKER, start)),
         // Prefix operators: arithmetic/logical unary (`-x`, `!x`), lower-bound
         // type expressions (`<:Real` in `Array{<:Real}`), and unary `::`
         // declarations (`::Int` in a method signature `f(::Int)`).
@@ -300,17 +322,20 @@ fn parse_prefix(
                 SyntaxKind::UNARY_EXPR
             };
             let operand_start = ctx.skip_trivia(start + 1);
+            // PREFIX_BP is above the range colon and the array-element boundary
+            // only matters at low binding powers, so neither `no_range` nor
+            // `array_mode` changes the operand here; carry the rest through.
+            let operand_flags = ExprFlags {
+                no_range: false,
+                array_mode: false,
+                ..flags
+            };
             let Some(operand) = parse_expr_in(
                 ctx.tokens(),
                 operand_start,
                 PREFIX_BP,
                 diagnostics,
-                inside_brackets,
-                // PREFIX_BP is above the range colon and the array-element
-                // boundary only matters at low binding powers, so neither flag
-                // changes the operand here.
-                false,
-                false,
+                operand_flags,
             ) else {
                 // A bare prefix operator with no operand: wrap it as an error.
                 return Some(error_expr_with_range(start, start + 1));
@@ -325,7 +350,7 @@ fn parse_prefix(
                 events,
             })
         }
-        TokKind::At => Some(parse_macro(ctx, start, diagnostics, inside_brackets)),
+        TokKind::At => Some(parse_macro(ctx, start, diagnostics, flags.inside_brackets)),
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
         TokKind::LBracket => Some(parse_bracket_literal(ctx, start, diagnostics)),
         TokKind::LBrace => parse_braces(ctx, start, diagnostics),
@@ -582,13 +607,19 @@ fn array_element_boundary(ctx: &ParserCtx<'_>, operand_end: usize, op_idx: usize
 
 /// Parse one element of an array literal: a full expression in array mode (a
 /// space-glued operator ends it) at statement-newline sensitivity (a newline is a
-/// row separator handled by the caller, not part of the element).
+/// row separator handled by the caller, not part of the element). Array literals
+/// are square-bracketed, so `end` is the index marker here.
 fn parse_element(
     tokens: &[Token],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    parse_expr_in(tokens, start, 0, diagnostics, false, false, true)
+    let flags = ExprFlags {
+        array_mode: true,
+        end_marker: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
 /// Wrap a parsed element in an `ARG` node, returning the index just past it.
@@ -1130,15 +1161,11 @@ fn parse_macro_args(
             ) => break,
             _ => {
                 push_range(events, pos, next);
-                match parse_expr_in(
-                    ctx.tokens(),
-                    next,
-                    0,
-                    diagnostics,
+                let arg_flags = ExprFlags {
                     inside_brackets,
-                    false,
-                    false,
-                ) {
+                    ..ExprFlags::default()
+                };
+                match parse_expr_in(ctx.tokens(), next, 0, diagnostics, arg_flags) {
                     Some(arg) => {
                         events.extend(arg.events);
                         pos = arg.end;
@@ -1178,6 +1205,9 @@ fn parse_arg_list(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> (Vec<Event>, usize) {
     let tokens = ctx.tokens();
+    // `end` is the index marker only inside square brackets — indexing (`a[end]`)
+    // and vector literals (`[end]`), both of which close with `]`.
+    let end_marker = close == TokKind::RBracket;
     let mut events = vec![Event::Start(list_kind), Event::Tok(open_idx)];
     let mut i = open_idx + 1;
     let mut in_params = false;
@@ -1214,7 +1244,7 @@ fn parse_arg_list(
                 events.push(Event::Tok(i));
                 i += 1;
             }
-            Some(_) => i = parse_one_arg(ctx, &mut events, i, diagnostics),
+            Some(_) => i = parse_one_arg(ctx, &mut events, i, end_marker, diagnostics),
         }
     }
 
@@ -1232,9 +1262,18 @@ fn parse_one_arg(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
     i: usize,
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
+    let flags = ExprFlags {
+        inside_brackets: true,
+        end_marker,
+        ..ExprFlags::default()
+    };
+    let parse_arg_expr = |tokens: &[Token], start, diagnostics: &mut Vec<ParseDiagnostic>| {
+        parse_expr_in(tokens, start, 0, diagnostics, flags)
+    };
     if let Some(eq_idx) = kwarg_eq(ctx, i) {
         events.push(Event::Start(SyntaxKind::KEYWORD_ARG));
         events.push(Event::Start(SyntaxKind::NAME));
@@ -1245,7 +1284,7 @@ fn parse_one_arg(
         events.push(Event::Tok(eq_idx));
         let val_start = ctx.skip_trivia(eq_idx + 1);
         push_range(events, eq_idx + 1, val_start);
-        let end = match parse_expr_in_brackets(tokens, val_start, 0, diagnostics) {
+        let end = match parse_arg_expr(tokens, val_start, diagnostics) {
             Some(val) => {
                 events.extend(val.events);
                 val.end
@@ -1254,7 +1293,7 @@ fn parse_one_arg(
         };
         events.push(Event::Finish);
         end
-    } else if let Some(arg) = parse_expr_in_brackets(tokens, i, 0, diagnostics) {
+    } else if let Some(arg) = parse_arg_expr(tokens, i, diagnostics) {
         events.push(Event::Start(SyntaxKind::ARG));
         events.extend(arg.events);
         events.push(Event::Finish);
@@ -1310,23 +1349,21 @@ fn parse_ternary(
     cond: ExprParse,
     q_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
-    inside_brackets: bool,
-    no_range: bool,
+    flags: ExprFlags,
 ) -> Result<ExprParse, ExprParse> {
     let tokens = ctx.tokens();
+    let inside_brackets = flags.inside_brackets;
 
     // True-branch: `no_range` so a bare `:` ends it (the ternary separator). A
     // real range in the true-branch must therefore be parenthesized, as in Julia.
     let then_start = ctx.skip_trivia(q_idx + 1);
-    let Some(then_br) = parse_expr_in(
-        tokens,
-        then_start,
-        TERNARY_R,
-        diagnostics,
-        inside_brackets,
-        true,
-        false,
-    ) else {
+    let then_flags = ExprFlags {
+        no_range: true,
+        array_mode: false,
+        ..flags
+    };
+    let Some(then_br) = parse_expr_in(tokens, then_start, TERNARY_R, diagnostics, then_flags)
+    else {
         let op = &tokens[q_idx];
         push_diagnostic(
             diagnostics,
@@ -1369,15 +1406,12 @@ fn parse_ternary(
     // False-branch: inherit `no_range` so an enclosing ternary's `:` still ends
     // it (`a ? b ? c : d : e`), while a top-level else may hold a range.
     let else_start = ctx.skip_trivia(colon + 1);
-    let Some(else_br) = parse_expr_in(
-        tokens,
-        else_start,
-        TERNARY_R,
-        diagnostics,
-        inside_brackets,
-        no_range,
-        false,
-    ) else {
+    let else_flags = ExprFlags {
+        array_mode: false,
+        ..flags
+    };
+    let Some(else_br) = parse_expr_in(tokens, else_start, TERNARY_R, diagnostics, else_flags)
+    else {
         let op = &tokens[colon];
         push_diagnostic(
             diagnostics,

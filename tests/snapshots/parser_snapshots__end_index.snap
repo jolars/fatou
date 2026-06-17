@@ -1,0 +1,124 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..88
+  INDEX_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    ARG_LIST@1..6
+      LBRACKET@1..2 "["
+      ARG@2..5
+        END_MARKER@2..5
+          END_KW@2..5 "end"
+      RBRACKET@5..6 "]"
+  NEWLINE@6..7 "\n"
+  INDEX_EXPR@7..17
+    NAME@7..8
+      IDENT@7..8 "a"
+    ARG_LIST@8..17
+      LBRACKET@8..9 "["
+      ARG@9..16
+        BINARY_EXPR@9..16
+          END_MARKER@9..12
+            END_KW@9..12 "end"
+          WHITESPACE@12..13 " "
+          MINUS@13..14 "-"
+          WHITESPACE@14..15 " "
+          LITERAL@15..16
+            INTEGER@15..16 "1"
+      RBRACKET@16..17 "]"
+  NEWLINE@17..18 "\n"
+  INDEX_EXPR@18..26
+    NAME@18..19
+      IDENT@18..19 "a"
+    ARG_LIST@19..26
+      LBRACKET@19..20 "["
+      ARG@20..25
+        BINARY_EXPR@20..25
+          LITERAL@20..21
+            INTEGER@20..21 "2"
+          COLON@21..22 ":"
+          END_MARKER@22..25
+            END_KW@22..25 "end"
+      RBRACKET@25..26 "]"
+  NEWLINE@26..27 "\n"
+  INDEX_EXPR@27..38
+    NAME@27..28
+      IDENT@27..28 "m"
+    ARG_LIST@28..38
+      LBRACKET@28..29 "["
+      ARG@29..32
+        END_MARKER@29..32
+          END_KW@29..32 "end"
+      COMMA@32..33 ","
+      WHITESPACE@33..34 " "
+      ARG@34..37
+        END_MARKER@34..37
+          END_KW@34..37 "end"
+      RBRACKET@37..38 "]"
+  NEWLINE@38..39 "\n"
+  ASSIGNMENT_EXPR@39..49
+    INDEX_EXPR@39..45
+      NAME@39..40
+        IDENT@39..40 "a"
+      ARG_LIST@40..45
+        LBRACKET@40..41 "["
+        ARG@41..44
+          END_MARKER@41..44
+            END_KW@41..44 "end"
+        RBRACKET@44..45 "]"
+    WHITESPACE@45..46 " "
+    EQ@46..47 "="
+    WHITESPACE@47..48 " "
+    LITERAL@48..49
+      INTEGER@48..49 "1"
+  NEWLINE@49..50 "\n"
+  ASSIGNMENT_EXPR@50..65
+    NAME@50..51
+      IDENT@50..51 "v"
+    WHITESPACE@51..52 " "
+    EQ@52..53 "="
+    WHITESPACE@53..54 " "
+    VECT_EXPR@54..65
+      LBRACKET@54..55 "["
+      ARG@55..56
+        LITERAL@55..56
+          INTEGER@55..56 "1"
+      COMMA@56..57 ","
+      WHITESPACE@57..58 " "
+      ARG@58..59
+        LITERAL@58..59
+          INTEGER@58..59 "2"
+      COMMA@59..60 ","
+      WHITESPACE@60..61 " "
+      ARG@61..64
+        END_MARKER@61..64
+          END_KW@61..64 "end"
+      RBRACKET@64..65 "]"
+  NEWLINE@65..66 "\n"
+  INDEX_EXPR@66..80
+    NAME@66..72
+      IDENT@66..72 "nested"
+    ARG_LIST@72..80
+      LBRACKET@72..73 "["
+      ARG@73..79
+        INDEX_EXPR@73..79
+          NAME@73..74
+            IDENT@73..74 "a"
+          ARG_LIST@74..79
+            LBRACKET@74..75 "["
+            ARG@75..78
+              END_MARKER@75..78
+                END_KW@75..78 "end"
+            RBRACKET@78..79 "]"
+      RBRACKET@79..80 "]"
+  NEWLINE@80..81 "\n"
+  CALL_EXPR@81..87
+    NAME@81..82
+      IDENT@81..82 "f"
+    ARG_LIST@82..87
+      LPAREN@82..83 "("
+      END_KW@83..86 "end"
+      RPAREN@86..87 ")"
+  NEWLINE@87..88 "\n"
