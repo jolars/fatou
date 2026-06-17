@@ -117,6 +117,15 @@ through), so the grammar can grow incrementally.
   there parses as a `BEGIN_MARKER` atom (the leading-keyword block dispatch is
   skipped when `begin_marker` is set), composing through ranges/operators so
   `a[begin:end]`, `a[begin+1]`, and `m[begin, end]` all parse correctly.
+- [x] Symbol/expression quoting (`:foo`, `:end`, `:(x + 1)`). A prefix `:` in
+  `parse_prefix` builds a `QUOTE_SYM` via `parse_quote_sym` (mirroring the
+  `$ident`/`$(expr)` interpolation split): `:ident` wraps a `NAME`, `:keyword`
+  wraps the keyword token as a symbol (`TokKind::is_keyword`), and `:(expr)`
+  wraps a parsed `PAREN_EXPR`; the projector maps all three to JuliaSyntax's
+  `(quote-: …)`. A bare `:` not followed by a quotable token returns `None`, so
+  the index colon in `a[:]` is untouched. **Known limitations:** the bare-`:`
+  Colon value (`a[:]` → `(ref a :)`) and operator symbols (`:+`, `:(=)`) are
+  deferred (still divergences).
 - [x] Full numeric-literal coverage (rationals, `Inf`/`NaN`, big literals).
   `lex_number` (`lexer.rs`) now splits the base-prefixed integers into distinct
   `HEX_INT`/`OCT_INT`/`BIN_INT` kinds (with per-base digit classes and
@@ -205,7 +214,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`), symbols/quotes (`:T`), richer import/`using` (`import .A`,
+  (`a*b*c`), the pair operator `=>`, richer import/`using` (`import .A`,
   `x as y`), multi-clause generators, and assorted operators (`-->`, `<|`,
   `.&&`). **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the

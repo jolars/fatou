@@ -1,0 +1,73 @@
+---
+source: tests/parser_snapshots.rs
+assertion_line: 41
+expression: rendered
+---
+ROOT@0..48
+  QUOTE_SYM@0..4
+    COLON@0..1 ":"
+    NAME@1..4
+      IDENT@1..4 "foo"
+  NEWLINE@4..5 "\n"
+  QUOTE_SYM@5..13
+    COLON@5..6 ":"
+    PAREN_EXPR@6..13
+      LPAREN@6..7 "("
+      BINARY_EXPR@7..12
+        NAME@7..8
+          IDENT@7..8 "x"
+        WHITESPACE@8..9 " "
+        PLUS@9..10 "+"
+        WHITESPACE@10..11 " "
+        LITERAL@11..12
+          INTEGER@11..12 "1"
+      RPAREN@12..13 ")"
+  NEWLINE@13..14 "\n"
+  ASSIGNMENT_EXPR@14..22
+    NAME@14..15
+      IDENT@14..15 "x"
+    WHITESPACE@15..16 " "
+    EQ@16..17 "="
+    WHITESPACE@17..18 " "
+    QUOTE_SYM@18..22
+      COLON@18..19 ":"
+      NAME@19..22
+        IDENT@19..22 "sym"
+  NEWLINE@22..23 "\n"
+  VECT_EXPR@23..31
+    LBRACKET@23..24 "["
+    ARG@24..26
+      QUOTE_SYM@24..26
+        COLON@24..25 ":"
+        NAME@25..26
+          IDENT@25..26 "a"
+    COMMA@26..27 ","
+    WHITESPACE@27..28 " "
+    ARG@28..30
+      QUOTE_SYM@28..30
+        COLON@28..29 ":"
+        NAME@29..30
+          IDENT@29..30 "b"
+    RBRACKET@30..31 "]"
+  NEWLINE@31..32 "\n"
+  QUOTE_SYM@32..36
+    COLON@32..33 ":"
+    END_KW@33..36 "end"
+  NEWLINE@36..37 "\n"
+  CALL_EXPR@37..47
+    NAME@37..38
+      IDENT@37..38 "f"
+    ARG_LIST@38..47
+      LPAREN@38..39 "("
+      ARG@39..43
+        QUOTE_SYM@39..43
+          COLON@39..40 ":"
+          NAME@40..43
+            IDENT@40..43 "sym"
+      COMMA@43..44 ","
+      WHITESPACE@44..45 " "
+      ARG@45..46
+        NAME@45..46
+          IDENT@45..46 "x"
+      RPAREN@46..47 ")"
+  NEWLINE@47..48 "\n"

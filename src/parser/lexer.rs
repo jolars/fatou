@@ -151,6 +151,44 @@ impl TokKind {
             TokKind::Whitespace | TokKind::Newline | TokKind::Comment | TokKind::BlockComment
         )
     }
+
+    /// Whether this token is a reserved keyword. Used to recognize a keyword
+    /// quoted as a symbol (`:end`, `:function`).
+    pub(crate) fn is_keyword(self) -> bool {
+        matches!(
+            self,
+            TokKind::FunctionKw
+                | TokKind::EndKw
+                | TokKind::IfKw
+                | TokKind::ElseifKw
+                | TokKind::ElseKw
+                | TokKind::BeginKw
+                | TokKind::TrueKw
+                | TokKind::FalseKw
+                | TokKind::WhileKw
+                | TokKind::ForKw
+                | TokKind::DoKw
+                | TokKind::LetKw
+                | TokKind::QuoteKw
+                | TokKind::TryKw
+                | TokKind::CatchKw
+                | TokKind::FinallyKw
+                | TokKind::StructKw
+                | TokKind::MutableKw
+                | TokKind::ModuleKw
+                | TokKind::BaremoduleKw
+                | TokKind::ReturnKw
+                | TokKind::BreakKw
+                | TokKind::ContinueKw
+                | TokKind::ConstKw
+                | TokKind::GlobalKw
+                | TokKind::LocalKw
+                | TokKind::ImportKw
+                | TokKind::UsingKw
+                | TokKind::ExportKw
+                | TokKind::WhereKw
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

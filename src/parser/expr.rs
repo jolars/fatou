@@ -363,6 +363,10 @@ fn parse_prefix(
                 events,
             })
         }
+        // A prefix `:` quotes a symbol (`:foo`, `:end`) or expression (`:(x+1)`).
+        // A bare `:` not followed by something quotable (`a[:]`) is not a quote;
+        // `parse_quote_sym` returns `None` so it falls through.
+        TokKind::Colon => parse_quote_sym(ctx, start, diagnostics),
         TokKind::At => Some(parse_macro(ctx, start, diagnostics, flags.inside_brackets)),
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
         TokKind::LBracket => Some(parse_bracket_literal(ctx, start, diagnostics)),
@@ -380,6 +384,54 @@ fn parse_prefix(
         | TokKind::Char
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
+        _ => None,
+    }
+}
+
+/// Parse a prefix `:` quote into a `QUOTE_SYM` node: `:name`/`:end` (a symbol)
+/// or `:(expr)` (a quoted expression). Returns `None` for a bare `:` that is not
+/// followed by a quotable token (e.g. the index colon in `a[:]`), so the caller
+/// falls through to its normal handling.
+fn parse_quote_sym(
+    ctx: &ParserCtx<'_>,
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let next = ctx.skip_trivia(start + 1);
+    let mut events = vec![Event::Start(SyntaxKind::QUOTE_SYM), Event::Tok(start)];
+    push_range(&mut events, start + 1, next);
+    match ctx.token(next).map(|t| t.kind)? {
+        // `:(expr)` — the parenthesized expression is the quoted form.
+        TokKind::LParen => {
+            let paren = parse_paren(ctx, next, diagnostics)?;
+            let end = paren.end;
+            events.extend(paren.events);
+            events.push(Event::Finish);
+            Some(ExprParse { start, end, events })
+        }
+        // `:name` — an identifier symbol.
+        TokKind::Ident => {
+            events.push(Event::Start(SyntaxKind::NAME));
+            events.push(Event::Tok(next));
+            events.push(Event::Finish);
+            events.push(Event::Finish);
+            Some(ExprParse {
+                start,
+                end: next + 1,
+                events,
+            })
+        }
+        // `:end`, `:function`, … — a keyword used as a symbol.
+        k if k.is_keyword() => {
+            events.push(Event::Tok(next));
+            events.push(Event::Finish);
+            Some(ExprParse {
+                start,
+                end: next + 1,
+                events,
+            })
+        }
+        // A bare `:` (e.g. `a[:]`) is not a quote.
         _ => None,
     }
 }

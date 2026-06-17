@@ -62,6 +62,7 @@ pub enum SyntaxKind {
     LET_EXPR,
     LET_BINDINGS,
     QUOTE_EXPR,
+    QUOTE_SYM,
     TRY_EXPR,
     CATCH_CLAUSE,
     FINALLY_CLAUSE,

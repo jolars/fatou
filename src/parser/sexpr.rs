@@ -136,6 +136,7 @@ fn project(node: &SyntaxNode) -> String {
         ),
         LET_EXPR => project_let(node),
         QUOTE_EXPR => sexp("quote", vec![project_block_child(node)]),
+        QUOTE_SYM => project_quote_sym(node),
         TRY_EXPR => project_try(node),
         STRUCT_DEF => project_struct(node),
         MODULE_DEF => project_module(node),
@@ -581,6 +582,19 @@ fn project_module(node: &SyntaxNode) -> String {
         head,
         vec![project_signature(node), project_block_child(node)],
     )
+}
+
+fn project_quote_sym(node: &SyntaxNode) -> String {
+    // `:foo`/`:(expr)` → `(quote-: …)`. The quoted form is the first significant
+    // child after the `:` — a `NAME`/paren node, or a bare keyword token.
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(n) => return format!("(quote-: {})", project(&n)),
+            NodeOrToken::Token(t) if t.kind() == COLON || is_trivia(t.kind()) => continue,
+            NodeOrToken::Token(t) => return format!("(quote-: {})", t.text()),
+        }
+    }
+    "(quote-:)".to_string()
 }
 
 fn project_let(node: &SyntaxNode) -> String {

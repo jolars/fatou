@@ -30,6 +30,7 @@ splat
 string_interp_ident_boundary
 string_interpolation
 struct_module
+symbols
 ternary
 transpose
 triple_command
