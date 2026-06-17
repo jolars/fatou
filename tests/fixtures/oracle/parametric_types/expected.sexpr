@@ -1,0 +1,1 @@
+(toplevel (curly Vector T) (curly Dict String Int) (curly Array (<:-pre Real)) (= m (curly Matrix (curly Tuple Int Int))) (= (where (call foo (::-i x (curly Vector T))) T) x) (= (where (call bar (::-i x T)) (braces (<: T Number))) x) (where (curly Foo T) (>: T Int)))

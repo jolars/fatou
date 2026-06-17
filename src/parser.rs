@@ -14,7 +14,9 @@ mod events;
 mod expr;
 mod lexer;
 mod recovery;
+mod sexpr;
 mod structural;
 mod tree_builder;
 
 pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
+pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};

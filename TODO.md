@@ -175,7 +175,23 @@ through), so the grammar can grow incrementally.
 
 - [ ] `build.rs` generating shell completions + man pages (clap_complete /
   clap_mangen), as arity does.
-- [ ] JuliaSyntax.jl differential parser harness (the parser oracle; see
-  `AGENTS.md`), run via the Julia toolchain in the devenv.
+- [x] JuliaSyntax.jl differential parser harness (the parser oracle; see
+  `AGENTS.md`), run via the Julia toolchain in the devenv. A *projector*
+  (`src/parser/sexpr.rs`, `to_juliasyntax_sexpr`/`normalize_sexpr`, also
+  `fatou parse --to sexpr`) walks the CST and emits JuliaSyntax's `SyntaxNode`
+  s-expression shape, translating only *encoding* differences (wrapper nodes,
+  delimiters, trivia) and leaving genuine modeling divergences (comparison
+  chains stay nested, loose header passthrough) faithful so they surface. The
+  harness (`tests/juliasyntax_oracle.rs`) diffs each fixture against a pinned
+  `expected.sexpr` (`tests/fixtures/oracle/<slug>/`, refreshed by
+  `scripts/update-juliasyntax-corpus.{sh,jl}`, version-pinned in
+  `.juliasyntax-source`); `oracle_allowlist` guards the 34 matching cases
+  (no Julia needed → CI-safe), `oracle_full_report` (`#[ignore]`d) writes a
+  triage report, and `tests/oracle/{allowlist,blocked}.txt` (keyed by slug)
+  partition the corpus — 6 blocked with rationales (numeric-literal display
+  normalization, triple-string dedent, `end`/`[1 +2]`/unterminated-string and
+  incomplete-`do` error shapes). **Follow-ups:** grow the corpus by porting
+  JuliaSyntax's own test cases; design error-shape parity to promote the
+  blocked recovery cases; wire `oracle_allowlist` into CI.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.
 - [ ] `smol_str` interning for symbol names once the semantic model lands.

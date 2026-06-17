@@ -1,0 +1,1 @@
+(toplevel (= m (vcat (row 1 2) (row 3 4))) (= col (vcat 1 2 3)) (= row (hcat 1 2 3)) (= mixed (hcat (call-i 1 + 2) 3)) (= split (hcat 1 2)) (= rng (hcat (call-i 1 : 3) (call-i 4 : 6))) (= multi (vcat (row 1 2) (row 3 4))))

@@ -1,0 +1,1 @@
+(toplevel (= z (call-i (call-i a + (call-i b * c)) - d)) (= p (call-i x ^ (call-i 2 ^ 3))) (= q (&& (call-i a == b) (call-i c != d))))

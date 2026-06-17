@@ -1,0 +1,1 @@
+(toplevel (= c (macrocall core_@cmd (cmdstring-s-r "echo \$x | grep y"))))

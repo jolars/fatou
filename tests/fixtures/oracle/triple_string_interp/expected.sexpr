@@ -1,0 +1,1 @@
+(toplevel (= s (string-s "  value: " (call compute x) "\n")))

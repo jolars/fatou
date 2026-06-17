@@ -1,0 +1,1 @@
+(toplevel (macrocall @m) (macrocall-p @m x y) (macrocall @m x) (macrocall @m a b c) (macrocall @test (call-i a == b)) (macrocall @. x) (macrocall (. Mod (quote @mac)) x) (macrocall (. Base (quote @time)) (call f)) (macrocall @inbounds (ref A i)) (macrocall-p @m a (parameters (= b 1))))

@@ -1,0 +1,1 @@
+(toplevel (= b (macrocall @b_str (string-r "\\x00\\xff"))))

@@ -1,0 +1,1 @@
+(toplevel (= a (comprehension (generator x (= x xs)))) (= b (comprehension (generator (call-i x ^ 2) (filter (= x (call-i 1 : 10)) (call-i x > 2))))) (= c (comprehension (generator (call f x) (= x items)))))

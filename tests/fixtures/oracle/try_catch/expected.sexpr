@@ -1,0 +1,1 @@
+(toplevel (try (block (call risky)) (catch e (block (call handle e))) (finally (block (call cleanup)))) (try (block (call f)) (catch false (block (call g))) (else (block (call h)))))

@@ -1,0 +1,1 @@
+(toplevel (do (call map xs) (tuple x) (block (call-i x + 1))) (do (call f a b) (tuple x y) (block x)) (do (call open (string "f")) (tuple) (block (call read))) (= result (do (call sort data) (tuple a b) (block (call-i a < b)))) (do (call g z) (tuple w) (block w) (error-t)))

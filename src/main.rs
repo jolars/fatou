@@ -4,11 +4,11 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use fatou::cli::{Cli, Commands, LintOutput};
+use fatou::cli::{Cli, Commands, LintOutput, ParseFormat};
 use fatou::config::Config;
 use fatou::formatter::{self, FormatStyle};
 use fatou::linter::{self, LintStatus, OutputMode};
-use fatou::parser::{parse, reconstruct};
+use fatou::parser::{parse, reconstruct, to_juliasyntax_sexpr};
 
 fn main() -> ExitCode {
     env_logger::init();
@@ -29,7 +29,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             file,
             quiet,
             verify,
-        } => run_parse(file, quiet, verify),
+            to,
+        } => run_parse(file, quiet, verify, to),
         Commands::Format {
             paths,
             check,
@@ -53,12 +54,20 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     }
 }
 
-fn run_parse(file: Option<PathBuf>, quiet: bool, verify: bool) -> Result<ExitCode, String> {
+fn run_parse(
+    file: Option<PathBuf>,
+    quiet: bool,
+    verify: bool,
+    to: ParseFormat,
+) -> Result<ExitCode, String> {
     let text = read_source(file.as_deref())?;
     let output = parse(&text);
 
     if !quiet {
-        print!("{:#?}", output.cst);
+        match to {
+            ParseFormat::Cst => print!("{:#?}", output.cst),
+            ParseFormat::Sexpr => println!("{}", to_juliasyntax_sexpr(&output.cst)),
+        }
         for diag in &output.diagnostics {
             eprintln!(
                 "diagnostic [{}..{}]: {}",

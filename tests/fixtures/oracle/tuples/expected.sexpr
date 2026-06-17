@@ -1,0 +1,1 @@
+(toplevel (= t (tuple-p a b)) (= single (tuple-p a)) (= empty (tuple-p)) (= nt (tuple-p (= a 1) (= b 2))) (= mixed (tuple-p a b (parameters (= c 3)))) (= grouped (call-i a + b)) (= nested (tuple-p (tuple-p a b) c)))

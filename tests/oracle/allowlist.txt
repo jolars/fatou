@@ -1,0 +1,38 @@
+# JuliaSyntax oracle allowlist — slugs whose projection matches the pinned
+# expected.sexpr. Guarded against regression by `oracle_allowlist` (no Julia
+# needed). Seed/refresh from `oracle_full_report`. One slug per line.
+
+anonymous_functions
+array_literals
+binary_precedence
+broadcasting
+byte_string
+call_and_index
+command_literal
+comments
+comprehensions
+control_flow
+escaped_dollar
+generators
+keyword_args
+keyword_statements
+let_quote
+literals
+loops
+macros
+nested_string_interp
+parametric_types
+raw_string
+regex_string
+short_function_def
+splat
+string_interp_ident_boundary
+string_interpolation
+struct_module
+ternary
+transpose
+triple_command
+try_catch
+tuples
+type_annotations
+version_string

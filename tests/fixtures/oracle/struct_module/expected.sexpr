@@ -1,0 +1,1 @@
+(toplevel (struct Point (block x y)) (struct-mut Counter (block n)) (struct (<: Wrapper AbstractWrapper) (block value)) (module M (block (= (call f x) x))) (module-bare B (block)))

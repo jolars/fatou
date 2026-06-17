@@ -1,0 +1,29 @@
+# JuliaSyntax oracle blocked list — slugs deliberately deferred, each with a
+# one-line rationale. A blocked case is a known divergence (or an error-recovery
+# case), not a passing test. `allowlist ∪ blocked` covers the whole corpus.
+
+# Fixture ends with an intentionally incomplete `do` (Fatou parse diagnostic);
+# skipped by the harness until error-shape parity exists.
+do_blocks
+
+# Bare `end` is accepted by Fatou inside vect literals and call arguments, where
+# JuliaSyntax emits `(error-t)` — the `end` index marker is valid only inside
+# `ref` indexing.
+end_index
+
+# `[1 +2]` parses as `(hcat 1 (call-pre + 2))`; JuliaSyntax folds the signed
+# literal to `(hcat 1 2)` (whitespace-sensitive unary in an hcat row).
+matrices
+
+# JuliaSyntax renders numeric literals as their parsed value (underscores
+# stripped, oct/bin shown as hex, floats canonicalized); Fatou preserves the
+# source text. Literal display parity is out of scope for the parser.
+numeric_literals
+
+# JuliaSyntax dedents triple-quoted strings, strips the leading newline, and
+# escapes embedded newlines in display; Fatou preserves the raw content.
+triple_string_interp
+
+# Unterminated string: JuliaSyntax emits an `(error-t)` recovery node; Fatou
+# recovers losslessly without a diagnostic. Error-shape parity deferred.
+unterminated_string

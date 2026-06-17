@@ -1,0 +1,1 @@
+(toplevel (= s (string "price: \$5 and " qty)))

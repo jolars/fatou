@@ -1,0 +1,1 @@
+(toplevel (function (call g x) (block (= y (call-i (call-i x ^ 2) + 1)) (if (call-i y >= 10) (block y) (elseif (call-i y >= 5) (block (call-i y - 1)) (block x))))) (block a b))

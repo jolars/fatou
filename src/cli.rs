@@ -43,6 +43,11 @@ pub enum Commands {
         /// Verify parser losslessness (`reconstruct(text) == text`).
         #[arg(long)]
         verify: bool,
+
+        /// Output representation: the lossless CST (default) or the JuliaSyntax
+        /// s-expression projection (the parser oracle).
+        #[arg(long, value_enum, default_value_t = ParseFormat::Cst)]
+        to: ParseFormat,
     },
     /// Format `.jl` files.
     Format {
@@ -87,4 +92,12 @@ pub enum LintOutput {
     Pretty,
     Concise,
     Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseFormat {
+    /// The lossless `rowan` concrete syntax tree.
+    Cst,
+    /// The JuliaSyntax-native s-expression projection.
+    Sexpr,
 }

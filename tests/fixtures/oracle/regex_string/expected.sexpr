@@ -1,0 +1,1 @@
+(toplevel (= m (macrocall @r_str (string-r "\\d+\\.\\d*") "ims")))

@@ -1,0 +1,1 @@
+(toplevel (= g (generator x (= x xs))) (= s (generator (call-i x ^ 2) (filter (= x (call-i 1 : 10)) (call iseven x)))))

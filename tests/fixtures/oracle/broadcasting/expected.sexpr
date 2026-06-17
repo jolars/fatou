@@ -1,0 +1,1 @@
+(toplevel (dotcall-i a + b) (dotcall-i a * (dotcall-i b ^ c)) (dotcall-i x == y) (= y (dotcall-pre - x)) (.= a b) (dotcall f x y) (dotcall-i (dotcall g a) + (dotcall h b)))

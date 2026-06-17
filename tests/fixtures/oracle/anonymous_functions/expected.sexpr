@@ -1,0 +1,1 @@
+(toplevel (= f (-> x (call-i x ^ 2))) (= g (-> (tuple-p) 1)) (call map (-> x (call-i x + 1)) xs) (= h (-> a (-> b (call-i a + b)))))

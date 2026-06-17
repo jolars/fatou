@@ -1,0 +1,3 @@
+s = """
+  value: $(compute(x))
+"""

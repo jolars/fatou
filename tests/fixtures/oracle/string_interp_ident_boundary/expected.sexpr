@@ -1,0 +1,1 @@
+(toplevel (= s (string foo ".bar and " baz)))

@@ -1,0 +1,1 @@
+(toplevel (ref a end) (ref a (call-i end - 1)) (ref a (call-i 2 : end)) (ref m end end) (= (ref a end) 1) (= v (vect 1 2 (error-t))) (error-t end ✘) (ref nested (ref a end)) (call f (error-t)) (error-t end ✘))

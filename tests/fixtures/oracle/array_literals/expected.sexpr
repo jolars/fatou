@@ -1,0 +1,1 @@
+(toplevel (= a (vect 1 2 3)) (= b (vect)) (= c (vect x)) (= d (vect a b (parameters c))) (= e (vect (call f x) (call g y) z)) (= n (vect 1 2 3)))

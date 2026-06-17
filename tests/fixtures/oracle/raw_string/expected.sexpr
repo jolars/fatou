@@ -1,0 +1,1 @@
+(toplevel (= r (macrocall @raw_str (string-r "C:\\path\\to\\\$file"))))
