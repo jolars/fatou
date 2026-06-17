@@ -196,6 +196,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         LE => CallI("<="),
         GT => CallI(">"),
         GE => CallI(">="),
+        TILDE => CallI("~"),
 
         AND_AND => Special("&&"),
         OR_OR => Special("||"),
@@ -213,6 +214,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_SLASH_SLASH => DotCallI("//"),
         DOT_CARET => DotCallI("^"),
         DOT_PERCENT => DotCallI("%"),
+        DOT_TILDE => DotCallI("~"),
         DOT_EQ_EQ => DotCallI("=="),
         DOT_NOT_EQ => DotCallI("!="),
         DOT_LT => DotCallI("<"),
@@ -247,6 +249,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | OR_OR
             | COLON
             | COLON_COLON
+            | TILDE
+            | DOT_TILDE
             | SUBTYPE
             | SUPERTYPE
             | ARROW
@@ -332,6 +336,7 @@ fn project_unary(node: &SyntaxNode) -> String {
         SUPERTYPE => format!("(>:-pre {operand})"),
         DOT_PLUS => format!("(dotcall-pre + {operand})"),
         DOT_MINUS => format!("(dotcall-pre - {operand})"),
+        DOT_TILDE => format!("(dotcall-pre ~ {operand})"),
         _ => format!("(call-pre {} {operand})", op.text()),
     }
 }

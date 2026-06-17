@@ -34,6 +34,7 @@ string_interpolation
 struct_module
 symbols
 ternary
+tilde_operator
 transpose
 triple_command
 try_catch

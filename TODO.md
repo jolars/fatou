@@ -155,7 +155,16 @@ through), so the grammar can grow incrementally.
   the operator's own text as head (`(+= a b)`, `(.+= a b)`). `global x += 1` and
   `let x += 1` come along for free. **Deferred:** shift/`\`/`:`/`$`/unicode
   augmented forms (`<<= >>= >>>= \= := $= ÷= ⊻=`), operator-symbol quoting
-  (`:+=`), and the `~`/`.~` operator (a regular `call-i`, not `op=`).
+  (`:+=`).
+- [x] The `~` operator (and broadcast `.~`). Lexed as `Tilde`/`DotTilde`; infix on
+  the assignment tier `(2, 1)` — right-associative and as loose as `=` (`a ~ b = c`
+  ⇒ `(~ a (= b c))`) — but built as an ordinary `BINARY_EXPR` (handled in
+  `infix_binding_power`, not `is_assignment_op`), projecting `(call-i a ~ b)` /
+  `(dotcall-i a ~ b)`. Prefix `~a`/`.~x` reuse the unary-operator arm →
+  `(call-pre ~ a)` / `(dotcall-pre ~ x)`. The whitespace-sensitive matrix splitting
+  (`[a ~b]` is hcat of `a` and prefix `~b`; `[a~b]`/`[a ~ b]` is one infix element)
+  falls out of the shared `is_operator` machinery for free. **Deferred:** the bare
+  operator-as-value `~` (`(~)`).
 
 ## Incremental reparse
 

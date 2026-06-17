@@ -1,0 +1,1 @@
+(toplevel (call-i a ~ b) (call-i a ~ (call-i b ~ c)) (call-i a ~ (call-i b + c)) (call-i (call-i a + b) ~ c) (call-pre ~ a) (call-i (call-pre ~ a) + b) (dotcall-i a ~ b) (dotcall-pre ~ x) (global (call-i x ~ 1)) (= x (call-i a ~ b)) (hcat a (call-pre ~ b)) (vect (call-i a ~ b)) (hcat (call-i a ~ b) c))

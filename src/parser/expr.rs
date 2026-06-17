@@ -326,6 +326,8 @@ fn parse_prefix(
         | TokKind::DotPlus
         | TokKind::DotMinus
         | TokKind::Bang
+        | TokKind::Tilde
+        | TokKind::DotTilde
         | TokKind::Subtype
         | TokKind::Supertype
         | TokKind::ColonColon => {
@@ -1551,6 +1553,12 @@ fn parse_ternary(
 /// left_bp + 1`.
 fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
     Some(match kind {
+        // `~` (and broadcast `.~`) sits at the assignment tier: right-associative
+        // and as loose as `=` (`a ~ b = c` ⇒ `(~ a (= b c))`, `x = a ~ b` ⇒
+        // `(= x (~ a b))`), but builds an ordinary `(call-i a ~ b)`, not an
+        // assignment. Handled here (not `is_assignment_op`) so the node stays
+        // `BINARY_EXPR`.
+        TokKind::Tilde | TokKind::DotTilde => (2, 1),
         // The pair `=>` shares the arrow/ternary tier: right-associative, looser
         // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
         TokKind::Arrow | TokKind::FatArrow | TokKind::DotFatArrow => (4, 3),

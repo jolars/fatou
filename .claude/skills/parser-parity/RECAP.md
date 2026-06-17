@@ -22,45 +22,47 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **264 allowlisted**, 279 divergence, 32 unsupported.
-Dir corpus: **38 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "augmented assignment `op=`" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **271 allowlisted**, 273 divergence, 31 unsupported.
+Dir corpus: **39 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "the `~` operator" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-17b)
+## Latest session (2026-06-17c)
 
-**Augmented assignment `op=`** (parity-driven ASCII set). 5-file operator recipe:
-16 new TokKinds/SyntaxKinds — ASCII `+= -= *= /= //= ^= %= |= &=` and broadcast
-`.+= .-= .*= ./= .//= .^= .%=`. Lexer longest-match: `.//=` 4-char beats `.//`,
-`//=` 3-char beats `//`, `.+=` family in the 3-char dotted block. Parser: an
-`is_assignment_op` helper folds them into the existing `ASSIGNMENT_EXPR` arm and
-the `(2,1)` right-assoc tier (used in 3 spots formerly keyed on `Eq`/`DotEq`).
-Projector: `project_assignment` now reads the head from the operator token's own
-text (`(+= a b)`, `(.+= a b)`) — generalization, not compensation. `global x += 1`
-and `let x += 1` parse for free. Fixture `augmented_assignment` (parser + dir
-corpus).
+**`~` / `.~` operator.** 5-file recipe + prefix. `Tilde`/`DotTilde` lexed; infix at
+the assignment tier `(2,1)` right-assoc (added to `infix_binding_power`, *not*
+`is_assignment_op`, so it stays a `BINARY_EXPR` → `(call-i a ~ b)` / `(dotcall-i a
+~ b)`); prefix `~a`/`.~x` reuse the unary arm → `(call-pre ~ a)`/`(dotcall-pre ~
+x)`; `project_unary` gained a `DOT_TILDE` arm. The whitespace-sensitive matrix
+splitting (`[a ~b]` hcat-of-prefix vs `[a~b]`/`[a ~ b]` infix) fell out of the
+shared `is_operator` machinery for free — verified all 19 probe shapes match Julia.
+Fixture `tilde_operator` (parser + dir corpus).
 
-JS allow **259 → 264** (the 4 aug corpus cases + `if true; public *= 4; end`),
-unsupported 38 → 32, divergence +1 (`:+=` moved UNSUPPORTED → FAIL: now lexes as
-one token but operator-symbol quoting is deferred). Dir allow 37 → 38. Zero
-regressions; all green, clippy/fmt clean.
+JS allow **264 → 271** (`a ~ b`, `a .~ b`, `.~x`, `global x ~ 1`, `[a ~b]`,
+`[a~b]`, `[a ~ b c]`); unsupported 32 → 31, divergence 279 → 273. Only bare `~`
+(operator-as-value) stays FAIL. Dir allow 38 → 39. Zero regressions; green,
+clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **`~` / `.~` operator** (`a ~ b` → `(call-i a ~ b)`, `a .~ b` → dotcall). Cheap
-   `CallI`/`DotCallI` operator; a ~7-case FAIL cluster (`a ~ b`, `[a ~b]`, `.~x`,
-   `global x ~ 1`, …). Probe whitespace siblings (`[a~b]` vs `[a ~b]`).
-2. **Broadcast logical `.&&` / `.||`** — mirrors the `.+` dotted family; a few
-   corpus cases (`x .&& y`, `x .|| y`).
-3. **Richer `import`/`using`** — `import .A`, `import A: x as y`, `using A.B: c`.
+1. **Broadcast logical `.&&` / `.||`** — mirrors the `.+` dotted family; corpus
+   cases `x .&& y`, `x .|| y`. Cheap.
+2. **Richer `import`/`using`** — `import .A`, `import A: x as y`, `using A.B: c`.
    Several corpus cases + ubiquitous; needs a real import-path tree.
-4. **Bare `:` Colon value** (`a[:]` → `(ref a :)`) — small, finishes symbol work.
-5. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
+3. **Bare `:` Colon value** (`a[:]` → `(ref a :)`) — small, finishes symbol work.
+4. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
+5. **Range `..`** (`a..b`) and the `<|` pipe operator — small operator additions.
 
 ## Earlier sessions
+
+- **2026-06-17b** — Augmented assignment `op=` (parity-driven ASCII set): 16
+  TokKinds/SyntaxKinds for `+= -= *= /= //= ^= %= |= &=` + broadcast `.+= … .%=`.
+  Lexer longest-match (`.//=`>`.//`, `//=`>`//`); an `is_assignment_op` helper folds
+  them into the existing `ASSIGNMENT_EXPR` arm + `(2,1)` tier; `project_assignment`
+  reads the head from operator-token text. `global`/`let` free. JS allow 259 → 264.
 
 - **2026-06-17a** — Built the oracle from scratch + ran the loop 3×: JuliaSyntax
   differential oracle (projector `sexpr.rs` + `--to sexpr`, harness, curated +

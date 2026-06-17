@@ -118,6 +118,8 @@ pub(crate) enum TokKind {
     Bang,
     Amp,
     Pipe,
+    /// The `~` operator (infix `a ~ b` and prefix `~a`).
+    Tilde,
     Question,
     /// Postfix transpose/adjoint `'` (only when it follows a value; otherwise a
     /// `'` opens a [`TokKind::Char`] literal).
@@ -140,6 +142,8 @@ pub(crate) enum TokKind {
     DotGe,
     /// The broadcast pair operator `.=>`.
     DotFatArrow,
+    /// The broadcast `~` operator `.~`.
+    DotTilde,
     // Broadcast augmented assignment `.op=` (e.g. `.+=`). Same precedence and
     // modeling as the undotted forms.
     DotPlusEq,
@@ -816,6 +820,7 @@ impl<'a> Lexer<'a> {
                 Some(b'=') => Some(TokKind::DotEq),
                 Some(b'<') => Some(TokKind::DotLt),
                 Some(b'>') => Some(TokKind::DotGt),
+                Some(b'~') => Some(TokKind::DotTilde),
                 _ => None,
             };
             if let Some(kind) = dotted2 {
@@ -880,6 +885,7 @@ impl<'a> Lexer<'a> {
             Some(b'!') => Some(TokKind::Bang),
             Some(b'&') => Some(TokKind::Amp),
             Some(b'|') => Some(TokKind::Pipe),
+            Some(b'~') => Some(TokKind::Tilde),
             Some(b'?') => Some(TokKind::Question),
             Some(b'(') => Some(TokKind::LParen),
             Some(b')') => Some(TokKind::RParen),

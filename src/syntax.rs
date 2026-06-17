@@ -176,6 +176,7 @@ pub enum SyntaxKind {
     BANG,
     AMP,
     PIPE,
+    TILDE,
     QUESTION,
     TRANSPOSE,
 
@@ -195,6 +196,7 @@ pub enum SyntaxKind {
     DOT_GT,
     DOT_GE,
     DOT_FAT_ARROW,
+    DOT_TILDE,
     // Broadcast augmented assignment `.op=`.
     DOT_PLUS_EQ,
     DOT_MINUS_EQ,
