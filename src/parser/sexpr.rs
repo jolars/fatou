@@ -200,6 +200,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
 
         AND_AND => Special("&&"),
         OR_OR => Special("||"),
+        DOT_AND_AND => Special(".&&"),
+        DOT_OR_OR => Special(".||"),
         SUBTYPE => Special("<:"),
         SUPERTYPE => Special(">:"),
         EQ => Special("="),
@@ -247,6 +249,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | GE
             | AND_AND
             | OR_OR
+            | DOT_AND_AND
+            | DOT_OR_OR
             | COLON
             | COLON_COLON
             | TILDE

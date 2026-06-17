@@ -1562,8 +1562,8 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // The pair `=>` shares the arrow/ternary tier: right-associative, looser
         // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
         TokKind::Arrow | TokKind::FatArrow | TokKind::DotFatArrow => (4, 3),
-        TokKind::OrOr => (5, 6),
-        TokKind::AndAnd => (7, 8),
+        TokKind::OrOr | TokKind::DotOrOr => (5, 6),
+        TokKind::AndAnd | TokKind::DotAndAnd => (7, 8),
         // `where` sits below the comparison tier so its right-hand side captures
         // a `<:`/`>:` bound (`A where T<:Real` → `A where (T<:Real)`), and above
         // `->`/`=` so `f(x)::T where U` groups as `((f(x)::T) where U)`.

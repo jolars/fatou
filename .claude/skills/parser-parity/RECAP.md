@@ -22,39 +22,37 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **271 allowlisted**, 273 divergence, 31 unsupported.
-Dir corpus: **39 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "the `~` operator" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **273 allowlisted**, 273 divergence, 29 unsupported.
+Dir corpus: **40 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "broadcast `.&&`/`.||`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-17c)
+## Latest session (2026-06-17d)
 
-**`~` / `.~` operator.** 5-file recipe + prefix. `Tilde`/`DotTilde` lexed; infix at
-the assignment tier `(2,1)` right-assoc (added to `infix_binding_power`, *not*
-`is_assignment_op`, so it stays a `BINARY_EXPR` → `(call-i a ~ b)` / `(dotcall-i a
-~ b)`); prefix `~a`/`.~x` reuse the unary arm → `(call-pre ~ a)`/`(dotcall-pre ~
-x)`; `project_unary` gained a `DOT_TILDE` arm. The whitespace-sensitive matrix
-splitting (`[a ~b]` hcat-of-prefix vs `[a~b]`/`[a ~ b]` infix) fell out of the
-shared `is_operator` machinery for free — verified all 19 probe shapes match Julia.
-Fixture `tilde_operator` (parser + dir corpus).
+**Broadcast `.&&` / `.||`.** 5-file recipe (no prefix — they're infix-only).
+`DotAndAnd`/`DotOrOr` lexed in the 3-char dotted table; share the `&&`/`||`
+precedence tiers `(7,8)`/`(5,6)` in `infix_binding_power`; build ordinary
+`BINARY_EXPR`s and project via new `Special(".&&")`/`Special(".||")` heads (NOT
+`dotcall-i` — Julia gives `&&`/`||` their own special head, and the dotted forms
+inherit it: `(.&& a b)` / `(.|| a b)`). Also added to `is_operator` (sexpr) and
+`is_operator_kind` (ast/nodes `op_token`). Mixed-precedence chains `x .&& y .|| z`
+match Julia; same-operator chains inherit `&&`/`||`'s pre-existing left-nesting
+divergence (un-allowlisted). Fixture `dot_logical_operator` (parser + dir corpus).
 
-JS allow **264 → 271** (`a ~ b`, `a .~ b`, `.~x`, `global x ~ 1`, `[a ~b]`,
-`[a~b]`, `[a ~ b c]`); unsupported 32 → 31, divergence 279 → 273. Only bare `~`
-(operator-as-value) stays FAIL. Dir allow 38 → 39. Zero regressions; green,
-clippy/fmt clean.
+JS allow **271 → 273** (`x .&& y`, `x .|| y`); unsupported 31 → 29, divergence
+held at 273. Only `:.&&` (operator-as-value quote, like bare `~`) stays FAIL. Dir
+allow 39 → 40. Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Broadcast logical `.&&` / `.||`** — mirrors the `.+` dotted family; corpus
-   cases `x .&& y`, `x .|| y`. Cheap.
-2. **Richer `import`/`using`** — `import .A`, `import A: x as y`, `using A.B: c`.
+1. **Richer `import`/`using`** — `import .A`, `import A: x as y`, `using A.B: c`.
    Several corpus cases + ubiquitous; needs a real import-path tree.
-3. **Bare `:` Colon value** (`a[:]` → `(ref a :)`) — small, finishes symbol work.
-4. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
-5. **Range `..`** (`a..b`) and the `<|` pipe operator — small operator additions.
+2. **Bare `:` Colon value** (`a[:]` → `(ref a :)`) — small, finishes symbol work.
+3. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
+4. **Range `..`** (`a..b`) and the `<|` pipe operator — small operator additions.
 
 ## Earlier sessions
 

@@ -261,6 +261,8 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::GE
             | SyntaxKind::AND_AND
             | SyntaxKind::OR_OR
+            | SyntaxKind::DOT_AND_AND
+            | SyntaxKind::DOT_OR_OR
             | SyntaxKind::COLON
             | SyntaxKind::COLON_COLON
             | SyntaxKind::SUBTYPE

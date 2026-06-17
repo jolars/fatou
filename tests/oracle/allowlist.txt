@@ -14,6 +14,7 @@ command_literal
 comments
 comprehensions
 control_flow
+dot_logical_operator
 escaped_dollar
 generators
 keyword_args

@@ -166,6 +166,13 @@ through), so the grammar can grow incrementally.
   falls out of the shared `is_operator` machinery for free. **Deferred:** the bare
   operator-as-value `~` (`(~)`).
 
+- [x] Broadcast short-circuit operators `.&&` and `.||`. Lexed as
+  `DotAndAnd`/`DotOrOr` (3-char dotted table), sharing the `&&`/`||` precedence
+  tiers `(7, 8)`/`(5, 6)`. Built as ordinary `BINARY_EXPR`s and projected with
+  their own special heads `(.&& a b)` / `(.|| a b)` (mirroring `&&`/`||`'s
+  `Special` heads, not `dotcall-i`). Mixed chains like `x .&& y .|| z` match Julia;
+  same-operator chains inherit the existing left-nesting divergence of `&&`/`||`.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -238,7 +245,7 @@ through), so the grammar can grow incrementally.
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
   (`a*b*c`), richer import/`using` (`import .A`, `x as y`), multi-clause and
-  comma generators, and assorted operators (`-->`, `<|`, `.&&`, `.||`).
+  comma generators, and assorted operators (`-->`, `<|`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

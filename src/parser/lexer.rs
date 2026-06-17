@@ -144,6 +144,9 @@ pub(crate) enum TokKind {
     DotFatArrow,
     /// The broadcast `~` operator `.~`.
     DotTilde,
+    /// The broadcast short-circuit operators `.&&` and `.||`.
+    DotAndAnd,
+    DotOrOr,
     // Broadcast augmented assignment `.op=` (e.g. `.+=`). Same precedence and
     // modeling as the undotted forms.
     DotPlusEq,
@@ -796,6 +799,8 @@ impl<'a> Lexer<'a> {
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
                 (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
+                (Some(b'&'), Some(b'&')) => Some(TokKind::DotAndAnd),
+                (Some(b'|'), Some(b'|')) => Some(TokKind::DotOrOr),
                 // Broadcast augmented assignment `.op=`.
                 (Some(b'+'), Some(b'=')) => Some(TokKind::DotPlusEq),
                 (Some(b'-'), Some(b'=')) => Some(TokKind::DotMinusEq),
