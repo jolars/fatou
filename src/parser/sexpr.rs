@@ -94,7 +94,9 @@ fn project(node: &SyntaxNode) -> String {
         LITERAL => project_literal(node),
         STRING_LITERAL => project_string(node),
         CMD_LITERAL => project_cmd(node),
-        INTERPOLATION => project_interpolation(node),
+        // A standalone interpolation projects to a `$` node (`$x` → `($ x)`);
+        // inside a string the inner value is used instead (via `string_parts`).
+        INTERPOLATION => format!("($ {})", project_interpolation(node)),
 
         PAREN_EXPR | CONDITION => match first_node(node) {
             Some(inner) => project(&inner),
@@ -360,6 +362,12 @@ fn project_binary(node: &SyntaxNode) -> String {
         InfixHead::CallI(text) => format!("(call-i {lhs} {text} {})", project(rhs)),
         InfixHead::Special(text) => format!("({text} {lhs} {})", project(rhs)),
         InfixHead::DotCallI(text) => format!("(dotcall-i {lhs} {text} {})", project(rhs)),
+        // Field access. A plain field name is quoted (`f.x` → `(. f (quote x))`);
+        // an interpolated field name is inert-quoted (`f.$x` →
+        // `(. f (inert ($ x)))`), so the interpolation projects through `($ …)`.
+        InfixHead::Dot if rhs.kind() == INTERPOLATION => {
+            format!("(. {lhs} (inert {}))", project(rhs))
+        }
         InfixHead::Dot => format!("(. {lhs} (quote {}))", name_text(rhs)),
     }
 }

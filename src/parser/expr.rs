@@ -408,6 +408,11 @@ fn parse_prefix(
         // A bare `:` not followed by something quotable (`a[:]`) is not a quote;
         // `parse_quote_sym` returns `None` so it falls through.
         TokKind::Colon => parse_quote_sym(ctx, start, diagnostics),
+        // A prefix `$` is an interpolation (`$x`, `$(x + y)`). It parses
+        // everywhere — Julia only rejects it outside a quote during lowering,
+        // not at parse time — so the field-access right-hand side (`f.$x`) and
+        // quoted contexts (`:($x)`) reuse the same node.
+        TokKind::Dollar => Some(parse_prefix_interpolation(ctx, start, diagnostics)),
         TokKind::At => Some(parse_macro(ctx, start, diagnostics, flags.inside_brackets)),
         TokKind::LParen => parse_paren(ctx, start, diagnostics),
         TokKind::LBracket => Some(parse_bracket_literal(ctx, start, diagnostics)),
@@ -575,6 +580,54 @@ fn parse_string_literal(
         start,
         end: i,
         events,
+    }
+}
+
+/// Parse a standalone `$…` interpolation in expression position. `$ident` and
+/// `$(expr)` reuse the string-context [`parse_interpolation`]; any other operand
+/// (`$$a`, `$[1, 2]`, `$"s"`) binds `$` to the next *prefix atom* — tightly, with
+/// no postfix — so `$a.b` is `(. ($ a) …)` and `$$a` is `($ ($ a))`.
+fn parse_prefix_interpolation(
+    ctx: &ParserCtx<'_>,
+    dollar: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let next = dollar + 1;
+    if matches!(
+        ctx.token(next).map(|t| t.kind),
+        Some(TokKind::LParen | TokKind::Ident)
+    ) {
+        let mut events = Vec::new();
+        let end = parse_interpolation(ctx, &mut events, dollar, diagnostics);
+        return ExprParse {
+            start: dollar,
+            end,
+            events,
+        };
+    }
+
+    let mut events = vec![Event::Start(SyntaxKind::INTERPOLATION), Event::Tok(dollar)];
+    match parse_prefix(ctx, next, diagnostics, ExprFlags::default()) {
+        Some(operand) => {
+            push_range(&mut events, next, operand.start);
+            let end = operand.end;
+            events.extend(operand.events);
+            events.push(Event::Finish);
+            ExprParse {
+                start: dollar,
+                end,
+                events,
+            }
+        }
+        // A bare `$` with no operand: emit just the sigil.
+        None => {
+            events.push(Event::Finish);
+            ExprParse {
+                start: dollar,
+                end: next,
+                events,
+            }
+        }
     }
 }
 

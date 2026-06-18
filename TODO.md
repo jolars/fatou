@@ -265,6 +265,19 @@ through), so the grammar can grow incrementally.
   a `!` case (`!` is unary-only, no `infix_head` entry). **Deferred:** the rare
   `+(;;)` double-semi block edge.
 
+- [x] Prefix `$` interpolation in expression position. A prefix `$` is now an
+  interpolation everywhere (Julia rejects it outside a quote only during
+  lowering, not at parse time): `$x` → `($ x)`, `$(x + y)` → `($ (call-i x + y))`,
+  and the field-access right-hand side `f.$x` → `(. f (inert ($ x)))`. The new
+  `parse_prefix_interpolation` (`expr.rs`) reuses the string-context
+  `parse_interpolation` for `$ident`/`$(expr)` and otherwise binds `$` to the
+  next *prefix atom* — tightly, no postfix — so `$$a` → `($ ($ a))`, `$[1, 2]` →
+  `($ (vect 1 2))`, and `$a.b` → `(. ($ a) …)`. Projector (`sexpr.rs`): a
+  standalone `INTERPOLATION` projects to `($ …)` (string interiors keep the inner
+  value via `string_parts`), and the field-access `Dot` arm inert-quotes an
+  interpolated field name. **Deferred:** dotted-`$` macro paths (`A.$B.@x`),
+  `A.:.+`.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

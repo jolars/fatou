@@ -21,6 +21,7 @@ generator_arguments
 generators
 import_operator_names
 import_paths
+interpolation_expr
 keyword_args
 keyword_statements
 let_quote
