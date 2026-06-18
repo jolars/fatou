@@ -267,6 +267,20 @@ through), so the grammar can grow incrementally.
   **Deferred:** non-symbol paren contents (`import A.(a)` → `a`, no quote) and
   the erroring multi-token form (`import A.:(a+b)`).
 
+- [x] Type-operator paren-calls. The type operators `<:`/`>:` glued to a `(` now
+  follow the same `is_paren_call` heuristic as the unary operators: `<:(a, b)` →
+  `(<: a b)`, `<:(a,)` → `(<: a)`, `>:(a, b)` → `(>: a b)`, `<:(a...)` →
+  `(<: (... a))`, `<:()` → `(<:)`, while a lone bare operand stays a prefix
+  application (`<:(a)` → `(<:-pre a)`). `Subtype`/`Supertype` were added to the
+  unary paren-call arm of `parse_prefix` (`expr.rs`), building the same
+  `CALL_EXPR` (operator-token callee + `ARG_LIST`). The projector's `project_call`
+  (`sexpr.rs`) gains a `SUBTYPE`/`SUPERTYPE`-callee arm: these are syntactic type
+  operators, so JuliaSyntax heads the node with the operator itself (`(<: …)`)
+  rather than wrapping it in a `call` — mirroring how the binary `<:` projects via
+  `infix_head`. **Deferred:** curly operator calls (`<:{T}(x::T)` → still a
+  divergence) and the `<:(a; b)` block-vs-tuple operand shape (a pre-existing
+  paren-parsing divergence shared by all operators).
+
 - [x] Operator-as-call functions. A non-unary binary operator glued to a `(`
   (`*(x)`, `==(a, b)`, broadcast `.*(a, b)`, `.==(a, b)`, `=>(x, y)`, `*()`) names
   a function call with the operator as the callee: `parse_prefix` (`expr.rs`) gains
@@ -277,9 +291,8 @@ through), so the grammar can grow incrementally.
   from the first *significant* element, so an operator-token callee projects via
   `operator_func_repr` (`(. *)` for broadcast, the bare text otherwise) →
   `(call * x)` / `(call (. *) x)`. Unary operators keep their prefix-application
-  parse (`+(x)` → `(call-pre + x)`). **Deferred (still divergences):** the
-  type-operator forms (`<:(a,)` → `(<: a)`), curly operator calls (`+{T}(x::T)`),
-  and standalone parenthesized operators (`(+)` → `+`).
+  parse (`+(x)` → `(call-pre + x)`). **Deferred (still divergences):** curly
+  operator calls (`+{T}(x::T)`).
 
 - [x] Unary operator paren-calls. A unary arithmetic/logical operator
   (`+ - ! ~` and broadcast `.+ .- .~`) glued to a `(` is a function call when the

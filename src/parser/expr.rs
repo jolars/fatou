@@ -324,8 +324,10 @@ fn parse_prefix(
             // `+(a...)` → `(call + (... a))`, `+(a; b, c)` → `(call + a
             // (parameters b c))`). A single bare operand stays a prefix
             // application (`+(x)` → `(call-pre + x)`). Mirrors JuliaSyntax's
-            // paren-call heuristic. The syntactic `::`/`<:`/`>:` keep their
-            // prefix handling (their paren-call shape differs and is deferred).
+            // paren-call heuristic. The type operators `<:`/`>:` follow the same
+            // rule (`<:(a, b)` -> `(<: a b)`, `<:(a)` -> `(<:-pre a)`); the
+            // projector heads the call node with the operator. Unary `::` keeps
+            // its prefix handling (its paren-call shape differs and is deferred).
             if matches!(
                 tok.kind,
                 TokKind::Plus
@@ -335,6 +337,8 @@ fn parse_prefix(
                     | TokKind::Bang
                     | TokKind::Tilde
                     | TokKind::DotTilde
+                    | TokKind::Subtype
+                    | TokKind::Supertype
             ) && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen)
                 && unary_op_paren_is_call(ctx, start + 1)
             {

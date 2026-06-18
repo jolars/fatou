@@ -433,6 +433,7 @@ fn project_where(node: &SyntaxNode) -> String {
 
 fn project_call(head: &str, node: &SyntaxNode) -> String {
     let mut parts = Vec::new();
+    let mut head = head.to_string();
     // The callee is the first significant element. Usually a node (`f(x)`), but
     // for operator-as-call functions (`*(x)`, `.*(x)`) it is a bare operator
     // token that projects to its function name (`*`, `(. *)`).
@@ -440,6 +441,13 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
         match el {
             NodeOrToken::Node(n) => {
                 parts.push(project(&n));
+                break;
+            }
+            // The type operators `<:`/`>:` in call syntax (`<:(a, b)` →
+            // `(<: a b)`) are syntactic: JuliaSyntax heads the node with the
+            // operator itself rather than wrapping it in a `call`.
+            NodeOrToken::Token(t) if matches!(t.kind(), SUBTYPE | SUPERTYPE) => {
+                head = operator_func_repr(t.kind());
                 break;
             }
             NodeOrToken::Token(t) if is_operator(t.kind()) => {
@@ -455,7 +463,7 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
         // A bare generator argument: `sum(x for x in xs)` → `(call sum (generator …))`.
         parts.push(project_generator(&generator));
     }
-    sexp(head, parts)
+    sexp(&head, parts)
 }
 
 /// Project a typed comprehension `T[x for x in xs]` →

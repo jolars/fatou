@@ -22,16 +22,52 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **340 allowlisted**, 231 divergence, 4 unsupported.
-Dir corpus: **55 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "import paren-quotes" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **341 allowlisted**, 230 divergence, 4 unsupported.
+Dir corpus: **56 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "type-operator paren-calls" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18l)
+## Latest session (2026-06-18m)
+
+**Type-operator paren-calls.** The type operators `<:`/`>:` glued to a `(` now
+follow the same `is_paren_call` heuristic as the unary operators: `<:(a, b)` →
+`(<: a b)`, `<:(a,)` → `(<: a)`, `>:(a, b)` → `(>: a b)`, `<:(a...)` →
+`(<: (... a))`, `<:()` → `(<:)`, while a lone bare operand stays prefix
+(`<:(a)` → `(<:-pre a)`). Parser: `Subtype`/`Supertype` were added to the existing
+unary paren-call arm of `parse_prefix` (`expr.rs`) — same `matches!` gate,
+`ctx.token(start+1) == LParen`, `unary_op_paren_is_call` — so they build the same
+`CALL_EXPR` (operator-token callee + `ARG_LIST`). Projector (`sexpr.rs`):
+`project_call` gained a `SUBTYPE | SUPERTYPE`-callee arm that *overrides the head*
+with `operator_func_repr` (`<:`/`>:`) instead of emitting a `call` head + operator
+arg — these are syntactic type operators, so JuliaSyntax heads the node with the
+operator itself, mirroring how binary `<:` routes through `infix_head`'s
+`Special("<:")`. Faithful: the operator token + arg list are real CST children; the
+projector only formats the head. The single-operand prefix `<:(a)` was already
+correct (UNARY_EXPR, untouched). Fixture `type_operator_call` (parser + dir corpus,
+8 lines incl. boundary `<:(a)`/`>:(b)` prefix forms). **Deferred:** curly operator
+calls (`<:{T}(x::T)` js-9edf5083 — still FAIL, a separate curly-call gap) and the
+`<:(a; b)` block-vs-tuple operand shape (pre-existing paren-parsing divergence
+shared by all operators, incl. bare `(a; b)`).
+
+JS allow **340 → 341** (+1: `<:(a,)` js-70cde333, was FAIL); divergence 231 → 230,
+unsupported held 4. Dir allow 55 → 56. Zero regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
+   macro-name parser needs to accept a `(op)` signature like `function` now does.
+2. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
+   js-491f0afc) — add `public` as a contextual keyword routing through the same
+   `EXPORT_STMT`-style path; reuses the macro/name list machinery.
+3. **Curly operator calls** (`<:{T}(x::T)` js-9edf5083, `+{T}(...)`) — extend the
+   operator-callee path to `CURLY_EXPR`/parametric method signatures.
+4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18l)
 
 **Import paren-quotes.** A parenthesized quoted operator/symbol is now a valid
 dotted import-path component in two forms, both projecting to the bare quote:
@@ -54,19 +90,7 @@ the erroring multi-token quote (`import A.:(a+b)` — error-shape).
 
 JS allow **338 → 340** (+2: `import A.:(+)` js-0492d7fb, `import A.(:+)`
 js-6fe4ce2d); divergence 233 → 231, unsupported held 4. Dir allow 54 → 55. Zero
-regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
-   js-70cde333; `<:{T}(x::T)` js-9edf5083) — extend the unary paren-call path to
-   `Subtype`/`Supertype`.
-2. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
-   macro-name parser needs to accept a `(op)` signature like `function` now does.
-3. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
-   js-491f0afc) — add `public` as a contextual keyword routing through the same
-   `EXPORT_STMT`-style path; reuses the macro/name list machinery.
-4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
+regressions; green, clippy/fmt clean. (Next targets superseded by 18m.)
 
 ## Earlier session (2026-06-18k)
 
