@@ -145,6 +145,10 @@ fn project(node: &SyntaxNode) -> String {
             "function",
             vec![project_signature(node), project_block_child(node)],
         ),
+        MACRO_DEF => sexp(
+            "macro",
+            vec![project_signature(node), project_block_child(node)],
+        ),
         LET_EXPR => project_let(node),
         QUOTE_EXPR => sexp("quote", vec![project_block_child(node)]),
         QUOTE_SYM => project_quote_sym(node),

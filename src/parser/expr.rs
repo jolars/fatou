@@ -12,8 +12,8 @@ use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
     KwStmt, is_op_name, parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr,
-    parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr, parse_module_expr,
-    parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
+    parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr, parse_macro_def,
+    parse_module_expr, parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -107,6 +107,7 @@ fn parse_expr_in(
     match ctx.token(start).map(|t| t.kind) {
         Some(TokKind::IfKw) => return parse_if_expr(tokens, start, diagnostics),
         Some(TokKind::FunctionKw) => return parse_function_expr(tokens, start, diagnostics),
+        Some(TokKind::MacroKw) => return parse_macro_def(tokens, start, diagnostics),
         Some(TokKind::BeginKw) if !begin_marker => {
             return parse_begin_expr(tokens, start, diagnostics);
         }

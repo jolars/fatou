@@ -54,6 +54,7 @@ pub enum SyntaxKind {
     ELSE_CLAUSE,
     CONDITION,
     FUNCTION_DEF,
+    MACRO_DEF,
     SIGNATURE,
     BLOCK,
     BEGIN_EXPR,
@@ -110,6 +111,7 @@ pub enum SyntaxKind {
 
     // --- Keyword tokens ---
     FUNCTION_KW,
+    MACRO_KW,
     END_KW,
     IF_KW,
     ELSEIF_KW,

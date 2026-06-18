@@ -50,6 +50,7 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::StringPrefix => SyntaxKind::STRING_PREFIX,
         TokKind::StringSuffix => SyntaxKind::STRING_SUFFIX,
         TokKind::FunctionKw => SyntaxKind::FUNCTION_KW,
+        TokKind::MacroKw => SyntaxKind::MACRO_KW,
         TokKind::EndKw => SyntaxKind::END_KW,
         TokKind::IfKw => SyntaxKind::IF_KW,
         TokKind::ElseifKw => SyntaxKind::ELSEIF_KW,

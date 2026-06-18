@@ -47,6 +47,7 @@ pub(crate) enum TokKind {
 
     // Keywords
     FunctionKw,
+    MacroKw,
     EndKw,
     IfKw,
     ElseifKw,
@@ -978,6 +979,7 @@ impl<'a> Lexer<'a> {
 fn keyword_kind(text: &str) -> Option<TokKind> {
     Some(match text {
         "function" => TokKind::FunctionKw,
+        "macro" => TokKind::MacroKw,
         "end" => TokKind::EndKw,
         "if" => TokKind::IfKw,
         "elseif" => TokKind::ElseifKw,

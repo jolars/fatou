@@ -22,16 +22,54 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **341 allowlisted**, 230 divergence, 4 unsupported.
-Dir corpus: **56 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "type-operator paren-calls" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **346 allowlisted**, 225 divergence, 4 unsupported.
+Dir corpus: **57 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "macro definitions" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18m)
+## Latest session (2026-06-18n)
+
+**`macro` definitions.** `macro m(ex) … end` now parses. It is structurally
+identical to a `function` definition (a call-shaped signature plus a body
+block), so the whole feature is a thin reuse: `macro` became a keyword token
+(`MacroKw` in `lexer.rs`, `MACRO_KW` in `syntax.rs`/`tree_builder.rs`), the
+`parse_prefix` dispatch (`expr.rs`) routes `MacroKw` to the new
+`parse_macro_def`, and `parse_function_expr`/`parse_macro_def` both delegate to
+a shared `parse_function_like(node_kind)` in `structural.rs` — the only
+difference is `FUNCTION_DEF` vs `MACRO_DEF`. Projector (`sexpr.rs`): one new arm
+heads the node `macro` over `project_signature` + `project_block_child`,
+mirroring `FUNCTION_DEF`. Because the signature flows through the full
+expression path, every name form already supported for function signatures fell
+out for free: plain `macro f() end` → `(macro (call f) (block))`, operator
+`macro (:)(ex) end` → `(macro (call : ex) (block))` (target 1, via the 18j
+standalone-paren-operator parse), contextual-ident `macro (type)(ex) end`,
+interpolated `macro $f() end` and `macro ($f)() end` → `(macro (call ($ f))
+(block))`. Faithful: `macro` keyword + signature + block are all real CST
+children; the projector only formats the head. Fixture `macro_definition`
+(parser + dir corpus, 6 lines — the five passing JS forms). **Deferred:**
+`macro f end` (js-408b2118 — no signature parens → Fatou emits `(macro f
+(block))` vs Julia `(macro f)`, the exact same trailing-block error-shape
+divergence as `function f end`; left for the error phase).
+
+JS allow **341 → 346** (+5: `macro f() end` js-60025fb4, `macro (:)(ex) end`
+js-a916f049, `macro (type)(ex) end` js-937fb0b6, `macro $f() end` js-a2d8af0b,
+`macro ($f)() end` js-8fd3d513); divergence 230 → 225, unsupported held 4. Dir
+allow 56 → 57. Zero regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
+   js-491f0afc) — add `public` as a contextual keyword routing through the same
+   `EXPORT_STMT`-style path; reuses the macro/name list machinery.
+2. **Curly operator calls** (`<:{T}(x::T)` js-9edf5083, `+{T}(...)`) — extend the
+   operator-callee path to `CURLY_EXPR`/parametric method signatures.
+3. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18m)
 
 **Type-operator paren-calls.** The type operators `<:`/`>:` glued to a `(` now
 follow the same `is_paren_call` heuristic as the unary operators: `<:(a, b)` →
@@ -55,17 +93,7 @@ shared by all operators, incl. bare `(a; b)`).
 
 JS allow **340 → 341** (+1: `<:(a,)` js-70cde333, was FAIL); divergence 231 → 230,
 unsupported held 4. Dir allow 55 → 56. Zero regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
-   macro-name parser needs to accept a `(op)` signature like `function` now does.
-2. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
-   js-491f0afc) — add `public` as a contextual keyword routing through the same
-   `EXPORT_STMT`-style path; reuses the macro/name list machinery.
-3. **Curly operator calls** (`<:{T}(x::T)` js-9edf5083, `+{T}(...)`) — extend the
-   operator-callee path to `CURLY_EXPR`/parametric method signatures.
-4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
+(Next targets superseded by 18n; macro definitions landed.)
 
 ## Earlier session (2026-06-18l)
 

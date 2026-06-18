@@ -74,8 +74,28 @@ pub(crate) fn parse_function_expr(
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
+    parse_function_like(tokens, start, SyntaxKind::FUNCTION_DEF, diagnostics)
+}
+
+/// A `macro` definition: `macro name(args) body end`. Structurally identical to
+/// a `function` definition (a call-shaped signature plus a body block), so it
+/// shares [`parse_function_like`]; only the wrapper node kind differs.
+pub(crate) fn parse_macro_def(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    parse_function_like(tokens, start, SyntaxKind::MACRO_DEF, diagnostics)
+}
+
+fn parse_function_like(
+    tokens: &[Token],
+    start: usize,
+    node_kind: SyntaxKind,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
     let ctx = ParserCtx::new(tokens);
-    let mut events = vec![Event::Start(SyntaxKind::FUNCTION_DEF), Event::Tok(start)];
+    let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
     // Signature, e.g. `g(x)` (a call) or `g(x)::T`.
     let sig_start = ctx.skip_ws(start + 1);

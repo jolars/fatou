@@ -44,6 +44,17 @@ through), so the grammar can grow incrementally.
   anonymous functions `(x, y) -> …` await tuple-literal parsing (the array/tuple
   bullet below) — the parenthesized parameter list trips the "unclosed `(`" path
   for now; `x -> …`, `(x) -> …`, and `() -> …` work.
+- [x] `macro` definitions (`macro m(ex) … end`). Structurally identical to a
+  `function` definition — a call-shaped signature plus a body block — so `macro`
+  is now a keyword token (`MacroKw`/`MACRO_KW`) and `parse_macro_def`
+  (`structural.rs`) shares `parse_function_like` with `parse_function_expr`,
+  differing only in the wrapper node kind (`MACRO_DEF`). The projector heads the
+  node with `macro` (`sexpr.rs`). Signatures reuse the full expression path, so
+  operator (`macro (:)(ex)`), contextual-ident (`macro (type)(ex)`), and
+  interpolated (`macro $f()`, `macro ($f)()`) names all fall out for free.
+  **Known limitation:** `macro f end` (no signature parens) projects to
+  `(macro f (block))` rather than Julia's `(macro f)` — the same trailing-block
+  divergence as `function f end`, an error-shape case left for the error phase.
 - [x] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
   Structured into `STRING_LITERAL`/`CMD_LITERAL` nodes with `INTERPOLATION`
@@ -341,10 +352,10 @@ through), so the grammar can grow incrementally.
   `is_op_name` minus `&&`/`||`/`->` plus `:`), building a `PAREN_EXPR` wrapping
   the bare operator token; the projector already reads a lone-operator paren as
   the operator's text. Whitespace-insensitive (`( + )` is the same).
-  **Deferred:** broadcast forms (`(.+)` → `(. +)`), the erroring syntactic ops
-  (`(=)`, `(::)`, `(&&)`, `(->)`, `(?)`, `(...)` — error-shape), and
-  parenthesized-operator macro names (`macro (:)(ex) end` — separate macro-name
-  parsing gap).
+  **Deferred:** broadcast forms (`(.+)` → `(. +)`) and the erroring syntactic
+  ops (`(=)`, `(::)`, `(&&)`, `(->)`, `(?)`, `(...)` — error-shape).
+  Parenthesized-operator macro names (`macro (:)(ex) end`) now parse via the
+  `macro` definition bullet above.
 
 ## Incremental reparse
 
