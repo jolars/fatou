@@ -1,0 +1,11 @@
+# Normalize line endings to LF on checkout for all platforms. The parser
+# snapshot tests embed byte offsets into the CST, so a CRLF checkout on
+# Windows would shift every offset and break the snapshots.
+* text=auto eol=lf
+
+# Binary/fixture files that must stay byte-for-byte identical everywhere.
+*.jl text eol=lf
+*.sexpr text eol=lf
+*.snap text eol=lf
+*.jsonl text eol=lf
+*.juliasyntax-source text eol=lf
