@@ -292,6 +292,18 @@ through), so the grammar can grow incrementally.
   macro-in-importpath support, which plain `import A.@x` also lacks), and
   `function $f end` (empty-body signature shape).
 
+- [x] Standalone parenthesized operators: `(+)` → `+`, `(:)` → `:`, `(<:)` →
+  `<:`, with postfix application a call callee (`(+)(a, b)` → `(call + a b)`,
+  `function (:)() end` → `(function (call :) (block))`). `parse_paren` gains a
+  lone-operator arm gated by `is_paren_value_op` (the non-syntactic subset:
+  `is_op_name` minus `&&`/`||`/`->` plus `:`), building a `PAREN_EXPR` wrapping
+  the bare operator token; the projector already reads a lone-operator paren as
+  the operator's text. Whitespace-insensitive (`( + )` is the same).
+  **Deferred:** broadcast forms (`(.+)` → `(. +)`), the erroring syntactic ops
+  (`(=)`, `(::)`, `(&&)`, `(->)`, `(?)`, `(...)` — error-shape), and
+  parenthesized-operator macro names (`macro (:)(ex) end` — separate macro-name
+  parsing gap).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -363,7 +375,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`) and standalone parenthesized operators (`(+)` → `+`).
+  (`a*b*c`) and unicode operators (lexer).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

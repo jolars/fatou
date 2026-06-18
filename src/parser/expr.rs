@@ -731,6 +731,25 @@ fn parse_paren(
         _ => {}
     }
 
+    // `(op)` — a lone non-syntactic operator in parens is the operator as a
+    // value, e.g. `(+)` → `+`, `(:)` → `:`, `(<:)` → `<:`. Build a `PAREN_EXPR`
+    // wrapping the bare operator token (the projector reads a lone-operator paren
+    // as the operator's text). Postfix application (`(+)(a, b)`) then makes it a
+    // call callee. Whitespace-insensitive: `( + )` is the same.
+    if is_paren_value_op(ctx.token(inner_start).map(|t| t.kind)) {
+        let close = ctx.skip_trivia(inner_start + 1);
+        if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
+            let mut events = vec![Event::Start(SyntaxKind::PAREN_EXPR)];
+            push_range(&mut events, start, close + 1);
+            events.push(Event::Finish);
+            return Some(ExprParse {
+                start,
+                end: close + 1,
+                events,
+            });
+        }
+    }
+
     let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, diagnostics) else {
         return Some(error_expr_with_range(start, inner_start));
     };
@@ -1731,6 +1750,18 @@ fn is_operator_call_name(kind: TokKind) -> bool {
 /// syntactic `::`/`:` — all of which are valid symbols in a quote context (even
 /// `=`/`::`, which are errors in value position). Broadcast forms (`.+`, `.=`)
 /// quote to a `(. op)` shape and are excluded here.
+/// Whether `kind` is an operator that, alone inside parens in *value* position,
+/// is the operator as a value (`(+)` → `+`, `(:)` → `:`, `(<:)` → `<:`). This is
+/// the non-syntactic subset: `is_op_name` minus the syntactic `&&`/`||`/`->`
+/// (which Julia reports as errors in value position) plus `:`. Broadcast forms
+/// (`(.+)` → `(. +)`) and the erroring syntactic ops (`=`, `::`, assignment, `?`,
+/// `...`) are deliberately excluded.
+fn is_paren_value_op(kind: Option<TokKind>) -> bool {
+    let Some(k) = kind else { return false };
+    use TokKind::*;
+    (is_op_name(k) && !matches!(k, AndAnd | OrOr | Arrow)) || k == Colon
+}
+
 fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
     let Some(k) = kind else { return false };
     use TokKind::*;

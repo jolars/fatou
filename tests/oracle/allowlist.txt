@@ -36,6 +36,7 @@ operator_symbol_quote
 operator_symbol_quote_paren
 pairs
 parametric_types
+paren_operator
 range_operator
 raw_string
 regex_string

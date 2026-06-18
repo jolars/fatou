@@ -22,17 +22,57 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **333 allowlisted**, 237 divergence, 5 unsupported.
-Dir corpus: **52 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "`$`-interpolated names in export/module/import" are
-`[x]` in `TODO.md`.
+JS corpus (575 cases): **334 allowlisted**, 237 divergence, 4 unsupported.
+Dir corpus: **53 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "standalone parenthesized operators" are `[x]` in
+`TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18i)
+## Latest session (2026-06-18j)
+
+**Standalone parenthesized operators.** A lone non-syntactic operator inside
+parens in value position is the operator as a value: `(+)` → `+`, `(:)` → `:`,
+`(<:)` → `<:`, `(!)` → `!`. `parse_paren` (`expr.rs`) gains an arm, after the
+empty/`;`-tuple checks and before `parse_expr_in_brackets`, gated by the new
+`is_paren_value_op` predicate (`is_op_name` minus the syntactic `&&`/`||`/`->`,
+which Julia reports as errors in value position, plus `:`); when the interior is
+`( op )` it builds a `PAREN_EXPR` wrapping the bare operator token and returns —
+whitespace-insensitive via `skip_trivia` (`( + )` is the same). Postfix
+application then forms calls: `(+)(a, b)` → `(call + a b)`, `(:)(a)` →
+`(call : a)`, and `function (:)() end` → `(function (call :) (block))`. **The
+projector needed no change** — `sexpr.rs`'s `PAREN_EXPR | CONDITION` arm already
+falls back, when there is no inner node, to the first significant `is_operator`
+token's text (added in 18e for `:(=)`). Faithful: the parens stay real CST
+delimiters, the projector only unwraps. Fixture `paren_operator` (parser + dir
+corpus, 13 lines incl. boundary cases `(+x)`, `(a + b)` excluded by the
+next-token-`)` guard). **Deferred:** broadcast forms (`(.+)` → `(. +)`, would
+project as raw `.+` not `(. +)`), the erroring syntactic ops (`(=)`, `(::)`,
+`(&&)`, `(->)`, `(?)`, `(...)` — error-shape, stay UNSUPPORTED), and
+parenthesized-operator macro names (`macro (:)(ex) end` js-a916f049 stays FAIL —
+the macro-name parser doesn't recognize `(:)`, a separate gap).
+
+JS allow **333 → 334** (+1: `function (:)() end` js-beb4a3a3, was UNSUPPORTED);
+divergence held 237, unsupported 5 → 4. Dir allow 52 → 53. Zero regressions;
+green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Macro paths in `import`/`using`** (`import A.@x` → `(importpath A @x)`,
+   js-97312f87 once `$` root combines) — `parse_import_path` `.@name` component;
+   then `import $A.@x` falls out.
+2. **Import paren-quotes** (`import A.:(+)` js-0492d7fb, `import A.(:+)`
+   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery.
+3. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
+   js-70cde333) — extend the unary paren-call path to `Subtype`/`Supertype`.
+4. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
+   macro-name parser needs to accept a `(op)` signature like `function` now does.
+5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18i)
 
 **`$`-interpolated names in `export`/`module`/`import`.** Each name-position
 parser now recognizes a leading `$` and builds a real `INTERPOLATION` node via
@@ -54,21 +94,7 @@ empty-body signature shape, separate gap), dotted `import A.$B`.
 
 JS allow **329 → 333** (+4: `export $a, $(a*b)`, `export ($f)`, `import $A`,
 `module $A end`); divergence 241 → 237, unsupported held 5. Dir allow 51 → 52.
-Zero regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Standalone parenthesized operators** (`(+)` → `+`, `(:)` → `:`, `(<:)`) —
-   `parse_paren` treats a lone operator-function as a value. Foundational;
-   unblocks `function (:)() end` (js-beb4a3a3), `macro (:)(ex) end` (js-a916f049).
-2. **Macro paths in `import`/`using`** (`import A.@x` → `(importpath A @x)`,
-   js-97312f87 once `$` root combines) — `parse_import_path` `.@name` component;
-   then `import $A.@x` falls out.
-3. **Import paren-quotes** (`import A.:(+)`, `import A.(:+)`, js-0492d7fb,
-   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery.
-4. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
-   js-70cde333) — extend the unary paren-call path to `Subtype`/`Supertype`.
-5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
+Zero regressions; green, clippy/fmt clean. (Next targets superseded by 18j.)
 
 ## Earlier session (2026-06-18h)
 
