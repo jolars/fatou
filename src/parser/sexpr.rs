@@ -871,6 +871,11 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 parts.push(project_quote_sym(&n));
                 seen_name = true;
             }
+            // An interpolated path root (`import $A` → `($ A)`).
+            NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
+                parts.push(project(&n));
+                seen_name = true;
+            }
             _ => {}
         }
     }
@@ -1146,6 +1151,8 @@ fn ident_run(node: &SyntaxNode) -> Vec<String> {
         .filter_map(|el| match el {
             NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
             NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
+            // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
+            NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
             _ => None,
         })
         .collect()

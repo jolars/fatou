@@ -587,7 +587,7 @@ fn parse_string_literal(
 /// `$(expr)` reuse the string-context [`parse_interpolation`]; any other operand
 /// (`$$a`, `$[1, 2]`, `$"s"`) binds `$` to the next *prefix atom* — tightly, with
 /// no postfix — so `$a.b` is `(. ($ a) …)` and `$$a` is `($ ($ a))`.
-fn parse_prefix_interpolation(
+pub(super) fn parse_prefix_interpolation(
     ctx: &ParserCtx<'_>,
     dollar: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,

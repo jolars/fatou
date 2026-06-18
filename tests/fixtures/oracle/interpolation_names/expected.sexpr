@@ -1,0 +1,1 @@
+(toplevel (module ($ A) (block)) (import (importpath ($ A))) (export ($ a) ($ (call-i a * b))) (export ($ f)))

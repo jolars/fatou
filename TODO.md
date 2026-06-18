@@ -207,10 +207,11 @@ through), so the grammar can grow incrementally.
   the projector groups base-vs-names. Projects to `(import (importpath . A))`,
   `(import (as (importpath A) B))`, and `(import (: (importpath A) (as (importpath
   x) y)))` — faithfully, reading the real nodes (no projector reconstruction).
-  **Deferred (still divergences):** `@macro`/`$interp` paths, and the `. .A`
-  (space-separated dots) form — each is carried through verbatim, keeping
-  losslessness. `export`'s name list is untouched (still passthrough).
-  Operator-symbol names now parse (see the dedicated bullet below).
+  **Deferred (still divergences):** `@macro` paths, dotted `$interp` components
+  (`import A.$B` — the root `import $A` now parses, see the dedicated bullet
+  below), and the `. .A` (space-separated dots) form — each is carried through
+  verbatim, keeping losslessness. Operator-symbol names now parse (see the
+  dedicated bullet below).
 
 - [x] Arrow, pipe, and bitshift operators. The arrow family `-->` (own special
   head `(--> a b)`), `<-->` (ordinary `(call-i a <--> b)`), and broadcast `.-->`
@@ -277,6 +278,19 @@ through), so the grammar can grow incrementally.
   value via `string_parts`), and the field-access `Dot` arm inert-quotes an
   interpolated field name. **Deferred:** dotted-`$` macro paths (`A.$B.@x`),
   `A.:.+`.
+
+- [x] `$`-interpolated names in `export`/`module`/`import` name positions:
+  `module $A end` → `(module ($ A) (block))`, `import $A` →
+  `(import (importpath ($ A)))`, `export $a, $(a*b)` →
+  `(export ($ a) ($ (call-i a * b)))`, `export ($f)` → `(export ($ f))`. Each
+  name-position parser now recognizes a leading `$` and builds a real
+  `INTERPOLATION` node via the shared `parse_prefix_interpolation`: `parse_header`
+  (module), `parse_import_path` (import root), and the `parse_keyword_stmt` Path
+  passthrough (export list). Projector reads them through `project` — `ident_run`
+  and `project_import_path` gained an `INTERPOLATION` arm; module's
+  `project_signature` already handled it. **Deferred:** `import $A.@x` (needs
+  macro-in-importpath support, which plain `import A.@x` also lacks), and
+  `function $f end` (empty-body signature shape).
 
 ## Incremental reparse
 

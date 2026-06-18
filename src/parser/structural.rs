@@ -15,7 +15,7 @@
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
-use crate::parser::expr::parse_expr;
+use crate::parser::expr::{parse_expr, parse_prefix_interpolation};
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
 
@@ -378,10 +378,18 @@ pub(crate) fn parse_keyword_stmt(
             i = expr.end;
         }
 
-        // Carry any remaining same-line tokens through verbatim.
+        // Carry any remaining same-line tokens through verbatim, but build a real
+        // `INTERPOLATION` node for an interpolated name (`export $a, $(a*b)`) so
+        // the projector reads it as `($ …)` rather than a loose `$` + operand.
         while !header_ends(&ctx, i) {
-            events.push(Event::Tok(i));
-            i += 1;
+            if ctx.token(i).map(|t| t.kind) == Some(TokKind::Dollar) {
+                let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
+                events.extend(interp.events);
+                i = interp.end;
+            } else {
+                events.push(Event::Tok(i));
+                i += 1;
+            }
         }
     }
 
@@ -495,7 +503,7 @@ fn parse_import_path(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
     start: usize,
-    _diagnostics: &mut Vec<ParseDiagnostic>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let mut i = start;
     let mut body = Vec::new();
@@ -515,6 +523,13 @@ fn parse_import_path(
         Some(TokKind::Ident) => {
             body.push(Event::Tok(i));
             i += 1;
+        }
+        Some(TokKind::Dollar) => {
+            // An interpolated path root (`import $A`): a real `INTERPOLATION`
+            // node the projector reads as `($ A)`.
+            let interp = parse_prefix_interpolation(ctx, i, diagnostics);
+            body.extend(interp.events);
+            i = interp.end;
         }
         Some(k) if is_op_name(k) => {
             body.push(Event::Tok(i));
@@ -732,6 +747,12 @@ fn parse_header(
     if run_expr && let Some(expr) = parse_expr(ctx.tokens(), header_start, 0, diagnostics) {
         events.extend(expr.events);
         i = expr.end;
+    } else if ctx.token(i).map(|t| t.kind) == Some(TokKind::Dollar) {
+        // An interpolated name (`module $A end`): build a real `INTERPOLATION`
+        // node so the projector reads it as `($ A)` rather than a loose name.
+        let interp = parse_prefix_interpolation(ctx, i, diagnostics);
+        events.extend(interp.events);
+        i = interp.end;
     }
     while !header_ends(ctx, i) {
         events.push(Event::Tok(i));
