@@ -16,6 +16,7 @@ comprehensions
 control_flow
 dot_logical_operator
 escaped_dollar
+generator_arguments
 generators
 import_paths
 keyword_args

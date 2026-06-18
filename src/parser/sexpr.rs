@@ -122,6 +122,7 @@ fn project(node: &SyntaxNode) -> String {
         MATRIX_EXPR => project_matrix(node),
 
         COMPREHENSION => sexp("comprehension", vec![project_generator(node)]),
+        TYPED_COMPREHENSION => project_typed_comprehension(node),
         GENERATOR => project_generator(node),
 
         IF_EXPR => project_if(node),
@@ -390,8 +391,25 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
     }
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
         parts.extend(project_args(&arg_list));
+    } else if let Some(generator) = node.children().find(|c| c.kind() == GENERATOR) {
+        // A bare generator argument: `sum(x for x in xs)` → `(call sum (generator …))`.
+        parts.push(project_generator(&generator));
     }
     sexp(head, parts)
+}
+
+/// Project a typed comprehension `T[x for x in xs]` →
+/// `(typed_comprehension T (generator x (= x xs)))`. The callee is the first
+/// child; the bracketed body and clauses form the `GENERATOR` child.
+fn project_typed_comprehension(node: &SyntaxNode) -> String {
+    let mut parts = Vec::new();
+    if let Some(callee) = node.children().next() {
+        parts.push(project(&callee));
+    }
+    if let Some(generator) = node.children().find(|c| c.kind() == GENERATOR) {
+        parts.push(project_generator(&generator));
+    }
+    sexp("typed_comprehension", parts)
 }
 
 /// Project the argument-like direct children of `container` (an `ARG_LIST`,

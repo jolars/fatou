@@ -1107,6 +1107,50 @@ fn parse_postfix(
     node: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
+    // A single element followed by `for` is a generator argument:
+    // `sum(x for x in xs)` (a call whose sole argument is a generator) or
+    // `T[x for x in xs]` (a typed comprehension). The delimiters belong to the
+    // outer node; the generator clauses reuse the comprehension machinery.
+    let first_start = ctx.skip_trivia(open_idx + 1);
+    if ctx.token(first_start).map(|t| t.kind) != Some(close) {
+        let end_marker = close == TokKind::RBracket;
+        let flags = ExprFlags {
+            inside_brackets: true,
+            end_marker,
+            begin_marker: end_marker,
+            ..ExprFlags::default()
+        };
+        let diag_mark = diagnostics.len();
+        if let Some(first) = parse_expr_in(ctx.tokens(), first_start, 0, diagnostics, flags)
+            && ctx.token(ctx.skip_trivia(first.end)).map(|t| t.kind) == Some(TokKind::ForKw)
+        {
+            let generator = parse_comprehension(
+                ctx,
+                open_idx,
+                first,
+                SyntaxKind::GENERATOR,
+                close,
+                diagnostics,
+            );
+            let node_kind = if node == SyntaxKind::CALL_EXPR {
+                SyntaxKind::CALL_EXPR
+            } else {
+                SyntaxKind::TYPED_COMPREHENSION
+            };
+            let mut events = vec![Event::Start(node_kind)];
+            events.extend(lhs.events);
+            push_range(&mut events, lhs.end, open_idx);
+            events.extend(generator.events);
+            events.push(Event::Finish);
+            return ExprParse {
+                start: lhs.start,
+                end: generator.end,
+                events,
+            };
+        }
+        diagnostics.truncate(diag_mark);
+    }
+
     let (list_events, end) =
         parse_arg_list(ctx, open_idx, close, SyntaxKind::ARG_LIST, diagnostics);
     let mut events = vec![Event::Start(node)];

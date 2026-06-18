@@ -1,0 +1,1 @@
+(toplevel (= a (call sum (generator x (= x xs)))) (= b (call f (generator x (filter (= x xs) y)))) (= c (call g (generator x (cartesian_iterator (= a as) (= b bs))))) (= d (typed_comprehension T (generator x (= x xs)))) (= e (typed_comprehension Int (generator (call-i i * 2) (= i (call-i 1 : 3))))) (= g (typed_comprehension M (generator x (= a as) (filter (= b bs) p)))))

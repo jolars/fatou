@@ -93,9 +93,11 @@ through), so the grammar can grow incrementally.
   `FOR_BINDING`, each trailing `if` a `COMPREHENSION_IF` the projector folds into
   a `filter`) and comma-separated cartesian specs (`for a in as, b in bs` →
   `cartesian_iterator`) both parse; the `a = as` spec form is a plain
-  `ASSIGNMENT_EXPR`. Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`),
-  bare call-argument generators (`sum(x for x in xs)`), v1.7 matrix-row syntax
-  (`[1, 2; 3, 4]`), and unicode dotted operators.
+  `ASSIGNMENT_EXPR`. Bare call-argument generators (`sum(x for x in xs)` →
+  `CALL_EXPR` with a `GENERATOR` child) and typed comprehensions
+  (`T[x for x in xs]` → `TYPED_COMPREHENSION`) reuse the same machinery.
+  Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`), v1.7 matrix-row
+  syntax (`[1, 2; 3, 4]`), and unicode dotted operators.
 - [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the
   *immediately* preceding token (`prev_ends_value` in `lexer.rs`): when it abuts
   a value-ending token (ident, literal, closing `)`/`]`/`}`, string/cmd close,

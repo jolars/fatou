@@ -22,8 +22,8 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **291 allowlisted**, 265 divergence, 19 unsupported.
-Dir corpus: **43 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+JS corpus (575 cases): **292 allowlisted**, 265 divergence, 18 unsupported.
+Dir corpus: **44 allowlisted**, 5 blocked + 1 skipped (do_blocks).
 Grammar bullets through "richer `import`/`using`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,45 +31,46 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-17g)
+## Latest session (2026-06-18a)
 
-**Multi-clause & comma generators.** Replaced the single-clause `parse_comprehension`
-with a `for`-clause loop + new `parse_for_specs` helper (`expr.rs`): each `for`
-emits a sibling `FOR_BINDING`, comma-separated specs stay as tokens inside it, and
-the `a = as` spec form is parsed whole as an `ASSIGNMENT_EXPR` (the old "expected
-`in`" diagnostic is gone). Projector (`sexpr.rs`): `project_for_binding_node` now
-splits a binding on its top-level COMMA tokens — one spec projects directly, several
-become `(cartesian_iterator …)` via new `project_for_spec`; `project_generator`
-walks clauses in order and folds each trailing `COMPREHENSION_IF` into a `(filter
-<preceding-clause> cond)`. Fixture `multi_clause_generators` (parser + dir corpus).
+**Generator arguments & typed comprehensions.** `parse_postfix` (expr.rs) now
+speculatively parses the first bracketed element and, if a `for` follows, builds a
+`GENERATOR` node (reusing `parse_comprehension`) instead of an `ARG_LIST`: a `(…)`
+suffix stays `CALL_EXPR` with a `GENERATOR` child (`sum(x for x in xs)` →
+`(call sum (generator x (= x xs)))`), a `[…]` suffix becomes the new
+`TYPED_COMPREHENSION` (`T[x for x in xs]` → `(typed_comprehension T (generator …))`).
+Diagnostics are snapshotted and truncated when the speculative parse isn't a
+generator, so the `ARG_LIST` fallback path is clean. Projector (sexpr.rs):
+`project_call` gains a `GENERATOR`-child branch; new `project_typed_comprehension`.
+The generator delimiters (`(`/`)`, `[`/`]`) live inside the `GENERATOR` node — fine
+for projection (tokens ignored) and lossless. Fixture `generator_arguments` (parser
++ dir corpus, 6 cases incl. multi-clause+if and `Int[i*2 for i in 1:3]`).
 
-JS allow **282 → 291** (+9: `for…for`, `for…for…if`, `for…if…for`, comma
-`a in as, b in bs`, comma+if, comma+for+comma, the 4-clause comprehension, and
-two `=`-spec/`begin`-cond forms); divergence 266 → 265, unsupported 27 → 19.
-Dir allow 42 → 43. Zero regressions; green, clippy/fmt clean.
-
-**Bonus:** the shared `project_for_binding_node` also fixed the for-*loop*
-statement `for x in xs, y in ys … end` (js-ae2710c2, FAIL → PASS) — the loop
-parser already captured both comma specs in `FOR_BINDING`; only the projector's
-cartesian grouping was missing. Faithful, not compensation.
-
-**Still unsupported (deferred):** `[x \n\n for …]` (blank-line-before-`for`),
-`x where {y for y in ys}` (generator inside braces), `T[x for x in xs]` (typed
-comprehension). Tuple-destructuring loop vars (`for (i,j) in …`) and bare
-call-argument generators (`sum(x for x in xs)`) untouched.
+JS allow **291 → 292** (+1: typed comprehension `T[x for x in xs]`, js-d0b8bf98,
+UNSUPPORTED → PASS); divergence held 265, unsupported 19 → 18. Dir allow 43 → 44.
+The bare call-arg forms (`sum(x for …)`) aren't standalone JS-corpus cases — they
+appear parenthesized and already passed — but are now covered by the fixture. Zero
+regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Typed comprehension `T[x for x in xs]`** + bare call-arg generators
-   (`sum(x for x in xs)`) — reuses the now-complete generator machinery.
-2. **Precedence-table renumber** (infra), then arrow `-->`/`<-->` (prec 4, special
+1. **Precedence-table renumber** (infra), then arrow `-->`/`<-->` (prec 4, special
    head `(--> a b)`, dotted `.-->` → `dotcall-i`) and left-pipe `<|` (prec 8).
-   Blocked by cramped low-tier numbers (no integer gap at `=>`(4)/`||`(5) or
-   cmp(11)/`|>`(12)) — do the renumber first.
-3. **Splat postfix precedence** — fix `x..y...` → `(... (.. x y))` (also `x:y...`).
-4. **Operator-symbol import names** (`import A: +`, `import A.==`) — extend the
-   import-path grammar to accept operator tokens as name components.
+   Several UNSUPPORTED cases: `x --> y`, `x .--> y`, `x <| y <| z`, `x .|> y`.
+2. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`).
+3. **Operator-symbol import names** (`import A: +`, `import A.==`, `import A.:+`) —
+   several FAIL/UNSUPPORTED; extend import-path grammar to accept operator tokens.
+4. **Tuple-destructuring loop vars** (`for (i, j) in …`) — reuses generator/loop
+   machinery.
 
 ## Earlier sessions
+
+- **2026-06-17g** — Multi-clause & comma generators: replaced single-clause
+  `parse_comprehension` with a `for`-clause loop + `parse_for_specs` (each `for` a
+  sibling `FOR_BINDING`, comma specs as tokens, `a = as` form an `ASSIGNMENT_EXPR`);
+  projector `project_for_binding_node` splits on top-level commas into
+  `cartesian_iterator`, `project_generator` folds trailing `if` into `filter`. Also
+  fixed the for-*loop* `for x in xs, y in ys` (js-ae2710c2). JS allow 282 → 291.
+  Fixture `multi_clause_generators`.
 
 - **2026-06-17f** — Richer `import`/`using` path trees: dedicated `parse_import_stmt`
   building real `IMPORT_PATH`/`IMPORT_ALIAS` nodes the projector reads (no

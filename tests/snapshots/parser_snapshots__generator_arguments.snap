@@ -1,0 +1,203 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..166
+  ASSIGNMENT_EXPR@0..22
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    CALL_EXPR@4..22
+      NAME@4..7
+        IDENT@4..7 "sum"
+      GENERATOR@7..22
+        LPAREN@7..8 "("
+        NAME@8..9
+          IDENT@8..9 "x"
+        WHITESPACE@9..10 " "
+        FOR_BINDING@10..21
+          FOR_KW@10..13 "for"
+          WHITESPACE@13..14 " "
+          NAME@14..15
+            IDENT@14..15 "x"
+          WHITESPACE@15..16 " "
+          IDENT@16..18 "in"
+          WHITESPACE@18..19 " "
+          NAME@19..21
+            IDENT@19..21 "xs"
+        RPAREN@21..22 ")"
+  NEWLINE@22..23 "\n"
+  ASSIGNMENT_EXPR@23..48
+    NAME@23..24
+      IDENT@23..24 "b"
+    WHITESPACE@24..25 " "
+    EQ@25..26 "="
+    WHITESPACE@26..27 " "
+    CALL_EXPR@27..48
+      NAME@27..28
+        IDENT@27..28 "f"
+      GENERATOR@28..48
+        LPAREN@28..29 "("
+        NAME@29..30
+          IDENT@29..30 "x"
+        WHITESPACE@30..31 " "
+        FOR_BINDING@31..42
+          FOR_KW@31..34 "for"
+          WHITESPACE@34..35 " "
+          NAME@35..36
+            IDENT@35..36 "x"
+          WHITESPACE@36..37 " "
+          IDENT@37..39 "in"
+          WHITESPACE@39..40 " "
+          NAME@40..42
+            IDENT@40..42 "xs"
+        WHITESPACE@42..43 " "
+        COMPREHENSION_IF@43..47
+          IF_KW@43..45 "if"
+          WHITESPACE@45..46 " "
+          NAME@46..47
+            IDENT@46..47 "y"
+        RPAREN@47..48 ")"
+  NEWLINE@48..49 "\n"
+  ASSIGNMENT_EXPR@49..78
+    NAME@49..50
+      IDENT@49..50 "c"
+    WHITESPACE@50..51 " "
+    EQ@51..52 "="
+    WHITESPACE@52..53 " "
+    CALL_EXPR@53..78
+      NAME@53..54
+        IDENT@53..54 "g"
+      GENERATOR@54..78
+        LPAREN@54..55 "("
+        NAME@55..56
+          IDENT@55..56 "x"
+        WHITESPACE@56..57 " "
+        FOR_BINDING@57..77
+          FOR_KW@57..60 "for"
+          WHITESPACE@60..61 " "
+          NAME@61..62
+            IDENT@61..62 "a"
+          WHITESPACE@62..63 " "
+          IDENT@63..65 "in"
+          WHITESPACE@65..66 " "
+          NAME@66..68
+            IDENT@66..68 "as"
+          COMMA@68..69 ","
+          WHITESPACE@69..70 " "
+          NAME@70..71
+            IDENT@70..71 "b"
+          WHITESPACE@71..72 " "
+          IDENT@72..74 "in"
+          WHITESPACE@74..75 " "
+          NAME@75..77
+            IDENT@75..77 "bs"
+        RPAREN@77..78 ")"
+  NEWLINE@78..79 "\n"
+  ASSIGNMENT_EXPR@79..99
+    NAME@79..80
+      IDENT@79..80 "d"
+    WHITESPACE@80..81 " "
+    EQ@81..82 "="
+    WHITESPACE@82..83 " "
+    TYPED_COMPREHENSION@83..99
+      NAME@83..84
+        IDENT@83..84 "T"
+      GENERATOR@84..99
+        LBRACKET@84..85 "["
+        NAME@85..86
+          IDENT@85..86 "x"
+        WHITESPACE@86..87 " "
+        FOR_BINDING@87..98
+          FOR_KW@87..90 "for"
+          WHITESPACE@90..91 " "
+          NAME@91..92
+            IDENT@91..92 "x"
+          WHITESPACE@92..93 " "
+          IDENT@93..95 "in"
+          WHITESPACE@95..96 " "
+          NAME@96..98
+            IDENT@96..98 "xs"
+        RBRACKET@98..99 "]"
+  NEWLINE@99..100 "\n"
+  ASSIGNMENT_EXPR@100..127
+    NAME@100..101
+      IDENT@100..101 "e"
+    WHITESPACE@101..102 " "
+    EQ@102..103 "="
+    WHITESPACE@103..104 " "
+    TYPED_COMPREHENSION@104..127
+      NAME@104..107
+        IDENT@104..107 "Int"
+      GENERATOR@107..127
+        LBRACKET@107..108 "["
+        BINARY_EXPR@108..113
+          NAME@108..109
+            IDENT@108..109 "i"
+          WHITESPACE@109..110 " "
+          STAR@110..111 "*"
+          WHITESPACE@111..112 " "
+          LITERAL@112..113
+            INTEGER@112..113 "2"
+        WHITESPACE@113..114 " "
+        FOR_BINDING@114..126
+          FOR_KW@114..117 "for"
+          WHITESPACE@117..118 " "
+          NAME@118..119
+            IDENT@118..119 "i"
+          WHITESPACE@119..120 " "
+          IDENT@120..122 "in"
+          WHITESPACE@122..123 " "
+          BINARY_EXPR@123..126
+            LITERAL@123..124
+              INTEGER@123..124 "1"
+            COLON@124..125 ":"
+            LITERAL@125..126
+              INTEGER@125..126 "3"
+        RBRACKET@126..127 "]"
+  NEWLINE@127..128 "\n"
+  ASSIGNMENT_EXPR@128..165
+    NAME@128..129
+      IDENT@128..129 "g"
+    WHITESPACE@129..130 " "
+    EQ@130..131 "="
+    WHITESPACE@131..132 " "
+    TYPED_COMPREHENSION@132..165
+      NAME@132..133
+        IDENT@132..133 "M"
+      GENERATOR@133..165
+        LBRACKET@133..134 "["
+        NAME@134..135
+          IDENT@134..135 "x"
+        WHITESPACE@135..136 " "
+        FOR_BINDING@136..147
+          FOR_KW@136..139 "for"
+          WHITESPACE@139..140 " "
+          NAME@140..141
+            IDENT@140..141 "a"
+          WHITESPACE@141..142 " "
+          IDENT@142..144 "in"
+          WHITESPACE@144..145 " "
+          NAME@145..147
+            IDENT@145..147 "as"
+        WHITESPACE@147..148 " "
+        FOR_BINDING@148..159
+          FOR_KW@148..151 "for"
+          WHITESPACE@151..152 " "
+          NAME@152..153
+            IDENT@152..153 "b"
+          WHITESPACE@153..154 " "
+          IDENT@154..156 "in"
+          WHITESPACE@156..157 " "
+          NAME@157..159
+            IDENT@157..159 "bs"
+        WHITESPACE@159..160 " "
+        COMPREHENSION_IF@160..164
+          IF_KW@160..162 "if"
+          WHITESPACE@162..163 " "
+          NAME@163..164
+            IDENT@163..164 "p"
+        RBRACKET@164..165 "]"
+  NEWLINE@165..166 "\n"
