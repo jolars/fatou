@@ -3,8 +3,9 @@
 A language server, formatter, and linter for [Julia](https://julialang.org),
 written in Rust.
 
-Fatou follows the rust-analyzer design — a lossless [`rowan`](https://crates.io/crates/rowan)
-CST, [`salsa`](https://crates.io/crates/salsa) for incremental computation, and
+Fatou follows the rust-analyzer design — a lossless
+[`rowan`](https://crates.io/crates/rowan) CST,
+[`salsa`](https://crates.io/crates/salsa) for incremental computation, and
 [`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
 transport — and is modeled directly on the author's R tooling project, `arity`.
 

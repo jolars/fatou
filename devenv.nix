@@ -84,6 +84,10 @@
       biome = {
         enable = true;
       };
+
+      panache-format = {
+        enable = true;
+      };
     };
   };
 }

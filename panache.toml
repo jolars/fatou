@@ -1,1 +1,3 @@
 flavor = "gfm"
+
+extend-exclude = [".claude/**/*", "TODO.md", "AGENTS.md"]
