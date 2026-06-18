@@ -88,10 +88,14 @@ through), so the grammar can grow incrementally.
   tuples (`TUPLE_EXPR`), comprehensions (`COMPREHENSION`/`COMPREHENSION_IF`) and
   generators (`GENERATOR`) reusing `FOR_BINDING`, broadcasting operators
   (`.+`/`.*`/… and `f.(x)` as `DOT_CALL_EXPR`), and the ternary `? :`
-  (`TERNARY_EXPR`). Ranges already parsed via the `:` infix operator. Follow-ups:
-  multi-clause comprehensions (`for … for … if …`) and multi-variable bindings
-  (`for i, j in …`), bare call-argument generators (`sum(x for x in xs)`),
-  v1.7 matrix-row syntax (`[1, 2; 3, 4]`), and unicode dotted operators.
+  (`TERNARY_EXPR`). Ranges already parsed via the `:` infix operator.
+  Multi-clause generators (`for … for … if …`, each `for` a sibling
+  `FOR_BINDING`, each trailing `if` a `COMPREHENSION_IF` the projector folds into
+  a `filter`) and comma-separated cartesian specs (`for a in as, b in bs` →
+  `cartesian_iterator`) both parse; the `a = as` spec form is a plain
+  `ASSIGNMENT_EXPR`. Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`),
+  bare call-argument generators (`sum(x for x in xs)`), v1.7 matrix-row syntax
+  (`[1, 2; 3, 4]`), and unicode dotted operators.
 - [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the
   *immediately* preceding token (`prev_ends_value` in `lexer.rs`): when it abuts
   a value-ending token (ident, literal, closing `)`/`]`/`}`, string/cmd close,
@@ -265,8 +269,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`), multi-clause and comma generators, and assorted operators (`-->`,
-  `<|`, `.|>`).
+  (`a*b*c`) and assorted operators (`-->`, `<|`, `.|>`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

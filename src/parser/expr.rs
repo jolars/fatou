@@ -860,10 +860,12 @@ fn parse_matrix(
 
 /// Parse a comprehension `[elem for v in iter if cond]` or generator
 /// `(elem for v in iter)` given the already-parsed `elem` and the open delimiter
-/// at `open` (closing kind `close`). The binding becomes a `FOR_BINDING` and an
-/// optional filter a `COMPREHENSION_IF`. Only a single `for` (plus one optional
-/// `if`) is handled; multiple clauses are a follow-up. `in` is matched as a bare
-/// `in` identifier, mirroring `for`/`while` loops.
+/// at `open` (closing kind `close`). Each `for` becomes a `FOR_BINDING` and each
+/// trailing `if` a `COMPREHENSION_IF` wrapping the preceding clause. Multiple
+/// `for` clauses (`for a in as for b in bs`) and comma-separated iteration specs
+/// within one clause (`for a in as, b in bs`) are both handled. `in` is matched
+/// as a bare `in` identifier, mirroring `for`/`while` loops; the `a = as` spec
+/// form is parsed as a plain assignment.
 fn parse_comprehension(
     ctx: &ParserCtx<'_>,
     open: usize,
@@ -878,67 +880,35 @@ fn parse_comprehension(
     let mut pos = elem.end;
     events.extend(elem.events);
 
-    // `for <var> in <iter>` binding.
-    let for_idx = ctx.skip_trivia(pos);
-    push_range(&mut events, pos, for_idx);
-    events.push(Event::Start(SyntaxKind::FOR_BINDING));
-    events.push(Event::Tok(for_idx)); // `for`
-    pos = for_idx + 1;
-
-    let var_start = ctx.skip_trivia(pos);
-    push_range(&mut events, pos, var_start);
-    if let Some(var) = parse_expr_in_brackets(tokens, var_start, 0, diagnostics) {
-        events.extend(var.events);
-        pos = var.end;
-    } else {
-        pos = var_start;
-    }
-
-    // `in` is lexed as a bare identifier (not a keyword), as in `for` loops.
-    let in_idx = ctx.skip_trivia(pos);
-    push_range(&mut events, pos, in_idx);
-    if ctx
-        .token(in_idx)
-        .is_some_and(|t| t.kind == TokKind::Ident && t.text == "in")
-    {
-        events.push(Event::Tok(in_idx));
-        pos = in_idx + 1;
-    } else {
-        let tok = &tokens[for_idx];
-        push_diagnostic(
-            diagnostics,
-            "expected `in` in comprehension",
-            tok.start,
-            tok.end,
-        );
-    }
-
-    let iter_start = ctx.skip_trivia(pos);
-    push_range(&mut events, pos, iter_start);
-    if let Some(iter) = parse_expr_in_brackets(tokens, iter_start, 0, diagnostics) {
-        events.extend(iter.events);
-        pos = iter.end;
-    } else {
-        pos = iter_start;
-    }
-    events.push(Event::Finish); // FOR_BINDING
-
-    // Optional `if <cond>` filter.
-    let if_idx = ctx.skip_trivia(pos);
-    if ctx.token(if_idx).map(|t| t.kind) == Some(TokKind::IfKw) {
-        push_range(&mut events, pos, if_idx);
-        events.push(Event::Start(SyntaxKind::COMPREHENSION_IF));
-        events.push(Event::Tok(if_idx)); // `if`
-        pos = if_idx + 1;
-        let cond_start = ctx.skip_trivia(pos);
-        push_range(&mut events, pos, cond_start);
-        if let Some(cond) = parse_expr_in_brackets(tokens, cond_start, 0, diagnostics) {
-            events.extend(cond.events);
-            pos = cond.end;
-        } else {
-            pos = cond_start;
+    // One or more `for <specs> [if <cond>]` clauses.
+    loop {
+        let for_idx = ctx.skip_trivia(pos);
+        if ctx.token(for_idx).map(|t| t.kind) != Some(TokKind::ForKw) {
+            break;
         }
-        events.push(Event::Finish); // COMPREHENSION_IF
+        push_range(&mut events, pos, for_idx);
+        events.push(Event::Start(SyntaxKind::FOR_BINDING));
+        events.push(Event::Tok(for_idx)); // `for`
+        pos = parse_for_specs(ctx, for_idx + 1, &mut events, diagnostics);
+        events.push(Event::Finish); // FOR_BINDING
+
+        // Optional `if <cond>` filter on this clause.
+        let if_idx = ctx.skip_trivia(pos);
+        if ctx.token(if_idx).map(|t| t.kind) == Some(TokKind::IfKw) {
+            push_range(&mut events, pos, if_idx);
+            events.push(Event::Start(SyntaxKind::COMPREHENSION_IF));
+            events.push(Event::Tok(if_idx)); // `if`
+            pos = if_idx + 1;
+            let cond_start = ctx.skip_trivia(pos);
+            push_range(&mut events, pos, cond_start);
+            if let Some(cond) = parse_expr_in_brackets(tokens, cond_start, 0, diagnostics) {
+                events.extend(cond.events);
+                pos = cond.end;
+            } else {
+                pos = cond_start;
+            }
+            events.push(Event::Finish); // COMPREHENSION_IF
+        }
     }
 
     // Closing delimiter.
@@ -958,6 +928,63 @@ fn parse_comprehension(
         end,
         events,
     }
+}
+
+/// Parse the comma-separated iteration specs of one `for` clause, starting just
+/// past the `for` keyword. Each spec is `var in iter`/`var ∈ iter` (the `in`
+/// matched as a bare identifier) or the assignment form `var = iter` (parsed
+/// whole as an `ASSIGNMENT_EXPR`). Commas are kept as tokens so the projector can
+/// group multiple specs into a `cartesian_iterator`. Returns the index past the
+/// last spec.
+fn parse_for_specs(
+    ctx: &ParserCtx<'_>,
+    mut pos: usize,
+    events: &mut Vec<Event>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let tokens = ctx.tokens();
+    loop {
+        // The loop variable (or, for the `=` form, the whole spec assignment).
+        let var_start = ctx.skip_trivia(pos);
+        push_range(events, pos, var_start);
+        if let Some(var) = parse_expr_in_brackets(tokens, var_start, 0, diagnostics) {
+            events.extend(var.events);
+            pos = var.end;
+        } else {
+            pos = var_start;
+        }
+
+        // `in`/`∈` form needs an explicit iterator; the `=` form is already
+        // complete (consumed above as an assignment).
+        let in_idx = ctx.skip_trivia(pos);
+        if ctx
+            .token(in_idx)
+            .is_some_and(|t| t.kind == TokKind::Ident && (t.text == "in" || t.text == "∈"))
+        {
+            push_range(events, pos, in_idx);
+            events.push(Event::Tok(in_idx));
+            pos = in_idx + 1;
+            let iter_start = ctx.skip_trivia(pos);
+            push_range(events, pos, iter_start);
+            if let Some(iter) = parse_expr_in_brackets(tokens, iter_start, 0, diagnostics) {
+                events.extend(iter.events);
+                pos = iter.end;
+            } else {
+                pos = iter_start;
+            }
+        }
+
+        // Another comma-separated spec in the same clause?
+        let comma_idx = ctx.skip_trivia(pos);
+        if ctx.token(comma_idx).map(|t| t.kind) == Some(TokKind::Comma) {
+            push_range(events, pos, comma_idx);
+            events.push(Event::Tok(comma_idx));
+            pos = comma_idx + 1;
+            continue;
+        }
+        break;
+    }
+    pos
 }
 
 fn parse_postfix_chain(

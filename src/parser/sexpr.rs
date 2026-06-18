@@ -468,17 +468,19 @@ fn project_matrix(node: &SyntaxNode) -> String {
 // --- Comprehensions / generators -------------------------------------------
 
 fn project_generator(node: &SyntaxNode) -> String {
-    // Fatou is flat: `body FOR_BINDING… [COMPREHENSION_IF]`. JuliaSyntax nests
-    // `(generator body (= v it) …)` and folds a trailing `if` into a `filter`.
+    // Fatou is flat: `body (FOR_BINDING [COMPREHENSION_IF])…`. JuliaSyntax nests
+    // `(generator body <clause>…)`, where each `for` clause is one `(= v it)` (or
+    // a `(cartesian_iterator …)` for comma-separated specs), and a trailing `if`
+    // wraps the immediately preceding clause in a `(filter <clause> cond)`.
     let mut body = String::new();
-    let mut bindings = Vec::new();
-    let mut filter: Option<String> = None;
+    let mut clauses: Vec<String> = Vec::new();
     for child in node.children() {
         match child.kind() {
-            FOR_BINDING => bindings.push(project_for_binding_node(&child)),
+            FOR_BINDING => clauses.push(project_for_binding_node(&child)),
             COMPREHENSION_IF => {
-                if let Some(cond) = first_node(&child) {
-                    filter = Some(project(&cond));
+                if let (Some(cond), Some(last)) = (first_node(&child), clauses.last().cloned()) {
+                    let n = clauses.len();
+                    clauses[n - 1] = format!("(filter {last} {})", project(&cond));
                 }
             }
             _ if body.is_empty() => body = project(&child),
@@ -486,11 +488,7 @@ fn project_generator(node: &SyntaxNode) -> String {
         }
     }
     let mut parts = vec![body];
-    if let (Some(cond), Some(last)) = (filter, bindings.last().cloned()) {
-        let n = bindings.len();
-        bindings[n - 1] = format!("(filter {last} {cond})");
-    }
-    parts.extend(bindings);
+    parts.extend(clauses);
     sexp("generator", parts)
 }
 
@@ -504,12 +502,32 @@ fn project_for_binding(node: &SyntaxNode) -> String {
 }
 
 fn project_for_binding_node(binding: &SyntaxNode) -> String {
-    // `for j = 1:3` keeps a proper ASSIGNMENT_EXPR; `for i in xs` keeps the
-    // iterator as loose passthrough tokens after an `in` keyword-identifier.
-    if let Some(assign) = binding.children().find(|c| c.kind() == ASSIGNMENT_EXPR) {
-        return project(&assign);
+    // Split the clause's specs on top-level commas (kept as tokens). One spec
+    // projects directly; several become a `(cartesian_iterator …)`.
+    let mut specs: Vec<Vec<SyntaxElement>> = vec![Vec::new()];
+    for el in binding.children_with_tokens() {
+        match &el {
+            NodeOrToken::Token(t) if t.kind() == COMMA => specs.push(Vec::new()),
+            NodeOrToken::Token(t) if is_drop_token(t.kind()) => {}
+            _ => specs.last_mut().expect("non-empty").push(el),
+        }
     }
-    let elems = significant(binding);
+    let projected: Vec<String> = specs.iter().map(|s| project_for_spec(s)).collect();
+    match projected.as_slice() {
+        [one] => one.clone(),
+        _ => sexp("cartesian_iterator", projected),
+    }
+}
+
+fn project_for_spec(elems: &[SyntaxElement]) -> String {
+    // `j = 1:3` keeps a proper ASSIGNMENT_EXPR; `i in xs` keeps the iterator as
+    // loose passthrough tokens after an `in` keyword-identifier.
+    if let [NodeOrToken::Node(n)] = elems
+        && n.kind() == ASSIGNMENT_EXPR
+    {
+        return project(n);
+    }
+    // Otherwise the loose `var in iter` form: split on the `in`/`∈` token.
     let split = elems
         .iter()
         .position(|el| matches!(el, NodeOrToken::Token(t) if t.text() == "in" || t.text() == "∈"));
@@ -519,7 +537,7 @@ fn project_for_binding_node(binding: &SyntaxNode) -> String {
             let iter = project_flat(elems[idx + 1..].to_vec());
             format!("(= {var} {iter})")
         }
-        None => project_flat(elems),
+        None => project_flat(elems.to_vec()),
     }
 }
 

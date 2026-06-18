@@ -1,0 +1,211 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..186
+  ASSIGNMENT_EXPR@0..28
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    GENERATOR@4..28
+      LPAREN@4..5 "("
+      NAME@5..6
+        IDENT@5..6 "x"
+      WHITESPACE@6..7 " "
+      FOR_BINDING@7..27
+        FOR_KW@7..10 "for"
+        WHITESPACE@10..11 " "
+        NAME@11..12
+          IDENT@11..12 "i"
+        WHITESPACE@12..13 " "
+        IDENT@13..15 "in"
+        WHITESPACE@15..16 " "
+        NAME@16..18
+          IDENT@16..18 "is"
+        COMMA@18..19 ","
+        WHITESPACE@19..20 " "
+        NAME@20..21
+          IDENT@20..21 "j"
+        WHITESPACE@21..22 " "
+        IDENT@22..24 "in"
+        WHITESPACE@24..25 " "
+        NAME@25..27
+          IDENT@25..27 "js"
+      RPAREN@27..28 ")"
+  NEWLINE@28..29 "\n"
+  ASSIGNMENT_EXPR@29..60
+    NAME@29..30
+      IDENT@29..30 "b"
+    WHITESPACE@30..31 " "
+    EQ@31..32 "="
+    WHITESPACE@32..33 " "
+    GENERATOR@33..60
+      LPAREN@33..34 "("
+      NAME@34..35
+        IDENT@34..35 "x"
+      WHITESPACE@35..36 " "
+      FOR_BINDING@36..47
+        FOR_KW@36..39 "for"
+        WHITESPACE@39..40 " "
+        NAME@40..41
+          IDENT@40..41 "i"
+        WHITESPACE@41..42 " "
+        IDENT@42..44 "in"
+        WHITESPACE@44..45 " "
+        NAME@45..47
+          IDENT@45..47 "is"
+      WHITESPACE@47..48 " "
+      FOR_BINDING@48..59
+        FOR_KW@48..51 "for"
+        WHITESPACE@51..52 " "
+        NAME@52..53
+          IDENT@52..53 "j"
+        WHITESPACE@53..54 " "
+        IDENT@54..56 "in"
+        WHITESPACE@56..57 " "
+        NAME@57..59
+          IDENT@57..59 "js"
+      RPAREN@59..60 ")"
+  NEWLINE@60..61 "\n"
+  ASSIGNMENT_EXPR@61..97
+    NAME@61..62
+      IDENT@61..62 "c"
+    WHITESPACE@62..63 " "
+    EQ@63..64 "="
+    WHITESPACE@64..65 " "
+    GENERATOR@65..97
+      LPAREN@65..66 "("
+      NAME@66..67
+        IDENT@66..67 "x"
+      WHITESPACE@67..68 " "
+      FOR_BINDING@68..79
+        FOR_KW@68..71 "for"
+        WHITESPACE@71..72 " "
+        NAME@72..73
+          IDENT@72..73 "i"
+        WHITESPACE@73..74 " "
+        IDENT@74..76 "in"
+        WHITESPACE@76..77 " "
+        NAME@77..79
+          IDENT@77..79 "is"
+      WHITESPACE@79..80 " "
+      FOR_BINDING@80..91
+        FOR_KW@80..83 "for"
+        WHITESPACE@83..84 " "
+        NAME@84..85
+          IDENT@84..85 "j"
+        WHITESPACE@85..86 " "
+        IDENT@86..88 "in"
+        WHITESPACE@88..89 " "
+        NAME@89..91
+          IDENT@89..91 "js"
+      WHITESPACE@91..92 " "
+      COMPREHENSION_IF@92..96
+        IF_KW@92..94 "if"
+        WHITESPACE@94..95 " "
+        NAME@95..96
+          IDENT@95..96 "p"
+      RPAREN@96..97 ")"
+  NEWLINE@97..98 "\n"
+  ASSIGNMENT_EXPR@98..134
+    NAME@98..99
+      IDENT@98..99 "d"
+    WHITESPACE@99..100 " "
+    EQ@100..101 "="
+    WHITESPACE@101..102 " "
+    GENERATOR@102..134
+      LPAREN@102..103 "("
+      NAME@103..104
+        IDENT@103..104 "x"
+      WHITESPACE@104..105 " "
+      FOR_BINDING@105..116
+        FOR_KW@105..108 "for"
+        WHITESPACE@108..109 " "
+        NAME@109..110
+          IDENT@109..110 "i"
+        WHITESPACE@110..111 " "
+        IDENT@111..113 "in"
+        WHITESPACE@113..114 " "
+        NAME@114..116
+          IDENT@114..116 "is"
+      WHITESPACE@116..117 " "
+      COMPREHENSION_IF@117..121
+        IF_KW@117..119 "if"
+        WHITESPACE@119..120 " "
+        NAME@120..121
+          IDENT@120..121 "p"
+      WHITESPACE@121..122 " "
+      FOR_BINDING@122..133
+        FOR_KW@122..125 "for"
+        WHITESPACE@125..126 " "
+        NAME@126..127
+          IDENT@126..127 "j"
+        WHITESPACE@127..128 " "
+        IDENT@128..130 "in"
+        WHITESPACE@130..131 " "
+        NAME@131..133
+          IDENT@131..133 "js"
+      RPAREN@133..134 ")"
+  NEWLINE@134..135 "\n"
+  ASSIGNMENT_EXPR@135..185
+    NAME@135..136
+      IDENT@135..136 "e"
+    WHITESPACE@136..137 " "
+    EQ@137..138 "="
+    WHITESPACE@138..139 " "
+    COMPREHENSION@139..185
+      LBRACKET@139..140 "["
+      NAME@140..141
+        IDENT@140..141 "x"
+      WHITESPACE@141..142 " "
+      FOR_BINDING@142..152
+        FOR_KW@142..145 "for"
+        WHITESPACE@145..146 " "
+        ASSIGNMENT_EXPR@146..152
+          NAME@146..147
+            IDENT@146..147 "i"
+          WHITESPACE@147..148 " "
+          EQ@148..149 "="
+          WHITESPACE@149..150 " "
+          NAME@150..152
+            IDENT@150..152 "is"
+      WHITESPACE@152..153 " "
+      FOR_BINDING@153..163
+        FOR_KW@153..156 "for"
+        WHITESPACE@156..157 " "
+        ASSIGNMENT_EXPR@157..163
+          NAME@157..158
+            IDENT@157..158 "j"
+          WHITESPACE@158..159 " "
+          EQ@159..160 "="
+          WHITESPACE@160..161 " "
+          NAME@161..163
+            IDENT@161..163 "js"
+      WHITESPACE@163..164 " "
+      COMPREHENSION_IF@164..168
+        IF_KW@164..166 "if"
+        WHITESPACE@166..167 " "
+        NAME@167..168
+          IDENT@167..168 "p"
+      WHITESPACE@168..169 " "
+      FOR_BINDING@169..179
+        FOR_KW@169..172 "for"
+        WHITESPACE@172..173 " "
+        ASSIGNMENT_EXPR@173..179
+          NAME@173..174
+            IDENT@173..174 "k"
+          WHITESPACE@174..175 " "
+          EQ@175..176 "="
+          WHITESPACE@176..177 " "
+          NAME@177..179
+            IDENT@177..179 "ks"
+      WHITESPACE@179..180 " "
+      COMPREHENSION_IF@180..184
+        IF_KW@180..182 "if"
+        WHITESPACE@182..183 " "
+        NAME@183..184
+          IDENT@183..184 "q"
+      RBRACKET@184..185 "]"
+  NEWLINE@185..186 "\n"

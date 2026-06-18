@@ -22,8 +22,8 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **282 allowlisted**, 266 divergence, 27 unsupported.
-Dir corpus: **42 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+JS corpus (575 cases): **291 allowlisted**, 265 divergence, 19 unsupported.
+Dir corpus: **43 allowlisted**, 5 blocked + 1 skipped (do_blocks).
 Grammar bullets through "richer `import`/`using`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,39 +31,36 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-17f)
+## Latest session (2026-06-17g)
 
-**Richer `import`/`using` path trees.** Replaced the verbatim passthrough with a
-dedicated `parse_import_stmt` (`structural.rs`) that builds real nodes; the
-projector now *reads* them (no reconstruction). New `SyntaxKind`s `IMPORT_PATH`
-(leading `.`/`..`/`...` dots + dot-separated names) and `IMPORT_ALIAS` (`as`
-rename wrapping a path; `as` is a contextual `Ident`, matched by text). A
-top-level `:` token switches from base path to a comma-separated name list; `,`/`:`
-kept as tokens so `project_import` groups base-vs-names by presence of the colon.
-`project_import_path` expands each leading-dot token to one `.` per char and skips
-the *separator* dots (only pre-first-name dots carry meaning); `project_import_alias`
-emits `(as <importpath> <name>)`. Fixtures `import_paths` (parser + dir corpus).
+**Multi-clause & comma generators.** Replaced the single-clause `parse_comprehension`
+with a `for`-clause loop + new `parse_for_specs` helper (`expr.rs`): each `for`
+emits a sibling `FOR_BINDING`, comma-separated specs stay as tokens inside it, and
+the `a = as` spec form is parsed whole as an `ASSIGNMENT_EXPR` (the old "expected
+`in`" diagnostic is gone). Projector (`sexpr.rs`): `project_for_binding_node` now
+splits a binding on its top-level COMMA tokens — one spec projects directly, several
+become `(cartesian_iterator …)` via new `project_for_spec`; `project_generator`
+walks clauses in order and folds each trailing `COMPREHENSION_IF` into a `(filter
+<preceding-clause> cond)`. Fixture `multi_clause_generators` (parser + dir corpus).
 
-JS allow **274 → 282** (+8: `import .A`/`..A`/`...A`/`....A`, `import A as B`,
-`import A, y`, `import A: x as y`, `using A: x as y`); divergence 274 → 266,
-unsupported unchanged (27). Dir allow 41 → 42. Zero regressions; green,
-clippy/fmt clean.
+JS allow **282 → 291** (+9: `for…for`, `for…for…if`, `for…if…for`, comma
+`a in as, b in bs`, comma+if, comma+for+comma, the 4-clause comprehension, and
+two `=`-spec/`begin`-cond forms); divergence 266 → 265, unsupported 27 → 19.
+Dir allow 42 → 43. Zero regressions; green, clippy/fmt clean.
 
-**Trap learned:** a clause parser that emits leading whitespace via `push_range`
-*before* deciding the clause is unrecognized will double-emit it (caller's verbatim
-passthrough re-emits) → losslessness break on the deferred forms (`import @x`,
-`import A: +`). Fix: parse the path into a scratch event buffer first, commit the
-whitespace only on success. Always `--verify` the deferred/edge forms, not just the
-happy path.
+**Bonus:** the shared `project_for_binding_node` also fixed the for-*loop*
+statement `for x in xs, y in ys … end` (js-ae2710c2, FAIL → PASS) — the loop
+parser already captured both comma specs in `FOR_BINDING`; only the projector's
+cartesian grouping was missing. Faithful, not compensation.
 
-**Deferred (still divergences, carried verbatim):** operator-symbol names
-(`import A.==`, `import A: +, ==`), `@macro`/`$interp` paths (`import @x`,
-`import $A`), the `. .A` space-separated-dots form, and `import A; B` (`;` splits
-statements). `export`'s name list is untouched (still passthrough).
+**Still unsupported (deferred):** `[x \n\n for …]` (blank-line-before-`for`),
+`x where {y for y in ys}` (generator inside braces), `T[x for x in xs]` (typed
+comprehension). Tuple-destructuring loop vars (`for (i,j) in …`) and bare
+call-argument generators (`sum(x for x in xs)`) untouched.
 
 **Suggested next targets (ranked):**
-1. **Multi-clause / comma generators** (`(x for a in as, b in bs)`, `… for … if …`).
-   ~9 corpus cases (a coherent cluster).
+1. **Typed comprehension `T[x for x in xs]`** + bare call-arg generators
+   (`sum(x for x in xs)`) — reuses the now-complete generator machinery.
 2. **Precedence-table renumber** (infra), then arrow `-->`/`<-->` (prec 4, special
    head `(--> a b)`, dotted `.-->` → `dotcall-i`) and left-pipe `<|` (prec 8).
    Blocked by cramped low-tier numbers (no integer gap at `=>`(4)/`||`(5) or
@@ -73,6 +70,13 @@ statements). `export`'s name list is untouched (still passthrough).
    import-path grammar to accept operator tokens as name components.
 
 ## Earlier sessions
+
+- **2026-06-17f** — Richer `import`/`using` path trees: dedicated `parse_import_stmt`
+  building real `IMPORT_PATH`/`IMPORT_ALIAS` nodes the projector reads (no
+  reconstruction); leading-dot expansion, `:` switches base→name-list, `as` is a
+  contextual ident. JS allow 274 → 282. Deferred: operator-symbol/`@macro`/`$interp`
+  names, `export` list. Trap: scratch-buffer the clause, commit whitespace only on
+  success, else verbatim passthrough double-emits.
 
 - **2026-06-17e** — Range operator `..`: `DotDot` 2-char op (longest match `...` >
   `..` > `.`), placed after the splat check, before the broadcast-`.` block; a

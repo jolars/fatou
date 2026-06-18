@@ -1,0 +1,1 @@
+(toplevel (= a (generator x (cartesian_iterator (= i is) (= j js)))) (= b (generator x (= i is) (= j js))) (= c (generator x (= i is) (filter (= j js) p))) (= d (generator x (filter (= i is) p) (= j js))) (= e (comprehension (generator x (= i is) (filter (= j js) p) (filter (= k ks) q)))))

@@ -24,6 +24,7 @@ let_quote
 literals
 loops
 macros
+multi_clause_generators
 nested_string_interp
 pairs
 parametric_types
