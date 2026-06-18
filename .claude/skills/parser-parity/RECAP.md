@@ -22,16 +22,52 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **352 allowlisted**, 219 divergence, 4 unsupported.
-Dir corpus: **59 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "curly operator calls" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **356 allowlisted**, 215 divergence, 4 unsupported.
+Dir corpus: **60 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "field-access suffixes" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18p)
+## Latest session (2026-06-18q)
+
+**Field-access suffixes.** Fixed a broad mis-parse: a `()`/`[]`/`{}` glued after
+a field access bound to the field *name* instead of the whole access, so `A.f()`,
+`a.b[i]`, `a.b{T}`, `a.b.c()` all projected to a broken `(. a (quote ))`. Root
+cause: the field-access `.` lives in the infix loop (`expr.rs`) with the tightest
+binding power, but its RHS was parsed by `parse_expr_in` — whose recursive
+`parse_postfix_chain` greedily swallowed the trailing call/index/curly. **One-line
+fix:** when `op_kind == Dot`, parse the RHS *prefix-only* (`parse_prefix`, the
+field name is an atom) instead of `parse_expr_in`; the outer postfix chain then
+attaches the suffix to the whole `BINARY_EXPR` field access — exactly Julia's
+call-chain model (`A.f()` = `(A.f)()`). CST shape unchanged for plain `a.b`
+(still `BINARY_EXPR`), so the projector stays a faithful encoding translation. Two
+freebies fell out: the qualified function def `function A.f() end` →
+`(function (call (. A (quote f))) (block))` (signature flows through the same
+path), and `f(a).g(b)`. Projector (`sexpr.rs`): one new arm — a quoted field name
+`a.:b` routes its `QUOTE_SYM` rhs through `project` → `(. a (quote-: b))` (was the
+empty `name_text`, a pre-existing adjacent bug). Fixture `field_access_suffix`
+(parser + dir corpus, 9 lines). No deferred edge cases.
+
+JS allow **352 → 356** (+4: `A.:+` js-22ffbcb0, `function A.f()   end`
+js-4dc53c96, `f(a).g(b)` js-aaefc5cc, `function (A).f() end` js-f6bfe0fc);
+divergence 219 → 215, unsupported held 4. Dir allow 59 → 60. Zero regressions;
+green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Anonymous `function (args) body end`** — `function (x) body end` →
+   `(function (tuple-p x) (block body))` (js-038a64f2); Fatou parses the `(x)`
+   signature as a bare `PAREN_EXPR` → `(function x …)`. The signature parens
+   should become a `tuple-p`. Probe `function (x, y) end`, `function () end`,
+   `function (x,) end` first.
+2. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b` (js-f74d3ac9), `public ⤈`, `module M; export ⤈` (js-39a1855a),
+   `x -->₁ y` (js-50dc84fd); larger lexer feature.
+3. **`&` as a prefix** — `&x`, `&{T}`; small, `&` currently drops the sigil.
+
+## Earlier session (2026-06-18p)
 
 **Curly operator calls.** An operator glued to `{` is now a parametric callee:
 `+{T}` → `(curly + T)`, `*{T}(x)` → `(call (curly * T) x)`, `<:{T}(x::T)` →
@@ -55,14 +91,7 @@ lines incl. standalone `+{T}`/`*{T,S}` and broadcast `.+{T}`). **Deferred:**
 
 JS allow **350 → 352** (+2: `+{T}(x::T)` js-340cc5a1, `<:{T}(x::T)` js-9edf5083);
 divergence 221 → 219, unsupported held 4. Dir allow 58 → 59. Zero regressions;
-green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b` (js-f74d3ac9 unsupported), `public ⤈`, `module M; export ⤈` (js-39a1855a),
-   `x -->₁ y` (js-50dc84fd), many scattered FAILs; larger lexer feature.
-2. **`&` as a prefix** — `&x`, `&{T}` (js — `(& …)`); small, but `&` currently
-   parses as nothing (drops the sigil). Probe whether it's worth a node.
+green, clippy/fmt clean. (Next targets superseded by 18q; field-access landed.)
 
 ## Earlier session (2026-06-18o)
 

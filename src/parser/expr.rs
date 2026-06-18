@@ -290,7 +290,17 @@ fn parse_expr_in(
         }
 
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
-        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
+        // Field access `a.b`: the right operand is an atom (the field name), not a
+        // postfix-chained expression. A trailing `()`/`[]`/`{}` binds to the whole
+        // field access (`A.f()` is `(A.f)()`, `a.b{T}` is `(a.b){T}`), so parse the
+        // RHS prefix-only and let the outer postfix chain attach any suffix. Other
+        // operators parse a full right operand at their binding power.
+        let rhs_result = if op_kind == TokKind::Dot {
+            parse_prefix(&ctx, rhs_operand, diagnostics, flags)
+        } else {
+            parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags)
+        };
+        let Some(rhs) = rhs_result else {
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,

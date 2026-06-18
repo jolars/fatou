@@ -1,0 +1,135 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..76
+  CALL_EXPR@0..5
+    BINARY_EXPR@0..3
+      NAME@0..1
+        IDENT@0..1 "a"
+      DOT@1..2 "."
+      NAME@2..3
+        IDENT@2..3 "b"
+    ARG_LIST@3..5
+      LPAREN@3..4 "("
+      RPAREN@4..5 ")"
+  NEWLINE@5..6 "\n"
+  CALL_EXPR@6..12
+    BINARY_EXPR@6..9
+      NAME@6..7
+        IDENT@6..7 "a"
+      DOT@7..8 "."
+      NAME@8..9
+        IDENT@8..9 "b"
+    ARG_LIST@9..12
+      LPAREN@9..10 "("
+      ARG@10..11
+        NAME@10..11
+          IDENT@10..11 "x"
+      RPAREN@11..12 ")"
+  NEWLINE@12..13 "\n"
+  INDEX_EXPR@13..19
+    BINARY_EXPR@13..16
+      NAME@13..14
+        IDENT@13..14 "a"
+      DOT@14..15 "."
+      NAME@15..16
+        IDENT@15..16 "b"
+    ARG_LIST@16..19
+      LBRACKET@16..17 "["
+      ARG@17..18
+        NAME@17..18
+          IDENT@17..18 "i"
+      RBRACKET@18..19 "]"
+  NEWLINE@19..20 "\n"
+  CURLY_EXPR@20..26
+    BINARY_EXPR@20..23
+      NAME@20..21
+        IDENT@20..21 "a"
+      DOT@21..22 "."
+      NAME@22..23
+        IDENT@22..23 "b"
+    ARG_LIST@23..26
+      LBRACE@23..24 "{"
+      ARG@24..25
+        NAME@24..25
+          IDENT@24..25 "T"
+      RBRACE@25..26 "}"
+  NEWLINE@26..27 "\n"
+  CALL_EXPR@27..34
+    BINARY_EXPR@27..32
+      BINARY_EXPR@27..30
+        NAME@27..28
+          IDENT@27..28 "a"
+        DOT@28..29 "."
+        NAME@29..30
+          IDENT@29..30 "b"
+      DOT@30..31 "."
+      NAME@31..32
+        IDENT@31..32 "c"
+    ARG_LIST@32..34
+      LPAREN@32..33 "("
+      RPAREN@33..34 ")"
+  NEWLINE@34..35 "\n"
+  BINARY_EXPR@35..41
+    CALL_EXPR@35..39
+      NAME@35..36
+        IDENT@35..36 "f"
+      ARG_LIST@36..39
+        LPAREN@36..37 "("
+        ARG@37..38
+          NAME@37..38
+            IDENT@37..38 "x"
+        RPAREN@38..39 ")"
+    DOT@39..40 "."
+    NAME@40..41
+      IDENT@40..41 "y"
+  NEWLINE@41..42 "\n"
+  CALL_EXPR@42..51
+    BINARY_EXPR@42..48
+      CALL_EXPR@42..46
+        NAME@42..43
+          IDENT@42..43 "f"
+        ARG_LIST@43..46
+          LPAREN@43..44 "("
+          ARG@44..45
+            NAME@44..45
+              IDENT@44..45 "a"
+          RPAREN@45..46 ")"
+      DOT@46..47 "."
+      NAME@47..48
+        IDENT@47..48 "g"
+    ARG_LIST@48..51
+      LPAREN@48..49 "("
+      ARG@49..50
+        NAME@49..50
+          IDENT@49..50 "b"
+      RPAREN@50..51 ")"
+  NEWLINE@51..52 "\n"
+  BINARY_EXPR@52..56
+    NAME@52..53
+      IDENT@52..53 "a"
+    DOT@53..54 "."
+    QUOTE_SYM@54..56
+      COLON@54..55 ":"
+      NAME@55..56
+        IDENT@55..56 "b"
+  NEWLINE@56..57 "\n"
+  FUNCTION_DEF@57..75
+    FUNCTION_KW@57..65 "function"
+    WHITESPACE@65..66 " "
+    SIGNATURE@66..71
+      CALL_EXPR@66..71
+        BINARY_EXPR@66..69
+          NAME@66..67
+            IDENT@66..67 "A"
+          DOT@67..68 "."
+          NAME@68..69
+            IDENT@68..69 "f"
+        ARG_LIST@69..71
+          LPAREN@69..70 "("
+          RPAREN@70..71 ")"
+    BLOCK@71..72
+      WHITESPACE@71..72 " "
+    END_KW@72..75 "end"
+  NEWLINE@75..76 "\n"

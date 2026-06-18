@@ -373,6 +373,9 @@ fn project_binary(node: &SyntaxNode) -> String {
         InfixHead::Dot if rhs.kind() == INTERPOLATION => {
             format!("(. {lhs} (inert {}))", project(rhs))
         }
+        // A quoted field name (`a.:b`) is already a `(quote-: …)` symbol; emit it
+        // directly rather than wrapping it in another `(quote …)`.
+        InfixHead::Dot if rhs.kind() == QUOTE_SYM => format!("(. {lhs} {})", project(rhs)),
         InfixHead::Dot => format!("(. {lhs} (quote {}))", name_text(rhs)),
     }
 }

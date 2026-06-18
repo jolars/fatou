@@ -1,0 +1,1 @@
+(toplevel (call (. a (quote b))) (call (. a (quote b)) x) (ref (. a (quote b)) i) (curly (. a (quote b)) T) (call (. (. a (quote b)) (quote c))) (. (call f x) (quote y)) (call (. (call f a) (quote g)) b) (. a (quote-: b)) (function (call (. A (quote f))) (block)))

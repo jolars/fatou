@@ -329,6 +329,18 @@ through), so the grammar can grow incrementally.
   part. **Deferred:** `&{T}` (`(& (braces T))` — a pre-existing `&`-prefix gap)
   and the error-shape syntactic callees (`&&{T}`, `->{T}`).
 
+- [x] Field-access suffixes. A `()`/`[]`/`{}`/`.field` suffix now binds to the
+  whole field access, not just the field name: `A.f()` → `(call (. A (quote f)))`,
+  `a.b[i]` → `(ref (. a (quote b)) i)`, `a.b{T}` → `(curly (. a (quote b)) T)`,
+  `a.b.c()`, `f(a).g(b)`, and the qualified function definition `function A.f()
+  end` → `(function (call (. A (quote f))) (block))`. The field-access `.` stays in
+  the infix loop (still a `BINARY_EXPR`), but its right operand is now parsed
+  *prefix-only* (`parse_prefix`, the field name is an atom) instead of a full
+  postfix-chained expression — so the outer postfix chain attaches any trailing
+  suffix. Projector (`sexpr.rs`): a quoted field name (`a.:b`) routes its
+  `QUOTE_SYM` rhs through `project` → `(. a (quote-: b))` instead of the empty
+  `name_text`. CST shape unchanged for plain `a.b`.
+
 - [x] Unary operator paren-calls. A unary arithmetic/logical operator
   (`+ - ! ~` and broadcast `.+ .- .~`) glued to a `(` is a function call when the
   parens look like an argument list: `+(a...)` → `(call + (... a))`, `+(x, y)` →

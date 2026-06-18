@@ -18,6 +18,7 @@ control_flow
 curly_operator_call
 dot_logical_operator
 escaped_dollar
+field_access_suffix
 generator_arguments
 generators
 import_operator_names
