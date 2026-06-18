@@ -1,0 +1,1 @@
+(toplevel (import (importpath A (quote-: +))) (import (importpath A (quote-: +))) (import (importpath A (quote-: foo))) (import (importpath A (quote-: foo))) (using (importpath A (quote-: *))))

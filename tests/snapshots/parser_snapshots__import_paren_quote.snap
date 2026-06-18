@@ -1,0 +1,72 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..73
+  IMPORT_STMT@0..13
+    IMPORT_KW@0..6 "import"
+    WHITESPACE@6..7 " "
+    IMPORT_PATH@7..13
+      IDENT@7..8 "A"
+      DOT@8..9 "."
+      QUOTE_SYM@9..13
+        COLON@9..10 ":"
+        PAREN_EXPR@10..13
+          LPAREN@10..11 "("
+          PLUS@11..12 "+"
+          RPAREN@12..13 ")"
+  NEWLINE@13..14 "\n"
+  IMPORT_STMT@14..27
+    IMPORT_KW@14..20 "import"
+    WHITESPACE@20..21 " "
+    IMPORT_PATH@21..27
+      IDENT@21..22 "A"
+      DOT@22..23 "."
+      PAREN_EXPR@23..27
+        LPAREN@23..24 "("
+        QUOTE_SYM@24..26
+          COLON@24..25 ":"
+          PLUS@25..26 "+"
+        RPAREN@26..27 ")"
+  NEWLINE@27..28 "\n"
+  IMPORT_STMT@28..43
+    IMPORT_KW@28..34 "import"
+    WHITESPACE@34..35 " "
+    IMPORT_PATH@35..43
+      IDENT@35..36 "A"
+      DOT@36..37 "."
+      QUOTE_SYM@37..43
+        COLON@37..38 ":"
+        PAREN_EXPR@38..43
+          LPAREN@38..39 "("
+          NAME@39..42
+            IDENT@39..42 "foo"
+          RPAREN@42..43 ")"
+  NEWLINE@43..44 "\n"
+  IMPORT_STMT@44..59
+    IMPORT_KW@44..50 "import"
+    WHITESPACE@50..51 " "
+    IMPORT_PATH@51..59
+      IDENT@51..52 "A"
+      DOT@52..53 "."
+      PAREN_EXPR@53..59
+        LPAREN@53..54 "("
+        QUOTE_SYM@54..58
+          COLON@54..55 ":"
+          NAME@55..58
+            IDENT@55..58 "foo"
+        RPAREN@58..59 ")"
+  NEWLINE@59..60 "\n"
+  USING_STMT@60..72
+    USING_KW@60..65 "using"
+    WHITESPACE@65..66 " "
+    IMPORT_PATH@66..72
+      IDENT@66..67 "A"
+      DOT@67..68 "."
+      QUOTE_SYM@68..72
+        COLON@68..69 ":"
+        PAREN_EXPR@69..72
+          LPAREN@69..70 "("
+          STAR@70..71 "*"
+          RPAREN@71..72 ")"
+  NEWLINE@72..73 "\n"

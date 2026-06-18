@@ -15,7 +15,7 @@
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
-use crate::parser::expr::{parse_expr, parse_prefix_interpolation};
+use crate::parser::expr::{parse_expr, parse_prefix_interpolation, parse_quote_sym};
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
 
@@ -598,14 +598,35 @@ fn parse_import_path(
                 body.push(Event::Tok(i)); // separating `.`
                 i = push_macro_name(ctx, &mut body, i + 1);
             }
-            (Some(TokKind::Dot), Some(TokKind::Colon)) if matches!(ctx.token(i + 2).map(|t| t.kind), Some(k) if is_op_name(k)) =>
-            {
+            (Some(TokKind::Dot), Some(TokKind::Colon)) => {
+                // A quoted symbol component (`A.:+` → `(quote-: +)`, `A.:(+)` →
+                // `(quote-: +)`). The `:` and everything after it is a `QUOTE_SYM`.
+                let Some(quote) = parse_quote_sym(ctx, i + 1, diagnostics) else {
+                    break;
+                };
                 body.push(Event::Tok(i)); // separating `.`
-                body.push(Event::Start(SyntaxKind::QUOTE_SYM));
-                body.push(Event::Tok(i + 1)); // `:`
-                body.push(Event::Tok(i + 2)); // operator
-                body.push(Event::Finish);
-                i += 3;
+                body.extend(quote.events);
+                i = quote.end;
+            }
+            (Some(TokKind::Dot), Some(TokKind::LParen))
+                if ctx.token(i + 2).map(|t| t.kind) == Some(TokKind::Colon) =>
+            {
+                // A parenthesized quoted symbol (`A.(:+)` → `(quote-: +)`). The
+                // parens wrap a `QUOTE_SYM`; both project away to the bare quote.
+                let Some(quote) = parse_quote_sym(ctx, i + 2, diagnostics) else {
+                    break;
+                };
+                let rparen = quote.end;
+                if ctx.token(rparen).map(|t| t.kind) != Some(TokKind::RParen) {
+                    break;
+                }
+                body.push(Event::Tok(i)); // separating `.`
+                body.push(Event::Start(SyntaxKind::PAREN_EXPR));
+                body.push(Event::Tok(i + 1)); // `(`
+                body.extend(quote.events);
+                body.push(Event::Tok(rparen)); // `)`
+                body.push(Event::Finish); // PAREN_EXPR
+                i = rparen + 1;
             }
             (Some(k), _) if is_dotted_op_name(k) => {
                 body.push(Event::Tok(i));

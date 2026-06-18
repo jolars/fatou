@@ -20,6 +20,7 @@ escaped_dollar
 generator_arguments
 generators
 import_operator_names
+import_paren_quote
 import_paths
 interpolation_expr
 interpolation_names

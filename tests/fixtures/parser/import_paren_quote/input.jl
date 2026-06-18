@@ -1,0 +1,5 @@
+import A.:(+)
+import A.(:+)
+import A.:(foo)
+import A.(:foo)
+using A.:(*)

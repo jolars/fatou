@@ -438,7 +438,7 @@ fn parse_prefix(
 /// or `:(expr)` (a quoted expression). Returns `None` for a bare `:` that is not
 /// followed by a quotable token (e.g. the index colon in `a[:]`), so the caller
 /// falls through to its normal handling.
-fn parse_quote_sym(
+pub(super) fn parse_quote_sym(
     ctx: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,

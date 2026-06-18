@@ -235,8 +235,7 @@ through), so the grammar can grow incrementally.
   operator tokens; `project_import_path` reuses the projector's `is_operator` and
   routes `QUOTE_SYM` children through `project_quote_sym`. **Deferred (still
   divergences):** unicode operators (`import .⋆`, `import A.⋆.f` — `⋆` lexes as
-  `ERROR`, awaiting unicode-operator lexing) and the paren-quoted forms
-  (`import A.:(+)`, `import A.(:+)`).
+  `ERROR`, awaiting unicode-operator lexing).
 
 - [x] Macro names in `export`/`import`/`using`. A `@` in a directive name
   position now builds a real `MACRO_NAME` node instead of dropping the sigil: the
@@ -253,6 +252,20 @@ through), so the grammar can grow incrementally.
   `$`-root already parsing, `import $A.@x` → `(import (importpath ($ A) @x))`
   falls out for free. **Deferred:** `public @a` (`public` is not yet a contextual
   keyword) and standalone qualified macro paths as expressions (`A.B.@x`).
+
+- [x] Import paren-quotes. `parse_import_path` (`structural.rs`) now accepts a
+  parenthesized quoted operator/symbol as a dotted path component in two forms,
+  both projecting to the same bare quote: `import A.:(+)` → `(importpath A
+  (quote-: +))` (the `:` and its `(op)` are a `QUOTE_SYM` wrapping a `PAREN_EXPR`)
+  and `import A.(:+)` → `(importpath A (quote-: +))` (a `PAREN_EXPR` wrapping a
+  `QUOTE_SYM`). The `(Dot, Colon)` loop arm now delegates to the shared
+  `parse_quote_sym` (made `pub(super)`), so `A.:foo`/`A.:(foo)` quote too; a new
+  `(Dot, LParen)`-with-inner-`:` arm builds the paren-wrapped form. The projector
+  gains a `PAREN_EXPR` arm in `project_import_path` that unwraps via `project`
+  (the existing `PAREN_EXPR` → inner-node fallback yields the quote). Faithful:
+  the parens stay real CST delimiters; the projector only unwraps them.
+  **Deferred:** non-symbol paren contents (`import A.(a)` → `a`, no quote) and
+  the erroring multi-token form (`import A.:(a+b)`).
 
 - [x] Operator-as-call functions. A non-unary binary operator glued to a `(`
   (`*(x)`, `==(a, b)`, broadcast `.*(a, b)`, `.==(a, b)`, `=>(x, y)`, `*()`) names

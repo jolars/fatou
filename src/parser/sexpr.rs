@@ -871,6 +871,12 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 parts.push(project_quote_sym(&n));
                 seen_name = true;
             }
+            // A parenthesized quoted symbol (`import A.(:+)` → `(quote-: +)`); the
+            // paren unwraps to its inner quote.
+            NodeOrToken::Node(n) if n.kind() == PAREN_EXPR => {
+                parts.push(project(&n));
+                seen_name = true;
+            }
             // An interpolated path root (`import $A` → `($ A)`).
             NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
                 parts.push(project(&n));

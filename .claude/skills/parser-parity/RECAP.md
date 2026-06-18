@@ -22,17 +22,53 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **338 allowlisted**, 233 divergence, 4 unsupported.
-Dir corpus: **54 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "macro names in export/import/using" are `[x]` in
-`TODO.md`.
+JS corpus (575 cases): **340 allowlisted**, 231 divergence, 4 unsupported.
+Dir corpus: **55 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "import paren-quotes" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18k)
+## Latest session (2026-06-18l)
+
+**Import paren-quotes.** A parenthesized quoted operator/symbol is now a valid
+dotted import-path component in two forms, both projecting to the bare quote:
+`import A.:(+)` → `(importpath A (quote-: +))` and `import A.(:+)` →
+`(importpath A (quote-: +))`. `parse_quote_sym` was made `pub(super)` and
+imported into `structural.rs`; the `parse_import_path` loop's `(Dot, Colon)` arm
+now *delegates* to it (so `A.:+`, `A.:(+)`, and as a freebie `A.:foo`/`A.:(foo)`
+all flow through one path) instead of hand-emitting a two-token `QUOTE_SYM`. A
+new `(Dot, LParen)`-with-inner-`:` arm parses `A.(:+)`: it builds a `PAREN_EXPR`
+wrapping the `QUOTE_SYM` that `parse_quote_sym` returns, keeping the parens as
+real CST delimiters. Projector (`sexpr.rs`): `project_import_path` gained a
+`PAREN_EXPR` arm routing through `project` — the existing `PAREN_EXPR` →
+first-inner-node fallback already yields `(quote-: +)`, so no quote-specific
+logic was needed. Faithful: parens stay real children, the projector only
+unwraps. CST shapes: `A.:(+)` = `QUOTE_SYM{: PAREN_EXPR{( + )}}`; `A.(:+)` =
+`PAREN_EXPR{( QUOTE_SYM{: +} )}`. Fixture `import_paren_quote` (parser + dir
+corpus, 5 lines incl. ident `A.:(foo)`/`A.(:foo)` and `using`). **Deferred:**
+non-symbol paren contents (`import A.(a)` → `a`, no quote — a separate gap) and
+the erroring multi-token quote (`import A.:(a+b)` — error-shape).
+
+JS allow **338 → 340** (+2: `import A.:(+)` js-0492d7fb, `import A.(:+)`
+js-6fe4ce2d); divergence 233 → 231, unsupported held 4. Dir allow 54 → 55. Zero
+regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
+   js-70cde333; `<:{T}(x::T)` js-9edf5083) — extend the unary paren-call path to
+   `Subtype`/`Supertype`.
+2. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
+   macro-name parser needs to accept a `(op)` signature like `function` now does.
+3. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
+   js-491f0afc) — add `public` as a contextual keyword routing through the same
+   `EXPORT_STMT`-style path; reuses the macro/name list machinery.
+4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18k)
 
 **Macro names in `export`/`import`/`using`.** A `@` in a directive name position
 now builds a real `MACRO_NAME` node instead of dropping the sigil. New shared
@@ -60,22 +96,7 @@ shapes, not directive names).
 JS allow **334 → 338** (+4: `export @a` js-b7bb6850, `module M; export @a; end`
 js-7a07fde8, `import @x` js-73c24f26, `import $A.@x` js-97312f87); divergence
 237 → 233, unsupported held 4. Dir allow 53 → 54. Zero regressions; green,
-clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Import paren-quotes** (`import A.:(+)` js-0492d7fb, `import A.(:+)`
-   js-6fe4ce2d) — finishes the import quoting cluster; `parse_import_path`
-   surgery (a `.:(op)` and `.(:op)` component).
-2. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
-   js-70cde333; `<:{T}(x::T)` js-9edf5083) — extend the unary paren-call path to
-   `Subtype`/`Supertype`.
-3. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
-   macro-name parser needs to accept a `(op)` signature like `function` now does.
-4. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
-   js-491f0afc) — add `public` as a contextual keyword routing through the same
-   `EXPORT_STMT`-style path; unlocks the macro/name list reuse just landed.
-5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
+clippy/fmt clean. (Next targets superseded by 18l; import paren-quotes landed.)
 
 ## Earlier session (2026-06-18j)
 
