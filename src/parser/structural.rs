@@ -15,7 +15,7 @@
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
-use crate::parser::expr::{parse_expr, parse_prefix_interpolation, parse_quote_sym};
+use crate::parser::expr::{parse_expr, parse_prefix_interpolation, parse_quote_sym, parse_stmt};
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
 
@@ -344,7 +344,7 @@ pub(crate) fn parse_module_expr(
         false,
         diagnostics,
     );
-    i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
+    i = run_module_block(&ctx, &mut events, i, END_ONLY, diagnostics);
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
     events.push(Event::Finish);
     Some(ExprParse {
@@ -869,6 +869,29 @@ fn run_block(
     terminators: &[TokKind],
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
+    run_block_inner(ctx, events, start, terminators, false, diagnostics)
+}
+
+/// Like [`run_block`], but a module body where the contextual keyword `public`
+/// opens a `PUBLIC_STMT` (parsed via [`parse_stmt`] rather than [`parse_expr`]).
+fn run_module_block(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    start: usize,
+    terminators: &[TokKind],
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    run_block_inner(ctx, events, start, terminators, true, diagnostics)
+}
+
+fn run_block_inner(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    start: usize,
+    terminators: &[TokKind],
+    public_context: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
     let tokens = ctx.tokens();
     events.push(Event::Start(SyntaxKind::BLOCK));
     let mut i = start;
@@ -886,7 +909,12 @@ fn run_block(
             None => break,
             Some(k) if terminators.contains(&k) => break,
             Some(_) => {
-                if let Some(stmt) = parse_expr(tokens, i, 0, diagnostics) {
+                let parsed = if public_context {
+                    parse_stmt(tokens, i, diagnostics)
+                } else {
+                    parse_expr(tokens, i, 0, diagnostics)
+                };
+                if let Some(stmt) = parsed {
                     events.extend(stmt.events);
                     i = stmt.end;
                 } else {

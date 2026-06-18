@@ -55,6 +55,19 @@ through), so the grammar can grow incrementally.
   **Known limitation:** `macro f end` (no signature parens) projects to
   `(macro f (block))` rather than Julia's `(macro f)` — the same trailing-block
   divergence as `function f end`, an error-shape case left for the error phase.
+- [x] `public` contextual keyword (`public A, B`, `public @a`). A statement-only
+  reword: at toplevel and module-block scope, the identifier `public` opens a
+  `PUBLIC_STMT` (parsed by `parse_keyword_stmt` with `KwStmt::Path`, reusing the
+  `export` name-list machinery) *unless* the next significant token is `(`, `=`,
+  or `[` — which keep `public` an ordinary identifier (`public(x)`, `public = 1`,
+  `public[i]`), matching JuliaSyntax's `parse_public` compatibility shim. A new
+  `public_context` flag on `ExprFlags` (set by `parse_stmt`, threaded through the
+  toplevel loop and `run_module_block`, off in every other block) gates the
+  detection so `public` stays an identifier inside `begin`/`if`/function bodies.
+  The projector heads the node `public`, dropping the leading keyword token before
+  reading the names via the shared `name_run_item`. **Deferred:** unicode operator
+  names (`public ⤈` — needs unicode-operator lexing) and the `;`-separated
+  toplevel `toplevel-;` grouping divergence.
 - [x] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
   Structured into `STRING_LITERAL`/`CMD_LITERAL` nodes with `INTERPOLATION`

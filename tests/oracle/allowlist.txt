@@ -40,6 +40,7 @@ operator_symbol_quote_paren
 pairs
 parametric_types
 paren_operator
+public_statement
 range_operator
 raw_string
 regex_string

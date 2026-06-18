@@ -1,0 +1,89 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..103
+  PUBLIC_STMT@0..11
+    IDENT@0..6 "public"
+    WHITESPACE@6..7 " "
+    IDENT@7..8 "A"
+    COMMA@8..9 ","
+    WHITESPACE@9..10 " "
+    IDENT@10..11 "B"
+  NEWLINE@11..12 "\n"
+  PUBLIC_STMT@12..21
+    IDENT@12..18 "public"
+    WHITESPACE@18..19 " "
+    MACRO_NAME@19..21
+      AT@19..20 "@"
+      IDENT@20..21 "a"
+  NEWLINE@21..22 "\n"
+  PUBLIC_STMT@22..34
+    IDENT@22..28 "public"
+    WHITESPACE@28..29 " "
+    IDENT@29..30 "a"
+    COMMA@30..31 ","
+    WHITESPACE@31..32 " "
+    MACRO_NAME@32..34
+      AT@32..33 "@"
+      IDENT@33..34 "b"
+  NEWLINE@34..35 "\n"
+  MODULE_DEF@35..63
+    MODULE_KW@35..41 "module"
+    WHITESPACE@41..42 " "
+    SIGNATURE@42..43
+      IDENT@42..43 "M"
+    BLOCK@43..60
+      NEWLINE@43..44 "\n"
+      WHITESPACE@44..48 "    "
+      PUBLIC_STMT@48..59
+        IDENT@48..54 "public"
+        WHITESPACE@54..55 " "
+        IDENT@55..56 "A"
+        COMMA@56..57 ","
+        WHITESPACE@57..58 " "
+        IDENT@58..59 "B"
+      NEWLINE@59..60 "\n"
+    END_KW@60..63 "end"
+  NEWLINE@63..64 "\n"
+  ASSIGNMENT_EXPR@64..74
+    NAME@64..70
+      IDENT@64..70 "public"
+    WHITESPACE@70..71 " "
+    EQ@71..72 "="
+    WHITESPACE@72..73 " "
+    LITERAL@73..74
+      INTEGER@73..74 "4"
+  NEWLINE@74..75 "\n"
+  ASSIGNMENT_EXPR@75..88
+    CALL_EXPR@75..84
+      NAME@75..81
+        IDENT@75..81 "public"
+      ARG_LIST@81..84
+        LPAREN@81..82 "("
+        ARG@82..83
+          NAME@82..83
+            IDENT@82..83 "x"
+        RPAREN@83..84 ")"
+    WHITESPACE@84..85 " "
+    EQ@85..86 "="
+    WHITESPACE@86..87 " "
+    LITERAL@87..88
+      INTEGER@87..88 "6"
+  NEWLINE@88..89 "\n"
+  ASSIGNMENT_EXPR@89..102
+    INDEX_EXPR@89..98
+      NAME@89..95
+        IDENT@89..95 "public"
+      ARG_LIST@95..98
+        LBRACKET@95..96 "["
+        ARG@96..97
+          LITERAL@96..97
+            INTEGER@96..97 "7"
+        RBRACKET@97..98 "]"
+    WHITESPACE@98..99 " "
+    EQ@99..100 "="
+    WHITESPACE@100..101 " "
+    LITERAL@101..102
+      INTEGER@101..102 "5"
+  NEWLINE@102..103 "\n"

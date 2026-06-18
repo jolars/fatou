@@ -1,5 +1,5 @@
 use crate::parser::events::Event;
-use crate::parser::expr::parse_expr;
+use crate::parser::expr::parse_stmt;
 use crate::parser::lexer::lex;
 use crate::parser::tree_builder::build_tree;
 use crate::syntax::SyntaxNode;
@@ -31,7 +31,7 @@ pub fn parse(text: &str) -> ParseOutput {
             continue;
         }
 
-        if let Some(expr) = parse_expr(&tokens, i, 0, &mut diagnostics) {
+        if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
             events.extend(expr.events);
             i = expr.end;
         } else {

@@ -81,6 +81,7 @@ pub enum SyntaxKind {
     IMPORT_STMT,
     USING_STMT,
     EXPORT_STMT,
+    PUBLIC_STMT,
     IMPORT_PATH,
     IMPORT_ALIAS,
     MACRO_CALL,

@@ -22,16 +22,56 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **346 allowlisted**, 225 divergence, 4 unsupported.
-Dir corpus: **57 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "macro definitions" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **350 allowlisted**, 221 divergence, 4 unsupported.
+Dir corpus: **58 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "`public` contextual keyword" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18n)
+## Latest session (2026-06-18o)
+
+**`public` contextual keyword.** `public A, B` / `public @a` now open a
+`PUBLIC_STMT` at toplevel and module-block statement scope. Unlike `export`,
+`public` is *contextual*: it must stay an ordinary identifier in sub-expressions
+(`x = public`), as a call/assignment/index (`public(x)`, `public = 1`,
+`public[i]`), and inside non-module blocks (`begin`/`if`/function bodies). The
+rule (copied from JuliaSyntax's `parse_public` compat shim, `src/parser.jl`
+~513): at file/module level, `public` is the keyword form *unless* the next
+significant token is `(`, `=`, or `[`. Implemented with a new `public_context`
+flag on `ExprFlags`: `parse_stmt` (new entry, sets the flag) is called by the
+toplevel drive loop (`core.rs`) and by `run_module_block` (new wrapper around
+`run_block_inner`, used only by `parse_module_expr`); every other block keeps
+`run_block` → `parse_expr` (flag off). In `parse_expr_in`, when the flag is set
+and `is_public_keyword` fires (identifier `public` + next-sig-token ∉ `( = [`),
+it delegates to `parse_keyword_stmt(PUBLIC_STMT, KwStmt::Path)` — the same
+name-list machinery as `export`, so `@a` (MACRO_NAME), `$a`, and comma lists fall
+out for free. Projector (`sexpr.rs`): `project_public` heads the node `public`,
+dropping the leading `public` identifier token (it's a real CST child, unlike
+`export`'s distinct `EXPORT_KW`) before reading names via the new shared
+`name_run_item` (refactored out of `ident_run`). Faithful: the `public` keyword
++ names are real CST children; the projector only formats the head. Fixture
+`public_statement` (parser + dir corpus, 9 lines incl. the three identifier
+boundary forms). **Deferred:** unicode operator names (`public ⤈` js-8cf24212 —
+needs unicode-operator lexing, target below) and `;`-separated toplevel
+(`a=3; b=6; public a,b` js-8d65be34 — the pre-existing `toplevel-;` grouping
+divergence, unrelated to `public`).
+
+JS allow **346 → 350** (+4: `public A, B` js-dd6bb2e4, `module Mod … public A,B`
+js-1669b4f6, `module Mod2 … public a,b` js-37572fe9, `module M; public @a; end`
+js-491f0afc; the six identifier-form `public` cases already passed); divergence
+225 → 221, unsupported held 4. Dir allow 57 → 58. Zero regressions; green,
+clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Curly operator calls** (`<:{T}(x::T)` js-9edf5083, `+{T}(...)`) — extend the
+   operator-callee path to `CURLY_EXPR`/parametric method signatures.
+2. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, `public ⤈`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18n)
 
 **`macro` definitions.** `macro m(ex) … end` now parses. It is structurally
 identical to a `function` definition (a call-shaped signature plus a body
@@ -58,16 +98,8 @@ divergence as `function f end`; left for the error phase).
 JS allow **341 → 346** (+5: `macro f() end` js-60025fb4, `macro (:)(ex) end`
 js-a916f049, `macro (type)(ex) end` js-937fb0b6, `macro $f() end` js-a2d8af0b,
 `macro ($f)() end` js-8fd3d513); divergence 230 → 225, unsupported held 4. Dir
-allow 56 → 57. Zero regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
-   js-491f0afc) — add `public` as a contextual keyword routing through the same
-   `EXPORT_STMT`-style path; reuses the macro/name list machinery.
-2. **Curly operator calls** (`<:{T}(x::T)` js-9edf5083, `+{T}(...)`) — extend the
-   operator-callee path to `CURLY_EXPR`/parametric method signatures.
-3. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
+allow 56 → 57. Zero regressions; green, clippy/fmt clean. (Next targets
+superseded by 18o; `public` keyword landed.)
 
 ## Earlier session (2026-06-18m)
 

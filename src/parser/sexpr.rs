@@ -166,6 +166,7 @@ fn project(node: &SyntaxNode) -> String {
         IMPORT_STMT => project_import("import", node),
         USING_STMT => project_import("using", node),
         EXPORT_STMT => project_export(node),
+        PUBLIC_STMT => project_public(node),
         IMPORT_PATH => project_import_path(node),
         IMPORT_ALIAS => project_import_alias(node),
 
@@ -824,6 +825,18 @@ fn project_export(node: &SyntaxNode) -> String {
     sexp("export", items)
 }
 
+fn project_public(node: &SyntaxNode) -> String {
+    // The leading `public` contextual keyword is a plain identifier token in the
+    // CST (it stays an identifier elsewhere), so drop the first significant
+    // element before reading the name list exactly like `export`.
+    let items: Vec<String> = significant(node)
+        .into_iter()
+        .skip(1)
+        .filter_map(name_run_item)
+        .collect();
+    sexp("public", items)
+}
+
 fn project_import(head: &str, node: &SyntaxNode) -> String {
     // `import A` / `using A.B` / `import A: b, c as d`. The path tree is built by
     // the parser: each clause is an `IMPORT_PATH` or `IMPORT_ALIAS` node, and a
@@ -1171,16 +1184,22 @@ fn operator_token(node: &SyntaxNode) -> Option<SyntaxToken> {
 fn ident_run(node: &SyntaxNode) -> Vec<String> {
     significant(node)
         .into_iter()
-        .filter_map(|el| match el {
-            NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
-            NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
-            // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
-            NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
-            // A macro name (`export @a`) → `@a`.
-            NodeOrToken::Node(n) if n.kind() == MACRO_NAME => Some(project_macro_name(&n)),
-            _ => None,
-        })
+        .filter_map(name_run_item)
         .collect()
+}
+
+/// Project one element of an `export`/`public` name list: a bare identifier, a
+/// `NAME` node, an interpolated name (`$a`), or a macro name (`@a`).
+fn name_run_item(el: SyntaxElement) -> Option<String> {
+    match el {
+        NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
+        NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
+        // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
+        NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
+        // A macro name (`export @a`) → `@a`.
+        NodeOrToken::Node(n) if n.kind() == MACRO_NAME => Some(project_macro_name(&n)),
+        _ => None,
+    }
 }
 
 /// Project a flat sequence of significant elements representing a simple

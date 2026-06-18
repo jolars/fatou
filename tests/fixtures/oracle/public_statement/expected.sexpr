@@ -1,0 +1,1 @@
+(toplevel (public A B) (public @a) (public a @b) (module M (block (public A B))) (= public 4) (= (call public x) 6) (= (ref public 7) 5))

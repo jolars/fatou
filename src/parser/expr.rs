@@ -41,6 +41,12 @@ struct ExprFlags {
     /// literals, where `[begin … end]` is a block), matching Julia: `begin` is a
     /// first-index marker only in `ref` position.
     begin_marker: bool,
+    /// At toplevel or module-block statement position, where the contextual
+    /// keyword `public` opens a `PUBLIC_STMT`. Off everywhere else (so `public`
+    /// stays a plain identifier in sub-expressions and non-module blocks),
+    /// matching Julia, which only parses `public` as a keyword at file/module
+    /// level.
+    public_context: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -64,6 +70,20 @@ pub(crate) fn parse_expr(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     parse_expr_in(tokens, start, min_bp, diagnostics, ExprFlags::default())
+}
+
+/// Parse one statement at toplevel or module-block scope, where the contextual
+/// keyword `public` opens a `PUBLIC_STMT`. Identical to [`parse_expr`] otherwise.
+pub(crate) fn parse_stmt(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        public_context: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
@@ -98,8 +118,24 @@ fn parse_expr_in(
         array_mode,
         end_marker: _,
         begin_marker,
+        public_context,
     } = flags;
     let ctx = ParserCtx::new(tokens);
+
+    // The contextual keyword `public` (a plain identifier elsewhere) opens a
+    // `PUBLIC_STMT` at toplevel/module-block statement position, *unless* the next
+    // significant token is `(`, `=`, or `[` — those keep `public` an identifier
+    // (a call `public(x)`, an assignment `public = 1`, an index `public[i]`),
+    // matching JuliaSyntax's `parse_public` compatibility shim.
+    if public_context && is_public_keyword(&ctx, start) {
+        return parse_keyword_stmt(
+            tokens,
+            start,
+            SyntaxKind::PUBLIC_STMT,
+            KwStmt::Path,
+            diagnostics,
+        );
+    }
 
     // Leading keywords open a structural (block) form. Inside an indexing `a[…]`
     // a leading `begin` is instead the index-begin marker (handled in
@@ -276,6 +312,21 @@ fn parse_expr_in(
     }
 
     Some(lhs)
+}
+
+/// Whether the identifier `public` at `start` opens a `PUBLIC_STMT`. True when
+/// the token is the identifier `public` and the next significant token exists and
+/// is not `(`, `=`, or `[` — those three keep `public` an ordinary identifier (a
+/// call, assignment, or index), matching JuliaSyntax's `parse_public`.
+fn is_public_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
+    match ctx.token(start) {
+        Some(t) if t.kind == TokKind::Ident && t.text == "public" => {}
+        _ => return false,
+    }
+    match ctx.token(ctx.skip_trivia(start + 1)).map(|t| t.kind) {
+        Some(TokKind::LParen | TokKind::Eq | TokKind::LBracket) | None => false,
+        Some(_) => true,
+    }
 }
 
 /// Build a binary/assignment node from `lhs`, the gap (whitespace + operator +
