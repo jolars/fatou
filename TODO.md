@@ -237,6 +237,23 @@ through), so the grammar can grow incrementally.
   `ERROR`, awaiting unicode-operator lexing) and the paren-quoted forms
   (`import A.:(+)`, `import A.(:+)`).
 
+- [x] Operator-as-call functions. A non-unary binary operator glued to a `(`
+  (`*(x)`, `==(a, b)`, broadcast `.*(a, b)`, `.==(a, b)`, `=>(x, y)`, `*()`) names
+  a function call with the operator as the callee: `parse_prefix` (`expr.rs`) gains
+  an arm gated by `is_operator_call_name` (the non-unary, non-syntactic operators —
+  excludes `+`/`-`/`!`/`~`, `&`, `:`, `::`, `&&`/`||`, `->`, `<:`/`>:`) that, on an
+  adjacent `(`, builds a `CALL_EXPR` whose first child is the bare operator token
+  plus the usual `ARG_LIST`. The projector's `project_call` now reads the callee
+  from the first *significant* element, so an operator-token callee projects via
+  `operator_func_repr` (`(. *)` for broadcast, the bare text otherwise) →
+  `(call * x)` / `(call (. *) x)`. Unary operators keep their prefix-application
+  parse (`+(x)` → `(call-pre + x)`). **Deferred (still divergences):** unary
+  operator paren-calls where the parens are an arglist (`+(a...)` →
+  `(call + (... a))`, `+(a; b, c)`, `+(x, y)` — the JuliaSyntax `is_paren_call`
+  heuristic over commas/splat/semis), the type-operator forms (`<:(a,)` → `(<: a)`),
+  curly operator calls (`+{T}(x::T)`), and standalone parenthesized operators
+  (`(+)` → `+`).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

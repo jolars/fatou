@@ -353,6 +353,26 @@ fn parse_prefix(
                 events,
             })
         }
+        // A non-unary operator glued to a `(` is a call with the operator as the
+        // callee: `*(x)` → `(call * x)`, `.*(a, b)` → `(call (. *) a b)`. Only the
+        // adjacent form is a call (`* (x)` is an error); a space would leave the
+        // `(` to be parsed separately. Unary operators (`+`, `-`, `!`, `~`) keep
+        // their prefix-application handling above.
+        k if is_operator_call_name(k)
+            && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen) =>
+        {
+            let (list_events, end) = parse_arg_list(
+                ctx,
+                start + 1,
+                TokKind::RParen,
+                SyntaxKind::ARG_LIST,
+                diagnostics,
+            );
+            let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
+            events.extend(list_events);
+            events.push(Event::Finish);
+            Some(ExprParse { start, end, events })
+        }
         // A prefix `:` quotes a symbol (`:foo`, `:end`) or expression (`:(x+1)`).
         // A bare `:` not followed by something quotable (`a[:]`) is not a quote;
         // `parse_quote_sym` returns `None` so it falls through.
@@ -1540,6 +1560,52 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::DotSlashSlashEq
             | TokKind::DotCaretEq
             | TokKind::DotPercentEq
+    )
+}
+
+/// A binary operator that, glued to a `(`, names a function call: `*(x)`,
+/// `==(a, b)`, `.*(a, b)`. These are the operators that are *not* unary in Julia
+/// (so the parens form an argument list, never a prefix application) and not
+/// syntactic (`&`, `:`, `::`, `&&`, `||`, `->` route elsewhere). The unary
+/// operators (`+`, `-`, `!`, `~`) and type operators (`<:`, `>:`) are excluded;
+/// they keep their prefix-application parse.
+fn is_operator_call_name(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        Star | Slash
+            | SlashSlash
+            | Caret
+            | Percent
+            | EqEq
+            | NotEq
+            | Lt
+            | Le
+            | Gt
+            | Ge
+            | Pipe
+            | Shl
+            | Shr
+            | UShr
+            | PipeGt
+            | PipeLt
+            | FatArrow
+            | LongArrow
+            | LeftRightArrow
+            | DotStar
+            | DotSlash
+            | DotSlashSlash
+            | DotCaret
+            | DotPercent
+            | DotEqEq
+            | DotNotEq
+            | DotLt
+            | DotLe
+            | DotGt
+            | DotGe
+            | DotFatArrow
+            | DotLongArrow
+            | DotPipeGt
     )
 }
 

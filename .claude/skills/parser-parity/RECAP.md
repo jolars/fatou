@@ -22,16 +22,60 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **308 allowlisted**, 259 divergence, 8 unsupported.
-Dir corpus: **48 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "operator-symbol import names" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **310 allowlisted**, 257 divergence, 8 unsupported.
+Dir corpus: **49 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "operator-as-call functions" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18e)
+## Latest session (2026-06-18f)
+
+**Operator-as-call functions.** A non-unary binary operator glued to a `(` names
+a function call with the operator as callee. `parse_prefix` (`expr.rs`) gains an
+arm gated by the new `is_operator_call_name` predicate (the non-unary,
+non-syntactic operators: `* / // ^ % == != < <= > >= | << >> >>> |> <| => --> <-->`
+plus their broadcast forms, excluding `+ - ! ~`, `&`, `:`, `::`, `&& ||`, `->`,
+`<: >:`); on an *adjacent* `(` it builds a `CALL_EXPR` whose first child is the
+bare operator token plus the usual `ARG_LIST`. Projector: `project_call` now reads
+the callee from the first *significant* element (was first child node), so an
+operator-token callee routes through the new `operator_func_repr` helper —
+`(. *)` for broadcast (via `infix_head`'s `DotCallI`), bare text otherwise — giving
+`*(x)` → `(call * x)`, `.*(a,b)` → `(call (. *) a b)`. Faithful: the operator is a
+real CST child, the projector only formats it. Unary ops keep their prefix parse
+(`+(x)` → `(call-pre + x)`, untouched). Files: `expr.rs` (arm + predicate),
+`sexpr.rs` (`project_call` callee loop + `operator_func_repr`). Fixture
+`operator_call` (parser + dir corpus: `*(x) .*(x) /(x,y) ==(a,b) %(x) .==(a,b)
+=>(x,y) |(x) *(x,y,z) *()`). **Deferred:** unary operator arglist-calls (`+(a...)`
+→ `(call + (... a))`, `+(a;b,c)`, `+(x,y)` — needs JuliaSyntax's `is_paren_call`
+heuristic over commas/splat/semis), type-operator `<:(a,)` → `(<: a)`, curly
+operator calls (`+{T}(x::T)`), standalone parenthesized operators (`(+)` → `+`).
+
+JS allow **308 → 310** (+2: `*(x)` js-4766b25e, `.*(x)` js-ddc5134e); divergence
+259 → 257, unsupported held 8. Dir allow 48 → 49. Zero regressions; green,
+clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Unary operator arglist-calls** (`+(a...)` → `(call + (... a))`, `+(x,y)`,
+   `+(a;b,c)`, js-1ac6ceb0/js-3af347c3) — implement JuliaSyntax's `is_paren_call`
+   heuristic in `parse_prefix`'s existing unary arm: when the parens have a comma,
+   an initial splat, or initial-semi+args, build a `CALL_EXPR` (callee = op token)
+   instead of the `UNARY_EXPR`+`PAREN_EXPR`. Reuses this session's `project_call`
+   operator-callee support directly. Highest-value follow-on.
+2. **Standalone parenthesized operators** (`(+)` → `+`, `(:)` → `:`, `(<:)`) —
+   `parse_paren` treats a lone operator-function (op names, `:`, broadcast `.op`,
+   but NOT `=`/`::`/`&&`/`||`/`->`) as a value. Not in JS corpus directly but
+   complements the quote-only handling.
+3. **Import paren-quotes** (`import A.:(+)`, `import A.(:+)`, js-0492d7fb,
+   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery.
+4. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
+   **tuple-destructuring loop vars** (`for (i, j) in …`).
+5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18e)
 
 **Paren-quoted operators.** `parse_quote_sym` (`expr.rs`) gained an `LParen` arm
 guarded by `is_paren_quotable_op`: when `:` is followed by `( op )` whose interior
@@ -53,21 +97,6 @@ surgery).
 
 JS allow **305 → 308** (+3: `:(=)`, `:(::)`, `:(::\n)`); divergence 261 → 259,
 unsupported 9 → 8. Dir allow 47 → 48. Zero regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Standalone parenthesized operators** (`(+)` → `+`, `(:)` → `:`, js-4766b25e
-   `*(x)`-adjacent) — `parse_paren` should treat a lone *operator-function* (op
-   names, `:`, but NOT `=`/`::`) as a value. Complements this session's quote-only
-   handling.
-2. **Import paren-quotes** (`import A.:(+)`, `import A.(:+)`, js-0492d7fb,
-   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery to slot
-   a paren-quote component after a dot (and the colon-inside-paren `.(:+)` form).
-3. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`,
-   js-2155b9ca, js-5d3b9cc6).
-4. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
-   **tuple-destructuring loop vars** (`for (i, j) in …`).
-5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, and many scattered FAILs; larger lexer feature.
 
 ## Earlier session (2026-06-18d)
 

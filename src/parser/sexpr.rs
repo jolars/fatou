@@ -251,6 +251,17 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
     }
 }
 
+/// The function-name representation of an operator used as a callee, e.g. in
+/// `*(x)` → `(call * x)` or `.*(x)` → `(call (. *) x)`. Broadcast operators
+/// project to `(. op)`; everything else to the bare operator text.
+fn operator_func_repr(kind: SyntaxKind) -> String {
+    match infix_head(kind) {
+        InfixHead::CallI(s) | InfixHead::Special(s) => s.to_string(),
+        InfixHead::DotCallI(s) => format!("(. {s})"),
+        InfixHead::Dot => ".".to_string(),
+    }
+}
+
 fn is_operator(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -409,9 +420,21 @@ fn project_where(node: &SyntaxNode) -> String {
 
 fn project_call(head: &str, node: &SyntaxNode) -> String {
     let mut parts = Vec::new();
-    let mut children = node.children();
-    if let Some(callee) = children.next() {
-        parts.push(project(&callee));
+    // The callee is the first significant element. Usually a node (`f(x)`), but
+    // for operator-as-call functions (`*(x)`, `.*(x)`) it is a bare operator
+    // token that projects to its function name (`*`, `(. *)`).
+    for el in significant(node) {
+        match el {
+            NodeOrToken::Node(n) => {
+                parts.push(project(&n));
+                break;
+            }
+            NodeOrToken::Token(t) if is_operator(t.kind()) => {
+                parts.push(operator_func_repr(t.kind()));
+                break;
+            }
+            NodeOrToken::Token(_) => {}
+        }
     }
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
         parts.extend(project_args(&arg_list));
