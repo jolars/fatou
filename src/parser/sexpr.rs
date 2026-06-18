@@ -98,7 +98,15 @@ fn project(node: &SyntaxNode) -> String {
 
         PAREN_EXPR | CONDITION => match first_node(node) {
             Some(inner) => project(&inner),
-            None => "(block)".to_string(),
+            // A lone operator in parens is the operator as a value/symbol, e.g.
+            // `(+)` → `+` or, quoted, `:(=)` → `(quote-: =)`.
+            None => significant(node)
+                .iter()
+                .find_map(|el| match el {
+                    NodeOrToken::Token(t) if is_operator(t.kind()) => Some(t.text().to_string()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "(block)".to_string()),
         },
 
         BINARY_EXPR => project_binary(node),

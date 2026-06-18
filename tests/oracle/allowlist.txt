@@ -30,6 +30,7 @@ macros
 multi_clause_generators
 nested_string_interp
 operator_symbol_quote
+operator_symbol_quote_paren
 pairs
 parametric_types
 range_operator

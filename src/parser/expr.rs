@@ -391,6 +391,30 @@ fn parse_quote_sym(
     let mut events = vec![Event::Start(SyntaxKind::QUOTE_SYM), Event::Tok(start)];
     push_range(&mut events, start + 1, next);
     match ctx.token(next).map(|t| t.kind)? {
+        // `:(op)` — a lone operator quoted in parens, e.g. `:(=)`, `:(::)`,
+        // `:(:)`, `:(+)`. In a quote context a bare operator (including the
+        // syntactic `=`/`::`/`:` that are errors in value position) is a symbol.
+        // Build a `PAREN_EXPR` wrapping the operator token; the projector reads a
+        // lone-operator paren as the operator's text.
+        TokKind::LParen
+            if {
+                let op = ctx.skip_trivia(next + 1);
+                is_paren_quotable_op(ctx.token(op).map(|t| t.kind))
+                    && ctx.token(ctx.skip_trivia(op + 1)).map(|t| t.kind) == Some(TokKind::RParen)
+            } =>
+        {
+            let op = ctx.skip_trivia(next + 1);
+            let rparen = ctx.skip_trivia(op + 1);
+            events.push(Event::Start(SyntaxKind::PAREN_EXPR));
+            push_range(&mut events, next, rparen + 1);
+            events.push(Event::Finish); // PAREN_EXPR
+            events.push(Event::Finish); // QUOTE_SYM
+            Some(ExprParse {
+                start,
+                end: rparen + 1,
+                events,
+            })
+        }
         // `:(expr)` — the parenthesized expression is the quoted form.
         TokKind::LParen => {
             let paren = parse_paren(ctx, next, diagnostics)?;
@@ -1517,6 +1541,31 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::DotCaretEq
             | TokKind::DotPercentEq
     )
+}
+
+/// A lone operator that may be quoted inside parens, `:(op)`. Accepts undotted
+/// operator names, undotted augmented/plain assignment operators, and the
+/// syntactic `::`/`:` — all of which are valid symbols in a quote context (even
+/// `=`/`::`, which are errors in value position). Broadcast forms (`.+`, `.=`)
+/// quote to a `(. op)` shape and are excluded here.
+fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
+    let Some(k) = kind else { return false };
+    use TokKind::*;
+    is_op_name(k)
+        || matches!(
+            k,
+            Eq | PlusEq
+                | MinusEq
+                | StarEq
+                | SlashEq
+                | SlashSlashEq
+                | CaretEq
+                | PercentEq
+                | PipeEq
+                | AmpEq
+                | ColonColon
+                | Colon
+        )
 }
 
 /// Parse the `then : else` tail of a ternary whose `?` sits at `q_idx`, given the

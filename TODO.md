@@ -133,10 +133,17 @@ through), so the grammar can grow incrementally.
   (`:+`, `:<:`, `:+=` → `(quote-: …)`): an extra `parse_quote_sym` arm wraps an
   undotted operator-name token (`is_op_name`, shared from `structural.rs`) or an
   assignment operator (`is_assignment_op`) as a bare symbol, matching Julia (a
-  space before the op, `: +`, is an error and stays unhandled). **Known
+  space before the op, `: +`, is an error and stays unhandled). Paren-quoted
+  operators now quote too (`:(=)`, `:(::)`, `:(:)`, `:(+)`, `:(+=)` →
+  `(quote-: …)`): a `parse_quote_sym` `LParen` arm recognizes `( op )` where the
+  interior is a lone undotted operator (`is_paren_quotable_op`, which adds the
+  syntactic `=`/`::`/`:` that are errors in value position) and builds a
+  `PAREN_EXPR` wrapping the bare operator token; the projector reads a
+  lone-operator paren (no inner node) as the operator's text. **Known
   limitations:** the bare-`:` Colon value (`a[:]` → `(ref a :)`), broadcast
-  operator quotes (`:.+` → `(. +)`), and paren-quoted operators (`:(=)`, `:(::)`)
-  are deferred (still divergences).
+  operator quotes (`:.+` → `(. +)`, `:(.=)` → `(quote-: (. =))`), standalone
+  parenthesized operators (`(+)` → `+`), and import paren-quotes (`import A.:(+)`,
+  `import A.(:+)`) are deferred (still divergences).
 - [x] Pair operator `=>` (and broadcast `.=>`). Lexed as `FatArrow`/`DotFatArrow`
   (a new two-/three-char operator), parsed as a `BINARY_EXPR` on the arrow tier
   `(4, 3)` — right-associative, looser than `||`, tighter than `=` — and
@@ -301,7 +308,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`) and paren-quoted operators (`:(=)`, `:(::)`).
+  (`a*b*c`) and standalone parenthesized operators (`(+)` → `+`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

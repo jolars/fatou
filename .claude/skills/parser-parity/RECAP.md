@@ -22,8 +22,8 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **305 allowlisted**, 261 divergence, 9 unsupported.
-Dir corpus: **47 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+JS corpus (575 cases): **308 allowlisted**, 259 divergence, 8 unsupported.
+Dir corpus: **48 allowlisted**, 5 blocked + 1 skipped (do_blocks).
 Grammar bullets through "operator-symbol import names" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,7 +31,45 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18d)
+## Latest session (2026-06-18e)
+
+**Paren-quoted operators.** `parse_quote_sym` (`expr.rs`) gained an `LParen` arm
+guarded by `is_paren_quotable_op`: when `:` is followed by `( op )` whose interior
+is a lone undotted operator, it builds a `PAREN_EXPR` wrapping the bare operator
+token instead of calling `parse_paren` (which errors on a lone op). The new
+predicate accepts `is_op_name` plus the undotted assignment ops and the *syntactic*
+`=`/`::`/`:` — these are errors in value position but valid as quoted symbols. The
+projector's `PAREN_EXPR | CONDITION` arm now falls back, when there's no inner node,
+to the first significant `is_operator` token's text, so `(=)`/`(::)`/`(+)` inside a
+quote project to `=`/`::`/`+` and the whole quote to `(quote-: …)`. Faithful: the
+parens stay in the CST, the projector only unwraps. Files: `expr.rs` (arm +
+`is_paren_quotable_op`), `sexpr.rs` (PAREN_EXPR fallback). Fixture
+`operator_symbol_quote_paren` (parser + dir corpus: `:(=) :(::) :(:) :(+) :(&&)
+:(<:) :(+=) :(==)`). **Deferred:** broadcast paren-quotes (`:(.=)` → `(quote-: (. =))`),
+standalone parenthesized operators (`(+)` → `+`, still ERROR — Julia distinguishes
+quote-context where `=`/`::` are values from value-context where they're errors),
+and import paren-quotes (`import A.:(+)`, `import A.(:+)` — need `parse_import_path`
+surgery).
+
+JS allow **305 → 308** (+3: `:(=)`, `:(::)`, `:(::\n)`); divergence 261 → 259,
+unsupported 9 → 8. Dir allow 47 → 48. Zero regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Standalone parenthesized operators** (`(+)` → `+`, `(:)` → `:`, js-4766b25e
+   `*(x)`-adjacent) — `parse_paren` should treat a lone *operator-function* (op
+   names, `:`, but NOT `=`/`::`) as a value. Complements this session's quote-only
+   handling.
+2. **Import paren-quotes** (`import A.:(+)`, `import A.(:+)`, js-0492d7fb,
+   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery to slot
+   a paren-quote component after a dot (and the colon-inside-paren `.(:+)` form).
+3. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`,
+   js-2155b9ca, js-5d3b9cc6).
+4. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
+   **tuple-destructuring loop vars** (`for (i, j) in …`).
+5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, and many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18d)
 
 **Prefix operator-symbol quoting.** `parse_quote_sym` (`expr.rs`) gained one arm:
 after the `:`, an undotted operator-name token (`is_op_name`, now `pub(super)` and
@@ -50,18 +88,6 @@ needs quote-context paren parsing where lone ops are values), broadcast quotes
 JS allow **302 → 305** (+3: `:+=`, `:<:`, and `function (:*=(f))() end`);
 divergence 262 → 261, unsupported 11 → 9. Dir allow 46 → 47. Zero regressions;
 green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Paren-quoted operators** (`:(=)`→`(quote-: =)`, `:(::)`→`(quote-: ::)`,
-   js-4b4543b0, js-4745d6d9, js-e83b620a) — finishes the quoting cluster; needs a
-   quote-context paren parse where a lone operator (`(=)`, `(::)`) is a value, not
-   an error. Also `import A.:(+)` / `import A.(:+)` (js-0492d7fb, js-6fe4ce2d).
-2. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`,
-   js-2155b9ca, js-5d3b9cc6).
-3. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
-   **tuple-destructuring loop vars** (`for (i, j) in …`).
-4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, and many scattered FAILs; larger lexer feature.
 
 ## Earlier session (2026-06-18c)
 
