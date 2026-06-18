@@ -19,6 +19,7 @@ dot_logical_operator
 escaped_dollar
 generator_arguments
 generators
+import_operator_names
 import_paths
 keyword_args
 keyword_statements

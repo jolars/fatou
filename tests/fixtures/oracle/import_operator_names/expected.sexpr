@@ -1,0 +1,1 @@
+(toplevel (import (: (importpath A) (importpath +))) (import (: (importpath A) (importpath +) (importpath ==))) (import (: (importpath Base) (importpath +) (importpath -) (importpath *))) (import (importpath A ==)) (import (importpath A (quote-: +))) (using (: (importpath A) (importpath <))))

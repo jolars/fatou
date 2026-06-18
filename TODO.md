@@ -195,10 +195,10 @@ through), so the grammar can grow incrementally.
   the projector groups base-vs-names. Projects to `(import (importpath . A))`,
   `(import (as (importpath A) B))`, and `(import (: (importpath A) (as (importpath
   x) y)))` — faithfully, reading the real nodes (no projector reconstruction).
-  **Deferred (still divergences):** operator-symbol names (`import A.==`,
-  `import A: +`), `@macro`/`$interp` paths, and the `. .A` (space-separated dots)
-  form — each is carried through verbatim, keeping losslessness. `export`'s name
-  list is untouched (still passthrough).
+  **Deferred (still divergences):** `@macro`/`$interp` paths, and the `. .A`
+  (space-separated dots) form — each is carried through verbatim, keeping
+  losslessness. `export`'s name list is untouched (still passthrough).
+  Operator-symbol names now parse (see the dedicated bullet below).
 
 - [x] Arrow, pipe, and bitshift operators. The arrow family `-->` (own special
   head `(--> a b)`), `<-->` (ordinary `(call-i a <--> b)`), and broadcast `.-->`
@@ -211,6 +211,19 @@ through), so the grammar can grow incrementally.
   and `^` (Julia precedence 14). Lexed with longest-match (`<-->` 4-char and `-->`/
   `>>>` 3-char beat their prefixes; `.-->` 4-char beats `.-`). **Deferred:** dotted
   bitshift (`.<< .>> .>>>`), and the unicode-subscript arrow `-->₁`.
+
+- [x] Operator-symbol import names. `parse_import_path` (`structural.rs`) now
+  accepts symbolic operators as path components in three positions: a bare name in
+  the `:` list (`import A: +, ==`, `import Base: +, -, *`), a fused dotted operator
+  component (`import A.==`, lexed as the single `.==` token whose leading dot is the
+  separator — the projector strips it), and a quoted operator symbol after a dot
+  (`import A.:+` → a `QUOTE_SYM` node → `(importpath A (quote-: +))`). Two
+  predicates (`is_op_name`/`is_dotted_op_name`) gate the undotted vs. fused-dotted
+  operator tokens; `project_import_path` reuses the projector's `is_operator` and
+  routes `QUOTE_SYM` children through `project_quote_sym`. **Deferred (still
+  divergences):** unicode operators (`import .⋆`, `import A.⋆.f` — `⋆` lexes as
+  `ERROR`, awaiting unicode-operator lexing) and the paren-quoted forms
+  (`import A.:(+)`, `import A.(:+)`).
 
 ## Incremental reparse
 
@@ -283,7 +296,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`) and operator-symbol import names (`import A.==`, `import A: +`).
+  (`a*b*c`) and operator-symbol quoting (`:+`, `:(=)`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

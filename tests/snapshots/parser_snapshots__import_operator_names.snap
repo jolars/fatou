@@ -1,0 +1,74 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..84
+  IMPORT_STMT@0..11
+    IMPORT_KW@0..6 "import"
+    WHITESPACE@6..7 " "
+    IMPORT_PATH@7..8
+      IDENT@7..8 "A"
+    COLON@8..9 ":"
+    WHITESPACE@9..10 " "
+    IMPORT_PATH@10..11
+      PLUS@10..11 "+"
+  NEWLINE@11..12 "\n"
+  IMPORT_STMT@12..27
+    IMPORT_KW@12..18 "import"
+    WHITESPACE@18..19 " "
+    IMPORT_PATH@19..20
+      IDENT@19..20 "A"
+    COLON@20..21 ":"
+    WHITESPACE@21..22 " "
+    IMPORT_PATH@22..23
+      PLUS@22..23 "+"
+    COMMA@23..24 ","
+    WHITESPACE@24..25 " "
+    IMPORT_PATH@25..27
+      EQ_EQ@25..27 "=="
+  NEWLINE@27..28 "\n"
+  IMPORT_STMT@28..48
+    IMPORT_KW@28..34 "import"
+    WHITESPACE@34..35 " "
+    IMPORT_PATH@35..39
+      IDENT@35..39 "Base"
+    COLON@39..40 ":"
+    WHITESPACE@40..41 " "
+    IMPORT_PATH@41..42
+      PLUS@41..42 "+"
+    COMMA@42..43 ","
+    WHITESPACE@43..44 " "
+    IMPORT_PATH@44..45
+      MINUS@44..45 "-"
+    COMMA@45..46 ","
+    WHITESPACE@46..47 " "
+    IMPORT_PATH@47..48
+      STAR@47..48 "*"
+  NEWLINE@48..49 "\n"
+  IMPORT_STMT@49..60
+    IMPORT_KW@49..55 "import"
+    WHITESPACE@55..56 " "
+    IMPORT_PATH@56..60
+      IDENT@56..57 "A"
+      DOT_EQ_EQ@57..60 ".=="
+  NEWLINE@60..61 "\n"
+  IMPORT_STMT@61..72
+    IMPORT_KW@61..67 "import"
+    WHITESPACE@67..68 " "
+    IMPORT_PATH@68..72
+      IDENT@68..69 "A"
+      DOT@69..70 "."
+      QUOTE_SYM@70..72
+        COLON@70..71 ":"
+        PLUS@71..72 "+"
+  NEWLINE@72..73 "\n"
+  USING_STMT@73..83
+    USING_KW@73..78 "using"
+    WHITESPACE@78..79 " "
+    IMPORT_PATH@79..80
+      IDENT@79..80 "A"
+    COLON@80..81 ":"
+    WHITESPACE@81..82 " "
+    IMPORT_PATH@82..83
+      LT@82..83 "<"
+  NEWLINE@83..84 "\n"

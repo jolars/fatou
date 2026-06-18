@@ -509,34 +509,133 @@ fn parse_import_path(
         i += 1;
     }
 
-    // First name component.
-    if !matches!(ctx.token(i).map(|t| t.kind), Some(TokKind::Ident)) {
-        // No name: a bare relative path (`import .`) keeps just the dots; nothing
-        // at all means no path here.
-        if body.is_empty() {
-            return start;
+    // First name component: an identifier, or a bare operator symbol when the
+    // clause's whole path is an operator (`import A: +`, `import A: +, ==`).
+    match ctx.token(i).map(|t| t.kind) {
+        Some(TokKind::Ident) => {
+            body.push(Event::Tok(i));
+            i += 1;
         }
-        events.push(Event::Start(SyntaxKind::IMPORT_PATH));
-        events.extend(body);
-        events.push(Event::Finish);
-        return i;
+        Some(k) if is_op_name(k) => {
+            body.push(Event::Tok(i));
+            i += 1;
+        }
+        _ => {
+            // No name: a bare relative path (`import .`) keeps just the dots;
+            // nothing at all means no path here.
+            if body.is_empty() {
+                return start;
+            }
+            events.push(Event::Start(SyntaxKind::IMPORT_PATH));
+            events.extend(body);
+            events.push(Event::Finish);
+            return i;
+        }
     }
-    body.push(Event::Tok(i));
-    i += 1;
 
-    // Further `.name` components, kept tight (no internal whitespace).
-    while matches!(ctx.token(i).map(|t| t.kind), Some(TokKind::Dot))
-        && matches!(ctx.token(i + 1).map(|t| t.kind), Some(TokKind::Ident))
-    {
-        body.push(Event::Tok(i)); // separating `.`
-        body.push(Event::Tok(i + 1)); // name
-        i += 2;
+    // Further `.component` parts, kept tight (no internal whitespace). A
+    // component is an identifier (`A.B`), a fused dotted operator (`A.==`, lexed
+    // as one `.==` token whose leading dot is the separator), or a quoted
+    // operator symbol (`A.:+` → `.` `:` `+` → `(quote-: +)`).
+    loop {
+        match (
+            ctx.token(i).map(|t| t.kind),
+            ctx.token(i + 1).map(|t| t.kind),
+        ) {
+            (Some(TokKind::Dot), Some(TokKind::Ident)) => {
+                body.push(Event::Tok(i)); // separating `.`
+                body.push(Event::Tok(i + 1)); // name
+                i += 2;
+            }
+            (Some(TokKind::Dot), Some(TokKind::Colon)) if matches!(ctx.token(i + 2).map(|t| t.kind), Some(k) if is_op_name(k)) =>
+            {
+                body.push(Event::Tok(i)); // separating `.`
+                body.push(Event::Start(SyntaxKind::QUOTE_SYM));
+                body.push(Event::Tok(i + 1)); // `:`
+                body.push(Event::Tok(i + 2)); // operator
+                body.push(Event::Finish);
+                i += 3;
+            }
+            (Some(k), _) if is_dotted_op_name(k) => {
+                body.push(Event::Tok(i));
+                i += 1;
+            }
+            _ => break,
+        }
     }
 
     events.push(Event::Start(SyntaxKind::IMPORT_PATH));
     events.extend(body);
     events.push(Event::Finish);
     i
+}
+
+/// An undotted operator symbol usable as a bare import-path name (`import A: +`,
+/// `import A.:+`, `import A: +, ==`). Excludes the `:` list separator, the
+/// relative-dot tokens, and assignment forms (`=`, `+=`).
+fn is_op_name(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        Plus | Minus
+            | Star
+            | Slash
+            | SlashSlash
+            | Caret
+            | Percent
+            | EqEq
+            | NotEq
+            | Lt
+            | Le
+            | Gt
+            | Ge
+            | AndAnd
+            | OrOr
+            | Subtype
+            | Supertype
+            | Arrow
+            | LongArrow
+            | LeftRightArrow
+            | FatArrow
+            | Shl
+            | Shr
+            | UShr
+            | PipeGt
+            | PipeLt
+            | Bang
+            | Amp
+            | Pipe
+            | Tilde
+    )
+}
+
+/// A fused dotted (broadcast) operator token (`.+`, `.==`). In an import path
+/// these encode a separator dot fused to an operator name, so the projector
+/// strips the leading dot (`import A.==` → `(importpath A ==)`).
+fn is_dotted_op_name(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        DotPlus
+            | DotMinus
+            | DotStar
+            | DotSlash
+            | DotSlashSlash
+            | DotCaret
+            | DotPercent
+            | DotEqEq
+            | DotNotEq
+            | DotLt
+            | DotLe
+            | DotGt
+            | DotGe
+            | DotAndAnd
+            | DotOrOr
+            | DotTilde
+            | DotFatArrow
+            | DotLongArrow
+            | DotPipeGt
+    )
 }
 
 /// Whether the token at `i` is the contextual `as` keyword (a plain identifier

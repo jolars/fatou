@@ -807,10 +807,24 @@ fn project_import_path(node: &SyntaxNode) -> String {
                     parts.push(t.text().to_string());
                     seen_name = true;
                 }
+                // Separator dots/colons between components carry no meaning here.
+                DOT | DOT_DOT | DOT_DOT_DOT | COLON => {}
+                // An operator-symbol name component (`import A.==`, `import A: +`).
+                // A fused dotted operator (`.==`) carries the separator dot, which
+                // we strip — JuliaSyntax models it as the bare operator name.
+                k if is_operator(k) => {
+                    parts.push(t.text().trim_start_matches('.').to_string());
+                    seen_name = true;
+                }
                 _ => {}
             },
             NodeOrToken::Node(n) if n.kind() == NAME => {
                 parts.push(name_text(&n));
+                seen_name = true;
+            }
+            // A quoted operator symbol component (`import A.:+` → `(quote-: +)`).
+            NodeOrToken::Node(n) if n.kind() == QUOTE_SYM => {
+                parts.push(project_quote_sym(&n));
                 seen_name = true;
             }
             _ => {}
