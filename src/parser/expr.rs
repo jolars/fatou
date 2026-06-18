@@ -319,6 +319,37 @@ fn parse_prefix(
         | TokKind::Subtype
         | TokKind::Supertype
         | TokKind::ColonColon => {
+            // A unary arithmetic/logical operator glued to a `(` is a call when
+            // the parens look like an argument list (`+(x, y)` → `(call + x y)`,
+            // `+(a...)` → `(call + (... a))`, `+(a; b, c)` → `(call + a
+            // (parameters b c))`). A single bare operand stays a prefix
+            // application (`+(x)` → `(call-pre + x)`). Mirrors JuliaSyntax's
+            // paren-call heuristic. The syntactic `::`/`<:`/`>:` keep their
+            // prefix handling (their paren-call shape differs and is deferred).
+            if matches!(
+                tok.kind,
+                TokKind::Plus
+                    | TokKind::Minus
+                    | TokKind::DotPlus
+                    | TokKind::DotMinus
+                    | TokKind::Bang
+                    | TokKind::Tilde
+                    | TokKind::DotTilde
+            ) && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen)
+                && unary_op_paren_is_call(ctx, start + 1)
+            {
+                let (list_events, end) = parse_arg_list(
+                    ctx,
+                    start + 1,
+                    TokKind::RParen,
+                    SyntaxKind::ARG_LIST,
+                    diagnostics,
+                );
+                let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
+                events.extend(list_events);
+                events.push(Event::Finish);
+                return Some(ExprParse { start, end, events });
+            }
             let node = if tok.kind == TokKind::ColonColon {
                 SyntaxKind::TYPE_ANNOTATION
             } else {
@@ -1569,6 +1600,39 @@ fn is_assignment_op(kind: TokKind) -> bool {
 /// syntactic (`&`, `:`, `::`, `&&`, `||`, `->` route elsewhere). The unary
 /// operators (`+`, `-`, `!`, `~`) and type operators (`<:`, `>:`) are excluded;
 /// they keep their prefix-application parse.
+/// Whether a unary operator's adjacent parens form an argument list — making
+/// `+(...)` a call (`(call + …)`) rather than a parenthesized operand (a prefix
+/// application `+(x)` → `(call-pre + x)`). Mirrors JuliaSyntax: the parens are a
+/// call when empty (`+()`), opened by a leading `;` (a parameters section,
+/// `+(; a)`), or when — at the top level — they contain a comma (`+(x, y)`) or a
+/// splat `...` (`+(a...)`). A lone interior expression, or a non-leading `;`
+/// block (`+(a; b)`), stays a prefix operand.
+fn unary_op_paren_is_call(ctx: &ParserCtx<'_>, lparen_idx: usize) -> bool {
+    let first = ctx.skip_trivia(lparen_idx + 1);
+    match ctx.token(first).map(|t| t.kind) {
+        Some(TokKind::RParen) => return true,
+        Some(TokKind::Semicolon) => return true,
+        _ => {}
+    }
+    let mut depth = 0i32;
+    let mut i = first;
+    while let Some(tok) = ctx.token(i) {
+        match tok.kind {
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                if depth == 0 {
+                    return false;
+                }
+                depth -= 1;
+            }
+            TokKind::Comma | TokKind::DotDotDot if depth == 0 => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 fn is_operator_call_name(kind: TokKind) -> bool {
     use TokKind::*;
     matches!(

@@ -255,6 +255,11 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
 /// `*(x)` → `(call * x)` or `.*(x)` → `(call (. *) x)`. Broadcast operators
 /// project to `(. op)`; everything else to the bare operator text.
 fn operator_func_repr(kind: SyntaxKind) -> String {
+    // `!` is unary-only (no `infix_head` entry), but it is a valid call callee:
+    // `!(a, b)` → `(call ! a b)`.
+    if kind == BANG {
+        return "!".to_string();
+    }
     match infix_head(kind) {
         InfixHead::CallI(s) | InfixHead::Special(s) => s.to_string(),
         InfixHead::DotCallI(s) => format!("(. {s})"),

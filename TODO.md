@@ -247,12 +247,23 @@ through), so the grammar can grow incrementally.
   from the first *significant* element, so an operator-token callee projects via
   `operator_func_repr` (`(. *)` for broadcast, the bare text otherwise) →
   `(call * x)` / `(call (. *) x)`. Unary operators keep their prefix-application
-  parse (`+(x)` → `(call-pre + x)`). **Deferred (still divergences):** unary
-  operator paren-calls where the parens are an arglist (`+(a...)` →
-  `(call + (... a))`, `+(a; b, c)`, `+(x, y)` — the JuliaSyntax `is_paren_call`
-  heuristic over commas/splat/semis), the type-operator forms (`<:(a,)` → `(<: a)`),
-  curly operator calls (`+{T}(x::T)`), and standalone parenthesized operators
-  (`(+)` → `+`).
+  parse (`+(x)` → `(call-pre + x)`). **Deferred (still divergences):** the
+  type-operator forms (`<:(a,)` → `(<: a)`), curly operator calls (`+{T}(x::T)`),
+  and standalone parenthesized operators (`(+)` → `+`).
+
+- [x] Unary operator paren-calls. A unary arithmetic/logical operator
+  (`+ - ! ~` and broadcast `.+ .- .~`) glued to a `(` is a function call when the
+  parens look like an argument list: `+(a...)` → `(call + (... a))`, `+(x, y)` →
+  `(call + x y)`, `+(a; b, c)` → `(call + a (parameters b c))`, `+()` → `(call +)`,
+  `+(; a)` → `(call + (parameters a))`. A lone bare operand stays a prefix
+  application (`+(x)` → `(call-pre + x)`), and a non-leading-`;` block (`+(a; b)`)
+  too. Mirrors JuliaSyntax's `is_paren_call`: the new `unary_op_paren_is_call`
+  (`expr.rs`) scans the adjacent parens and reports a call when they are empty,
+  open with a leading `;`, or contain a top-level comma or splat. The unary arm of
+  `parse_prefix` then builds a `CALL_EXPR` (operator-token callee + `ARG_LIST`,
+  reusing the operator-as-call projection); `operator_func_repr` (`sexpr.rs`) gains
+  a `!` case (`!` is unary-only, no `infix_head` entry). **Deferred:** the rare
+  `+(;;)` double-semi block edge.
 
 ## Incremental reparse
 

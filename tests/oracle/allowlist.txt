@@ -50,4 +50,5 @@ triple_command
 try_catch
 tuples
 type_annotations
+unary_operator_call
 version_string

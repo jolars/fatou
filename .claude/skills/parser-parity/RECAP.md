@@ -22,16 +22,57 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **310 allowlisted**, 257 divergence, 8 unsupported.
-Dir corpus: **49 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "operator-as-call functions" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **323 allowlisted**, 244 divergence, 8 unsupported.
+Dir corpus: **50 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "unary operator paren-calls" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18f)
+## Latest session (2026-06-18g)
+
+**Unary operator paren-calls.** A unary arithmetic/logical operator (`+ - ! ~` and
+broadcast `.+ .- .~`) adjacently glued to a `(` is a function call when the parens
+look like an argument list, not a parenthesized operand. The unary arm of
+`parse_prefix` (`expr.rs`) gains a pre-check: when the op is one of those seven
+kinds, the next token is an adjacent `(`, and the new `unary_op_paren_is_call`
+predicate fires, it builds a `CALL_EXPR` (operator-token callee + `ARG_LIST` via
+`parse_arg_list`) instead of the usual `UNARY_EXPR`+`PAREN_EXPR`. `unary_op_paren_is_call`
+mirrors JuliaSyntax's `is_paren_call`: scanning the adjacent parens, it returns a
+call iff they are empty (`+()`), open with a leading `;` (`+(; a)`), or contain — at
+top-level bracket depth 0 — a comma (`+(x, y)`) or a splat `...` (`+(a...)`); a lone
+bare operand (`+(x)`), a parenthesized inner tuple (`+((x, y))`), or a non-leading
+`;` block (`+(a; b)`) all stay prefix `call-pre`. Reuses last session's
+operator-callee projection directly; `operator_func_repr` (`sexpr.rs`) gained a `!`
+special-case (`!` is unary-only, no `infix_head` entry, so it was hitting the `?`
+fallback → `!(a, b)` had projected to `(call ? a b)`). Faithful: the operator token
+and arg list are real CST children; the projector only formats the callee. Fixture
+`unary_operator_call` (parser + dir corpus, 12 lines incl. the prefix boundary
+`+(x)`). **Deferred:** rare `+(;;)` double-semi (Julia: block → prefix; the leading-`;`
+check makes Fatou call it). Type-operator paren-calls (`<:(a,)`), curly operator
+calls (`+{T}(...)`), standalone `(+)` still deferred.
+
+JS allow **310 → 323** (+13 — unary operator paren-calls are common across the
+corpus); divergence 257 → 244, unsupported held 8. Dir allow 49 → 50. Zero
+regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Standalone parenthesized operators** (`(+)` → `+`, `(:)` → `:`, `(<:)`) —
+   `parse_paren` treats a lone operator-function (op names, `:`, broadcast `.op`,
+   but NOT `=`/`::`/`&&`/`||`/`->`) as a value. Complements the quote-only handling.
+2. **Import paren-quotes** (`import A.:(+)`, `import A.(:+)`, js-0492d7fb,
+   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery.
+3. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
+   **tuple-destructuring loop vars** (`for (i, j) in …`).
+4. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`) —
+   extend the new unary paren-call path to `Subtype`/`Supertype` with a `<:`/`>:`
+   head instead of `call` (different projector head, hence deferred this session).
+5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18f)
 
 **Operator-as-call functions.** A non-unary binary operator glued to a `(` names
 a function call with the operator as callee. `parse_prefix` (`expr.rs`) gains an
@@ -56,24 +97,6 @@ operator calls (`+{T}(x::T)`), standalone parenthesized operators (`(+)` → `+`
 JS allow **308 → 310** (+2: `*(x)` js-4766b25e, `.*(x)` js-ddc5134e); divergence
 259 → 257, unsupported held 8. Dir allow 48 → 49. Zero regressions; green,
 clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Unary operator arglist-calls** (`+(a...)` → `(call + (... a))`, `+(x,y)`,
-   `+(a;b,c)`, js-1ac6ceb0/js-3af347c3) — implement JuliaSyntax's `is_paren_call`
-   heuristic in `parse_prefix`'s existing unary arm: when the parens have a comma,
-   an initial splat, or initial-semi+args, build a `CALL_EXPR` (callee = op token)
-   instead of the `UNARY_EXPR`+`PAREN_EXPR`. Reuses this session's `project_call`
-   operator-callee support directly. Highest-value follow-on.
-2. **Standalone parenthesized operators** (`(+)` → `+`, `(:)` → `:`, `(<:)`) —
-   `parse_paren` treats a lone operator-function (op names, `:`, broadcast `.op`,
-   but NOT `=`/`::`/`&&`/`||`/`->`) as a value. Not in JS corpus directly but
-   complements the quote-only handling.
-3. **Import paren-quotes** (`import A.:(+)`, `import A.(:+)`, js-0492d7fb,
-   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery.
-4. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
-   **tuple-destructuring loop vars** (`for (i, j) in …`).
-5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
 
 ## Earlier session (2026-06-18e)
 
