@@ -11,9 +11,9 @@ use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
-    KwStmt, parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr, parse_if_expr,
-    parse_import_stmt, parse_keyword_stmt, parse_let_expr, parse_module_expr, parse_quote_expr,
-    parse_struct_expr, parse_try_expr, parse_while_expr,
+    KwStmt, is_op_name, parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr,
+    parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr, parse_module_expr,
+    parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -404,6 +404,18 @@ fn parse_quote_sym(
             events.push(Event::Start(SyntaxKind::NAME));
             events.push(Event::Tok(next));
             events.push(Event::Finish);
+            events.push(Event::Finish);
+            Some(ExprParse {
+                start,
+                end: next + 1,
+                events,
+            })
+        }
+        // `:+`, `:<:`, `:+=`, … — a symbolic operator used as a symbol. Restricted
+        // to undotted operator names (`is_op_name`) plus assignment operators;
+        // broadcast forms like `:.+` quote to `(. +)` and are not handled here.
+        k if is_op_name(k) || is_assignment_op(k) => {
+            events.push(Event::Tok(next));
             events.push(Event::Finish);
             Some(ExprParse {
                 start,

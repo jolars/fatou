@@ -29,6 +29,7 @@ loops
 macros
 multi_clause_generators
 nested_string_interp
+operator_symbol_quote
 pairs
 parametric_types
 range_operator

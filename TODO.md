@@ -129,9 +129,14 @@ through), so the grammar can grow incrementally.
   wraps the keyword token as a symbol (`TokKind::is_keyword`), and `:(expr)`
   wraps a parsed `PAREN_EXPR`; the projector maps all three to JuliaSyntax's
   `(quote-: …)`. A bare `:` not followed by a quotable token returns `None`, so
-  the index colon in `a[:]` is untouched. **Known limitations:** the bare-`:`
-  Colon value (`a[:]` → `(ref a :)`) and operator symbols (`:+`, `:(=)`) are
-  deferred (still divergences).
+  the index colon in `a[:]` is untouched. Prefix operator symbols now quote too
+  (`:+`, `:<:`, `:+=` → `(quote-: …)`): an extra `parse_quote_sym` arm wraps an
+  undotted operator-name token (`is_op_name`, shared from `structural.rs`) or an
+  assignment operator (`is_assignment_op`) as a bare symbol, matching Julia (a
+  space before the op, `: +`, is an error and stays unhandled). **Known
+  limitations:** the bare-`:` Colon value (`a[:]` → `(ref a :)`), broadcast
+  operator quotes (`:.+` → `(. +)`), and paren-quoted operators (`:(=)`, `:(::)`)
+  are deferred (still divergences).
 - [x] Pair operator `=>` (and broadcast `.=>`). Lexed as `FatArrow`/`DotFatArrow`
   (a new two-/three-char operator), parsed as a `BINARY_EXPR` on the arrow tier
   `(4, 3)` — right-associative, looser than `||`, tighter than `=` — and
@@ -296,7 +301,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`) and operator-symbol quoting (`:+`, `:(=)`).
+  (`a*b*c`) and paren-quoted operators (`:(=)`, `:(::)`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

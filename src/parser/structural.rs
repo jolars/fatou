@@ -573,7 +573,7 @@ fn parse_import_path(
 /// An undotted operator symbol usable as a bare import-path name (`import A: +`,
 /// `import A.:+`, `import A: +, ==`). Excludes the `:` list separator, the
 /// relative-dot tokens, and assignment forms (`=`, `+=`).
-fn is_op_name(kind: TokKind) -> bool {
+pub(super) fn is_op_name(kind: TokKind) -> bool {
     use TokKind::*;
     matches!(
         kind,

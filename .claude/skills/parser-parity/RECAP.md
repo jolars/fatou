@@ -22,8 +22,8 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **302 allowlisted**, 262 divergence, 11 unsupported.
-Dir corpus: **46 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+JS corpus (575 cases): **305 allowlisted**, 261 divergence, 9 unsupported.
+Dir corpus: **47 allowlisted**, 5 blocked + 1 skipped (do_blocks).
 Grammar bullets through "operator-symbol import names" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,7 +31,39 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18c)
+## Latest session (2026-06-18d)
+
+**Prefix operator-symbol quoting.** `parse_quote_sym` (`expr.rs`) gained one arm:
+after the `:`, an undotted operator-name token (`is_op_name`, now `pub(super)` and
+imported from `structural.rs`) or an assignment operator (`is_assignment_op`) is
+emitted as a bare symbol token, so `:+`/`:<:`/`:>:`/`:+=`/`:&`/`:!` → `(quote-: …)`.
+The projector already mapped a bare-token `QUOTE_SYM` child to `(quote-: <text>)`,
+so `sexpr.rs` was untouched (faithful). Whitespace matters: Julia treats `: +` and
+`: foo` as errors (`(quote-: (error-t) +)`), and `:.+`/`:.=` quote to `(. +)`/
+`(. =)` (broadcast), and `:==` lexes as `:=`+`=` (deprecated `:=` token) — all left
+unhandled/deferred. Files: `expr.rs` (arm + import), `structural.rs` (visibility).
+Fixture `operator_symbol_quote` (parser + dir corpus, `:+= :<: :>: :+ :& :!`).
+**Deferred:** paren-quoted operators (`:(=)`→`(quote-: =)`, `:(::)`→`(quote-: ::)`,
+needs quote-context paren parsing where lone ops are values), broadcast quotes
+(`:.+`), and dotted `A.:+` (UNSUPPORTED, dotted field access + quote).
+
+JS allow **302 → 305** (+3: `:+=`, `:<:`, and `function (:*=(f))() end`);
+divergence 262 → 261, unsupported 11 → 9. Dir allow 46 → 47. Zero regressions;
+green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Paren-quoted operators** (`:(=)`→`(quote-: =)`, `:(::)`→`(quote-: ::)`,
+   js-4b4543b0, js-4745d6d9, js-e83b620a) — finishes the quoting cluster; needs a
+   quote-context paren parse where a lone operator (`(=)`, `(::)`) is a value, not
+   an error. Also `import A.:(+)` / `import A.(:+)` (js-0492d7fb, js-6fe4ce2d).
+2. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`,
+   js-2155b9ca, js-5d3b9cc6).
+3. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
+   **tuple-destructuring loop vars** (`for (i, j) in …`).
+4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, and many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18c)
 
 **Operator-symbol import names.** `parse_import_path` (`structural.rs`) gained
 operator components in three positions: bare name in the `:` list (`import A: +,
@@ -52,18 +84,6 @@ as `ERROR`, needs unicode-operator lexing) and paren-quoted forms (`A.:(+)`,
 JS allow **299 → 302** (+3: `import A.:+`, `import A.==`, `import A: +, ==`);
 divergence 265 → 262, unsupported held 11. Dir allow 45 → 46. Zero regressions;
 green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Operator-symbol quoting** (`:+`, `:(=)`, `:<:`, `:+=`, `:.&&`) — a cluster of
-   FAIL/UNSUPPORTED (js-871a4d6b `:+=`, …); `parse_quote_sym` currently rejects bare
-   operators. The import work just demonstrated the projector side already handles
-   an operator-token `QUOTE_SYM` child; this generalizes the *prefix* `:op` path.
-2. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`,
-   js-2155b9ca, js-5d3b9cc6).
-3. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
-   **tuple-destructuring loop vars** (`for (i, j) in …`).
-4. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, and many scattered FAILs; larger lexer feature.
 
 ## Earlier sessions
 
