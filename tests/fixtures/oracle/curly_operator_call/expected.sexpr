@@ -1,0 +1,1 @@
+(toplevel (call (curly + T) (::-i x T)) (call (curly <: T) (::-i x T)) (call (curly >: T) x) (call (curly * T) x) (call (curly (. +) T) x) (call (curly ! T) x) (curly + T) (curly * T S))

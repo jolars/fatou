@@ -22,16 +22,49 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **350 allowlisted**, 221 divergence, 4 unsupported.
-Dir corpus: **58 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "`public` contextual keyword" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **352 allowlisted**, 219 divergence, 4 unsupported.
+Dir corpus: **59 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "curly operator calls" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18o)
+## Latest session (2026-06-18p)
+
+**Curly operator calls.** An operator glued to `{` is now a parametric callee:
+`+{T}` → `(curly + T)`, `*{T}(x)` → `(call (curly * T) x)`, `<:{T}(x::T)` →
+`(call (curly <: T) (::-i x T))`, broadcast `.+{T}(x)` → `(call (curly (. +) T)
+x)`. Implemented as a single top arm in `parse_prefix` (`expr.rs`) gated by the
+new `is_curly_operator_name` (= `is_operator_call_name` ∪ the unary
+`+ - .+ .- ! ~ .~ <: >:`): when the operator is glued to `{`, it returns the
+operator as a *bare leaf token* (`events: [Tok(start)]`) and lets the existing
+postfix chain build the `CURLY_EXPR` (and any trailing `(…)` call) exactly as for
+an identifier callee `f{T}` — so no curly/call construction was duplicated. `::`,
+`&`, `:` are excluded (Julia keeps them prefixes over the braces: `::{T}` →
+`(::-pre (braces T))`); syntactic `&&`/`->`/`$=` give `(error …)` callees, left
+unsupported. Projector (`sexpr.rs`): one-word change — `project_call`'s `<:`/`>:`
+head-override arm is now gated on `head == "call"`, since in a `curly` callee the
+operator is an ordinary first part (`(curly <: T)`), not a head. Faithful: the
+operator token is a real CST child (bare, like other operator callees); the
+projector only formats it. Fixture `curly_operator_call` (parser + dir corpus, 8
+lines incl. standalone `+{T}`/`*{T,S}` and broadcast `.+{T}`). **Deferred:**
+`&{T}` (Julia `(& (braces T))` — a pre-existing `&`-as-prefix gap, Fatou drops the
+`&` entirely; out of scope) and error-shape syntactic callees.
+
+JS allow **350 → 352** (+2: `+{T}(x::T)` js-340cc5a1, `<:{T}(x::T)` js-9edf5083);
+divergence 221 → 219, unsupported held 4. Dir allow 58 → 59. Zero regressions;
+green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b` (js-f74d3ac9 unsupported), `public ⤈`, `module M; export ⤈` (js-39a1855a),
+   `x -->₁ y` (js-50dc84fd), many scattered FAILs; larger lexer feature.
+2. **`&` as a prefix** — `&x`, `&{T}` (js — `(& …)`); small, but `&` currently
+   parses as nothing (drops the sigil). Probe whether it's worth a node.
+
+## Earlier session (2026-06-18o)
 
 **`public` contextual keyword.** `public A, B` / `public @a` now open a
 `PUBLIC_STMT` at toplevel and module-block statement scope. Unlike `export`,
@@ -63,13 +96,7 @@ JS allow **346 → 350** (+4: `public A, B` js-dd6bb2e4, `module Mod … public 
 js-1669b4f6, `module Mod2 … public a,b` js-37572fe9, `module M; public @a; end`
 js-491f0afc; the six identifier-form `public` cases already passed); divergence
 225 → 221, unsupported held 4. Dir allow 57 → 58. Zero regressions; green,
-clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Curly operator calls** (`<:{T}(x::T)` js-9edf5083, `+{T}(...)`) — extend the
-   operator-callee path to `CURLY_EXPR`/parametric method signatures.
-2. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, `public ⤈`, many scattered FAILs; larger lexer feature.
+clippy/fmt clean. (Next targets superseded by 18p; curly operator calls landed.)
 
 ## Earlier session (2026-06-18n)
 

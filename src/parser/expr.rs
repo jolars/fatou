@@ -352,6 +352,20 @@ fn parse_prefix(
 ) -> Option<ExprParse> {
     let tok = ctx.token(start)?;
     match tok.kind {
+        // An operator glued to `{` is a parametric callee: `+{T}` → `(curly + T)`,
+        // `*{T}(x)` → `(call (curly * T) x)`. We return the operator as a bare leaf
+        // and let the postfix chain build the `CURLY_EXPR` (and any trailing call),
+        // exactly as for an identifier callee `f{T}`. Excludes `::`/`&`/`:`, which
+        // Julia keeps as prefixes over the braces (`::{T}` → `(::-pre (braces T))`).
+        k if is_curly_operator_name(k)
+            && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LBrace) =>
+        {
+            Some(ExprParse {
+                start,
+                end: start + 1,
+                events: vec![Event::Tok(start)],
+            })
+        }
         // A bare `end` inside square brackets is the index-end marker (`a[end]`,
         // `a[end - 1]`); elsewhere `end` is a block terminator and not an atom.
         TokKind::EndKw if flags.end_marker => Some(atom(SyntaxKind::END_MARKER, start)),
@@ -1799,6 +1813,20 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | DotLongArrow
             | DotPipeGt
     )
+}
+
+/// Whether `kind` is an operator that, glued to `{`, names a parametric callee
+/// (`+{T}` → `(curly + T)`). This is the operator-call set (binary operators)
+/// plus the unary arithmetic/logical and type operators. `::`, `&`, and `:` are
+/// excluded: Julia keeps them as prefixes over the braces, and the syntactic
+/// `&&`/`||`/`->` produce error-shape callees and stay unsupported.
+fn is_curly_operator_name(kind: TokKind) -> bool {
+    use TokKind::*;
+    is_operator_call_name(kind)
+        || matches!(
+            kind,
+            Plus | Minus | DotPlus | DotMinus | Bang | Tilde | DotTilde | Subtype | Supertype
+        )
 }
 
 /// A lone operator that may be quoted inside parens, `:(op)`. Accepts undotted

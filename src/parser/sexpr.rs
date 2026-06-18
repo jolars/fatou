@@ -450,8 +450,10 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
             }
             // The type operators `<:`/`>:` in call syntax (`<:(a, b)` →
             // `(<: a b)`) are syntactic: JuliaSyntax heads the node with the
-            // operator itself rather than wrapping it in a `call`.
-            NodeOrToken::Token(t) if matches!(t.kind(), SUBTYPE | SUPERTYPE) => {
+            // operator itself rather than wrapping it in a `call`. In a `curly`
+            // callee (`<:{T}` → `(curly <: T)`) the operator is an ordinary part,
+            // so this head override only applies to `call`.
+            NodeOrToken::Token(t) if head == "call" && matches!(t.kind(), SUBTYPE | SUPERTYPE) => {
                 head = operator_func_repr(t.kind());
                 break;
             }

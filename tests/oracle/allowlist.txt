@@ -15,6 +15,7 @@ command_literal
 comments
 comprehensions
 control_flow
+curly_operator_call
 dot_logical_operator
 escaped_dollar
 generator_arguments

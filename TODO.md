@@ -301,9 +301,8 @@ through), so the grammar can grow incrementally.
   (`sexpr.rs`) gains a `SUBTYPE`/`SUPERTYPE`-callee arm: these are syntactic type
   operators, so JuliaSyntax heads the node with the operator itself (`(<: …)`)
   rather than wrapping it in a `call` — mirroring how the binary `<:` projects via
-  `infix_head`. **Deferred:** curly operator calls (`<:{T}(x::T)` → still a
-  divergence) and the `<:(a; b)` block-vs-tuple operand shape (a pre-existing
-  paren-parsing divergence shared by all operators).
+  `infix_head`. **Deferred:** the `<:(a; b)` block-vs-tuple operand shape (a
+  pre-existing paren-parsing divergence shared by all operators).
 
 - [x] Operator-as-call functions. A non-unary binary operator glued to a `(`
   (`*(x)`, `==(a, b)`, broadcast `.*(a, b)`, `.==(a, b)`, `=>(x, y)`, `*()`) names
@@ -315,8 +314,20 @@ through), so the grammar can grow incrementally.
   from the first *significant* element, so an operator-token callee projects via
   `operator_func_repr` (`(. *)` for broadcast, the bare text otherwise) →
   `(call * x)` / `(call (. *) x)`. Unary operators keep their prefix-application
-  parse (`+(x)` → `(call-pre + x)`). **Deferred (still divergences):** curly
-  operator calls (`+{T}(x::T)`).
+  parse (`+(x)` → `(call-pre + x)`).
+
+- [x] Curly operator calls. An operator glued to `{` is a parametric callee:
+  `+{T}` → `(curly + T)`, `*{T}(x)` → `(call (curly * T) x)`, `<:{T}(x::T)` →
+  `(call (curly <: T) (::-i x T))`, broadcast `.+{T}(x)` → `(call (curly (. +) T)
+  x)`. `parse_prefix` (`expr.rs`) gains a top arm gated by `is_curly_operator_name`
+  (the `is_operator_call_name` set plus the unary `+ - .+ .- ! ~ .~ <: >:`):
+  glued to `{`, it returns the operator as a bare leaf token, and the postfix
+  chain builds the `CURLY_EXPR` (and any trailing call) exactly as for an
+  identifier callee. `::`, `&`, and `:` are excluded (Julia keeps them prefixes
+  over the braces). The projector's `project_call` gates its `<:`/`>:` head
+  override on `head == "call"`, so in a `curly` callee the operator is an ordinary
+  part. **Deferred:** `&{T}` (`(& (braces T))` — a pre-existing `&`-prefix gap)
+  and the error-shape syntactic callees (`&&{T}`, `->{T}`).
 
 - [x] Unary operator paren-calls. A unary arithmetic/logical operator
   (`+ - ! ~` and broadcast `.+ .- .~`) glued to a `(` is a function call when the
