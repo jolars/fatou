@@ -28,6 +28,7 @@ keyword_statements
 let_quote
 literals
 loops
+macro_directive_names
 macros
 multi_clause_generators
 nested_string_interp

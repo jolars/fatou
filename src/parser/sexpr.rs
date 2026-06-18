@@ -876,6 +876,11 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 parts.push(project(&n));
                 seen_name = true;
             }
+            // A macro-name component (`import A.@x` → `(importpath A @x)`).
+            NodeOrToken::Node(n) if n.kind() == MACRO_NAME => {
+                parts.push(project_macro_name(&n));
+                seen_name = true;
+            }
             _ => {}
         }
     }
@@ -1153,6 +1158,8 @@ fn ident_run(node: &SyntaxNode) -> Vec<String> {
             NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
             // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
             NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
+            // A macro name (`export @a`) → `@a`.
+            NodeOrToken::Node(n) if n.kind() == MACRO_NAME => Some(project_macro_name(&n)),
             _ => None,
         })
         .collect()

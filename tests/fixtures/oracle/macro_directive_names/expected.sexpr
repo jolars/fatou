@@ -1,0 +1,1 @@
+(toplevel (export @a) (export a @b) (export @a b) (import (importpath @x)) (import (importpath A @x)) (import (importpath A B @x)) (import (importpath . @x)) (using (importpath A @x)))

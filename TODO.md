@@ -207,11 +207,11 @@ through), so the grammar can grow incrementally.
   the projector groups base-vs-names. Projects to `(import (importpath . A))`,
   `(import (as (importpath A) B))`, and `(import (: (importpath A) (as (importpath
   x) y)))` — faithfully, reading the real nodes (no projector reconstruction).
-  **Deferred (still divergences):** `@macro` paths, dotted `$interp` components
-  (`import A.$B` — the root `import $A` now parses, see the dedicated bullet
-  below), and the `. .A` (space-separated dots) form — each is carried through
-  verbatim, keeping losslessness. Operator-symbol names now parse (see the
-  dedicated bullet below).
+  **Deferred (still divergences):** dotted `$interp` components (`import A.$B` —
+  the root `import $A` now parses, see the dedicated bullet below) and the `. .A`
+  (space-separated dots) form — each is carried through verbatim, keeping
+  losslessness. Operator-symbol names and `@macro` paths now parse (see the
+  dedicated bullets below).
 
 - [x] Arrow, pipe, and bitshift operators. The arrow family `-->` (own special
   head `(--> a b)`), `<-->` (ordinary `(call-i a <--> b)`), and broadcast `.-->`
@@ -237,6 +237,22 @@ through), so the grammar can grow incrementally.
   divergences):** unicode operators (`import .⋆`, `import A.⋆.f` — `⋆` lexes as
   `ERROR`, awaiting unicode-operator lexing) and the paren-quoted forms
   (`import A.:(+)`, `import A.(:+)`).
+
+- [x] Macro names in `export`/`import`/`using`. A `@` in a directive name
+  position now builds a real `MACRO_NAME` node instead of dropping the sigil: the
+  shared `push_macro_name` helper (`structural.rs`) emits `MACRO_NAME` over the
+  `@` plus an adjacent identifier (no args, no dotted chain — in these positions
+  Julia treats a trailing `.mac` as a separate erroring component). It is wired
+  into the `export` verbatim loop (`parse_keyword_stmt`, `export @a` →
+  `(export @a)`, `export a, @b` → `(export a @b)`) and into `parse_import_path`
+  in both the path-root arm (`import @x` → `(importpath @x)`, `import .@x` →
+  `(importpath . @x)`) and the dotted-component loop (`import A.@x` →
+  `(importpath A @x)`, `import A.B.@x`, `import A.@x.y` → `(importpath A @x y)`).
+  The projector reads the new node via `project_macro_name` from `ident_run`
+  (export) and `project_import_path` (import); both yield bare `@x`. With the
+  `$`-root already parsing, `import $A.@x` → `(import (importpath ($ A) @x))`
+  falls out for free. **Deferred:** `public @a` (`public` is not yet a contextual
+  keyword) and standalone qualified macro paths as expressions (`A.B.@x`).
 
 - [x] Operator-as-call functions. A non-unary binary operator glued to a `(`
   (`*(x)`, `==(a, b)`, broadcast `.*(a, b)`, `.==(a, b)`, `=>(x, y)`, `*()`) names

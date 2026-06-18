@@ -1,0 +1,81 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..94
+  EXPORT_STMT@0..9
+    EXPORT_KW@0..6 "export"
+    WHITESPACE@6..7 " "
+    MACRO_NAME@7..9
+      AT@7..8 "@"
+      IDENT@8..9 "a"
+  NEWLINE@9..10 "\n"
+  EXPORT_STMT@10..22
+    EXPORT_KW@10..16 "export"
+    WHITESPACE@16..17 " "
+    IDENT@17..18 "a"
+    COMMA@18..19 ","
+    WHITESPACE@19..20 " "
+    MACRO_NAME@20..22
+      AT@20..21 "@"
+      IDENT@21..22 "b"
+  NEWLINE@22..23 "\n"
+  EXPORT_STMT@23..35
+    EXPORT_KW@23..29 "export"
+    WHITESPACE@29..30 " "
+    MACRO_NAME@30..32
+      AT@30..31 "@"
+      IDENT@31..32 "a"
+    COMMA@32..33 ","
+    WHITESPACE@33..34 " "
+    IDENT@34..35 "b"
+  NEWLINE@35..36 "\n"
+  IMPORT_STMT@36..45
+    IMPORT_KW@36..42 "import"
+    WHITESPACE@42..43 " "
+    IMPORT_PATH@43..45
+      MACRO_NAME@43..45
+        AT@43..44 "@"
+        IDENT@44..45 "x"
+  NEWLINE@45..46 "\n"
+  IMPORT_STMT@46..57
+    IMPORT_KW@46..52 "import"
+    WHITESPACE@52..53 " "
+    IMPORT_PATH@53..57
+      IDENT@53..54 "A"
+      DOT@54..55 "."
+      MACRO_NAME@55..57
+        AT@55..56 "@"
+        IDENT@56..57 "x"
+  NEWLINE@57..58 "\n"
+  IMPORT_STMT@58..71
+    IMPORT_KW@58..64 "import"
+    WHITESPACE@64..65 " "
+    IMPORT_PATH@65..71
+      IDENT@65..66 "A"
+      DOT@66..67 "."
+      IDENT@67..68 "B"
+      DOT@68..69 "."
+      MACRO_NAME@69..71
+        AT@69..70 "@"
+        IDENT@70..71 "x"
+  NEWLINE@71..72 "\n"
+  IMPORT_STMT@72..82
+    IMPORT_KW@72..78 "import"
+    WHITESPACE@78..79 " "
+    IMPORT_PATH@79..82
+      DOT@79..80 "."
+      MACRO_NAME@80..82
+        AT@80..81 "@"
+        IDENT@81..82 "x"
+  NEWLINE@82..83 "\n"
+  USING_STMT@83..93
+    USING_KW@83..88 "using"
+    WHITESPACE@88..89 " "
+    IMPORT_PATH@89..93
+      IDENT@89..90 "A"
+      DOT@90..91 "."
+      MACRO_NAME@91..93
+        AT@91..92 "@"
+        IDENT@92..93 "x"
+  NEWLINE@93..94 "\n"

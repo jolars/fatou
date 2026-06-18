@@ -22,9 +22,9 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **334 allowlisted**, 237 divergence, 4 unsupported.
-Dir corpus: **53 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "standalone parenthesized operators" are `[x]` in
+JS corpus (575 cases): **338 allowlisted**, 233 divergence, 4 unsupported.
+Dir corpus: **54 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "macro names in export/import/using" are `[x]` in
 `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -32,7 +32,52 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18j)
+## Latest session (2026-06-18k)
+
+**Macro names in `export`/`import`/`using`.** A `@` in a directive name position
+now builds a real `MACRO_NAME` node instead of dropping the sigil. New shared
+helper `push_macro_name` (`structural.rs`) emits `MACRO_NAME` spanning the `@`
+plus an adjacent identifier (no args, no dotted chain — Julia treats a trailing
+`.mac` here as a separate erroring component). Wired into the `export` verbatim
+loop (`parse_keyword_stmt`, new `At` match arm beside the `Dollar` one) and into
+`parse_import_path` in two spots: the path-root arm (new `Some(At)` case beside
+`Some(Dollar)`) and the dotted-component loop (new `(Dot, At)` case beside
+`(Dot, Ident)`). Projector (`sexpr.rs`): `ident_run` (export) and
+`project_import_path` (import) each gained a `MACRO_NAME` arm routing through the
+existing `project_macro_name`, which yields bare `@x` for the single-ident case.
+Faithful: the `@` sigil + name are real CST children, the projector only formats
+the wrapper. Results: `export @a` → `(export @a)`, `export a, @b` →
+`(export a @b)`, `import @x` → `(importpath @x)`, `import .@x` →
+`(importpath . @x)`, `import A.@x` → `(importpath A @x)`, `import A.B.@x`,
+`import A.@x.y` → `(importpath A @x y)`. With the `$`-root from 18i already
+parsing, `import $A.@x` → `(import (importpath ($ A) @x))` (target 1) fell out
+for free. Fixture `macro_directive_names` (parser + dir corpus, 8 lines).
+**Deferred:** `public @a` (js-491f0afc — `public` is not yet a contextual
+keyword, a separate gap), and standalone qualified macro paths *as expressions*
+(`A.B.@x` js-968d2da1, `A.@doc x\ny`, `@A.B.x` — these are macrocall-expression
+shapes, not directive names).
+
+JS allow **334 → 338** (+4: `export @a` js-b7bb6850, `module M; export @a; end`
+js-7a07fde8, `import @x` js-73c24f26, `import $A.@x` js-97312f87); divergence
+237 → 233, unsupported held 4. Dir allow 53 → 54. Zero regressions; green,
+clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Import paren-quotes** (`import A.:(+)` js-0492d7fb, `import A.(:+)`
+   js-6fe4ce2d) — finishes the import quoting cluster; `parse_import_path`
+   surgery (a `.:(op)` and `.(:op)` component).
+2. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
+   js-70cde333; `<:{T}(x::T)` js-9edf5083) — extend the unary paren-call path to
+   `Subtype`/`Supertype`.
+3. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
+   macro-name parser needs to accept a `(op)` signature like `function` now does.
+4. **`public` contextual keyword** (`public @a`, `module M; public @a; end`
+   js-491f0afc) — add `public` as a contextual keyword routing through the same
+   `EXPORT_STMT`-style path; unlocks the macro/name list reuse just landed.
+5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b`, many scattered FAILs; larger lexer feature.
+
+## Earlier session (2026-06-18j)
 
 **Standalone parenthesized operators.** A lone non-syntactic operator inside
 parens in value position is the operator as a value: `(+)` → `+`, `(:)` → `:`,
@@ -57,20 +102,7 @@ the macro-name parser doesn't recognize `(:)`, a separate gap).
 
 JS allow **333 → 334** (+1: `function (:)() end` js-beb4a3a3, was UNSUPPORTED);
 divergence held 237, unsupported 5 → 4. Dir allow 52 → 53. Zero regressions;
-green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Macro paths in `import`/`using`** (`import A.@x` → `(importpath A @x)`,
-   js-97312f87 once `$` root combines) — `parse_import_path` `.@name` component;
-   then `import $A.@x` falls out.
-2. **Import paren-quotes** (`import A.:(+)` js-0492d7fb, `import A.(:+)`
-   js-6fe4ce2d) — finishes the quoting cluster; `parse_import_path` surgery.
-3. **Type-operator paren-calls** (`<:(a, b)` → `(<: a b)`, `<:(a,)` → `(<: a)`,
-   js-70cde333) — extend the unary paren-call path to `Subtype`/`Supertype`.
-4. **Parenthesized-operator macro names** (`macro (:)(ex) end` js-a916f049) — the
-   macro-name parser needs to accept a `(op)` signature like `function` now does.
-5. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b`, many scattered FAILs; larger lexer feature.
+green, clippy/fmt clean. (Next targets superseded by 18k; macro paths landed.)
 
 ## Earlier session (2026-06-18i)
 

@@ -378,17 +378,25 @@ pub(crate) fn parse_keyword_stmt(
             i = expr.end;
         }
 
-        // Carry any remaining same-line tokens through verbatim, but build a real
-        // `INTERPOLATION` node for an interpolated name (`export $a, $(a*b)`) so
-        // the projector reads it as `($ …)` rather than a loose `$` + operand.
+        // Carry any remaining same-line tokens through verbatim, but build real
+        // nodes for the name forms the projector models: an `INTERPOLATION` for an
+        // interpolated name (`export $a, $(a*b)`) and a `MACRO_NAME` for a macro
+        // name (`export @a`), so the projector reads them as `($ …)`/`@a` rather
+        // than a loose `$`/`@` + operand.
         while !header_ends(&ctx, i) {
-            if ctx.token(i).map(|t| t.kind) == Some(TokKind::Dollar) {
-                let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
-                events.extend(interp.events);
-                i = interp.end;
-            } else {
-                events.push(Event::Tok(i));
-                i += 1;
+            match ctx.token(i).map(|t| t.kind) {
+                Some(TokKind::Dollar) => {
+                    let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
+                    events.extend(interp.events);
+                    i = interp.end;
+                }
+                Some(TokKind::At) => {
+                    i = push_macro_name(&ctx, &mut events, i);
+                }
+                _ => {
+                    events.push(Event::Tok(i));
+                    i += 1;
+                }
             }
         }
     }
@@ -495,6 +503,24 @@ fn parse_import_clause(
     path_end
 }
 
+/// Emit a [`MACRO_NAME`](SyntaxKind) node for a macro name used as a directive
+/// name (`export @a`, `import A.@x`): the `@` sigil at `at_idx` plus an adjacent
+/// identifier. Returns the index just past the name. Unlike a macro *call*, no
+/// arguments and no dotted chain are consumed — in these positions Julia treats a
+/// trailing `.mac` as a separate (erroring) component, and the import-path loop
+/// handles further dotted components itself.
+fn push_macro_name(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, at_idx: usize) -> usize {
+    events.push(Event::Start(SyntaxKind::MACRO_NAME));
+    events.push(Event::Tok(at_idx)); // `@`
+    let mut i = at_idx + 1;
+    if ctx.token(i).map(|t| t.kind) == Some(TokKind::Ident) {
+        events.push(Event::Tok(i));
+        i += 1;
+    }
+    events.push(Event::Finish);
+    i
+}
+
 /// Parse a single dotted import path into an [`IMPORT_PATH`](SyntaxKind) node:
 /// leading relative dots (`.`/`..`/`...`) followed by dot-separated identifier
 /// components (`A.B.C`). Returns the index after the path; equal to `start` when
@@ -531,6 +557,11 @@ fn parse_import_path(
             body.extend(interp.events);
             i = interp.end;
         }
+        Some(TokKind::At) => {
+            // A macro-name path root (`import @x`, `import .@x`): a `MACRO_NAME`
+            // node the projector reads as `@x`.
+            i = push_macro_name(ctx, &mut body, i);
+        }
         Some(k) if is_op_name(k) => {
             body.push(Event::Tok(i));
             i += 1;
@@ -561,6 +592,11 @@ fn parse_import_path(
                 body.push(Event::Tok(i)); // separating `.`
                 body.push(Event::Tok(i + 1)); // name
                 i += 2;
+            }
+            (Some(TokKind::Dot), Some(TokKind::At)) => {
+                // A macro-name component (`import A.@x` → `(importpath A @x)`).
+                body.push(Event::Tok(i)); // separating `.`
+                i = push_macro_name(ctx, &mut body, i + 1);
             }
             (Some(TokKind::Dot), Some(TokKind::Colon)) if matches!(ctx.token(i + 2).map(|t| t.kind), Some(k) if is_op_name(k)) =>
             {
