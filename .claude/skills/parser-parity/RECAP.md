@@ -22,47 +22,55 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **292 allowlisted**, 265 divergence, 18 unsupported.
-Dir corpus: **44 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "richer `import`/`using`" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **299 allowlisted**, 265 divergence, 11 unsupported.
+Dir corpus: **45 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "arrow/pipe/bitshift operators" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18a)
+## Latest session (2026-06-18b)
 
-**Generator arguments & typed comprehensions.** `parse_postfix` (expr.rs) now
-speculatively parses the first bracketed element and, if a `for` follows, builds a
-`GENERATOR` node (reusing `parse_comprehension`) instead of an `ARG_LIST`: a `(…)`
-suffix stays `CALL_EXPR` with a `GENERATOR` child (`sum(x for x in xs)` →
-`(call sum (generator x (= x xs)))`), a `[…]` suffix becomes the new
-`TYPED_COMPREHENSION` (`T[x for x in xs]` → `(typed_comprehension T (generator …))`).
-Diagnostics are snapshotted and truncated when the speculative parse isn't a
-generator, so the `ARG_LIST` fallback path is clean. Projector (sexpr.rs):
-`project_call` gains a `GENERATOR`-child branch; new `project_typed_comprehension`.
-The generator delimiters (`(`/`)`, `[`/`]`) live inside the `GENERATOR` node — fine
-for projection (tokens ignored) and lossless. Fixture `generator_arguments` (parser
-+ dir corpus, 6 cases incl. multi-clause+if and `Int[i*2 for i in 1:3]`).
+**Arrow, pipe, and bitshift operators.** Full 5-file recipe for a cluster sharing
+two precedence insights from `Base.operator_precedence`. Arrow family: `-->`
+(`LongArrow`, Special head `(--> a b)`), `<-->` (`LeftRightArrow`, `(call-i a <-->
+b)`), broadcast `.-->` (`DotLongArrow`, `(dotcall-i a --> b)`) — all right-assoc on
+the existing arrow tier `(4,3)`. Pipes: `<|` (`PipeLt`, looser, right-assoc) at a
+*new* slot `(12,11)`; `|>` (and new broadcast `.|>` → `DotPipeGt`) bumped `(12,13)
+→ (13,14)` to make room (colon `(14,15)` still binds tighter since the loop uses
+`l_bp >= min_bp`, 14≥14 ⇒ `a |> (b:c)`). Bitshift `<< >> >>>` (`Shl`/`Shr`/`UShr`)
+left-assoc at `(30,31)`, between `//`(28,29) and `^`(32,31) — Julia prec 14 makes
+bitshift *tighter* than `*`/`//`, looser than `^` (surprised me; verified). Lexer
+longest-match: `<-->` 4-char and `-->`/`>>>` 3-char beat prefixes; `.-->` 4-char
+beats `.-`. No global renumber needed (the renumber the prior recap flagged turned
+out to be a local 1-tier bump). Fixture `arrow_pipe_bitshift_operators` (parser +
+dir corpus, 11 cases).
 
-JS allow **291 → 292** (+1: typed comprehension `T[x for x in xs]`, js-d0b8bf98,
-UNSUPPORTED → PASS); divergence held 265, unsupported 19 → 18. Dir allow 43 → 44.
-The bare call-arg forms (`sum(x for …)`) aren't standalone JS-corpus cases — they
-appear parenthesized and already passed — but are now covered by the fixture. Zero
-regressions; green, clippy/fmt clean.
+JS allow **292 → 299** (+7: `x --> y`, `x .--> y`, `x <--> y` (was FAIL), `x <| y
+<| z`, `x .|> y`, `x >> y >> z`, `outer <| x = rhs`); divergence held 265,
+unsupported 18 → 11. Dir allow 44 → 45. Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Precedence-table renumber** (infra), then arrow `-->`/`<-->` (prec 4, special
-   head `(--> a b)`, dotted `.-->` → `dotcall-i`) and left-pipe `<|` (prec 8).
-   Several UNSUPPORTED cases: `x --> y`, `x .--> y`, `x <| y <| z`, `x .|> y`.
-2. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`).
-3. **Operator-symbol import names** (`import A: +`, `import A.==`, `import A.:+`) —
-   several FAIL/UNSUPPORTED; extend import-path grammar to accept operator tokens.
-4. **Tuple-destructuring loop vars** (`for (i, j) in …`) — reuses generator/loop
-   machinery.
+1. **Operator-symbol import names** (`import A: +`, `import A.==`, `import A.:+`,
+   `import A.:.+`) — several FAIL + UNSUPPORTED (js-22ffbcb0, js-3a22c71b,
+   js-99360f4e, js-32feecde); extend `parse_import_stmt` path grammar to accept
+   operator tokens as name components.
+2. **Operator-symbol quoting** (`:+`, `:(=)`, `:<:`, `:+=`, `:.&&`) — a cluster of
+   FAIL/UNSUPPORTED; `parse_quote_sym` currently rejects bare operators.
+3. **Splat postfix precedence** — `x..y...` → `(... (.. x y))` (also `x:y...`,
+   js-2155b9ca, js-5d3b9cc6).
+4. **Dotted-`$` field access** (`f.$x`, `f.$(x+y)`, js-a643eeec, js-c651c24f) and
+   **tuple-destructuring loop vars** (`for (i, j) in …`).
 
 ## Earlier sessions
+
+- **2026-06-18a** — Generator arguments & typed comprehensions: `parse_postfix`
+  speculatively parses the first bracketed element and, on a following `for`, builds
+  a `GENERATOR` (call-arg `sum(x for …)`) or `TYPED_COMPREHENSION` (`T[x for …]`)
+  instead of an `ARG_LIST`; projector gains a `GENERATOR`-child branch +
+  `project_typed_comprehension`. JS allow 291 → 292. Fixture `generator_arguments`.
 
 - **2026-06-17g** — Multi-clause & comma generators: replaced single-clause
   `parse_comprehension` with a `for`-clause loop + `parse_for_specs` (each `for` a

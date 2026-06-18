@@ -99,8 +99,16 @@ pub(crate) enum TokKind {
     Subtype,
     Supertype,
     Arrow,
+    /// The arrow operator `-->` (right-associative, own head `(--> a b)`).
+    LongArrow,
+    /// The arrow operator `<-->` (right-associative, ordinary `(call-i a <--> b)`).
+    LeftRightArrow,
     /// The pair operator `=>`.
     FatArrow,
+    /// Bitshift operators `<<`, `>>`, `>>>` (left-associative).
+    Shl,
+    Shr,
+    UShr,
     // Augmented (compound) assignment operators `op=`. Right-associative and at
     // the same precedence as `=`; modeled as `ASSIGNMENT_EXPR`.
     PlusEq,
@@ -117,6 +125,8 @@ pub(crate) enum TokKind {
     DotDot,
     DotDotDot,
     PipeGt,
+    /// The left-pipe operator `<|` (right-associative).
+    PipeLt,
     Bang,
     Amp,
     Pipe,
@@ -144,6 +154,10 @@ pub(crate) enum TokKind {
     DotGe,
     /// The broadcast pair operator `.=>`.
     DotFatArrow,
+    /// The broadcast arrow operator `.-->` (projects `(dotcall-i a --> b)`).
+    DotLongArrow,
+    /// The broadcast left-pipe-to-right `.|>` (projects `(dotcall-i a |> b)`).
+    DotPipeGt,
     /// The broadcast `~` operator `.~`.
     DotTilde,
     /// The broadcast short-circuit operators `.&&` and `.||`.
@@ -804,6 +818,12 @@ impl<'a> Lexer<'a> {
                 self.push(TokKind::DotSlashSlashEq, start, self.pos);
                 return;
             }
+            // The 4-char broadcast arrow `.-->` must beat `.-` (`DotMinus`).
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'-'), Some(b'-'), Some(b'>')) {
+                self.pos += 4;
+                self.push(TokKind::DotLongArrow, start, self.pos);
+                return;
+            }
             let dotted3 = match (b1, self.peek(2)) {
                 (Some(b'='), Some(b'=')) => Some(TokKind::DotEqEq),
                 (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
@@ -811,6 +831,7 @@ impl<'a> Lexer<'a> {
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
                 (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
+                (Some(b'|'), Some(b'>')) => Some(TokKind::DotPipeGt),
                 (Some(b'&'), Some(b'&')) => Some(TokKind::DotAndAnd),
                 (Some(b'|'), Some(b'|')) => Some(TokKind::DotOrOr),
                 // Broadcast augmented assignment `.op=`.
@@ -855,6 +876,27 @@ impl<'a> Lexer<'a> {
             return;
         }
 
+        // The 4-char arrow `<-->` must beat the 2-char `<|`/`<:`/`<=`/`<<`.
+        if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-'), Some(b'>'))
+        {
+            self.pos += 4;
+            self.push(TokKind::LeftRightArrow, start, self.pos);
+            return;
+        }
+
+        // Three-char ASCII ops (longest match): the arrow `-->` must beat `->`,
+        // and the unsigned shift `>>>` must beat `>>`.
+        let three = match (b0, b1, self.peek(2)) {
+            (Some(b'-'), Some(b'-'), Some(b'>')) => Some(TokKind::LongArrow),
+            (Some(b'>'), Some(b'>'), Some(b'>')) => Some(TokKind::UShr),
+            _ => None,
+        };
+        if let Some(kind) = three {
+            self.pos += 3;
+            self.push(kind, start, self.pos);
+            return;
+        }
+
         // Two-char operators next (longest match).
         let two = match (b0, b1) {
             (Some(b'/'), Some(b'/')) => Some(TokKind::SlashSlash),
@@ -870,6 +912,9 @@ impl<'a> Lexer<'a> {
             (Some(b'>'), Some(b':')) => Some(TokKind::Supertype),
             (Some(b'-'), Some(b'>')) => Some(TokKind::Arrow),
             (Some(b'|'), Some(b'>')) => Some(TokKind::PipeGt),
+            (Some(b'<'), Some(b'|')) => Some(TokKind::PipeLt),
+            (Some(b'<'), Some(b'<')) => Some(TokKind::Shl),
+            (Some(b'>'), Some(b'>')) => Some(TokKind::Shr),
             // Augmented assignment `op=`.
             (Some(b'+'), Some(b'=')) => Some(TokKind::PlusEq),
             (Some(b'-'), Some(b'=')) => Some(TokKind::MinusEq),

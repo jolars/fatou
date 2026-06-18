@@ -200,6 +200,18 @@ through), so the grammar can grow incrementally.
   form — each is carried through verbatim, keeping losslessness. `export`'s name
   list is untouched (still passthrough).
 
+- [x] Arrow, pipe, and bitshift operators. The arrow family `-->` (own special
+  head `(--> a b)`), `<-->` (ordinary `(call-i a <--> b)`), and broadcast `.-->`
+  (`(dotcall-i a --> b)`) join the existing arrow tier `(4, 3)` (right-associative).
+  The pipe operators split Julia's two pipe precedences: left-pipe `<|` (`PipeLt`)
+  is looser and right-associative at `(12, 11)`, right-pipe `|>` (and new broadcast
+  `.|>`) is tighter and left-associative, bumped from `(12, 13)` to `(13, 14)` to
+  open the slot (colon still binds tighter, 14 ≥ 14). Bitshift `<< >> >>>`
+  (`Shl`/`Shr`/`UShr`) sit at a new left-associative tier `(30, 31)` between `//`
+  and `^` (Julia precedence 14). Lexed with longest-match (`<-->` 4-char and `-->`/
+  `>>>` 3-char beat their prefixes; `.-->` 4-char beats `.-`). **Deferred:** dotted
+  bitshift (`.<< .>> .>>>`), and the unicode-subscript arrow `-->₁`.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -271,7 +283,7 @@ through), so the grammar can grow incrementally.
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
-  (`a*b*c`) and assorted operators (`-->`, `<|`, `.|>`).
+  (`a*b*c`) and operator-symbol import names (`import A.==`, `import A: +`).
   **Follow-ups:** work the backlog up the allowlist;
   design error-shape parity to promote the blocked recovery cases; wire the
   oracle gates into CI.

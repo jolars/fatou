@@ -1,0 +1,1 @@
+(toplevel (--> x y) (call-i x <--> y) (dotcall-i x --> y) (--> a (--> b c)) (call-i x <| (call-i y <| z)) (dotcall-i x |> y) (call-i (call-i x |> y) <| z) (call-i (call-i x >> y) >> z) (call-i x << y) (call-i x >>> y) (= (call-i outer <| x) rhs))

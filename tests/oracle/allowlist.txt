@@ -4,6 +4,7 @@
 
 anonymous_functions
 array_literals
+arrow_pipe_bitshift_operators
 augmented_assignment
 begin_index
 binary_precedence

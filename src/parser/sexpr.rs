@@ -192,6 +192,12 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_DOT => CallI(".."),
         FAT_ARROW => CallI("=>"),
         PIPE_GT => CallI("|>"),
+        PIPE_LT => CallI("<|"),
+        LONG_ARROW => Special("-->"),
+        LEFT_RIGHT_ARROW => CallI("<-->"),
+        SHL => CallI("<<"),
+        SHR => CallI(">>"),
+        USHR => CallI(">>>"),
         AMP => CallI("&"),
         PIPE => CallI("|"),
         EQ_EQ => CallI("=="),
@@ -228,6 +234,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_GT => DotCallI(">"),
         DOT_GE => DotCallI(">="),
         DOT_FAT_ARROW => DotCallI("=>"),
+        DOT_LONG_ARROW => DotCallI("-->"),
+        DOT_PIPE_GT => DotCallI("|>"),
 
         // Fallback: treat as an ordinary infix call using the raw text. Leaked
         // in faithfully so an unmapped operator surfaces as a divergence.
@@ -263,9 +271,15 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | SUBTYPE
             | SUPERTYPE
             | ARROW
+            | LONG_ARROW
+            | LEFT_RIGHT_ARROW
             | FAT_ARROW
+            | SHL
+            | SHR
+            | USHR
             | DOT
             | PIPE_GT
+            | PIPE_LT
             | BANG
             | AMP
             | PIPE
@@ -284,6 +298,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_GT
             | DOT_GE
             | DOT_FAT_ARROW
+            | DOT_LONG_ARROW
+            | DOT_PIPE_GT
             | PLUS_EQ
             | MINUS_EQ
             | STAR_EQ

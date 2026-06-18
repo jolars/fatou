@@ -1620,7 +1620,12 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         TokKind::Tilde | TokKind::DotTilde => (2, 1),
         // The pair `=>` shares the arrow/ternary tier: right-associative, looser
         // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
-        TokKind::Arrow | TokKind::FatArrow | TokKind::DotFatArrow => (4, 3),
+        TokKind::Arrow
+        | TokKind::FatArrow
+        | TokKind::DotFatArrow
+        | TokKind::LongArrow
+        | TokKind::LeftRightArrow
+        | TokKind::DotLongArrow => (4, 3),
         TokKind::OrOr | TokKind::DotOrOr => (5, 6),
         TokKind::AndAnd | TokKind::DotAndAnd => (7, 8),
         // `where` sits below the comparison tier so its right-hand side captures
@@ -1641,7 +1646,11 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::DotLe
         | TokKind::DotGt
         | TokKind::DotGe => (10, 11),
-        TokKind::PipeGt => (12, 13),
+        // The pipe operators share Julia's pipe precedence: `<|` (left-pipe) is
+        // looser and right-associative, `|>` (right-pipe, also broadcast `.|>`)
+        // is tighter and left-associative (`a <| b |> c` ⇒ `a <| (b |> c)`).
+        TokKind::PipeLt => (12, 11),
+        TokKind::PipeGt | TokKind::DotPipeGt => (13, 14),
         // The range operator `..` shares the colon tier (Julia gives both
         // precedence 10) and is left-associative, building an ordinary
         // `(call-i a .. b)`.
@@ -1656,6 +1665,9 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // Rational `//` (and broadcast `.//`) bind tighter than `*`/`/` but
         // looser than `^`, and are left-associative (`a//b//c` ⇒ `(a//b)//c`).
         TokKind::SlashSlash | TokKind::DotSlashSlash => (28, 29),
+        // Bitshift `<< >> >>>` binds tighter than `//` and looser than `^`
+        // (Julia precedence 14), left-associative.
+        TokKind::Shl | TokKind::Shr | TokKind::UShr => (30, 31),
         TokKind::Caret | TokKind::DotCaret => (32, 31),
         TokKind::ColonColon => (36, 37),
         TokKind::Dot => (40, 41),
