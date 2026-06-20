@@ -399,6 +399,9 @@ fn project_unary(node: &SyntaxNode) -> String {
     match op.kind() {
         SUBTYPE => format!("(<:-pre {operand})"),
         SUPERTYPE => format!("(>:-pre {operand})"),
+        // The address-of `&x` heads the node with the operator itself (a
+        // syntactic prefix), not the generic `call-pre`.
+        AMP => format!("(& {operand})"),
         DOT_PLUS => format!("(dotcall-pre + {operand})"),
         DOT_MINUS => format!("(dotcall-pre - {operand})"),
         DOT_TILDE => format!("(dotcall-pre ~ {operand})"),

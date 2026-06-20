@@ -22,16 +22,53 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **358 allowlisted**, 213 divergence, 4 unsupported.
-Dir corpus: **61 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "anon function signatures" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **359 allowlisted**, 212 divergence, 4 unsupported.
+Dir corpus: **62 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "ASCII bitwise operators `&`/`|`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20a)
+## Latest session (2026-06-20b)
+
+**ASCII bitwise operators `&` and `|`.** Both were lexed (`Amp`/`Pipe` →
+`AMP`/`PIPE`) but silently dropped — no `infix_binding_power` entry and no prefix
+arm — so `a & b` → `(toplevel a b)` and `&x` → `(toplevel x)`. Probed Julia's
+precedence: `&` is in the `*` (times) family, `|` in the `+` (plus) family, both
+left-assoc (`a & b * c` → `((a&b)*c)`; `a + b & c` → `(a+(b&c))`; `a | b & c` →
+`(a|(b&c))`). **Fix (parser):** add `Amp` to the `(24,25)` tier and `Pipe` to the
+`(20,21)` tier in `infix_binding_power` (`expr.rs`) — infix `&`/`|` now build
+`BINARY_EXPR`, and the **already-present** `infix_head` (`AMP => CallI("&")`,
+`PIPE => CallI("|")`) + `is_operator` arms project them with no `sexpr.rs` infix
+change. Prefix `&x` (address-of) is a *syntactic* prefix that Julia heads with `&`
+itself, not the generic `call-pre`: add `Amp` to the unary `parse_prefix` arm (→
+`UNARY_EXPR`, identical `PREFIX_BP=28` machinery as `-x`), **excluded** from the
+inner unary-paren-call `matches!` so `&(x, y)` stays prefix-over-tuple
+(`(& (tuple-p x y))`) rather than a call. One new `project_unary` arm
+`AMP => (& operand)`. Results all match Julia: `&x`→`(& x)`, `&{T}`→
+`(& (braces T))` (`&`∉`is_curly_operator_name`, so it's prefix-over-braces, not a
+curly callee), `&a.b`→`(& (. a (quote b)))`, `f(&x)`→`(call f (& x))`,
+`&x + y`→`(call-i (& x) + y)`, `x & &y`→`(call-i x & (& y))`. Faithful: the
+operator tokens are real CST children; the projector only formats heads. Fixture
+`ampersand_operator` (parser + dir corpus, 12 lines incl. precedence
+discriminators). **Deferred:** broadcast `.&`/`.|` (`.&(x,y)`, `:.&&` — need
+broadcast-`&` lexing) and unicode bitwise `⊻` (unicode-operator lexing, target 1).
+
+JS allow **358 → 359** (+1: `&a` js-d2cb9522, was FAIL); divergence 213 → 212,
+unsupported held 4. Dir allow 61 → 62. Zero regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b` (js-f74d3ac9), `public ⤈`, `module M; export ⤈` (js-39a1855a),
+   `x -->₁ y` (js-50dc84fd), `√x` (js-e13fa52a), `⊻`; larger lexer feature.
+2. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
+   signature relabel to descend the `::` LHS (not just the outermost paren).
+3. **Broadcast `.&`/`.|`** — lex `DotAmp`/`DotPipe`, project to `(. &)`/`(. |)`
+   heads; unblocks `.&(x,y)` js-cdf6c5ab and the paren-quote `:.&&`.
+
+## Earlier session (2026-06-20a)
 
 **Anon `function (args) … end` signatures as argument tuples.** Julia models a
 parenthesized `function` signature as a tuple of args, not a parenthesized value:
@@ -62,15 +99,8 @@ naive first pass regressed 4 `[allow]` eventually-call cases — `function (f():
 js-328a1786, `(f() where T)` js-4eeda108, `(x*y )` js-9ddf0017,
 `((f()::S) where T)` js-e0aa726d — all restored by the `signature_eventually_call`
 guard); divergence 215 → 213, unsupported held 4. Dir allow 60 → 61. Zero
-regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b` (js-f74d3ac9), `public ⤈`, `module M; export ⤈` (js-39a1855a),
-   `x -->₁ y` (js-50dc84fd), `√x` (js-e13fa52a); larger lexer feature.
-2. **`&` as a prefix** — `&x`, `&{T}`; small, `&` currently drops the sigil.
-3. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend
-   the signature relabel to descend the `::` LHS (not just the outermost paren).
+regressions; green, clippy/fmt clean. (Next targets superseded by 20b; ASCII
+bitwise operators landed.)
 
 ## Earlier session (2026-06-18q)
 

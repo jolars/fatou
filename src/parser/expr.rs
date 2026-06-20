@@ -382,9 +382,10 @@ fn parse_prefix(
         // A bare `begin` inside an indexing `a[…]` is the index-begin marker
         // (`a[begin]`, `a[begin + 1]`); elsewhere `begin` opens a block.
         TokKind::BeginKw if flags.begin_marker => Some(atom(SyntaxKind::BEGIN_MARKER, start)),
-        // Prefix operators: arithmetic/logical unary (`-x`, `!x`), lower-bound
-        // type expressions (`<:Real` in `Array{<:Real}`), and unary `::`
-        // declarations (`::Int` in a method signature `f(::Int)`).
+        // Prefix operators: arithmetic/logical unary (`-x`, `!x`), the address-of
+        // `&x` (a syntactic prefix heading the node with `&`, not `call-pre`),
+        // lower-bound type expressions (`<:Real` in `Array{<:Real}`), and unary
+        // `::` declarations (`::Int` in a method signature `f(::Int)`).
         TokKind::Plus
         | TokKind::Minus
         | TokKind::DotPlus
@@ -392,6 +393,7 @@ fn parse_prefix(
         | TokKind::Bang
         | TokKind::Tilde
         | TokKind::DotTilde
+        | TokKind::Amp
         | TokKind::Subtype
         | TokKind::Supertype
         | TokKind::ColonColon => {
@@ -2024,10 +2026,17 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // precedence 10) and is left-associative, building an ordinary
         // `(call-i a .. b)`.
         TokKind::Colon | TokKind::DotDot => (14, 15),
-        TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus => (20, 21),
+        // Bitwise-or `|` shares the `+` (plus) precedence family, left-associative
+        // (`a | b & c` ⇒ `(a | (b & c))`, `a & b | c` ⇒ `((a & b) | c)`).
+        TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus | TokKind::Pipe => {
+            (20, 21)
+        }
+        // Bitwise-and `&` shares the `*` (times) precedence family, left-associative
+        // (`a & b * c` ⇒ `((a & b) * c)`, `a + b & c` ⇒ `(a + (b & c))`).
         TokKind::Star
         | TokKind::Slash
         | TokKind::Percent
+        | TokKind::Amp
         | TokKind::DotStar
         | TokKind::DotSlash
         | TokKind::DotPercent => (24, 25),

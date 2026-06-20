@@ -409,6 +409,22 @@ through), so the grammar can grow incrementally.
   nested under `::-i`, needs descending into the signature, not just the
   outermost paren).
 
+- [x] ASCII bitwise operators `&` and `|`. Both were lexed but dropped (no
+  binding power, no prefix arm). Infix `&` shares the `*` (times) precedence
+  family `(24, 25)` and `|` shares the `+` (plus) family `(20, 21)`, both
+  left-associative (`a + b & c` → `(a + (b & c))`, `a & b | c` →
+  `((a & b) | c)`); added to `infix_binding_power`. Prefix `&x` (address-of) is a
+  syntactic prefix that heads the node with `&` itself, not the generic
+  `call-pre`: `Amp` joined the unary `parse_prefix` arm (→ `UNARY_EXPR`, same
+  `PREFIX_BP` machinery as `-x`), with a new `AMP => (& operand)` arm in
+  `project_unary`. So `&x` → `(& x)`, `&{T}` → `(& (braces T))`, `&a.b` →
+  `(& (. a (quote b)))`, `&(x, y)` → `(& (tuple-p x y))` (prefix over a tuple, not
+  a paren-call — `Amp` is excluded from the unary paren-call set). The `infix_head`
+  and `is_operator` arms for `AMP`/`PIPE` already existed, so the projector was
+  otherwise untouched. **Deferred:** broadcast `.&`/`.|` (`.&(x,y)`, `:.&&` —
+  need broadcast-`&` lexing) and the unicode bitwise `⊻` (unicode-operator
+  lexing).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

@@ -1,0 +1,142 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..87
+  UNARY_EXPR@0..2
+    AMP@0..1 "&"
+    NAME@1..2
+      IDENT@1..2 "x"
+  NEWLINE@2..3 "\n"
+  UNARY_EXPR@3..7
+    AMP@3..4 "&"
+    BRACES@4..7
+      LBRACE@4..5 "{"
+      ARG@5..6
+        NAME@5..6
+          IDENT@5..6 "T"
+      RBRACE@6..7 "}"
+  NEWLINE@7..8 "\n"
+  UNARY_EXPR@8..12
+    AMP@8..9 "&"
+    BINARY_EXPR@9..12
+      NAME@9..10
+        IDENT@9..10 "a"
+      DOT@10..11 "."
+      NAME@11..12
+        IDENT@11..12 "b"
+  NEWLINE@12..13 "\n"
+  UNARY_EXPR@13..20
+    AMP@13..14 "&"
+    TUPLE_EXPR@14..20
+      LPAREN@14..15 "("
+      ARG@15..16
+        NAME@15..16
+          IDENT@15..16 "x"
+      COMMA@16..17 ","
+      WHITESPACE@17..18 " "
+      ARG@18..19
+        NAME@18..19
+          IDENT@18..19 "y"
+      RPAREN@19..20 ")"
+  NEWLINE@20..21 "\n"
+  BINARY_EXPR@21..26
+    NAME@21..22
+      IDENT@21..22 "a"
+    WHITESPACE@22..23 " "
+    AMP@23..24 "&"
+    WHITESPACE@24..25 " "
+    NAME@25..26
+      IDENT@25..26 "b"
+  NEWLINE@26..27 "\n"
+  BINARY_EXPR@27..32
+    NAME@27..28
+      IDENT@27..28 "a"
+    WHITESPACE@28..29 " "
+    PIPE@29..30 "|"
+    WHITESPACE@30..31 " "
+    NAME@31..32
+      IDENT@31..32 "b"
+  NEWLINE@32..33 "\n"
+  BINARY_EXPR@33..42
+    BINARY_EXPR@33..38
+      NAME@33..34
+        IDENT@33..34 "a"
+      WHITESPACE@34..35 " "
+      AMP@35..36 "&"
+      WHITESPACE@36..37 " "
+      NAME@37..38
+        IDENT@37..38 "b"
+    WHITESPACE@38..39 " "
+    AMP@39..40 "&"
+    WHITESPACE@40..41 " "
+    NAME@41..42
+      IDENT@41..42 "c"
+  NEWLINE@42..43 "\n"
+  BINARY_EXPR@43..49
+    UNARY_EXPR@43..45
+      AMP@43..44 "&"
+      NAME@44..45
+        IDENT@44..45 "x"
+    WHITESPACE@45..46 " "
+    PLUS@46..47 "+"
+    WHITESPACE@47..48 " "
+    NAME@48..49
+      IDENT@48..49 "y"
+  NEWLINE@49..50 "\n"
+  BINARY_EXPR@50..59
+    NAME@50..51
+      IDENT@50..51 "a"
+    WHITESPACE@51..52 " "
+    PLUS@52..53 "+"
+    WHITESPACE@53..54 " "
+    BINARY_EXPR@54..59
+      NAME@54..55
+        IDENT@54..55 "b"
+      WHITESPACE@55..56 " "
+      AMP@56..57 "&"
+      WHITESPACE@57..58 " "
+      NAME@58..59
+        IDENT@58..59 "c"
+  NEWLINE@59..60 "\n"
+  BINARY_EXPR@60..69
+    BINARY_EXPR@60..65
+      NAME@60..61
+        IDENT@60..61 "a"
+      WHITESPACE@61..62 " "
+      AMP@62..63 "&"
+      WHITESPACE@63..64 " "
+      NAME@64..65
+        IDENT@64..65 "b"
+    WHITESPACE@65..66 " "
+    PIPE@66..67 "|"
+    WHITESPACE@67..68 " "
+    NAME@68..69
+      IDENT@68..69 "c"
+  NEWLINE@69..70 "\n"
+  BINARY_EXPR@70..79
+    BINARY_EXPR@70..75
+      NAME@70..71
+        IDENT@70..71 "a"
+      WHITESPACE@71..72 " "
+      AMP@72..73 "&"
+      WHITESPACE@73..74 " "
+      NAME@74..75
+        IDENT@74..75 "b"
+    WHITESPACE@75..76 " "
+    STAR@76..77 "*"
+    WHITESPACE@77..78 " "
+    NAME@78..79
+      IDENT@78..79 "c"
+  NEWLINE@79..80 "\n"
+  BINARY_EXPR@80..86
+    NAME@80..81
+      IDENT@80..81 "x"
+    WHITESPACE@81..82 " "
+    AMP@82..83 "&"
+    WHITESPACE@83..84 " "
+    UNARY_EXPR@84..86
+      AMP@84..85 "&"
+      NAME@85..86
+        IDENT@85..86 "y"
+  NEWLINE@86..87 "\n"

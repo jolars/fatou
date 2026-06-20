@@ -2,6 +2,7 @@
 # expected.sexpr. Guarded against regression by `oracle_allowlist` (no Julia
 # needed). Seed/refresh from `oracle_full_report`. One slug per line.
 
+ampersand_operator
 anon_function_signature
 anonymous_functions
 array_literals
