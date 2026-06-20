@@ -1,0 +1,73 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..72
+  BINARY_EXPR@0..15
+    BINARY_EXPR@0..8
+      NAME@0..1
+        IDENT@0..1 "a"
+      WHITESPACE@1..2 " "
+      PLUS@2..6 "+₁"
+      WHITESPACE@6..7 " "
+      NAME@7..8
+        IDENT@7..8 "b"
+    WHITESPACE@8..9 " "
+    PLUS@9..13 "+₁"
+    WHITESPACE@13..14 " "
+    NAME@14..15
+      IDENT@14..15 "c"
+  NEWLINE@15..16 "\n"
+  BINARY_EXPR@16..26
+    NAME@16..17
+      IDENT@16..17 "x"
+    WHITESPACE@17..18 " "
+    LONG_ARROW@18..24 "-->₁"
+    WHITESPACE@24..25 " "
+    NAME@25..26
+      IDENT@25..26 "y"
+  NEWLINE@26..27 "\n"
+  BINARY_EXPR@27..35
+    LITERAL@27..28
+      INTEGER@27..28 "2"
+    WHITESPACE@28..29 " "
+    PLUS@29..33 "+₁"
+    WHITESPACE@33..34 " "
+    LITERAL@34..35
+      INTEGER@34..35 "3"
+  NEWLINE@35..36 "\n"
+  BINARY_EXPR@36..45
+    NAME@36..37
+      IDENT@36..37 "a"
+    WHITESPACE@37..38 " "
+    DOT_PLUS@38..43 ".+₁"
+    WHITESPACE@43..44 " "
+    NAME@44..45
+      IDENT@44..45 "b"
+  NEWLINE@45..46 "\n"
+  BINARY_EXPR@46..55
+    NAME@46..47
+      IDENT@46..47 "a"
+    WHITESPACE@47..48 " "
+    EQ_EQ@48..53 "==₁"
+    WHITESPACE@53..54 " "
+    NAME@54..55
+      IDENT@54..55 "b"
+  NEWLINE@55..56 "\n"
+  POSTFIX_EXPR@56..61
+    NAME@56..57
+      IDENT@56..57 "f"
+    TRANSPOSE@57..61 "'ᵀ"
+  NEWLINE@61..62 "\n"
+  VECT_EXPR@62..71
+    LBRACKET@62..63 "["
+    ARG@63..70
+      BINARY_EXPR@63..70
+        NAME@63..64
+          IDENT@63..64 "x"
+        WHITESPACE@64..65 " "
+        PLUS@65..69 "+₁"
+        NAME@69..70
+          IDENT@69..70 "y"
+    RBRACKET@70..71 "]"
+  NEWLINE@71..72 "\n"

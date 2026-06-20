@@ -22,53 +22,56 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **382 allowlisted**, 189 divergence, 4 unsupported.
-Dir corpus: **67 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Numeric-literal juxtaposition" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **386 allowlisted**, 185 divergence, 4 unsupported.
+Dir corpus: **68 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Operator suffix sub/superscripts" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20g)
+## Latest session (2026-06-20h)
 
-**Numeric-literal juxtaposition (implicit multiplication).** An adjacent value
-with no operator between now parses as `JUXTAPOSE_EXPR` → `(juxtapose a b)`. The
-operator loop in `parse_expr_in` calls a new `should_juxtapose` after the postfix
-chain (and before `next_operator`); on success it parses the right operand at
-`JUXTAPOSE_R` and re-enters the loop. **Faithful to JuliaSyntax's `is_juxtapose`**
-(non-string branch): the term must be glued (token at `lhs.end` is not trivia —
-`is_trivia` covers `Newline`, so a space kills it), must start a value (not
-`is_operator` — radicals `√`/`¬` are `UniRadical`, not operators, so they pass —
-not a closing delimiter, keyword, or `@`); a numeric-literal coefficient
-(`lhs_is_number`: a single number token) juxtaposes with any such value, a
-non-numeric **closed** value (`lhs_value_close`: PAREN/CALL/INDEX/CURLY/VECT/
-MATRIX/POSTFIX) only with a non-numeric term. **Binding powers** `JUXTAPOSE_L=32`,
-`JUXTAPOSE_R=31` (right-assoc, like `^`): tighter than `*`(24)/`//`(28)/`<<`(30),
-looser than `^`(32). Verified against Julia: `2x^2`→`(juxtapose 2 (x^2))`,
-`2^2x`→`2^(2x)`, `2x*y`→`(2x)*y`, `a*2x`→`a*(2x)`, `2//3x`→`2//(3x)`. **Postfix
-guard:** `parse_postfix_chain` breaks before a `(` glued to a number so `2(x)` is
-multiplication (`(juxtapose 2 x)`), not a call, mirroring JuliaSyntax's
-`parse_call_chain` `is_number(peek_behind) && peek==K"("` early-return; `2[1]`
-stays `(ref 2 1)`. **Projector:** one arm `JUXTAPOSE_EXPR => sexp("juxtapose",
-project_each(child_nodes))`. New `SyntaxKind::JUXTAPOSE_EXPR` (no lexer/tree_builder
-change — it's a node, not a token).
+**Operator suffix sub/superscripts.** An operator token now absorbs a trailing
+run of sub/superscript or prime chars (`a +₁ b`, `x -->₁ y`, `f'ᵀ`, `a .+₁ b`),
+keeping its *kind* (so binding power is untouched) and only growing its text.
+**Lexer:** new `push_op(kind, start)` consumes `is_op_suffix_char` runs when
+`op_takes_suffix(kind)`; all operator-push sites in `lex_operator_or_unknown` plus
+the `Transpose` site route through it. `op_takes_suffix` mirrors JuliaSyntax's
+`optakessuffix` — **excluded:** assignments (`= op= .= .op=`), `&& || .&& .||`,
+`<: >: : :: .. ... ! ~ .~ -> ? $`, and the radicals/`UniAssign`; **included:** the
+arithmetic/comparison/bitwise/arrow/pipe/transpose ops and their broadcast forms,
+plus the unicode tiers (verified each via `Tokenize.tokenize` byte ranges, not
+guessed). `is_op_suffix_char` checks the explicit JuliaSyntax suffix-char set
+(combining-mark categories Mn/Mc/Me are a deferred pragmatic subset, like
+`is_unicode_ident`). **Projector** (`project_binary`): a suffixed operator
+(`op_has_suffix` = last char is a suffix char) emits a generic `(call-i …)` /
+`(dotcall-i …)` with the **full text**, even when the base op is syntactic —
+`-->₁`→`(call-i x -->₁ y)`, not `(--> …)` — matching Julia, where a suffix makes
+the op non-syntactic. `f'ᵀ` needed no projector change (`project_postfix` already
+reads token text). **Array-split fix** (`array_element_boundary`): the
+whitespace-sensitive `[a +b]`→`[a, +b]` split was firing for *any* operator (a
+latent bug: `[a *b]` wrongly became `(hcat a b)`). Now gated on
+`op_can_lead_array_element` = genuinely unary-capable infix ops {`+ - .+ .- & ~ .~`}
+∪ symbol-quote `:` and **never a suffixed op**. So `[a *b]`/`[a ::b]`/`[a <:b]`
+→ `(vect …)`, `[x +₁y]`→`(vect (call-i x +₁ y))`, while `[a +b]`/`[1 :a]` still
+split (`hcat`). Mirrors JuliaSyntax `is_both_unary_and_binary` + the `:`-quote path.
 
-JS allow **377 → 382** (+5: `2x` js-b595b214, `2(x)` js-c574cd37, `(x-1)y`
-js-10f37fd5, `1√x` js-80cfb887, `x'y` js-c33f231d); divergence 194 → 189,
-unsupported held 4. Dir allow 66 → 67 (`juxtaposition`). Zero regressions; green,
-clippy/fmt clean. **Deferred:** n-ary `(2)(3)x` (Fatou nests right →
-`(juxtapose (call 2 3) x)`, a recorded divergence like associative `*`), string
-juxtaposition `"a"x` (error recovery), `f(2)2`/`2begin end` (error-shape).
+JS allow **382 → 386** (+4: `a +₁ b +₁ c` js-db974d0b, `x -->₁ y` js-50dc84fd,
+`[x +₁y]` js-97cf44fb, `f'ᵀ` js-90fb496e); divergence 189 → 185, unsupported held 4.
+Dir allow 67 → 68 (`operator_suffixes`). Fixed two transient regressions from the
+array gate (`[1 :a]` js-ac8bb0f2, `[1 2:3 :a]` js-a73c4b25) by adding `:` back to
+the lead set. Zero net regressions; green, clippy/fmt clean. New parser snapshot
+`array_space_unary` locks the corrected splitting. **Deferred:** unicode unary in
+plus/times tiers (`±x`, not yet a prefix), combining-mark suffix categories.
 
 **Suggested next targets (ranked):**
-1. **Operator suffix sub/superscripts** — `a +₁ b` (js-db974d0b), `x -->₁ y`
-   (js-50dc84fd), `[x +₁y]` (js-97cf44fb), `f'ᵀ` (js-90fb496e). Julia's `isopsuffix`
-   set (subscripts/superscripts/primes) extends an operator token; the op keeps its
-   tier but the suffix is part of its text. Lexer-only once the suffix set is added.
-2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
+1. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
    `project_string`'s macrocall branch (still open from 2026-06-20e).
+2. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes
+   (`is_both_unary_and_binary` set); needs a `parse_prefix` arm for the relevant
+   unicode chars and would also let `[a ±b]` split correctly.
 3. **Comparison/`<:` chains and unicode comparison chains** — recorded as nested
    divergences; revisit only if flattening is wanted.
 
@@ -76,6 +79,12 @@ juxtaposition `"a"x` (error recovery), `f(2)2`/`2begin end` (error-shape).
 
 One-liners; full implementation detail lives in the matching `[x]` bullet in
 `TODO.md`.
+
+- **2026-06-20g** — Numeric-literal juxtaposition (implicit multiplication): an
+  adjacent glued value with no operator → `JUXTAPOSE_EXPR`/`(juxtapose a b)` via
+  `should_juxtapose` (faithful to `is_juxtapose`); binding powers `(32,31)`
+  (tighter than `*`, looser than `^`); `parse_postfix_chain` guard so `2(x)` is
+  `(juxtapose 2 x)` not a call. JS allow 377 → 382. Fixture `juxtaposition`.
 
 - **2026-06-20f** — Unicode operators (single-codepoint infix/prefix): the whole
   faithful set generated into `src/parser/unicode_ops.rs` (code-point-sorted

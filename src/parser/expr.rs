@@ -8,7 +8,7 @@
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
-use crate::parser::lexer::{TokKind, Token};
+use crate::parser::lexer::{TokKind, Token, is_op_suffix_char};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
     KwStmt, is_op_name, parse_abstract_type, parse_begin_expr, parse_do_block, parse_for_expr,
@@ -971,11 +971,47 @@ fn parse_paren(
 /// `[1 +2]` is two elements while `[1 + 2]` is one.
 fn array_element_boundary(ctx: &ParserCtx<'_>, operand_end: usize, op_idx: usize) -> bool {
     let space_before = op_idx > operand_end;
-    space_before
-        && !matches!(
-            ctx.token(op_idx + 1).map(|t| t.kind),
-            Some(TokKind::Whitespace | TokKind::Newline) | None
-        )
+    if !space_before {
+        return false;
+    }
+    // Only an operator that can be *unary* begins a new element when glued to its
+    // operand: `[a +b]` is `[a, +b]` but `[a *b]` is `[a*b]` (one element), since
+    // `*` is binary-only. A suffixed operator (`+₁`) is never unary either, so
+    // `[x +₁y]` stays one element. Matches JuliaSyntax's whitespace-sensitive
+    // array splitting (only `is_unary`/`is_both_unary_and_binary` operators split).
+    let Some(op) = ctx.token(op_idx) else {
+        return false;
+    };
+    if !op_can_lead_array_element(op) {
+        return false;
+    }
+    // …and the operator must be glued to its own operand (no whitespace after).
+    !matches!(
+        ctx.token(op_idx + 1).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Newline) | None
+    )
+}
+
+/// Whether `op`, glued to the following operand inside an array literal, reads as
+/// that operand's prefix (so it begins a new element). The leading operators are
+/// the unary-and-binary infix operators `+ - & ~` (broadcast `.+ .- .~`) and the
+/// symbol-quote `:` (glued `:a` is a quoted symbol). Binary-only operators
+/// (`* / % | :: <: >:`, broadcast `.& .|`) and any *suffixed* operator (`+₁`,
+/// never unary) stay infix and do not split. Unary-only prefixes (`! ¬ √ $`) have
+/// no infix binding power, so they end the element naturally and are not listed
+/// here. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
+fn op_can_lead_array_element(op: &Token) -> bool {
+    matches!(
+        op.kind,
+        TokKind::Plus
+            | TokKind::Minus
+            | TokKind::DotPlus
+            | TokKind::DotMinus
+            | TokKind::Tilde
+            | TokKind::DotTilde
+            | TokKind::Amp
+            | TokKind::Colon
+    ) && !op.text.chars().next_back().is_some_and(is_op_suffix_char)
 }
 
 /// Parse one element of an array literal: a full expression in array mode (a

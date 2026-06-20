@@ -474,10 +474,10 @@ through), so the grammar can grow incrementally.
   `(24,25)`, power `(32,31)` right-assoc). Radicals `√ ∛ ∜` and `¬` are prefix-only,
   routed through the existing unary arm → `(call-pre √ x)`. The projector reads the
   operator text from the token (`x → y` → `(call-i x → y)`, `a ≔ b` → `(≔ a b)`).
-  **Deferred:** juxtaposition (`1√x` → `(juxtapose …)`), operator suffix
-  sub/superscripts (`a +₁ b`, `f'ᵀ`), unicode in `export`/`public`/`import`
-  positions, broadcast unicode (`.…`), unicode comparison chains (nested, like the
-  ASCII chain divergence), and unicode unary in the plus/times tiers (`±x`).
+  **Deferred:** unicode in `export`/`public`/`import` positions, broadcast unicode
+  (`.…`), unicode comparison chains (nested, like the ASCII chain divergence), and
+  unicode unary in the plus/times tiers (`±x`). (Juxtaposition and operator-suffix
+  sub/superscripts both landed separately — see those bullets.)
 
 - [x] Numeric-literal juxtaposition (implicit multiplication). An adjacent value
   with no operator between is parsed as a `JUXTAPOSE_EXPR` → `(juxtapose a b)`:
@@ -493,9 +493,25 @@ through), so the grammar can grow incrementally.
   `parse_postfix_chain` gains a guard so a `(` glued to a number is multiplication,
   not a call (`2(x)` ⇒ `(juxtapose 2 x)`, while `2[1]` stays `(ref 2 1)`). The
   projector heads the node `juxtapose` over its children. **Deferred:** n-ary
-  flattening (`(2)(3)x` nests right, like associative `*`, a recorded divergence),
-  string-literal juxtaposition (`"a"x`, error recovery), and operator-suffix
-  sub/superscripts.
+  flattening (`(2)(3)x` nests right, like associative `*`, a recorded divergence)
+  and string-literal juxtaposition (`"a"x`, error recovery).
+- [x] Operator suffix sub/superscripts. An operator token may absorb a trailing
+  run of sub/superscript or prime characters (`a +₁ b`, `x -->₁ y`, `f'ᵀ`,
+  `a .+₁ b`): the lexer's new `push_op` consumes `is_op_suffix_char` runs after
+  any operator whose kind `op_takes_suffix` (mirroring JuliaSyntax's
+  `optakessuffix` — assignments, `: :: .. ... ! ~ -> ? $ && || <: >:` and the
+  radicals are excluded). The token *kind* is unchanged (so binding power is
+  untouched); only the text grows, and the projector reads it. `project_binary`
+  emits a suffixed operator as a generic `(call-i …)`/`(dotcall-i …)` with the
+  full text even when the base operator is syntactic (`-->₁` ⇒ `(call-i x -->₁ y)`,
+  not `(--> …)`), matching JuliaSyntax, where a suffix makes the operator
+  non-syntactic. The explicit suffix-char set is handled; the combining-mark
+  categories (Mn/Mc/Me) `optakessuffix` also accepts are a deferred pragmatic
+  subset. Also corrected the whitespace-sensitive array-element split
+  (`array_element_boundary`) to fire only for genuinely unary-capable operators
+  (`+ - & ~`, broadcast `.+ .- .~`, and the symbol-quote `:`) and never for a
+  suffixed operator: `[a *b]`/`[a ::b]` are now one element (`(vect …)`) and
+  `[x +₁y]` stays `(vect (call-i x +₁ y))`, while `[a +b]`/`[1 :a]` still split.
 
 ## Incremental reparse
 

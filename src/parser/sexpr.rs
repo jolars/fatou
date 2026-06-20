@@ -280,6 +280,15 @@ fn operator_func_repr(kind: SyntaxKind) -> String {
     }
 }
 
+/// Whether an operator's text carries a trailing sub/superscript or prime suffix
+/// (`+₁`, `-->₁`). A base operator never ends in a suffix character, so checking
+/// the final character is sufficient.
+fn op_has_suffix(text: &str) -> bool {
+    text.chars()
+        .next_back()
+        .is_some_and(super::lexer::is_op_suffix_char)
+}
+
 fn is_operator(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -381,6 +390,22 @@ fn project_binary(node: &SyntaxNode) -> String {
         UNICODE_OP => return format!("(call-i {lhs} {} {})", op.text(), project(rhs)),
         UNICODE_ASSIGN_OP => return format!("({} {lhs} {})", op.text(), project(rhs)),
         _ => {}
+    }
+    // A suffixed operator (`a +₁ b`, `x -->₁ y`) carries its sub/superscript
+    // suffix in the token text and always projects as a generic infix call —
+    // even operators that are otherwise syntactic (`-->`). Broadcast operators
+    // keep the `dotcall-i` head with the leading `.` stripped from the function
+    // name. Mirrors JuliaSyntax, where a suffix makes the operator non-syntactic.
+    if op_has_suffix(op.text()) {
+        let text = op.text();
+        return match infix_head(op.kind()) {
+            InfixHead::DotCallI(_) => format!(
+                "(dotcall-i {lhs} {} {})",
+                text.trim_start_matches('.'),
+                project(rhs)
+            ),
+            _ => format!("(call-i {lhs} {text} {})", project(rhs)),
+        };
     }
     match infix_head(op.kind()) {
         InfixHead::CallI(text) => format!("(call-i {lhs} {text} {})", project(rhs)),

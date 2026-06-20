@@ -332,6 +332,25 @@ impl<'a> Lexer<'a> {
         });
     }
 
+    /// Push an operator token, first absorbing any trailing sub/superscript or
+    /// prime suffix into its text when the operator kind takes one (`+₁`,
+    /// `-->₁`, `f'ᵀ`). The kind is unchanged — only the text grows — so the
+    /// parser still keys on the precedence tier and the projector reads the full
+    /// operator text.
+    fn push_op(&mut self, kind: TokKind, start: usize) {
+        if op_takes_suffix(kind) {
+            while self.pos < self.bytes.len() {
+                let c = self.char_at(self.pos);
+                if is_op_suffix_char(c) {
+                    self.pos += c.len_utf8();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.push(kind, start, self.pos);
+    }
+
     fn next_token(&mut self) {
         // Inside a string/command body, the body lexer owns the bytes until the
         // closing delimiter (or an interpolation, which pushes its own frame).
@@ -377,7 +396,7 @@ impl<'a> Lexer<'a> {
             b'`' => self.lex_open_cmd(start, false),
             b'\'' if self.prev_ends_value() => {
                 self.pos += 1;
-                self.push(TokKind::Transpose, start, self.pos);
+                self.push_op(TokKind::Transpose, start);
             }
             b'\'' => self.lex_char_or_unknown(start),
             b'0'..=b'9' => self.lex_number(start),
@@ -812,7 +831,7 @@ impl<'a> Lexer<'a> {
         // Three-char operators first (longest match): the `...` splat/vararg.
         if (b0, b1, self.peek(2)) == (Some(b'.'), Some(b'.'), Some(b'.')) {
             self.pos += 3;
-            self.push(TokKind::DotDotDot, start, self.pos);
+            self.push_op(TokKind::DotDotDot, start);
             return;
         }
 
@@ -820,7 +839,7 @@ impl<'a> Lexer<'a> {
         // so a bare `..` isn't mistaken for a dotted operator or two lone dots).
         if (b0, b1) == (Some(b'.'), Some(b'.')) {
             self.pos += 2;
-            self.push(TokKind::DotDot, start, self.pos);
+            self.push_op(TokKind::DotDot, start);
             return;
         }
 
@@ -833,13 +852,13 @@ impl<'a> Lexer<'a> {
             // The lone 4-char dotted op `.//=` must beat the 3-char `.//`.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
                 self.pos += 4;
-                self.push(TokKind::DotSlashSlashEq, start, self.pos);
+                self.push_op(TokKind::DotSlashSlashEq, start);
                 return;
             }
             // The 4-char broadcast arrow `.-->` must beat `.-` (`DotMinus`).
             if (b1, self.peek(2), self.peek(3)) == (Some(b'-'), Some(b'-'), Some(b'>')) {
                 self.pos += 4;
-                self.push(TokKind::DotLongArrow, start, self.pos);
+                self.push_op(TokKind::DotLongArrow, start);
                 return;
             }
             let dotted3 = match (b1, self.peek(2)) {
@@ -863,7 +882,7 @@ impl<'a> Lexer<'a> {
             };
             if let Some(kind) = dotted3 {
                 self.pos += 3;
-                self.push(kind, start, self.pos);
+                self.push_op(kind, start);
                 return;
             }
             let dotted2 = match b1 {
@@ -885,7 +904,7 @@ impl<'a> Lexer<'a> {
             };
             if let Some(kind) = dotted2 {
                 self.pos += 2;
-                self.push(kind, start, self.pos);
+                self.push_op(kind, start);
                 return;
             }
             // A lone `.` (or `..`) falls through to the single-char table below.
@@ -894,7 +913,7 @@ impl<'a> Lexer<'a> {
         // The lone 3-char ASCII op `//=` must beat the 2-char `//`.
         if (b0, b1, self.peek(2)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
             self.pos += 3;
-            self.push(TokKind::SlashSlashEq, start, self.pos);
+            self.push_op(TokKind::SlashSlashEq, start);
             return;
         }
 
@@ -902,7 +921,7 @@ impl<'a> Lexer<'a> {
         if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-'), Some(b'>'))
         {
             self.pos += 4;
-            self.push(TokKind::LeftRightArrow, start, self.pos);
+            self.push_op(TokKind::LeftRightArrow, start);
             return;
         }
 
@@ -915,7 +934,7 @@ impl<'a> Lexer<'a> {
         };
         if let Some(kind) = three {
             self.pos += 3;
-            self.push(kind, start, self.pos);
+            self.push_op(kind, start);
             return;
         }
 
@@ -950,7 +969,7 @@ impl<'a> Lexer<'a> {
         };
         if let Some(kind) = two {
             self.pos += 2;
-            self.push(kind, start, self.pos);
+            self.push_op(kind, start);
             return;
         }
 
@@ -986,7 +1005,7 @@ impl<'a> Lexer<'a> {
         match one {
             Some(kind) => {
                 self.pos += 1;
-                self.push(kind, start, self.pos);
+                self.push_op(kind, start);
             }
             None => {
                 // A single-codepoint Unicode operator (`→`, `∈`, `√`, …): look
@@ -995,7 +1014,7 @@ impl<'a> Lexer<'a> {
                 let ch = self.char_at(self.pos);
                 if let Some(kind) = super::unicode_ops::unicode_op_kind(ch) {
                     self.pos += ch.len_utf8();
-                    self.push(kind, start, self.pos);
+                    self.push_op(kind, start);
                 } else {
                     // Unknown: consume one full char to stay on a char boundary.
                     self.pos += ch.len_utf8();
@@ -1055,6 +1074,78 @@ fn is_ident_continue(c: char) -> bool {
 /// math/symbol code points Julia allows (a pragmatic superset for the skeleton).
 fn is_unicode_ident(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '\u{391}'..='\u{3c9}' | '\u{2070}'..='\u{209f}')
+}
+
+/// The explicit operator-suffix characters Julia allows after an operator
+/// (subscripts, superscripts, and primes), mirroring JuliaSyntax's `isopsuffix`
+/// "additional allowed cases" set. The combining-mark categories (Mn/Mc/Me) that
+/// `isopsuffix` also accepts are not handled here (a pragmatic subset, like
+/// [`is_unicode_ident`]); these cover every realistic operator suffix.
+const OP_SUFFIX_CHARS: &str = "²³¹ʰʲʳʷʸˡˢˣᴬᴮᴰᴱᴳᴴᴵᴶᴷᴸᴹᴺᴼᴾᴿᵀᵁᵂᵃᵇᵈᵉᵍᵏᵐᵒᵖᵗᵘᵛᵝᵞᵟᵠᵡᵢᵣᵤᵥᵦᵧᵨᵩᵪᶜᶠᶥᶦᶫᶰᶸᶻᶿ′″‴‵‶‷⁗⁰ⁱ⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₒₓₕₖₗₘₙₚₛₜⱼⱽꜛꜜꜝ";
+
+/// Whether `c` can extend an operator token as a sub/superscript or prime suffix
+/// (`+₁`, `-->₁`, `f'ᵀ`). See [`OP_SUFFIX_CHARS`].
+pub(crate) fn is_op_suffix_char(c: char) -> bool {
+    OP_SUFFIX_CHARS.contains(c)
+}
+
+/// Whether an operator of the given kind may absorb trailing suffix characters.
+/// Mirrors JuliaSyntax's `optakessuffix`: assignments, the short-circuit/type
+/// operators, `: :: .. ... ! ~ -> ? $` and the radicals do **not** take a suffix;
+/// the arithmetic/comparison/bitwise/arrow operators (and their broadcast forms)
+/// do.
+fn op_takes_suffix(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        Plus | Minus
+            | Star
+            | Slash
+            | SlashSlash
+            | Caret
+            | Percent
+            | EqEq
+            | NotEq
+            | Lt
+            | Le
+            | Gt
+            | Ge
+            | Amp
+            | Pipe
+            | Shl
+            | Shr
+            | UShr
+            | PipeGt
+            | PipeLt
+            | FatArrow
+            | LongArrow
+            | LeftRightArrow
+            | Transpose
+            | DotPlus
+            | DotMinus
+            | DotStar
+            | DotSlash
+            | DotSlashSlash
+            | DotCaret
+            | DotPercent
+            | DotEqEq
+            | DotNotEq
+            | DotLt
+            | DotLe
+            | DotGt
+            | DotGe
+            | DotFatArrow
+            | DotLongArrow
+            | DotPipeGt
+            | DotAmp
+            | DotPipe
+            | UniArrow
+            | UniComparison
+            | UniColon
+            | UniPlus
+            | UniTimes
+            | UniPower
+    )
 }
 
 #[cfg(test)]

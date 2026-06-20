@@ -1,0 +1,143 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..78
+  MATRIX_EXPR@0..6
+    LBRACKET@0..1 "["
+    MATRIX_ROW@1..5
+      ARG@1..2
+        NAME@1..2
+          IDENT@1..2 "a"
+      WHITESPACE@2..3 " "
+      ARG@3..5
+        UNARY_EXPR@3..5
+          PLUS@3..4 "+"
+          NAME@4..5
+            IDENT@4..5 "b"
+    RBRACKET@5..6 "]"
+  NEWLINE@6..7 "\n"
+  MATRIX_EXPR@7..13
+    LBRACKET@7..8 "["
+    MATRIX_ROW@8..12
+      ARG@8..9
+        NAME@8..9
+          IDENT@8..9 "a"
+      WHITESPACE@9..10 " "
+      ARG@10..12
+        UNARY_EXPR@10..12
+          MINUS@10..11 "-"
+          NAME@11..12
+            IDENT@11..12 "b"
+    RBRACKET@12..13 "]"
+  NEWLINE@13..14 "\n"
+  VECT_EXPR@14..20
+    LBRACKET@14..15 "["
+    ARG@15..19
+      BINARY_EXPR@15..19
+        NAME@15..16
+          IDENT@15..16 "a"
+        WHITESPACE@16..17 " "
+        STAR@17..18 "*"
+        NAME@18..19
+          IDENT@18..19 "b"
+    RBRACKET@19..20 "]"
+  NEWLINE@20..21 "\n"
+  VECT_EXPR@21..27
+    LBRACKET@21..22 "["
+    ARG@22..26
+      BINARY_EXPR@22..26
+        NAME@22..23
+          IDENT@22..23 "a"
+        WHITESPACE@23..24 " "
+        SLASH@24..25 "/"
+        NAME@25..26
+          IDENT@25..26 "b"
+    RBRACKET@26..27 "]"
+  NEWLINE@27..28 "\n"
+  VECT_EXPR@28..35
+    LBRACKET@28..29 "["
+    ARG@29..34
+      TYPE_ANNOTATION@29..34
+        NAME@29..30
+          IDENT@29..30 "a"
+        WHITESPACE@30..31 " "
+        COLON_COLON@31..33 "::"
+        NAME@33..34
+          IDENT@33..34 "b"
+    RBRACKET@34..35 "]"
+  NEWLINE@35..36 "\n"
+  VECT_EXPR@36..43
+    LBRACKET@36..37 "["
+    ARG@37..42
+      BINARY_EXPR@37..42
+        NAME@37..38
+          IDENT@37..38 "a"
+        WHITESPACE@38..39 " "
+        SUBTYPE@39..41 "<:"
+        NAME@41..42
+          IDENT@41..42 "b"
+    RBRACKET@42..43 "]"
+  NEWLINE@43..44 "\n"
+  MATRIX_EXPR@44..50
+    LBRACKET@44..45 "["
+    MATRIX_ROW@45..49
+      ARG@45..46
+        LITERAL@45..46
+          INTEGER@45..46 "1"
+      WHITESPACE@46..47 " "
+      ARG@47..49
+        QUOTE_SYM@47..49
+          COLON@47..48 ":"
+          NAME@48..49
+            IDENT@48..49 "a"
+    RBRACKET@49..50 "]"
+  NEWLINE@50..51 "\n"
+  MATRIX_EXPR@51..61
+    LBRACKET@51..52 "["
+    MATRIX_ROW@52..60
+      ARG@52..53
+        LITERAL@52..53
+          INTEGER@52..53 "1"
+      WHITESPACE@53..54 " "
+      ARG@54..57
+        BINARY_EXPR@54..57
+          LITERAL@54..55
+            INTEGER@54..55 "2"
+          COLON@55..56 ":"
+          LITERAL@56..57
+            INTEGER@56..57 "3"
+      WHITESPACE@57..58 " "
+      ARG@58..60
+        QUOTE_SYM@58..60
+          COLON@58..59 ":"
+          NAME@59..60
+            IDENT@59..60 "a"
+    RBRACKET@60..61 "]"
+  NEWLINE@61..62 "\n"
+  MATRIX_EXPR@62..69
+    LBRACKET@62..63 "["
+    MATRIX_ROW@63..68
+      ARG@63..64
+        NAME@63..64
+          IDENT@63..64 "a"
+      WHITESPACE@64..65 " "
+      ARG@65..68
+        UNARY_EXPR@65..68
+          DOT_PLUS@65..67 ".+"
+          NAME@67..68
+            IDENT@67..68 "b"
+    RBRACKET@68..69 "]"
+  NEWLINE@69..70 "\n"
+  VECT_EXPR@70..77
+    LBRACKET@70..71 "["
+    ARG@71..76
+      BINARY_EXPR@71..76
+        NAME@71..72
+          IDENT@71..72 "a"
+        WHITESPACE@72..73 " "
+        DOT_STAR@73..75 ".*"
+        NAME@75..76
+          IDENT@75..76 "b"
+    RBRACKET@76..77 "]"
+  NEWLINE@77..78 "\n"
