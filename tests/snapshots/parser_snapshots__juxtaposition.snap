@@ -1,0 +1,139 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..74
+  JUXTAPOSE_EXPR@0..2
+    LITERAL@0..1
+      INTEGER@0..1 "2"
+    NAME@1..2
+      IDENT@1..2 "x"
+  NEWLINE@2..3 "\n"
+  JUXTAPOSE_EXPR@3..7
+    LITERAL@3..6
+      FLOAT@3..6 "1.5"
+    NAME@6..7
+      IDENT@6..7 "x"
+  NEWLINE@7..8 "\n"
+  JUXTAPOSE_EXPR@8..11
+    LITERAL@8..9
+      INTEGER@8..9 "2"
+    NAME@9..11
+      IDENT@9..11 "im"
+  NEWLINE@11..12 "\n"
+  JUXTAPOSE_EXPR@12..16
+    LITERAL@12..13
+      INTEGER@12..13 "2"
+    PAREN_EXPR@13..16
+      LPAREN@13..14 "("
+      NAME@14..15
+        IDENT@14..15 "x"
+      RPAREN@15..16 ")"
+  NEWLINE@16..17 "\n"
+  JUXTAPOSE_EXPR@17..22
+    LITERAL@17..18
+      INTEGER@17..18 "1"
+    UNARY_EXPR@18..22
+      UNICODE_RADICAL@18..21 "√"
+      NAME@21..22
+        IDENT@21..22 "x"
+  NEWLINE@22..23 "\n"
+  JUXTAPOSE_EXPR@23..29
+    PAREN_EXPR@23..28
+      LPAREN@23..24 "("
+      BINARY_EXPR@24..27
+        NAME@24..25
+          IDENT@24..25 "x"
+        MINUS@25..26 "-"
+        LITERAL@26..27
+          INTEGER@26..27 "1"
+      RPAREN@27..28 ")"
+    NAME@28..29
+      IDENT@28..29 "y"
+  NEWLINE@29..30 "\n"
+  JUXTAPOSE_EXPR@30..35
+    CALL_EXPR@30..34
+      NAME@30..31
+        IDENT@30..31 "f"
+      ARG_LIST@31..34
+        LPAREN@31..32 "("
+        ARG@32..33
+          NAME@32..33
+            IDENT@32..33 "x"
+        RPAREN@33..34 ")"
+    NAME@34..35
+      IDENT@34..35 "y"
+  NEWLINE@35..36 "\n"
+  JUXTAPOSE_EXPR@36..43
+    VECT_EXPR@36..42
+      LBRACKET@36..37 "["
+      ARG@37..38
+        LITERAL@37..38
+          INTEGER@37..38 "1"
+      COMMA@38..39 ","
+      WHITESPACE@39..40 " "
+      ARG@40..41
+        LITERAL@40..41
+          INTEGER@40..41 "2"
+      RBRACKET@41..42 "]"
+    NAME@42..43
+      IDENT@42..43 "x"
+  NEWLINE@43..44 "\n"
+  JUXTAPOSE_EXPR@44..47
+    POSTFIX_EXPR@44..46
+      NAME@44..45
+        IDENT@44..45 "x"
+      TRANSPOSE@45..46 "'"
+    NAME@46..47
+      IDENT@46..47 "y"
+  NEWLINE@47..48 "\n"
+  JUXTAPOSE_EXPR@48..52
+    LITERAL@48..49
+      INTEGER@48..49 "2"
+    BINARY_EXPR@49..52
+      NAME@49..50
+        IDENT@49..50 "x"
+      CARET@50..51 "^"
+      LITERAL@51..52
+        INTEGER@51..52 "2"
+  NEWLINE@52..53 "\n"
+  BINARY_EXPR@53..57
+    LITERAL@53..54
+      INTEGER@53..54 "2"
+    CARET@54..55 "^"
+    JUXTAPOSE_EXPR@55..57
+      LITERAL@55..56
+        INTEGER@55..56 "2"
+      NAME@56..57
+        IDENT@56..57 "x"
+  NEWLINE@57..58 "\n"
+  BINARY_EXPR@58..62
+    JUXTAPOSE_EXPR@58..60
+      LITERAL@58..59
+        INTEGER@58..59 "2"
+      NAME@59..60
+        IDENT@59..60 "x"
+    STAR@60..61 "*"
+    NAME@61..62
+      IDENT@61..62 "y"
+  NEWLINE@62..63 "\n"
+  BINARY_EXPR@63..68
+    LITERAL@63..64
+      INTEGER@63..64 "2"
+    SLASH_SLASH@64..66 "//"
+    JUXTAPOSE_EXPR@66..68
+      LITERAL@66..67
+        INTEGER@66..67 "3"
+      NAME@67..68
+        IDENT@67..68 "x"
+  NEWLINE@68..69 "\n"
+  BINARY_EXPR@69..73
+    NAME@69..70
+      IDENT@69..70 "a"
+    STAR@70..71 "*"
+    JUXTAPOSE_EXPR@71..73
+      LITERAL@71..72
+        INTEGER@71..72 "2"
+      NAME@72..73
+        IDENT@72..73 "x"
+  NEWLINE@73..74 "\n"

@@ -120,6 +120,7 @@ fn project(node: &SyntaxNode) -> String {
         TYPE_ANNOTATION => project_type_annotation(node),
         WHERE_EXPR => project_where(node),
         ARROW_EXPR => sexp("->", project_each(child_nodes(node))),
+        JUXTAPOSE_EXPR => sexp("juxtapose", project_each(child_nodes(node))),
         TERNARY_EXPR => sexp("?", project_each(child_nodes(node))),
 
         CALL_EXPR => project_call("call", node),

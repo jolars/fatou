@@ -1,0 +1,1 @@
+(toplevel (juxtapose 2 x) (juxtapose 1.5 x) (juxtapose 2 im) (juxtapose 2 x) (juxtapose 1 (call-pre √ x)) (juxtapose (call-i x - 1) y) (juxtapose (call f x) y) (juxtapose (vect 1 2) x) (juxtapose (call-post x ') y) (juxtapose 2 (call-i x ^ 2)) (call-i 2 ^ (juxtapose 2 x)) (call-i (juxtapose 2 x) * y) (call-i 2 // (juxtapose 3 x)) (call-i a * (juxtapose 2 x)))

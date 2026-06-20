@@ -186,9 +186,9 @@ through), so the grammar can grow incrementally.
   **No-ops by design:** `Inf`/`NaN`/`Inf32`/… are ordinary identifiers in Julia,
   not literals, so they stay `NAME`; oversized "big" integer literals remain
   plain `INTEGER` tokens (type promotion is a lowering concern, not the
-  parser's). **Deferred:** numeric juxtaposition / implicit multiplication
-  (`2x`, `2π`, `1im`) is a separate parser feature — the literal there is just
-  the number and `im`/`x` are identifiers.
+  parser's). Numeric juxtaposition / implicit multiplication
+  (`2x`, `2π`, `1im`) is its own parser feature, landed separately (see
+  "Numeric-literal juxtaposition" below).
 - [x] Augmented (compound) assignment operators `op=` (parity-driven ASCII set):
   `+= -= *= /= //= ^= %= |= &=` plus broadcast `.+= .-= .*= ./= .//= .^= .%=`.
   Lexed as single tokens (longest-match: `.//=` 4-char and `//=` 3-char beat their
@@ -478,6 +478,24 @@ through), so the grammar can grow incrementally.
   sub/superscripts (`a +₁ b`, `f'ᵀ`), unicode in `export`/`public`/`import`
   positions, broadcast unicode (`.…`), unicode comparison chains (nested, like the
   ASCII chain divergence), and unicode unary in the plus/times tiers (`±x`).
+
+- [x] Numeric-literal juxtaposition (implicit multiplication). An adjacent value
+  with no operator between is parsed as a `JUXTAPOSE_EXPR` → `(juxtapose a b)`:
+  `2x`, `2(x)`, `1√x`, `(x-1)y`, `f(x)y`, `[1,2]x`, `2im`, `x'y`. The operator
+  loop (`parse_expr_in`) checks `should_juxtapose` after the postfix chain —
+  faithful to JuliaSyntax's `is_juxtapose`: the term must be glued (no preceding
+  whitespace/newline), not an operator (radicals `√`/`¬` pass, they are not
+  `is_operator`), not a closing/keyword/`@` token; a numeric-literal coefficient
+  juxtaposes with any such value, while a non-numeric closed value (`lhs_value_close`:
+  paren/call/index/curly/vect/matrix/transpose) juxtaposes only with a non-numeric
+  term. Binding powers `(JUXTAPOSE_L=32, JUXTAPOSE_R=31)` make it tighter than `*`/`//`
+  but looser than `^`, matching `2x^2` ⇒ `(juxtapose 2 (x^2))` and `2^2x` ⇒ `2^(2x)`.
+  `parse_postfix_chain` gains a guard so a `(` glued to a number is multiplication,
+  not a call (`2(x)` ⇒ `(juxtapose 2 x)`, while `2[1]` stays `(ref 2 1)`). The
+  projector heads the node `juxtapose` over its children. **Deferred:** n-ary
+  flattening (`(2)(3)x` nests right, like associative `*`, a recorded divergence),
+  string-literal juxtaposition (`"a"x`, error recovery), and operator-suffix
+  sub/superscripts.
 
 ## Incremental reparse
 

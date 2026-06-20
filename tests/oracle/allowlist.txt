@@ -30,6 +30,7 @@ import_paren_quote
 import_paths
 interpolation_expr
 interpolation_names
+juxtaposition
 keyword_args
 keyword_statements
 let_quote

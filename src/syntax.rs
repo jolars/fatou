@@ -49,6 +49,7 @@ pub enum SyntaxKind {
     BEGIN_MARKER,
     ASSIGNMENT_EXPR,
     ARROW_EXPR,
+    JUXTAPOSE_EXPR,
     TERNARY_EXPR,
     IF_EXPR,
     ELSEIF_CLAUSE,

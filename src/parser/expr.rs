@@ -62,6 +62,16 @@ const PREFIX_BP: u8 = 28;
 const TERNARY_L: u8 = 3;
 const TERNARY_R: u8 = 3;
 
+/// Binding powers for numeric-literal-coefficient juxtaposition (`2x`, `(x-1)y`,
+/// `1√x`). Julia binds juxtaposition tighter than `*`/`//`/`<<` but looser than
+/// `^`: `2x^2` ⇒ `(juxtapose 2 (x^2))` (left binds into a following `^`), while
+/// `2^2x` ⇒ `2^(2x)` (it binds into `^`'s right operand). So the left power must
+/// out-bind `^`'s right (`31`), and the right operand captures only `^` (`32`)
+/// and tighter — keeping `*` (`24`) and `//` (`28`) out. Right-associative
+/// (`L > R`), like `^`.
+const JUXTAPOSE_L: u8 = 32;
+const JUXTAPOSE_R: u8 = 31;
+
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
@@ -247,6 +257,19 @@ fn parse_expr_in(
 
     loop {
         lhs = parse_postfix_chain(&ctx, lhs, diagnostics);
+
+        // Numeric-literal-coefficient juxtaposition (`2x`, `2(x)`, `(x-1)y`,
+        // `1√x`): an adjacent value with no operator between is an implicit
+        // multiplication binding tighter than `*` and looser than `^`. The right
+        // operand is parsed at `JUXTAPOSE_R` (capturing a trailing `^` but not a
+        // `*`), and the whole thing re-enters the loop so a following operator
+        // (`2x*y` ⇒ `(2x)*y`) attaches outside.
+        if should_juxtapose(&ctx, &lhs, min_bp)
+            && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
+        {
+            lhs = build_binary(SyntaxKind::JUXTAPOSE_EXPR, lhs, rhs);
+            continue;
+        }
 
         let Some((op_idx, op_kind)) = next_operator(&ctx, lhs.end, inside_brackets) else {
             break;
@@ -1284,6 +1307,14 @@ fn parse_postfix_chain(
     loop {
         // No newline between the callee and `(`/`[` — only horizontal space.
         let next = ctx.skip_ws(lhs.end);
+        // Juxtaposition with a numeric literal is multiplication, not a call: a
+        // `(` glued to a number (`2(x)`) is left for the juxtaposition check in
+        // the operator loop to consume as a `(juxtapose 2 x)`, not a `(call 2 x)`.
+        // (A `[` glued to a number stays an index, `2[1]` ⇒ `(ref 2 1)`, matching
+        // JuliaSyntax's `parse_call_chain` guard.)
+        if ctx.token(next).map(|t| t.kind) == Some(TokKind::LParen) && lhs_is_number(ctx, &lhs) {
+            break;
+        }
         match ctx.token(next).map(|t| t.kind) {
             Some(TokKind::LParen) => {
                 lhs = parse_postfix(
@@ -1768,6 +1799,85 @@ fn is_operator(kind: TokKind) -> bool {
     matches!(kind, TokKind::Question)
         || is_assignment_op(kind)
         || infix_binding_power(kind).is_some()
+}
+
+/// Whether `kind` is a numeric literal token (Julia's `is_number`: not chars or
+/// booleans). Used to recognize a numeric-literal coefficient for juxtaposition.
+fn is_number_tok(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::Integer
+            | TokKind::BinInt
+            | TokKind::OctInt
+            | TokKind::HexInt
+            | TokKind::Float
+            | TokKind::Float32
+    )
+}
+
+/// Whether `lhs` is a bare numeric literal (a single number token). A numeric
+/// coefficient juxtaposes with almost any adjacent value, and a `(` glued to it
+/// is a multiplication rather than a call (`2(x)` ⇒ `(juxtapose 2 x)`).
+fn lhs_is_number(ctx: &ParserCtx<'_>, lhs: &ExprParse) -> bool {
+    lhs.end == lhs.start + 1 && ctx.token(lhs.start).is_some_and(|t| is_number_tok(t.kind))
+}
+
+/// Whether `lhs` is a closed value that may carry a non-numeric juxtaposed term
+/// (`(x-1)y`, `f(x)y`, `[1,2]x`, `x'y`) — a parenthesized/bracketed expression,
+/// a call/index/curly suffix, or a transpose. Other left operands (bare names,
+/// block forms, prefixed terms) never start a juxtaposition.
+fn lhs_value_close(lhs: &ExprParse) -> bool {
+    matches!(
+        lhs.events.first(),
+        Some(Event::Start(
+            SyntaxKind::PAREN_EXPR
+                | SyntaxKind::CALL_EXPR
+                | SyntaxKind::INDEX_EXPR
+                | SyntaxKind::CURLY_EXPR
+                | SyntaxKind::VECT_EXPR
+                | SyntaxKind::MATRIX_EXPR
+                | SyntaxKind::POSTFIX_EXPR
+        ))
+    )
+}
+
+/// A closing delimiter that ends the surrounding container rather than starting
+/// a juxtaposed term.
+fn is_juxtapose_closing(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::RParen | TokKind::RBracket | TokKind::RBrace | TokKind::Comma | TokKind::Semicolon
+    )
+}
+
+/// Whether the token directly after `lhs` begins a juxtaposed term — an implicit
+/// multiplication with no operator between (`2x`, `2(x)`, `(x-1)y`, `1√x`).
+/// Mirrors JuliaSyntax's `parse_juxtapose`/`is_juxtapose` (the non-string-literal
+/// branch; string juxtaposition is error recovery and deferred).
+fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
+    if JUXTAPOSE_L < min_bp {
+        return false;
+    }
+    let Some(next) = ctx.token(lhs.end) else {
+        return false;
+    };
+    let k = next.kind;
+    // The term must be adjacent — no intervening whitespace, newline, or comment.
+    if k.is_trivia() {
+        return false;
+    }
+    // It must start a value: not an operator (radicals are not `is_operator`, so
+    // they pass), not a closing delimiter, keyword, or macro `@`.
+    if is_operator(k) || is_juxtapose_closing(k) || k.is_keyword() || k == TokKind::At {
+        return false;
+    }
+    // A numeric coefficient juxtaposes with any such value.
+    if lhs_is_number(ctx, lhs) {
+        return true;
+    }
+    // A non-numeric value juxtaposes only with a non-numeric term (`f(2)2` is a
+    // call, not juxtaposition) and only when the left operand is a closed value.
+    !is_number_tok(k) && lhs_value_close(lhs)
 }
 
 /// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,
