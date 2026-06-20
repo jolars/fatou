@@ -439,6 +439,18 @@ through), so the grammar can grow incrementally.
   `PRIMITIVE_DEF` kinds project via `(abstract <spec>)` and
   `project_primitive` → `(primitive <spec> <bits>)`.
 
+- [x] Broadcast bitwise operators `.&` and `.|`. Lexed as `DotAmp`/`DotPipe`
+  (lone `&`/`|` after a `.`, in the 2-char dotted table — `.&&`/`.||`/`.|>`
+  already win in the 3-char table). Mirror the undotted tiers: `.&` shares the
+  `*` (times) family `(24, 25)`, `.|` the `+` (plus) family `(20, 21)`, both
+  left-associative (`a .+ b .& c` → `(dotcall-i a + (dotcall-i b & c))`). Infix
+  projects via new `DOT_AMP => DotCallI("&")`/`DOT_PIPE => DotCallI("|")`
+  `infix_head` arms → `(dotcall-i a & b)`. Glued to a `(`, both are operator-call
+  names (unlike undotted `&`, which stays a prefix): `.&(x, y)` →
+  `(call (. &) x y)`, `.|(x, y)` → `(call (. |) x y)`. **Deferred:** standalone
+  `.&` → `(. &)` and the broadcast quote `:.&&` → `(quote-: (. &&))` (the same
+  broadcast-standalone/broadcast-quote gaps that also affect `.+`/`:.+`).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

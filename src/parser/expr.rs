@@ -1856,6 +1856,8 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | DotFatArrow
             | DotLongArrow
             | DotPipeGt
+            | DotAmp
+            | DotPipe
     )
 }
 
@@ -2060,15 +2062,19 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         TokKind::Colon | TokKind::DotDot => (14, 15),
         // Bitwise-or `|` shares the `+` (plus) precedence family, left-associative
         // (`a | b & c` ⇒ `(a | (b & c))`, `a & b | c` ⇒ `((a & b) | c)`).
-        TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus | TokKind::Pipe => {
-            (20, 21)
-        }
+        TokKind::Plus
+        | TokKind::Minus
+        | TokKind::DotPlus
+        | TokKind::DotMinus
+        | TokKind::Pipe
+        | TokKind::DotPipe => (20, 21),
         // Bitwise-and `&` shares the `*` (times) precedence family, left-associative
         // (`a & b * c` ⇒ `((a & b) * c)`, `a + b & c` ⇒ `(a + (b & c))`).
         TokKind::Star
         | TokKind::Slash
         | TokKind::Percent
         | TokKind::Amp
+        | TokKind::DotAmp
         | TokKind::DotStar
         | TokKind::DotSlash
         | TokKind::DotPercent => (24, 25),

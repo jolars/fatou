@@ -22,9 +22,9 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **369 allowlisted**, 202 divergence, 4 unsupported.
-Dir corpus: **63 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "`abstract type`/`primitive type` declarations" are `[x]`
+JS corpus (575 cases): **370 allowlisted**, 201 divergence, 4 unsupported.
+Dir corpus: **64 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "broadcast bitwise operators `.&`/`.|`" are `[x]`
 in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -32,7 +32,46 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20c)
+## Latest session (2026-06-20d)
+
+**Broadcast bitwise operators `.&` and `.|`.** Last session landed undotted
+`&`/`|`; the broadcast forms were still mis-lexed (`.` + `&` separately → `a .& b`
+projected as a broken field access `(. a (quote ))`). 5-file recipe: `DotAmp`/
+`DotPipe` TokKinds lexed in the **2-char dotted table** (lone `&`/`|` after `.`;
+the 3-char table's `.&&`/`.||`/`.|>` are checked first, so they still win) →
+`DOT_AMP`/`DOT_PIPE` SyntaxKinds → `tree_builder` map → `infix_binding_power`
+mirrors the undotted tiers (`DotAmp` in the `*`/times family `(24,25)`, `DotPipe`
+in the `+`/plus family `(20,21)`, both left-assoc) → `infix_head`
+`DOT_AMP => DotCallI("&")`/`DOT_PIPE => DotCallI("|")` + `is_operator` arms. Infix
+matches Julia exactly: `a .& b` → `(dotcall-i a & b)`, `a .+ b .& c` →
+`(dotcall-i a + (dotcall-i b & c))`, `x .& y .| z` → nested left. For the glued-`(`
+operator-call form, `DotAmp`/`DotPipe` joined `is_operator_call_name` (unlike
+undotted `&`, which Julia keeps a prefix — `&(x,y)` → `(& (tuple-p x y))`), so
+`.&(x, y)` → `(call (. &) x y)` via the existing operator-callee path
+(`operator_func_repr`'s `DotCallI` → `(. &)`). No projector change beyond the two
+`infix_head` arms — faithful: the `.&`/`.|` tokens are real CST children, the
+projector only formats heads. Fixture `broadcast_bitwise_operators` (parser + dir
+corpus, 8 lines incl. precedence + operator-call discriminators). **Deferred:**
+standalone `.&` → `(. &)` (now empty `(toplevel)`, same broadcast-standalone gap
+that leaves `.+` → `(unsupported ERROR)`) and the broadcast quote `:.&&` →
+`(quote-: (. &&))` (broadcast-quote gap shared with `:.+`).
+
+JS allow **369 → 370** (+1: `.&(x,y)` js-cdf6c5ab, was FAIL); divergence 202 →
+201, unsupported held 4. Dir allow 63 → 64. Zero regressions; green, clippy/fmt
+clean.
+
+**Suggested next targets (ranked):**
+1. **Unicode operators** (lexer) — the single largest remaining lexer feature;
+   unblocks `import .⋆`, `A.⋆.f`, `a … b` (js-e5d8580f), `a .… b` (js-f74d3ac9,
+   UNSUPPORTED), `√x` (js-e13fa52a), `x → y` (js-db694f69), `i ∈ rhs`
+   (js-f3da47b9), `⊻`, `public ⤈`, `x -->₁ y`.
+2. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
+   signature relabel to descend the `::` LHS (not just the outermost paren).
+3. **Broadcast-standalone/quote** — `.&`/`.+` standalone → `(. &)`/`(. +)` and
+   `:.&&`/`:.+` quotes → `(quote-: (. …))`; needs a prefix arm for a bare broadcast
+   operator + dotted-op handling in `parse_quote_sym`.
+
+## Earlier session (2026-06-20c)
 
 **`abstract type`/`primitive type` declarations.** `abstract`/`primitive`/`type`
 are contextual keywords (Julia: `abstract = 1` → `(= abstract 1)`), so they stay
@@ -64,18 +103,8 @@ only formats the head and drops the contextual keyword tokens. Fixture
 this construct (multiline + `;`-body forms all handled).
 
 JS allow **359 → 369** (+10); divergence 212 → 202, unsupported held 4. Dir allow
-62 → 63. Zero regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b` (js-e5d8580f), `a .… b` (js-f74d3ac9, UNSUPPORTED), `public ⤈`,
-   `module M; export ⤈` (js-39a1855a), `x -->₁ y` (js-50dc84fd), `√x`
-   (js-e13fa52a), `x → y` (js-db694f69), `i ∈ rhs` (js-f3da47b9), `⊻`; the
-   single largest remaining lexer feature.
-2. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
-   signature relabel to descend the `::` LHS (not just the outermost paren).
-3. **Broadcast `.&`/`.|`** — lex `DotAmp`/`DotPipe`, project to `(. &)`/`(. |)`
-   heads; unblocks `.&(x,y)` js-cdf6c5ab and the paren-quote `:.&&`.
+62 → 63. Zero regressions; green, clippy/fmt clean. (Next targets superseded by
+20d; broadcast `.&`/`.|` landed.)
 
 ## Earlier session (2026-06-20b)
 

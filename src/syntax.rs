@@ -216,6 +216,8 @@ pub enum SyntaxKind {
     DOT_TILDE,
     DOT_AND_AND,
     DOT_OR_OR,
+    DOT_AMP,
+    DOT_PIPE,
     // Broadcast augmented assignment `.op=`.
     DOT_PLUS_EQ,
     DOT_MINUS_EQ,

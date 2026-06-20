@@ -164,6 +164,9 @@ pub(crate) enum TokKind {
     /// The broadcast short-circuit operators `.&&` and `.||`.
     DotAndAnd,
     DotOrOr,
+    /// The broadcast bitwise operators `.&` and `.|`.
+    DotAmp,
+    DotPipe,
     // Broadcast augmented assignment `.op=` (e.g. `.+=`). Same precedence and
     // modeling as the undotted forms.
     DotPlusEq,
@@ -860,6 +863,10 @@ impl<'a> Lexer<'a> {
                 Some(b'<') => Some(TokKind::DotLt),
                 Some(b'>') => Some(TokKind::DotGt),
                 Some(b'~') => Some(TokKind::DotTilde),
+                // `.&&`/`.||`/`.|>` were already matched by the 3-char table, so a
+                // lone `&`/`|` after the dot is the broadcast bitwise operator.
+                Some(b'&') => Some(TokKind::DotAmp),
+                Some(b'|') => Some(TokKind::DotPipe),
                 _ => None,
             };
             if let Some(kind) = dotted2 {

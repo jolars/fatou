@@ -253,6 +253,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_FAT_ARROW => DotCallI("=>"),
         DOT_LONG_ARROW => DotCallI("-->"),
         DOT_PIPE_GT => DotCallI("|>"),
+        DOT_AMP => DotCallI("&"),
+        DOT_PIPE => DotCallI("|"),
 
         // Fallback: treat as an ordinary infix call using the raw text. Leaked
         // in faithfully so an unmapped operator surfaces as a divergence.
@@ -333,6 +335,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_FAT_ARROW
             | DOT_LONG_ARROW
             | DOT_PIPE_GT
+            | DOT_AMP
+            | DOT_PIPE
             | PLUS_EQ
             | MINUS_EQ
             | STAR_EQ

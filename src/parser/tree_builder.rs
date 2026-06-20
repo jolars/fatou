@@ -147,6 +147,8 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::DotTilde => SyntaxKind::DOT_TILDE,
         TokKind::DotAndAnd => SyntaxKind::DOT_AND_AND,
         TokKind::DotOrOr => SyntaxKind::DOT_OR_OR,
+        TokKind::DotAmp => SyntaxKind::DOT_AMP,
+        TokKind::DotPipe => SyntaxKind::DOT_PIPE,
         TokKind::DotPlusEq => SyntaxKind::DOT_PLUS_EQ,
         TokKind::DotMinusEq => SyntaxKind::DOT_MINUS_EQ,
         TokKind::DotStarEq => SyntaxKind::DOT_STAR_EQ,

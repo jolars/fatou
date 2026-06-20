@@ -1,0 +1,1 @@
+(toplevel (dotcall-i a & b) (dotcall-i a | b) (dotcall-i (dotcall-i a & b) & c) (dotcall-i a + (dotcall-i b & c)) (dotcall-i (dotcall-i x & y) | z) (call (. &) x y) (call (. |) x y) (call-i (dotcall-i a & b) == c))

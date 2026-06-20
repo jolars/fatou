@@ -11,6 +11,7 @@ arrow_pipe_bitshift_operators
 augmented_assignment
 begin_index
 binary_precedence
+broadcast_bitwise_operators
 broadcasting
 byte_string
 call_and_index
