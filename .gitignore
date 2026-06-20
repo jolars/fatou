@@ -40,3 +40,7 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 /tests/oracle/juliasyntax-report.txt
+/.task/checksum
+/assets/fatou-logo.png
+/assets/fatou-logo.svg
+/assets/fatou-newton.png

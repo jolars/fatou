@@ -41,6 +41,19 @@ tasks:
     cmds:
       - cargo deny check
 
+  logo:
+    desc: 'Generate the logo (pass params after --, e.g. `task logo -- mode=newton`)'
+    cmds:
+      - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
+
+  logo-watch:
+    desc: 'Re-generate the logo whenever the script changes (`task logo-watch -- mode=newton`)'
+    watch: true
+    sources:
+      - scripts/generate-logo.jl
+    cmds:
+      - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
+
   # Placeholder until the Runic.jl differential gauge lands (see TODO.md).
   # runic-compat:
   #   desc: Measure soft Runic.jl compatibility (writes RUNIC_COMPAT.md)
