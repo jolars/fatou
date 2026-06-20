@@ -156,6 +156,16 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::DotSlashSlashEq => SyntaxKind::DOT_SLASH_SLASH_EQ,
         TokKind::DotCaretEq => SyntaxKind::DOT_CARET_EQ,
         TokKind::DotPercentEq => SyntaxKind::DOT_PERCENT_EQ,
+        // The six `call-i` Unicode operator tiers collapse to one token kind;
+        // the projector recovers the operator text from the token itself.
+        TokKind::UniArrow
+        | TokKind::UniComparison
+        | TokKind::UniColon
+        | TokKind::UniPlus
+        | TokKind::UniTimes
+        | TokKind::UniPower => SyntaxKind::UNICODE_OP,
+        TokKind::UniAssign => SyntaxKind::UNICODE_ASSIGN_OP,
+        TokKind::UniRadical => SyntaxKind::UNICODE_RADICAL,
         TokKind::LParen => SyntaxKind::LPAREN,
         TokKind::RParen => SyntaxKind::RPAREN,
         TokKind::LBracket => SyntaxKind::LBRACKET,

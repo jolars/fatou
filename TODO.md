@@ -461,6 +461,23 @@ through), so the grammar can grow incrementally.
   escape-processing of the name (`var"\""` → `(var ")` follows Julia's raw-string
   rules, so escape-free names match but escaped ones stay FAIL) and the
   suffix-error shape (`var"x"y` → `(var x (error-t))`).
+- [x] Unicode operators (single-codepoint infix/prefix). The full set of length-1
+  non-ASCII operators from JuliaSyntax's kind tables is generated into
+  `src/parser/unicode_ops.rs` (a code-point-sorted binary-search table mapping
+  each operator to its precedence tier), classified by `is_prec_*`. The lexer's
+  operator fallback looks the char up and emits one of eight tier `TokKind`s
+  (`UniArrow`/`UniComparison`/`UniColon`/`UniPlus`/`UniTimes`/`UniPower`
+  → `UNICODE_OP`, `UniAssign` → `UNICODE_ASSIGN_OP`, `UniRadical` →
+  `UNICODE_RADICAL`); the six `call-i` tiers share one `SyntaxKind`. Binding
+  powers mirror the ASCII siblings (arrow `(4,3)` right-assoc, assignment `(2,1)`
+  right-assoc, comparison `(10,11)`, colon `(14,15)`, plus `(20,21)`, times
+  `(24,25)`, power `(32,31)` right-assoc). Radicals `√ ∛ ∜` and `¬` are prefix-only,
+  routed through the existing unary arm → `(call-pre √ x)`. The projector reads the
+  operator text from the token (`x → y` → `(call-i x → y)`, `a ≔ b` → `(≔ a b)`).
+  **Deferred:** juxtaposition (`1√x` → `(juxtapose …)`), operator suffix
+  sub/superscripts (`a +₁ b`, `f'ᵀ`), unicode in `export`/`public`/`import`
+  positions, broadcast unicode (`.…`), unicode comparison chains (nested, like the
+  ASCII chain divergence), and unicode unary in the plus/times tiers (`±x`).
 
 ## Incremental reparse
 

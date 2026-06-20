@@ -177,6 +177,20 @@ pub(crate) enum TokKind {
     DotCaretEq,
     DotPercentEq,
 
+    // Single-codepoint Unicode operators, grouped by precedence tier. The exact
+    // operator text is carried by the token; the parser only needs the tier (for
+    // binding power) and the projector reads the text. The lexer classifies each
+    // operator char via the generated `unicode_op_kind` table.
+    UniArrow,
+    UniComparison,
+    UniColon,
+    UniPlus,
+    UniTimes,
+    UniPower,
+    UniAssign,
+    /// Prefix-only Unicode operators `¬ √ ∛ ∜` (the `unicode_ops` tier).
+    UniRadical,
+
     // Delimiters / punctuation
     LParen,
     RParen,
@@ -975,9 +989,18 @@ impl<'a> Lexer<'a> {
                 self.push(kind, start, self.pos);
             }
             None => {
-                // Unknown: consume one full char to stay on a char boundary.
-                self.pos += self.char_at(self.pos).len_utf8();
-                self.push(TokKind::Unknown, start, self.pos);
+                // A single-codepoint Unicode operator (`→`, `∈`, `√`, …): look
+                // it up by char and emit its precedence-tier kind. The operator
+                // text stays in the token; the parser keys on the tier.
+                let ch = self.char_at(self.pos);
+                if let Some(kind) = super::unicode_ops::unicode_op_kind(ch) {
+                    self.pos += ch.len_utf8();
+                    self.push(kind, start, self.pos);
+                } else {
+                    // Unknown: consume one full char to stay on a char boundary.
+                    self.pos += ch.len_utf8();
+                    self.push(TokKind::Unknown, start, self.pos);
+                }
             }
         }
     }

@@ -354,6 +354,9 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_SLASH_SLASH_EQ
             | DOT_CARET_EQ
             | DOT_PERCENT_EQ
+            | UNICODE_OP
+            | UNICODE_ASSIGN_OP
+            | UNICODE_RADICAL
     )
 }
 
@@ -370,6 +373,14 @@ fn project_binary(node: &SyntaxNode) -> String {
     }
     let lhs = project(&operands[0]);
     let rhs = &operands[1];
+    // Unicode operators carry their own text: the `call-i` tiers head an ordinary
+    // infix call, and the assignment tier (`≔ ≕ ⩴`) heads the node with the
+    // operator itself, just like the ASCII `Special` forms.
+    match op.kind() {
+        UNICODE_OP => return format!("(call-i {lhs} {} {})", op.text(), project(rhs)),
+        UNICODE_ASSIGN_OP => return format!("({} {lhs} {})", op.text(), project(rhs)),
+        _ => {}
+    }
     match infix_head(op.kind()) {
         InfixHead::CallI(text) => format!("(call-i {lhs} {text} {})", project(rhs)),
         InfixHead::Special(text) => format!("({text} {lhs} {})", project(rhs)),

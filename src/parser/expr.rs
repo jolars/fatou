@@ -428,7 +428,11 @@ fn parse_prefix(
         | TokKind::Amp
         | TokKind::Subtype
         | TokKind::Supertype
-        | TokKind::ColonColon => {
+        | TokKind::ColonColon
+        // Prefix-only Unicode radicals `√ ∛ ∜` and logical-not `¬`: a unary
+        // application heading a `UNARY_EXPR` (`√x` → `(call-pre √ x)`), with the
+        // same precedence as `-`/`+` (binds looser than `^`, tighter than `*`).
+        | TokKind::UniRadical => {
             // A unary arithmetic/logical operator glued to a `(` is a call when
             // the parens look like an argument list (`+(x, y)` → `(call + x y)`,
             // `+(a...)` → `(call + (... a))`, `+(a; b, c)` → `(call + a
@@ -2035,6 +2039,18 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // assignment. Handled here (not `is_assignment_op`) so the node stays
         // `BINARY_EXPR`.
         TokKind::Tilde | TokKind::DotTilde => (2, 1),
+        // Unicode operators share the tier of their ASCII precedence class. The
+        // assignment-tier ops (`≔ ≕ ⩴`) are right-associative like `~`; the arrow
+        // tier (`→ ← ↔ …`) is right-associative like `=>`/`-->`; the rest mirror
+        // their ASCII siblings (comparison/colon/plus/times left-associative,
+        // power right-associative).
+        TokKind::UniAssign => (2, 1),
+        TokKind::UniArrow => (4, 3),
+        TokKind::UniComparison => (10, 11),
+        TokKind::UniColon => (14, 15),
+        TokKind::UniPlus => (20, 21),
+        TokKind::UniTimes => (24, 25),
+        TokKind::UniPower => (32, 31),
         // The pair `=>` shares the arrow/ternary tier: right-associative, looser
         // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
         TokKind::Arrow

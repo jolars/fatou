@@ -1,0 +1,83 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..72
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    UNICODE_OP@2..5 "→"
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "y"
+  NEWLINE@7..8 "\n"
+  BINARY_EXPR@8..17
+    NAME@8..9
+      IDENT@8..9 "i"
+    WHITESPACE@9..10 " "
+    UNICODE_OP@10..13 "∈"
+    WHITESPACE@13..14 " "
+    NAME@14..17
+      IDENT@14..17 "rhs"
+  NEWLINE@17..18 "\n"
+  BINARY_EXPR@18..25
+    NAME@18..19
+      IDENT@18..19 "a"
+    WHITESPACE@19..20 " "
+    UNICODE_OP@20..23 "…"
+    WHITESPACE@23..24 " "
+    NAME@24..25
+      IDENT@24..25 "b"
+  NEWLINE@25..26 "\n"
+  UNARY_EXPR@26..30
+    UNICODE_RADICAL@26..29 "√"
+    NAME@29..30
+      IDENT@29..30 "x"
+  NEWLINE@30..31 "\n"
+  BINARY_EXPR@31..39
+    UNARY_EXPR@31..35
+      UNICODE_RADICAL@31..34 "√"
+      NAME@34..35
+        IDENT@34..35 "x"
+    WHITESPACE@35..36 " "
+    PLUS@36..37 "+"
+    WHITESPACE@37..38 " "
+    LITERAL@38..39
+      INTEGER@38..39 "1"
+  NEWLINE@39..40 "\n"
+  BINARY_EXPR@40..47
+    NAME@40..41
+      IDENT@40..41 "a"
+    WHITESPACE@41..42 " "
+    UNICODE_ASSIGN_OP@42..45 "≔"
+    WHITESPACE@45..46 " "
+    NAME@46..47
+      IDENT@46..47 "b"
+  NEWLINE@47..48 "\n"
+  BINARY_EXPR@48..61
+    NAME@48..49
+      IDENT@48..49 "a"
+    WHITESPACE@49..50 " "
+    UNICODE_OP@50..53 "→"
+    WHITESPACE@53..54 " "
+    BINARY_EXPR@54..61
+      NAME@54..55
+        IDENT@54..55 "b"
+      WHITESPACE@55..56 " "
+      UNICODE_OP@56..59 "→"
+      WHITESPACE@59..60 " "
+      NAME@60..61
+        IDENT@60..61 "c"
+  NEWLINE@61..62 "\n"
+  BINARY_EXPR@62..71
+    UNARY_EXPR@62..65
+      UNICODE_RADICAL@62..64 "¬"
+      NAME@64..65
+        IDENT@64..65 "a"
+    WHITESPACE@65..66 " "
+    UNICODE_OP@66..69 "∧"
+    WHITESPACE@69..70 " "
+    NAME@70..71
+      IDENT@70..71 "b"
+  NEWLINE@71..72 "\n"

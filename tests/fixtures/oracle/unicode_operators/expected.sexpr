@@ -1,0 +1,1 @@
+(toplevel (call-i x → y) (call-i i ∈ rhs) (call-i a … b) (call-pre √ x) (call-i (call-pre √ x) + 1) (≔ a b) (call-i a → (call-i b → c)) (call-i (call-pre ¬ a) ∧ b))

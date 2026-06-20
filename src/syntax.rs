@@ -228,6 +228,14 @@ pub enum SyntaxKind {
     DOT_CARET_EQ,
     DOT_PERCENT_EQ,
 
+    // Single-codepoint Unicode operator tokens. The tier distinctions the parser
+    // needs live in the `TokKind`; here only the projection shape matters, so the
+    // six `call-i` tiers collapse to `UNICODE_OP`, the assignment tier projects
+    // its own head, and the radicals are prefix-only.
+    UNICODE_OP,
+    UNICODE_ASSIGN_OP,
+    UNICODE_RADICAL,
+
     // --- Delimiter / punctuation tokens ---
     LPAREN,
     RPAREN,

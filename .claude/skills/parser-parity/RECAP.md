@@ -22,62 +22,72 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **373 allowlisted**, 198 divergence, 4 unsupported.
-Dir corpus: **65 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "non-standard identifiers `var\"…\"`" are `[x]`
-in `TODO.md`.
+JS corpus (575 cases): **377 allowlisted**, 194 divergence, 4 unsupported.
+Dir corpus: **66 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Unicode operators" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20e)
+## Latest session (2026-06-20f)
 
-**Non-standard identifiers `var"…"`.** A `var` prefix glued to a single-quoted
-string is a non-standard *identifier*, not a string macro — Julia models
-`var"x"` as `(var x)`, not `(macrocall @var_str …)`. Fatou was lexing it through
-the generic string-macro path (`STRING_PREFIX` "var" + string → `STRING_LITERAL`
-→ `(macrocall @var_str (string-r "x"))`). **Fix (parser, no lexer change):** in
-`parse_string_literal` (`expr.rs`), when the prefix token's text is exactly `var`
-and the open delimiter is a single `"` (len 1), build a new
-`NONSTANDARD_IDENTIFIER` node instead of `STRING_LITERAL`; the same token run
-(prefix, open, content, close) is reused. Triple-quoted `var"""…"""` keeps len ≥ 3
-so it stays an `@var_str` macrocall, and `r`/`raw`/`b` prefixes are untouched.
-Projector (`sexpr.rs`): one arm + `project_var` heads the node `var` over the raw
-delimited content (`raw_content`) — empty content → `(var)` (normalizes equal to
-Julia's `(var )`). Faithful: the `var`/delim/content tokens are real CST children;
-the projector only formats the head and drops the delimiters. Results match Julia:
-`var"x"`→`(var x)`, `var""`→`(var)`, `var"#"`→`(var #)`, `f(var"x")`→`(call f
-(var x))`, `var"x" + 1`→`(call-i (var x) + 1)`. Fixture `nonstandard_identifier`
-(parser fixture has 7 lines incl. the triple-`var` macrocall guard; oracle dir
-fixture trims that line — triple prefix strings project `string-r` not `string-s-r`,
-a separate pre-existing encoding gap). **Deferred:** name escape-processing
-(`var"\""` → `(var ")` follows Julia's raw-string rules; escape-free names match,
-but `var"\""` js-61a01ce8 / `var"\\\""` js-8f5b1a26 stay FAIL — though `var"\\x"`
-js-d855305c passed as a bonus since raw source == show output) and the
-suffix-error shape (`var"x"y` → `(var x (error-t))`).
+**Unicode operators (single-codepoint infix/prefix).** The whole faithful set,
+not a hand-picked subset. Generated `src/parser/unicode_ops.rs` from JuliaSyntax's
+own kind tables: every length-1 non-ASCII operator from
+`Tokenize._nondot_symbolic_operator_kinds()`, classified by the `is_prec_*`
+predicate, into a **code-point-sorted binary-search table** `(char → tier
+TokKind)`. The dump script (kept in `/tmp` reasoning, not committed) walks the
+pinned package source via `Tokenize` submodule + `is_prec_*`; 593 operators across
+8 tiers (arrow 148, comparison 276, plus 53, times 73, power 30, colon 6,
+assignment 3, unicode_ops/radical 4). **Lexer:** the `lex_operator_or_unknown`
+`None` fallback (was always `Unknown`) now looks the char up via
+`unicode_op_kind`; all unicode ops are single codepoints and never ident-starts,
+so this is the only hook needed. **8 new `TokKind`s** (one per tier) →
+**3 `SyntaxKind`s** (`tree_builder` collapses the six `call-i` tiers to
+`UNICODE_OP`; `UniAssign`→`UNICODE_ASSIGN_OP`; `UniRadical`→`UNICODE_RADICAL`).
+**Binding powers** (`expr.rs`) mirror ASCII siblings: arrow `(4,3)` R-assoc,
+assignment `(2,1)` R-assoc, comparison `(10,11)`, colon `(14,15)`, plus `(20,21)`,
+times `(24,25)`, power `(32,31)` R-assoc. **Radicals `√ ∛ ∜` and `¬`** join the
+existing unary arm in `parse_prefix` → `UNARY_EXPR` → `(call-pre √ x)` (same prec
+as `-`: `√x^2`=`√(x^2)`, `√x+1`=`(√x)+1`). **Projector faithful:** `project_binary`
+reads `op.text()` for `UNICODE_OP` (call-i) / `UNICODE_ASSIGN_OP` (own-head, like
+`Special`); `project_unary`'s existing `_` arm covers radicals; one `is_operator`
+arm so `operator_token` finds them. Results match Julia exactly: `x → y`→
+`(call-i x → y)`, `i ∈ rhs`, `a … b`, `√x`→`(call-pre √ x)`, `a ≔ b`→`(≔ a b)`,
+`a → b → c` nests right, `a ↑ b ↑ c` nests right. **Deferred:** juxtaposition
+(`1√x` js-80cfb887 — Fatou has no juxtapose yet, `2x`→`(toplevel 2 x)`), operator
+sub/superscript suffixes (`a +₁ b` js-db974d0b, `f'ᵀ`, `[x +₁y]`), unicode in
+`export`/`public`/`import` (`export ⤈`, `import .⋆`, `A.⋆.f`), broadcast unicode
+(`.…` js-f74d3ac9), unicode comparison chains (nest like the ASCII divergence),
+plus/times-tier unicode unary (`±x`).
 
-JS allow **370 → 373** (+3: `var""` js-7a6211e2, `var"x"` js-aae88021, `var"\\x"`
-js-d855305c); divergence 201 → 198, unsupported held 4. Dir allow 64 → 65. Zero
-regressions; green, clippy/fmt clean.
+JS allow **373 → 377** (+4: `x → y` js-db694f69, `√x` js-e13fa52a, `a … b`
+js-e5d8580f, `i ∈ rhs` js-f3da47b9); divergence 198 → 194, unsupported held 4.
+Dir allow 65 → 66 (`unicode_operators`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Unicode operators** (lexer) — still the single largest remaining lexer
-   feature; unblocks `√x` (js-e13fa52a), `x → y` (js-db694f69), `i ∈ rhs`
-   (js-f3da47b9), `a … b` (js-e5d8580f), `⊻`, `export ⤈`/`public ⤈`, `import .⋆`,
-   `A.⋆.f`, `x -->₁ y`, `a +₁ b +₁ c`.
-2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
-   `project_string`'s macrocall branch (head should be `string-s-r`/`cmdstring-s-r`
-   when the open delim is triple). Small encoding fix; would also let the triple
-   `var"""…"""` guard line join the oracle corpus.
-3. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
-   signature relabel to descend the `::` LHS (not just the outermost paren).
+1. **Juxtaposition** (`2x`, `1√x`, `2(x+1)`) — `(juxtapose a b)`: a value followed
+   with no operator by another value/prefix-atom. Unblocks `1√x` (js-80cfb887) and
+   likely a cluster of numeric-coefficient cases. Probe the precedence (binds
+   tighter than `*`, looser than `^`/unary).
+2. **Operator suffix sub/superscripts** — `a +₁ b` (js-db974d0b), `x -->₁ y`
+   (js-50dc84fd), `[x +₁y]` (js-97cf44fb), `f'ᵀ` (js-90fb496e). Julia's `isopsuffix`
+   set (subscripts/superscripts/primes) extends an operator token; the op keeps its
+   tier but the suffix is part of its text. Lexer-only once the suffix set is added.
+3. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
+   `project_string`'s macrocall branch (still open from 2026-06-20e).
 
 ## Earlier sessions
 
 One-liners; full implementation detail lives in the matching `[x]` bullet in
 `TODO.md`.
+
+- **2026-06-20e** — Non-standard identifiers `var"…"`: a `var` prefix + single-`"`
+  open delim builds a `NONSTANDARD_IDENTIFIER` (not a string macro) in
+  `parse_string_literal`; `project_var` heads `var` over the raw content. `var"x"`→
+  `(var x)`, `var""`→`(var)`. JS allow 370 → 373. Fixture `nonstandard_identifier`.
 
 - **2026-06-20d** — Broadcast bitwise `.&`/`.|`: `DotAmp`/`DotPipe` in the 2-char
   dotted table (3-char `.&&`/`.||`/`.|>` win first), mirror undotted tiers (`.&`
