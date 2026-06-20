@@ -113,6 +113,7 @@ fn project(node: &SyntaxNode) -> String {
         },
 
         BINARY_EXPR => project_binary(node),
+        RANGE_EXPR => project_range(node),
         ASSIGNMENT_EXPR => project_assignment(node),
         UNARY_EXPR => project_unary(node),
         POSTFIX_EXPR => project_postfix(node),
@@ -422,6 +423,22 @@ fn project_binary(node: &SyntaxNode) -> String {
         InfixHead::Dot if rhs.kind() == QUOTE_SYM => format!("(. {lhs} {})", project(rhs)),
         InfixHead::Dot => format!("(. {lhs} (quote {}))", name_text(rhs)),
     }
+}
+
+/// A stepped range `a:b:c` is a single infix colon call over three operands:
+/// `(call-i a : b c)`. Mirrors JuliaSyntax, which folds the range with step into
+/// one `(call ...)` node rather than nesting two binary colons.
+fn project_range(node: &SyntaxNode) -> String {
+    let operands = child_nodes(node);
+    if operands.len() != 3 {
+        return project_flat(significant(node));
+    }
+    format!(
+        "(call-i {} : {} {})",
+        project(&operands[0]),
+        project(&operands[1]),
+        project(&operands[2]),
+    )
 }
 
 fn project_assignment(node: &SyntaxNode) -> String {

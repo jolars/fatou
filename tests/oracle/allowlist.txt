@@ -15,6 +15,7 @@ broadcast_bitwise_operators
 broadcasting
 byte_string
 call_and_index
+colon_range
 command_literal
 comments
 comprehensions

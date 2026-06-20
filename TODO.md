@@ -528,6 +528,18 @@ through), so the grammar can grow incrementally.
   it still juxtaposes (`-2(x)` ⇒ `(juxtapose -2 x)`). Also fixes the `matrices`
   oracle case: `[1 +2]` ⇒ `(hcat 1 2)`.
 
+- [x] Stepped colon ranges. A `:` chain with a step folds three operands into one
+  call rather than nesting two binary colons (`1:2:3` ⇒ `(call-i 1 : 2 3)`,
+  `a:b:c:d:e` ⇒ `(call-i (call-i a : b c) : d e)`), mirroring JuliaSyntax's
+  `parse_range` (every second colon emits a 3-arg call, then the fold becomes the
+  left operand of the next chain). The operator loop intercepts `:` (after the
+  ternary `no_range` guard) and delegates to `parse_colon_range`, which gathers
+  operands at the colon's right binding power `(14, 15)` and emits a new
+  `RANGE_EXPR` node per stepped triple; an odd trailing colon (`a:b:c:d`) leaves
+  the usual two-operand `BINARY_EXPR`. The chain stops at a ternary separator or
+  an array-element boundary (`[1 :2]`). `project_range` emits the 3-operand
+  `(call-i lhs : mid rhs)`; plain `a:b` is unchanged.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

@@ -297,6 +297,19 @@ fn parse_expr_in(
             break;
         }
 
+        // Range `:` collapses a stepped chain into a single 3-operand call
+        // (`a:b:c` ⇒ `(call-i a : b c)`, `a:b:c:d:e` ⇒ `(call-i (call-i a : b c)
+        // : d e)`), exactly as JuliaSyntax's `parse_range`, so it is handled
+        // before the generic left-associative path.
+        if op_kind == TokKind::Colon {
+            let (l_bp, _) = infix_binding_power(TokKind::Colon).expect("colon binds");
+            if l_bp < min_bp {
+                break;
+            }
+            lhs = parse_colon_range(tokens, &ctx, lhs, op_idx, diagnostics, flags);
+            continue;
+        }
+
         // Ternary `cond ? then : else` — right-associative, just above
         // assignment and below `||`. Handled specially (like assignment) so the
         // `:` separator is consumed here rather than parsed as a range operator.
@@ -406,6 +419,80 @@ fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
         start: lhs.start,
         end: rhs.end,
         events,
+    }
+}
+
+/// Build a stepped range `(a : b : c)` from its three operands, capturing the two
+/// colon tokens (and surrounding trivia) in the gaps between operands.
+fn build_range3(a: ExprParse, b: ExprParse, c: ExprParse) -> ExprParse {
+    let mut events = vec![Event::Start(SyntaxKind::RANGE_EXPR)];
+    events.extend(a.events);
+    push_range(&mut events, a.end, b.start);
+    events.extend(b.events);
+    push_range(&mut events, b.end, c.start);
+    events.extend(c.events);
+    events.push(Event::Finish);
+    ExprParse {
+        start: a.start,
+        end: c.end,
+        events,
+    }
+}
+
+/// Parse a range `:` chain starting at the colon `first_colon` (the first operand
+/// `lhs` is already parsed and the caller has cleared the binding-power check).
+/// Mirrors JuliaSyntax's `parse_range`: every second colon folds three operands
+/// into one `RANGE_EXPR` (`a:b:c`), and a further colon nests the folded range as
+/// the left operand of the next chain (`(a:b:c):d:e`). An odd trailing colon
+/// (`a:b:c:d`) leaves an ordinary two-operand `BINARY_EXPR`.
+fn parse_colon_range(
+    tokens: &[Token],
+    ctx: &ParserCtx<'_>,
+    lhs: ExprParse,
+    first_colon: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    flags: ExprFlags,
+) -> ExprParse {
+    let (_, r_bp) = infix_binding_power(TokKind::Colon).expect("colon binds");
+    let mut head = lhs;
+    // The operand awaiting a step partner (JuliaSyntax's open colon count).
+    let mut step: Option<ExprParse> = None;
+    let mut op_idx = first_colon;
+    loop {
+        let rhs_operand = ctx.skip_trivia(op_idx + 1);
+        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
+            let op = &tokens[op_idx];
+            push_diagnostic(
+                diagnostics,
+                "expected right-hand side for operator",
+                op.start,
+                op.end,
+            );
+            return error_expr_to_line_end(tokens, head.start, op_idx + 1);
+        };
+        let last_end = rhs.end;
+        match step.take() {
+            Some(mid) => head = build_range3(head, mid, rhs),
+            None => step = Some(rhs),
+        }
+        // Continue the chain only on another range colon at the same level: not a
+        // ternary separator (`no_range`) and not an array-element boundary
+        // (`[1 :2]` splits into elements rather than ranging).
+        let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
+            Some((idx, TokKind::Colon)) if !flags.no_range => {
+                let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
+                (!split).then_some(idx)
+            }
+            _ => None,
+        };
+        match continues {
+            Some(idx) => op_idx = idx,
+            None => break,
+        }
+    }
+    match step {
+        Some(mid) => build_binary(SyntaxKind::BINARY_EXPR, head, mid),
+        None => head,
     }
 }
 

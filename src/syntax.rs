@@ -22,6 +22,7 @@ pub enum SyntaxKind {
     INTERPOLATION,
     NAME,
     BINARY_EXPR,
+    RANGE_EXPR,
     UNARY_EXPR,
     PAREN_EXPR,
     TUPLE_EXPR,

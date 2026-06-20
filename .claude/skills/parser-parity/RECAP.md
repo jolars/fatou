@@ -22,53 +22,61 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **392 allowlisted**, 179 divergence, 4 unsupported.
-Dir corpus: **70 allowlisted**, 4 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Signed numeric literals" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **394 allowlisted**, 177 divergence, 4 unsupported.
+Dir corpus: **71 allowlisted**, 4 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Stepped colon ranges" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20i)
+## Latest session (2026-06-20j)
 
-**Signed numeric literals.** A `+`/`-` glued to an adjacent number now folds into
-a single signed literal rather than a unary prefix call, mirroring JuliaSyntax
-`parse_unary` (lines 1192–1217 in the pinned source). `parse_prefix` grows a
-guarded arm `k if matches!(k, Plus|Minus) && signed_literal_fold(ctx, start)` that
-builds a `LITERAL` wrapping the sign + number tokens. `signed_literal_fold` encodes
-the exact rule: op undotted (`Plus`/`Minus`, not `DotPlus`/`DotMinus`) **and
-unsuffixed** (a suffixed `+₁` is never unary); directly followed (no whitespace) by
-a number literal — decimal `Integer`/`Float`/`Float32` for either sign, plus the
-unsigned `BinInt`/`HexInt`/`OctInt` for `+` **only** (its sign is a no-op drop;
-`-0x1` stays `(call-pre - 0x1)`); and it does **not** fold when `^`/`[`/`{` follow
-the literal (`k3 = skip_ws(start+2)`), since those bind tighter than unary negation
-(`-2^2` ⇒ `(call-pre - (2^2))`, `-2[1]` ⇒ `(call-pre - (ref 2 1))`, `-2{T}` ⇒
-`(call-pre - (curly 2 T))`). **Projector** `project_literal`: a two-token `LITERAL`
-combines sign + number — `-` kept (`-2`), `+` dropped (`+2.0` ⇒ `2.0`). **Juxtaposition**
-`lhs_is_number` now also matches the two-token folded literal, so `-2(x)` ⇒
-`(juxtapose -2 x)` and the postfix-chain `(`-is-call guard still fires. Hex/oct/bin
-with `-` and the oct/bin display normalization (`+0o22` ⇒ Julia `0x12`) remain
-recorded divergences (numeric-literal display), un-allowlisted.
+**Stepped colon ranges.** `a:b:c` (a range with a step) now folds its three
+operands into a single infix colon call rather than nesting two binary colons,
+mirroring JuliaSyntax's `parse_range`: `1:2:3` ⇒ `(call-i 1 : 2 3)`,
+`a:b:c:d:e` ⇒ `(call-i (call-i a : b c) : d e)` (the folded triple becomes the
+left operand of the next chain). The operator loop intercepts `op_kind == Colon`
+(right after the ternary `no_range` guard, before the generic left-assoc path)
+and delegates the whole colon chain to `parse_colon_range`. That helper mirrors
+JuliaSyntax's n_colons counter: it parses each operand at the colon right binding
+power `(14,15)` (so the inner parse stops before the next colon but still grabs a
+tighter `+`, e.g. `a:b:c+d` ⇒ `(call-i a : b (c+d))`), holding one operand in a
+`step: Option` slot — when a *second* colon arrives, `build_range3` emits a new
+3-operand `RANGE_EXPR` and clears the slot; an odd trailing colon (`a:b:c:d`)
+leaves the slot full and falls back to a 2-operand `BINARY_EXPR`. The chain stops
+at a ternary separator (`no_range`) or an array-element boundary (`[1 :2]` splits
+into elements). New `RANGE_EXPR` `SyntaxKind` (after `BINARY_EXPR`); projector
+`project_range` emits `(call-i op0 : op1 op2)`. Plain `a:b` is unchanged (still
+`BINARY_EXPR` → `(call-i a : b)`); `..`/UniColon untouched (scoped to ASCII
+`Colon`). Siblings verified intact: `a[:]`, `:foo`, ternary, indexing.
 
-JS allow **386 → 392** (+6: `-2` js-cf3bae39, `+2.0` js-40a457ac, `-1.0f0`
-js-2846887e, `-2*x` js-f4c437eb, `+0x12` js-d0c63a7a, +1); divergence 185 → 179,
-unsupported held 4. Dir allow 67… → 70: new fixture `signed_literals`, **and**
-`matrices` un-blocked — `[1 +2]` now folds to `(hcat 1 2)` matching Julia (removed
-its `blocked.txt` entry). Zero regressions; green, clippy/fmt clean. The only
-snapshot change was `matrices` (folded `[1 +2]`); accepted. **Deferred:** the
-oct/bin→hex and float-canonicalization display normalization (`-0x1`, `+0o22`,
-`-0xf.0p0`); error-shape for suffixed-op prefix (`+₁2` ⇒ Julia `(error +₁)`).
+JS allow **392 → 394** (+2: `1:2:3` js-f70459ee, `a:b:c:d:e` js-c443c81e);
+divergence 179 → 177, unsupported held 4. Dir allow 70 → 71 (new fixture
+`colon_range`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
+1. **Bare comma tuples** — `a, b = c, d` ⇒ `(= (tuple a b) (tuple c d))`,
+   `return x,y` ⇒ `(return (tuple x y))`, `const x,y = 1,2`. Top-level commas in
+   statement/assignment position form a `tuple`; Fatou currently drops the tail
+   (`return x,y` ⇒ `(return x)`). Touches statement-level parsing — bigger.
+2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
    `project_string`'s macrocall branch (still open from 2026-06-20e).
-2. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes
-   (`is_both_unary_and_binary` set); needs a `parse_prefix` arm for the relevant
-   unicode chars and would also let `[a ±b]` split correctly.
-3. **Comparison/`<:` chains and unicode comparison chains** — recorded as nested
-   divergences; revisit only if flattening is wanted.
+3. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
+
+## Earlier sessions
+
+One-liners; full implementation detail lives in the matching `[x]` bullet in
+`TODO.md`.
+
+- **2026-06-20i** — Signed numeric literals: a `+`/`-` glued to an adjacent number
+  folds into a single signed `LITERAL` (`-2`, `+2.0` ⇒ `2.0`) via
+  `signed_literal_fold` in `parse_prefix` (undotted+unsuffixed op, no whitespace,
+  decimal for either sign + unsigned bin/hex/oct for `+` only; no fold before
+  `^`/`[`/`{`); `project_literal` combines the two tokens, `lhs_is_number`
+  juxtaposes them. Un-blocked `matrices` (`[1 +2]` ⇒ `(hcat 1 2)`). JS allow
+  386 → 392.
 
 ## Earlier sessions
 
