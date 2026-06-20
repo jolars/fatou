@@ -451,6 +451,17 @@ through), so the grammar can grow incrementally.
   `.&` → `(. &)` and the broadcast quote `:.&&` → `(quote-: (. &&))` (the same
   broadcast-standalone/broadcast-quote gaps that also affect `.+`/`:.+`).
 
+- [x] Non-standard identifiers `var"…"`. A `var` prefix glued to a single-quoted
+  string is a non-standard *identifier*, not a string macro: `var"x"` → `(var x)`,
+  `var""` → `(var)`, `var"#"` → `(var #)`. Detected in `parse_string_literal`
+  (`expr.rs`) — prefix text `var` + single-`"` open delimiter → a new
+  `NONSTANDARD_IDENTIFIER` node (triple-quoted `var"""…"""` stays an ordinary
+  `@var_str` macrocall, and other prefixes `r`/`raw`/`b` are unaffected). Projector
+  `project_var` heads the node `var` over the raw delimited content. **Deferred:**
+  escape-processing of the name (`var"\""` → `(var ")` follows Julia's raw-string
+  rules, so escape-free names match but escaped ones stay FAIL) and the
+  suffix-error shape (`var"x"y` → `(var x (error-t))`).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

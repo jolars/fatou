@@ -40,6 +40,7 @@ macro_directive_names
 macros
 multi_clause_generators
 nested_string_interp
+nonstandard_identifier
 operator_call
 operator_symbol_quote
 operator_symbol_quote_paren

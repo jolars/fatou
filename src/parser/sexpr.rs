@@ -93,6 +93,7 @@ fn project(node: &SyntaxNode) -> String {
         NAME => name_text(node),
         LITERAL => project_literal(node),
         STRING_LITERAL => project_string(node),
+        NONSTANDARD_IDENTIFIER => project_var(node),
         CMD_LITERAL => project_cmd(node),
         // A standalone interpolation projects to a `$` node (`$x` → `($ x)`);
         // inside a string the inner value is used instead (via `string_parts`).
@@ -1049,6 +1050,20 @@ fn project_string(node: &SyntaxNode) -> String {
         _ => "string",
     };
     sexp(head, string_parts(node))
+}
+
+/// A `var"name"` non-standard identifier projects to `(var name)`, heading the
+/// node with the raw delimited content. (Escape-processing of the name —
+/// `var"\""` → `(var ")` — follows Julia's raw-string rules and is deferred, so
+/// only escape-free names match the oracle today.)
+fn project_var(node: &SyntaxNode) -> String {
+    let content = raw_content(node);
+    let parts = if content.is_empty() {
+        vec![]
+    } else {
+        vec![content]
+    };
+    sexp("var", parts)
 }
 
 fn project_cmd(node: &SyntaxNode) -> String {

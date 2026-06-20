@@ -22,9 +22,9 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **370 allowlisted**, 201 divergence, 4 unsupported.
-Dir corpus: **64 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "broadcast bitwise operators `.&`/`.|`" are `[x]`
+JS corpus (575 cases): **373 allowlisted**, 198 divergence, 4 unsupported.
+Dir corpus: **65 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "non-standard identifiers `var\"…\"`" are `[x]`
 in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -32,7 +32,49 @@ associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20d)
+## Latest session (2026-06-20e)
+
+**Non-standard identifiers `var"…"`.** A `var` prefix glued to a single-quoted
+string is a non-standard *identifier*, not a string macro — Julia models
+`var"x"` as `(var x)`, not `(macrocall @var_str …)`. Fatou was lexing it through
+the generic string-macro path (`STRING_PREFIX` "var" + string → `STRING_LITERAL`
+→ `(macrocall @var_str (string-r "x"))`). **Fix (parser, no lexer change):** in
+`parse_string_literal` (`expr.rs`), when the prefix token's text is exactly `var`
+and the open delimiter is a single `"` (len 1), build a new
+`NONSTANDARD_IDENTIFIER` node instead of `STRING_LITERAL`; the same token run
+(prefix, open, content, close) is reused. Triple-quoted `var"""…"""` keeps len ≥ 3
+so it stays an `@var_str` macrocall, and `r`/`raw`/`b` prefixes are untouched.
+Projector (`sexpr.rs`): one arm + `project_var` heads the node `var` over the raw
+delimited content (`raw_content`) — empty content → `(var)` (normalizes equal to
+Julia's `(var )`). Faithful: the `var`/delim/content tokens are real CST children;
+the projector only formats the head and drops the delimiters. Results match Julia:
+`var"x"`→`(var x)`, `var""`→`(var)`, `var"#"`→`(var #)`, `f(var"x")`→`(call f
+(var x))`, `var"x" + 1`→`(call-i (var x) + 1)`. Fixture `nonstandard_identifier`
+(parser fixture has 7 lines incl. the triple-`var` macrocall guard; oracle dir
+fixture trims that line — triple prefix strings project `string-r` not `string-s-r`,
+a separate pre-existing encoding gap). **Deferred:** name escape-processing
+(`var"\""` → `(var ")` follows Julia's raw-string rules; escape-free names match,
+but `var"\""` js-61a01ce8 / `var"\\\""` js-8f5b1a26 stay FAIL — though `var"\\x"`
+js-d855305c passed as a bonus since raw source == show output) and the
+suffix-error shape (`var"x"y` → `(var x (error-t))`).
+
+JS allow **370 → 373** (+3: `var""` js-7a6211e2, `var"x"` js-aae88021, `var"\\x"`
+js-d855305c); divergence 201 → 198, unsupported held 4. Dir allow 64 → 65. Zero
+regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Unicode operators** (lexer) — still the single largest remaining lexer
+   feature; unblocks `√x` (js-e13fa52a), `x → y` (js-db694f69), `i ∈ rhs`
+   (js-f3da47b9), `a … b` (js-e5d8580f), `⊻`, `export ⤈`/`public ⤈`, `import .⋆`,
+   `A.⋆.f`, `x -->₁ y`, `a +₁ b +₁ c`.
+2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
+   `project_string`'s macrocall branch (head should be `string-s-r`/`cmdstring-s-r`
+   when the open delim is triple). Small encoding fix; would also let the triple
+   `var"""…"""` guard line join the oracle corpus.
+3. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
+   signature relabel to descend the `::` LHS (not just the outermost paren).
+
+## Earlier session (2026-06-20d)
 
 **Broadcast bitwise operators `.&` and `.|`.** Last session landed undotted
 `&`/`|`; the broadcast forms were still mis-lexed (`.` + `&` separately → `a .& b`
@@ -58,18 +100,7 @@ that leaves `.+` → `(unsupported ERROR)`) and the broadcast quote `:.&&` →
 
 JS allow **369 → 370** (+1: `.&(x,y)` js-cdf6c5ab, was FAIL); divergence 202 →
 201, unsupported held 4. Dir allow 63 → 64. Zero regressions; green, clippy/fmt
-clean.
-
-**Suggested next targets (ranked):**
-1. **Unicode operators** (lexer) — the single largest remaining lexer feature;
-   unblocks `import .⋆`, `A.⋆.f`, `a … b` (js-e5d8580f), `a .… b` (js-f74d3ac9,
-   UNSUPPORTED), `√x` (js-e13fa52a), `x → y` (js-db694f69), `i ∈ rhs`
-   (js-f3da47b9), `⊻`, `public ⤈`, `x -->₁ y`.
-2. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
-   signature relabel to descend the `::` LHS (not just the outermost paren).
-3. **Broadcast-standalone/quote** — `.&`/`.+` standalone → `(. &)`/`(. +)` and
-   `:.&&`/`:.+` quotes → `(quote-: (. …))`; needs a prefix arm for a bare broadcast
-   operator + dotted-op handling in `parse_quote_sym`.
+clean. (Next targets superseded by 20e; non-standard identifiers landed.)
 
 ## Earlier session (2026-06-20c)
 

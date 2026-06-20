@@ -644,13 +644,25 @@ fn parse_string_literal(
 ) -> ExprParse {
     let mut i = start;
 
-    // Optional non-standard literal prefix (`r`, `raw`, …).
+    // Optional non-standard literal prefix (`r`, `raw`, …). The `var` prefix is
+    // special: `var"…"` (single-quoted only) is a non-standard *identifier*, not
+    // a string macro — Julia models it as `(var name)`. Triple-quoted `var"""…"""`
+    // stays an ordinary `@var_str` macrocall.
+    let mut var_prefix = false;
     if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix) {
+        var_prefix = ctx.token(i).map(|t| t.text.as_str()) == Some("var");
         i += 1;
     }
 
+    let single_quote_open = matches!(
+        ctx.token(i),
+        Some(t) if t.kind == TokKind::StringDelimOpen && t.text.len() == 1
+    );
     let node = match ctx.token(i).map(|t| t.kind) {
         Some(TokKind::CmdDelimOpen) => SyntaxKind::CMD_LITERAL,
+        Some(TokKind::StringDelimOpen) if var_prefix && single_quote_open => {
+            SyntaxKind::NONSTANDARD_IDENTIFIER
+        }
         _ => SyntaxKind::STRING_LITERAL,
     };
     let close_kind = if node == SyntaxKind::CMD_LITERAL {
