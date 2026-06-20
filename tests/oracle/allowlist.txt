@@ -39,6 +39,7 @@ loops
 macro_definition
 macro_directive_names
 macros
+matrices
 multi_clause_generators
 nested_string_interp
 nonstandard_identifier
@@ -54,6 +55,7 @@ range_operator
 raw_string
 regex_string
 short_function_def
+signed_literals
 splat
 string_interp_ident_boundary
 string_interpolation

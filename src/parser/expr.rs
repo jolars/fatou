@@ -437,6 +437,23 @@ fn parse_prefix(
         // A bare `begin` inside an indexing `a[…]` is the index-begin marker
         // (`a[begin]`, `a[begin + 1]`); elsewhere `begin` opens a block.
         TokKind::BeginKw if flags.begin_marker => Some(atom(SyntaxKind::BEGIN_MARKER, start)),
+        // Signed numeric literal: a `+`/`-` glued to an adjacent number folds into
+        // a single signed literal rather than a unary prefix call (`-2` → `-2`,
+        // `+2.0` → `2.0`, `-2*x` → `(call-i -2 * x)`). Mirrors JuliaSyntax
+        // `parse_unary`; see `signed_literal_fold` for the exact conditions.
+        k if matches!(k, TokKind::Plus | TokKind::Minus) && signed_literal_fold(ctx, start) => {
+            let num = start + 1;
+            Some(ExprParse {
+                start,
+                end: num + 1,
+                events: vec![
+                    Event::Start(SyntaxKind::LITERAL),
+                    Event::Tok(start),
+                    Event::Tok(num),
+                    Event::Finish,
+                ],
+            })
+        }
         // Prefix operators: arithmetic/logical unary (`-x`, `!x`), the address-of
         // `&x` (a syntactic prefix heading the node with `&`, not `call-pre`),
         // lower-bound type expressions (`<:Real` in `Array{<:Real}`), and unary
@@ -1839,6 +1856,51 @@ fn is_operator(kind: TokKind) -> bool {
 
 /// Whether `kind` is a numeric literal token (Julia's `is_number`: not chars or
 /// booleans). Used to recognize a numeric-literal coefficient for juxtaposition.
+/// Whether a `+`/`-` at `op_idx`, glued to an adjacent numeric literal, folds
+/// into a single signed literal rather than a unary prefix call. Mirrors
+/// JuliaSyntax `parse_unary`: the operator must be undotted (`Plus`/`Minus`, not
+/// `DotPlus`/`DotMinus`) and unsuffixed, and directly followed (no whitespace) by
+/// a number literal — decimal `Integer`/`Float`/`Float32` for either sign, plus
+/// the unsigned `BinInt`/`HexInt`/`OctInt` for `+` only (whose sign is a no-op;
+/// `-0x1` stays a prefix call). It does *not* fold when `^`/`[`/`{` follow the
+/// literal, since those bind tighter than unary negation (`-2^x` is `-(2^x)`,
+/// `-2[1]` is `-(2[1])`, `-2{T}` is `-(2{T})`).
+fn signed_literal_fold(ctx: &ParserCtx<'_>, op_idx: usize) -> bool {
+    let Some(op) = ctx.token(op_idx) else {
+        return false;
+    };
+    // A suffixed `+₁` is not a unary operator at all, so never folds.
+    if op.text.chars().next_back().is_some_and(is_op_suffix_char) {
+        return false;
+    }
+    let Some(num) = ctx.token(op_idx + 1) else {
+        return false;
+    };
+    let folds = match op.kind {
+        TokKind::Minus => matches!(
+            num.kind,
+            TokKind::Integer | TokKind::Float | TokKind::Float32
+        ),
+        TokKind::Plus => is_number_tok(num.kind),
+        _ => return false,
+    };
+    if !folds {
+        return false;
+    }
+    // `^`/`[`/`{` after the literal bind tighter than unary negation.
+    let k3 = ctx.token(ctx.skip_ws(op_idx + 2)).map(|t| t.kind);
+    !matches!(
+        k3,
+        Some(
+            TokKind::Caret
+                | TokKind::DotCaret
+                | TokKind::UniPower
+                | TokKind::LBracket
+                | TokKind::LBrace
+        )
+    )
+}
+
 fn is_number_tok(kind: TokKind) -> bool {
     matches!(
         kind,
@@ -1855,7 +1917,18 @@ fn is_number_tok(kind: TokKind) -> bool {
 /// coefficient juxtaposes with almost any adjacent value, and a `(` glued to it
 /// is a multiplication rather than a call (`2(x)` ⇒ `(juxtapose 2 x)`).
 fn lhs_is_number(ctx: &ParserCtx<'_>, lhs: &ExprParse) -> bool {
-    lhs.end == lhs.start + 1 && ctx.token(lhs.start).is_some_and(|t| is_number_tok(t.kind))
+    // A bare numeric literal: a single number token.
+    if lhs.end == lhs.start + 1 && ctx.token(lhs.start).is_some_and(|t| is_number_tok(t.kind)) {
+        return true;
+    }
+    // A folded signed literal (`-2`, `+2.0`): a `LITERAL` wrapping a `+`/`-` sign
+    // token and the adjacent number, so the coefficient still juxtaposes (`-2x`,
+    // `-2(x)`) and a glued `(` is multiplication rather than a call.
+    matches!(lhs.events.first(), Some(Event::Start(SyntaxKind::LITERAL)))
+        && lhs.end == lhs.start + 2
+        && ctx
+            .token(lhs.start + 1)
+            .is_some_and(|t| is_number_tok(t.kind))
 }
 
 /// Whether `lhs` is a closed value that may carry a non-numeric juxtaposed term

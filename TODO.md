@@ -513,6 +513,21 @@ through), so the grammar can grow incrementally.
   suffixed operator: `[a *b]`/`[a ::b]` are now one element (`(vect …)`) and
   `[x +₁y]` stays `(vect (call-i x +₁ y))`, while `[a +b]`/`[1 :a]` still split.
 
+- [x] Signed numeric literals. A `+`/`-` glued to an adjacent number folds into a
+  single signed literal rather than a unary prefix call (`-2` ⇒ `-2`, `+2.0` ⇒
+  `2.0`, `-1.0f0` ⇒ `-1.0f0`, `-2*x` ⇒ `(call-i -2 * x)`), mirroring JuliaSyntax
+  `parse_unary`. `parse_prefix` grows a guarded arm driven by `signed_literal_fold`:
+  the operator must be undotted (`Plus`/`Minus`) and unsuffixed, directly followed
+  (no whitespace) by a number literal — decimal `Integer`/`Float`/`Float32` for
+  either sign, plus the unsigned `BinInt`/`HexInt`/`OctInt` for `+` only (a no-op
+  drop; `-0x1` stays `(call-pre - 0x1)`). It does *not* fold when `^`/`[`/`{`
+  follow the literal, since those bind tighter than unary negation (`-2^2` ⇒
+  `(call-pre - (2^2))`, `-2[1]` ⇒ `(call-pre - (ref 2 1))`). The fold builds a
+  `LITERAL` wrapping the sign + number tokens; `project_literal` combines them
+  (`-` kept, `+` dropped), and `lhs_is_number` recognizes the two-token literal so
+  it still juxtaposes (`-2(x)` ⇒ `(juxtapose -2 x)`). Also fixes the `matrices`
+  oracle case: `[1 +2]` ⇒ `(hcat 1 2)`.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

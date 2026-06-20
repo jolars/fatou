@@ -22,49 +22,44 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **386 allowlisted**, 185 divergence, 4 unsupported.
-Dir corpus: **68 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Operator suffix sub/superscripts" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **392 allowlisted**, 179 divergence, 4 unsupported.
+Dir corpus: **70 allowlisted**, 4 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Signed numeric literals" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20h)
+## Latest session (2026-06-20i)
 
-**Operator suffix sub/superscripts.** An operator token now absorbs a trailing
-run of sub/superscript or prime chars (`a +₁ b`, `x -->₁ y`, `f'ᵀ`, `a .+₁ b`),
-keeping its *kind* (so binding power is untouched) and only growing its text.
-**Lexer:** new `push_op(kind, start)` consumes `is_op_suffix_char` runs when
-`op_takes_suffix(kind)`; all operator-push sites in `lex_operator_or_unknown` plus
-the `Transpose` site route through it. `op_takes_suffix` mirrors JuliaSyntax's
-`optakessuffix` — **excluded:** assignments (`= op= .= .op=`), `&& || .&& .||`,
-`<: >: : :: .. ... ! ~ .~ -> ? $`, and the radicals/`UniAssign`; **included:** the
-arithmetic/comparison/bitwise/arrow/pipe/transpose ops and their broadcast forms,
-plus the unicode tiers (verified each via `Tokenize.tokenize` byte ranges, not
-guessed). `is_op_suffix_char` checks the explicit JuliaSyntax suffix-char set
-(combining-mark categories Mn/Mc/Me are a deferred pragmatic subset, like
-`is_unicode_ident`). **Projector** (`project_binary`): a suffixed operator
-(`op_has_suffix` = last char is a suffix char) emits a generic `(call-i …)` /
-`(dotcall-i …)` with the **full text**, even when the base op is syntactic —
-`-->₁`→`(call-i x -->₁ y)`, not `(--> …)` — matching Julia, where a suffix makes
-the op non-syntactic. `f'ᵀ` needed no projector change (`project_postfix` already
-reads token text). **Array-split fix** (`array_element_boundary`): the
-whitespace-sensitive `[a +b]`→`[a, +b]` split was firing for *any* operator (a
-latent bug: `[a *b]` wrongly became `(hcat a b)`). Now gated on
-`op_can_lead_array_element` = genuinely unary-capable infix ops {`+ - .+ .- & ~ .~`}
-∪ symbol-quote `:` and **never a suffixed op**. So `[a *b]`/`[a ::b]`/`[a <:b]`
-→ `(vect …)`, `[x +₁y]`→`(vect (call-i x +₁ y))`, while `[a +b]`/`[1 :a]` still
-split (`hcat`). Mirrors JuliaSyntax `is_both_unary_and_binary` + the `:`-quote path.
+**Signed numeric literals.** A `+`/`-` glued to an adjacent number now folds into
+a single signed literal rather than a unary prefix call, mirroring JuliaSyntax
+`parse_unary` (lines 1192–1217 in the pinned source). `parse_prefix` grows a
+guarded arm `k if matches!(k, Plus|Minus) && signed_literal_fold(ctx, start)` that
+builds a `LITERAL` wrapping the sign + number tokens. `signed_literal_fold` encodes
+the exact rule: op undotted (`Plus`/`Minus`, not `DotPlus`/`DotMinus`) **and
+unsuffixed** (a suffixed `+₁` is never unary); directly followed (no whitespace) by
+a number literal — decimal `Integer`/`Float`/`Float32` for either sign, plus the
+unsigned `BinInt`/`HexInt`/`OctInt` for `+` **only** (its sign is a no-op drop;
+`-0x1` stays `(call-pre - 0x1)`); and it does **not** fold when `^`/`[`/`{` follow
+the literal (`k3 = skip_ws(start+2)`), since those bind tighter than unary negation
+(`-2^2` ⇒ `(call-pre - (2^2))`, `-2[1]` ⇒ `(call-pre - (ref 2 1))`, `-2{T}` ⇒
+`(call-pre - (curly 2 T))`). **Projector** `project_literal`: a two-token `LITERAL`
+combines sign + number — `-` kept (`-2`), `+` dropped (`+2.0` ⇒ `2.0`). **Juxtaposition**
+`lhs_is_number` now also matches the two-token folded literal, so `-2(x)` ⇒
+`(juxtapose -2 x)` and the postfix-chain `(`-is-call guard still fires. Hex/oct/bin
+with `-` and the oct/bin display normalization (`+0o22` ⇒ Julia `0x12`) remain
+recorded divergences (numeric-literal display), un-allowlisted.
 
-JS allow **382 → 386** (+4: `a +₁ b +₁ c` js-db974d0b, `x -->₁ y` js-50dc84fd,
-`[x +₁y]` js-97cf44fb, `f'ᵀ` js-90fb496e); divergence 189 → 185, unsupported held 4.
-Dir allow 67 → 68 (`operator_suffixes`). Fixed two transient regressions from the
-array gate (`[1 :a]` js-ac8bb0f2, `[1 2:3 :a]` js-a73c4b25) by adding `:` back to
-the lead set. Zero net regressions; green, clippy/fmt clean. New parser snapshot
-`array_space_unary` locks the corrected splitting. **Deferred:** unicode unary in
-plus/times tiers (`±x`, not yet a prefix), combining-mark suffix categories.
+JS allow **386 → 392** (+6: `-2` js-cf3bae39, `+2.0` js-40a457ac, `-1.0f0`
+js-2846887e, `-2*x` js-f4c437eb, `+0x12` js-d0c63a7a, +1); divergence 185 → 179,
+unsupported held 4. Dir allow 67… → 70: new fixture `signed_literals`, **and**
+`matrices` un-blocked — `[1 +2]` now folds to `(hcat 1 2)` matching Julia (removed
+its `blocked.txt` entry). Zero regressions; green, clippy/fmt clean. The only
+snapshot change was `matrices` (folded `[1 +2]`); accepted. **Deferred:** the
+oct/bin→hex and float-canonicalization display normalization (`-0x1`, `+0o22`,
+`-0xf.0p0`); error-shape for suffixed-op prefix (`+₁2` ⇒ Julia `(error +₁)`).
 
 **Suggested next targets (ranked):**
 1. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
@@ -79,6 +74,15 @@ plus/times tiers (`±x`, not yet a prefix), combining-mark suffix categories.
 
 One-liners; full implementation detail lives in the matching `[x]` bullet in
 `TODO.md`.
+
+- **2026-06-20h** — Operator suffix sub/superscripts: an operator token absorbs a
+  trailing run of `is_op_suffix_char` chars (`a +₁ b`, `x -->₁ y`, `f'ᵀ`) keeping
+  its *kind* (binding power untouched), text-only growth via lexer `push_op` gated
+  on `op_takes_suffix` (mirrors `optakessuffix`); `project_binary` emits a suffixed
+  op as a generic `(call-i …)` even when the base is syntactic. Also fixed the
+  array-element split (`array_element_boundary`) to fire only for unary-capable ops
+  (`+ - .+ .- & ~ .~ :`), never a suffixed op. JS allow 382 → 386. Fixtures
+  `operator_suffixes`, `array_space_unary`.
 
 - **2026-06-20g** — Numeric-literal juxtaposition (implicit multiplication): an
   adjacent glued value with no operator → `JUXTAPOSE_EXPR`/`(juxtapose a b)` via

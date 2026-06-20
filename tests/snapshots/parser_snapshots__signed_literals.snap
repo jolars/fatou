@@ -1,0 +1,60 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..42
+  LITERAL@0..2
+    MINUS@0..1 "-"
+    INTEGER@1..2 "2"
+  NEWLINE@2..3 "\n"
+  LITERAL@3..7
+    PLUS@3..4 "+"
+    FLOAT@4..7 "2.0"
+  NEWLINE@7..8 "\n"
+  LITERAL@8..14
+    MINUS@8..9 "-"
+    FLOAT32@9..14 "1.0f0"
+  NEWLINE@14..15 "\n"
+  LITERAL@15..19
+    MINUS@15..16 "-"
+    FLOAT@16..19 "2.0"
+  NEWLINE@19..20 "\n"
+  BINARY_EXPR@20..24
+    LITERAL@20..22
+      MINUS@20..21 "-"
+      INTEGER@21..22 "2"
+    STAR@22..23 "*"
+    NAME@23..24
+      IDENT@23..24 "x"
+  NEWLINE@24..25 "\n"
+  JUXTAPOSE_EXPR@25..30
+    LITERAL@25..27
+      MINUS@25..26 "-"
+      INTEGER@26..27 "2"
+    PAREN_EXPR@27..30
+      LPAREN@27..28 "("
+      NAME@28..29
+        IDENT@28..29 "x"
+      RPAREN@29..30 ")"
+  NEWLINE@30..31 "\n"
+  UNARY_EXPR@31..35
+    MINUS@31..32 "-"
+    BINARY_EXPR@32..35
+      LITERAL@32..33
+        INTEGER@32..33 "2"
+      CARET@33..34 "^"
+      LITERAL@34..35
+        INTEGER@34..35 "2"
+  NEWLINE@35..36 "\n"
+  UNARY_EXPR@36..41
+    MINUS@36..37 "-"
+    INDEX_EXPR@37..41
+      LITERAL@37..38
+        INTEGER@37..38 "2"
+      ARG_LIST@38..41
+        LBRACKET@38..39 "["
+        ARG@39..40
+          LITERAL@39..40
+            INTEGER@39..40 "1"
+        RBRACKET@40..41 "]"
+  NEWLINE@41..42 "\n"

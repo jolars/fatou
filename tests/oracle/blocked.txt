@@ -11,10 +11,6 @@ do_blocks
 # `ref` indexing.
 end_index
 
-# `[1 +2]` parses as `(hcat 1 (call-pre + 2))`; JuliaSyntax folds the signed
-# literal to `(hcat 1 2)` (whitespace-sensitive unary in an hcat row).
-matrices
-
 # JuliaSyntax renders numeric literals as their parsed value (underscores
 # stripped, oct/bin shown as hex, floats canonicalized); Fatou preserves the
 # source text. Literal display parity is out of scope for the parser.

@@ -1059,7 +1059,21 @@ fn project_macro_name(node: &SyntaxNode) -> String {
 // --- Literals / strings ----------------------------------------------------
 
 fn project_literal(node: &SyntaxNode) -> String {
-    match node.children_with_tokens().find_map(|el| el.into_token()) {
+    let toks: Vec<_> = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .collect();
+    // A folded signed numeric literal (`-2`, `+2.0`): the leading `+`/`-` sign
+    // token precedes the number. `-` stays in the literal; `+` is a no-op and is
+    // dropped (`+2.0` → `2.0`, matching JuliaSyntax's glued literal).
+    if let [sign, num] = toks.as_slice() {
+        return if sign.text() == "-" {
+            format!("-{}", num.text())
+        } else {
+            num.text().to_string()
+        };
+    }
+    match toks.first() {
         Some(tok) => match tok.kind() {
             CHAR => format!("(char {})", tok.text()),
             TRUE_KW => "true".to_string(),

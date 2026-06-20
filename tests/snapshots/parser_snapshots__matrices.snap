@@ -117,10 +117,9 @@ ROOT@0..121
             INTEGER@72..73 "1"
         WHITESPACE@73..74 " "
         ARG@74..76
-          UNARY_EXPR@74..76
+          LITERAL@74..76
             PLUS@74..75 "+"
-            LITERAL@75..76
-              INTEGER@75..76 "2"
+            INTEGER@75..76 "2"
       RBRACKET@76..77 "]"
   NEWLINE@77..78 "\n"
   ASSIGNMENT_EXPR@78..93
