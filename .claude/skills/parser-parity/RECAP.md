@@ -22,16 +22,57 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **356 allowlisted**, 215 divergence, 4 unsupported.
-Dir corpus: **60 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "field-access suffixes" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **358 allowlisted**, 213 divergence, 4 unsupported.
+Dir corpus: **61 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "anon function signatures" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-18q)
+## Latest session (2026-06-20a)
+
+**Anon `function (args) … end` signatures as argument tuples.** Julia models a
+parenthesized `function` signature as a tuple of args, not a parenthesized value:
+`function (x) end` → `(function (tuple-p x) (block))`. Multi-element and
+`;`-parameter forms already parsed as `TUPLE_EXPR`; only the lone `(x)` parsed as
+`PAREN_EXPR` (→ stripped `x`). **Fix (parser, `structural.rs`):** in
+`parse_function_like`, when the whole signature's first event is
+`Start(PAREN_EXPR)`, relabel it to `Start(TUPLE_EXPR)` — but *only* when the
+parenthesized expr is not "eventually a call". New `signature_eventually_call` is
+a faithful event-walking mirror of JuliaSyntax's `was_eventually_call`: peel
+`where`/`parens`/infix-`::` off the front (`first_child_slice`) and stop at a
+`CALL_EXPR`; a `BINARY_EXPR` is a call iff its operator (`direct_child_operator`)
+is an ordinary infix-call op (`is_call_infix_operator`, mirroring `infix_head`'s
+`CallI` arms — excludes `&& || <: >: -->`, field `.`, and all broadcast `.±`).
+So `function (x::T)`/`(a.b.c)`/`(x && y)`/`(x .+ y)`/`(x -> y)` → `tuple-p`
+(anonymous), while `(x*y)`/`(f()::S)`/`(f() where T)`/`((f()::S) where T)` keep
+parens stripped (named methods). Gated to `FUNCTION_DEF` (macros need a call
+sig). **No projector change** — `TUPLE_EXPR` with a bare (un-`ARG`-wrapped) child
+already projects via `project_args`'s `_ => project(&n)` arm. Faithful: JuliaSyntax
+genuinely emits a `tuple` node here; the relabel makes Fatou's CST match.
+Fixture `anon_function_signature` (parser + dir corpus, 10 lines incl. the
+eventually-call discriminators). **Deferred:** `function (x)::T end` (`(x)` is a
+`tuple-p` nested under `::-i` — needs descending into the signature, not just the
+outermost paren).
+
+JS allow **356 → 358** (+1 net new: `function (x) body end` js-038a64f2; the
+naive first pass regressed 4 `[allow]` eventually-call cases — `function (f()::S)`
+js-328a1786, `(f() where T)` js-4eeda108, `(x*y )` js-9ddf0017,
+`((f()::S) where T)` js-e0aa726d — all restored by the `signature_eventually_call`
+guard); divergence 215 → 213, unsupported held 4. Dir allow 60 → 61. Zero
+regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b` (js-f74d3ac9), `public ⤈`, `module M; export ⤈` (js-39a1855a),
+   `x -->₁ y` (js-50dc84fd), `√x` (js-e13fa52a); larger lexer feature.
+2. **`&` as a prefix** — `&x`, `&{T}`; small, `&` currently drops the sigil.
+3. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend
+   the signature relabel to descend the `::` LHS (not just the outermost paren).
+
+## Earlier session (2026-06-18q)
 
 **Field-access suffixes.** Fixed a broad mis-parse: a `()`/`[]`/`{}` glued after
 a field access bound to the field *name* instead of the whole access, so `A.f()`,
@@ -54,18 +95,8 @@ empty `name_text`, a pre-existing adjacent bug). Fixture `field_access_suffix`
 JS allow **352 → 356** (+4: `A.:+` js-22ffbcb0, `function A.f()   end`
 js-4dc53c96, `f(a).g(b)` js-aaefc5cc, `function (A).f() end` js-f6bfe0fc);
 divergence 219 → 215, unsupported held 4. Dir allow 59 → 60. Zero regressions;
-green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Anonymous `function (args) body end`** — `function (x) body end` →
-   `(function (tuple-p x) (block body))` (js-038a64f2); Fatou parses the `(x)`
-   signature as a bare `PAREN_EXPR` → `(function x …)`. The signature parens
-   should become a `tuple-p`. Probe `function (x, y) end`, `function () end`,
-   `function (x,) end` first.
-2. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b` (js-f74d3ac9), `public ⤈`, `module M; export ⤈` (js-39a1855a),
-   `x -->₁ y` (js-50dc84fd); larger lexer feature.
-3. **`&` as a prefix** — `&x`, `&{T}`; small, `&` currently drops the sigil.
+green, clippy/fmt clean. (Next targets superseded by 20a; anon function
+signatures landed.)
 
 ## Earlier session (2026-06-18p)
 

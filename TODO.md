@@ -392,6 +392,22 @@ through), so the grammar can grow incrementally.
   ops (`(=)`, `(::)`, `(&&)`, `(->)`, `(?)`, `(...)` — error-shape).
   Parenthesized-operator macro names (`macro (:)(ex) end`) now parse via the
   `macro` definition bullet above.
+- [x] Anonymous `function (args) … end` signatures as argument tuples. Julia
+  models a parenthesized `function` signature as a tuple of arguments, not a
+  parenthesized value: `function (x) end` → `(function (tuple-p x) (block))`.
+  Multi-element and `;`-parameter forms already parsed as `TUPLE_EXPR`; the lone
+  `(x)` form parsed as `PAREN_EXPR` (→ stripped `x`). `parse_function_like`
+  (`structural.rs`) now relabels a whole-signature `PAREN_EXPR`'s `Start` event
+  to `TUPLE_EXPR` — but only when the parenthesized expression is *not*
+  "eventually a call" (`signature_eventually_call`, a faithful event-walking
+  mirror of JuliaSyntax's `was_eventually_call`: peel `where`/`parens`/infix-`::`
+  off the front and check for a call). So `function (x::T) end`, `(a.b.c)`,
+  `(x && y)`, `(x .+ y)`, `(x -> y)` become `tuple-p` (anonymous), while
+  `function (x*y) end`, `(f()::S)`, `(f() where T)` keep their parens stripped
+  (named methods). The decision is gated to `FUNCTION_DEF`; `macro` keeps its
+  call signature. **Deferred:** `function (x)::T end` (the `(x)` is a `tuple-p`
+  nested under `::-i`, needs descending into the signature, not just the
+  outermost paren).
 
 ## Incremental reparse
 

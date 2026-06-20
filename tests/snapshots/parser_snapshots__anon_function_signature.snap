@@ -1,0 +1,185 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..205
+  FUNCTION_DEF@0..21
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..12
+      TUPLE_EXPR@9..12
+        LPAREN@9..10 "("
+        NAME@10..11
+          IDENT@10..11 "x"
+        RPAREN@11..12 ")"
+    BLOCK@12..18
+      WHITESPACE@12..13 " "
+      NAME@13..17
+        IDENT@13..17 "body"
+      WHITESPACE@17..18 " "
+    END_KW@18..21 "end"
+  NEWLINE@21..22 "\n"
+  FUNCTION_DEF@22..41
+    FUNCTION_KW@22..30 "function"
+    WHITESPACE@30..31 " "
+    SIGNATURE@31..37
+      TUPLE_EXPR@31..37
+        LPAREN@31..32 "("
+        ARG@32..33
+          NAME@32..33
+            IDENT@32..33 "x"
+        COMMA@33..34 ","
+        WHITESPACE@34..35 " "
+        ARG@35..36
+          NAME@35..36
+            IDENT@35..36 "y"
+        RPAREN@36..37 ")"
+    BLOCK@37..38
+      WHITESPACE@37..38 " "
+    END_KW@38..41 "end"
+  NEWLINE@41..42 "\n"
+  FUNCTION_DEF@42..57
+    FUNCTION_KW@42..50 "function"
+    WHITESPACE@50..51 " "
+    SIGNATURE@51..53
+      TUPLE_EXPR@51..53
+        LPAREN@51..52 "("
+        RPAREN@52..53 ")"
+    BLOCK@53..54
+      WHITESPACE@53..54 " "
+    END_KW@54..57 "end"
+  NEWLINE@57..58 "\n"
+  FUNCTION_DEF@58..75
+    FUNCTION_KW@58..66 "function"
+    WHITESPACE@66..67 " "
+    SIGNATURE@67..71
+      TUPLE_EXPR@67..71
+        LPAREN@67..68 "("
+        ARG@68..69
+          NAME@68..69
+            IDENT@68..69 "x"
+        COMMA@69..70 ","
+        RPAREN@70..71 ")"
+    BLOCK@71..72
+      WHITESPACE@71..72 " "
+    END_KW@72..75 "end"
+  NEWLINE@75..76 "\n"
+  FUNCTION_DEF@76..95
+    FUNCTION_KW@76..84 "function"
+    WHITESPACE@84..85 " "
+    SIGNATURE@85..91
+      TUPLE_EXPR@85..91
+        LPAREN@85..86 "("
+        ARG@86..87
+          NAME@86..87
+            IDENT@86..87 "x"
+        PARAMETERS@87..90
+          SEMICOLON@87..88 ";"
+          WHITESPACE@88..89 " "
+          ARG@89..90
+            NAME@89..90
+              IDENT@89..90 "y"
+        RPAREN@90..91 ")"
+    BLOCK@91..92
+      WHITESPACE@91..92 " "
+    END_KW@92..95 "end"
+  NEWLINE@95..96 "\n"
+  FUNCTION_DEF@96..115
+    FUNCTION_KW@96..104 "function"
+    WHITESPACE@104..105 " "
+    SIGNATURE@105..111
+      TUPLE_EXPR@105..111
+        LPAREN@105..106 "("
+        TYPE_ANNOTATION@106..110
+          NAME@106..107
+            IDENT@106..107 "x"
+          COLON_COLON@107..109 "::"
+          NAME@109..110
+            IDENT@109..110 "T"
+        RPAREN@110..111 ")"
+    BLOCK@111..112
+      WHITESPACE@111..112 " "
+    END_KW@112..115 "end"
+  NEWLINE@115..116 "\n"
+  FUNCTION_DEF@116..136
+    FUNCTION_KW@116..124 "function"
+    WHITESPACE@124..125 " "
+    SIGNATURE@125..132
+      TUPLE_EXPR@125..132
+        LPAREN@125..126 "("
+        BINARY_EXPR@126..131
+          BINARY_EXPR@126..129
+            NAME@126..127
+              IDENT@126..127 "a"
+            DOT@127..128 "."
+            NAME@128..129
+              IDENT@128..129 "b"
+          DOT@129..130 "."
+          NAME@130..131
+            IDENT@130..131 "c"
+        RPAREN@131..132 ")"
+    BLOCK@132..133
+      WHITESPACE@132..133 " "
+    END_KW@133..136 "end"
+  NEWLINE@136..137 "\n"
+  FUNCTION_DEF@137..155
+    FUNCTION_KW@137..145 "function"
+    WHITESPACE@145..146 " "
+    SIGNATURE@146..151
+      PAREN_EXPR@146..151
+        LPAREN@146..147 "("
+        BINARY_EXPR@147..150
+          NAME@147..148
+            IDENT@147..148 "x"
+          STAR@148..149 "*"
+          NAME@149..150
+            IDENT@149..150 "y"
+        RPAREN@150..151 ")"
+    BLOCK@151..152
+      WHITESPACE@151..152 " "
+    END_KW@152..155 "end"
+  NEWLINE@155..156 "\n"
+  FUNCTION_DEF@156..177
+    FUNCTION_KW@156..164 "function"
+    WHITESPACE@164..165 " "
+    SIGNATURE@165..173
+      PAREN_EXPR@165..173
+        LPAREN@165..166 "("
+        TYPE_ANNOTATION@166..172
+          CALL_EXPR@166..169
+            NAME@166..167
+              IDENT@166..167 "f"
+            ARG_LIST@167..169
+              LPAREN@167..168 "("
+              RPAREN@168..169 ")"
+          COLON_COLON@169..171 "::"
+          NAME@171..172
+            IDENT@171..172 "S"
+        RPAREN@172..173 ")"
+    BLOCK@173..174
+      WHITESPACE@173..174 " "
+    END_KW@174..177 "end"
+  NEWLINE@177..178 "\n"
+  FUNCTION_DEF@178..204
+    FUNCTION_KW@178..186 "function"
+    WHITESPACE@186..187 " "
+    SIGNATURE@187..200
+      PAREN_EXPR@187..200
+        LPAREN@187..188 "("
+        WHERE_EXPR@188..199
+          CALL_EXPR@188..191
+            NAME@188..189
+              IDENT@188..189 "f"
+            ARG_LIST@189..191
+              LPAREN@189..190 "("
+              RPAREN@190..191 ")"
+          WHITESPACE@191..192 " "
+          WHERE_KW@192..197 "where"
+          WHITESPACE@197..198 " "
+          NAME@198..199
+            IDENT@198..199 "T"
+        RPAREN@199..200 ")"
+    BLOCK@200..201
+      WHITESPACE@200..201 " "
+    END_KW@201..204 "end"
+  NEWLINE@204..205 "\n"

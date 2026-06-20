@@ -102,7 +102,25 @@ fn parse_function_like(
     let mut i = if let Some(sig) = parse_expr(tokens, sig_start, 0, diagnostics) {
         push_range(&mut events, start + 1, sig.start);
         events.push(Event::Start(SyntaxKind::SIGNATURE));
-        events.extend(sig.events);
+        let mut sig_events = sig.events;
+        // An anonymous `function (args) … end` signature is a tuple of arguments,
+        // not a parenthesized value: Julia models `function (x) end` as
+        // `(function (tuple-p x) …)`. A lone `(x)` parses as `PAREN_EXPR`
+        // (multi-element / `;` forms already become `TUPLE_EXPR`); relabel it so
+        // the single-arg case joins them — unless the parenthesized expression is
+        // "eventually a call" (`function (x*y) end`, `function (f()::S) end`),
+        // which names a method and keeps its parens stripped. Macros take a call
+        // signature, so the shared path's macro form is left alone.
+        if node_kind == SyntaxKind::FUNCTION_DEF
+            && matches!(
+                sig_events.first(),
+                Some(Event::Start(SyntaxKind::PAREN_EXPR))
+            )
+            && !signature_eventually_call(&sig_events, tokens)
+        {
+            sig_events[0] = Event::Start(SyntaxKind::TUPLE_EXPR);
+        }
+        events.extend(sig_events);
         events.push(Event::Finish);
         sig.end
     } else {
@@ -697,6 +715,121 @@ pub(super) fn is_op_name(kind: TokKind) -> bool {
             | Bang
             | Amp
             | Pipe
+            | Tilde
+    )
+}
+
+/// Mirror of JuliaSyntax's `was_eventually_call`, over a parsed node's event
+/// slice: peel `where`/`parens`/infix-`::` off the front (following the first
+/// child) and report whether a call is reached. Used to decide whether a
+/// parenthesized `function` signature is an anonymous argument tuple
+/// (`function (x) end` → `(tuple-p x)`) or a named-function signature in parens
+/// (`function (x*y) end` → `(call-i x * y)`, parens stripped). `events` must be
+/// the balanced event slice of a single node (`events[0]` its `Start`).
+fn signature_eventually_call(events: &[Event], tokens: &[Token]) -> bool {
+    use SyntaxKind::*;
+    match events.first() {
+        Some(Event::Start(CALL_EXPR)) => true,
+        Some(Event::Start(TYPE_ANNOTATION | WHERE_EXPR | PAREN_EXPR)) => {
+            first_child_slice(events).is_some_and(|child| signature_eventually_call(child, tokens))
+        }
+        // A `BINARY_EXPR` is a call iff its operator is an ordinary infix-call
+        // operator (`*`, `=>`, `<`, …); the short-circuit/type/arrow/field/dotted
+        // operators model as their own heads, not `call` (mirrors the `CallI`
+        // arms of the projector's `infix_head`).
+        Some(Event::Start(BINARY_EXPR)) => {
+            direct_child_operator(events, tokens).is_some_and(is_call_infix_operator)
+        }
+        _ => false,
+    }
+}
+
+/// The balanced event slice of `events`' first child node (`events[0]` is the
+/// parent `Start`), skipping any leading delimiter/trivia tokens. `None` if the
+/// node has no child node.
+fn first_child_slice(events: &[Event]) -> Option<&[Event]> {
+    let mut depth = 0i32;
+    let mut start = None;
+    for (i, ev) in events.iter().enumerate() {
+        match ev {
+            Event::Start(_) => {
+                depth += 1;
+                if depth == 2 {
+                    start = Some(i);
+                    break;
+                }
+            }
+            Event::Finish => depth -= 1,
+            Event::Tok(_) => {}
+        }
+    }
+    let start = start?;
+    let mut depth = 0i32;
+    for (i, ev) in events[start..].iter().enumerate() {
+        match ev {
+            Event::Start(_) => depth += 1,
+            Event::Finish => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&events[start..=start + i]);
+                }
+            }
+            Event::Tok(_) => {}
+        }
+    }
+    None
+}
+
+/// The kind of a binary node's operator: its first significant direct-child
+/// token (depth 1), skipping trivia. Operands are deeper child nodes.
+fn direct_child_operator(events: &[Event], tokens: &[Token]) -> Option<TokKind> {
+    let mut depth = 0i32;
+    for ev in events {
+        match ev {
+            Event::Start(_) => depth += 1,
+            Event::Finish => depth -= 1,
+            Event::Tok(i) => {
+                let kind = tokens[*i].kind;
+                if depth == 1 && !kind.is_trivia() {
+                    return Some(kind);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Whether `kind` is an ordinary infix-call operator — one JuliaSyntax models as
+/// `K"call"` (and the projector's `infix_head` maps to `CallI`). Excludes the
+/// short-circuit (`&&`/`||`), type (`<:`/`>:`), `-->`, field-access `.`, and all
+/// dotted/broadcast operators, which carry their own heads.
+fn is_call_infix_operator(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        Plus | Minus
+            | Star
+            | Slash
+            | SlashSlash
+            | Caret
+            | Percent
+            | Colon
+            | DotDot
+            | FatArrow
+            | PipeGt
+            | PipeLt
+            | LeftRightArrow
+            | Shl
+            | Shr
+            | UShr
+            | Amp
+            | Pipe
+            | EqEq
+            | NotEq
+            | Lt
+            | Le
+            | Gt
+            | Ge
             | Tilde
     )
 }
