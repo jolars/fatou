@@ -69,6 +69,8 @@ pub enum SyntaxKind {
     CATCH_CLAUSE,
     FINALLY_CLAUSE,
     STRUCT_DEF,
+    ABSTRACT_DEF,
+    PRIMITIVE_DEF,
     MODULE_DEF,
     DO_EXPR,
     DO_PARAMS,

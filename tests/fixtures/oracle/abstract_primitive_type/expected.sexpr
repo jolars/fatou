@@ -1,0 +1,1 @@
+(toplevel (abstract A) (abstract (<: A B)) (abstract (call-i A < B)) (abstract (<: A (curly B T S))) (abstract (curly A T)) (primitive A 32) (primitive (<: A B) 8) (primitive (curly Ptr T) 32))

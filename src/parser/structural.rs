@@ -345,6 +345,116 @@ pub(crate) fn parse_struct_expr(
     })
 }
 
+/// Skip (and emit) trivia and `;` separators up to `i`'s next significant token.
+/// Inside `abstract`/`primitive type … end` a trailing `;` before `end` is an
+/// insignificant separator (`abstract type A ; end` ≡ `abstract type A end`).
+fn skip_trivia_and_semis(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, mut i: usize) -> usize {
+    loop {
+        let next = ctx.skip_trivia(i);
+        push_range(events, i, next);
+        i = next;
+        if ctx.token(i).map(|t| t.kind) == Some(TokKind::Semicolon) {
+            events.push(Event::Tok(i));
+            i += 1;
+        } else {
+            return i;
+        }
+    }
+}
+
+/// `abstract type Name end` — a contextual-keyword declaration. `abstract` and
+/// `type` are ordinary identifiers elsewhere; here they are bare leaf tokens and
+/// the type expression (`A`, `A <: B`, `A{T}`, …) is parsed into a `SIGNATURE`.
+/// JuliaSyntax models this as `(abstract <spec>)`, so there is no body block.
+pub(crate) fn parse_abstract_type(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::ABSTRACT_DEF), Event::Tok(start)];
+
+    // The contextual `type` keyword (guaranteed adjacent by the caller's gate).
+    let type_idx = ctx.skip_trivia(start + 1);
+    push_range(&mut events, start + 1, type_idx);
+    events.push(Event::Tok(type_idx));
+
+    // The type spec is a real expression (`<:`, `curly`, `where`, …). It has no
+    // block body, so trivia (including newlines) up to `end` is insignificant.
+    let spec_start = ctx.skip_trivia(type_idx + 1);
+    push_range(&mut events, type_idx + 1, spec_start);
+    let mut i = spec_start;
+    if ctx.token(spec_start).map(|t| t.kind) != Some(TokKind::EndKw)
+        && let Some(expr) = parse_expr(tokens, spec_start, 0, diagnostics)
+    {
+        events.push(Event::Start(SyntaxKind::SIGNATURE));
+        events.extend(expr.events);
+        events.push(Event::Finish);
+        i = expr.end;
+    }
+    let before_end = skip_trivia_and_semis(&ctx, &mut events, i);
+    i = expect_end(&ctx, &mut events, before_end, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+/// `primitive type Name Bits end` — like [`parse_abstract_type`], but a size
+/// expression follows the type spec on the same line. JuliaSyntax models this as
+/// `(primitive <spec> <bits>)`; the spec goes in a `SIGNATURE`, the size is a
+/// sibling expression node.
+pub(crate) fn parse_primitive_type(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(SyntaxKind::PRIMITIVE_DEF), Event::Tok(start)];
+
+    // The contextual `type` keyword (guaranteed adjacent by the caller's gate).
+    let type_idx = ctx.skip_trivia(start + 1);
+    push_range(&mut events, start + 1, type_idx);
+    events.push(Event::Tok(type_idx));
+
+    // The type spec, parsed as an expression and wrapped in a `SIGNATURE`. The
+    // size is *not* swallowed because a juxtaposed name and number (`A 32`,
+    // `B 8`) is not a valid expression continuation, so the spec parse stops.
+    let spec_start = ctx.skip_trivia(type_idx + 1);
+    push_range(&mut events, type_idx + 1, spec_start);
+    let mut i = spec_start;
+    if ctx.token(spec_start).map(|t| t.kind) != Some(TokKind::EndKw)
+        && let Some(expr) = parse_expr(tokens, spec_start, 0, diagnostics)
+    {
+        events.push(Event::Start(SyntaxKind::SIGNATURE));
+        events.extend(expr.events);
+        events.push(Event::Finish);
+        i = expr.end;
+    }
+
+    // The bit size: the next expression (possibly on a following line).
+    let size_start = ctx.skip_trivia(i);
+    push_range(&mut events, i, size_start);
+    i = size_start;
+    if ctx.token(size_start).map(|t| t.kind) != Some(TokKind::EndKw)
+        && let Some(size) = parse_expr(tokens, size_start, 0, diagnostics)
+    {
+        events.extend(size.events);
+        i = size.end;
+    }
+
+    let before_end = skip_trivia_and_semis(&ctx, &mut events, i);
+    i = expect_end(&ctx, &mut events, before_end, start, diagnostics);
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
 /// `module Name … end` and `baremodule Name … end`.
 pub(crate) fn parse_module_expr(
     tokens: &[Token],

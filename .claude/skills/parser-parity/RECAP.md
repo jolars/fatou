@@ -22,16 +22,62 @@ new session.
 
 ## Progress
 
-JS corpus (575 cases): **359 allowlisted**, 212 divergence, 4 unsupported.
-Dir corpus: **62 allowlisted**, 5 blocked + 1 skipped (do_blocks).
-Grammar bullets through "ASCII bitwise operators `&`/`|`" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **369 allowlisted**, 202 divergence, 4 unsupported.
+Dir corpus: **63 allowlisted**, 5 blocked + 1 skipped (do_blocks).
+Grammar bullets through "`abstract type`/`primitive type` declarations" are `[x]`
+in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), numeric-literal display normalization,
 triple-string dedent, `end`/`[1 +2]`/unterminated-string/incomplete-`do` error
 shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20b)
+## Latest session (2026-06-20c)
+
+**`abstract type`/`primitive type` declarations.** `abstract`/`primitive`/`type`
+are contextual keywords (Julia: `abstract = 1` → `(= abstract 1)`), so they stay
+`Ident` in the lexer — no lexer/tree_builder change. New `type_decl_keyword`
+(`expr.rs`) detects an `abstract`/`primitive` Ident immediately followed (across
+trivia) by a `type` Ident and dispatches to the new parsers *before* the
+block-keyword match; the adjacent-ident pair is unambiguous, so it fires in any
+expression position (`x = abstract type A end` → `(= x (abstract A))`).
+`parse_abstract_type`/`parse_primitive_type` (`structural.rs`) emit the two
+keyword idents as bare leaf tokens, then parse the type spec as a **real
+expression** into a `SIGNATURE` (run via `parse_expr`, not `parse_header` — these
+have *no block body*, so trivia/newlines up to `end` are insignificant). Every
+spec shape falls out for free since it's an ordinary expr + `project_signature`:
+`abstract type A end`→`(abstract A)`, `A <: B`→`(abstract (<: A B))`, `A < B`→
+`(abstract (call-i A < B))`, `A <: B{T,S}`→`(abstract (<: A (curly B T S)))`,
+`A{T}`→`(abstract (curly A T))`. `primitive` additionally parses the bit size as a
+sibling expr node after the spec (the juxtaposed `A 32`/`B 8` doesn't combine, so
+the spec parse stops cleanly): `(primitive A 32)`, `(primitive (<: A B) 8)`,
+`(primitive (curly Ptr T) 32)`, `(primitive A ($ N))`. A trailing `;` before
+`end` (`abstract type A ; end`) is an insignificant separator — new
+`skip_trivia_and_semis` helper skips trivia + `;` runs before `expect_end` (this
+fixed 2 cases that briefly went FAIL→UNSUPPORTED with a spurious "expected end"
+diagnostic). New `ABSTRACT_DEF`/`PRIMITIVE_DEF` SyntaxKinds; projector arms
+`ABSTRACT_DEF => (abstract <spec>)` (inline `sexp`) and `project_primitive`
+(`(primitive <spec> <bits>)`, bits = the non-`SIGNATURE` child node). Faithful:
+the keyword idents, signature, and size are all real CST children; the projector
+only formats the head and drops the contextual keyword tokens. Fixture
+`abstract_primitive_type` (parser + dir corpus, 8 lines). **Deferred:** none for
+this construct (multiline + `;`-body forms all handled).
+
+JS allow **359 → 369** (+10); divergence 212 → 202, unsupported held 4. Dir allow
+62 → 63. Zero regressions; green, clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
+   `a … b` (js-e5d8580f), `a .… b` (js-f74d3ac9, UNSUPPORTED), `public ⤈`,
+   `module M; export ⤈` (js-39a1855a), `x -->₁ y` (js-50dc84fd), `√x`
+   (js-e13fa52a), `x → y` (js-db694f69), `i ∈ rhs` (js-f3da47b9), `⊻`; the
+   single largest remaining lexer feature.
+2. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
+   signature relabel to descend the `::` LHS (not just the outermost paren).
+3. **Broadcast `.&`/`.|`** — lex `DotAmp`/`DotPipe`, project to `(. &)`/`(. |)`
+   heads; unblocks `.&(x,y)` js-cdf6c5ab and the paren-quote `:.&&`.
+
+## Earlier session (2026-06-20b)
 
 **ASCII bitwise operators `&` and `|`.** Both were lexed (`Amp`/`Pipe` →
 `AMP`/`PIPE`) but silently dropped — no `infix_binding_power` entry and no prefix
@@ -58,15 +104,7 @@ broadcast-`&` lexing) and unicode bitwise `⊻` (unicode-operator lexing, target
 
 JS allow **358 → 359** (+1: `&a` js-d2cb9522, was FAIL); divergence 213 → 212,
 unsupported held 4. Dir allow 61 → 62. Zero regressions; green, clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **Unicode operators** (lexer) — unblocks `import .⋆`, `A.⋆.f`, `[x +₁y]`,
-   `a … b` (js-f74d3ac9), `public ⤈`, `module M; export ⤈` (js-39a1855a),
-   `x -->₁ y` (js-50dc84fd), `√x` (js-e13fa52a), `⊻`; larger lexer feature.
-2. **`function (x)::T end`** — `(x)` is a `tuple-p` nested under `::-i`; extend the
-   signature relabel to descend the `::` LHS (not just the outermost paren).
-3. **Broadcast `.&`/`.|`** — lex `DotAmp`/`DotPipe`, project to `(. &)`/`(. |)`
-   heads; unblocks `.&(x,y)` js-cdf6c5ab and the paren-quote `:.&&`.
+(Next targets superseded by 20c; abstract/primitive type landed.)
 
 ## Earlier session (2026-06-20a)
 

@@ -425,6 +425,20 @@ through), so the grammar can grow incrementally.
   need broadcast-`&` lexing) and the unicode bitwise `⊻` (unicode-operator
   lexing).
 
+- [x] `abstract type`/`primitive type` declarations. `abstract`, `primitive`,
+  and `type` are contextual keywords (ordinary identifiers elsewhere), so they
+  stay `Ident` in the lexer; `type_decl_keyword` (`expr.rs`) detects an
+  `abstract`/`primitive` immediately followed by `type` and dispatches before the
+  block-keyword match. `parse_abstract_type`/`parse_primitive_type`
+  (`structural.rs`) emit the two keyword idents as bare leaf tokens, parse the
+  type spec as a real expression into a `SIGNATURE` (so `<:`/`<`/`curly`/`where`
+  all fall out: `(abstract (<: A (curly B T S)))`, `(abstract (call-i A < B))`),
+  and — for `primitive` — parse the bit size as a sibling expression node
+  (`(primitive (<: A B) 8)`). No block body: trivia, newlines, and a trailing `;`
+  before `end` are insignificant (`skip_trivia_and_semis`). New `ABSTRACT_DEF`/
+  `PRIMITIVE_DEF` kinds project via `(abstract <spec>)` and
+  `project_primitive` → `(primitive <spec> <bits>)`.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

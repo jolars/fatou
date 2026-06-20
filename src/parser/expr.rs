@@ -11,9 +11,10 @@ use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::lexer::{TokKind, Token};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
-    KwStmt, is_op_name, parse_begin_expr, parse_do_block, parse_for_expr, parse_function_expr,
-    parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr, parse_macro_def,
-    parse_module_expr, parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
+    KwStmt, is_op_name, parse_abstract_type, parse_begin_expr, parse_do_block, parse_for_expr,
+    parse_function_expr, parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr,
+    parse_macro_def, parse_module_expr, parse_primitive_type, parse_quote_expr, parse_struct_expr,
+    parse_try_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -135,6 +136,18 @@ fn parse_expr_in(
             KwStmt::Path,
             diagnostics,
         );
+    }
+
+    // The contextual keywords `abstract`/`primitive` (ordinary identifiers
+    // elsewhere) open a type declaration only when immediately followed by the
+    // contextual `type`, exactly as JuliaSyntax recognizes them. The pair of
+    // adjacent identifiers is unambiguous, so this fires in any expression
+    // position (`x = abstract type A end`).
+    if let Some(decl_word) = type_decl_keyword(&ctx, start) {
+        return match decl_word {
+            TypeDecl::Abstract => parse_abstract_type(tokens, start, diagnostics),
+            TypeDecl::Primitive => parse_primitive_type(tokens, start, diagnostics),
+        };
     }
 
     // Leading keywords open a structural (block) form. Inside an indexing `a[…]`
@@ -328,6 +341,25 @@ fn parse_expr_in(
 /// the token is the identifier `public` and the next significant token exists and
 /// is not `(`, `=`, or `[` — those three keep `public` an ordinary identifier (a
 /// call, assignment, or index), matching JuliaSyntax's `parse_public`.
+enum TypeDecl {
+    Abstract,
+    Primitive,
+}
+
+/// Detect a contextual `abstract type`/`primitive type` opener: an identifier
+/// `abstract`/`primitive` immediately followed (across trivia only) by the
+/// identifier `type`. Returns `None` for the plain-identifier uses (`abstract`,
+/// `abstract = 1`, `abstract(x)`).
+fn type_decl_keyword(ctx: &ParserCtx<'_>, start: usize) -> Option<TypeDecl> {
+    let word = match ctx.token(start) {
+        Some(t) if t.kind == TokKind::Ident && t.text == "abstract" => TypeDecl::Abstract,
+        Some(t) if t.kind == TokKind::Ident && t.text == "primitive" => TypeDecl::Primitive,
+        _ => return None,
+    };
+    let next = ctx.token(ctx.skip_trivia(start + 1))?;
+    (next.kind == TokKind::Ident && next.text == "type").then_some(word)
+}
+
 fn is_public_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
     match ctx.token(start) {
         Some(t) if t.kind == TokKind::Ident && t.text == "public" => {}

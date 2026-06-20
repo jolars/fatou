@@ -154,6 +154,8 @@ fn project(node: &SyntaxNode) -> String {
         QUOTE_SYM => project_quote_sym(node),
         TRY_EXPR => project_try(node),
         STRUCT_DEF => project_struct(node),
+        ABSTRACT_DEF => sexp("abstract", vec![project_signature(node)]),
+        PRIMITIVE_DEF => project_primitive(node),
         MODULE_DEF => project_module(node),
         DO_EXPR => project_do(node),
 
@@ -723,6 +725,18 @@ fn project_struct(node: &SyntaxNode) -> String {
         head,
         vec![project_signature(node), project_block_child(node)],
     )
+}
+
+fn project_primitive(node: &SyntaxNode) -> String {
+    // `(primitive <spec> <bits>)`: the spec is the `SIGNATURE` child, the bit
+    // size is the sibling expression node that follows it.
+    let spec = project_signature(node);
+    let size = node
+        .children()
+        .find(|c| c.kind() != SIGNATURE)
+        .map(|c| project(&c))
+        .unwrap_or_default();
+    sexp("primitive", vec![spec, size])
 }
 
 fn project_module(node: &SyntaxNode) -> String {
