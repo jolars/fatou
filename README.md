@@ -1,4 +1,4 @@
-# Fatou <img src='https://raw.githubusercontent.com/jolars/fatou/main/images/logo.png' align="right" width="139" />
+# Fatou <img src='https://raw.githubusercontent.com/jolars/fatou/main/assets/logo.png' align="right" width="139" />
 
 A language server, formatter, and linter for [Julia](https://julialang.org),
 written in Rust.
