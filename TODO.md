@@ -528,10 +528,12 @@ through), so the grammar can grow incrementally.
   (`expr.rs`) — prefix text `var` + single-`"` open delimiter → a new
   `NONSTANDARD_IDENTIFIER` node (triple-quoted `var"""…"""` stays an ordinary
   `@var_str` macrocall, and other prefixes `r`/`raw`/`b` are unaffected). Projector
-  `project_var` heads the node `var` over the raw delimited content. **Deferred:**
-  escape-processing of the name (`var"\""` → `(var ")` follows Julia's raw-string
-  rules, so escape-free names match but escaped ones stay FAIL) and the
-  suffix-error shape (`var"x"y` → `(var x (error-t))`).
+  `project_var` heads the node `var` over the raw delimited content. The lexer
+  applies Julia's raw-string rule (an odd backslash run before a quote escapes
+  it) so `var"\""`/`var"\\\""` lex as one identifier; `project_var` runs the
+  name through `unescape_raw_string` (`\"` ⇒ `"`, `\\\"` ⇒ `\"`, trailing `\\`
+  ⇒ `\`, other backslash runs literal). **Deferred:** the suffix-error shape
+  (`var"x"y` → `(var x (error-t))`).
 - [x] Unicode operators (single-codepoint infix/prefix). The full set of length-1
   non-ASCII operators from JuliaSyntax's kind tables is generated into
   `src/parser/unicode_ops.rs` (a code-point-sorted binary-search table mapping

@@ -536,6 +536,22 @@ impl<'a> Lexer<'a> {
         // Accumulate a content chunk until the close delimiter, an interpolation,
         // EOF, or (for single-quoted strings) an unterminating newline.
         while self.pos < self.bytes.len() {
+            // In a raw (prefixed) string, a backslash run immediately before the
+            // closing quote escapes it when the run length is odd (Julia's
+            // raw-string rule: `\"` ⇒ literal quote, `\\\"` ⇒ `\` then literal
+            // quote). Consume the run plus the escaped quote so it stays content.
+            if raw && self.peek(0) == Some(b'\\') {
+                let mut run = 0;
+                while self.peek(run) == Some(b'\\') {
+                    run += 1;
+                }
+                if self.peek(run) == Some(quote) && run % 2 == 1 {
+                    self.pos += run + 1;
+                } else {
+                    self.pos += run;
+                }
+                continue;
+            }
             if self.at_close_delim(quote, triple) {
                 break;
             }

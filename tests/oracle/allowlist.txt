@@ -59,6 +59,7 @@ ncat
 nested_macro_path
 nested_string_interp
 nonstandard_identifier
+nonstandard_identifier_escape
 operator_call
 operator_suffixes
 operator_symbol_quote

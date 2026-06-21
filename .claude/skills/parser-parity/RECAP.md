@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **520 allowlisted**, 52 divergence, 3 unsupported.
-Dir corpus: **99 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **522 allowlisted**, 50 divergence, 3 unsupported.
+Dir corpus: **100 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "broadcast type comparison `.<:`/`.>:`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,34 +31,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21w)
+## Latest session (2026-06-21x)
 
-**Broadcast type comparison `.<:`/`.>:`.** `x .<: y` ⇒ `(dotcall-i x <: y)`,
-`x .>: y` ⇒ `(dotcall-i x >: y)`. Standard 5-file operator recipe: new
-`DotSubtype`/`DotSupertype` `TokKind`s lexed in the 3-char dotted table
-(`(b'<', b':')`/`(b'>', b':')` after the dot, before the 2-char `DotLt`/`DotGt`
-so longest-match wins); `DOT_SUBTYPE`/`DOT_SUPERTYPE` `SyntaxKind`s;
-`tree_builder` map; comparison tier `(10, 11)` left-assoc in `infix_binding_power`;
-`infix_head` `DotCallI("<:")`/`DotCallI(">:")` + `is_operator`. Also added to
-`is_operator_call_name` (paren-call name `.<:(x, y)` ⇒ `(call (. <:) x y)`) and
-`is_value_operator` (bare atom `.<:` ⇒ `(. <:)`), matching the existing dotted
-comparison ops. All four forms verified identical to Julia. Comparison chains
-`a .<: b .<: c` stay nested (`(dotcall-i (dotcall-i a <: b) <: c)`), a recorded
-modeling divergence; Julia flattens to `(comparison …)`. JS allow 519 → 520
-(`x .<: y`); dir allow 98 → 99 (fixture `broadcast_type_comparison`). Green;
-clippy/fmt clean.
+**`var"…"` with escapes.** `var"\""` ⇒ `(var ")`, `var"\\\""` ⇒ `(var \")`,
+`var"\\"` ⇒ `(var \)`, `var"a\"b"` ⇒ `(var a"b)`. Two-part fix. **Lexer**
+(`lex_in_string_mode`): in raw (prefixed) mode, before the close-delim check,
+count a backslash run; if it is immediately followed by the close quote and the
+run length is **odd**, the final backslash escapes that quote — consume the run
+plus the quote so `\"` stays inside `STRING_CONTENT` instead of terminating the
+string. (Previously raw strings never recognized `\"`, so `var"\""` lexed as
+content `\` + a stray close.) **Projector** (`project_var`): the var *name* is
+the unescaped value, so run `raw_content` through a new `unescape_raw_string`
+mirroring Julia's `unescape_raw_string` — a backslash run of `n` immediately
+before a `"` **or at end-of-content** (the close delimiter is the implied `"`)
+yields `n/2` backslashes plus a literal `"` when `n` is odd; any other run is
+literal (`var"x\\y"` ⇒ `x\\y`, the `\\` not before a quote stays). The
+end-of-content case is what makes a trailing even run collapse (`\\` ⇒ `\`)
+even though the close quote isn't in the captured content. JS allow 520 → 522
+(`var"\""`, `var"\\\""`); dir allow 99 → 100 (fixture
+`nonstandard_identifier_escape`, 5 cases). Suffix-error shape (`var"x"y`)
+still deferred. Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **`var"…"` with escapes** (js-61a01ce8 `var"\""` ⇒ `(var ")`, js-8f5b1a26): the
-   non-standard-identifier content needs escape processing (`\"`→`"`, `\\`→`\`)
-   like the string path. 2 JS cases.
-2. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
+1. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
    drops the operand to an `error-t` (`:$x` ⇒ `(quote-: $) (error-t x)`). Entangled
    with interpolation/splat/field access and error-shape. Not in the JS corpus.
-3. Survey the remaining 52 JS FAILs for the next cluster (`cargo test --test
+2. **`var"…"` as a `catch`/`try` binding** (js-5faabde7 `try x catch var"#" y end`
+   ⇒ `… (catch (var #) …)`): the catch-variable slot doesn't yet accept a
+   non-standard identifier. Small, real-world-ish.
+3. Survey the remaining 50 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 
 ## Earlier sessions
+
+- **2026-06-21w** — Broadcast type comparison `.<:`/`.>:`. `x .<: y` ⇒
+  `(dotcall-i x <: y)`, `x .>: y` ⇒ `(dotcall-i x >: y)`. Standard 5-file
+  operator recipe: `DotSubtype`/`DotSupertype` `TokKind`s in the 3-char dotted
+  table (before 2-char `DotLt`/`DotGt`), comparison tier `(10,11)`,
+  `infix_head` `DotCallI`. Also `is_operator_call_name` (`.<:(x,y)`) and
+  `is_value_operator` (bare `.<:` ⇒ `(. <:)`). Chains stay nested (recorded
+  divergence). JS allow 519 → 520; dir 98 → 99 (fixture
+  `broadcast_type_comparison`).
 
 - **2026-06-21v** — Word operators `in`/`isa`. `i in rhs` ⇒ `(call-i i in rhs)`,
   `x isa T` ⇒ `(call-i x isa T)`. Lexed as **identifiers** (so `:in`/`for i in xs`

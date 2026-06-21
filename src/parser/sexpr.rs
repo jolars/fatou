@@ -1754,13 +1754,55 @@ fn escape_display(s: &str, raw: bool) -> String {
 /// `var"\""` → `(var ")` — follows Julia's raw-string rules and is deferred, so
 /// only escape-free names match the oracle today.)
 fn project_var(node: &SyntaxNode) -> String {
-    let content = raw_content(node);
+    let content = unescape_raw_string(&raw_content(node));
     let parts = if content.is_empty() {
         vec![]
     } else {
         vec![content]
     };
     sexp("var", parts)
+}
+
+/// Unescape a raw-string body the way Julia's `unescape_raw_string` does: a run
+/// of `n` backslashes immediately before a `"` (or at the end of the body, where
+/// the closing delimiter is the implied `"`) yields `n / 2` backslashes, plus a
+/// literal `"` when `n` is odd (`\"` ⇒ `"`, `\\\"` ⇒ `\` then `"`, trailing
+/// `\\` ⇒ `\`); any other backslash run is literal. Used for `var"…"` identifier
+/// content, whose name is the unescaped value rather than the raw source bytes.
+fn unescape_raw_string(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            let mut run = 0;
+            while i + run < bytes.len() && bytes[i + run] == b'\\' {
+                run += 1;
+            }
+            let at_end = i + run >= bytes.len();
+            let before_quote = !at_end && bytes[i + run] == b'"';
+            if before_quote || at_end {
+                for _ in 0..run / 2 {
+                    out.push('\\');
+                }
+                i += run;
+                if run % 2 == 1 {
+                    out.push('"');
+                    i += 1;
+                }
+            } else {
+                for _ in 0..run {
+                    out.push('\\');
+                }
+                i += run;
+            }
+        } else {
+            let ch = s[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
 }
 
 fn project_cmd(node: &SyntaxNode) -> String {

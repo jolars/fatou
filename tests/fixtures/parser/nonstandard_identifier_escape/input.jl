@@ -1,0 +1,5 @@
+var"\""
+var"\\\""
+var"a\"b"
+var"\\"
+var"x\\y"
