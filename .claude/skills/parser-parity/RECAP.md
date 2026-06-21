@@ -22,50 +22,57 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **404 allowlisted**, 167 divergence, 4 unsupported.
-Dir corpus: **73 allowlisted**, 4 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Top-level `;` grouping" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **411 allowlisted**, 160 divergence, 4 unsupported.
+Dir corpus: **74 allowlisted**, 4 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Paren block sequences" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20l)
+## Latest session (2026-06-21a)
 
-**Top-level `;` grouping.** A logical line carrying a top-level `;` now folds its
-statements into a `TOPLEVEL_SEMICOLON` node, projecting `(toplevel-; …)`
-(mirroring JuliaSyntax): `a;b;c` ⇒ `(toplevel (toplevel-; a b c))`, `a;` ⇒
-`(toplevel (toplevel-; a))`, bare `;`/`;;` ⇒ `(toplevel (toplevel-;))`. The rule
-is per-logical-line: a line wraps iff it contained a `;` anywhere (leading,
-between, or trailing); a plain line stays bare (`a` ⇒ `(toplevel a)`); newlines
-split groups (`a;b\nc;d` ⇒ two `toplevel-;` nodes; `a; b\nc` ⇒
-`(toplevel (toplevel-; a b) c)`).
+**Paren block sequences.** A `;`-bearing parenthesized run that is *not* a tuple
+now parses as a `PAREN_BLOCK` projecting `(block-p …)` (mirroring JuliaSyntax
+`parse_paren`/`parse_brackets`): `(a; b; c)` ⇒ `(block-p a b c)`, `(a=1; b=2)` ⇒
+`(block-p (= a 1) (= b 2))`, `(a;b;;c)` ⇒ `(block-p a b c)`, `(a=1;)` ⇒
+`(block-p (= a 1))`, `(;;)` ⇒ `(block-p)`. Tuples are unchanged: `(a, b)`,
+`(; a=1)`, `(x...; y)` stay `tuple-p`.
 
-This is a **parser** change in the toplevel driver `parse` (`src/parser/core.rs`),
-not the projector: the old flat loop (emit trivia/`;` at root, parse each stmt)
-became a two-level loop — leading trivia (incl. newlines) emitted at root, then a
-line buffer accumulates statements + interspersed `;`/trivia until a newline/EOF,
-and the buffer is wrapped in `TOPLEVEL_SEMICOLON` only when `has_semicolon`.
-parse_stmt naturally absorbs newlines inside multi-line constructs, so the line
-follows the parser. New `SyntaxKind::TOPLEVEL_SEMICOLON` + projector arm
-(`sexp("toplevel-;", stmt_strings(node))` → empty parts give `(toplevel-;)`).
+The disambiguation lives in `paren_is_block` (`src/parser/expr.rs`): a depth-0
+token scan gathers `had_commas`/`had_splat`/`num_semis`/`num_subexprs` +
+`initial_semi`, then applies the exact rule
+`is_tuple = had_commas || (had_splat && num_semis≥1) || (initial_semi &&
+(num_semis==1 || num_subexprs>0))`, `is_block = !is_tuple && num_semis>0`. The two
+`;`-reaching `parse_arg_list` call sites in `parse_paren` now pick the node kind
+via `paren_list_kind`. **Key reuse:** the block is parsed by the *same* arg-list
+machinery as a tuple (same `ARG`/`KEYWORD_ARG`/`PARAMETERS` events); only the
+outer node kind differs, and `project_block_args` flattens the
+`PARAMETERS`/`ARG` encoding into a flat statement list. New
+`SyntaxKind::PAREN_BLOCK` (after `BARE_TUPLE_EXPR`).
 
-Scoped to the toplevel driver **only**: inside `begin`/module blocks `;` does not
-group (`begin a; b end` ⇒ `(block a b)`, `module M; export a; end` ⇒
-`(module M (block (export a)))`) — `run_block_inner` is untouched, faithful to
-JuliaSyntax which only groups at toplevel.
+**Sibling trap caught:** a function signature's `;`-parens (`function (x; y) end`)
+are a *parameter list*, not a block — Julia wants `(tuple-p x (parameters y))`.
+`parse_function_like` (`structural.rs`) now relabels a `PAREN_BLOCK` signature
+back to `TUPLE_EXPR` (identical shape), alongside the existing `PAREN_EXPR`→tuple
+relabel. The anon-function snapshot would have regressed without this.
 
-JS allow **398 → 404** (+6: `a;;;b;;` js-3043c4a2, `;a` js-35c649e9, `a;b;c`
-js-714d8a96, `import A; B` js-acfc6b49, `a;b \n c;d` js-9b9946da, +1 module case);
-divergence 173 → 167, unsupported held 4. Dir allow 72 → 73 (new fixture
-`toplevel_semicolon`). Zero regressions; green, clippy/fmt clean.
+JS allow **404 → 411** (+7: `(a=1;)` js-8daf5e52, `(;;)` js-538e61ed, `(a;b;;c)`
+js-21b19ccb, `(a=1; b=2)` js-ed563534, + paren-block siblings); divergence
+167 → 160, unsupported held 4. Dir allow 73 → 74 (new fixture `paren_block`).
+Zero regressions; green, clippy/fmt clean.
+
+**Deferred (next obvious follow-up):** per-group `parameters` in the *tuple* case
+— `(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c d))` and `(; a=1; b=2)`
+⇒ two `(parameters …)` nodes. Fatou still flattens both into a single
+`(parameters …)`, so js-2020c1de and js-aa0e6a42 remain FAIL. The fix is in the
+arg-list/projector parameters handling (start a new `PARAMETERS` per `;` group),
+not the block disambiguation.
 
 **Suggested next targets (ranked):**
-1. **Paren block sequences** `(a; b; c)` ⇒ `(block-p a b c)` — separate from
-   toplevel grouping (uses `block-p`, not `toplevel-;`). FAILs: js-2020c1de
-   `(a; b; c,d)`, js-8daf5e52 `(a=1;)`, js-538e61ed `(;;)`, js-aa0e6a42
-   `(; a=1; b=2)`. Parens-level, ~6 cases.
+1. **Per-group tuple `parameters`** (the deferred follow-up above) — 2 FAILs,
+   small, finishes the paren story.
 2. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
    `"""\n  x\n y"""` etc.). Common-leading-whitespace stripping + line handling.
    Display-ish but high count; check whether it's a parser or projector concern.
@@ -77,6 +84,12 @@ divergence 173 → 167, unsupported held 4. Dir allow 72 → 73 (new fixture
 
 One-liners; full implementation detail lives in the matching `[x]` bullet in
 `TODO.md`.
+
+- **2026-06-20l** — Top-level `;` grouping: a logical line carrying a top-level
+  `;` folds its statements into a `TOPLEVEL_SEMICOLON` node (`(toplevel-; …)`); the
+  `parse` driver (`core.rs`) now works one newline-delimited line at a time,
+  wrapping only when the line saw a `;`. Scoped to toplevel — `begin`/module blocks
+  don't group. JS allow 398 → 404. Fixture `toplevel_semicolon`.
 
 - **2026-06-20k** — Bare-comma tuples: a top-level comma at statement scope folds
   operands into `BARE_TUPLE_EXPR`/`(tuple …)` (vs parenthesized `tuple-p`), via a

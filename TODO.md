@@ -565,6 +565,22 @@ through), so the grammar can grow incrementally.
   stays bare (`a` ⇒ `(toplevel a)`) and newlines split groups (`a;b\nc;d` ⇒
   two `toplevel-;` nodes). Scoped to the toplevel driver only: inside `begin`/
   module blocks `;` does not group (`begin a; b end` ⇒ `(block a b)`).
+- [x] Paren block sequences. A `;`-bearing parenthesized run that is not a tuple
+  now parses as a `PAREN_BLOCK` projecting `(block-p …)`, mirroring JuliaSyntax
+  `parse_paren`/`parse_brackets`: `(a; b; c)` ⇒ `(block-p a b c)`, `(a=1; b=2)` ⇒
+  `(block-p (= a 1) (= b 2))`, `(a;b;;c)` ⇒ `(block-p a b c)`, `(;;)` ⇒
+  `(block-p)`. `paren_is_block` (`src/parser/expr.rs`) gathers the disambiguation
+  flags by a depth-0 token scan and applies the rule `is_tuple = had_commas ||
+  (had_splat && num_semis≥1) || (initial_semi && (num_semis==1 || num_subexprs>0))`,
+  `is_block = !is_tuple && num_semis>0`; the two `;`-reaching call sites in
+  `parse_paren` pick the node kind via `paren_list_kind`. The block reuses the
+  arg-list machinery, so the projector (`project_block_args`) flattens the
+  `ARG`/`KEYWORD_ARG`/`PARAMETERS` encoding into a flat statement list. A function
+  signature's `;`-parens (`function (x; y) end`) are a parameter list, not a
+  block, so `parse_function_like` relabels a `PAREN_BLOCK` signature back to
+  `TUPLE_EXPR` (same shape). **Deferred:** per-group `parameters` in the tuple
+  case (`(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c d))`,
+  `(; a=1; b=2)` ⇒ two `parameters` nodes) — Fatou still flattens to one.
 
 ## Incremental reparse
 

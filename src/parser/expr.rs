@@ -1069,7 +1069,7 @@ fn parse_paren(
                 ctx,
                 start,
                 TokKind::RParen,
-                SyntaxKind::TUPLE_EXPR,
+                paren_list_kind(ctx, start),
                 diagnostics,
             );
             return Some(ExprParse { start, end, events });
@@ -1124,7 +1124,7 @@ fn parse_paren(
             ctx,
             start,
             TokKind::RParen,
-            SyntaxKind::TUPLE_EXPR,
+            paren_list_kind(ctx, start),
             diagnostics,
         );
         return Some(ExprParse { start, end, events });
@@ -2228,6 +2228,77 @@ fn unary_op_paren_is_call(ctx: &ParserCtx<'_>, lparen_idx: usize) -> bool {
         i += 1;
     }
     false
+}
+
+/// The node kind for a parenthesized run carrying a `;`: a `PAREN_BLOCK`
+/// (projects `(block-p …)`) or a `TUPLE_EXPR` (projects `(tuple-p …)`). A pure
+/// comma list (no semicolons) always stays a tuple.
+fn paren_list_kind(ctx: &ParserCtx<'_>, lparen_idx: usize) -> SyntaxKind {
+    if paren_is_block(ctx, lparen_idx) {
+        SyntaxKind::PAREN_BLOCK
+    } else {
+        SyntaxKind::TUPLE_EXPR
+    }
+}
+
+/// Whether a `;`-bearing parenthesized run is a block rather than a tuple,
+/// mirroring JuliaSyntax `parse_paren`/`parse_brackets`:
+///
+/// ```text
+/// is_tuple = had_commas || (had_splat && num_semis >= 1) ||
+///            (initial_semi && (num_semis == 1 || num_subexprs > 0))
+/// is_block = !is_tuple && num_semis > 0
+/// ```
+///
+/// So `(a; b)`, `(a=1;)`, `(a;b;;c)`, and `(;;)` are blocks (`block-p`), while
+/// `(a, b)`, `(; a=1)`, `(; a=1; b=2)`, and `(x...; y)` are tuples (`tuple-p`).
+/// Flags are gathered by a depth-0 token scan from just after the `(`.
+fn paren_is_block(ctx: &ParserCtx<'_>, lparen_idx: usize) -> bool {
+    let first = ctx.skip_trivia(lparen_idx + 1);
+    let initial_semi = ctx.token(first).map(|t| t.kind) == Some(TokKind::Semicolon);
+    let mut depth = 0i32;
+    let mut had_commas = false;
+    let mut had_splat = false;
+    let mut num_semis = 0u32;
+    let mut num_subexprs = 0u32;
+    let mut in_subexpr = false;
+    let mut i = first;
+    while let Some(tok) = ctx.token(i) {
+        match tok.kind {
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => {
+                if !in_subexpr {
+                    num_subexprs += 1;
+                    in_subexpr = true;
+                }
+                depth += 1;
+            }
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            TokKind::Comma if depth == 0 => {
+                had_commas = true;
+                in_subexpr = false;
+            }
+            TokKind::Semicolon if depth == 0 => {
+                num_semis += 1;
+                in_subexpr = false;
+            }
+            TokKind::DotDotDot if depth == 0 => had_splat = true,
+            k if !k.is_trivia() && !in_subexpr => {
+                num_subexprs += 1;
+                in_subexpr = true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let is_tuple = had_commas
+        || (had_splat && num_semis >= 1)
+        || (initial_semi && (num_semis == 1 || num_subexprs > 0));
+    !is_tuple && num_semis > 0
 }
 
 fn is_operator_call_name(kind: TokKind) -> bool {

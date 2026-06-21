@@ -135,6 +135,7 @@ fn project(node: &SyntaxNode) -> String {
         BRACES => sexp("braces", project_args(node)),
 
         TUPLE_EXPR => sexp("tuple-p", project_args(node)),
+        PAREN_BLOCK => sexp("block-p", project_block_args(node)),
         BARE_TUPLE_EXPR => sexp("tuple", project_each(child_nodes(node))),
         VECT_EXPR => sexp("vect", project_args(node)),
         MATRIX_EXPR => project_matrix(node),
@@ -577,6 +578,34 @@ fn project_args(container: &SyntaxNode) -> Vec<String> {
                 if t.kind() == END_KW {
                     out.push("end".to_string());
                 }
+            }
+        }
+    }
+    out
+}
+
+/// Project a `PAREN_BLOCK`'s children as a flat statement list. The block is
+/// parsed with the arg-list machinery, so positional statements are `ARG`s,
+/// assignments are `KEYWORD_ARG`s, and statements after the first `;` live in a
+/// `PARAMETERS` node — all flattened away here, since a block has no parameters
+/// (`(a; b; c)` ⇒ `(block-p a b c)`, `(a=1; b=2)` ⇒ `(block-p (= a 1) (= b 2))`).
+fn project_block_args(container: &SyntaxNode) -> Vec<String> {
+    let mut out = Vec::new();
+    let push_stmt = |n: &SyntaxNode, out: &mut Vec<String>| match n.kind() {
+        ARG => out.push(project_first(n)),
+        KEYWORD_ARG => out.push(project_keyword_arg(n)),
+        _ => out.push(project(n)),
+    };
+    for el in significant(container) {
+        if let NodeOrToken::Node(n) = el {
+            if n.kind() == PARAMETERS {
+                for inner in significant(&n) {
+                    if let NodeOrToken::Node(m) = inner {
+                        push_stmt(&m, &mut out);
+                    }
+                }
+            } else {
+                push_stmt(&n, &mut out);
             }
         }
     }

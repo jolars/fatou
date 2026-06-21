@@ -1,0 +1,94 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..51
+  PAREN_BLOCK@0..9
+    LPAREN@0..1 "("
+    ARG@1..2
+      NAME@1..2
+        IDENT@1..2 "a"
+    PARAMETERS@2..8
+      SEMICOLON@2..3 ";"
+      WHITESPACE@3..4 " "
+      ARG@4..5
+        NAME@4..5
+          IDENT@4..5 "b"
+      SEMICOLON@5..6 ";"
+      WHITESPACE@6..7 " "
+      ARG@7..8
+        NAME@7..8
+          IDENT@7..8 "c"
+    RPAREN@8..9 ")"
+  NEWLINE@9..10 "\n"
+  PAREN_BLOCK@10..16
+    LPAREN@10..11 "("
+    KEYWORD_ARG@11..14
+      NAME@11..12
+        IDENT@11..12 "a"
+      EQ@12..13 "="
+      LITERAL@13..14
+        INTEGER@13..14 "1"
+    PARAMETERS@14..15
+      SEMICOLON@14..15 ";"
+    RPAREN@15..16 ")"
+  NEWLINE@16..17 "\n"
+  PAREN_BLOCK@17..27
+    LPAREN@17..18 "("
+    KEYWORD_ARG@18..21
+      NAME@18..19
+        IDENT@18..19 "a"
+      EQ@19..20 "="
+      LITERAL@20..21
+        INTEGER@20..21 "1"
+    PARAMETERS@21..26
+      SEMICOLON@21..22 ";"
+      WHITESPACE@22..23 " "
+      KEYWORD_ARG@23..26
+        NAME@23..24
+          IDENT@23..24 "b"
+        EQ@24..25 "="
+        LITERAL@25..26
+          INTEGER@25..26 "2"
+    RPAREN@26..27 ")"
+  NEWLINE@27..28 "\n"
+  PAREN_BLOCK@28..36
+    LPAREN@28..29 "("
+    ARG@29..30
+      NAME@29..30
+        IDENT@29..30 "a"
+    PARAMETERS@30..35
+      SEMICOLON@30..31 ";"
+      ARG@31..32
+        NAME@31..32
+          IDENT@31..32 "b"
+      SEMICOLON@32..33 ";"
+      SEMICOLON@33..34 ";"
+      ARG@34..35
+        NAME@34..35
+          IDENT@34..35 "c"
+    RPAREN@35..36 ")"
+  NEWLINE@36..37 "\n"
+  PAREN_BLOCK@37..45
+    LPAREN@37..38 "("
+    ARG@38..39
+      NAME@38..39
+        IDENT@38..39 "a"
+    PARAMETERS@39..44
+      SEMICOLON@39..40 ";"
+      WHITESPACE@40..41 " "
+      KEYWORD_ARG@41..44
+        NAME@41..42
+          IDENT@41..42 "b"
+        EQ@42..43 "="
+        LITERAL@43..44
+          INTEGER@43..44 "1"
+    RPAREN@44..45 ")"
+  NEWLINE@45..46 "\n"
+  PAREN_BLOCK@46..50
+    LPAREN@46..47 "("
+    PARAMETERS@47..49
+      SEMICOLON@47..48 ";"
+      SEMICOLON@48..49 ";"
+    RPAREN@49..50 ")"
+  NEWLINE@50..51 "\n"

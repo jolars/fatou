@@ -113,14 +113,22 @@ fn parse_function_like(
         // "eventually a call" (`function (x*y) end`, `function (f()::S) end`),
         // which names a method and keeps its parens stripped. Macros take a call
         // signature, so the shared path's macro form is left alone.
-        if node_kind == SyntaxKind::FUNCTION_DEF
-            && matches!(
-                sig_events.first(),
+        if node_kind == SyntaxKind::FUNCTION_DEF {
+            match sig_events.first() {
                 Some(Event::Start(SyntaxKind::PAREN_EXPR))
-            )
-            && !signature_eventually_call(&sig_events, tokens)
-        {
-            sig_events[0] = Event::Start(SyntaxKind::TUPLE_EXPR);
+                    if !signature_eventually_call(&sig_events, tokens) =>
+                {
+                    sig_events[0] = Event::Start(SyntaxKind::TUPLE_EXPR);
+                }
+                // A `;`-bearing signature (`function (x; y) end`) parses as a
+                // `PAREN_BLOCK` in value position, but in a signature the parens
+                // are a parameter list, not a block — relabel to the tuple it
+                // already shares its `ARG`/`PARAMETERS` shape with.
+                Some(Event::Start(SyntaxKind::PAREN_BLOCK)) => {
+                    sig_events[0] = Event::Start(SyntaxKind::TUPLE_EXPR);
+                }
+                _ => {}
+            }
         }
         events.extend(sig_events);
         events.push(Event::Finish);
