@@ -1126,12 +1126,131 @@ fn project_literal(node: &SyntaxNode) -> String {
     }
     match toks.first() {
         Some(tok) => match tok.kind() {
-            CHAR => format!("(char {})", tok.text()),
+            CHAR => project_char(tok.text()),
             TRUE_KW => "true".to_string(),
             FALSE_KW => "false".to_string(),
             _ => tok.text().to_string(),
         },
         None => "(unsupported LITERAL)".to_string(),
+    }
+}
+
+/// Project a char-literal token (`'…'`) to `(char '…')`, decoding the source
+/// escapes to a single codepoint and re-displaying it the way JuliaSyntax shows
+/// a `Char`. Multi-codepoint or invalid content (over-long `'ab'`, bad escape
+/// `'\xq'`) is an error shape JuliaSyntax flags specially and we defer, so the
+/// raw token text is passed through (it stays an un-allowlisted divergence).
+fn project_char(text: &str) -> String {
+    match decode_char(text) {
+        Some(c) => format!("(char '{}')", display_char(c)),
+        None => format!("(char {text})"),
+    }
+}
+
+/// Decode a char literal's source text (`'\xce\xb1'`) to its single codepoint.
+/// Byte escapes (`\xNN`, octal) and literal characters accumulate as bytes that
+/// are then read as UTF-8; `\u`/`\U` and named escapes contribute a codepoint
+/// directly. Returns `None` for empty, malformed, or over-long content.
+fn decode_char(text: &str) -> Option<char> {
+    let inner = text.strip_prefix('\'')?.strip_suffix('\'')?;
+    if inner.is_empty() {
+        return None;
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4];
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            continue;
+        }
+        match chars.next()? {
+            'n' => bytes.push(b'\n'),
+            't' => bytes.push(b'\t'),
+            'r' => bytes.push(b'\r'),
+            'a' => bytes.push(0x07),
+            'b' => bytes.push(0x08),
+            'f' => bytes.push(0x0c),
+            'v' => bytes.push(0x0b),
+            'e' => bytes.push(0x1b),
+            '\\' => bytes.push(b'\\'),
+            '\'' => bytes.push(b'\''),
+            '"' => bytes.push(b'"'),
+            'x' => bytes.push(take_hex(&mut chars, 2)? as u8),
+            'u' => {
+                let cp = char::from_u32(take_hex(&mut chars, 4)?)?;
+                bytes.extend_from_slice(cp.encode_utf8(&mut buf).as_bytes());
+            }
+            'U' => {
+                let cp = char::from_u32(take_hex(&mut chars, 8)?)?;
+                bytes.extend_from_slice(cp.encode_utf8(&mut buf).as_bytes());
+            }
+            d @ '0'..='7' => {
+                let mut val = d.to_digit(8)?;
+                for _ in 0..2 {
+                    match chars.peek().and_then(|c| c.to_digit(8)) {
+                        Some(o) => {
+                            val = val * 8 + o;
+                            chars.next();
+                        }
+                        None => break,
+                    }
+                }
+                bytes.push(val as u8);
+            }
+            _ => return None,
+        }
+    }
+    let s = std::str::from_utf8(&bytes).ok()?;
+    let mut it = s.chars();
+    let first = it.next()?;
+    it.next().is_none().then_some(first)
+}
+
+/// Consume up to `max` hex digits from `chars` and return their value; `None`
+/// if there is not at least one digit.
+fn take_hex(chars: &mut std::iter::Peekable<std::str::Chars>, max: usize) -> Option<u32> {
+    let mut val = 0u32;
+    let mut n = 0;
+    while n < max {
+        match chars.peek().and_then(|c| c.to_digit(16)) {
+            Some(d) => {
+                val = val * 16 + d;
+                chars.next();
+                n += 1;
+            }
+            None => break,
+        }
+    }
+    (n > 0).then_some(val)
+}
+
+/// Render a single codepoint as JuliaSyntax shows a `Char` body: the named
+/// control escapes, `\\`/`\'`, a `\xNN` form for the remaining C0 controls and
+/// DEL, a `\u`/`\U` form for other non-printable codepoints, else literal.
+fn display_char(c: char) -> String {
+    match c {
+        '\0' => "\\0".to_string(),
+        '\u{7}' => "\\a".to_string(),
+        '\u{8}' => "\\b".to_string(),
+        '\t' => "\\t".to_string(),
+        '\n' => "\\n".to_string(),
+        '\u{b}' => "\\v".to_string(),
+        '\u{c}' => "\\f".to_string(),
+        '\r' => "\\r".to_string(),
+        '\u{1b}' => "\\e".to_string(),
+        '\\' => "\\\\".to_string(),
+        '\'' => "\\'".to_string(),
+        c if (c as u32) < 0x20 || c as u32 == 0x7f => format!("\\x{:02x}", c as u32),
+        c if c.is_control() => {
+            let v = c as u32;
+            if v <= 0xffff {
+                format!("\\u{v:04x}")
+            } else {
+                format!("\\U{v:08x}")
+            }
+        }
+        c => c.to_string(),
     }
 }
 
@@ -1557,7 +1676,7 @@ fn project_element(el: &SyntaxElement) -> Option<String> {
             IDENT | INTEGER | BIN_INT | OCT_INT | HEX_INT | FLOAT | FLOAT32 => {
                 Some(t.text().to_string())
             }
-            CHAR => Some(format!("(char {})", t.text())),
+            CHAR => Some(project_char(t.text())),
             TRUE_KW => Some("true".to_string()),
             FALSE_KW => Some("false".to_string()),
             END_KW => Some("end".to_string()),

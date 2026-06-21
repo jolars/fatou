@@ -659,24 +659,33 @@ impl<'a> Lexer<'a> {
     /// is found within a short window (one char, or a backslash escape);
     /// otherwise it is an [`TokKind::Unknown`] single byte.
     fn lex_char_or_unknown(&mut self, start: usize) {
-        let after_open = self.pos + 1;
-        // Try `'\x'` (escape) or `'c'` (single char), then a closing quote.
-        let content_end = if self.bytes.get(after_open) == Some(&b'\\') {
-            // Escape: consume backslash + following char.
-            let mut idx = after_open + 1;
-            if idx < self.bytes.len() {
-                idx += 1;
+        // Scan to the closing `'`, skipping a backslash escape's following byte
+        // so an escaped quote (`'\''`) does not terminate the literal. The
+        // content may be several escapes (`'\xce\xb1'`) or over-long (`'ab'`);
+        // validity (single codepoint, well-formed escapes) is decided later. A
+        // newline or end of input without a closing quote leaves the lone `'` a
+        // postfix transpose token (`TokKind::Unknown`).
+        let mut idx = self.pos + 1;
+        let mut found = false;
+        while idx < self.bytes.len() {
+            match self.bytes[idx] {
+                b'\'' => {
+                    found = true;
+                    break;
+                }
+                b'\n' => break,
+                b'\\' => {
+                    idx += 1;
+                    if idx < self.bytes.len() {
+                        idx += self.char_at(idx).len_utf8();
+                    }
+                }
+                _ => idx += self.char_at(idx).len_utf8(),
             }
-            idx
-        } else if after_open < self.bytes.len() {
-            // A single (possibly multibyte) char.
-            after_open + self.char_at(after_open).len_utf8()
-        } else {
-            after_open
-        };
+        }
 
-        if self.bytes.get(content_end) == Some(&b'\'') {
-            self.pos = content_end + 1;
+        if found {
+            self.pos = idx + 1;
             self.push(TokKind::Char, start, self.pos);
         } else {
             self.pos += 1;

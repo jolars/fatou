@@ -616,6 +616,19 @@ through), so the grammar can grow incrementally.
   single-line raw strings keep the `(string-r …)`/`quote_raw` path. **Deferred:**
   raw-string quote unescaping (`\"`/`\\` before a closing quote inside the body).
 
+- [x] Char literal escape decoding (`'\xce\xb1'`, `'α'`, `'\U1D7DA'`). The
+  lexer now scans a char literal to its closing `'` (skipping a backslash escape's
+  following byte) instead of only allowing one char or a single-byte escape, so
+  multi-escape literals lex as one `CHAR` token. The projector (`project_char` in
+  `src/parser/sexpr.rs`) decodes the source escapes to a single codepoint—byte
+  escapes (`\xNN`, octal) and literal chars accumulate as UTF-8 bytes, `\u`/`\U`
+  and named escapes contribute a codepoint—then re-displays it the way JuliaSyntax
+  shows a `Char` (named control escapes, `\\`/`\'`, `\xNN`/`\u`/`\U` hex forms for
+  other non-printables, else literal). `'\xce\xb1'` ⇒ `(char 'α')`, `'\U1D7DA'` ⇒
+  `(char '𝟚')`. **Deferred:** the error shapes — over-long `'ab'`
+  (`ErrorOverLongCharacter`) and invalid escapes `'\xq'` (`ErrorInvalidEscapeSequence`)
+  fall back to raw passthrough.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

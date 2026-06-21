@@ -1,0 +1,1 @@
+(toplevel (char 'a') (char 'α') (char '\n') (char '\t') (char '\0') (char '\\') (char '\'') (char 'A') (char 'α') (char 'α') (char '𝟚'))

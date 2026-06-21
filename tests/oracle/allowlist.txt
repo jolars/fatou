@@ -16,6 +16,7 @@ broadcast_bitwise_operators
 broadcasting
 byte_string
 call_and_index
+char_escapes
 colon_range
 command_literal
 comments

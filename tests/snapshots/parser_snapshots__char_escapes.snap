@@ -1,0 +1,38 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..67
+  LITERAL@0..3
+    CHAR@0..3 "'a'"
+  NEWLINE@3..4 "\n"
+  LITERAL@4..8
+    CHAR@4..8 "'α'"
+  NEWLINE@8..9 "\n"
+  LITERAL@9..13
+    CHAR@9..13 "'\\n'"
+  NEWLINE@13..14 "\n"
+  LITERAL@14..18
+    CHAR@14..18 "'\\t'"
+  NEWLINE@18..19 "\n"
+  LITERAL@19..23
+    CHAR@19..23 "'\\0'"
+  NEWLINE@23..24 "\n"
+  LITERAL@24..28
+    CHAR@24..28 "'\\\\'"
+  NEWLINE@28..29 "\n"
+  LITERAL@29..33
+    CHAR@29..33 "'\\''"
+  NEWLINE@33..34 "\n"
+  LITERAL@34..40
+    CHAR@34..40 "'\\x41'"
+  NEWLINE@40..41 "\n"
+  LITERAL@41..51
+    CHAR@41..51 "'\\xce\\xb1'"
+  NEWLINE@51..52 "\n"
+  LITERAL@52..56
+    CHAR@52..56 "'α'"
+  NEWLINE@56..57 "\n"
+  LITERAL@57..66
+    CHAR@57..66 "'\\U1D7DA'"
+  NEWLINE@66..67 "\n"

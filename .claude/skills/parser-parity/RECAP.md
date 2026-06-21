@@ -22,54 +22,59 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **440 allowlisted**, 131 divergence, 4 unsupported.
-Dir corpus: **78 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "Triple-quoted string dedent" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **443 allowlisted**, 128 divergence, 4 unsupported.
+Dir corpus: **79 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "Char literal escape decoding" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21d)
+## Latest session (2026-06-21e)
 
-**Raw triple-quoted strings `r"""…"""`.** The top-ranked leftover from the dedent
-session (~3 JS FAILs). A **projector** concern: `project_string`'s prefixed-string
-branch now checks the open-delim length and, for triple, emits a `string-s-r` body
-built by the *same* `triple_string_parts` dedent/chunking as a plain triple string
-— only the unescaping differs. Threaded a `raw: bool` through `triple_string_parts`
-→ `escape_display`: in a raw string the content is literal bytes, so each chunk's
-backslashes/quotes/`$` are escaped (`\\`, `\"`, `\$`) on top of the control-char
-escaping (`\n \t \r`). `r"""\n x\n y"""` ⇒ `(macrocall @r_str (string-s-r "x\n"
-"y"))`; a trailing-backslash line `r"""\n x\<nl> y"""` ⇒ `(... (string-s-r "x\\\n"
-"y"))` (literal backslash display-doubled). Single-line raw strings keep the
-`(string-r …)`/`quote_raw` path untouched.
+**Char literal escape decoding `'\xce\xb1'`, `'α'`, `'\U1D7DA'`.** Two
+buckets in one. **Parser:** the lexer's `lex_char_or_unknown` only allowed one
+char or a single-byte escape (`\` + 1 byte), so a multi-escape literal failed —
+`'\xce\xb1'` lexed as `'` (Unknown) + `xce` + … . Rewrote it to scan to the
+closing `'`, skipping a backslash escape's following byte so `'\''` doesn't
+self-terminate; a newline/EOF without a close leaves the lone `'` an Unknown
+(transpose). Now `'\xce\xb1'` is one `CHAR` token. **Projector:** the two CHAR
+arms (`project_literal`, `project_element`) echoed raw text; that matched only
+because simple literals' source == display. Added `project_char` → `decode_char`
+(source escapes → one codepoint: byte escapes `\xNN`/octal + literal chars
+accumulate as UTF-8 bytes, `\u`/`\U`/named escapes contribute a codepoint, then
+UTF-8-decode to a single char) → `display_char` (JuliaSyntax `Char` show: named
+control escapes `\n\t\r\0\a\b\f\v\e`, `\\`/`\'`, `\xNN`/`\u`/`\U` for other
+non-printables, else literal). `'\xce\xb1'` ⇒ `(char 'α')`, `'\U1D7DA'` ⇒
+`(char '𝟚')`. Error shapes (`'ab'` over-long, `'\xq'` bad escape) decode to
+`None` → raw passthrough → stay un-allowlisted (deferred, as before).
 
-**Why no real unescaping:** the corpus raw-triple cases have backslashes only
-before newlines (never before a closing quote), so JuliaSyntax's raw unescaping
-(`\"`→`"`, `\\`→`\` *before a quote*) is a no-op and pass-through + raw display
-escaping matches. `\"`/`\\`-before-quote inside the body stays deferred.
-
-JS allow **437 → 440** (+3), divergence 134 → 131, unsupported held 4. Dir allow
-77 → 78 (new fixture `raw_triple_string`). Zero regressions; green, clippy/fmt
-clean.
+JS allow **440 → 443** (+3: js-0f48ee8b, js-4e93f00d, js-c412428b), divergence
+131 → 128, unsupported held 4. Dir allow 78 → 79 (new fixture `char_escapes`).
+Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
 1. **String escape processing** — `"\xqqq"`, `"a\\nb"`, line continuations
-   `"a\<newline>b"` (e.g. js-037931f4 `"a\<cr><nl>b"`, js-69d4ff58); needs a real
-   Julia source→value unescaper in the `string`/`string-s` paths. Unlocks the
-   escape FAIL cluster + char literals.
-2. **Char literals** `'\xce\xb1'`, `'α'`, `'ab'` (js-0f48ee8b) — escape/value
-   display; shares the unescaper from (1).
-3. **Docstrings** `"""…""" foo` ⇒ `(doc (string-s …) foo)` (js-10d3f0bb,
+   `"a\<newline>b"` (e.g. js-037931f4 `"a\<cr><nl>b"`, js-69d4ff58). The
+   *string* analogue of this session: needs a Julia source→value unescaper in the
+   `string`/`string-s` paths (can reuse `decode_char`'s escape logic generalized
+   to a byte stream). Unlocks the string-escape FAIL cluster.
+2. **Docstrings** `"""…""" foo` ⇒ `(doc (string-s …) foo)` (js-10d3f0bb,
    js-02079ffa) — string-then-expr at statement scope folds into a `(doc …)`
    macrocall.
-4. **`var"…"` escape unescaping** — js-57…/js-8f5b1a26 `var"\""`, `var"\\\""`;
-   also shares the raw unescaper.
-5. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
+3. **`var"…"` escape unescaping** — js-57…/js-8f5b1a26 `var"\""`, `var"\\\""`;
+   shares the raw unescaper.
+4. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
    (deferred from 2026-06-21b).
 
 ## Earlier sessions
+
+- **2026-06-21d** — Raw triple-quoted strings (`r"""…"""`): `project_string`'s
+  prefixed branch emits a `string-s-r` body via the same `triple_string_parts`
+  dedent as a plain triple, threading `raw: bool` to `escape_display` so raw
+  bytes' `\\`/`\"`/`\$` escape on top of control chars. JS allow 437 → 440.
+  Fixture `raw_triple_string`.
 
 - **2026-06-21c** — Triple-quoted string dedent (largest FAIL cluster, ~22 JS).
   Projector concern: CST stays lossless (raw `STRING_CONTENT`); `triple_string_parts`
