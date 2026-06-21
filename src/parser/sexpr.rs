@@ -1104,6 +1104,14 @@ fn project_macrocall(node: &SyntaxNode) -> String {
 }
 
 fn project_macro_name(node: &SyntaxNode) -> String {
+    // A `var"…"` non-standard identifier name (`@var"#"` ⇒ `(var @#)`): the `@`
+    // sigil prefixes the identifier content. JuliaSyntax folds the `@` into the
+    // `var` name itself rather than wrapping it as a separate macro-name token.
+    let var_name = node
+        .children()
+        .find(|c| c.kind() == NONSTANDARD_IDENTIFIER)
+        .map(|c| format!("(var @{})", raw_content(&c)));
+
     // Trailing form (`A.@x`, `A.B.@x`, `$A.@x`, `A.$B.@x`): the module path is a
     // single leading node (`NAME`, `BINARY_EXPR`, or `INTERPOLATION`) that
     // `project` already nests correctly, then `. @ name`. Reuse `project` for the
@@ -1113,8 +1121,16 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         .children()
         .find(|c| matches!(c.kind(), NAME | BINARY_EXPR | INTERPOLATION))
     {
-        let macro_name = macro_name_after_at(node);
-        return format!("(. {} (quote @{macro_name}))", project(&module));
+        let name = match &var_name {
+            Some(v) => v.clone(),
+            None => format!("@{}", macro_name_after_at(node)),
+        };
+        return format!("(. {} (quote {name}))", project(&module));
+    }
+
+    // Prefix form with a `var"…"` name and no module (`@var"#"` ⇒ `(var @#)`).
+    if let Some(v) = var_name {
+        return v;
     }
 
     // Prefix form (`@m`, `@A.x`, `@A.B.x`): a flat run of component tokens after

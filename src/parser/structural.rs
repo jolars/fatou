@@ -16,7 +16,7 @@ use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
-    parse_block_stmt, parse_expr, parse_prefix_interpolation, parse_quote_sym,
+    parse_block_stmt, parse_expr, parse_prefix_interpolation, parse_quote_sym, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -559,7 +559,7 @@ pub(crate) fn parse_keyword_stmt(
                     i = interp.end;
                 }
                 Some(TokKind::At) => {
-                    i = push_macro_name(&ctx, &mut events, i);
+                    i = push_macro_name(&ctx, &mut events, i, diagnostics);
                 }
                 _ => {
                     events.push(Event::Tok(i));
@@ -677,11 +677,19 @@ fn parse_import_clause(
 /// arguments and no dotted chain are consumed — in these positions Julia treats a
 /// trailing `.mac` as a separate (erroring) component, and the import-path loop
 /// handles further dotted components itself.
-fn push_macro_name(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, at_idx: usize) -> usize {
+fn push_macro_name(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    at_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
     events.push(Event::Tok(at_idx)); // `@`
     let mut i = at_idx + 1;
-    if ctx.token(i).map(|t| t.kind) == Some(TokKind::Ident) {
+    if let Some(end) = push_var_macro_name(ctx, events, i, diagnostics) {
+        // A `var"…"` non-standard identifier name (`export @var"#"`).
+        i = end;
+    } else if ctx.token(i).map(|t| t.kind) == Some(TokKind::Ident) {
         events.push(Event::Tok(i));
         i += 1;
     }
@@ -728,7 +736,7 @@ fn parse_import_path(
         Some(TokKind::At) => {
             // A macro-name path root (`import @x`, `import .@x`): a `MACRO_NAME`
             // node the projector reads as `@x`.
-            i = push_macro_name(ctx, &mut body, i);
+            i = push_macro_name(ctx, &mut body, i, diagnostics);
         }
         Some(k) if is_op_name(k) => {
             body.push(Event::Tok(i));
@@ -764,7 +772,7 @@ fn parse_import_path(
             (Some(TokKind::Dot), Some(TokKind::At)) => {
                 // A macro-name component (`import A.@x` → `(importpath A @x)`).
                 body.push(Event::Tok(i)); // separating `.`
-                i = push_macro_name(ctx, &mut body, i + 1);
+                i = push_macro_name(ctx, &mut body, i + 1, diagnostics);
             }
             (Some(TokKind::Dot), Some(TokKind::Colon)) => {
                 // A quoted symbol component (`A.:+` → `(quote-: +)`, `A.:(+)` →

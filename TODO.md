@@ -100,7 +100,11 @@ through), so the grammar can grow incrementally.
   `$A.@x`, `A.$B.@x`, `A.@.x`) project to the same nested `(. (. A (quote B))
   (quote @x))` shape as plain field access: `project_macro_name` reuses `project`
   on the trailing-form module node and folds the prefix-form flat components.
-  **Deferred:** `@var"#"`, `@(A)`, `@S[a].b`/`@S{a}.b` (macrocall then postfix).
+  A `var"…"` non-standard identifier as the macro name (`@var"#"` ⇒ `(var @#)`,
+  qualified `A.@var"#"`, `export @var"#"`) parses via `push_var_macro_name`
+  (`expr.rs`), shared by `parse_macro_name_body` and `push_macro_name`
+  (`structural.rs`); `project_macro_name` folds the `@` into the `var` content.
+  **Deferred:** `@(A)`, `@S[a].b`/`@S{a}.b` (macrocall then postfix).
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside

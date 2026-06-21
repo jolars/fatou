@@ -1775,7 +1775,7 @@ fn parse_macro(
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
     events.push(Event::Tok(at_idx)); // `@`
-    let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1);
+    let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     events.push(Event::Finish); // close MACRO_NAME
 
     let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, inside_brackets);
@@ -1805,7 +1805,7 @@ fn parse_qualified_macro(
     let at_idx = ctx.skip_trivia(dot_idx + 1);
     push_range(&mut events, dot_idx + 1, at_idx);
     events.push(Event::Tok(at_idx)); // `@`
-    let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1);
+    let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     events.push(Event::Finish); // close MACRO_NAME
 
     let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, inside_brackets);
@@ -1817,11 +1817,45 @@ fn parse_qualified_macro(
     }
 }
 
+/// If `i` begins a `var"…"` single-quoted non-standard identifier — the macro
+/// name in `@var"#"` (`(var @#)`) — append its `NONSTANDARD_IDENTIFIER` node to
+/// `events` and return the index past it. Otherwise return `None`. Triple-quoted
+/// `var"""…"""` is an ordinary `@var_str` macro, not a name, so it is excluded.
+pub(crate) fn push_var_macro_name(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    i: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<usize> {
+    let is_var = ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix)
+        && ctx.token(i).map(|t| t.text.as_str()) == Some("var");
+    let single_quote = matches!(
+        ctx.token(i + 1),
+        Some(t) if t.kind == TokKind::StringDelimOpen && t.text.len() == 1
+    );
+    if is_var && single_quote {
+        let lit = parse_string_literal(ctx, i, diagnostics);
+        let end = lit.end;
+        events.extend(lit.events);
+        Some(end)
+    } else {
+        None
+    }
+}
+
 /// Emit the tokens of a macro name following the `@` sigil, starting at `start`:
-/// either a lone `.` (the broadcast macro `@.`) or an identifier followed by a
-/// trailing adjacent `.ident` chain (`@Mod.mac`). Returns the index just past
-/// the name.
-fn parse_macro_name_body(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, start: usize) -> usize {
+/// either a lone `.` (the broadcast macro `@.`), an identifier followed by a
+/// trailing adjacent `.ident` chain (`@Mod.mac`), or a `var"…"` non-standard
+/// identifier (`@var"#"`). Returns the index just past the name.
+fn parse_macro_name_body(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    if let Some(end) = push_var_macro_name(ctx, events, start, diagnostics) {
+        return end;
+    }
     match ctx.token(start).map(|t| t.kind) {
         // The broadcast macro `@.` — the name is the single `.` token.
         Some(TokKind::Dot) => {

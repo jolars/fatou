@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **479 allowlisted**, 92 divergence, 4 unsupported.
-Dir corpus: **85 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **482 allowlisted**, 89 divergence, 4 unsupported.
+Dir corpus: **86 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,36 +31,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21k)
+## Latest session (2026-06-21l)
 
-**Nested dotted macro paths.** `@A.B.x`, `A.B.@x`, `$A.@x`, `A.$B.@x`, and the
-qualified broadcast `A.@.x` now project to the same nested form as plain field
-access (`(. (. A (quote B)) (quote @x))`) instead of flattening the module path.
-Pure projector fix — the CST already carried the path; the two `MACRO_NAME` CST
-shapes just weren't both read. `project_macro_name` (`sexpr.rs`) now branches:
-(1) **trailing form** (`A.B.@x` — module is a single leading `NAME`/`BINARY_EXPR`/
-`INTERPOLATION` node, then `. @ name`) reuses `project` on that node so dotted
-nesting and the `(inert ($ B))` interpolation split stay consistent with field
-access, with the name from new helper `macro_name_after_at`; (2) **prefix form**
-(`@A.B.x` — flat component tokens after `@`) folds the leading components into
-nested `(. … (quote …))` and treats the last as the macro name. `@m`/`@.`/`@$`/
-`@+`/`@end` (single component, no module) unchanged. Simple `@A.x`/`A.@x` and
-`import A.@x` still match.
+**`var"…"` macro names.** A `var"…"` single-quoted non-standard identifier as a
+macro name now parses: `@var"#"` ⇒ `(macrocall (var @#))`, qualified `A.@var"#"`
+⇒ `(macrocall (. A (quote (var @#))))`, and `export @var"#"` ⇒ `(export (var
+@#))`. New shared helper `push_var_macro_name` (`expr.rs`, pub(crate)) detects a
+`StringPrefix "var"` + single-`"` open and splices a `NONSTANDARD_IDENTIFIER`
+node into the `MACRO_NAME`; called from `parse_macro_name_body` (now threads
+`diagnostics`) for macro *calls* and from `push_macro_name` (`structural.rs`, now
+threads `diagnostics`) for `export`/`import` directive names. Triple-quoted
+`@var"""…"""` stays an ordinary `@var_str` macrocall (excluded). Projector
+`project_macro_name` folds the `@` sigil into the var content (`(var @#)`),
+handled in both the trailing (qualified) and prefix branches.
 
-JS allow **474 → 479** (+5: js-ee8e4e0c `@A.B.x`, js-968d2da1 `A.B.@x`,
-js-8bf1e2ef `$A.@x`, js-ab3caeec `A.$B.@x`, plus bonus js-47b1514b `A.@.x`),
-divergence 97 → 92, unsupported held 4. Dir allow 84 → 85 (new fixture
-`nested_macro_path`). Zero regressions; green, clippy/fmt clean.
+JS allow **479 → 482** (+3: js-babd656c `@var"#" a`, js-8f4830c7 `A.@var"#" a`,
+js-213cfe89 `export @var"'"`), divergence 92 → 89, unsupported held 4. Dir allow
+85 → 86 (new fixture `var_macro_name`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Other macro-name forms**: `@var"#"` (js-babd656c ⇒ `(var @#)`, js-8f4830c7
-   qualified), `@(A)` paren name (js-f3aa762e ⇒ `@A`), `@S[a].b`/`@S{a}.b`
-   (js-b55b2b19/b6643c20 — macrocall then postfix `.b`).
+1. **Remaining macro-name forms**: `@(A)` paren name (js-f3aa762e ⇒ `@A`),
+   `@S[a].b`/`@S{a}.b` (js-b55b2b19/b6643c20 — macrocall then postfix `.b`, the
+   `.b` currently binds inside the arg).
 2. **N-dim array concatenation** (~25 FAIL, largest cluster): `;;`/`;;;` ncat
    dims, empty `[;]`/`[;;]`, newline-as-row-sep, `[f (x)]` space-call.
-3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26.
+3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26 (raw-string
+   rules in `project_var`); also `@doc x\ny` newline-continuation special case
+   (js-f965a412, js-e2c9c2c6, js-91c18a50 — `@doc`-only one-newline arg grab).
 
 ## Earlier sessions
+
+- **2026-06-21k** — Nested dotted macro paths. `@A.B.x`, `A.B.@x`, `$A.@x`,
+  `A.$B.@x`, `A.@.x` project to nested `(. (. A (quote B)) (quote @x))` like field
+  access. Pure projector: `project_macro_name` branches trailing form (reuses
+  `project` on the module node, name via `macro_name_after_at`) vs prefix form
+  (folds flat components). JS allow 474 → 479. Fixture `nested_macro_path`.
 
 - **2026-06-21j** — Operator/keyword macro names. A macro name after `@` may be an
   operator (`@+`, `@!`, `@..`), the `$` sigil (`@$`), or a keyword (`@end`):

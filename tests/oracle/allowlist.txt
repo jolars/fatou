@@ -86,4 +86,5 @@ type_annotations
 type_operator_call
 unary_operator_call
 unicode_operators
+var_macro_name
 version_string
