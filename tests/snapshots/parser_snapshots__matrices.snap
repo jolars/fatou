@@ -39,22 +39,19 @@ ROOT@0..121
     WHITESPACE@20..21 " "
     MATRIX_EXPR@21..30
       LBRACKET@21..22 "["
-      MATRIX_ROW@22..23
-        ARG@22..23
-          LITERAL@22..23
-            INTEGER@22..23 "1"
+      ARG@22..23
+        LITERAL@22..23
+          INTEGER@22..23 "1"
       SEMICOLON@23..24 ";"
       WHITESPACE@24..25 " "
-      MATRIX_ROW@25..26
-        ARG@25..26
-          LITERAL@25..26
-            INTEGER@25..26 "2"
+      ARG@25..26
+        LITERAL@25..26
+          INTEGER@25..26 "2"
       SEMICOLON@26..27 ";"
       WHITESPACE@27..28 " "
-      MATRIX_ROW@28..29
-        ARG@28..29
-          LITERAL@28..29
-            INTEGER@28..29 "3"
+      ARG@28..29
+        LITERAL@28..29
+          INTEGER@28..29 "3"
       RBRACKET@29..30 "]"
   NEWLINE@30..31 "\n"
   ASSIGNMENT_EXPR@31..44
@@ -65,18 +62,17 @@ ROOT@0..121
     WHITESPACE@36..37 " "
     MATRIX_EXPR@37..44
       LBRACKET@37..38 "["
-      MATRIX_ROW@38..43
-        ARG@38..39
-          LITERAL@38..39
-            INTEGER@38..39 "1"
-        WHITESPACE@39..40 " "
-        ARG@40..41
-          LITERAL@40..41
-            INTEGER@40..41 "2"
-        WHITESPACE@41..42 " "
-        ARG@42..43
-          LITERAL@42..43
-            INTEGER@42..43 "3"
+      ARG@38..39
+        LITERAL@38..39
+          INTEGER@38..39 "1"
+      WHITESPACE@39..40 " "
+      ARG@40..41
+        LITERAL@40..41
+          INTEGER@40..41 "2"
+      WHITESPACE@41..42 " "
+      ARG@42..43
+        LITERAL@42..43
+          INTEGER@42..43 "3"
       RBRACKET@43..44 "]"
   NEWLINE@44..45 "\n"
   ASSIGNMENT_EXPR@45..62
@@ -87,20 +83,19 @@ ROOT@0..121
     WHITESPACE@52..53 " "
     MATRIX_EXPR@53..62
       LBRACKET@53..54 "["
-      MATRIX_ROW@54..61
-        ARG@54..59
-          BINARY_EXPR@54..59
-            LITERAL@54..55
-              INTEGER@54..55 "1"
-            WHITESPACE@55..56 " "
-            PLUS@56..57 "+"
-            WHITESPACE@57..58 " "
-            LITERAL@58..59
-              INTEGER@58..59 "2"
-        WHITESPACE@59..60 " "
-        ARG@60..61
-          LITERAL@60..61
-            INTEGER@60..61 "3"
+      ARG@54..59
+        BINARY_EXPR@54..59
+          LITERAL@54..55
+            INTEGER@54..55 "1"
+          WHITESPACE@55..56 " "
+          PLUS@56..57 "+"
+          WHITESPACE@57..58 " "
+          LITERAL@58..59
+            INTEGER@58..59 "2"
+      WHITESPACE@59..60 " "
+      ARG@60..61
+        LITERAL@60..61
+          INTEGER@60..61 "3"
       RBRACKET@61..62 "]"
   NEWLINE@62..63 "\n"
   ASSIGNMENT_EXPR@63..77
@@ -111,15 +106,14 @@ ROOT@0..121
     WHITESPACE@70..71 " "
     MATRIX_EXPR@71..77
       LBRACKET@71..72 "["
-      MATRIX_ROW@72..76
-        ARG@72..73
-          LITERAL@72..73
-            INTEGER@72..73 "1"
-        WHITESPACE@73..74 " "
-        ARG@74..76
-          LITERAL@74..76
-            PLUS@74..75 "+"
-            INTEGER@75..76 "2"
+      ARG@72..73
+        LITERAL@72..73
+          INTEGER@72..73 "1"
+      WHITESPACE@73..74 " "
+      ARG@74..76
+        LITERAL@74..76
+          PLUS@74..75 "+"
+          INTEGER@75..76 "2"
       RBRACKET@76..77 "]"
   NEWLINE@77..78 "\n"
   ASSIGNMENT_EXPR@78..93
@@ -130,22 +124,21 @@ ROOT@0..121
     WHITESPACE@83..84 " "
     MATRIX_EXPR@84..93
       LBRACKET@84..85 "["
-      MATRIX_ROW@85..92
-        ARG@85..88
-          BINARY_EXPR@85..88
-            LITERAL@85..86
-              INTEGER@85..86 "1"
-            COLON@86..87 ":"
-            LITERAL@87..88
-              INTEGER@87..88 "3"
-        WHITESPACE@88..89 " "
-        ARG@89..92
-          BINARY_EXPR@89..92
-            LITERAL@89..90
-              INTEGER@89..90 "4"
-            COLON@90..91 ":"
-            LITERAL@91..92
-              INTEGER@91..92 "6"
+      ARG@85..88
+        BINARY_EXPR@85..88
+          LITERAL@85..86
+            INTEGER@85..86 "1"
+          COLON@86..87 ":"
+          LITERAL@87..88
+            INTEGER@87..88 "3"
+      WHITESPACE@88..89 " "
+      ARG@89..92
+        BINARY_EXPR@89..92
+          LITERAL@89..90
+            INTEGER@89..90 "4"
+          COLON@90..91 ":"
+          LITERAL@91..92
+            INTEGER@91..92 "6"
       RBRACKET@92..93 "]"
   NEWLINE@93..94 "\n"
   ASSIGNMENT_EXPR@94..120

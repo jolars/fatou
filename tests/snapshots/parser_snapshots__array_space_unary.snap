@@ -5,30 +5,28 @@ expression: rendered
 ROOT@0..78
   MATRIX_EXPR@0..6
     LBRACKET@0..1 "["
-    MATRIX_ROW@1..5
-      ARG@1..2
-        NAME@1..2
-          IDENT@1..2 "a"
-      WHITESPACE@2..3 " "
-      ARG@3..5
-        UNARY_EXPR@3..5
-          PLUS@3..4 "+"
-          NAME@4..5
-            IDENT@4..5 "b"
+    ARG@1..2
+      NAME@1..2
+        IDENT@1..2 "a"
+    WHITESPACE@2..3 " "
+    ARG@3..5
+      UNARY_EXPR@3..5
+        PLUS@3..4 "+"
+        NAME@4..5
+          IDENT@4..5 "b"
     RBRACKET@5..6 "]"
   NEWLINE@6..7 "\n"
   MATRIX_EXPR@7..13
     LBRACKET@7..8 "["
-    MATRIX_ROW@8..12
-      ARG@8..9
-        NAME@8..9
-          IDENT@8..9 "a"
-      WHITESPACE@9..10 " "
-      ARG@10..12
-        UNARY_EXPR@10..12
-          MINUS@10..11 "-"
-          NAME@11..12
-            IDENT@11..12 "b"
+    ARG@8..9
+      NAME@8..9
+        IDENT@8..9 "a"
+    WHITESPACE@9..10 " "
+    ARG@10..12
+      UNARY_EXPR@10..12
+        MINUS@10..11 "-"
+        NAME@11..12
+          IDENT@11..12 "b"
     RBRACKET@12..13 "]"
   NEWLINE@13..14 "\n"
   VECT_EXPR@14..20
@@ -81,52 +79,49 @@ ROOT@0..78
   NEWLINE@43..44 "\n"
   MATRIX_EXPR@44..50
     LBRACKET@44..45 "["
-    MATRIX_ROW@45..49
-      ARG@45..46
-        LITERAL@45..46
-          INTEGER@45..46 "1"
-      WHITESPACE@46..47 " "
-      ARG@47..49
-        QUOTE_SYM@47..49
-          COLON@47..48 ":"
-          NAME@48..49
-            IDENT@48..49 "a"
+    ARG@45..46
+      LITERAL@45..46
+        INTEGER@45..46 "1"
+    WHITESPACE@46..47 " "
+    ARG@47..49
+      QUOTE_SYM@47..49
+        COLON@47..48 ":"
+        NAME@48..49
+          IDENT@48..49 "a"
     RBRACKET@49..50 "]"
   NEWLINE@50..51 "\n"
   MATRIX_EXPR@51..61
     LBRACKET@51..52 "["
-    MATRIX_ROW@52..60
-      ARG@52..53
-        LITERAL@52..53
-          INTEGER@52..53 "1"
-      WHITESPACE@53..54 " "
-      ARG@54..57
-        BINARY_EXPR@54..57
-          LITERAL@54..55
-            INTEGER@54..55 "2"
-          COLON@55..56 ":"
-          LITERAL@56..57
-            INTEGER@56..57 "3"
-      WHITESPACE@57..58 " "
-      ARG@58..60
-        QUOTE_SYM@58..60
-          COLON@58..59 ":"
-          NAME@59..60
-            IDENT@59..60 "a"
+    ARG@52..53
+      LITERAL@52..53
+        INTEGER@52..53 "1"
+    WHITESPACE@53..54 " "
+    ARG@54..57
+      BINARY_EXPR@54..57
+        LITERAL@54..55
+          INTEGER@54..55 "2"
+        COLON@55..56 ":"
+        LITERAL@56..57
+          INTEGER@56..57 "3"
+    WHITESPACE@57..58 " "
+    ARG@58..60
+      QUOTE_SYM@58..60
+        COLON@58..59 ":"
+        NAME@59..60
+          IDENT@59..60 "a"
     RBRACKET@60..61 "]"
   NEWLINE@61..62 "\n"
   MATRIX_EXPR@62..69
     LBRACKET@62..63 "["
-    MATRIX_ROW@63..68
-      ARG@63..64
-        NAME@63..64
-          IDENT@63..64 "a"
-      WHITESPACE@64..65 " "
-      ARG@65..68
-        UNARY_EXPR@65..68
-          DOT_PLUS@65..67 ".+"
-          NAME@67..68
-            IDENT@67..68 "b"
+    ARG@63..64
+      NAME@63..64
+        IDENT@63..64 "a"
+    WHITESPACE@64..65 " "
+    ARG@65..68
+      UNARY_EXPR@65..68
+        DOT_PLUS@65..67 ".+"
+        NAME@67..68
+          IDENT@67..68 "b"
     RBRACKET@68..69 "]"
   NEWLINE@69..70 "\n"
   VECT_EXPR@70..77

@@ -116,16 +116,15 @@ ROOT@0..103
   NEWLINE@79..80 "\n"
   MATRIX_EXPR@80..86
     LBRACKET@80..81 "["
-    MATRIX_ROW@81..85
-      ARG@81..82
-        NAME@81..82
-          IDENT@81..82 "a"
-      WHITESPACE@82..83 " "
-      ARG@83..85
-        UNARY_EXPR@83..85
-          TILDE@83..84 "~"
-          NAME@84..85
-            IDENT@84..85 "b"
+    ARG@81..82
+      NAME@81..82
+        IDENT@81..82 "a"
+    WHITESPACE@82..83 " "
+    ARG@83..85
+      UNARY_EXPR@83..85
+        TILDE@83..84 "~"
+        NAME@84..85
+          IDENT@84..85 "b"
     RBRACKET@85..86 "]"
   NEWLINE@86..87 "\n"
   VECT_EXPR@87..92
@@ -141,19 +140,18 @@ ROOT@0..103
   NEWLINE@92..93 "\n"
   MATRIX_EXPR@93..102
     LBRACKET@93..94 "["
-    MATRIX_ROW@94..101
-      ARG@94..99
-        BINARY_EXPR@94..99
-          NAME@94..95
-            IDENT@94..95 "a"
-          WHITESPACE@95..96 " "
-          TILDE@96..97 "~"
-          WHITESPACE@97..98 " "
-          NAME@98..99
-            IDENT@98..99 "b"
-      WHITESPACE@99..100 " "
-      ARG@100..101
-        NAME@100..101
-          IDENT@100..101 "c"
+    ARG@94..99
+      BINARY_EXPR@94..99
+        NAME@94..95
+          IDENT@94..95 "a"
+        WHITESPACE@95..96 " "
+        TILDE@96..97 "~"
+        WHITESPACE@97..98 " "
+        NAME@98..99
+          IDENT@98..99 "b"
+    WHITESPACE@99..100 " "
+    ARG@100..101
+      NAME@100..101
+        IDENT@100..101 "c"
     RBRACKET@101..102 "]"
   NEWLINE@102..103 "\n"

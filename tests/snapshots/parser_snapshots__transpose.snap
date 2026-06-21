@@ -18,14 +18,13 @@ ROOT@0..50
   POSTFIX_EXPR@7..13
     MATRIX_EXPR@7..12
       LBRACKET@7..8 "["
-      MATRIX_ROW@8..11
-        ARG@8..9
-          LITERAL@8..9
-            INTEGER@8..9 "1"
-        WHITESPACE@9..10 " "
-        ARG@10..11
-          LITERAL@10..11
-            INTEGER@10..11 "2"
+      ARG@8..9
+        LITERAL@8..9
+          INTEGER@8..9 "1"
+      WHITESPACE@9..10 " "
+      ARG@10..11
+        LITERAL@10..11
+          INTEGER@10..11 "2"
       RBRACKET@11..12 "]"
     TRANSPOSE@12..13 "'"
   NEWLINE@13..14 "\n"

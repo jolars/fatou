@@ -1313,6 +1313,11 @@ fn parse_bracket_literal(
     if ctx.token(first_start).map(|t| t.kind) == Some(TokKind::RBracket) {
         return vect(diagnostics);
     }
+    // An element-free `[; …]` is an empty n-dimensional concatenation
+    // (`[;]` → `ncat-1`, `[;;]` → `ncat-2`), not a vector.
+    if let Some(empty) = parse_empty_ncat(ctx, lbrk, first_start) {
+        return empty;
+    }
     let Some(first) = parse_element(tokens, first_start, diagnostics) else {
         return vect(diagnostics);
     };
@@ -1342,9 +1347,67 @@ fn parse_bracket_literal(
     }
 }
 
-/// Parse the matrix form of a `[...]` literal given its already-parsed first
-/// element. Elements within a row are space-separated; rows are separated by `;`
-/// or a newline. Each element is an `ARG` inside a `MATRIX_ROW`.
+/// A run of separator tokens between two concatenation elements (or trailing
+/// before `]`): horizontal whitespace, comments, newlines, and `;`. The
+/// dimension it separates along is its semicolon count, or 1 for a row-breaking
+/// newline, or 0 for plain whitespace.
+struct SepRun {
+    toks: Vec<usize>,
+    semis: usize,
+    has_newline: bool,
+}
+
+impl SepRun {
+    /// The dimension this separator concatenates along. A trailing separator
+    /// (`between` = false) only separates via `;` — a trailing newline is just
+    /// whitespace (`[x\n]` is a `vect`, not a `vcat`).
+    fn dim(&self, between: bool) -> usize {
+        if self.semis > 0 {
+            self.semis
+        } else if self.has_newline && between {
+            1
+        } else {
+            0
+        }
+    }
+}
+
+/// Build an element-free `[; …]` concatenation (`[;]` → `ncat-1`,
+/// `[;;]` → `ncat-2`): the body is only trivia and `;`. Returns `None` when a
+/// real element follows (the caller then falls back to a vector).
+fn parse_empty_ncat(ctx: &ParserCtx<'_>, lbrk: usize, first_start: usize) -> Option<ExprParse> {
+    let mut q = first_start;
+    let mut saw_semi = false;
+    while let Some(k) = ctx.token(q).map(|t| t.kind) {
+        match k {
+            TokKind::Semicolon => {
+                saw_semi = true;
+                q += 1;
+            }
+            _ if k.is_trivia() => q += 1,
+            _ => break,
+        }
+    }
+    if !saw_semi || ctx.token(q).map(|t| t.kind) != Some(TokKind::RBracket) {
+        return None;
+    }
+    let mut events = vec![Event::Start(SyntaxKind::MATRIX_EXPR), Event::Tok(lbrk)];
+    push_range(&mut events, lbrk + 1, q + 1);
+    events.push(Event::Finish); // MATRIX_EXPR
+    Some(ExprParse {
+        start: lbrk,
+        end: q + 1,
+        events,
+    })
+}
+
+/// Parse the concatenation form of a `[...]` literal given its already-parsed
+/// first element. Elements are separated along increasing dimensions by spaces
+/// (dim 0, a `row`), single `;`/newlines (dim 1), `;;` (dim 2), and so on. The
+/// CST nests groups by dimension into `MATRIX_ROW` nodes (with bare single
+/// elements left unwrapped); the projector recovers each group's dimension from
+/// its separator tokens and heads it `hcat`/`vcat`/`ncat-d` (top) or
+/// `row`/`nrow-d` (nested).
 fn parse_matrix(
     ctx: &ParserCtx<'_>,
     lbrk: usize,
@@ -1352,100 +1415,140 @@ fn parse_matrix(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     let tokens = ctx.tokens();
-    let mut events = vec![Event::Start(SyntaxKind::MATRIX_EXPR), Event::Tok(lbrk)];
-    push_range(&mut events, lbrk + 1, first.start);
-    events.push(Event::Start(SyntaxKind::MATRIX_ROW));
-    let mut pos = push_element_arg(&mut events, first);
+    let lead_start = first.start;
+    let mut elems = vec![first];
+    let mut seps: Vec<SepRun> = Vec::new();
+    let mut pos = elems[0].end;
 
-    loop {
-        // Scan past horizontal whitespace and comments to the next significant
-        // token (a newline stays significant as a row separator).
-        let mut look = pos;
-        while matches!(
-            ctx.token(look).map(|t| t.kind),
-            Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
-        ) {
-            look += 1;
+    // Scan the body into elements and the separator runs that follow each of
+    // them (the final entry is the trailing run before `]`/EOF).
+    let end = loop {
+        let mut run = SepRun {
+            toks: Vec::new(),
+            semis: 0,
+            has_newline: false,
+        };
+        let mut q = pos;
+        while let Some(k) = ctx.token(q).map(|t| t.kind) {
+            match k {
+                TokKind::Semicolon => run.semis += 1,
+                TokKind::Newline => run.has_newline = true,
+                TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment => {}
+                _ => break,
+            }
+            run.toks.push(q);
+            q += 1;
         }
-
-        match ctx.token(look).map(|t| t.kind) {
-            // End of the literal: close the open row, emit trailing trivia + `]`.
-            None | Some(TokKind::RBracket) => {
-                events.push(Event::Finish); // MATRIX_ROW
-                push_range(&mut events, pos, look);
-                let end = if ctx.token(look).map(|t| t.kind) == Some(TokKind::RBracket) {
-                    events.push(Event::Tok(look));
-                    look + 1
-                } else {
-                    look
-                };
-                events.push(Event::Finish); // MATRIX_EXPR
-                return ExprParse {
-                    start: lbrk,
-                    end,
-                    events,
-                };
+        match ctx.token(q).map(|t| t.kind) {
+            None => {
+                seps.push(run);
+                break q;
             }
-            // Row separator: close the row, consume the `;`/newline/trivia run,
-            // then either close (a trailing separator) or open the next row.
-            Some(TokKind::Semicolon | TokKind::Newline) => {
-                events.push(Event::Finish); // MATRIX_ROW
-                let mut q = pos;
-                loop {
-                    while matches!(ctx.token(q).map(|t| t.kind), Some(k) if k.is_trivia()) {
-                        events.push(Event::Tok(q));
-                        q += 1;
-                    }
-                    if ctx.token(q).map(|t| t.kind) == Some(TokKind::Semicolon) {
-                        events.push(Event::Tok(q));
-                        q += 1;
-                        continue;
-                    }
-                    break;
-                }
-                match ctx.token(q).map(|t| t.kind) {
-                    None => {
-                        events.push(Event::Finish); // MATRIX_EXPR
-                        return ExprParse {
-                            start: lbrk,
-                            end: q,
-                            events,
-                        };
-                    }
-                    Some(TokKind::RBracket) => {
-                        events.push(Event::Tok(q));
-                        events.push(Event::Finish); // MATRIX_EXPR
-                        return ExprParse {
-                            start: lbrk,
-                            end: q + 1,
-                            events,
-                        };
-                    }
-                    _ => {
-                        events.push(Event::Start(SyntaxKind::MATRIX_ROW));
-                        pos = match parse_element(tokens, q, diagnostics) {
-                            Some(el) => push_element_arg(&mut events, el),
-                            None => {
-                                events.push(Event::Tok(q));
-                                q + 1
-                            }
-                        };
-                    }
-                }
+            Some(TokKind::RBracket) => {
+                seps.push(run);
+                break q + 1;
             }
-            // Another element in the current row (whitespace is the separator).
             _ => {
-                push_range(&mut events, pos, look);
-                pos = match parse_element(tokens, look, diagnostics) {
-                    Some(el) => push_element_arg(&mut events, el),
-                    None => {
-                        events.push(Event::Tok(look));
-                        look + 1
-                    }
+                seps.push(run);
+                let el = match parse_element(tokens, q, diagnostics) {
+                    Some(el) => el,
+                    None => ExprParse {
+                        start: q,
+                        end: q + 1,
+                        events: vec![Event::Tok(q)],
+                    },
                 };
+                pos = el.end;
+                elems.push(el);
             }
+        }
+    };
+
+    let n = elems.len();
+    let close = if ctx.token(end.saturating_sub(1)).map(|t| t.kind) == Some(TokKind::RBracket) {
+        Some(end - 1)
+    } else {
+        None
+    };
+
+    // The top-level dimension: the largest `between`-element separator, plus any
+    // trailing semicolon run (`[x;]` is a `vcat`).
+    let top_d = (0..n.saturating_sub(1))
+        .map(|k| seps[k].dim(true))
+        .chain(std::iter::once(seps[n - 1].dim(false)))
+        .max()
+        .unwrap_or(0);
+
+    // A lone element with no real separator (only a trailing newline) is a
+    // vector, matching JuliaSyntax (`[x\n]` → `(vect x)`).
+    let node_kind = if n == 1 && top_d == 0 {
+        SyntaxKind::VECT_EXPR
+    } else {
+        SyntaxKind::MATRIX_EXPR
+    };
+
+    let mut events = vec![Event::Start(node_kind), Event::Tok(lbrk)];
+    push_range(&mut events, lbrk + 1, lead_start);
+    emit_cat_groups(&mut events, &elems, &seps, 0, n, top_d);
+    // Trailing separator run, then the closing bracket.
+    for &t in &seps[n - 1].toks {
+        events.push(Event::Tok(t));
+    }
+    if let Some(close) = close {
+        events.push(Event::Tok(close));
+    }
+    events.push(Event::Finish); // node_kind
+    ExprParse {
+        start: lbrk,
+        end,
+        events,
+    }
+}
+
+/// Emit the children of a concatenation group spanning elements `lo..hi`,
+/// splitting at separators of dimension `split_d` and emitting their tokens
+/// between children.
+fn emit_cat_groups(
+    events: &mut Vec<Event>,
+    elems: &[ExprParse],
+    seps: &[SepRun],
+    lo: usize,
+    hi: usize,
+    split_d: usize,
+) {
+    let mut g = lo;
+    for k in lo..hi {
+        let is_boundary = k + 1 < hi && seps[k].dim(true) == split_d;
+        if is_boundary {
+            emit_cat_child(events, elems, seps, g, k + 1);
+            for &t in &seps[k].toks {
+                events.push(Event::Tok(t));
+            }
+            g = k + 1;
+        } else if k + 1 == hi {
+            emit_cat_child(events, elems, seps, g, hi);
         }
     }
+}
+
+/// Emit one concatenation child spanning elements `lo..hi`. A single bare
+/// element is emitted unwrapped (inside its `ARG`); a multi-element group is
+/// wrapped in a `MATRIX_ROW` and split along its own maximum internal dimension.
+fn emit_cat_child(
+    events: &mut Vec<Event>,
+    elems: &[ExprParse],
+    seps: &[SepRun],
+    lo: usize,
+    hi: usize,
+) {
+    if hi - lo == 1 {
+        push_element_arg(events, elems[lo].clone());
+        return;
+    }
+    let inner_d = (lo..hi - 1).map(|k| seps[k].dim(true)).max().unwrap_or(0);
+    events.push(Event::Start(SyntaxKind::MATRIX_ROW));
+    emit_cat_groups(events, elems, seps, lo, hi, inner_d);
+    events.push(Event::Finish); // MATRIX_ROW
 }
 
 /// Parse a comprehension `[elem for v in iter if cond]` or generator

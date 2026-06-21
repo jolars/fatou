@@ -1,0 +1,298 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..193
+  ASSIGNMENT_EXPR@0..12
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    MATRIX_EXPR@4..12
+      LBRACKET@4..5 "["
+      ARG@5..6
+        NAME@5..6
+          IDENT@5..6 "x"
+      WHITESPACE@6..7 " "
+      SEMICOLON@7..8 ";"
+      SEMICOLON@8..9 ";"
+      WHITESPACE@9..10 " "
+      ARG@10..11
+        NAME@10..11
+          IDENT@10..11 "y"
+      RBRACKET@11..12 "]"
+  NEWLINE@12..13 "\n"
+  ASSIGNMENT_EXPR@13..26
+    NAME@13..14
+      IDENT@13..14 "b"
+    WHITESPACE@14..15 " "
+    EQ@15..16 "="
+    WHITESPACE@16..17 " "
+    MATRIX_EXPR@17..26
+      LBRACKET@17..18 "["
+      ARG@18..19
+        NAME@18..19
+          IDENT@18..19 "x"
+      WHITESPACE@19..20 " "
+      SEMICOLON@20..21 ";"
+      SEMICOLON@21..22 ";"
+      SEMICOLON@22..23 ";"
+      WHITESPACE@23..24 " "
+      ARG@24..25
+        NAME@24..25
+          IDENT@24..25 "y"
+      RBRACKET@25..26 "]"
+  NEWLINE@26..27 "\n"
+  ASSIGNMENT_EXPR@27..43
+    NAME@27..28
+      IDENT@27..28 "c"
+    WHITESPACE@28..29 " "
+    EQ@29..30 "="
+    WHITESPACE@30..31 " "
+    MATRIX_EXPR@31..43
+      LBRACKET@31..32 "["
+      MATRIX_ROW@32..37
+        ARG@32..33
+          NAME@32..33
+            IDENT@32..33 "x"
+        WHITESPACE@33..34 " "
+        SEMICOLON@34..35 ";"
+        WHITESPACE@35..36 " "
+        ARG@36..37
+          NAME@36..37
+            IDENT@36..37 "y"
+      WHITESPACE@37..38 " "
+      SEMICOLON@38..39 ";"
+      SEMICOLON@39..40 ";"
+      WHITESPACE@40..41 " "
+      ARG@41..42
+        NAME@41..42
+          IDENT@41..42 "z"
+      RBRACKET@42..43 "]"
+  NEWLINE@43..44 "\n"
+  ASSIGNMENT_EXPR@44..64
+    NAME@44..45
+      IDENT@44..45 "d"
+    WHITESPACE@45..46 " "
+    EQ@46..47 "="
+    WHITESPACE@47..48 " "
+    MATRIX_EXPR@48..64
+      LBRACKET@48..49 "["
+      MATRIX_ROW@49..54
+        ARG@49..50
+          NAME@49..50
+            IDENT@49..50 "x"
+        WHITESPACE@50..51 " "
+        SEMICOLON@51..52 ";"
+        WHITESPACE@52..53 " "
+        ARG@53..54
+          NAME@53..54
+            IDENT@53..54 "y"
+      WHITESPACE@54..55 " "
+      SEMICOLON@55..56 ";"
+      SEMICOLON@56..57 ";"
+      WHITESPACE@57..58 " "
+      MATRIX_ROW@58..63
+        ARG@58..59
+          NAME@58..59
+            IDENT@58..59 "z"
+        WHITESPACE@59..60 " "
+        SEMICOLON@60..61 ";"
+        WHITESPACE@61..62 " "
+        ARG@62..63
+          NAME@62..63
+            IDENT@62..63 "w"
+      RBRACKET@63..64 "]"
+  NEWLINE@64..65 "\n"
+  ASSIGNMENT_EXPR@65..82
+    NAME@65..66
+      IDENT@65..66 "e"
+    WHITESPACE@66..67 " "
+    EQ@67..68 "="
+    WHITESPACE@68..69 " "
+    MATRIX_EXPR@69..82
+      LBRACKET@69..70 "["
+      ARG@70..71
+        NAME@70..71
+          IDENT@70..71 "x"
+      WHITESPACE@71..72 " "
+      SEMICOLON@72..73 ";"
+      SEMICOLON@73..74 ";"
+      WHITESPACE@74..75 " "
+      ARG@75..76
+        NAME@75..76
+          IDENT@75..76 "y"
+      WHITESPACE@76..77 " "
+      SEMICOLON@77..78 ";"
+      SEMICOLON@78..79 ";"
+      WHITESPACE@79..80 " "
+      ARG@80..81
+        NAME@80..81
+          IDENT@80..81 "z"
+      RBRACKET@81..82 "]"
+  NEWLINE@82..83 "\n"
+  ASSIGNMENT_EXPR@83..100
+    NAME@83..84
+      IDENT@83..84 "f"
+    WHITESPACE@84..85 " "
+    EQ@85..86 "="
+    WHITESPACE@86..87 " "
+    MATRIX_EXPR@87..100
+      LBRACKET@87..88 "["
+      ARG@88..89
+        NAME@88..89
+          IDENT@88..89 "x"
+      WHITESPACE@89..90 " "
+      SEMICOLON@90..91 ";"
+      SEMICOLON@91..92 ";"
+      SEMICOLON@92..93 ";"
+      WHITESPACE@93..94 " "
+      MATRIX_ROW@94..99
+        ARG@94..95
+          NAME@94..95
+            IDENT@94..95 "y"
+        WHITESPACE@95..96 " "
+        SEMICOLON@96..97 ";"
+        WHITESPACE@97..98 " "
+        ARG@98..99
+          NAME@98..99
+            IDENT@98..99 "z"
+      RBRACKET@99..100 "]"
+  NEWLINE@100..101 "\n"
+  ASSIGNMENT_EXPR@101..123
+    NAME@101..102
+      IDENT@101..102 "g"
+    WHITESPACE@102..103 " "
+    EQ@103..104 "="
+    WHITESPACE@104..105 " "
+    MATRIX_EXPR@105..123
+      LBRACKET@105..106 "["
+      MATRIX_ROW@106..116
+        ARG@106..107
+          NAME@106..107
+            IDENT@106..107 "x"
+        WHITESPACE@107..108 " "
+        SEMICOLON@108..109 ";"
+        SEMICOLON@109..110 ";"
+        WHITESPACE@110..111 " "
+        MATRIX_ROW@111..116
+          ARG@111..112
+            NAME@111..112
+              IDENT@111..112 "y"
+          WHITESPACE@112..113 " "
+          SEMICOLON@113..114 ";"
+          WHITESPACE@114..115 " "
+          ARG@115..116
+            NAME@115..116
+              IDENT@115..116 "z"
+      WHITESPACE@116..117 " "
+      SEMICOLON@117..118 ";"
+      SEMICOLON@118..119 ";"
+      SEMICOLON@119..120 ";"
+      WHITESPACE@120..121 " "
+      ARG@121..122
+        NAME@121..122
+          IDENT@121..122 "w"
+      RBRACKET@122..123 "]"
+  NEWLINE@123..124 "\n"
+  ASSIGNMENT_EXPR@124..144
+    NAME@124..125
+      IDENT@124..125 "h"
+    WHITESPACE@125..126 " "
+    EQ@126..127 "="
+    WHITESPACE@127..128 " "
+    MATRIX_EXPR@128..144
+      LBRACKET@128..129 "["
+      MATRIX_ROW@129..138
+        ARG@129..130
+          NAME@129..130
+            IDENT@129..130 "a"
+        WHITESPACE@130..131 " "
+        SEMICOLON@131..132 ";"
+        WHITESPACE@132..133 " "
+        ARG@133..134
+          NAME@133..134
+            IDENT@133..134 "b"
+        WHITESPACE@134..135 " "
+        SEMICOLON@135..136 ";"
+        WHITESPACE@136..137 " "
+        ARG@137..138
+          NAME@137..138
+            IDENT@137..138 "c"
+      WHITESPACE@138..139 " "
+      SEMICOLON@139..140 ";"
+      SEMICOLON@140..141 ";"
+      WHITESPACE@141..142 " "
+      ARG@142..143
+        NAME@142..143
+          IDENT@142..143 "d"
+      RBRACKET@143..144 "]"
+  NEWLINE@144..145 "\n"
+  ASSIGNMENT_EXPR@145..156
+    NAME@145..146
+      IDENT@145..146 "i"
+    WHITESPACE@146..147 " "
+    EQ@147..148 "="
+    WHITESPACE@148..149 " "
+    MATRIX_EXPR@149..156
+      LBRACKET@149..150 "["
+      ARG@150..151
+        NAME@150..151
+          IDENT@150..151 "x"
+      WHITESPACE@151..152 " "
+      SEMICOLON@152..153 ";"
+      SEMICOLON@153..154 ";"
+      WHITESPACE@154..155 " "
+      RBRACKET@155..156 "]"
+  NEWLINE@156..157 "\n"
+  ASSIGNMENT_EXPR@157..165
+    NAME@157..158
+      IDENT@157..158 "j"
+    WHITESPACE@158..159 " "
+    EQ@159..160 "="
+    WHITESPACE@160..161 " "
+    MATRIX_EXPR@161..165
+      LBRACKET@161..162 "["
+      ARG@162..163
+        NAME@162..163
+          IDENT@162..163 "x"
+      SEMICOLON@163..164 ";"
+      RBRACKET@164..165 "]"
+  NEWLINE@165..166 "\n"
+  ASSIGNMENT_EXPR@166..173
+    NAME@166..167
+      IDENT@166..167 "k"
+    WHITESPACE@167..168 " "
+    EQ@168..169 "="
+    WHITESPACE@169..170 " "
+    MATRIX_EXPR@170..173
+      LBRACKET@170..171 "["
+      SEMICOLON@171..172 ";"
+      RBRACKET@172..173 "]"
+  NEWLINE@173..174 "\n"
+  ASSIGNMENT_EXPR@174..182
+    NAME@174..175
+      IDENT@174..175 "l"
+    WHITESPACE@175..176 " "
+    EQ@176..177 "="
+    WHITESPACE@177..178 " "
+    MATRIX_EXPR@178..182
+      LBRACKET@178..179 "["
+      SEMICOLON@179..180 ";"
+      SEMICOLON@180..181 ";"
+      RBRACKET@181..182 "]"
+  NEWLINE@182..183 "\n"
+  ASSIGNMENT_EXPR@183..192
+    NAME@183..184
+      IDENT@183..184 "m"
+    WHITESPACE@184..185 " "
+    EQ@185..186 "="
+    WHITESPACE@186..187 " "
+    MATRIX_EXPR@187..192
+      LBRACKET@187..188 "["
+      SEMICOLON@188..189 ";"
+      SEMICOLON@189..190 ";"
+      SEMICOLON@190..191 ";"
+      RBRACKET@191..192 "]"
+  NEWLINE@192..193 "\n"

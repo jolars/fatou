@@ -660,26 +660,111 @@ fn project_parameters(node: &SyntaxNode) -> String {
 
 // --- Matrices --------------------------------------------------------------
 
+/// Project the outer `[...]` concatenation node. The CST nests rows by
+/// dimension (`MATRIX_ROW` groups, bare `ARG` elements); the dimension `d` of a
+/// group is recovered from the separator tokens between its direct child nodes:
+/// a run of `;` contributes its length, a row-separating newline contributes 1,
+/// a space contributes 0. The top head is `hcat`/`vcat`/`ncat-d`
+/// (`d` = 0/1/≥2); nested groups are `row` (`d` = 0) or `nrow-d` (`d` ≥ 1),
+/// mirroring JuliaSyntax. An element-free `[; …]` is `ncat-d` with `d` the
+/// longest semicolon run.
 fn project_matrix(node: &SyntaxNode) -> String {
-    let rows: Vec<SyntaxNode> = node.children().filter(|c| c.kind() == MATRIX_ROW).collect();
-    if rows.len() == 1 {
-        // Single row of space-separated columns → hcat.
-        return sexp("hcat", project_args(&rows[0]));
-    }
-    // Multiple rows → vcat; single-element rows are emitted unwrapped, matching
-    // JuliaSyntax (`[1; 2]` → `(vcat 1 2)`, `[1 2; 3 4]` → `(vcat (row …) …)`).
-    let items = rows
-        .iter()
-        .map(|row| {
-            let elems = project_args(row);
-            if elems.len() == 1 {
-                elems.into_iter().next().unwrap()
-            } else {
-                sexp("row", elems)
-            }
-        })
+    let children: Vec<SyntaxNode> = node
+        .children()
+        .filter(|c| matches!(c.kind(), ARG | MATRIX_ROW))
         .collect();
-    sexp("vcat", items)
+    if children.is_empty() {
+        return sexp(&format!("ncat-{}", max_semicolon_run(node)), Vec::new());
+    }
+    let d = group_dimension(node);
+    let head = match d {
+        0 => "hcat".to_string(),
+        1 => "vcat".to_string(),
+        _ => format!("ncat-{d}"),
+    };
+    sexp(&head, children.iter().map(project_cat_child).collect())
+}
+
+/// Project one direct child of a concatenation group: a bare `ARG` element
+/// unwraps to its inner expression; a `MATRIX_ROW` becomes a `row` (dimension 0)
+/// or `nrow-d` group, recursing on its own children.
+fn project_cat_child(node: &SyntaxNode) -> String {
+    match node.kind() {
+        ARG => project_first(node),
+        MATRIX_ROW => {
+            let d = group_dimension(node);
+            let head = if d == 0 {
+                "row".to_string()
+            } else {
+                format!("nrow-{d}")
+            };
+            let items = node
+                .children()
+                .filter(|c| matches!(c.kind(), ARG | MATRIX_ROW))
+                .map(|c| project_cat_child(&c))
+                .collect();
+            sexp(&head, items)
+        }
+        _ => project(node),
+    }
+}
+
+/// The concatenation dimension of a group: the largest separator dimension among
+/// the runs lying *between* direct child nodes (a `;` run counts its length, a
+/// newline counts 1), plus any trailing semicolon run after the last child
+/// (a trailing newline does not separate, so it is ignored).
+fn group_dimension(node: &SyntaxNode) -> usize {
+    let mut d = 0;
+    let mut seen_node = false;
+    let mut semis = 0usize;
+    let mut newline = false;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(n) if matches!(n.kind(), ARG | MATRIX_ROW) => {
+                if seen_node {
+                    let run = if semis > 0 {
+                        semis
+                    } else {
+                        usize::from(newline)
+                    };
+                    d = d.max(run);
+                }
+                seen_node = true;
+                semis = 0;
+                newline = false;
+            }
+            NodeOrToken::Token(t) => match t.kind() {
+                SEMICOLON => semis += 1,
+                NEWLINE => newline = true,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    // Trailing run after the last child: only semicolons separate (`[x;]` is a
+    // `vcat`, but `[x\n]` is just a `vect`).
+    if seen_node && semis > 0 {
+        d = d.max(semis);
+    }
+    d
+}
+
+/// The length of the longest consecutive `;` run among a node's direct tokens
+/// (used for element-free `[; …]` concatenations).
+fn max_semicolon_run(node: &SyntaxNode) -> usize {
+    let mut max = 0;
+    let mut run = 0;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(t) if t.kind() == SEMICOLON => {
+                run += 1;
+                max = max.max(run);
+            }
+            NodeOrToken::Token(t) if is_trivia(t.kind()) => {}
+            _ => run = 0,
+        }
+    }
+    max
 }
 
 // --- Comprehensions / generators -------------------------------------------

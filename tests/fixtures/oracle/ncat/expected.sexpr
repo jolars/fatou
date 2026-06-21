@@ -1,0 +1,1 @@
+(toplevel (= a (ncat-2 x y)) (= b (ncat-3 x y)) (= c (ncat-2 (nrow-1 x y) z)) (= d (ncat-2 (nrow-1 x y) (nrow-1 z w))) (= e (ncat-2 x y z)) (= f (ncat-3 x (nrow-1 y z))) (= g (ncat-3 (nrow-2 x (nrow-1 y z)) w)) (= h (ncat-2 (nrow-1 a b c) d)) (= i (ncat-2 x)) (= j (vcat x)) (= k (ncat-1)) (= l (ncat-2)) (= m (ncat-3)))

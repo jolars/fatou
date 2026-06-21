@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **482 allowlisted**, 89 divergence, 4 unsupported.
-Dir corpus: **86 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **496 allowlisted**, 75 divergence, 4 unsupported.
+Dir corpus: **87 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,35 +31,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21l)
+## Latest session (2026-06-21m)
 
-**`var"…"` macro names.** A `var"…"` single-quoted non-standard identifier as a
-macro name now parses: `@var"#"` ⇒ `(macrocall (var @#))`, qualified `A.@var"#"`
-⇒ `(macrocall (. A (quote (var @#))))`, and `export @var"#"` ⇒ `(export (var
-@#))`. New shared helper `push_var_macro_name` (`expr.rs`, pub(crate)) detects a
-`StringPrefix "var"` + single-`"` open and splices a `NONSTANDARD_IDENTIFIER`
-node into the `MACRO_NAME`; called from `parse_macro_name_body` (now threads
-`diagnostics`) for macro *calls* and from `push_macro_name` (`structural.rs`, now
-threads `diagnostics`) for `export`/`import` directive names. Triple-quoted
-`@var"""…"""` stays an ordinary `@var_str` macrocall (excluded). Projector
-`project_macro_name` folds the `@` sigil into the var content (`(var @#)`),
-handled in both the trailing (qualified) and prefix branches.
+**N-dimensional concatenation (`;;`/`;;;`).** `[...]` now nests by dimension.
+`parse_matrix` (`expr.rs`) was rewritten: it scans the body into elements plus
+dimension-tagged `SepRun`s (a `;` run's length, a row-breaking newline → 1, a
+space → 0; a *trailing* separator counts `;` only, so `[x;]` → `(vcat x)` but
+`[x\n]` → `(vect x)`), then `emit_cat_groups`/`emit_cat_child` recursively split
+at each level's max dimension, wrapping multi-element groups in `MATRIX_ROW` and
+leaving single elements bare. The projector (`project_matrix`, new
+`project_cat_child`/`group_dimension`/`max_semicolon_run`) recovers each group's
+dimension from the `;`/newline tokens between its direct child nodes and heads it
+`hcat`/`vcat`/`ncat-d` (top) or `row`/`nrow-d` (nested). Element-free `[;]`/`[;;]`
+→ `(ncat-1)`/`(ncat-2)` via `parse_empty_ncat`. CST is now flatter (single-row
+hcat and single-element vcat rows drop the redundant `MATRIX_ROW`); snapshots
+`matrices`/`tilde_operator`/`transpose`/`array_space_unary` re-accepted, projections
+unchanged.
 
-JS allow **479 → 482** (+3: js-babd656c `@var"#" a`, js-8f4830c7 `A.@var"#" a`,
-js-213cfe89 `export @var"'"`), divergence 92 → 89, unsupported held 4. Dir allow
-85 → 86 (new fixture `var_macro_name`). Zero regressions; green, clippy/fmt clean.
+JS allow **482 → 496** (+14), divergence 89 → 75, unsupported held 4. Dir allow
+86 → 87 (new fixture `ncat`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Remaining macro-name forms**: `@(A)` paren name (js-f3aa762e ⇒ `@A`),
-   `@S[a].b`/`@S{a}.b` (js-b55b2b19/b6643c20 — macrocall then postfix `.b`, the
-   `.b` currently binds inside the arg).
-2. **N-dim array concatenation** (~25 FAIL, largest cluster): `;;`/`;;;` ncat
-   dims, empty `[;]`/`[;;]`, newline-as-row-sep, `[f (x)]` space-call.
-3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26 (raw-string
-   rules in `project_var`); also `@doc x\ny` newline-continuation special case
-   (js-f965a412, js-e2c9c2c6, js-91c18a50 — `@doc`-only one-newline arg grab).
+1. **Typed + brace concatenation** (reuses this session's machinery): `T[x y]` →
+   `(typed_hcat T x y)`, `T[a;b]` → `(typed_vcat T a b)`, `T[a ; b ;; c ; d]` →
+   `(typed_ncat-2 …)` (js-9d8e3914/9f265a80/f401d1e3/dcc67116; currently `ref` —
+   the `[` is a postfix index, needs a concat path when the bracket body is
+   space/`;`-separated). Braces `{x y}` → `(bracescat (row x y))`, `{x ;;; y}` →
+   `(bracescat (nrow-3 x y))` (js-1ba87cf7/3de3c224; always `bracescat` head,
+   dimension lives only in the nested `nrow-d`).
+2. **Remaining macro-name forms**: `@(A)` paren name (js-f3aa762e ⇒ `@A`),
+   `@S[a].b`/`@S{a}.b` (js-b55b2b19/b6643c20 — macrocall then postfix `.b`).
+3. **Concat newline/whitespace edges** (mostly error-shape, lower value):
+   `[x \n, ]`, `[x \n\n ]`, `[a b ;; \n c]`, `[f (x)]` space-call — several emit
+   Julia `(error-t)` recovery, so check each before committing.
 
 ## Earlier sessions
+
+- **2026-06-21l** — `var"…"` macro names. `@var"#"` ⇒ `(macrocall (var @#))`,
+  qualified `A.@var"#"`, `export @var"#"` via shared `push_var_macro_name`
+  (`expr.rs`); triple-quoted `@var"""…"""` stays an ordinary macrocall.
+  `project_macro_name` folds the `@` into the var content. JS allow 479 → 482.
+  Fixture `var_macro_name`.
 
 - **2026-06-21k** — Nested dotted macro paths. `@A.B.x`, `A.B.@x`, `$A.@x`,
   `A.$B.@x`, `A.@.x` project to nested `(. (. A (quote B)) (quote @x))` like field
