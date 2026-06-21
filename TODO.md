@@ -221,8 +221,15 @@ through), so the grammar can grow incrementally.
   `:.+=` → `(quote-: (. +))` etc.): a `parse_quote_sym` arm gated on
   `is_dotted_broadcast_text` (leading broadcast `.`, excluding `..`/`...`) wraps
   the dotted-operator token in an `OPERATOR_ATOM`, which the projector's
-  `project_operator_atom` splits the broadcast dot off of into `(. op)`. **Known
-  limitations:** the bare-`:` Colon value (`a[:]` → `(ref a :)`), the paren form
+  `project_operator_atom` splits the broadcast dot off of into `(. op)`. The
+  remaining undotted value/syntactic operators now quote too (`:..`, `:√`, `:∛`,
+  `:¬`, the Unicode operators `:⊕`/`:≤`/`:→`, and the ternary `:?` →
+  `(quote-: ..)`/`(quote-: √)`/`(quote-: ?)` etc.): the bare-operator quote arm's
+  predicate gains `is_quotable_operator` (`DotDot`, the Unicode operator tiers and
+  radicals, `Question`), the token text projected verbatim. **Known
+  limitations:** the bare-`:` Colon value (`a[:]` → `(ref a :)`), the syntactic
+  sigil quotes `:$`/`:.`/`:...` (Julia quotes the sigil alone, dropping any
+  operand to an `error-t` — error-shape, deferred), the paren form
   of a dotted *syntactic-assignment* quote (`:(.=)` still errors; the
   `is_paren_quotable_op` interior set has no dotted forms), standalone
   parenthesized operators (`(+)` → `+`), and import paren-quotes (`import A.:(+)`,

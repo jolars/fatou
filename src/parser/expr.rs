@@ -817,6 +817,29 @@ fn is_value_operator(kind: TokKind) -> bool {
         )
 }
 
+/// Whether `kind` is an operator that a prefix `:` quotes into a symbol but that
+/// is *not* already covered by `is_op_name`/`is_assignment_op`: the range `..`,
+/// the Unicode operators and radicals, and the ternary `?`. Julia quotes all of
+/// these (`:..` ⇒ `(quote-: ..)`, `:√` ⇒ `(quote-: √)`, `:?` ⇒ `(quote-: ?)`).
+/// The broadcast dotted operators are handled by their own quote arm; the
+/// syntactic sigils `$`/`.`/`...` are deferred (Julia quotes the sigil alone and
+/// drops any operand to an `error-t`, an error-shape we don't model yet).
+fn is_quotable_operator(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        DotDot
+            | UniRadical
+            | UniArrow
+            | UniComparison
+            | UniColon
+            | UniPlus
+            | UniTimes
+            | UniPower
+            | Question
+    )
+}
+
 /// Parse a prefix `:` quote into a `QUOTE_SYM` node: `:name`/`:end` (a symbol)
 /// or `:(expr)` (a quoted expression). Returns `None` for a bare `:` that is not
 /// followed by a quotable token (e.g. the index colon in `a[:]`), so the caller
@@ -894,10 +917,13 @@ pub(super) fn parse_quote_sym(
                 events,
             })
         }
-        // `:+`, `:<:`, `:+=`, … — a symbolic operator used as a symbol. Restricted
-        // to undotted operator names (`is_op_name`) plus assignment operators;
+        // `:+`, `:<:`, `:+=`, `:..`, `:√`, `:⊕`, `:?`, … — a symbolic operator
+        // used as a symbol. Covers undotted operator names (`is_op_name`),
+        // assignment operators, and the remaining value/syntactic operators Julia
+        // still quotes (`..`, the Unicode operators and radicals, the ternary `?`);
         // broadcast forms like `:.+` are handled by the dotted-operator arm above.
-        k if is_op_name(k) || is_assignment_op(k) => {
+        // The token text is emitted verbatim; the projector reads it back.
+        k if is_op_name(k) || is_assignment_op(k) || is_quotable_operator(k) => {
             events.push(Event::Tok(next));
             events.push(Event::Finish);
             Some(ExprParse {

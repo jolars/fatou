@@ -23,7 +23,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 ## Progress
 
 JS corpus (575 cases): **514 allowlisted**, 58 divergence, 3 unsupported.
-Dir corpus: **94 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Dir corpus: **95 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,46 +31,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21s)
+## Latest session (2026-06-21t)
 
-**Quote of dotted operators.** `:.+`, `:.&`, `:.=`, `:.&&`, `:.||`, `:.==`,
-`:.+=` ⇒ `(quote-: (. +))` etc. — a prefix `:` quoting a *dotted* (broadcast)
-operator models the operator as a `(. op)` access, like Julia. `parse_quote_sym`
-(`expr.rs`) gains an arm, placed *before* the `is_op_name`/`is_assignment_op` arm
-(so `.=`/`.+=`, which `is_assignment_op` would otherwise emit bare, route here),
-gated on new `is_dotted_broadcast_text` (token text leads with a broadcast `.`,
-len > 1, second byte ≠ `.` so `..`/`...` are excluded); it wraps the dotted-op
-token in an `OPERATOR_ATOM` (Fatou's operator-as-value node). Projector
-`project_operator_atom` (`sexpr.rs`) splits the broadcast dot: the existing
-`DotCallI` arm already handled `.+`/`.&`/`.==`; a new text-based arm handles the
-short-circuit/assignment Specials `.&&`/`.||`/`.=`/`.+=` (head ≠ `DotCallI`) by
-stripping the leading `.`. The paren expr form `:(.+)` already worked (the `.+`
-parses as an `OPERATOR_ATOM` inside the paren); only `:(.=)` (dotted *syntactic*
-assignment in parens) still errors — `is_paren_quotable_op` has no dotted set —
-left deferred. Fixture `dotted_operator_quote`.
+**Undotted operator-symbol quotes.** `:..`, `:√`, `:∛`, `:¬`, the Unicode
+operators (`:⊕`, `:≤`, `:→`, `:∈`, `:×`), and the ternary `:?` ⇒
+`(quote-: ..)`/`(quote-: √)`/`(quote-: ?)` etc. — the sibling cluster flagged last
+session. Pure parser change in `parse_quote_sym` (`expr.rs`): the bare-operator
+quote arm's predicate gains `is_quotable_operator(k)` (a new helper matching
+`DotDot`, the Unicode operator tiers `UniArrow`/`UniComparison`/`UniColon`/
+`UniPlus`/`UniTimes`/`UniPower`, `UniRadical`, and `Question`) alongside the
+existing `is_op_name`/`is_assignment_op`. The token text is emitted verbatim into
+`QUOTE_SYM`; `project_quote_sym` already reads a bare op token's text, so the
+projector was untouched. `:&&`/`:||`/`:->`/`:~`/`:!` already quoted (in
+`is_op_name`); the dotted broadcasts (`:.+`) stay on their own earlier arm.
+Siblings verified unregressed: `a[:]` (index colon → `None`), `a:b`
+(range), `::x` (type-annot prefix), `a.:b` (field access), `a ? b : c` (ternary).
+Fixture `operator_symbol_quote_value`.
 
-JS allow **511 → 514** (+3: `:.=`, `:.&&`, plus `A.:.+` — quoted dotted op as a
-field-access name, which reuses `parse_quote_sym`). Divergence 60 → 58,
-unsupported 4 → 3. Dir allow 93 → 94 (+1 fixture). Zero regressions; green,
-clippy/fmt clean.
+**Deferred (still divergences):** the syntactic sigil quotes `:$`/`:.`/`:...` —
+Julia quotes the sigil *alone* and drops any following operand to an `error-t`
+(`:$x` ⇒ `(quote-: $) (error-t x)`), entangled with interpolation/splat/field
+access; error-shape, left out. Also the long-standing bare-`:` Colon index value
+(`a[:]` ⇒ Fatou `(ref a)` vs Julia `(ref a :)`).
 
-**Sibling gaps surfaced (not in JS corpus, left as visible divergences):** undotted
-value-operator quotes still don't form — `:..` ⇒ `(toplevel ..)`, `:√`/`:∛`/`:¬`
-⇒ bare radical, where Julia wants `(quote-: ..)`/`(quote-: √)` etc. Julia also
-quotes `:&&`/`:||`/`:->`/`:?`. A natural follow-up cluster: extend the
-`parse_quote_sym` operator arm to cover `is_value_operator` (and the syntactic
-short-circuit/arrow/`?` set) so any operator-as-symbol quotes.
+These cases aren't in the JS corpus, so JS allow held at **514** (0 regressions);
+dir allow **94 → 95** (+1 fixture). Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Undotted operator-symbol quotes** (the sibling cluster above): `:..`, `:√`,
-   `:∛`, `:¬`, `:&&`, `:||`, `:->`, `:?` ⇒ `(quote-: ..)`/`(quote-: √)`/… Extend
-   the `parse_quote_sym` operator arm to cover `is_value_operator` plus the
-   syntactic short-circuit/arrow/`?` set; the OPERATOR_ATOM wrap already projects
-   them. Not in the JS corpus, but unblocks any operator-as-symbol. Verify `::`
-   stays a type annotation (`:::` ⇒ `(::-pre :)`, not a quote).
-2. **Command literals / custom cmd macros** (`` x`str` `` ⇒ `(macrocall @x_cmd
+1. **Command literals / custom cmd macros** (`` x`str` `` ⇒ `(macrocall @x_cmd
    (cmdstring-r "str"))`, `` x`` ``, triple `` ```…``` `` ⇒ `core_@cmd`): backtick
    cmd-macro names. ~4 JS FAILs.
+2. **Syntactic sigil quotes `:$`/`:.`/`:...`** (deferred this session): Julia
+   quotes the sigil alone and drops the operand to an `error-t` (`:$x` ⇒
+   `(quote-: $) (error-t x)`). Entangled with interpolation/splat/field access and
+   error-shape; a quote-context flag through `parse_prefix_interpolation` plus
+   error-shape modeling. Not in the JS corpus.
 3. Survey the remaining 58 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 4. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
@@ -78,6 +73,16 @@ short-circuit/arrow/`?` set) so any operator-as-symbol quotes.
    the parens (left as divergences).
 
 ## Earlier sessions
+
+- **2026-06-21s** — Quote of dotted operators. `:.+`, `:.&`, `:.=`, `:.&&`,
+  `:.||`, `:.==`, `:.+=` ⇒ `(quote-: (. +))` etc. — a prefix `:` quoting a
+  *dotted* (broadcast) operator models it as a `(. op)` access. `parse_quote_sym`
+  arm gated on `is_dotted_broadcast_text` (leading broadcast `.`, excl. `..`/`...`)
+  wraps the token in `OPERATOR_ATOM`; `project_operator_atom` splits the broadcast
+  dot (a text-based arm handles the short-circuit/assignment Specials
+  `.&&`/`.||`/`.=`/`.+=`). `:(.=)` (dotted syntactic assignment in parens) still
+  errors. JS allow 511 → 514 (+`:.=`, `:.&&`, `A.:.+`). Fixture
+  `dotted_operator_quote`.
 
 - **2026-06-21r** — String-macro numeric suffix. `x"s"2` ⇒ `(macrocall @x_str
   (string-r "s") 2)`: a digit-led suffix glued to a string macro's close delimiter

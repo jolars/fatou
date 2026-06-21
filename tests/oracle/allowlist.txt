@@ -61,6 +61,7 @@ operator_call
 operator_suffixes
 operator_symbol_quote
 operator_symbol_quote_paren
+operator_symbol_quote_value
 pairs
 parametric_types
 paren_block
