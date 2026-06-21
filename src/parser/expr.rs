@@ -705,8 +705,14 @@ fn parse_prefix(
                 diagnostics,
                 operand_flags,
             ) else {
-                // A bare prefix operator with no operand: wrap it as an error.
-                return Some(error_expr_with_range(start, start + 1));
+                // A bare prefix operator with no operand is the operator used as
+                // a value atom (`+` → `+`, `<:` → `<:`, `.+` → `(. +)`). The
+                // syntactic `::` has no value form and stays an error (Julia:
+                // `::` → `(::-pre (error))`).
+                if tok.kind == TokKind::ColonColon {
+                    return Some(error_expr_with_range(start, start + 1));
+                }
+                return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
             };
             let mut events = vec![Event::Start(node)];
             push_range(&mut events, start, operand.start);
@@ -764,8 +770,51 @@ fn parse_prefix(
         | TokKind::Char
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
+        // A bare binary/value operator in prefix position is the operator used as
+        // a value atom (`.&` → `(. &)`, `*` → `*`, `=>` → `=>`). The unary value
+        // operators (`+ - ! ~ <: >:`) are folded above; this arm catches the
+        // binary-only and broadcast value operators that fall through. Syntactic
+        // operators (`= :: && || -> ? . ...`) are excluded by `is_value_operator`
+        // and fall to `None` (an error, matching Julia).
+        k if is_value_operator(k) => Some(atom(SyntaxKind::OPERATOR_ATOM, start)),
         _ => None,
     }
+}
+
+/// Whether `kind` is an operator that, alone in value position, is the operator
+/// used as a value atom (`+` → `+`, `.&` → `(. &)`, `:` → `:`). This is the
+/// non-syntactic operator set: undotted operator names (minus the syntactic
+/// `&&`/`||`/`->`), the broadcast forms, plus `:`/`..` and the Unicode radicals.
+/// The erroring syntactic operators (`= :: && || -> ? . ...` and assignment)
+/// are excluded — Julia reports them as errors in value position.
+fn is_value_operator(kind: TokKind) -> bool {
+    use TokKind::*;
+    (is_op_name(kind) && !matches!(kind, AndAnd | OrOr | Arrow))
+        || matches!(
+            kind,
+            Colon
+                | DotDot
+                | UniRadical
+                | DotPlus
+                | DotMinus
+                | DotStar
+                | DotSlash
+                | DotSlashSlash
+                | DotCaret
+                | DotPercent
+                | DotTilde
+                | DotEqEq
+                | DotNotEq
+                | DotLt
+                | DotLe
+                | DotGt
+                | DotGe
+                | DotFatArrow
+                | DotLongArrow
+                | DotPipeGt
+                | DotAmp
+                | DotPipe
+        )
 }
 
 /// Parse a prefix `:` quote into a `QUOTE_SYM` node: `:name`/`:end` (a symbol)

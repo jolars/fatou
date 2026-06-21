@@ -22,37 +22,48 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **461 allowlisted**, 110 divergence, 4 unsupported.
-Dir corpus: **82 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "docstring attachment" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **469 allowlisted**, 102 divergence, 4 unsupported.
+Dir corpus: **83 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21h)
+## Latest session (2026-06-21i)
 
-**Docstring attachment.** A bare, unprefixed `STRING_LITERAL` statement directly
-followed by another statement — ≤1 newline of trivia, no `;`, no blank line —
-folds into `(doc <string> <target>)` (JuliaSyntax `parse_docstring`). Rule probed
-exhaustively: blank line breaks it, a comment *line* between breaks it (2
-newlines), same-line comment is fine, prefixed string macros (`r"…"`) and command
-strings never doc, `"a" + b` is one expr (never matches), `"doc"\nend` = no
-target = bare string, the target is taken as-is (not recursively a doc), and the
-rule fires anywhere mid-block (not just at block start). **Implementation:** one
-recursive post-pass `fold_docstrings` (`core.rs`) over the *flat* event stream
-just before `build_tree`. Key insight — every block body's events flatten up into
-the root event list, so a single pass folds toplevel, `;`-grouped lines
-(`TOPLEVEL_SEMICOLON`), and nested function/module/begin `BLOCK`s uniformly
-(containers gated by `is_doc_container`). New `DOC` `SyntaxKind`; projector arm
-`DOC ⇒ (doc …)` reuses `stmt_strings`. CST stays lossless (only `DOC` wrappers
-inserted). **Not a projector compensation** — the fold is a real CST node, the
-projector just maps it.
+**Bare operator value atoms.** A non-syntactic operator with no operand to its
+right is the operator used as a *value* (a function reference), not an error:
+`+` ⇒ `+`, `~` ⇒ `~`, `.+` ⇒ `(. +)`, `.&` ⇒ `(. &)`, `<:` ⇒ `<:`, and this also
+unblocked `(.+)(a)` ⇒ `(call (. +) a)`. Probed Julia exhaustively for the
+syntactic/value split: `+ - * == < <: >: .+ .- .& | ~ ! |> => √` are valid bare
+atoms; `= :: && || -> ? . ...` and all assignment ops error (`(error op)` /
+`(::-pre (error))`) — deferred error-shape. **Implementation:** new
+`OPERATOR_ATOM` `SyntaxKind`. Two parser entry points (`src/parser/expr.rs`):
+(1) the unary-prefix arm's no-operand branch now returns `OPERATOR_ATOM` instead
+of `error_expr_with_range` (except `::`, kept erroring); (2) a fallback arm before
+`_ => None` catches the binary-only and broadcast value operators via the new
+`is_value_operator` predicate (undotted `is_op_name` minus `&& || ->`, plus the
+broadcast set, `: .. √`). Projector `OPERATOR_ATOM ⇒ project_operator_atom`
+(`sexpr.rs`): `(. op)` for broadcast forms (detected via `infix_head` returning
+`DotCallI`), raw token text otherwise — so unmapped kinds (`√`, `..`) stay
+faithful. Bare `$` interpolation (`$\n`) now projects to `$` (not `($ )`).
+**Not a projector compensation** — `OPERATOR_ATOM` is a real CST node; the CST
+stays lossless.
 
-JS allow **455 → 461** (+6: js-02079ffa, js-10d3f0bb, js-69e0ae28, js-9a2b0b62,
-js-dc95e5f6, js-e16974cd), divergence 116 → 110, unsupported held 4. Dir allow
-81 → 82 (new fixture `docstring`). Zero regressions; green, clippy/fmt clean.
+JS allow **461 → 469** (+8: js-4c6afee9, js-7ace431c, js-9ec2caf4, js-a318c242,
+js-a3fb44cc, js-bb93e85b, js-cee17e6f, js-ca7f2569), divergence 110 → 102,
+unsupported held 4. Dir allow 82 → 83 (new fixture `bare_operator`). Zero
+regressions; green, clippy/fmt clean.
+
+**Trap found (deferred, not in scope):** prefix operators consume an operand
+*across a newline* — `-\nx` ⇒ `(call-pre - x)` where Julia makes two statements
+`- x`. The bare cases in the corpus are single operators (EOF/trailing-newline)
+so they're unaffected; the `bare_operator` fixture uses `;`-terminated lines to
+sidestep this (a trailing unary-arm operator would otherwise eat the next line's
+first token). Fixing it is a newline-statement-termination concern for unary
+operands.
 
 **Suggested next targets (ranked):**
 1. **Macro-call name clusters** (~15 FAIL): `@A.B.x` (js-ee8e4e0c), `A.B.@x`
@@ -60,15 +71,20 @@ js-dc95e5f6, js-e16974cd), divergence 116 → 110, unsupported held 4. Dir allow
    (js-28af1263), `@end x` (js-a37773f7), `@$ y` (js-c143c4d8), `$A.@x`,
    `A.$B.@x`, `@S[a].b`/`@S{a}.b` etc. Several share a root in macro-name parsing.
 2. **N-dim array concatenation** (~25 FAIL, largest cluster): `;;`/`;;;` ncat
-   dims (`[a ;; b]`, `[x ; y ;; z]`, `T[a b; c d]`), empty `[;]`/`[;;]`,
-   newline-as-row-sep `[x \n y]`, `[f (x)]` space-call. Big unlock; needs a
-   dedicated array-literal parser rework.
-3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26; reuse the
-   raw-string unescaper for `var` content.
-4. **`function \n f() end`** — newline directly after the `function` keyword
-   mis-parses the signature as a block (earlier leftover).
+   dims, empty `[;]`/`[;;]`, newline-as-row-sep `[x \n y]`, `[f (x)]` space-call.
+   Big unlock; needs a dedicated array-literal parser rework.
+3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26.
+4. **`function \n f() end`** (js-e811d4a1) — newline after the `function` keyword.
 
 ## Earlier sessions
+
+- **2026-06-21h** — Docstring attachment (`"doc"\nfoo` ⇒ `(doc (string "doc")
+  foo)`). A bare unprefixed `STRING_LITERAL` statement directly followed by
+  another (≤1 newline trivia, no `;`, no blank line) folds into a `DOC` node via
+  one recursive post-pass `fold_docstrings` (`core.rs`) over the flat event stream
+  before `build_tree` — block bodies flatten up, so one pass covers toplevel,
+  `;`-lines, and nested function/module/begin bodies. JS allow 455 → 461. Fixture
+  `docstring`.
 
 - **2026-06-21g** — Bare-name function/macro forward declarations (`function f
   end`, `macro m end`, `function $f end` ⇒ `(function f)`/`(macro m)`/`(function
@@ -290,14 +306,11 @@ js-dc95e5f6, js-e16974cd), divergence 116 → 110, unsupported held 4. Dir allow
 
 - **2026-06-17d** — Broadcast short-circuit `.&&`/`.||`: 5-file recipe (infix-only,
   no prefix); `DotAndAnd`/`DotOrOr` in the 3-char dotted table, share `&&`/`||`
-  tiers, project to their own `Special(".&&")`/`Special(".||")` heads (not
-  `dotcall-i`). JS allow 271 → 273. Fixture `dot_logical_operator`.
+  tiers, project to their own `Special` heads. JS allow 271 → 273.
 
-- **2026-06-17b** — Augmented assignment `op=` (parity-driven ASCII set): 16
-  TokKinds/SyntaxKinds for `+= -= *= /= //= ^= %= |= &=` + broadcast `.+= … .%=`.
-  Lexer longest-match (`.//=`>`.//`, `//=`>`//`); an `is_assignment_op` helper folds
-  them into the existing `ASSIGNMENT_EXPR` arm + `(2,1)` tier; `project_assignment`
-  reads the head from operator-token text. `global`/`let` free. JS allow 259 → 264.
+- **2026-06-17b** — Augmented assignment `op=` (16 TokKinds for `+= … &=` +
+  broadcast); `is_assignment_op` folds them into `ASSIGNMENT_EXPR` + `(2,1)` tier.
+  JS allow 259 → 264.
 
 - **2026-06-17a** — Built the oracle from scratch + ran the loop 3×: JuliaSyntax
   differential oracle (projector `sexpr.rs` + `--to sexpr`, harness, curated +

@@ -659,6 +659,20 @@ through), so the grammar can grow incrementally.
   Projector arm `DOC ⇒ (doc …)` (`src/parser/sexpr.rs`). **Deferred:** the
   no-target error shape (`"doc"\nend` ⇒ string then `(error end)`).
 
+- [x] Bare operator value atoms (`+` ⇒ `+`, `.&` ⇒ `(. &)`, `(.+)(a)` ⇒
+  `(call (. +) a)`). A non-syntactic operator with no operand to its right is the
+  operator used as a value (a function reference), not an error. The unary-prefix
+  arm (`+ - ! ~ <: >: .+ .- …`) now builds an `OPERATOR_ATOM` instead of erroring
+  when its operand parse fails (except `::`, which keeps Julia's `(::-pre (error))`
+  shape); a fallback arm catches the binary-only and broadcast value operators
+  (`* == |> => .& .* …`) via `is_value_operator` (`src/parser/expr.rs`). Syntactic
+  operators (`= :: && || -> ? . ...` and assignment) are excluded and stay errors.
+  Projector `OPERATOR_ATOM ⇒ project_operator_atom` emits `(. op)` for broadcast
+  forms and the raw token text otherwise; a bare `$` interpolation projects to `$`
+  (`src/parser/sexpr.rs`). **Deferred:** prefix operators consume an operand across
+  a newline (`-\nx` ⇒ `(call-pre - x)` vs Julia's two statements) — a separate
+  newline-statement-termination concern.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

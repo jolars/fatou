@@ -1,0 +1,65 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..49
+  TOPLEVEL_SEMICOLON@0..21
+    OPERATOR_ATOM@0..1
+      PLUS@0..1 "+"
+    SEMICOLON@1..2 ";"
+    WHITESPACE@2..3 " "
+    OPERATOR_ATOM@3..4
+      TILDE@3..4 "~"
+    SEMICOLON@4..5 ";"
+    WHITESPACE@5..6 " "
+    OPERATOR_ATOM@6..8
+      DOT_PLUS@6..8 ".+"
+    SEMICOLON@8..9 ";"
+    WHITESPACE@9..10 " "
+    OPERATOR_ATOM@10..12
+      DOT_AMP@10..12 ".&"
+    SEMICOLON@12..13 ";"
+    WHITESPACE@13..14 " "
+    OPERATOR_ATOM@14..16
+      SUBTYPE@14..16 "<:"
+    SEMICOLON@16..17 ";"
+    WHITESPACE@17..18 " "
+    OPERATOR_ATOM@18..20
+      SUPERTYPE@18..20 ">:"
+    SEMICOLON@20..21 ";"
+  NEWLINE@21..22 "\n"
+  TOPLEVEL_SEMICOLON@22..36
+    OPERATOR_ATOM@22..23
+      STAR@22..23 "*"
+    SEMICOLON@23..24 ";"
+    WHITESPACE@24..25 " "
+    OPERATOR_ATOM@25..27
+      EQ_EQ@25..27 "=="
+    SEMICOLON@27..28 ";"
+    WHITESPACE@28..29 " "
+    OPERATOR_ATOM@29..31
+      PIPE_GT@29..31 "|>"
+    SEMICOLON@31..32 ";"
+    WHITESPACE@32..33 " "
+    OPERATOR_ATOM@33..35
+      FAT_ARROW@33..35 "=>"
+    SEMICOLON@35..36 ";"
+  NEWLINE@36..37 "\n"
+  CALL_EXPR@37..44
+    PAREN_EXPR@37..41
+      LPAREN@37..38 "("
+      OPERATOR_ATOM@38..40
+        DOT_PLUS@38..40 ".+"
+      RPAREN@40..41 ")"
+    ARG_LIST@41..44
+      LPAREN@41..42 "("
+      ARG@42..43
+        NAME@42..43
+          IDENT@42..43 "a"
+      RPAREN@43..44 ")"
+  NEWLINE@44..45 "\n"
+  PAREN_EXPR@45..48
+    LPAREN@45..46 "("
+    PLUS@46..47 "+"
+    RPAREN@47..48 ")"
+  NEWLINE@48..49 "\n"

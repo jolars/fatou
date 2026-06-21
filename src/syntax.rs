@@ -52,6 +52,7 @@ pub enum SyntaxKind {
     POSTFIX_EXPR,
     END_MARKER,
     BEGIN_MARKER,
+    OPERATOR_ATOM,
     ASSIGNMENT_EXPR,
     ARROW_EXPR,
     JUXTAPOSE_EXPR,

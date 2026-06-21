@@ -104,7 +104,15 @@ fn project(node: &SyntaxNode) -> String {
         CMD_LITERAL => project_cmd(node),
         // A standalone interpolation projects to a `$` node (`$x` → `($ x)`);
         // inside a string the inner value is used instead (via `string_parts`).
-        INTERPOLATION => format!("($ {})", project_interpolation(node)),
+        // A bare `$` with no operand (`$\n`) is the `$` symbol itself.
+        INTERPOLATION => {
+            let inner = project_interpolation(node);
+            if inner.is_empty() && !node.children_with_tokens().any(|el| el.kind() == LPAREN) {
+                "$".to_string()
+            } else {
+                format!("($ {inner})")
+            }
+        }
 
         PAREN_EXPR | CONDITION => match first_node(node) {
             Some(inner) => project(&inner),
@@ -182,6 +190,7 @@ fn project(node: &SyntaxNode) -> String {
 
         END_MARKER => "end".to_string(),
         BEGIN_MARKER => "begin".to_string(),
+        OPERATOR_ATOM => project_operator_atom(node),
 
         other => format!("(unsupported {other:?})"),
     }
@@ -266,6 +275,23 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         // in faithfully so an unmapped operator surfaces as a divergence.
         _ => CallI("?"),
     }
+}
+
+/// A bare operator used as a value atom (`+` → `+`, `.&` → `(. &)`, `:` → `:`).
+/// Broadcast operators project to `(. op)` (via `operator_func_repr`); every
+/// other operator projects to its raw token text, so kinds without an
+/// `infix_head` entry (the Unicode radicals `√`/`¬`, `..`) project faithfully.
+fn project_operator_atom(node: &SyntaxNode) -> String {
+    significant(node)
+        .iter()
+        .find_map(|el| match el {
+            NodeOrToken::Token(t) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
+                Some(operator_func_repr(t.kind()))
+            }
+            NodeOrToken::Token(t) => Some(t.text().to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "(operator)".to_string())
 }
 
 /// The function-name representation of an operator used as a callee, e.g. in
