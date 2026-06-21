@@ -741,6 +741,17 @@ through), so the grammar can grow incrementally.
   (`src/parser/sexpr.rs`). **Deferred:** prefix operators consume an operand across
   a newline (`-\nx` ⇒ `(call-pre - x)` vs Julia's two statements) — a separate
   newline-statement-termination concern.
+- [x] Word operators `in`/`isa` (`i in rhs` ⇒ `(call-i i in rhs)`, `x isa T` ⇒
+  `(call-i x isa T)`). Lexed as identifiers (so `for i in xs` keeps `in` the
+  iteration separator), they act as infix operators at the comparison tier
+  (`(10, 11)`, left-associative) via a `word_operator` check in the Pratt loop
+  (`src/parser/expr.rs`), gated off by the new `ExprFlags::no_word_op` while
+  parsing a `for`-binding (`parse_for_binding`, threaded through `parse_header`).
+  The projector reads the loose `in`/`isa` `IDENT` operator of a `BINARY_EXPR`
+  back as a `(call-i …)` head (`src/parser/sexpr.rs`). Comparison chains stay
+  nested (`a in b in c` ⇒ `((a in b) in c)`), a recorded modeling divergence like
+  the symbolic comparisons. **Deferred:** the broadcast type comparison `.<:`/`.>:`
+  (mis-lexes as `.<` + `:y` today).
 
 ## Incremental reparse
 

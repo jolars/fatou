@@ -99,3 +99,4 @@ unary_operator_call
 unicode_operators
 var_macro_name
 version_string
+word_operators

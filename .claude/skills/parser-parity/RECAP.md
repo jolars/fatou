@@ -22,46 +22,59 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **517 allowlisted**, 55 divergence, 3 unsupported.
-Dir corpus: **97 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **519 allowlisted**, 53 divergence, 3 unsupported.
+Dir corpus: **98 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "word operators `in`/`isa`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21u)
+## Latest session (2026-06-21v)
 
-**Command literals / custom cmd macros.** `` `cmd` `` ⇒ `(macrocall core_@cmd
-(cmdstring-r "cmd"))`; a prefix names a custom command macro `` x`str` `` ⇒
-`(macrocall @x_cmd (cmdstring-r "str"))`, `` x`` `` ⇒ empty body; a glued flag is
-an extra arg `` x`str`flag `` ⇒ `… (cmdstring-r "str") "flag"`; a triple-backtick
-command gets the same dedent + per-line chunking as a triple string
-(`` ```\n x\n y``` `` ⇒ `(cmdstring-s-r "x\n" "y")`). **Pure projector change** —
-the parser already built `CMD_LITERAL` with `STRING_PREFIX`/`STRING_SUFFIX`
-children. `project_cmd` (`sexpr.rs`) now picks the head from `STRING_PREFIX`
-(`@<p>_cmd` else `core_@cmd`), appends a `STRING_SUFFIX` flag arg, and routes the
-triple case through a new `triple_cmd_parts`. **Trap hit:** commands are *raw* —
-`$x` interpolation stays literal source (escaped `\$`), so the triple path can't
-reuse `triple_string_parts` (which splits interpolation into its own child and
-regressed `triple_command`). Refactored: extracted `chunk_triple_lines` (the
-dedent/chunk/escape tail) shared by `triple_string_parts` and `triple_cmd_parts`,
-the latter folding `cmd_raw_body` (content + interpolation source) into all-`Text`
-lines. JS allow 514 → 517 (`x`str`/x``/triple-dedent`); dir allow 95 → 97
-(fixtures `command_macro`, `triple_command_dedent`). Green; clippy/fmt clean.
+**Word operators `in`/`isa`.** `i in rhs` ⇒ `(call-i i in rhs)`, `(i,j) in iter`
+⇒ `(call-i (tuple-p i j) in iter)`, `x isa T` ⇒ `(call-i x isa T)`. They stay
+lexed as **identifiers** (so `:in`/bare `in`/`for i in xs` are untouched) and act
+as comparison-tier infix operators `(10, 11)` via a new `word_operator` check in
+the Pratt loop placed after juxtaposition, before `next_operator` (`expr.rs`).
+The for-binding parse must *not* swallow `in` (it is the iteration separator), so
+a new `ExprFlags::no_word_op` gates the check off; `parse_for_binding` sets it and
+`parse_header` (`structural.rs`) routes only `FOR_BINDING` through it (a `while x
+in xs` condition keeps `in` a real comparison). Projector: `project_binary`
+(`sexpr.rs`) detects the sole loose `IDENT` child of a `BINARY_EXPR` (operands are
+node-wrapped) and heads `(call-i lhs <in|isa> rhs)`. Comparison chains stay nested
+(`a in b in c` ⇒ `((a in b) in c)`), a recorded modeling divergence like the
+symbolic comparisons. JS allow 517 → 519 (`i in rhs`, `(i,j) in iter`); dir allow
+97 → 98 (fixture `word_operators`). Green; clippy/fmt clean. **Note:** `for i ∈ xs`
+stays divergent (`∈` is a `UniComparison` op consumed by the var parse; `no_word_op`
+only suppresses the `in`/`isa` *identifiers*, not the Unicode `∈`) — pre-existing,
+not a regression.
 
 **Suggested next targets (ranked):**
-1. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
+1. **Broadcast type comparison `.<:`/`.>:`** (js-7c3e5c83 `x .<: y` ⇒ `(dotcall-i
+   x <: y)`): today `.<:` mis-lexes as `.<` + `:y`. Add `DotSubtype`/`DotSupertype`
+   to the dotted operator tables (longest-match: `.<:` before `.<`), comparison
+   tier, `DotCallI("<:")`. Small, clean, 1 JS case.
+2. **`var"…"` with escapes** (js-61a01ce8 `var"\""` ⇒ `(var ")`, js-8f5b1a26): the
+   non-standard-identifier content needs escape processing (`\"`→`"`, `\\`→`\`)
+   like the string path. 2 JS cases.
+3. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
    drops the operand to an `error-t` (`:$x` ⇒ `(quote-: $) (error-t x)`). Entangled
    with interpolation/splat/field access and error-shape. Not in the JS corpus.
-2. Survey the remaining 55 JS FAILs for the next cluster (`cargo test --test
+4. Survey the remaining 53 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
-3. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
-   @b))`, `A.@(x)` ⇒ `(. A (quote @x))`.
 
 ## Earlier sessions
 
+- **2026-06-21u** — Command literals / custom cmd macros. `` `cmd` `` ⇒
+  `(macrocall core_@cmd (cmdstring-r "cmd"))`; a prefix names a custom command
+  macro `` x`str` `` ⇒ `(macrocall @x_cmd …)`; a glued flag is an extra arg; a
+  triple-backtick command gets the same dedent + per-line chunking as a triple
+  string. Pure projector change: `project_cmd` heads from `STRING_PREFIX`, routes
+  the triple case through a new `triple_cmd_parts` sharing `chunk_triple_lines`
+  with `triple_string_parts` (commands are raw, so `$x` stays literal). JS allow
+  514 → 517; dir allow 95 → 97 (`command_macro`, `triple_command_dedent`).
 - **2026-06-21t** — Undotted operator-symbol quotes. `:..`, `:√`, `:∛`, `:¬`, the
   Unicode operators (`:⊕`, `:≤`, `:→`, `:∈`, `:×`), and the ternary `:?` ⇒
   `(quote-: ..)`/`(quote-: ?)` etc. Pure parser change: `parse_quote_sym`'s

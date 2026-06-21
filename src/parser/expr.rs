@@ -53,6 +53,11 @@ struct ExprFlags {
     /// (`a, b` ⇒ `(tuple a b)`). Off inside brackets and sub-expressions, where
     /// commas are argument/element separators handled by the container parsers.
     stmt_comma: bool,
+    /// Suppress the word operators `in`/`isa` (lexed as identifiers, comparison
+    /// precedence). Set only while parsing a `for`/generator loop variable, where
+    /// a following `in` is the iteration separator rather than a comparison
+    /// operator (`for i in xs` keeps `i` the loop variable, not `(i in xs)`).
+    no_word_op: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -76,6 +81,12 @@ const TERNARY_R: u8 = 3;
 /// (`L > R`), like `^`.
 const JUXTAPOSE_L: u8 = 32;
 const JUXTAPOSE_R: u8 = 31;
+
+/// Binding powers for the word operators `in`/`isa`. They share the comparison
+/// tier (the symbolic comparisons `< == …` are `(10, 11)`) and are
+/// left-associative.
+const WORD_OP_L: u8 = 10;
+const WORD_OP_R: u8 = 11;
 
 /// The loose end of the precedence range at which a statement-level bare comma
 /// builds a tuple. A comma binds *tighter* than assignment (`=` at `(2, 1)`), so
@@ -127,6 +138,22 @@ pub(crate) fn parse_block_stmt(
     parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
+/// Parse a `for`-loop binding (`for i in xs`), where a following `in`/`isa` is
+/// the iteration separator handled by the caller rather than a comparison
+/// operator. The `=` form (`for i = 1:3`) is still parsed whole as an
+/// `ASSIGNMENT_EXPR`. See [`ExprFlags::no_word_op`].
+pub(crate) fn parse_for_binding(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        no_word_op: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
+}
+
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
 /// insignificant and an operator may continue onto the next line. Note: this does
 /// *not* enable the `end` index marker — that is specific to square brackets and
@@ -161,6 +188,7 @@ fn parse_expr_in(
         begin_marker,
         public_context,
         stmt_comma,
+        no_word_op,
     } = flags;
     let ctx = ParserCtx::new(tokens);
 
@@ -313,6 +341,33 @@ fn parse_expr_in(
             && ctx.token(ctx.skip_ws(lhs.end)).map(|t| t.kind) == Some(TokKind::Comma)
         {
             lhs = parse_comma_tuple(tokens, &ctx, lhs, diagnostics, flags);
+            continue;
+        }
+
+        // Word operators `in`/`isa` (lexed as identifiers) act as infix operators
+        // at comparison precedence (`i in rhs` ⇒ `(call-i i in rhs)`, `x isa T` ⇒
+        // `(call-i x isa T)`). Like the comparison operators, they are
+        // left-associative and chains stay nested (a recorded modeling
+        // divergence). Suppressed while parsing a loop variable, where `in` is the
+        // for-spec separator. Checked after juxtaposition (so an adjacent `2in`
+        // still juxtaposes) and before the symbolic operators.
+        if !no_word_op && let Some(op_idx) = word_operator(&ctx, lhs.end, inside_brackets) {
+            if WORD_OP_L < min_bp {
+                break;
+            }
+            let rhs_operand = ctx.skip_trivia(op_idx + 1);
+            let Some(rhs) = parse_expr_in(tokens, rhs_operand, WORD_OP_R, diagnostics, flags)
+            else {
+                let op = &tokens[op_idx];
+                push_diagnostic(
+                    diagnostics,
+                    "expected right-hand side for operator",
+                    op.start,
+                    op.end,
+                );
+                return Some(error_expr_to_line_end(tokens, lhs.start, op_idx + 1));
+            };
+            lhs = build_binary(SyntaxKind::BINARY_EXPR, lhs, rhs);
             continue;
         }
 
@@ -1721,9 +1776,16 @@ fn parse_for_specs(
     let tokens = ctx.tokens();
     loop {
         // The loop variable (or, for the `=` form, the whole spec assignment).
+        // `no_word_op` keeps a following `in`/`isa` as the iteration separator
+        // (handled below) rather than swallowing it as a comparison operator.
         let var_start = ctx.skip_trivia(pos);
         push_range(events, pos, var_start);
-        if let Some(var) = parse_expr_in_brackets(tokens, var_start, 0, diagnostics) {
+        let var_flags = ExprFlags {
+            inside_brackets: true,
+            no_word_op: true,
+            ..ExprFlags::default()
+        };
+        if let Some(var) = parse_expr_in(tokens, var_start, 0, diagnostics, var_flags) {
             events.extend(var.events);
             pos = var.end;
         } else {
@@ -2537,6 +2599,26 @@ fn next_operator(
         return is_operator(next.kind).then_some((next_idx, next.kind));
     }
     is_operator(op.kind).then_some((op_idx, op.kind))
+}
+
+/// If an `in`/`isa` word operator (lexed as an identifier, comparison
+/// precedence) immediately follows the operand ending at `from`, return its
+/// token index. Honors newline sensitivity exactly like [`next_operator`]: a
+/// newline ends the expression at statement scope, but inside brackets the
+/// operator may continue onto the next line.
+fn word_operator(ctx: &ParserCtx<'_>, from: usize, inside_brackets: bool) -> Option<usize> {
+    let op_idx = ctx.skip_ws(from);
+    let op = ctx.token(op_idx)?;
+    let op_idx = if op.kind == TokKind::Newline {
+        if !inside_brackets {
+            return None;
+        }
+        ctx.skip_ws_and_newlines(from)
+    } else {
+        op_idx
+    };
+    let op = ctx.token(op_idx)?;
+    (op.kind == TokKind::Ident && (op.text == "in" || op.text == "isa")).then_some(op_idx)
 }
 
 fn is_operator(kind: TokKind) -> bool {

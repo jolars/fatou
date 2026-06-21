@@ -1,0 +1,81 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..65
+  BINARY_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "i"
+    WHITESPACE@1..2 " "
+    IDENT@2..4 "in"
+    WHITESPACE@4..5 " "
+    NAME@5..8
+      IDENT@5..8 "rhs"
+  NEWLINE@8..9 "\n"
+  BINARY_EXPR@9..23
+    TUPLE_EXPR@9..15
+      LPAREN@9..10 "("
+      ARG@10..11
+        NAME@10..11
+          IDENT@10..11 "i"
+      COMMA@11..12 ","
+      WHITESPACE@12..13 " "
+      ARG@13..14
+        NAME@13..14
+          IDENT@13..14 "j"
+      RPAREN@14..15 ")"
+    WHITESPACE@15..16 " "
+    IDENT@16..18 "in"
+    WHITESPACE@18..19 " "
+    NAME@19..23
+      IDENT@19..23 "iter"
+  NEWLINE@23..24 "\n"
+  BINARY_EXPR@24..31
+    NAME@24..25
+      IDENT@24..25 "x"
+    WHITESPACE@25..26 " "
+    IDENT@26..29 "isa"
+    WHITESPACE@29..30 " "
+    NAME@30..31
+      IDENT@30..31 "T"
+  NEWLINE@31..32 "\n"
+  BINARY_EXPR@32..38
+    NAME@32..33
+      IDENT@32..33 "a"
+    WHITESPACE@33..34 " "
+    IDENT@34..36 "in"
+    WHITESPACE@36..37 " "
+    NAME@37..38
+      IDENT@37..38 "b"
+  NEWLINE@38..39 "\n"
+  BINARY_EXPR@39..53
+    BINARY_EXPR@39..48
+      NAME@39..40
+        IDENT@39..40 "x"
+      WHITESPACE@40..41 " "
+      IDENT@41..44 "isa"
+      WHITESPACE@44..45 " "
+      NAME@45..48
+        IDENT@45..48 "Int"
+    WHITESPACE@48..49 " "
+    AND_AND@49..51 "&&"
+    WHITESPACE@51..52 " "
+    NAME@52..53
+      IDENT@52..53 "y"
+  NEWLINE@53..54 "\n"
+  BINARY_EXPR@54..64
+    CALL_EXPR@54..58
+      NAME@54..55
+        IDENT@54..55 "f"
+      ARG_LIST@55..58
+        LPAREN@55..56 "("
+        ARG@56..57
+          NAME@56..57
+            IDENT@56..57 "x"
+        RPAREN@57..58 ")"
+    WHITESPACE@58..59 " "
+    IDENT@59..61 "in"
+    WHITESPACE@61..62 " "
+    NAME@62..64
+      IDENT@62..64 "xs"
+  NEWLINE@64..65 "\n"

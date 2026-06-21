@@ -416,6 +416,24 @@ fn is_operator(kind: SyntaxKind) -> bool {
 // --- Binary / unary / assignment -------------------------------------------
 
 fn project_binary(node: &SyntaxNode) -> String {
+    // Word operators `in`/`isa` are lexed as identifiers, so the operator is the
+    // sole loose `IDENT` token child (both operands are wrapped in nodes). They
+    // head an ordinary infix call: `i in rhs` ⇒ `(call-i i in rhs)`.
+    if let Some(word) = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| t.kind() == IDENT && matches!(t.text(), "in" | "isa"))
+    {
+        let operands = child_nodes(node);
+        if operands.len() == 2 {
+            return format!(
+                "(call-i {} {} {})",
+                project(&operands[0]),
+                word.text(),
+                project(&operands[1])
+            );
+        }
+    }
     let op = match operator_token(node) {
         Some(t) => t,
         None => return format!("(unsupported {:?})", node.kind()),

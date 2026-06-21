@@ -16,7 +16,8 @@ use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
-    parse_block_stmt, parse_expr, parse_prefix_interpolation, parse_quote_sym, push_var_macro_name,
+    parse_block_stmt, parse_expr, parse_for_binding, parse_prefix_interpolation, parse_quote_sym,
+    push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -1092,7 +1093,18 @@ fn parse_header(
 
     events.push(Event::Start(node_kind));
     let mut i = header_start;
-    if run_expr && let Some(expr) = parse_expr(ctx.tokens(), header_start, 0, diagnostics) {
+    // A `for`-loop binding suppresses the `in`/`isa` word operators so a following
+    // `in` is the iteration separator (consumed as a loose token below and split
+    // out by the projector), not a comparison. Other headers (`while` conditions,
+    // `let` bindings) keep `in`/`isa` as ordinary comparison operators.
+    let header_expr = run_expr.then(|| {
+        if node_kind == SyntaxKind::FOR_BINDING {
+            parse_for_binding(ctx.tokens(), header_start, diagnostics)
+        } else {
+            parse_expr(ctx.tokens(), header_start, 0, diagnostics)
+        }
+    });
+    if let Some(Some(expr)) = header_expr {
         events.extend(expr.events);
         i = expr.end;
     } else if ctx.token(i).map(|t| t.kind) == Some(TokKind::Dollar) {
