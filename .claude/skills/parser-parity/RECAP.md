@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **496 allowlisted**, 75 divergence, 4 unsupported.
-Dir corpus: **87 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **503 allowlisted**, 68 divergence, 4 unsupported.
+Dir corpus: **89 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,41 +31,45 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21m)
+## Latest session (2026-06-21n)
 
-**N-dimensional concatenation (`;;`/`;;;`).** `[...]` now nests by dimension.
-`parse_matrix` (`expr.rs`) was rewritten: it scans the body into elements plus
-dimension-tagged `SepRun`s (a `;` run's length, a row-breaking newline → 1, a
-space → 0; a *trailing* separator counts `;` only, so `[x;]` → `(vcat x)` but
-`[x\n]` → `(vect x)`), then `emit_cat_groups`/`emit_cat_child` recursively split
-at each level's max dimension, wrapping multi-element groups in `MATRIX_ROW` and
-leaving single elements bare. The projector (`project_matrix`, new
-`project_cat_child`/`group_dimension`/`max_semicolon_run`) recovers each group's
-dimension from the `;`/newline tokens between its direct child nodes and heads it
-`hcat`/`vcat`/`ncat-d` (top) or `row`/`nrow-d` (nested). Element-free `[;]`/`[;;]`
-→ `(ncat-1)`/`(ncat-2)` via `parse_empty_ncat`. CST is now flatter (single-row
-hcat and single-element vcat rows drop the redundant `MATRIX_ROW`); snapshots
-`matrices`/`tilde_operator`/`transpose`/`array_space_unary` re-accepted, projections
-unchanged.
+**Typed + brace concatenation.** `T[x y]` → `(typed_hcat T x y)`, `T[a;b]` →
+`(typed_vcat T a b)`, `T[a ;; b]` → `(typed_ncat-2 T a b)`, `T[;]` →
+`(typed_ncat-1 T)`; `{x y}` → `(bracescat (row x y))`, `{a;b}` → `(bracescat a b)`,
+`{a;;b}` → `(bracescat (nrow-2 a b))`, `{;}` → `(bracescat (nrow-1))`.
+`parse_matrix`/`parse_empty_ncat` (`expr.rs`) were parametrized on the close token
+plus the comma-form and matrix-form node kinds, so all three delimiters reuse the
+same scan + `MATRIX_ROW` nesting. Typed: new `parse_typed_concat` runs after the
+comprehension check in `parse_postfix` (RBracket only); a space/`;`-separated body
+→ `TYPED_MATRIX_EXPR` wrapping the type expr + a `MATRIX_EXPR` (a lone element with
+only a trailing newline collapses to `VECT_EXPR` → stays a `ref`). Braces:
+`parse_braces` now dispatches comma/single/empty → `BRACES`, else
+`BRACESCAT_EXPR`. Projector: `matrix_head_and_children` factored out of
+`project_matrix`; `project_typed_matrix` prepends the type and prefixes `typed_`;
+`project_bracescat` always heads `bracescat` (dim-1 keeps children, dim-0/≥2 and
+empty nest a single `row`/`nrow-d` child, since bracescat is itself the dim-1
+container). Fixtures `typed_concat`, `bracescat`.
 
-JS allow **482 → 496** (+14), divergence 89 → 75, unsupported held 4. Dir allow
-86 → 87 (new fixture `ncat`). Zero regressions; green, clippy/fmt clean.
+JS allow **496 → 503** (+7), divergence 75 → 68, unsupported held 4. Dir allow
+87 → 89 (+2 fixtures). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Typed + brace concatenation** (reuses this session's machinery): `T[x y]` →
-   `(typed_hcat T x y)`, `T[a;b]` → `(typed_vcat T a b)`, `T[a ; b ;; c ; d]` →
-   `(typed_ncat-2 …)` (js-9d8e3914/9f265a80/f401d1e3/dcc67116; currently `ref` —
-   the `[` is a postfix index, needs a concat path when the bracket body is
-   space/`;`-separated). Braces `{x y}` → `(bracescat (row x y))`, `{x ;;; y}` →
-   `(bracescat (nrow-3 x y))` (js-1ba87cf7/3de3c224; always `bracescat` head,
-   dimension lives only in the nested `nrow-d`).
-2. **Remaining macro-name forms**: `@(A)` paren name (js-f3aa762e ⇒ `@A`),
+1. **Remaining macro-name forms**: `@(A)` paren name (js-f3aa762e ⇒ `@A`),
    `@S[a].b`/`@S{a}.b` (js-b55b2b19/b6643c20 — macrocall then postfix `.b`).
-3. **Concat newline/whitespace edges** (mostly error-shape, lower value):
+2. **Concat newline/whitespace edges** (mostly error-shape, lower value):
    `[x \n, ]`, `[x \n\n ]`, `[a b ;; \n c]`, `[f (x)]` space-call — several emit
    Julia `(error-t)` recovery, so check each before committing.
+3. Survey the remaining 68 JS FAILs for the next cluster (`cargo test --test
+   juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 
 ## Earlier sessions
+
+- **2026-06-21m** — N-dimensional concatenation (`;;`/`;;;`). `parse_matrix`
+  rewritten to scan elements + dimension-tagged `SepRun`s and recursively nest
+  `MATRIX_ROW`s at each level's max dimension; projector `project_matrix`/
+  `project_cat_child`/`group_dimension` recover dimension from `;`/newline tokens,
+  heading `hcat`/`vcat`/`ncat-d` (top) or `row`/`nrow-d` (nested). Element-free
+  `[;]`/`[;;]` via `parse_empty_ncat`. JS allow 482 → 496. Fixture `ncat`.
 
 - **2026-06-21l** — `var"…"` macro names. `@var"#"` ⇒ `(macrocall (var @#))`,
   qualified `A.@var"#"`, `export @var"#"` via shared `push_var_macro_name`

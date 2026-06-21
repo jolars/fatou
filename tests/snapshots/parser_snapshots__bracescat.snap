@@ -1,0 +1,220 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..133
+  ASSIGNMENT_EXPR@0..9
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    BRACESCAT_EXPR@4..9
+      LBRACE@4..5 "{"
+      ARG@5..6
+        NAME@5..6
+          IDENT@5..6 "x"
+      WHITESPACE@6..7 " "
+      ARG@7..8
+        NAME@7..8
+          IDENT@7..8 "y"
+      RBRACE@8..9 "}"
+  NEWLINE@9..10 "\n"
+  ASSIGNMENT_EXPR@10..20
+    NAME@10..11
+      IDENT@10..11 "b"
+    WHITESPACE@11..12 " "
+    EQ@12..13 "="
+    WHITESPACE@13..14 " "
+    BRACESCAT_EXPR@14..20
+      LBRACE@14..15 "{"
+      ARG@15..16
+        NAME@15..16
+          IDENT@15..16 "a"
+      SEMICOLON@16..17 ";"
+      WHITESPACE@17..18 " "
+      ARG@18..19
+        NAME@18..19
+          IDENT@18..19 "b"
+      RBRACE@19..20 "}"
+  NEWLINE@20..21 "\n"
+  ASSIGNMENT_EXPR@21..35
+    NAME@21..22
+      IDENT@21..22 "c"
+    WHITESPACE@22..23 " "
+    EQ@23..24 "="
+    WHITESPACE@24..25 " "
+    BRACESCAT_EXPR@25..35
+      LBRACE@25..26 "{"
+      MATRIX_ROW@26..29
+        ARG@26..27
+          NAME@26..27
+            IDENT@26..27 "a"
+        WHITESPACE@27..28 " "
+        ARG@28..29
+          NAME@28..29
+            IDENT@28..29 "b"
+      SEMICOLON@29..30 ";"
+      WHITESPACE@30..31 " "
+      MATRIX_ROW@31..34
+        ARG@31..32
+          NAME@31..32
+            IDENT@31..32 "c"
+        WHITESPACE@32..33 " "
+        ARG@33..34
+          NAME@33..34
+            IDENT@33..34 "d"
+      RBRACE@34..35 "}"
+  NEWLINE@35..36 "\n"
+  ASSIGNMENT_EXPR@36..49
+    NAME@36..37
+      IDENT@36..37 "d"
+    WHITESPACE@37..38 " "
+    EQ@38..39 "="
+    WHITESPACE@39..40 " "
+    BRACESCAT_EXPR@40..49
+      LBRACE@40..41 "{"
+      ARG@41..42
+        NAME@41..42
+          IDENT@41..42 "x"
+      WHITESPACE@42..43 " "
+      SEMICOLON@43..44 ";"
+      SEMICOLON@44..45 ";"
+      SEMICOLON@45..46 ";"
+      WHITESPACE@46..47 " "
+      ARG@47..48
+        NAME@47..48
+          IDENT@47..48 "y"
+      RBRACE@48..49 "}"
+  NEWLINE@49..50 "\n"
+  ASSIGNMENT_EXPR@50..62
+    NAME@50..51
+      IDENT@50..51 "e"
+    WHITESPACE@51..52 " "
+    EQ@52..53 "="
+    WHITESPACE@53..54 " "
+    BRACESCAT_EXPR@54..62
+      LBRACE@54..55 "{"
+      ARG@55..56
+        NAME@55..56
+          IDENT@55..56 "a"
+      WHITESPACE@56..57 " "
+      SEMICOLON@57..58 ";"
+      SEMICOLON@58..59 ";"
+      WHITESPACE@59..60 " "
+      ARG@60..61
+        NAME@60..61
+          IDENT@60..61 "b"
+      RBRACE@61..62 "}"
+  NEWLINE@62..63 "\n"
+  ASSIGNMENT_EXPR@63..77
+    NAME@63..64
+      IDENT@63..64 "f"
+    WHITESPACE@64..65 " "
+    EQ@65..66 "="
+    WHITESPACE@66..67 " "
+    BRACESCAT_EXPR@67..77
+      LBRACE@67..68 "{"
+      MATRIX_ROW@68..71
+        ARG@68..69
+          NAME@68..69
+            IDENT@68..69 "a"
+        SEMICOLON@69..70 ";"
+        ARG@70..71
+          NAME@70..71
+            IDENT@70..71 "b"
+      SEMICOLON@71..72 ";"
+      SEMICOLON@72..73 ";"
+      MATRIX_ROW@73..76
+        ARG@73..74
+          NAME@73..74
+            IDENT@73..74 "c"
+        SEMICOLON@74..75 ";"
+        ARG@75..76
+          NAME@75..76
+            IDENT@75..76 "d"
+      RBRACE@76..77 "}"
+  NEWLINE@77..78 "\n"
+  ASSIGNMENT_EXPR@78..86
+    NAME@78..79
+      IDENT@78..79 "g"
+    WHITESPACE@79..80 " "
+    EQ@80..81 "="
+    WHITESPACE@81..82 " "
+    BRACESCAT_EXPR@82..86
+      LBRACE@82..83 "{"
+      ARG@83..84
+        NAME@83..84
+          IDENT@83..84 "x"
+      SEMICOLON@84..85 ";"
+      RBRACE@85..86 "}"
+  NEWLINE@86..87 "\n"
+  ASSIGNMENT_EXPR@87..96
+    NAME@87..88
+      IDENT@87..88 "h"
+    WHITESPACE@88..89 " "
+    EQ@89..90 "="
+    WHITESPACE@90..91 " "
+    BRACESCAT_EXPR@91..96
+      LBRACE@91..92 "{"
+      ARG@92..93
+        NAME@92..93
+          IDENT@92..93 "x"
+      SEMICOLON@93..94 ";"
+      SEMICOLON@94..95 ";"
+      RBRACE@95..96 "}"
+  NEWLINE@96..97 "\n"
+  ASSIGNMENT_EXPR@97..104
+    NAME@97..98
+      IDENT@97..98 "i"
+    WHITESPACE@98..99 " "
+    EQ@99..100 "="
+    WHITESPACE@100..101 " "
+    BRACESCAT_EXPR@101..104
+      LBRACE@101..102 "{"
+      SEMICOLON@102..103 ";"
+      RBRACE@103..104 "}"
+  NEWLINE@104..105 "\n"
+  ASSIGNMENT_EXPR@105..113
+    NAME@105..106
+      IDENT@105..106 "j"
+    WHITESPACE@106..107 " "
+    EQ@107..108 "="
+    WHITESPACE@108..109 " "
+    BRACESCAT_EXPR@109..113
+      LBRACE@109..110 "{"
+      SEMICOLON@110..111 ";"
+      SEMICOLON@111..112 ";"
+      RBRACE@112..113 "}"
+  NEWLINE@113..114 "\n"
+  ASSIGNMENT_EXPR@114..124
+    NAME@114..115
+      IDENT@114..115 "k"
+    WHITESPACE@115..116 " "
+    EQ@116..117 "="
+    WHITESPACE@117..118 " "
+    BRACES@118..124
+      LBRACE@118..119 "{"
+      ARG@119..120
+        NAME@119..120
+          IDENT@119..120 "a"
+      COMMA@120..121 ","
+      WHITESPACE@121..122 " "
+      ARG@122..123
+        NAME@122..123
+          IDENT@122..123 "b"
+      RBRACE@123..124 "}"
+  NEWLINE@124..125 "\n"
+  ASSIGNMENT_EXPR@125..132
+    NAME@125..126
+      IDENT@125..126 "l"
+    WHITESPACE@126..127 " "
+    EQ@127..128 "="
+    WHITESPACE@128..129 " "
+    BRACES@129..132
+      LBRACE@129..130 "{"
+      ARG@130..131
+        NAME@130..131
+          IDENT@130..131 "x"
+      RBRACE@131..132 "}"
+  NEWLINE@132..133 "\n"

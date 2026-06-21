@@ -150,6 +150,8 @@ fn project(node: &SyntaxNode) -> String {
         BARE_TUPLE_EXPR => sexp("tuple", project_each(child_nodes(node))),
         VECT_EXPR => sexp("vect", project_args(node)),
         MATRIX_EXPR => project_matrix(node),
+        TYPED_MATRIX_EXPR => project_typed_matrix(node),
+        BRACESCAT_EXPR => project_bracescat(node),
 
         COMPREHENSION => sexp("comprehension", vec![project_generator(node)]),
         TYPED_COMPREHENSION => project_typed_comprehension(node),
@@ -669,12 +671,20 @@ fn project_parameters(node: &SyntaxNode) -> String {
 /// mirroring JuliaSyntax. An element-free `[; …]` is `ncat-d` with `d` the
 /// longest semicolon run.
 fn project_matrix(node: &SyntaxNode) -> String {
+    let (head, children) = matrix_head_and_children(node);
+    sexp(&head, children)
+}
+
+/// The bracket-concatenation head (`hcat`/`vcat`/`ncat-d`, or `ncat-d` for an
+/// element-free `[; …]`) and the projected child s-expressions. Shared by the
+/// plain (`[...]`) and typed (`T[...]`) concatenation projectors.
+fn matrix_head_and_children(node: &SyntaxNode) -> (String, Vec<String>) {
     let children: Vec<SyntaxNode> = node
         .children()
         .filter(|c| matches!(c.kind(), ARG | MATRIX_ROW))
         .collect();
     if children.is_empty() {
-        return sexp(&format!("ncat-{}", max_semicolon_run(node)), Vec::new());
+        return (format!("ncat-{}", max_semicolon_run(node)), Vec::new());
     }
     let d = group_dimension(node);
     let head = match d {
@@ -682,7 +692,45 @@ fn project_matrix(node: &SyntaxNode) -> String {
         1 => "vcat".to_string(),
         _ => format!("ncat-{d}"),
     };
-    sexp(&head, children.iter().map(project_cat_child).collect())
+    (head, children.iter().map(project_cat_child).collect())
+}
+
+/// Project a typed concatenation `T[...]`: the same shape as the inner
+/// `MATRIX_EXPR`, but with the type expression prepended and the head prefixed
+/// `typed_` (`T[x y]` → `(typed_hcat T x y)`, `T[;]` → `(typed_ncat-1 T)`).
+fn project_typed_matrix(node: &SyntaxNode) -> String {
+    let mut children = node.children();
+    let type_node = children.next().expect("typed concat has a type child");
+    let matrix = children
+        .find(|c| c.kind() == MATRIX_EXPR)
+        .expect("typed concat has a matrix body");
+    let (head, mut args) = matrix_head_and_children(&matrix);
+    args.insert(0, project(&type_node));
+    sexp(&format!("typed_{head}"), args)
+}
+
+/// Project a brace concatenation `{...}`: always headed `bracescat`. A
+/// dimension-1 (vcat-like) layout keeps its children directly; a horizontal or
+/// higher-dimensional layout (and the element-free `{; …}` form) becomes a
+/// single nested `row`/`nrow-d` child, since `bracescat` is itself the
+/// dimension-1 container (`{x y}` → `(bracescat (row x y))`, `{a;b}` →
+/// `(bracescat a b)`, `{;;}` → `(bracescat (nrow-2))`).
+fn project_bracescat(node: &SyntaxNode) -> String {
+    let children: Vec<SyntaxNode> = node
+        .children()
+        .filter(|c| matches!(c.kind(), ARG | MATRIX_ROW))
+        .collect();
+    if children.is_empty() {
+        let d = max_semicolon_run(node);
+        return sexp("bracescat", vec![sexp(&format!("nrow-{d}"), Vec::new())]);
+    }
+    let d = group_dimension(node);
+    let items: Vec<String> = children.iter().map(project_cat_child).collect();
+    match d {
+        1 => sexp("bracescat", items),
+        0 => sexp("bracescat", vec![sexp("row", items)]),
+        _ => sexp("bracescat", vec![sexp(&format!("nrow-{d}"), items)]),
+    }
 }
 
 /// Project one direct child of a concatenation group: a bare `ARG` element

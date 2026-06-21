@@ -1315,7 +1315,13 @@ fn parse_bracket_literal(
     }
     // An element-free `[; …]` is an empty n-dimensional concatenation
     // (`[;]` → `ncat-1`, `[;;]` → `ncat-2`), not a vector.
-    if let Some(empty) = parse_empty_ncat(ctx, lbrk, first_start) {
+    if let Some(empty) = parse_empty_ncat(
+        ctx,
+        lbrk,
+        first_start,
+        TokKind::RBracket,
+        SyntaxKind::MATRIX_EXPR,
+    ) {
         return empty;
     }
     let Some(first) = parse_element(tokens, first_start, diagnostics) else {
@@ -1343,7 +1349,15 @@ fn parse_bracket_literal(
             diagnostics,
         ),
         None | Some(TokKind::RBracket | TokKind::Comma) => vect(diagnostics),
-        _ => parse_matrix(ctx, lbrk, first, diagnostics),
+        _ => parse_matrix(
+            ctx,
+            lbrk,
+            first,
+            TokKind::RBracket,
+            SyntaxKind::VECT_EXPR,
+            SyntaxKind::MATRIX_EXPR,
+            diagnostics,
+        ),
     }
 }
 
@@ -1375,7 +1389,13 @@ impl SepRun {
 /// Build an element-free `[; …]` concatenation (`[;]` → `ncat-1`,
 /// `[;;]` → `ncat-2`): the body is only trivia and `;`. Returns `None` when a
 /// real element follows (the caller then falls back to a vector).
-fn parse_empty_ncat(ctx: &ParserCtx<'_>, lbrk: usize, first_start: usize) -> Option<ExprParse> {
+fn parse_empty_ncat(
+    ctx: &ParserCtx<'_>,
+    lbrk: usize,
+    first_start: usize,
+    close: TokKind,
+    node_kind: SyntaxKind,
+) -> Option<ExprParse> {
     let mut q = first_start;
     let mut saw_semi = false;
     while let Some(k) = ctx.token(q).map(|t| t.kind) {
@@ -1388,12 +1408,12 @@ fn parse_empty_ncat(ctx: &ParserCtx<'_>, lbrk: usize, first_start: usize) -> Opt
             _ => break,
         }
     }
-    if !saw_semi || ctx.token(q).map(|t| t.kind) != Some(TokKind::RBracket) {
+    if !saw_semi || ctx.token(q).map(|t| t.kind) != Some(close) {
         return None;
     }
-    let mut events = vec![Event::Start(SyntaxKind::MATRIX_EXPR), Event::Tok(lbrk)];
+    let mut events = vec![Event::Start(node_kind), Event::Tok(lbrk)];
     push_range(&mut events, lbrk + 1, q + 1);
-    events.push(Event::Finish); // MATRIX_EXPR
+    events.push(Event::Finish); // node_kind
     Some(ExprParse {
         start: lbrk,
         end: q + 1,
@@ -1412,6 +1432,9 @@ fn parse_matrix(
     ctx: &ParserCtx<'_>,
     lbrk: usize,
     first: ExprParse,
+    close: TokKind,
+    comma_kind: SyntaxKind,
+    matrix_kind: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     let tokens = ctx.tokens();
@@ -1444,7 +1467,7 @@ fn parse_matrix(
                 seps.push(run);
                 break q;
             }
-            Some(TokKind::RBracket) => {
+            Some(k) if k == close => {
                 seps.push(run);
                 break q + 1;
             }
@@ -1465,7 +1488,7 @@ fn parse_matrix(
     };
 
     let n = elems.len();
-    let close = if ctx.token(end.saturating_sub(1)).map(|t| t.kind) == Some(TokKind::RBracket) {
+    let close_idx = if ctx.token(end.saturating_sub(1)).map(|t| t.kind) == Some(close) {
         Some(end - 1)
     } else {
         None
@@ -1482,9 +1505,9 @@ fn parse_matrix(
     // A lone element with no real separator (only a trailing newline) is a
     // vector, matching JuliaSyntax (`[x\n]` → `(vect x)`).
     let node_kind = if n == 1 && top_d == 0 {
-        SyntaxKind::VECT_EXPR
+        comma_kind
     } else {
-        SyntaxKind::MATRIX_EXPR
+        matrix_kind
     };
 
     let mut events = vec![Event::Start(node_kind), Event::Tok(lbrk)];
@@ -1494,8 +1517,8 @@ fn parse_matrix(
     for &t in &seps[n - 1].toks {
         events.push(Event::Tok(t));
     }
-    if let Some(close) = close {
-        events.push(Event::Tok(close));
+    if let Some(close_idx) = close_idx {
+        events.push(Event::Tok(close_idx));
     }
     events.push(Event::Finish); // node_kind
     ExprParse {
@@ -1852,6 +1875,15 @@ fn parse_postfix(
         diagnostics.truncate(diag_mark);
     }
 
+    // A space-, `;`-, or newline-separated bracket body after a value is a typed
+    // concatenation (`T[x y]` → `(typed_hcat T x y)`), not an index. A comma
+    // list, single element, or empty `T[]` stays an `INDEX_EXPR`.
+    if close == TokKind::RBracket
+        && let Some(typed) = parse_typed_concat(ctx, &lhs, open_idx, diagnostics)
+    {
+        return typed;
+    }
+
     let (list_events, end) =
         parse_arg_list(ctx, open_idx, close, SyntaxKind::ARG_LIST, diagnostics);
     let mut events = vec![Event::Start(node)];
@@ -1863,6 +1895,86 @@ fn parse_postfix(
         start: lhs.start,
         end,
         events,
+    }
+}
+
+/// Detect and parse a typed concatenation `T[...]`: a bracket body after a value
+/// that is space-, `;`-, or newline-separated (or an element-free `;`-only
+/// `T[;]`). Returns `None` for a comma list, single element, empty `T[]`, or a
+/// comprehension, leaving the caller to build an `INDEX_EXPR`. The result wraps
+/// the type expression `lhs` and a `MATRIX_EXPR` body in a `TYPED_MATRIX_EXPR`.
+fn parse_typed_concat(
+    ctx: &ParserCtx<'_>,
+    lhs: &ExprParse,
+    open_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let diag_mark = diagnostics.len();
+    let first_start = ctx.skip_trivia(open_idx + 1);
+    // `T[]` is an empty index, not a concatenation.
+    if ctx.token(first_start).map(|t| t.kind) == Some(TokKind::RBracket) {
+        return None;
+    }
+    let wrap = |body: ExprParse| {
+        let mut events = vec![Event::Start(SyntaxKind::TYPED_MATRIX_EXPR)];
+        events.extend(lhs.events.iter().cloned());
+        push_range(&mut events, lhs.end, open_idx);
+        let end = body.end;
+        events.extend(body.events);
+        events.push(Event::Finish);
+        ExprParse {
+            start: lhs.start,
+            end,
+            events,
+        }
+    };
+    // An element-free `T[; …]` is an empty n-dimensional concatenation.
+    if let Some(empty) = parse_empty_ncat(
+        ctx,
+        open_idx,
+        first_start,
+        TokKind::RBracket,
+        SyntaxKind::MATRIX_EXPR,
+    ) {
+        return Some(wrap(empty));
+    }
+    let first = parse_element(ctx.tokens(), first_start, diagnostics)?;
+    // Look at the first separator: a `,`, `]`, end, or `for` means this is an
+    // index/comprehension, not a concatenation.
+    let mut look = first.end;
+    while matches!(
+        ctx.token(look).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
+    ) {
+        look += 1;
+    }
+    match ctx.token(look).map(|t| t.kind) {
+        None | Some(TokKind::RBracket | TokKind::Comma | TokKind::ForKw) => {
+            diagnostics.truncate(diag_mark);
+            None
+        }
+        _ => {
+            let body = parse_matrix(
+                ctx,
+                open_idx,
+                first,
+                TokKind::RBracket,
+                SyntaxKind::VECT_EXPR,
+                SyntaxKind::MATRIX_EXPR,
+                diagnostics,
+            );
+            // A lone element with only a trailing newline collapses to the
+            // comma kind (`T[x\n]` → `(ref T x)`), so it stays an index.
+            if matches!(
+                body.events.first(),
+                Some(Event::Start(SyntaxKind::VECT_EXPR))
+            ) {
+                diagnostics.truncate(diag_mark);
+                None
+            } else {
+                Some(wrap(body))
+            }
+        }
     }
 }
 
@@ -2063,17 +2175,63 @@ fn parse_macro_args(
     pos
 }
 
-/// Parse a standalone `{ … }` brace expression into a `BRACES` node — the
-/// type-variable list of a bare `where {T, S}`. Like `PAREN_EXPR`, the braces
-/// node directly holds its comma-separated items (no wrapping `ARG_LIST`).
+/// Parse a standalone `{ … }` brace expression. A comma-separated (or single,
+/// empty) layout is a `BRACES` node holding its items directly (no wrapping
+/// `ARG_LIST`), matching `where {T, S}`. A space-, `;`-, or newline-separated
+/// layout is a `BRACESCAT_EXPR` of `MATRIX_ROW`s — the same nesting the
+/// projector reads for `[...]`, but always headed `bracescat`.
 fn parse_braces(
     ctx: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
-    let (events, end) =
-        parse_arg_list(ctx, start, TokKind::RBrace, SyntaxKind::BRACES, diagnostics);
-    Some(ExprParse { start, end, events })
+    let tokens = ctx.tokens();
+    let braces = |diagnostics: &mut Vec<ParseDiagnostic>| {
+        let (events, end) =
+            parse_arg_list(ctx, start, TokKind::RBrace, SyntaxKind::BRACES, diagnostics);
+        ExprParse { start, end, events }
+    };
+
+    let first_start = ctx.skip_trivia(start + 1);
+    if ctx.token(first_start).map(|t| t.kind) == Some(TokKind::RBrace) {
+        return Some(braces(diagnostics));
+    }
+    // An element-free `{; …}` is an empty n-dimensional concatenation
+    // (`{;}` → `(bracescat (nrow-1))`), not a brace list.
+    if let Some(empty) = parse_empty_ncat(
+        ctx,
+        start,
+        first_start,
+        TokKind::RBrace,
+        SyntaxKind::BRACESCAT_EXPR,
+    ) {
+        return Some(empty);
+    }
+    let Some(first) = parse_element(tokens, first_start, diagnostics) else {
+        return Some(braces(diagnostics));
+    };
+
+    // The first separator decides comma list vs concatenation, mirroring
+    // `parse_bracket_literal` (a newline is a significant row separator).
+    let mut look = first.end;
+    while matches!(
+        ctx.token(look).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
+    ) {
+        look += 1;
+    }
+    match ctx.token(look).map(|t| t.kind) {
+        None | Some(TokKind::RBrace | TokKind::Comma) => Some(braces(diagnostics)),
+        _ => Some(parse_matrix(
+            ctx,
+            start,
+            first,
+            TokKind::RBrace,
+            SyntaxKind::BRACES,
+            SyntaxKind::BRACESCAT_EXPR,
+            diagnostics,
+        )),
+    }
 }
 
 /// Parse a comma-separated, bracket-delimited argument list into a `list_kind`
@@ -2328,6 +2486,8 @@ fn lhs_value_close(lhs: &ExprParse) -> bool {
                 | SyntaxKind::CURLY_EXPR
                 | SyntaxKind::VECT_EXPR
                 | SyntaxKind::MATRIX_EXPR
+                | SyntaxKind::TYPED_MATRIX_EXPR
+                | SyntaxKind::BRACESCAT_EXPR
                 | SyntaxKind::POSTFIX_EXPR
         ))
     )

@@ -1,0 +1,1 @@
+(toplevel (= a (bracescat (row x y))) (= b (bracescat a b)) (= c (bracescat (row a b) (row c d))) (= d (bracescat (nrow-3 x y))) (= e (bracescat (nrow-2 a b))) (= f (bracescat (nrow-2 (nrow-1 a b) (nrow-1 c d)))) (= g (bracescat x)) (= h (bracescat (nrow-2 x))) (= i (bracescat (nrow-1))) (= j (bracescat (nrow-2))) (= k (braces a b)) (= l (braces x)))

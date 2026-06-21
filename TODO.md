@@ -142,8 +142,17 @@ through), so the grammar can grow incrementally.
   `[x ;; y]` → `(ncat-2 x y)`, `[x ; y ;; z]` → `(ncat-2 (nrow-1 x y) z)`,
   `[x;]` → `(vcat x)`, `[x\n]` → `(vect x)`; element-free `[;]`/`[;;]` →
   `(ncat-1)`/`(ncat-2)` via `parse_empty_ncat`.
-  Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`), typed (`T[a;b]`
-  → `typed_ncat`) and brace (`{a;;b}` → `bracescat`) concatenation, mixed
+  Typed concatenation (`T[x y]` → `(typed_hcat T x y)`, `T[a;b]` →
+  `(typed_vcat T a b)`, `T[a ;; b]` → `(typed_ncat-2 T a b)`, `T[;]` →
+  `(typed_ncat-1 T)`): a space/`;`-separated bracket body after a value builds a
+  `TYPED_MATRIX_EXPR` (the type expr + a `MATRIX_EXPR` body) via
+  `parse_typed_concat`; the projector prepends the type and prefixes the head
+  `typed_`. Brace concatenation (`{x y}` → `(bracescat (row x y))`, `{a;b}` →
+  `(bracescat a b)`, `{a;;b}` → `(bracescat (nrow-2 a b))`): `parse_braces`
+  dispatches comma → `BRACES`, space/`;` → `BRACESCAT_EXPR`; the projector always
+  heads `bracescat`, keeping a dim-1 layout's children but nesting a higher-dim
+  layout as a single `row`/`nrow-d` child.
+  Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`), mixed
   space+`;;` rows (`[x y ;; z w]`, an `(error-t)` shape), and unicode dotted
   operators.
 - [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the
