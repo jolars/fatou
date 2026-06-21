@@ -1,7 +1,7 @@
 use crate::parser::events::Event;
 use crate::parser::expr::parse_stmt;
-use crate::parser::lexer::{TokKind, lex};
-use crate::parser::tree_builder::build_tree;
+use crate::parser::lexer::{TokKind, Token, lex};
+use crate::parser::tree_builder::{build_tree, syntax_kind_for};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 pub use crate::parser::diagnostics::ParseDiagnostic;
@@ -71,8 +71,138 @@ pub fn parse(text: &str) -> ParseOutput {
         }
     }
 
+    let events = fold_docstrings(&events, &tokens, true);
+
     let cst = build_tree(&tokens, &events);
     ParseOutput { cst, diagnostics }
+}
+
+/// One child of a statement container: either a leaf token or a fully-formed
+/// subtree (its node kind plus the *inner* events between its `Start`/`Finish`).
+enum Item {
+    Leaf(usize),
+    Subtree(SyntaxKind, Vec<Event>),
+}
+
+/// Whether a node of `kind` is a statement container in which the docstring fold
+/// applies (a string literal statement directly followed by another statement).
+fn is_doc_container(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::BLOCK | SyntaxKind::TOPLEVEL_SEMICOLON)
+}
+
+/// Whether a `STRING_LITERAL` subtree is a plain string (doc-eligible) rather
+/// than a prefixed string macro (`r"…"`, `b"…"`), which is a macro call in
+/// JuliaSyntax and never a docstring. Eligible iff its first token is not a
+/// `STRING_PREFIX`.
+fn string_is_doc_eligible(inner: &[Event], tokens: &[Token]) -> bool {
+    match inner.first() {
+        Some(Event::Tok(idx)) => syntax_kind_for(tokens[*idx].kind) != SyntaxKind::STRING_PREFIX,
+        _ => true,
+    }
+}
+
+/// Recursively fold docstrings in a statement container's child sequence.
+/// `inner` is the flat event list of one node's children (the whole event
+/// stream, for the implicit `ROOT`). A bare unprefixed `STRING_LITERAL`
+/// statement immediately followed by another statement — at most one newline of
+/// intervening trivia, no `;` — folds into a `DOC` node `(doc str target)`,
+/// mirroring JuliaSyntax's `parse_docstring`. The pass descends into every
+/// subtree so nested blocks (function/module/begin bodies) fold too.
+fn fold_docstrings(inner: &[Event], tokens: &[Token], is_container: bool) -> Vec<Event> {
+    // Split the flat event list into this level's direct children.
+    let mut items: Vec<Item> = Vec::new();
+    let mut k = 0;
+    while k < inner.len() {
+        match inner[k] {
+            Event::Tok(idx) => {
+                items.push(Item::Leaf(idx));
+                k += 1;
+            }
+            Event::Start(kind) => {
+                let mut depth = 1usize;
+                let mut j = k + 1;
+                while j < inner.len() {
+                    match inner[j] {
+                        Event::Start(_) => depth += 1,
+                        Event::Finish => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        Event::Tok(_) => {}
+                    }
+                    j += 1;
+                }
+                // Recurse into the subtree's inner events.
+                let child = fold_docstrings(&inner[k + 1..j], tokens, is_doc_container(kind));
+                items.push(Item::Subtree(kind, child));
+                k = j + 1;
+            }
+            Event::Finish => k += 1,
+        }
+    }
+
+    let mut out: Vec<Event> = Vec::new();
+    let mut idx = 0;
+    while idx < items.len() {
+        if is_container
+            && let Item::Subtree(SyntaxKind::STRING_LITERAL, str_inner) = &items[idx]
+            && string_is_doc_eligible(str_inner, tokens)
+            && let Some(target) = doc_target(&items, idx, tokens)
+        {
+            // Wrap the string, the intervening trivia, and the target in a `DOC`.
+            out.push(Event::Start(SyntaxKind::DOC));
+            emit_items(&items[idx..=target], &mut out);
+            out.push(Event::Finish);
+            idx = target + 1;
+            continue;
+        }
+        emit_items(&items[idx..=idx], &mut out);
+        idx += 1;
+    }
+    out
+}
+
+/// Given a string statement at `start`, find the index of the statement it
+/// documents: the next subtree child, reachable across at most one newline of
+/// trivia and no `;`. Returns `None` if no eligible target follows.
+fn doc_target(items: &[Item], start: usize, tokens: &[Token]) -> Option<usize> {
+    let mut newlines = 0;
+    let mut j = start + 1;
+    while j < items.len() {
+        match &items[j] {
+            Item::Subtree(..) => return Some(j),
+            Item::Leaf(t) => {
+                let kind = tokens[*t].kind;
+                if kind == TokKind::Newline {
+                    newlines += 1;
+                    if newlines > 1 {
+                        return None;
+                    }
+                } else if !kind.is_trivia() {
+                    return None;
+                }
+                j += 1;
+            }
+        }
+    }
+    None
+}
+
+/// Append the events for `items` to `out`, rebuilding each subtree from its
+/// recorded kind and inner events.
+fn emit_items(items: &[Item], out: &mut Vec<Event>) {
+    for item in items {
+        match item {
+            Item::Leaf(idx) => out.push(Event::Tok(*idx)),
+            Item::Subtree(kind, inner) => {
+                out.push(Event::Start(*kind));
+                out.extend(inner.iter().cloned());
+                out.push(Event::Finish);
+            }
+        }
+    }
 }
 
 /// Round-trip the input through the parser: concatenating every token in the CST

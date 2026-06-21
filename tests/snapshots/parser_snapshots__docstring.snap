@@ -1,0 +1,51 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..72
+  DOC@0..9
+    STRING_LITERAL@0..5
+      STRING_DELIM_OPEN@0..1 "\""
+      STRING_CONTENT@1..4 "doc"
+      STRING_DELIM_CLOSE@4..5 "\""
+    WHITESPACE@5..6 " "
+    NAME@6..9
+      IDENT@6..9 "foo"
+  NEWLINE@9..10 "\n"
+  DOC@10..27
+    STRING_LITERAL@10..23
+      STRING_DELIM_OPEN@10..11 "\""
+      STRING_CONTENT@11..22 "a docstring"
+      STRING_DELIM_CLOSE@22..23 "\""
+    NEWLINE@23..24 "\n"
+    NAME@24..27
+      IDENT@24..27 "bar"
+  NEWLINE@27..28 "\n"
+  FUNCTION_DEF@28..42
+    FUNCTION_KW@28..36 "function"
+    WHITESPACE@36..37 " "
+    SIGNATURE@37..38
+      NAME@37..38
+        IDENT@37..38 "f"
+    BLOCK@38..39
+      WHITESPACE@38..39 " "
+    END_KW@39..42 "end"
+  NEWLINE@42..43 "\n"
+  MODULE_DEF@43..71
+    MODULE_KW@43..49 "module"
+    WHITESPACE@49..50 " "
+    SIGNATURE@50..51
+      IDENT@50..51 "M"
+    BLOCK@51..68
+      NEWLINE@51..52 "\n"
+      DOC@52..67
+        STRING_LITERAL@52..61
+          STRING_DELIM_OPEN@52..53 "\""
+          STRING_CONTENT@53..60 "mod doc"
+          STRING_DELIM_CLOSE@60..61 "\""
+        NEWLINE@61..62 "\n"
+        NAME@62..67
+          IDENT@62..67 "inner"
+      NEWLINE@67..68 "\n"
+    END_KW@68..71 "end"
+  NEWLINE@71..72 "\n"

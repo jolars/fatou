@@ -606,7 +606,7 @@ through), so the grammar can grow incrementally.
   lossless (raw content preserved in `STRING_CONTENT`). Also emits the empty
   `String` child for empty literals (`"" → (string "")`, `"""""" → (string-s
   "")`). **Deferred:** full source-escape unescaping (`\xNN`/`\uNNNN`/line
-  continuations), and docstring `(doc …)` attachment.
+  continuations).
 
 - [x] Raw triple-quoted strings (`r"""…"""`). A prefixed triple-quoted string
   reuses the same dedent + per-line chunking as a plain triple string, projecting
@@ -644,8 +644,20 @@ through), so the grammar can grow incrementally.
   trailing `\n` is consumed with the backslash instead of leaking out and
   terminating the single-line string. The CST stays lossless (one raw
   `STRING_CONTENT` token). **Deferred:** invalid-escape error shapes (`"\xqqq"` ⇒
-  `(string (ErrorInvalidEscapeSequence))`) fall back to raw passthrough; docstring
-  `(doc …)` attachment.
+  `(string (ErrorInvalidEscapeSequence))`) fall back to raw passthrough.
+
+- [x] Docstring attachment (`"doc"\nfoo` ⇒ `(doc (string "doc") foo)`). A bare,
+  unprefixed `STRING_LITERAL` statement directly followed by another statement —
+  at most one newline of intervening trivia, no `;`, no blank line — folds into a
+  `DOC` node, mirroring JuliaSyntax's `parse_docstring`. Implemented as a single
+  recursive post-pass over the event stream (`fold_docstrings`, `src/parser/core.rs`)
+  run just before tree building: because every block body's events flatten up into
+  the root event list, one pass folds toplevel, `;`-grouped lines, and nested
+  function/module/begin bodies uniformly. Prefixed string macros (`r"…"`, command
+  strings) and string-as-expression (`"a" + b`) are excluded by construction. The
+  CST stays lossless (only `DOC` wrappers are inserted around existing tokens).
+  Projector arm `DOC ⇒ (doc …)` (`src/parser/sexpr.rs`). **Deferred:** the
+  no-target error shape (`"doc"\nend` ⇒ string then `(error end)`).
 
 ## Incremental reparse
 

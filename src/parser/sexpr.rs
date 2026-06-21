@@ -89,6 +89,9 @@ fn project(node: &SyntaxNode) -> String {
         // `(toplevel-; …)` node (mirroring JuliaSyntax); an empty `;` line is
         // `(toplevel-;)`.
         TOPLEVEL_SEMICOLON => sexp("toplevel-;", stmt_strings(node)),
+        // A string-literal statement directly followed by another statement folds
+        // into a docstring `(doc <string> <target>)` (JuliaSyntax `parse_docstring`).
+        DOC => sexp("doc", stmt_strings(node)),
         BLOCK => sexp("block", stmt_strings(node)),
         // `begin … end` wraps a `BLOCK`; project that directly so it lowers to a
         // single `(block …)` rather than a doubled `(block (block …))`.

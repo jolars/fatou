@@ -22,49 +22,61 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **455 allowlisted**, 116 divergence, 4 unsupported.
-Dir corpus: **81 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "string escape processing" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **461 allowlisted**, 110 divergence, 4 unsupported.
+Dir corpus: **82 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "docstring attachment" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21g)
+## Latest session (2026-06-21h)
 
-**Bare-name function/macro forward declarations.** `function f end`, `macro m
-end`, `function $f end` are *declarations* in JuliaSyntax with no body block:
-`(function f)`, `(macro m)`, `(function ($ f))` — distinct from a call signature
-`function f() end` → `(function (call f) (block))`. Pure projector concern (the
-CST is fine: `SIGNATURE(NAME)` + empty `BLOCK`). **Projector:** new
-`project_function_like` (`sexpr.rs`) drops the empty `BLOCK` when
-`is_forward_declaration` holds — signature inner node is `NAME` or
-`INTERPOLATION` (a bare name, not a `CALL_EXPR`). Faithful: in Julia a bare-name
-header is *only ever* a declaration (a body makes it an error, e.g. `function f;
-x end` → `(function (error f) (block x))`), so discriminating on the signature
-shape alone is correct for valid inputs.
+**Docstring attachment.** A bare, unprefixed `STRING_LITERAL` statement directly
+followed by another statement — ≤1 newline of trivia, no `;`, no blank line —
+folds into `(doc <string> <target>)` (JuliaSyntax `parse_docstring`). Rule probed
+exhaustively: blank line breaks it, a comment *line* between breaks it (2
+newlines), same-line comment is fine, prefixed string macros (`r"…"`) and command
+strings never doc, `"a" + b` is one expr (never matches), `"doc"\nend` = no
+target = bare string, the target is taken as-is (not recursively a doc), and the
+rule fires anywhere mid-block (not just at block start). **Implementation:** one
+recursive post-pass `fold_docstrings` (`core.rs`) over the *flat* event stream
+just before `build_tree`. Key insight — every block body's events flatten up into
+the root event list, so a single pass folds toplevel, `;`-grouped lines
+(`TOPLEVEL_SEMICOLON`), and nested function/module/begin `BLOCK`s uniformly
+(containers gated by `is_doc_container`). New `DOC` `SyntaxKind`; projector arm
+`DOC ⇒ (doc …)` reuses `stmt_strings`. CST stays lossless (only `DOC` wrappers
+inserted). **Not a projector compensation** — the fold is a real CST node, the
+projector just maps it.
 
-JS allow **450 → 455** (+5: js-080efb64 `function $f end`, js-0e5c696e `function
-f \n\n end`, js-408b2118 `macro f end`, js-81258463 `(function f \n end)`,
-js-c75e926e `function f end`), divergence 121 → 116, unsupported held 4. Dir
-allow 80 → 81 (new fixture `function_forward_decl`). Zero regressions; green,
-clippy/fmt clean. `function \n f() end` (js-e811d4a1, newline right after the
-keyword) stays FAIL — the signature is mis-parsed as a block; separate frontier.
+JS allow **455 → 461** (+6: js-02079ffa, js-10d3f0bb, js-69e0ae28, js-9a2b0b62,
+js-dc95e5f6, js-e16974cd), divergence 116 → 110, unsupported held 4. Dir allow
+81 → 82 (new fixture `docstring`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
 1. **Macro-call name clusters** (~15 FAIL): `@A.B.x` (js-ee8e4e0c), `A.B.@x`
    (js-968d2da1), `@(A) x` (js-f3aa762e), `@! x` (js-fb523956), `@+x y`
    (js-28af1263), `@end x` (js-a37773f7), `@$ y` (js-c143c4d8), `$A.@x`,
    `A.$B.@x`, `@S[a].b`/`@S{a}.b` etc. Several share a root in macro-name parsing.
-2. **Docstrings** `"""…""" foo` / bare string-then-expr folds into `(doc …)`
-   (js-10d3f0bb, js-69e0ae28, js-02079ffa). Statement-driver concern (`core.rs`).
+2. **N-dim array concatenation** (~25 FAIL, largest cluster): `;;`/`;;;` ncat
+   dims (`[a ;; b]`, `[x ; y ;; z]`, `T[a b; c d]`), empty `[;]`/`[;;]`,
+   newline-as-row-sep `[x \n y]`, `[f (x)]` space-call. Big unlock; needs a
+   dedicated array-literal parser rework.
 3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26; reuse the
    raw-string unescaper for `var` content.
 4. **`function \n f() end`** — newline directly after the `function` keyword
-   mis-parses the signature as a block (this session's leftover).
+   mis-parses the signature as a block (earlier leftover).
 
 ## Earlier sessions
+
+- **2026-06-21g** — Bare-name function/macro forward declarations (`function f
+  end`, `macro m end`, `function $f end` ⇒ `(function f)`/`(macro m)`/`(function
+  ($ f))`). Pure projector: `project_function_like` drops the empty `BLOCK` when
+  the signature inner node is a bare `NAME`/`INTERPOLATION` (`is_forward_declaration`);
+  faithful since a bare-name header is only ever a declaration. JS allow 450 →
+  455. Fixture `function_forward_decl`. `function \n f() end` (js-e811d4a1) stays
+  FAIL — newline right after the keyword mis-parses the signature as a block.
 
 - **2026-06-21f** — Single-quoted string escape processing + line continuations.
   Projector `string_parts` now computes the *value* (`decoded_string_parts` →

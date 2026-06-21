@@ -23,6 +23,7 @@ comments
 comprehensions
 control_flow
 curly_operator_call
+docstring
 dot_logical_operator
 escaped_dollar
 field_access_suffix
