@@ -2091,6 +2091,23 @@ fn parse_macro_name_body(
             }
             i
         }
+        // A parenthesized macro name `@(A)`: a single identifier wrapped in
+        // parens unwraps to the bare name `@A` (interior whitespace is allowed:
+        // `@( A )`). The parens are kept in the CST for losslessness; the
+        // projector reads only the identifier component. Anything other than a
+        // lone identifier (`@(A.b)`, `@(f(x))`) is left for the paren-arg form to
+        // handle (it stays a divergence, matching Julia's error recovery).
+        Some(TokKind::LParen) => {
+            let inner = ctx.skip_ws(start + 1);
+            if ctx.token(inner).map(|t| t.kind) == Some(TokKind::Ident) {
+                let after = ctx.skip_ws(inner + 1);
+                if ctx.token(after).map(|t| t.kind) == Some(TokKind::RParen) {
+                    push_range(events, start, after + 1);
+                    return after + 1;
+                }
+            }
+            start
+        }
         // An operator, `$`, or keyword directly after `@` names the macro
         // (`@+`, `@!`, `@..`, `@$`, `@end`). A lone `:` (`@:`) is left to error.
         Some(k) if is_macro_name_token(k) => {

@@ -115,7 +115,12 @@ through), so the grammar can grow incrementally.
   `@S[a](x)` ⇒ `(call (macrocall @S (vect a)) x)`). `parse_macro_args` parses
   only the bracket prefix (`parse_prefix`) and returns, so the outer postfix
   chain attaches any suffix; the space form `@S [a].b` keeps `[a].b` as one arg.
-  **Deferred:** `@(A)` paren macro name.
+  A parenthesized macro name `@(A)` (a lone identifier in parens, interior
+  whitespace allowed) unwraps to the bare name `@A`: `parse_macro_name_body`
+  consumes the `( ident )` run into the `MACRO_NAME` (lossless) and the projector
+  reads only the identifier component, so `@(A) x` ⇒ `(macrocall @A x)` and
+  `@(A)(x)` ⇒ `(macrocall-p @A x)`. **Deferred:** qualified/dotted interiors
+  (`@(A.b)`, `A.@(x)`, `@(A).b`) stay error-shape divergences.
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside

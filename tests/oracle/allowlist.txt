@@ -63,6 +63,7 @@ operator_symbol_quote_paren
 pairs
 parametric_types
 paren_block
+paren_macro_name
 paren_operator
 public_statement
 range_operator

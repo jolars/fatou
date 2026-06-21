@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **508 allowlisted**, 63 divergence, 4 unsupported.
-Dir corpus: **91 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **509 allowlisted**, 62 divergence, 4 unsupported.
+Dir corpus: **92 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,37 +31,42 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21p)
+## Latest session (2026-06-21q)
 
-**Bracket-macrocall postfix.** `@S[a].b` ⇒ `(. (macrocall @S (vect a)) (quote b))`,
-`@S{a}.b` ⇒ `(. (macrocall @S (braces a)) (quote b))`. A `[`/`{` *adjacent* to the
-macro name (no whitespace — else `name_end` points at the Whitespace trivia token,
-as the paren form already relies on) is the bracket-macrocall form: the bracket is
-the sole argument and any postfix (`.b`, `(x)`, `[b]`, `+ b`) chains onto the
-*whole* macrocall, not the bracket. Fix in `parse_macro_args` (`expr.rs`): after
-the paren branch, if `ctx.token(name_end)` is `LBracket`/`LBrace`, parse only the
-bracket via `parse_prefix` (no postfix chain) and `return arg.end`, letting the
-outer Pratt loop's `parse_postfix_chain` attach the suffix. The space form
-`@S [a].b` is untouched (still one space-separated arg `[a].b`). Qualified
-(`@S.x[a].b`) falls out for free since `parse_qualified_macro` shares
-`parse_macro_args`. Pure parser change — projector already handles `.`/call/index
-over a macrocall (the paren form `@S(a).b` was already correct). Fixture
-`macro_bracket_postfix`.
+**`@(A)` paren macro name.** `@(A) x` ⇒ `(macrocall @A x)`, `@(A)` ⇒ `(macrocall
+@A)`, `@( A ) x` (interior whitespace) ⇒ same, `@(A)(x)` ⇒ `(macrocall-p @A x)`.
+A lone identifier wrapped in parens after `@` unwraps to the bare name. Pure
+parser change: a new `LParen` arm in `parse_macro_name_body` (`expr.rs`) — when
+`@` is followed by `( <skip_ws> ident <skip_ws> )`, `push_range` the whole `(…)`
+run into the `MACRO_NAME` (lossless) and `return after+1`; else `return start`
+(leaves the `(` to the paren-arg form). The projector needs **no** change: its
+`comps` collection already filters to IDENT + name-part tokens, so `LPAREN`/
+`RPAREN`/`WHITESPACE` are skipped and `comps == [A]` ⇒ `@A`. Anything but a lone
+ident (`@(A.b)`, `@(f(x))`) stays an error-shape divergence (un-allowlisted).
+Fixture `paren_macro_name`.
 
-JS allow **506 → 508** (+2: `@S[a].b`, `@S{a}.b`), divergence 65 → 63, unsupported
-held 4. Dir allow 90 → 91 (+1 fixture). Zero regressions; green, clippy/fmt clean.
+JS allow **508 → 509** (+1: `@(A) x`), divergence 63 → 62, unsupported held 4.
+Dir allow 91 → 92 (+1 fixture). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **`@(A)` paren macro name** (js-f3aa762e ⇒ `@A`): `@(A) x` — a parenthesized
-   macro name unwraps to the bare name. Fatou currently emits `(macrocall-p @. A)`.
-2. **Signed non-decimal/float literals** (`-0o22`, `+0b10010`, `-0x1`, `-0xf.0p0`,
+1. **Signed non-decimal/float literals** (`-0o22`, `+0b10010`, `-0x1`, `-0xf.0p0`,
    `+0o22`, `-0b10010`, `0x...p+0`, `1.0e-1000`): cluster of ~10 JS FAILs around
    signed/exponent numeric folding. Check which are genuine vs display-normalization
    (some may be deliberate blocked divergences).
-3. Survey the remaining 63 JS FAILs for the next cluster (`cargo test --test
+2. Survey the remaining 62 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
+3. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
+   @b))`, `A.@(x)` ⇒ `(. A (quote @x))` — Julia extends/qualifies the name through
+   the parens (probed this session; left as divergences).
 
 ## Earlier sessions
+
+- **2026-06-21p** — Bracket-macrocall postfix. `@S[a].b` ⇒ `(. (macrocall @S
+  (vect a)) (quote b))`, `@S{a}.b` similarly. A `[`/`{` adjacent to the macro name
+  is the bracket-macrocall form: the bracket is the sole arg, postfix chains onto
+  the whole macrocall. `parse_macro_args` parses only the bracket prefix and
+  returns, letting the outer Pratt loop attach the suffix. JS allow 506 → 508.
+  Fixture `macro_bracket_postfix`.
 
 - **2026-06-21o** — `@doc` macro newline extension. `@doc x\ny` ⇒ `(macrocall @doc
   x y)`: the doc macro (leaf identifier `doc`: `@doc`, `A.@doc`, `@A.doc`) taking
