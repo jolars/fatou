@@ -85,6 +85,10 @@ pub fn normalize_sexpr(s: &str) -> String {
 fn project(node: &SyntaxNode) -> String {
     match node.kind() {
         ROOT => sexp("toplevel", stmt_strings(node)),
+        // A logical line carrying a top-level `;` groups its statements into a
+        // `(toplevel-; …)` node (mirroring JuliaSyntax); an empty `;` line is
+        // `(toplevel-;)`.
+        TOPLEVEL_SEMICOLON => sexp("toplevel-;", stmt_strings(node)),
         BLOCK => sexp("block", stmt_strings(node)),
         // `begin … end` wraps a `BLOCK`; project that directly so it lowers to a
         // single `(block …)` rather than a doubled `(block (block …))`.

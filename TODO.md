@@ -66,8 +66,8 @@ through), so the grammar can grow incrementally.
   detection so `public` stays an identifier inside `begin`/`if`/function bodies.
   The projector heads the node `public`, dropping the leading keyword token before
   reading the names via the shared `name_run_item`. **Deferred:** unicode operator
-  names (`public ⤈` — needs unicode-operator lexing) and the `;`-separated
-  toplevel `toplevel-;` grouping divergence.
+  names (`public ⤈` — needs unicode-operator lexing). (The `;`-separated toplevel
+  `toplevel-;` grouping is now handled — see "Top-level `;` grouping" below.)
 - [x] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
   Structured into `STRING_LITERAL`/`CMD_LITERAL` nodes with `INTERPOLATION`
@@ -555,6 +555,16 @@ through), so the grammar can grow incrementally.
   y` ⇒ `(return (tuple x y))` and `const x, y = 1, 2` ⇒ `(const (= …))` via a
   new `KwStmt::ExprTuple`; `global`/`local` keep their bare name list
   (`(global a b)`).
+
+- [x] Top-level `;` grouping. A logical line carrying a top-level `;` now folds
+  its statements into a `TOPLEVEL_SEMICOLON` node (`(toplevel-; …)`, mirroring
+  JuliaSyntax): `a;b;c` ⇒ `(toplevel (toplevel-; a b c))`, `a;` ⇒
+  `(toplevel (toplevel-; a))`, bare `;` ⇒ `(toplevel (toplevel-;))`. The `parse`
+  driver (`src/parser/core.rs`) now works one logical line at a time —
+  newline-delimited — wrapping the line only when it saw a `;`; a plain line
+  stays bare (`a` ⇒ `(toplevel a)`) and newlines split groups (`a;b\nc;d` ⇒
+  two `toplevel-;` nodes). Scoped to the toplevel driver only: inside `begin`/
+  module blocks `;` does not group (`begin a; b end` ⇒ `(block a b)`).
 
 ## Incremental reparse
 

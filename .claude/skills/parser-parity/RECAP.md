@@ -22,64 +22,67 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **398 allowlisted**, 173 divergence, 4 unsupported.
-Dir corpus: **72 allowlisted**, 4 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Bare-comma tuples" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **404 allowlisted**, 167 divergence, 4 unsupported.
+Dir corpus: **73 allowlisted**, 4 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Top-level `;` grouping" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20k)
+## Latest session (2026-06-20l)
 
-**Bare-comma tuples.** A top-level comma at statement scope now folds operands
-into a `BARE_TUPLE_EXPR` (projects `(tuple …)`, distinct from the parenthesized
-`TUPLE_EXPR` → `tuple-p`): `a, b, c` ⇒ `(tuple a b c)`, `x, = xs` ⇒
-`(= (tuple x) xs)`. The key precedence fact (mirroring JuliaSyntax's
-`parse_eq` = `parse_assignment(parse_comma)`): comma binds **tighter than
-assignment** but looser than every real operator, so the tuple forms first and
-`=` binds the two tuples — `a, b = c, d` ⇒ `(= (tuple a b) (tuple c d))`,
-`x = a, b` ⇒ `(= x (tuple a b))`. Implemented inside the Pratt operator loop
-(not as a Pratt op — comma never reaches `next_operator`), gated by a new
-`stmt_comma` `ExprFlags` field: when `stmt_comma && min_bp <= COMMA_BP (2)` and
-a comma follows `lhs`, `parse_comma_tuple` wraps the already-parsed first operand
-plus each further item (parsed at `COMMA_ITEM_BP (3)`, which excludes `=` at
-l_bp 2 and the comma itself, but keeps ternary at l_bp 3 and tighter:
-`a => b, c` ⇒ `(tuple (=> a b) c)`, `a ? b : c, d` ⇒ `(tuple (? a b c) d)`).
-Trailing comma → item parse returns `None` → stop (faithful to `parse_comma`).
-Because comma fires both at top (`min_bp 0`) and inside an assignment RHS
-(`min_bp 1`), tuples form on both sides automatically; `~` (l_bp 2) sees the
-whole tuple as its LHS (`a, b ~ c` ⇒ `(call-i (tuple a b) ~ c)`).
+**Top-level `;` grouping.** A logical line carrying a top-level `;` now folds its
+statements into a `TOPLEVEL_SEMICOLON` node, projecting `(toplevel-; …)`
+(mirroring JuliaSyntax): `a;b;c` ⇒ `(toplevel (toplevel-; a b c))`, `a;` ⇒
+`(toplevel (toplevel-; a))`, bare `;`/`;;` ⇒ `(toplevel (toplevel-;))`. The rule
+is per-logical-line: a line wraps iff it contained a `;` anywhere (leading,
+between, or trailing); a plain line stays bare (`a` ⇒ `(toplevel a)`); newlines
+split groups (`a;b\nc;d` ⇒ two `toplevel-;` nodes; `a; b\nc` ⇒
+`(toplevel (toplevel-; a b) c)`).
 
-`stmt_comma` is on at toplevel (`parse_stmt`), module/block statements (new
-`parse_block_stmt`, used by `run_block_inner` for both public and non-public
-blocks), and the operand of `return`/`const` (new `KwStmt::ExprTuple`):
-`return x, y` ⇒ `(return (tuple x y))`, `const x, y = 1, 2` ⇒ `(const (= …))`.
-`global`/`local` deliberately stay `KwStmt::Expr` — they carry a bare name list
-(`global a, b` ⇒ `(global a b)`, already correct via verbatim IDENT collection),
-not a tuple. Off inside brackets (commas are arg/element separators handled by
-`parse_arg_list`); `(a, b)` stays `tuple-p`.
+This is a **parser** change in the toplevel driver `parse` (`src/parser/core.rs`),
+not the projector: the old flat loop (emit trivia/`;` at root, parse each stmt)
+became a two-level loop — leading trivia (incl. newlines) emitted at root, then a
+line buffer accumulates statements + interspersed `;`/trivia until a newline/EOF,
+and the buffer is wrapped in `TOPLEVEL_SEMICOLON` only when `has_semicolon`.
+parse_stmt naturally absorbs newlines inside multi-line constructs, so the line
+follows the parser. New `SyntaxKind::TOPLEVEL_SEMICOLON` + projector arm
+(`sexp("toplevel-;", stmt_strings(node))` → empty parts give `(toplevel-;)`).
 
-JS allow **394 → 398** (+4: `a, b = c, d` js-abbe51ed, `return x,y` js-f102f999,
-`const x,y = 1,2` js-a73e110d, `x, = xs` js-8749407b); divergence 177 → 173,
-unsupported held 4. Dir allow 71 → 72 (new fixture `bare_tuple`). Zero
-regressions; green, clippy/fmt clean.
+Scoped to the toplevel driver **only**: inside `begin`/module blocks `;` does not
+group (`begin a; b end` ⇒ `(block a b)`, `module M; export a; end` ⇒
+`(module M (block (export a)))`) — `run_block_inner` is untouched, faithful to
+JuliaSyntax which only groups at toplevel.
+
+JS allow **398 → 404** (+6: `a;;;b;;` js-3043c4a2, `;a` js-35c649e9, `a;b;c`
+js-714d8a96, `import A; B` js-acfc6b49, `a;b \n c;d` js-9b9946da, +1 module case);
+divergence 173 → 167, unsupported held 4. Dir allow 72 → 73 (new fixture
+`toplevel_semicolon`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
+1. **Paren block sequences** `(a; b; c)` ⇒ `(block-p a b c)` — separate from
+   toplevel grouping (uses `block-p`, not `toplevel-;`). FAILs: js-2020c1de
+   `(a; b; c,d)`, js-8daf5e52 `(a=1;)`, js-538e61ed `(;;)`, js-aa0e6a42
+   `(; a=1; b=2)`. Parens-level, ~6 cases.
+2. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
    `"""\n  x\n y"""` etc.). Common-leading-whitespace stripping + line handling.
    Display-ish but high count; check whether it's a parser or projector concern.
-2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
+3. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
    `project_string`'s macrocall branch (still open from 2026-06-20e).
-3. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
-4. **`;` block sequences** — `a;b;c` ⇒ `(toplevel (block a b c))`?, `(a; b; c)`,
-   semicolon statement grouping. Cluster of ~10 FAILs; statement-level.
+4. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
 
 ## Earlier sessions
 
 One-liners; full implementation detail lives in the matching `[x]` bullet in
 `TODO.md`.
+
+- **2026-06-20k** — Bare-comma tuples: a top-level comma at statement scope folds
+  operands into `BARE_TUPLE_EXPR`/`(tuple …)` (vs parenthesized `tuple-p`), via a
+  `stmt_comma` flag and `parse_comma_tuple` in the Pratt loop; comma binds tighter
+  than `=` but looser than every real op, so `a, b = c, d` ⇒
+  `(= (tuple a b) (tuple c d))`. JS allow 394 → 398. Fixture `bare_tuple`.
 
 - **2026-06-20j** — Stepped colon ranges: `a:b:c` folds three operands into one
   infix colon call (`(call-i a : b c)`) rather than nesting two binary colons,

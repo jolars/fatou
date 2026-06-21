@@ -27,6 +27,7 @@ pub enum SyntaxKind {
     PAREN_EXPR,
     TUPLE_EXPR,
     BARE_TUPLE_EXPR,
+    TOPLEVEL_SEMICOLON,
     VECT_EXPR,
     MATRIX_EXPR,
     MATRIX_ROW,

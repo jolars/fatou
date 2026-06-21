@@ -1,8 +1,8 @@
 use crate::parser::events::Event;
 use crate::parser::expr::parse_stmt;
-use crate::parser::lexer::lex;
+use crate::parser::lexer::{TokKind, lex};
 use crate::parser::tree_builder::build_tree;
-use crate::syntax::SyntaxNode;
+use crate::syntax::{SyntaxKind, SyntaxNode};
 
 pub use crate::parser::diagnostics::ParseDiagnostic;
 
@@ -13,10 +13,13 @@ pub struct ParseOutput {
     pub diagnostics: Vec<ParseDiagnostic>,
 }
 
-/// Parse `text` into a lossless `rowan` CST. The drive loop emits root-level
-/// trivia and statement separators directly, parsing each statement with the
-/// Pratt expression parser; an unparseable token is consumed as one error token
-/// so the loop always makes progress.
+/// Parse `text` into a lossless `rowan` CST. The drive loop works one logical
+/// line at a time: leading trivia (including newlines) is emitted directly at
+/// the root, then the line's statements are parsed with the Pratt parser. A line
+/// that carries a top-level `;` groups its statements into a `TOPLEVEL_SEMICOLON`
+/// node (mirroring JuliaSyntax's `toplevel-;`); a plain line stays bare. An
+/// unparseable token is consumed as one error token so the loop always makes
+/// progress.
 pub fn parse(text: &str) -> ParseOutput {
     let tokens = lex(text);
     let mut diagnostics = Vec::new();
@@ -24,19 +27,47 @@ pub fn parse(text: &str) -> ParseOutput {
 
     let mut i = 0usize;
     while i < tokens.len() {
-        if tokens[i].kind.is_trivia() || tokens[i].kind == crate::parser::lexer::TokKind::Semicolon
-        {
+        // Leading trivia and blank/newline runs belong directly at the root.
+        if tokens[i].kind.is_trivia() {
             events.push(Event::Tok(i));
             i += 1;
             continue;
         }
 
-        if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
-            events.extend(expr.events);
-            i = expr.end;
+        // Collect a single logical line (up to the next newline or EOF),
+        // tracking whether it carries a `;` separator.
+        let mut line = Vec::new();
+        let mut has_semicolon = false;
+        while i < tokens.len() {
+            match tokens[i].kind {
+                TokKind::Newline => break,
+                TokKind::Semicolon => {
+                    has_semicolon = true;
+                    line.push(Event::Tok(i));
+                    i += 1;
+                }
+                k if k.is_trivia() => {
+                    line.push(Event::Tok(i));
+                    i += 1;
+                }
+                _ => {
+                    if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
+                        line.extend(expr.events);
+                        i = expr.end;
+                    } else {
+                        line.push(Event::Tok(i));
+                        i += 1;
+                    }
+                }
+            }
+        }
+
+        if has_semicolon {
+            events.push(Event::Start(SyntaxKind::TOPLEVEL_SEMICOLON));
+            events.extend(line);
+            events.push(Event::Finish);
         } else {
-            events.push(Event::Tok(i));
-            i += 1;
+            events.extend(line);
         }
     }
 
@@ -107,9 +138,20 @@ mod tests {
             "q = [x for x in xs]\n",
             "r = [x^2 for x in 1:10 if x > 2]\n",
             "g = (x for x in xs)\n",
+            "a; b\n",
+            "a;;;b;;\n",
+            ";a\n",
         ] {
             assert_lossless(input);
         }
+    }
+
+    #[test]
+    fn groups_top_level_semicolon_line() {
+        let out = parse("a; b\nc\n");
+        let kinds: Vec<_> = out.cst.children().map(|n| n.kind()).collect();
+        use crate::syntax::SyntaxKind::{NAME, TOPLEVEL_SEMICOLON};
+        assert_eq!(kinds, vec![TOPLEVEL_SEMICOLON, NAME]);
     }
 
     #[test]

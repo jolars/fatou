@@ -1,0 +1,59 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..39
+  TOPLEVEL_SEMICOLON@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    SEMICOLON@1..2 ";"
+    NAME@2..3
+      IDENT@2..3 "b"
+    SEMICOLON@3..4 ";"
+    NAME@4..5
+      IDENT@4..5 "c"
+  NEWLINE@5..6 "\n"
+  TOPLEVEL_SEMICOLON@6..9
+    NAME@6..7
+      IDENT@6..7 "a"
+    SEMICOLON@7..8 ";"
+    NAME@8..9
+      IDENT@8..9 "b"
+  NEWLINE@9..10 "\n"
+  TOPLEVEL_SEMICOLON@10..17
+    NAME@10..11
+      IDENT@10..11 "a"
+    SEMICOLON@11..12 ";"
+    SEMICOLON@12..13 ";"
+    SEMICOLON@13..14 ";"
+    NAME@14..15
+      IDENT@14..15 "b"
+    SEMICOLON@15..16 ";"
+    SEMICOLON@16..17 ";"
+  NEWLINE@17..18 "\n"
+  TOPLEVEL_SEMICOLON@18..22
+    NAME@18..19
+      IDENT@18..19 "a"
+    SEMICOLON@19..20 ";"
+    WHITESPACE@20..21 " "
+    NAME@21..22
+      IDENT@21..22 "b"
+  NEWLINE@22..23 "\n"
+  TOPLEVEL_SEMICOLON@23..26
+    NAME@23..24
+      IDENT@23..24 "c"
+    SEMICOLON@24..25 ";"
+    NAME@25..26
+      IDENT@25..26 "d"
+  NEWLINE@26..27 "\n"
+  TOPLEVEL_SEMICOLON@27..38
+    IMPORT_STMT@27..35
+      IMPORT_KW@27..33 "import"
+      WHITESPACE@33..34 " "
+      IMPORT_PATH@34..35
+        IDENT@34..35 "A"
+    SEMICOLON@35..36 ";"
+    WHITESPACE@36..37 " "
+    NAME@37..38
+      IDENT@37..38 "B"
+  NEWLINE@38..39 "\n"

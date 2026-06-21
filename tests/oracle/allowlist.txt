@@ -65,6 +65,7 @@ struct_module
 symbols
 ternary
 tilde_operator
+toplevel_semicolon
 transpose
 triple_command
 try_catch
