@@ -1,0 +1,1 @@
+(toplevel (. (macrocall @S (vect a)) (quote b)) (. (macrocall @S (braces a)) (quote b)) (call (macrocall @S (vect a)) x) (ref (macrocall @S (vect a)) b) (. (macrocall (. S (quote @x)) (vect a)) (quote b)) (. (. (macrocall @S (vect a)) (quote b)) (quote c)))

@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **506 allowlisted**, 65 divergence, 4 unsupported.
-Dir corpus: **90 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **508 allowlisted**, 63 divergence, 4 unsupported.
+Dir corpus: **91 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,36 +31,44 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21o)
+## Latest session (2026-06-21p)
 
-**`@doc` macro newline extension.** `@doc x\ny` ⇒ `(macrocall @doc x y)`:
-JuliaSyntax's doc-macro rule — when the doc macro (leaf identifier `doc`, so
-`@doc`, `A.@doc`, `@A.doc`) takes *exactly one* space-separated argument and the
-next line carries a non-closing expression, the macrocall consumes the newline
-plus one more argument. `parse_macro_args` (`expr.rs`) now counts `n_args` in the
-space-form loop; after it, if `macro_leaf_is_doc(ctx, name_end)` (the token before
-`name_end` is `Ident "doc"`) and `n_args == 1`, it peeks past the newline: a blank
-line (second `Newline`), a closing token (`end else elseif catch finally , ; ) ] }`),
-or EOF stops it; otherwise it `push_range`s the newline and parses one more arg at
-bp 0 with `stmt_comma: true` (so `@doc x\ny, z` ⇒ `(macrocall @doc x (tuple y z))`).
-Pure parser change — the projector already handles n-ary macrocalls. Fixture
-`doc_macro`.
+**Bracket-macrocall postfix.** `@S[a].b` ⇒ `(. (macrocall @S (vect a)) (quote b))`,
+`@S{a}.b` ⇒ `(. (macrocall @S (braces a)) (quote b))`. A `[`/`{` *adjacent* to the
+macro name (no whitespace — else `name_end` points at the Whitespace trivia token,
+as the paren form already relies on) is the bracket-macrocall form: the bracket is
+the sole argument and any postfix (`.b`, `(x)`, `[b]`, `+ b`) chains onto the
+*whole* macrocall, not the bracket. Fix in `parse_macro_args` (`expr.rs`): after
+the paren branch, if `ctx.token(name_end)` is `LBracket`/`LBrace`, parse only the
+bracket via `parse_prefix` (no postfix chain) and `return arg.end`, letting the
+outer Pratt loop's `parse_postfix_chain` attach the suffix. The space form
+`@S [a].b` is untouched (still one space-separated arg `[a].b`). Qualified
+(`@S.x[a].b`) falls out for free since `parse_qualified_macro` shares
+`parse_macro_args`. Pure parser change — projector already handles `.`/call/index
+over a macrocall (the paren form `@S(a).b` was already correct). Fixture
+`macro_bracket_postfix`.
 
-JS allow **503 → 506** (+3: `@doc x\ny`, `A.@doc x\ny`, `@A.doc x\ny`), divergence
-68 → 65, unsupported held 4. Dir allow 89 → 90 (+1 fixture). Zero regressions;
-green, clippy/fmt clean.
+JS allow **506 → 508** (+2: `@S[a].b`, `@S{a}.b`), divergence 65 → 63, unsupported
+held 4. Dir allow 90 → 91 (+1 fixture). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
 1. **`@(A)` paren macro name** (js-f3aa762e ⇒ `@A`): `@(A) x` — a parenthesized
    macro name unwraps to the bare name. Fatou currently emits `(macrocall-p @. A)`.
-2. **`@S[a].b`/`@S{a}.b`** (js-b55b2b19/b6643c20): macrocall then postfix `.b` —
-   the `.b` must attach to the *whole* macrocall (`(. (macrocall @S (vect a))
-   (quote b))`), like the field-access-suffix fix (2026-06-18q) but the suffix is
-   a Dot rather than a call/index.
-3. Survey the remaining 65 JS FAILs for the next cluster (`cargo test --test
+2. **Signed non-decimal/float literals** (`-0o22`, `+0b10010`, `-0x1`, `-0xf.0p0`,
+   `+0o22`, `-0b10010`, `0x...p+0`, `1.0e-1000`): cluster of ~10 JS FAILs around
+   signed/exponent numeric folding. Check which are genuine vs display-normalization
+   (some may be deliberate blocked divergences).
+3. Survey the remaining 63 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 
 ## Earlier sessions
+
+- **2026-06-21o** — `@doc` macro newline extension. `@doc x\ny` ⇒ `(macrocall @doc
+  x y)`: the doc macro (leaf identifier `doc`: `@doc`, `A.@doc`, `@A.doc`) taking
+  exactly one space-separated arg consumes the next line's non-closing expression
+  as a second arg. `parse_macro_args` counts `n_args`; after the space loop, if
+  `macro_leaf_is_doc` and `n_args == 1`, peeks past the newline (blank line/closing
+  token/EOF stops). Pure parser change. JS allow 503 → 506. Fixture `doc_macro`.
 
 - **2026-06-21n** — Typed + brace concatenation. `T[x y]` → `(typed_hcat T x y)`,
   `T[a;b]` → `(typed_vcat …)`, `T[a ;; b]` → `(typed_ncat-2 …)`; `{x y}` →

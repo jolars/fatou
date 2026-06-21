@@ -109,7 +109,13 @@ through), so the grammar can grow incrementally.
   holds a non-closing expression, `parse_macro_args` consumes the newline and one
   more `parse_eq`-level argument (`@doc x\ny` ⇒ `(macrocall @doc x y)`); a blank
   line, closing token, or end of input stops it.
-  **Deferred:** `@(A)`, `@S[a].b`/`@S{a}.b` (macrocall then postfix).
+  A `[`/`{` adjacent to the macro name (no whitespace) is the bracket-macrocall
+  form: the bracket is the sole argument and postfix operators chain onto the
+  whole macrocall (`@S[a].b` ⇒ `(. (macrocall @S (vect a)) (quote b))`,
+  `@S[a](x)` ⇒ `(call (macrocall @S (vect a)) x)`). `parse_macro_args` parses
+  only the bracket prefix (`parse_prefix`) and returns, so the outer postfix
+  chain attaches any suffix; the space form `@S [a].b` keeps `[a].b` as one arg.
+  **Deferred:** `@(A)` paren macro name.
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside

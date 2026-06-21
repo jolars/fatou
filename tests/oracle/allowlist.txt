@@ -44,6 +44,7 @@ keyword_statements
 let_quote
 literals
 loops
+macro_bracket_postfix
 macro_definition
 macro_directive_names
 macro_operator_names

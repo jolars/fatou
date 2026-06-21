@@ -2141,6 +2141,26 @@ fn parse_macro_args(
         return end;
     }
 
+    // Bracket form `@m[a]`/`@m{a}`: a `[`/`{` adjacent to the macro name (no
+    // whitespace, else `name_end` points at the whitespace token) is the single
+    // argument. Postfix operators chain onto the whole macrocall, not the bracket
+    // (`@m[a].b` ⇒ `(. (macrocall @m (vect a)) (quote b))`, `@m[a](x)` ⇒
+    // `(call (macrocall @m (vect a)) x)`), so parse only the bracket prefix here
+    // and let the outer postfix chain attach any suffix.
+    if matches!(
+        ctx.token(name_end).map(|t| t.kind),
+        Some(TokKind::LBracket | TokKind::LBrace)
+    ) {
+        let arg_flags = ExprFlags {
+            inside_brackets,
+            ..ExprFlags::default()
+        };
+        if let Some(arg) = parse_prefix(ctx, name_end, diagnostics, arg_flags) {
+            events.extend(arg.events);
+            return arg.end;
+        }
+    }
+
     // Space form `@m a b`: each argument is a full expression. Stop at a newline,
     // end of input, or a delimiter that closes/separates an enclosing list.
     let mut pos = name_end;
