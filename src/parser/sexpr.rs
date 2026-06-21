@@ -1582,6 +1582,26 @@ fn triple_string_parts(node: &SyntaxNode, raw: bool) -> Vec<String> {
         }
     }
 
+    chunk_triple_lines(lines, raw)
+}
+
+/// A triple-backtick command's content as raw text lines (commands keep
+/// `$`-interpolation as literal source, so every child — content and
+/// interpolation alike — is folded into one raw string before dedenting), then
+/// JuliaSyntax's dedent + per-line chunking is applied with raw escaping.
+fn triple_cmd_parts(node: &SyntaxNode) -> Vec<String> {
+    let body = normalize_newlines(&cmd_raw_body(node));
+    let lines: Vec<Vec<TripleItem>> = body
+        .split('\n')
+        .map(|seg| vec![TripleItem::Text(seg.to_string())])
+        .collect();
+    chunk_triple_lines(lines, true)
+}
+
+/// Apply JuliaSyntax's triple-quoted dedent and per-line chunking to a sequence
+/// of content lines, emitting one display-escaped `String`/interpolation part per
+/// surviving chunk.
+fn chunk_triple_lines(lines: Vec<Vec<TripleItem>>, raw: bool) -> Vec<String> {
     let last_idx = lines.len() - 1;
 
     // Common leading whitespace over lines 2..end. Whitespace-only lines are
@@ -1722,18 +1742,30 @@ fn project_var(node: &SyntaxNode) -> String {
 }
 
 fn project_cmd(node: &SyntaxNode) -> String {
-    // Command literals lower to a `core_@cmd` macrocall over a raw cmdstring.
-    // Commands are raw: JuliaSyntax keeps `$`-interpolation as literal source
-    // (escaped `\$`) and defers expansion to the macro, so reconstruct the raw
-    // body from both content tokens and interpolation source text.
+    // Command literals lower to a macrocall over a raw cmdstring. A bare literal
+    // (`` `cmd` ``) uses the built-in `core_@cmd`; a prefix names a custom command
+    // macro (`` x`str` `` ⇒ `@x_cmd`). Commands are raw: JuliaSyntax keeps
+    // `$`-interpolation as literal source (escaped `\$`) and defers expansion to
+    // the macro, so reconstruct the raw body from content and interpolation text.
     let triple = matches!(string_token(node, CMD_DELIM_OPEN), Some(d) if d.len() >= 3);
-    let head = if triple {
-        "cmdstring-s-r"
-    } else {
-        "cmdstring-r"
+    let head = match string_token(node, STRING_PREFIX) {
+        Some(prefix) => format!("@{prefix}_cmd"),
+        None => "core_@cmd".to_string(),
     };
-    let body = format!("({head} {})", quote_raw(&cmd_raw_body(node)));
-    sexp("macrocall", vec!["core_@cmd".to_string(), body])
+    // A triple-quoted command gets JuliaSyntax's dedent + per-line chunking (raw),
+    // matching the triple-string path; a single-quoted one is one raw chunk.
+    let body = if triple {
+        sexp("cmdstring-s-r", triple_cmd_parts(node))
+    } else {
+        format!("(cmdstring-r {})", quote_raw(&cmd_raw_body(node)))
+    };
+    let mut parts = vec![head, body];
+    if let Some(suffix) = string_token(node, STRING_SUFFIX) {
+        // A flag glued to the closing delimiter (`` x`str`flag ``) is an extra
+        // macrocall argument.
+        parts.push(quote_raw(&suffix));
+    }
+    sexp("macrocall", parts)
 }
 
 fn cmd_raw_body(node: &SyntaxNode) -> String {

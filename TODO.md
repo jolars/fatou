@@ -78,7 +78,12 @@ through), so the grammar can grow incrementally.
   An identifier-shaped flag suffix may carry trailing digits (`x"s"i2` → `"i2"`),
   and a digit-led suffix glued to a string macro is an extra numeric macrocall
   argument (`x"s"2` → `(macrocall @x_str (string-r "s") 2)`); the suffix number is
-  captured into the `STRING_LITERAL` node. Known limitation: a `\"` immediately
+  captured into the `STRING_LITERAL` node. Command literals lower the same way: a
+  bare `` `cmd` `` is `(macrocall core_@cmd (cmdstring-r "cmd"))`, a prefix names a
+  custom command macro (`` x`str` `` → `(macrocall @x_cmd (cmdstring-r "str"))`), a
+  glued flag is an extra argument (`` x`str`flag ``), and a triple-backtick command
+  gets the same dedent + per-line chunking as a triple string (`cmdstring-s-r`).
+  Known limitation: a `\"` immediately
   before a raw-string closing quote is not yet handled (the raw body is kept as
   one content chunk).
 - [x] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.

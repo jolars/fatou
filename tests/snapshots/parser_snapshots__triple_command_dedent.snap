@@ -1,0 +1,10 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..13
+  CMD_LITERAL@0..12
+    CMD_DELIM_OPEN@0..3 "```"
+    STRING_CONTENT@3..9 "\n x\n y"
+    CMD_DELIM_CLOSE@9..12 "```"
+  NEWLINE@12..13 "\n"

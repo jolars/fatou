@@ -21,6 +21,7 @@ call_and_index
 char_escapes
 colon_range
 command_literal
+command_macro
 comments
 comprehensions
 control_flow
@@ -86,6 +87,7 @@ tilde_operator
 toplevel_semicolon
 transpose
 triple_command
+triple_command_dedent
 triple_string_dedent
 triple_string_interp
 try_catch

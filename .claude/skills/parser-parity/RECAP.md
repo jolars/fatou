@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **514 allowlisted**, 58 divergence, 3 unsupported.
-Dir corpus: **95 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **517 allowlisted**, 55 divergence, 3 unsupported.
+Dir corpus: **97 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,48 +31,44 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21t)
+## Latest session (2026-06-21u)
 
-**Undotted operator-symbol quotes.** `:..`, `:√`, `:∛`, `:¬`, the Unicode
-operators (`:⊕`, `:≤`, `:→`, `:∈`, `:×`), and the ternary `:?` ⇒
-`(quote-: ..)`/`(quote-: √)`/`(quote-: ?)` etc. — the sibling cluster flagged last
-session. Pure parser change in `parse_quote_sym` (`expr.rs`): the bare-operator
-quote arm's predicate gains `is_quotable_operator(k)` (a new helper matching
-`DotDot`, the Unicode operator tiers `UniArrow`/`UniComparison`/`UniColon`/
-`UniPlus`/`UniTimes`/`UniPower`, `UniRadical`, and `Question`) alongside the
-existing `is_op_name`/`is_assignment_op`. The token text is emitted verbatim into
-`QUOTE_SYM`; `project_quote_sym` already reads a bare op token's text, so the
-projector was untouched. `:&&`/`:||`/`:->`/`:~`/`:!` already quoted (in
-`is_op_name`); the dotted broadcasts (`:.+`) stay on their own earlier arm.
-Siblings verified unregressed: `a[:]` (index colon → `None`), `a:b`
-(range), `::x` (type-annot prefix), `a.:b` (field access), `a ? b : c` (ternary).
-Fixture `operator_symbol_quote_value`.
-
-**Deferred (still divergences):** the syntactic sigil quotes `:$`/`:.`/`:...` —
-Julia quotes the sigil *alone* and drops any following operand to an `error-t`
-(`:$x` ⇒ `(quote-: $) (error-t x)`), entangled with interpolation/splat/field
-access; error-shape, left out. Also the long-standing bare-`:` Colon index value
-(`a[:]` ⇒ Fatou `(ref a)` vs Julia `(ref a :)`).
-
-These cases aren't in the JS corpus, so JS allow held at **514** (0 regressions);
-dir allow **94 → 95** (+1 fixture). Green; clippy/fmt clean.
+**Command literals / custom cmd macros.** `` `cmd` `` ⇒ `(macrocall core_@cmd
+(cmdstring-r "cmd"))`; a prefix names a custom command macro `` x`str` `` ⇒
+`(macrocall @x_cmd (cmdstring-r "str"))`, `` x`` `` ⇒ empty body; a glued flag is
+an extra arg `` x`str`flag `` ⇒ `… (cmdstring-r "str") "flag"`; a triple-backtick
+command gets the same dedent + per-line chunking as a triple string
+(`` ```\n x\n y``` `` ⇒ `(cmdstring-s-r "x\n" "y")`). **Pure projector change** —
+the parser already built `CMD_LITERAL` with `STRING_PREFIX`/`STRING_SUFFIX`
+children. `project_cmd` (`sexpr.rs`) now picks the head from `STRING_PREFIX`
+(`@<p>_cmd` else `core_@cmd`), appends a `STRING_SUFFIX` flag arg, and routes the
+triple case through a new `triple_cmd_parts`. **Trap hit:** commands are *raw* —
+`$x` interpolation stays literal source (escaped `\$`), so the triple path can't
+reuse `triple_string_parts` (which splits interpolation into its own child and
+regressed `triple_command`). Refactored: extracted `chunk_triple_lines` (the
+dedent/chunk/escape tail) shared by `triple_string_parts` and `triple_cmd_parts`,
+the latter folding `cmd_raw_body` (content + interpolation source) into all-`Text`
+lines. JS allow 514 → 517 (`x`str`/x``/triple-dedent`); dir allow 95 → 97
+(fixtures `command_macro`, `triple_command_dedent`). Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Command literals / custom cmd macros** (`` x`str` `` ⇒ `(macrocall @x_cmd
-   (cmdstring-r "str"))`, `` x`` ``, triple `` ```…``` `` ⇒ `core_@cmd`): backtick
-   cmd-macro names. ~4 JS FAILs.
-2. **Syntactic sigil quotes `:$`/`:.`/`:...`** (deferred this session): Julia
-   quotes the sigil alone and drops the operand to an `error-t` (`:$x` ⇒
-   `(quote-: $) (error-t x)`). Entangled with interpolation/splat/field access and
-   error-shape; a quote-context flag through `parse_prefix_interpolation` plus
-   error-shape modeling. Not in the JS corpus.
-3. Survey the remaining 58 JS FAILs for the next cluster (`cargo test --test
+1. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
+   drops the operand to an `error-t` (`:$x` ⇒ `(quote-: $) (error-t x)`). Entangled
+   with interpolation/splat/field access and error-shape. Not in the JS corpus.
+2. Survey the remaining 55 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
-4. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
-   @b))`, `A.@(x)` ⇒ `(. A (quote @x))` — Julia extends/qualifies the name through
-   the parens (left as divergences).
+3. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
+   @b))`, `A.@(x)` ⇒ `(. A (quote @x))`.
 
 ## Earlier sessions
+
+- **2026-06-21t** — Undotted operator-symbol quotes. `:..`, `:√`, `:∛`, `:¬`, the
+  Unicode operators (`:⊕`, `:≤`, `:→`, `:∈`, `:×`), and the ternary `:?` ⇒
+  `(quote-: ..)`/`(quote-: ?)` etc. Pure parser change: `parse_quote_sym`'s
+  bare-operator arm gained `is_quotable_operator` (`DotDot`, the Unicode operator
+  tiers, `UniRadical`, `Question`); projector untouched. Deferred the syntactic
+  sigil quotes `:$`/`:.`/`:...` (error-shape). JS allow held 514. Fixture
+  `operator_symbol_quote_value`.
 
 - **2026-06-21s** — Quote of dotted operators. `:.+`, `:.&`, `:.=`, `:.&&`,
   `:.||`, `:.==`, `:.+=` ⇒ `(quote-: (. +))` etc. — a prefix `:` quoting a

@@ -1,0 +1,23 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..22
+  CMD_LITERAL@0..6
+    STRING_PREFIX@0..1 "x"
+    CMD_DELIM_OPEN@1..2 "`"
+    STRING_CONTENT@2..5 "str"
+    CMD_DELIM_CLOSE@5..6 "`"
+  NEWLINE@6..7 "\n"
+  CMD_LITERAL@7..10
+    STRING_PREFIX@7..8 "x"
+    CMD_DELIM_OPEN@8..9 "`"
+    CMD_DELIM_CLOSE@9..10 "`"
+  NEWLINE@10..11 "\n"
+  CMD_LITERAL@11..21
+    STRING_PREFIX@11..12 "x"
+    CMD_DELIM_OPEN@12..13 "`"
+    STRING_CONTENT@13..16 "str"
+    CMD_DELIM_CLOSE@16..17 "`"
+    STRING_SUFFIX@17..21 "flag"
+  NEWLINE@21..22 "\n"
