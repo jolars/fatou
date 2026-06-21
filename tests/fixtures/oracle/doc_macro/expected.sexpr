@@ -1,0 +1,1 @@
+(toplevel (macrocall @doc x y) (macrocall (. A (quote @doc)) x y) (macrocall (. A (quote @doc)) x y) (macrocall @doc (string "text") foo) (macrocall @doc x (tuple z w)))

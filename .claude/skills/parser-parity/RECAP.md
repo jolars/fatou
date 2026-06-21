@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **503 allowlisted**, 68 divergence, 4 unsupported.
-Dir corpus: **89 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **506 allowlisted**, 65 divergence, 4 unsupported.
+Dir corpus: **90 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,38 +31,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21n)
+## Latest session (2026-06-21o)
 
-**Typed + brace concatenation.** `T[x y]` → `(typed_hcat T x y)`, `T[a;b]` →
-`(typed_vcat T a b)`, `T[a ;; b]` → `(typed_ncat-2 T a b)`, `T[;]` →
-`(typed_ncat-1 T)`; `{x y}` → `(bracescat (row x y))`, `{a;b}` → `(bracescat a b)`,
-`{a;;b}` → `(bracescat (nrow-2 a b))`, `{;}` → `(bracescat (nrow-1))`.
-`parse_matrix`/`parse_empty_ncat` (`expr.rs`) were parametrized on the close token
-plus the comma-form and matrix-form node kinds, so all three delimiters reuse the
-same scan + `MATRIX_ROW` nesting. Typed: new `parse_typed_concat` runs after the
-comprehension check in `parse_postfix` (RBracket only); a space/`;`-separated body
-→ `TYPED_MATRIX_EXPR` wrapping the type expr + a `MATRIX_EXPR` (a lone element with
-only a trailing newline collapses to `VECT_EXPR` → stays a `ref`). Braces:
-`parse_braces` now dispatches comma/single/empty → `BRACES`, else
-`BRACESCAT_EXPR`. Projector: `matrix_head_and_children` factored out of
-`project_matrix`; `project_typed_matrix` prepends the type and prefixes `typed_`;
-`project_bracescat` always heads `bracescat` (dim-1 keeps children, dim-0/≥2 and
-empty nest a single `row`/`nrow-d` child, since bracescat is itself the dim-1
-container). Fixtures `typed_concat`, `bracescat`.
+**`@doc` macro newline extension.** `@doc x\ny` ⇒ `(macrocall @doc x y)`:
+JuliaSyntax's doc-macro rule — when the doc macro (leaf identifier `doc`, so
+`@doc`, `A.@doc`, `@A.doc`) takes *exactly one* space-separated argument and the
+next line carries a non-closing expression, the macrocall consumes the newline
+plus one more argument. `parse_macro_args` (`expr.rs`) now counts `n_args` in the
+space-form loop; after it, if `macro_leaf_is_doc(ctx, name_end)` (the token before
+`name_end` is `Ident "doc"`) and `n_args == 1`, it peeks past the newline: a blank
+line (second `Newline`), a closing token (`end else elseif catch finally , ; ) ] }`),
+or EOF stops it; otherwise it `push_range`s the newline and parses one more arg at
+bp 0 with `stmt_comma: true` (so `@doc x\ny, z` ⇒ `(macrocall @doc x (tuple y z))`).
+Pure parser change — the projector already handles n-ary macrocalls. Fixture
+`doc_macro`.
 
-JS allow **496 → 503** (+7), divergence 75 → 68, unsupported held 4. Dir allow
-87 → 89 (+2 fixtures). Zero regressions; green, clippy/fmt clean.
+JS allow **503 → 506** (+3: `@doc x\ny`, `A.@doc x\ny`, `@A.doc x\ny`), divergence
+68 → 65, unsupported held 4. Dir allow 89 → 90 (+1 fixture). Zero regressions;
+green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Remaining macro-name forms**: `@(A)` paren name (js-f3aa762e ⇒ `@A`),
-   `@S[a].b`/`@S{a}.b` (js-b55b2b19/b6643c20 — macrocall then postfix `.b`).
-2. **Concat newline/whitespace edges** (mostly error-shape, lower value):
-   `[x \n, ]`, `[x \n\n ]`, `[a b ;; \n c]`, `[f (x)]` space-call — several emit
-   Julia `(error-t)` recovery, so check each before committing.
-3. Survey the remaining 68 JS FAILs for the next cluster (`cargo test --test
+1. **`@(A)` paren macro name** (js-f3aa762e ⇒ `@A`): `@(A) x` — a parenthesized
+   macro name unwraps to the bare name. Fatou currently emits `(macrocall-p @. A)`.
+2. **`@S[a].b`/`@S{a}.b`** (js-b55b2b19/b6643c20): macrocall then postfix `.b` —
+   the `.b` must attach to the *whole* macrocall (`(. (macrocall @S (vect a))
+   (quote b))`), like the field-access-suffix fix (2026-06-18q) but the suffix is
+   a Dot rather than a call/index.
+3. Survey the remaining 65 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 
 ## Earlier sessions
+
+- **2026-06-21n** — Typed + brace concatenation. `T[x y]` → `(typed_hcat T x y)`,
+  `T[a;b]` → `(typed_vcat …)`, `T[a ;; b]` → `(typed_ncat-2 …)`; `{x y}` →
+  `(bracescat (row x y))`, `{a;b}` → `(bracescat a b)`, `{a;;b}` →
+  `(bracescat (nrow-2 …))`. `parse_matrix`/`parse_empty_ncat` parametrized on the
+  close token + node kinds so all three delimiters reuse one scan; new
+  `parse_typed_concat` (after the comprehension check, RBracket only) wraps a
+  `TYPED_MATRIX_EXPR`; `parse_braces` dispatches comma/single/empty → `BRACES`
+  else `BRACESCAT_EXPR`. Projector `matrix_head_and_children` factored out;
+  `project_typed_matrix` prefixes `typed_`; `project_bracescat` always heads
+  `bracescat`. JS allow 496 → 503. Fixtures `typed_concat`, `bracescat`.
 
 - **2026-06-21m** — N-dimensional concatenation (`;;`/`;;;`). `parse_matrix`
   rewritten to scan elements + dimension-tagged `SepRun`s and recursively nest

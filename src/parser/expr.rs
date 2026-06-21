@@ -2144,6 +2144,7 @@ fn parse_macro_args(
     // Space form `@m a b`: each argument is a full expression. Stop at a newline,
     // end of input, or a delimiter that closes/separates an enclosing list.
     let mut pos = name_end;
+    let mut n_args = 0;
     loop {
         let next = ctx.skip_ws(pos);
         match ctx.token(next).map(|t| t.kind) {
@@ -2166,13 +2167,65 @@ fn parse_macro_args(
                     Some(arg) => {
                         events.extend(arg.events);
                         pos = arg.end;
+                        n_args += 1;
                     }
                     None => break,
                 }
             }
         }
     }
+
+    // `@doc` extension: when the doc macro takes exactly one space-separated
+    // argument and the next line carries another expression, it is consumed as a
+    // second argument (`@doc x\ny` ⇒ `(macrocall @doc x y)`). A blank line, a
+    // closing token, or end of input on the next line stops it. Matches
+    // JuliaSyntax's doc-macro rule; the name's leaf identifier must be `doc`
+    // (`@doc`, `A.@doc`, `@A.doc`).
+    if n_args == 1 && macro_leaf_is_doc(ctx, name_end) {
+        let nl = ctx.skip_ws(pos);
+        if ctx.token(nl).map(|t| t.kind) == Some(TokKind::Newline) {
+            let after = ctx.skip_ws(nl + 1);
+            let extend = !matches!(
+                ctx.token(after).map(|t| t.kind),
+                None | Some(
+                    TokKind::Newline
+                        | TokKind::Comma
+                        | TokKind::Semicolon
+                        | TokKind::RParen
+                        | TokKind::RBracket
+                        | TokKind::RBrace
+                        | TokKind::EndKw
+                        | TokKind::ElseKw
+                        | TokKind::ElseifKw
+                        | TokKind::CatchKw
+                        | TokKind::FinallyKw
+                )
+            );
+            if extend {
+                push_range(events, pos, after);
+                let arg_flags = ExprFlags {
+                    inside_brackets,
+                    stmt_comma: true,
+                    ..ExprFlags::default()
+                };
+                if let Some(arg) = parse_expr_in(ctx.tokens(), after, 0, diagnostics, arg_flags) {
+                    events.extend(arg.events);
+                    pos = arg.end;
+                }
+            }
+        }
+    }
     pos
+}
+
+/// Whether the macro name ending at `name_end` has the leaf identifier `doc` —
+/// the special doc macro (`@doc`, `A.@doc`, `@A.doc`), whose single-argument
+/// form is extended with the next line's expression in [`parse_macro_args`].
+fn macro_leaf_is_doc(ctx: &ParserCtx<'_>, name_end: usize) -> bool {
+    name_end > 0
+        && ctx
+            .token(name_end - 1)
+            .is_some_and(|t| t.kind == TokKind::Ident && t.text == "doc")
 }
 
 /// Parse a standalone `{ … }` brace expression. A comma-separated (or single,

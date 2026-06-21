@@ -1,0 +1,72 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..59
+  MACRO_CALL@0..8
+    MACRO_NAME@0..4
+      AT@0..1 "@"
+      IDENT@1..4 "doc"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "x"
+    NEWLINE@6..7 "\n"
+    NAME@7..8
+      IDENT@7..8 "y"
+  NEWLINE@8..9 "\n"
+  MACRO_CALL@9..19
+    MACRO_NAME@9..15
+      NAME@9..10
+        IDENT@9..10 "A"
+      DOT@10..11 "."
+      AT@11..12 "@"
+      IDENT@12..15 "doc"
+    WHITESPACE@15..16 " "
+    NAME@16..17
+      IDENT@16..17 "x"
+    NEWLINE@17..18 "\n"
+    NAME@18..19
+      IDENT@18..19 "y"
+  NEWLINE@19..20 "\n"
+  MACRO_CALL@20..30
+    MACRO_NAME@20..26
+      AT@20..21 "@"
+      IDENT@21..22 "A"
+      DOT@22..23 "."
+      IDENT@23..26 "doc"
+    WHITESPACE@26..27 " "
+    NAME@27..28
+      IDENT@27..28 "x"
+    NEWLINE@28..29 "\n"
+    NAME@29..30
+      IDENT@29..30 "y"
+  NEWLINE@30..31 "\n"
+  MACRO_CALL@31..46
+    MACRO_NAME@31..35
+      AT@31..32 "@"
+      IDENT@32..35 "doc"
+    WHITESPACE@35..36 " "
+    STRING_LITERAL@36..42
+      STRING_DELIM_OPEN@36..37 "\""
+      STRING_CONTENT@37..41 "text"
+      STRING_DELIM_CLOSE@41..42 "\""
+    WHITESPACE@42..43 " "
+    NAME@43..46
+      IDENT@43..46 "foo"
+  NEWLINE@46..47 "\n"
+  MACRO_CALL@47..58
+    MACRO_NAME@47..51
+      AT@47..48 "@"
+      IDENT@48..51 "doc"
+    WHITESPACE@51..52 " "
+    NAME@52..53
+      IDENT@52..53 "x"
+    NEWLINE@53..54 "\n"
+    BARE_TUPLE_EXPR@54..58
+      NAME@54..55
+        IDENT@54..55 "z"
+      COMMA@55..56 ","
+      WHITESPACE@56..57 " "
+      NAME@57..58
+        IDENT@57..58 "w"
+  NEWLINE@58..59 "\n"

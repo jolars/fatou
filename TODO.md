@@ -104,6 +104,11 @@ through), so the grammar can grow incrementally.
   qualified `A.@var"#"`, `export @var"#"`) parses via `push_var_macro_name`
   (`expr.rs`), shared by `parse_macro_name_body` and `push_macro_name`
   (`structural.rs`); `project_macro_name` folds the `@` into the `var` content.
+  The doc macro extends across one newline: when `@doc` (leaf name `doc`, also
+  `A.@doc`/`@A.doc`) takes exactly one space-separated argument and the next line
+  holds a non-closing expression, `parse_macro_args` consumes the newline and one
+  more `parse_eq`-level argument (`@doc x\ny` ⇒ `(macrocall @doc x y)`); a blank
+  line, closing token, or end of input stops it.
   **Deferred:** `@(A)`, `@S[a].b`/`@S{a}.b` (macrocall then postfix).
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
