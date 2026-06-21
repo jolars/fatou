@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **509 allowlisted**, 62 divergence, 4 unsupported.
-Dir corpus: **92 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **511 allowlisted**, 60 divergence, 4 unsupported.
+Dir corpus: **93 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,35 +31,56 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21q)
+## Latest session (2026-06-21r)
 
-**`@(A)` paren macro name.** `@(A) x` ⇒ `(macrocall @A x)`, `@(A)` ⇒ `(macrocall
-@A)`, `@( A ) x` (interior whitespace) ⇒ same, `@(A)(x)` ⇒ `(macrocall-p @A x)`.
-A lone identifier wrapped in parens after `@` unwraps to the bare name. Pure
-parser change: a new `LParen` arm in `parse_macro_name_body` (`expr.rs`) — when
-`@` is followed by `( <skip_ws> ident <skip_ws> )`, `push_range` the whole `(…)`
-run into the `MACRO_NAME` (lossless) and `return after+1`; else `return start`
-(leaves the `(` to the paren-arg form). The projector needs **no** change: its
-`comps` collection already filters to IDENT + name-part tokens, so `LPAREN`/
-`RPAREN`/`WHITESPACE` are skipped and `comps == [A]` ⇒ `@A`. Anything but a lone
-ident (`@(A.b)`, `@(f(x))`) stays an error-shape divergence (un-allowlisted).
-Fixture `paren_macro_name`.
+**String-macro numeric suffix.** `x"s"2` ⇒ `(macrocall @x_str (string-r "s") 2)`,
+`x"s"2.0` similarly; a digit-led suffix glued to a string macro's close delimiter
+is an extra numeric macrocall argument. The flag-suffix path already handled the
+identifier form (`x"s"y` ⇒ `… "y"`); extended `lexer.rs::lex_suffix` so a
+letter-led flag also absorbs trailing digits (`x"s"i2` ⇒ `… "i2"`). The numeric
+suffix is lexed as an ordinary `Integer`/`Float`, so `parse_string_literal`
+(`expr.rs`) now captures it into the `STRING_LITERAL` node when `has_prefix &&
+node == STRING_LITERAL` and the glued token is numeric (whitespace is its own
+token, so `x"s" 2` with a space stays separate; plain `"s"2` is a docstring,
+gated out by `has_prefix`). Projector `project_string` (`sexpr.rs`) renders it via
+new `numeric_suffix` helper as the literal text (not a flag string).
+**Display-normalized numerics stay divergent**: `x"s"0x1` (→ `0x01`), `x"s"1e3`
+(→ `1000.0`) render raw in Fatou, so they're left un-allowlisted (same bucket as
+the rest of the numeric-display divergences). Fixture `string_macro_suffix`.
 
-JS allow **508 → 509** (+1: `@(A) x`), divergence 63 → 62, unsupported held 4.
-Dir allow 91 → 92 (+1 fixture). Zero regressions; green, clippy/fmt clean.
+JS allow **509 → 511** (+2: `x"s"2`, `x"s"10.0`), divergence 62 → 60, unsupported
+held 4. Dir allow 92 → 93 (+1 fixture). Zero regressions; green, clippy/fmt clean.
+
+**Resolved target #1 (signed non-decimal/float literals):** all 8 JS FAILs in
+that cluster (`+0o22`, `-0o22`, `+0b10010`, `-0xf.0p0`, `-0x1`, `-0b10010`,
+`1.0e-1000`, `0x…p+0`) are **display normalization only** — Fatou already produces
+the correct *structure* (folds `+`/hex-float into the literal, keeps `-` on a
+non-decimal int as `(call-pre - …)`); only the rendered value differs
+(`0o22`→`0x12`, `-0xf.0p0`→`-15.0`). Already recorded out-of-scope (dir
+`blocked.txt: numeric_literals`); no action.
 
 **Suggested next targets (ranked):**
-1. **Signed non-decimal/float literals** (`-0o22`, `+0b10010`, `-0x1`, `-0xf.0p0`,
-   `+0o22`, `-0b10010`, `0x...p+0`, `1.0e-1000`): cluster of ~10 JS FAILs around
-   signed/exponent numeric folding. Check which are genuine vs display-normalization
-   (some may be deliberate blocked divergences).
-2. Survey the remaining 62 JS FAILs for the next cluster (`cargo test --test
+1. **Quote of dotted operators** (`:.=`, `:.&&`, also `:.+`, `:.&`): Julia ⇒
+   `(quote-: (. =))` etc. Fatou diverges — `:.+` drops the quote (⇒ `(. +)`),
+   `:.=` ⇒ `(quote-: .=)` (op not split), `:.&&` ⇒ empty `(toplevel)` (dropped).
+   `parse_quote_sym` (`expr.rs`) needs a dotted-operator arm; projector should
+   head the dotted op as `(. <op>)`. 2 JS FAILs (`:.=`, `:.&&`) + sibling fixes.
+2. **Command literals / custom cmd macros** (`` x`str` `` ⇒ `(macrocall @x_cmd
+   (cmdstring-r "str"))`, `` x`` ``, triple `` ```…``` `` ⇒ `core_@cmd`): backtick
+   cmd-macro names. ~4 JS FAILs.
+3. Survey the remaining 60 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
-3. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
+4. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
    @b))`, `A.@(x)` ⇒ `(. A (quote @x))` — Julia extends/qualifies the name through
-   the parens (probed this session; left as divergences).
+   the parens (left as divergences).
 
 ## Earlier sessions
+
+- **2026-06-21q** — `@(A)` paren macro name. `@(A) x` ⇒ `(macrocall @A x)`: a lone
+  ident wrapped in parens after `@` unwraps to the bare name via a new `LParen` arm
+  in `parse_macro_name_body` (`push_range` the whole `(…)` run into `MACRO_NAME`).
+  Projector unchanged (its `comps` filter already skips parens/ws). JS allow
+  508 → 509. Fixture `paren_macro_name`.
 
 - **2026-06-21p** — Bracket-macrocall postfix. `@S[a].b` ⇒ `(. (macrocall @S
   (vect a)) (quote b))`, `@S{a}.b` similarly. A `[`/`{` adjacent to the macro name

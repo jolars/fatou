@@ -623,12 +623,17 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// After a prefixed literal closes, lex a run of ASCII-alpha flag letters as
-    /// a single suffix token (e.g. the `ims` in `r"pat"ims`).
+    /// After a prefixed literal closes, lex an identifier-shaped flag suffix as a
+    /// single suffix token (e.g. the `ims` in `r"pat"ims`, the `i2` in `x"s"i2`).
+    /// The suffix must start with a letter; a digit-led suffix is a numeric macro
+    /// argument instead (handled in `parse_string_literal`), not a flag string.
     fn lex_suffix(&mut self) {
         let start = self.pos;
-        while matches!(self.peek(0), Some(c) if c.is_ascii_alphabetic()) {
+        if matches!(self.peek(0), Some(c) if c.is_ascii_alphabetic()) {
             self.pos += 1;
+            while matches!(self.peek(0), Some(c) if c.is_ascii_alphanumeric()) {
+                self.pos += 1;
+            }
         }
         if self.pos > start {
             self.push(TokKind::StringSuffix, start, self.pos);

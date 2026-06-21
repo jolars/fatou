@@ -918,7 +918,9 @@ fn parse_string_literal(
     // a string macro — Julia models it as `(var name)`. Triple-quoted `var"""…"""`
     // stays an ordinary `@var_str` macrocall.
     let mut var_prefix = false;
+    let mut has_prefix = false;
     if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix) {
+        has_prefix = true;
         var_prefix = ctx.token(i).map(|t| t.text.as_str()) == Some("var");
         i += 1;
     }
@@ -958,8 +960,20 @@ fn parse_string_literal(
             Some(k) if k == close_kind => {
                 events.push(Event::Tok(i));
                 i += 1;
-                // Optional suffix flags (`r"pat"ims`).
-                if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringSuffix) {
+                // Optional suffix glued after the close delimiter of a string
+                // macro: a flag run (`r"pat"ims` → `"ims"`) or a numeric literal
+                // (`x"s"2` → an extra `2` macrocall argument). A digit-led suffix
+                // is lexed as an ordinary number, so capture it into the literal
+                // node here; the projector renders it as the trailing argument.
+                let suffix = ctx.token(i).map(|t| t.kind);
+                let is_flag = suffix == Some(TokKind::StringSuffix);
+                let is_numeric = has_prefix
+                    && node == SyntaxKind::STRING_LITERAL
+                    && matches!(
+                        suffix,
+                        Some(TokKind::Integer | TokKind::Float | TokKind::Float32)
+                    );
+                if is_flag || is_numeric {
                     events.push(Event::Tok(i));
                     i += 1;
                 }

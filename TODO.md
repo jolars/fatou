@@ -75,8 +75,12 @@ through), so the grammar can grow incrementally.
   Structured into `STRING_LITERAL`/`CMD_LITERAL` nodes with `INTERPOLATION`
   children whose `$(expr)` interiors are fully parsed sub-expressions; prefixes
   (`r`, `raw`, `b`, `v`) and suffix flags (`r"…"ims`) are represented as tokens.
-  Known limitation: a `\"` immediately before a raw-string closing quote is not
-  yet handled (the raw body is kept as one content chunk).
+  An identifier-shaped flag suffix may carry trailing digits (`x"s"i2` → `"i2"`),
+  and a digit-led suffix glued to a string macro is an extra numeric macrocall
+  argument (`x"s"2` → `(macrocall @x_str (string-r "s") 2)`); the suffix number is
+  captured into the `STRING_LITERAL` node. Known limitation: a `\"` immediately
+  before a raw-string closing quote is not yet handled (the raw body is kept as
+  one content chunk).
 - [x] Macros (`@m`, `@m(...)`, `@m arg`), `@.`, and macro call argument forms.
   A leading `@` builds a `MACRO_CALL` wrapping a `MACRO_NAME` (`parse_macro` in
   `expr.rs`, dispatched from `parse_prefix`). The name body

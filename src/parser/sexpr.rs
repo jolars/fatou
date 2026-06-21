@@ -1509,6 +1509,10 @@ fn project_string(node: &SyntaxNode) -> String {
         let mut parts = vec![format!("@{prefix}_str"), body];
         if let Some(suffix) = string_token(node, STRING_SUFFIX) {
             parts.push(quote_raw(&suffix));
+        } else if let Some(num) = numeric_suffix(node) {
+            // A glued numeric suffix (`x"s"2`) is an extra macrocall argument,
+            // rendered as the numeric literal itself (not a flag string).
+            parts.push(num);
         }
         return sexp("macrocall", parts);
     }
@@ -1852,6 +1856,16 @@ fn raw_content(node: &SyntaxNode) -> String {
         .filter(|t| t.kind() == STRING_CONTENT)
         .map(|t| t.text().to_string())
         .collect()
+}
+
+/// A numeric literal token glued after a string macro's close delimiter
+/// (`x"s"2`), captured into the `STRING_LITERAL` node as a trailing macrocall
+/// argument. Returns the token's source text verbatim.
+fn numeric_suffix(node: &SyntaxNode) -> Option<String> {
+    node.children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| matches!(t.kind(), INTEGER | FLOAT | FLOAT32))
+        .map(|t| t.text().to_string())
 }
 
 fn string_token(node: &SyntaxNode, kind: SyntaxKind) -> Option<String> {
