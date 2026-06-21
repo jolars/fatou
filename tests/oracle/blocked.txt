@@ -16,10 +16,6 @@ end_index
 # source text. Literal display parity is out of scope for the parser.
 numeric_literals
 
-# JuliaSyntax dedents triple-quoted strings, strips the leading newline, and
-# escapes embedded newlines in display; Fatou preserves the raw content.
-triple_string_interp
-
 # Unterminated string: JuliaSyntax emits an `(error-t)` recovery node; Fatou
 # recovers losslessly without a diagnostic. Error-shape parity deferred.
 unterminated_string

@@ -1,0 +1,1 @@
+(toplevel (= x (string-s "foo\n" " bar\n")) (= y (string-s "a: " val "\n" "b: " (call f z) "\n")) (= z (string-s "one\n" "two")))

@@ -1147,11 +1147,178 @@ fn project_string(node: &SyntaxNode) -> String {
         return sexp("macrocall", parts);
     }
 
-    let head = match string_token(node, STRING_DELIM_OPEN) {
-        Some(d) if d.len() >= 3 => "string-s",
-        _ => "string",
+    // Triple-quoted strings get JuliaSyntax's dedent + per-line chunking applied
+    // to compute their literal value (a faithful encoding of what the literal
+    // means, mirroring `SyntaxNode`'s String children).
+    if matches!(string_token(node, STRING_DELIM_OPEN), Some(d) if d.len() >= 3) {
+        return sexp("string-s", triple_string_parts(node));
+    }
+
+    let mut parts = string_parts(node);
+    if parts.is_empty() {
+        // An empty literal still carries one empty String child (`"" → (string "")`).
+        parts.push("\"\"".to_string());
+    }
+    sexp("string", parts)
+}
+
+/// One piece of a triple-quoted string's processed content: either a literal
+/// text chunk (JuliaSyntax keeps one `String` per line) or an interpolation.
+enum TripleItem {
+    Text(String),
+    Interp(String),
+}
+
+/// Project a triple-quoted string's content the way JuliaSyntax does: normalize
+/// line endings to `\n`, split into per-line chunks, strip the common leading
+/// indentation, drop the leading newline right after `"""`, then display-escape.
+fn triple_string_parts(node: &SyntaxNode) -> Vec<String> {
+    // Build the content as a sequence of lines (split on normalized newlines);
+    // each line is a run of text/interpolation items.
+    let mut lines: Vec<Vec<TripleItem>> = vec![Vec::new()];
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(t) if t.kind() == STRING_CONTENT => {
+                let text = normalize_newlines(t.text());
+                let mut segs = text.split('\n');
+                if let Some(first) = segs.next() {
+                    lines
+                        .last_mut()
+                        .unwrap()
+                        .push(TripleItem::Text(first.to_string()));
+                }
+                for seg in segs {
+                    lines.push(vec![TripleItem::Text(seg.to_string())]);
+                }
+            }
+            NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
+                lines
+                    .last_mut()
+                    .unwrap()
+                    .push(TripleItem::Interp(project_interpolation(&n)));
+            }
+            _ => {}
+        }
+    }
+
+    let last_idx = lines.len() - 1;
+
+    // Common leading whitespace over lines 2..end. Whitespace-only lines are
+    // skipped except the last (the closing-delimiter line), which always counts.
+    let candidates: Vec<String> = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, line)| *i != 0 && (!line_is_blank(line) || *i == last_idx))
+        .map(|(_, line)| line_lead_ws(line))
+        .collect();
+    let dedent_len = common_prefix_len(&candidates);
+
+    let mut chunks: Vec<TripleItem> = Vec::new();
+    for (i, mut line) in lines.into_iter().enumerate() {
+        let has_newline = i != last_idx;
+        if i == 0 {
+            // The opening line is never dedented; an empty one (`"""` directly
+            // followed by a newline) is dropped along with its newline.
+            if line_is_empty(&line) {
+                continue;
+            }
+        } else if let Some(TripleItem::Text(t)) = line.first_mut() {
+            *t = strip_leading_ws(t, dedent_len);
+        }
+        if has_newline {
+            match line.last_mut() {
+                Some(TripleItem::Text(t)) => t.push('\n'),
+                _ => line.push(TripleItem::Text("\n".to_string())),
+            }
+        }
+        chunks.extend(line);
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    for chunk in chunks {
+        match chunk {
+            TripleItem::Text(t) if t.is_empty() => {}
+            TripleItem::Text(t) => out.push(format!("\"{}\"", escape_display(&t))),
+            TripleItem::Interp(s) => out.push(s),
+        }
+    }
+    if out.is_empty() {
+        out.push("\"\"".to_string());
+    }
+    out
+}
+
+/// Collapse CRLF and lone CR line endings to LF (JuliaSyntax normalizes both).
+fn normalize_newlines(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Leading run of spaces/tabs at the start of a line (empty if it opens with an
+/// interpolation).
+fn line_lead_ws(line: &[TripleItem]) -> String {
+    match line.first() {
+        Some(TripleItem::Text(t)) => t.chars().take_while(|c| *c == ' ' || *c == '\t').collect(),
+        _ => String::new(),
+    }
+}
+
+/// A line with no interpolation whose text is entirely spaces/tabs (or empty).
+fn line_is_blank(line: &[TripleItem]) -> bool {
+    line.iter().all(|it| match it {
+        TripleItem::Text(t) => t.chars().all(|c| c == ' ' || c == '\t'),
+        TripleItem::Interp(_) => false,
+    })
+}
+
+/// A line with no interpolation and no text at all.
+fn line_is_empty(line: &[TripleItem]) -> bool {
+    line.iter()
+        .all(|it| matches!(it, TripleItem::Text(t) if t.is_empty()))
+}
+
+/// Longest common prefix length (in bytes) over the given whitespace strings.
+fn common_prefix_len(strs: &[String]) -> usize {
+    let mut iter = strs.iter();
+    let Some(first) = iter.next() else {
+        return 0;
     };
-    sexp(head, string_parts(node))
+    let mut len = first.len();
+    for s in iter {
+        len = first
+            .bytes()
+            .zip(s.bytes())
+            .take(len)
+            .take_while(|(a, b)| a == b)
+            .count();
+    }
+    len
+}
+
+/// Strip up to `n` leading whitespace bytes (spaces/tabs are single-byte).
+fn strip_leading_ws(t: &str, n: usize) -> String {
+    let mut idx = 0;
+    for c in t.chars() {
+        if idx >= n || (c != ' ' && c != '\t') {
+            break;
+        }
+        idx += 1;
+    }
+    t[idx..].to_string()
+}
+
+/// Escape the control characters JuliaSyntax shows as backslash escapes; other
+/// bytes (including backslashes already present in the source) pass through.
+fn escape_display(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// A `var"name"` non-standard identifier projects to `(var name)`, heading the

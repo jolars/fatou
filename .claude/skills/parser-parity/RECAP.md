@@ -22,55 +22,61 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **415 allowlisted**, 156 divergence, 4 unsupported.
-Dir corpus: **75 allowlisted**, 4 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Per-group parameters" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **437 allowlisted**, 134 divergence, 4 unsupported.
+Dir corpus: **77 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "Triple-quoted string dedent" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
-numeric-literal display normalization, triple-string dedent,
+numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21b)
+## Latest session (2026-06-21c)
 
-**Per-group `parameters` in tuples and calls.** Each `;` after the first now
-starts a fresh `PARAMETERS` group instead of folding the whole tail into one,
-matching JuliaSyntax: `(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c
-d))`, `(; a=1; b=2)` ⇒ `(tuple-p (parameters (= a 1)) (parameters (= b 2)))`,
-`f(a; b; c)` ⇒ `(call f a (parameters b) (parameters c))`, `+(;;a)` ⇒ `(call +
-(parameters) (parameters a))`.
+**Triple-quoted string dedent.** The largest FAIL cluster (~22 JS cases). It's a
+**projector** concern: the CST stays lossless (raw content in `STRING_CONTENT`),
+and `triple_string_parts` (`src/parser/sexpr.rs`) computes the literal's *value*
+the way JuliaSyntax does — faithful encoding, not compensation. Algorithm:
+normalize CRLF/CR → LF; split content into one `String` chunk per line; compute
+the longest common leading-whitespace prefix over lines 2..end (skip blank lines
+*except* the closing-delimiter/last line, which always counts; the opening line is
+never dedented); strip that prefix; drop the leading newline right after `"""` (if
+the opening line is empty); append each line's `\n` to its last text chunk (or a
+fresh `"\n"` chunk if the line ends in an interpolation); drop empty text chunks;
+display-escape control chars (NL/TAB/CR → `\n`/`\t`/`\r`). Examples: `"""\n  x\n
+y"""` ⇒ `(string-s " x\n" "y")`, `"""\n  $a\n  $b\n"""` ⇒ `(string-s "  " a "\n"
+"  " b "\n")`. Also added the empty-`String`-child fix: `"" → (string "")`,
+`"""""" → (string-s "")`.
 
-**Pure parser fix** — the projector needed nothing. In `parse_arg_list`
-(`src/parser/expr.rs`) a `;` now closes the open `PARAMETERS` (if any) before
-opening a new one, with the `;` as the new group's leading delimiter;
-`project_args` already maps each `PARAMETERS` sibling to its own `(parameters
-…)`, and `project_block_args` still flattens them so the `PAREN_BLOCK`
-projection is unchanged (only its internal CST gained sibling `PARAMETERS`
-nodes — the `paren_block` snapshot was re-accepted, projection identical).
+**No escape unescaping needed** — single-char source escapes (`\n \t \\ \" \$`)
+re-escape to themselves, so pass-through + control-char display-escaping matches
+all corpus triple cases; only `\xNN`/`\uNNNN`/line-continuation would need real
+unescaping (none in the triple cluster).
 
-JS allow **411 → 415** (+4: `(a; b; c,d)` js-2020c1de, `(; a=1; b=2)`
-js-aa0e6a42, `f(a; b; c)` js-b035c294, `+(;;a)` js-88c49b23); divergence
-160 → 156, unsupported held 4. Dir allow 74 → 75 (new fixture
-`multi_param_groups`). Zero regressions; green, clippy/fmt clean.
-
-**Still FAIL (deferred):** the empty-all-semis operator-prefix case `+(;;)` ⇒
-`(call-pre + (block-p))` and `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92). Fatou now
-emits `(call + (parameters) (parameters))` — a *prefix-call/block*
-disambiguation, separate from parameter grouping: when an operator's paren
-content is all empty `;` it becomes a prefix call over a `(block-p)`, not a
-regular call with empty parameter groups.
+JS allow **415 → 437** (+22); divergence 156 → 134, unsupported held 4. Dir allow
+75 → 77 (new fixture `triple_string_dedent`; `triple_string_interp` moved out of
+`blocked.txt`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
-   `"""\n  x\n y"""` etc.). Common-leading-whitespace stripping + line handling.
-   Display-ish but high count; check whether it's a parser or projector concern.
-2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
-   `project_string`'s macrocall branch (still open from 2026-06-20e).
-3. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
-4. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
-   (the two deferred FAILs above); a narrow prefix-call/block disambiguation.
+1. **Raw triple strings** `r"""…"""` — `string-s-r` head + the same dedent applied
+   to raw content via `quote_raw` (the macrocall branch of `project_string`); ~3
+   FAILs (`r"""\n x\n y"""`, `r"""\nx"""`).
+2. **String escape processing** — `"\xqqq"`, `"a\\nb"`, line continuations
+   `"a\<newline>b"`; needs a real Julia unescaper (source → value) in the
+   `string`/`string-s` paths. Unlocks the escape FAIL cluster + char literals.
+3. **Char literals** `'\xce\xb1'`, `'α'`, `'ab'` — escape/value display.
+4. **Docstrings** `"""…""" foo` ⇒ `(doc (string-s …) foo)` — string-then-expr at
+   statement scope folds into a `(doc …)` macrocall (w5 probe).
+5. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
+   (deferred from 2026-06-21b); a narrow prefix-call/block disambiguation.
 
 ## Earlier sessions
+
+- **2026-06-21b** — Per-group `parameters`: each `;` after the first opens a fresh
+  `PARAMETERS` group (`(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c d))`,
+  `f(a; b; c)` ⇒ `(call f a (parameters b) (parameters c))`), via `parse_arg_list`
+  closing the open group before opening a new one; projector unchanged. JS allow
+  411 → 415. Fixture `multi_param_groups`. Deferred: empty-all-semis `+(;;)`.
 
 - **2026-06-21a** — Paren block sequences: a `;`-bearing parenthesized run that is
   *not* a tuple parses as a `PAREN_BLOCK` projecting `(block-p …)` (`(a; b; c)` ⇒

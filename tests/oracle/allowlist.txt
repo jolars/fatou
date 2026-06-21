@@ -70,6 +70,8 @@ tilde_operator
 toplevel_semicolon
 transpose
 triple_command
+triple_string_dedent
+triple_string_interp
 try_catch
 tuples
 type_annotations

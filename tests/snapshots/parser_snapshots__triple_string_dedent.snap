@@ -1,0 +1,56 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..88
+  ASSIGNMENT_EXPR@0..32
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..32
+      STRING_DELIM_OPEN@4..7 "\"\"\""
+      STRING_CONTENT@7..29 "\n    foo\n     bar\n    "
+      STRING_DELIM_CLOSE@29..32 "\"\"\""
+  NEWLINE@32..33 "\n"
+  ASSIGNMENT_EXPR@33..69
+    NAME@33..34
+      IDENT@33..34 "y"
+    WHITESPACE@34..35 " "
+    EQ@35..36 "="
+    WHITESPACE@36..37 " "
+    STRING_LITERAL@37..69
+      STRING_DELIM_OPEN@37..40 "\"\"\""
+      STRING_CONTENT@40..46 "\n  a: "
+      INTERPOLATION@46..50
+        DOLLAR@46..47 "$"
+        IDENT@47..50 "val"
+      STRING_CONTENT@50..56 "\n  b: "
+      INTERPOLATION@56..63
+        DOLLAR@56..57 "$"
+        LPAREN@57..58 "("
+        CALL_EXPR@58..62
+          NAME@58..59
+            IDENT@58..59 "f"
+          ARG_LIST@59..62
+            LPAREN@59..60 "("
+            ARG@60..61
+              NAME@60..61
+                IDENT@60..61 "z"
+            RPAREN@61..62 ")"
+        RPAREN@62..63 ")"
+      STRING_CONTENT@63..66 "\n  "
+      STRING_DELIM_CLOSE@66..69 "\"\"\""
+  NEWLINE@69..70 "\n"
+  ASSIGNMENT_EXPR@70..87
+    NAME@70..71
+      IDENT@70..71 "z"
+    WHITESPACE@71..72 " "
+    EQ@72..73 "="
+    WHITESPACE@73..74 " "
+    STRING_LITERAL@74..87
+      STRING_DELIM_OPEN@74..77 "\"\"\""
+      STRING_CONTENT@77..84 "one\ntwo"
+      STRING_DELIM_CLOSE@84..87 "\"\"\""
+  NEWLINE@87..88 "\n"

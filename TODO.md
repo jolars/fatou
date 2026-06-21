@@ -593,6 +593,19 @@ through), so the grammar can grow incrementally.
   `PAREN_BLOCK` projection is unchanged). **Deferred:** the empty-all-semis
   operator-prefix case `+(;;)` ⇒ `(call-pre + (block-p))` (a separate
   prefix-call/block disambiguation, still FAIL).
+- [x] Triple-quoted string dedent. The projector now computes a triple-quoted
+  string's value the way JuliaSyntax does: normalize CRLF/CR line endings to LF,
+  split the content into one `String` chunk per line, strip the longest common
+  leading whitespace (skipping blank lines except the closing-delimiter line, and
+  never dedenting the opening line), drop the leading newline right after `"""`,
+  then display-escape control characters. `"""\n  x\n y"""` ⇒ `(string-s " x\n"
+  "y")`, `"""\n  $a\n  $b\n"""` ⇒ `(string-s "  " a "\n" "  " b "\n")`. Pure
+  projector change in `triple_string_parts` (`src/parser/sexpr.rs`); the CST stays
+  lossless (raw content preserved in `STRING_CONTENT`). Also emits the empty
+  `String` child for empty literals (`"" → (string "")`, `"""""" → (string-s
+  "")`). **Deferred:** raw triple strings (`r"""…"""` → `string-s-r`, same dedent
+  + `quote_raw`), full source-escape unescaping (`\xNN`/`\uNNNN`/line
+  continuations), and docstring `(doc …)` attachment.
 
 ## Incremental reparse
 
@@ -656,9 +669,8 @@ through), so the grammar can grow incrementally.
   `.juliasyntax-source`); `oracle_allowlist` guards the 34 matching cases
   (no Julia needed → CI-safe), `oracle_full_report` (`#[ignore]`d) writes a
   triage report, and `tests/oracle/{allowlist,blocked}.txt` (keyed by slug)
-  partition the corpus — 6 blocked with rationales (numeric-literal display
-  normalization, triple-string dedent, `end`/`[1 +2]`/unterminated-string and
-  incomplete-`do` error shapes). A harvested **JuliaSyntax sub-corpus**
+  partition the corpus — 4 blocked with rationales (numeric-literal display
+  normalization, `end`/unterminated-string and incomplete-`do` error shapes). A harvested **JuliaSyntax sub-corpus**
   (`scripts/harvest-juliasyntax-corpus.jl` → `tests/fixtures/oracle/juliasyntax.jsonl`,
   575 micro-cases extracted from JuliaSyntax's own `test/parser.jl`, expected
   regenerated via our pinned `parseall`) is gated opt-in by `oracle_juliasyntax`
