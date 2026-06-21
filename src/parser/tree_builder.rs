@@ -141,6 +141,8 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::DotLe => SyntaxKind::DOT_LE,
         TokKind::DotGt => SyntaxKind::DOT_GT,
         TokKind::DotGe => SyntaxKind::DOT_GE,
+        TokKind::DotSubtype => SyntaxKind::DOT_SUBTYPE,
+        TokKind::DotSupertype => SyntaxKind::DOT_SUPERTYPE,
         TokKind::DotFatArrow => SyntaxKind::DOT_FAT_ARROW,
         TokKind::DotLongArrow => SyntaxKind::DOT_LONG_ARROW,
         TokKind::DotPipeGt => SyntaxKind::DOT_PIPE_GT,

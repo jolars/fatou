@@ -153,6 +153,10 @@ pub(crate) enum TokKind {
     DotLe,
     DotGt,
     DotGe,
+    /// The broadcast type-comparison operators `.<:`/`.>:` (project
+    /// `(dotcall-i a <: b)`/`(dotcall-i a >: b)`).
+    DotSubtype,
+    DotSupertype,
     /// The broadcast pair operator `.=>`.
     DotFatArrow,
     /// The broadcast arrow operator `.-->` (projects `(dotcall-i a --> b)`).
@@ -887,6 +891,8 @@ impl<'a> Lexer<'a> {
                 (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
                 (Some(b'<'), Some(b'=')) => Some(TokKind::DotLe),
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
+                (Some(b'<'), Some(b':')) => Some(TokKind::DotSubtype),
+                (Some(b'>'), Some(b':')) => Some(TokKind::DotSupertype),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
                 (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
                 (Some(b'|'), Some(b'>')) => Some(TokKind::DotPipeGt),

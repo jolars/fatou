@@ -16,6 +16,7 @@ binary_precedence
 bracescat
 broadcast_bitwise_operators
 broadcasting
+broadcast_type_comparison
 byte_string
 call_and_index
 char_escapes

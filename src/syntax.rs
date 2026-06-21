@@ -220,6 +220,8 @@ pub enum SyntaxKind {
     DOT_LE,
     DOT_GT,
     DOT_GE,
+    DOT_SUBTYPE,
+    DOT_SUPERTYPE,
     DOT_FAT_ARROW,
     DOT_LONG_ARROW,
     DOT_PIPE_GT,

@@ -22,51 +22,51 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **519 allowlisted**, 53 divergence, 3 unsupported.
-Dir corpus: **98 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "word operators `in`/`isa`" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **520 allowlisted**, 52 divergence, 3 unsupported.
+Dir corpus: **99 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "broadcast type comparison `.<:`/`.>:`" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21v)
+## Latest session (2026-06-21w)
 
-**Word operators `in`/`isa`.** `i in rhs` ⇒ `(call-i i in rhs)`, `(i,j) in iter`
-⇒ `(call-i (tuple-p i j) in iter)`, `x isa T` ⇒ `(call-i x isa T)`. They stay
-lexed as **identifiers** (so `:in`/bare `in`/`for i in xs` are untouched) and act
-as comparison-tier infix operators `(10, 11)` via a new `word_operator` check in
-the Pratt loop placed after juxtaposition, before `next_operator` (`expr.rs`).
-The for-binding parse must *not* swallow `in` (it is the iteration separator), so
-a new `ExprFlags::no_word_op` gates the check off; `parse_for_binding` sets it and
-`parse_header` (`structural.rs`) routes only `FOR_BINDING` through it (a `while x
-in xs` condition keeps `in` a real comparison). Projector: `project_binary`
-(`sexpr.rs`) detects the sole loose `IDENT` child of a `BINARY_EXPR` (operands are
-node-wrapped) and heads `(call-i lhs <in|isa> rhs)`. Comparison chains stay nested
-(`a in b in c` ⇒ `((a in b) in c)`), a recorded modeling divergence like the
-symbolic comparisons. JS allow 517 → 519 (`i in rhs`, `(i,j) in iter`); dir allow
-97 → 98 (fixture `word_operators`). Green; clippy/fmt clean. **Note:** `for i ∈ xs`
-stays divergent (`∈` is a `UniComparison` op consumed by the var parse; `no_word_op`
-only suppresses the `in`/`isa` *identifiers*, not the Unicode `∈`) — pre-existing,
-not a regression.
+**Broadcast type comparison `.<:`/`.>:`.** `x .<: y` ⇒ `(dotcall-i x <: y)`,
+`x .>: y` ⇒ `(dotcall-i x >: y)`. Standard 5-file operator recipe: new
+`DotSubtype`/`DotSupertype` `TokKind`s lexed in the 3-char dotted table
+(`(b'<', b':')`/`(b'>', b':')` after the dot, before the 2-char `DotLt`/`DotGt`
+so longest-match wins); `DOT_SUBTYPE`/`DOT_SUPERTYPE` `SyntaxKind`s;
+`tree_builder` map; comparison tier `(10, 11)` left-assoc in `infix_binding_power`;
+`infix_head` `DotCallI("<:")`/`DotCallI(">:")` + `is_operator`. Also added to
+`is_operator_call_name` (paren-call name `.<:(x, y)` ⇒ `(call (. <:) x y)`) and
+`is_value_operator` (bare atom `.<:` ⇒ `(. <:)`), matching the existing dotted
+comparison ops. All four forms verified identical to Julia. Comparison chains
+`a .<: b .<: c` stay nested (`(dotcall-i (dotcall-i a <: b) <: c)`), a recorded
+modeling divergence; Julia flattens to `(comparison …)`. JS allow 519 → 520
+(`x .<: y`); dir allow 98 → 99 (fixture `broadcast_type_comparison`). Green;
+clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Broadcast type comparison `.<:`/`.>:`** (js-7c3e5c83 `x .<: y` ⇒ `(dotcall-i
-   x <: y)`): today `.<:` mis-lexes as `.<` + `:y`. Add `DotSubtype`/`DotSupertype`
-   to the dotted operator tables (longest-match: `.<:` before `.<`), comparison
-   tier, `DotCallI("<:")`. Small, clean, 1 JS case.
-2. **`var"…"` with escapes** (js-61a01ce8 `var"\""` ⇒ `(var ")`, js-8f5b1a26): the
+1. **`var"…"` with escapes** (js-61a01ce8 `var"\""` ⇒ `(var ")`, js-8f5b1a26): the
    non-standard-identifier content needs escape processing (`\"`→`"`, `\\`→`\`)
    like the string path. 2 JS cases.
-3. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
+2. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
    drops the operand to an `error-t` (`:$x` ⇒ `(quote-: $) (error-t x)`). Entangled
    with interpolation/splat/field access and error-shape. Not in the JS corpus.
-4. Survey the remaining 53 JS FAILs for the next cluster (`cargo test --test
+3. Survey the remaining 52 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 
 ## Earlier sessions
 
+- **2026-06-21v** — Word operators `in`/`isa`. `i in rhs` ⇒ `(call-i i in rhs)`,
+  `x isa T` ⇒ `(call-i x isa T)`. Lexed as **identifiers** (so `:in`/`for i in xs`
+  are untouched), acting as comparison-tier infix ops via a `word_operator` check
+  in the Pratt loop, gated off by `ExprFlags::no_word_op` in `parse_for_binding`.
+  Projector reads the loose `IDENT` operator of a `BINARY_EXPR`. Comparison chains
+  stay nested (recorded divergence). JS allow 517 → 519; dir 97 → 98 (fixture
+  `word_operators`). `for i ∈ xs` stays divergent (`∈` consumed by the var parse).
 - **2026-06-21u** — Command literals / custom cmd macros. `` `cmd` `` ⇒
   `(macrocall core_@cmd (cmdstring-r "cmd"))`; a prefix names a custom command
   macro `` x`str` `` ⇒ `(macrocall @x_cmd …)`; a glued flag is an extra arg; a

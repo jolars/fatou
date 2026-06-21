@@ -267,6 +267,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_LE => DotCallI("<="),
         DOT_GT => DotCallI(">"),
         DOT_GE => DotCallI(">="),
+        DOT_SUBTYPE => DotCallI("<:"),
+        DOT_SUPERTYPE => DotCallI(">:"),
         DOT_FAT_ARROW => DotCallI("=>"),
         DOT_LONG_ARROW => DotCallI("-->"),
         DOT_PIPE_GT => DotCallI("|>"),
@@ -386,6 +388,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_LE
             | DOT_GT
             | DOT_GE
+            | DOT_SUBTYPE
+            | DOT_SUPERTYPE
             | DOT_FAT_ARROW
             | DOT_LONG_ARROW
             | DOT_PIPE_GT

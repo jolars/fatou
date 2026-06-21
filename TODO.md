@@ -750,8 +750,14 @@ through), so the grammar can grow incrementally.
   The projector reads the loose `in`/`isa` `IDENT` operator of a `BINARY_EXPR`
   back as a `(call-i …)` head (`src/parser/sexpr.rs`). Comparison chains stay
   nested (`a in b in c` ⇒ `((a in b) in c)`), a recorded modeling divergence like
-  the symbolic comparisons. **Deferred:** the broadcast type comparison `.<:`/`.>:`
-  (mis-lexes as `.<` + `:y` today).
+  the symbolic comparisons.
+
+- [x] Broadcast type comparison `.<:`/`.>:` (`x .<: y` ⇒ `(dotcall-i x <: y)`,
+  `x .>: y` ⇒ `(dotcall-i x >: y)`). New `DotSubtype`/`DotSupertype` `TokKind`s in
+  the 3-char dotted table (longest-match before `.<`/`.>`), comparison tier
+  `(10, 11)`, projected `DotCallI("<:")`/`DotCallI(">:")`. The paren-call name
+  (`.<:(x, y)` ⇒ `(call (. <:) x y)`) and bare value atom (`.<:` ⇒ `(. <:)`)
+  follow via the existing dotted-operator paths.
 
 ## Incremental reparse
 

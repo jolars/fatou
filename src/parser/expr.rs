@@ -864,6 +864,8 @@ fn is_value_operator(kind: TokKind) -> bool {
                 | DotLe
                 | DotGt
                 | DotGe
+                | DotSubtype
+                | DotSupertype
                 | DotFatArrow
                 | DotLongArrow
                 | DotPipeGt
@@ -2942,6 +2944,8 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | DotLe
             | DotGt
             | DotGe
+            | DotSubtype
+            | DotSupertype
             | DotFatArrow
             | DotLongArrow
             | DotPipeGt
@@ -3151,7 +3155,9 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::DotLt
         | TokKind::DotLe
         | TokKind::DotGt
-        | TokKind::DotGe => (10, 11),
+        | TokKind::DotGe
+        | TokKind::DotSubtype
+        | TokKind::DotSupertype => (10, 11),
         // The pipe operators share Julia's pipe precedence: `<|` (left-pipe) is
         // looser and right-associative, `|>` (right-pipe, also broadcast `.|>`)
         // is tighter and left-associative (`a <| b |> c` ⇒ `a <| (b |> c)`).
