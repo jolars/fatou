@@ -1104,9 +1104,23 @@ fn project_macrocall(node: &SyntaxNode) -> String {
 }
 
 fn project_macro_name(node: &SyntaxNode) -> String {
-    // Collect identifier components in order (module path + macro name), noting
-    // whether a qualifying `.` is present.
-    let idents: Vec<String> = node
+    // Trailing form (`A.@x`, `A.B.@x`, `$A.@x`, `A.$B.@x`): the module path is a
+    // single leading node (`NAME`, `BINARY_EXPR`, or `INTERPOLATION`) that
+    // `project` already nests correctly, then `. @ name`. Reuse `project` for the
+    // module so dotted access and interpolation splits (`(inert ($ B))`) stay
+    // consistent with plain field access.
+    if let Some(module) = node
+        .children()
+        .find(|c| matches!(c.kind(), NAME | BINARY_EXPR | INTERPOLATION))
+    {
+        let macro_name = macro_name_after_at(node);
+        return format!("(. {} (quote @{macro_name}))", project(&module));
+    }
+
+    // Prefix form (`@m`, `@A.x`, `@A.B.x`): a flat run of component tokens after
+    // the `@`. The last component is the macro name; the rest form the module
+    // path, nested left-to-right the same way field access is.
+    let comps: Vec<String> = node
         .children_with_tokens()
         .filter_map(|el| match el {
             NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
@@ -1116,24 +1130,42 @@ fn project_macro_name(node: &SyntaxNode) -> String {
             NodeOrToken::Token(t) if is_macro_name_part_token(t.kind()) => {
                 Some(t.text().to_string())
             }
-            NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
             _ => None,
         })
         .collect();
-    let has_dot = node.children_with_tokens().any(|el| el.kind() == DOT);
 
-    match idents.as_slice() {
+    match comps.as_slice() {
         // `@.` — broadcast macro: `@` then the lone broadcast dot, no ident.
         [] => "@.".to_string(),
         // Simple `@m`.
-        [one] if !has_dot => format!("@{one}"),
-        // Qualified `Base.@time` / `@Mod.mac` → `(. <module> (quote @macro))`.
+        [one] => format!("@{one}"),
+        // Qualified `@Mod.mac` / `@A.B.x` → `(. <module> (quote @macro))`.
         rest => {
             let (macro_name, module) = rest.split_last().unwrap();
-            let module_path = module.join(".");
-            format!("(. {module_path} (quote @{macro_name}))")
+            let mut path = module[0].clone();
+            for c in &module[1..] {
+                path = format!("(. {path} (quote {c}))");
+            }
+            format!("(. {path} (quote @{macro_name}))")
         }
     }
+}
+
+/// The macro-name component text in a trailing-form `MACRO_NAME` — the token
+/// immediately after the `@` (`A.B.@x` → `x`).
+fn macro_name_after_at(node: &SyntaxNode) -> String {
+    let mut after_at = false;
+    for el in node.children_with_tokens() {
+        if let NodeOrToken::Token(t) = el {
+            if after_at {
+                return t.text().to_string();
+            }
+            if t.kind() == AT {
+                after_at = true;
+            }
+        }
+    }
+    String::new()
 }
 
 /// Whether `kind` is a macro-name component token other than an identifier — an

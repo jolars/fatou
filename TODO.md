@@ -96,8 +96,11 @@ through), so the grammar can grow incrementally.
   dedicated form. Operator, `$`, and keyword macro names (`@+`, `@!`, `@..`,
   `@$`, `@end`, qualified `A.@!`) parse via `is_macro_name_token` in
   `parse_macro_name_body`; the projector reads the name token through
-  `is_macro_name_part_token`. **Deferred:** nested dotted macro paths
-  (`@A.B.x`/`A.B.@x` still flatten the module path), `@var"#"`, `@(A)`.
+  `is_macro_name_part_token`. Nested dotted macro paths (`@A.B.x`, `A.B.@x`,
+  `$A.@x`, `A.$B.@x`, `A.@.x`) project to the same nested `(. (. A (quote B))
+  (quote @x))` shape as plain field access: `project_macro_name` reuses `project`
+  on the trailing-form module node and folds the prefix-form flat components.
+  **Deferred:** `@var"#"`, `@(A)`, `@S[a].b`/`@S{a}.b` (macrocall then postfix).
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside

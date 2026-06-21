@@ -49,6 +49,7 @@ macros
 matrices
 multi_clause_generators
 multi_param_groups
+nested_macro_path
 nested_string_interp
 nonstandard_identifier
 operator_call
