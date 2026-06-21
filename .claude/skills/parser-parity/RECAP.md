@@ -22,53 +22,70 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **394 allowlisted**, 177 divergence, 4 unsupported.
-Dir corpus: **71 allowlisted**, 4 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Stepped colon ranges" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **398 allowlisted**, 173 divergence, 4 unsupported.
+Dir corpus: **72 allowlisted**, 4 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Bare-comma tuples" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-20j)
+## Latest session (2026-06-20k)
 
-**Stepped colon ranges.** `a:b:c` (a range with a step) now folds its three
-operands into a single infix colon call rather than nesting two binary colons,
-mirroring JuliaSyntax's `parse_range`: `1:2:3` ⇒ `(call-i 1 : 2 3)`,
-`a:b:c:d:e` ⇒ `(call-i (call-i a : b c) : d e)` (the folded triple becomes the
-left operand of the next chain). The operator loop intercepts `op_kind == Colon`
-(right after the ternary `no_range` guard, before the generic left-assoc path)
-and delegates the whole colon chain to `parse_colon_range`. That helper mirrors
-JuliaSyntax's n_colons counter: it parses each operand at the colon right binding
-power `(14,15)` (so the inner parse stops before the next colon but still grabs a
-tighter `+`, e.g. `a:b:c+d` ⇒ `(call-i a : b (c+d))`), holding one operand in a
-`step: Option` slot — when a *second* colon arrives, `build_range3` emits a new
-3-operand `RANGE_EXPR` and clears the slot; an odd trailing colon (`a:b:c:d`)
-leaves the slot full and falls back to a 2-operand `BINARY_EXPR`. The chain stops
-at a ternary separator (`no_range`) or an array-element boundary (`[1 :2]` splits
-into elements). New `RANGE_EXPR` `SyntaxKind` (after `BINARY_EXPR`); projector
-`project_range` emits `(call-i op0 : op1 op2)`. Plain `a:b` is unchanged (still
-`BINARY_EXPR` → `(call-i a : b)`); `..`/UniColon untouched (scoped to ASCII
-`Colon`). Siblings verified intact: `a[:]`, `:foo`, ternary, indexing.
+**Bare-comma tuples.** A top-level comma at statement scope now folds operands
+into a `BARE_TUPLE_EXPR` (projects `(tuple …)`, distinct from the parenthesized
+`TUPLE_EXPR` → `tuple-p`): `a, b, c` ⇒ `(tuple a b c)`, `x, = xs` ⇒
+`(= (tuple x) xs)`. The key precedence fact (mirroring JuliaSyntax's
+`parse_eq` = `parse_assignment(parse_comma)`): comma binds **tighter than
+assignment** but looser than every real operator, so the tuple forms first and
+`=` binds the two tuples — `a, b = c, d` ⇒ `(= (tuple a b) (tuple c d))`,
+`x = a, b` ⇒ `(= x (tuple a b))`. Implemented inside the Pratt operator loop
+(not as a Pratt op — comma never reaches `next_operator`), gated by a new
+`stmt_comma` `ExprFlags` field: when `stmt_comma && min_bp <= COMMA_BP (2)` and
+a comma follows `lhs`, `parse_comma_tuple` wraps the already-parsed first operand
+plus each further item (parsed at `COMMA_ITEM_BP (3)`, which excludes `=` at
+l_bp 2 and the comma itself, but keeps ternary at l_bp 3 and tighter:
+`a => b, c` ⇒ `(tuple (=> a b) c)`, `a ? b : c, d` ⇒ `(tuple (? a b c) d)`).
+Trailing comma → item parse returns `None` → stop (faithful to `parse_comma`).
+Because comma fires both at top (`min_bp 0`) and inside an assignment RHS
+(`min_bp 1`), tuples form on both sides automatically; `~` (l_bp 2) sees the
+whole tuple as its LHS (`a, b ~ c` ⇒ `(call-i (tuple a b) ~ c)`).
 
-JS allow **392 → 394** (+2: `1:2:3` js-f70459ee, `a:b:c:d:e` js-c443c81e);
-divergence 179 → 177, unsupported held 4. Dir allow 70 → 71 (new fixture
-`colon_range`). Zero regressions; green, clippy/fmt clean.
+`stmt_comma` is on at toplevel (`parse_stmt`), module/block statements (new
+`parse_block_stmt`, used by `run_block_inner` for both public and non-public
+blocks), and the operand of `return`/`const` (new `KwStmt::ExprTuple`):
+`return x, y` ⇒ `(return (tuple x y))`, `const x, y = 1, 2` ⇒ `(const (= …))`.
+`global`/`local` deliberately stay `KwStmt::Expr` — they carry a bare name list
+(`global a, b` ⇒ `(global a b)`, already correct via verbatim IDENT collection),
+not a tuple. Off inside brackets (commas are arg/element separators handled by
+`parse_arg_list`); `(a, b)` stays `tuple-p`.
+
+JS allow **394 → 398** (+4: `a, b = c, d` js-abbe51ed, `return x,y` js-f102f999,
+`const x,y = 1,2` js-a73e110d, `x, = xs` js-8749407b); divergence 177 → 173,
+unsupported held 4. Dir allow 71 → 72 (new fixture `bare_tuple`). Zero
+regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Bare comma tuples** — `a, b = c, d` ⇒ `(= (tuple a b) (tuple c d))`,
-   `return x,y` ⇒ `(return (tuple x y))`, `const x,y = 1,2`. Top-level commas in
-   statement/assignment position form a `tuple`; Fatou currently drops the tail
-   (`return x,y` ⇒ `(return x)`). Touches statement-level parsing — bigger.
+1. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
+   `"""\n  x\n y"""` etc.). Common-leading-whitespace stripping + line handling.
+   Display-ish but high count; check whether it's a parser or projector concern.
 2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
    `project_string`'s macrocall branch (still open from 2026-06-20e).
 3. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
+4. **`;` block sequences** — `a;b;c` ⇒ `(toplevel (block a b c))`?, `(a; b; c)`,
+   semicolon statement grouping. Cluster of ~10 FAILs; statement-level.
 
 ## Earlier sessions
 
 One-liners; full implementation detail lives in the matching `[x]` bullet in
 `TODO.md`.
+
+- **2026-06-20j** — Stepped colon ranges: `a:b:c` folds three operands into one
+  infix colon call (`(call-i a : b c)`) rather than nesting two binary colons,
+  via `parse_colon_range` + new `RANGE_EXPR` (mirrors JuliaSyntax `parse_range`'s
+  n_colons fold; odd trailing colon falls back to `BINARY_EXPR`). JS allow
+  392 → 394. Fixture `colon_range`.
 
 - **2026-06-20i** — Signed numeric literals: a `+`/`-` glued to an adjacent number
   folds into a single signed `LITERAL` (`-2`, `+2.0` ⇒ `2.0`) via

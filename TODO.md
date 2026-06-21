@@ -540,6 +540,22 @@ through), so the grammar can grow incrementally.
   an array-element boundary (`[1 :2]`). `project_range` emits the 3-operand
   `(call-i lhs : mid rhs)`; plain `a:b` is unchanged.
 
+- [x] Bare-comma tuples. A top-level comma at statement scope now folds its
+  operands into a `BARE_TUPLE_EXPR` (`(tuple …)`, vs the parenthesized
+  `tuple-p`): `a, b, c` ⇒ `(tuple a b c)`, `x, = xs` ⇒ `(= (tuple x) xs)`.
+  Comma binds tighter than assignment but looser than every real operator
+  (mirroring JuliaSyntax's `parse_comma` below `parse_assignment`), so it
+  composes with `=` on both sides — `a, b = c, d` ⇒
+  `(= (tuple a b) (tuple c d))`. Implemented in the operator loop, gated by a
+  `stmt_comma` flag (on at toplevel/module/block statements and the operand of
+  `return`/`const`, off inside brackets where commas are arg/element
+  separators): when `min_bp <= COMMA_BP (2)` and a comma follows, the already
+  parsed first operand and each further item — parsed at `COMMA_ITEM_BP (3)`,
+  excluding `=` and the comma — are gathered by `parse_comma_tuple`. `return x,
+  y` ⇒ `(return (tuple x y))` and `const x, y = 1, 2` ⇒ `(const (= …))` via a
+  new `KwStmt::ExprTuple`; `global`/`local` keep their bare name list
+  (`(global a b)`).
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

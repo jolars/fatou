@@ -1,0 +1,1 @@
+(toplevel (tuple a b c) (= (tuple a b) (tuple c d)) (= x (tuple a b)) (= (tuple x) xs) (= (tuple x y) a) (return (tuple x y)) (const (= (tuple x y) (tuple 1 2))) (tuple (call-i a + b) c) (tuple (call-i a => b) c))

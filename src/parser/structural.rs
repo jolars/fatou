@@ -15,7 +15,9 @@
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
-use crate::parser::expr::{parse_expr, parse_prefix_interpolation, parse_quote_sym, parse_stmt};
+use crate::parser::expr::{
+    parse_block_stmt, parse_expr, parse_prefix_interpolation, parse_quote_sym,
+};
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
 
@@ -489,8 +491,14 @@ pub(crate) enum KwStmt {
     /// the enclosing block loop, exactly like a single-token atom.
     Bare,
     /// An optional leading expression, then verbatim passthrough of the rest of
-    /// the line (`return [expr]`, `const x = 1`, `global a, b`).
+    /// the line (`global a, b`, `local x`). A top-level comma is *not* folded
+    /// into a tuple: `global`/`local` carry a bare name list (`global a, b` ⇒
+    /// `(global a b)`), so each name is parsed separately.
     Expr,
+    /// Like [`KwStmt::Expr`], but the operand allows a statement-level
+    /// bare-comma tuple (`return x, y` ⇒ `(return (tuple x y))`, `const x, y =
+    /// 1, 2` ⇒ `(const (= (tuple x y) (tuple 1 2)))`).
+    ExprTuple,
     /// Pure verbatim passthrough of the rest of the line (`import A: b`,
     /// `using A.B`, `export a, b`). The module-path/name grammar uses `:`/`.`/`,`
     /// that have no dedicated trees yet, so parsing it as an expression would
@@ -518,12 +526,16 @@ pub(crate) fn parse_keyword_stmt(
         push_range(&mut events, i, operand_start);
         i = operand_start;
 
-        if matches!(body, KwStmt::Expr)
-            && !header_ends(&ctx, i)
-            && let Some(expr) = parse_expr(tokens, i, 0, diagnostics)
-        {
-            events.extend(expr.events);
-            i = expr.end;
+        if !header_ends(&ctx, i) {
+            let operand = match body {
+                KwStmt::ExprTuple => parse_block_stmt(tokens, i, false, diagnostics),
+                KwStmt::Expr => parse_expr(tokens, i, 0, diagnostics),
+                _ => None,
+            };
+            if let Some(expr) = operand {
+                events.extend(expr.events);
+                i = expr.end;
+            }
         }
 
         // Carry any remaining same-line tokens through verbatim, but build real
@@ -1152,11 +1164,7 @@ fn run_block_inner(
             None => break,
             Some(k) if terminators.contains(&k) => break,
             Some(_) => {
-                let parsed = if public_context {
-                    parse_stmt(tokens, i, diagnostics)
-                } else {
-                    parse_expr(tokens, i, 0, diagnostics)
-                };
+                let parsed = parse_block_stmt(tokens, i, public_context, diagnostics);
                 if let Some(stmt) = parsed {
                     events.extend(stmt.events);
                     i = stmt.end;

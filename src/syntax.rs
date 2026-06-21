@@ -26,6 +26,7 @@ pub enum SyntaxKind {
     UNARY_EXPR,
     PAREN_EXPR,
     TUPLE_EXPR,
+    BARE_TUPLE_EXPR,
     VECT_EXPR,
     MATRIX_EXPR,
     MATRIX_ROW,

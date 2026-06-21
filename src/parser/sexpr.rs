@@ -131,6 +131,7 @@ fn project(node: &SyntaxNode) -> String {
         BRACES => sexp("braces", project_args(node)),
 
         TUPLE_EXPR => sexp("tuple-p", project_args(node)),
+        BARE_TUPLE_EXPR => sexp("tuple", project_each(child_nodes(node))),
         VECT_EXPR => sexp("vect", project_args(node)),
         MATRIX_EXPR => project_matrix(node),
 

@@ -48,6 +48,11 @@ struct ExprFlags {
     /// matching Julia, which only parses `public` as a keyword at file/module
     /// level.
     public_context: bool,
+    /// At statement position (toplevel, module/block statements, and the operand
+    /// of `return`/`const`): a top-level comma collects a bare-comma tuple
+    /// (`a, b` ⇒ `(tuple a b)`). Off inside brackets and sub-expressions, where
+    /// commas are argument/element separators handled by the container parsers.
+    stmt_comma: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -72,6 +77,17 @@ const TERNARY_R: u8 = 3;
 const JUXTAPOSE_L: u8 = 32;
 const JUXTAPOSE_R: u8 = 31;
 
+/// The loose end of the precedence range at which a statement-level bare comma
+/// builds a tuple. A comma binds *tighter* than assignment (`=` at `(2, 1)`), so
+/// `a, b = c, d` ⇒ `(= (tuple a b) (tuple c d))`: the tuple forms first and the
+/// assignment binds the two tuples. It fires only while parsing at `min_bp <=
+/// COMMA_BP` (toplevel `0`, an assignment right-hand side `1`), so it stays inert
+/// once inside a comma item. Each item is parsed at `COMMA_ITEM_BP` — one tighter
+/// — which excludes assignment (`2 < 3`) and the comma itself but keeps the
+/// ternary (`3`) and everything tighter (`a => b, c` ⇒ `(tuple (=> a b) c)`).
+const COMMA_BP: u8 = 2;
+const COMMA_ITEM_BP: u8 = 3;
+
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
@@ -90,8 +106,22 @@ pub(crate) fn parse_stmt(
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
+    parse_block_stmt(tokens, start, true, diagnostics)
+}
+
+/// Parse one statement inside a block body, where a top-level comma builds a
+/// bare-comma tuple (`a, b` ⇒ `(tuple a b)`). `public_context` is true only at
+/// toplevel/module scope (where `public` opens a `PUBLIC_STMT`), false in inner
+/// blocks (where `public` stays an ordinary identifier).
+pub(crate) fn parse_block_stmt(
+    tokens: &[Token],
+    start: usize,
+    public_context: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
     let flags = ExprFlags {
-        public_context: true,
+        public_context,
+        stmt_comma: true,
         ..ExprFlags::default()
     };
     parse_expr_in(tokens, start, 0, diagnostics, flags)
@@ -130,6 +160,7 @@ fn parse_expr_in(
         end_marker: _,
         begin_marker,
         public_context,
+        stmt_comma,
     } = flags;
     let ctx = ParserCtx::new(tokens);
 
@@ -186,7 +217,7 @@ fn parse_expr_in(
                 tokens,
                 start,
                 SyntaxKind::RETURN_EXPR,
-                KwStmt::Expr,
+                KwStmt::ExprTuple,
                 diagnostics,
             );
         }
@@ -213,7 +244,7 @@ fn parse_expr_in(
                 tokens,
                 start,
                 SyntaxKind::CONST_STMT,
-                KwStmt::Expr,
+                KwStmt::ExprTuple,
                 diagnostics,
             );
         }
@@ -268,6 +299,20 @@ fn parse_expr_in(
             && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
         {
             lhs = build_binary(SyntaxKind::JUXTAPOSE_EXPR, lhs, rhs);
+            continue;
+        }
+
+        // Statement-level bare-comma tuple: at statement scope a top-level comma
+        // collects the operands into a `BARE_TUPLE_EXPR`. Comma is not a Pratt
+        // operator (it never reaches `next_operator`); it is handled here, looser
+        // than every real operator but tighter than assignment, so a following `=`
+        // binds the whole tuple (`a, b = c, d` ⇒ `(= (tuple a b) (tuple c d))`).
+        // The `min_bp` guard keeps it inert once we are inside a comma item.
+        if stmt_comma
+            && min_bp <= COMMA_BP
+            && ctx.token(ctx.skip_ws(lhs.end)).map(|t| t.kind) == Some(TokKind::Comma)
+        {
+            lhs = parse_comma_tuple(tokens, &ctx, lhs, diagnostics, flags);
             continue;
         }
 
@@ -420,6 +465,50 @@ fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
         end: rhs.end,
         events,
     }
+}
+
+/// Collect a statement-level bare-comma tuple. The first operand `first` is
+/// already parsed and the caller has confirmed a comma follows it. Each further
+/// operand is parsed at [`COMMA_ITEM_BP`] (so it stops before the next comma and
+/// before any assignment), and the comma tokens and surrounding trivia are kept
+/// in the gaps. A trailing comma with no operand after it (`x, = xs` ⇒
+/// `(tuple x)`, `x, y, = a`) leaves a tuple with the operands gathered so far,
+/// mirroring JuliaSyntax's `parse_comma`.
+fn parse_comma_tuple(
+    tokens: &[Token],
+    ctx: &ParserCtx<'_>,
+    first: ExprParse,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    flags: ExprFlags,
+) -> ExprParse {
+    let start = first.start;
+    let mut events = vec![Event::Start(SyntaxKind::BARE_TUPLE_EXPR)];
+    let mut end = first.end;
+    events.extend(first.events);
+
+    loop {
+        let comma_idx = ctx.skip_ws(end);
+        if ctx.token(comma_idx).map(|t| t.kind) != Some(TokKind::Comma) {
+            break;
+        }
+        push_range(&mut events, end, comma_idx);
+        events.push(Event::Tok(comma_idx));
+        end = comma_idx + 1;
+
+        let item_start = ctx.skip_ws(end);
+        match parse_expr_in(tokens, item_start, COMMA_ITEM_BP, diagnostics, flags) {
+            Some(item) => {
+                push_range(&mut events, end, item.start);
+                events.extend(item.events);
+                end = item.end;
+            }
+            // Trailing comma: nothing follows that can start an operand.
+            None => break,
+        }
+    }
+
+    events.push(Event::Finish);
+    ExprParse { start, end, events }
 }
 
 /// Build a stepped range `(a : b : c)` from its three operands, capturing the two
