@@ -1164,47 +1164,61 @@ fn decode_char(text: &str) -> Option<char> {
             bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
             continue;
         }
-        match chars.next()? {
-            'n' => bytes.push(b'\n'),
-            't' => bytes.push(b'\t'),
-            'r' => bytes.push(b'\r'),
-            'a' => bytes.push(0x07),
-            'b' => bytes.push(0x08),
-            'f' => bytes.push(0x0c),
-            'v' => bytes.push(0x0b),
-            'e' => bytes.push(0x1b),
-            '\\' => bytes.push(b'\\'),
-            '\'' => bytes.push(b'\''),
-            '"' => bytes.push(b'"'),
-            'x' => bytes.push(take_hex(&mut chars, 2)? as u8),
-            'u' => {
-                let cp = char::from_u32(take_hex(&mut chars, 4)?)?;
-                bytes.extend_from_slice(cp.encode_utf8(&mut buf).as_bytes());
-            }
-            'U' => {
-                let cp = char::from_u32(take_hex(&mut chars, 8)?)?;
-                bytes.extend_from_slice(cp.encode_utf8(&mut buf).as_bytes());
-            }
-            d @ '0'..='7' => {
-                let mut val = d.to_digit(8)?;
-                for _ in 0..2 {
-                    match chars.peek().and_then(|c| c.to_digit(8)) {
-                        Some(o) => {
-                            val = val * 8 + o;
-                            chars.next();
-                        }
-                        None => break,
-                    }
-                }
-                bytes.push(val as u8);
-            }
-            _ => return None,
-        }
+        decode_escape_into(&mut chars, &mut bytes)?;
     }
     let s = std::str::from_utf8(&bytes).ok()?;
     let mut it = s.chars();
     let first = it.next()?;
     it.next().is_none().then_some(first)
+}
+
+/// Decode a single backslash escape (the backslash already consumed) into `bytes`,
+/// the way Julia reads a `Char`/`String` literal: byte escapes (`\xNN`, octal) push
+/// one byte; `\u`/`\U` push a codepoint's UTF-8 bytes; named escapes push their
+/// control byte. Returns `None` on a malformed or unknown escape.
+fn decode_escape_into(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    bytes: &mut Vec<u8>,
+) -> Option<()> {
+    let mut buf = [0u8; 4];
+    match chars.next()? {
+        'n' => bytes.push(b'\n'),
+        't' => bytes.push(b'\t'),
+        'r' => bytes.push(b'\r'),
+        'a' => bytes.push(0x07),
+        'b' => bytes.push(0x08),
+        'f' => bytes.push(0x0c),
+        'v' => bytes.push(0x0b),
+        'e' => bytes.push(0x1b),
+        '\\' => bytes.push(b'\\'),
+        '\'' => bytes.push(b'\''),
+        '"' => bytes.push(b'"'),
+        '$' => bytes.push(b'$'),
+        'x' => bytes.push(take_hex(chars, 2)? as u8),
+        'u' => {
+            let cp = char::from_u32(take_hex(chars, 4)?)?;
+            bytes.extend_from_slice(cp.encode_utf8(&mut buf).as_bytes());
+        }
+        'U' => {
+            let cp = char::from_u32(take_hex(chars, 8)?)?;
+            bytes.extend_from_slice(cp.encode_utf8(&mut buf).as_bytes());
+        }
+        d @ '0'..='7' => {
+            let mut val = d.to_digit(8)?;
+            for _ in 0..2 {
+                match chars.peek().and_then(|c| c.to_digit(8)) {
+                    Some(o) => {
+                        val = val * 8 + o;
+                        chars.next();
+                    }
+                    None => break,
+                }
+            }
+            bytes.push(val as u8);
+        }
+        _ => return None,
+    }
+    Some(())
 }
 
 /// Consume up to `max` hex digits from `chars` and return their value; `None`
@@ -1225,11 +1239,12 @@ fn take_hex(chars: &mut std::iter::Peekable<std::str::Chars>, max: usize) -> Opt
     (n > 0).then_some(val)
 }
 
-/// Render a single codepoint as JuliaSyntax shows a `Char` body: the named
-/// control escapes, `\\`/`\'`, a `\xNN` form for the remaining C0 controls and
-/// DEL, a `\u`/`\U` form for other non-printable codepoints, else literal.
-fn display_char(c: char) -> String {
-    match c {
+/// JuliaSyntax's escape for a control/non-printable codepoint, shared by `Char`
+/// and `String` show: the named control escapes, a `\xNN` form for the remaining
+/// C0 controls and DEL, a `\u`/`\U` form for other non-printable codepoints.
+/// Returns `None` for a printable char (which shows as itself).
+fn control_escape(c: char) -> Option<String> {
+    Some(match c {
         '\0' => "\\0".to_string(),
         '\u{7}' => "\\a".to_string(),
         '\u{8}' => "\\b".to_string(),
@@ -1239,8 +1254,6 @@ fn display_char(c: char) -> String {
         '\u{c}' => "\\f".to_string(),
         '\r' => "\\r".to_string(),
         '\u{1b}' => "\\e".to_string(),
-        '\\' => "\\\\".to_string(),
-        '\'' => "\\'".to_string(),
         c if (c as u32) < 0x20 || c as u32 == 0x7f => format!("\\x{:02x}", c as u32),
         c if c.is_control() => {
             let v = c as u32;
@@ -1250,7 +1263,17 @@ fn display_char(c: char) -> String {
                 format!("\\U{v:08x}")
             }
         }
-        c => c.to_string(),
+        _ => return None,
+    })
+}
+
+/// Render a single codepoint as JuliaSyntax shows a `Char` body: `\\`/`\'`, the
+/// shared control escapes, else literal.
+fn display_char(c: char) -> String {
+    match c {
+        '\\' => "\\\\".to_string(),
+        '\'' => "\\'".to_string(),
+        c => control_escape(c).unwrap_or_else(|| c.to_string()),
     }
 }
 
@@ -1496,6 +1519,36 @@ fn cmd_raw_body(node: &SyntaxNode) -> String {
 }
 
 fn string_parts(node: &SyntaxNode) -> Vec<String> {
+    // JuliaSyntax projects a single-quoted string to its *value*: escapes are
+    // decoded and re-shown JuliaSyntax-style, and a `\`-newline line continuation
+    // splits the content into separate `String` chunks (dropping the backslash,
+    // the newline, and the following indentation). On any malformed escape we fall
+    // back to echoing the raw source — those are deferred error shapes that stay
+    // un-allowlisted, matching the prior behavior.
+    decoded_string_parts(node).unwrap_or_else(|| raw_string_parts(node))
+}
+
+fn decoded_string_parts(node: &SyntaxNode) -> Option<Vec<String>> {
+    let mut parts = Vec::new();
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(t) if t.kind() == STRING_CONTENT => {
+                for chunk in decode_string_chunks(t.text())? {
+                    if !chunk.is_empty() {
+                        parts.push(format!("\"{}\"", escape_string_value(&chunk)));
+                    }
+                }
+            }
+            NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
+                parts.push(project_interpolation(&n));
+            }
+            _ => {}
+        }
+    }
+    Some(parts)
+}
+
+fn raw_string_parts(node: &SyntaxNode) -> Vec<String> {
     let mut parts = Vec::new();
     for el in node.children_with_tokens() {
         match el {
@@ -1509,6 +1562,59 @@ fn string_parts(node: &SyntaxNode) -> Vec<String> {
         }
     }
     parts
+}
+
+/// Decode one `STRING_CONTENT` token's source into its literal value, split into
+/// chunks at each `\`-newline line continuation (JuliaSyntax keeps one `String`
+/// per chunk). A continuation drops the backslash, the newline (`\n`/`\r`/`\r\n`),
+/// and the run of spaces/tabs that follow. Returns `None` on a malformed escape
+/// or invalid UTF-8.
+fn decode_string_chunks(text: &str) -> Option<Vec<String>> {
+    let mut chunks: Vec<Vec<u8>> = vec![Vec::new()];
+    let mut buf = [0u8; 4];
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            let last = chunks.last_mut().unwrap();
+            last.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            continue;
+        }
+        match chars.peek() {
+            Some('\n') | Some('\r') => {
+                let nl = chars.next().unwrap();
+                if nl == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                while matches!(chars.peek(), Some(' ') | Some('\t')) {
+                    chars.next();
+                }
+                chunks.push(Vec::new());
+            }
+            _ => decode_escape_into(&mut chars, chunks.last_mut().unwrap())?,
+        }
+    }
+    chunks
+        .into_iter()
+        .map(|c| String::from_utf8(c).ok())
+        .collect()
+}
+
+/// Escape a decoded string value the way JuliaSyntax's `String` show does:
+/// `\\`/`\"`/`\$`, the shared control escapes, else literal.
+fn escape_string_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '$' => out.push_str("\\$"),
+            c => match control_escape(c) {
+                Some(esc) => out.push_str(&esc),
+                None => out.push(c),
+            },
+        }
+    }
+    out
 }
 
 fn project_interpolation(node: &SyntaxNode) -> String {

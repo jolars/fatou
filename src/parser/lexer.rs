@@ -607,10 +607,17 @@ impl<'a> Lexer<'a> {
     }
 
     /// Consume one body byte. In non-raw mode a backslash escapes the next byte
-    /// (so `\"`, `\$`, `\n` stay inside the content chunk).
+    /// (so `\"`, `\$`, `\n` stay inside the content chunk). A `\`-newline line
+    /// continuation may span a CRLF, so the whole `\r\n` is consumed with the
+    /// backslash — otherwise the trailing `\n` would leak out and terminate a
+    /// single-line string.
     fn consume_body_byte(&mut self, raw: bool) {
         if !raw && self.peek(0) == Some(b'\\') && self.pos + 1 < self.bytes.len() {
-            self.pos += 2;
+            if self.peek(1) == Some(b'\r') && self.peek(2) == Some(b'\n') {
+                self.pos += 3;
+            } else {
+                self.pos += 2;
+            }
         } else {
             self.pos += self.char_at(self.pos).len_utf8();
         }

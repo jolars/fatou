@@ -629,6 +629,22 @@ through), so the grammar can grow incrementally.
   (`ErrorOverLongCharacter`) and invalid escapes `'\xq'` (`ErrorInvalidEscapeSequence`)
   fall back to raw passthrough.
 
+- [x] Single-quoted string escape processing and line continuations
+  (`"\x41\x42"` ⇒ `(string "AB")`, `"a\<newline>b"` ⇒ `(string "a" "b")`). The
+  projector (`string_parts`/`decode_string_chunks`/`escape_string_value` in
+  `src/parser/sexpr.rs`) now computes a string's *value* the way JuliaSyntax does
+  rather than echoing the raw source: escapes are decoded (sharing
+  `decode_escape_into` with `project_char`) and re-shown JuliaSyntax-style (sharing
+  the control escapes via `control_escape`), and a `\`-newline line continuation
+  splits the content into separate `String` chunks — dropping the backslash, the
+  newline (`\n`/`\r`/`\r\n`), and the following indentation. A `\`-CRLF
+  continuation also needed a lexer fix (`consume_body_byte`, `lexer.rs`) so the
+  trailing `\n` is consumed with the backslash instead of leaking out and
+  terminating the single-line string. The CST stays lossless (one raw
+  `STRING_CONTENT` token). **Deferred:** invalid-escape error shapes (`"\xqqq"` ⇒
+  `(string (ErrorInvalidEscapeSequence))`) fall back to raw passthrough; docstring
+  `(doc …)` attachment.
+
 ## Incremental reparse
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

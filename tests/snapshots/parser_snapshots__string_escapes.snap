@@ -1,0 +1,71 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..79
+  ASSIGNMENT_EXPR@0..10
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    STRING_LITERAL@4..10
+      STRING_DELIM_OPEN@4..5 "\""
+      STRING_CONTENT@5..9 "x\\\ny"
+      STRING_DELIM_CLOSE@9..10 "\""
+  NEWLINE@10..11 "\n"
+  ASSIGNMENT_EXPR@11..24
+    NAME@11..12
+      IDENT@11..12 "b"
+    WHITESPACE@12..13 " "
+    EQ@13..14 "="
+    WHITESPACE@14..15 " "
+    STRING_LITERAL@15..24
+      STRING_DELIM_OPEN@15..16 "\""
+      STRING_CONTENT@16..23 "p\\\n   q"
+      STRING_DELIM_CLOSE@23..24 "\""
+  NEWLINE@24..25 "\n"
+  ASSIGNMENT_EXPR@25..39
+    NAME@25..26
+      IDENT@25..26 "c"
+    WHITESPACE@26..27 " "
+    EQ@27..28 "="
+    WHITESPACE@28..29 " "
+    STRING_LITERAL@29..39
+      STRING_DELIM_OPEN@29..30 "\""
+      STRING_CONTENT@30..38 "\\x41\\x42"
+      STRING_DELIM_CLOSE@38..39 "\""
+  NEWLINE@39..40 "\n"
+  ASSIGNMENT_EXPR@40..55
+    NAME@40..41
+      IDENT@40..41 "d"
+    WHITESPACE@41..42 " "
+    EQ@42..43 "="
+    WHITESPACE@43..44 " "
+    STRING_LITERAL@44..55
+      STRING_DELIM_OPEN@44..45 "\""
+      STRING_CONTENT@45..54 "tab\\there"
+      STRING_DELIM_CLOSE@54..55 "\""
+  NEWLINE@55..56 "\n"
+  ASSIGNMENT_EXPR@56..66
+    NAME@56..57
+      IDENT@56..57 "e"
+    WHITESPACE@57..58 " "
+    EQ@58..59 "="
+    WHITESPACE@59..60 " "
+    STRING_LITERAL@60..66
+      STRING_DELIM_OPEN@60..61 "\""
+      STRING_CONTENT@61..65 "a\\$b"
+      STRING_DELIM_CLOSE@65..66 "\""
+  NEWLINE@66..67 "\n"
+  ASSIGNMENT_EXPR@67..78
+    NAME@67..68
+      IDENT@67..68 "f"
+    WHITESPACE@68..69 " "
+    EQ@69..70 "="
+    WHITESPACE@70..71 " "
+    STRING_LITERAL@71..78
+      STRING_DELIM_OPEN@71..72 "\""
+      STRING_CONTENT@72..77 "a\\\\nb"
+      STRING_DELIM_CLOSE@77..78 "\""
+  NEWLINE@78..79 "\n"

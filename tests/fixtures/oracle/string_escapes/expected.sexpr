@@ -1,0 +1,1 @@
+(toplevel (= a (string "x" "y")) (= b (string "p" "q")) (= c (string "AB")) (= d (string "tab\there")) (= e (string "a\$b")) (= f (string "a\\nb")))

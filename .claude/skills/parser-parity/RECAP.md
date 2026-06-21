@@ -22,53 +22,58 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **443 allowlisted**, 128 divergence, 4 unsupported.
-Dir corpus: **79 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "Char literal escape decoding" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **450 allowlisted**, 121 divergence, 4 unsupported.
+Dir corpus: **80 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "string escape processing" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21e)
+## Latest session (2026-06-21f)
 
-**Char literal escape decoding `'\xce\xb1'`, `'α'`, `'\U1D7DA'`.** Two
-buckets in one. **Parser:** the lexer's `lex_char_or_unknown` only allowed one
-char or a single-byte escape (`\` + 1 byte), so a multi-escape literal failed —
-`'\xce\xb1'` lexed as `'` (Unknown) + `xce` + … . Rewrote it to scan to the
-closing `'`, skipping a backslash escape's following byte so `'\''` doesn't
-self-terminate; a newline/EOF without a close leaves the lone `'` an Unknown
-(transpose). Now `'\xce\xb1'` is one `CHAR` token. **Projector:** the two CHAR
-arms (`project_literal`, `project_element`) echoed raw text; that matched only
-because simple literals' source == display. Added `project_char` → `decode_char`
-(source escapes → one codepoint: byte escapes `\xNN`/octal + literal chars
-accumulate as UTF-8 bytes, `\u`/`\U`/named escapes contribute a codepoint, then
-UTF-8-decode to a single char) → `display_char` (JuliaSyntax `Char` show: named
-control escapes `\n\t\r\0\a\b\f\v\e`, `\\`/`\'`, `\xNN`/`\u`/`\U` for other
-non-printables, else literal). `'\xce\xb1'` ⇒ `(char 'α')`, `'\U1D7DA'` ⇒
-`(char '𝟚')`. Error shapes (`'ab'` over-long, `'\xq'` bad escape) decode to
-`None` → raw passthrough → stay un-allowlisted (deferred, as before).
+**Single-quoted string escape processing + line continuations.** The string
+analogue of the char session, mostly a projector concern. **Projector:**
+`string_parts` (`sexpr.rs`) echoed raw `STRING_CONTENT`; now it computes the
+*value* via `decoded_string_parts` → `decode_string_chunks` (decode escapes, split
+into separate `String` chunks at each `\`-newline line continuation — drop the
+backslash, the newline `\n`/`\r`/`\r\n`, and the following indentation; drop empty
+chunks) + `escape_string_value` (JuliaSyntax `String` show: `\\`/`\"`/`\$` +
+control escapes). Refactored the char path to share: `decode_escape_into`
+(byte/`\u`/`\U`/named escapes, now also `\$`) and `control_escape` (the shared
+named/`\x`/`\u`/`\U` control table, factored out of `display_char`). On a
+malformed escape it falls back to raw echo (`raw_string_parts`) so error shapes
+stay deferred. `"\x41\x42"` ⇒ `(string "AB")`, `"a\<nl>b"` ⇒ `(string "a" "b")`.
+**Parser:** a `\`-CRLF continuation leaked its trailing `\n` and terminated the
+single-line string — fixed `consume_body_byte` (`lexer.rs`) to consume the whole
+`\r\n` with the backslash.
 
-JS allow **440 → 443** (+3: js-0f48ee8b, js-4e93f00d, js-c412428b), divergence
-131 → 128, unsupported held 4. Dir allow 78 → 79 (new fixture `char_escapes`).
-Zero regressions; green, clippy/fmt clean.
+JS allow **443 → 450** (+7: the line-continuation cluster js-037931f4/69d4ff58/
+93e66c31/a85ff3b0/c75f692a/cb885216/f6fe37ab), divergence 128 → 121, unsupported
+held 4. Dir allow 79 → 80 (new fixture `string_escapes`). Zero regressions; green,
+clippy/fmt clean. `"\xqqq"` (js-fc03650e) stays FAIL — deferred error shape.
 
 **Suggested next targets (ranked):**
-1. **String escape processing** — `"\xqqq"`, `"a\\nb"`, line continuations
-   `"a\<newline>b"` (e.g. js-037931f4 `"a\<cr><nl>b"`, js-69d4ff58). The
-   *string* analogue of this session: needs a Julia source→value unescaper in the
-   `string`/`string-s` paths (can reuse `decode_char`'s escape logic generalized
-   to a byte stream). Unlocks the string-escape FAIL cluster.
-2. **Docstrings** `"""…""" foo` ⇒ `(doc (string-s …) foo)` (js-10d3f0bb,
-   js-02079ffa) — string-then-expr at statement scope folds into a `(doc …)`
-   macrocall.
-3. **`var"…"` escape unescaping** — js-57…/js-8f5b1a26 `var"\""`, `var"\\\""`;
-   shares the raw unescaper.
+1. **Docstrings** `"""…""" foo` / bare string-then-expr at statement scope folds
+   into a `(doc …)` macrocall (js-10d3f0bb, js-02079ffa, js-69e0ae28). Surfaced
+   this session: consecutive bare toplevel strings doc-fold in Julia. Likely a
+   `core.rs`/statement-driver concern (string literal followed by an expr).
+2. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26 `var"\\\""`;
+   the `var` content follows Julia's raw-string rules (reuse the raw unescaper).
+3. **Triple-string escape decoding** — `triple_string_parts` still echoes source
+   escapes (only control chars escape); the `\xNN`/`\u` decoding from this session
+   could extend there.
 4. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
    (deferred from 2026-06-21b).
 
 ## Earlier sessions
+
+- **2026-06-21e** — Char literal escape decoding (`'\xce\xb1'`, `'α'`,
+  `'\U1D7DA'`): lexer scans a char to its closing `'` (skip an escape's following
+  byte) so multi-escape literals are one `CHAR`; `project_char` → `decode_char`
+  (source escapes → one codepoint via a byte buffer) → `display_char` (JuliaSyntax
+  `Char` show). JS allow 440 → 443. Fixture `char_escapes`.
 
 - **2026-06-21d** — Raw triple-quoted strings (`r"""…"""`): `project_string`'s
   prefixed branch emits a `string-s-r` body via the same `triple_string_parts`
