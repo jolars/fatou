@@ -1919,13 +1919,16 @@ fn parse_arg_list(
                 events.push(Event::Tok(i));
                 i += 1;
             }
-            // `;` splits positional arguments from keyword parameters; the first
-            // one opens a `PARAMETERS` node holding the rest of the list.
+            // `;` splits positional arguments from keyword parameters, and each
+            // subsequent `;` starts a fresh `PARAMETERS` group: `(a; b; c,d)` ⇒
+            // `a (parameters b) (parameters c d)`. Close the open group before
+            // opening the next so the groups stay siblings.
             Some(TokKind::Semicolon) => {
-                if !in_params {
-                    events.push(Event::Start(SyntaxKind::PARAMETERS));
-                    in_params = true;
+                if in_params {
+                    events.push(Event::Finish); // close previous PARAMETERS
                 }
+                events.push(Event::Start(SyntaxKind::PARAMETERS));
+                in_params = true;
                 events.push(Event::Tok(i));
                 i += 1;
             }

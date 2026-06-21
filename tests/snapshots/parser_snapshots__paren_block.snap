@@ -8,12 +8,13 @@ ROOT@0..51
     ARG@1..2
       NAME@1..2
         IDENT@1..2 "a"
-    PARAMETERS@2..8
+    PARAMETERS@2..5
       SEMICOLON@2..3 ";"
       WHITESPACE@3..4 " "
       ARG@4..5
         NAME@4..5
           IDENT@4..5 "b"
+    PARAMETERS@5..8
       SEMICOLON@5..6 ";"
       WHITESPACE@6..7 " "
       ARG@7..8
@@ -57,12 +58,14 @@ ROOT@0..51
     ARG@29..30
       NAME@29..30
         IDENT@29..30 "a"
-    PARAMETERS@30..35
+    PARAMETERS@30..32
       SEMICOLON@30..31 ";"
       ARG@31..32
         NAME@31..32
           IDENT@31..32 "b"
+    PARAMETERS@32..33
       SEMICOLON@32..33 ";"
+    PARAMETERS@33..35
       SEMICOLON@33..34 ";"
       ARG@34..35
         NAME@34..35
@@ -87,8 +90,9 @@ ROOT@0..51
   NEWLINE@45..46 "\n"
   PAREN_BLOCK@46..50
     LPAREN@46..47 "("
-    PARAMETERS@47..49
+    PARAMETERS@47..48
       SEMICOLON@47..48 ";"
+    PARAMETERS@48..49
       SEMICOLON@48..49 ";"
     RPAREN@49..50 ")"
   NEWLINE@50..51 "\n"

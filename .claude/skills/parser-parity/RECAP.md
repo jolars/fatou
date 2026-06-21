@@ -22,68 +22,62 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **411 allowlisted**, 160 divergence, 4 unsupported.
-Dir corpus: **74 allowlisted**, 4 blocked + 1 skipped (do_blocks).
-Grammar bullets through "Paren block sequences" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **415 allowlisted**, 156 divergence, 4 unsupported.
+Dir corpus: **75 allowlisted**, 4 blocked + 1 skipped (do_blocks).
+Grammar bullets through "Per-group parameters" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization, triple-string dedent,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21a)
+## Latest session (2026-06-21b)
 
-**Paren block sequences.** A `;`-bearing parenthesized run that is *not* a tuple
-now parses as a `PAREN_BLOCK` projecting `(block-p …)` (mirroring JuliaSyntax
-`parse_paren`/`parse_brackets`): `(a; b; c)` ⇒ `(block-p a b c)`, `(a=1; b=2)` ⇒
-`(block-p (= a 1) (= b 2))`, `(a;b;;c)` ⇒ `(block-p a b c)`, `(a=1;)` ⇒
-`(block-p (= a 1))`, `(;;)` ⇒ `(block-p)`. Tuples are unchanged: `(a, b)`,
-`(; a=1)`, `(x...; y)` stay `tuple-p`.
+**Per-group `parameters` in tuples and calls.** Each `;` after the first now
+starts a fresh `PARAMETERS` group instead of folding the whole tail into one,
+matching JuliaSyntax: `(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c
+d))`, `(; a=1; b=2)` ⇒ `(tuple-p (parameters (= a 1)) (parameters (= b 2)))`,
+`f(a; b; c)` ⇒ `(call f a (parameters b) (parameters c))`, `+(;;a)` ⇒ `(call +
+(parameters) (parameters a))`.
 
-The disambiguation lives in `paren_is_block` (`src/parser/expr.rs`): a depth-0
-token scan gathers `had_commas`/`had_splat`/`num_semis`/`num_subexprs` +
-`initial_semi`, then applies the exact rule
-`is_tuple = had_commas || (had_splat && num_semis≥1) || (initial_semi &&
-(num_semis==1 || num_subexprs>0))`, `is_block = !is_tuple && num_semis>0`. The two
-`;`-reaching `parse_arg_list` call sites in `parse_paren` now pick the node kind
-via `paren_list_kind`. **Key reuse:** the block is parsed by the *same* arg-list
-machinery as a tuple (same `ARG`/`KEYWORD_ARG`/`PARAMETERS` events); only the
-outer node kind differs, and `project_block_args` flattens the
-`PARAMETERS`/`ARG` encoding into a flat statement list. New
-`SyntaxKind::PAREN_BLOCK` (after `BARE_TUPLE_EXPR`).
+**Pure parser fix** — the projector needed nothing. In `parse_arg_list`
+(`src/parser/expr.rs`) a `;` now closes the open `PARAMETERS` (if any) before
+opening a new one, with the `;` as the new group's leading delimiter;
+`project_args` already maps each `PARAMETERS` sibling to its own `(parameters
+…)`, and `project_block_args` still flattens them so the `PAREN_BLOCK`
+projection is unchanged (only its internal CST gained sibling `PARAMETERS`
+nodes — the `paren_block` snapshot was re-accepted, projection identical).
 
-**Sibling trap caught:** a function signature's `;`-parens (`function (x; y) end`)
-are a *parameter list*, not a block — Julia wants `(tuple-p x (parameters y))`.
-`parse_function_like` (`structural.rs`) now relabels a `PAREN_BLOCK` signature
-back to `TUPLE_EXPR` (identical shape), alongside the existing `PAREN_EXPR`→tuple
-relabel. The anon-function snapshot would have regressed without this.
+JS allow **411 → 415** (+4: `(a; b; c,d)` js-2020c1de, `(; a=1; b=2)`
+js-aa0e6a42, `f(a; b; c)` js-b035c294, `+(;;a)` js-88c49b23); divergence
+160 → 156, unsupported held 4. Dir allow 74 → 75 (new fixture
+`multi_param_groups`). Zero regressions; green, clippy/fmt clean.
 
-JS allow **404 → 411** (+7: `(a=1;)` js-8daf5e52, `(;;)` js-538e61ed, `(a;b;;c)`
-js-21b19ccb, `(a=1; b=2)` js-ed563534, + paren-block siblings); divergence
-167 → 160, unsupported held 4. Dir allow 73 → 74 (new fixture `paren_block`).
-Zero regressions; green, clippy/fmt clean.
-
-**Deferred (next obvious follow-up):** per-group `parameters` in the *tuple* case
-— `(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c d))` and `(; a=1; b=2)`
-⇒ two `(parameters …)` nodes. Fatou still flattens both into a single
-`(parameters …)`, so js-2020c1de and js-aa0e6a42 remain FAIL. The fix is in the
-arg-list/projector parameters handling (start a new `PARAMETERS` per `;` group),
-not the block disambiguation.
+**Still FAIL (deferred):** the empty-all-semis operator-prefix case `+(;;)` ⇒
+`(call-pre + (block-p))` and `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92). Fatou now
+emits `(call + (parameters) (parameters))` — a *prefix-call/block*
+disambiguation, separate from parameter grouping: when an operator's paren
+content is all empty `;` it becomes a prefix call over a `(block-p)`, not a
+regular call with empty parameter groups.
 
 **Suggested next targets (ranked):**
-1. **Per-group tuple `parameters`** (the deferred follow-up above) — 2 FAILs,
-   small, finishes the paren story.
-2. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
+1. **Triple-quoted string dedent** — the largest FAIL cluster (~25 cases:
    `"""\n  x\n y"""` etc.). Common-leading-whitespace stripping + line handling.
    Display-ish but high count; check whether it's a parser or projector concern.
-3. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
+2. **Triple-quoted prefix string macros** — `string-r` vs `string-s-r` in
    `project_string`'s macrocall branch (still open from 2026-06-20e).
-4. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
+3. **Unicode unary in plus/times tiers** — `±x`/`∓x`/`⋆x` as prefixes.
+4. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
+   (the two deferred FAILs above); a narrow prefix-call/block disambiguation.
 
 ## Earlier sessions
 
-One-liners; full implementation detail lives in the matching `[x]` bullet in
-`TODO.md`.
+- **2026-06-21a** — Paren block sequences: a `;`-bearing parenthesized run that is
+  *not* a tuple parses as a `PAREN_BLOCK` projecting `(block-p …)` (`(a; b; c)` ⇒
+  `(block-p a b c)`), via `paren_is_block`'s depth-0 token scan + the `is_tuple`/
+  `is_block` rule; the two `;`-reaching `parse_arg_list` call sites pick the kind
+  via `paren_list_kind`. `function (x; y) end` signatures relabel back to
+  `TUPLE_EXPR`. JS allow 404 → 411. Fixture `paren_block`.
 
 - **2026-06-20l** — Top-level `;` grouping: a logical line carrying a top-level
   `;` folds its statements into a `TOPLEVEL_SEMICOLON` node (`(toplevel-; …)`); the
@@ -110,11 +104,6 @@ One-liners; full implementation detail lives in the matching `[x]` bullet in
   `^`/`[`/`{`); `project_literal` combines the two tokens, `lhs_is_number`
   juxtaposes them. Un-blocked `matrices` (`[1 +2]` ⇒ `(hcat 1 2)`). JS allow
   386 → 392.
-
-## Earlier sessions
-
-One-liners; full implementation detail lives in the matching `[x]` bullet in
-`TODO.md`.
 
 - **2026-06-20h** — Operator suffix sub/superscripts: an operator token absorbs a
   trailing run of `is_op_suffix_char` chars (`a +₁ b`, `x -->₁ y`, `f'ᵀ`) keeping

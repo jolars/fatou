@@ -578,9 +578,21 @@ through), so the grammar can grow incrementally.
   `ARG`/`KEYWORD_ARG`/`PARAMETERS` encoding into a flat statement list. A function
   signature's `;`-parens (`function (x; y) end`) are a parameter list, not a
   block, so `parse_function_like` relabels a `PAREN_BLOCK` signature back to
-  `TUPLE_EXPR` (same shape). **Deferred:** per-group `parameters` in the tuple
-  case (`(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c d))`,
-  `(; a=1; b=2)` ⇒ two `parameters` nodes) — Fatou still flattens to one.
+  `TUPLE_EXPR` (same shape).
+
+- [x] Per-group `parameters` in tuples and calls. Each `;` after the first now
+  starts a fresh `PARAMETERS` group rather than folding the whole tail into one,
+  matching JuliaSyntax: `(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c
+  d))`, `(; a=1; b=2)` ⇒ `(tuple-p (parameters (= a 1)) (parameters (= b 2)))`,
+  `f(a; b; c)` ⇒ `(call f a (parameters b) (parameters c))`, `+(;;a)` ⇒ `(call +
+  (parameters) (parameters a))`. Pure parser fix in `parse_arg_list`
+  (`src/parser/expr.rs`): a `;` closes the open `PARAMETERS` (if any) and opens a
+  new one, with the `;` as the group's leading delimiter; the projector already
+  maps each `PARAMETERS` sibling to its own `(parameters …)` and
+  `project_block_args` still flattens them for the block case (so the
+  `PAREN_BLOCK` projection is unchanged). **Deferred:** the empty-all-semis
+  operator-prefix case `+(;;)` ⇒ `(call-pre + (block-p))` (a separate
+  prefix-call/block disambiguation, still FAIL).
 
 ## Incremental reparse
 

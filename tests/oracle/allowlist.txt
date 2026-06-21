@@ -43,6 +43,7 @@ macro_directive_names
 macros
 matrices
 multi_clause_generators
+multi_param_groups
 nested_string_interp
 nonstandard_identifier
 operator_call

@@ -1,0 +1,1 @@
+(toplevel (tuple-p a (parameters b) (parameters c d)) (tuple-p (parameters (= a 1)) (parameters (= b 2))) (call f a (parameters b) (parameters c)) (call f a b (parameters c d)) (call g x (parameters y) (parameters z)))
