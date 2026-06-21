@@ -1139,7 +1139,14 @@ fn project_string(node: &SyntaxNode) -> String {
     // String macro: a prefix (`r`, `raw`, `b`, `v`) makes it a raw `@<p>_str`
     // macrocall rather than an interpolating `(string …)`.
     if let Some(prefix) = string_token(node, STRING_PREFIX) {
-        let body = format!("(string-r {})", quote_raw(&raw_content(node)));
+        // A triple-quoted raw string still gets JuliaSyntax's dedent + per-line
+        // chunking; only the unescaping differs (raw content's backslashes and
+        // quotes stay literal), so its chunks are display-escaped as raw bytes.
+        let body = if matches!(string_token(node, STRING_DELIM_OPEN), Some(d) if d.len() >= 3) {
+            sexp("string-s-r", triple_string_parts(node, true))
+        } else {
+            format!("(string-r {})", quote_raw(&raw_content(node)))
+        };
         let mut parts = vec![format!("@{prefix}_str"), body];
         if let Some(suffix) = string_token(node, STRING_SUFFIX) {
             parts.push(quote_raw(&suffix));
@@ -1151,7 +1158,7 @@ fn project_string(node: &SyntaxNode) -> String {
     // to compute their literal value (a faithful encoding of what the literal
     // means, mirroring `SyntaxNode`'s String children).
     if matches!(string_token(node, STRING_DELIM_OPEN), Some(d) if d.len() >= 3) {
-        return sexp("string-s", triple_string_parts(node));
+        return sexp("string-s", triple_string_parts(node, false));
     }
 
     let mut parts = string_parts(node);
@@ -1172,7 +1179,7 @@ enum TripleItem {
 /// Project a triple-quoted string's content the way JuliaSyntax does: normalize
 /// line endings to `\n`, split into per-line chunks, strip the common leading
 /// indentation, drop the leading newline right after `"""`, then display-escape.
-fn triple_string_parts(node: &SyntaxNode) -> Vec<String> {
+fn triple_string_parts(node: &SyntaxNode, raw: bool) -> Vec<String> {
     // Build the content as a sequence of lines (split on normalized newlines);
     // each line is a run of text/interpolation items.
     let mut lines: Vec<Vec<TripleItem>> = vec![Vec::new()];
@@ -1238,7 +1245,7 @@ fn triple_string_parts(node: &SyntaxNode) -> Vec<String> {
     for chunk in chunks {
         match chunk {
             TripleItem::Text(t) if t.is_empty() => {}
-            TripleItem::Text(t) => out.push(format!("\"{}\"", escape_display(&t))),
+            TripleItem::Text(t) => out.push(format!("\"{}\"", escape_display(&t, raw))),
             TripleItem::Interp(s) => out.push(s),
         }
     }
@@ -1306,15 +1313,20 @@ fn strip_leading_ws(t: &str, n: usize) -> String {
     t[idx..].to_string()
 }
 
-/// Escape the control characters JuliaSyntax shows as backslash escapes; other
-/// bytes (including backslashes already present in the source) pass through.
-fn escape_display(s: &str) -> String {
+/// Escape the control characters JuliaSyntax shows as backslash escapes. For an
+/// interpolating string the source escapes (`\n`, `\\`) already display as
+/// themselves, so only literal control chars need escaping; for a `raw` string
+/// the content is literal bytes, so backslashes/quotes/`$` are escaped too.
+fn escape_display(s: &str, raw: bool) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
             '\r' => out.push_str("\\r"),
+            '\\' if raw => out.push_str("\\\\"),
+            '"' if raw => out.push_str("\\\""),
+            '$' if raw => out.push_str("\\$"),
             _ => out.push(c),
         }
     }

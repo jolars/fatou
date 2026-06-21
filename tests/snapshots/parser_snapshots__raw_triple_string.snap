@@ -1,0 +1,23 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..39
+  STRING_LITERAL@0..13
+    STRING_PREFIX@0..1 "r"
+    STRING_DELIM_OPEN@1..4 "\"\"\""
+    STRING_CONTENT@4..10 "\n x\n y"
+    STRING_DELIM_CLOSE@10..13 "\"\"\""
+  NEWLINE@13..14 "\n"
+  STRING_LITERAL@14..23
+    STRING_PREFIX@14..15 "r"
+    STRING_DELIM_OPEN@15..18 "\"\"\""
+    STRING_CONTENT@18..20 "\nx"
+    STRING_DELIM_CLOSE@20..23 "\"\"\""
+  NEWLINE@23..24 "\n"
+  STRING_LITERAL@24..38
+    STRING_PREFIX@24..25 "r"
+    STRING_DELIM_OPEN@25..28 "\"\"\""
+    STRING_CONTENT@28..35 "\n x\\\n y"
+    STRING_DELIM_CLOSE@35..38 "\"\"\""
+  NEWLINE@38..39 "\n"

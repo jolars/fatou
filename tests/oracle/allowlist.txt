@@ -57,6 +57,7 @@ paren_operator
 public_statement
 range_operator
 raw_string
+raw_triple_string
 regex_string
 short_function_def
 signed_literals

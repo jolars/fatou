@@ -1,0 +1,1 @@
+(toplevel (macrocall @r_str (string-s-r "x\n" "y")) (macrocall @r_str (string-s-r "x")) (macrocall @r_str (string-s-r "x\\\n" "y")))

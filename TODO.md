@@ -603,9 +603,18 @@ through), so the grammar can grow incrementally.
   projector change in `triple_string_parts` (`src/parser/sexpr.rs`); the CST stays
   lossless (raw content preserved in `STRING_CONTENT`). Also emits the empty
   `String` child for empty literals (`"" → (string "")`, `"""""" → (string-s
-  "")`). **Deferred:** raw triple strings (`r"""…"""` → `string-s-r`, same dedent
-  + `quote_raw`), full source-escape unescaping (`\xNN`/`\uNNNN`/line
+  "")`). **Deferred:** full source-escape unescaping (`\xNN`/`\uNNNN`/line
   continuations), and docstring `(doc …)` attachment.
+
+- [x] Raw triple-quoted strings (`r"""…"""`). A prefixed triple-quoted string
+  reuses the same dedent + per-line chunking as a plain triple string, projecting
+  to a `string-s-r` body inside the `@<p>_str` macrocall; only the unescaping
+  differs—raw content's backslashes and quotes are literal, so each chunk is
+  display-escaped as raw bytes (`\\`, `\"`, `\$` in addition to control chars).
+  `r"""\n x\n y"""` ⇒ `(macrocall @r_str (string-s-r "x\n" "y"))`. Projector-only
+  change (`project_string`/`triple_string_parts`/`escape_display`, `sexpr.rs`);
+  single-line raw strings keep the `(string-r …)`/`quote_raw` path. **Deferred:**
+  raw-string quote unescaping (`\"`/`\\` before a closing quote inside the body).
 
 ## Incremental reparse
 

@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **437 allowlisted**, 134 divergence, 4 unsupported.
-Dir corpus: **77 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **440 allowlisted**, 131 divergence, 4 unsupported.
+Dir corpus: **78 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "Triple-quoted string dedent" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,46 +31,55 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21c)
+## Latest session (2026-06-21d)
 
-**Triple-quoted string dedent.** The largest FAIL cluster (~22 JS cases). It's a
-**projector** concern: the CST stays lossless (raw content in `STRING_CONTENT`),
-and `triple_string_parts` (`src/parser/sexpr.rs`) computes the literal's *value*
-the way JuliaSyntax does — faithful encoding, not compensation. Algorithm:
-normalize CRLF/CR → LF; split content into one `String` chunk per line; compute
-the longest common leading-whitespace prefix over lines 2..end (skip blank lines
-*except* the closing-delimiter/last line, which always counts; the opening line is
-never dedented); strip that prefix; drop the leading newline right after `"""` (if
-the opening line is empty); append each line's `\n` to its last text chunk (or a
-fresh `"\n"` chunk if the line ends in an interpolation); drop empty text chunks;
-display-escape control chars (NL/TAB/CR → `\n`/`\t`/`\r`). Examples: `"""\n  x\n
-y"""` ⇒ `(string-s " x\n" "y")`, `"""\n  $a\n  $b\n"""` ⇒ `(string-s "  " a "\n"
-"  " b "\n")`. Also added the empty-`String`-child fix: `"" → (string "")`,
-`"""""" → (string-s "")`.
+**Raw triple-quoted strings `r"""…"""`.** The top-ranked leftover from the dedent
+session (~3 JS FAILs). A **projector** concern: `project_string`'s prefixed-string
+branch now checks the open-delim length and, for triple, emits a `string-s-r` body
+built by the *same* `triple_string_parts` dedent/chunking as a plain triple string
+— only the unescaping differs. Threaded a `raw: bool` through `triple_string_parts`
+→ `escape_display`: in a raw string the content is literal bytes, so each chunk's
+backslashes/quotes/`$` are escaped (`\\`, `\"`, `\$`) on top of the control-char
+escaping (`\n \t \r`). `r"""\n x\n y"""` ⇒ `(macrocall @r_str (string-s-r "x\n"
+"y"))`; a trailing-backslash line `r"""\n x\<nl> y"""` ⇒ `(... (string-s-r "x\\\n"
+"y"))` (literal backslash display-doubled). Single-line raw strings keep the
+`(string-r …)`/`quote_raw` path untouched.
 
-**No escape unescaping needed** — single-char source escapes (`\n \t \\ \" \$`)
-re-escape to themselves, so pass-through + control-char display-escaping matches
-all corpus triple cases; only `\xNN`/`\uNNNN`/line-continuation would need real
-unescaping (none in the triple cluster).
+**Why no real unescaping:** the corpus raw-triple cases have backslashes only
+before newlines (never before a closing quote), so JuliaSyntax's raw unescaping
+(`\"`→`"`, `\\`→`\` *before a quote*) is a no-op and pass-through + raw display
+escaping matches. `\"`/`\\`-before-quote inside the body stays deferred.
 
-JS allow **415 → 437** (+22); divergence 156 → 134, unsupported held 4. Dir allow
-75 → 77 (new fixture `triple_string_dedent`; `triple_string_interp` moved out of
-`blocked.txt`). Zero regressions; green, clippy/fmt clean.
+JS allow **437 → 440** (+3), divergence 134 → 131, unsupported held 4. Dir allow
+77 → 78 (new fixture `raw_triple_string`). Zero regressions; green, clippy/fmt
+clean.
 
 **Suggested next targets (ranked):**
-1. **Raw triple strings** `r"""…"""` — `string-s-r` head + the same dedent applied
-   to raw content via `quote_raw` (the macrocall branch of `project_string`); ~3
-   FAILs (`r"""\n x\n y"""`, `r"""\nx"""`).
-2. **String escape processing** — `"\xqqq"`, `"a\\nb"`, line continuations
-   `"a\<newline>b"`; needs a real Julia unescaper (source → value) in the
-   `string`/`string-s` paths. Unlocks the escape FAIL cluster + char literals.
-3. **Char literals** `'\xce\xb1'`, `'α'`, `'ab'` — escape/value display.
-4. **Docstrings** `"""…""" foo` ⇒ `(doc (string-s …) foo)` — string-then-expr at
-   statement scope folds into a `(doc …)` macrocall (w5 probe).
+1. **String escape processing** — `"\xqqq"`, `"a\\nb"`, line continuations
+   `"a\<newline>b"` (e.g. js-037931f4 `"a\<cr><nl>b"`, js-69d4ff58); needs a real
+   Julia source→value unescaper in the `string`/`string-s` paths. Unlocks the
+   escape FAIL cluster + char literals.
+2. **Char literals** `'\xce\xb1'`, `'α'`, `'ab'` (js-0f48ee8b) — escape/value
+   display; shares the unescaper from (1).
+3. **Docstrings** `"""…""" foo` ⇒ `(doc (string-s …) foo)` (js-10d3f0bb,
+   js-02079ffa) — string-then-expr at statement scope folds into a `(doc …)`
+   macrocall.
+4. **`var"…"` escape unescaping** — js-57…/js-8f5b1a26 `var"\""`, `var"\\\""`;
+   also shares the raw unescaper.
 5. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
-   (deferred from 2026-06-21b); a narrow prefix-call/block disambiguation.
+   (deferred from 2026-06-21b).
 
 ## Earlier sessions
+
+- **2026-06-21c** — Triple-quoted string dedent (largest FAIL cluster, ~22 JS).
+  Projector concern: CST stays lossless (raw `STRING_CONTENT`); `triple_string_parts`
+  (`sexpr.rs`) computes the literal value JuliaSyntax-style — normalize CRLF/CR→LF,
+  one `String` chunk per line, strip longest common leading-ws over lines 2..end
+  (skip blank lines except the closing/last; opening line never dedented), drop the
+  newline right after `"""`, append each line's `\n`, drop empty chunks,
+  display-escape control chars. Empty literals emit one empty `String`
+  (`""→(string "")`, `""""""→(string-s "")`). JS allow 415 → 437. Fixture
+  `triple_string_dedent`.
 
 - **2026-06-21b** — Per-group `parameters`: each `;` after the first opens a fresh
   `PARAMETERS` group (`(a; b; c,d)` ⇒ `(tuple-p a (parameters b) (parameters c d))`,
