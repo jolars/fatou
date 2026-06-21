@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **450 allowlisted**, 121 divergence, 4 unsupported.
-Dir corpus: **80 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **455 allowlisted**, 116 divergence, 4 unsupported.
+Dir corpus: **81 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "string escape processing" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,43 +31,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21f)
+## Latest session (2026-06-21g)
 
-**Single-quoted string escape processing + line continuations.** The string
-analogue of the char session, mostly a projector concern. **Projector:**
-`string_parts` (`sexpr.rs`) echoed raw `STRING_CONTENT`; now it computes the
-*value* via `decoded_string_parts` → `decode_string_chunks` (decode escapes, split
-into separate `String` chunks at each `\`-newline line continuation — drop the
-backslash, the newline `\n`/`\r`/`\r\n`, and the following indentation; drop empty
-chunks) + `escape_string_value` (JuliaSyntax `String` show: `\\`/`\"`/`\$` +
-control escapes). Refactored the char path to share: `decode_escape_into`
-(byte/`\u`/`\U`/named escapes, now also `\$`) and `control_escape` (the shared
-named/`\x`/`\u`/`\U` control table, factored out of `display_char`). On a
-malformed escape it falls back to raw echo (`raw_string_parts`) so error shapes
-stay deferred. `"\x41\x42"` ⇒ `(string "AB")`, `"a\<nl>b"` ⇒ `(string "a" "b")`.
-**Parser:** a `\`-CRLF continuation leaked its trailing `\n` and terminated the
-single-line string — fixed `consume_body_byte` (`lexer.rs`) to consume the whole
-`\r\n` with the backslash.
+**Bare-name function/macro forward declarations.** `function f end`, `macro m
+end`, `function $f end` are *declarations* in JuliaSyntax with no body block:
+`(function f)`, `(macro m)`, `(function ($ f))` — distinct from a call signature
+`function f() end` → `(function (call f) (block))`. Pure projector concern (the
+CST is fine: `SIGNATURE(NAME)` + empty `BLOCK`). **Projector:** new
+`project_function_like` (`sexpr.rs`) drops the empty `BLOCK` when
+`is_forward_declaration` holds — signature inner node is `NAME` or
+`INTERPOLATION` (a bare name, not a `CALL_EXPR`). Faithful: in Julia a bare-name
+header is *only ever* a declaration (a body makes it an error, e.g. `function f;
+x end` → `(function (error f) (block x))`), so discriminating on the signature
+shape alone is correct for valid inputs.
 
-JS allow **443 → 450** (+7: the line-continuation cluster js-037931f4/69d4ff58/
-93e66c31/a85ff3b0/c75f692a/cb885216/f6fe37ab), divergence 128 → 121, unsupported
-held 4. Dir allow 79 → 80 (new fixture `string_escapes`). Zero regressions; green,
-clippy/fmt clean. `"\xqqq"` (js-fc03650e) stays FAIL — deferred error shape.
+JS allow **450 → 455** (+5: js-080efb64 `function $f end`, js-0e5c696e `function
+f \n\n end`, js-408b2118 `macro f end`, js-81258463 `(function f \n end)`,
+js-c75e926e `function f end`), divergence 121 → 116, unsupported held 4. Dir
+allow 80 → 81 (new fixture `function_forward_decl`). Zero regressions; green,
+clippy/fmt clean. `function \n f() end` (js-e811d4a1, newline right after the
+keyword) stays FAIL — the signature is mis-parsed as a block; separate frontier.
 
 **Suggested next targets (ranked):**
-1. **Docstrings** `"""…""" foo` / bare string-then-expr at statement scope folds
-   into a `(doc …)` macrocall (js-10d3f0bb, js-02079ffa, js-69e0ae28). Surfaced
-   this session: consecutive bare toplevel strings doc-fold in Julia. Likely a
-   `core.rs`/statement-driver concern (string literal followed by an expr).
-2. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26 `var"\\\""`;
-   the `var` content follows Julia's raw-string rules (reuse the raw unescaper).
-3. **Triple-string escape decoding** — `triple_string_parts` still echoes source
-   escapes (only control chars escape); the `\xNN`/`\u` decoding from this session
-   could extend there.
-4. **Empty-semis operator-prefix block** — `+(;;)` ⇒ `(call-pre + (block-p))`
-   (deferred from 2026-06-21b).
+1. **Macro-call name clusters** (~15 FAIL): `@A.B.x` (js-ee8e4e0c), `A.B.@x`
+   (js-968d2da1), `@(A) x` (js-f3aa762e), `@! x` (js-fb523956), `@+x y`
+   (js-28af1263), `@end x` (js-a37773f7), `@$ y` (js-c143c4d8), `$A.@x`,
+   `A.$B.@x`, `@S[a].b`/`@S{a}.b` etc. Several share a root in macro-name parsing.
+2. **Docstrings** `"""…""" foo` / bare string-then-expr folds into `(doc …)`
+   (js-10d3f0bb, js-69e0ae28, js-02079ffa). Statement-driver concern (`core.rs`).
+3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26; reuse the
+   raw-string unescaper for `var` content.
+4. **`function \n f() end`** — newline directly after the `function` keyword
+   mis-parses the signature as a block (this session's leftover).
 
 ## Earlier sessions
+
+- **2026-06-21f** — Single-quoted string escape processing + line continuations.
+  Projector `string_parts` now computes the *value* (`decoded_string_parts` →
+  `decode_string_chunks` + `escape_string_value`); `\`-newline continuations split
+  chunks; shared `decode_escape_into`/`control_escape` with the char path. Parser:
+  `consume_body_byte` consumes the whole `\r\n` with the backslash. JS allow 443 →
+  450. Fixture `string_escapes`.
 
 - **2026-06-21e** — Char literal escape decoding (`'\xce\xb1'`, `'α'`,
   `'\U1D7DA'`): lexer scans a char to its closing `'` (skip an escape's following

@@ -26,6 +26,7 @@ curly_operator_call
 dot_logical_operator
 escaped_dollar
 field_access_suffix
+function_forward_decl
 generator_arguments
 generators
 import_operator_names

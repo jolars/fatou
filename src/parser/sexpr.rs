@@ -150,14 +150,8 @@ fn project(node: &SyntaxNode) -> String {
             "for",
             vec![project_for_binding(node), project_block_child(node)],
         ),
-        FUNCTION_DEF => sexp(
-            "function",
-            vec![project_signature(node), project_block_child(node)],
-        ),
-        MACRO_DEF => sexp(
-            "macro",
-            vec![project_signature(node), project_block_child(node)],
-        ),
+        FUNCTION_DEF => project_function_like("function", node),
+        MACRO_DEF => project_function_like("macro", node),
         LET_EXPR => project_let(node),
         QUOTE_EXPR => sexp("quote", vec![project_block_child(node)]),
         QUOTE_SYM => project_quote_sym(node),
@@ -1662,6 +1656,31 @@ fn quote_raw(s: &str) -> String {
 }
 
 // --- Signatures ------------------------------------------------------------
+
+/// Project a `function`/`macro` definition. A bare-name signature
+/// (`function f end`, `macro m end`) is a forward declaration with no body in
+/// JuliaSyntax (`(function f)`), distinct from a method/macro with a call
+/// signature and block (`function f() end` → `(function (call f) (block))`).
+fn project_function_like(head: &str, node: &SyntaxNode) -> String {
+    if is_forward_declaration(node) {
+        sexp(head, vec![project_signature(node)])
+    } else {
+        sexp(
+            head,
+            vec![project_signature(node), project_block_child(node)],
+        )
+    }
+}
+
+/// A `function`/`macro` header is a forward declaration when its signature is a
+/// bare name (`f`, `$f`) rather than a call (`f()`) or other expression.
+fn is_forward_declaration(node: &SyntaxNode) -> bool {
+    node.children()
+        .find(|c| c.kind() == SIGNATURE)
+        .and_then(|sig| first_node(&sig))
+        .map(|inner| matches!(inner.kind(), NAME | INTERPOLATION))
+        .unwrap_or(false)
+}
 
 fn project_signature(node: &SyntaxNode) -> String {
     match node.children().find(|c| c.kind() == SIGNATURE) {

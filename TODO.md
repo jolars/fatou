@@ -52,9 +52,11 @@ through), so the grammar can grow incrementally.
   node with `macro` (`sexpr.rs`). Signatures reuse the full expression path, so
   operator (`macro (:)(ex)`), contextual-ident (`macro (type)(ex)`), and
   interpolated (`macro $f()`, `macro ($f)()`) names all fall out for free.
-  **Known limitation:** `macro f end` (no signature parens) projects to
-  `(macro f (block))` rather than Julia's `(macro f)` — the same trailing-block
-  divergence as `function f end`, an error-shape case left for the error phase.
+  Bare-name forward declarations (`function f end`, `macro m end`, `function $f
+  end`) project to `(function f)`/`(macro m)` with no body block:
+  `project_function_like` (`sexpr.rs`) drops the empty `BLOCK` when the signature
+  is a bare `NAME`/`INTERPOLATION` (`is_forward_declaration`), matching
+  JuliaSyntax which has no body for a declaration.
 - [x] `public` contextual keyword (`public A, B`, `public @a`). A statement-only
   reword: at toplevel and module-block scope, the identifier `public` opens a
   `PUBLIC_STMT` (parsed by `parse_keyword_stmt` with `KwStmt::Path`, reusing the

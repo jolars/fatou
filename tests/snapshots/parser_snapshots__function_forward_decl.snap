@@ -1,0 +1,36 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..43
+  FUNCTION_DEF@0..14
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..10
+      NAME@9..10
+        IDENT@9..10 "f"
+    BLOCK@10..11
+      WHITESPACE@10..11 " "
+    END_KW@11..14 "end"
+  NEWLINE@14..15 "\n"
+  FUNCTION_DEF@15..30
+    FUNCTION_KW@15..23 "function"
+    WHITESPACE@23..24 " "
+    SIGNATURE@24..26
+      INTERPOLATION@24..26
+        DOLLAR@24..25 "$"
+        IDENT@25..26 "f"
+    BLOCK@26..27
+      WHITESPACE@26..27 " "
+    END_KW@27..30 "end"
+  NEWLINE@30..31 "\n"
+  MACRO_DEF@31..42
+    MACRO_KW@31..36 "macro"
+    WHITESPACE@36..37 " "
+    SIGNATURE@37..38
+      NAME@37..38
+        IDENT@37..38 "m"
+    BLOCK@38..39
+      WHITESPACE@38..39 " "
+    END_KW@39..42 "end"
+  NEWLINE@42..43 "\n"
