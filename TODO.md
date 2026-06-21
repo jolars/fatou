@@ -93,7 +93,11 @@ through), so the grammar can grow incrementally.
   limitations:** whitespace-sensitive operator nuances in the space-arg form
   (Julia's `@m a +b` vs `@m a + b`) are not modeled — each space arg is a plain
   `parse_expr`; and string/cmd macros (`@m"…"`, `` @m`…` ``) are not yet a
-  dedicated form.
+  dedicated form. Operator, `$`, and keyword macro names (`@+`, `@!`, `@..`,
+  `@$`, `@end`, qualified `A.@!`) parse via `is_macro_name_token` in
+  `parse_macro_name_body`; the projector reads the name token through
+  `is_macro_name_part_token`. **Deferred:** nested dotted macro paths
+  (`@A.B.x`/`A.B.@x` still flatten the module path), `@var"#"`, `@(A)`.
 - [x] Parametric types and braces (`Vector{T}`, `where`), type annotations
   (`x::T`), keyword arguments and `;` in call argument lists, splat
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside

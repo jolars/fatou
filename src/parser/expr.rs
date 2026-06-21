@@ -1842,10 +1842,28 @@ fn parse_macro_name_body(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, start: us
             }
             i
         }
+        // An operator, `$`, or keyword directly after `@` names the macro
+        // (`@+`, `@!`, `@..`, `@$`, `@end`). A lone `:` (`@:`) is left to error.
+        Some(k) if is_macro_name_token(k) => {
+            events.push(Event::Tok(start));
+            start + 1
+        }
         // A bare `@` with no name — emit nothing more; the MACRO_NAME holds just
         // the sigil (still lossless).
         _ => start,
     }
+}
+
+/// Whether `kind`, directly after `@`, names the macro: any operator name, the
+/// `$` sigil, or a keyword (`@+`, `@!`, `@..`, `@$`, `@end`). `.` is excluded —
+/// it is the broadcast macro `@.`, handled before this — and `:` is excluded so
+/// `@:` falls through to error recovery (Julia rejects it).
+fn is_macro_name_token(kind: TokKind) -> bool {
+    !matches!(kind, TokKind::Dot | TokKind::Colon)
+        && (is_op_name(kind)
+            || is_value_operator(kind)
+            || kind == TokKind::Dollar
+            || kind.is_keyword())
 }
 
 /// Parse the arguments of a macro call after its name (which ends at `name_end`)

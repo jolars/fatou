@@ -44,6 +44,7 @@ literals
 loops
 macro_definition
 macro_directive_names
+macro_operator_names
 macros
 matrices
 multi_clause_generators

@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **469 allowlisted**, 102 divergence, 4 unsupported.
-Dir corpus: **83 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **474 allowlisted**, 97 divergence, 4 unsupported.
+Dir corpus: **84 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,52 +31,55 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21i)
+## Latest session (2026-06-21j)
 
-**Bare operator value atoms.** A non-syntactic operator with no operand to its
-right is the operator used as a *value* (a function reference), not an error:
-`+` ⇒ `+`, `~` ⇒ `~`, `.+` ⇒ `(. +)`, `.&` ⇒ `(. &)`, `<:` ⇒ `<:`, and this also
-unblocked `(.+)(a)` ⇒ `(call (. +) a)`. Probed Julia exhaustively for the
-syntactic/value split: `+ - * == < <: >: .+ .- .& | ~ ! |> => √` are valid bare
-atoms; `= :: && || -> ? . ...` and all assignment ops error (`(error op)` /
-`(::-pre (error))`) — deferred error-shape. **Implementation:** new
-`OPERATOR_ATOM` `SyntaxKind`. Two parser entry points (`src/parser/expr.rs`):
-(1) the unary-prefix arm's no-operand branch now returns `OPERATOR_ATOM` instead
-of `error_expr_with_range` (except `::`, kept erroring); (2) a fallback arm before
-`_ => None` catches the binary-only and broadcast value operators via the new
-`is_value_operator` predicate (undotted `is_op_name` minus `&& || ->`, plus the
-broadcast set, `: .. √`). Projector `OPERATOR_ATOM ⇒ project_operator_atom`
-(`sexpr.rs`): `(. op)` for broadcast forms (detected via `infix_head` returning
-`DotCallI`), raw token text otherwise — so unmapped kinds (`√`, `..`) stay
-faithful. Bare `$` interpolation (`$\n`) now projects to `$` (not `($ )`).
-**Not a projector compensation** — `OPERATOR_ATOM` is a real CST node; the CST
-stays lossless.
+**Operator/keyword macro names.** A macro name after `@` may be an operator
+(`@+`, `@!`, `@..`), the `$` sigil (`@$`), or a keyword (`@end`), not just an
+identifier — and the qualified form too (`A.@!` ⇒ `(. A (quote @!))`). Two
+small changes: (1) `parse_macro_name_body` (`expr.rs`) gains an arm gated on the
+new `is_macro_name_token` predicate (`is_op_name | is_value_operator | Dollar |
+is_keyword`, minus `Dot`/`Colon`: `@.` is the broadcast macro, `@:` errors) that
+consumes a single operator/keyword/`$` token as the name; (2) the projector's
+`project_macro_name` (`sexpr.rs`) collects those tokens as name components via
+the new `is_macro_name_part_token` (`is_operator && !DOT | DOLLAR | is_keyword`),
+so `@+` ⇒ `@+`, `@end` ⇒ `@end`, etc. `@.` (broadcast) and `@..` (DotDot, a
+distinct token) stay distinct. CST stays lossless; the name token is a real
+child of `MACRO_NAME` — not a projector compensation.
 
-JS allow **461 → 469** (+8: js-4c6afee9, js-7ace431c, js-9ec2caf4, js-a318c242,
-js-a3fb44cc, js-bb93e85b, js-cee17e6f, js-ca7f2569), divergence 110 → 102,
-unsupported held 4. Dir allow 82 → 83 (new fixture `bare_operator`). Zero
-regressions; green, clippy/fmt clean.
-
-**Trap found (deferred, not in scope):** prefix operators consume an operand
-*across a newline* — `-\nx` ⇒ `(call-pre - x)` where Julia makes two statements
-`- x`. The bare cases in the corpus are single operators (EOF/trailing-newline)
-so they're unaffected; the `bare_operator` fixture uses `;`-terminated lines to
-sidestep this (a trailing unary-arm operator would otherwise eat the next line's
-first token). Fixing it is a newline-statement-termination concern for unary
-operands.
+JS allow **469 → 474** (+5: js-28af1263 `@+x y`, js-48fbbaa8 `@.. x`,
+js-a37773f7 `@end x`, js-c143c4d8 `@$ y`, js-fb523956 `@! x`), divergence
+102 → 97, unsupported held 4. Dir allow 83 → 84 (new fixture
+`macro_operator_names`). Zero regressions; green, clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Macro-call name clusters** (~15 FAIL): `@A.B.x` (js-ee8e4e0c), `A.B.@x`
-   (js-968d2da1), `@(A) x` (js-f3aa762e), `@! x` (js-fb523956), `@+x y`
-   (js-28af1263), `@end x` (js-a37773f7), `@$ y` (js-c143c4d8), `$A.@x`,
-   `A.$B.@x`, `@S[a].b`/`@S{a}.b` etc. Several share a root in macro-name parsing.
-2. **N-dim array concatenation** (~25 FAIL, largest cluster): `;;`/`;;;` ncat
-   dims, empty `[;]`/`[;;]`, newline-as-row-sep `[x \n y]`, `[f (x)]` space-call.
-   Big unlock; needs a dedicated array-literal parser rework.
-3. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26.
-4. **`function \n f() end`** (js-e811d4a1) — newline after the `function` keyword.
+1. **Nested dotted macro paths** (~4 FAIL): `@A.B.x`/`A.B.@x` (js-ee8e4e0c,
+   js-968d2da1) ⇒ `(. (. A (quote B)) (quote @x))`, plus interpolation
+   `$A.@x` (js-8bf1e2ef) ⇒ `(. ($ A) (quote @x))`, `A.$B.@x` (js-ab3caeec) ⇒
+   `(. (. A (inert ($ B))) (quote @x))`. Regular field access *already* nests
+   with the `quote`/`inert` split (probe-confirmed); the macro-name projector
+   `join(".")`s the module path flatly instead of reusing it. Root: make
+   `project_macro_name`'s qualified arm nest the module path (and the trailing
+   `parse_qualified_macro` form preserves an lhs node the projector drops today —
+   `A.B.@x` ⇒ `(.  (quote @x))`, empty module). One projector rework unlocks all 4.
+2. **Other macro-name forms**: `@var"#"` (js-babd656c ⇒ `(var @#)`, js-8f4830c7
+   qualified), `@(A)` paren name (js-f3aa762e ⇒ `@A`), `@S[a].b`/`@S{a}.b`
+   (js-b55b2b19/b6643c20 — macrocall then postfix `.b`).
+3. **N-dim array concatenation** (~25 FAIL, largest cluster): `;;`/`;;;` ncat
+   dims, empty `[;]`/`[;;]`, newline-as-row-sep, `[f (x)]` space-call.
+4. **`var"…"` escape unescaping** — js-61a01ce8 `var"\""`, js-8f5b1a26.
 
 ## Earlier sessions
+
+- **2026-06-21i** — Bare operator value atoms. A non-syntactic operator with no
+  operand to its right is the operator used as a *value* (`+` ⇒ `+`, `.&` ⇒
+  `(. &)`, `<:` ⇒ `<:`); new `OPERATOR_ATOM` `SyntaxKind`, two `expr.rs` entry
+  points (unary-prefix no-operand branch + a fallback arm via the new
+  `is_value_operator` predicate, undotted `is_op_name` minus `&& || ->` plus the
+  broadcast set and `: .. √`); projector `project_operator_atom`. The erroring
+  syntactic ops (`= :: && || -> ? . ...` + assignment) stay deferred error-shape.
+  Trap (deferred): prefix ops consume an operand *across a newline* (`-\nx` ⇒
+  `(call-pre - x)` vs Julia's two statements). JS allow 461 → 469. Fixture
+  `bare_operator`.
 
 - **2026-06-21h** — Docstring attachment (`"doc"\nfoo` ⇒ `(doc (string "doc")
   foo)`). A bare unprefixed `STRING_LITERAL` statement directly followed by

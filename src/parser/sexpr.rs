@@ -1110,6 +1110,12 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         .children_with_tokens()
         .filter_map(|el| match el {
             NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
+            // An operator, `$`, or keyword name token (`@+`, `@$`, `@end`). The
+            // qualifying `.` and broadcast `@.` dot are excluded so they don't
+            // count as a name component.
+            NodeOrToken::Token(t) if is_macro_name_part_token(t.kind()) => {
+                Some(t.text().to_string())
+            }
             NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
             _ => None,
         })
@@ -1128,6 +1134,13 @@ fn project_macro_name(node: &SyntaxNode) -> String {
             format!("(. {module_path} (quote @{macro_name}))")
         }
     }
+}
+
+/// Whether `kind` is a macro-name component token other than an identifier — an
+/// operator name (`+`, `!`, `..`), the `$` sigil, or a keyword (`end`). `DOT` is
+/// excluded: it is the qualifier dot or the broadcast `@.`, never a name part.
+fn is_macro_name_part_token(kind: SyntaxKind) -> bool {
+    (is_operator(kind) && kind != DOT) || kind == DOLLAR || is_keyword(kind)
 }
 
 // --- Literals / strings ----------------------------------------------------
