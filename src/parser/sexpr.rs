@@ -290,6 +290,17 @@ fn project_operator_atom(node: &SyntaxNode) -> String {
             NodeOrToken::Token(t) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
                 Some(operator_func_repr(t.kind()))
             }
+            // Dotted broadcast operators whose head is not `DotCallI` — the
+            // short-circuit `.&&`/`.||` and the assignment forms `.=`/`.+=` quote
+            // as `(. op)` too (`:.&&` ⇒ `(quote-: (. &&))`). Strip the leading
+            // broadcast dot; `..`/`...` lead with a doubled dot and are excluded.
+            NodeOrToken::Token(t)
+                if t.text().starts_with('.')
+                    && t.text().len() > 1
+                    && t.text().as_bytes()[1] != b'.' =>
+            {
+                Some(format!("(. {})", &t.text()[1..]))
+            }
             NodeOrToken::Token(t) => Some(t.text().to_string()),
             _ => None,
         })

@@ -216,9 +216,15 @@ through), so the grammar can grow incrementally.
   interior is a lone undotted operator (`is_paren_quotable_op`, which adds the
   syntactic `=`/`::`/`:` that are errors in value position) and builds a
   `PAREN_EXPR` wrapping the bare operator token; the projector reads a
-  lone-operator paren (no inner node) as the operator's text. **Known
-  limitations:** the bare-`:` Colon value (`a[:]` → `(ref a :)`), broadcast
-  operator quotes (`:.+` → `(. +)`, `:(.=)` → `(quote-: (. =))`), standalone
+  lone-operator paren (no inner node) as the operator's text. Prefix-quoted
+  *dotted* (broadcast) operators now quote too (`:.+`, `:.&`, `:.=`, `:.&&`,
+  `:.+=` → `(quote-: (. +))` etc.): a `parse_quote_sym` arm gated on
+  `is_dotted_broadcast_text` (leading broadcast `.`, excluding `..`/`...`) wraps
+  the dotted-operator token in an `OPERATOR_ATOM`, which the projector's
+  `project_operator_atom` splits the broadcast dot off of into `(. op)`. **Known
+  limitations:** the bare-`:` Colon value (`a[:]` → `(ref a :)`), the paren form
+  of a dotted *syntactic-assignment* quote (`:(.=)` still errors; the
+  `is_paren_quotable_op` interior set has no dotted forms), standalone
   parenthesized operators (`(+)` → `+`), and import paren-quotes (`import A.:(+)`,
   `import A.(:+)`) are deferred (still divergences).
 - [x] Pair operator `=>` (and broadcast `.=>`). Lexed as `FatArrow`/`DotFatArrow`

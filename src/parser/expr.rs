@@ -874,9 +874,29 @@ pub(super) fn parse_quote_sym(
                 events,
             })
         }
+        // `:.+`, `:.&`, `:.=`, `:.&&`, `:.+=` — a quoted *dotted* (broadcast)
+        // operator. Julia models the dotted operator as a `(. op)` access, so
+        // `:.+` ⇒ `(quote-: (. +))`. Wrap the token in an `OPERATOR_ATOM` (Fatou's
+        // operator-as-value node), which the projector splits the broadcast dot
+        // off of. The `..`/`...` range/splat operators are not broadcasts and
+        // fall through to the bare-operator arm below (`:..` ⇒ `(quote-: ..)`).
+        _ if ctx
+            .token(next)
+            .is_some_and(|t| is_dotted_broadcast_text(&t.text)) =>
+        {
+            events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
+            events.push(Event::Tok(next));
+            events.push(Event::Finish); // OPERATOR_ATOM
+            events.push(Event::Finish); // QUOTE_SYM
+            Some(ExprParse {
+                start,
+                end: next + 1,
+                events,
+            })
+        }
         // `:+`, `:<:`, `:+=`, … — a symbolic operator used as a symbol. Restricted
         // to undotted operator names (`is_op_name`) plus assignment operators;
-        // broadcast forms like `:.+` quote to `(. +)` and are not handled here.
+        // broadcast forms like `:.+` are handled by the dotted-operator arm above.
         k if is_op_name(k) || is_assignment_op(k) => {
             events.push(Event::Tok(next));
             events.push(Event::Finish);
@@ -2638,6 +2658,14 @@ fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
 
 /// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,
 /// …): the loosest, right-associative tier, all modeled as `ASSIGNMENT_EXPR`.
+/// Whether an operator token's text is a *dotted* (broadcast) operator — it leads
+/// with a broadcast `.` (`.+`, `.&`, `.=`, `.&&`, `.+=`). The range/splat
+/// operators `..`/`...` lead with a *doubled* dot and are not broadcasts, so they
+/// are excluded; bare field-access `.` is excluded by the length check.
+fn is_dotted_broadcast_text(text: &str) -> bool {
+    text.as_bytes().first() == Some(&b'.') && text.len() > 1 && text.as_bytes()[1] != b'.'
+}
+
 fn is_assignment_op(kind: TokKind) -> bool {
     matches!(
         kind,

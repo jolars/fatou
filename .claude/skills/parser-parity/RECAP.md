@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **511 allowlisted**, 60 divergence, 4 unsupported.
-Dir corpus: **93 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **514 allowlisted**, 58 divergence, 3 unsupported.
+Dir corpus: **94 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "bare operator value atoms" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,50 +31,61 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21r)
+## Latest session (2026-06-21s)
 
-**String-macro numeric suffix.** `x"s"2` ⇒ `(macrocall @x_str (string-r "s") 2)`,
-`x"s"2.0` similarly; a digit-led suffix glued to a string macro's close delimiter
-is an extra numeric macrocall argument. The flag-suffix path already handled the
-identifier form (`x"s"y` ⇒ `… "y"`); extended `lexer.rs::lex_suffix` so a
-letter-led flag also absorbs trailing digits (`x"s"i2` ⇒ `… "i2"`). The numeric
-suffix is lexed as an ordinary `Integer`/`Float`, so `parse_string_literal`
-(`expr.rs`) now captures it into the `STRING_LITERAL` node when `has_prefix &&
-node == STRING_LITERAL` and the glued token is numeric (whitespace is its own
-token, so `x"s" 2` with a space stays separate; plain `"s"2` is a docstring,
-gated out by `has_prefix`). Projector `project_string` (`sexpr.rs`) renders it via
-new `numeric_suffix` helper as the literal text (not a flag string).
-**Display-normalized numerics stay divergent**: `x"s"0x1` (→ `0x01`), `x"s"1e3`
-(→ `1000.0`) render raw in Fatou, so they're left un-allowlisted (same bucket as
-the rest of the numeric-display divergences). Fixture `string_macro_suffix`.
+**Quote of dotted operators.** `:.+`, `:.&`, `:.=`, `:.&&`, `:.||`, `:.==`,
+`:.+=` ⇒ `(quote-: (. +))` etc. — a prefix `:` quoting a *dotted* (broadcast)
+operator models the operator as a `(. op)` access, like Julia. `parse_quote_sym`
+(`expr.rs`) gains an arm, placed *before* the `is_op_name`/`is_assignment_op` arm
+(so `.=`/`.+=`, which `is_assignment_op` would otherwise emit bare, route here),
+gated on new `is_dotted_broadcast_text` (token text leads with a broadcast `.`,
+len > 1, second byte ≠ `.` so `..`/`...` are excluded); it wraps the dotted-op
+token in an `OPERATOR_ATOM` (Fatou's operator-as-value node). Projector
+`project_operator_atom` (`sexpr.rs`) splits the broadcast dot: the existing
+`DotCallI` arm already handled `.+`/`.&`/`.==`; a new text-based arm handles the
+short-circuit/assignment Specials `.&&`/`.||`/`.=`/`.+=` (head ≠ `DotCallI`) by
+stripping the leading `.`. The paren expr form `:(.+)` already worked (the `.+`
+parses as an `OPERATOR_ATOM` inside the paren); only `:(.=)` (dotted *syntactic*
+assignment in parens) still errors — `is_paren_quotable_op` has no dotted set —
+left deferred. Fixture `dotted_operator_quote`.
 
-JS allow **509 → 511** (+2: `x"s"2`, `x"s"10.0`), divergence 62 → 60, unsupported
-held 4. Dir allow 92 → 93 (+1 fixture). Zero regressions; green, clippy/fmt clean.
+JS allow **511 → 514** (+3: `:.=`, `:.&&`, plus `A.:.+` — quoted dotted op as a
+field-access name, which reuses `parse_quote_sym`). Divergence 60 → 58,
+unsupported 4 → 3. Dir allow 93 → 94 (+1 fixture). Zero regressions; green,
+clippy/fmt clean.
 
-**Resolved target #1 (signed non-decimal/float literals):** all 8 JS FAILs in
-that cluster (`+0o22`, `-0o22`, `+0b10010`, `-0xf.0p0`, `-0x1`, `-0b10010`,
-`1.0e-1000`, `0x…p+0`) are **display normalization only** — Fatou already produces
-the correct *structure* (folds `+`/hex-float into the literal, keeps `-` on a
-non-decimal int as `(call-pre - …)`); only the rendered value differs
-(`0o22`→`0x12`, `-0xf.0p0`→`-15.0`). Already recorded out-of-scope (dir
-`blocked.txt: numeric_literals`); no action.
+**Sibling gaps surfaced (not in JS corpus, left as visible divergences):** undotted
+value-operator quotes still don't form — `:..` ⇒ `(toplevel ..)`, `:√`/`:∛`/`:¬`
+⇒ bare radical, where Julia wants `(quote-: ..)`/`(quote-: √)` etc. Julia also
+quotes `:&&`/`:||`/`:->`/`:?`. A natural follow-up cluster: extend the
+`parse_quote_sym` operator arm to cover `is_value_operator` (and the syntactic
+short-circuit/arrow/`?` set) so any operator-as-symbol quotes.
 
 **Suggested next targets (ranked):**
-1. **Quote of dotted operators** (`:.=`, `:.&&`, also `:.+`, `:.&`): Julia ⇒
-   `(quote-: (. =))` etc. Fatou diverges — `:.+` drops the quote (⇒ `(. +)`),
-   `:.=` ⇒ `(quote-: .=)` (op not split), `:.&&` ⇒ empty `(toplevel)` (dropped).
-   `parse_quote_sym` (`expr.rs`) needs a dotted-operator arm; projector should
-   head the dotted op as `(. <op>)`. 2 JS FAILs (`:.=`, `:.&&`) + sibling fixes.
+1. **Undotted operator-symbol quotes** (the sibling cluster above): `:..`, `:√`,
+   `:∛`, `:¬`, `:&&`, `:||`, `:->`, `:?` ⇒ `(quote-: ..)`/`(quote-: √)`/… Extend
+   the `parse_quote_sym` operator arm to cover `is_value_operator` plus the
+   syntactic short-circuit/arrow/`?` set; the OPERATOR_ATOM wrap already projects
+   them. Not in the JS corpus, but unblocks any operator-as-symbol. Verify `::`
+   stays a type annotation (`:::` ⇒ `(::-pre :)`, not a quote).
 2. **Command literals / custom cmd macros** (`` x`str` `` ⇒ `(macrocall @x_cmd
    (cmdstring-r "str"))`, `` x`` ``, triple `` ```…``` `` ⇒ `core_@cmd`): backtick
    cmd-macro names. ~4 JS FAILs.
-3. Survey the remaining 60 JS FAILs for the next cluster (`cargo test --test
+3. Survey the remaining 58 JS FAILs for the next cluster (`cargo test --test
    juliasyntax_oracle -- --ignored juliasyntax_full_report`).
 4. Deferred macro-name edges: qualified paren interiors `@(A).b` ⇒ `(. A (quote
    @b))`, `A.@(x)` ⇒ `(. A (quote @x))` — Julia extends/qualifies the name through
    the parens (left as divergences).
 
 ## Earlier sessions
+
+- **2026-06-21r** — String-macro numeric suffix. `x"s"2` ⇒ `(macrocall @x_str
+  (string-r "s") 2)`: a digit-led suffix glued to a string macro's close delimiter
+  is an extra numeric macrocall argument. `lexer.rs::lex_suffix` lets a letter-led
+  flag absorb trailing digits (`x"s"i2`); `parse_string_literal` captures a numeric
+  glued token into `STRING_LITERAL` (gated `has_prefix`); `project_string` renders
+  it via `numeric_suffix`. Display-normalized numerics (`x"s"0x1`, `x"s"1e3`) stay
+  divergent. JS allow 509 → 511. Fixture `string_macro_suffix`.
 
 - **2026-06-21q** — `@(A)` paren macro name. `@(A) x` ⇒ `(macrocall @A x)`: a lone
   ident wrapped in parens after `@` unwraps to the bare name via a new `LParen` arm

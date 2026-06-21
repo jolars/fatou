@@ -28,6 +28,7 @@ curly_operator_call
 doc_macro
 docstring
 dot_logical_operator
+dotted_operator_quote
 escaped_dollar
 field_access_suffix
 function_forward_decl
