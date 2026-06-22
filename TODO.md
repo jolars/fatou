@@ -89,8 +89,7 @@ through), so the grammar can grow incrementally.
   recovered run (leading trivia stays outside). A bare docstring opener
   (`stmt_is_doc_string`) is exempt so `fold_docstrings` still owns `"a"\nfoo`.
   Fixture `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
-  **Deferred** (different shapes): stray-delimiter `✘` leftover (`var"x")` ⇒
-  `(var x) (error-t ✘)`), `;`-line leftover (`a b; c`).
+  **Deferred** (different shapes): `;`-line leftover (`a b; c`).
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒
@@ -115,6 +114,19 @@ through), so the grammar can grow incrementally.
   block form's `lhs_is_block_keyword` suppression. Postfix/infix still apply
   (`(begin end).x`, `(begin end)+1`, `(begin end)(x)`). Projector untouched.
   Fixture `paren_block_juxtapose_error`. JS allow 575 → 576; dir 123 → 124.
+- [x] Stray-closing-delimiter `✘` leftover (error-shape slice). A leftover
+  *closing* delimiter recovered at toplevel is JuliaSyntax's `✘` error-token
+  glyph: `var"x")` ⇒ `(var x) (error-t ✘)`, `&)` ⇒ `& (error-t ✘)`, `a)`/`1)`/
+  `x]`/`f(x))` ⇒ `… (error-t ✘)`. Pure projector change (`sexpr.rs`): Fatou
+  already wraps the stray `)`/`]`/`}` in `ERROR_TRIVIA`, but `project_error`
+  dropped the delimiter token via `significant`; it now walks
+  `children_with_tokens` and renders a close-delimiter token (`is_close_delimiter`)
+  as `✘` while still dropping trivia/structure. Fixture
+  `stray_close_delimiter_error`. JS allow 576 → 581; dir 124 → 125. **Deferred**
+  (different parser shapes — stray delim not yet wrapped): `:)` ⇒ `(toplevel :
+  (error-t ✘))` (colon + rparen are bare ROOT children), `return)` ⇒ `(return)
+  (error-t ✘)` (rparen absorbed into `RETURN_EXPR`), `(begin end)"x"` ⇒
+  `(block) (error-t ✘ "x" ✘)`.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

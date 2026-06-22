@@ -92,6 +92,7 @@ short_function_def
 signed_literals
 splat
 splat_precedence
+stray_close_delimiter_error
 string_escapes
 string_interp_ident_boundary
 string_interpolation

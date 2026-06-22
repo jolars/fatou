@@ -2177,11 +2177,22 @@ fn with_error_trivia(node: &SyntaxNode, mut parts: Vec<String>) -> Vec<String> {
 }
 
 fn project_error(head: &str, node: &SyntaxNode) -> String {
-    let parts: Vec<String> = significant(node)
-        .iter()
-        .filter_map(project_element)
+    // A stray *closing* delimiter recovered into an error node is JuliaSyntax's
+    // `✘` error-token glyph (`var"x")` ⇒ `(error-t ✘)`); other recovered tokens
+    // and child nodes project normally, trivia/structure are dropped.
+    let parts: Vec<String> = node
+        .children_with_tokens()
+        .filter_map(|el| match &el {
+            NodeOrToken::Token(t) if is_close_delimiter(t.kind()) => Some("✘".to_string()),
+            NodeOrToken::Token(t) if is_drop_token(t.kind()) => None,
+            _ => project_element(&el),
+        })
         .collect();
     sexp(head, parts)
+}
+
+fn is_close_delimiter(kind: SyntaxKind) -> bool {
+    matches!(kind, RPAREN | RBRACKET | RBRACE)
 }
 
 fn sexp(head: &str, parts: Vec<String>) -> String {

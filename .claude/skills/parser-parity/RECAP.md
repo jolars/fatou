@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **576 allowlisted**,
-109 divergence, 0 unsupported. Dir corpus: **124 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **581 allowlisted**,
+104 divergence, 0 unsupported. Dir corpus: **125 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
-total). Grammar bullets through "separate-toplevel trailing-junk `(error-t)`"
+total). Grammar bullets through "stray-closing-delimiter `✘` leftover"
 are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -34,42 +34,45 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22v)
+## Latest session (2026-06-22w)
 
-**Paren-block juxtapose-error `(error-t)` — error-shape slice 8.** A
-parenthesized block form (`(begin end)`) glued to a value must *not* juxtapose
-(unlike a paren-wrapped ordinary value `(a)x`⇒`(juxtapose a x)`): the trailing
-term is leftover junk the toplevel driver wraps. `(begin end)x`⇒
-`(block) (error-t x)`, `(begin 1 end)x`⇒`(block 1) (error-t x)`, `(if c end)y`⇒
-`(if c (block)) (error-t y)`, `(let x=1 end)z`⇒`(let … (block)) (error-t z)`.
-**Pure parser change** (`expr.rs`): the *bare* block form already suppressed
-juxtaposition via `lhs_is_block_keyword`, but a paren wrapper made the lhs an
-ordinary `PAREN_EXPR` so the numeric/string juxtapose checks fired. New
-`lhs_is_paren_block` — a `PAREN_EXPR` whose first inner node (2nd `Start` event)
-is a block-keyword form (`is_block_form_kind`: the same set as the `block_form`
-dispatch) — now guards both `should_juxtapose` and
-`should_juxtapose_string_error`. Once juxtaposition is suppressed the Pratt loop
-breaks and the session-t toplevel-leftover driver wraps the trailing run in
-`(error-t …)`. Postfix/infix still apply to a paren-block (`(begin end).x`⇒
-`(. (block) (quote x))`, `(begin end)+1`⇒`(call-i (block) + 1)`, `(begin end)(x)`⇒
-`(call (block) x)`). Projector untouched. Fixture `paren_block_juxtapose_error`.
-JS allow 575 → 576 (js-e6d7437a); dir 123 → 124. Zero regressions; green;
-clippy/fmt clean.
+**Stray-closing-delimiter `✘` leftover — error-shape slice 9.** A leftover
+*closing* delimiter recovered at toplevel is JuliaSyntax's `✘` error-token glyph:
+`var"x")`⇒`(var x) (error-t ✘)`, `&)`⇒`& (error-t ✘)`, `a)`/`1)`/`x]`/`f(x))`⇒
+`… (error-t ✘)`. **Pure projector change** (`sexpr.rs`): Fatou already wraps the
+stray `)`/`]`/`}` in `ERROR_TRIVIA` (a parser decision long made), but
+`project_error` dropped the delimiter token because `significant` filters all
+delimiters. It now walks `children_with_tokens` directly: a close-delimiter token
+(new `is_close_delimiter`: `RPAREN`/`RBRACKET`/`RBRACE`) renders as `✘`, other
+tokens keep the old drop-trivia/project-significant behavior. Faithful encoding
+fix, not compensation — the stray token already lives in the CST; `✘` is just its
+JuliaSyntax projection. Fixture `stray_close_delimiter_error`. JS allow 576 → 581
+(js-61b75364 `var"x")`, js-1b0af392 `&)`, + `a)`/`1)`/`x]`/`f(x))`); dir 124 →
+125. Zero regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** (1) **stray-delimiter `✘` leftover**
-`var"x")`/`return)`⇒`… (error-t ✘)` — a leftover *closing* delimiter renders as
-JuliaSyntax's `✘` error token (needs a new render path; js-61b75364, js-1983c3f9
-`var"x"+`; also unblocks `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`).
-(2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
-(quote @x)))`, `@A.B.@x a`. (3) **incomplete `do`**⇒`(block (error))` (unblocks
-dir `do_blocks`). (4) **lexer-classified named kinds** (`'ab'`⇒
-`(char (ErrorOverLongCharacter))`, `a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
+**Suggested next targets (ranked):** (1) **stray-delim not-yet-wrapped** — same
+`✘` shape but the parser doesn't wrap the leftover delimiter yet: `:)`⇒
+`(toplevel : (error-t ✘))` (colon + rparen are bare ROOT children, projector
+drops both → `(toplevel)`), `return)`⇒`(return) (error-t ✘)` (rparen absorbed
+*into* `RETURN_EXPR`). Parser/driver work to detect a leftover closer after a
+complete value/keyword form. (2) **paren-block string-juxtapose** `(begin end)"x"`⇒
+`(block) (error-t ✘ "x" ✘)` (currently `(error-t (string "x"))` — needs the
+double-`✘`-wrapped string form). (3) **macro-path error-t** `A.@B.x`⇒
+`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`. (4)
+**incomplete `do`**⇒`(block (error))` (unblocks dir `do_blocks`). (5)
+**lexer-classified named kinds** (`'ab'`⇒`(char (ErrorOverLongCharacter))`,
+`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
 
 ## Earlier sessions
 
 The **error-shape lineage** (the current frontier; entries share the
 `ERROR_TRIVIA`/`project_error`/leftover-driver machinery, so kept in brief):
 
+- **2026-06-22v** — Paren-block juxtapose-error: `(begin end)x`⇒`(block)
+  (error-t x)`, `(if c end)y`⇒`(if c (block)) (error-t y)`; new `lhs_is_paren_block`
+  (a `PAREN_EXPR` wrapping a block-keyword form) suppresses both juxtapose checks
+  so the toplevel-leftover driver wraps the trailing run; postfix/infix still
+  apply. Pure `expr.rs` change. JS 575 → 576.
 - **2026-06-22u** — String-juxtapose-error: `"a"x`⇒`(juxtapose (string "a")
   (error-t) x)`, `2"a"` mirror; `should_juxtapose_string_error` runs before
   numeric `should_juxtapose`, `build_string_juxtapose_error` splices the marker;
