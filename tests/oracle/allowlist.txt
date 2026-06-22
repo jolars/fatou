@@ -17,6 +17,7 @@ bracescat
 broadcast_bitwise_operators
 broadcasting
 broadcast_type_comparison
+broadcast_unicode_operator
 byte_string
 call_and_index
 char_escapes

@@ -452,6 +452,11 @@ fn project_binary(node: &SyntaxNode) -> String {
     // infix call, and the assignment tier (`≔ ≕ ⩴`) heads the node with the
     // operator itself, just like the ASCII `Special` forms.
     match op.kind() {
+        // A broadcast Unicode operator (`.…`, `.×`) carries a leading `.`: strip
+        // it and head `dotcall-i`, like the ASCII broadcast forms.
+        UNICODE_OP if op.text().starts_with('.') => {
+            return format!("(dotcall-i {lhs} {} {})", &op.text()[1..], project(rhs));
+        }
         UNICODE_OP => return format!("(call-i {lhs} {} {})", op.text(), project(rhs)),
         UNICODE_ASSIGN_OP => return format!("({} {lhs} {})", op.text(), project(rhs)),
         _ => {}
@@ -1189,9 +1194,14 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 // Separator dots/colons between components carry no meaning here.
                 DOT | DOT_DOT | DOT_DOT_DOT | COLON => {}
                 // An operator-symbol name component (`import A.==`, `import A: +`).
-                // A fused dotted operator (`.==`) carries the separator dot, which
-                // we strip — JuliaSyntax models it as the bare operator name.
+                // A fused dotted operator (`.==`, `.⋆`) carries a leading `.`. After
+                // a name it is a separator we strip (`import A.==` → `… ==`); before
+                // any name it is a *relative-import* dot emitted on its own (`import
+                // .==` → `(importpath . ==)`), so keep one `.` part in that case.
                 k if is_operator(k) => {
+                    if !seen_name && t.text().starts_with('.') {
+                        parts.push(".".to_string());
+                    }
                     parts.push(t.text().trim_start_matches('.').to_string());
                     seen_name = true;
                 }

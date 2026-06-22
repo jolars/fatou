@@ -950,6 +950,21 @@ impl<'a> Lexer<'a> {
                 self.push_op(kind, start);
                 return;
             }
+            // A broadcast `.` fused to a single-codepoint Unicode infix operator
+            // (`.…`, `.×`, `.⊕`, …): emit the operator's precedence-tier kind on a
+            // token spanning `.op`. The projector strips the leading `.` and heads
+            // `dotcall-i`. Radicals (`.√`, prefix) and the assignment tier are not
+            // fused here — they need their own (currently deferred) projections.
+            if b1.is_some_and(|b| !b.is_ascii()) {
+                let ch = self.char_at(self.pos + 1);
+                if let Some(kind) =
+                    super::unicode_ops::unicode_op_kind(ch).filter(|&k| is_unicode_infix_tier(k))
+                {
+                    self.pos += 1 + ch.len_utf8();
+                    self.push_op(kind, start);
+                    return;
+                }
+            }
             // A lone `.` (or `..`) falls through to the single-char table below.
         }
 
@@ -1188,6 +1203,17 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | UniPlus
             | UniTimes
             | UniPower
+    )
+}
+
+/// Whether a Unicode operator tier is an infix `call-i` tier (so a broadcast
+/// `.` may fuse to it as `dotcall-i`). Excludes the prefix-only radicals and the
+/// assignment tier, whose broadcast forms are not modeled yet.
+fn is_unicode_infix_tier(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        UniArrow | UniComparison | UniColon | UniPlus | UniTimes | UniPower
     )
 }
 

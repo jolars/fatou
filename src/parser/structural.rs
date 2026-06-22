@@ -807,7 +807,9 @@ fn parse_import_path(
             // node the projector reads as `@x`.
             i = push_macro_name(ctx, &mut body, i, diagnostics);
         }
-        Some(k) if is_op_name(k) || is_unicode_op_name(k) => {
+        Some(k) if is_op_name(k) || is_unicode_op_name(k) || is_dotted_op_name(k) => {
+            // A leading operator name. A fused dotted operator (`import .==`,
+            // `import .⋆`) carries a relative-import `.` the projector splits out.
             body.push(Event::Tok(i));
             i += 1;
         }
@@ -873,21 +875,17 @@ fn parse_import_path(
                 body.push(Event::Finish); // PAREN_EXPR
                 i = rparen + 1;
             }
-            (Some(TokKind::Dot), Some(k)) if is_unicode_op_name(k) => {
-                // A unicode-operator component (`import A.⋆.f` → `(importpath A ⋆
-                // f)`). Unlike ASCII operators, a unicode op is not fused with its
-                // leading dot, so the `.` separator and op arrive as two tokens.
-                body.push(Event::Tok(i)); // separating `.`
-                body.push(Event::Tok(i + 1)); // op name
-                i += 2;
-            }
             (Some(TokKind::DotDotDot), _) => {
                 // A `..` range-operator component (`import A...` → `(importpath A
                 // ..)`): the `...` is the separator dot fused with the `..` name.
                 body.push(Event::Tok(i));
                 i += 1;
             }
-            (Some(k), _) if is_dotted_op_name(k) => {
+            (Some(k), _) if is_dotted_op_name(k) || is_unicode_op_name(k) => {
+                // A fused dotted operator component: the separator dot fused to an
+                // operator name. ASCII (`import A.==` → `(importpath A ==)`) and
+                // single-codepoint unicode (`import A.⋆.f` → `(importpath A ⋆ f)`)
+                // both arrive as one token whose leading `.` the projector strips.
                 body.push(Event::Tok(i));
                 i += 1;
             }

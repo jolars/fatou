@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **534 allowlisted**, 38 divergence, 3 unsupported.
-Dir corpus: **103 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **535 allowlisted**, 38 divergence, 2 unsupported.
+Dir corpus: **104 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "`export`/`public` name lists" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,37 +31,46 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22c)
+## Latest session (2026-06-22d)
 
-**Import operator/unicode/dot names (cluster).** Four FAILs, split across both
-buckets, all in `parse_import_path` (`structural.rs`) + `project_import_path`
-(`sexpr.rs`). (1) **Unicode-op components** — `import ⋆`/`import .⋆`/`import A.⋆.f`/
-`import A: ⋆, f`. A single-codepoint unicode op lexes as its own token (NOT fused
-with a separator dot like the ASCII `.==`), so the path dropped it. New
-`is_unicode_op_name` predicate gates a first-name arm (`is_op_name(k) ||
-is_unicode_op_name(k)`) and a new `(Dot, unicode)` loop arm; projector's existing
-`is_operator` arm already emits the text. (2) **`...`-after-name** — `import A...`/
-`import A.B...` ⇒ `(importpath A ..)`: the `...` is the separator dot fused with the
-`..` range operator. New loop arm consumes the `DotDotDot` token; projector
-`DOT_DOT_DOT if seen_name` arm emits `..`. (`import A..` — DotDot, no separator —
-stays an error shape, untouched.) (3) **Whitespace-separated leading dots** —
-`import . .A`/`import .. .A` ⇒ the leading-dot loop now `skip_ws`-hops between dots
-(carrying the gap verbatim) instead of stopping at the first whitespace. `is_op_name`
-deliberately NOT widened (it gates many operator contexts in `expr.rs`); unicode
-handled locally. JS allow 530 → 534 (all four import FAILs); dir 102 → 103 (fixture
-`import_unicode_dot_names`). Green; clippy/fmt clean.
+**Broadcast unicode infix operators `.…` (UNSUPPORTED frontier).** `a .… b` ⇒
+`(dotcall-i a … b)` (also `.×`/`.→`/`.⊕`/`.≤`). The lexer now fuses a broadcast
+`.` immediately followed by an infix-tier unicode op into one token spanning
+`.op`, keeping the op's tier `TokKind` (so binding power is unchanged); new
+`is_unicode_infix_tier` gates the six `call-i` tiers (radicals `.√` and the
+assignment tier stay unfused — different shapes, deferred). Projector
+`project_binary` gained a `UNICODE_OP if text starts with '.'` arm stripping the
+dot → `dotcall-i`. **Trap hit:** fusion collided with import-path leading/separator
+dots — the prior session relied on `import .⋆` lexing `.`+`⋆` as *two* tokens. Fix:
+`parse_import_path` (`structural.rs`) first-name + component arms now also accept
+`is_dotted_op_name`/`is_unicode_op_name` for the fused token (the old `(Dot,
+unicode)` arm is gone), and `project_import_path` emits a lone relative-dot part
+when a fused dotted op precedes the first name. This *also* fixed the previously
+broken ASCII `import .==`/`import .+` ⇒ `(importpath . ==)` for free. JS allow
+534 → 535 (`js-f74d3ac9`, was unsupported); dir 103 → 104 (`broadcast_unicode_operator`).
+Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Comparison-chain cluster** (`x < y < z`, `a + b + c`, `a * b * c`,
-   `x && y && z`, `x == y < z`) — recorded modeling divergences (Fatou nests);
-   confirm they're intentional before touching, likely just leave un-allowlisted.
-2. **Negative/edge numeric literal display** (`-0b10010`, `-0x1`, `1.0e-1000`,
-   `10.0e1000'`) — display normalization, likely blocked not fixed.
-3. **Paren block edge** `+(;;)`, `+(\n;\n;\n)` — empty all-semis paren (deferred
-   from the multi-param-groups session).
-4. Survey the remaining 38 JS FAILs for the next genuine parser gap.
+1. **`struct A const a end`** (js-33d4b6c0) — `const` fields in a struct body ⇒
+   `(struct A (block (const a)))`; Fatou drops the `const`. Real feature, genuine
+   parser gap.
+2. **`begin x end::T`** (js-0e1915ed) — a `begin…end` block as the LHS of a
+   postfix infix op (`(::-i (block x) T)`); Fatou splits it into two statements.
+   Block-keyword exprs usable as operands.
+3. **`<: A where B`** (js-063e192a) — prefix `<:`/`>:` should bind *looser* than
+   `where`: `(<:-pre (where A B))`, Fatou gives `(where (<:-pre A) B)`. Precedence
+   fix for prefix type operators vs `where`.
+4. Recorded modeling divergences (do **not** fix): comparison/associative chains
+   (`a+b+c`, `x<y<z`, `[x+y+z]`), numeric-literal display normalization.
 
 ## Earlier sessions
+
+- **2026-06-22c** — Import operator/unicode/dot names (cluster). Four FAILs in
+  `parse_import_path` + `project_import_path`: unicode-op components (`import ⋆`/
+  `.⋆`/`A.⋆.f`), `...`-after-name (`import A...` ⇒ `(importpath A ..)`), and
+  whitespace-separated leading dots (`import . .A`). JS allow 530 → 534; dir
+  102 → 103 (`import_unicode_dot_names`). (NB: this session's `.⋆`-as-two-tokens
+  assumption was superseded the next session by lexer fusion.)
 
 - **2026-06-22b** — `export`/`public` name lists (cluster). Operator-name projector
   gap (`name_run_item` dropped operator tokens) + newline-continuation parser gap

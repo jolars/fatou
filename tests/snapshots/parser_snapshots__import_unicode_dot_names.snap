@@ -16,8 +16,7 @@ ROOT@0..105
     IMPORT_KW@12..18 "import"
     WHITESPACE@18..19 " "
     IMPORT_PATH@19..23
-      DOT@19..20 "."
-      UNICODE_OP@20..23 "⋆"
+      UNICODE_OP@19..23 ".⋆"
   NEWLINE@23..24 "\n"
   IMPORT_STMT@24..34
     IMPORT_KW@24..30 "import"
@@ -30,8 +29,7 @@ ROOT@0..105
     WHITESPACE@41..42 " "
     IMPORT_PATH@42..49
       IDENT@42..43 "A"
-      DOT@43..44 "."
-      UNICODE_OP@44..47 "⋆"
+      UNICODE_OP@43..47 ".⋆"
       DOT@47..48 "."
       IDENT@48..49 "f"
   NEWLINE@49..50 "\n"
@@ -70,6 +68,5 @@ ROOT@0..105
     WHITESPACE@98..99 " "
     IMPORT_PATH@99..104
       IDENT@99..100 "A"
-      DOT@100..101 "."
-      UNICODE_OP@101..104 "⋆"
+      UNICODE_OP@100..104 ".⋆"
   NEWLINE@104..105 "\n"

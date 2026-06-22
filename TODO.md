@@ -185,9 +185,8 @@ through), so the grammar can grow incrementally.
   dispatches comma → `BRACES`, space/`;` → `BRACESCAT_EXPR`; the projector always
   heads `bracescat`, keeping a dim-1 layout's children but nesting a higher-dim
   layout as a single `row`/`nrow-d` child.
-  Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`), mixed
-  space+`;;` rows (`[x y ;; z w]`, an `(error-t)` shape), and unicode dotted
-  operators.
+  Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`) and mixed
+  space+`;;` rows (`[x y ;; z w]`, an `(error-t)` shape).
 - [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the
   *immediately* preceding token (`prev_ends_value` in `lexer.rs`): when it abuts
   a value-ending token (ident, literal, closing `)`/`]`/`}`, string/cmd close,
@@ -341,14 +340,17 @@ through), so the grammar can grow incrementally.
 - [x] Unicode, `..`, and whitespace-separated-dot import names. `parse_import_path`
   (`structural.rs`) threads three more component forms through: a single-codepoint
   unicode operator as a path name (`import ⋆`, `import .⋆`, `import A.⋆.f`,
-  `import A: ⋆, f` → the op arrives as its own token, not fused with the separator
-  dot, so a new `(Dot, unicode)` loop arm + an `is_unicode_op_name` arm in the
-  first-name match carry it); a trailing `...` after a name as the `..` range
+  `import A: ⋆, f`); a trailing `...` after a name as the `..` range
   operator (`import A...`, `import A.B...` → `(importpath A ..)` — the `...` is the
   separator dot fused with `..`, projected via a `DOT_DOT_DOT if seen_name` arm);
   and whitespace-separated leading dots (`import . .A`, `import .. .A` → the
   leading-dot loop now `skip_ws`-hops between dots, carrying the gap verbatim).
-  Projector `project_import_path` reuses `is_operator` for the unicode name.
+  Projector `project_import_path` reuses `is_operator` for the unicode name. (Once
+  broadcast unicode operators began fusing the separator `.` into the op token —
+  see the unicode-operators bullet — both `.⋆` and the ASCII `.==`/`.+` reach the
+  path as one fused token: the first-name/component arms now also accept
+  `is_dotted_op_name`, and the projector emits a lone relative-dot part when the
+  fused op precedes the first name, so `import .==` → `(importpath . ==)` too.)
 
 - [x] Macro names in `export`/`import`/`using`. A `@` in a directive name
   position now builds a real `MACRO_NAME` node instead of dropping the sigil: the
@@ -565,10 +567,16 @@ through), so the grammar can grow incrementally.
   `(24,25)`, power `(32,31)` right-assoc). Radicals `√ ∛ ∜` and `¬` are prefix-only,
   routed through the existing unary arm → `(call-pre √ x)`. The projector reads the
   operator text from the token (`x → y` → `(call-i x → y)`, `a ≔ b` → `(≔ a b)`).
-  **Deferred:** broadcast
-  unicode (`.…`), unicode comparison chains (nested, like the ASCII chain divergence), and
-  unicode unary in the plus/times tiers (`±x`). (Juxtaposition and operator-suffix
-  sub/superscripts both landed separately — see those bullets.)
+  Broadcast (dotted) infix unicode operators (`a .… b`, `a .× b` → `(dotcall-i a
+  … b)`) now land too: the lexer fuses a broadcast `.` immediately followed by an
+  infix-tier unicode op into one token spanning `.op` (`is_unicode_infix_tier`
+  gates the six `call-i` tiers; radicals and the assignment tier stay unfused),
+  and `project_binary` strips the leading `.` and heads `dotcall-i`. Import paths
+  cope with the now-fused token by splitting the leading `.` back out (see the
+  import bullet). **Deferred:** broadcast unicode radicals (`.√x`, prefix) and the
+  assignment tier; unicode comparison chains (nested, like the ASCII chain
+  divergence); unicode unary in the plus/times tiers (`±x`). (Juxtaposition and
+  operator-suffix sub/superscripts both landed separately — see those bullets.)
 
 - [x] Numeric-literal juxtaposition (implicit multiplication). An adjacent value
   with no operator between is parsed as a `JUXTAPOSE_EXPR` → `(juxtapose a b)`:
