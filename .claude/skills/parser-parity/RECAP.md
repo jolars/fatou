@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **547 allowlisted**, 28 divergence, 0 unsupported.
-Dir corpus: **113 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **548 allowlisted**, 27 divergence, 0 unsupported.
+Dir corpus: **114 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "splat/vararg `...` precedence" are `[x]`
 in `TODO.md`.
 
@@ -32,33 +32,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22l)
+## Latest session (2026-06-22m)
 
-**Generators in newline-`[…]` and braces (js-066dacc4, js-1c86494f) — both
-UNSUPPORTED cleared.** `[x \n\n for a in as]` ⇒ `(comprehension (generator x (= a
-as)))`: a newline run before the comprehension `for` is insignificant ws. In
-`parse_bracket_literal` the first-separator skip stops at the first `Newline`, so
-a leading-newline-then-`for` fell to `parse_matrix`. New `newline_run_precedes_for`
-(mirrors `newline_run_precedes_comma`) gates a `Newline` arm → `parse_comprehension`;
-a second element before the `for` is hit first, so `[1\n2\nfor …]` stays a matrix
-(error-shape, unaffected). `{y for y in ys}` ⇒ `(braces (generator y (= y ys)))`:
-`parse_braces` had no `ForKw` arm (it fell to `parse_matrix` → `bracescat`). New
-`BRACES_COMPREHENSION` `SyntaxKind` (projector `sexp("braces", [project_generator])`)
-+ a `ForKw` arm routing to the shared `parse_comprehension`. Both reuse the
-existing generator machinery (multi-clause, `if`-filter all work). Projector got
-one new arm (genuine new node mapping). JS allow 545 → 547 (0 unsupported now);
-dir 111 → 113 (`comprehension_blank_line`, `braces_generator`). Green; clippy/fmt
-clean.
+**Whitespace-sensitive postfix split in matrices (js-443dcfda).** `[f (x)]` ⇒
+`(hcat f x)`: a `(`/`[`/`{` with whitespace before it inside a concatenation
+literal begins a *new* element rather than chaining as a call/index/curly, while
+`[f(x)]` (glued) stays `(vect (call f x))`. `parse_postfix_chain` now takes the
+`array_mode` flag (threaded from `parse_element` via the operator loop) and breaks
+before a space-preceded opener, so the element ends and `parse_matrix` picks the
+opener up as the next element (`[a [b] c]` ⇒ `(hcat a (vect b) c)`,
+`[a {T} b]` ⇒ `(hcat a (braces T) b)`, `[a; f (x)]` ⇒ `(vcat a (row f x))`).
+Mirrors JuliaSyntax's whitespace-sensitive array splitting; outside `array_mode`
+(`f (x)` at toplevel = error-shape) is untouched. Pure parser fix (one new param +
+one guard); projector unchanged. JS allow 547 → 548; dir 113 → 114
+(`array_space_call`). Green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** The 28 remaining JS FAILs are now all
-recorded modeling/display divergences or error-shapes — no UNSUPPORTED frontier
-left. Highest-value non-divergence candidates:
-1. `[f (x)]` (js-443dcfda) — space-separated `f (x)` inside `[…]` is two hcat
-   elements `(hcat f x)`, not a call; whitespace-sensitive, probe siblings.
-2. `[a b ;; \n c]` (js-82572497), `[x+y + z]`/`[x+y+z]` (js-516f4fd7,
-   js-99360f4e) — matrix-element splitting edge cases worth a look.
-   The rest are assoc `a+b+c`/comparison chains/signed-numeric display
-   (deliberate) or error-shapes (`a--b`, `'ab'`, `function \n f() end`).
+**Suggested next targets (ranked):** The 27 remaining JS FAILs are all recorded
+modeling/display divergences or error-shapes — no UNSUPPORTED frontier and no
+clean non-divergence candidates left. The closest:
+1. `[a b ;; \n c]` (js-82572497) — mixed space + `;;` row with a newline; an
+   `(error-t)` shape in Julia, so likely error-shape work (deferred phase).
+2. Remaining FAILs: assoc `a+b+c`/`[x+y+z]`/comparison chains/`x&&y&&z`
+   (deliberate nesting), signed/based-numeric display (`-0x1`, `+0o22`,
+   `1.0e-1000`), and error-shapes (`a--b`, `'ab'`, `'\xq'`, `function \n f()
+   end`, `10.0e1000'`). All recorded — the JS backlog is essentially drained of
+   non-divergence parser work; next growth likely comes from a JuliaSyntax bump
+   (re-harvest) or the error-shape parity phase.
+
+## Earlier sessions
+
+- **2026-06-22l** — Generators in newline-`[…]` and braces (js-066dacc4,
+  js-1c86494f). `[x \n\n for a in as]` ⇒ `(comprehension (generator …))` (newline
+  run before `for` is insignificant; `newline_run_precedes_for` gates a `Newline`
+  arm → `parse_comprehension`); `{y for y in ys}` ⇒ `(braces (generator …))` (new
+  `BRACES_COMPREHENSION` + `ForKw` arm in `parse_braces`). JS allow 545 → 547 (0
+  unsupported now); dir 111 → 113.
 
 ## Earlier sessions
 

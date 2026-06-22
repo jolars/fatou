@@ -221,6 +221,12 @@ through), so the grammar can grow incrementally.
   is a brace generator (`{y for y in ys}` → `(braces (generator y (= y ys)))`):
   `parse_braces` routes it to the shared `parse_comprehension` with a
   `BRACES_COMPREHENSION` node the projector heads `braces`.
+  Whitespace-sensitive postfix split: inside a concatenation literal a `(`/`[`/`{`
+  with whitespace before it begins a *new* element rather than chaining as a
+  call/index/curly, so `[f (x)]` → `(hcat f x)` (two elements) while `[f(x)]` →
+  `(vect (call f x))`; `parse_postfix_chain` takes the `array_mode` flag and breaks
+  before a space-preceded opener (`[a [b] c]` → `(hcat a (vect b) c)`,
+  `[a {T} b]` → `(hcat a (braces T) b)`).
   Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`) and mixed
   space+`;;` rows (`[x y ;; z w]`, an `(error-t)` shape).
 - [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the

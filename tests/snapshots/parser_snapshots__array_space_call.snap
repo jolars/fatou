@@ -1,0 +1,155 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..80
+  MATRIX_EXPR@0..7
+    LBRACKET@0..1 "["
+    ARG@1..2
+      NAME@1..2
+        IDENT@1..2 "f"
+    WHITESPACE@2..3 " "
+    ARG@3..6
+      PAREN_EXPR@3..6
+        LPAREN@3..4 "("
+        NAME@4..5
+          IDENT@4..5 "x"
+        RPAREN@5..6 ")"
+    RBRACKET@6..7 "]"
+  NEWLINE@7..8 "\n"
+  VECT_EXPR@8..14
+    LBRACKET@8..9 "["
+    ARG@9..13
+      CALL_EXPR@9..13
+        NAME@9..10
+          IDENT@9..10 "f"
+        ARG_LIST@10..13
+          LPAREN@10..11 "("
+          ARG@11..12
+            NAME@11..12
+              IDENT@11..12 "x"
+          RPAREN@12..13 ")"
+    RBRACKET@13..14 "]"
+  NEWLINE@14..15 "\n"
+  MATRIX_EXPR@15..26
+    LBRACKET@15..16 "["
+    ARG@16..17
+      NAME@16..17
+        IDENT@16..17 "a"
+    WHITESPACE@17..18 " "
+    ARG@18..21
+      PAREN_EXPR@18..21
+        LPAREN@18..19 "("
+        NAME@19..20
+          IDENT@19..20 "x"
+        RPAREN@20..21 ")"
+    WHITESPACE@21..22 " "
+    ARG@22..25
+      PAREN_EXPR@22..25
+        LPAREN@22..23 "("
+        NAME@23..24
+          IDENT@23..24 "y"
+        RPAREN@24..25 ")"
+    RBRACKET@25..26 "]"
+  NEWLINE@26..27 "\n"
+  MATRIX_EXPR@27..36
+    LBRACKET@27..28 "["
+    ARG@28..29
+      NAME@28..29
+        IDENT@28..29 "a"
+    WHITESPACE@29..30 " "
+    ARG@30..33
+      VECT_EXPR@30..33
+        LBRACKET@30..31 "["
+        ARG@31..32
+          NAME@31..32
+            IDENT@31..32 "b"
+        RBRACKET@32..33 "]"
+    WHITESPACE@33..34 " "
+    ARG@34..35
+      NAME@34..35
+        IDENT@34..35 "c"
+    RBRACKET@35..36 "]"
+  NEWLINE@36..37 "\n"
+  MATRIX_EXPR@37..46
+    LBRACKET@37..38 "["
+    ARG@38..39
+      NAME@38..39
+        IDENT@38..39 "a"
+    WHITESPACE@39..40 " "
+    ARG@40..43
+      BRACES@40..43
+        LBRACE@40..41 "{"
+        ARG@41..42
+          NAME@41..42
+            IDENT@41..42 "T"
+        RBRACE@42..43 "}"
+    WHITESPACE@43..44 " "
+    ARG@44..45
+      NAME@44..45
+        IDENT@44..45 "b"
+    RBRACKET@45..46 "]"
+  NEWLINE@46..47 "\n"
+  MATRIX_EXPR@47..55
+    LBRACKET@47..48 "["
+    ARG@48..52
+      CALL_EXPR@48..52
+        NAME@48..49
+          IDENT@48..49 "f"
+        ARG_LIST@49..52
+          LPAREN@49..50 "("
+          ARG@50..51
+            NAME@50..51
+              IDENT@50..51 "x"
+          RPAREN@51..52 ")"
+    WHITESPACE@52..53 " "
+    ARG@53..54
+      NAME@53..54
+        IDENT@53..54 "g"
+    RBRACKET@54..55 "]"
+  NEWLINE@55..56 "\n"
+  MATRIX_EXPR@56..66
+    LBRACKET@56..57 "["
+    ARG@57..58
+      NAME@57..58
+        IDENT@57..58 "a"
+    SEMICOLON@58..59 ";"
+    WHITESPACE@59..60 " "
+    MATRIX_ROW@60..65
+      ARG@60..61
+        NAME@60..61
+          IDENT@60..61 "f"
+      WHITESPACE@61..62 " "
+      ARG@62..65
+        PAREN_EXPR@62..65
+          LPAREN@62..63 "("
+          NAME@63..64
+            IDENT@63..64 "x"
+          RPAREN@64..65 ")"
+    RBRACKET@65..66 "]"
+  NEWLINE@66..67 "\n"
+  MATRIX_EXPR@67..79
+    LBRACKET@67..68 "["
+    MATRIX_ROW@68..71
+      ARG@68..69
+        NAME@68..69
+          IDENT@68..69 "a"
+      WHITESPACE@69..70 " "
+      ARG@70..71
+        NAME@70..71
+          IDENT@70..71 "b"
+    SEMICOLON@71..72 ";"
+    WHITESPACE@72..73 " "
+    MATRIX_ROW@73..78
+      ARG@73..74
+        NAME@73..74
+          IDENT@73..74 "c"
+      WHITESPACE@74..75 " "
+      ARG@75..78
+        PAREN_EXPR@75..78
+          LPAREN@75..76 "("
+          NAME@76..77
+            IDENT@76..77 "d"
+          RPAREN@77..78 ")"
+    RBRACKET@78..79 "]"
+  NEWLINE@79..80 "\n"

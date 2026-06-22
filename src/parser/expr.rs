@@ -384,7 +384,7 @@ fn parse_expr_in(
 
     loop {
         if !lhs_is_block_keyword {
-            lhs = parse_postfix_chain(&ctx, lhs, diagnostics);
+            lhs = parse_postfix_chain(&ctx, lhs, array_mode, diagnostics);
         }
 
         // Numeric-literal-coefficient juxtaposition (`2x`, `2(x)`, `(x-1)y`,
@@ -2061,11 +2061,25 @@ fn parse_for_specs(
 fn parse_postfix_chain(
     ctx: &ParserCtx<'_>,
     mut lhs: ExprParse,
+    array_mode: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     loop {
         // No newline between the callee and `(`/`[` — only horizontal space.
         let next = ctx.skip_ws(lhs.end);
+        // Inside an array literal, a `(`/`[`/`{` with whitespace before it begins a
+        // new concatenation element rather than chaining as a call/index/curly:
+        // `[f (x)]` is `(hcat f x)` (two elements), while `[f(x)]` is `(vect (call
+        // f x))`. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
+        if array_mode
+            && next > lhs.end
+            && matches!(
+                ctx.token(next).map(|t| t.kind),
+                Some(TokKind::LParen | TokKind::LBracket | TokKind::LBrace)
+            )
+        {
+            break;
+        }
         // Juxtaposition with a numeric literal is multiplication, not a call: a
         // `(` glued to a number (`2(x)`) is left for the juxtaposition check in
         // the operator loop to consume as a `(juxtapose 2 x)`, not a `(call 2 x)`.
