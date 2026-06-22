@@ -123,9 +123,8 @@ through), so the grammar can grow incrementally.
   `children_with_tokens` and renders a close-delimiter token (`is_close_delimiter`)
   as `✘` while still dropping trivia/structure. Fixture
   `stray_close_delimiter_error`. JS allow 576 → 581; dir 124 → 125. **Deferred**
-  (different parser shapes — stray delim not yet wrapped): `return)` ⇒ `(return)
-  (error-t ✘)` (rparen absorbed into `RETURN_EXPR`), `)` ⇒ `(error) (error-t ✘)`
-  (lone closer needs a synthesized `(error)`), `(begin end)"x"` ⇒
+  (different parser shapes — stray delim not yet wrapped): `)` ⇒ `(error)
+  (error-t ✘)` (lone closer needs a synthesized `(error)`), `(begin end)"x"` ⇒
   `(block) (error-t ✘ "x" ✘)`.
 - [x] Bare `:` colon value atom. A prefix `:` not followed by something quotable
   is the Colon value atom, not a quote: `parse_quote_sym` returns `None` and
@@ -137,6 +136,20 @@ through), so the grammar can grow incrementally.
   leftover mark, so the toplevel driver wraps the trailing `)` as `(error-t ✘)`.
   Pure `expr.rs` change (one `.or_else`). Fixtures `colon_value_atom`,
   `colon_stray_close`. JS allow 581 → 582; dir 125 → 127.
+- [x] Optional-value-keyword stray-closer `✘` (error-shape slice). `return`
+  followed by a stray closing delimiter ends the empty form there, leaving the
+  delimiter for the toplevel-leftover driver to wrap, matching `break)`:
+  `return)` ⇒ `(return) (error-t ✘)`, `return ]`/`return}`, `return) x` ⇒
+  `(return) (error-t ✘ x)`. Previously `return`'s `ExprTuple` operand parse
+  carried the `)` verbatim *into* `RETURN_EXPR`. New `optional_value` flag on
+  `parse_keyword_stmt` (`structural.rs`): when set and the operand position is a
+  close delimiter (`is_close_delimiter_tok`), the node finishes right after the
+  keyword. Only `return` passes `true`; value-required `const`/`global`/`local`
+  keep their loose shape (they need a separate inner-`(error)` synthesis).
+  Projector untouched. Fixture `return_stray_close`. JS allow 582 → 583; dir
+  127 → 128. **Deferred**: lone closer `)` ⇒ `(error) (error-t ✘)` (synthesized
+  leading `(error)`; swallows the rest of the line, `) x` ⇒ `(error)
+  (error-t ✘ x)`; the `;`-segment forms emit a subtle `✘ ✘` double-marker).
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

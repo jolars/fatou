@@ -90,6 +90,7 @@ range_operator
 raw_string
 raw_triple_string
 regex_string
+return_stray_close
 short_function_def
 signed_literals
 splat

@@ -311,6 +311,7 @@ fn parse_expr_in(
                     start,
                     SyntaxKind::RETURN_EXPR,
                     KwStmt::ExprTuple,
+                    true,
                     diagnostics,
                 );
             }
@@ -320,6 +321,7 @@ fn parse_expr_in(
                     start,
                     SyntaxKind::BREAK_EXPR,
                     KwStmt::Bare,
+                    false,
                     diagnostics,
                 );
             }
@@ -329,6 +331,7 @@ fn parse_expr_in(
                     start,
                     SyntaxKind::CONTINUE_EXPR,
                     KwStmt::Bare,
+                    false,
                     diagnostics,
                 );
             }
@@ -338,6 +341,7 @@ fn parse_expr_in(
                     start,
                     SyntaxKind::CONST_STMT,
                     KwStmt::ExprTuple,
+                    false,
                     diagnostics,
                 );
             }
@@ -347,6 +351,7 @@ fn parse_expr_in(
                     start,
                     SyntaxKind::GLOBAL_STMT,
                     KwStmt::Expr,
+                    false,
                     diagnostics,
                 );
             }
@@ -356,6 +361,7 @@ fn parse_expr_in(
                     start,
                     SyntaxKind::LOCAL_STMT,
                     KwStmt::Expr,
+                    false,
                     diagnostics,
                 );
             }

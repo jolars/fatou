@@ -512,6 +512,7 @@ pub(crate) fn parse_keyword_stmt(
     start: usize,
     node_kind: SyntaxKind,
     body: KwStmt,
+    optional_value: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let ctx = ParserCtx::new(tokens);
@@ -520,6 +521,24 @@ pub(crate) fn parse_keyword_stmt(
     let mut i = start + 1;
     if !matches!(body, KwStmt::Bare) {
         let operand_start = ctx.skip_ws(i);
+        // A keyword whose value is optional (`return`) ends right after the
+        // keyword when its operand position is a stray closing delimiter
+        // (`return)`, `return ]`): the empty form `(return)` is emitted and the
+        // delimiter is left for the toplevel-leftover driver to wrap as `✘`,
+        // matching `break)`. Value-required keywords (`const`/`global`/`local`)
+        // instead need an inner `(error)` synthesis and so do not take this path.
+        if optional_value
+            && ctx
+                .token(operand_start)
+                .is_some_and(|t| is_close_delimiter_tok(t.kind))
+        {
+            events.push(Event::Finish);
+            return Some(ExprParse {
+                start,
+                end: i,
+                events,
+            });
+        }
         push_range(&mut events, i, operand_start);
         i = operand_start;
 
@@ -1290,6 +1309,12 @@ fn parse_header(
 /// Whether the keyword-line header ends at `i`: at a newline, a `;`, a block
 /// terminator keyword (so one-liners like `struct Foo end` stop correctly), or
 /// end of input.
+/// Whether `kind` is a closing bracket token (`)`, `]`, `}`). Used to detect a
+/// stray closer where a keyword's optional value would otherwise begin.
+fn is_close_delimiter_tok(kind: TokKind) -> bool {
+    matches!(kind, TokKind::RParen | TokKind::RBracket | TokKind::RBrace)
+}
+
 fn header_ends(ctx: &ParserCtx<'_>, i: usize) -> bool {
     match ctx.token(i).map(|t| t.kind) {
         None => true,
