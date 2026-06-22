@@ -1111,14 +1111,7 @@ pub(crate) fn parse_do_block(
     push_range(&mut events, lhs.end, do_idx);
     events.push(Event::Tok(do_idx));
 
-    let mut i = parse_header(
-        ctx,
-        &mut events,
-        do_idx + 1,
-        SyntaxKind::DO_PARAMS,
-        true,
-        diagnostics,
-    );
+    let mut i = parse_do_params(ctx, &mut events, do_idx + 1, diagnostics);
     i = run_block(ctx, &mut events, i, END_ONLY, diagnostics);
     i = expect_end(ctx, &mut events, i, do_idx, diagnostics);
     events.push(Event::Finish);
@@ -1127,6 +1120,57 @@ pub(crate) fn parse_do_block(
         end: i,
         events,
     }
+}
+
+/// Parse the optional argument tuple on a `do` line into a `DO_PARAMS` node.
+/// JuliaSyntax parses these as a comma-separated list (`parse_comma_separated`),
+/// so the list ends at the first non-comma token — anything after the last arg
+/// (`f(x) do y body end` ⇒ args `y`, block `body`) falls through to the block.
+/// An empty arg line (`do\n …` / `do; …`) emits no node so the projector heads a
+/// bare `(tuple)`. Returns the index after the params.
+fn parse_do_params(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    after_kw: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let start = ctx.skip_ws(after_kw);
+    push_range(events, after_kw, start);
+
+    if header_ends(ctx, start) {
+        return start;
+    }
+
+    events.push(Event::Start(SyntaxKind::DO_PARAMS));
+    let mut i = match parse_expr(ctx.tokens(), start, 0, diagnostics) {
+        Some(expr) => {
+            events.extend(expr.events);
+            expr.end
+        }
+        None => start,
+    };
+    // Continue the list only across commas; the first non-comma ends the args.
+    loop {
+        let next = ctx.skip_ws(i);
+        if ctx.token(next).map(|t| t.kind) != Some(TokKind::Comma) {
+            break;
+        }
+        push_range(events, i, next + 1);
+        let arg_start = ctx.skip_ws(next + 1);
+        push_range(events, next + 1, arg_start);
+        match parse_expr(ctx.tokens(), arg_start, 0, diagnostics) {
+            Some(expr) => {
+                events.extend(expr.events);
+                i = expr.end;
+            }
+            None => {
+                i = arg_start;
+                break;
+            }
+        }
+    }
+    events.push(Event::Finish);
+    i
 }
 
 /// Parse a `CONDITION` node (the test of an `if`/`elseif`). The condition lives

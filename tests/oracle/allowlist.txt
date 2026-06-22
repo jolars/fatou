@@ -29,6 +29,7 @@ comments
 comprehensions
 control_flow
 curly_operator_call
+do_block
 doc_macro
 docstring
 dot_logical_operator

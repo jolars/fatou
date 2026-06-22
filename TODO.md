@@ -38,10 +38,13 @@ through), so the grammar can grow incrementally.
   rather than returning early; `lhs_is_block_keyword` suppresses postfix
   chaining and juxtaposition (Julia errors on `begin x end(y)` / `begin x end y`).
 - [x] `do` blocks — postfix on a call (`f(x) do y … end`). Attached in the
-  postfix chain (`parse_postfix_chain`) and parsed by `parse_do_block`, which
-  reuses the generic header passthrough for the `do`-line parameters
-  (`DO_PARAMS`) and the shared block/`end` helpers. Same-line only (`do` must sit
-  on the call's line); terminal in the chain, so calling its result needs
+  postfix chain (`parse_postfix_chain`) and parsed by `parse_do_block`, whose
+  `parse_do_params` reads the `do`-line parameters (`DO_PARAMS`) as a
+  comma-separated argument list (mirroring JuliaSyntax's `parse_comma_separated`):
+  the list ends at the first non-comma token, so a same-line body
+  (`f(x) do y body end` ⇒ `(do (call f x) (tuple y) (block body))`) falls through
+  to the block rather than being swallowed as a parameter. Same-line only (`do`
+  must sit on the call's line); terminal in the chain, so calling its result needs
   explicit parens.
 - [x] `return`, `break`, `continue`, `const`, `global`, `local`, `import`,
   `using`, `export`. Leading-keyword statement forms (no `… end`), parsed by

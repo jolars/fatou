@@ -22,9 +22,9 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **538 allowlisted**, 35 divergence, 2 unsupported.
-Dir corpus: **107 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "block forms as infix operands" are `[x]`
+JS corpus (575 cases): **539 allowlisted**, 34 divergence, 2 unsupported.
+Dir corpus: **108 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "do-block same-line body" are `[x]`
 in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -32,40 +32,44 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22g)
+## Latest session (2026-06-22h)
 
-**`where` precedence overhaul (js-063e192a).** `where` was a plain infix op at
-`(8,9)` (below comparison) — wrong both ways. It must bind *tighter* than every
-binary operator (`A << B where C` ⇒ `(call-i A << (where B C))`, `x <: A where B`
-⇒ `(<: x (where A B))`) but *looser* than `^`/juxtaposition/`.` (`A^B where C` ⇒
-`(where (call-i A ^ B) C)`), matching JuliaSyntax's `parse_where` sitting between
-`parse_shift` and `parse_juxtapose`, with the bound parsed at `parse_comparison`
-under `where_enabled=false`. Binding powers alone can't model it (the chain is
-left-assoc but the bound is looser than `where` itself, and `^`/shift collide at
-r_bp 31), so `where` is now handled directly in the operator loop via a new
-`parse_where_chain` helper (gate `WHERE_BP = 31`; bound parsed at
-`WHERE_BOUND_BP = 10` with a new `no_where` flag → left-nested chain +
-`<:`-bound capture). `^`/juxtaposition bumped to `(34,33)` to open the slot above
-`WHERE_BP`. Prefix `<:`/`>:` now parse their operand at `WHERE_BP` so a trailing
-`where` attaches (`<: A where B` ⇒ `(<:-pre (where A B))`, issue #21545); the
-other unary prefixes set `no_where` on their operand so `+ <: A where B` ⇒
-`(where (call-pre + (<:-pre A)) B)`. Value-position `::` pulls a trailing `where`
-into its RHS (`f(x)::T where U` ⇒ `(::-i (call f x) (where T U))`), but a
-long-form `function` return type does not (new `no_decl_where` flag on
-`parse_signature_expr`: `function f()::S where T end` ⇒
-`(where (::-i (call f) S) T)`). Pure parser fix — `sexpr.rs` untouched. JS allow
-537 → 538 (`js-063e192a`); dir 106 → 107 (`where_precedence`). Green; clippy/fmt
-clean.
+**Do-block same-line body (js-68aeea63).** `f(x) do y body end` ⇒
+`(do (call f x) (tuple y) (block body))` — `y` is the lone do-param, `body` the
+block body. The bug: `parse_do_block` (`structural.rs`) read `DO_PARAMS` via the
+generic `parse_header`, which gobbles the whole line, so `y body` both landed in
+the tuple and the block came up empty. Fix: new `parse_do_params` reads the
+do-line args as a *comma-separated list* (mirroring JuliaSyntax's
+`parse_comma_separated(parse_range)`): parse one expr, then continue only across
+commas — the first non-comma token ends the list, so anything after the last arg
+falls through to `run_block`. Empty arg lines (`do\n …`, `do; …`) still emit no
+node (projector heads bare `(tuple)`). Pure parser fix — `sexpr.rs` untouched.
+Bonus: comma-separated params now each parse as proper `NAME` nodes (were loose
+`IDENT` tokens). JS allow 538 → 539 (`js-68aeea63`); dir 107 → 108 (new fixture
+`do_block`). The pre-existing `do_blocks` dir case stays blocked — its last case
+is an intentionally incomplete `do` (missing `end`, error-shape). Green;
+clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **`f(x) do y body end`** (js-68aeea63) — re-check the do-block projection; it's
-   a FAIL in the JS corpus (do_blocks is the one skipped dir case).
-2. Triage the remaining 35 JS FAILs for a cluster sharing a root cause; regenerate
-   `juliasyntax-report.txt` and scan the FAIL inputs.
-3. Recorded modeling divergences (do **not** fix): comparison/associative chains
-   (`a+b+c`, `x<y<z`, `[x+y+z]`), numeric-literal display normalization.
+1. Triage the remaining 34 JS FAILs for a cluster sharing a root cause; many are
+   recorded modeling/display divergences (see Progress), so scan for a genuinely
+   parseable construct. Candidates: `[f (x)]` (js-443dcfda, space-call in vect),
+   `a--b` (js-90827a2e), `x:y...` / `x..y...` (splat-precedence gap, js-5d3b9cc6 /
+   js-2155b9ca).
+2. `+(;;)` / `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92) — empty all-semicolon param
+   groups (deferred from 2026-06-21b multi_param_groups).
+3. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4),
+   `x where {y for y in ys}` (js-1c86494f).
 
 ## Earlier sessions
+
+- **2026-06-22g** — `where` precedence overhaul (js-063e192a). `where` binds
+  tighter than every binary op but looser than `^`/juxtaposition/`.`, handled
+  directly in the operator loop via `parse_where_chain` (gate `WHERE_BP = 31`,
+  bound at `WHERE_BOUND_BP = 10` with a `no_where` flag); `^`/juxtaposition bumped
+  to `(34,33)`. Prefix `<:`/`>:` pull a trailing `where`; value-position `::` pulls
+  it into its RHS but a long-form `function` return type does not (`no_decl_where`).
+  Pure parser fix. JS allow 537 → 538; dir 106 → 107 (`where_precedence`).
 
 - **2026-06-22f** — Block forms as infix operands (js-0e1915ed). `begin x end::T`
   ⇒ `(::-i (block x) T)`. Value-producing block forms now fall through into the

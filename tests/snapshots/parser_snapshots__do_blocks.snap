@@ -57,7 +57,8 @@ ROOT@0..143
         IDENT@39..40 "x"
       COMMA@40..41 ","
       WHITESPACE@41..42 " "
-      IDENT@42..43 "y"
+      NAME@42..43
+        IDENT@42..43 "y"
     BLOCK@43..50
       NEWLINE@43..44 "\n"
       WHITESPACE@44..48 "    "
@@ -118,7 +119,8 @@ ROOT@0..143
           IDENT@107..108 "a"
         COMMA@108..109 ","
         WHITESPACE@109..110 " "
-        IDENT@110..111 "b"
+        NAME@110..111
+          IDENT@110..111 "b"
       BLOCK@111..122
         NEWLINE@111..112 "\n"
         WHITESPACE@112..116 "    "
