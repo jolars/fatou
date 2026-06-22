@@ -1,0 +1,75 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..56
+  SPLAT_EXPR@0..6
+    BINARY_EXPR@0..3
+      NAME@0..1
+        IDENT@0..1 "x"
+      COLON@1..2 ":"
+      NAME@2..3
+        IDENT@2..3 "y"
+    DOT_DOT_DOT@3..6 "..."
+  NEWLINE@6..7 "\n"
+  SPLAT_EXPR@7..14
+    BINARY_EXPR@7..11
+      NAME@7..8
+        IDENT@7..8 "x"
+      DOT_DOT@8..10 ".."
+      NAME@10..11
+        IDENT@10..11 "y"
+    DOT_DOT_DOT@11..14 "..."
+  NEWLINE@14..15 "\n"
+  BINARY_EXPR@15..22
+    NAME@15..16
+      IDENT@15..16 "a"
+    PIPE_GT@16..18 "|>"
+    SPLAT_EXPR@18..22
+      NAME@18..19
+        IDENT@18..19 "b"
+      DOT_DOT_DOT@19..22 "..."
+  NEWLINE@22..23 "\n"
+  BINARY_EXPR@23..30
+    NAME@23..24
+      IDENT@23..24 "a"
+    AND_AND@24..26 "&&"
+    SPLAT_EXPR@26..30
+      NAME@26..27
+        IDENT@26..27 "b"
+      DOT_DOT_DOT@27..30 "..."
+  NEWLINE@30..31 "\n"
+  SPLAT_EXPR@31..37
+    BINARY_EXPR@31..34
+      NAME@31..32
+        IDENT@31..32 "a"
+      PLUS@32..33 "+"
+      NAME@33..34
+        IDENT@33..34 "b"
+    DOT_DOT_DOT@34..37 "..."
+  NEWLINE@37..38 "\n"
+  SPLAT_EXPR@38..45
+    TYPE_ANNOTATION@38..42
+      NAME@38..39
+        IDENT@38..39 "a"
+      COLON_COLON@39..41 "::"
+      NAME@41..42
+        IDENT@41..42 "b"
+    DOT_DOT_DOT@42..45 "..."
+  NEWLINE@45..46 "\n"
+  CALL_EXPR@46..55
+    NAME@46..47
+      IDENT@46..47 "f"
+    ARG_LIST@47..55
+      LPAREN@47..48 "("
+      ARG@48..54
+        SPLAT_EXPR@48..54
+          BINARY_EXPR@48..51
+            NAME@48..49
+              IDENT@48..49 "x"
+            COLON@49..50 ":"
+            NAME@50..51
+              IDENT@50..51 "y"
+          DOT_DOT_DOT@51..54 "..."
+      RPAREN@54..55 ")"
+  NEWLINE@55..56 "\n"

@@ -326,8 +326,16 @@ through), so the grammar can grow incrementally.
   the broadcast-dot block); the number lexer no longer eats a `.` followed by `.`
   so `1..n` is `1 .. n`. Shares the colon precedence tier `(14, 15)`
   (left-associative), built as an ordinary `BINARY_EXPR` and projected to
-  `(call-i a .. b)`. The `...`-splat-vs-`..` postfix precedence (`x..y...`) stays
-  a divergence (separate splat-precedence gap).
+  `(call-i a .. b)`.
+
+- [x] Splat/vararg `...` precedence. The postfix `...` is no longer parsed in the
+  tight postfix chain (where it bound tighter than every infix op) but as a
+  postfix operator in the Pratt loop with left binding power `SPLAT_BP = 14` —
+  looser than the colon/range tier (`x:y...` ⇒ `(... (call-i x : y))`,
+  `x..y...` ⇒ `(... (call-i x .. y))`) but tighter than the pipes and everything
+  looser (`a|>b...` ⇒ `(call-i a |> (... b))`, `a&&b...` ⇒ `(&& a (... b))`).
+  `...` is not in `is_operator`, so when it does not bind (inside colon's right
+  operand) the loop breaks and an enclosing parse consumes it.
 
 - [x] Richer `import`/`using` path trees. A dedicated `parse_import_stmt`
   (`structural.rs`) replaces the verbatim passthrough: each clause is an

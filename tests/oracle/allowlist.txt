@@ -83,6 +83,7 @@ regex_string
 short_function_def
 signed_literals
 splat
+splat_precedence
 string_escapes
 string_interp_ident_boundary
 string_interpolation

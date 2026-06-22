@@ -128,6 +128,15 @@ const WORD_OP_R: u8 = 11;
 const COMMA_BP: u8 = 2;
 const COMMA_ITEM_BP: u8 = 3;
 
+/// Left binding power of the postfix splat/vararg `...`. JuliaSyntax parses `...`
+/// between `parse_pipe_lt` and `parse_range`, so it binds looser than the
+/// colon/range tier (`x:y...` ⇒ `(... (call-i x : y))`) but tighter than the
+/// pipes and everything looser (`a|>b...` ⇒ `(call-i a |> (... b))`,
+/// `a&&b...` ⇒ `(&& a (... b))`). Colon's right power is `15` and `|>`'s is `14`,
+/// so a left power of `14` binds inside a pipe's right operand (`14 >= 14`) but
+/// not inside colon's (`14 < 15`).
+const SPLAT_BP: u8 = 14;
+
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
@@ -395,6 +404,30 @@ fn parse_expr_in(
         // Past the postfix/juxtaposition checks the bare block form is fully
         // formed; any further iterations see an ordinary operand.
         lhs_is_block_keyword = false;
+
+        // Splat/vararg `x...` is a postfix operator (left power `SPLAT_BP = 14`),
+        // not part of the postfix chain: it binds looser than the colon/range
+        // tier (`x:y...` ⇒ `(... (call-i x : y))`) but tighter than the pipes
+        // and everything looser (`a|>b...` ⇒ `(call-i a |> (... b))`). It wraps
+        // `lhs` and re-loops; `...` is not in `is_operator`, so when it does not
+        // bind (`SPLAT_BP < min_bp`, e.g. inside colon's right operand) the loop
+        // simply breaks and an enclosing parse consumes it.
+        if SPLAT_BP >= min_bp {
+            let splat_idx = ctx.skip_ws(lhs.end);
+            if ctx.token(splat_idx).map(|t| t.kind) == Some(TokKind::DotDotDot) {
+                let mut events = vec![Event::Start(SyntaxKind::SPLAT_EXPR)];
+                events.extend(lhs.events);
+                push_range(&mut events, lhs.end, splat_idx);
+                events.push(Event::Tok(splat_idx));
+                events.push(Event::Finish);
+                lhs = ExprParse {
+                    start: lhs.start,
+                    end: splat_idx + 1,
+                    events,
+                };
+                continue;
+            }
+        }
 
         // `where` clause: a left-associative chain (`A where B where C` ⇒
         // `(where (where A B) C)`) binding tighter than every binary operator but
@@ -2059,20 +2092,6 @@ fn parse_postfix_chain(
             // operator is always adjacent (no newline between operand and `'`).
             Some(TokKind::Transpose) => {
                 let mut events = vec![Event::Start(SyntaxKind::POSTFIX_EXPR)];
-                events.extend(lhs.events);
-                push_range(&mut events, lhs.end, next);
-                events.push(Event::Tok(next));
-                events.push(Event::Finish);
-                lhs = ExprParse {
-                    start: lhs.start,
-                    end: next + 1,
-                    events,
-                };
-            }
-            // Splat/vararg `x...` is postfix and terminal: wrap and re-loop (the
-            // next pass finds nothing more to chain).
-            Some(TokKind::DotDotDot) => {
-                let mut events = vec![Event::Start(SyntaxKind::SPLAT_EXPR)];
                 events.extend(lhs.events);
                 push_range(&mut events, lhs.end, next);
                 events.push(Event::Tok(next));

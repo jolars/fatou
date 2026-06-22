@@ -22,9 +22,9 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **539 allowlisted**, 34 divergence, 2 unsupported.
-Dir corpus: **108 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "do-block same-line body" are `[x]`
+JS corpus (575 cases): **541 allowlisted**, 32 divergence, 2 unsupported.
+Dir corpus: **109 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "splat/vararg `...` precedence" are `[x]`
 in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -32,36 +32,42 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22h)
+## Latest session (2026-06-22i)
 
-**Do-block same-line body (js-68aeea63).** `f(x) do y body end` ⇒
-`(do (call f x) (tuple y) (block body))` — `y` is the lone do-param, `body` the
-block body. The bug: `parse_do_block` (`structural.rs`) read `DO_PARAMS` via the
-generic `parse_header`, which gobbles the whole line, so `y body` both landed in
-the tuple and the block came up empty. Fix: new `parse_do_params` reads the
-do-line args as a *comma-separated list* (mirroring JuliaSyntax's
-`parse_comma_separated(parse_range)`): parse one expr, then continue only across
-commas — the first non-comma token ends the list, so anything after the last arg
-falls through to `run_block`. Empty arg lines (`do\n …`, `do; …`) still emit no
-node (projector heads bare `(tuple)`). Pure parser fix — `sexpr.rs` untouched.
-Bonus: comma-separated params now each parse as proper `NAME` nodes (were loose
-`IDENT` tokens). JS allow 538 → 539 (`js-68aeea63`); dir 107 → 108 (new fixture
-`do_block`). The pre-existing `do_blocks` dir case stays blocked — its last case
-is an intentionally incomplete `do` (missing `end`, error-shape). Green;
-clippy/fmt clean.
+**Splat/vararg `...` precedence (js-5d3b9cc6, js-2155b9ca).** `x:y...` ⇒
+`(... (call-i x : y))`, `x..y...` ⇒ `(... (call-i x .. y))`. The bug: `...` was
+consumed in `parse_postfix_chain` (`expr.rs`), which runs tighter than every
+infix op, so it wrapped only the colon's right operand (`(call-i x : (... y))`).
+Probing Julia placed splat between the pipes (looser side) and the colon/range
+tier (tighter side): looser than colon (`x:y...`/`a+b...`/`a::b...` ⇒ splat
+outermost) but tighter than `|>`/`&&`/`||`/`=`/comparison (`a|>b...` ⇒
+`(call-i a |> (... b))`). Fix: removed the `DotDotDot` arm from
+`parse_postfix_chain` and added a postfix check in the Pratt loop with left power
+`SPLAT_BP = 14` (colon r_bp `15`, `|>` r_bp `14`, so `14` binds inside a pipe's
+right operand but not colon's). `...` is not in `is_operator`, so when it doesn't
+bind the loop breaks and an enclosing parse consumes it. Pure parser fix —
+`sexpr.rs` untouched. JS allow 539 → 541 (`js-5d3b9cc6`, `js-2155b9ca`); dir
+108 → 109 (new fixture `splat_precedence`). Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. Triage the remaining 34 JS FAILs for a cluster sharing a root cause; many are
+1. Triage the remaining 32 JS FAILs for a cluster sharing a root cause; many are
    recorded modeling/display divergences (see Progress), so scan for a genuinely
    parseable construct. Candidates: `[f (x)]` (js-443dcfda, space-call in vect),
-   `a--b` (js-90827a2e), `x:y...` / `x..y...` (splat-precedence gap, js-5d3b9cc6 /
-   js-2155b9ca).
+   `a--b` (js-90827a2e), the vect-newline-comma pair `[x\n, y]`/`[x \n, ]`
+   (js-3a445ddd / js-4bfc9602), `[a b ;; \n c]` (js-82572497, newline in ncat).
 2. `+(;;)` / `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92) — empty all-semicolon param
    groups (deferred from 2026-06-21b multi_param_groups).
 3. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4),
    `x where {y for y in ys}` (js-1c86494f).
 
 ## Earlier sessions
+
+- **2026-06-22h** — Do-block same-line body (js-68aeea63). `f(x) do y body end` ⇒
+  `(do (call f x) (tuple y) (block body))`. New `parse_do_params` (`structural.rs`)
+  reads the do-line args as a comma-separated list (was the line-gobbling generic
+  `parse_header`), so a same-line body falls through to `run_block`; params now
+  parse as proper `NAME` nodes. Pure parser fix. JS allow 538 → 539; dir 107 → 108
+  (`do_block`).
 
 - **2026-06-22g** — `where` precedence overhaul (js-063e192a). `where` binds
   tighter than every binary op but looser than `^`/juxtaposition/`.`, handled
