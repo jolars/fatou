@@ -100,6 +100,7 @@ struct_module
 symbols
 ternary
 tilde_operator
+toplevel_leftover_error
 toplevel_semicolon
 transpose
 triple_command

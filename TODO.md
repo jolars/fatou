@@ -26,7 +26,7 @@ through), so the grammar can grow incrementally.
   (`parse_arg_list` EOF arm) appends a zero-width `ERROR_TRIVIA` (`[x` ⇒
   `(vect x (error-t))`, `var"x"(` ⇒ `(call (var x) (error-t))`, `f(a` ⇒
   `(call f a (error-t))`). Fixture `unclosed_delimiter`. JS allow 553 → 555; dir
-  114 → 116. **Deferred** (ranked next slices): trailing-junk `(error-t b)`,
+  114 → 116. **Deferred** (ranked next slices):
   incomplete-`do` `(error)`, the lexer-classified named kinds
   (`'ab'`⇒`ErrorOverLongCharacter`, `a--b`⇒`ErrorInvalidOperator`, bad
   escape/numeric). `end_index` also needs bare-`end` rejection (a grammar
@@ -78,6 +78,21 @@ through), so the grammar can grow incrementally.
   `ERROR_TRIVIA` out of the operands and prefixes the field; `project_quote_sym`
   prefixes the symbol. Fixture `field_access_space`. JS allow 564 → 568; dir
   120 → 121.
+- [x] Separate-toplevel trailing-junk `(error-t)` (error-shape slice). On a
+  separator-less logical line, a complete statement followed by more non-trivia
+  content wraps the leftover run in one `(error-t …)` sibling: `x y` ⇒
+  `x (error-t y)`, `f(2)2` ⇒ `(call f 2) (error-t 2)`, `x' y` ⇒
+  `(call-post x ') (error-t y)`, `var"x" y` ⇒ `(var x) (error-t y)`, `a b c` ⇒
+  `a (error-t b c)`. The `parse` driver (`core.rs`) records the event offset
+  right after a line's first statement (`leftover_mark`) and, when no `;` is
+  present and significant content follows, opens an `ERROR_TRIVIA` over the
+  recovered run (leading trivia stays outside). A bare docstring opener
+  (`stmt_is_doc_string`) is exempt so `fold_docstrings` still owns `"a"\nfoo`.
+  Fixture `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
+  **Deferred** (different shapes): stray-delimiter `✘` leftover (`var"x")` ⇒
+  `(var x) (error-t ✘)`), string-juxtapose-error `"a"x` ⇒
+  `(juxtapose (string "a") (error-t) x)`, block-form juxtapose `(begin end)x` ⇒
+  `(block) (error-t x)`, `;`-line leftover (`a b; c`).
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

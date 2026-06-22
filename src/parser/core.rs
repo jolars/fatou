@@ -35,9 +35,14 @@ pub fn parse(text: &str) -> ParseOutput {
         }
 
         // Collect a single logical line (up to the next newline or EOF),
-        // tracking whether it carries a `;` separator.
+        // tracking whether it carries a `;` separator. `leftover_mark` records
+        // the event offset right after the line's first complete statement so a
+        // trailing junk run on a separator-less line can be wrapped in an
+        // `(error-t …)` node (`x y` ⇒ `x (error-t y)`).
         let mut line = Vec::new();
         let mut has_semicolon = false;
+        let mut leftover_mark: Option<usize> = None;
+        let mut first_is_doc_string = false;
         while i < tokens.len() {
             match tokens[i].kind {
                 TokKind::Newline => break,
@@ -52,8 +57,12 @@ pub fn parse(text: &str) -> ParseOutput {
                 }
                 _ => {
                     if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
+                        if leftover_mark.is_none() {
+                            first_is_doc_string = stmt_is_doc_string(&expr.events, &tokens);
+                        }
                         line.extend(expr.events);
                         i = expr.end;
+                        leftover_mark.get_or_insert(line.len());
                     } else {
                         line.push(Event::Tok(i));
                         i += 1;
@@ -66,6 +75,24 @@ pub fn parse(text: &str) -> ParseOutput {
             events.push(Event::Start(SyntaxKind::TOPLEVEL_SEMICOLON));
             events.extend(line);
             events.push(Event::Finish);
+        } else if let Some(mark) = leftover_mark.filter(|&m| {
+            // Junk after the first statement on a separator-less line — but a
+            // bare docstring (`"a"\nfoo`) owns its trailing statement, so leave
+            // that to `fold_docstrings`.
+            !first_is_doc_string && line[m..].iter().any(|e| is_significant_event(e, &tokens))
+        }) {
+            events.extend(line[..mark].iter().cloned());
+            let tail = &line[mark..];
+            // Leading trivia stays outside the error node; everything from the
+            // first significant leftover token onward is the recovered run.
+            let lead = tail
+                .iter()
+                .take_while(|e| !is_significant_event(e, &tokens))
+                .count();
+            events.extend(tail[..lead].iter().cloned());
+            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+            events.extend(tail[lead..].iter().cloned());
+            events.push(Event::Finish);
         } else {
             events.extend(line);
         }
@@ -75,6 +102,27 @@ pub fn parse(text: &str) -> ParseOutput {
 
     let cst = build_tree(&tokens, &events);
     ParseOutput { cst, diagnostics }
+}
+
+/// Whether an event carries significant (non-trivia) content: any node opener,
+/// or a non-trivia leaf token.
+fn is_significant_event(event: &Event, tokens: &[Token]) -> bool {
+    match event {
+        Event::Start(_) => true,
+        Event::Tok(idx) => !tokens[*idx].kind.is_trivia(),
+        Event::Finish => false,
+    }
+}
+
+/// Whether a statement's events open a bare (doc-eligible) `STRING_LITERAL` —
+/// the first inner token is not a `STRING_PREFIX`. Such a statement starts a
+/// potential docstring, so a trailing statement on the same logical line is left
+/// to `fold_docstrings` rather than wrapped as junk.
+fn stmt_is_doc_string(events: &[Event], tokens: &[Token]) -> bool {
+    matches!(
+        events.first(),
+        Some(Event::Start(SyntaxKind::STRING_LITERAL))
+    ) && string_is_doc_eligible(&events[1..], tokens)
 }
 
 /// One child of a statement container: either a leaf token or a fully-formed

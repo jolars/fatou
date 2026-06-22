@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **568 allowlisted**,
-117 divergence, 0 unsupported. Dir corpus: **121 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **571 allowlisted**,
+114 divergence, 0 unsupported. Dir corpus: **122 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
-total). Grammar bullets through "field-access/colon-quote space `(error-t)`"
+total). Grammar bullets through "separate-toplevel trailing-junk `(error-t)`"
 are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -34,45 +34,50 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22s)
+## Latest session (2026-06-22t)
 
-**Field-access/colon-quote space `(error-t)` — error-shape slice 5.** Whitespace
-before a field-access dot, or between a `:` and the quoted symbol, splices a
-zero-width `ERROR_TRIVIA`. Two independent insertions that compose:
-- **Dot space** (`x .y`⇒`(. x (error-t) (quote y))`, `x .:y`⇒
-  `(. x (error-t) (quote-: y))`, `f(x) .field`, `x.y .z`): the operator loop's
-  `Dot` arm builds via new `build_binary_dot_error` when `op_idx > lhs.end`
-  (whitespace before the dot). **Crucial discriminator:** a broadcast op `.+`
-  lexes as a *single* token (not `TokKind::Dot`), so `a .+ b`⇒`(dotcall-i a + b)`
-  stays untouched — only field-access dots fire.
-- **Colon-quote space** (`: foo`/`:\nfoo`⇒`(quote-: (error-t) foo)`, `A.: +`⇒
-  `(. A (quote-: (error-t) +))`, `: (x)`, `: .+`): `parse_quote_sym` splices the
-  marker right after the colon when `next > start + 1` (any trivia/newline before
-  the quoted content). All arms (ident/op/paren/keyword/dotted) inherit it.
+**Separate-toplevel trailing-junk `(error-t)` — error-shape slice 6.** On a
+separator-less logical line, a complete statement followed by more non-trivia
+content wraps the leftover run in one `(error-t …)` sibling: `x y`⇒
+`x (error-t y)`, `f(2)2`⇒`(call f 2) (error-t 2)`, `x' y`⇒
+`(call-post x ') (error-t y)`, `var"x" y`⇒`(var x) (error-t y)`, `a b c`⇒
+`a (error-t b c)`. **Pure driver change** (`core.rs` `parse`): records the event
+offset right after a line's first statement (`leftover_mark`); after the line, if
+no `;` and `line[mark..]` has significant content, opens an `ERROR_TRIVIA` over
+the recovered run (leading trivia stays *outside* the node, so `x [ws] y` keeps
+the space at toplevel). New helpers `is_significant_event` (a `Start`, or a
+non-trivia `Tok`) and `stmt_is_doc_string` (reuses `string_is_doc_eligible`) —
+the latter exempts a bare docstring opener so `fold_docstrings` still owns
+`"a"\nfoo` and `"a" b`. Projector untouched (`project_error` already wraps the
+recovered children). Fixture `toplevel_leftover_error`. JS allow 568 → 571
+(js-11c590bd/887fcea6/5f48712f); dir 121 → 122. Zero regressions; green;
+clippy/fmt clean.
 
-Both compose: `A .: foo`⇒`(. A (error-t) (quote-: (error-t) foo))`.
-**Projector:** `project_binary` now filters `ERROR_TRIVIA` out of `operands`
-(else the `len != 2` guard trips) and a `dot_error` prefix splices `(error-t)`
-before the quoted field in the three `Dot` arms; `project_quote_sym` tracks a
-leading `ERROR_TRIVIA` child and prefixes the symbol. Fixture
-`field_access_space`. JS allow 564 → 568 (js-ac4d250c/24c4fb24/310fb669/a669ac63);
-dir 120 → 121. Zero regressions; green; clippy/fmt clean.
-
-**Suggested next targets (ranked):** (1) **separate-toplevel leftover**
-`f(2)2`⇒`(call f 2) (error-t 2)`, `var"x" y`⇒`(var x) (error-t y)` — a complete
-statement then junk on the same line yields a *significant* `(error-t …)` sibling
-statement (the `parse` line loop must wrap a leftover run; content IS shown).
-(2) **`"a"x` juxtapose-error**⇒`(juxtapose (string "a") (error-t) x)` — currently
-mis-folds as a docstring; a glued ident after a *string literal* is a juxtapose
-with a zero-width error-t and must beat the docstring fold. (3) **macro-path
-error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`,
-`@A.B.@x a` — a `.@` after a dotted module path splices an error-t (the
-`project_macro_name` path; sibling of the field-access dot). (4) **incomplete
-`do`**⇒`(block (error))` (unblocks dir `do_blocks`). (5) **lexer-classified named
-kinds** (`'ab'`⇒`(char (ErrorOverLongCharacter))`, `a--b`⇒
-`(call-i a (ErrorInvalidOperator) b)`).
+**Suggested next targets (ranked):** (1) **`"a"x` juxtapose-error**⇒
+`(juxtapose (string "a") (error-t) x)` (also `"a""b"`, `"$y"x`, `"a"begin end`) —
+a glued atom after a *string literal* is a juxtapose with a zero-width error-t;
+must beat the docstring fold (currently exempted, so still mis-folds). (2)
+**block-form juxtapose-error** `(begin end)x`⇒`(block) (error-t x)` — a block
+form glued to a value must *not* juxtapose (Fatou currently builds
+`(juxtapose (block) x)`); the leftover driver then wraps `x`. (3) **stray-delimiter
+`✘` leftover** `var"x")`/`return)`⇒`… (error-t ✘)` — a leftover *closing*
+delimiter renders as JuliaSyntax's `✘` error token (needs a new render path).
+(4) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
+(quote @x)))`, `@A.B.@x a`. (5) **incomplete `do`**⇒`(block (error))` (unblocks
+dir `do_blocks`). (6) **lexer-classified named kinds** (`'ab'`⇒
+`(char (ErrorOverLongCharacter))`, `a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
 
 ## Earlier sessions
+
+- **2026-06-22s** — Field-access/colon-quote space `(error-t)` — error-shape
+  slice 5. Whitespace before a field-access dot (`x .y`⇒`(. x (error-t)
+  (quote y))`; operator-loop `Dot` arm via `build_binary_dot_error` when
+  `op_idx > lhs.end`; a broadcast `.+` lexes as one token so `a .+ b` is
+  untouched) or between `:` and the quoted symbol (`: foo`⇒`(quote-: (error-t)
+  foo)`; `parse_quote_sym` when `next > start + 1`) splices a zero-width
+  `ERROR_TRIVIA`; both compose (`A .: foo`). `project_binary` filters it from
+  operands + prefixes the field; `project_quote_sym` prefixes the symbol. Fixture
+  `field_access_space`. JS allow 564 → 568; dir 120 → 121.
 
 - **2026-06-22r** — Whitespace-before-postfix-opener `(error-t)` — error-shape
   slice 4. A `(`/`[`/`{`/`. (` chained after a value with disallowed leading

@@ -1,0 +1,34 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..15
+  CALL_EXPR@0..4
+    NAME@0..1
+      IDENT@0..1 "f"
+    ARG_LIST@1..4
+      LPAREN@1..2 "("
+      ARG@2..3
+        LITERAL@2..3
+          INTEGER@2..3 "2"
+      RPAREN@3..4 ")"
+  ERROR_TRIVIA@4..5
+    LITERAL@4..5
+      INTEGER@4..5 "2"
+  NEWLINE@5..6 "\n"
+  NAME@6..7
+    IDENT@6..7 "x"
+  WHITESPACE@7..8 " "
+  ERROR_TRIVIA@8..9
+    NAME@8..9
+      IDENT@8..9 "y"
+  NEWLINE@9..10 "\n"
+  POSTFIX_EXPR@10..12
+    NAME@10..11
+      IDENT@10..11 "x"
+    TRANSPOSE@11..12 "'"
+  WHITESPACE@12..13 " "
+  ERROR_TRIVIA@13..14
+    NAME@13..14
+      IDENT@13..14 "y"
+  NEWLINE@14..15 "\n"
