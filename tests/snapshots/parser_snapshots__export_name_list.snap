@@ -1,0 +1,41 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..63
+  EXPORT_STMT@0..12
+    EXPORT_KW@0..6 "export"
+    WHITESPACE@6..7 " "
+    PLUS@7..8 "+"
+    COMMA@8..9 ","
+    WHITESPACE@9..10 " "
+    EQ_EQ@10..12 "=="
+  NEWLINE@12..13 "\n"
+  EXPORT_STMT@13..27
+    EXPORT_KW@13..19 "export"
+    WHITESPACE@19..20 " "
+    UNICODE_OP@20..23 "⊕"
+    COMMA@23..24 ","
+    WHITESPACE@24..25 " "
+    UNICODE_OP@25..27 "÷"
+  NEWLINE@27..28 "\n"
+  PUBLIC_STMT@28..43
+    IDENT@28..34 "public"
+    WHITESPACE@34..35 " "
+    IDENT@35..38 "foo"
+    COMMA@38..39 ","
+    WHITESPACE@39..40 " "
+    UNICODE_OP@40..43 "⤈"
+  NEWLINE@43..44 "\n"
+  EXPORT_STMT@44..62
+    EXPORT_KW@44..50 "export"
+    WHITESPACE@50..51 " "
+    IDENT@51..52 "a"
+    COMMA@52..53 ","
+    WHITESPACE@53..54 " "
+    IDENT@54..55 "b"
+    COMMA@55..56 ","
+    NEWLINE@56..57 "\n"
+    WHITESPACE@57..61 "    "
+    IDENT@61..62 "c"
+  NEWLINE@62..63 "\n"

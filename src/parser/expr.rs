@@ -13,8 +13,8 @@ use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
     KwStmt, is_op_name, parse_abstract_type, parse_begin_expr, parse_do_block, parse_for_expr,
     parse_function_expr, parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr,
-    parse_macro_def, parse_module_expr, parse_primitive_type, parse_quote_expr, parse_struct_expr,
-    parse_try_expr, parse_while_expr,
+    parse_macro_def, parse_module_expr, parse_name_list_stmt, parse_primitive_type,
+    parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -198,13 +198,7 @@ fn parse_expr_in(
     // (a call `public(x)`, an assignment `public = 1`, an index `public[i]`),
     // matching JuliaSyntax's `parse_public` compatibility shim.
     if public_context && is_public_keyword(&ctx, start) {
-        return parse_keyword_stmt(
-            tokens,
-            start,
-            SyntaxKind::PUBLIC_STMT,
-            KwStmt::Path,
-            diagnostics,
-        );
+        return parse_name_list_stmt(tokens, start, SyntaxKind::PUBLIC_STMT, diagnostics);
     }
 
     // The contextual keywords `abstract`/`primitive` (ordinary identifiers
@@ -301,13 +295,7 @@ fn parse_expr_in(
             return parse_import_stmt(tokens, start, SyntaxKind::USING_STMT, diagnostics);
         }
         Some(TokKind::ExportKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::EXPORT_STMT,
-                KwStmt::Path,
-                diagnostics,
-            );
+            return parse_name_list_stmt(tokens, start, SyntaxKind::EXPORT_STMT, diagnostics);
         }
         _ => {}
     }

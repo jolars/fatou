@@ -22,47 +22,54 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **525 allowlisted**, 47 divergence, 3 unsupported.
-Dir corpus: **101 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "`try`/`catch`/`finally` variants" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **530 allowlisted**, 42 divergence, 3 unsupported.
+Dir corpus: **102 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "`export`/`public` name lists" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22a)
+## Latest session (2026-06-22b)
 
-**`try`/`catch`/`finally` variants (cluster).** Three FAILs, one coherent
-target. (1) **Catch-variable projector gap** — `catch $e` / `catch var"#"` parse
-fine (`INTERPOLATION` / `NONSTANDARD_IDENTIFIER` child of `CATCH_CLAUSE`) but
-`project_try` only looked for a `NAME` child, emitting `false`. Fix: read the
-first non-`BLOCK` child node (absent ⇒ `false`); `catch $e` ⇒ `(catch ($ e) …)`,
-`catch var"#"` ⇒ `(catch (var #) …)`. No-variable cases have only a `BLOCK`
-child, so the find stays correct. (2) **`finally`-then-`catch` parser gap** —
-`try x finally y catch e z end` swallowed the `catch` into the finally block
-(its `run_block` used `END_ONLY` then `break`). Fix (`structural.rs::parse_try_expr`):
-the `finally` arm now bounds its block on `TRY_TERMINATORS` and continues the
-clause loop iff a `catch` follows (else `break`, letting `expect_end` recover —
-`else`/second-`finally` after `finally` stay error-shape, deferred). JS allow
-522 → 525 (`try x catch $e y end`, `try x catch var"#" y end`, `try x finally y
-catch e z end`); dir 100 → 101 (fixture `try_catch_variants`). Green;
+**`export`/`public` name lists (cluster).** Five FAILs, one coherent target,
+split across two buckets. (1) **Projector gap** — operator names. `export +, ==`
+and unicode `module M; export ⤈; end` / `public ⤈` already parse fine (the
+`PLUS`/`EQ_EQ`/`UNICODE_OP` tokens are direct children of `EXPORT_STMT`/
+`PUBLIC_STMT`) but `name_run_item` only read `IDENT`/`NAME`/`INTERPOLATION`/
+`MACRO_NAME`, dropping operators. Fix: add an `is_operator` token arm emitting the
+bare op text. (2) **Parser gap** — newline continuation. `export \n a` and
+`export a, \n @b` dropped the next-line name (the old `parse_keyword_stmt` +
+`KwStmt::Path` stopped at the first newline). Replaced with a dedicated
+`parse_name_list_stmt` (`structural.rs`) routing both `export` and `public`: skip
+ws+newlines after the keyword, then a token loop where a `Comma` also skips
+ws+newlines after it (so the list continues onto the next line), `$`/`@`/operator/
+ident handled per-token, everything else carried verbatim. A *bare* newline after
+a complete name still ends (`export a \n b` stays two statements, matching Julia).
+Removed the now-unused `KwStmt::Path` variant. Preserved all prior passes
+(`export ($f)`, `export @var"'"`, `export $a, $(a*b)`, `public A, B`). JS allow
+525 → 530 (`export +, ==`, `export \n a`, `export a, \n @b`, `module M; export ⤈`,
+`module M; public ⤈`); dir 101 → 102 (fixture `export_name_list`). Green;
 clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Comparison-chain cluster** (the dominant remaining FAIL group:
-   `x < y < z`, `a + b + c`, `a * b * c`, `x && y && z`, `x || y || z`,
-   `x .< y .< z`, `x == y < z`, `x .< y < z`) — but these are **recorded
-   modeling divergences** (chains/associative ops stay nested). Confirm they're
-   all the deliberate-divergence kind, not a real gap, before touching.
-2. **Negative numeric literal display** (`-0x1`, `+0o22`, `-0b10010`, `+0b10010`,
-   `-0xf.0p0`, `1.0e-1000`, `0x123…p+0`) — display normalization, likely blocked
-   not fixed; verify.
-3. **`finally` + `else` error-shape** and `+(;;)` / `+(\n;\n;\n)` empty-all-semis
-   (deferred error-shape / param edge).
-4. Survey the remaining 47 JS FAILs for the next genuine parser gap.
+1. **Import operator/unicode/dot names** (`import .⋆`, `import A.⋆.f`,
+   `import A...`, `import . .A`) — the sibling of this session in
+   `parse_import_path`; carries operator/unicode components through verbatim now.
+2. **Comparison-chain cluster** (`x < y < z`, `a + b + c`, `a * b * c`,
+   `x && y && z`, etc.) — recorded modeling divergences; confirm before touching.
+3. **Negative numeric literal display** (`-0x1`, `+0o22`, `1.0e-1000`, …) —
+   display normalization, likely blocked not fixed.
+4. Survey the remaining 42 JS FAILs for the next genuine parser gap.
 
 ## Earlier sessions
+
+- **2026-06-22a** — `try`/`catch`/`finally` variants (cluster). Catch-variable
+  projector gap (`catch $e`/`catch var"#"` read first non-`BLOCK` child ⇒
+  `(catch ($ e) …)`) + `finally`-then-`catch` parser gap (`parse_try_expr`'s
+  `finally` arm bounds on `TRY_TERMINATORS`, continues iff a `catch` follows). JS
+  allow 522 → 525; dir 100 → 101 (`try_catch_variants`).
 
 - **2026-06-21x** — `var"…"` with escapes. `var"\""` ⇒ `(var ")`, `var"\\"` ⇒
   `(var \)`. Lexer (`lex_in_string_mode`): in raw mode, an odd backslash run

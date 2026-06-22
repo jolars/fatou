@@ -2111,6 +2111,9 @@ fn name_run_item(el: SyntaxElement) -> Option<String> {
         NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
         // A macro name (`export @a`) → `@a`.
         NodeOrToken::Node(n) if n.kind() == MACRO_NAME => Some(project_macro_name(&n)),
+        // An operator used as a name (`export +, ==`, `export ⊕`) → the bare
+        // operator text.
+        NodeOrToken::Token(t) if is_operator(t.kind()) => Some(t.text().to_string()),
         _ => None,
     }
 }

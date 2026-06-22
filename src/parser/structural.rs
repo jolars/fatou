@@ -513,11 +513,6 @@ pub(crate) enum KwStmt {
     /// bare-comma tuple (`return x, y` ⇒ `(return (tuple x y))`, `const x, y =
     /// 1, 2` ⇒ `(const (= (tuple x y) (tuple 1 2)))`).
     ExprTuple,
-    /// Pure verbatim passthrough of the rest of the line (`import A: b`,
-    /// `using A.B`, `export a, b`). The module-path/name grammar uses `:`/`.`/`,`
-    /// that have no dedicated trees yet, so parsing it as an expression would
-    /// misread `:` as a range and `.` as field access (see `TODO.md`).
-    Path,
 }
 
 /// Parse a simple keyword-led statement that is not a `… end` block form. The
@@ -571,6 +566,66 @@ pub(crate) fn parse_keyword_stmt(
                     events.push(Event::Tok(i));
                     i += 1;
                 }
+            }
+        }
+    }
+
+    events.push(Event::Finish);
+    Some(ExprParse {
+        start,
+        end: i,
+        events,
+    })
+}
+
+/// Parse an `export`/`public` name-list statement. The keyword at `start` opens
+/// `node_kind`, followed by a comma-separated list of exported names. A name is a
+/// bare identifier, an operator used as a name (`export +, ==`, `export ⊕`), an
+/// interpolated name (`export $a, $(a*b)`), or a macro name (`export @a`,
+/// `export @var"#"`). A newline directly after the keyword or after a comma
+/// continues the list onto the next line (`export a, \n b`); a newline after a
+/// complete name ends the statement (`export a \n b` is two statements). Every
+/// token is either parsed into a name subtree or carried through verbatim, so
+/// losslessness holds.
+pub(crate) fn parse_name_list_stmt(
+    tokens: &[Token],
+    start: usize,
+    node_kind: SyntaxKind,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let ctx = ParserCtx::new(tokens);
+    let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
+
+    // A newline directly after the keyword continues onto the next line.
+    let mut i = ctx.skip_ws_and_newlines(start + 1);
+    push_range(&mut events, start + 1, i);
+
+    while !header_ends(&ctx, i) {
+        match ctx.token(i).map(|t| t.kind) {
+            // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
+            Some(TokKind::Dollar) => {
+                let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
+                events.extend(interp.events);
+                i = interp.end;
+            }
+            // A macro name (`export @a`, `export @var"#"`) → `@a`.
+            Some(TokKind::At) => {
+                i = push_macro_name(&ctx, &mut events, i, diagnostics);
+            }
+            // A comma separates names and allows the list to continue onto the
+            // next line (a newline right after the comma is skipped).
+            Some(TokKind::Comma) => {
+                events.push(Event::Tok(i));
+                let next = ctx.skip_ws_and_newlines(i + 1);
+                push_range(&mut events, i + 1, next);
+                i = next;
+            }
+            // A bare identifier, an operator name, or any other same-line token
+            // (parens around an interpolation, intervening whitespace) carried
+            // through verbatim.
+            _ => {
+                events.push(Event::Tok(i));
+                i += 1;
             }
         }
     }

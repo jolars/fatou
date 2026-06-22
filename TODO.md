@@ -31,9 +31,16 @@ through), so the grammar can grow incrementally.
   `using`, `export`. Leading-keyword statement forms (no `… end`), parsed by
   the shared `parse_keyword_stmt` in `structural.rs`: control flow is bare or
   takes an optional operand; `const`/`global`/`local` parse their first operand
-  as an expression then carry the rest of the line through; `export` carries the
-  whole clause through verbatim. `import`/`using` now build a real path tree (see
-  the dedicated bullet below); `export`'s richer name list stays passthrough.
+  as an expression then carry the rest of the line through. `import`/`using` now
+  build a real path tree (see the dedicated bullet below). `export`/`public`
+  parse a dedicated comma-separated name list (`parse_name_list_stmt` in
+  `structural.rs`): a name is a bare identifier, an operator used as a name
+  (`export +, ==`, `export ⊕`), an interpolated name (`export $a, $(a*b)`), or a
+  macro name (`export @a`, `export @var"#"`). A newline directly after the keyword
+  or after a comma continues the list onto the next line (`export a, \n b`); a
+  bare newline after a complete name ends the statement (`export a \n b` is two
+  statements). The projector's shared `name_run_item` reads operator-token names
+  as their bare text.
 - [x] Anonymous functions and `->`; short-form function definitions
   (`f(x) = …`). The `->` operator (already lexed, Julia precedence `(4, 3)` —
   right-associative, tighter than `=`) builds a dedicated `ARROW_EXPR` in the
@@ -59,17 +66,18 @@ through), so the grammar can grow incrementally.
   JuliaSyntax which has no body for a declaration.
 - [x] `public` contextual keyword (`public A, B`, `public @a`). A statement-only
   reword: at toplevel and module-block scope, the identifier `public` opens a
-  `PUBLIC_STMT` (parsed by `parse_keyword_stmt` with `KwStmt::Path`, reusing the
-  `export` name-list machinery) *unless* the next significant token is `(`, `=`,
+  `PUBLIC_STMT` (parsed by `parse_name_list_stmt`, sharing the `export` name-list
+  machinery) *unless* the next significant token is `(`, `=`,
   or `[` — which keep `public` an ordinary identifier (`public(x)`, `public = 1`,
   `public[i]`), matching JuliaSyntax's `parse_public` compatibility shim. A new
   `public_context` flag on `ExprFlags` (set by `parse_stmt`, threaded through the
   toplevel loop and `run_module_block`, off in every other block) gates the
   detection so `public` stays an identifier inside `begin`/`if`/function bodies.
   The projector heads the node `public`, dropping the leading keyword token before
-  reading the names via the shared `name_run_item`. **Deferred:** unicode operator
-  names (`public ⤈` — needs unicode-operator lexing). (The `;`-separated toplevel
-  `toplevel-;` grouping is now handled — see "Top-level `;` grouping" below.)
+  reading the names via the shared `name_run_item`. Operator names (`public +`),
+  unicode operator names (`public ⤈`), and newline continuation now fall out of
+  the shared `parse_name_list_stmt`. (The `;`-separated toplevel `toplevel-;`
+  grouping is now handled — see "Top-level `;` grouping" below.)
 - [x] String interpolation (`"$x"`, `"$(expr)"`), raw/byte strings, command
   literals (`` `…` ``), non-standard string literals (`r"..."`, `b"..."`).
   Structured into `STRING_LITERAL`/`CMD_LITERAL` nodes with `INTERPOLATION`
@@ -547,8 +555,9 @@ through), so the grammar can grow incrementally.
   `(24,25)`, power `(32,31)` right-assoc). Radicals `√ ∛ ∜` and `¬` are prefix-only,
   routed through the existing unary arm → `(call-pre √ x)`. The projector reads the
   operator text from the token (`x → y` → `(call-i x → y)`, `a ≔ b` → `(≔ a b)`).
-  **Deferred:** unicode in `export`/`public`/`import` positions, broadcast unicode
-  (`.…`), unicode comparison chains (nested, like the ASCII chain divergence), and
+  **Deferred:** unicode in `import` positions (`export`/`public` name lists now
+  read unicode operator names — see the `export`/`public` bullets), broadcast
+  unicode (`.…`), unicode comparison chains (nested, like the ASCII chain divergence), and
   unicode unary in the plus/times tiers (`±x`). (Juxtaposition and operator-suffix
   sub/superscripts both landed separately — see those bullets.)
 

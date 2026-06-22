@@ -32,6 +32,7 @@ docstring
 dot_logical_operator
 dotted_operator_quote
 escaped_dollar
+export_name_list
 field_access_suffix
 function_forward_decl
 generator_arguments
