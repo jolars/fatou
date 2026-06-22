@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **543 allowlisted**, 30 divergence, 2 unsupported.
-Dir corpus: **110 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **545 allowlisted**, 28 divergence, 2 unsupported.
+Dir corpus: **111 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "splat/vararg `...` precedence" are `[x]`
 in `TODO.md`.
 
@@ -32,37 +32,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22j)
+## Latest session (2026-06-22k)
 
-**Vect newline-comma (js-3a445ddd, js-4bfc9602).** `[x\n, y]` ⇒ `(vect x y)`,
-`[x \n, ]` ⇒ `(vect x)`. The bug: in `parse_bracket_literal`'s first-separator
-dispatch (`expr.rs`), a newline as the first separator routed unconditionally to
-`parse_matrix` (→ `vcat`), but Julia treats a newline that is *followed by a
-comma* as insignificant whitespace — the comma is the real vector separator. The
-rule from probing: the first separator sets the mode. Comma first → vect (later
-newlines ignored: `[1,\n2,\n3]` → `(vect 1 2 3)`); newline/`;`/element first →
-matrix (a later comma is a Julia error: `[a\nb\n,c]` → `(vcat … error-t)`). A
-newline run is a separator only between two *elements*; a newline directly before
-a comma is not. Fix: new `newline_run_precedes_comma` (peeks past
-newlines/ws/comments for a `,`) gates a new `Newline` arm → `vect`; `;`-after-
-newline and element-after-newline stay matrix (unchanged); `parse_arg_list`
-already treats the interior newline as container trivia. Pure parser fix —
-`sexpr.rs` untouched. JS allow 541 → 543; dir 109 → 110 (new fixture
-`vect_newline_comma`). Green; clippy/fmt clean.
+**Empty all-semicolon operator group (js-7a161b5a, js-b3691b92).** `+(;;)` ⇒
+`(call-pre + (block-p))`, `+(\n;\n;\n)` likewise. The bug: in
+`unary_op_paren_is_call` (`expr.rs`), a *leading* `;` after the `(`
+unconditionally reported a paren-call, so `+(;;)` became `(call + (parameters)
+(parameters))`. But Julia resolves an empty multi-`;` group `(;;)` to a *block*
+`(block-p)`, and a unary operator glued to a block prefixes it rather than
+calling. Rule from probing: a leading `;` is a call (`+(;)` → `(call +
+(parameters))`, `+(; a; b)` → two parameters, `+(; a=1)` → params) *unless* the
+parens form a block — i.e. `paren_is_block` is true (empty group, 2+ semis,
+`num_subexprs==0`). Fix: the `Semicolon` arm now returns
+`!paren_is_block(ctx, lparen_idx)` instead of unconditional `true`. Non-unary
+operators (`*(;;)` → `(call * (parameters) (parameters))`) are unaffected — they
+always parse as call. Pure parser fix; `sexpr.rs` untouched. JS allow 543 → 545;
+dir 110 → 111 (new fixture `empty_semicolon_param_group`). Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. `+(;;)` / `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92) — empty all-semicolon param
-   groups (deferred from 2026-06-21b multi_param_groups). Genuinely parseable.
-2. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4, blank line before
+1. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4, blank line before
    comprehension `for`), `x where {y for y in ys}` (js-1c86494f, brace generator
    in `where`).
-3. `[f (x)]` (js-443dcfda) — space-separated `f (x)` inside `[…]` is two hcat
+2. `[f (x)]` (js-443dcfda) — space-separated `f (x)` inside `[…]` is two hcat
    elements `(hcat f x)`, not a call; whitespace-sensitive, probe siblings.
-   Remaining 30 JS FAILs are mostly recorded modeling/display divergences (assoc
+   Remaining 28 JS FAILs are mostly recorded modeling/display divergences (assoc
    `a+b+c`, comparison chains, signed-numeric display) or error-shapes (`a--b`,
    `'ab'`, `function \n f() end`).
 
 ## Earlier sessions
+
+- **2026-06-22j** — Vect newline-comma (js-3a445ddd, js-4bfc9602). `[x\n, y]` ⇒
+  `(vect x y)`, `[x \n, ]` ⇒ `(vect x)`. In `parse_bracket_literal`'s
+  first-separator dispatch, a newline directly *before a comma* is insignificant
+  ws (the comma is the real separator) — new `newline_run_precedes_comma` gates a
+  `Newline` arm → `vect`; `;`-after-newline and element-after-newline stay matrix.
+  Pure parser fix. JS allow 541 → 543; dir 109 → 110 (`vect_newline_comma`).
 
 - **2026-06-22i** — Splat/vararg `...` precedence (js-5d3b9cc6, js-2155b9ca).
   `x:y...` ⇒ `(... (call-i x : y))`. `...` was consumed in `parse_postfix_chain`

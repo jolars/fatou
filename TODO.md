@@ -482,8 +482,10 @@ through), so the grammar can grow incrementally.
   open with a leading `;`, or contain a top-level comma or splat. The unary arm of
   `parse_prefix` then builds a `CALL_EXPR` (operator-token callee + `ARG_LIST`,
   reusing the operator-as-call projection); `operator_func_repr` (`sexpr.rs`) gains
-  a `!` case (`!` is unary-only, no `infix_head` entry). **Deferred:** the rare
-  `+(;;)` double-semi block edge.
+  a `!` case (`!` is unary-only, no `infix_head` entry). The empty all-semicolon
+  block edge `+(;;)` → `(call-pre + (block-p))` is handled: a leading-`;`
+  paren-call defers to `paren_is_block`, so a multi-`;` empty group prefixes the
+  block instead of opening a call.
 
 - [x] Prefix `$` interpolation in expression position. A prefix `$` is now an
   interpolation everywhere (Julia rejects it outside a quote only during

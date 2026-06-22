@@ -34,6 +34,7 @@ doc_macro
 docstring
 dot_logical_operator
 dotted_operator_quote
+empty_semicolon_param_group
 escaped_dollar
 export_name_list
 field_access_suffix

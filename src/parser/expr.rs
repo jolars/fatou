@@ -3008,7 +3008,12 @@ fn unary_op_paren_is_call(ctx: &ParserCtx<'_>, lparen_idx: usize) -> bool {
     let first = ctx.skip_trivia(lparen_idx + 1);
     match ctx.token(first).map(|t| t.kind) {
         Some(TokKind::RParen) => return true,
-        Some(TokKind::Semicolon) => return true,
+        // A leading `;` opens a parameters group (`+(; a=1)` → `(call + (parameters
+        // (= a 1)))`), so it is a call — unless the parens form a *block*
+        // (`+(;;)` → `(call-pre + (block-p))`), where the unary operator instead
+        // prefixes the parenthesized block. Mirrors JuliaSyntax resolving the
+        // empty all-semicolon group `(;;)` to a block rather than an arglist.
+        Some(TokKind::Semicolon) => return !paren_is_block(ctx, lparen_idx),
         _ => {}
     }
     let mut depth = 0i32;

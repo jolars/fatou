@@ -1,0 +1,73 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..40
+  UNARY_EXPR@0..5
+    PLUS@0..1 "+"
+    PAREN_BLOCK@1..5
+      LPAREN@1..2 "("
+      PARAMETERS@2..3
+        SEMICOLON@2..3 ";"
+      PARAMETERS@3..4
+        SEMICOLON@3..4 ";"
+      RPAREN@4..5 ")"
+  NEWLINE@5..6 "\n"
+  UNARY_EXPR@6..11
+    MINUS@6..7 "-"
+    PAREN_BLOCK@7..11
+      LPAREN@7..8 "("
+      PARAMETERS@8..9
+        SEMICOLON@8..9 ";"
+      PARAMETERS@9..10
+        SEMICOLON@9..10 ";"
+      RPAREN@10..11 ")"
+  NEWLINE@11..12 "\n"
+  UNARY_EXPR@12..18
+    PLUS@12..13 "+"
+    PAREN_BLOCK@13..18
+      LPAREN@13..14 "("
+      PARAMETERS@14..15
+        SEMICOLON@14..15 ";"
+      PARAMETERS@15..16
+        SEMICOLON@15..16 ";"
+      PARAMETERS@16..17
+        SEMICOLON@16..17 ";"
+      RPAREN@17..18 ")"
+  NEWLINE@18..19 "\n"
+  CALL_EXPR@19..23
+    PLUS@19..20 "+"
+    ARG_LIST@20..23
+      LPAREN@20..21 "("
+      PARAMETERS@21..22
+        SEMICOLON@21..22 ";"
+      RPAREN@22..23 ")"
+  NEWLINE@23..24 "\n"
+  CALL_EXPR@24..33
+    PLUS@24..25 "+"
+    ARG_LIST@25..33
+      LPAREN@25..26 "("
+      PARAMETERS@26..29
+        SEMICOLON@26..27 ";"
+        WHITESPACE@27..28 " "
+        ARG@28..29
+          NAME@28..29
+            IDENT@28..29 "a"
+      PARAMETERS@29..32
+        SEMICOLON@29..30 ";"
+        WHITESPACE@30..31 " "
+        ARG@31..32
+          NAME@31..32
+            IDENT@31..32 "b"
+      RPAREN@32..33 ")"
+  NEWLINE@33..34 "\n"
+  CALL_EXPR@34..39
+    STAR@34..35 "*"
+    ARG_LIST@35..39
+      LPAREN@35..36 "("
+      PARAMETERS@36..37
+        SEMICOLON@36..37 ";"
+      PARAMETERS@37..38
+        SEMICOLON@37..38 ";"
+      RPAREN@38..39 ")"
+  NEWLINE@39..40 "\n"
