@@ -22,10 +22,11 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **553 allowlisted**, 22 divergence, 0 unsupported.
-Dir corpus: **115 allowlisted**, 3 blocked (1 skipped: do_blocks).
-Grammar bullets through "integer-literal display normalization" are `[x]`
-in `TODO.md`.
+JS corpus (**685 cases** — error shapes now harvested): **555 allowlisted**,
+130 divergence, 0 unsupported. Dir corpus: **116 allowlisted**, 4 blocked
+(do_blocks/unterminated_string/end_index/numeric_literals; all now FAIL not skip
+since `render` is total). Grammar bullets through "typed error-node taxonomy"
+are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -33,45 +34,63 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22n)
+## Latest session (2026-06-22o)
 
-**Integer-literal display normalization (projector; 5 JS FAILs).** JuliaSyntax
-renders a numeric leaf as its parsed *value*, not the source text — the same
-value-rendering the projector already does for strings/chars (`display_char`,
-`triple_string_parts`). The CST stays lossless source text; only the projector
-changed. `literal_token_text` (`sexpr.rs`) now strips underscores from decimal
-`INTEGER`s and routes `HEX_INT`/`OCT_INT`/`BIN_INT` through `normalize_based_int`:
-value → lowercase hex, zero-padded to Julia's selected `UInt` width. Bit count is
-hex `4·ndigits`, binary `ndigits`, octal `bits(leading)+3·(ndigits−1)` (helper
-`octal_bits`), rounded up to {8,16,32,64,128} ⇒ {2,4,8,16,32} hex digits
-(`0x1`⇒`0x01`, `0o22`⇒`0x12`, `0o755`⇒`0x01ed`, `0o00007`⇒`0x0007`,
-`-0x1`⇒`(call-pre - 0x01)`, `+0o22`⇒`0x12`). Applied in both single-token and
-signed two-token literal paths; `>128`-bit BigInt falls back to source text
-(deferred). Flipped js-08ad283e/-36619afa/-38c73ec9/-5752c3f6/-790279e4. JS allow
-548 → 553; dir 114 → 115 (`based_int_display`). Green; clippy/fmt clean.
+**Typed error-node taxonomy — error-shape parity Phase 0 + first slice.** The
+long-deferred error-shape phase begins. JuliaSyntax splices typed error nodes
+into the tree (named lexer kinds `(ErrorName)`, generic `(error)` = missing
+element, `(error-t)` = `TRIVIA_FLAG` truncation/EOF); Fatou previously recovered
+losslessly + reported side-channel diagnostics, and the harness *skipped* any
+diagnostic-bearing case. **Data model:** rowan green nodes carry only a `u16`
+discriminant (no flag bits), and `kind_from_raw` transmutes relying on `ERROR`
+staying *last* — so new error kinds go *before* `ERROR`. Added one kind this
+session: `ERROR_TRIVIA` (projected `(error-t)`), keeping `ERROR` as bare
+`(error)` + unknown-token catch-all. Named lexer kinds are deferred to their own
+slices (one kind + emitter + projector arm together — avoids dead arms). New
+projector `project_error(head, node)` wraps any *significant* recovered tokens
+(delimiters dropped, so a zero-width synthesized node → bare `(error-t)`).
+Recovery helper `error_node_with_range(kind, …)`. **Harness:** `render()` is now
+total — dropped the `diagnostics.is_empty()` skip; returns `None` (→
+`Unsupported`) only on the raw `(unsupported …)` sentinel. Safe because
+allowlisted = currently-passing = no-diagnostics, so the 553/115 gates are
+untouched (verified: pass count == allowlist size). **Harvest:** relaxed the
+`occursin("(error", …)` filter (kept the `!isvalid` UTF-8 guard) and re-harvested
+→ JS corpus 575 → 685 (the +110 error cases all enter as un-allowlisted
+divergence, the visible backlog — user chose *fold into main corpus*).
+**First slice (unclosed delimiter):** `parse_arg_list`'s EOF arm (`None => break`)
+now appends a zero-width `ERROR_TRIVIA` (closing any open `PARAMETERS` first), so
+`[x` ⇒ `(vect x (error-t))`, `var"x"(` ⇒ `(call (var x) (error-t))`, `f(a` ⇒
+`(call f a (error-t))`. No well-formed case reaches that arm, so it can't regress
+the allowlist. `project_args`' existing `_ => project(&n)` renders the child.
+Lossless (node wraps no tokens). Fixture `unclosed_delimiter`. JS allow
+553 → 555 (js-36696d34, js-f68656dd); dir 115 → 116. Green; clippy/fmt clean.
 
-**Why the prior session called the backlog "drained" but this was real:** the
-disposition that lumped *all* numeric-literal display under "blocked" was
-over-broad — integer normalization is a faithful, tractable projector translation
-(precedent: string/char value rendering); only *float* canonicalization is the
-genuinely hard, deferred half. The "blocked" rationale conflated the CST
-(lossless source text — unchanged) with the projector (a separate value display).
+**Suggested next targets (ranked):** continue the error-shape slices, each a
+normal one-kind-per-session target: (1) **unterminated string** `"str` ⇒
+`(string "str" (error-t))` — parser-synth append in the string parser (js-b4a566a6;
+unblocks dir `unterminated_string`); (2) **trailing junk** `f(2)2` ⇒
+`(call f 2) (error-t 2)`, `var"x"y` ⇒ `(var x (error-t))` — wrap skipped tokens
+(~30 JS cases); (3) **incomplete `do`** ⇒ `(block (error))` (unblocks `do_blocks`);
+(4) **lexer-classified named kinds** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
+`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`, bad escape/numeric (each adds its
+`SyntaxKind` before `ERROR` + a lexer `TokKind` + projector arm). 40 error-bare /
+70 error-t JS FAILs remain. `end_index` also needs bare-`end` *rejection* (a
+grammar change), so error-node work alone won't unblock it.
 
-**Suggested next targets (ranked):** The 22 remaining JS FAILs are all recorded
-modeling divergences, **float**-display normalization, or error-shapes — no
-clean parser frontier in the pinned corpus. Two user-flagged deferred buckets
-remain (noted in `TODO.md`):
-1. **Float-literal display normalization** — `2.`⇒`2.0`, `1.5e-3`⇒`0.0015`,
-   `1f0`⇒`1.0f0`, hex `0x1.8p3`⇒`12.0`, underflow `1.0e-1000`⇒`0.0`. Hard:
-   must replicate Julia's `Base.show(::Float64)`/`Float32` shortest-round-trip +
-   notation thresholds (Rust `{}` differs, e.g. `1e20`). Would also flip the dir
-   `numeric_literals` fixture (currently blocked on the float half).
-2. **Error-shape parity phase** — the separate deferred workstream (`a--b`,
-   `'ab'`, `function \n f() end`, unterminated string, incomplete `do`).
 Modeling divergences (associative/comparison/short-circuit nesting, n-ary
-juxtaposition) are deliberate and stay un-allowlisted.
+juxtaposition) are deliberate and stay un-allowlisted. Remaining clean deferred
+buckets: **float**-literal display normalization (`2.`⇒`2.0`, `1f0`⇒`1.0f0`, hex
+`0x1.8p3`⇒`12.0`; needs Julia's `Base.show(::Float64)` shortest-round-trip) and
+the rest of the error-shape slices (see next-targets above).
 
 ## Earlier sessions
+
+- **2026-06-22n** — Integer-literal display normalization (projector; 5 JS FAILs).
+  `literal_token_text` renders a numeric leaf as its parsed *value* (underscores
+  stripped, `HEX/OCT/BIN_INT` → lowercase hex zero-padded to Julia's `UInt` width
+  via `normalize_based_int`/`octal_bits`): `0o755`⇒`0x01ed`, `-0x1`⇒
+  `(call-pre - 0x01)`. CST stays lossless; only the projector changed. `>128`-bit
+  BigInt deferred. JS allow 548 → 553; dir 114 → 115 (`based_int_display`).
 
 - **2026-06-22m** — Whitespace-sensitive postfix split in matrices (js-443dcfda).
   `[f (x)]` ⇒ `(hcat f x)`: a space-preceded `(`/`[`/`{` inside a concatenation

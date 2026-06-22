@@ -12,8 +12,9 @@
 # rest of the corpus uses), keeping the projector and harness as the single
 # source of truth.
 #
-# Inputs whose `parseall` output contains an error node, and empty/whitespace
-# inputs, are skipped: those belong to the deferred error-shape-parity phase.
+# Empty/whitespace inputs and non-UTF-8 inputs/renderings are skipped. Error
+# shapes are now in scope (Fatou emits in-tree typed error nodes), so cases whose
+# `parseall` output contains `(error …)` are kept and projected like any other.
 #
 # Output: `tests/fixtures/oracle/juliasyntax.jsonl`, one
 # `{"slug","input","expected"}` object per line, sorted by slug. Pinned to the
@@ -102,7 +103,7 @@ end
 function main()
     inputs = harvest_inputs()
     rows = Tuple{String,String,String}[]
-    (skipped_error, skipped_empty, skipped_throw, skipped_invalid, dup) = (0, 0, 0, 0, 0)
+    (skipped_empty, skipped_throw, skipped_invalid, dup) = (0, 0, 0, 0)
     seen = Set{String}()
     for input in inputs
         if isempty(strip(input))
@@ -122,8 +123,12 @@ function main()
             skipped_throw += 1
             continue
         end
-        if occursin("(error", sexpr) || !isvalid(sexpr)
-            skipped_error += 1
+        # Error shapes are in scope: Fatou now emits in-tree typed error nodes
+        # (`(error)`/`(error-t)`/named kinds), so `(error …)`-bearing cases are
+        # kept and projected like any other. Only drop a rendering that itself is
+        # not valid UTF-8 (it cannot be JSON-encoded for the corpus).
+        if !isvalid(sexpr)
+            skipped_invalid += 1
             continue
         end
         s = slug(input)
@@ -154,7 +159,7 @@ function main()
     println("harvested $(length(inputs)) inputs from JuliaSyntax test/parser.jl")
     println(
         "wrote $(length(rows)) cases to $OUT_PATH " *
-        "(skipped: $skipped_error error, $skipped_empty empty, " *
+        "(skipped: $skipped_empty empty, " *
         "$skipped_invalid non-utf8, $skipped_throw throwing, $dup duplicate)",
     )
 end

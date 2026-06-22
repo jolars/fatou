@@ -260,9 +260,16 @@ pub enum SyntaxKind {
     AT,
     DOLLAR,
 
-    /// Both the unknown-token kind and the error-recovery node kind. Keep this
-    /// the **last** variant: [`JuliaLanguage::kind_from_raw`] uses it as the
-    /// upper bound of the valid discriminant range.
+    /// A JuliaSyntax `TRIVIA_FLAG`-tagged error node, projected as `(error-t)`:
+    /// a synthesized/truncation marker (EOF or skipped tokens), as distinct from
+    /// the bare `(error)` of a missing required element ([`SyntaxKind::ERROR`]).
+    /// New error kinds go here, **before** the `ERROR` sentinel.
+    ERROR_TRIVIA,
+
+    /// Both the unknown-token kind and the bare error-recovery node kind
+    /// (projected `(error)`). Keep this the **last** variant:
+    /// [`JuliaLanguage::kind_from_raw`] uses it as the upper bound of the valid
+    /// discriminant range.
     ERROR,
 }
 
@@ -312,6 +319,7 @@ mod tests {
             SyntaxKind::STRING_CONTENT,
             SyntaxKind::FUNCTION_KW,
             SyntaxKind::DOLLAR,
+            SyntaxKind::ERROR_TRIVIA,
             SyntaxKind::ERROR,
         ] {
             let raw = JuliaLanguage::kind_to_raw(kind);

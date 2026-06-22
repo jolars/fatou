@@ -2720,7 +2720,19 @@ fn parse_arg_list(
             i += 1;
         }
         match tokens.get(i).map(|t| t.kind) {
-            None => break, // unterminated list; still lossless
+            None => {
+                // Unterminated list (EOF before the closing delimiter). Mirror
+                // JuliaSyntax: append a zero-width `(error-t)` truncation marker
+                // as the final element (`f(a` → `(call f a (error-t))`, `[x` →
+                // `(vect x (error-t))`). Lossless — the node wraps no tokens.
+                if in_params {
+                    events.push(Event::Finish); // close PARAMETERS first
+                    in_params = false;
+                }
+                events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                events.push(Event::Finish);
+                break;
+            }
             Some(k) if k == close => {
                 if in_params {
                     events.push(Event::Finish); // close PARAMETERS

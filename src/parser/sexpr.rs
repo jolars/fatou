@@ -195,6 +195,15 @@ fn project(node: &SyntaxNode) -> String {
         BEGIN_MARKER => "begin".to_string(),
         OPERATOR_ATOM => project_operator_atom(node),
 
+        // Typed error nodes (JuliaSyntax error taxonomy). `ERROR` is the bare
+        // `(error)` — a missing required element; `ERROR_TRIVIA` is the
+        // `TRIVIA_FLAG`-tagged `(error-t)` — a synthesized/truncation marker.
+        // Either may wrap recovered tokens (`(error-t b)`); the delimiter that
+        // triggered recovery is dropped by `significant`, so a zero-width
+        // synthesized node renders as the bare `(error-t)`.
+        ERROR => project_error("error", node),
+        ERROR_TRIVIA => project_error("error-t", node),
+
         other => format!("(unsupported {other:?})"),
     }
 }
@@ -2109,6 +2118,16 @@ fn project_signature(node: &SyntaxNode) -> String {
 }
 
 // --- Generic helpers -------------------------------------------------------
+
+/// Project a typed error node, wrapping any recovered (significant) tokens or
+/// child nodes. An empty node renders as the bare `(error)`/`(error-t)`.
+fn project_error(head: &str, node: &SyntaxNode) -> String {
+    let parts: Vec<String> = significant(node)
+        .iter()
+        .filter_map(project_element)
+        .collect();
+    sexp(head, parts)
+}
 
 fn sexp(head: &str, parts: Vec<String>) -> String {
     if parts.is_empty() {

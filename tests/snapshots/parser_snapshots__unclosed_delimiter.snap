@@ -1,0 +1,11 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..2
+  VECT_EXPR@0..2
+    LBRACKET@0..1 "["
+    ARG@1..2
+      NAME@1..2
+        IDENT@1..2 "x"
+    ERROR_TRIVIA@2..2

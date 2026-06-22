@@ -13,6 +13,24 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Typed error-node taxonomy (error-shape parity, Phase 0 + first slice). The
+  parser now emits in-tree typed error nodes the projector renders to
+  JuliaSyntax's shape, so error cases compare like any other instead of being
+  skipped. New `SyntaxKind::ERROR_TRIVIA` (projected `(error-t)`, the
+  `TRIVIA_FLAG` truncation marker) sits before the `ERROR` sentinel (bare
+  `(error)`); `project_error` wraps any recovered tokens. The oracle harness
+  `render()` is now total (no longer skips on diagnostics; `Unsupported` keyed on
+  the `(unsupported …)` sentinel), and the harvest filter no longer drops
+  `(error …)` cases — the JS corpus grew 575 → 685 (the +110 error cases are the
+  visible backlog). First slice: an unterminated arg-list/bracket-literal
+  (`parse_arg_list` EOF arm) appends a zero-width `ERROR_TRIVIA` (`[x` ⇒
+  `(vect x (error-t))`, `var"x"(` ⇒ `(call (var x) (error-t))`, `f(a` ⇒
+  `(call f a (error-t))`). Fixture `unclosed_delimiter`. JS allow 553 → 555; dir
+  114 → 116. **Deferred** (ranked next slices): unterminated-string `(error-t)`,
+  trailing-junk `(error-t b)`, incomplete-`do` `(error)`, the lexer-classified
+  named kinds (`'ab'`⇒`ErrorOverLongCharacter`, `a--b`⇒`ErrorInvalidOperator`,
+  bad escape/numeric). `end_index` also needs bare-`end` rejection (a grammar
+  change), so it stays blocked.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
@@ -943,8 +961,8 @@ through), so the grammar can grow incrementally.
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
   **prioritized parser-growth backlog** — e.g. associative n-ary flattening
   (`a*b*c`) and unicode operators (lexer).
-  **Follow-ups:** work the backlog up the allowlist;
-  design error-shape parity to promote the blocked recovery cases; wire the
-  oracle gates into CI.
+  **Follow-ups:** work the backlog up the allowlist; continue the error-shape
+  parity slices (the taxonomy infrastructure has landed — see the typed
+  error-node bullet above); wire the oracle gates into CI.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.
 - [ ] `smol_str` interning for symbol names once the semantic model lands.

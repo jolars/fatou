@@ -1,6 +1,10 @@
+{"slug":"js-0026fb4f","input":"\"$(x;y)\"","expected":"(toplevel (string (error x y)))"}
+{"slug":"js-006f1f57","input":"var\"x\"y","expected":"(toplevel (var x (error-t)))"}
+{"slug":"js-00f6acf2","input":"a ? b: c","expected":"(toplevel (? a b (error-t) c))"}
 {"slug":"js-013ac273","input":"return\nx","expected":"(toplevel (return) x)"}
 {"slug":"js-01c31e70","input":"begin a ; b end","expected":"(toplevel (block a b))"}
 {"slug":"js-02079ffa","input":" \"x\" a ; \"y\" b ","expected":"(toplevel (toplevel-; (doc (string \"x\") a) (doc (string \"y\") b)))"}
+{"slug":"js-02515103","input":"const global x","expected":"(toplevel (error (const (global x))))"}
 {"slug":"js-02e33bec","input":"[x=1, y=2]","expected":"(toplevel (vect (= x 1) (= y 2)))"}
 {"slug":"js-03480054","input":"primitive type A $N end","expected":"(toplevel (primitive A ($ N)))"}
 {"slug":"js-037931f4","input":"\"a\\\r\nb\"","expected":"(toplevel (string \"a\" \"b\"))"}
@@ -8,11 +12,13 @@
 {"slug":"js-043bf02a","input":"local x","expected":"(toplevel (local x))"}
 {"slug":"js-0492d7fb","input":"import A.:(+)","expected":"(toplevel (import (importpath A (quote-: +))))"}
 {"slug":"js-04a6fb16","input":"+x","expected":"(toplevel (call-pre + x))"}
+{"slug":"js-04c134e8","input":"struct try end","expected":"(toplevel (struct (error try) (block)))"}
 {"slug":"js-059b8502","input":"``","expected":"(toplevel (macrocall core_@cmd (cmdstring-r \"\")))"}
 {"slug":"js-063e192a","input":"<: A where B","expected":"(toplevel (<:-pre (where A B)))"}
 {"slug":"js-0648bea1","input":"x .--> y","expected":"(toplevel (dotcall-i x --> y))"}
 {"slug":"js-0661a137","input":"x .< y < z","expected":"(toplevel (comparison x (. <) y < z))"}
 {"slug":"js-066dacc4","input":"[x \n\n for a in as]","expected":"(toplevel (comprehension (generator x (= a as))))"}
+{"slug":"js-06bb63a0","input":"if \n end","expected":"(toplevel (if (error) (block)))"}
 {"slug":"js-06e57e65","input":"export outer","expected":"(toplevel (export outer))"}
 {"slug":"js-06f7f7e3","input":"function f{T}() end","expected":"(toplevel (function (call (curly f T)) (block)))"}
 {"slug":"js-07e2b311","input":"\"\"\"\n  x\n y\"\"\"","expected":"(toplevel (string-s \" x\\n\" \"y\"))"}
@@ -38,12 +44,16 @@
 {"slug":"js-10a205bf","input":"let x=1,y=2 end","expected":"(toplevel (let (block (= x 1) (= y 2)) (block)))"}
 {"slug":"js-10d3f0bb","input":" \"doc\" \n foo      ","expected":"(toplevel (doc (string \"doc\") foo))"}
 {"slug":"js-10f37fd5","input":"(x-1)y","expected":"(toplevel (juxtapose (call-i x - 1) y))"}
+{"slug":"js-11c590bd","input":"f(2)2","expected":"(toplevel (call f 2) (error-t 2))"}
 {"slug":"js-11e2e762","input":"function f() where T   end","expected":"(toplevel (function (where (call f) T) (block)))"}
+{"slug":"js-128bdd20","input":"f.'","expected":"(toplevel f (error-t '))"}
 {"slug":"js-12ae32cb","input":"\"\"","expected":"(toplevel (string \"\"))"}
 {"slug":"js-12b10c81","input":"\"hi$(\"ho\")\"","expected":"(toplevel (string \"hi\" (string \"ho\")))"}
 {"slug":"js-12ef57ec","input":"begin f() where T = x end","expected":"(toplevel (block (= (where (call f) T) x)))"}
+{"slug":"js-138895fa","input":"global const x","expected":"(toplevel (global (error (const x))))"}
 {"slug":"js-140ac37d","input":"a->b","expected":"(toplevel (-> a b))"}
 {"slug":"js-1476345e","input":"if a xx else yy end","expected":"(toplevel (if a (block xx) (block yy)))"}
+{"slug":"js-147fac91","input":"a :< b","expected":"(toplevel (call-i a (error : <) b))"}
 {"slug":"js-14ebe56a","input":"break","expected":"(toplevel (break))"}
 {"slug":"js-16406744","input":"r\"\"\"\n x\\\n y\"\"\"","expected":"(toplevel (macrocall @r_str (string-s-r \"x\\\\\\n\" \"y\")))"}
 {"slug":"js-1669b4f6","input":"module Mod\n public A, B \n end","expected":"(toplevel (module Mod (block (public A B))))"}
@@ -55,12 +65,17 @@
 {"slug":"js-19111e49","input":"\"\"\" x\n y\"\"\"","expected":"(toplevel (string-s \" x\\n\" \"y\"))"}
 {"slug":"js-19118d9f","input":"$$a","expected":"(toplevel ($ ($ a)))"}
 {"slug":"js-193ad70e","input":"baremodule A end","expected":"(toplevel (module-bare A (block)))"}
+{"slug":"js-1983c3f9","input":"var\"x\"+","expected":"(toplevel (call-i (var x) + (error)))"}
 {"slug":"js-19e5c1d9","input":"global const x = 1","expected":"(toplevel (global (const (= x 1))))"}
 {"slug":"js-19f5d851","input":"a[i,j]","expected":"(toplevel (ref a i j))"}
 {"slug":"js-1ac6ceb0","input":"+(a...)","expected":"(toplevel (call + (... a)))"}
+{"slug":"js-1b0af392","input":"&)","expected":"(toplevel & (error-t ✘))"}
+{"slug":"js-1b9f9fa4","input":"var\"x\"end","expected":"(toplevel (var x (error-t)))"}
 {"slug":"js-1ba87cf7","input":"{x y}","expected":"(toplevel (bracescat (row x y)))"}
 {"slug":"js-1bd822b7","input":"import .A","expected":"(toplevel (import (importpath . A)))"}
+{"slug":"js-1beba79b","input":"public experimental=true foo, bar","expected":"(toplevel (public experimental) (error-t = true foo ✘ bar))"}
 {"slug":"js-1c86494f","input":"x where {y for y in ys}","expected":"(toplevel (where x (braces (generator y (= y ys)))))"}
+{"slug":"js-1c95c72d","input":"a [i]","expected":"(toplevel (ref a (error-t) i))"}
 {"slug":"js-1cd46e85","input":"\n a","expected":"(toplevel a)"}
 {"slug":"js-1dd1a9c7","input":"let x+=1 ; end","expected":"(toplevel (let (block (+= x 1)) (block)))"}
 {"slug":"js-1e18ed2c","input":"a[i]","expected":"(toplevel (ref a i))"}
@@ -71,20 +86,27 @@
 {"slug":"js-2020c1de","input":"(a; b; c,d)","expected":"(toplevel (tuple-p a (parameters b) (parameters c d)))"}
 {"slug":"js-213cfe89","input":"export @var\"'\"","expected":"(toplevel (export (var @')))"}
 {"slug":"js-2155b9ca","input":"x..y...","expected":"(toplevel (... (call-i x .. y)))"}
+{"slug":"js-217d6a60","input":"function f body end","expected":"(toplevel (function (error f) (block body)))"}
+{"slug":"js-21a9ffda","input":"[x\n,,]","expected":"(toplevel (vect x (error-t ✘)))"}
 {"slug":"js-21b19ccb","input":"(a;b;;c)","expected":"(toplevel (block-p a b c))"}
 {"slug":"js-223c4d20","input":"a = b","expected":"(toplevel (= a b))"}
 {"slug":"js-225893dd","input":"[x]","expected":"(toplevel (vect x))"}
 {"slug":"js-22ffbcb0","input":"A.:+","expected":"(toplevel (. A (quote-: +)))"}
 {"slug":"js-230ec15d","input":"a ? b : c:d","expected":"(toplevel (? a b (call-i c : d)))"}
 {"slug":"js-238e9ee4","input":"x where \n T","expected":"(toplevel (where x T))"}
+{"slug":"js-24c4fb24","input":"A.: +","expected":"(toplevel (. A (quote-: (error-t) +)))"}
 {"slug":"js-24eb7adf","input":"using  A","expected":"(toplevel (using (importpath A)))"}
+{"slug":"js-2516c70f","input":"@M.(x)","expected":"(toplevel (macrocall (dotcall @M (error-t) x)))"}
 {"slug":"js-2537c6e0","input":"[@foo]","expected":"(toplevel (vect (macrocall @foo)))"}
 {"slug":"js-255bf916","input":"[x, y]","expected":"(toplevel (vect x y))"}
 {"slug":"js-259072e6","input":"f(x)","expected":"(toplevel (call f x))"}
 {"slug":"js-25d98952","input":"[a ; \n\n b]","expected":"(toplevel (vcat a b))"}
 {"slug":"js-25f334e5","input":"a ~ b","expected":"(toplevel (call-i a ~ b))"}
+{"slug":"js-265fda17","input":"'","expected":"(toplevel (char (error)))"}
 {"slug":"js-26a99aa3","input":"let x=1\n end","expected":"(toplevel (let (block (= x 1)) (block)))"}
+{"slug":"js-27399b6e","input":"using A, B as C","expected":"(toplevel (using (importpath A) (error (as (importpath B) C))))"}
 {"slug":"js-273c37c1","input":"struct A \n a \n b \n end","expected":"(toplevel (struct A (block a b)))"}
+{"slug":"js-27604c64","input":"A.@B.x","expected":"(toplevel (macrocall (. (. A (quote B)) (error-t) (quote @x))))"}
 {"slug":"js-2846887e","input":"-1.0f0","expected":"(toplevel -1.0f0)"}
 {"slug":"js-28af1263","input":"@+x y","expected":"(toplevel (macrocall @+ x y))"}
 {"slug":"js-28b460a4","input":"\"$((x for y in z))\"","expected":"(toplevel (string (generator x (= y z))))"}
@@ -97,15 +119,19 @@
 {"slug":"js-2d38b159","input":"import ...A","expected":"(toplevel (import (importpath . . . A)))"}
 {"slug":"js-2e169bcf","input":"export \n a","expected":"(toplevel (export a))"}
 {"slug":"js-2e38e77b","input":"()","expected":"(toplevel (tuple-p))"}
+{"slug":"js-2ecf6410","input":"\"a\"x","expected":"(toplevel (juxtapose (string \"a\") (error-t) x))"}
 {"slug":"js-2f4583c8","input":"f'","expected":"(toplevel (call-post f '))"}
 {"slug":"js-2ff186e9","input":"f.(a,b)","expected":"(toplevel (dotcall f a b))"}
 {"slug":"js-30239a61","input":"return x","expected":"(toplevel (return x))"}
 {"slug":"js-3043c4a2","input":"a;;;b;;","expected":"(toplevel (toplevel-; a b))"}
+{"slug":"js-310fb669","input":": foo","expected":"(toplevel (quote-: (error-t) foo))"}
 {"slug":"js-31989902","input":"try x catch $e y end","expected":"(toplevel (try (block x) (catch ($ e) (block y))))"}
+{"slug":"js-31ac0309","input":"try x end","expected":"(toplevel (try (block x) (error-t)))"}
 {"slug":"js-323ab4b8","input":"x\"\"","expected":"(toplevel (macrocall @x_str (string-r \"\")))"}
 {"slug":"js-328a1786","input":"function (f()::S) end","expected":"(toplevel (function (::-i (call f) S) (block)))"}
 {"slug":"js-329349f3","input":"x`str`","expected":"(toplevel (macrocall @x_cmd (cmdstring-r \"str\")))"}
 {"slug":"js-32a94876","input":"module A \n a \n b \n end","expected":"(toplevel (module A (block a b)))"}
+{"slug":"js-32d4edc0","input":"<: =","expected":"(toplevel (= <: (error)))"}
 {"slug":"js-32feecde","input":"import A.:+","expected":"(toplevel (import (importpath A (quote-: +))))"}
 {"slug":"js-32ffc37f","input":"```cmd```","expected":"(toplevel (macrocall core_@cmd (cmdstring-s-r \"cmd\")))"}
 {"slug":"js-330e0021","input":"(a...)","expected":"(toplevel (... a))"}
@@ -117,14 +143,18 @@
 {"slug":"js-340cc5a1","input":"+{T}(x::T)","expected":"(toplevel (call (curly + T) (::-i x T)))"}
 {"slug":"js-34604a8c","input":"@S[a ;; b]","expected":"(toplevel (macrocall @S (ncat-2 a b)))"}
 {"slug":"js-357d871f","input":"in\"str\"","expected":"(toplevel (macrocall @in_str (string-r \"str\")))"}
+{"slug":"js-358671ae","input":"module do \n end","expected":"(toplevel (module (error do) (block)))"}
 {"slug":"js-359448d5","input":"\"\"\"\n x\n\n y\"\"\"","expected":"(toplevel (string-s \"x\\n\" \"\\n\" \"y\"))"}
 {"slug":"js-35c649e9","input":";a","expected":"(toplevel (toplevel-; a))"}
 {"slug":"js-36189cdf","input":"x\"s\"10.0","expected":"(toplevel (macrocall @x_str (string-r \"s\") 10.0))"}
 {"slug":"js-36619afa","input":"-0o22","expected":"(toplevel (call-pre - 0x12))"}
 {"slug":"js-3664a053","input":"a::b->c","expected":"(toplevel (-> (::-i a b) c))"}
+{"slug":"js-36696d34","input":"[x","expected":"(toplevel (vect x (error-t)))"}
 {"slug":"js-369484c6","input":"function (x::T)() end","expected":"(toplevel (function (call (::-i x T)) (block)))"}
 {"slug":"js-37572fe9","input":"module Mod2\n a = 3; b = 6; public a, b\n end","expected":"(toplevel (module Mod2 (block (= a 3) (= b 6) (public a b))))"}
+{"slug":"js-3761c6a3","input":"+₁ x","expected":"(toplevel (call-pre (error +₁) x))"}
 {"slug":"js-37e605a6","input":"@foo (x)","expected":"(toplevel (macrocall @foo x))"}
+{"slug":"js-380918b9","input":"=","expected":"(toplevel (error =))"}
 {"slug":"js-38c73ec9","input":"+0b10010","expected":"(toplevel 0x12)"}
 {"slug":"js-392ee4d7","input":"x\"str\"","expected":"(toplevel (macrocall @x_str (string-r \"str\")))"}
 {"slug":"js-3932036c","input":"try x catch e y end","expected":"(toplevel (try (block x) (catch e (block y))))"}
@@ -146,6 +176,8 @@
 {"slug":"js-3d2d4883","input":"@doc x y\nz","expected":"(toplevel (macrocall @doc x y) z)"}
 {"slug":"js-3d3ee356","input":"@foo (x,y)","expected":"(toplevel (macrocall @foo (tuple-p x y)))"}
 {"slug":"js-3d6d1e53","input":"\"\"\"\n \tx\n \ty\"\"\"","expected":"(toplevel (string-s \"x\\n\" \"y\"))"}
+{"slug":"js-3d845989","input":"try else x finally y end","expected":"(toplevel (try (block) (else (error (block x))) (finally (block y))))"}
+{"slug":"js-3da8c9d7","input":"[(x)for x in xs]","expected":"(toplevel (comprehension (generator x (error-t) (= x xs))))"}
 {"slug":"js-3dce0c13","input":":.&&","expected":"(toplevel (quote-: (. &&)))"}
 {"slug":"js-3de3c224","input":"{x ;;; y}","expected":"(toplevel (bracescat (nrow-3 x y)))"}
 {"slug":"js-3ef7c84e","input":"'\\xq'","expected":"(toplevel (char (ErrorInvalidEscapeSequence)))"}
@@ -158,20 +190,26 @@
 {"slug":"js-402d281a","input":"if a xx end","expected":"(toplevel (if a (block xx)))"}
 {"slug":"js-408b2118","input":"macro f end","expected":"(toplevel (macro f))"}
 {"slug":"js-40a457ac","input":"+2.0","expected":"(toplevel 2.0)"}
+{"slug":"js-41462599","input":"a ? b c","expected":"(toplevel (? a b (error-t) c))"}
+{"slug":"js-419c8358","input":"f (a)","expected":"(toplevel (call f (error-t) a))"}
 {"slug":"js-41bffcf8","input":"[;]","expected":"(toplevel (ncat-1))"}
+{"slug":"js-434fcafd","input":"if true; x ? true end","expected":"(toplevel (if true (block (if x true (error-t) (error-t)))))"}
 {"slug":"js-43905523","input":"A.@S[a]","expected":"(toplevel (macrocall (. A (quote @S)) (vect a)))"}
 {"slug":"js-43931954","input":"<: x","expected":"(toplevel (<:-pre x))"}
 {"slug":"js-441c57c2","input":"const global x = 1","expected":"(toplevel (const (global (= x 1))))"}
 {"slug":"js-443dcfda","input":"[f (x)]","expected":"(toplevel (hcat f x))"}
 {"slug":"js-44884b3e","input":"let x::1 ; end","expected":"(toplevel (let (block (::-i x 1)) (block)))"}
+{"slug":"js-45090b5c","input":"a ?b : c","expected":"(toplevel (? a (error-t) b c))"}
 {"slug":"js-46d673fc","input":"(a=1)","expected":"(toplevel (= a 1))"}
 {"slug":"js-47070deb","input":"x where \n {T}","expected":"(toplevel (where x (braces T)))"}
+{"slug":"js-471d5c84","input":"if true; x ? true : elseif true end","expected":"(toplevel (if true (block (if x true (error-t))) (elseif true (block))))"}
 {"slug":"js-47310745","input":"[x;]","expected":"(toplevel (vcat x))"}
 {"slug":"js-4745d6d9","input":":(::)","expected":"(toplevel (quote-: ::))"}
 {"slug":"js-47663478","input":" \"notdoc\" \n\n foo ","expected":"(toplevel (string \"notdoc\") foo)"}
 {"slug":"js-4766b25e","input":"*(x)","expected":"(toplevel (call * x))"}
 {"slug":"js-47b1514b","input":"A.@.x","expected":"(toplevel (macrocall (. A (quote @.)) x))"}
 {"slug":"js-47fe84f4","input":"export $a, $(a*b)","expected":"(toplevel (export ($ a) ($ (call-i a * b))))"}
+{"slug":"js-48512d42","input":"var\"x\"1","expected":"(toplevel (var x (error-t)))"}
 {"slug":"js-488a8833","input":"function f()::S where T end","expected":"(toplevel (function (where (::-i (call f) S) T) (block)))"}
 {"slug":"js-48bc6592","input":"@x(a, b)","expected":"(toplevel (macrocall-p @x a b))"}
 {"slug":"js-48f62881","input":"+(\n;\n)","expected":"(toplevel (call + (parameters)))"}
@@ -181,6 +219,7 @@
 {"slug":"js-49a6a8b9","input":"try \n x \n catch e \n y \n finally \n z end","expected":"(toplevel (try (block x) (catch e (block y)) (finally (block z))))"}
 {"slug":"js-49b36175","input":"try x catch end","expected":"(toplevel (try (block x) (catch false (block))))"}
 {"slug":"js-49f515e6","input":"export a, \n @b","expected":"(toplevel (export a @b))"}
+{"slug":"js-4a2410ee","input":": end","expected":"(toplevel : (error-t end))"}
 {"slug":"js-4ab88420","input":"a + b .+ c","expected":"(toplevel (dotcall-i (call-i a + b) + c))"}
 {"slug":"js-4b4543b0","input":":(=)","expected":"(toplevel (quote-: =))"}
 {"slug":"js-4bd469ed","input":"a .=> b","expected":"(toplevel (dotcall-i a => b))"}
@@ -197,6 +236,7 @@
 {"slug":"js-4e757add","input":"function f()::g(T) end","expected":"(toplevel (function (::-i (call f) (call g T)) (block)))"}
 {"slug":"js-4e93f00d","input":"'\\u03b1'","expected":"(toplevel (char 'α'))"}
 {"slug":"js-4eeda108","input":"function (f() where T) end","expected":"(toplevel (function (where (call f) T) (block)))"}
+{"slug":"js-4f46be13","input":"+ (a,b)","expected":"(toplevel (call + (error) a b))"}
 {"slug":"js-4f53cda1","input":"[]","expected":"(toplevel (vect))"}
 {"slug":"js-50dc84fd","input":"x -->₁ y","expected":"(toplevel (call-i x -->₁ y))"}
 {"slug":"js-50e1650c","input":"@doc x\n\ny","expected":"(toplevel (macrocall @doc x) y)"}
@@ -205,13 +245,16 @@
 {"slug":"js-52167c1b","input":"(a * b)","expected":"(toplevel (call-i a * b))"}
 {"slug":"js-52b4338f","input":"\"\"\"\n  \"\"\"","expected":"(toplevel (string-s \"\"))"}
 {"slug":"js-538e61ed","input":"(;;)","expected":"(toplevel (block-p))"}
+{"slug":"js-54d626e0","input":":)","expected":"(toplevel : (error-t ✘))"}
 {"slug":"js-54da521b","input":"try catch ; else end","expected":"(toplevel (try (block) (catch false (block)) (else (block))))"}
+{"slug":"js-557adcf4","input":"a[:(end)]","expected":"(toplevel (typed_hcat a (quote-: (error-t)) (error-t)) (error-t end ✘ ✘))"}
 {"slug":"js-55e3b646","input":"a => b","expected":"(toplevel (call-i a => b))"}
 {"slug":"js-56543f8a","input":"import A.B","expected":"(toplevel (import (importpath A B)))"}
 {"slug":"js-56b3bc34","input":"(2)(3)x","expected":"(toplevel (juxtapose 2 3 x))"}
 {"slug":"js-56c50e0b","input":"[x ; y ;; z ; w ;;; a ; b ;; c ; d]","expected":"(toplevel (ncat-3 (nrow-2 (nrow-1 x y) (nrow-1 z w)) (nrow-2 (nrow-1 a b) (nrow-1 c d))))"}
 {"slug":"js-5709d39c","input":"[a ~b]","expected":"(toplevel (hcat a (call-pre ~ b)))"}
 {"slug":"js-5752c3f6","input":"-0x1","expected":"(toplevel (call-pre - 0x01))"}
+{"slug":"js-578363a4","input":"[a b \n ;; c]","expected":"(toplevel (ncat-2 (row a b (error-t)) c))"}
 {"slug":"js-5a835349","input":"+()","expected":"(toplevel (call +))"}
 {"slug":"js-5ac1fca1","input":"@A.foo a b","expected":"(toplevel (macrocall (. A (quote @foo)) a b))"}
 {"slug":"js-5c3f2893","input":"A.@S{a}","expected":"(toplevel (macrocall (. A (quote @S)) (braces a)))"}
@@ -220,12 +263,17 @@
 {"slug":"js-5d3b9cc6","input":"x:y...","expected":"(toplevel (... (call-i x : y)))"}
 {"slug":"js-5dde8968","input":"xx","expected":"(toplevel xx)"}
 {"slug":"js-5f34ad69","input":"function f() end","expected":"(toplevel (function (call f) (block)))"}
+{"slug":"js-5f48712f","input":"x' y","expected":"(toplevel (call-post x ') (error-t y))"}
+{"slug":"js-5f647579","input":"import A as B: x","expected":"(toplevel (import (: (error (as (importpath A) B)) (importpath x))))"}
 {"slug":"js-5faabde7","input":"try x catch var\"#\" y end","expected":"(toplevel (try (block x) (catch (var #) (block y))))"}
 {"slug":"js-5ff44275","input":"x .&& y","expected":"(toplevel (.&& x y))"}
 {"slug":"js-60025fb4","input":"macro f()     end","expected":"(toplevel (macro (call f) (block)))"}
 {"slug":"js-604ad0dd","input":"x .< y .< z","expected":"(toplevel (comparison x (. <) y (. <) z))"}
 {"slug":"js-61a01ce8","input":"var\"\\\"\"","expected":"(toplevel (var \"))"}
+{"slug":"js-61b75364","input":"var\"x\")","expected":"(toplevel (var x) (error-t ✘))"}
 {"slug":"js-61f9deea","input":"@S{a,b}","expected":"(toplevel (macrocall @S (braces a b)))"}
+{"slug":"js-62113d6b","input":"export (x::T)","expected":"(toplevel (export (error (::-i x T))))"}
+{"slug":"js-6254c28f","input":"+=","expected":"(toplevel (error +=))"}
 {"slug":"js-6278bb20","input":"x where T<:S","expected":"(toplevel (where x (<: T S)))"}
 {"slug":"js-62795215","input":"\"$outer\"","expected":"(toplevel (string outer))"}
 {"slug":"js-628d99f7","input":"-2^x","expected":"(toplevel (call-pre - (call-i 2 ^ x)))"}
@@ -240,15 +288,21 @@
 {"slug":"js-671608d5","input":"[x,y ; z]","expected":"(toplevel (vect x y (parameters z)))"}
 {"slug":"js-671e86ec","input":"x^y^z","expected":"(toplevel (call-i x ^ (call-i y ^ z)))"}
 {"slug":"js-673aeeb0","input":"1:2","expected":"(toplevel (call-i 1 : 2))"}
+{"slug":"js-6808df30","input":"'a","expected":"(toplevel (char 'a' (error-t)))"}
 {"slug":"js-68347271","input":"for x in xs end","expected":"(toplevel (for (= x xs) (block)))"}
 {"slug":"js-68841841","input":"a[begin]","expected":"(toplevel (ref a begin))"}
 {"slug":"js-68a87cd1","input":"a .* b","expected":"(toplevel (dotcall-i a * b))"}
 {"slug":"js-68aeea63","input":"f(x) do y body end","expected":"(toplevel (do (call f x) (tuple y) (block body)))"}
+{"slug":"js-68f7107f","input":"x 'y","expected":"(toplevel x (error-t ' 'y'))"}
 {"slug":"js-69d4ff58","input":"\"a\\\r\"","expected":"(toplevel (string \"a\"))"}
 {"slug":"js-69e0ae28","input":" \"doc\" foo         ","expected":"(toplevel (doc (string \"doc\") foo))"}
+{"slug":"js-6be56bdb","input":"[x@y]","expected":"(toplevel (hcat x (error-t ✘ y)))"}
 {"slug":"js-6c8d108a","input":"\"\"\"\n  $a\n  $b\n\"\"\"","expected":"(toplevel (string-s \"  \" a \"\\n\" \"  \" b \"\\n\"))"}
 {"slug":"js-6d57a341","input":"f(a,b)","expected":"(toplevel (call f a b))"}
+{"slug":"js-6e93ce7c","input":"try x catch e+3 y end","expected":"(toplevel (try (block x) (catch (error (call-i e + 3)) (block y))))"}
+{"slug":"js-6f49cdbd","input":"''","expected":"(toplevel (char (error)))"}
 {"slug":"js-6fe4ce2d","input":"import A.(:+)","expected":"(toplevel (import (importpath A (quote-: +))))"}
+{"slug":"js-704830e1","input":"@A.$x a","expected":"(toplevel (macrocall (. A (inert (error x))) a))"}
 {"slug":"js-705e91fc","input":"x .^ y","expected":"(toplevel (dotcall-i x ^ y))"}
 {"slug":"js-708b363b","input":"(x=1, y=2)","expected":"(toplevel (tuple-p (= x 1) (= y 2)))"}
 {"slug":"js-70cde333","input":"<:(a,)","expected":"(toplevel (<: a))"}
@@ -264,6 +318,7 @@
 {"slug":"js-73475cb4","input":"42","expected":"(toplevel 42)"}
 {"slug":"js-73c24f26","input":"import @x","expected":"(toplevel (import (importpath @x)))"}
 {"slug":"js-741f2569","input":"function type() end","expected":"(toplevel (function (call type) (block)))"}
+{"slug":"js-74a9b301","input":"if true; x ? true elseif true end","expected":"(toplevel (if true (block (if x true (error-t) (error-t))) (elseif true (block))))"}
 {"slug":"js-74bdfbc9","input":"i in rhs","expected":"(toplevel (call-i i in rhs))"}
 {"slug":"js-750a6d97","input":"[@foo x]","expected":"(toplevel (vect (macrocall @foo x)))"}
 {"slug":"js-7574f4ae","input":"(x,)","expected":"(toplevel (tuple-p x))"}
@@ -272,6 +327,7 @@
 {"slug":"js-77c30e64","input":"+(a,b)^2","expected":"(toplevel (call-i (call + a b) ^ 2))"}
 {"slug":"js-786e4ea4","input":"abstract type A ; end","expected":"(toplevel (abstract A))"}
 {"slug":"js-78f0be89","input":"a::b","expected":"(toplevel (::-i a b))"}
+{"slug":"js-78f9ac01","input":"function","expected":"(toplevel (function (error (error)) (block (error)) (error-t)))"}
 {"slug":"js-790279e4","input":"-0b10010","expected":"(toplevel (call-pre - 0x12))"}
 {"slug":"js-793e9fa9","input":"x\"s\"y","expected":"(toplevel (macrocall @x_str (string-r \"s\") \"y\"))"}
 {"slug":"js-79b7f48e","input":"a - b - c","expected":"(toplevel (call-i (call-i a - b) - c))"}
@@ -289,14 +345,18 @@
 {"slug":"js-7e0330f6","input":".~x","expected":"(toplevel (dotcall-pre ~ x))"}
 {"slug":"js-7e18f737","input":"a\nb","expected":"(toplevel a b)"}
 {"slug":"js-7e642569","input":"[a~b]","expected":"(toplevel (vect (call-i a ~ b)))"}
+{"slug":"js-7f73ec42","input":"\"a\"\"b\"","expected":"(toplevel (juxtapose (string \"a\") (error-t) (string \"b\")))"}
 {"slug":"js-801f1af0","input":"f.x.y","expected":"(toplevel (. (. f (quote x)) (quote y)))"}
 {"slug":"js-80259ca2","input":"[x ; y ; z]","expected":"(toplevel (vcat x y z))"}
+{"slug":"js-803233ba","input":"if true \n public A, B \n end","expected":"(toplevel (if true (block public) (error-t A ✘ B)))"}
 {"slug":"js-80cfb887","input":"1√x","expected":"(toplevel (juxtapose 1 (call-pre √ x)))"}
 {"slug":"js-80fbaa5e","input":"a ? b :\nc","expected":"(toplevel (? a b c))"}
+{"slug":"js-810e177c","input":"if true; x ? true\nend","expected":"(toplevel (if true (block (if x true (error-t) (error-t)))))"}
 {"slug":"js-81258463","input":"(function f \n end)","expected":"(toplevel (function f))"}
 {"slug":"js-814f6b72","input":"let ; end","expected":"(toplevel (let (block) (block)))"}
 {"slug":"js-81be47a1","input":"a + b + c","expected":"(toplevel (call-i a + b c))"}
 {"slug":"js-82572497","input":"[a b ;; \n c]","expected":"(toplevel (hcat a b c))"}
+{"slug":"js-83672850","input":"[x@y","expected":"(toplevel (hcat x (error-t ✘ y)))"}
 {"slug":"js-83836a50","input":"begin\na\nb\nend","expected":"(toplevel (block a b))"}
 {"slug":"js-840df0f6","input":"10.0f100'","expected":"(toplevel (call-post (ErrorNumericOverflow) '))"}
 {"slug":"js-844874ea","input":"import $A","expected":"(toplevel (import (importpath ($ A))))"}
@@ -312,11 +372,13 @@
 {"slug":"js-87c39e60","input":":<:","expected":"(toplevel (quote-: <:))"}
 {"slug":"js-8846a394","input":"f(a=1; b=2)","expected":"(toplevel (call f (= a 1) (parameters (= b 2))))"}
 {"slug":"js-886eef61","input":"\"\"\"\n\nx\"\"\"","expected":"(toplevel (string-s \"\\n\" \"x\"))"}
+{"slug":"js-887fcea6","input":"x y","expected":"(toplevel x (error-t y))"}
 {"slug":"js-88953ca6","input":"<:(a)","expected":"(toplevel (<:-pre a))"}
 {"slug":"js-88a92223","input":"(x for a in as, b in bs)","expected":"(toplevel (generator x (cartesian_iterator (= a as) (= b bs))))"}
 {"slug":"js-88c49b23","input":"+(;;a)","expected":"(toplevel (call + (parameters) (parameters a)))"}
 {"slug":"js-89aee0bb","input":"isa::T","expected":"(toplevel (::-i isa T))"}
 {"slug":"js-89ca13ac","input":"\"$x$y$z\"","expected":"(toplevel (string x y z))"}
+{"slug":"js-8a8de823","input":"?","expected":"(toplevel (error ?))"}
 {"slug":"js-8ad53fd6","input":"if a \n\n xx \n\n end","expected":"(toplevel (if a (block xx)))"}
 {"slug":"js-8bf1e2ef","input":"$A.@x","expected":"(toplevel (macrocall (. ($ A) (quote @x))))"}
 {"slug":"js-8cf24212","input":"module M; public ⤈; end","expected":"(toplevel (module M (block (public ⤈))))"}
@@ -329,10 +391,12 @@
 {"slug":"js-8f5b1a26","input":"var\"\\\\\\\"\"","expected":"(toplevel (var \\\"))"}
 {"slug":"js-8fc30a05","input":"'α'","expected":"(toplevel (char 'α'))"}
 {"slug":"js-8fd3d513","input":"macro ($f)()  end","expected":"(toplevel (macro (call ($ f)) (block)))"}
+{"slug":"js-8fdce19e","input":"using A as B","expected":"(toplevel (using (error (as (importpath A) B))))"}
 {"slug":"js-90827a2e","input":"a--b","expected":"(toplevel (call-i a (ErrorInvalidOperator) b))"}
 {"slug":"js-90fb496e","input":"f'ᵀ","expected":"(toplevel (call-post f 'ᵀ))"}
 {"slug":"js-9100dc2a","input":"(x for a in as, b in bs if z)","expected":"(toplevel (generator x (filter (cartesian_iterator (= a as) (= b bs)) z)))"}
 {"slug":"js-91521263","input":"\"\"\"\n \tx\n  y\"\"\"","expected":"(toplevel (string-s \"\\tx\\n\" \" y\"))"}
+{"slug":"js-918a0e9d","input":"a? b : c","expected":"(toplevel (? a (error-t) b c))"}
 {"slug":"js-91c18a50","input":"A.@doc x\ny","expected":"(toplevel (macrocall (. A (quote @doc)) x y))"}
 {"slug":"js-922aecca","input":"public = 4","expected":"(toplevel (= public 4))"}
 {"slug":"js-937fb0b6","input":"macro (type)(ex) end","expected":"(toplevel (macro (call type ex) (block)))"}
@@ -357,6 +421,7 @@
 {"slug":"js-9a1149da","input":"@. x","expected":"(toplevel (macrocall @. x))"}
 {"slug":"js-9a292ca6","input":"$f(x)","expected":"(toplevel (call ($ f) x))"}
 {"slug":"js-9a2b0b62","input":"\"\"\"\n doc\n \"\"\" foo","expected":"(toplevel (doc (string-s \"doc\\n\") foo))"}
+{"slug":"js-9a5c92cd","input":".+=","expected":"(toplevel (error (. +=)))"}
 {"slug":"js-9b26ff60","input":"[x for a in as]","expected":"(toplevel (comprehension (generator x (= a as))))"}
 {"slug":"js-9b4a8489","input":"function (x=1) end","expected":"(toplevel (function (tuple-p (= x 1)) (block)))"}
 {"slug":"js-9b9946da","input":"a;b \n c;d","expected":"(toplevel (toplevel-; a b) (toplevel-; c d))"}
@@ -372,6 +437,7 @@
 {"slug":"js-9ecaac93","input":"primitive type A 32 ; end","expected":"(toplevel (primitive A 32))"}
 {"slug":"js-9edf5083","input":"<:{T}(x::T)","expected":"(toplevel (call (curly <: T) (::-i x T)))"}
 {"slug":"js-9f265a80","input":"T[a b; c d]","expected":"(toplevel (typed_vcat T (row a b) (row c d)))"}
+{"slug":"js-9f8d2fe1","input":"* <: A","expected":"(toplevel (call-pre (error *) (<:-pre A)))"}
 {"slug":"js-9fbb7d97","input":"quote body end","expected":"(toplevel (quote (block body)))"}
 {"slug":"js-9fd36568","input":"(x...; y)","expected":"(toplevel (tuple-p (... x) (parameters y)))"}
 {"slug":"js-9fdd0b63","input":"a[end]","expected":"(toplevel (ref a end))"}
@@ -379,17 +445,21 @@
 {"slug":"js-a1112011","input":"+(a,b)","expected":"(toplevel (call + a b))"}
 {"slug":"js-a134572b","input":"x .< y","expected":"(toplevel (dotcall-i x < y))"}
 {"slug":"js-a15cb95f","input":"if a xx elseif b yy end","expected":"(toplevel (if a (block xx) (elseif b (block yy))))"}
+{"slug":"js-a1ca6b11","input":"+)","expected":"(toplevel + (error-t ✘))"}
 {"slug":"js-a2a98d77","input":"a \n b","expected":"(toplevel a b)"}
 {"slug":"js-a2d8af0b","input":"macro $f()    end","expected":"(toplevel (macro (call ($ f)) (block)))"}
 {"slug":"js-a315d163","input":"[a ;; \n b]","expected":"(toplevel (ncat-2 a b))"}
 {"slug":"js-a318c242","input":"+","expected":"(toplevel +)"}
+{"slug":"js-a3664b67","input":"const x","expected":"(toplevel (error (const x)))"}
 {"slug":"js-a37773f7","input":"@end x","expected":"(toplevel (macrocall @end x))"}
 {"slug":"js-a3f0aa2a","input":"\"\"\"\n  x\n \ty\"\"\"","expected":"(toplevel (string-s \" x\\n\" \"\\ty\"))"}
 {"slug":"js-a3fb44cc","input":"<: \n","expected":"(toplevel <:)"}
 {"slug":"js-a5897938","input":"+(a;)","expected":"(toplevel (call-pre + (block-p a)))"}
 {"slug":"js-a5e912fa","input":"x >: y","expected":"(toplevel (>: x y))"}
 {"slug":"js-a60ca8aa","input":".+(a)^2","expected":"(toplevel (dotcall-pre + (call-i a ^ 2)))"}
+{"slug":"js-a60e7cdd","input":"\"$(x for y in z)\"","expected":"(toplevel (string (error (generator x (= y z)))))"}
 {"slug":"js-a643eeec","input":"f.$x","expected":"(toplevel (. f (inert ($ x))))"}
+{"slug":"js-a669ac63","input":":\nfoo","expected":"(toplevel (quote-: (error-t) foo))"}
 {"slug":"js-a73c4b25","input":"[1 2:3 :a]","expected":"(toplevel (hcat 1 (call-i 2 : 3) (quote-: a)))"}
 {"slug":"js-a73e110d","input":"const x,y = 1,2","expected":"(toplevel (const (= (tuple x y) (tuple 1 2))))"}
 {"slug":"js-a788feff","input":"import ....A","expected":"(toplevel (import (importpath . . . . A)))"}
@@ -397,7 +467,10 @@
 {"slug":"js-a85ff3b0","input":"\"a\\\r\n\"","expected":"(toplevel (string \"a\"))"}
 {"slug":"js-a8766b23","input":"[x,]","expected":"(toplevel (vect x))"}
 {"slug":"js-a87d191d","input":"primitive type A 32 end","expected":"(toplevel (primitive A 32))"}
+{"slug":"js-a8d38457","input":"const x .= 1","expected":"(toplevel (error (const (.= x 1))))"}
 {"slug":"js-a916f049","input":"macro (:)(ex) end","expected":"(toplevel (macro (call : ex) (block)))"}
+{"slug":"js-a991f61a","input":"a ? b :c","expected":"(toplevel (? a b (error-t) c))"}
+{"slug":"js-a9ef4778","input":"\"a\"begin end","expected":"(toplevel (juxtapose (string \"a\") (error-t) (block)))"}
 {"slug":"js-aa0e6a42","input":"(; a=1; b=2)","expected":"(toplevel (tuple-p (parameters (= a 1)) (parameters (= b 2))))"}
 {"slug":"js-aae7e166","input":"a .+= b","expected":"(toplevel (.+= a b))"}
 {"slug":"js-aae88021","input":"var\"x\" ","expected":"(toplevel (var x))"}
@@ -405,6 +478,7 @@
 {"slug":"js-ab3caeec","input":"A.$B.@x","expected":"(toplevel (macrocall (. (. A (inert ($ B))) (quote @x))))"}
 {"slug":"js-abbe51ed","input":"a, b = c, d","expected":"(toplevel (= (tuple a b) (tuple c d)))"}
 {"slug":"js-abfeab52","input":"[x +y]","expected":"(toplevel (hcat x (call-pre + y)))"}
+{"slug":"js-ac4d250c","input":"x .y","expected":"(toplevel (. x (error-t) (quote y)))"}
 {"slug":"js-ac8bb0f2","input":"[1 :a]","expected":"(toplevel (hcat 1 (quote-: a)))"}
 {"slug":"js-ac8d7f41","input":"import A as B","expected":"(toplevel (import (as (importpath A) B)))"}
 {"slug":"js-acfc6b49","input":"import A; B","expected":"(toplevel (toplevel-; (import (importpath A)) B))"}
@@ -414,6 +488,7 @@
 {"slug":"js-ae2710c2","input":"for x in xs, y in ys \n a \n end","expected":"(toplevel (for (cartesian_iterator (= x xs) (= y ys)) (block a)))"}
 {"slug":"js-ae52f662","input":"import A: x","expected":"(toplevel (import (: (importpath A) (importpath x))))"}
 {"slug":"js-ae569a2a","input":"mutable struct A end","expected":"(toplevel (struct-mut A (block)))"}
+{"slug":"js-aec1df42","input":".<: x","expected":"(toplevel (dotcall-pre (error (. <:)) x))"}
 {"slug":"js-af666625","input":"try x catch \n y end","expected":"(toplevel (try (block x) (catch false (block y))))"}
 {"slug":"js-afa84f7f","input":"import A: +, ==","expected":"(toplevel (import (: (importpath A) (importpath +) (importpath ==))))"}
 {"slug":"js-afbd989d","input":"x^y","expected":"(toplevel (call-i x ^ y))"}
@@ -421,13 +496,21 @@
 {"slug":"js-b035c294","input":"f(a; b; c)","expected":"(toplevel (call f a (parameters b) (parameters c)))"}
 {"slug":"js-b0576c05","input":"while cond body end","expected":"(toplevel (while cond (block body)))"}
 {"slug":"js-b10fa164","input":"i = rhs","expected":"(toplevel (= i rhs))"}
+{"slug":"js-b125918f","input":"return)","expected":"(toplevel (return) (error-t ✘))"}
 {"slug":"js-b1495613","input":":end","expected":"(toplevel (quote-: end))"}
+{"slug":"js-b1ac400e","input":":(end)","expected":"(toplevel (quote-: (error-t)) (error-t end ✘))"}
+{"slug":"js-b242d390","input":"function begin() end","expected":"(toplevel (function (call (error begin)) (block)))"}
 {"slug":"js-b2c5bc29","input":"abstract type A <: B end","expected":"(toplevel (abstract (<: A B)))"}
+{"slug":"js-b2e95475","input":"@[x] y z","expected":"(toplevel (macrocall (error (vect x)) y z))"}
+{"slug":"js-b32e242a","input":"\"$(x,y)\"","expected":"(toplevel (string (error x y)))"}
 {"slug":"js-b3691b92","input":"+(\n;\n;\n)","expected":"(toplevel (call-pre + (block-p)))"}
+{"slug":"js-b3d1db31","input":"/x","expected":"(toplevel (call-pre (error /) x))"}
 {"slug":"js-b47ce3a1","input":"[x+y +z]","expected":"(toplevel (hcat (call-i x + y) (call-pre + z)))"}
+{"slug":"js-b4a566a6","input":"\"str","expected":"(toplevel (string \"str\" (error-t)))"}
 {"slug":"js-b4ff6d3b","input":"\"\"\"\n\tx\n y\"\"\"","expected":"(toplevel (string-s \"\\tx\\n\" \" y\"))"}
 {"slug":"js-b55b2b19","input":"@S[a].b","expected":"(toplevel (. (macrocall @S (vect a)) (quote b)))"}
 {"slug":"js-b595b214","input":"2x","expected":"(toplevel (juxtapose 2 x))"}
+{"slug":"js-b5967309","input":"[a ;; b c]","expected":"(toplevel (ncat-2 a (row b (error-t) c)))"}
 {"slug":"js-b5bea41b","input":"true","expected":"(toplevel true)"}
 {"slug":"js-b6224d6c","input":"a ? b : c","expected":"(toplevel (? a b c))"}
 {"slug":"js-b6643c20","input":"@S{a}.b","expected":"(toplevel (. (macrocall @S (braces a)) (quote b)))"}
@@ -435,8 +518,12 @@
 {"slug":"js-b6c14267","input":"(; a=1)","expected":"(toplevel (tuple-p (parameters (= a 1))))"}
 {"slug":"js-b74f62c4","input":"(x,y)","expected":"(toplevel (tuple-p x y))"}
 {"slug":"js-b7bb6850","input":"export @a","expected":"(toplevel (export @a))"}
+{"slug":"js-b8cce2e4","input":"S {a}","expected":"(toplevel (curly S (error-t) a))"}
+{"slug":"js-ba5ec51d","input":")","expected":"(toplevel (error) (error-t ✘))"}
 {"slug":"js-babd656c","input":"@var\"#\" a","expected":"(toplevel (macrocall (var @#) a))"}
 {"slug":"js-bb93e85b","input":".+","expected":"(toplevel (. +))"}
+{"slug":"js-bc08a2b0","input":"@doc x\nend","expected":"(toplevel (macrocall @doc x) (error end))"}
+{"slug":"js-bdc67126","input":"if a xx else if b yy end","expected":"(toplevel (if a (block xx) (error-t) (elseif b (block yy))))"}
 {"slug":"js-beb4a3a3","input":"function (:)() end","expected":"(toplevel (function (call :) (block)))"}
 {"slug":"js-bf651d22","input":"<: <: x","expected":"(toplevel (<:-pre (<:-pre x)))"}
 {"slug":"js-bf71b3b1","input":"function (f() where T) where U end","expected":"(toplevel (function (where (where (call f) T) U) (block)))"}
@@ -457,7 +544,10 @@
 {"slug":"js-c574cd37","input":"2(x)","expected":"(toplevel (juxtapose 2 x))"}
 {"slug":"js-c58e7df3","input":"import A: x, y","expected":"(toplevel (import (: (importpath A) (importpath x) (importpath y))))"}
 {"slug":"js-c5f10289","input":"r\"\"\"\n x\n y\"\"\"","expected":"(toplevel (macrocall @r_str (string-s-r \"x\\n\" \"y\")))"}
+{"slug":"js-c5f76b75","input":"<: )","expected":"(toplevel <: (error-t ✘))"}
 {"slug":"js-c651c24f","input":"f.$(x+y)","expected":"(toplevel (. f (inert ($ (call-i x + y)))))"}
+{"slug":"js-c6f083a9","input":"1:\n2","expected":"(toplevel (call-i 1 : (error)) 2)"}
+{"slug":"js-c74994ac","input":" \"notdoc\" ]        ","expected":"(toplevel (string \"notdoc\") (error-t ✘))"}
 {"slug":"js-c75e926e","input":"function f end","expected":"(toplevel (function f))"}
 {"slug":"js-c75f692a","input":"\"a\\\n\"","expected":"(toplevel (string \"a\"))"}
 {"slug":"js-c7b5ee9c","input":"\"$(x)\"","expected":"(toplevel (string x))"}
@@ -476,27 +566,34 @@
 {"slug":"js-cf3bae39","input":"-2","expected":"(toplevel -2)"}
 {"slug":"js-cf78ea89","input":"'ab'","expected":"(toplevel (char (ErrorOverLongCharacter)))"}
 {"slug":"js-d005b3d4","input":"let ; body end","expected":"(toplevel (let (block) (block body)))"}
+{"slug":"js-d072fbb4","input":"if end","expected":"(toplevel (if (error) (block)))"}
 {"slug":"js-d08565c3","input":"(x for a in as for b in bs)","expected":"(toplevel (generator x (= a as) (= b bs)))"}
 {"slug":"js-d0b8bf98","input":"T[x for x in xs]","expected":"(toplevel (typed_comprehension T (generator x (= x xs))))"}
 {"slug":"js-d0c63a7a","input":"+0x12","expected":"(toplevel 0x12)"}
 {"slug":"js-d0d79879","input":"f.(a=1; b=2)","expected":"(toplevel (dotcall f (= a 1) (parameters (= b 2))))"}
 {"slug":"js-d18b6658","input":"export +, ==","expected":"(toplevel (export + ==))"}
 {"slug":"js-d24d5634","input":"global x += 1","expected":"(toplevel (global (+= x 1)))"}
+{"slug":"js-d27f8e09","input":".+)","expected":"(toplevel (. +) (error-t ✘))"}
 {"slug":"js-d2cb9522","input":"&a","expected":"(toplevel (& a))"}
 {"slug":"js-d379a6e3","input":"-0x12","expected":"(toplevel (call-pre - 0x12))"}
 {"slug":"js-d39fba0b","input":"A.@x(y)","expected":"(toplevel (macrocall-p (. A (quote @x)) y))"}
 {"slug":"js-d3a1d75d","input":"function f() \n a \n b end","expected":"(toplevel (function (call f) (block a b)))"}
 {"slug":"js-d438a18a","input":"x < y","expected":"(toplevel (call-i x < y))"}
+{"slug":"js-d48e351c","input":"outer i = rhs","expected":"(toplevel outer (error-t i = rhs))"}
 {"slug":"js-d4bd65f7","input":"+(\n;a)","expected":"(toplevel (call + (parameters a)))"}
 {"slug":"js-d5375db9","input":"x --> y","expected":"(toplevel (--> x y))"}
+{"slug":"js-d65b3394","input":"f. (x)","expected":"(toplevel (dotcall f (error-t) x))"}
 {"slug":"js-d7273fe6","input":"[\n  ;; \n ]","expected":"(toplevel (ncat-2))"}
 {"slug":"js-d749929f","input":"'a'","expected":"(toplevel (char 'a'))"}
 {"slug":"js-d76d80e6","input":"try x catch ; y end","expected":"(toplevel (try (block x) (catch false (block y))))"}
+{"slug":"js-d7b0ba21","input":"begin \n public A, B \n end","expected":"(toplevel (block public (error-t A ✘ B)))"}
 {"slug":"js-d855305c","input":"var\"\\\\x\"","expected":"(toplevel (var \\\\x))"}
 {"slug":"js-d87ab658","input":"S{a,b}","expected":"(toplevel (curly S a b))"}
+{"slug":"js-d89d29e0","input":"x.3","expected":"(toplevel x (error-t 0.3))"}
 {"slug":"js-d9bd3600","input":"(a=1)[]","expected":"(toplevel (ref (= a 1)))"}
 {"slug":"js-d9d3be14","input":"try \n x \n catch e \n y \n else z finally \n w end","expected":"(toplevel (try (block x) (catch e (block y)) (else (block z)) (finally (block w))))"}
 {"slug":"js-d9da4426","input":"\"\"\"\n$x\n a\"\"\"","expected":"(toplevel (string-s x \"\\n\" \" a\"))"}
+{"slug":"js-da8ab15a","input":"x@y","expected":"(toplevel x (error-t ✘ y))"}
 {"slug":"js-daaceab4","input":"[a ~ b c]","expected":"(toplevel (hcat (call-i a ~ b) c))"}
 {"slug":"js-db694f69","input":"x → y","expected":"(toplevel (call-i x → y))"}
 {"slug":"js-db974d0b","input":"a +₁ b +₁ c","expected":"(toplevel (call-i (call-i a +₁ b) +₁ c))"}
@@ -512,7 +609,9 @@
 {"slug":"js-e03ef02a","input":"in::T","expected":"(toplevel (::-i in T))"}
 {"slug":"js-e0aa726d","input":"function ((f()::S) where T) end","expected":"(toplevel (function (where (::-i (call f) S) T) (block)))"}
 {"slug":"js-e0e7297f","input":"-2[1, 3]","expected":"(toplevel (call-pre - (ref 2 1 3)))"}
+{"slug":"js-e110b7d5","input":"outer (x,y) = rhs","expected":"(toplevel (= (call outer (error-t) x y) rhs))"}
 {"slug":"js-e13fa52a","input":"√x","expected":"(toplevel (call-pre √ x))"}
+{"slug":"js-e151591c","input":"public export=true foo, bar","expected":"(toplevel (public export) (error-t = true foo ✘ bar))"}
 {"slug":"js-e16974cd","input":"module A \n \"x\"\na\n end","expected":"(toplevel (module A (block (doc (string \"x\") a))))"}
 {"slug":"js-e197c4bd","input":"f() do\nend","expected":"(toplevel (do (call f) (tuple) (block)))"}
 {"slug":"js-e256ee8e","input":"continue","expected":"(toplevel (continue))"}
@@ -525,18 +624,25 @@
 {"slug":"js-e5c7f303","input":"x == y < z","expected":"(toplevel (comparison x == y < z))"}
 {"slug":"js-e5d8580f","input":"a … b","expected":"(toplevel (call-i a … b))"}
 {"slug":"js-e6723c8f","input":"public(x::String) = false","expected":"(toplevel (= (call public (::-i x String)) false))"}
+{"slug":"js-e6d7437a","input":"(begin end)x","expected":"(toplevel (block) (error-t x))"}
+{"slug":"js-e704747c","input":"macro while(ex) end","expected":"(toplevel (macro (call (error while) ex) (block)))"}
 {"slug":"js-e73f0d2f","input":"local const x = 1","expected":"(toplevel (local (const (= x 1))))"}
 {"slug":"js-e7737c16","input":"(1:\n2)","expected":"(toplevel (call-i 1 : 2))"}
 {"slug":"js-e7ffd43d","input":"struct A end","expected":"(toplevel (struct A (block)))"}
 {"slug":"js-e811d4a1","input":"function \n f() end","expected":"(toplevel (function (call f) (block)))"}
 {"slug":"js-e83b620a","input":":(::\n)","expected":"(toplevel (quote-: ::))"}
+{"slug":"js-e8b41b39","input":"[a b ;; c]","expected":"(toplevel (ncat-2 (row a b (error-t)) c))"}
+{"slug":"js-e8bedab7","input":"\"$y\"x","expected":"(toplevel (juxtapose (string y) (error-t) x))"}
+{"slug":"js-e9213d60","input":".+ =","expected":"(toplevel (= (. +) (error)))"}
 {"slug":"js-ea753461","input":"outer\"str\"","expected":"(toplevel (macrocall @outer_str (string-r \"str\")))"}
 {"slug":"js-ec84ac67","input":"(x)","expected":"(toplevel x)"}
 {"slug":"js-ed563534","input":"(a=1; b=2)","expected":"(toplevel (block-p (= a 1) (= b 2)))"}
 {"slug":"js-ee0a3ae4","input":"(1:2)","expected":"(toplevel (call-i 1 : 2))"}
+{"slug":"js-ee1eea21","input":"import A: x, B: y","expected":"(toplevel (import (: (importpath A) (importpath x) (importpath B) (error-t (importpath y)))))"}
 {"slug":"js-ee8d7fdd","input":"x where {T S}","expected":"(toplevel (where x (bracescat (row T S))))"}
 {"slug":"js-ee8e4e0c","input":"@A.B.x","expected":"(toplevel (macrocall (. (. A (quote B)) (quote @x))))"}
 {"slug":"js-ef1156e2","input":"outer = rhs","expected":"(toplevel (= outer rhs))"}
+{"slug":"js-efa48a00","input":"?\"str\"","expected":"(toplevel (call-pre (error ?) (string \"str\")))"}
 {"slug":"js-efa5ade7","input":"global x ~ 1","expected":"(toplevel (global (call-i x ~ 1)))"}
 {"slug":"js-effed8f1","input":".+(a,)","expected":"(toplevel (call (. +) a))"}
 {"slug":"js-f03a05f5","input":"function f() where {T} end","expected":"(toplevel (function (where (call f) (braces T)) (block)))"}
@@ -551,6 +657,7 @@
 {"slug":"js-f44f5372","input":"+(a)(x,y)^2","expected":"(toplevel (call-pre + (call-i (call a x y) ^ 2)))"}
 {"slug":"js-f4c437eb","input":"-2*x","expected":"(toplevel (call-i -2 * x))"}
 {"slug":"js-f62b4241","input":"a..b","expected":"(toplevel (call-i a .. b))"}
+{"slug":"js-f68656dd","input":"var\"x\"(","expected":"(toplevel (call (var x) (error-t)))"}
 {"slug":"js-f6b3387f","input":"+(;)","expected":"(toplevel (call + (parameters)))"}
 {"slug":"js-f6bfe0fc","input":"function (A).f() end","expected":"(toplevel (function (call (. A (quote f))) (block)))"}
 {"slug":"js-f6fe37ab","input":"\"a\\\nb\"","expected":"(toplevel (string \"a\" \"b\"))"}
@@ -561,8 +668,10 @@
 {"slug":"js-f94dcc4b","input":"x .|> y","expected":"(toplevel (dotcall-i x |> y))"}
 {"slug":"js-f965a412","input":"@doc x\ny","expected":"(toplevel (macrocall @doc x y))"}
 {"slug":"js-f9a269a2","input":"(i,j) in iter","expected":"(toplevel (call-i (tuple-p i j) in iter))"}
+{"slug":"js-f9c36919","input":" \"notdoc\" \n]      ","expected":"(toplevel (string \"notdoc\") (error) (error-t ✘))"}
 {"slug":"js-f9c7015b","input":"\"$in\"","expected":"(toplevel (string in))"}
 {"slug":"js-f9f66cc8","input":":foo","expected":"(toplevel (quote-: foo))"}
+{"slug":"js-fa8109ce","input":"[x\n,, y]","expected":"(toplevel (vect x (error-t ✘ y)))"}
 {"slug":"js-fa81321d","input":"+(a,b)(x)^2","expected":"(toplevel (call-i (call (call + a b) x) ^ 2))"}
 {"slug":"js-fb436f81","input":"(x for a in as if z for b in bs)","expected":"(toplevel (generator x (filter (= a as) z) (= b bs)))"}
 {"slug":"js-fb523956","input":"@! x","expected":"(toplevel (macrocall @! x))"}
@@ -571,5 +680,6 @@
 {"slug":"js-fc2338c2","input":"+(a;;)","expected":"(toplevel (call-pre + (block-p a)))"}
 {"slug":"js-fd12849d","input":"\"$var\"","expected":"(toplevel (string var))"}
 {"slug":"js-fe010859","input":"x₁","expected":"(toplevel x₁)"}
+{"slug":"js-fe911108","input":"@A.B.@x a","expected":"(toplevel (macrocall (. (. A (quote B)) (quote (error-t) @x)) a))"}
 {"slug":"js-ff024f11","input":"\"\"\"\nx\"\"\"","expected":"(toplevel (string-s \"x\"))"}
 {"slug":"js-ffe87f76","input":"abstract type A <: B{T,S} end","expected":"(toplevel (abstract (<: A (curly B T S))))"}
