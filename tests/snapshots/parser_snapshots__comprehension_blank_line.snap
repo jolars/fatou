@@ -1,0 +1,46 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..38
+  COMPREHENSION@0..15
+    LBRACKET@0..1 "["
+    NAME@1..2
+      IDENT@1..2 "x"
+    NEWLINE@2..3 "\n"
+    FOR_BINDING@3..14
+      FOR_KW@3..6 "for"
+      WHITESPACE@6..7 " "
+      NAME@7..8
+        IDENT@7..8 "a"
+      WHITESPACE@8..9 " "
+      IDENT@9..11 "in"
+      WHITESPACE@11..12 " "
+      NAME@12..14
+        IDENT@12..14 "as"
+    RBRACKET@14..15 "]"
+  NEWLINE@15..16 "\n"
+  COMPREHENSION@16..37
+    LBRACKET@16..17 "["
+    NAME@17..18
+      IDENT@17..18 "y"
+    NEWLINE@18..19 "\n"
+    NEWLINE@19..20 "\n"
+    FOR_BINDING@20..31
+      FOR_KW@20..23 "for"
+      WHITESPACE@23..24 " "
+      NAME@24..25
+        IDENT@24..25 "b"
+      WHITESPACE@25..26 " "
+      IDENT@26..28 "in"
+      WHITESPACE@28..29 " "
+      NAME@29..31
+        IDENT@29..31 "bs"
+    WHITESPACE@31..32 " "
+    COMPREHENSION_IF@32..36
+      IF_KW@32..34 "if"
+      WHITESPACE@34..35 " "
+      NAME@35..36
+        IDENT@35..36 "p"
+    RBRACKET@36..37 "]"
+  NEWLINE@37..38 "\n"

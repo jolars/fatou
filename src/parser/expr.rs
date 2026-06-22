@@ -1598,6 +1598,22 @@ fn newline_run_precedes_comma(ctx: &ParserCtx<'_>, look: usize) -> bool {
     ctx.token(peek).map(|t| t.kind) == Some(TokKind::Comma)
 }
 
+/// Whether the trivia run beginning at the newline `look` is followed by a
+/// `for`. A blank line (or any newlines) before the comprehension `for` is
+/// insignificant: `[x \n\n for a in as]` is `(comprehension …)`, not a `vcat`.
+/// A second element before the `for` is hit first, keeping `[1\n2\nfor …]` a
+/// matrix.
+fn newline_run_precedes_for(ctx: &ParserCtx<'_>, look: usize) -> bool {
+    let mut peek = look;
+    while matches!(
+        ctx.token(peek).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment | TokKind::Newline)
+    ) {
+        peek += 1;
+    }
+    ctx.token(peek).map(|t| t.kind) == Some(TokKind::ForKw)
+}
+
 /// Parse a `[...]` literal at prefix position (postfix `[` is indexing). A `,`
 /// after the first element (or an empty/single `[x]`) is a `VECT_EXPR`, reusing
 /// the arg-list machinery; a space-, `;`-, or newline-separated layout is a
@@ -1665,6 +1681,16 @@ fn parse_bracket_literal(
             diagnostics,
         ),
         None | Some(TokKind::RBracket | TokKind::Comma) => vect(diagnostics),
+        // A newline run before the comprehension `for` is insignificant, so
+        // `[x \n\n for a in as]` stays a `(comprehension …)`.
+        Some(TokKind::Newline) if newline_run_precedes_for(ctx, look) => parse_comprehension(
+            ctx,
+            lbrk,
+            first,
+            SyntaxKind::COMPREHENSION,
+            TokKind::RBracket,
+            diagnostics,
+        ),
         // A newline run is a row separator only if it separates two *elements*.
         // When the next significant token past the newline(s) is a `,`, the comma
         // is the real separator and the newline is insignificant whitespace, so
@@ -2626,6 +2652,14 @@ fn parse_braces(
         look += 1;
     }
     match ctx.token(look).map(|t| t.kind) {
+        Some(TokKind::ForKw) => Some(parse_comprehension(
+            ctx,
+            start,
+            first,
+            SyntaxKind::BRACES_COMPREHENSION,
+            TokKind::RBrace,
+            diagnostics,
+        )),
         None | Some(TokKind::RBrace | TokKind::Comma) => Some(braces(diagnostics)),
         _ => Some(parse_matrix(
             ctx,

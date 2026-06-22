@@ -206,6 +206,8 @@ through), so the grammar can grow incrementally.
   `(ncat-1)`/`(ncat-2)` via `parse_empty_ncat`. A newline first separator that is
   followed (past trivia) by a `,` is insignificant whitespace — the comma is the
   real vector separator — so `[x\n, y]` → `(vect x y)` (`newline_run_precedes_comma`).
+  Likewise a newline run before the comprehension `for` is insignificant, so
+  `[x \n\n for a in as]` → `(comprehension …)` (`newline_run_precedes_for`).
   Typed concatenation (`T[x y]` → `(typed_hcat T x y)`, `T[a;b]` →
   `(typed_vcat T a b)`, `T[a ;; b]` → `(typed_ncat-2 T a b)`, `T[;]` →
   `(typed_ncat-1 T)`): a space/`;`-separated bracket body after a value builds a
@@ -215,7 +217,10 @@ through), so the grammar can grow incrementally.
   `(bracescat a b)`, `{a;;b}` → `(bracescat (nrow-2 a b))`): `parse_braces`
   dispatches comma → `BRACES`, space/`;` → `BRACESCAT_EXPR`; the projector always
   heads `bracescat`, keeping a dim-1 layout's children but nesting a higher-dim
-  layout as a single `row`/`nrow-d` child.
+  layout as a single `row`/`nrow-d` child. A `for` after the first brace element
+  is a brace generator (`{y for y in ys}` → `(braces (generator y (= y ys)))`):
+  `parse_braces` routes it to the shared `parse_comprehension` with a
+  `BRACES_COMPREHENSION` node the projector heads `braces`.
   Follow-ups: tuple-destructuring loop vars (`for (i, j) in …`) and mixed
   space+`;;` rows (`[x y ;; z w]`, an `(error-t)` shape).
 - [x] Transpose/adjoint postfix `'`. The lexer disambiguates `'` by the

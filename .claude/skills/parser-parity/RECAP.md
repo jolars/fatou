@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **545 allowlisted**, 28 divergence, 2 unsupported.
-Dir corpus: **111 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **547 allowlisted**, 28 divergence, 0 unsupported.
+Dir corpus: **113 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "splat/vararg `...` precedence" are `[x]`
 in `TODO.md`.
 
@@ -32,34 +32,43 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22k)
+## Latest session (2026-06-22l)
 
-**Empty all-semicolon operator group (js-7a161b5a, js-b3691b92).** `+(;;)` ⇒
-`(call-pre + (block-p))`, `+(\n;\n;\n)` likewise. The bug: in
-`unary_op_paren_is_call` (`expr.rs`), a *leading* `;` after the `(`
-unconditionally reported a paren-call, so `+(;;)` became `(call + (parameters)
-(parameters))`. But Julia resolves an empty multi-`;` group `(;;)` to a *block*
-`(block-p)`, and a unary operator glued to a block prefixes it rather than
-calling. Rule from probing: a leading `;` is a call (`+(;)` → `(call +
-(parameters))`, `+(; a; b)` → two parameters, `+(; a=1)` → params) *unless* the
-parens form a block — i.e. `paren_is_block` is true (empty group, 2+ semis,
-`num_subexprs==0`). Fix: the `Semicolon` arm now returns
-`!paren_is_block(ctx, lparen_idx)` instead of unconditional `true`. Non-unary
-operators (`*(;;)` → `(call * (parameters) (parameters))`) are unaffected — they
-always parse as call. Pure parser fix; `sexpr.rs` untouched. JS allow 543 → 545;
-dir 110 → 111 (new fixture `empty_semicolon_param_group`). Green; clippy/fmt clean.
+**Generators in newline-`[…]` and braces (js-066dacc4, js-1c86494f) — both
+UNSUPPORTED cleared.** `[x \n\n for a in as]` ⇒ `(comprehension (generator x (= a
+as)))`: a newline run before the comprehension `for` is insignificant ws. In
+`parse_bracket_literal` the first-separator skip stops at the first `Newline`, so
+a leading-newline-then-`for` fell to `parse_matrix`. New `newline_run_precedes_for`
+(mirrors `newline_run_precedes_comma`) gates a `Newline` arm → `parse_comprehension`;
+a second element before the `for` is hit first, so `[1\n2\nfor …]` stays a matrix
+(error-shape, unaffected). `{y for y in ys}` ⇒ `(braces (generator y (= y ys)))`:
+`parse_braces` had no `ForKw` arm (it fell to `parse_matrix` → `bracescat`). New
+`BRACES_COMPREHENSION` `SyntaxKind` (projector `sexp("braces", [project_generator])`)
++ a `ForKw` arm routing to the shared `parse_comprehension`. Both reuse the
+existing generator machinery (multi-clause, `if`-filter all work). Projector got
+one new arm (genuine new node mapping). JS allow 545 → 547 (0 unsupported now);
+dir 111 → 113 (`comprehension_blank_line`, `braces_generator`). Green; clippy/fmt
+clean.
 
-**Suggested next targets (ranked):**
-1. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4, blank line before
-   comprehension `for`), `x where {y for y in ys}` (js-1c86494f, brace generator
-   in `where`).
-2. `[f (x)]` (js-443dcfda) — space-separated `f (x)` inside `[…]` is two hcat
+**Suggested next targets (ranked):** The 28 remaining JS FAILs are now all
+recorded modeling/display divergences or error-shapes — no UNSUPPORTED frontier
+left. Highest-value non-divergence candidates:
+1. `[f (x)]` (js-443dcfda) — space-separated `f (x)` inside `[…]` is two hcat
    elements `(hcat f x)`, not a call; whitespace-sensitive, probe siblings.
-   Remaining 28 JS FAILs are mostly recorded modeling/display divergences (assoc
-   `a+b+c`, comparison chains, signed-numeric display) or error-shapes (`a--b`,
-   `'ab'`, `function \n f() end`).
+2. `[a b ;; \n c]` (js-82572497), `[x+y + z]`/`[x+y+z]` (js-516f4fd7,
+   js-99360f4e) — matrix-element splitting edge cases worth a look.
+   The rest are assoc `a+b+c`/comparison chains/signed-numeric display
+   (deliberate) or error-shapes (`a--b`, `'ab'`, `function \n f() end`).
 
 ## Earlier sessions
+
+- **2026-06-22k** — Empty all-semicolon operator group (js-7a161b5a, js-b3691b92).
+  `+(;;)` ⇒ `(call-pre + (block-p))`. In `unary_op_paren_is_call`, a leading `;`
+  unconditionally reported a paren-call; but an empty multi-`;` group `(;;)` is a
+  *block* and a unary op glued to it prefixes rather than calls. Fix: the
+  `Semicolon` arm returns `!paren_is_block(ctx, lparen_idx)`. Non-unary ops
+  (`*(;;)`) unaffected. JS allow 543 → 545; dir 110 → 111
+  (`empty_semicolon_param_group`).
 
 - **2026-06-22j** — Vect newline-comma (js-3a445ddd, js-4bfc9602). `[x\n, y]` ⇒
   `(vect x y)`, `[x \n, ]` ⇒ `(vect x)`. In `parse_bracket_literal`'s

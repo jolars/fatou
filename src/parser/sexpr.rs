@@ -154,6 +154,7 @@ fn project(node: &SyntaxNode) -> String {
         BRACESCAT_EXPR => project_bracescat(node),
 
         COMPREHENSION => sexp("comprehension", vec![project_generator(node)]),
+        BRACES_COMPREHENSION => sexp("braces", vec![project_generator(node)]),
         TYPED_COMPREHENSION => project_typed_comprehension(node),
         GENERATOR => project_generator(node),
 

@@ -1,0 +1,73 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..65
+  BRACES_COMPREHENSION@0..15
+    LBRACE@0..1 "{"
+    NAME@1..2
+      IDENT@1..2 "y"
+    WHITESPACE@2..3 " "
+    FOR_BINDING@3..14
+      FOR_KW@3..6 "for"
+      WHITESPACE@6..7 " "
+      NAME@7..8
+        IDENT@7..8 "y"
+      WHITESPACE@8..9 " "
+      IDENT@9..11 "in"
+      WHITESPACE@11..12 " "
+      NAME@12..14
+        IDENT@12..14 "ys"
+    RBRACE@14..15 "}"
+  NEWLINE@15..16 "\n"
+  BRACES_COMPREHENSION@16..36
+    LBRACE@16..17 "{"
+    NAME@17..18
+      IDENT@17..18 "x"
+    WHITESPACE@18..19 " "
+    FOR_BINDING@19..30
+      FOR_KW@19..22 "for"
+      WHITESPACE@22..23 " "
+      NAME@23..24
+        IDENT@23..24 "x"
+      WHITESPACE@24..25 " "
+      IDENT@25..27 "in"
+      WHITESPACE@27..28 " "
+      NAME@28..30
+        IDENT@28..30 "xs"
+    WHITESPACE@30..31 " "
+    COMPREHENSION_IF@31..35
+      IF_KW@31..33 "if"
+      WHITESPACE@33..34 " "
+      NAME@34..35
+        IDENT@34..35 "p"
+    RBRACE@35..36 "}"
+  NEWLINE@36..37 "\n"
+  BRACES_COMPREHENSION@37..64
+    LBRACE@37..38 "{"
+    NAME@38..39
+      IDENT@38..39 "z"
+    WHITESPACE@39..40 " "
+    FOR_BINDING@40..51
+      FOR_KW@40..43 "for"
+      WHITESPACE@43..44 " "
+      NAME@44..45
+        IDENT@44..45 "a"
+      WHITESPACE@45..46 " "
+      IDENT@46..48 "in"
+      WHITESPACE@48..49 " "
+      NAME@49..51
+        IDENT@49..51 "as"
+    WHITESPACE@51..52 " "
+    FOR_BINDING@52..63
+      FOR_KW@52..55 "for"
+      WHITESPACE@55..56 " "
+      NAME@56..57
+        IDENT@56..57 "b"
+      WHITESPACE@57..58 " "
+      IDENT@58..60 "in"
+      WHITESPACE@60..61 " "
+      NAME@61..63
+        IDENT@61..63 "bs"
+    RBRACE@63..64 "}"
+  NEWLINE@64..65 "\n"
