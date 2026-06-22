@@ -760,6 +760,14 @@ through), so the grammar can grow incrementally.
   `(10, 11)`, projected `DotCallI("<:")`/`DotCallI(">:")`. The paren-call name
   (`.<:(x, y)` ⇒ `(call (. <:) x y)`) and bare value atom (`.<:` ⇒ `(. <:)`)
   follow via the existing dotted-operator paths.
+- [x] `try`/`catch`/`finally` variants. A `catch` exception variable may be a
+  `$`-interpolation (`catch $e` ⇒ `(catch ($ e) …)`) or a `var"…"` non-standard
+  identifier (`catch var"#"` ⇒ `(catch (var #) …)`): the projector now reads the
+  first non-`BLOCK` child of `CATCH_CLAUSE` as the variable rather than only a
+  bare `NAME`. A `catch` may also follow `finally` (`try x finally y catch e z
+  end` ⇒ `(try … (finally …) (catch e …))`): the parser's `finally` arm bounds
+  its block on the try terminators and continues the clause loop when a `catch`
+  follows instead of breaking.
 
 ## Incremental reparse
 

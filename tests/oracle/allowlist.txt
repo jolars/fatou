@@ -93,6 +93,7 @@ triple_command_dedent
 triple_string_dedent
 triple_string_interp
 try_catch
+try_catch_variants
 tuples
 type_annotations
 typed_concat

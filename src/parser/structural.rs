@@ -293,9 +293,14 @@ pub(crate) fn parse_try_expr(
             Some(TokKind::FinallyKw) => {
                 events.push(Event::Start(SyntaxKind::FINALLY_CLAUSE));
                 events.push(Event::Tok(i));
-                i = run_block(&ctx, &mut events, i + 1, END_ONLY, diagnostics);
+                i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
                 events.push(Event::Finish);
-                break;
+                // Julia accepts `catch` after `finally` (either clause order);
+                // any other clause keyword here is an error, so stop and let
+                // `expect_end` recover.
+                if ctx.token(i).map(|t| t.kind) != Some(TokKind::CatchKw) {
+                    break;
+                }
             }
             _ => break,
         }

@@ -22,47 +22,55 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **522 allowlisted**, 50 divergence, 3 unsupported.
-Dir corpus: **100 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "broadcast type comparison `.<:`/`.>:`" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **525 allowlisted**, 47 divergence, 3 unsupported.
+Dir corpus: **101 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "`try`/`catch`/`finally` variants" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-21x)
+## Latest session (2026-06-22a)
 
-**`var"…"` with escapes.** `var"\""` ⇒ `(var ")`, `var"\\\""` ⇒ `(var \")`,
-`var"\\"` ⇒ `(var \)`, `var"a\"b"` ⇒ `(var a"b)`. Two-part fix. **Lexer**
-(`lex_in_string_mode`): in raw (prefixed) mode, before the close-delim check,
-count a backslash run; if it is immediately followed by the close quote and the
-run length is **odd**, the final backslash escapes that quote — consume the run
-plus the quote so `\"` stays inside `STRING_CONTENT` instead of terminating the
-string. (Previously raw strings never recognized `\"`, so `var"\""` lexed as
-content `\` + a stray close.) **Projector** (`project_var`): the var *name* is
-the unescaped value, so run `raw_content` through a new `unescape_raw_string`
-mirroring Julia's `unescape_raw_string` — a backslash run of `n` immediately
-before a `"` **or at end-of-content** (the close delimiter is the implied `"`)
-yields `n/2` backslashes plus a literal `"` when `n` is odd; any other run is
-literal (`var"x\\y"` ⇒ `x\\y`, the `\\` not before a quote stays). The
-end-of-content case is what makes a trailing even run collapse (`\\` ⇒ `\`)
-even though the close quote isn't in the captured content. JS allow 520 → 522
-(`var"\""`, `var"\\\""`); dir allow 99 → 100 (fixture
-`nonstandard_identifier_escape`, 5 cases). Suffix-error shape (`var"x"y`)
-still deferred. Green; clippy/fmt clean.
+**`try`/`catch`/`finally` variants (cluster).** Three FAILs, one coherent
+target. (1) **Catch-variable projector gap** — `catch $e` / `catch var"#"` parse
+fine (`INTERPOLATION` / `NONSTANDARD_IDENTIFIER` child of `CATCH_CLAUSE`) but
+`project_try` only looked for a `NAME` child, emitting `false`. Fix: read the
+first non-`BLOCK` child node (absent ⇒ `false`); `catch $e` ⇒ `(catch ($ e) …)`,
+`catch var"#"` ⇒ `(catch (var #) …)`. No-variable cases have only a `BLOCK`
+child, so the find stays correct. (2) **`finally`-then-`catch` parser gap** —
+`try x finally y catch e z end` swallowed the `catch` into the finally block
+(its `run_block` used `END_ONLY` then `break`). Fix (`structural.rs::parse_try_expr`):
+the `finally` arm now bounds its block on `TRY_TERMINATORS` and continues the
+clause loop iff a `catch` follows (else `break`, letting `expect_end` recover —
+`else`/second-`finally` after `finally` stay error-shape, deferred). JS allow
+522 → 525 (`try x catch $e y end`, `try x catch var"#" y end`, `try x finally y
+catch e z end`); dir 100 → 101 (fixture `try_catch_variants`). Green;
+clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Syntactic sigil quotes `:$`/`:.`/`:...`**: Julia quotes the sigil alone and
-   drops the operand to an `error-t` (`:$x` ⇒ `(quote-: $) (error-t x)`). Entangled
-   with interpolation/splat/field access and error-shape. Not in the JS corpus.
-2. **`var"…"` as a `catch`/`try` binding** (js-5faabde7 `try x catch var"#" y end`
-   ⇒ `… (catch (var #) …)`): the catch-variable slot doesn't yet accept a
-   non-standard identifier. Small, real-world-ish.
-3. Survey the remaining 50 JS FAILs for the next cluster (`cargo test --test
-   juliasyntax_oracle -- --ignored juliasyntax_full_report`).
+1. **Comparison-chain cluster** (the dominant remaining FAIL group:
+   `x < y < z`, `a + b + c`, `a * b * c`, `x && y && z`, `x || y || z`,
+   `x .< y .< z`, `x == y < z`, `x .< y < z`) — but these are **recorded
+   modeling divergences** (chains/associative ops stay nested). Confirm they're
+   all the deliberate-divergence kind, not a real gap, before touching.
+2. **Negative numeric literal display** (`-0x1`, `+0o22`, `-0b10010`, `+0b10010`,
+   `-0xf.0p0`, `1.0e-1000`, `0x123…p+0`) — display normalization, likely blocked
+   not fixed; verify.
+3. **`finally` + `else` error-shape** and `+(;;)` / `+(\n;\n;\n)` empty-all-semis
+   (deferred error-shape / param edge).
+4. Survey the remaining 47 JS FAILs for the next genuine parser gap.
 
 ## Earlier sessions
+
+- **2026-06-21x** — `var"…"` with escapes. `var"\""` ⇒ `(var ")`, `var"\\"` ⇒
+  `(var \)`. Lexer (`lex_in_string_mode`): in raw mode, an odd backslash run
+  before the close quote escapes it (consume run + quote, stays `STRING_CONTENT`).
+  Projector `project_var`: `unescape_raw_string` mirrors Julia (run of `n` before
+  a `"` *or at end-of-content* ⇒ `n/2` backslashes + a literal `"` if odd). JS
+  allow 520 → 522; dir 99 → 100 (`nonstandard_identifier_escape`). Suffix-error
+  shape (`var"x"y`) deferred.
 
 - **2026-06-21w** — Broadcast type comparison `.<:`/`.>:`. `x .<: y` ⇒
   `(dotcall-i x <: y)`, `x .>: y` ⇒ `(dotcall-i x >: y)`. Standard 5-file

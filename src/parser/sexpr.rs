@@ -982,9 +982,12 @@ fn project_try(node: &SyntaxNode) -> String {
     for clause in node.children() {
         match clause.kind() {
             CATCH_CLAUSE => {
+                // The catch-variable is the first child node before the body
+                // block; it may be a plain NAME, a `$`-interpolation, or a
+                // `var"…"` non-standard identifier. Absent ⇒ `false`.
                 let var = clause
                     .children()
-                    .find(|c| c.kind() == NAME)
+                    .find(|c| c.kind() != BLOCK)
                     .map(|c| project(&c))
                     .unwrap_or_else(|| "false".to_string());
                 let block = project_block_child(&clause);
