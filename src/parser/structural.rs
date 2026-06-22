@@ -771,17 +771,25 @@ fn parse_import_path(
     let mut i = start;
     let mut body = Vec::new();
 
-    // Leading relative dots: `.`/`..`/`...`, consumed greedily before any name.
-    while matches!(
-        ctx.token(i).map(|t| t.kind),
-        Some(TokKind::Dot | TokKind::DotDot | TokKind::DotDotDot)
-    ) {
-        body.push(Event::Tok(i));
-        i += 1;
+    // Leading relative dots: `.`/`..`/`...`, optionally separated by whitespace
+    // (`import . .A` ⇒ two leading dots). The separating whitespace is carried
+    // into the path verbatim so the projector (which counts dots) stays faithful.
+    loop {
+        let dot = ctx.skip_ws(i);
+        if matches!(
+            ctx.token(dot).map(|t| t.kind),
+            Some(TokKind::Dot | TokKind::DotDot | TokKind::DotDotDot)
+        ) {
+            push_range(&mut body, i, dot);
+            body.push(Event::Tok(dot));
+            i = dot + 1;
+        } else {
+            break;
+        }
     }
 
     // First name component: an identifier, or a bare operator symbol when the
-    // clause's whole path is an operator (`import A: +`, `import A: +, ==`).
+    // clause's whole path is an operator (`import A: +`, `import .⋆`, `import ⋆`).
     match ctx.token(i).map(|t| t.kind) {
         Some(TokKind::Ident) => {
             body.push(Event::Tok(i));
@@ -799,7 +807,7 @@ fn parse_import_path(
             // node the projector reads as `@x`.
             i = push_macro_name(ctx, &mut body, i, diagnostics);
         }
-        Some(k) if is_op_name(k) => {
+        Some(k) if is_op_name(k) || is_unicode_op_name(k) => {
             body.push(Event::Tok(i));
             i += 1;
         }
@@ -864,6 +872,20 @@ fn parse_import_path(
                 body.push(Event::Tok(rparen)); // `)`
                 body.push(Event::Finish); // PAREN_EXPR
                 i = rparen + 1;
+            }
+            (Some(TokKind::Dot), Some(k)) if is_unicode_op_name(k) => {
+                // A unicode-operator component (`import A.⋆.f` → `(importpath A ⋆
+                // f)`). Unlike ASCII operators, a unicode op is not fused with its
+                // leading dot, so the `.` separator and op arrive as two tokens.
+                body.push(Event::Tok(i)); // separating `.`
+                body.push(Event::Tok(i + 1)); // op name
+                i += 2;
+            }
+            (Some(TokKind::DotDotDot), _) => {
+                // A `..` range-operator component (`import A...` → `(importpath A
+                // ..)`): the `...` is the separator dot fused with the `..` name.
+                body.push(Event::Tok(i));
+                i += 1;
             }
             (Some(k), _) if is_dotted_op_name(k) => {
                 body.push(Event::Tok(i));
@@ -1059,6 +1081,24 @@ fn is_dotted_op_name(kind: TokKind) -> bool {
             | DotFatArrow
             | DotLongArrow
             | DotPipeGt
+    )
+}
+
+/// A single-codepoint Unicode operator usable as an import-path name component
+/// (`import ⋆`, `import A.⋆.f`). Each lexes as its own token (no leading-dot
+/// fusion), so the import path threads it through verbatim like an identifier.
+fn is_unicode_op_name(kind: TokKind) -> bool {
+    use TokKind::*;
+    matches!(
+        kind,
+        UniArrow
+            | UniComparison
+            | UniColon
+            | UniPlus
+            | UniTimes
+            | UniPower
+            | UniAssign
+            | UniRadical
     )
 }
 

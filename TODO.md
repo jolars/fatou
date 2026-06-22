@@ -311,10 +311,10 @@ through), so the grammar can grow incrementally.
   `(import (as (importpath A) B))`, and `(import (: (importpath A) (as (importpath
   x) y)))` — faithfully, reading the real nodes (no projector reconstruction).
   **Deferred (still divergences):** dotted `$interp` components (`import A.$B` —
-  the root `import $A` now parses, see the dedicated bullet below) and the `. .A`
-  (space-separated dots) form — each is carried through verbatim, keeping
-  losslessness. Operator-symbol names and `@macro` paths now parse (see the
-  dedicated bullets below).
+  the root `import $A` now parses, see the dedicated bullet below) — carried
+  through verbatim, keeping losslessness. Operator-symbol names, `@macro` paths,
+  the `. .A` whitespace-separated leading dots, and unicode/`..` components now
+  parse (see the dedicated bullets below).
 
 - [x] Arrow, pipe, and bitshift operators. The arrow family `-->` (own special
   head `(--> a b)`), `<-->` (ordinary `(call-i a <--> b)`), and broadcast `.-->`
@@ -336,9 +336,19 @@ through), so the grammar can grow incrementally.
   (`import A.:+` → a `QUOTE_SYM` node → `(importpath A (quote-: +))`). Two
   predicates (`is_op_name`/`is_dotted_op_name`) gate the undotted vs. fused-dotted
   operator tokens; `project_import_path` reuses the projector's `is_operator` and
-  routes `QUOTE_SYM` children through `project_quote_sym`. **Deferred (still
-  divergences):** unicode operators (`import .⋆`, `import A.⋆.f` — `⋆` lexes as
-  `ERROR`, awaiting unicode-operator lexing).
+  routes `QUOTE_SYM` children through `project_quote_sym`.
+
+- [x] Unicode, `..`, and whitespace-separated-dot import names. `parse_import_path`
+  (`structural.rs`) threads three more component forms through: a single-codepoint
+  unicode operator as a path name (`import ⋆`, `import .⋆`, `import A.⋆.f`,
+  `import A: ⋆, f` → the op arrives as its own token, not fused with the separator
+  dot, so a new `(Dot, unicode)` loop arm + an `is_unicode_op_name` arm in the
+  first-name match carry it); a trailing `...` after a name as the `..` range
+  operator (`import A...`, `import A.B...` → `(importpath A ..)` — the `...` is the
+  separator dot fused with `..`, projected via a `DOT_DOT_DOT if seen_name` arm);
+  and whitespace-separated leading dots (`import . .A`, `import .. .A` → the
+  leading-dot loop now `skip_ws`-hops between dots, carrying the gap verbatim).
+  Projector `project_import_path` reuses `is_operator` for the unicode name.
 
 - [x] Macro names in `export`/`import`/`using`. A `@` in a directive name
   position now builds a real `MACRO_NAME` node instead of dropping the sigil: the
@@ -555,8 +565,7 @@ through), so the grammar can grow incrementally.
   `(24,25)`, power `(32,31)` right-assoc). Radicals `√ ∛ ∜` and `¬` are prefix-only,
   routed through the existing unary arm → `(call-pre √ x)`. The projector reads the
   operator text from the token (`x → y` → `(call-i x → y)`, `a ≔ b` → `(≔ a b)`).
-  **Deferred:** unicode in `import` positions (`export`/`public` name lists now
-  read unicode operator names — see the `export`/`public` bullets), broadcast
+  **Deferred:** broadcast
   unicode (`.…`), unicode comparison chains (nested, like the ASCII chain divergence), and
   unicode unary in the plus/times tiers (`±x`). (Juxtaposition and operator-suffix
   sub/superscripts both landed separately — see those bullets.)

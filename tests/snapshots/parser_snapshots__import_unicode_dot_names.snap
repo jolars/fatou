@@ -1,0 +1,75 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..105
+  IMPORT_STMT@0..11
+    IMPORT_KW@0..6 "import"
+    WHITESPACE@6..7 " "
+    IMPORT_PATH@7..11
+      DOT@7..8 "."
+      WHITESPACE@8..9 " "
+      DOT@9..10 "."
+      IDENT@10..11 "A"
+  NEWLINE@11..12 "\n"
+  IMPORT_STMT@12..23
+    IMPORT_KW@12..18 "import"
+    WHITESPACE@18..19 " "
+    IMPORT_PATH@19..23
+      DOT@19..20 "."
+      UNICODE_OP@20..23 "⋆"
+  NEWLINE@23..24 "\n"
+  IMPORT_STMT@24..34
+    IMPORT_KW@24..30 "import"
+    WHITESPACE@30..31 " "
+    IMPORT_PATH@31..34
+      UNICODE_OP@31..34 "⋆"
+  NEWLINE@34..35 "\n"
+  IMPORT_STMT@35..49
+    IMPORT_KW@35..41 "import"
+    WHITESPACE@41..42 " "
+    IMPORT_PATH@42..49
+      IDENT@42..43 "A"
+      DOT@43..44 "."
+      UNICODE_OP@44..47 "⋆"
+      DOT@47..48 "."
+      IDENT@48..49 "f"
+  NEWLINE@49..50 "\n"
+  IMPORT_STMT@50..61
+    IMPORT_KW@50..56 "import"
+    WHITESPACE@56..57 " "
+    IMPORT_PATH@57..61
+      IDENT@57..58 "A"
+      DOT_DOT_DOT@58..61 "..."
+  NEWLINE@61..62 "\n"
+  IMPORT_STMT@62..75
+    IMPORT_KW@62..68 "import"
+    WHITESPACE@68..69 " "
+    IMPORT_PATH@69..75
+      IDENT@69..70 "A"
+      DOT@70..71 "."
+      IDENT@71..72 "B"
+      DOT_DOT_DOT@72..75 "..."
+  NEWLINE@75..76 "\n"
+  IMPORT_STMT@76..92
+    IMPORT_KW@76..82 "import"
+    WHITESPACE@82..83 " "
+    IMPORT_PATH@83..84
+      IDENT@83..84 "A"
+    COLON@84..85 ":"
+    WHITESPACE@85..86 " "
+    IMPORT_PATH@86..89
+      UNICODE_OP@86..89 "⋆"
+    COMMA@89..90 ","
+    WHITESPACE@90..91 " "
+    IMPORT_PATH@91..92
+      IDENT@91..92 "f"
+  NEWLINE@92..93 "\n"
+  USING_STMT@93..104
+    USING_KW@93..98 "using"
+    WHITESPACE@98..99 " "
+    IMPORT_PATH@99..104
+      IDENT@99..100 "A"
+      DOT@100..101 "."
+      UNICODE_OP@101..104 "⋆"
+  NEWLINE@104..105 "\n"

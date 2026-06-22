@@ -1183,6 +1183,9 @@ fn project_import_path(node: &SyntaxNode) -> String {
                     parts.push(t.text().to_string());
                     seen_name = true;
                 }
+                // After a name, a `...` is a separator dot fused with the `..`
+                // range operator as a component (`import A...` → `(importpath A ..)`).
+                DOT_DOT_DOT if seen_name => parts.push("..".to_string()),
                 // Separator dots/colons between components carry no meaning here.
                 DOT | DOT_DOT | DOT_DOT_DOT | COLON => {}
                 // An operator-symbol name component (`import A.==`, `import A: +`).

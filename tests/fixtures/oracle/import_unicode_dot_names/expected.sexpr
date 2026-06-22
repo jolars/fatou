@@ -1,0 +1,1 @@
+(toplevel (import (importpath . . A)) (import (importpath . ⋆)) (import (importpath ⋆)) (import (importpath A ⋆ f)) (import (importpath A ..)) (import (importpath A B ..)) (import (: (importpath A) (importpath ⋆) (importpath f))) (using (importpath A ⋆)))

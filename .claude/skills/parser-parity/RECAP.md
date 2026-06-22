@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **530 allowlisted**, 42 divergence, 3 unsupported.
-Dir corpus: **102 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **534 allowlisted**, 38 divergence, 3 unsupported.
+Dir corpus: **103 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "`export`/`public` name lists" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -31,39 +31,43 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22b)
+## Latest session (2026-06-22c)
 
-**`export`/`public` name lists (cluster).** Five FAILs, one coherent target,
-split across two buckets. (1) **Projector gap** — operator names. `export +, ==`
-and unicode `module M; export ⤈; end` / `public ⤈` already parse fine (the
-`PLUS`/`EQ_EQ`/`UNICODE_OP` tokens are direct children of `EXPORT_STMT`/
-`PUBLIC_STMT`) but `name_run_item` only read `IDENT`/`NAME`/`INTERPOLATION`/
-`MACRO_NAME`, dropping operators. Fix: add an `is_operator` token arm emitting the
-bare op text. (2) **Parser gap** — newline continuation. `export \n a` and
-`export a, \n @b` dropped the next-line name (the old `parse_keyword_stmt` +
-`KwStmt::Path` stopped at the first newline). Replaced with a dedicated
-`parse_name_list_stmt` (`structural.rs`) routing both `export` and `public`: skip
-ws+newlines after the keyword, then a token loop where a `Comma` also skips
-ws+newlines after it (so the list continues onto the next line), `$`/`@`/operator/
-ident handled per-token, everything else carried verbatim. A *bare* newline after
-a complete name still ends (`export a \n b` stays two statements, matching Julia).
-Removed the now-unused `KwStmt::Path` variant. Preserved all prior passes
-(`export ($f)`, `export @var"'"`, `export $a, $(a*b)`, `public A, B`). JS allow
-525 → 530 (`export +, ==`, `export \n a`, `export a, \n @b`, `module M; export ⤈`,
-`module M; public ⤈`); dir 101 → 102 (fixture `export_name_list`). Green;
-clippy/fmt clean.
+**Import operator/unicode/dot names (cluster).** Four FAILs, split across both
+buckets, all in `parse_import_path` (`structural.rs`) + `project_import_path`
+(`sexpr.rs`). (1) **Unicode-op components** — `import ⋆`/`import .⋆`/`import A.⋆.f`/
+`import A: ⋆, f`. A single-codepoint unicode op lexes as its own token (NOT fused
+with a separator dot like the ASCII `.==`), so the path dropped it. New
+`is_unicode_op_name` predicate gates a first-name arm (`is_op_name(k) ||
+is_unicode_op_name(k)`) and a new `(Dot, unicode)` loop arm; projector's existing
+`is_operator` arm already emits the text. (2) **`...`-after-name** — `import A...`/
+`import A.B...` ⇒ `(importpath A ..)`: the `...` is the separator dot fused with the
+`..` range operator. New loop arm consumes the `DotDotDot` token; projector
+`DOT_DOT_DOT if seen_name` arm emits `..`. (`import A..` — DotDot, no separator —
+stays an error shape, untouched.) (3) **Whitespace-separated leading dots** —
+`import . .A`/`import .. .A` ⇒ the leading-dot loop now `skip_ws`-hops between dots
+(carrying the gap verbatim) instead of stopping at the first whitespace. `is_op_name`
+deliberately NOT widened (it gates many operator contexts in `expr.rs`); unicode
+handled locally. JS allow 530 → 534 (all four import FAILs); dir 102 → 103 (fixture
+`import_unicode_dot_names`). Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. **Import operator/unicode/dot names** (`import .⋆`, `import A.⋆.f`,
-   `import A...`, `import . .A`) — the sibling of this session in
-   `parse_import_path`; carries operator/unicode components through verbatim now.
-2. **Comparison-chain cluster** (`x < y < z`, `a + b + c`, `a * b * c`,
-   `x && y && z`, etc.) — recorded modeling divergences; confirm before touching.
-3. **Negative numeric literal display** (`-0x1`, `+0o22`, `1.0e-1000`, …) —
-   display normalization, likely blocked not fixed.
-4. Survey the remaining 42 JS FAILs for the next genuine parser gap.
+1. **Comparison-chain cluster** (`x < y < z`, `a + b + c`, `a * b * c`,
+   `x && y && z`, `x == y < z`) — recorded modeling divergences (Fatou nests);
+   confirm they're intentional before touching, likely just leave un-allowlisted.
+2. **Negative/edge numeric literal display** (`-0b10010`, `-0x1`, `1.0e-1000`,
+   `10.0e1000'`) — display normalization, likely blocked not fixed.
+3. **Paren block edge** `+(;;)`, `+(\n;\n;\n)` — empty all-semis paren (deferred
+   from the multi-param-groups session).
+4. Survey the remaining 38 JS FAILs for the next genuine parser gap.
 
 ## Earlier sessions
+
+- **2026-06-22b** — `export`/`public` name lists (cluster). Operator-name projector
+  gap (`name_run_item` dropped operator tokens) + newline-continuation parser gap
+  (new `parse_name_list_stmt` routing both keywords, skipping ws+newlines after the
+  keyword and after each comma). JS allow 525 → 530; dir 101 → 102
+  (`export_name_list`).
 
 - **2026-06-22a** — `try`/`catch`/`finally` variants (cluster). Catch-variable
   projector gap (`catch $e`/`catch var"#"` read first non-`BLOCK` child ⇒
