@@ -203,7 +203,9 @@ through), so the grammar can grow incrementally.
   tokens and heads it `hcat`/`vcat`/`ncat-d` (top) or `row`/`nrow-d` (nested).
   `[x ;; y]` → `(ncat-2 x y)`, `[x ; y ;; z]` → `(ncat-2 (nrow-1 x y) z)`,
   `[x;]` → `(vcat x)`, `[x\n]` → `(vect x)`; element-free `[;]`/`[;;]` →
-  `(ncat-1)`/`(ncat-2)` via `parse_empty_ncat`.
+  `(ncat-1)`/`(ncat-2)` via `parse_empty_ncat`. A newline first separator that is
+  followed (past trivia) by a `,` is insignificant whitespace — the comma is the
+  real vector separator — so `[x\n, y]` → `(vect x y)` (`newline_run_precedes_comma`).
   Typed concatenation (`T[x y]` → `(typed_hcat T x y)`, `T[a;b]` →
   `(typed_vcat T a b)`, `T[a ;; b]` → `(typed_ncat-2 T a b)`, `T[;]` →
   `(typed_ncat-1 T)`): a space/`;`-separated bracket body after a value builds a

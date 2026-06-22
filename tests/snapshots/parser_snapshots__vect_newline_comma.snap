@@ -1,0 +1,42 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..24
+  VECT_EXPR@0..7
+    LBRACKET@0..1 "["
+    ARG@1..2
+      NAME@1..2
+        IDENT@1..2 "x"
+    NEWLINE@2..3 "\n"
+    COMMA@3..4 ","
+    WHITESPACE@4..5 " "
+    ARG@5..6
+      NAME@5..6
+        IDENT@5..6 "y"
+    RBRACKET@6..7 "]"
+  NEWLINE@7..8 "\n"
+  VECT_EXPR@8..15
+    LBRACKET@8..9 "["
+    ARG@9..10
+      NAME@9..10
+        IDENT@9..10 "x"
+    WHITESPACE@10..11 " "
+    NEWLINE@11..12 "\n"
+    COMMA@12..13 ","
+    WHITESPACE@13..14 " "
+    RBRACKET@14..15 "]"
+  NEWLINE@15..16 "\n"
+  VECT_EXPR@16..23
+    LBRACKET@16..17 "["
+    ARG@17..18
+      NAME@17..18
+        IDENT@17..18 "x"
+    NEWLINE@18..19 "\n"
+    COMMA@19..20 ","
+    NEWLINE@20..21 "\n"
+    ARG@21..22
+      NAME@21..22
+        IDENT@21..22 "y"
+    RBRACKET@22..23 "]"
+  NEWLINE@23..24 "\n"

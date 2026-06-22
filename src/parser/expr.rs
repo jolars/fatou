@@ -1583,6 +1583,21 @@ fn push_element_arg(events: &mut Vec<Event>, el: ExprParse) -> usize {
     end
 }
 
+/// Whether the trivia run beginning at the newline `look` (newlines, horizontal
+/// whitespace, and comments) is followed by a `,`. Used to decide that a newline
+/// first separator inside `[…]` is insignificant because a comma — the real
+/// separator of a vector — comes next.
+fn newline_run_precedes_comma(ctx: &ParserCtx<'_>, look: usize) -> bool {
+    let mut peek = look;
+    while matches!(
+        ctx.token(peek).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment | TokKind::Newline)
+    ) {
+        peek += 1;
+    }
+    ctx.token(peek).map(|t| t.kind) == Some(TokKind::Comma)
+}
+
 /// Parse a `[...]` literal at prefix position (postfix `[` is indexing). A `,`
 /// after the first element (or an empty/single `[x]`) is a `VECT_EXPR`, reusing
 /// the arg-list machinery; a space-, `;`-, or newline-separated layout is a
@@ -1650,6 +1665,12 @@ fn parse_bracket_literal(
             diagnostics,
         ),
         None | Some(TokKind::RBracket | TokKind::Comma) => vect(diagnostics),
+        // A newline run is a row separator only if it separates two *elements*.
+        // When the next significant token past the newline(s) is a `,`, the comma
+        // is the real separator and the newline is insignificant whitespace, so
+        // `[x\n, y]` is `(vect x y)`, matching Julia (`;` after a newline stays a
+        // matrix row separator, and another element keeps it a matrix).
+        Some(TokKind::Newline) if newline_run_precedes_comma(ctx, look) => vect(diagnostics),
         _ => parse_matrix(
             ctx,
             lbrk,

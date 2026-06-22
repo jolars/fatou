@@ -108,6 +108,7 @@ type_operator_call
 unary_operator_call
 unicode_operators
 var_macro_name
+vect_newline_comma
 version_string
 where_precedence
 word_operators

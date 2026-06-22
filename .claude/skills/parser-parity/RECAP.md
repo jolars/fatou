@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **541 allowlisted**, 32 divergence, 2 unsupported.
-Dir corpus: **109 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **543 allowlisted**, 30 divergence, 2 unsupported.
+Dir corpus: **110 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "splat/vararg `...` precedence" are `[x]`
 in `TODO.md`.
 
@@ -32,35 +32,45 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22i)
+## Latest session (2026-06-22j)
 
-**Splat/vararg `...` precedence (js-5d3b9cc6, js-2155b9ca).** `x:y...` ⇒
-`(... (call-i x : y))`, `x..y...` ⇒ `(... (call-i x .. y))`. The bug: `...` was
-consumed in `parse_postfix_chain` (`expr.rs`), which runs tighter than every
-infix op, so it wrapped only the colon's right operand (`(call-i x : (... y))`).
-Probing Julia placed splat between the pipes (looser side) and the colon/range
-tier (tighter side): looser than colon (`x:y...`/`a+b...`/`a::b...` ⇒ splat
-outermost) but tighter than `|>`/`&&`/`||`/`=`/comparison (`a|>b...` ⇒
-`(call-i a |> (... b))`). Fix: removed the `DotDotDot` arm from
-`parse_postfix_chain` and added a postfix check in the Pratt loop with left power
-`SPLAT_BP = 14` (colon r_bp `15`, `|>` r_bp `14`, so `14` binds inside a pipe's
-right operand but not colon's). `...` is not in `is_operator`, so when it doesn't
-bind the loop breaks and an enclosing parse consumes it. Pure parser fix —
-`sexpr.rs` untouched. JS allow 539 → 541 (`js-5d3b9cc6`, `js-2155b9ca`); dir
-108 → 109 (new fixture `splat_precedence`). Green; clippy/fmt clean.
+**Vect newline-comma (js-3a445ddd, js-4bfc9602).** `[x\n, y]` ⇒ `(vect x y)`,
+`[x \n, ]` ⇒ `(vect x)`. The bug: in `parse_bracket_literal`'s first-separator
+dispatch (`expr.rs`), a newline as the first separator routed unconditionally to
+`parse_matrix` (→ `vcat`), but Julia treats a newline that is *followed by a
+comma* as insignificant whitespace — the comma is the real vector separator. The
+rule from probing: the first separator sets the mode. Comma first → vect (later
+newlines ignored: `[1,\n2,\n3]` → `(vect 1 2 3)`); newline/`;`/element first →
+matrix (a later comma is a Julia error: `[a\nb\n,c]` → `(vcat … error-t)`). A
+newline run is a separator only between two *elements*; a newline directly before
+a comma is not. Fix: new `newline_run_precedes_comma` (peeks past
+newlines/ws/comments for a `,`) gates a new `Newline` arm → `vect`; `;`-after-
+newline and element-after-newline stay matrix (unchanged); `parse_arg_list`
+already treats the interior newline as container trivia. Pure parser fix —
+`sexpr.rs` untouched. JS allow 541 → 543; dir 109 → 110 (new fixture
+`vect_newline_comma`). Green; clippy/fmt clean.
 
 **Suggested next targets (ranked):**
-1. Triage the remaining 32 JS FAILs for a cluster sharing a root cause; many are
-   recorded modeling/display divergences (see Progress), so scan for a genuinely
-   parseable construct. Candidates: `[f (x)]` (js-443dcfda, space-call in vect),
-   `a--b` (js-90827a2e), the vect-newline-comma pair `[x\n, y]`/`[x \n, ]`
-   (js-3a445ddd / js-4bfc9602), `[a b ;; \n c]` (js-82572497, newline in ncat).
-2. `+(;;)` / `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92) — empty all-semicolon param
-   groups (deferred from 2026-06-21b multi_param_groups).
-3. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4),
-   `x where {y for y in ys}` (js-1c86494f).
+1. `+(;;)` / `+(\n;\n;\n)` (js-7a161b5a, js-b3691b92) — empty all-semicolon param
+   groups (deferred from 2026-06-21b multi_param_groups). Genuinely parseable.
+2. The 2 UNSUPPORTED: `[x \n\n for a in as]` (js-066dacc4, blank line before
+   comprehension `for`), `x where {y for y in ys}` (js-1c86494f, brace generator
+   in `where`).
+3. `[f (x)]` (js-443dcfda) — space-separated `f (x)` inside `[…]` is two hcat
+   elements `(hcat f x)`, not a call; whitespace-sensitive, probe siblings.
+   Remaining 30 JS FAILs are mostly recorded modeling/display divergences (assoc
+   `a+b+c`, comparison chains, signed-numeric display) or error-shapes (`a--b`,
+   `'ab'`, `function \n f() end`).
 
 ## Earlier sessions
+
+- **2026-06-22i** — Splat/vararg `...` precedence (js-5d3b9cc6, js-2155b9ca).
+  `x:y...` ⇒ `(... (call-i x : y))`. `...` was consumed in `parse_postfix_chain`
+  (tighter than every infix op), so it wrapped only the colon's right operand. Fix:
+  moved it to a postfix check in the Pratt loop at `SPLAT_BP = 14` (looser than
+  colon r_bp `15`, tighter than `|>` r_bp `14`); not in `is_operator`, so the loop
+  breaks and an enclosing parse consumes it. Pure parser fix. JS allow 539 → 541;
+  dir 108 → 109 (`splat_precedence`).
 
 - **2026-06-22h** — Do-block same-line body (js-68aeea63). `f(x) do y body end` ⇒
   `(do (call f x) (tuple y) (block body))`. New `parse_do_params` (`structural.rs`)
