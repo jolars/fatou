@@ -22,9 +22,9 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **536 allowlisted**, 37 divergence, 2 unsupported.
-Dir corpus: **105 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "`struct`/`module` signature + same-line body" are `[x]`
+JS corpus (575 cases): **537 allowlisted**, 36 divergence, 2 unsupported.
+Dir corpus: **106 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "block forms as infix operands" are `[x]`
 in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -32,37 +32,43 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22e)
+## Latest session (2026-06-22f)
 
-**`struct`/`module` signature + same-line body (js-33d4b6c0).** `struct A const a
-end` ⇒ `(struct A (block (const a)))`. Root cause: `parse_struct_expr`/
-`parse_module_expr` called `parse_header(.., run_expr: false)`, which gobbled the
-*entire* keyword line into `SIGNATURE` as loose tokens — so a same-line body
-(`const a`, `B`, `x; y`) was swallowed into the signature. Fix: new
-`parse_signature` (`structural.rs`) parses the type/name as a single expression
-into `SIGNATURE` and stops right after it (no while-loop gobble), letting the rest
-of the line fall through to `run_block`. Bonus: the subtype `A <: B` is now a real
-`BINARY_EXPR` and bare names are `NAME` nodes (the projector's `first_node` path
-already handled both, so `sexpr.rs` was untouched — pure parser fix). Multi-line
-structs/modules unchanged (header ends at the newline as before). Snapshots
-updated for `docstring`/`interpolation_names`/`public_statement`/`struct_module`
-(signature names now wrapped in `NAME`/`BINARY_EXPR`; trailing ws moved from
-SIGNATURE to BLOCK) — all projection-neutral. JS allow 535 → 536 (`js-33d4b6c0`);
-dir 104 → 105 (`struct_const_field`). Green; clippy/fmt clean.
+**Block forms as infix operands (js-0e1915ed).** `begin x end::T` ⇒
+`(::-i (block x) T)`. Root cause: every value-producing block form (`begin`/`if`/
+`for`/`while`/`let`/`try`/`function`/`macro`/`quote`/`struct`/`module`/
+`abstract type`/`primitive type`) returned early from `parse_expr_in` before the
+Pratt operator loop, so a trailing infix op started a fresh statement. Fix: those
+arms now compute a `block_form: Option<Option<ExprParse>>` and fall through into
+the operator loop as `lhs` (statement keywords `return`/`break`/`continue`/
+`const`/`global`/`local`/`import`/`using`/`export` keep early returns — they
+absorb their own operand, so `return x::T` ⇒ `(return (::-i x T))`). A new
+`lhs_is_block_keyword` flag suppresses postfix chaining and juxtaposition for the
+bare block form (Julia *errors* on `begin x end(y)`/`begin x end y` — error-shape,
+left divergent) and clears after the first iteration; comma/word/symbolic ops all
+apply (`begin x end, y` ⇒ `(tuple …)`, `if c x end + 1`, `begin x end where T`).
+Pure parser fix — `sexpr.rs` untouched (the existing `TYPE_ANNOTATION`/`BINARY`/
+`WHERE`/`BARE_TUPLE` arms project the block child recursively). JS allow
+536 → 537 (`js-0e1915ed`); dir 105 → 106 (`block_form_operand`). Green; clippy/fmt
+clean.
 
 **Suggested next targets (ranked):**
-1. **`begin x end::T`** (js-0e1915ed) — a `begin…end` block as the LHS of a
-   postfix infix op (`(::-i (block x) T)`); Fatou splits it into two statements.
-   Block-keyword exprs usable as operands.
-2. **`<: A where B`** (js-063e192a) — prefix `<:`/`>:` should bind *looser* than
+1. **`<: A where B`** (js-063e192a) — prefix `<:`/`>:` should bind *looser* than
    `where`: `(<:-pre (where A B))`, Fatou gives `(where (<:-pre A) B)`. Precedence
    fix for prefix type operators vs `where`.
-3. **`f(x) do y body end`** (js-68aeea63) — re-check the do-block projection; it's
+2. **`f(x) do y body end`** (js-68aeea63) — re-check the do-block projection; it's
    a FAIL in the JS corpus.
-4. Recorded modeling divergences (do **not** fix): comparison/associative chains
+3. Recorded modeling divergences (do **not** fix): comparison/associative chains
    (`a+b+c`, `x<y<z`, `[x+y+z]`), numeric-literal display normalization.
 
 ## Earlier sessions
+
+- **2026-06-22e** — `struct`/`module` signature + same-line body (js-33d4b6c0).
+  New `parse_signature` (`structural.rs`) parses the type/name as one expression
+  into `SIGNATURE` and stops, letting a same-line body (`struct A const a end` ⇒
+  `(struct A (block (const a)))`) fall through to `run_block`; subtype `A <: B`
+  becomes a real `BINARY_EXPR`, bare names `NAME` (projector untouched). JS allow
+  535 → 536; dir 104 → 105 (`struct_const_field`).
 
 - **2026-06-22d** — Broadcast unicode infix operators `.…` (UNSUPPORTED frontier).
   `a .… b` ⇒

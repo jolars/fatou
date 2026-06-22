@@ -1,0 +1,1 @@
+(toplevel (::-i (block x) T) (::-i (if c (block x)) T) (call-i (while c (block x)) + 1) (call-i (let (block (= x 1)) (block)) + 2) (::-i (try (block x) (catch false (block))) T) (::-i (quote (block x)) T) (::-i (for (= i xs) (block)) T) (where (block x) T) (call-i (block x) => y) (|| (block x) y) (tuple (block x) y) (::-i (abstract A) T))

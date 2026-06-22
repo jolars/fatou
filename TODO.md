@@ -29,6 +29,14 @@ through), so the grammar can grow incrementally.
   `(struct (<: A B) (block c))`, `module A x end` ⇒ `(module A (block x))`. The
   signature subtype (`A <: B`) is now a real `BINARY_EXPR` node and the bare name
   a `NAME` node (the projector's `first_node` path).
+- [x] Block forms as infix operands. A value-producing block form (`begin`/`if`/
+  `for`/`while`/`let`/`try`/`function`/`macro`/`quote`/`struct`/`module`/
+  `abstract type`/`primitive type`) is an operand: a trailing infix operator
+  takes the whole form as its left side (`begin x end::T` ⇒ `(::-i (block x) T)`,
+  `if c x end + 1`, `begin x end where T`, `begin x end, y` ⇒ `(tuple …)`). In
+  `parse_expr_in` these forms now fall through into the operator loop as `lhs`
+  rather than returning early; `lhs_is_block_keyword` suppresses postfix
+  chaining and juxtaposition (Julia errors on `begin x end(y)` / `begin x end y`).
 - [x] `do` blocks — postfix on a call (`f(x) do y … end`). Attached in the
   postfix chain (`parse_postfix_chain`) and parsed by `parse_do_block`, which
   reuses the generic header passthrough for the `do`-line parameters

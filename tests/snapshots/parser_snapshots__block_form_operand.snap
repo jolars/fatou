@@ -1,0 +1,198 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..210
+  TYPE_ANNOTATION@0..14
+    BEGIN_EXPR@0..11
+      BEGIN_KW@0..5 "begin"
+      BLOCK@5..8
+        WHITESPACE@5..6 " "
+        NAME@6..7
+          IDENT@6..7 "x"
+        WHITESPACE@7..8 " "
+      END_KW@8..11 "end"
+    COLON_COLON@11..13 "::"
+    NAME@13..14
+      IDENT@13..14 "T"
+  NEWLINE@14..15 "\n"
+  TYPE_ANNOTATION@15..28
+    IF_EXPR@15..25
+      IF_KW@15..17 "if"
+      WHITESPACE@17..18 " "
+      CONDITION@18..19
+        NAME@18..19
+          IDENT@18..19 "c"
+      BLOCK@19..22
+        WHITESPACE@19..20 " "
+        NAME@20..21
+          IDENT@20..21 "x"
+        WHITESPACE@21..22 " "
+      END_KW@22..25 "end"
+    COLON_COLON@25..27 "::"
+    NAME@27..28
+      IDENT@27..28 "T"
+  NEWLINE@28..29 "\n"
+  BINARY_EXPR@29..46
+    WHILE_EXPR@29..42
+      WHILE_KW@29..34 "while"
+      WHITESPACE@34..35 " "
+      CONDITION@35..36
+        NAME@35..36
+          IDENT@35..36 "c"
+      BLOCK@36..39
+        WHITESPACE@36..37 " "
+        NAME@37..38
+          IDENT@37..38 "x"
+        WHITESPACE@38..39 " "
+      END_KW@39..42 "end"
+    WHITESPACE@42..43 " "
+    PLUS@43..44 "+"
+    WHITESPACE@44..45 " "
+    LITERAL@45..46
+      INTEGER@45..46 "1"
+  NEWLINE@46..47 "\n"
+  BINARY_EXPR@47..64
+    LET_EXPR@47..60
+      LET_KW@47..50 "let"
+      WHITESPACE@50..51 " "
+      LET_BINDINGS@51..57
+        ASSIGNMENT_EXPR@51..56
+          NAME@51..52
+            IDENT@51..52 "x"
+          WHITESPACE@52..53 " "
+          EQ@53..54 "="
+          WHITESPACE@54..55 " "
+          LITERAL@55..56
+            INTEGER@55..56 "1"
+        WHITESPACE@56..57 " "
+      BLOCK@57..57
+      END_KW@57..60 "end"
+    WHITESPACE@60..61 " "
+    PLUS@61..62 "+"
+    WHITESPACE@62..63 " "
+    LITERAL@63..64
+      INTEGER@63..64 "2"
+  NEWLINE@64..65 "\n"
+  TYPE_ANNOTATION@65..83
+    TRY_EXPR@65..80
+      TRY_KW@65..68 "try"
+      BLOCK@68..71
+        WHITESPACE@68..69 " "
+        NAME@69..70
+          IDENT@69..70 "x"
+        WHITESPACE@70..71 " "
+      CATCH_CLAUSE@71..77
+        CATCH_KW@71..76 "catch"
+        WHITESPACE@76..77 " "
+        BLOCK@77..77
+      END_KW@77..80 "end"
+    COLON_COLON@80..82 "::"
+    NAME@82..83
+      IDENT@82..83 "T"
+  NEWLINE@83..84 "\n"
+  TYPE_ANNOTATION@84..98
+    QUOTE_EXPR@84..95
+      QUOTE_KW@84..89 "quote"
+      BLOCK@89..92
+        WHITESPACE@89..90 " "
+        NAME@90..91
+          IDENT@90..91 "x"
+        WHITESPACE@91..92 " "
+      END_KW@92..95 "end"
+    COLON_COLON@95..97 "::"
+    NAME@97..98
+      IDENT@97..98 "T"
+  NEWLINE@98..99 "\n"
+  TYPE_ANNOTATION@99..117
+    FOR_EXPR@99..114
+      FOR_KW@99..102 "for"
+      WHITESPACE@102..103 " "
+      FOR_BINDING@103..111
+        NAME@103..104
+          IDENT@103..104 "i"
+        WHITESPACE@104..105 " "
+        IDENT@105..107 "in"
+        WHITESPACE@107..108 " "
+        IDENT@108..110 "xs"
+        WHITESPACE@110..111 " "
+      BLOCK@111..111
+      END_KW@111..114 "end"
+    COLON_COLON@114..116 "::"
+    NAME@116..117
+      IDENT@116..117 "T"
+  NEWLINE@117..118 "\n"
+  WHERE_EXPR@118..137
+    BEGIN_EXPR@118..129
+      BEGIN_KW@118..123 "begin"
+      BLOCK@123..126
+        WHITESPACE@123..124 " "
+        NAME@124..125
+          IDENT@124..125 "x"
+        WHITESPACE@125..126 " "
+      END_KW@126..129 "end"
+    WHITESPACE@129..130 " "
+    WHERE_KW@130..135 "where"
+    WHITESPACE@135..136 " "
+    NAME@136..137
+      IDENT@136..137 "T"
+  NEWLINE@137..138 "\n"
+  BINARY_EXPR@138..154
+    BEGIN_EXPR@138..149
+      BEGIN_KW@138..143 "begin"
+      BLOCK@143..146
+        WHITESPACE@143..144 " "
+        NAME@144..145
+          IDENT@144..145 "x"
+        WHITESPACE@145..146 " "
+      END_KW@146..149 "end"
+    WHITESPACE@149..150 " "
+    FAT_ARROW@150..152 "=>"
+    WHITESPACE@152..153 " "
+    NAME@153..154
+      IDENT@153..154 "y"
+  NEWLINE@154..155 "\n"
+  BINARY_EXPR@155..171
+    BEGIN_EXPR@155..166
+      BEGIN_KW@155..160 "begin"
+      BLOCK@160..163
+        WHITESPACE@160..161 " "
+        NAME@161..162
+          IDENT@161..162 "x"
+        WHITESPACE@162..163 " "
+      END_KW@163..166 "end"
+    WHITESPACE@166..167 " "
+    OR_OR@167..169 "||"
+    WHITESPACE@169..170 " "
+    NAME@170..171
+      IDENT@170..171 "y"
+  NEWLINE@171..172 "\n"
+  BARE_TUPLE_EXPR@172..186
+    BEGIN_EXPR@172..183
+      BEGIN_KW@172..177 "begin"
+      BLOCK@177..180
+        WHITESPACE@177..178 " "
+        NAME@178..179
+          IDENT@178..179 "x"
+        WHITESPACE@179..180 " "
+      END_KW@180..183 "end"
+    COMMA@183..184 ","
+    WHITESPACE@184..185 " "
+    NAME@185..186
+      IDENT@185..186 "y"
+  NEWLINE@186..187 "\n"
+  TYPE_ANNOTATION@187..209
+    ABSTRACT_DEF@187..206
+      IDENT@187..195 "abstract"
+      WHITESPACE@195..196 " "
+      IDENT@196..200 "type"
+      WHITESPACE@200..201 " "
+      SIGNATURE@201..202
+        NAME@201..202
+          IDENT@201..202 "A"
+      WHITESPACE@202..203 " "
+      END_KW@203..206 "end"
+    COLON_COLON@206..208 "::"
+    NAME@208..209
+      IDENT@208..209 "T"
+  NEWLINE@209..210 "\n"

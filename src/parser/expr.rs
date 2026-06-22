@@ -201,109 +201,134 @@ fn parse_expr_in(
         return parse_name_list_stmt(tokens, start, SyntaxKind::PUBLIC_STMT, diagnostics);
     }
 
-    // The contextual keywords `abstract`/`primitive` (ordinary identifiers
+    // Value-producing block forms (`begin…end`, `if`, `for`, `while`, `let`,
+    // `try`, `function`/`macro`, `quote`, `struct`, `module`, and the contextual
+    // `abstract type`/`primitive type` declarations) are operands: Julia lets a
+    // trailing infix operator take the whole block form as its left side
+    // (`begin x end::T` ⇒ `(::-i (block x) T)`, `if c x end + 1`). So they fall
+    // through into the operator loop as `lhs` rather than returning early, with
+    // postfix chaining and juxtaposition suppressed (Julia errors on `begin x
+    // end(y)` / `begin x end y`). Inside an indexing `a[…]` a leading `begin` is
+    // instead the index-begin marker (handled in `parse_prefix`).
+    //
+    // The contextual `abstract`/`primitive` words (ordinary identifiers
     // elsewhere) open a type declaration only when immediately followed by the
-    // contextual `type`, exactly as JuliaSyntax recognizes them. The pair of
-    // adjacent identifiers is unambiguous, so this fires in any expression
-    // position (`x = abstract type A end`).
-    if let Some(decl_word) = type_decl_keyword(&ctx, start) {
-        return match decl_word {
+    // contextual `type`; the pair of adjacent identifiers is unambiguous, so this
+    // fires in any expression position (`x = abstract type A end`).
+    let block_form = if let Some(decl_word) = type_decl_keyword(&ctx, start) {
+        Some(match decl_word {
             TypeDecl::Abstract => parse_abstract_type(tokens, start, diagnostics),
             TypeDecl::Primitive => parse_primitive_type(tokens, start, diagnostics),
-        };
+        })
+    } else {
+        match ctx.token(start).map(|t| t.kind) {
+            Some(TokKind::IfKw) => Some(parse_if_expr(tokens, start, diagnostics)),
+            Some(TokKind::FunctionKw) => Some(parse_function_expr(tokens, start, diagnostics)),
+            Some(TokKind::MacroKw) => Some(parse_macro_def(tokens, start, diagnostics)),
+            Some(TokKind::BeginKw) if !begin_marker => {
+                Some(parse_begin_expr(tokens, start, diagnostics))
+            }
+            Some(TokKind::QuoteKw) => Some(parse_quote_expr(tokens, start, diagnostics)),
+            Some(TokKind::WhileKw) => Some(parse_while_expr(tokens, start, diagnostics)),
+            Some(TokKind::ForKw) => Some(parse_for_expr(tokens, start, diagnostics)),
+            Some(TokKind::LetKw) => Some(parse_let_expr(tokens, start, diagnostics)),
+            Some(TokKind::TryKw) => Some(parse_try_expr(tokens, start, diagnostics)),
+            Some(TokKind::StructKw | TokKind::MutableKw) => {
+                Some(parse_struct_expr(tokens, start, diagnostics))
+            }
+            Some(TokKind::ModuleKw | TokKind::BaremoduleKw) => {
+                Some(parse_module_expr(tokens, start, diagnostics))
+            }
+            _ => None,
+        }
+    };
+
+    // Statement keywords consume their own operand through the expression loop
+    // internally, so they return directly (`return x::T` ⇒ `(return (::-i x T))`,
+    // not `(::-i (return x) T)`).
+    if block_form.is_none() {
+        match ctx.token(start).map(|t| t.kind) {
+            Some(TokKind::ReturnKw) => {
+                return parse_keyword_stmt(
+                    tokens,
+                    start,
+                    SyntaxKind::RETURN_EXPR,
+                    KwStmt::ExprTuple,
+                    diagnostics,
+                );
+            }
+            Some(TokKind::BreakKw) => {
+                return parse_keyword_stmt(
+                    tokens,
+                    start,
+                    SyntaxKind::BREAK_EXPR,
+                    KwStmt::Bare,
+                    diagnostics,
+                );
+            }
+            Some(TokKind::ContinueKw) => {
+                return parse_keyword_stmt(
+                    tokens,
+                    start,
+                    SyntaxKind::CONTINUE_EXPR,
+                    KwStmt::Bare,
+                    diagnostics,
+                );
+            }
+            Some(TokKind::ConstKw) => {
+                return parse_keyword_stmt(
+                    tokens,
+                    start,
+                    SyntaxKind::CONST_STMT,
+                    KwStmt::ExprTuple,
+                    diagnostics,
+                );
+            }
+            Some(TokKind::GlobalKw) => {
+                return parse_keyword_stmt(
+                    tokens,
+                    start,
+                    SyntaxKind::GLOBAL_STMT,
+                    KwStmt::Expr,
+                    diagnostics,
+                );
+            }
+            Some(TokKind::LocalKw) => {
+                return parse_keyword_stmt(
+                    tokens,
+                    start,
+                    SyntaxKind::LOCAL_STMT,
+                    KwStmt::Expr,
+                    diagnostics,
+                );
+            }
+            Some(TokKind::ImportKw) => {
+                return parse_import_stmt(tokens, start, SyntaxKind::IMPORT_STMT, diagnostics);
+            }
+            Some(TokKind::UsingKw) => {
+                return parse_import_stmt(tokens, start, SyntaxKind::USING_STMT, diagnostics);
+            }
+            Some(TokKind::ExportKw) => {
+                return parse_name_list_stmt(tokens, start, SyntaxKind::EXPORT_STMT, diagnostics);
+            }
+            _ => {}
+        }
     }
 
-    // Leading keywords open a structural (block) form. Inside an indexing `a[…]`
-    // a leading `begin` is instead the index-begin marker (handled in
-    // `parse_prefix`), so skip the block dispatch there.
-    match ctx.token(start).map(|t| t.kind) {
-        Some(TokKind::IfKw) => return parse_if_expr(tokens, start, diagnostics),
-        Some(TokKind::FunctionKw) => return parse_function_expr(tokens, start, diagnostics),
-        Some(TokKind::MacroKw) => return parse_macro_def(tokens, start, diagnostics),
-        Some(TokKind::BeginKw) if !begin_marker => {
-            return parse_begin_expr(tokens, start, diagnostics);
-        }
-        Some(TokKind::QuoteKw) => return parse_quote_expr(tokens, start, diagnostics),
-        Some(TokKind::WhileKw) => return parse_while_expr(tokens, start, diagnostics),
-        Some(TokKind::ForKw) => return parse_for_expr(tokens, start, diagnostics),
-        Some(TokKind::LetKw) => return parse_let_expr(tokens, start, diagnostics),
-        Some(TokKind::TryKw) => return parse_try_expr(tokens, start, diagnostics),
-        Some(TokKind::StructKw | TokKind::MutableKw) => {
-            return parse_struct_expr(tokens, start, diagnostics);
-        }
-        Some(TokKind::ModuleKw | TokKind::BaremoduleKw) => {
-            return parse_module_expr(tokens, start, diagnostics);
-        }
-        Some(TokKind::ReturnKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::RETURN_EXPR,
-                KwStmt::ExprTuple,
-                diagnostics,
-            );
-        }
-        Some(TokKind::BreakKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::BREAK_EXPR,
-                KwStmt::Bare,
-                diagnostics,
-            );
-        }
-        Some(TokKind::ContinueKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::CONTINUE_EXPR,
-                KwStmt::Bare,
-                diagnostics,
-            );
-        }
-        Some(TokKind::ConstKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::CONST_STMT,
-                KwStmt::ExprTuple,
-                diagnostics,
-            );
-        }
-        Some(TokKind::GlobalKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::GLOBAL_STMT,
-                KwStmt::Expr,
-                diagnostics,
-            );
-        }
-        Some(TokKind::LocalKw) => {
-            return parse_keyword_stmt(
-                tokens,
-                start,
-                SyntaxKind::LOCAL_STMT,
-                KwStmt::Expr,
-                diagnostics,
-            );
-        }
-        Some(TokKind::ImportKw) => {
-            return parse_import_stmt(tokens, start, SyntaxKind::IMPORT_STMT, diagnostics);
-        }
-        Some(TokKind::UsingKw) => {
-            return parse_import_stmt(tokens, start, SyntaxKind::USING_STMT, diagnostics);
-        }
-        Some(TokKind::ExportKw) => {
-            return parse_name_list_stmt(tokens, start, SyntaxKind::EXPORT_STMT, diagnostics);
-        }
-        _ => {}
-    }
-
-    let mut lhs = parse_prefix(&ctx, start, diagnostics, flags)?;
+    // A block form is an operand whose own postfix (`.f`, `(y)`, `[y]`, `{T}`) and
+    // juxtaposition are errors in Julia; only infix operators take it as a left
+    // side. `lhs_is_block_keyword` suppresses those two checks for the bare block
+    // form (the first loop iteration) and is cleared once any operator builds a
+    // binary node on top of it.
+    let (mut lhs, mut lhs_is_block_keyword) = match block_form {
+        Some(parsed) => (parsed?, true),
+        None => (parse_prefix(&ctx, start, diagnostics, flags)?, false),
+    };
 
     loop {
-        lhs = parse_postfix_chain(&ctx, lhs, diagnostics);
+        if !lhs_is_block_keyword {
+            lhs = parse_postfix_chain(&ctx, lhs, diagnostics);
+        }
 
         // Numeric-literal-coefficient juxtaposition (`2x`, `2(x)`, `(x-1)y`,
         // `1√x`): an adjacent value with no operator between is an implicit
@@ -311,12 +336,17 @@ fn parse_expr_in(
         // operand is parsed at `JUXTAPOSE_R` (capturing a trailing `^` but not a
         // `*`), and the whole thing re-enters the loop so a following operator
         // (`2x*y` ⇒ `(2x)*y`) attaches outside.
-        if should_juxtapose(&ctx, &lhs, min_bp)
+        if !lhs_is_block_keyword
+            && should_juxtapose(&ctx, &lhs, min_bp)
             && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
         {
             lhs = build_binary(SyntaxKind::JUXTAPOSE_EXPR, lhs, rhs);
             continue;
         }
+
+        // Past the postfix/juxtaposition checks the bare block form is fully
+        // formed; any further iterations see an ordinary operand.
+        lhs_is_block_keyword = false;
 
         // Statement-level bare-comma tuple: at statement scope a top-level comma
         // collects the operands into a `BARE_TUPLE_EXPR`. Comma is not a Pratt

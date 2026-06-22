@@ -13,6 +13,7 @@ bare_operator
 bare_tuple
 begin_index
 binary_precedence
+block_form_operand
 bracescat
 broadcast_bitwise_operators
 broadcasting
