@@ -12,6 +12,7 @@ arrow_pipe_bitshift_operators
 augmented_assignment
 bare_operator
 bare_tuple
+based_int_display
 begin_index
 binary_precedence
 block_form_operand

@@ -1,0 +1,98 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..126
+  ASSIGNMENT_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    LITERAL@4..7
+      HEX_INT@4..7 "0x1"
+  NEWLINE@7..8 "\n"
+  ASSIGNMENT_EXPR@8..16
+    NAME@8..9
+      IDENT@8..9 "b"
+    WHITESPACE@9..10 " "
+    EQ@10..11 "="
+    WHITESPACE@11..12 " "
+    LITERAL@12..16
+      OCT_INT@12..16 "0o22"
+  NEWLINE@16..17 "\n"
+  ASSIGNMENT_EXPR@17..28
+    NAME@17..18
+      IDENT@17..18 "c"
+    WHITESPACE@18..19 " "
+    EQ@19..20 "="
+    WHITESPACE@20..21 " "
+    LITERAL@21..28
+      BIN_INT@21..28 "0b10010"
+  NEWLINE@28..29 "\n"
+  ASSIGNMENT_EXPR@29..37
+    NAME@29..30
+      IDENT@29..30 "d"
+    WHITESPACE@30..31 " "
+    EQ@31..32 "="
+    WHITESPACE@32..33 " "
+    UNARY_EXPR@33..37
+      MINUS@33..34 "-"
+      LITERAL@34..37
+        HEX_INT@34..37 "0x1"
+  NEWLINE@37..38 "\n"
+  ASSIGNMENT_EXPR@38..47
+    NAME@38..39
+      IDENT@38..39 "e"
+    WHITESPACE@39..40 " "
+    EQ@40..41 "="
+    WHITESPACE@41..42 " "
+    LITERAL@42..47
+      PLUS@42..43 "+"
+      OCT_INT@43..47 "0o22"
+  NEWLINE@47..48 "\n"
+  ASSIGNMENT_EXPR@48..57
+    NAME@48..49
+      IDENT@48..49 "f"
+    WHITESPACE@49..50 " "
+    EQ@50..51 "="
+    WHITESPACE@51..52 " "
+    LITERAL@52..57
+      OCT_INT@52..57 "0o755"
+  NEWLINE@57..58 "\n"
+  ASSIGNMENT_EXPR@58..72
+    NAME@58..59
+      IDENT@58..59 "g"
+    WHITESPACE@59..60 " "
+    EQ@60..61 "="
+    WHITESPACE@61..62 " "
+    LITERAL@62..72
+      HEX_INT@62..72 "0xdeadbeef"
+  NEWLINE@72..73 "\n"
+  ASSIGNMENT_EXPR@73..82
+    NAME@73..74
+      IDENT@73..74 "h"
+    WHITESPACE@74..75 " "
+    EQ@75..76 "="
+    WHITESPACE@76..77 " "
+    LITERAL@77..82
+      INTEGER@77..82 "1_000"
+  NEWLINE@82..83 "\n"
+  ASSIGNMENT_EXPR@83..105
+    NAME@83..84
+      IDENT@83..84 "i"
+    WHITESPACE@84..85 " "
+    EQ@85..86 "="
+    WHITESPACE@86..87 " "
+    LITERAL@87..105
+      BIN_INT@87..105 "0b1111111100000000"
+  NEWLINE@105..106 "\n"
+  ASSIGNMENT_EXPR@106..125
+    NAME@106..107
+      IDENT@106..107 "j"
+    WHITESPACE@107..108 " "
+    EQ@108..109 "="
+    WHITESPACE@109..110 " "
+    LITERAL@110..125
+      OCT_INT@110..125 "0o7777777777777"
+  NEWLINE@125..126 "\n"

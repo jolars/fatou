@@ -679,6 +679,31 @@ through), so the grammar can grow incrementally.
   it still juxtaposes (`-2(x)` ⇒ `(juxtapose -2 x)`). Also fixes the `matrices`
   oracle case: `[1 +2]` ⇒ `(hcat 1 2)`.
 
+- [x] Integer-literal display normalization (projector). JuliaSyntax shows a
+  numeric leaf as its parsed *value*, not the source text; the projector now does
+  the same for integers (the same value-rendering the string/char paths already
+  do — the CST stays lossless source text). `literal_token_text` (`sexpr.rs`)
+  strips underscores from decimal `INTEGER`s (`1_000` ⇒ `1000`) and routes
+  base-prefixed `HEX_INT`/`OCT_INT`/`BIN_INT` through `normalize_based_int`, which
+  renders the value as lowercase hex zero-padded to the width of Julia's selected
+  `UInt` type: bit count (hex `4·ndigits`, binary `ndigits`, octal
+  `bits(leading) + 3·(ndigits−1)` via `octal_bits`) rounded up to {8,16,32,64,128}
+  ⇒ {2,4,8,16,32} hex digits (`0x1`⇒`0x01`, `0o22`⇒`0x12`, `0b10010`⇒`0x12`,
+  `0o755`⇒`0x01ed`, `0o00007`⇒`0x0007`). Applied in both the single-token and
+  signed two-token literal paths, so `-0x1`⇒`(call-pre - 0x01)`, `+0o22`⇒`0x12`.
+  **Deferred (two recorded buckets, to revisit):** (1) *float-literal display
+  normalization* — `2.`⇒`2.0`, `1.5e-3`⇒`0.0015`, `1f0`⇒`1.0f0`, hex floats
+  `0x1.8p3`⇒`12.0`, underflow `1.0e-1000`⇒`0.0`; needs replicating Julia's exact
+  `Base.show(::Float64)`/`Float32` shortest-round-trip + notation thresholds
+  (Rust's `{}` differs), and `>128`-bit `BigInt` based literals (shown as
+  decimal). (2) *modeling divergences* — associative n-ary flattening (`a+b+c`,
+  `a*b*c`, `[x+y+z]`), comparison chains (`x<y<z` ⇒ `(comparison …)`),
+  short-circuit chains (`x&&y&&z`), and n-ary juxtaposition (`(2)(3)x`) all stay
+  nested by deliberate Fatou choice. (Error-shape recovery — `a--b`, `'ab'`,
+  `function \n f() end` — remains the separate deferred phase.) The dir fixture
+  `based_int_display` covers the integer case; `numeric_literals` stays blocked on
+  the float half.
+
 - [x] Stepped colon ranges. A `:` chain with a step folds three operands into one
   call rather than nesting two binary colons (`1:2:3` ⇒ `(call-i 1 : 2 3)`,
   `a:b:c:d:e` ⇒ `(call-i (call-i a : b c) : d e)`), mirroring JuliaSyntax's

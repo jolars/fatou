@@ -22,44 +22,63 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **548 allowlisted**, 27 divergence, 0 unsupported.
-Dir corpus: **114 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "splat/vararg `...` precedence" are `[x]`
+JS corpus (575 cases): **553 allowlisted**, 22 divergence, 0 unsupported.
+Dir corpus: **115 allowlisted**, 3 blocked (1 skipped: do_blocks).
+Grammar bullets through "integer-literal display normalization" are `[x]`
 in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
-numeric-literal display normalization,
+**float**-literal display normalization (`2.`/`1f0`/hex floats/`1.0e-1000`; the
+integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22m)
+## Latest session (2026-06-22n)
 
-**Whitespace-sensitive postfix split in matrices (js-443dcfda).** `[f (x)]` ⇒
-`(hcat f x)`: a `(`/`[`/`{` with whitespace before it inside a concatenation
-literal begins a *new* element rather than chaining as a call/index/curly, while
-`[f(x)]` (glued) stays `(vect (call f x))`. `parse_postfix_chain` now takes the
-`array_mode` flag (threaded from `parse_element` via the operator loop) and breaks
-before a space-preceded opener, so the element ends and `parse_matrix` picks the
-opener up as the next element (`[a [b] c]` ⇒ `(hcat a (vect b) c)`,
-`[a {T} b]` ⇒ `(hcat a (braces T) b)`, `[a; f (x)]` ⇒ `(vcat a (row f x))`).
-Mirrors JuliaSyntax's whitespace-sensitive array splitting; outside `array_mode`
-(`f (x)` at toplevel = error-shape) is untouched. Pure parser fix (one new param +
-one guard); projector unchanged. JS allow 547 → 548; dir 113 → 114
-(`array_space_call`). Green; clippy/fmt clean.
+**Integer-literal display normalization (projector; 5 JS FAILs).** JuliaSyntax
+renders a numeric leaf as its parsed *value*, not the source text — the same
+value-rendering the projector already does for strings/chars (`display_char`,
+`triple_string_parts`). The CST stays lossless source text; only the projector
+changed. `literal_token_text` (`sexpr.rs`) now strips underscores from decimal
+`INTEGER`s and routes `HEX_INT`/`OCT_INT`/`BIN_INT` through `normalize_based_int`:
+value → lowercase hex, zero-padded to Julia's selected `UInt` width. Bit count is
+hex `4·ndigits`, binary `ndigits`, octal `bits(leading)+3·(ndigits−1)` (helper
+`octal_bits`), rounded up to {8,16,32,64,128} ⇒ {2,4,8,16,32} hex digits
+(`0x1`⇒`0x01`, `0o22`⇒`0x12`, `0o755`⇒`0x01ed`, `0o00007`⇒`0x0007`,
+`-0x1`⇒`(call-pre - 0x01)`, `+0o22`⇒`0x12`). Applied in both single-token and
+signed two-token literal paths; `>128`-bit BigInt falls back to source text
+(deferred). Flipped js-08ad283e/-36619afa/-38c73ec9/-5752c3f6/-790279e4. JS allow
+548 → 553; dir 114 → 115 (`based_int_display`). Green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** The 27 remaining JS FAILs are all recorded
-modeling/display divergences or error-shapes — no UNSUPPORTED frontier and no
-clean non-divergence candidates left. The closest:
-1. `[a b ;; \n c]` (js-82572497) — mixed space + `;;` row with a newline; an
-   `(error-t)` shape in Julia, so likely error-shape work (deferred phase).
-2. Remaining FAILs: assoc `a+b+c`/`[x+y+z]`/comparison chains/`x&&y&&z`
-   (deliberate nesting), signed/based-numeric display (`-0x1`, `+0o22`,
-   `1.0e-1000`), and error-shapes (`a--b`, `'ab'`, `'\xq'`, `function \n f()
-   end`, `10.0e1000'`). All recorded — the JS backlog is essentially drained of
-   non-divergence parser work; next growth likely comes from a JuliaSyntax bump
-   (re-harvest) or the error-shape parity phase.
+**Why the prior session called the backlog "drained" but this was real:** the
+disposition that lumped *all* numeric-literal display under "blocked" was
+over-broad — integer normalization is a faithful, tractable projector translation
+(precedent: string/char value rendering); only *float* canonicalization is the
+genuinely hard, deferred half. The "blocked" rationale conflated the CST
+(lossless source text — unchanged) with the projector (a separate value display).
+
+**Suggested next targets (ranked):** The 22 remaining JS FAILs are all recorded
+modeling divergences, **float**-display normalization, or error-shapes — no
+clean parser frontier in the pinned corpus. Two user-flagged deferred buckets
+remain (noted in `TODO.md`):
+1. **Float-literal display normalization** — `2.`⇒`2.0`, `1.5e-3`⇒`0.0015`,
+   `1f0`⇒`1.0f0`, hex `0x1.8p3`⇒`12.0`, underflow `1.0e-1000`⇒`0.0`. Hard:
+   must replicate Julia's `Base.show(::Float64)`/`Float32` shortest-round-trip +
+   notation thresholds (Rust `{}` differs, e.g. `1e20`). Would also flip the dir
+   `numeric_literals` fixture (currently blocked on the float half).
+2. **Error-shape parity phase** — the separate deferred workstream (`a--b`,
+   `'ab'`, `function \n f() end`, unterminated string, incomplete `do`).
+Modeling divergences (associative/comparison/short-circuit nesting, n-ary
+juxtaposition) are deliberate and stay un-allowlisted.
 
 ## Earlier sessions
+
+- **2026-06-22m** — Whitespace-sensitive postfix split in matrices (js-443dcfda).
+  `[f (x)]` ⇒ `(hcat f x)`: a space-preceded `(`/`[`/`{` inside a concatenation
+  literal begins a *new* element rather than chaining (`parse_postfix_chain` takes
+  an `array_mode` flag and breaks before a space-preceded opener); `[f(x)]` (glued)
+  stays `(vect (call f x))`. Pure parser fix. JS allow 547 → 548; dir 113 → 114
+  (`array_space_call`).
 
 - **2026-06-22l** — Generators in newline-`[…]` and braces (js-066dacc4,
   js-1c86494f). `[x \n\n for a in as]` ⇒ `(comprehension (generator …))` (newline
@@ -67,8 +86,6 @@ clean non-divergence candidates left. The closest:
   arm → `parse_comprehension`); `{y for y in ys}` ⇒ `(braces (generator …))` (new
   `BRACES_COMPREHENSION` + `ForKw` arm in `parse_braces`). JS allow 545 → 547 (0
   unsupported now); dir 111 → 113.
-
-## Earlier sessions
 
 - **2026-06-22k** — Empty all-semicolon operator group (js-7a161b5a, js-b3691b92).
   `+(;;)` ⇒ `(call-pre + (block-p))`. In `unary_op_paren_is_call`, a leading `;`

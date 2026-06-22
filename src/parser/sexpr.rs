@@ -1385,21 +1385,74 @@ fn project_literal(node: &SyntaxNode) -> String {
     // token precedes the number. `-` stays in the literal; `+` is a no-op and is
     // dropped (`+2.0` → `2.0`, matching JuliaSyntax's glued literal).
     if let [sign, num] = toks.as_slice() {
+        let n = literal_token_text(num);
         return if sign.text() == "-" {
-            format!("-{}", num.text())
+            format!("-{n}")
         } else {
-            num.text().to_string()
+            n
         };
     }
     match toks.first() {
-        Some(tok) => match tok.kind() {
-            CHAR => project_char(tok.text()),
-            TRUE_KW => "true".to_string(),
-            FALSE_KW => "false".to_string(),
-            _ => tok.text().to_string(),
-        },
+        Some(tok) => literal_token_text(tok),
         None => "(unsupported LITERAL)".to_string(),
     }
+}
+
+/// Render a single literal token the way JuliaSyntax displays it. Integer
+/// literals are normalized to their parsed *value* (underscores stripped;
+/// hex/octal/binary shown as zero-padded hex at Julia's width tier), matching
+/// how JuliaSyntax shows the leaf value rather than the source text — the same
+/// value-rendering the string/char paths already do. Floats are left as source
+/// text for now (float canonicalization is a separate, deferred follow-up).
+fn literal_token_text(tok: &SyntaxToken) -> String {
+    match tok.kind() {
+        CHAR => project_char(tok.text()),
+        TRUE_KW => "true".to_string(),
+        FALSE_KW => "false".to_string(),
+        INTEGER => tok.text().replace('_', ""),
+        HEX_INT => normalize_based_int(tok.text(), 16),
+        OCT_INT => normalize_based_int(tok.text(), 8),
+        BIN_INT => normalize_based_int(tok.text(), 2),
+        _ => tok.text().to_string(),
+    }
+}
+
+/// Normalize a base-prefixed integer literal (`0x…`/`0o…`/`0b…`) to JuliaSyntax's
+/// display: the parsed value as lowercase hex, zero-padded to the width of the
+/// unsigned type Julia selects from the digit count. Hex counts 4 bits/digit,
+/// binary 1 bit/digit, and octal `bits(leading) + 3·(ndigits−1)`; that bit count
+/// rounds up to the next of {8,16,32,64,128} (UInt8…UInt128). Values wider than
+/// 128 bits are `BigInt` (shown as decimal) — not handled here, so the source
+/// text is kept (a deferred divergence).
+fn normalize_based_int(text: &str, base: u32) -> String {
+    let digits: String = text[2..].chars().filter(|&c| c != '_').collect();
+    let nbits = match base {
+        16 => 4 * digits.len(),
+        2 => digits.len(),
+        _ => octal_bits(&digits),
+    };
+    let tier_bits = match nbits {
+        0..=8 => 8,
+        9..=16 => 16,
+        17..=32 => 32,
+        33..=64 => 64,
+        65..=128 => 128,
+        _ => return text.replace('_', ""),
+    };
+    match u128::from_str_radix(&digits, base) {
+        Ok(v) => format!("0x{:0width$x}", v, width = tier_bits / 4),
+        Err(_) => text.replace('_', ""),
+    }
+}
+
+/// Bit width of an octal literal's digit string: the leading digit contributes
+/// only its significant bits (`0`→0, `1`→1, `2–3`→2, `4–7`→3) and each remaining
+/// digit a full 3 bits, matching Julia's octal type selection (`0o200`→`0x80`,
+/// `0o400`→`0x0100`, leading zeros widen: `0o00007`→`0x0007`).
+fn octal_bits(digits: &str) -> usize {
+    let lead = digits.as_bytes()[0] - b'0';
+    let lead_bits = (8 - lead.leading_zeros()) as usize;
+    lead_bits + 3 * (digits.len() - 1)
 }
 
 /// Project a char-literal token (`'…'`) to `(char '…')`, decoding the source
