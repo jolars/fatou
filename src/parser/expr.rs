@@ -2175,6 +2175,13 @@ fn parse_postfix_chain(
                 push_range(&mut events, lhs.end, next);
                 events.push(Event::Tok(next)); // `.`
                 push_range(&mut events, next + 1, lparen);
+                // Whitespace before the `(` of a broadcast call is disallowed:
+                // `f. (x)` → `(dotcall f (error-t) x)`, mirroring the glued
+                // postfix-opener error above.
+                if lparen > next + 1 {
+                    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                    events.push(Event::Finish);
+                }
                 events.extend(list_events);
                 events.push(Event::Finish);
                 lhs = ExprParse {
@@ -2280,6 +2287,15 @@ fn parse_postfix(
     let mut events = vec![Event::Start(node)];
     events.extend(lhs.events);
     push_range(&mut events, lhs.end, open_idx);
+    // Whitespace before a glued postfix opener is disallowed: JuliaSyntax keeps
+    // the call/index/curly shape but splices a zero-width `(error-t)` before the
+    // arguments to flag the space (`f (a)` → `(call f (error-t) a)`, `a [i]` →
+    // `(ref a (error-t) i)`, `S {a}` → `(curly S (error-t) a)`). Lossless — the
+    // marker wraps no tokens; the trivia stays attached to the node.
+    if open_idx > lhs.end {
+        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+        events.push(Event::Finish);
+    }
     events.extend(list_events);
     events.push(Event::Finish);
     ExprParse {

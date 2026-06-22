@@ -610,6 +610,14 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
             NodeOrToken::Token(_) => {}
         }
     }
+    // A direct-child `(error-t)` flags disallowed whitespace before the opener
+    // (`f (a)` → `(call f (error-t) a)`); it sits between the callee and the
+    // arguments. (An unterminated arg list's `(error-t)` lives *inside* the
+    // `ARG_LIST` instead and is emitted by `project_args`, so the two never
+    // collide.)
+    if let Some(err) = node.children().find(|c| c.kind() == ERROR_TRIVIA) {
+        parts.push(project_error("error-t", &err));
+    }
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
         parts.extend(project_args(&arg_list));
     } else if let Some(generator) = node.children().find(|c| c.kind() == GENERATOR) {

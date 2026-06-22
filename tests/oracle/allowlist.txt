@@ -80,6 +80,7 @@ parametric_types
 paren_block
 paren_macro_name
 paren_operator
+postfix_space_error
 public_statement
 range_operator
 raw_string

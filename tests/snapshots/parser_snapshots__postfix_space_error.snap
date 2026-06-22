@@ -1,0 +1,54 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..25
+  CALL_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "f"
+    WHITESPACE@1..2 " "
+    ERROR_TRIVIA@2..2
+    ARG_LIST@2..5
+      LPAREN@2..3 "("
+      ARG@3..4
+        NAME@3..4
+          IDENT@3..4 "a"
+      RPAREN@4..5 ")"
+  NEWLINE@5..6 "\n"
+  INDEX_EXPR@6..11
+    NAME@6..7
+      IDENT@6..7 "a"
+    WHITESPACE@7..8 " "
+    ERROR_TRIVIA@8..8
+    ARG_LIST@8..11
+      LBRACKET@8..9 "["
+      ARG@9..10
+        NAME@9..10
+          IDENT@9..10 "i"
+      RBRACKET@10..11 "]"
+  NEWLINE@11..12 "\n"
+  CURLY_EXPR@12..17
+    NAME@12..13
+      IDENT@12..13 "S"
+    WHITESPACE@13..14 " "
+    ERROR_TRIVIA@14..14
+    ARG_LIST@14..17
+      LBRACE@14..15 "{"
+      ARG@15..16
+        NAME@15..16
+          IDENT@15..16 "a"
+      RBRACE@16..17 "}"
+  NEWLINE@17..18 "\n"
+  DOT_CALL_EXPR@18..24
+    NAME@18..19
+      IDENT@18..19 "f"
+    DOT@19..20 "."
+    WHITESPACE@20..21 " "
+    ERROR_TRIVIA@21..21
+    ARG_LIST@21..24
+      LPAREN@21..22 "("
+      ARG@22..23
+        NAME@22..23
+          IDENT@22..23 "x"
+      RPAREN@23..24 ")"
+  NEWLINE@24..25 "\n"

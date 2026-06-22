@@ -54,6 +54,18 @@ through), so the grammar can grow incrementally.
   556 → 559; dir 118 → 119. **Deferred** (different shapes): operator suffix
   `var"x"+` ⇒ `(call-i (var x) + (error))`, close-delim/`@macro`/whitespace
   suffixes ⇒ separate-toplevel `(error-t …)`.
+- [x] Whitespace-before-postfix-opener `(error-t)` (error-shape slice). A
+  `(`/`[`/`{` chained after a value with disallowed whitespace keeps the
+  call/index/curly/dotcall shape but splices a zero-width `ERROR_TRIVIA` before
+  the args: `f (a)` ⇒ `(call f (error-t) a)`, `a [i]` ⇒ `(ref a (error-t) i)`,
+  `S {a}` ⇒ `(curly S (error-t) a)`, `f. (x)` ⇒ `(dotcall f (error-t) x)`.
+  `parse_postfix` (and the inline `DOT_CALL_EXPR` arm) inserts the marker when
+  `open_idx > lhs.end`; `project_call` emits a direct-child `(error-t)` between
+  callee and args (distinct from the unterminated-arglist marker, which lives
+  *inside* `ARG_LIST`). Array-mode space-split is untouched (no error-t — it's a
+  real `hcat`). Fixture `postfix_space_error`. JS allow 559 → 564 (also unblocked
+  `outer (x,y) = rhs`); dir 119 → 120. **Deferred**: field-access space `x .y` ⇒
+  `(. x (error-t) (quote y))` (separate `BINARY_EXPR`/`project_binary` path).
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
