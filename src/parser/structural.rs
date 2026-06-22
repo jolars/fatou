@@ -343,14 +343,7 @@ pub(crate) fn parse_struct_expr(
         push_diagnostic(diagnostics, "expected `struct`", kw.start, kw.end);
     }
 
-    i = parse_header(
-        &ctx,
-        &mut events,
-        i,
-        SyntaxKind::SIGNATURE,
-        false,
-        diagnostics,
-    );
+    i = parse_signature(&ctx, &mut events, i, diagnostics);
     i = run_block(&ctx, &mut events, i, END_ONLY, diagnostics);
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
     events.push(Event::Finish);
@@ -480,14 +473,7 @@ pub(crate) fn parse_module_expr(
     let ctx = ParserCtx::new(tokens);
     let mut events = vec![Event::Start(SyntaxKind::MODULE_DEF), Event::Tok(start)];
 
-    let mut i = parse_header(
-        &ctx,
-        &mut events,
-        start + 1,
-        SyntaxKind::SIGNATURE,
-        false,
-        diagnostics,
-    );
+    let mut i = parse_signature(&ctx, &mut events, start + 1, diagnostics);
     i = run_module_block(&ctx, &mut events, i, END_ONLY, diagnostics);
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
     events.push(Event::Finish);
@@ -1165,6 +1151,41 @@ fn parse_condition(
             cond_start
         }
     }
+}
+
+/// Parse a `struct`/`module` signature: a single type/name expression wrapped in
+/// a `SIGNATURE` node. Unlike [`parse_header`], it stops right after that
+/// expression rather than gobbling the rest of the line, so same-line body
+/// statements (`struct A const a end`, `module A x end`) fall through to the
+/// block. An empty signature (the keyword's line ends immediately) emits no node.
+/// Returns the index after the signature.
+fn parse_signature(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    after_kw: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let sig_start = ctx.skip_ws(after_kw);
+    push_range(events, after_kw, sig_start);
+
+    if header_ends(ctx, sig_start) {
+        return sig_start;
+    }
+
+    events.push(Event::Start(SyntaxKind::SIGNATURE));
+    let i = if let Some(expr) = parse_expr(ctx.tokens(), sig_start, 0, diagnostics) {
+        events.extend(expr.events);
+        expr.end
+    } else if ctx.token(sig_start).map(|t| t.kind) == Some(TokKind::Dollar) {
+        // An interpolated name (`module $A end`): a real `INTERPOLATION` node.
+        let interp = parse_prefix_interpolation(ctx, sig_start, diagnostics);
+        events.extend(interp.events);
+        interp.end
+    } else {
+        sig_start
+    };
+    events.push(Event::Finish);
+    i
 }
 
 /// Parse the header that sits on a block keyword's line, wrapping it in

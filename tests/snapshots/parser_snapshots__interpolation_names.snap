@@ -6,12 +6,12 @@ ROOT@0..54
   MODULE_DEF@0..13
     MODULE_KW@0..6 "module"
     WHITESPACE@6..7 " "
-    SIGNATURE@7..10
+    SIGNATURE@7..9
       INTERPOLATION@7..9
         DOLLAR@7..8 "$"
         IDENT@8..9 "A"
+    BLOCK@9..10
       WHITESPACE@9..10 " "
-    BLOCK@10..10
     END_KW@10..13 "end"
   NEWLINE@13..14 "\n"
   IMPORT_STMT@14..23

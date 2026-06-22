@@ -7,7 +7,8 @@ ROOT@0..157
     STRUCT_KW@0..6 "struct"
     WHITESPACE@6..7 " "
     SIGNATURE@7..12
-      IDENT@7..12 "Point"
+      NAME@7..12
+        IDENT@7..12 "Point"
     BLOCK@12..25
       NEWLINE@12..13 "\n"
       WHITESPACE@13..17 "    "
@@ -27,7 +28,8 @@ ROOT@0..157
     STRUCT_KW@38..44 "struct"
     WHITESPACE@44..45 " "
     SIGNATURE@45..52
-      IDENT@45..52 "Counter"
+      NAME@45..52
+        IDENT@45..52 "Counter"
     BLOCK@52..59
       NEWLINE@52..53 "\n"
       WHITESPACE@53..57 "    "
@@ -41,11 +43,14 @@ ROOT@0..157
     STRUCT_KW@64..70 "struct"
     WHITESPACE@70..71 " "
     SIGNATURE@71..97
-      IDENT@71..78 "Wrapper"
-      WHITESPACE@78..79 " "
-      SUBTYPE@79..81 "<:"
-      WHITESPACE@81..82 " "
-      IDENT@82..97 "AbstractWrapper"
+      BINARY_EXPR@71..97
+        NAME@71..78
+          IDENT@71..78 "Wrapper"
+        WHITESPACE@78..79 " "
+        SUBTYPE@79..81 "<:"
+        WHITESPACE@81..82 " "
+        NAME@82..97
+          IDENT@82..97 "AbstractWrapper"
     BLOCK@97..108
       NEWLINE@97..98 "\n"
       WHITESPACE@98..102 "    "
@@ -59,7 +64,8 @@ ROOT@0..157
     MODULE_KW@113..119 "module"
     WHITESPACE@119..120 " "
     SIGNATURE@120..121
-      IDENT@120..121 "M"
+      NAME@120..121
+        IDENT@120..121 "M"
     BLOCK@121..135
       NEWLINE@121..122 "\n"
       WHITESPACE@122..126 "    "
@@ -86,7 +92,8 @@ ROOT@0..157
     BAREMODULE_KW@140..150 "baremodule"
     WHITESPACE@150..151 " "
     SIGNATURE@151..152
-      IDENT@151..152 "B"
+      NAME@151..152
+        IDENT@151..152 "B"
     BLOCK@152..153
       NEWLINE@152..153 "\n"
     END_KW@153..156 "end"

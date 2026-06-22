@@ -35,7 +35,8 @@ ROOT@0..72
     MODULE_KW@43..49 "module"
     WHITESPACE@49..50 " "
     SIGNATURE@50..51
-      IDENT@50..51 "M"
+      NAME@50..51
+        IDENT@50..51 "M"
     BLOCK@51..68
       NEWLINE@51..52 "\n"
       DOC@52..67

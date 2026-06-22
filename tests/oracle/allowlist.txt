@@ -85,6 +85,7 @@ string_escapes
 string_interp_ident_boundary
 string_interpolation
 string_macro_suffix
+struct_const_field
 struct_module
 symbols
 ternary

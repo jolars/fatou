@@ -21,6 +21,14 @@ through), so the grammar can grow incrementally.
   operators and parametric-type bullets below. **Known limitation:**
   `mutable` is lexed as a keyword, so it cannot currently be used as a bare
   identifier (it is contextual in Julia, special only before `struct`).
+- [x] `struct`/`module` signature + same-line body. `parse_signature`
+  (`structural.rs`) parses the type/name as a single expression into `SIGNATURE`
+  and stops there, instead of gobbling the rest of the line. Same-line body
+  statements now fall through to the block: `struct A const a end` ⇒
+  `(struct A (block (const a)))`, `struct A <: B c end` ⇒
+  `(struct (<: A B) (block c))`, `module A x end` ⇒ `(module A (block x))`. The
+  signature subtype (`A <: B`) is now a real `BINARY_EXPR` node and the bare name
+  a `NAME` node (the projector's `first_node` path).
 - [x] `do` blocks — postfix on a call (`f(x) do y … end`). Attached in the
   postfix chain (`parse_postfix_chain`) and parsed by `parse_do_block`, which
   reuses the generic header passthrough for the `do`-line parameters

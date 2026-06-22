@@ -1,0 +1,84 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..111
+  STRUCT_DEF@0..20
+    STRUCT_KW@0..6 "struct"
+    WHITESPACE@6..7 " "
+    SIGNATURE@7..8
+      NAME@7..8
+        IDENT@7..8 "A"
+    BLOCK@8..17
+      WHITESPACE@8..9 " "
+      CONST_STMT@9..17
+        CONST_KW@9..14 "const"
+        WHITESPACE@14..15 " "
+        NAME@15..16
+          IDENT@15..16 "a"
+        WHITESPACE@16..17 " "
+    END_KW@17..20 "end"
+  NEWLINE@20..21 "\n"
+  STRUCT_DEF@21..54
+    MUTABLE_KW@21..28 "mutable"
+    WHITESPACE@28..29 " "
+    STRUCT_KW@29..35 "struct"
+    WHITESPACE@35..36 " "
+    SIGNATURE@36..37
+      NAME@36..37
+        IDENT@36..37 "A"
+    BLOCK@37..51
+      WHITESPACE@37..38 " "
+      CONST_STMT@38..51
+        CONST_KW@38..43 "const"
+        WHITESPACE@43..44 " "
+        TYPE_ANNOTATION@44..50
+          NAME@44..45
+            IDENT@44..45 "a"
+          COLON_COLON@45..47 "::"
+          NAME@47..50
+            IDENT@47..50 "Int"
+        WHITESPACE@50..51 " "
+    END_KW@51..54 "end"
+  NEWLINE@54..55 "\n"
+  STRUCT_DEF@55..78
+    STRUCT_KW@55..61 "struct"
+    WHITESPACE@61..62 " "
+    SIGNATURE@62..63
+      NAME@62..63
+        IDENT@62..63 "A"
+    BLOCK@63..75
+      WHITESPACE@63..64 " "
+      NAME@64..65
+        IDENT@64..65 "x"
+      SEMICOLON@65..66 ";"
+      WHITESPACE@66..67 " "
+      CONST_STMT@67..75
+        CONST_KW@67..72 "const"
+        WHITESPACE@72..73 " "
+        NAME@73..74
+          IDENT@73..74 "b"
+        WHITESPACE@74..75 " "
+    END_KW@75..78 "end"
+  NEWLINE@78..79 "\n"
+  STRUCT_DEF@79..110
+    STRUCT_KW@79..85 "struct"
+    WHITESPACE@85..86 " "
+    SIGNATURE@86..88
+      NAME@86..88
+        IDENT@86..88 "Pt"
+    BLOCK@88..107
+      NEWLINE@88..89 "\n"
+      WHITESPACE@89..93 "    "
+      CONST_STMT@93..100
+        CONST_KW@93..98 "const"
+        WHITESPACE@98..99 " "
+        NAME@99..100
+          IDENT@99..100 "x"
+      NEWLINE@100..101 "\n"
+      WHITESPACE@101..105 "    "
+      NAME@105..106
+        IDENT@105..106 "y"
+      NEWLINE@106..107 "\n"
+    END_KW@107..110 "end"
+  NEWLINE@110..111 "\n"

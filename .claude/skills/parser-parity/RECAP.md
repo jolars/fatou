@@ -22,18 +22,50 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **535 allowlisted**, 38 divergence, 2 unsupported.
-Dir corpus: **104 allowlisted**, 4 blocked (1 skipped: do_blocks).
-Grammar bullets through "`export`/`public` name lists" are `[x]` in `TODO.md`.
+JS corpus (575 cases): **536 allowlisted**, 37 divergence, 2 unsupported.
+Dir corpus: **105 allowlisted**, 4 blocked (1 skipped: do_blocks).
+Grammar bullets through "`struct`/`module` signature + same-line body" are `[x]`
+in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22d)
+## Latest session (2026-06-22e)
 
-**Broadcast unicode infix operators `.…` (UNSUPPORTED frontier).** `a .… b` ⇒
+**`struct`/`module` signature + same-line body (js-33d4b6c0).** `struct A const a
+end` ⇒ `(struct A (block (const a)))`. Root cause: `parse_struct_expr`/
+`parse_module_expr` called `parse_header(.., run_expr: false)`, which gobbled the
+*entire* keyword line into `SIGNATURE` as loose tokens — so a same-line body
+(`const a`, `B`, `x; y`) was swallowed into the signature. Fix: new
+`parse_signature` (`structural.rs`) parses the type/name as a single expression
+into `SIGNATURE` and stops right after it (no while-loop gobble), letting the rest
+of the line fall through to `run_block`. Bonus: the subtype `A <: B` is now a real
+`BINARY_EXPR` and bare names are `NAME` nodes (the projector's `first_node` path
+already handled both, so `sexpr.rs` was untouched — pure parser fix). Multi-line
+structs/modules unchanged (header ends at the newline as before). Snapshots
+updated for `docstring`/`interpolation_names`/`public_statement`/`struct_module`
+(signature names now wrapped in `NAME`/`BINARY_EXPR`; trailing ws moved from
+SIGNATURE to BLOCK) — all projection-neutral. JS allow 535 → 536 (`js-33d4b6c0`);
+dir 104 → 105 (`struct_const_field`). Green; clippy/fmt clean.
+
+**Suggested next targets (ranked):**
+1. **`begin x end::T`** (js-0e1915ed) — a `begin…end` block as the LHS of a
+   postfix infix op (`(::-i (block x) T)`); Fatou splits it into two statements.
+   Block-keyword exprs usable as operands.
+2. **`<: A where B`** (js-063e192a) — prefix `<:`/`>:` should bind *looser* than
+   `where`: `(<:-pre (where A B))`, Fatou gives `(where (<:-pre A) B)`. Precedence
+   fix for prefix type operators vs `where`.
+3. **`f(x) do y body end`** (js-68aeea63) — re-check the do-block projection; it's
+   a FAIL in the JS corpus.
+4. Recorded modeling divergences (do **not** fix): comparison/associative chains
+   (`a+b+c`, `x<y<z`, `[x+y+z]`), numeric-literal display normalization.
+
+## Earlier sessions
+
+- **2026-06-22d** — Broadcast unicode infix operators `.…` (UNSUPPORTED frontier).
+  `a .… b` ⇒
 `(dotcall-i a … b)` (also `.×`/`.→`/`.⊕`/`.≤`). The lexer now fuses a broadcast
 `.` immediately followed by an infix-tier unicode op into one token spanning
 `.op`, keeping the op's tier `TokKind` (so binding power is unchanged); new
@@ -49,21 +81,6 @@ when a fused dotted op precedes the first name. This *also* fixed the previously
 broken ASCII `import .==`/`import .+` ⇒ `(importpath . ==)` for free. JS allow
 534 → 535 (`js-f74d3ac9`, was unsupported); dir 103 → 104 (`broadcast_unicode_operator`).
 Green; clippy/fmt clean.
-
-**Suggested next targets (ranked):**
-1. **`struct A const a end`** (js-33d4b6c0) — `const` fields in a struct body ⇒
-   `(struct A (block (const a)))`; Fatou drops the `const`. Real feature, genuine
-   parser gap.
-2. **`begin x end::T`** (js-0e1915ed) — a `begin…end` block as the LHS of a
-   postfix infix op (`(::-i (block x) T)`); Fatou splits it into two statements.
-   Block-keyword exprs usable as operands.
-3. **`<: A where B`** (js-063e192a) — prefix `<:`/`>:` should bind *looser* than
-   `where`: `(<:-pre (where A B))`, Fatou gives `(where (<:-pre A) B)`. Precedence
-   fix for prefix type operators vs `where`.
-4. Recorded modeling divergences (do **not** fix): comparison/associative chains
-   (`a+b+c`, `x<y<z`, `[x+y+z]`), numeric-literal display normalization.
-
-## Earlier sessions
 
 - **2026-06-22c** — Import operator/unicode/dot names (cluster). Four FAILs in
   `parse_import_path` + `project_import_path`: unicode-op components (`import ⋆`/
