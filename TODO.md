@@ -43,6 +43,17 @@ through), so the grammar can grow incrementally.
   stopping content at the newline — an unterminated string consumes to EOF.
   Fixtures `unterminated_string`, `unterminated_command`. JS allow 555 → 556; dir
   116 → 118.
+- [x] `var"…"` glued-suffix `(error-t)` (error-shape slice). A `var"…"`
+  non-standard identifier takes no flags, so a glued suffix — a flag-like alpha
+  run (lexed `StringSuffix`) or a digit-led numeric literal — is junk:
+  `parse_string_literal`'s close-delim arm consumes it as a sibling token and
+  appends a zero-width `ERROR_TRIVIA`, so `var"x"y`/`var"x"1`/`var"x"end` ⇒
+  `(var x (error-t))` (`project_var` ignores the sibling token; `with_error_trivia`
+  emits the marker). A glued postfix opener (`[ ( { ' .`) or operator stays a
+  chain/bind in the outer parser. Fixture `var_identifier_suffix`. JS allow
+  556 → 559; dir 118 → 119. **Deferred** (different shapes): operator suffix
+  `var"x"+` ⇒ `(call-i (var x) + (error))`, close-delim/`@macro`/whitespace
+  suffixes ⇒ separate-toplevel `(error-t …)`.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

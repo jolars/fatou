@@ -22,11 +22,11 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **556 allowlisted**,
-129 divergence, 0 unsupported. Dir corpus: **118 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **559 allowlisted**,
+126 divergence, 0 unsupported. Dir corpus: **119 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
-total). Grammar bullets through "unterminated-string `(error-t)`" are `[x]` in
-`TODO.md`.
+total). Grammar bullets through "`var\"…\"` glued-suffix `(error-t)`" are `[x]`
+in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -34,46 +34,56 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22p)
+## Latest session (2026-06-22q)
 
-**Unterminated-string `(error-t)` — error-shape slice 2.** A string/command/
-`var"…"` literal with no closing delimiter now appends a zero-width
-`ERROR_TRIVIA` inside its body, mirroring JuliaSyntax's truncation marker:
-`"str` ⇒ `(string "str" (error-t))`, `` `cmd `` ⇒
-`(macrocall core_@cmd (cmdstring-r "cmd" (error-t)))`, `r"pat` ⇒
-`(macrocall @r_str (string-r "pat" (error-t)))`, `var"x` ⇒ `(var x (error-t))`.
-**Parser:** `parse_string_literal`'s unterminated arm (`_ => break`, reached only
-when no close delimiter is seen — the close arm breaks separately) appends a
-zero-width `ERROR_TRIVIA` node; lossless (wraps no tokens), covers all four
-literal flavors since they share this parser. **Projector:** new
-`with_error_trivia(node, parts)` appends `project_error("error-t", …)` to a
-literal body's parts, and drops a sole filler `""` first — Julia emits no
-empty-content placeholder for an unterminated literal (`"` ⇒ `(string (error-t))`,
-not `(string "")`; but terminated `""`/`r""` keep their `""`). Wired into
-`project_string` (plain/triple/macro-r/raw-triple paths), `project_cmd`
-(cmdstring-r/cmdstring-s-r), and `project_var`. **Lexer fix (faithfulness):**
-single-quoted `"…"` strings now span literal newlines like Julia — removed the
-deliberate `quote == b'"'` newline-break in `lex_in_string_mode`, so `"a\nb"` ⇒
-`(string "a\nb")` and an unterminated string consumes to EOF (commands already
-spanned newlines). This is what unblocked the multi-line dir fixture
-`unterminated_string` (`s = "oops⏎ok = 1⏎` ⇒ `(= s (string "oops\nok = 1\n"
-(error-t)))`). New fixtures `unterminated_string` (snapshot updated),
-`unterminated_command`. JS allow 555 → 556 (js-b4a566a6); dir 116 → 118
-(`unterminated_string` un-blocked + new `unterminated_command`). Zero
-regressions; green; clippy/fmt clean.
+**`var"…"` glued-suffix `(error-t)` — error-shape slice 3 (trailing-junk, glued
+sub-case).** A glued atom suffix after a `var"…"` non-standard identifier ⇒
+`(var x (error-t))`: `var"x"y`, `var"x"1`, `var"x"end`. A `var"…"` identifier
+takes no flags (unlike a string macro `r"pat"ims`), so a glued suffix is junk.
+**Parser:** `parse_string_literal`'s close-delimiter arm, for
+`NONSTANDARD_IDENTIFIER` only, checks the immediately-following (glued, no-ws)
+token; if it's a `StringSuffix` (the letter-led alpha run the lexer's `lex_suffix`
+grabs because `var` is a prefix — so `y`/`end`/`function`/`if` all arrive as one
+`StringSuffix`) or a numeric literal (`Integer`/`Float`/`Float32`/`Bin`/`Oct`/`HexInt`,
+digit-led, not grabbed by `lex_suffix`), it pushes the token as a sibling child
+and appends a zero-width `ERROR_TRIVIA`, then breaks. **Projector untouched:**
+`project_var` reads only `raw_content` (STRING_CONTENT) + `with_error_trivia`, so
+the sibling junk token is naturally ignored and the marker emits `(error-t)`.
+Mirrors JuliaSyntax structurally — it nests the junk inside the error node flagged
+*trivia*; Fatou has no per-token trivia flag, so the junk sits beside an empty
+error-t (projects identically; the only error-t that *shows* content,
+`f(2)2`⇒`(error-t 2)`, is a different significant-leftover recovery). Glued
+postfix openers (`[ ( { ' .`) and operators are untouched — they chain/bind in the
+outer parser (`var"x"[1]`⇒`(ref (var x) 1)`, `var"x"*y`⇒`(call-i (var x) * y)`).
+Fixture `var_identifier_suffix`. JS allow 556 → 559 (js-006f1f57/48512d42/1b9f9fa4);
+dir 118 → 119. Zero regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** continue the error-shape slices: (1)
-**trailing junk** `f(2)2` ⇒ `(call f 2) (error-t 2)`, `var"x"y` ⇒
-`(var x (error-t))`, `"a"x` ⇒ `(juxtapose (string "a") (error-t) x)` — wrap
-skipped post-literal tokens (~30 JS cases, several `var"x"*` in the report);
-(2) **incomplete `do`** ⇒ `(block (error))` (unblocks dir `do_blocks`);
-(3) **lexer-classified named kinds** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
-`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`, bad escape/numeric (each adds its
-`SyntaxKind` before `ERROR` + a lexer `TokKind` + projector arm). `end_index`
-also needs bare-`end` *rejection* (a grammar change), so error-node work alone
-won't unblock it.
+**Suggested next targets (ranked):** the remaining trailing-junk shapes are
+*separate-toplevel* recoveries, harder than the glued sub-case: (1) **whitespace/
+operator/delim-leftover** `f(2)2`⇒`(call f 2) (error-t 2)`, `var"x" y`⇒
+`(var x) (error-t y)`, `var"x")`⇒`(var x) (error-t ✘)` — a complete statement
+followed by junk on the same line yields a *significant* `(error-t …)` sibling
+statement (needs the driver/`parse` line loop to wrap a leftover run; note the
+content IS shown here, unlike the glued var suffix). (2) **`"a"x` juxtapose-error**
+⇒ `(juxtapose (string "a") (error-t) x)` — currently mis-folds as a docstring
+(`(doc (string "a") x)`); a glued ident after a *string literal* is a juxtapose
+with a zero-width error-t marker, and must beat the docstring fold. (3)
+**incomplete `do`** ⇒ `(block (error))` (unblocks dir `do_blocks`). (4)
+**lexer-classified named kinds** (`'ab'`⇒`(char (ErrorOverLongCharacter))`,
+`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
 
 ## Earlier sessions
+
+- **2026-06-22p** — Unterminated-string `(error-t)` — error-shape slice 2. A
+  string/command/`var"…"` literal with no closing delimiter appends a zero-width
+  `ERROR_TRIVIA` inside its body (`parse_string_literal`'s unterminated `_ => break`
+  arm): `"str` ⇒ `(string "str" (error-t))`, `var"x` ⇒ `(var x (error-t))`.
+  Projector `with_error_trivia` appends the marker and drops a sole filler `""`
+  (Julia omits the empty-content placeholder for an unterminated literal). Lexer
+  faithfulness fix: single-quoted `"…"` strings span literal newlines like Julia
+  (`"a\nb"` ⇒ `(string "a\nb")`), so an unterminated string consumes to EOF. New
+  fixtures `unterminated_string`, `unterminated_command`. JS allow 555 → 556; dir
+  116 → 118.
 
 - **2026-06-22o** — Typed error-node taxonomy (error-shape parity Phase 0 + first
   slice). JuliaSyntax splices typed error nodes into the tree; added

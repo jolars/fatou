@@ -1247,12 +1247,40 @@ fn parse_string_literal(
             Some(k) if k == close_kind => {
                 events.push(Event::Tok(i));
                 i += 1;
+                let suffix = ctx.token(i).map(|t| t.kind);
+                // A `var"…"` non-standard identifier takes no flags: a glued
+                // suffix (a flag-like alpha run lexed as `StringSuffix`, or a
+                // digit-led numeric literal) is junk. Consume it as a child
+                // token and append a zero-width `(error-t)` recovery marker,
+                // mirroring JuliaSyntax (`var"x"y`/`var"x"1`/`var"x"end` ⇒
+                // `(var x (error-t))`). A glued postfix opener (`[ ( { ' .`) or
+                // operator is *not* a suffix here — it chains/binds in the outer
+                // parser, so only these atom-like kinds trigger recovery.
+                if node == SyntaxKind::NONSTANDARD_IDENTIFIER {
+                    if matches!(
+                        suffix,
+                        Some(
+                            TokKind::StringSuffix
+                                | TokKind::Integer
+                                | TokKind::Float
+                                | TokKind::Float32
+                                | TokKind::BinInt
+                                | TokKind::OctInt
+                                | TokKind::HexInt
+                        )
+                    ) {
+                        events.push(Event::Tok(i));
+                        i += 1;
+                        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                        events.push(Event::Finish);
+                    }
+                    break;
+                }
                 // Optional suffix glued after the close delimiter of a string
                 // macro: a flag run (`r"pat"ims` → `"ims"`) or a numeric literal
                 // (`x"s"2` → an extra `2` macrocall argument). A digit-led suffix
                 // is lexed as an ordinary number, so capture it into the literal
                 // node here; the projector renders it as the trailing argument.
-                let suffix = ctx.token(i).map(|t| t.kind);
                 let is_flag = suffix == Some(TokKind::StringSuffix);
                 let is_numeric = has_prefix
                     && node == SyntaxKind::STRING_LITERAL
