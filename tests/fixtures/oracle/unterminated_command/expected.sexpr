@@ -1,0 +1,1 @@
+(toplevel (macrocall core_@cmd (cmdstring-r "ls -l" (error-t))))

@@ -1266,8 +1266,16 @@ fn parse_string_literal(
                 }
                 break;
             }
-            // Unterminated: anything else (incl. EOF) ends the literal.
-            _ => break,
+            // Unterminated: anything else (incl. EOF) ends the literal. Mirror
+            // JuliaSyntax: a string/command/`var"…"` literal with no closing
+            // delimiter gets a zero-width `(error-t)` truncation marker appended
+            // inside its body (`"str` → `(string "str" (error-t))`, `var"x` →
+            // `(var x (error-t))`). Lossless — the node wraps no tokens.
+            _ => {
+                events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                events.push(Event::Finish);
+                break;
+            }
         }
     }
 

@@ -113,6 +113,8 @@ type_operator_call
 unary_operator_call
 unclosed_delimiter
 unicode_operators
+unterminated_command
+unterminated_string
 var_macro_name
 vect_newline_comma
 version_string

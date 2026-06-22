@@ -26,11 +26,23 @@ through), so the grammar can grow incrementally.
   (`parse_arg_list` EOF arm) appends a zero-width `ERROR_TRIVIA` (`[x` ⇒
   `(vect x (error-t))`, `var"x"(` ⇒ `(call (var x) (error-t))`, `f(a` ⇒
   `(call f a (error-t))`). Fixture `unclosed_delimiter`. JS allow 553 → 555; dir
-  114 → 116. **Deferred** (ranked next slices): unterminated-string `(error-t)`,
-  trailing-junk `(error-t b)`, incomplete-`do` `(error)`, the lexer-classified
-  named kinds (`'ab'`⇒`ErrorOverLongCharacter`, `a--b`⇒`ErrorInvalidOperator`,
-  bad escape/numeric). `end_index` also needs bare-`end` rejection (a grammar
+  114 → 116. **Deferred** (ranked next slices): trailing-junk `(error-t b)`,
+  incomplete-`do` `(error)`, the lexer-classified named kinds
+  (`'ab'`⇒`ErrorOverLongCharacter`, `a--b`⇒`ErrorInvalidOperator`, bad
+  escape/numeric). `end_index` also needs bare-`end` rejection (a grammar
   change), so it stays blocked.
+- [x] Unterminated-string `(error-t)` (error-shape slice). A string/command/
+  `var"…"` literal with no closing delimiter appends a zero-width `ERROR_TRIVIA`
+  inside its body (`parse_string_literal`'s unterminated arm): `"str` ⇒
+  `(string "str" (error-t))`, `` `cmd `` ⇒ `(cmdstring-r "cmd" (error-t))`,
+  `r"pat` ⇒ `(string-r "pat" (error-t))`, `var"x` ⇒ `(var x (error-t))`. The
+  projector's `with_error_trivia` appends `(error-t)` to each literal body,
+  dropping the empty-`""` content placeholder Julia omits for an unterminated
+  literal. Also fixed a lexer divergence: single-quoted `"…"` strings now span
+  literal newlines like Julia (`"a\nb"` ⇒ `(string "a\nb")`), instead of
+  stopping content at the newline — an unterminated string consumes to EOF.
+  Fixtures `unterminated_string`, `unterminated_command`. JS allow 555 → 556; dir
+  116 → 118.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

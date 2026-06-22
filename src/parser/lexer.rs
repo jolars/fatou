@@ -558,10 +558,6 @@ impl<'a> Lexer<'a> {
             if !raw && self.peek(0) == Some(b'$') && self.is_interp_start(1) {
                 break;
             }
-            if !triple && quote == b'"' && self.peek(0) == Some(b'\n') {
-                // Unterminated single-line string: stop before the newline.
-                break;
-            }
             self.consume_body_byte(raw);
         }
 

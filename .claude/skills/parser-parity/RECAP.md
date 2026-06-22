@@ -22,11 +22,11 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **555 allowlisted**,
-130 divergence, 0 unsupported. Dir corpus: **116 allowlisted**, 4 blocked
-(do_blocks/unterminated_string/end_index/numeric_literals; all now FAIL not skip
-since `render` is total). Grammar bullets through "typed error-node taxonomy"
-are `[x]` in `TODO.md`.
+JS corpus (**685 cases** — error shapes now harvested): **556 allowlisted**,
+129 divergence, 0 unsupported. Dir corpus: **118 allowlisted**, 3 blocked
+(do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
+total). Grammar bullets through "unterminated-string `(error-t)`" are `[x]` in
+`TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -34,56 +34,59 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22o)
+## Latest session (2026-06-22p)
 
-**Typed error-node taxonomy — error-shape parity Phase 0 + first slice.** The
-long-deferred error-shape phase begins. JuliaSyntax splices typed error nodes
-into the tree (named lexer kinds `(ErrorName)`, generic `(error)` = missing
-element, `(error-t)` = `TRIVIA_FLAG` truncation/EOF); Fatou previously recovered
-losslessly + reported side-channel diagnostics, and the harness *skipped* any
-diagnostic-bearing case. **Data model:** rowan green nodes carry only a `u16`
-discriminant (no flag bits), and `kind_from_raw` transmutes relying on `ERROR`
-staying *last* — so new error kinds go *before* `ERROR`. Added one kind this
-session: `ERROR_TRIVIA` (projected `(error-t)`), keeping `ERROR` as bare
-`(error)` + unknown-token catch-all. Named lexer kinds are deferred to their own
-slices (one kind + emitter + projector arm together — avoids dead arms). New
-projector `project_error(head, node)` wraps any *significant* recovered tokens
-(delimiters dropped, so a zero-width synthesized node → bare `(error-t)`).
-Recovery helper `error_node_with_range(kind, …)`. **Harness:** `render()` is now
-total — dropped the `diagnostics.is_empty()` skip; returns `None` (→
-`Unsupported`) only on the raw `(unsupported …)` sentinel. Safe because
-allowlisted = currently-passing = no-diagnostics, so the 553/115 gates are
-untouched (verified: pass count == allowlist size). **Harvest:** relaxed the
-`occursin("(error", …)` filter (kept the `!isvalid` UTF-8 guard) and re-harvested
-→ JS corpus 575 → 685 (the +110 error cases all enter as un-allowlisted
-divergence, the visible backlog — user chose *fold into main corpus*).
-**First slice (unclosed delimiter):** `parse_arg_list`'s EOF arm (`None => break`)
-now appends a zero-width `ERROR_TRIVIA` (closing any open `PARAMETERS` first), so
-`[x` ⇒ `(vect x (error-t))`, `var"x"(` ⇒ `(call (var x) (error-t))`, `f(a` ⇒
-`(call f a (error-t))`. No well-formed case reaches that arm, so it can't regress
-the allowlist. `project_args`' existing `_ => project(&n)` renders the child.
-Lossless (node wraps no tokens). Fixture `unclosed_delimiter`. JS allow
-553 → 555 (js-36696d34, js-f68656dd); dir 115 → 116. Green; clippy/fmt clean.
+**Unterminated-string `(error-t)` — error-shape slice 2.** A string/command/
+`var"…"` literal with no closing delimiter now appends a zero-width
+`ERROR_TRIVIA` inside its body, mirroring JuliaSyntax's truncation marker:
+`"str` ⇒ `(string "str" (error-t))`, `` `cmd `` ⇒
+`(macrocall core_@cmd (cmdstring-r "cmd" (error-t)))`, `r"pat` ⇒
+`(macrocall @r_str (string-r "pat" (error-t)))`, `var"x` ⇒ `(var x (error-t))`.
+**Parser:** `parse_string_literal`'s unterminated arm (`_ => break`, reached only
+when no close delimiter is seen — the close arm breaks separately) appends a
+zero-width `ERROR_TRIVIA` node; lossless (wraps no tokens), covers all four
+literal flavors since they share this parser. **Projector:** new
+`with_error_trivia(node, parts)` appends `project_error("error-t", …)` to a
+literal body's parts, and drops a sole filler `""` first — Julia emits no
+empty-content placeholder for an unterminated literal (`"` ⇒ `(string (error-t))`,
+not `(string "")`; but terminated `""`/`r""` keep their `""`). Wired into
+`project_string` (plain/triple/macro-r/raw-triple paths), `project_cmd`
+(cmdstring-r/cmdstring-s-r), and `project_var`. **Lexer fix (faithfulness):**
+single-quoted `"…"` strings now span literal newlines like Julia — removed the
+deliberate `quote == b'"'` newline-break in `lex_in_string_mode`, so `"a\nb"` ⇒
+`(string "a\nb")` and an unterminated string consumes to EOF (commands already
+spanned newlines). This is what unblocked the multi-line dir fixture
+`unterminated_string` (`s = "oops⏎ok = 1⏎` ⇒ `(= s (string "oops\nok = 1\n"
+(error-t)))`). New fixtures `unterminated_string` (snapshot updated),
+`unterminated_command`. JS allow 555 → 556 (js-b4a566a6); dir 116 → 118
+(`unterminated_string` un-blocked + new `unterminated_command`). Zero
+regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** continue the error-shape slices, each a
-normal one-kind-per-session target: (1) **unterminated string** `"str` ⇒
-`(string "str" (error-t))` — parser-synth append in the string parser (js-b4a566a6;
-unblocks dir `unterminated_string`); (2) **trailing junk** `f(2)2` ⇒
-`(call f 2) (error-t 2)`, `var"x"y` ⇒ `(var x (error-t))` — wrap skipped tokens
-(~30 JS cases); (3) **incomplete `do`** ⇒ `(block (error))` (unblocks `do_blocks`);
-(4) **lexer-classified named kinds** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
+**Suggested next targets (ranked):** continue the error-shape slices: (1)
+**trailing junk** `f(2)2` ⇒ `(call f 2) (error-t 2)`, `var"x"y` ⇒
+`(var x (error-t))`, `"a"x` ⇒ `(juxtapose (string "a") (error-t) x)` — wrap
+skipped post-literal tokens (~30 JS cases, several `var"x"*` in the report);
+(2) **incomplete `do`** ⇒ `(block (error))` (unblocks dir `do_blocks`);
+(3) **lexer-classified named kinds** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
 `a--b`⇒`(call-i a (ErrorInvalidOperator) b)`, bad escape/numeric (each adds its
-`SyntaxKind` before `ERROR` + a lexer `TokKind` + projector arm). 40 error-bare /
-70 error-t JS FAILs remain. `end_index` also needs bare-`end` *rejection* (a
-grammar change), so error-node work alone won't unblock it.
-
-Modeling divergences (associative/comparison/short-circuit nesting, n-ary
-juxtaposition) are deliberate and stay un-allowlisted. Remaining clean deferred
-buckets: **float**-literal display normalization (`2.`⇒`2.0`, `1f0`⇒`1.0f0`, hex
-`0x1.8p3`⇒`12.0`; needs Julia's `Base.show(::Float64)` shortest-round-trip) and
-the rest of the error-shape slices (see next-targets above).
+`SyntaxKind` before `ERROR` + a lexer `TokKind` + projector arm). `end_index`
+also needs bare-`end` *rejection* (a grammar change), so error-node work alone
+won't unblock it.
 
 ## Earlier sessions
+
+- **2026-06-22o** — Typed error-node taxonomy (error-shape parity Phase 0 + first
+  slice). JuliaSyntax splices typed error nodes into the tree; added
+  `ERROR_TRIVIA` (projected `(error-t)`, the `TRIVIA_FLAG` truncation marker)
+  *before* the `ERROR` sentinel (bare `(error)` + unknown-token catch-all). New
+  `project_error(head, node)` wraps significant recovered tokens. Harness
+  `render()` made total (dropped the `diagnostics.is_empty()` skip; `Unsupported`
+  only on the `(unsupported …)` sentinel). Harvest filter relaxed to keep
+  `(error …)` cases → JS corpus 575 → 685 (+110 error cases = visible backlog,
+  folded into main corpus). First slice: `parse_arg_list`'s EOF arm appends a
+  zero-width `ERROR_TRIVIA` (`[x` ⇒ `(vect x (error-t))`, `f(a` ⇒
+  `(call f a (error-t))`). Fixture `unclosed_delimiter`. JS allow 553 → 555; dir
+  115 → 116.
 
 - **2026-06-22n** — Integer-literal display normalization (projector; 5 JS FAILs).
   `literal_token_text` renders a numeric leaf as its parsed *value* (underscores

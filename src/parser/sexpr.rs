@@ -1614,9 +1614,15 @@ fn project_string(node: &SyntaxNode) -> String {
         // chunking; only the unescaping differs (raw content's backslashes and
         // quotes stay literal), so its chunks are display-escaped as raw bytes.
         let body = if matches!(string_token(node, STRING_DELIM_OPEN), Some(d) if d.len() >= 3) {
-            sexp("string-s-r", triple_string_parts(node, true))
+            sexp(
+                "string-s-r",
+                with_error_trivia(node, triple_string_parts(node, true)),
+            )
         } else {
-            format!("(string-r {})", quote_raw(&raw_content(node)))
+            sexp(
+                "string-r",
+                with_error_trivia(node, vec![quote_raw(&raw_content(node))]),
+            )
         };
         let mut parts = vec![format!("@{prefix}_str"), body];
         if let Some(suffix) = string_token(node, STRING_SUFFIX) {
@@ -1633,7 +1639,10 @@ fn project_string(node: &SyntaxNode) -> String {
     // to compute their literal value (a faithful encoding of what the literal
     // means, mirroring `SyntaxNode`'s String children).
     if matches!(string_token(node, STRING_DELIM_OPEN), Some(d) if d.len() >= 3) {
-        return sexp("string-s", triple_string_parts(node, false));
+        return sexp(
+            "string-s",
+            with_error_trivia(node, triple_string_parts(node, false)),
+        );
     }
 
     let mut parts = string_parts(node);
@@ -1641,7 +1650,7 @@ fn project_string(node: &SyntaxNode) -> String {
         // An empty literal still carries one empty String child (`"" → (string "")`).
         parts.push("\"\"".to_string());
     }
-    sexp("string", parts)
+    sexp("string", with_error_trivia(node, parts))
 }
 
 /// One piece of a triple-quoted string's processed content: either a literal
@@ -1839,7 +1848,7 @@ fn project_var(node: &SyntaxNode) -> String {
     } else {
         vec![content]
     };
-    sexp("var", parts)
+    sexp("var", with_error_trivia(node, parts))
 }
 
 /// Unescape a raw-string body the way Julia's `unescape_raw_string` does: a run
@@ -1898,9 +1907,15 @@ fn project_cmd(node: &SyntaxNode) -> String {
     // A triple-quoted command gets JuliaSyntax's dedent + per-line chunking (raw),
     // matching the triple-string path; a single-quoted one is one raw chunk.
     let body = if triple {
-        sexp("cmdstring-s-r", triple_cmd_parts(node))
+        sexp(
+            "cmdstring-s-r",
+            with_error_trivia(node, triple_cmd_parts(node)),
+        )
     } else {
-        format!("(cmdstring-r {})", quote_raw(&cmd_raw_body(node)))
+        sexp(
+            "cmdstring-r",
+            with_error_trivia(node, vec![quote_raw(&cmd_raw_body(node))]),
+        )
     };
     let mut parts = vec![head, body];
     if let Some(suffix) = string_token(node, STRING_SUFFIX) {
@@ -2121,6 +2136,20 @@ fn project_signature(node: &SyntaxNode) -> String {
 
 /// Project a typed error node, wrapping any recovered (significant) tokens or
 /// child nodes. An empty node renders as the bare `(error)`/`(error-t)`.
+/// Append the unclosed-delimiter `(error-t)` marker to a literal body's parts
+/// when the literal carries an `ERROR_TRIVIA` child. JuliaSyntax emits no empty
+/// `""` content placeholder for an unterminated literal, so drop a sole filler
+/// `""` before appending (`"` → `(string (error-t))`, not `(string "")`).
+fn with_error_trivia(node: &SyntaxNode, mut parts: Vec<String>) -> Vec<String> {
+    if let Some(err) = node.children().find(|c| c.kind() == ERROR_TRIVIA) {
+        if parts == ["\"\""] {
+            parts.clear();
+        }
+        parts.push(project_error("error-t", &err));
+    }
+    parts
+}
+
 fn project_error(head: &str, node: &SyntaxNode) -> String {
     let parts: Vec<String> = significant(node)
         .iter()
