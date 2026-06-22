@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **575 allowlisted**,
-110 divergence, 0 unsupported. Dir corpus: **123 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **576 allowlisted**,
+109 divergence, 0 unsupported. Dir corpus: **124 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
 total). Grammar bullets through "separate-toplevel trailing-junk `(error-t)`"
 are `[x]` in `TODO.md`.
@@ -34,40 +34,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22u)
+## Latest session (2026-06-22v)
 
-**String-juxtapose-error `(error-t)` — error-shape slice 7.** A string literal
-glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
-recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x`⇒
-`(juxtapose (string "a") (error-t) x)`, `"a""b"`, `"a"begin end`, `"$y"x`, and the
-term-glued-to-string form `2"a"`⇒`(juxtapose 2 (error-t) (string "a"))`. **Pure
-parser change** (`expr.rs`): the Pratt loop checks `should_juxtapose_string_error`
-*before* numeric `should_juxtapose` — it fires when the LHS is a plain
-(non-prefixed) `STRING_LITERAL` and the glued term is any non-number value
-(`lhs_is_plain_string`), or when the glued term is itself a string delim
-(`StringDelimOpen`/`CmdDelimOpen`) after a number/closed value. New
-`build_string_juxtapose_error` splices a zero-width `ERROR_TRIVIA` between the
-operands; new `is_closing_token` (delimiters + block-closing keywords) breaks it.
-Numbers (`"a"2`⇒`(doc … 2)`), `@` (`"a"@x`), operators (`"a"+b`), and `end`
-(`"a"end`) break it — so the docstring fold still owns the spaced/numeric forms.
-The string juxtapose builds at parse time, so the whole thing is one
-`JUXTAPOSE_EXPR` statement and never reaches `fold_docstrings`. Projector
-untouched (the `juxtapose` arm already projects the `(error-t)` child). Fixture
-`string_juxtapose_error`. JS allow 571 → 575 (js-2ecf6410/7f73ec42/a9ef4778 +
-`"$y"x`); dir 122 → 123. Zero regressions; green; clippy/fmt clean.
+**Paren-block juxtapose-error `(error-t)` — error-shape slice 8.** A
+parenthesized block form (`(begin end)`) glued to a value must *not* juxtapose
+(unlike a paren-wrapped ordinary value `(a)x`⇒`(juxtapose a x)`): the trailing
+term is leftover junk the toplevel driver wraps. `(begin end)x`⇒
+`(block) (error-t x)`, `(begin 1 end)x`⇒`(block 1) (error-t x)`, `(if c end)y`⇒
+`(if c (block)) (error-t y)`, `(let x=1 end)z`⇒`(let … (block)) (error-t z)`.
+**Pure parser change** (`expr.rs`): the *bare* block form already suppressed
+juxtaposition via `lhs_is_block_keyword`, but a paren wrapper made the lhs an
+ordinary `PAREN_EXPR` so the numeric/string juxtapose checks fired. New
+`lhs_is_paren_block` — a `PAREN_EXPR` whose first inner node (2nd `Start` event)
+is a block-keyword form (`is_block_form_kind`: the same set as the `block_form`
+dispatch) — now guards both `should_juxtapose` and
+`should_juxtapose_string_error`. Once juxtaposition is suppressed the Pratt loop
+breaks and the session-t toplevel-leftover driver wraps the trailing run in
+`(error-t …)`. Postfix/infix still apply to a paren-block (`(begin end).x`⇒
+`(. (block) (quote x))`, `(begin end)+1`⇒`(call-i (block) + 1)`, `(begin end)(x)`⇒
+`(call (block) x)`). Projector untouched. Fixture `paren_block_juxtapose_error`.
+JS allow 575 → 576 (js-e6d7437a); dir 123 → 124. Zero regressions; green;
+clippy/fmt clean.
 
-**Suggested next targets (ranked):** (1) **block-form juxtapose-error**
-`(begin end)x`⇒`(block) (error-t x)` — a block form glued to a value must *not*
-juxtapose (Fatou currently builds `(juxtapose (block) x)`); the leftover driver
-then wraps `x`. (2) **stray-delimiter `✘` leftover** `var"x")`/`return)`⇒
-`… (error-t ✘)` — a leftover *closing* delimiter renders as JuliaSyntax's `✘`
-error token (needs a new render path; js-61b75364, js-1983c3f9 `var"x"+`). (3)
-**macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
-(quote @x)))`, `@A.B.@x a`. (4) **incomplete `do`**⇒`(block (error))` (unblocks
-dir `do_blocks`). (5) **lexer-classified named kinds** (`'ab'`⇒
+**Suggested next targets (ranked):** (1) **stray-delimiter `✘` leftover**
+`var"x")`/`return)`⇒`… (error-t ✘)` — a leftover *closing* delimiter renders as
+JuliaSyntax's `✘` error token (needs a new render path; js-61b75364, js-1983c3f9
+`var"x"+`; also unblocks `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`).
+(2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
+(quote @x)))`, `@A.B.@x a`. (3) **incomplete `do`**⇒`(block (error))` (unblocks
+dir `do_blocks`). (4) **lexer-classified named kinds** (`'ab'`⇒
 `(char (ErrorOverLongCharacter))`, `a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
 
 ## Earlier sessions
+
+- **2026-06-22u** — String-juxtapose-error `(error-t)` — error-shape slice 7. A
+  string literal glued (no whitespace) to another term is an invalid juxtaposition
+  JuliaSyntax recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x`⇒
+  `(juxtapose (string "a") (error-t) x)`, `2"a"`⇒`(juxtapose 2 (error-t) (string
+  "a"))`. Pratt loop checks `should_juxtapose_string_error` before numeric
+  `should_juxtapose`; `build_string_juxtapose_error` splices the marker. Numbers/`@`/
+  operators/`end` break it (docstring fold keeps the numeric forms). Fixture
+  `string_juxtapose_error`. JS allow 571 → 575; dir 122 → 123.
 
 - **2026-06-22t** — Separate-toplevel trailing-junk `(error-t)` — error-shape
   slice 6. A complete statement followed by more non-trivia content on a

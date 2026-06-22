@@ -3101,6 +3101,56 @@ fn lhs_value_close(lhs: &ExprParse) -> bool {
     )
 }
 
+/// Whether `lhs` is a *parenthesized block form* — a `PAREN_EXPR` whose first
+/// inner node is a value-producing block-keyword form (`begin`, `if`, `let`,
+/// `quote`, `struct`, …). The paren is transparent (it projects to the inner
+/// block), and like the bare block forms such a value never juxtaposes:
+/// `(begin end)x` is two statements, the trailing `x` recovered as a leftover
+/// `(error-t x)` by the driver, not `(juxtapose (block) x)`. A paren wrapping an
+/// ordinary value (`(a)`, `(x-1)`) still juxtaposes, so this consults only the
+/// juxtaposition checks; postfix and infix operators apply to a paren-block
+/// regardless (`(begin end).x`, `(begin end)+1`).
+fn lhs_is_paren_block(lhs: &ExprParse) -> bool {
+    if !matches!(
+        lhs.events.first(),
+        Some(Event::Start(SyntaxKind::PAREN_EXPR))
+    ) {
+        return false;
+    }
+    // The first node inside the paren is the second `Start` event in the
+    // preorder stream (the first being the `PAREN_EXPR` itself).
+    lhs.events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Start(k) => Some(*k),
+            _ => None,
+        })
+        .nth(1)
+        .is_some_and(is_block_form_kind)
+}
+
+/// The value-producing block-keyword forms (mirrors the `block_form` dispatch in
+/// [`parse_expr_in`]). A bare such form suppresses postfix/juxtaposition via
+/// `lhs_is_block_keyword`; a parenthesized one is detected by [`lhs_is_paren_block`].
+fn is_block_form_kind(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::IF_EXPR
+            | SyntaxKind::FUNCTION_DEF
+            | SyntaxKind::MACRO_DEF
+            | SyntaxKind::BEGIN_EXPR
+            | SyntaxKind::QUOTE_EXPR
+            | SyntaxKind::WHILE_EXPR
+            | SyntaxKind::FOR_EXPR
+            | SyntaxKind::LET_EXPR
+            | SyntaxKind::TRY_EXPR
+            | SyntaxKind::STRUCT_DEF
+            | SyntaxKind::MODULE_DEF
+            | SyntaxKind::ABSTRACT_DEF
+            | SyntaxKind::PRIMITIVE_DEF
+    )
+}
+
 /// A closing delimiter that ends the surrounding container rather than starting
 /// a juxtaposed term.
 fn is_juxtapose_closing(kind: TokKind) -> bool {
@@ -3158,6 +3208,11 @@ fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u
     if JUXTAPOSE_L < min_bp {
         return false;
     }
+    // A parenthesized block form (`(begin end)`) never juxtaposes — the glued
+    // term is leftover junk, not a string juxtaposition.
+    if lhs_is_paren_block(lhs) {
+        return false;
+    }
     let Some(next) = ctx.token(lhs.end) else {
         return false;
     };
@@ -3206,7 +3261,9 @@ fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
     }
     // A non-numeric value juxtaposes only with a non-numeric term (`f(2)2` is a
     // call, not juxtaposition) and only when the left operand is a closed value.
-    !is_number_tok(k) && lhs_value_close(lhs)
+    // A parenthesized block form (`(begin end)x`) is excluded: it does not
+    // juxtapose, leaving the glued term as a leftover `(error-t …)`.
+    !is_number_tok(k) && lhs_value_close(lhs) && !lhs_is_paren_block(lhs)
 }
 
 /// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,

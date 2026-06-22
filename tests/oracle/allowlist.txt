@@ -79,6 +79,7 @@ operator_symbol_quote_value
 pairs
 parametric_types
 paren_block
+paren_block_juxtapose_error
 paren_macro_name
 paren_operator
 postfix_space_error

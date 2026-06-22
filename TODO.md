@@ -90,8 +90,7 @@ through), so the grammar can grow incrementally.
   (`stmt_is_doc_string`) is exempt so `fold_docstrings` still owns `"a"\nfoo`.
   Fixture `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
   **Deferred** (different shapes): stray-delimiter `✘` leftover (`var"x")` ⇒
-  `(var x) (error-t ✘)`), block-form juxtapose `(begin end)x` ⇒
-  `(block) (error-t x)`, `;`-line leftover (`a b; c`).
+  `(var x) (error-t ✘)`), `;`-line leftover (`a b; c`).
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒
@@ -105,6 +104,17 @@ through), so the grammar can grow incrementally.
   (`"a"2` stays a docstring), and closing tokens (`"a"end`) break it. Projector
   untouched (the `juxtapose` arm projects the `(error-t)` child directly). Fixture
   `string_juxtapose_error`. JS allow 571 → 575; dir 122 → 123.
+- [x] Paren-block juxtapose-error `(error-t)` (error-shape slice). A
+  parenthesized block form (`(begin end)`) glued to a value does *not* juxtapose
+  (unlike a paren-wrapped ordinary value `(a)x` ⇒ `(juxtapose a x)`): the trailing
+  term is leftover junk the toplevel driver wraps, `(begin end)x` ⇒
+  `(block) (error-t x)`, `(if c end)y` ⇒ `(if c (block)) (error-t y)`. New
+  `lhs_is_paren_block` (`expr.rs`) — a `PAREN_EXPR` whose first inner node is a
+  block-keyword form (`is_block_form_kind`: begin/if/let/quote/struct/…) — guards
+  both `should_juxtapose` and `should_juxtapose_string_error`, mirroring the bare
+  block form's `lhs_is_block_keyword` suppression. Postfix/infix still apply
+  (`(begin end).x`, `(begin end)+1`, `(begin end)(x)`). Projector untouched.
+  Fixture `paren_block_juxtapose_error`. JS allow 575 → 576; dir 123 → 124.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

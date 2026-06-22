@@ -1,0 +1,68 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..55
+  PAREN_EXPR@0..11
+    LPAREN@0..1 "("
+    BEGIN_EXPR@1..10
+      BEGIN_KW@1..6 "begin"
+      BLOCK@6..7
+        WHITESPACE@6..7 " "
+      END_KW@7..10 "end"
+    RPAREN@10..11 ")"
+  ERROR_TRIVIA@11..12
+    NAME@11..12
+      IDENT@11..12 "x"
+  NEWLINE@12..13 "\n"
+  PAREN_EXPR@13..26
+    LPAREN@13..14 "("
+    BEGIN_EXPR@14..25
+      BEGIN_KW@14..19 "begin"
+      BLOCK@19..22
+        WHITESPACE@19..20 " "
+        LITERAL@20..21
+          INTEGER@20..21 "1"
+        WHITESPACE@21..22 " "
+      END_KW@22..25 "end"
+    RPAREN@25..26 ")"
+  ERROR_TRIVIA@26..27
+    NAME@26..27
+      IDENT@26..27 "x"
+  NEWLINE@27..28 "\n"
+  PAREN_EXPR@28..38
+    LPAREN@28..29 "("
+    IF_EXPR@29..37
+      IF_KW@29..31 "if"
+      WHITESPACE@31..32 " "
+      CONDITION@32..33
+        NAME@32..33
+          IDENT@32..33 "c"
+      BLOCK@33..34
+        WHITESPACE@33..34 " "
+      END_KW@34..37 "end"
+    RPAREN@37..38 ")"
+  ERROR_TRIVIA@38..39
+    NAME@38..39
+      IDENT@38..39 "y"
+  NEWLINE@39..40 "\n"
+  PAREN_EXPR@40..53
+    LPAREN@40..41 "("
+    LET_EXPR@41..52
+      LET_KW@41..44 "let"
+      WHITESPACE@44..45 " "
+      LET_BINDINGS@45..49
+        ASSIGNMENT_EXPR@45..48
+          NAME@45..46
+            IDENT@45..46 "x"
+          EQ@46..47 "="
+          LITERAL@47..48
+            INTEGER@47..48 "1"
+        WHITESPACE@48..49 " "
+      BLOCK@49..49
+      END_KW@49..52 "end"
+    RPAREN@52..53 ")"
+  ERROR_TRIVIA@53..54
+    NAME@53..54
+      IDENT@53..54 "z"
+  NEWLINE@54..55 "\n"
