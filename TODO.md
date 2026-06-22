@@ -90,9 +90,21 @@ through), so the grammar can grow incrementally.
   (`stmt_is_doc_string`) is exempt so `fold_docstrings` still owns `"a"\nfoo`.
   Fixture `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
   **Deferred** (different shapes): stray-delimiter `✘` leftover (`var"x")` ⇒
-  `(var x) (error-t ✘)`), string-juxtapose-error `"a"x` ⇒
-  `(juxtapose (string "a") (error-t) x)`, block-form juxtapose `(begin end)x` ⇒
+  `(var x) (error-t ✘)`), block-form juxtapose `(begin end)x` ⇒
   `(block) (error-t x)`, `;`-line leftover (`a b; c`).
+- [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
+  glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
+  recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒
+  `(juxtapose (string "a") (error-t) x)`, `"a""b"`, `"a"begin end`, `"$y"x`, and
+  the term-glued-to-string form `2"a"` ⇒ `(juxtapose 2 (error-t) (string "a"))`.
+  The Pratt loop (`expr.rs`) checks `should_juxtapose_string_error` before the
+  numeric juxtaposition: it fires when the left operand is a plain (non-prefixed)
+  string literal and the glued term is any non-number value, or the glued term is
+  itself a string literal after a number/closed value; `build_string_juxtapose_error`
+  splices a zero-width `ERROR_TRIVIA` between the operands. Operators, `@`, numbers
+  (`"a"2` stays a docstring), and closing tokens (`"a"end`) break it. Projector
+  untouched (the `juxtapose` arm projects the `(error-t)` child directly). Fixture
+  `string_juxtapose_error`. JS allow 571 → 575; dir 122 → 123.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

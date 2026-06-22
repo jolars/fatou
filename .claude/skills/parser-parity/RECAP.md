@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **571 allowlisted**,
-114 divergence, 0 unsupported. Dir corpus: **122 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **575 allowlisted**,
+110 divergence, 0 unsupported. Dir corpus: **123 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
 total). Grammar bullets through "separate-toplevel trailing-junk `(error-t)`"
 are `[x]` in `TODO.md`.
@@ -34,40 +34,48 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22t)
+## Latest session (2026-06-22u)
 
-**Separate-toplevel trailing-junk `(error-t)` — error-shape slice 6.** On a
-separator-less logical line, a complete statement followed by more non-trivia
-content wraps the leftover run in one `(error-t …)` sibling: `x y`⇒
-`x (error-t y)`, `f(2)2`⇒`(call f 2) (error-t 2)`, `x' y`⇒
-`(call-post x ') (error-t y)`, `var"x" y`⇒`(var x) (error-t y)`, `a b c`⇒
-`a (error-t b c)`. **Pure driver change** (`core.rs` `parse`): records the event
-offset right after a line's first statement (`leftover_mark`); after the line, if
-no `;` and `line[mark..]` has significant content, opens an `ERROR_TRIVIA` over
-the recovered run (leading trivia stays *outside* the node, so `x [ws] y` keeps
-the space at toplevel). New helpers `is_significant_event` (a `Start`, or a
-non-trivia `Tok`) and `stmt_is_doc_string` (reuses `string_is_doc_eligible`) —
-the latter exempts a bare docstring opener so `fold_docstrings` still owns
-`"a"\nfoo` and `"a" b`. Projector untouched (`project_error` already wraps the
-recovered children). Fixture `toplevel_leftover_error`. JS allow 568 → 571
-(js-11c590bd/887fcea6/5f48712f); dir 121 → 122. Zero regressions; green;
-clippy/fmt clean.
+**String-juxtapose-error `(error-t)` — error-shape slice 7.** A string literal
+glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
+recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x`⇒
+`(juxtapose (string "a") (error-t) x)`, `"a""b"`, `"a"begin end`, `"$y"x`, and the
+term-glued-to-string form `2"a"`⇒`(juxtapose 2 (error-t) (string "a"))`. **Pure
+parser change** (`expr.rs`): the Pratt loop checks `should_juxtapose_string_error`
+*before* numeric `should_juxtapose` — it fires when the LHS is a plain
+(non-prefixed) `STRING_LITERAL` and the glued term is any non-number value
+(`lhs_is_plain_string`), or when the glued term is itself a string delim
+(`StringDelimOpen`/`CmdDelimOpen`) after a number/closed value. New
+`build_string_juxtapose_error` splices a zero-width `ERROR_TRIVIA` between the
+operands; new `is_closing_token` (delimiters + block-closing keywords) breaks it.
+Numbers (`"a"2`⇒`(doc … 2)`), `@` (`"a"@x`), operators (`"a"+b`), and `end`
+(`"a"end`) break it — so the docstring fold still owns the spaced/numeric forms.
+The string juxtapose builds at parse time, so the whole thing is one
+`JUXTAPOSE_EXPR` statement and never reaches `fold_docstrings`. Projector
+untouched (the `juxtapose` arm already projects the `(error-t)` child). Fixture
+`string_juxtapose_error`. JS allow 571 → 575 (js-2ecf6410/7f73ec42/a9ef4778 +
+`"$y"x`); dir 122 → 123. Zero regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** (1) **`"a"x` juxtapose-error**⇒
-`(juxtapose (string "a") (error-t) x)` (also `"a""b"`, `"$y"x`, `"a"begin end`) —
-a glued atom after a *string literal* is a juxtapose with a zero-width error-t;
-must beat the docstring fold (currently exempted, so still mis-folds). (2)
-**block-form juxtapose-error** `(begin end)x`⇒`(block) (error-t x)` — a block
-form glued to a value must *not* juxtapose (Fatou currently builds
-`(juxtapose (block) x)`); the leftover driver then wraps `x`. (3) **stray-delimiter
-`✘` leftover** `var"x")`/`return)`⇒`… (error-t ✘)` — a leftover *closing*
-delimiter renders as JuliaSyntax's `✘` error token (needs a new render path).
-(4) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
-(quote @x)))`, `@A.B.@x a`. (5) **incomplete `do`**⇒`(block (error))` (unblocks
-dir `do_blocks`). (6) **lexer-classified named kinds** (`'ab'`⇒
+**Suggested next targets (ranked):** (1) **block-form juxtapose-error**
+`(begin end)x`⇒`(block) (error-t x)` — a block form glued to a value must *not*
+juxtapose (Fatou currently builds `(juxtapose (block) x)`); the leftover driver
+then wraps `x`. (2) **stray-delimiter `✘` leftover** `var"x")`/`return)`⇒
+`… (error-t ✘)` — a leftover *closing* delimiter renders as JuliaSyntax's `✘`
+error token (needs a new render path; js-61b75364, js-1983c3f9 `var"x"+`). (3)
+**macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
+(quote @x)))`, `@A.B.@x a`. (4) **incomplete `do`**⇒`(block (error))` (unblocks
+dir `do_blocks`). (5) **lexer-classified named kinds** (`'ab'`⇒
 `(char (ErrorOverLongCharacter))`, `a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
 
 ## Earlier sessions
+
+- **2026-06-22t** — Separate-toplevel trailing-junk `(error-t)` — error-shape
+  slice 6. A complete statement followed by more non-trivia content on a
+  separator-less line wraps the leftover run in one `(error-t …)` sibling
+  (`x y`⇒`x (error-t y)`, `f(2)2`⇒`(call f 2) (error-t 2)`). Driver change
+  (`core.rs`): `leftover_mark` + `ERROR_TRIVIA` over the recovered run; a bare
+  docstring opener is exempt so `fold_docstrings` still owns `"a"\nfoo`. Fixture
+  `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
 
 - **2026-06-22s** — Field-access/colon-quote space `(error-t)` — error-shape
   slice 5. Whitespace before a field-access dot (`x .y`⇒`(. x (error-t)

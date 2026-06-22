@@ -1,0 +1,57 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..36
+  JUXTAPOSE_EXPR@0..4
+    STRING_LITERAL@0..3
+      STRING_DELIM_OPEN@0..1 "\""
+      STRING_CONTENT@1..2 "a"
+      STRING_DELIM_CLOSE@2..3 "\""
+    ERROR_TRIVIA@3..3
+    NAME@3..4
+      IDENT@3..4 "x"
+  NEWLINE@4..5 "\n"
+  JUXTAPOSE_EXPR@5..11
+    STRING_LITERAL@5..8
+      STRING_DELIM_OPEN@5..6 "\""
+      STRING_CONTENT@6..7 "a"
+      STRING_DELIM_CLOSE@7..8 "\""
+    ERROR_TRIVIA@8..8
+    STRING_LITERAL@8..11
+      STRING_DELIM_OPEN@8..9 "\""
+      STRING_CONTENT@9..10 "b"
+      STRING_DELIM_CLOSE@10..11 "\""
+  NEWLINE@11..12 "\n"
+  JUXTAPOSE_EXPR@12..24
+    STRING_LITERAL@12..15
+      STRING_DELIM_OPEN@12..13 "\""
+      STRING_CONTENT@13..14 "a"
+      STRING_DELIM_CLOSE@14..15 "\""
+    ERROR_TRIVIA@15..15
+    BEGIN_EXPR@15..24
+      BEGIN_KW@15..20 "begin"
+      BLOCK@20..21
+        WHITESPACE@20..21 " "
+      END_KW@21..24 "end"
+  NEWLINE@24..25 "\n"
+  JUXTAPOSE_EXPR@25..30
+    STRING_LITERAL@25..29
+      STRING_DELIM_OPEN@25..26 "\""
+      INTERPOLATION@26..28
+        DOLLAR@26..27 "$"
+        IDENT@27..28 "y"
+      STRING_DELIM_CLOSE@28..29 "\""
+    ERROR_TRIVIA@29..29
+    NAME@29..30
+      IDENT@29..30 "x"
+  NEWLINE@30..31 "\n"
+  JUXTAPOSE_EXPR@31..35
+    LITERAL@31..32
+      INTEGER@31..32 "2"
+    ERROR_TRIVIA@32..32
+    STRING_LITERAL@32..35
+      STRING_DELIM_OPEN@32..33 "\""
+      STRING_CONTENT@33..34 "a"
+      STRING_DELIM_CLOSE@34..35 "\""
+  NEWLINE@35..36 "\n"

@@ -1,0 +1,1 @@
+(toplevel (juxtapose (string "a") (error-t) x) (juxtapose (string "a") (error-t) (string "b")) (juxtapose (string "a") (error-t) (block)) (juxtapose (string y) (error-t) x) (juxtapose 2 (error-t) (string "a")))

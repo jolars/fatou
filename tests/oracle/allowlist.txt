@@ -94,6 +94,7 @@ splat_precedence
 string_escapes
 string_interp_ident_boundary
 string_interpolation
+string_juxtapose_error
 string_macro_suffix
 struct_const_field
 struct_module

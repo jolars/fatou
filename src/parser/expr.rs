@@ -387,6 +387,19 @@ fn parse_expr_in(
             lhs = parse_postfix_chain(&ctx, lhs, array_mode, diagnostics);
         }
 
+        // Invalid string juxtaposition (`"a"x`, `"a""b"`, `2"a"`): a string
+        // literal glued to another term (or a term glued to a string) is an error
+        // in Julia, recovered as `(juxtapose lhs (error-t) rhs)`. Checked before
+        // the numeric case so a string operand takes the error-bearing shape; the
+        // right operand is parsed identically (at `JUXTAPOSE_R`).
+        if !lhs_is_block_keyword
+            && should_juxtapose_string_error(&ctx, &lhs, min_bp)
+            && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
+        {
+            lhs = build_string_juxtapose_error(lhs, rhs);
+            continue;
+        }
+
         // Numeric-literal-coefficient juxtaposition (`2x`, `2(x)`, `(x-1)y`,
         // `1√x`): an adjacent value with no operator between is an implicit
         // multiplication binding tighter than `*` and looser than `^`. The right
@@ -695,6 +708,26 @@ fn is_public_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
 fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
     let mut events = vec![Event::Start(kind)];
     events.extend(lhs.events);
+    push_range(&mut events, lhs.end, rhs.start);
+    events.extend(rhs.events);
+    events.push(Event::Finish);
+    ExprParse {
+        start: lhs.start,
+        end: rhs.end,
+        events,
+    }
+}
+
+/// Build a `JUXTAPOSE_EXPR` for an *invalid* string juxtaposition, splicing a
+/// zero-width `ERROR_TRIVIA` node between the two operands. JuliaSyntax recovers a
+/// string literal glued to another term (`"a"x`, `2"b"`) by emitting
+/// `(juxtapose lhs (error-t) rhs)`; the marker sits right after the left operand
+/// (before any gap, of which there is none — juxtaposition requires adjacency).
+fn build_string_juxtapose_error(lhs: ExprParse, rhs: ExprParse) -> ExprParse {
+    let mut events = vec![Event::Start(SyntaxKind::JUXTAPOSE_EXPR)];
+    events.extend(lhs.events);
+    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+    events.push(Event::Finish);
     push_range(&mut events, lhs.end, rhs.start);
     events.extend(rhs.events);
     events.push(Event::Finish);
@@ -3075,6 +3108,75 @@ fn is_juxtapose_closing(kind: TokKind) -> bool {
         kind,
         TokKind::RParen | TokKind::RBracket | TokKind::RBrace | TokKind::Comma | TokKind::Semicolon
     )
+}
+
+/// A token that closes the surrounding construct (JuliaSyntax `is_closing_token`):
+/// a closing delimiter/separator or a block-closing keyword (`end`, `else`,
+/// `elseif`, `catch`, `finally`). Such a token after a value never begins a
+/// juxtaposed term — a trailing `end` is leftover-junk (`"a"end`), not a juxtapose.
+fn is_closing_token(kind: TokKind) -> bool {
+    is_juxtapose_closing(kind)
+        || matches!(
+            kind,
+            TokKind::EndKw
+                | TokKind::ElseKw
+                | TokKind::ElseifKw
+                | TokKind::CatchKw
+                | TokKind::FinallyKw
+        )
+}
+
+/// Whether `lhs` is a plain (non-prefixed) string literal — a `STRING_LITERAL`
+/// node whose first token is not a `STRING_PREFIX`. A prefixed string is a string
+/// macro (`r"…"`), which absorbs a glued suffix as a flag rather than juxtaposing.
+fn lhs_is_plain_string(ctx: &ParserCtx<'_>, lhs: &ExprParse) -> bool {
+    if !matches!(
+        lhs.events.first(),
+        Some(Event::Start(SyntaxKind::STRING_LITERAL))
+    ) {
+        return false;
+    }
+    let first_tok = lhs.events.iter().find_map(|e| match e {
+        Event::Tok(idx) => Some(*idx),
+        _ => None,
+    });
+    match first_tok {
+        Some(idx) => ctx.token(idx).map(|t| t.kind) != Some(TokKind::StringPrefix),
+        None => true,
+    }
+}
+
+/// Whether the glued term after `lhs` forms an *invalid* string juxtaposition,
+/// which JuliaSyntax recovers as `(juxtapose lhs (error-t) rhs)`. Mirrors
+/// `parse_juxtapose`'s `prev_k == K"string" || is_string_delim(t)` branch: it
+/// fires when the left operand is a plain string literal (and the glued term is
+/// any non-number value) or when the glued term is itself a string literal (and
+/// the left operand is a value that would otherwise juxtapose). Adjacency,
+/// operator/`@`/closing-token, and `min_bp` gating match the numeric juxtaposition
+/// in [`should_juxtapose`].
+fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
+    if JUXTAPOSE_L < min_bp {
+        return false;
+    }
+    let Some(next) = ctx.token(lhs.end) else {
+        return false;
+    };
+    let k = next.kind;
+    // The term must be adjacent and must start a value: not an operator (radicals
+    // are not `is_operator`, so they pass), not a macro `@`, not a closing token.
+    if k.is_trivia() || is_operator(k) || k == TokKind::At || is_closing_token(k) {
+        return false;
+    }
+    if lhs_is_plain_string(ctx, lhs) {
+        // `prev == string`: juxtaposes with any non-number term (a glued number
+        // after a string is a docstring target, `"a"2` ⇒ `(doc (string "a") 2)`).
+        return !is_number_tok(k);
+    }
+    // `is_string_delim(t)`: the glued term is itself a string literal. It
+    // juxtaposes with the left operand whenever a numeric one would (`2"a"`,
+    // `(x)"a"`) — i.e. a bare number or a closed value.
+    matches!(k, TokKind::StringDelimOpen | TokKind::CmdDelimOpen)
+        && (lhs_is_number(ctx, lhs) || lhs_value_close(lhs))
 }
 
 /// Whether the token directly after `lhs` begins a juxtaposed term — an implicit
