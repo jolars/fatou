@@ -452,7 +452,19 @@ fn project_binary(node: &SyntaxNode) -> String {
         Some(t) => t,
         None => return format!("(unsupported {:?})", node.kind()),
     };
-    let operands = child_nodes(node);
+    // A field-access dot with disallowed leading whitespace (`x .y`) carries a
+    // zero-width `ERROR_TRIVIA` child between the operands; it is not an operand
+    // itself, so exclude it from the operand count and splice `(error-t)` before
+    // the quoted field name in the `Dot` arm below.
+    let dot_error = if node.children().any(|c| c.kind() == ERROR_TRIVIA) {
+        "(error-t) "
+    } else {
+        ""
+    };
+    let operands: Vec<SyntaxNode> = child_nodes(node)
+        .into_iter()
+        .filter(|n| n.kind() != ERROR_TRIVIA)
+        .collect();
     if operands.len() != 2 {
         return project_flat(significant(node));
     }
@@ -495,12 +507,14 @@ fn project_binary(node: &SyntaxNode) -> String {
         // an interpolated field name is inert-quoted (`f.$x` →
         // `(. f (inert ($ x)))`), so the interpolation projects through `($ …)`.
         InfixHead::Dot if rhs.kind() == INTERPOLATION => {
-            format!("(. {lhs} (inert {}))", project(rhs))
+            format!("(. {lhs} {dot_error}(inert {}))", project(rhs))
         }
         // A quoted field name (`a.:b`) is already a `(quote-: …)` symbol; emit it
         // directly rather than wrapping it in another `(quote …)`.
-        InfixHead::Dot if rhs.kind() == QUOTE_SYM => format!("(. {lhs} {})", project(rhs)),
-        InfixHead::Dot => format!("(. {lhs} (quote {}))", name_text(rhs)),
+        InfixHead::Dot if rhs.kind() == QUOTE_SYM => {
+            format!("(. {lhs} {dot_error}{})", project(rhs))
+        }
+        InfixHead::Dot => format!("(. {lhs} {dot_error}(quote {}))", name_text(rhs)),
     }
 }
 
@@ -1061,11 +1075,15 @@ fn project_module(node: &SyntaxNode) -> String {
 fn project_quote_sym(node: &SyntaxNode) -> String {
     // `:foo`/`:(expr)` → `(quote-: …)`. The quoted form is the first significant
     // child after the `:` — a `NAME`/paren node, or a bare keyword token.
+    // Whitespace between the `:` and the symbol splices a leading `ERROR_TRIVIA`
+    // child (`: foo` ⇒ `(quote-: (error-t) foo)`).
+    let mut prefix = "";
     for el in node.children_with_tokens() {
         match el {
-            NodeOrToken::Node(n) => return format!("(quote-: {})", project(&n)),
+            NodeOrToken::Node(n) if n.kind() == ERROR_TRIVIA => prefix = "(error-t) ",
+            NodeOrToken::Node(n) => return format!("(quote-: {prefix}{})", project(&n)),
             NodeOrToken::Token(t) if t.kind() == COLON || is_trivia(t.kind()) => continue,
-            NodeOrToken::Token(t) => return format!("(quote-: {})", t.text()),
+            NodeOrToken::Token(t) => return format!("(quote-: {prefix}{})", t.text()),
         }
     }
     "(quote-:)".to_string()

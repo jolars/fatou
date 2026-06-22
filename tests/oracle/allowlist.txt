@@ -41,6 +41,7 @@ dotted_operator_quote
 empty_semicolon_param_group
 escaped_dollar
 export_name_list
+field_access_space
 field_access_suffix
 function_forward_decl
 generator_arguments

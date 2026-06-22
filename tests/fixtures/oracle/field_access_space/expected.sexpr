@@ -1,0 +1,1 @@
+(toplevel (. x (error-t) (quote y)) (. a (error-t) (quote b)) (. x (error-t) (quote-: y)) (. (call f x) (error-t) (quote field)) (. (. x (quote y)) (error-t) (quote z)) (. A (quote-: (error-t) +)) (quote-: (error-t) foo) (. A (error-t) (quote-: (error-t) foo)))

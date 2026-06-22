@@ -596,7 +596,17 @@ fn parse_expr_in(
             TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
             _ => SyntaxKind::BINARY_EXPR,
         };
-        lhs = build_binary(node, lhs, rhs);
+        // Whitespace before a field-access dot is disallowed: JuliaSyntax keeps
+        // the `(. lhs (quote rhs))` shape but splices a zero-width `(error-t)`
+        // between the value and the field (`x .y` ⇒ `(. x (error-t) (quote y))`).
+        // A broadcast operator `.+` lexes as a single token (not `Dot`), so this
+        // never fires for `a .+ b`. The marker is inserted before the field name;
+        // it wraps no tokens and the WHITESPACE trivia stays on the node.
+        if op_kind == TokKind::Dot && op_idx > lhs.end {
+            lhs = build_binary_dot_error(node, lhs, rhs);
+        } else {
+            lhs = build_binary(node, lhs, rhs);
+        }
     }
 
     Some(lhs)
@@ -686,6 +696,25 @@ fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
     let mut events = vec![Event::Start(kind)];
     events.extend(lhs.events);
     push_range(&mut events, lhs.end, rhs.start);
+    events.extend(rhs.events);
+    events.push(Event::Finish);
+    ExprParse {
+        start: lhs.start,
+        end: rhs.end,
+        events,
+    }
+}
+
+/// Like [`build_binary`], but splices a zero-width `ERROR_TRIVIA` node between
+/// the operator gap and the right operand. Used for a field-access dot with
+/// disallowed leading whitespace (`x .y`): the marker projects as `(error-t)`
+/// between the value and the quoted field name.
+fn build_binary_dot_error(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
+    let mut events = vec![Event::Start(kind)];
+    events.extend(lhs.events);
+    push_range(&mut events, lhs.end, rhs.start);
+    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+    events.push(Event::Finish);
     events.extend(rhs.events);
     events.push(Event::Finish);
     ExprParse {
@@ -1093,6 +1122,15 @@ pub(super) fn parse_quote_sym(
     let next = ctx.skip_trivia(start + 1);
     let mut events = vec![Event::Start(SyntaxKind::QUOTE_SYM), Event::Tok(start)];
     push_range(&mut events, start + 1, next);
+    // Whitespace (or a newline) between the `:` and the quoted symbol is
+    // disallowed: JuliaSyntax splices a zero-width `(error-t)` as the first
+    // element of the quote (`: foo` ⇒ `(quote-: (error-t) foo)`, `A.: +` ⇒
+    // `(. A (quote-: (error-t) +))`). `:foo` (glued) has no marker. The marker
+    // wraps no tokens; the trivia stays on the node.
+    if next > start + 1 {
+        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+        events.push(Event::Finish);
+    }
     match ctx.token(next).map(|t| t.kind)? {
         // `:(op)` — a lone operator quoted in parens, e.g. `:(=)`, `:(::)`,
         // `:(:)`, `:(+)`. In a quote context a bare operator (including the

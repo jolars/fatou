@@ -64,8 +64,20 @@ through), so the grammar can grow incrementally.
   callee and args (distinct from the unterminated-arglist marker, which lives
   *inside* `ARG_LIST`). Array-mode space-split is untouched (no error-t — it's a
   real `hcat`). Fixture `postfix_space_error`. JS allow 559 → 564 (also unblocked
-  `outer (x,y) = rhs`); dir 119 → 120. **Deferred**: field-access space `x .y` ⇒
-  `(. x (error-t) (quote y))` (separate `BINARY_EXPR`/`project_binary` path).
+  `outer (x,y) = rhs`); dir 119 → 120.
+- [x] Field-access/colon-quote space `(error-t)` (error-shape slice). Whitespace
+  before a field-access dot, or between a `:` and the quoted symbol, is
+  disallowed: JuliaSyntax keeps the shape but splices a zero-width `ERROR_TRIVIA`.
+  `x .y` ⇒ `(. x (error-t) (quote y))`, `x .:y` ⇒ `(. x (error-t) (quote-: y))`
+  (operator loop's `Dot` arm builds via `build_binary_dot_error` when
+  `op_idx > lhs.end`; a broadcast `.+` lexes as one token so `a .+ b` is
+  untouched). `: foo`/`:\nfoo` ⇒ `(quote-: (error-t) foo)`, `A.: +` ⇒
+  `(. A (quote-: (error-t) +))` (`parse_quote_sym` splices the marker when
+  `next > start + 1`). Both compose: `A .: foo` ⇒
+  `(. A (error-t) (quote-: (error-t) foo))`. `project_binary` filters the
+  `ERROR_TRIVIA` out of the operands and prefixes the field; `project_quote_sym`
+  prefixes the symbol. Fixture `field_access_space`. JS allow 564 → 568; dir
+  120 → 121.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
