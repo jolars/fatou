@@ -123,10 +123,20 @@ through), so the grammar can grow incrementally.
   `children_with_tokens` and renders a close-delimiter token (`is_close_delimiter`)
   as `✘` while still dropping trivia/structure. Fixture
   `stray_close_delimiter_error`. JS allow 576 → 581; dir 124 → 125. **Deferred**
-  (different parser shapes — stray delim not yet wrapped): `:)` ⇒ `(toplevel :
-  (error-t ✘))` (colon + rparen are bare ROOT children), `return)` ⇒ `(return)
-  (error-t ✘)` (rparen absorbed into `RETURN_EXPR`), `(begin end)"x"` ⇒
+  (different parser shapes — stray delim not yet wrapped): `return)` ⇒ `(return)
+  (error-t ✘)` (rparen absorbed into `RETURN_EXPR`), `)` ⇒ `(error) (error-t ✘)`
+  (lone closer needs a synthesized `(error)`), `(begin end)"x"` ⇒
   `(block) (error-t ✘ "x" ✘)`.
+- [x] Bare `:` colon value atom. A prefix `:` not followed by something quotable
+  is the Colon value atom, not a quote: `parse_quote_sym` returns `None` and
+  `parse_prefix` now falls through to an `OPERATOR_ATOM` (`a[:]` ⇒ `(ref a :)`,
+  `[:]` ⇒ `(vect :)`, `a[:, :]` ⇒ `(ref a : :)`, `f(:)` ⇒ `(call f :)`, lone `:`
+  ⇒ `:`). Previously the bare `:` token was dropped by the projector's delimiter
+  filter, so these all silently lost the colon. This also unblocks the
+  stray-close case `:)` ⇒ `(toplevel : (error-t ✘))`: the colon now sets the
+  leftover mark, so the toplevel driver wraps the trailing `)` as `(error-t ✘)`.
+  Pure `expr.rs` change (one `.or_else`). Fixtures `colon_value_atom`,
+  `colon_stray_close`. JS allow 581 → 582; dir 125 → 127.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

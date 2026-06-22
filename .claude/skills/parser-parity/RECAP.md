@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **581 allowlisted**,
-104 divergence, 0 unsupported. Dir corpus: **125 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **582 allowlisted**,
+103 divergence, 0 unsupported. Dir corpus: **127 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
-total). Grammar bullets through "stray-closing-delimiter `✘` leftover"
+total). Grammar bullets through "bare `:` colon value atom"
 are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
@@ -34,36 +34,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22w)
+## Latest session (2026-06-22x)
 
-**Stray-closing-delimiter `✘` leftover — error-shape slice 9.** A leftover
-*closing* delimiter recovered at toplevel is JuliaSyntax's `✘` error-token glyph:
-`var"x")`⇒`(var x) (error-t ✘)`, `&)`⇒`& (error-t ✘)`, `a)`/`1)`/`x]`/`f(x))`⇒
-`… (error-t ✘)`. **Pure projector change** (`sexpr.rs`): Fatou already wraps the
-stray `)`/`]`/`}` in `ERROR_TRIVIA` (a parser decision long made), but
-`project_error` dropped the delimiter token because `significant` filters all
-delimiters. It now walks `children_with_tokens` directly: a close-delimiter token
-(new `is_close_delimiter`: `RPAREN`/`RBRACKET`/`RBRACE`) renders as `✘`, other
-tokens keep the old drop-trivia/project-significant behavior. Faithful encoding
-fix, not compensation — the stray token already lives in the CST; `✘` is just its
-JuliaSyntax projection. Fixture `stray_close_delimiter_error`. JS allow 576 → 581
-(js-61b75364 `var"x")`, js-1b0af392 `&)`, + `a)`/`1)`/`x]`/`f(x))`); dir 124 →
-125. Zero regressions; green; clippy/fmt clean.
+**Bare `:` colon value atom — root-cause modeling fix.** A prefix `:` not
+followed by something quotable is the Colon *value* atom, not a quote. Previously
+`parse_quote_sym` returned `None` and the `TokKind::Colon` arm in `parse_prefix`
+short-circuited on that `None`, so the bare `:` token was left loose and dropped
+by the projector's delimiter filter: `a[:]`⇒`(ref a)`, `[:]`⇒`(vect)`, `:`⇒
+`(toplevel)`, `:;`⇒`(toplevel-;)` all silently lost the colon. Fix is one
+`.or_else(|| Some(atom(OPERATOR_ATOM, start)))` — when the quote parse declines, a
+bare `:` becomes an `OPERATOR_ATOM` (which `project_operator_atom` renders as `:`).
+Now `a[:]`⇒`(ref a :)`, `[:]`⇒`(vect :)`, `a[:, :]`⇒`(ref a : :)`, `f(:)`⇒
+`(call f :)`, `(:)`⇒`:` (unchanged — its own lone-operator-paren path), `:`⇒`:`.
+This *also* fixed the recap's ranked target `:)`⇒`(toplevel : (error-t ✘))`: with
+the colon now a real statement, the toplevel leftover driver sets `leftover_mark`
+after it and wraps the trailing `)` as `(error-t ✘)`. **Pure `expr.rs` change**,
+no projector edit — a genuine modeling gap, not error-shape work. Fixtures
+`colon_value_atom`, `colon_stray_close`. JS allow 581 → 582 (js-54d626e0 `:)`);
+dir 125 → 127. The `a[:]`-family cases aren't in the JS corpus, so the dir
+fixtures are what lock them. Zero regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** (1) **stray-delim not-yet-wrapped** — same
-`✘` shape but the parser doesn't wrap the leftover delimiter yet: `:)`⇒
-`(toplevel : (error-t ✘))` (colon + rparen are bare ROOT children, projector
-drops both → `(toplevel)`), `return)`⇒`(return) (error-t ✘)` (rparen absorbed
-*into* `RETURN_EXPR`). Parser/driver work to detect a leftover closer after a
-complete value/keyword form. (2) **paren-block string-juxtapose** `(begin end)"x"`⇒
-`(block) (error-t ✘ "x" ✘)` (currently `(error-t (string "x"))` — needs the
-double-`✘`-wrapped string form). (3) **macro-path error-t** `A.@B.x`⇒
-`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`. (4)
-**incomplete `do`**⇒`(block (error))` (unblocks dir `do_blocks`). (5)
-**lexer-classified named kinds** (`'ab'`⇒`(char (ErrorOverLongCharacter))`,
-`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
+**Suggested next targets (ranked):** (1) **stray-delim not-yet-wrapped (rest)** —
+`return)`⇒`(return) (error-t ✘)` (rparen absorbed *into* `RETURN_EXPR` via
+`parse_keyword_stmt`'s carry-verbatim loop at `structural.rs:553`; `return` has an
+*optional* value so stopping the header at a close delimiter yields the clean
+shape — but `const`/`global`/`local`/`export` need the larger inner-`(error)`
+synthesis, so scope to optional-value keywords, don't flip shared `header_ends`),
+and `)`⇒`(error) (error-t ✘)` (lone closer needs a synthesized leading `(error)`
+placeholder — a distinct mechanism). (2) **paren-block string-juxtapose**
+`(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (needs the double-`✘`-wrapped string
+form). (3) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B))
+(error-t) (quote @x)))`, `@A.B.@x a`. (4) **incomplete `do`**⇒`(block (error))`
+(unblocks dir `do_blocks`). (5) **lexer-classified named kinds** (`'ab'`⇒
+`(char (ErrorOverLongCharacter))`, `a--b`⇒`(call-i a (ErrorInvalidOperator) b)`).
 
 ## Earlier sessions
+
+- **2026-06-22w** — Stray-closing-delimiter `✘` leftover: a leftover *closing*
+  delimiter at toplevel is JuliaSyntax's `✘` glyph (`var"x")`⇒`(var x) (error-t
+  ✘)`, `&)`⇒`& (error-t ✘)`, `a)`/`1)`/`x]`/`f(x))`). Pure `sexpr.rs`:
+  `project_error` walks `children_with_tokens` and renders a close-delimiter token
+  (`is_close_delimiter`) as `✘`. JS 576 → 581.
 
 The **error-shape lineage** (the current frontier; entries share the
 `ERROR_TRIVIA`/`project_error`/leftover-driver machinery, so kept in brief):

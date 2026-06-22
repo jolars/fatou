@@ -1046,9 +1046,13 @@ fn parse_prefix(
             Some(ExprParse { start, end, events })
         }
         // A prefix `:` quotes a symbol (`:foo`, `:end`) or expression (`:(x+1)`).
-        // A bare `:` not followed by something quotable (`a[:]`) is not a quote;
-        // `parse_quote_sym` returns `None` so it falls through.
-        TokKind::Colon => parse_quote_sym(ctx, start, diagnostics),
+        // A bare `:` not followed by something quotable (`a[:]`, `[:]`, a lone
+        // `:`) is the Colon value atom, not a quote: `parse_quote_sym` returns
+        // `None` and we fall through to an `OPERATOR_ATOM` (`a[:]` ⇒ `(ref a :)`,
+        // `:` ⇒ `:`). Without the fallthrough the bare `:` token is dropped by the
+        // projector's delimiter filter.
+        TokKind::Colon => parse_quote_sym(ctx, start, diagnostics)
+            .or_else(|| Some(atom(SyntaxKind::OPERATOR_ATOM, start))),
         // A prefix `$` is an interpolation (`$x`, `$(x + y)`). It parses
         // everywhere — Julia only rejects it outside a quote during lowering,
         // not at parse time — so the field-access right-hand side (`f.$x`) and

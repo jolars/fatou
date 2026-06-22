@@ -1,0 +1,52 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..26
+  INDEX_EXPR@0..4
+    NAME@0..1
+      IDENT@0..1 "a"
+    ARG_LIST@1..4
+      LBRACKET@1..2 "["
+      ARG@2..3
+        OPERATOR_ATOM@2..3
+          COLON@2..3 ":"
+      RBRACKET@3..4 "]"
+  NEWLINE@4..5 "\n"
+  VECT_EXPR@5..8
+    LBRACKET@5..6 "["
+    ARG@6..7
+      OPERATOR_ATOM@6..7
+        COLON@6..7 ":"
+    RBRACKET@7..8 "]"
+  NEWLINE@8..9 "\n"
+  INDEX_EXPR@9..16
+    NAME@9..10
+      IDENT@9..10 "a"
+    ARG_LIST@10..16
+      LBRACKET@10..11 "["
+      ARG@11..12
+        OPERATOR_ATOM@11..12
+          COLON@11..12 ":"
+      COMMA@12..13 ","
+      WHITESPACE@13..14 " "
+      ARG@14..15
+        OPERATOR_ATOM@14..15
+          COLON@14..15 ":"
+      RBRACKET@15..16 "]"
+  NEWLINE@16..17 "\n"
+  PAREN_EXPR@17..20
+    LPAREN@17..18 "("
+    COLON@18..19 ":"
+    RPAREN@19..20 ")"
+  NEWLINE@20..21 "\n"
+  CALL_EXPR@21..25
+    NAME@21..22
+      IDENT@21..22 "f"
+    ARG_LIST@22..25
+      LPAREN@22..23 "("
+      ARG@23..24
+        OPERATOR_ATOM@23..24
+          COLON@23..24 ":"
+      RPAREN@24..25 ")"
+  NEWLINE@25..26 "\n"

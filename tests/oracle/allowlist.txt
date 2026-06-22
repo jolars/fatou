@@ -26,6 +26,8 @@ byte_string
 call_and_index
 char_escapes
 colon_range
+colon_stray_close
+colon_value_atom
 command_literal
 command_macro
 comments
