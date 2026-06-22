@@ -107,4 +107,5 @@ unary_operator_call
 unicode_operators
 var_macro_name
 version_string
+where_precedence
 word_operators

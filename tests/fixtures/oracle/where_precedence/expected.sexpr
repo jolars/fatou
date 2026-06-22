@@ -1,0 +1,1 @@
+(toplevel (<:-pre (where A B)) (>:-pre (where A B)) (<: x (where A B)) (where A (<: T Real)) (<: T (where S U)) (where (where A B) C) (::-i (call f x) (where T U)) (call-i A + (where B C)) (where (call-i A ^ B) C) (where (curly Foo T) (>: T Int)))

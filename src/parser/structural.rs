@@ -17,7 +17,7 @@ use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
     parse_block_stmt, parse_expr, parse_for_binding, parse_prefix_interpolation, parse_quote_sym,
-    push_var_macro_name,
+    parse_signature_expr, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -100,9 +100,11 @@ fn parse_function_like(
     let ctx = ParserCtx::new(tokens);
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
-    // Signature, e.g. `g(x)` (a call) or `g(x)::T`.
+    // Signature, e.g. `g(x)` (a call) or `g(x)::T`. A `::` return type stays a
+    // bare annotation and a trailing `where` binds the whole signature (rather
+    // than the return type), so parse it with `no_decl_where`.
     let sig_start = ctx.skip_ws(start + 1);
-    let mut i = if let Some(sig) = parse_expr(tokens, sig_start, 0, diagnostics) {
+    let mut i = if let Some(sig) = parse_signature_expr(tokens, sig_start, diagnostics) {
         push_range(&mut events, start + 1, sig.start);
         events.push(Event::Start(SyntaxKind::SIGNATURE));
         let mut sig_events = sig.events;

@@ -159,11 +159,21 @@ through), so the grammar can grow incrementally.
   (`x...`). Postfix `{…}` builds a `CURLY_EXPR` in the postfix chain (alongside
   call/index); standalone `{…}` (e.g. `where {T, S}`) builds a `BRACES` node via
   the prefix path. `::` is a dedicated `TYPE_ANNOTATION` (binary `x::T` and unary
-  `::T` in method args like `f(::Int)`). `where` is a low-precedence
-  left-associative operator `(8, 9)` → `WHERE_EXPR`, sitting below the comparison
-  tier (so its RHS captures a `<:`/`>:` bound) and above `->`/`=` (so
-  `f(x)::T where U` groups as `((f(x)::T) where U)`); `<:`/`>:` are now lexed as
-  `SUBTYPE`/`SUPERTYPE` comparison operators (infix and prefix). In call/index
+  `::T` in method args like `f(::Int)`). `where` is a left-associative chain →
+  `WHERE_EXPR` (handled directly in the operator loop, gate `WHERE_BP = 31`),
+  binding tighter than every binary operator but looser than `^`/juxtaposition/`.`
+  (mirroring JuliaSyntax's `parse_where` between `parse_shift` and
+  `parse_juxtapose`): `A << B where C` ⇒ `(call-i A << (where B C))`,
+  `A^B where C` ⇒ `(where (call-i A ^ B) C)`. Each bound is parsed at comparison
+  precedence with `where` suppressed, so a chain stays left-nested
+  (`A where B where C` ⇒ `(where (where A B) C)`) and the bound captures a
+  `<:`/`>:` bound (`A where T<:Real`). Prefix `<:`/`>:` reach into a trailing
+  `where` (`<: A where B` ⇒ `(<:-pre (where A B))`), and a value-position `::`
+  pulls a trailing `where` into its right operand (`f(x)::T where U` ⇒
+  `(::-i (call f x) (where T U))`), while a long-form `function`'s return type
+  does not (`function f()::S where T end` ⇒ `(where (::-i (call f) S) T)`).
+  `<:`/`>:` are lexed as `SUBTYPE`/`SUPERTYPE` comparison operators (infix and
+  prefix). In call/index
   argument lists, a `;` opens a `PARAMETERS` node for the keyword section and
   `name = value` builds a `KEYWORD_ARG` (`kw`-style); splat `x...` (lexed as a
   single `...` token) is a terminal postfix `SPLAT_EXPR`.

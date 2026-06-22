@@ -58,6 +58,19 @@ struct ExprFlags {
     /// a following `in` is the iteration separator rather than a comparison
     /// operator (`for i in xs` keeps `i` the loop variable, not `(i in xs)`).
     no_word_op: bool,
+    /// Suppress the `where` clause. Set only while parsing a `where` bound, so a
+    /// chain stays left-nested (`A where B where C` ⇒ `(where (where A B) C)`,
+    /// not right-nested) and the bound captures only comparison-and-tighter
+    /// (mirrors JuliaSyntax's `where_enabled=false` inside `parse_where_chain`).
+    no_where: bool,
+    /// Suppress the `::` annotation pulling a trailing `where` into its right
+    /// operand. Set only for the top level of a long-form `function`/`macro`
+    /// signature, where the return type is a bare call-level type and a trailing
+    /// `where` binds the whole signature (`function f()::S where T end` ⇒
+    /// `(function (where (::-i (call f) S) T) …)`), unlike a value-position `::`
+    /// (`f(x)::T where U` ⇒ `(::-i (call f x) (where T U))`). Resets inside
+    /// brackets, so argument annotations still capture their own `where`.
+    no_decl_where: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -76,11 +89,27 @@ const TERNARY_R: u8 = 3;
 /// `1√x`). Julia binds juxtaposition tighter than `*`/`//`/`<<` but looser than
 /// `^`: `2x^2` ⇒ `(juxtapose 2 (x^2))` (left binds into a following `^`), while
 /// `2^2x` ⇒ `2^(2x)` (it binds into `^`'s right operand). So the left power must
-/// out-bind `^`'s right (`31`), and the right operand captures only `^` (`32`)
-/// and tighter — keeping `*` (`24`) and `//` (`28`) out. Right-associative
-/// (`L > R`), like `^`.
-const JUXTAPOSE_L: u8 = 32;
-const JUXTAPOSE_R: u8 = 31;
+/// out-bind `^`'s right (`33`), and the right operand captures only `^` (`34`)
+/// and tighter — keeping `*` (`24`), `//` (`28`), and `where` (`31`) out.
+/// Right-associative (`L > R`), like `^`.
+const JUXTAPOSE_L: u8 = 34;
+const JUXTAPOSE_R: u8 = 33;
+
+/// Binding power gate for the `where` clause. `where` binds tighter than every
+/// binary operator (so `A << B where C` ⇒ `(call-i A << (where B C))`) but looser
+/// than `^`/juxtaposition/`.` (so `A^B where C` ⇒ `(where (call-i A ^ B) C)`),
+/// matching JuliaSyntax, where `parse_where` sits between `parse_shift` and
+/// `parse_juxtapose`. The chain fires whenever `WHERE_BP >= min_bp`; the shift
+/// tier's right power is `31`, so this is `31` while `^`/juxtaposition sit at
+/// `33`/`34`. The `::` annotation captures its own trailing `where` separately
+/// (see the operator loop), since it parses its operands through `parse_where`.
+const WHERE_BP: u8 = 31;
+
+/// The precedence at which a `where` bound is parsed (JuliaSyntax parses it with
+/// `parse_comparison`): the comparison tier's left power, so the bound captures a
+/// `<:`/`>:`/comparison operator and everything tighter (`A where T<:S` ⇒
+/// `(where A (<: T S))`) but stops before `&&`/`||`/`->`/`=`.
+const WHERE_BOUND_BP: u8 = 10;
 
 /// Binding powers for the word operators `in`/`isa`. They share the comparison
 /// tier (the symbolic comparisons `< == …` are `(10, 11)`) and are
@@ -171,6 +200,23 @@ pub(crate) fn parse_expr_in_brackets(
     parse_expr_in(tokens, start, min_bp, diagnostics, flags)
 }
 
+/// Parse the top-level signature of a long-form `function`/`macro` definition.
+/// Like [`parse_expr`] but with `no_decl_where` set, so a `::` return type stays
+/// a bare call-level annotation and a trailing `where` binds the whole signature
+/// (`function f()::S where T end` ⇒ `(where (::-i (call f) S) T)`), matching
+/// JuliaSyntax's `parse_function_signature`.
+pub(crate) fn parse_signature_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        no_decl_where: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
+}
+
 fn parse_expr_in(
     tokens: &[Token],
     start: usize,
@@ -189,6 +235,8 @@ fn parse_expr_in(
         public_context,
         stmt_comma,
         no_word_op,
+        no_where,
+        no_decl_where,
     } = flags;
     let ctx = ParserCtx::new(tokens);
 
@@ -348,6 +396,23 @@ fn parse_expr_in(
         // formed; any further iterations see an ordinary operand.
         lhs_is_block_keyword = false;
 
+        // `where` clause: a left-associative chain (`A where B where C` ⇒
+        // `(where (where A B) C)`) binding tighter than every binary operator but
+        // looser than `^`/juxtaposition/`.` (handled above). Each bound is parsed
+        // at comparison precedence with `where` itself suppressed (`no_where`), so
+        // `A where T<:S` captures the `<:` bound while a trailing `where` stays in
+        // this chain. Suppressed while parsing a bound. The `::` annotation
+        // captures its own trailing `where` (below), so a `where` reaching here
+        // belongs to `lhs`, not to a pending `::` right operand.
+        if !no_where
+            && WHERE_BP >= min_bp
+            && let Some((where_idx, TokKind::WhereKw)) =
+                next_operator(&ctx, lhs.end, inside_brackets)
+        {
+            lhs = parse_where_chain(tokens, &ctx, lhs, where_idx, diagnostics, flags);
+            continue;
+        }
+
         // Statement-level bare-comma tuple: at statement scope a top-level comma
         // collects the operands into a `BARE_TUPLE_EXPR`. Comma is not a Pratt
         // operator (it never reaches `next_operator`); it is handled here, looser
@@ -467,7 +532,7 @@ fn parse_expr_in(
         } else {
             parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags)
         };
-        let Some(rhs) = rhs_result else {
+        let Some(mut rhs) = rhs_result else {
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
@@ -478,17 +543,74 @@ fn parse_expr_in(
             return Some(error_expr_to_line_end(tokens, lhs.start, op_idx + 1));
         };
 
+        // A `::` annotation captures a trailing `where` in its right operand
+        // (JuliaSyntax parses the annotation through `parse_where`): `A::B where C`
+        // ⇒ `(:: A (where B C))`. `where` binds tighter than `::` itself, so the
+        // chain wraps the annotation type, not the whole `::`. Suppressed inside a
+        // `where` bound, where `::` does not pull in a following `where`.
+        if op_kind == TokKind::ColonColon
+            && !no_where
+            && !no_decl_where
+            && let Some((where_idx, TokKind::WhereKw)) =
+                next_operator(&ctx, rhs.end, inside_brackets)
+        {
+            rhs = parse_where_chain(tokens, &ctx, rhs, where_idx, diagnostics, flags);
+        }
+
         let node = match op_kind {
             k if is_assignment_op(k) => SyntaxKind::ASSIGNMENT_EXPR,
             TokKind::Arrow => SyntaxKind::ARROW_EXPR,
             TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
-            TokKind::WhereKw => SyntaxKind::WHERE_EXPR,
             _ => SyntaxKind::BINARY_EXPR,
         };
         lhs = build_binary(node, lhs, rhs);
     }
 
     Some(lhs)
+}
+
+/// Consume a left-associative `where` chain onto `lhs`, starting at the `where`
+/// token `where_idx`. Each iteration parses the bound at `WHERE_BOUND_BP`
+/// (comparison precedence) with `where` suppressed, then wraps the running
+/// expression in a `WHERE_EXPR` (`A where B where C` ⇒ `(where (where A B) C)`).
+/// Mirrors JuliaSyntax's `parse_where_chain` (`while peek == where`, the bound
+/// parsed by `parse_comparison` with `where_enabled=false`).
+fn parse_where_chain(
+    tokens: &[Token],
+    ctx: &ParserCtx<'_>,
+    mut lhs: ExprParse,
+    mut where_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    flags: ExprFlags,
+) -> ExprParse {
+    let bound_flags = ExprFlags {
+        no_where: true,
+        ..flags
+    };
+    loop {
+        let bound_start = ctx.skip_trivia(where_idx + 1);
+        let Some(bound) = parse_expr_in(
+            tokens,
+            bound_start,
+            WHERE_BOUND_BP,
+            diagnostics,
+            bound_flags,
+        ) else {
+            let op = &tokens[where_idx];
+            push_diagnostic(
+                diagnostics,
+                "expected type bound after `where`",
+                op.start,
+                op.end,
+            );
+            return error_expr_to_line_end(tokens, lhs.start, where_idx + 1);
+        };
+        lhs = build_binary(SyntaxKind::WHERE_EXPR, lhs, bound);
+        match next_operator(ctx, lhs.end, flags.inside_brackets) {
+            Some((idx, TokKind::WhereKw)) => where_idx = idx,
+            _ => return lhs,
+        }
+    }
 }
 
 /// Whether the identifier `public` at `start` opens a `PUBLIC_STMT`. True when
@@ -763,18 +885,29 @@ fn parse_prefix(
                 SyntaxKind::UNARY_EXPR
             };
             let operand_start = ctx.skip_trivia(start + 1);
+            // The type operators `<:`/`>:` parse their operand at the `where`
+            // tier so a trailing `where` clause attaches to the operand rather
+            // than the whole prefix (`<: A where B` ⇒ `(<:-pre (where A B))`,
+            // JuliaSyntax issue #21545); the arithmetic/logical prefixes keep the
+            // tighter `PREFIX_BP` and suppress `where` in their operand, so a
+            // trailing `where` binds the whole prefix instead (`+ <: A where B` ⇒
+            // `(where (call-pre + (<:-pre A)) B)`, mirroring JuliaSyntax's
+            // `parse_unary` operand sitting below `parse_where`).
+            let is_subtype = matches!(tok.kind, TokKind::Subtype | TokKind::Supertype);
             // PREFIX_BP is above the range colon and the array-element boundary
             // only matters at low binding powers, so neither `no_range` nor
             // `array_mode` changes the operand here; carry the rest through.
             let operand_flags = ExprFlags {
                 no_range: false,
                 array_mode: false,
+                no_where: !is_subtype || flags.no_where,
                 ..flags
             };
+            let operand_bp = if is_subtype { WHERE_BP } else { PREFIX_BP };
             let Some(operand) = parse_expr_in(
                 ctx.tokens(),
                 operand_start,
-                PREFIX_BP,
+                operand_bp,
                 diagnostics,
                 operand_flags,
             ) else {
@@ -2642,7 +2775,7 @@ fn word_operator(ctx: &ParserCtx<'_>, from: usize, inside_brackets: bool) -> Opt
 }
 
 fn is_operator(kind: TokKind) -> bool {
-    matches!(kind, TokKind::Question)
+    matches!(kind, TokKind::Question | TokKind::WhereKw)
         || is_assignment_op(kind)
         || infix_binding_power(kind).is_some()
 }
@@ -3145,7 +3278,7 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         TokKind::UniColon => (14, 15),
         TokKind::UniPlus => (20, 21),
         TokKind::UniTimes => (24, 25),
-        TokKind::UniPower => (32, 31),
+        TokKind::UniPower => (34, 33),
         // The pair `=>` shares the arrow/ternary tier: right-associative, looser
         // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
         TokKind::Arrow
@@ -3156,10 +3289,11 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::DotLongArrow => (4, 3),
         TokKind::OrOr | TokKind::DotOrOr => (5, 6),
         TokKind::AndAnd | TokKind::DotAndAnd => (7, 8),
-        // `where` sits below the comparison tier so its right-hand side captures
-        // a `<:`/`>:` bound (`A where T<:Real` → `A where (T<:Real)`), and above
-        // `->`/`=` so `f(x)::T where U` groups as `((f(x)::T) where U)`.
-        TokKind::WhereKw => (8, 9),
+        // `where` is not an ordinary infix operator: it is a left-associative
+        // chain handled directly in the operator loop (see `parse_where_chain`),
+        // binding tighter than every binary operator but looser than
+        // `^`/juxtaposition/`.`. It returns `None` here so the generic path stops
+        // at it.
         TokKind::EqEq
         | TokKind::NotEq
         | TokKind::Lt
@@ -3209,7 +3343,7 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // Bitshift `<< >> >>>` binds tighter than `//` and looser than `^`
         // (Julia precedence 14), left-associative.
         TokKind::Shl | TokKind::Shr | TokKind::UShr => (30, 31),
-        TokKind::Caret | TokKind::DotCaret => (32, 31),
+        TokKind::Caret | TokKind::DotCaret => (34, 33),
         TokKind::ColonColon => (36, 37),
         TokKind::Dot => (40, 41),
         _ => return None,

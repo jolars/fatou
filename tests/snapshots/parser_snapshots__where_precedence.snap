@@ -1,0 +1,159 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..156
+  UNARY_EXPR@0..12
+    SUBTYPE@0..2 "<:"
+    WHITESPACE@2..3 " "
+    WHERE_EXPR@3..12
+      NAME@3..4
+        IDENT@3..4 "A"
+      WHITESPACE@4..5 " "
+      WHERE_KW@5..10 "where"
+      WHITESPACE@10..11 " "
+      NAME@11..12
+        IDENT@11..12 "B"
+  NEWLINE@12..13 "\n"
+  UNARY_EXPR@13..25
+    SUPERTYPE@13..15 ">:"
+    WHITESPACE@15..16 " "
+    WHERE_EXPR@16..25
+      NAME@16..17
+        IDENT@16..17 "A"
+      WHITESPACE@17..18 " "
+      WHERE_KW@18..23 "where"
+      WHITESPACE@23..24 " "
+      NAME@24..25
+        IDENT@24..25 "B"
+  NEWLINE@25..26 "\n"
+  BINARY_EXPR@26..40
+    NAME@26..27
+      IDENT@26..27 "x"
+    WHITESPACE@27..28 " "
+    SUBTYPE@28..30 "<:"
+    WHITESPACE@30..31 " "
+    WHERE_EXPR@31..40
+      NAME@31..32
+        IDENT@31..32 "A"
+      WHITESPACE@32..33 " "
+      WHERE_KW@33..38 "where"
+      WHITESPACE@38..39 " "
+      NAME@39..40
+        IDENT@39..40 "B"
+  NEWLINE@40..41 "\n"
+  WHERE_EXPR@41..58
+    NAME@41..42
+      IDENT@41..42 "A"
+    WHITESPACE@42..43 " "
+    WHERE_KW@43..48 "where"
+    WHITESPACE@48..49 " "
+    BINARY_EXPR@49..58
+      NAME@49..50
+        IDENT@49..50 "T"
+      WHITESPACE@50..51 " "
+      SUBTYPE@51..53 "<:"
+      WHITESPACE@53..54 " "
+      NAME@54..58
+        IDENT@54..58 "Real"
+  NEWLINE@58..59 "\n"
+  BINARY_EXPR@59..73
+    NAME@59..60
+      IDENT@59..60 "T"
+    WHITESPACE@60..61 " "
+    SUBTYPE@61..63 "<:"
+    WHITESPACE@63..64 " "
+    WHERE_EXPR@64..73
+      NAME@64..65
+        IDENT@64..65 "S"
+      WHITESPACE@65..66 " "
+      WHERE_KW@66..71 "where"
+      WHITESPACE@71..72 " "
+      NAME@72..73
+        IDENT@72..73 "U"
+  NEWLINE@73..74 "\n"
+  WHERE_EXPR@74..91
+    WHERE_EXPR@74..83
+      NAME@74..75
+        IDENT@74..75 "A"
+      WHITESPACE@75..76 " "
+      WHERE_KW@76..81 "where"
+      WHITESPACE@81..82 " "
+      NAME@82..83
+        IDENT@82..83 "B"
+    WHITESPACE@83..84 " "
+    WHERE_KW@84..89 "where"
+    WHITESPACE@89..90 " "
+    NAME@90..91
+      IDENT@90..91 "C"
+  NEWLINE@91..92 "\n"
+  TYPE_ANNOTATION@92..107
+    CALL_EXPR@92..96
+      NAME@92..93
+        IDENT@92..93 "f"
+      ARG_LIST@93..96
+        LPAREN@93..94 "("
+        ARG@94..95
+          NAME@94..95
+            IDENT@94..95 "x"
+        RPAREN@95..96 ")"
+    COLON_COLON@96..98 "::"
+    WHERE_EXPR@98..107
+      NAME@98..99
+        IDENT@98..99 "T"
+      WHITESPACE@99..100 " "
+      WHERE_KW@100..105 "where"
+      WHITESPACE@105..106 " "
+      NAME@106..107
+        IDENT@106..107 "U"
+  NEWLINE@107..108 "\n"
+  BINARY_EXPR@108..121
+    NAME@108..109
+      IDENT@108..109 "A"
+    WHITESPACE@109..110 " "
+    PLUS@110..111 "+"
+    WHITESPACE@111..112 " "
+    WHERE_EXPR@112..121
+      NAME@112..113
+        IDENT@112..113 "B"
+      WHITESPACE@113..114 " "
+      WHERE_KW@114..119 "where"
+      WHITESPACE@119..120 " "
+      NAME@120..121
+        IDENT@120..121 "C"
+  NEWLINE@121..122 "\n"
+  WHERE_EXPR@122..133
+    BINARY_EXPR@122..125
+      NAME@122..123
+        IDENT@122..123 "A"
+      CARET@123..124 "^"
+      NAME@124..125
+        IDENT@124..125 "B"
+    WHITESPACE@125..126 " "
+    WHERE_KW@126..131 "where"
+    WHITESPACE@131..132 " "
+    NAME@132..133
+      IDENT@132..133 "C"
+  NEWLINE@133..134 "\n"
+  WHERE_EXPR@134..155
+    CURLY_EXPR@134..140
+      NAME@134..137
+        IDENT@134..137 "Foo"
+      ARG_LIST@137..140
+        LBRACE@137..138 "{"
+        ARG@138..139
+          NAME@138..139
+            IDENT@138..139 "T"
+        RBRACE@139..140 "}"
+    WHITESPACE@140..141 " "
+    WHERE_KW@141..146 "where"
+    WHITESPACE@146..147 " "
+    BINARY_EXPR@147..155
+      NAME@147..148
+        IDENT@147..148 "T"
+      WHITESPACE@148..149 " "
+      SUPERTYPE@149..151 ">:"
+      WHITESPACE@151..152 " "
+      NAME@152..155
+        IDENT@152..155 "Int"
+  NEWLINE@155..156 "\n"

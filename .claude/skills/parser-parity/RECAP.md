@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (575 cases): **537 allowlisted**, 36 divergence, 2 unsupported.
-Dir corpus: **106 allowlisted**, 4 blocked (1 skipped: do_blocks).
+JS corpus (575 cases): **538 allowlisted**, 35 divergence, 2 unsupported.
+Dir corpus: **107 allowlisted**, 4 blocked (1 skipped: do_blocks).
 Grammar bullets through "block forms as infix operands" are `[x]`
 in `TODO.md`.
 
@@ -32,36 +32,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 numeric-literal display normalization,
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-22f)
+## Latest session (2026-06-22g)
 
-**Block forms as infix operands (js-0e1915ed).** `begin x end::T` ⇒
-`(::-i (block x) T)`. Root cause: every value-producing block form (`begin`/`if`/
-`for`/`while`/`let`/`try`/`function`/`macro`/`quote`/`struct`/`module`/
-`abstract type`/`primitive type`) returned early from `parse_expr_in` before the
-Pratt operator loop, so a trailing infix op started a fresh statement. Fix: those
-arms now compute a `block_form: Option<Option<ExprParse>>` and fall through into
-the operator loop as `lhs` (statement keywords `return`/`break`/`continue`/
-`const`/`global`/`local`/`import`/`using`/`export` keep early returns — they
-absorb their own operand, so `return x::T` ⇒ `(return (::-i x T))`). A new
-`lhs_is_block_keyword` flag suppresses postfix chaining and juxtaposition for the
-bare block form (Julia *errors* on `begin x end(y)`/`begin x end y` — error-shape,
-left divergent) and clears after the first iteration; comma/word/symbolic ops all
-apply (`begin x end, y` ⇒ `(tuple …)`, `if c x end + 1`, `begin x end where T`).
-Pure parser fix — `sexpr.rs` untouched (the existing `TYPE_ANNOTATION`/`BINARY`/
-`WHERE`/`BARE_TUPLE` arms project the block child recursively). JS allow
-536 → 537 (`js-0e1915ed`); dir 105 → 106 (`block_form_operand`). Green; clippy/fmt
+**`where` precedence overhaul (js-063e192a).** `where` was a plain infix op at
+`(8,9)` (below comparison) — wrong both ways. It must bind *tighter* than every
+binary operator (`A << B where C` ⇒ `(call-i A << (where B C))`, `x <: A where B`
+⇒ `(<: x (where A B))`) but *looser* than `^`/juxtaposition/`.` (`A^B where C` ⇒
+`(where (call-i A ^ B) C)`), matching JuliaSyntax's `parse_where` sitting between
+`parse_shift` and `parse_juxtapose`, with the bound parsed at `parse_comparison`
+under `where_enabled=false`. Binding powers alone can't model it (the chain is
+left-assoc but the bound is looser than `where` itself, and `^`/shift collide at
+r_bp 31), so `where` is now handled directly in the operator loop via a new
+`parse_where_chain` helper (gate `WHERE_BP = 31`; bound parsed at
+`WHERE_BOUND_BP = 10` with a new `no_where` flag → left-nested chain +
+`<:`-bound capture). `^`/juxtaposition bumped to `(34,33)` to open the slot above
+`WHERE_BP`. Prefix `<:`/`>:` now parse their operand at `WHERE_BP` so a trailing
+`where` attaches (`<: A where B` ⇒ `(<:-pre (where A B))`, issue #21545); the
+other unary prefixes set `no_where` on their operand so `+ <: A where B` ⇒
+`(where (call-pre + (<:-pre A)) B)`. Value-position `::` pulls a trailing `where`
+into its RHS (`f(x)::T where U` ⇒ `(::-i (call f x) (where T U))`), but a
+long-form `function` return type does not (new `no_decl_where` flag on
+`parse_signature_expr`: `function f()::S where T end` ⇒
+`(where (::-i (call f) S) T)`). Pure parser fix — `sexpr.rs` untouched. JS allow
+537 → 538 (`js-063e192a`); dir 106 → 107 (`where_precedence`). Green; clippy/fmt
 clean.
 
 **Suggested next targets (ranked):**
-1. **`<: A where B`** (js-063e192a) — prefix `<:`/`>:` should bind *looser* than
-   `where`: `(<:-pre (where A B))`, Fatou gives `(where (<:-pre A) B)`. Precedence
-   fix for prefix type operators vs `where`.
-2. **`f(x) do y body end`** (js-68aeea63) — re-check the do-block projection; it's
-   a FAIL in the JS corpus.
+1. **`f(x) do y body end`** (js-68aeea63) — re-check the do-block projection; it's
+   a FAIL in the JS corpus (do_blocks is the one skipped dir case).
+2. Triage the remaining 35 JS FAILs for a cluster sharing a root cause; regenerate
+   `juliasyntax-report.txt` and scan the FAIL inputs.
 3. Recorded modeling divergences (do **not** fix): comparison/associative chains
    (`a+b+c`, `x<y<z`, `[x+y+z]`), numeric-literal display normalization.
 
 ## Earlier sessions
+
+- **2026-06-22f** — Block forms as infix operands (js-0e1915ed). `begin x end::T`
+  ⇒ `(::-i (block x) T)`. Value-producing block forms now fall through into the
+  Pratt loop as `lhs` (via `block_form: Option<Option<ExprParse>>`) instead of
+  returning early; a `lhs_is_block_keyword` flag suppresses postfix/juxtaposition
+  for the bare form. Pure parser fix. JS allow 536 → 537; dir 105 → 106
+  (`block_form_operand`).
 
 - **2026-06-22e** — `struct`/`module` signature + same-line body (js-33d4b6c0).
   New `parse_signature` (`structural.rs`) parses the type/name as one expression
