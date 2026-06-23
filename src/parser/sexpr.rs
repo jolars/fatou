@@ -1511,13 +1511,61 @@ fn octal_bits(digits: &str) -> usize {
 
 /// Project a char-literal token (`'…'`) to `(char '…')`, decoding the source
 /// escapes to a single codepoint and re-displaying it the way JuliaSyntax shows
-/// a `Char`. Multi-codepoint or invalid content (over-long `'ab'`, bad escape
-/// `'\xq'`) is an error shape JuliaSyntax flags specially and we defer, so the
-/// raw token text is passed through (it stays an un-allowlisted divergence).
+/// a `Char`. Content `decode_char` rejects is one of JuliaSyntax's error shapes:
+/// empty `''` ⇒ `(char (error))`, a malformed escape `'\xq'` ⇒
+/// `(char (ErrorInvalidEscapeSequence))`, a lone non-UTF-8 byte `'\xff'` stays a
+/// valid one-byte `Char`, and anything else multi-codepoint `'ab'` ⇒
+/// `(char (ErrorOverLongCharacter))`.
 fn project_char(text: &str) -> String {
     match decode_char(text) {
         Some(c) => format!("(char '{}')", display_char(c)),
-        None => format!("(char {text})"),
+        None => match classify_char_error(text) {
+            CharError::Empty => "(char (error))".to_string(),
+            CharError::BadEscape => "(char (ErrorInvalidEscapeSequence))".to_string(),
+            CharError::OverLong => "(char (ErrorOverLongCharacter))".to_string(),
+            CharError::SingleByte(b) => format!("(char '\\x{b:02x}')"),
+        },
+    }
+}
+
+/// Why `decode_char` rejected a char-literal body, mapped to JuliaSyntax's
+/// error-token classification.
+enum CharError {
+    /// Empty body (`''`).
+    Empty,
+    /// A malformed backslash escape (`'\xq'`, `'\q'`, `'\400'`).
+    BadEscape,
+    /// A single byte that is not valid UTF-8 (`'\xff'`, `'\377'`) — still a
+    /// valid one-byte Julia `Char`, displayed `\xNN`.
+    SingleByte(u8),
+    /// A well-formed body holding more than one codepoint (`'ab'`, `'\xff\xff'`).
+    OverLong,
+}
+
+/// Classify a char-literal body that `decode_char` could not reduce to a single
+/// codepoint. Mirrors `decode_char`'s byte accumulation but reports *why* it
+/// failed; a malformed escape wins over over-long (matching JuliaSyntax).
+fn classify_char_error(text: &str) -> CharError {
+    let inner = text
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+        .unwrap_or("");
+    if inner.is_empty() {
+        return CharError::Empty;
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 4];
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+        } else if decode_escape_into(&mut chars, &mut bytes).is_none() {
+            return CharError::BadEscape;
+        }
+    }
+    match bytes.as_slice() {
+        [b] => CharError::SingleByte(*b),
+        _ => CharError::OverLong,
     }
 }
 
@@ -1588,7 +1636,8 @@ fn decode_escape_into(
                     None => break,
                 }
             }
-            bytes.push(val as u8);
+            // Julia caps an octal escape at one byte; `\400` and up overflow.
+            bytes.push(u8::try_from(val).ok()?);
         }
         _ => return None,
     }

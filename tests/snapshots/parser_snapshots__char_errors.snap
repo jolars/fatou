@@ -1,0 +1,14 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..14
+  LITERAL@0..4
+    CHAR@0..4 "'ab'"
+  NEWLINE@4..5 "\n"
+  LITERAL@5..10
+    CHAR@5..10 "'\\xq'"
+  NEWLINE@10..11 "\n"
+  LITERAL@11..13
+    CHAR@11..13 "''"
+  NEWLINE@13..14 "\n"

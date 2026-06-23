@@ -24,6 +24,7 @@ broadcast_type_comparison
 broadcast_unicode_operator
 byte_string
 call_and_index
+char_errors
 char_escapes
 colon_range
 colon_stray_close

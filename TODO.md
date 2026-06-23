@@ -27,10 +27,9 @@ through), so the grammar can grow incrementally.
   `(vect x (error-t))`, `var"x"(` ⇒ `(call (var x) (error-t))`, `f(a` ⇒
   `(call f a (error-t))`). Fixture `unclosed_delimiter`. JS allow 553 → 555; dir
   114 → 116. **Deferred** (ranked next slices):
-  incomplete-`do` `(error)`, the lexer-classified named kinds
-  (`'ab'`⇒`ErrorOverLongCharacter`, `a--b`⇒`ErrorInvalidOperator`, bad
-  escape/numeric). `end_index` also needs bare-`end` rejection (a grammar
-  change), so it stays blocked.
+  incomplete-`do` `(error)`, the operator-token named kinds
+  (`a--b`⇒`ErrorInvalidOperator`). `end_index` also needs bare-`end` rejection
+  (a grammar change), so it stays blocked.
 - [x] Unterminated-string `(error-t)` (error-shape slice). A string/command/
   `var"…"` literal with no closing delimiter appends a zero-width `ERROR_TRIVIA`
   inside its body (`parse_string_literal`'s unterminated arm): `"str` ⇒
@@ -216,6 +215,17 @@ through), so the grammar can grow incrementally.
   `saw_catch` flag and wraps the else `run_block` in an `ERROR` node when false;
   the `ELSE_CLAUSE` arm of `project_try` (`sexpr.rs`) projects that `ERROR`
   child. Fixture `try_else_without_catch`. JS allow 591 → 592; dir 135 → 136.
+- [x] Char-literal error classification (closed-but-invalid bodies). A `'…'`
+  whose body is not a single codepoint maps to one of JuliaSyntax's error
+  shapes: empty `''` ⇒ `(char (error))`, a malformed escape `'\xq'`/`'\400'` ⇒
+  `(char (ErrorInvalidEscapeSequence))`, anything else multi-codepoint `'ab'`/
+  `'αβ'`/`'\xff\xff'` ⇒ `(char (ErrorOverLongCharacter))`; a lone non-UTF-8 byte
+  `'\xff'`/`'\377'` stays a valid one-byte `Char`. The CST keeps a single lossless
+  `CHAR` token; the refined `None` arm of `project_char` (`sexpr.rs`) classifies
+  via `classify_char_error`, and the octal escape now rejects values past `0xff`.
+  Fixture `char_errors`. JS allow 592 → 595; dir 136 → 137. **Deferred:**
+  unterminated chars (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`) need
+  lexer changes (the lone `'` currently lexes as `Unknown`).
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
