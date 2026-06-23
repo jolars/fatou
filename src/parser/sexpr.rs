@@ -1388,10 +1388,16 @@ fn project_export(node: &SyntaxNode) -> String {
 
 fn project_public(node: &SyntaxNode) -> String {
     // The leading `public` contextual keyword is a plain identifier token in the
-    // CST (it stays an identifier elsewhere), so drop the first significant
-    // element before reading the name list exactly like `export`.
-    let items: Vec<String> = significant(node)
-        .into_iter()
+    // CST (it stays an identifier elsewhere), so drop the first element before
+    // reading the name list exactly like `export`. A name may itself be a
+    // contextual keyword (`public export`), which `significant` would drop, so
+    // filter only trivia and the comma separators here.
+    let items: Vec<String> = node
+        .children_with_tokens()
+        .filter(|el| match el {
+            NodeOrToken::Node(_) => true,
+            NodeOrToken::Token(t) => !is_trivia(t.kind()) && t.kind() != COMMA,
+        })
         .skip(1)
         .filter_map(name_run_item)
         .collect();
@@ -2582,6 +2588,9 @@ fn name_run_item(el: SyntaxElement) -> Option<String> {
         // An operator used as a name (`export +, ==`, `export ⊕`) → the bare
         // operator text.
         NodeOrToken::Token(t) if is_operator(t.kind()) => Some(t.text().to_string()),
+        // A contextual keyword used as a name (`public export` ⇒ `(public
+        // export)`): the parser places it in the name slot, so render its text.
+        NodeOrToken::Token(t) if is_keyword(t.kind()) => Some(t.text().to_string()),
         _ => None,
     }
 }

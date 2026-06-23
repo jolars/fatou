@@ -1,0 +1,46 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..76
+  PUBLIC_STMT@0..19
+    IDENT@0..6 "public"
+    WHITESPACE@6..7 " "
+    IDENT@7..19 "experimental"
+  ERROR@19..33
+    EQ@19..20 "="
+    TRUE_KW@20..24 "true"
+    WHITESPACE@24..25 " "
+    IDENT@25..28 "foo"
+    COMMA@28..29 ","
+    WHITESPACE@29..30 " "
+    IDENT@30..33 "bar"
+  NEWLINE@33..34 "\n"
+  PUBLIC_STMT@34..47
+    IDENT@34..40 "public"
+    WHITESPACE@40..41 " "
+    EXPORT_KW@41..47 "export"
+  ERROR@47..61
+    EQ@47..48 "="
+    TRUE_KW@48..52 "true"
+    WHITESPACE@52..53 " "
+    IDENT@53..56 "foo"
+    COMMA@56..57 ","
+    WHITESPACE@57..58 " "
+    IDENT@58..61 "bar"
+  NEWLINE@61..62 "\n"
+  PUBLIC_STMT@62..73
+    IDENT@62..68 "public"
+    WHITESPACE@68..69 " "
+    IDENT@69..70 "x"
+    COMMA@70..71 ","
+    WHITESPACE@71..72 " "
+    IDENT@72..73 "y"
+  ERROR@73..75
+    EQ@73..74 "="
+    INTEGER@74..75 "1"
+  NEWLINE@75..76 "\n"
+
+diagnostic [19..20]: trailing tokens after statement
+diagnostic [47..48]: trailing tokens after statement
+diagnostic [73..74]: trailing tokens after statement

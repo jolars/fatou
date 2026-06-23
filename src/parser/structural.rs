@@ -645,21 +645,33 @@ pub(crate) fn parse_name_list_stmt(
     let ctx = ParserCtx::new(tokens);
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
+    // `public` is a names-only compatibility shim: after a complete name it
+    // continues only across a comma, ending the statement at any other following
+    // token (`public x = 1` ⇒ `(public x) (error-t = 1)`, `public a b` ⇒
+    // `(public a) (error-t b)`). `export` instead re-enters the operator parser
+    // (`export x = 1` ⇒ `(= (export x) 1)`), so it keeps carrying every same-line
+    // token; the leftover that a stopped `public` leaves behind is recovered by
+    // the toplevel trailing-junk driver.
+    let is_public = node_kind == SyntaxKind::PUBLIC_STMT;
+
     // A newline directly after the keyword continues onto the next line.
     let mut i = ctx.skip_ws_and_newlines(start + 1);
     push_range(&mut events, start + 1, i);
 
     while !header_ends(&ctx, i) {
+        let mut consumed_name = false;
         match ctx.token(i).map(|t| t.kind) {
             // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
             Some(TokKind::Dollar) => {
                 let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
                 events.extend(interp.events);
                 i = interp.end;
+                consumed_name = true;
             }
             // A macro name (`export @a`, `export @var"#"`) → `@a`.
             Some(TokKind::At) => {
                 i = push_macro_name(&ctx, &mut events, i, diagnostics);
+                consumed_name = true;
             }
             // A comma separates names and allows the list to continue onto the
             // next line (a newline right after the comma is skipped).
@@ -673,8 +685,17 @@ pub(crate) fn parse_name_list_stmt(
             // (parens around an interpolation, intervening whitespace) carried
             // through verbatim.
             _ => {
+                let is_ws = ctx.token(i).is_some_and(|t| t.kind.is_trivia());
                 events.push(Event::Tok(i));
                 i += 1;
+                consumed_name = !is_ws;
+            }
+        }
+        // `public` stops once a complete name is not followed by a comma.
+        if is_public && consumed_name {
+            let sep = ctx.skip_ws(i);
+            if !matches!(ctx.token(sep).map(|t| t.kind), Some(TokKind::Comma)) {
+                break;
             }
         }
     }

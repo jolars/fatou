@@ -95,6 +95,7 @@ paren_macro_name
 paren_operator
 postfix_space_error
 public_statement
+public_stop_at_equals
 range_operator
 raw_string
 raw_triple_string

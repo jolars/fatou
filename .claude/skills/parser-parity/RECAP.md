@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **607 allowlisted**,
-78 divergence, 0 unsupported. Dir corpus: **141 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **609 allowlisted**,
+76 divergence, 0 unsupported. Dir corpus: **142 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,48 +52,61 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23l)
+## Latest session (2026-06-23m)
 
-**Block-body trailing junk.** JuliaSyntax ends a block at the first
-separator-less glued token (`parse_Nary` only continues across a newline/`;`),
-then the closing recovery (`bump_closing_token`) bumps the run as flat error
-tokens up to the closing keyword. Placement splits by form: `begin`/`quote` are
-modeled *as* the block, so the run lands **inside** it (`begin\n public A, B\n end`
-⇒ `(block public (error-t A ✘ B))`); `if`/`while`/etc. emit the block first, so
-the run is a **sibling** of it (`if true\n public A, B\n end` ⇒
-`(if true (block public) (error-t A ✘ B))`). Three-part fix, **no `junk_inside`
-flag needed** — the CST is uniform (junk `ERROR` is always a sibling of `BLOCK`,
-child of the construct) and the *projector* decides placement: (1)
-`run_block_inner` (`structural.rs`) tracks `saw_separator` and `parsed_any` and
-breaks the statement loop at glued junk; (2) `expect_end` became the full close
-(JuliaSyntax `bump_closing_token`): at `end` consume it, at a non-stopper bump the
-run via new `collect_block_junk` (stops at `end`/`else`/`elseif`/`catch`/`finally`/
-`) ] }` per new `is_block_junk_stopper`, swallows `,`/`;`/newlines) then consume
-`end`, else record the existing zero-width `MissingEnd`; (3)
-`project_block_child_folding_error` folds the sibling `ERROR` into the begin/quote
-block (alongside the existing `MissingEnd` fold), `project_if` projects it after
-the then-block. `while` auto-projects it (uses `project_each(child_nodes)`).
-Fixture `block_trailing_junk`. JS 605 → 607 (js-d7b0ba21, js-803233ba); dir
-140 → 141. Green; clippy/fmt clean.
+**`public` stops at the first non-comma after a name.** `public` is a names-only
+compatibility shim (JuliaSyntax `parse_public`): it parses a comma-separated list
+of bare symbols and ends the statement at the first token that isn't a comma after
+a complete name; the leftover floats to the toplevel trailing-junk driver
+(`public x=1, y` ⇒ `(public x) (error-t = 1 ✘ y)`, `public a b` ⇒
+`(public a) (error-t b)`, `public x==y` ⇒ `(public x) (error-t == y)`). Crucially
+`export` does **not** behave this way — it re-enters the operator-precedence parser
+(`export x=1` ⇒ `(= (export x) 1)`, `export x::T` ⇒ `(::-i (export x) T)`), so the
+new stop is gated on `PUBLIC_STMT` only and export's name-list loop (which carries
+every same-line token) is untouched. `outer` differs again (`outer x=1` ⇒
+`outer (error-t x = 1)`) and stays deferred. Three-part fix: (1)
+`parse_name_list_stmt` (`structural.rs`) tracks `consumed_name` per loop iteration
+and, for public, breaks when the next significant token (`skip_ws`) isn't a comma —
+the existing toplevel `leftover_mark` driver in `core.rs` then collects the rest
+raw and wraps it in one `ERROR` (`TrailingJunk` diag → `(error-t …)`, commas render
+`✘`); (2) `name_run_item` (`sexpr.rs`) gained a keyword-token arm so a contextual
+keyword used as a name renders its text (`public export` ⇒ `(public export)`); (3)
+`project_public` filters trivia/commas directly instead of via `significant`
+(which drops keyword tokens), so the keyword-name survives. Fixture
+`public_stop_at_equals`. JS 607 → 609 (js-1beba79b, js-e151591c); dir 141 → 142.
+Green; clippy/fmt clean.
 
-**Key insight that simplified it:** the junk and missing-`end` markers never
-stack — `bump_closing_token` emits *exactly one* recovery marker (the junk run
-*or* the zero-width missing-`end`). So `expect_end` collects junk *xor* records
-`MissingEnd`; `begin x y` (junk, no `end`) ⇒ `(block x (error-t y))`, not a
-doubled marker. The uniform-CST + projector-fold approach also avoided churning
-the 6 existing begin/quote snapshots (their `end` stays a child of the construct,
-outside the `BLOCK`; only the malformed-junk shape changed).
+**Key insight:** this was *not* a new error-shape mechanism — the toplevel
+flat-trailing-junk driver (2026-06-23k) already wraps whatever a statement leaves
+behind. The whole fix was teaching `public` to *stop early* (leave the leftover)
+plus two small projector touches for the keyword-as-name corner. Probing export
+vs public side-by-side was essential: they look like one shared `parse_name_list_stmt`
+but diverge completely past the first non-name token, so the stop had to be
+public-gated.
 
-**Scoping note:** still-open `✘`-glyph FAIL roots: (a) **`public`/`outer` stop at
-`=`** — `parse_name_list_stmt` (shared with `export`) carries *every* same-line
-token, but Julia's `public` takes bare names only and stops at `=`
-(`public x=1, y` ⇒ `(public x) (error-t = 1 ✘ y)`, js-1beba79b/js-e151591c); risk:
-don't regress `export`. (b) **array-internal** `[x@y]` ⇒ `(hcat x (error-t ✘ y))`
-(js-6be56bdb/js-83672850). Also deferred from this session:
-for/let/module/struct/try/do block junk (the sibling `ERROR` is in the CST but
-their explicit projectors don't yet emit it — only `if`/`while`/`begin`/`quote`
-do), and junk-then-`else` (`if true\n x y\n else z\n end`, where Julia stops the
-run at `else` and re-floats `else z`/`end` to toplevel).
+## Earlier sessions
+
+- **2026-06-23l** — Block-body trailing junk. A separator-less glued statement
+  inside a block ends it; the closing recovery (`bump_closing_token`) bumps the run
+  as flat error tokens up to the closing keyword. Uniform CST (junk `ERROR` is
+  always a sibling of `BLOCK`, child of the construct); the projector decides
+  placement — `begin`/`quote` fold it inside (`begin\n x y\n end` ⇒ `(block x
+  (error-t y))`), `if`/`while` keep it a sibling. `run_block_inner` breaks the
+  loop at glued junk; `expect_end` became the full close (`collect_block_junk` xor
+  zero-width `MissingEnd`, the two never stack); `project_block_child_folding_error`
+  + `project_if` render it. Fixture `block_trailing_junk`. JS 605 → 607; dir
+  140 → 141. Deferred: for/let/module/struct/try/do junk (sibling `ERROR` in CST,
+  not yet projected), junk-then-`else`.
+
+**Scoping note — next-target candidates** (still-open `✘`-glyph FAIL roots):
+(a) **array-internal** `[x@y]` ⇒ `(hcat x (error-t ✘ y))` (js-6be56bdb,
+js-83672850) — trailing junk *inside* a bracket array, analogous to the toplevel
+flat-junk driver but in array context; Fatou currently parses `@y` as a macrocall
+element. (b) **`outer` stop-at-`=`** — `outer x=1` ⇒ `outer (error-t x = 1)` (note
+`outer` itself becomes the bare value and the *whole* `x = 1` is junk, unlike
+`public`). (c) for/let/module/struct/try/do block junk (sibling `ERROR` is in the
+CST but their explicit projectors don't emit it — only `if`/`while`/`begin`/`quote`
+do).
 
 ## Earlier sessions
 

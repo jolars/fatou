@@ -98,7 +98,7 @@ through), so the grammar can grow incrementally.
   `;`-free, non-docstring line; `project_error` renders the broader glyph set via
   `is_error_glyph` (`( ) [ ] { } , @`). Extended fixture
   `toplevel_leftover_error`. JS allow 603 → 605 (`x@y`, `outer i = rhs`).
-  **Deferred**: `public`/`outer` stopping at `=` (`public x=1, y`).
+  **Deferred**: `outer` stopping at `=` (`outer x=1` ⇒ `outer (error-t x = 1)`).
 - [x] Block-body trailing-junk `(error-t)` (error-shape slice). A statement
   glued to the previous one inside a block with no `;`/newline between is junk:
   JuliaSyntax (`parse_Nary`) ends the block there and the closing recovery
@@ -114,6 +114,19 @@ through), so the grammar can grow incrementally.
   `block_trailing_junk`. JS allow 605 → 607; dir 140 → 141. **Deferred**:
   for/let/module/struct/try/do junk (sibling `ERROR` not yet projected),
   junk-then-`else` (`if true\n x y\n else z\n end`).
+- [x] `public` stop-at-non-comma `(error-t)` (error-shape slice). `public` is a
+  names-only compatibility shim: after a complete name it continues only across a
+  comma, ending the statement at the first other token, which the toplevel
+  trailing-junk driver then recovers (`public x=1, y` ⇒ `(public x) (error-t = 1
+  ✘ y)`, `public a b` ⇒ `(public a) (error-t b)`). `export` instead re-enters the
+  operator parser (`export x=1` ⇒ `(= (export x) 1)`), so it keeps carrying every
+  same-line token — the new stop is gated on `PUBLIC_STMT` only.
+  `parse_name_list_stmt` (`structural.rs`) breaks after a consumed name when the
+  next significant token isn't a comma; `name_run_item` learned to render a
+  contextual-keyword name (`public export` ⇒ `(public export)`), and
+  `project_public` keeps keyword-name tokens that `significant` would drop.
+  Fixture `public_stop_at_equals`. JS allow 607 → 609; dir 141 → 142.
+  **Deferred**: `export` operator re-entry, `outer` stop-at-`=`.
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒
