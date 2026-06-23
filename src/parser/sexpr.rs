@@ -1002,7 +1002,28 @@ fn matrix_head_and_children(node: &SyntaxNode) -> (String, Vec<String>) {
         1 => "vcat".to_string(),
         _ => format!("ncat-{d}"),
     };
-    (head, children.iter().map(project_cat_child).collect())
+    (head, project_cat_children(&children))
+}
+
+/// Project a sequence of concatenation children (`ARG` elements and `MATRIX_ROW`
+/// groups), splicing a zero-width `(error-t)` after any bare element whose end
+/// carries an `ArraySeparatorMismatch` diagnostic — a space/`;;` separator-order
+/// conflict (`[a b ;; c]` ⇒ `(ncat-2 (row a b (error-t)) c)`). The marker is only
+/// appended after `ARG` elements: when the offending element is the last in a
+/// row, the diagnostic's byte anchor also coincides with the enclosing
+/// `MATRIX_ROW`'s end, and the recursion handles it inside that row instead.
+fn project_cat_children(children: &[SyntaxNode]) -> Vec<String> {
+    let mut out = Vec::new();
+    for child in children {
+        out.push(project_cat_child(child));
+        if child.kind() == ARG {
+            let end = usize::from(child.text_range().end());
+            for _ in 0..diag_count_at(end, DiagnosticKind::ArraySeparatorMismatch) {
+                out.push("(error-t)".to_string());
+            }
+        }
+    }
+    out
 }
 
 /// Project a typed concatenation `T[...]`: the same shape as the inner
@@ -1056,12 +1077,11 @@ fn project_cat_child(node: &SyntaxNode) -> String {
             } else {
                 format!("nrow-{d}")
             };
-            let items = node
+            let items: Vec<SyntaxNode> = node
                 .children()
                 .filter(|c| matches!(c.kind(), ARG | MATRIX_ROW))
-                .map(|c| project_cat_child(&c))
                 .collect();
-            sexp(&head, items)
+            sexp(&head, project_cat_children(&items))
         }
         _ => project(node),
     }

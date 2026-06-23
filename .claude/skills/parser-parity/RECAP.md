@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **627 allowlisted**,
-58 divergence, 0 unsupported. Dir corpus: **148 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **630 allowlisted**,
+55 divergence, 0 unsupported. Dir corpus: **149 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,50 +52,55 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23s)
+## Latest session (2026-06-23t)
 
-**Missing operator right-operand → zero-width `(error)`.** Any infix/assignment
-operator whose right operand is absent keeps its node and synthesizes a
-zero-width `(error)` there, instead of error-wrapping the whole `lhs op` run to
-line end (`x =` ⇒ `(= x (error))`, `a +` ⇒ `(call-i a + (error))`, `a &&` ⇒
-`(&& a (error))`, `var"x"+` ⇒ `(call-i (var x) + (error))`). Two halves:
+**Array space/`;;` separator mismatch → zero-width `(error-t)`.** JuliaSyntax
+tracks an array "order" (a `Ref` in `parse_array_separator`): the first
+**space** separator makes it row-major, the first **`;;`** makes it
+column-major. A later separator of the *conflicting* kind — a `;;` in a
+row-major array, or a space in a column-major one — is a whitespace error, and
+JuliaSyntax splices a zero-width `(error-t)` right after the element preceding
+the offending separator (`[a b ;; c]` ⇒ `(ncat-2 (row a b (error-t)) c)`,
+`[a ;; b c]` ⇒ `(ncat-2 a (row b (error-t) c))`, `[a b ;; c ;; d]` ⇒
+`(ncat-2 (row a b (error-t)) c (error-t) d)`). Only `;` runs of **exactly two**
+participate; single `;`, newlines, and `;;;`-or-longer runs are order-neutral
+(`[a b ;;; c]`, `[a; b ;; c]` ⇒ no error).
 
-1. **Missing-RHS (the root cause).** The operator loop's missing-RHS branch
-   (`expr.rs` ~line 596) previously `return`ed `error_expr_to_line_end` (an
-   `ERROR` wrapping `lhs op …`). Now it builds the operator node with only the
-   LHS + operator via new `build_binary_missing_rhs` + `operator_node_kind`
-   (the node-kind match extracted from the build site), records the existing
-   `MissingOperand` diagnostic (spanning the operator), and `continue`s. The
-   projector reconstructs `(error)`: `operator_missing_rhs(op)` checks
-   `diag_count_from(op_start, MissingOperand)`; `project_binary` /
-   `project_assignment` emit `(<head> lhs (error))` when `operands.len()==1` and
-   the diag is present. The per-head formatting (unicode/suffix/`call-i`/special)
-   was factored into a shared `infix_call_string` so both the normal and
-   missing-RHS paths reuse it (field-access `Dot` stays caller-handled).
-2. **Prefix value-fallback (needed for the corpus cases).** A value-form prefix
-   operator (`+ - ! ~ <: >: .+ .- .~` in the unary arm, `* /` etc. in the
-   value-operator arm) directly before a bare `=` is its *value*, not a prefix
-   call, so the operator loop then forms the assignment: `<: =` ⇒ `(= <: (error))`,
-   `.+ =` ⇒ `(= (. +) (error))`, `<: = x` ⇒ `(= <: x)`. The purely syntactic
-   prefixes `&`/`::` are **excluded** (they consume the `=` as an error operand:
-   `& =` ⇒ `(& (error =))`), and `?` is excluded (keeps prefix-call handling).
+Implementation (parser records, projector reconstructs — no CST change): a new
+loop in `parse_matrix` (`expr.rs`) walks the between-element `SepRun`s tracking
+an `ArrayOrder` (`Unknown`/`RowMajor`/`ColumnMajor`); the first space/`;;` sets
+it, a later conflict records an `ArraySeparatorMismatch` diagnostic anchored at
+`tokens[elems[k].end-1].end`. Projector (`sexpr.rs`): new `project_cat_children`
+appends `(error-t)` after any **bare `ARG`** whose end carries the diag — *only*
+`ARG`s, never `MATRIX_ROW`s, since when the offending element is a row's last
+element the anchor coincides with the row's end and the recursion into the row
+handles it inside, so no double-count at any nesting. Wired into
+`matrix_head_and_children` and the `MATRIX_ROW` arm of `project_cat_child`.
+Fixture `array_separator_mismatch` (4 single-line cases). JS 627 → 630; dir
+148 → 149. Green; clippy/fmt clean, no regressions.
 
-No CST marker node, no new `DiagnosticKind` (reused `MissingOperand`). JS 624 →
-627 (`<: =`, `.+ =`, `var"x"+`); dir 147 → 148. Fixture `operator_missing_rhs`
-(a `;`-separated line — `;` isolates each statement so each missing-RHS triggers
-at the separator instead of continuing onto the next line). Green; clippy/fmt
-clean, no regressions.
-
-**Key insight:** trailing binary operators *continue across newlines* (`x =\na`
-⇒ `(= x a)`, like `1 +\n2`), so missing-RHS only fires at EOF, a `;`/closer, or
-a non-operand follower — hence the `;` fixture, and why `1:\n2` is **separate**
-(the `:` range goes through `parse_colon_range`, not this path, and still slurps
-across the newline). **Deferred:** `::`/`->` projectors don't reconstruct
-missing-RHS yet (`a ::`, not in corpus); word ops (`in`/`isa`) and `where` still
-use `error_expr_to_line_end`.
+**Deferred:** `;;` immediately before a newline is a line continuation →
+`(hcat …)` (`[a b ;; \n c]`, js-82572497) in row-major, but a plain `;;` in
+column-major (`[a ;; \n b]`); a structural dim-drop, not a marker, needs
+newline-after-last-semicolon tracking in `SepRun` (still a FAIL, no regression).
 
 ## Earlier sessions
 
+- **2026-06-23s** — Missing operator right-operand → zero-width `(error)`: any
+  infix/assignment operator with an absent right operand keeps its node and
+  synthesizes `(error)` there instead of error-wrapping `lhs op` to line end
+  (`x =` ⇒ `(= x (error))`, `a +` ⇒ `(call-i a + (error))`, `a &&` ⇒
+  `(&& a (error))`). The operator loop's missing-RHS branch now builds the node
+  with only the LHS (`build_binary_missing_rhs` + `operator_node_kind`) and
+  records the existing `MissingOperand` diagnostic; `project_binary`/
+  `project_assignment` reconstruct via `operator_missing_rhs`, head logic shared
+  through `infix_call_string`. Paired with a prefix value-fallback (a value-form
+  prefix op directly before a bare `=` is its value: `<: =` ⇒ `(= <: (error))`,
+  `.+ =` ⇒ `(= (. +) (error))`; `&`/`::`/`?` excluded). Fixture
+  `operator_missing_rhs` (`;`-separated, since trailing operators continue across
+  newlines so missing-RHS only fires at EOF/`;`/closer). JS 624 → 627; dir
+  147 → 148. Deferred: `::`/`->` projectors, word ops (`in`/`isa`), `where` still
+  use `error_expr_to_line_end`.
 - **2026-06-23r** — Missing `if`/`elseif` condition → zero-width `(error)`: an
   empty condition slot (`if end`, `if; end`, `if true; elseif; end`) is recovery;
   JuliaSyntax synthesizes `(error)` there. Pure projector win — Fatou already had
@@ -155,12 +160,18 @@ use `error_expr_to_line_end`.
 `outer` itself becomes the bare value and the *whole* `x = 1` is junk, unlike
 `public`). (b) for/let/module/struct/try/do block junk (sibling `ERROR` is in the
 CST but their explicit projectors don't emit it — only `if`/`while`/`begin`/`quote`
-do). (c) **`;;` ncat whitespace-error** — `[a b ;; c]` ⇒
-`(ncat-2 (row a b (error-t)) c)`, `[a ;; b c]` ⇒ `(ncat-2 a (row b (error-t) c))`
-(js-e8b41b39, js-b5967309, js-578363a4): a space-separated row adjacent to a `;;`
-column separator splices a zero-width `(error-t)` whitespace marker into the row.
-Sibling array junk with `;`/nested brackets (`[a@b;c]`, `[a@b[c]]`) is deferred
-from this session.
+do). (c) **`;;\n` line-continuation → `hcat`** (js-82572497, `[a b ;; \n c]` ⇒
+`(hcat a b c)`): the remaining piece of the 2026-06-23t separator-mismatch work
+— a `;;` immediately before a newline in a *row-major* array is a line
+continuation (the separator's dimension drops to 0, collapsing to `hcat`), but
+in a *column-major* array (`[a ;; \n b]`) it stays a plain `;;`. Needs
+newline-after-last-semicolon tracking in `SepRun` and a structural dim override,
+unlike the marker-only mismatch case already done. (d) **ternary-in-block
+recovery** — `if true; x ? true end` ⇒ `(if true (block (if x true (error-t)
+(error-t))))` (js-434fcafd, js-810e177c, js-74a9b301, js-471d5c84): an
+incomplete ternary inside a block recovers with an `if`-headed node and two
+`(error-t)`; context-dependent (differs from the toplevel `x ? true` shape), so
+fragile.
 
 ## Earlier sessions
 

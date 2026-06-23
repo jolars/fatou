@@ -7,6 +7,7 @@ ampersand_operator
 anon_function_signature
 anonymous_functions
 array_literals
+array_separator_mismatch
 array_space_call
 array_trailing_junk
 arrow_pipe_bitshift_operators

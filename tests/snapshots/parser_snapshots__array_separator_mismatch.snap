@@ -1,0 +1,100 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..52
+  MATRIX_EXPR@0..10
+    LBRACKET@0..1 "["
+    MATRIX_ROW@1..4
+      ARG@1..2
+        NAME@1..2
+          IDENT@1..2 "a"
+      WHITESPACE@2..3 " "
+      ARG@3..4
+        NAME@3..4
+          IDENT@3..4 "b"
+    WHITESPACE@4..5 " "
+    SEMICOLON@5..6 ";"
+    SEMICOLON@6..7 ";"
+    WHITESPACE@7..8 " "
+    ARG@8..9
+      NAME@8..9
+        IDENT@8..9 "c"
+    RBRACKET@9..10 "]"
+  NEWLINE@10..11 "\n"
+  MATRIX_EXPR@11..21
+    LBRACKET@11..12 "["
+    ARG@12..13
+      NAME@12..13
+        IDENT@12..13 "a"
+    WHITESPACE@13..14 " "
+    SEMICOLON@14..15 ";"
+    SEMICOLON@15..16 ";"
+    WHITESPACE@16..17 " "
+    MATRIX_ROW@17..20
+      ARG@17..18
+        NAME@17..18
+          IDENT@17..18 "b"
+      WHITESPACE@18..19 " "
+      ARG@19..20
+        NAME@19..20
+          IDENT@19..20 "c"
+    RBRACKET@20..21 "]"
+  NEWLINE@21..22 "\n"
+  MATRIX_EXPR@22..37
+    LBRACKET@22..23 "["
+    MATRIX_ROW@23..26
+      ARG@23..24
+        NAME@23..24
+          IDENT@23..24 "a"
+      WHITESPACE@24..25 " "
+      ARG@25..26
+        NAME@25..26
+          IDENT@25..26 "b"
+    WHITESPACE@26..27 " "
+    SEMICOLON@27..28 ";"
+    SEMICOLON@28..29 ";"
+    WHITESPACE@29..30 " "
+    ARG@30..31
+      NAME@30..31
+        IDENT@30..31 "c"
+    WHITESPACE@31..32 " "
+    SEMICOLON@32..33 ";"
+    SEMICOLON@33..34 ";"
+    WHITESPACE@34..35 " "
+    ARG@35..36
+      NAME@35..36
+        IDENT@35..36 "d"
+    RBRACKET@36..37 "]"
+  NEWLINE@37..38 "\n"
+  MATRIX_EXPR@38..51
+    LBRACKET@38..39 "["
+    MATRIX_ROW@39..45
+      ARG@39..40
+        NAME@39..40
+          IDENT@39..40 "a"
+      SEMICOLON@40..41 ";"
+      WHITESPACE@41..42 " "
+      MATRIX_ROW@42..45
+        ARG@42..43
+          NAME@42..43
+            IDENT@42..43 "b"
+        WHITESPACE@43..44 " "
+        ARG@44..45
+          NAME@44..45
+            IDENT@44..45 "c"
+    WHITESPACE@45..46 " "
+    SEMICOLON@46..47 ";"
+    SEMICOLON@47..48 ";"
+    WHITESPACE@48..49 " "
+    ARG@49..50
+      NAME@49..50
+        IDENT@49..50 "d"
+    RBRACKET@50..51 "]"
+  NEWLINE@51..52 "\n"
+
+diagnostic [4..4]: cannot mix space and `;;` separators in an array
+diagnostic [18..18]: cannot mix space and `;;` separators in an array
+diagnostic [26..26]: cannot mix space and `;;` separators in an array
+diagnostic [31..31]: cannot mix space and `;;` separators in an array
+diagnostic [45..45]: cannot mix space and `;;` separators in an array

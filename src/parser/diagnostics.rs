@@ -41,6 +41,12 @@ pub enum DiagnosticKind {
     /// Disallowed/absent whitespace around a ternary `:` (`a ? b: c`, `a ? b c`).
     /// Anchored at the true-branch's end; pushed once per missing side.
     TernaryColonWhitespace,
+    /// A space and `;;` separator mixed in one array (`[a b ;; c]`,
+    /// `[a ;; b c]`) — JuliaSyntax establishes a row-/column-major order from the
+    /// first space/`;;` separator and flags a later conflicting one, splicing a
+    /// zero-width `(error-t)` after the element preceding it. Anchored at that
+    /// element's end byte.
+    ArraySeparatorMismatch,
 
     // --- zero-width point driving a *wrapping* `(error …)` reconstruction: the
     // CST topology is faithful; the projector wraps the whole node from the

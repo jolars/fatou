@@ -1,0 +1,1 @@
+(toplevel (ncat-2 (row a b (error-t)) c) (ncat-2 a (row b (error-t) c)) (ncat-2 (row a b (error-t)) c (error-t) d) (ncat-2 (nrow-1 a (row b c (error-t))) d))

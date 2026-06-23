@@ -2000,6 +2000,16 @@ fn parse_bracket_literal(
     }
 }
 
+/// The concatenation order of an array, as JuliaSyntax tracks it: established by
+/// the first space (`RowMajor`) or `;;` (`ColumnMajor`) separator. A later
+/// separator of the conflicting kind is a whitespace error (see `parse_matrix`).
+#[derive(PartialEq)]
+enum ArrayOrder {
+    Unknown,
+    RowMajor,
+    ColumnMajor,
+}
+
 /// A run of separator tokens between two concatenation elements (or trailing
 /// before `]`): horizontal whitespace, comments, newlines, and `;`. The
 /// dimension it separates along is its semicolon count, or 1 for a row-breaking
@@ -2165,6 +2175,47 @@ fn parse_matrix(
     } else {
         None
     };
+
+    // JuliaSyntax establishes an array "order" from the first space/`;;`
+    // separator (a space makes it row-major; a `;;` makes it column-major) and
+    // then flags any *conflicting* later separator — a `;;` in a row-major array
+    // or a space in a column-major one — as a whitespace error, splicing a
+    // zero-width `(error-t)` right after the element preceding the offending
+    // separator (`[a b ;; c]` ⇒ `(ncat-2 (row a b (error-t)) c)`, `[a ;; b c]` ⇒
+    // `(ncat-2 a (row b (error-t) c))`). Only `;` runs of exactly two count;
+    // single `;`, newlines, and `;;;`-or-longer runs are order-neutral. We record
+    // each conflict as a diagnostic at the element's end byte; the projector
+    // reconstructs the marker. (A `;;` immediately followed by a newline is a line
+    // continuation collapsing to `hcat` rather than a conflict; that structural
+    // case is not handled here, so `[a b ;; \n c]` stays divergent.)
+    let mut order = ArrayOrder::Unknown;
+    for k in 0..n.saturating_sub(1) {
+        let sep = &seps[k];
+        let is_space = sep.semis == 0 && !sep.has_newline;
+        let is_double_semi = sep.semis == 2;
+        let conflict = match order {
+            ArrayOrder::Unknown => {
+                if is_space {
+                    order = ArrayOrder::RowMajor;
+                } else if is_double_semi {
+                    order = ArrayOrder::ColumnMajor;
+                }
+                false
+            }
+            ArrayOrder::RowMajor => is_double_semi,
+            ArrayOrder::ColumnMajor => is_space,
+        };
+        if conflict {
+            let anchor = tokens[elems[k].end - 1].end;
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::ArraySeparatorMismatch,
+                "cannot mix space and `;;` separators in an array",
+                anchor,
+                anchor,
+            );
+        }
+    }
 
     // The top-level dimension: the largest `between`-element separator, plus any
     // trailing semicolon run (`[x;]` is a `vcat`).

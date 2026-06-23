@@ -13,6 +13,20 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Array space/`;;` separator mismatch `(error-t)` (error-shape slice,
+  diagnostics model). JuliaSyntax establishes a row-/column-major order from the
+  first space or `;;` separator and flags a later conflicting one, splicing a
+  zero-width `(error-t)` after the element preceding it (`[a b ;; c]` ⇒
+  `(ncat-2 (row a b (error-t)) c)`, `[a ;; b c]` ⇒ `(ncat-2 a (row b (error-t) c))`,
+  `[a b ;; c ;; d]` ⇒ `(ncat-2 (row a b (error-t)) c (error-t) d)`). Only `;` runs
+  of exactly two count; single `;`, newlines, and `;;;`+ runs are neutral.
+  `parse_matrix` walks the separator runs tracking an `ArrayOrder` and records an
+  `ArraySeparatorMismatch` diagnostic at the offending element's end byte;
+  `project_cat_children` reconstructs the marker after the bare `ARG` it anchors
+  to (the row recursion handles in-row markers). Fixture
+  `array_separator_mismatch`. JS 627 → 630; dir 148 → 149. Deferred: `;;`
+  immediately before a newline is a line continuation collapsing to `hcat`
+  (`[a b ;; \n c]` ⇒ `(hcat a b c)`), a structural change not handled here.
 - [x] Missing operator right-operand `(error)` (error-shape slice, diagnostics
   model). Any infix/assignment operator whose right operand is absent keeps its
   node and synthesizes a zero-width `(error)` there (`x =` ⇒ `(= x (error))`,
