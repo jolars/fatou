@@ -602,7 +602,14 @@ fn parse_expr_in(
                 op.start,
                 op.end,
             );
-            return Some(error_expr_to_line_end(tokens, lhs.start, op_idx + 1));
+            // JuliaSyntax keeps the operator node and synthesizes a zero-width
+            // `(error)` for the absent operand (`x =` ⇒ `(= x (error))`, `a +`
+            // ⇒ `(call-i a + (error))`, `a &&` ⇒ `(&& a (error))`) rather than
+            // discarding the whole construct. Build the node with only the LHS
+            // and the operator; the projector replays the `(error)` from the
+            // `MissingOperand` diagnostic anchored at the operator.
+            lhs = build_binary_missing_rhs(operator_node_kind(op_kind), lhs, rhs_operand);
+            continue;
         };
 
         // A `::` annotation captures a trailing `where` in its right operand
@@ -619,12 +626,7 @@ fn parse_expr_in(
             rhs = parse_where_chain(tokens, &ctx, rhs, where_idx, diagnostics, flags);
         }
 
-        let node = match op_kind {
-            k if is_assignment_op(k) => SyntaxKind::ASSIGNMENT_EXPR,
-            TokKind::Arrow => SyntaxKind::ARROW_EXPR,
-            TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
-            _ => SyntaxKind::BINARY_EXPR,
-        };
+        let node = operator_node_kind(op_kind);
         // Whitespace before a field-access dot is disallowed: JuliaSyntax keeps
         // the `(. lhs (quote rhs))` shape but flags it (`x .y` ⇒
         // `(. x (error-t) (quote y))`). We record a `DotWhitespace` diagnostic at
@@ -737,6 +739,34 @@ fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
     ExprParse {
         start: lhs.start,
         end: rhs.end,
+        events,
+    }
+}
+
+/// The CST node kind for an infix operator: an assignment, an anonymous-function
+/// `->`, a `::` type annotation, or a plain binary expression.
+fn operator_node_kind(op_kind: TokKind) -> SyntaxKind {
+    match op_kind {
+        k if is_assignment_op(k) => SyntaxKind::ASSIGNMENT_EXPR,
+        TokKind::Arrow => SyntaxKind::ARROW_EXPR,
+        TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
+        _ => SyntaxKind::BINARY_EXPR,
+    }
+}
+
+/// Build an operator node whose right operand is absent: `lhs`, then the gap
+/// (whitespace + operator + trailing trivia) up to `gap_end`, and no RHS. The
+/// projector replays JuliaSyntax's zero-width `(error)` operand from the
+/// `MissingOperand` diagnostic recorded at the operator.
+fn build_binary_missing_rhs(kind: SyntaxKind, lhs: ExprParse, gap_end: usize) -> ExprParse {
+    let mut events = vec![Event::Start(kind)];
+    let start = lhs.start;
+    events.extend(lhs.events);
+    push_range(&mut events, lhs.end, gap_end);
+    events.push(Event::Finish);
+    ExprParse {
+        start,
+        end: gap_end,
         events,
     }
 }
@@ -975,6 +1005,19 @@ fn parse_prefix(
                 SyntaxKind::UNARY_EXPR
             };
             let operand_start = ctx.skip_trivia(start + 1);
+            // A value-form prefix operator (`+ - ! ~ <: >: .+ .- .~`, the
+            // radicals) directly followed by a bare `=` is not a prefix call:
+            // the operator is used as a value and `=` is the assignment
+            // (`<: =` ⇒ `(= <: (error))`, `+ = x` ⇒ `(= + x)`). The purely
+            // syntactic prefixes `&`/`::` instead consume the `=` as an error
+            // operand (`& =` ⇒ `(& (error =))`), so they are excluded. Fall
+            // through to the bare-value atom; the operator loop forms the
+            // assignment (and `error_operator_atom`'s `=` RHS, or its absence).
+            if ctx.token(operand_start).map(|t| t.kind) == Some(TokKind::Eq)
+                && !matches!(tok.kind, TokKind::Amp | TokKind::ColonColon)
+            {
+                return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
+            }
             // The type operators `<:`/`>:` parse their operand at the `where`
             // tier so a trailing `where` clause attaches to the operand rather
             // than the whole prefix (`<: A where B` ⇒ `(<:-pre (where A B))`,
@@ -1099,6 +1142,15 @@ fn parse_prefix(
         // here. Lone syntactic operators are handled by the arm above.
         k if is_value_operator(k) || k == TokKind::Question => {
             let operand_start = ctx.skip_trivia(start + 1);
+            // A value operator directly followed by a bare `=` is its value form
+            // with `=` the assignment, not an invalid prefix call (`* =` ⇒
+            // `(= * (error))`, `/ = x` ⇒ `(= / x)`). `?` is excluded — it keeps
+            // its prefix-call handling. Fall through to the bare-value atom.
+            if k != TokKind::Question
+                && ctx.token(operand_start).map(|t| t.kind) == Some(TokKind::Eq)
+            {
+                return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
+            }
             // The operand binds at `PREFIX_BP` — tighter than the arithmetic
             // tiers (`/x + y` ⇒ `(call-i (call-pre (error /) x) + y)`) but below
             // `^` (`/x^2` ⇒ `(call-pre (error /) (call-i x ^ 2))`). The

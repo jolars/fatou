@@ -86,6 +86,7 @@ nested_string_interp
 nonstandard_identifier
 nonstandard_identifier_escape
 operator_call
+operator_missing_rhs
 operator_suffixes
 operator_symbol_quote
 operator_symbol_quote_paren

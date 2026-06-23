@@ -1,0 +1,70 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..46
+  TOPLEVEL_SEMICOLON@0..45
+    ASSIGNMENT_EXPR@0..4
+      NAME@0..1
+        IDENT@0..1 "x"
+      WHITESPACE@1..2 " "
+      EQ@2..3 "="
+      WHITESPACE@3..4 " "
+    SEMICOLON@4..5 ";"
+    WHITESPACE@5..6 " "
+    BINARY_EXPR@6..10
+      NAME@6..7
+        IDENT@6..7 "a"
+      WHITESPACE@7..8 " "
+      PLUS@8..9 "+"
+      WHITESPACE@9..10 " "
+    SEMICOLON@10..11 ";"
+    WHITESPACE@11..12 " "
+    BINARY_EXPR@12..17
+      NAME@12..13
+        IDENT@12..13 "a"
+      WHITESPACE@13..14 " "
+      AND_AND@14..16 "&&"
+      WHITESPACE@16..17 " "
+    SEMICOLON@17..18 ";"
+    WHITESPACE@18..19 " "
+    ASSIGNMENT_EXPR@19..24
+      OPERATOR_ATOM@19..21
+        SUBTYPE@19..21 "<:"
+      WHITESPACE@21..22 " "
+      EQ@22..23 "="
+      WHITESPACE@23..24 " "
+    SEMICOLON@24..25 ";"
+    WHITESPACE@25..26 " "
+    ASSIGNMENT_EXPR@26..31
+      OPERATOR_ATOM@26..28
+        DOT_PLUS@26..28 ".+"
+      WHITESPACE@28..29 " "
+      EQ@29..30 "="
+      WHITESPACE@30..31 " "
+    SEMICOLON@31..32 ";"
+    WHITESPACE@32..33 " "
+    ASSIGNMENT_EXPR@33..37
+      OPERATOR_ATOM@33..34
+        STAR@33..34 "*"
+      WHITESPACE@34..35 " "
+      EQ@35..36 "="
+      WHITESPACE@36..37 " "
+    SEMICOLON@37..38 ";"
+    WHITESPACE@38..39 " "
+    ASSIGNMENT_EXPR@39..45
+      OPERATOR_ATOM@39..41
+        SUBTYPE@39..41 "<:"
+      WHITESPACE@41..42 " "
+      EQ@42..43 "="
+      WHITESPACE@43..44 " "
+      NAME@44..45
+        IDENT@44..45 "x"
+  NEWLINE@45..46 "\n"
+
+diagnostic [2..3]: expected right-hand side for operator
+diagnostic [8..9]: expected right-hand side for operator
+diagnostic [14..16]: expected right-hand side for operator
+diagnostic [22..23]: expected right-hand side for operator
+diagnostic [29..30]: expected right-hand side for operator
+diagnostic [35..36]: expected right-hand side for operator

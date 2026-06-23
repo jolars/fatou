@@ -622,11 +622,50 @@ fn project_binary(node: &SyntaxNode) -> String {
         ""
     };
     let operands = child_nodes(node);
+    // Missing right operand: JuliaSyntax keeps the operator node and synthesizes
+    // a zero-width `(error)` for the absent operand (`a +` ⇒ `(call-i a +
+    // (error))`, `a &&` ⇒ `(&& a (error))`). Reconstructed from the
+    // `MissingOperand` diagnostic at the operator; a field-access dot has no
+    // suffix-quoting to do, so it gets the bare `(. lhs (error))`.
+    if operands.len() == 1 && operator_missing_rhs(&op) {
+        let lhs = project(&operands[0]);
+        return infix_call_string(&op, &lhs, "(error)")
+            .unwrap_or_else(|| format!("(. {lhs} {dot_error}(error))"));
+    }
     if operands.len() != 2 {
         return project_flat(significant(node));
     }
     let lhs = project(&operands[0]);
     let rhs = &operands[1];
+    let rhs_str = project(rhs);
+    // The non-field-access heads (unicode, suffixed, `call-i`/`dotcall-i`/special)
+    // are shared with the missing-operand path above.
+    if let Some(s) = infix_call_string(&op, &lhs, &rhs_str) {
+        return s;
+    }
+    match infix_head(op.kind()) {
+        // Field access. A plain field name is quoted (`f.x` → `(. f (quote x))`);
+        // an interpolated field name is inert-quoted (`f.$x` →
+        // `(. f (inert ($ x)))`), so the interpolation projects through `($ …)`.
+        InfixHead::Dot if rhs.kind() == INTERPOLATION => {
+            format!("(. {lhs} {dot_error}(inert {rhs_str}))")
+        }
+        // A quoted field name (`a.:b`) is already a `(quote-: …)` symbol; emit it
+        // directly rather than wrapping it in another `(quote …)`.
+        InfixHead::Dot if rhs.kind() == QUOTE_SYM => {
+            format!("(. {lhs} {dot_error}{rhs_str})")
+        }
+        InfixHead::Dot => format!("(. {lhs} {dot_error}(quote {}))", name_text(rhs)),
+        // Non-dot heads are handled by `infix_call_string` above.
+        _ => unreachable!("non-dot infix head handled by infix_call_string"),
+    }
+}
+
+/// Format a non-field-access infix operator from its operator token and
+/// already-projected operand strings. Returns `None` for a field-access dot,
+/// whose right operand needs structural inspection (handled by the caller).
+/// Shared by the normal and missing-right-operand projection paths.
+fn infix_call_string(op: &SyntaxToken, lhs: &str, rhs: &str) -> Option<String> {
     // Unicode operators carry their own text: the `call-i` tiers head an ordinary
     // infix call, and the assignment tier (`≔ ≕ ⩴`) heads the node with the
     // operator itself, just like the ASCII `Special` forms.
@@ -634,10 +673,10 @@ fn project_binary(node: &SyntaxNode) -> String {
         // A broadcast Unicode operator (`.…`, `.×`) carries a leading `.`: strip
         // it and head `dotcall-i`, like the ASCII broadcast forms.
         UNICODE_OP if op.text().starts_with('.') => {
-            return format!("(dotcall-i {lhs} {} {})", &op.text()[1..], project(rhs));
+            return Some(format!("(dotcall-i {lhs} {} {rhs})", &op.text()[1..]));
         }
-        UNICODE_OP => return format!("(call-i {lhs} {} {})", op.text(), project(rhs)),
-        UNICODE_ASSIGN_OP => return format!("({} {lhs} {})", op.text(), project(rhs)),
+        UNICODE_OP => return Some(format!("(call-i {lhs} {} {rhs})", op.text())),
+        UNICODE_ASSIGN_OP => return Some(format!("({} {lhs} {rhs})", op.text())),
         _ => {}
     }
     // A suffixed operator (`a +₁ b`, `x -->₁ y`) carries its sub/superscript
@@ -647,32 +686,29 @@ fn project_binary(node: &SyntaxNode) -> String {
     // name. Mirrors JuliaSyntax, where a suffix makes the operator non-syntactic.
     if op_has_suffix(op.text()) {
         let text = op.text();
-        return match infix_head(op.kind()) {
-            InfixHead::DotCallI(_) => format!(
-                "(dotcall-i {lhs} {} {})",
-                text.trim_start_matches('.'),
-                project(rhs)
-            ),
-            _ => format!("(call-i {lhs} {text} {})", project(rhs)),
-        };
+        return Some(match infix_head(op.kind()) {
+            InfixHead::DotCallI(_) => {
+                format!("(dotcall-i {lhs} {} {rhs})", text.trim_start_matches('.'))
+            }
+            _ => format!("(call-i {lhs} {text} {rhs})"),
+        });
     }
     match infix_head(op.kind()) {
-        InfixHead::CallI(text) => format!("(call-i {lhs} {text} {})", project(rhs)),
-        InfixHead::Special(text) => format!("({text} {lhs} {})", project(rhs)),
-        InfixHead::DotCallI(text) => format!("(dotcall-i {lhs} {text} {})", project(rhs)),
-        // Field access. A plain field name is quoted (`f.x` → `(. f (quote x))`);
-        // an interpolated field name is inert-quoted (`f.$x` →
-        // `(. f (inert ($ x)))`), so the interpolation projects through `($ …)`.
-        InfixHead::Dot if rhs.kind() == INTERPOLATION => {
-            format!("(. {lhs} {dot_error}(inert {}))", project(rhs))
-        }
-        // A quoted field name (`a.:b`) is already a `(quote-: …)` symbol; emit it
-        // directly rather than wrapping it in another `(quote …)`.
-        InfixHead::Dot if rhs.kind() == QUOTE_SYM => {
-            format!("(. {lhs} {dot_error}{})", project(rhs))
-        }
-        InfixHead::Dot => format!("(. {lhs} {dot_error}(quote {}))", name_text(rhs)),
+        InfixHead::CallI(text) => Some(format!("(call-i {lhs} {text} {rhs})")),
+        InfixHead::Special(text) => Some(format!("({text} {lhs} {rhs})")),
+        InfixHead::DotCallI(text) => Some(format!("(dotcall-i {lhs} {text} {rhs})")),
+        InfixHead::Dot => None,
     }
+}
+
+/// Whether the operator token heads a node whose right operand is absent — a
+/// `MissingOperand` diagnostic recorded spanning the operator. JuliaSyntax
+/// synthesizes a zero-width `(error)` for the missing operand.
+fn operator_missing_rhs(op: &SyntaxToken) -> bool {
+    diag_count_from(
+        usize::from(op.text_range().start()),
+        DiagnosticKind::MissingOperand,
+    ) > 0
 }
 
 /// A stepped range `a:b:c` is a single infix colon call over three operands:
@@ -694,11 +730,17 @@ fn project_range(node: &SyntaxNode) -> String {
 fn project_assignment(node: &SyntaxNode) -> String {
     // The operator's own text is its JuliaSyntax head verbatim: `=`, `.=`, `+=`,
     // `.+=`, … all project as `(<op> lhs rhs)`.
-    let head = match operator_token(node) {
+    let op = operator_token(node);
+    let head = match &op {
         Some(t) => t.text().to_string(),
         None => "=".to_string(),
     };
-    sexp(&head, project_each(child_nodes(node)))
+    let operands = child_nodes(node);
+    // Missing right operand: `<: =` ⇒ `(= <: (error))`, `a +=` ⇒ `(+= a (error))`.
+    if operands.len() == 1 && op.is_some_and(|t| operator_missing_rhs(&t)) {
+        return format!("({head} {} (error))", project(&operands[0]));
+    }
+    sexp(&head, project_each(operands))
 }
 
 fn project_unary(node: &SyntaxNode) -> String {

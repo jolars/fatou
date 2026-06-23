@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **624 allowlisted**,
-61 divergence, 0 unsupported. Dir corpus: **147 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **627 allowlisted**,
+58 divergence, 0 unsupported. Dir corpus: **148 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,61 +52,75 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23r)
+## Latest session (2026-06-23s)
 
-**Missing `if`/`elseif` condition → zero-width `(error)`.** An `if`/`elseif`
-whose condition slot is empty is recovery; JuliaSyntax synthesizes a zero-width
-`(error)` in the slot (`if end` ⇒ `(if (error) (block))`, `if; end`,
-`if \n end`, `if true; elseif; end` ⇒ `… (elseif (error) (block))`). Fatou
-already parsed these with an absent `CONDITION` node and a `MissingCondition`
-diagnostic; the gap was purely projector-side. Two-line fix: (1)
-`parse_condition` (`structural.rs`) now anchors the `MissingCondition` diagnostic
-at the **opening keyword** token (`after_kw - 1`) instead of the post-keyword
-trivia, mirroring `MissingEnd` so the projector can find it by `keyword_start`;
-(2) new `missing_condition(node)` helper (`sexpr.rs`) emits `(error)` when
-`diag_count_from(keyword_start(node), MissingCondition) > 0`, wired into both
-`project_if` (main cond) and `project_if_tail` (the `ELSEIF_CLAUSE` cond). No CST
-change, no new `DiagnosticKind`. JS 622 → 624 (`if end`, `if \n end`); dir
-146 → 147. Fixture `if_missing_condition`. Green; clippy/fmt clean.
+**Missing operator right-operand → zero-width `(error)`.** Any infix/assignment
+operator whose right operand is absent keeps its node and synthesizes a
+zero-width `(error)` there, instead of error-wrapping the whole `lhs op` run to
+line end (`x =` ⇒ `(= x (error))`, `a +` ⇒ `(call-i a + (error))`, `a &&` ⇒
+`(&& a (error))`, `var"x"+` ⇒ `(call-i (var x) + (error))`). Two halves:
 
-**Key insight:** a textbook diagnostics-side-channel win — the CST was already
-faithful (missing = absence + diagnostic), so the only work was re-anchoring the
-diagnostic to a keyword the projector can locate and reading it back as `(error)`.
-**Deferred:** `while end` (no separator) recovers *differently* in JuliaSyntax —
-`(while (error end) (block (error)) (error-t))` (the `end` is consumed into the
-condition, then a synthesized block-`(error)` and missing-`end` `(error-t)`), a
-distinct recovery path. `while; end` *does* match the clean `(while (error)
-(block))` shape but `while` projects via `project_each`, not `project_if`, so it
-stays divergent (not in the corpus) until its projector grows the same hook.
+1. **Missing-RHS (the root cause).** The operator loop's missing-RHS branch
+   (`expr.rs` ~line 596) previously `return`ed `error_expr_to_line_end` (an
+   `ERROR` wrapping `lhs op …`). Now it builds the operator node with only the
+   LHS + operator via new `build_binary_missing_rhs` + `operator_node_kind`
+   (the node-kind match extracted from the build site), records the existing
+   `MissingOperand` diagnostic (spanning the operator), and `continue`s. The
+   projector reconstructs `(error)`: `operator_missing_rhs(op)` checks
+   `diag_count_from(op_start, MissingOperand)`; `project_binary` /
+   `project_assignment` emit `(<head> lhs (error))` when `operands.len()==1` and
+   the diag is present. The per-head formatting (unicode/suffix/`call-i`/special)
+   was factored into a shared `infix_call_string` so both the normal and
+   missing-RHS paths reuse it (field-access `Dot` stays caller-handled).
+2. **Prefix value-fallback (needed for the corpus cases).** A value-form prefix
+   operator (`+ - ! ~ <: >: .+ .- .~` in the unary arm, `* /` etc. in the
+   value-operator arm) directly before a bare `=` is its *value*, not a prefix
+   call, so the operator loop then forms the assignment: `<: =` ⇒ `(= <: (error))`,
+   `.+ =` ⇒ `(= (. +) (error))`, `<: = x` ⇒ `(= <: x)`. The purely syntactic
+   prefixes `&`/`::` are **excluded** (they consume the `=` as an error operand:
+   `& =` ⇒ `(& (error =))`), and `?` is excluded (keeps prefix-call handling).
+
+No CST marker node, no new `DiagnosticKind` (reused `MissingOperand`). JS 624 →
+627 (`<: =`, `.+ =`, `var"x"+`); dir 147 → 148. Fixture `operator_missing_rhs`
+(a `;`-separated line — `;` isolates each statement so each missing-RHS triggers
+at the separator instead of continuing onto the next line). Green; clippy/fmt
+clean, no regressions.
+
+**Key insight:** trailing binary operators *continue across newlines* (`x =\na`
+⇒ `(= x a)`, like `1 +\n2`), so missing-RHS only fires at EOF, a `;`/closer, or
+a non-operand follower — hence the `;` fixture, and why `1:\n2` is **separate**
+(the `:` range goes through `parse_colon_range`, not this path, and still slurps
+across the newline). **Deferred:** `::`/`->` projectors don't reconstruct
+missing-RHS yet (`a ::`, not in corpus); word ops (`in`/`isa`) and `where` still
+use `error_expr_to_line_end`.
 
 ## Earlier sessions
 
-- **2026-06-23q** — Multi-value `$(…)` interpolation → `(error …)`: a `$(…)`
-  string interpolation holds a single expression, so a multi-value parenthesized
-  form is invalid (`"$(x;y)"`, `"$(x,y)"`, `"$(x for y in z)"`). `parse_interpolation`
-  (`expr.rs`) now reuses `parse_paren` (faithful `PAREN_EXPR`/`PAREN_BLOCK`/
-  `TUPLE_EXPR`/`GENERATOR` subtree) + records `InvalidInterpolation`;
-  `project_interpolation` (`sexpr.rs`) reconstructs the error from the inner node
-  kind, unwrapping a `PAREN_EXPR` for the valid single-expr case. New
-  `DiagnosticKind::InvalidInterpolation`. JS 619 → 622; dir 145 → 146. Fixture
-  `string_interp_error`. (Gap was a parser shortcut, not a projector gap.)
+- **2026-06-23r** — Missing `if`/`elseif` condition → zero-width `(error)`: an
+  empty condition slot (`if end`, `if; end`, `if true; elseif; end`) is recovery;
+  JuliaSyntax synthesizes `(error)` there. Pure projector win — Fatou already had
+  an absent `CONDITION` + `MissingCondition` diagnostic; re-anchored that diag at
+  the opening keyword (mirroring `MissingEnd`) and added `missing_condition`
+  (`diag_count_from(keyword_start, …)`) wired into `project_if`/`project_if_tail`.
+  Fixture `if_missing_condition`. JS 622 → 624; dir 146 → 147. Deferred: `while
+  end` recovers differently (`(while (error end) (block (error)) (error-t))`).
+- **2026-06-23q** — Multi-value `$(…)` interpolation → `(error …)`: a `$(…)` holds
+  a single expression, so a multi-value parenthesized form is invalid (`"$(x;y)"`,
+  `"$(x,y)"`, `"$(x for y in z)"`). `parse_interpolation` reuses `parse_paren` +
+  records `InvalidInterpolation`; `project_interpolation` reconstructs the error
+  from the inner node kind. Fixture `string_interp_error`. JS 619 → 622; dir
+  145 → 146.
 - **2026-06-23p** — Lone syntactic operator → `(error op)`: a syntactic operator
-  with no value meaning used where an atom is expected is `(error op)` (`=`, `+=`,
-  `.+=`, `&&`, `||`, `->`, `...`, `?`/`?x`); applies in every atom position, the
-  trailing operand falling to the junk driver. New `is_lone_error_operator` +
-  `error_operator_atom` arms (`expr.rs`); `parse_comma_tuple` guards the
-  trailing-comma destructure. Fixture `lone_operator_error`. JS 614 → 619; dir
-  144 → 145.
-- **2026-06-23o** — Array-internal trailing junk: glued `@` → `(error-t ✘ …)`. A
-  macro `@` glued (no separating ws/`;`/newline) to a preceding array element is not
-  a new row — JuliaSyntax bumps the rest of the array to the `]`/EOF as one flat
-  trailing-junk run (`[x@y]` ⇒ `(hcat x (error-t ✘ y))`, `[a@b c]` ⇒ `(hcat a
-  (error-t ✘ b c))`); `@`/`,` render `✘`. One arm in `parse_matrix`'s scan loop
-  (`expr.rs`) on an empty separator run + `At` collects the run into one `ERROR`
-  element through the existing `emit_cat_child`/`ARG` machinery — **no projector
-  change**. Fixture `array_trailing_junk`. JS 612 → 614; dir 143 → 144. Deferred:
-  `;` in the junk (`[a@b;c]`), nested brackets (`[a@b[c]]`).
-
+  with no value meaning where an atom is expected is `(error op)` (`=`, `+=`,
+  `&&`, `->`, `...`, `?`/`?x`); the trailing operand falls to the junk driver.
+  `is_lone_error_operator` + `error_operator_atom` (`expr.rs`). Fixture
+  `lone_operator_error`. JS 614 → 619; dir 144 → 145.
+- **2026-06-23o** — Array-internal trailing junk: a macro `@` glued to a preceding
+  array element bumps the rest of the array to `]`/EOF as one flat trailing-junk
+  run (`[x@y]` ⇒ `(hcat x (error-t ✘ y))`); one arm in `parse_matrix` collects it
+  via existing `emit_cat_child`/`ARG`, no projector change. Fixture
+  `array_trailing_junk`. JS 612 → 614; dir 143 → 144. Deferred: `;`/nested
+  brackets in the junk.
 - **2026-06-23n** — Binary-only operator in prefix position → error-wrapped prefix
   call. `/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`;
   operand binds at `PREFIX_BP` (tighter than arithmetic, below `^`); bare `*` stays

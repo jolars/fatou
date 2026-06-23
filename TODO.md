@@ -13,6 +13,21 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Missing operator right-operand `(error)` (error-shape slice, diagnostics
+  model). Any infix/assignment operator whose right operand is absent keeps its
+  node and synthesizes a zero-width `(error)` there (`x =` ⇒ `(= x (error))`,
+  `a +` ⇒ `(call-i a + (error))`, `a &&` ⇒ `(&& a (error))`) instead of
+  error-wrapping the whole `lhs op` run. The operator loop now builds the node
+  with only the LHS (`build_binary_missing_rhs` + `operator_node_kind`) and the
+  existing `MissingOperand` diagnostic; `project_binary`/`project_assignment`
+  reconstruct the `(error)` via `operator_missing_rhs`
+  (`diag_count_from(op_start, …)`), the head logic factored into the shared
+  `infix_call_string`. Paired with a prefix value-fallback: a value-form prefix
+  operator (`+ - ! ~ <: >: .+ .- .~ * /`, not `&`/`::`) directly before a bare
+  `=` is its value, not a prefix call, so `=` becomes the assignment (`<: =` ⇒
+  `(= <: (error))`, `.+ =` ⇒ `(= (. +) (error))`, `<: = x` ⇒ `(= <: x)`).
+  Fixture `operator_missing_rhs`. JS 624 → 627 (`<: =`, `.+ =`, `var"x"+`);
+  dir 147 → 148.
 - [x] Missing-condition `(error)` (error-shape slice, diagnostics model). An
   `if`/`elseif` (and `while`) whose condition slot is empty (`if end`, `if; end`,
   `if true; elseif; end`) is recovery: JuliaSyntax synthesizes a zero-width
