@@ -10,8 +10,6 @@ ROOT@0..9
       WHITESPACE@4..8 "    "
       NAME@8..9
         IDENT@8..9 "x"
-    ERROR_TRIVIA@9..9
-    ERROR_TRIVIA@9..9
 
 diagnostic [0..3]: expected `catch` or `finally`
 diagnostic [0..3]: expected `end`

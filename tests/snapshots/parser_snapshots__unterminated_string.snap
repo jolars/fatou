@@ -12,4 +12,5 @@ ROOT@0..17
     STRING_LITERAL@4..17
       STRING_DELIM_OPEN@4..5 "\""
       STRING_CONTENT@5..17 "oops\nok = 1\n"
-      ERROR_TRIVIA@17..17
+
+diagnostic [4..4]: unterminated literal

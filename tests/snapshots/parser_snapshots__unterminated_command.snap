@@ -6,4 +6,5 @@ ROOT@0..6
   CMD_LITERAL@0..6
     CMD_DELIM_OPEN@0..1 "`"
     STRING_CONTENT@1..6 "ls -l"
-    ERROR_TRIVIA@6..6
+
+diagnostic [0..0]: unterminated literal

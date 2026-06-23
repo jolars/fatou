@@ -5,6 +5,7 @@ use crate::parser::tree_builder::{build_tree, syntax_kind_for};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 pub use crate::parser::diagnostics::ParseDiagnostic;
+use crate::parser::diagnostics::{DiagnosticKind, push_diagnostic};
 
 /// The result of a parse: the lossless CST plus any diagnostics.
 #[derive(Debug, Clone)]
@@ -38,7 +39,8 @@ pub fn parse(text: &str) -> ParseOutput {
         // tracking whether it carries a `;` separator. `leftover_mark` records
         // the event offset right after the line's first complete statement so a
         // trailing junk run on a separator-less line can be wrapped in an
-        // `(error-t …)` node (`x y` ⇒ `x (error-t y)`).
+        // `ERROR` node and flagged with a `TrailingJunk` diagnostic (projected
+        // `(error-t …)`: `x y` ⇒ `x (error-t y)`).
         let mut line = Vec::new();
         let mut has_semicolon = false;
         let mut leftover_mark: Option<usize> = None;
@@ -76,12 +78,20 @@ pub fn parse(text: &str) -> ParseOutput {
                         // they are left to the loose-token fallback below.
                         line.push(Event::Start(SyntaxKind::ERROR));
                         line.push(Event::Finish);
-                        line.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                        let run_start = tokens[i].start;
+                        line.push(Event::Start(SyntaxKind::ERROR));
                         while i < tokens.len() && tokens[i].kind != TokKind::Newline {
                             line.push(Event::Tok(i));
                             i += 1;
                         }
                         line.push(Event::Finish);
+                        push_diagnostic(
+                            &mut diagnostics,
+                            DiagnosticKind::StrayCloser,
+                            "stray closing delimiter",
+                            run_start,
+                            tokens[i - 1].end,
+                        );
                     } else {
                         line.push(Event::Tok(i));
                         i += 1;
@@ -109,9 +119,22 @@ pub fn parse(text: &str) -> ParseOutput {
                 .take_while(|e| !is_significant_event(e, &tokens))
                 .count();
             events.extend(tail[..lead].iter().cloned());
-            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+            let first_junk = tail[lead..].iter().find_map(|e| match e {
+                Event::Tok(idx) => Some(*idx),
+                _ => None,
+            });
+            events.push(Event::Start(SyntaxKind::ERROR));
             events.extend(tail[lead..].iter().cloned());
             events.push(Event::Finish);
+            if let Some(idx) = first_junk {
+                push_diagnostic(
+                    &mut diagnostics,
+                    DiagnosticKind::TrailingJunk,
+                    "trailing tokens after statement",
+                    tokens[idx].start,
+                    tokens[idx].end,
+                );
+            }
         } else {
             events.extend(line);
         }

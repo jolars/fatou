@@ -260,16 +260,13 @@ pub enum SyntaxKind {
     AT,
     DOLLAR,
 
-    /// A JuliaSyntax `TRIVIA_FLAG`-tagged error node, projected as `(error-t)`:
-    /// a synthesized/truncation marker (EOF or skipped tokens), as distinct from
-    /// the bare `(error)` of a missing required element ([`SyntaxKind::ERROR`]).
-    /// New error kinds go here, **before** the `ERROR` sentinel.
-    ERROR_TRIVIA,
-
-    /// Both the unknown-token kind and the bare error-recovery node kind
-    /// (projected `(error)`). Keep this the **last** variant:
-    /// [`JuliaLanguage::kind_from_raw`] uses it as the upper bound of the valid
-    /// discriminant range.
+    /// The error-recovery node kind: unknown tokens and recovered runs. Projected
+    /// `(error)`, or `(error-t)` for the byte-bearing recovery runs that the
+    /// projector identifies from the diagnostics side-channel. Recovery that is
+    /// merely *absent* (missing `end`, disallowed whitespace) lives only in the
+    /// diagnostics, not the tree (the rust-analyzer model). Keep this the **last**
+    /// variant: [`JuliaLanguage::kind_from_raw`] uses it as the upper bound of the
+    /// valid discriminant range.
     ERROR,
 }
 
@@ -319,7 +316,6 @@ mod tests {
             SyntaxKind::STRING_CONTENT,
             SyntaxKind::FUNCTION_KW,
             SyntaxKind::DOLLAR,
-            SyntaxKind::ERROR_TRIVIA,
             SyntaxKind::ERROR,
         ] {
             let raw = JuliaLanguage::kind_to_raw(kind);

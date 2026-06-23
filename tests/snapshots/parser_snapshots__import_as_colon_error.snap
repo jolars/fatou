@@ -68,7 +68,7 @@ ROOT@0..102
     IMPORT_PATH@65..66
       IDENT@65..66 "B"
     COLON@66..67 ":"
-    ERROR_TRIVIA@67..69
+    ERROR@67..69
       WHITESPACE@67..68 " "
       IMPORT_PATH@68..69
         IDENT@68..69 "y"
@@ -83,7 +83,7 @@ ROOT@0..102
     IMPORT_PATH@80..81
       IDENT@80..81 "B"
     COLON@81..82 ":"
-    ERROR_TRIVIA@82..84
+    ERROR@82..84
       WHITESPACE@82..83 " "
       IMPORT_PATH@83..84
         IDENT@83..84 "y"
@@ -102,8 +102,12 @@ ROOT@0..102
     IMPORT_PATH@97..98
       IDENT@97..98 "B"
     COLON@98..99 ":"
-    ERROR_TRIVIA@99..101
+    ERROR@99..101
       WHITESPACE@99..100 " "
       IMPORT_PATH@100..101
         IDENT@100..101 "y"
   NEWLINE@101..102 "\n"
+
+diagnostic [68..69]: recovery `:` in import
+diagnostic [83..84]: recovery `:` in import
+diagnostic [100..101]: recovery `:` in import

@@ -114,12 +114,12 @@ fn outcome(case: &Case) -> Outcome {
 /// Project the case's CST to a normalized s-expression. `None` (→ `Unsupported`,
 /// the growth frontier) only when the projection still contains an
 /// `(unsupported …)` sentinel — a `SyntaxKind` the projector cannot yet render.
-/// Parse *diagnostics* no longer skip a case: Fatou now emits in-tree typed
-/// error nodes (`(error)`/`(error-t)`), so error shapes are projected and
-/// compared like any other case.
+/// Error shapes are reconstructed by the projector from the parse diagnostics
+/// (`(error)`/`(error-t)`), passed alongside the CST, so they are compared like
+/// any other case rather than skipping.
 fn render(case: &Case) -> Option<String> {
     let output = parse(&case.input);
-    let raw = to_juliasyntax_sexpr(&output.cst);
+    let raw = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
     if raw.contains("(unsupported ") {
         return None;
     }

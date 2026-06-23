@@ -66,7 +66,9 @@ fn run_parse(
     if !quiet {
         match to {
             ParseFormat::Cst => print!("{:#?}", output.cst),
-            ParseFormat::Sexpr => println!("{}", to_juliasyntax_sexpr(&output.cst)),
+            ParseFormat::Sexpr => {
+                println!("{}", to_juliasyntax_sexpr(&output.cst, &output.diagnostics))
+            }
         }
         for diag in &output.diagnostics {
             eprintln!(

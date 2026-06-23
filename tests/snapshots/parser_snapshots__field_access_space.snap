@@ -8,7 +8,6 @@ ROOT@0..56
       IDENT@0..1 "x"
     WHITESPACE@1..2 " "
     DOT@2..3 "."
-    ERROR_TRIVIA@3..3
     NAME@3..4
       IDENT@3..4 "y"
   NEWLINE@4..5 "\n"
@@ -17,7 +16,6 @@ ROOT@0..56
       IDENT@5..6 "a"
     WHITESPACE@6..7 " "
     DOT@7..8 "."
-    ERROR_TRIVIA@8..8
     NAME@8..9
       IDENT@8..9 "b"
   NEWLINE@9..10 "\n"
@@ -26,7 +24,6 @@ ROOT@0..56
       IDENT@10..11 "x"
     WHITESPACE@11..12 " "
     DOT@12..13 "."
-    ERROR_TRIVIA@13..13
     QUOTE_SYM@13..15
       COLON@13..14 ":"
       NAME@14..15
@@ -44,7 +41,6 @@ ROOT@0..56
         RPAREN@19..20 ")"
     WHITESPACE@20..21 " "
     DOT@21..22 "."
-    ERROR_TRIVIA@22..22
     NAME@22..27
       IDENT@22..27 "field"
   NEWLINE@27..28 "\n"
@@ -57,7 +53,6 @@ ROOT@0..56
         IDENT@30..31 "y"
     WHITESPACE@31..32 " "
     DOT@32..33 "."
-    ERROR_TRIVIA@33..33
     NAME@33..34
       IDENT@33..34 "z"
   NEWLINE@34..35 "\n"
@@ -68,13 +63,11 @@ ROOT@0..56
     QUOTE_SYM@37..40
       COLON@37..38 ":"
       WHITESPACE@38..39 " "
-      ERROR_TRIVIA@39..39
       PLUS@39..40 "+"
   NEWLINE@40..41 "\n"
   QUOTE_SYM@41..46
     COLON@41..42 ":"
     WHITESPACE@42..43 " "
-    ERROR_TRIVIA@43..43
     NAME@43..46
       IDENT@43..46 "foo"
   NEWLINE@46..47 "\n"
@@ -83,11 +76,19 @@ ROOT@0..56
       IDENT@47..48 "A"
     WHITESPACE@48..49 " "
     DOT@49..50 "."
-    ERROR_TRIVIA@50..50
     QUOTE_SYM@50..55
       COLON@50..51 ":"
       WHITESPACE@51..52 " "
-      ERROR_TRIVIA@52..52
       NAME@52..55
         IDENT@52..55 "foo"
   NEWLINE@55..56 "\n"
+
+diagnostic [3..3]: whitespace before `.`
+diagnostic [8..8]: whitespace before `.`
+diagnostic [13..13]: whitespace before `.`
+diagnostic [22..22]: whitespace before `.`
+diagnostic [33..33]: whitespace before `.`
+diagnostic [38..38]: whitespace after `:`
+diagnostic [42..42]: whitespace after `:`
+diagnostic [51..51]: whitespace after `:`
+diagnostic [50..50]: whitespace before `.`

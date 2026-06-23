@@ -15,6 +15,5 @@ ROOT@0..18
       NAME@16..17
         IDENT@16..17 "y"
       NEWLINE@17..18 "\n"
-    ERROR_TRIVIA@18..18
 
 diagnostic [0..5]: expected `end`

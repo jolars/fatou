@@ -8,7 +8,22 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 - **Projector is faithful, never compensating.** Translate encoding (wrappers,
   delimiters, trivia) only; let modeling divergences surface. Diffs that live
-  mostly in `sexpr.rs` are a smell.
+  mostly in `sexpr.rs` are a smell. **Amended (2026-06-23i):** the projector now
+  also *reconstructs error shapes* (`(error)`/`(error-t)`/`✘`) from the
+  **diagnostics side-channel** (`ParseOutput.diagnostics`, keyed by byte
+  position) — we adopted the rust-analyzer model (missing = absence + diagnostic,
+  no zero-width CST marker nodes). The bright line is narrower now: reading
+  *recorded* diagnostics to replay an error shape is OK; inventing structure to
+  paper over a wrong CST topology is still forbidden. A non-error divergence that
+  lives mostly in `sexpr.rs` is still a smell.
+- **Error recovery is a side-channel, not a tree node.** `DiagnosticKind`
+  (`diagnostics.rs`) classifies every recovery; the projector's `diag_at` /
+  `diag_count_from` / `is_recovery_error` helpers (in `sexpr.rs`) look diagnostics
+  up by byte anchor. Zero-width markers carry **no** node (anchor = a byte point or
+  the construct's opening keyword); byte-bearing recovery (`StrayCloser`,
+  `TrailingJunk`, `ImportRecoveryColon`) is a real `ERROR` node the projector
+  renders with the `(error-t …)` head via `is_recovery_error`. The only CST error
+  kind is `ERROR` (`ERROR_TRIVIA` is **deleted**).
 - **5-file operator recipe**: lexer `TokKind`+lex → `syntax.rs` kind →
   `tree_builder.rs` map → `expr.rs` `infix_binding_power` → `sexpr.rs`
   `infix_head` + `is_operator`. Probe Julia for tier/associativity first.
@@ -26,6 +41,10 @@ JS corpus (**685 cases** — error shapes now harvested): **599 allowlisted**,
 86 divergence, 0 unsupported. Dir corpus: **139 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "import/as colon error shapes" are `[x]` in `TODO.md`.
+**Error shapes are now reconstructed from diagnostics, not in-tree marker
+nodes** (2026-06-23i refactor) — same projected output, so counts unchanged.
+`TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA` mechanism
+(historical log); the *output shapes* they cite are still correct.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -33,42 +52,59 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23h)
+## Latest session (2026-06-23i)
 
-**`import`/`as` colon error shapes.** Finished the deferred import/`as` recovery
-work. Three intertwined rules, all matched: (a) a top-level `:` is the base/names
-split **only as the first separator** (right after the base path) — after a comma
-any `:` is recovery, so `import A, B: y` ⇒ `(import (importpath A) (importpath B)
-(error-t (importpath y)))` with **no** `:` group; (b) a *second* colon in the
-names list is recovery too — `import A: x, B: y` ⇒ `(: A x B (error-t y))`,
-`import A: x: y` ⇒ `(: A x (error-t y))`; (c) a base alias that precedes a valid
-`:` is invalid — `import A as B: x` ⇒ `(import (: (error (as …)) x))`, and a
-`using` base alias before a `:` **stacks** both invalidities, `using A as B: x` ⇒
-`(error (error (as …)))`. `parse_import_stmt` (`structural.rs`) probes the base
-clause's following separator (`valid_colon`), passes an error-wrap **depth**
-(0/1/2) to `parse_import_clause` (replacing the old `wrap_alias_error: bool`), and
-wraps the clause after a recovery colon in `ERROR_TRIVIA` (then stops grouping).
-`project_import` (`sexpr.rs`) now reads the **first separator** token to decide
-`:` grouping (not "any colon present") and collects `ERROR`/`ERROR_TRIVIA`
-clauses. No diagnostics emitted. Fixture `import_as_colon_error`; dir case minted.
-JS allow 597 → 599; dir 138 → 139. Zero regressions; green; clippy/fmt clean.
+**Architecture reversal: error handling → the rust-analyzer model.** Decided the
+zero-width in-tree marker (`ERROR_TRIVIA` → `(error-t)`) grown over the
+error-shape lineage (2026-06-22o…2026-06-23h) was the wrong representation. It
+mirrored JuliaSyntax's green tree, but JuliaSyntax keeps zero-width error tokens
+*in the tree* whereas rust-analyzer represents **missing** by **absence** plus a
+diagnostics side-channel, reserving in-tree `ERROR` nodes for present-but-
+unexpected source. Switched to that model. **Same projected output** (the
+projector reconstructs the shapes from diagnostics) so **zero allowlist movement**
+— 599/139 unchanged. This is a representation refactor, not a parity change.
 
-**Deferred (still divergent, not allowlisted):** the *triple* `import A: x, B: y,
-C: z` nests as `(call-i (import (: A x B (error-t y C))) : z)` — a second recovery
-colon spills into a binary `:` call; left as a remaining divergence. `import A as
-B as C` ⇒ `(import (as A B)) (error-t as C)` (double `as`) also untackled.
+What changed: **`SyntaxKind::ERROR_TRIVIA` deleted** (one error kind, `ERROR`,
+remains). New `DiagnosticKind` enum on `ParseDiagnostic` (`diagnostics.rs`) and
+`push_diagnostic` takes a kind. The 15 emission sites split: the 12 zero-width
+markers (missing-`end`/-handler, dot/quote-colon/opener/glued-`for`/ternary
+whitespace, unterminated literal/arglist, string-suffix, string-juxtapose) now
+push **only a diagnostic** (no node); the 3 byte-bearing recoveries (`StrayCloser`,
+`TrailingJunk`, `ImportRecoveryColon`) wrap their run in a real `ERROR` node + a
+diagnostic. The projector (`sexpr.rs`) gained `diag_at`/`diag_count_from`/
+`is_recovery_error` (reading a thread-local `PROJ_DIAGS` set at the entry; chosen
+over threading a param through ~50 helpers) and reconstructs each shape by byte
+anchor: zero-width markers at a byte point, truncation markers at the construct's
+**opening keyword** (`keyword_start`, which special-cases `do`-blocks since the
+callee leads), byte-bearing recovery via range containment → `(error-t …)` head.
+`to_juliasyntax_sexpr` now takes `&[ParseDiagnostic]`. All `parser_snapshots`
+regenerated (markers gone from the CST, diagnostic lines added). Green; clippy/fmt
+clean. Plan: `~/.claude/plans/yeah-we-re-heading-the-swift-blossom.md`.
 
-**Suggested next targets (ranked):** (1) **unterminated chars** — `'`⇒
-`(char (error))`, `'a`⇒`(char 'a' (error-t))`; touches the lexer + transpose
-disambiguation (`f.'`, `x 'y`); probe those first. (2) **macro-path error-t**
-`A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a` (deep:
-Fatou currently drops the trailing `.x`). (3) **paren-block string-juxtapose**
-`(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘` string form). (4)
+**Gotcha that bit once:** `do_blocks` regressed mid-refactor — `keyword_start` as
+"first non-trivia token" is wrong for a do-block (callee comes before `do`);
+`expect_end` anchors `MissingEnd` at the `do` keyword. Fixed by special-casing
+`DO_EXPR` to find the `DO_KW` token.
+
+**Suggested next targets (ranked, now via diagnostics not nodes):** (1)
+**unterminated chars** — `'`⇒`(char (error))`, `'a`⇒`(char 'a' (error-t))`;
+touches the lexer + transpose disambiguation (`f.'`, `x 'y`); probe those first.
+(2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
+(quote @x)))`, `@A.B.@x a` (deep: Fatou drops the trailing `.x`). (3)
+**paren-block string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`. (4)
 **`public` soft-keyword in block context** — `begin public A, B end`⇒
-`(block public (error-t A ✘ B))` (toplevel `public A, B` already works; in a
-block `public` is a plain ident + error recovery).
+`(block public (error-t A ✘ B))`. Still-deferred import divergences: triple
+`import A: x, B: y, C: z` and double `import A as B as C`.
 
 ## Earlier sessions
+
+- **2026-06-23h** — `import`/`as` colon error shapes (the last error-shape-lineage
+  feature, before the 2026-06-23i representation reversal): a top-level `:` is the
+  base/names split only as the *first* separator (`import A, B: y` ⇒ recovery, no
+  `:` group); a second names-list colon is recovery; a base alias before a valid
+  `:` is invalid and a `using` base alias stacks both. `parse_import_stmt` passed
+  an error-wrap depth (0/1/2) to `parse_import_clause`. Fixture
+  `import_as_colon_error`. JS 597 → 599; dir 138 → 139.
 
 - **2026-06-23g** — `using`-base `as` rename error-wrap: an `as` rename is invalid
   in a `using` base path, so JuliaSyntax wraps the alias `(error (as …))`

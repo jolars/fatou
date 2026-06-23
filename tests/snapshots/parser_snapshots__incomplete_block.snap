@@ -31,6 +31,5 @@ ROOT@0..40
           WHITESPACE@32..36 "    "
         END_KW@36..39 "end"
       NEWLINE@39..40 "\n"
-    ERROR_TRIVIA@40..40
 
 diagnostic [0..8]: expected `end`

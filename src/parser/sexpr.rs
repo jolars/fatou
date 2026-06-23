@@ -19,18 +19,107 @@
 //! `(unsupported KIND)` sentinel so a gap stays loud rather than silently
 //! dropping content.
 
+use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 use rowan::NodeOrToken;
+use std::cell::RefCell;
 
 use SyntaxKind::*;
 
+// The projector reconstructs JuliaSyntax's `(error-t)`/`(error)` error shapes
+// from the parse diagnostics rather than from dedicated CST nodes (the
+// rust-analyzer model: recovery lives in a side-channel, not the tree). Since
+// `project` recurses through ~50 free helpers, the diagnostics are stashed in a
+// thread-local set once at the entry point and queried by byte position at the
+// handful of sites that need them, rather than threaded through every signature.
+thread_local! {
+    static PROJ_DIAGS: RefCell<Vec<(DiagnosticKind, usize, usize)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
 /// Render the given Fatou CST as a JuliaSyntax-native s-expression string.
 ///
+/// `diags` is the parse's diagnostics side-channel; the projector reads it to
+/// reconstruct error shapes (`(error-t)` markers, recovery `(error-t …)` heads).
 /// The root projects to `(toplevel …)`, mirroring `parseall`. Pair with
 /// [`normalize_sexpr`] when comparing against captured Julia output to ignore
 /// pretty-print whitespace differences.
-pub fn to_juliasyntax_sexpr(tree: &SyntaxNode) -> String {
+pub fn to_juliasyntax_sexpr(tree: &SyntaxNode, diags: &[ParseDiagnostic]) -> String {
+    PROJ_DIAGS.with(|d| {
+        *d.borrow_mut() = diags.iter().map(|x| (x.kind, x.start, x.end)).collect();
+    });
     project(tree)
+}
+
+/// Count diagnostics of `kind` recorded as a zero-width point at byte `pos`.
+fn diag_count_at(pos: usize, kind: DiagnosticKind) -> usize {
+    PROJ_DIAGS.with(|d| {
+        d.borrow()
+            .iter()
+            .filter(|(k, s, e)| *k == kind && *s == pos && *e == pos)
+            .count()
+    })
+}
+
+/// Whether a zero-width diagnostic of `kind` is recorded at byte `pos`.
+fn diag_at(pos: usize, kind: DiagnosticKind) -> bool {
+    diag_count_at(pos, kind) > 0
+}
+
+/// Count diagnostics of `kind` whose range *starts* at byte `pos` (ignoring the
+/// end). Used for the keyword-anchored truncation diagnostics, which span the
+/// opening keyword rather than a zero-width point.
+fn diag_count_from(pos: usize, kind: DiagnosticKind) -> usize {
+    PROJ_DIAGS.with(|d| {
+        d.borrow()
+            .iter()
+            .filter(|(k, s, _)| *k == kind && *s == pos)
+            .count()
+    })
+}
+
+/// The construct's opening-keyword start byte — the anchor the parser uses for
+/// truncation diagnostics (`MissingEnd`, `MissingTryHandler`). For most block
+/// forms that is the first non-trivia token, but a `do`-block leads with its
+/// callee, so the `do` keyword is anchored instead.
+fn keyword_start(node: &SyntaxNode) -> usize {
+    if node.kind() == DO_EXPR
+        && let Some(do_kw) = node
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| t.kind() == DO_KW)
+    {
+        return usize::from(do_kw.text_range().start());
+    }
+    node.descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| !is_trivia(t.kind()))
+        .map(|t| usize::from(t.text_range().start()))
+        .unwrap_or_else(|| usize::from(node.text_range().start()))
+}
+
+/// Whether `node` is a byte-bearing recovery `ERROR` node (a stray-closer run,
+/// trailing junk, or an import recovery `:` clause) — JuliaSyntax renders those
+/// with the `(error-t …)` head, unlike the plain `(error …)` of other recovery.
+/// A zero-width (empty) error node is never one, so the synthesized leading
+/// `(error)` of a stray closer keeps its plain head.
+fn is_recovery_error(node: &SyntaxNode) -> bool {
+    let r = node.text_range();
+    if r.start() == r.end() {
+        return false;
+    }
+    let (s, e) = (usize::from(r.start()), usize::from(r.end()));
+    PROJ_DIAGS.with(|d| {
+        d.borrow().iter().any(|(k, ds, de)| {
+            matches!(
+                k,
+                DiagnosticKind::StrayCloser
+                    | DiagnosticKind::TrailingJunk
+                    | DiagnosticKind::ImportRecoveryColon
+            ) && *ds >= s
+                && *de <= e
+        })
+    })
 }
 
 /// Canonical form of a JuliaSyntax s-expression string. Tokenizes on whitespace
@@ -136,8 +225,8 @@ fn project(node: &SyntaxNode) -> String {
         TYPE_ANNOTATION => project_type_annotation(node),
         WHERE_EXPR => project_where(node),
         ARROW_EXPR => sexp("->", project_each(child_nodes(node))),
-        JUXTAPOSE_EXPR => sexp("juxtapose", project_each(child_nodes(node))),
-        TERNARY_EXPR => sexp("?", project_each(child_nodes(node))),
+        JUXTAPOSE_EXPR => project_juxtapose(node),
+        TERNARY_EXPR => project_ternary(node),
 
         CALL_EXPR => project_call("call", node),
         INDEX_EXPR => project_call("ref", node),
@@ -196,14 +285,19 @@ fn project(node: &SyntaxNode) -> String {
         BEGIN_MARKER => "begin".to_string(),
         OPERATOR_ATOM => project_operator_atom(node),
 
-        // Typed error nodes (JuliaSyntax error taxonomy). `ERROR` is the bare
-        // `(error)` — a missing required element; `ERROR_TRIVIA` is the
-        // `TRIVIA_FLAG`-tagged `(error-t)` — a synthesized/truncation marker.
-        // Either may wrap recovered tokens (`(error-t b)`); the delimiter that
-        // triggered recovery is dropped by `significant`, so a zero-width
-        // synthesized node renders as the bare `(error-t)`.
-        ERROR => project_error("error", node),
-        ERROR_TRIVIA => project_error("error-t", node),
+        // The sole error node kind. JuliaSyntax distinguishes the bare `(error)`
+        // (a missing required element, an invalid `as` rename) from the
+        // `TRIVIA_FLAG`-tagged `(error-t)` (a recovered run); `is_recovery_error`
+        // recovers that distinction from the diagnostics side-channel. A stray
+        // closing delimiter recovered into the node renders as `✘`.
+        ERROR => project_error(
+            if is_recovery_error(node) {
+                "error-t"
+            } else {
+                "error"
+            },
+            node,
+        ),
 
         other => format!("(unsupported {other:?})"),
     }
@@ -430,6 +524,56 @@ fn is_operator(kind: SyntaxKind) -> bool {
 
 // --- Binary / unary / assignment -------------------------------------------
 
+/// `(? cond then else)`. Whitespace errors around `?`/`:` are recorded as
+/// `TernaryQWhitespace` (anchored at the `?`'s end) and `TernaryColonWhitespace`
+/// (anchored at the true-branch's end); each replays as a `(error-t)` between the
+/// respective operands (`a?b:c` ⇒ `(? a (error-t) (error-t) b (error-t) (error-t) c)`).
+fn project_ternary(node: &SyntaxNode) -> String {
+    let nodes = child_nodes(node);
+    let q_end = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| t.kind() == QUESTION)
+        .map(|t| usize::from(t.text_range().end()));
+    let mut parts = Vec::new();
+    for (i, n) in nodes.iter().enumerate() {
+        parts.push(project(n));
+        if i == 0 {
+            if let Some(qe) = q_end {
+                for _ in 0..diag_count_at(qe, DiagnosticKind::TernaryQWhitespace) {
+                    parts.push("(error-t)".to_string());
+                }
+            }
+        } else if i == 1 {
+            let then_end = usize::from(n.text_range().end());
+            for _ in 0..diag_count_at(then_end, DiagnosticKind::TernaryColonWhitespace) {
+                parts.push("(error-t)".to_string());
+            }
+        }
+    }
+    sexp("?", parts)
+}
+
+/// `(juxtapose lhs rhs)`. An *invalid* string juxtaposition (`"a"x`, `2"b"`)
+/// records a `StringJuxtapose` diagnostic at the left operand's end, projecting
+/// a `(error-t)` between the operands (`(juxtapose "a" (error-t) x)`).
+fn project_juxtapose(node: &SyntaxNode) -> String {
+    let nodes = child_nodes(node);
+    let mut parts = Vec::new();
+    for (i, n) in nodes.iter().enumerate() {
+        parts.push(project(n));
+        if i == 0
+            && diag_at(
+                usize::from(n.text_range().end()),
+                DiagnosticKind::StringJuxtapose,
+            )
+        {
+            parts.push("(error-t)".to_string());
+        }
+    }
+    sexp("juxtapose", parts)
+}
+
 fn project_binary(node: &SyntaxNode) -> String {
     // Word operators `in`/`isa` are lexed as identifiers, so the operator is the
     // sole loose `IDENT` token child (both operands are wrapped in nodes). They
@@ -453,19 +597,18 @@ fn project_binary(node: &SyntaxNode) -> String {
         Some(t) => t,
         None => return format!("(unsupported {:?})", node.kind()),
     };
-    // A field-access dot with disallowed leading whitespace (`x .y`) carries a
-    // zero-width `ERROR_TRIVIA` child between the operands; it is not an operand
-    // itself, so exclude it from the operand count and splice `(error-t)` before
-    // the quoted field name in the `Dot` arm below.
-    let dot_error = if node.children().any(|c| c.kind() == ERROR_TRIVIA) {
+    // A field-access dot with disallowed leading whitespace (`x .y`) records a
+    // `DotWhitespace` diagnostic at the dot's end; splice `(error-t)` before the
+    // quoted field name in the `Dot` arm below.
+    let dot_error = if diag_at(
+        usize::from(op.text_range().end()),
+        DiagnosticKind::DotWhitespace,
+    ) {
         "(error-t) "
     } else {
         ""
     };
-    let operands: Vec<SyntaxNode> = child_nodes(node)
-        .into_iter()
-        .filter(|n| n.kind() != ERROR_TRIVIA)
-        .collect();
+    let operands = child_nodes(node);
     if operands.len() != 2 {
         return project_flat(significant(node));
     }
@@ -625,15 +768,16 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
             NodeOrToken::Token(_) => {}
         }
     }
-    // A direct-child `(error-t)` flags disallowed whitespace before the opener
-    // (`f (a)` → `(call f (error-t) a)`); it sits between the callee and the
-    // arguments. (An unterminated arg list's `(error-t)` lives *inside* the
-    // `ARG_LIST` instead and is emitted by `project_args`, so the two never
-    // collide.)
-    if let Some(err) = node.children().find(|c| c.kind() == ERROR_TRIVIA) {
-        parts.push(project_error("error-t", &err));
-    }
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
+        // Disallowed whitespace before the opener records `OpenerWhitespace` at
+        // the opener's start (`f (a)` → `(call f (error-t) a)`); the marker sits
+        // between the callee and the arguments.
+        if diag_at(
+            usize::from(arg_list.text_range().start()),
+            DiagnosticKind::OpenerWhitespace,
+        ) {
+            parts.push("(error-t)".to_string());
+        }
         parts.extend(project_args(&arg_list));
     } else if let Some(generator) = node.children().find(|c| c.kind() == GENERATOR) {
         // A bare generator argument: `sum(x for x in xs)` → `(call sum (generator …))`.
@@ -676,6 +820,14 @@ fn project_args(container: &SyntaxNode) -> Vec<String> {
                 }
             }
         }
+    }
+    // An argument list with no closing delimiter (`f(a`) records `UnterminatedArgList`
+    // at the opener's start, projecting a trailing `(error-t)` (`(call f a (error-t))`).
+    if diag_at(
+        usize::from(container.text_range().start()),
+        DiagnosticKind::UnterminatedArgList,
+    ) {
+        out.push("(error-t)".to_string());
     }
     out
 }
@@ -900,8 +1052,17 @@ fn project_generator(node: &SyntaxNode) -> String {
     let mut clauses: Vec<String> = Vec::new();
     for child in node.children() {
         match child.kind() {
-            FOR_BINDING => clauses.push(project_for_binding_node(&child)),
-            ERROR_TRIVIA => clauses.push("(error-t)".to_string()),
+            FOR_BINDING => {
+                // A `for` glued to the body records `GluedFor` at the `for`'s
+                // start, projecting `(error-t)` before the first clause.
+                if diag_at(
+                    usize::from(child.text_range().start()),
+                    DiagnosticKind::GluedFor,
+                ) {
+                    clauses.push("(error-t)".to_string());
+                }
+                clauses.push(project_for_binding_node(&child));
+            }
             COMPREHENSION_IF => {
                 if let (Some(cond), Some(last)) = (first_node(&child), clauses.last().cloned()) {
                     let n = clauses.len();
@@ -1046,11 +1207,18 @@ fn project_try(node: &SyntaxNode) -> String {
                     parts.push(format!("(else {})", project_block_child(&clause)));
                 }
             }
-            // Truncation markers (missing `catch`/`finally`, missing `end`) land
-            // in document order: `try x` ⇒ `(try (block x) (error-t) (error-t))`.
-            ERROR_TRIVIA => parts.push(project_error("error-t", &clause)),
             _ => {}
         }
+    }
+    // Truncation markers land in document order: a missing `catch`/`finally`
+    // handler then a missing `end` (`try x` ⇒ `(try (block x) (error-t) (error-t))`).
+    // Both diagnostics anchor at the `try` keyword.
+    let kw = keyword_start(node);
+    for _ in 0..diag_count_from(kw, DiagnosticKind::MissingTryHandler) {
+        parts.push("(error-t)".to_string());
+    }
+    for _ in 0..diag_count_from(kw, DiagnosticKind::MissingEnd) {
+        parts.push("(error-t)".to_string());
     }
     sexp("try", parts)
 }
@@ -1090,14 +1258,22 @@ fn project_module(node: &SyntaxNode) -> String {
 fn project_quote_sym(node: &SyntaxNode) -> String {
     // `:foo`/`:(expr)` → `(quote-: …)`. The quoted form is the first significant
     // child after the `:` — a `NAME`/paren node, or a bare keyword token.
-    // Whitespace between the `:` and the symbol splices a leading `ERROR_TRIVIA`
-    // child (`: foo` ⇒ `(quote-: (error-t) foo)`).
+    // Whitespace between the `:` and the symbol records a `QuoteColonWhitespace`
+    // diagnostic at the `:`'s end and projects a leading `(error-t)`
+    // (`: foo` ⇒ `(quote-: (error-t) foo)`).
     let mut prefix = "";
     for el in node.children_with_tokens() {
         match el {
-            NodeOrToken::Node(n) if n.kind() == ERROR_TRIVIA => prefix = "(error-t) ",
             NodeOrToken::Node(n) => return format!("(quote-: {prefix}{})", project(&n)),
-            NodeOrToken::Token(t) if t.kind() == COLON || is_trivia(t.kind()) => continue,
+            NodeOrToken::Token(t) if t.kind() == COLON => {
+                if diag_at(
+                    usize::from(t.text_range().end()),
+                    DiagnosticKind::QuoteColonWhitespace,
+                ) {
+                    prefix = "(error-t) ";
+                }
+            }
+            NodeOrToken::Token(t) if is_trivia(t.kind()) => continue,
             NodeOrToken::Token(t) => return format!("(quote-: {prefix}{})", t.text()),
         }
     }
@@ -1216,11 +1392,10 @@ fn project_import(head: &str, node: &SyntaxNode) -> String {
     let mut clauses: Vec<String> = Vec::new();
     for el in node.children_with_tokens() {
         match el {
-            // `ERROR` wraps an invalid `as` rename (`using A as B`, `import A as
-            // B: x`); `ERROR_TRIVIA` wraps a clause after a recovery `:`.
-            NodeOrToken::Node(n)
-                if matches!(n.kind(), IMPORT_PATH | IMPORT_ALIAS | ERROR | ERROR_TRIVIA) =>
-            {
+            // `ERROR` wraps an invalid `as` rename (`using A as B`, projected
+            // `(error …)`) or a clause after a recovery `:` (`import A, B: y`,
+            // projected `(error-t …)` via the `ImportRecoveryColon` diagnostic).
+            NodeOrToken::Node(n) if matches!(n.kind(), IMPORT_PATH | IMPORT_ALIAS | ERROR) => {
                 clauses.push(project(&n));
             }
             NodeOrToken::Token(t)
@@ -2245,18 +2420,20 @@ fn project_signature(node: &SyntaxNode) -> String {
 
 // --- Generic helpers -------------------------------------------------------
 
-/// Project a typed error node, wrapping any recovered (significant) tokens or
-/// child nodes. An empty node renders as the bare `(error)`/`(error-t)`.
 /// Append the unclosed-delimiter `(error-t)` marker to a literal body's parts
-/// when the literal carries an `ERROR_TRIVIA` child. JuliaSyntax emits no empty
-/// `""` content placeholder for an unterminated literal, so drop a sole filler
-/// `""` before appending (`"` → `(string (error-t))`, not `(string "")`).
+/// when an `UnterminatedLiteral`/`StringSuffixSpace` diagnostic is anchored at
+/// the literal's start. JuliaSyntax emits no empty `""` content placeholder for
+/// an unterminated literal, so drop a sole filler `""` before appending
+/// (`"` → `(string (error-t))`, not `(string "")`).
 fn with_error_trivia(node: &SyntaxNode, mut parts: Vec<String>) -> Vec<String> {
-    if let Some(err) = node.children().find(|c| c.kind() == ERROR_TRIVIA) {
+    let s = usize::from(node.text_range().start());
+    if diag_at(s, DiagnosticKind::UnterminatedLiteral)
+        || diag_at(s, DiagnosticKind::StringSuffixSpace)
+    {
         if parts == ["\"\""] {
             parts.clear();
         }
-        parts.push(project_error("error-t", &err));
+        parts.push("(error-t)".to_string());
     }
     parts
 }
@@ -2301,18 +2478,18 @@ fn project_block_child(node: &SyntaxNode) -> String {
         .unwrap_or_else(|| "(block)".to_string())
 }
 
-/// Append `(error-t)` to `parts` for each direct `ERROR_TRIVIA` child — the
-/// truncation marker `expect_end` splices when a block form is missing its
-/// `end` (`if c\n x` ⇒ `(if c (block x) (error-t))`).
+/// Append `(error-t)` to `parts` for each `MissingEnd` diagnostic anchored at the
+/// construct's opening keyword — the truncation marker for a block form missing
+/// its `end` (`if c\n x` ⇒ `(if c (block x) (error-t))`).
 fn push_trailing_errors(node: &SyntaxNode, parts: &mut Vec<String>) {
-    for c in node.children().filter(|c| c.kind() == ERROR_TRIVIA) {
-        parts.push(project_error("error-t", &c));
+    for _ in 0..diag_count_from(keyword_start(node), DiagnosticKind::MissingEnd) {
+        parts.push("(error-t)".to_string());
     }
 }
 
-/// Project a block-form's `BLOCK` child, folding a trailing `ERROR_TRIVIA`
-/// sibling *into* the block — for constructs that JuliaSyntax models *as* the
-/// block (`begin`, `quote`), so the truncation marker lands inside it
+/// Project a block-form's `BLOCK` child, folding a trailing missing-`end` marker
+/// *into* the block — for constructs that JuliaSyntax models *as* the block
+/// (`begin`, `quote`), so the truncation marker lands inside it
 /// (`begin\n x` ⇒ `(block x (error-t))`).
 fn project_block_child_folding_error(node: &SyntaxNode) -> String {
     let Some(block) = node.children().find(|c| c.kind() == BLOCK) else {

@@ -6,7 +6,7 @@
 //! the event stream, so the parser preserves losslessness.
 
 use crate::parser::context::ParserCtx;
-use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
+use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::lexer::{TokKind, Token, is_op_suffix_char};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
@@ -402,7 +402,15 @@ fn parse_expr_in(
             && should_juxtapose_string_error(&ctx, &lhs, min_bp)
             && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
         {
-            lhs = build_string_juxtapose_error(lhs, rhs);
+            let pos = tokens[lhs.end - 1].end;
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::StringJuxtapose,
+                "invalid juxtaposition",
+                pos,
+                pos,
+            );
+            lhs = build_binary(SyntaxKind::JUXTAPOSE_EXPR, lhs, rhs);
             continue;
         }
 
@@ -496,6 +504,7 @@ fn parse_expr_in(
                 let op = &tokens[op_idx];
                 push_diagnostic(
                     diagnostics,
+                    DiagnosticKind::MissingOperand,
                     "expected right-hand side for operator",
                     op.start,
                     op.end,
@@ -588,6 +597,7 @@ fn parse_expr_in(
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
+                DiagnosticKind::MissingOperand,
                 "expected right-hand side for operator",
                 op.start,
                 op.end,
@@ -616,16 +626,22 @@ fn parse_expr_in(
             _ => SyntaxKind::BINARY_EXPR,
         };
         // Whitespace before a field-access dot is disallowed: JuliaSyntax keeps
-        // the `(. lhs (quote rhs))` shape but splices a zero-width `(error-t)`
-        // between the value and the field (`x .y` ⇒ `(. x (error-t) (quote y))`).
-        // A broadcast operator `.+` lexes as a single token (not `Dot`), so this
-        // never fires for `a .+ b`. The marker is inserted before the field name;
-        // it wraps no tokens and the WHITESPACE trivia stays on the node.
+        // the `(. lhs (quote rhs))` shape but flags it (`x .y` ⇒
+        // `(. x (error-t) (quote y))`). We record a `DotWhitespace` diagnostic at
+        // the dot's end; the projector replays the `(error-t)`. A broadcast
+        // operator `.+` lexes as a single token (not `Dot`), so this never fires
+        // for `a .+ b`.
         if op_kind == TokKind::Dot && op_idx > lhs.end {
-            lhs = build_binary_dot_error(node, lhs, rhs);
-        } else {
-            lhs = build_binary(node, lhs, rhs);
+            let op = &tokens[op_idx];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::DotWhitespace,
+                "whitespace before `.`",
+                op.end,
+                op.end,
+            );
         }
+        lhs = build_binary(node, lhs, rhs);
     }
 
     Some(lhs)
@@ -661,6 +677,7 @@ fn parse_where_chain(
             let op = &tokens[where_idx];
             push_diagnostic(
                 diagnostics,
+                DiagnosticKind::MissingWhereBound,
                 "expected type bound after `where`",
                 op.start,
                 op.end,
@@ -715,45 +732,6 @@ fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
     let mut events = vec![Event::Start(kind)];
     events.extend(lhs.events);
     push_range(&mut events, lhs.end, rhs.start);
-    events.extend(rhs.events);
-    events.push(Event::Finish);
-    ExprParse {
-        start: lhs.start,
-        end: rhs.end,
-        events,
-    }
-}
-
-/// Build a `JUXTAPOSE_EXPR` for an *invalid* string juxtaposition, splicing a
-/// zero-width `ERROR_TRIVIA` node between the two operands. JuliaSyntax recovers a
-/// string literal glued to another term (`"a"x`, `2"b"`) by emitting
-/// `(juxtapose lhs (error-t) rhs)`; the marker sits right after the left operand
-/// (before any gap, of which there is none — juxtaposition requires adjacency).
-fn build_string_juxtapose_error(lhs: ExprParse, rhs: ExprParse) -> ExprParse {
-    let mut events = vec![Event::Start(SyntaxKind::JUXTAPOSE_EXPR)];
-    events.extend(lhs.events);
-    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-    events.push(Event::Finish);
-    push_range(&mut events, lhs.end, rhs.start);
-    events.extend(rhs.events);
-    events.push(Event::Finish);
-    ExprParse {
-        start: lhs.start,
-        end: rhs.end,
-        events,
-    }
-}
-
-/// Like [`build_binary`], but splices a zero-width `ERROR_TRIVIA` node between
-/// the operator gap and the right operand. Used for a field-access dot with
-/// disallowed leading whitespace (`x .y`): the marker projects as `(error-t)`
-/// between the value and the quoted field name.
-fn build_binary_dot_error(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
-    let mut events = vec![Event::Start(kind)];
-    events.extend(lhs.events);
-    push_range(&mut events, lhs.end, rhs.start);
-    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-    events.push(Event::Finish);
     events.extend(rhs.events);
     events.push(Event::Finish);
     ExprParse {
@@ -849,6 +827,7 @@ fn parse_colon_range(
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
+                DiagnosticKind::MissingOperand,
                 "expected right-hand side for operator",
                 op.start,
                 op.end,
@@ -1166,13 +1145,18 @@ pub(super) fn parse_quote_sym(
     let mut events = vec![Event::Start(SyntaxKind::QUOTE_SYM), Event::Tok(start)];
     push_range(&mut events, start + 1, next);
     // Whitespace (or a newline) between the `:` and the quoted symbol is
-    // disallowed: JuliaSyntax splices a zero-width `(error-t)` as the first
-    // element of the quote (`: foo` ⇒ `(quote-: (error-t) foo)`, `A.: +` ⇒
-    // `(. A (quote-: (error-t) +))`). `:foo` (glued) has no marker. The marker
-    // wraps no tokens; the trivia stays on the node.
+    // disallowed: it records a `QuoteColonWhitespace` diagnostic at the `:`'s end,
+    // projected as a leading `(error-t)` (`: foo` ⇒ `(quote-: (error-t) foo)`,
+    // `A.: +` ⇒ `(. A (quote-: (error-t) +))`). `:foo` (glued) has no diagnostic.
     if next > start + 1 {
-        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-        events.push(Event::Finish);
+        let colon = &ctx.tokens()[start];
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::QuoteColonWhitespace,
+            "whitespace after `:`",
+            colon.end,
+            colon.end,
+        );
     }
     match ctx.token(next).map(|t| t.kind)? {
         // `:(op)` — a lone operator quoted in parens, e.g. `:(=)`, `:(::)`,
@@ -1332,8 +1316,8 @@ fn parse_string_literal(
                 // A `var"…"` non-standard identifier takes no flags: a glued
                 // suffix (a flag-like alpha run lexed as `StringSuffix`, or a
                 // digit-led numeric literal) is junk. Consume it as a child
-                // token and append a zero-width `(error-t)` recovery marker,
-                // mirroring JuliaSyntax (`var"x"y`/`var"x"1`/`var"x"end` ⇒
+                // token and record a `StringSuffixSpace` diagnostic (projected
+                // `(error-t)`: `var"x"y`/`var"x"1`/`var"x"end` ⇒
                 // `(var x (error-t))`). A glued postfix opener (`[ ( { ' .`) or
                 // operator is *not* a suffix here — it chains/binds in the outer
                 // parser, so only these atom-like kinds trigger recovery.
@@ -1352,8 +1336,14 @@ fn parse_string_literal(
                     ) {
                         events.push(Event::Tok(i));
                         i += 1;
-                        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-                        events.push(Event::Finish);
+                        let lit = &ctx.tokens()[start];
+                        push_diagnostic(
+                            diagnostics,
+                            DiagnosticKind::StringSuffixSpace,
+                            "invalid string-macro suffix",
+                            lit.start,
+                            lit.start,
+                        );
                     }
                     break;
                 }
@@ -1375,14 +1365,20 @@ fn parse_string_literal(
                 }
                 break;
             }
-            // Unterminated: anything else (incl. EOF) ends the literal. Mirror
-            // JuliaSyntax: a string/command/`var"…"` literal with no closing
-            // delimiter gets a zero-width `(error-t)` truncation marker appended
-            // inside its body (`"str` → `(string "str" (error-t))`, `var"x` →
-            // `(var x (error-t))`). Lossless — the node wraps no tokens.
+            // Unterminated: anything else (incl. EOF) ends the literal. A
+            // string/command/`var"…"` literal with no closing delimiter records an
+            // `UnterminatedLiteral` diagnostic, projected as a truncation
+            // `(error-t)` inside its body (`"str` → `(string "str" (error-t))`,
+            // `var"x` → `(var x (error-t))`).
             _ => {
-                events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-                events.push(Event::Finish);
+                let lit = &ctx.tokens()[start];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::UnterminatedLiteral,
+                    "unterminated literal",
+                    lit.start,
+                    lit.start,
+                );
                 break;
             }
         }
@@ -1613,7 +1609,13 @@ fn parse_paren(
         })
     } else {
         let open = &ctx.tokens()[start];
-        push_diagnostic(diagnostics, "unclosed `(`", open.start, open.end);
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::UnclosedParen,
+            "unclosed `(`",
+            open.start,
+            open.end,
+        );
         push_range(&mut events, inner.end, close);
         events.push(Event::Finish);
         Some(ExprParse {
@@ -2068,11 +2070,18 @@ fn parse_comprehension(
             break;
         }
         // JuliaSyntax requires whitespace before a comprehension/generator `for`;
-        // when it is glued to the preceding element (`[(x)for x in xs]`), splice a
-        // zero-width `(error-t)` marker between the body and the iteration clause.
+        // when it is glued to the preceding element (`[(x)for x in xs]`), record a
+        // `GluedFor` diagnostic at the `for`, projected as a `(error-t)` between
+        // the body and the iteration clause.
         if for_idx == pos {
-            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-            events.push(Event::Finish);
+            let for_tok = &ctx.tokens()[for_idx];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::GluedFor,
+                "expected whitespace before `for`",
+                for_tok.start,
+                for_tok.start,
+            );
         }
         push_range(&mut events, pos, for_idx);
         events.push(Event::Start(SyntaxKind::FOR_BINDING));
@@ -2107,7 +2116,13 @@ fn parse_comprehension(
         close_idx + 1
     } else {
         let tok = &tokens[open];
-        push_diagnostic(diagnostics, "unclosed comprehension", tok.start, tok.end);
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::UnclosedComprehension,
+            "unclosed comprehension",
+            tok.start,
+            tok.end,
+        );
         close_idx
     };
     events.push(Event::Finish); // node_kind
@@ -2267,8 +2282,14 @@ fn parse_postfix_chain(
                 // `f. (x)` → `(dotcall f (error-t) x)`, mirroring the glued
                 // postfix-opener error above.
                 if lparen > next + 1 {
-                    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-                    events.push(Event::Finish);
+                    let opener = &ctx.tokens()[lparen];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::OpenerWhitespace,
+                        "whitespace before opener",
+                        opener.start,
+                        opener.start,
+                    );
                 }
                 events.extend(list_events);
                 events.push(Event::Finish);
@@ -2376,13 +2397,19 @@ fn parse_postfix(
     events.extend(lhs.events);
     push_range(&mut events, lhs.end, open_idx);
     // Whitespace before a glued postfix opener is disallowed: JuliaSyntax keeps
-    // the call/index/curly shape but splices a zero-width `(error-t)` before the
-    // arguments to flag the space (`f (a)` → `(call f (error-t) a)`, `a [i]` →
-    // `(ref a (error-t) i)`, `S {a}` → `(curly S (error-t) a)`). Lossless — the
-    // marker wraps no tokens; the trivia stays attached to the node.
+    // the call/index/curly shape but flags the space. We record an
+    // `OpenerWhitespace` diagnostic at the opener's start, projected as a
+    // `(error-t)` before the arguments (`f (a)` → `(call f (error-t) a)`,
+    // `a [i]` → `(ref a (error-t) i)`, `S {a}` → `(curly S (error-t) a)`).
     if open_idx > lhs.end {
-        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-        events.push(Event::Finish);
+        let opener = &ctx.tokens()[open_idx];
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::OpenerWhitespace,
+            "whitespace before opener",
+            opener.start,
+            opener.start,
+        );
     }
     events.extend(list_events);
     events.push(Event::Finish);
@@ -2861,16 +2888,22 @@ fn parse_arg_list(
         }
         match tokens.get(i).map(|t| t.kind) {
             None => {
-                // Unterminated list (EOF before the closing delimiter). Mirror
-                // JuliaSyntax: append a zero-width `(error-t)` truncation marker
-                // as the final element (`f(a` → `(call f a (error-t))`, `[x` →
-                // `(vect x (error-t))`). Lossless — the node wraps no tokens.
+                // Unterminated list (EOF before the closing delimiter). Record an
+                // `UnterminatedArgList` diagnostic at the opener, projected as a
+                // trailing `(error-t)` (`f(a` → `(call f a (error-t))`, `[x` →
+                // `(vect x (error-t))`).
                 if in_params {
                     events.push(Event::Finish); // close PARAMETERS first
                     in_params = false;
                 }
-                events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-                events.push(Event::Finish);
+                let opener = &tokens[open_idx];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::UnterminatedArgList,
+                    "unterminated argument list",
+                    opener.start,
+                    opener.start,
+                );
                 break;
             }
             Some(k) if k == close => {
@@ -3542,9 +3575,9 @@ fn parse_ternary(
     let inside_brackets = flags.inside_brackets;
 
     // JuliaSyntax requires whitespace on both sides of `?` and `:`; each missing
-    // side splices one empty `(error-t)` marker. For `?` the markers sit between
-    // the condition and the true-branch (`a? b : c` ⇒ `(? a (error-t) b c)`); a
-    // glued `?` on both sides yields two (`a?b…` ⇒ `(? a (error-t) (error-t) b …)`).
+    // side records one `(error-t)` marker (as a diagnostic). For `?` the markers
+    // sit between the condition and the true-branch (`a? b : c` ⇒
+    // `(? a (error-t) b c)`); a glued `?` on both sides yields two.
     let ws_after = |idx: usize| ctx.token(idx + 1).is_some_and(|t| t.kind.is_trivia());
     let q_errors = usize::from(q_idx == cond.end) + usize::from(!ws_after(q_idx));
 
@@ -3561,6 +3594,7 @@ fn parse_ternary(
         let op = &tokens[q_idx];
         push_diagnostic(
             diagnostics,
+            DiagnosticKind::MissingTernaryTrue,
             "expected expression after `?`",
             op.start,
             op.end,
@@ -3598,6 +3632,7 @@ fn parse_ternary(
             let op = &tokens[colon];
             push_diagnostic(
                 diagnostics,
+                DiagnosticKind::MissingTernaryFalse,
                 "expected expression after `:`",
                 op.start,
                 op.end,
@@ -3608,6 +3643,7 @@ fn parse_ternary(
         let op = &tokens[q_idx];
         push_diagnostic(
             diagnostics,
+            DiagnosticKind::MissingTernaryColon,
             "expected `:` in ternary expression",
             op.start,
             op.end,
@@ -3626,29 +3662,41 @@ fn parse_ternary(
         });
     };
 
+    // Whitespace errors around `?`/`:` are recorded as diagnostics: `q_errors`
+    // copies anchored at the `?`'s end, `colon_errors` at the true-branch's end.
+    // The projector replays the counts as `(error-t)` markers.
+    let q_end = tokens[q_idx].end;
+    for _ in 0..q_errors {
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::TernaryQWhitespace,
+            "whitespace around `?`",
+            q_end,
+            q_end,
+        );
+    }
+    let then_end = tokens[then_br.end - 1].end;
+    for _ in 0..colon_errors {
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::TernaryColonWhitespace,
+            "whitespace around `:`",
+            then_end,
+            then_end,
+        );
+    }
+
     let mut events = vec![Event::Start(SyntaxKind::TERNARY_EXPR)];
     events.extend(cond.events);
     push_range(&mut events, cond.end, q_idx);
     events.push(Event::Tok(q_idx)); // `?`
-    for _ in 0..q_errors {
-        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-        events.push(Event::Finish);
-    }
     push_range(&mut events, q_idx + 1, then_br.start);
     events.extend(then_br.events);
     if has_colon {
         push_range(&mut events, then_br.end, colon);
-        for _ in 0..colon_errors {
-            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-            events.push(Event::Finish);
-        }
         events.push(Event::Tok(colon)); // `:`
         push_range(&mut events, colon + 1, else_br.start);
     } else {
-        for _ in 0..colon_errors {
-            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-            events.push(Event::Finish);
-        }
         push_range(&mut events, then_br.end, else_br.start);
     }
     events.extend(else_br.events);

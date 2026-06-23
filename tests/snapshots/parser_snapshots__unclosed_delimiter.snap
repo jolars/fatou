@@ -8,4 +8,5 @@ ROOT@0..2
     ARG@1..2
       NAME@1..2
         IDENT@1..2 "x"
-    ERROR_TRIVIA@2..2
+
+diagnostic [0..0]: unterminated argument list

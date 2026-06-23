@@ -7,7 +7,6 @@ ROOT@0..50
     NAME@0..1
       IDENT@0..1 "a"
     QUESTION@1..2 "?"
-    ERROR_TRIVIA@2..2
     WHITESPACE@2..3 " "
     NAME@3..4
       IDENT@3..4 "b"
@@ -22,7 +21,6 @@ ROOT@0..50
       IDENT@9..10 "a"
     WHITESPACE@10..11 " "
     QUESTION@11..12 "?"
-    ERROR_TRIVIA@12..12
     NAME@12..13
       IDENT@12..13 "b"
     WHITESPACE@13..14 " "
@@ -39,7 +37,6 @@ ROOT@0..50
     WHITESPACE@21..22 " "
     NAME@22..23
       IDENT@22..23 "b"
-    ERROR_TRIVIA@23..23
     COLON@23..24 ":"
     WHITESPACE@24..25 " "
     NAME@25..26
@@ -54,7 +51,6 @@ ROOT@0..50
     NAME@31..32
       IDENT@31..32 "b"
     WHITESPACE@32..33 " "
-    ERROR_TRIVIA@33..33
     COLON@33..34 ":"
     NAME@34..35
       IDENT@34..35 "c"
@@ -67,7 +63,6 @@ ROOT@0..50
     WHITESPACE@39..40 " "
     NAME@40..41
       IDENT@40..41 "b"
-    ERROR_TRIVIA@41..41
     WHITESPACE@41..42 " "
     NAME@42..43
       IDENT@42..43 "c"
@@ -76,13 +71,19 @@ ROOT@0..50
     NAME@44..45
       IDENT@44..45 "a"
     QUESTION@45..46 "?"
-    ERROR_TRIVIA@46..46
-    ERROR_TRIVIA@46..46
     NAME@46..47
       IDENT@46..47 "b"
-    ERROR_TRIVIA@47..47
-    ERROR_TRIVIA@47..47
     COLON@47..48 ":"
     NAME@48..49
       IDENT@48..49 "c"
   NEWLINE@49..50 "\n"
+
+diagnostic [2..2]: whitespace around `?`
+diagnostic [12..12]: whitespace around `?`
+diagnostic [23..23]: whitespace around `:`
+diagnostic [32..32]: whitespace around `:`
+diagnostic [41..41]: whitespace around `:`
+diagnostic [46..46]: whitespace around `?`
+diagnostic [46..46]: whitespace around `?`
+diagnostic [47..47]: whitespace around `:`
+diagnostic [47..47]: whitespace around `:`

@@ -13,7 +13,7 @@
 //! module directives (`import`/`using`/`export`).
 
 use crate::parser::context::ParserCtx;
-use crate::parser::diagnostics::{ParseDiagnostic, push_diagnostic};
+use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
     parse_block_stmt, parse_expr, parse_for_binding, parse_prefix_interpolation, parse_quote_sym,
@@ -303,7 +303,13 @@ pub(crate) fn parse_try_expr(
                     // else block in an `(error …)` node (`try x else y end` ⇒
                     // `(try (block x) (else (error (block y))) (error-t))`).
                     let kw = &ctx.tokens()[i];
-                    push_diagnostic(diagnostics, "`else` without `catch`", kw.start, kw.end);
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::ElseWithoutCatch,
+                        "`else` without `catch`",
+                        kw.start,
+                        kw.end,
+                    );
                     events.push(Event::Start(SyntaxKind::ERROR));
                     i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
                     events.push(Event::Finish);
@@ -331,12 +337,11 @@ pub(crate) fn parse_try_expr(
         let kw = &ctx.tokens()[start];
         push_diagnostic(
             diagnostics,
+            DiagnosticKind::MissingTryHandler,
             "expected `catch` or `finally`",
             kw.start,
             kw.end,
         );
-        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-        events.push(Event::Finish);
     }
 
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
@@ -373,7 +378,13 @@ pub(crate) fn parse_struct_expr(
         i += 1;
     } else {
         let kw = &ctx.tokens()[start];
-        push_diagnostic(diagnostics, "expected `struct`", kw.start, kw.end);
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::MissingStruct,
+            "expected `struct`",
+            kw.start,
+            kw.end,
+        );
     }
 
     i = parse_signature(&ctx, &mut events, i, diagnostics);
@@ -734,10 +745,21 @@ pub(crate) fn parse_import_stmt(
                     i = parse_import_clause(&ctx, &mut events, sep + 1, 0, diagnostics);
                 } else if kind == TokKind::Colon {
                     // A `:` that is not the base/names split is recovery: the
-                    // clause after it is wrapped `(error-t …)` and grouping stops.
-                    events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                    // clause after it is wrapped in an `ERROR` node (projected
+                    // `(error-t …)` via the recorded diagnostic) and grouping stops.
+                    events.push(Event::Start(SyntaxKind::ERROR));
                     i = parse_import_clause(&ctx, &mut events, sep + 1, 0, diagnostics);
                     events.push(Event::Finish);
+                    if i > sep + 1 {
+                        let last = &ctx.tokens()[i - 1];
+                        push_diagnostic(
+                            diagnostics,
+                            DiagnosticKind::ImportRecoveryColon,
+                            "recovery `:` in import",
+                            last.start,
+                            last.end,
+                        );
+                    }
                     break;
                 } else {
                     let wraps = usize::from(is_using && !valid_colon_consumed);
@@ -1290,7 +1312,13 @@ fn parse_condition(
         }
         None => {
             let tok = &ctx.tokens()[after_kw.min(ctx.tokens().len() - 1)];
-            push_diagnostic(diagnostics, "expected a condition", tok.start, tok.end);
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::MissingCondition,
+                "expected a condition",
+                tok.start,
+                tok.end,
+            );
             cond_start
         }
     }
@@ -1489,14 +1517,18 @@ fn expect_end(
         i + 1
     } else {
         // A block form truncated before its `end` (EOF or an unconsumable
-        // closer) gets a zero-width `ERROR_TRIVIA` marker as the construct's
-        // last child, mirroring JuliaSyntax's truncation `(error-t)`
-        // (`if c\n x` ⇒ `(if c (block x) (error-t))`). The marker wraps no
-        // tokens; projectors render it `(error-t)`.
+        // closer) records a `MissingEnd` diagnostic at the opening keyword; the
+        // projector replays it as JuliaSyntax's truncation `(error-t)`
+        // (`if c\n x` ⇒ `(if c (block x) (error-t))`). No node is added to the
+        // tree (the rust-analyzer model: absence + diagnostic).
         let kw = &ctx.tokens()[open_start];
-        push_diagnostic(diagnostics, "expected `end`", kw.start, kw.end);
-        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
-        events.push(Event::Finish);
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::MissingEnd,
+            "expected `end`",
+            kw.start,
+            kw.end,
+        );
         i
     }
 }

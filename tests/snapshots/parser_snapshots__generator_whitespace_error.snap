@@ -10,7 +10,6 @@ ROOT@0..57
       NAME@2..3
         IDENT@2..3 "x"
       RPAREN@3..4 ")"
-    ERROR_TRIVIA@4..4
     FOR_BINDING@4..15
       FOR_KW@4..7 "for"
       WHITESPACE@7..8 " "
@@ -34,7 +33,6 @@ ROOT@0..57
           NAME@20..21
             IDENT@20..21 "x"
         RPAREN@21..22 ")"
-    ERROR_TRIVIA@22..22
     FOR_BINDING@22..33
       FOR_KW@22..25 "for"
       WHITESPACE@25..26 " "
@@ -54,7 +52,6 @@ ROOT@0..57
       NAME@37..38
         IDENT@37..38 "x"
       RPAREN@38..39 ")"
-    ERROR_TRIVIA@39..39
     FOR_BINDING@39..50
       FOR_KW@39..42 "for"
       WHITESPACE@42..43 " "
@@ -73,3 +70,7 @@ ROOT@0..57
         IDENT@54..55 "y"
     RBRACKET@55..56 "]"
   NEWLINE@56..57 "\n"
+
+diagnostic [4..4]: expected whitespace before `for`
+diagnostic [22..22]: expected whitespace before `for`
+diagnostic [39..39]: expected whitespace before `for`

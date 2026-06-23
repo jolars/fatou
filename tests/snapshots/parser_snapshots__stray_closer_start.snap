@@ -4,28 +4,34 @@ expression: rendered
 ---
 ROOT@0..16
   ERROR@0..0
-  ERROR_TRIVIA@0..1
+  ERROR@0..1
     RPAREN@0..1 ")"
   NEWLINE@1..2 "\n"
   ERROR@2..2
-  ERROR_TRIVIA@2..5
+  ERROR@2..5
     RPAREN@2..3 ")"
     WHITESPACE@3..4 " "
     IDENT@4..5 "x"
   NEWLINE@5..6 "\n"
   ERROR@6..6
-  ERROR_TRIVIA@6..9
+  ERROR@6..9
     RPAREN@6..7 ")"
     RPAREN@7..8 ")"
     RPAREN@8..9 ")"
   NEWLINE@9..10 "\n"
   ERROR@10..10
-  ERROR_TRIVIA@10..13
+  ERROR@10..13
     RBRACKET@10..11 "]"
     WHITESPACE@11..12 " "
     IDENT@12..13 "x"
   NEWLINE@13..14 "\n"
   ERROR@14..14
-  ERROR_TRIVIA@14..15
+  ERROR@14..15
     RBRACE@14..15 "}"
   NEWLINE@15..16 "\n"
+
+diagnostic [0..1]: stray closing delimiter
+diagnostic [2..5]: stray closing delimiter
+diagnostic [6..9]: stray closing delimiter
+diagnostic [10..13]: stray closing delimiter
+diagnostic [14..15]: stray closing delimiter

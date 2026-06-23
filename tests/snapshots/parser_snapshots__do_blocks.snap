@@ -158,6 +158,5 @@ ROOT@0..143
       NAME@141..142
         IDENT@141..142 "w"
       NEWLINE@142..143 "\n"
-    ERROR_TRIVIA@143..143
 
 diagnostic [132..134]: expected `end`

@@ -20,7 +20,6 @@ ROOT@0..25
           NAME@19..20
             IDENT@19..20 "y"
           NEWLINE@20..21 "\n"
-    ERROR_TRIVIA@21..21
     END_KW@21..24 "end"
   NEWLINE@24..25 "\n"
 

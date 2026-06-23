@@ -11,7 +11,7 @@ ROOT@0..55
         WHITESPACE@6..7 " "
       END_KW@7..10 "end"
     RPAREN@10..11 ")"
-  ERROR_TRIVIA@11..12
+  ERROR@11..12
     NAME@11..12
       IDENT@11..12 "x"
   NEWLINE@12..13 "\n"
@@ -26,7 +26,7 @@ ROOT@0..55
         WHITESPACE@21..22 " "
       END_KW@22..25 "end"
     RPAREN@25..26 ")"
-  ERROR_TRIVIA@26..27
+  ERROR@26..27
     NAME@26..27
       IDENT@26..27 "x"
   NEWLINE@27..28 "\n"
@@ -42,7 +42,7 @@ ROOT@0..55
         WHITESPACE@33..34 " "
       END_KW@34..37 "end"
     RPAREN@37..38 ")"
-  ERROR_TRIVIA@38..39
+  ERROR@38..39
     NAME@38..39
       IDENT@38..39 "y"
   NEWLINE@39..40 "\n"
@@ -62,7 +62,12 @@ ROOT@0..55
       BLOCK@49..49
       END_KW@49..52 "end"
     RPAREN@52..53 ")"
-  ERROR_TRIVIA@53..54
+  ERROR@53..54
     NAME@53..54
       IDENT@53..54 "z"
   NEWLINE@54..55 "\n"
+
+diagnostic [11..12]: trailing tokens after statement
+diagnostic [26..27]: trailing tokens after statement
+diagnostic [38..39]: trailing tokens after statement
+diagnostic [53..54]: trailing tokens after statement
