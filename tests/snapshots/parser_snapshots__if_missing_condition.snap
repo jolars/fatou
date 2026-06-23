@@ -1,0 +1,38 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..36
+  IF_EXPR@0..6
+    IF_KW@0..2 "if"
+    WHITESPACE@2..3 " "
+    BLOCK@3..3
+    END_KW@3..6 "end"
+  NEWLINE@6..7 "\n"
+  IF_EXPR@7..14
+    IF_KW@7..9 "if"
+    BLOCK@9..11
+      SEMICOLON@9..10 ";"
+      WHITESPACE@10..11 " "
+    END_KW@11..14 "end"
+  NEWLINE@14..15 "\n"
+  IF_EXPR@15..35
+    IF_KW@15..17 "if"
+    WHITESPACE@17..18 " "
+    CONDITION@18..22
+      LITERAL@18..22
+        TRUE_KW@18..22 "true"
+    BLOCK@22..24
+      SEMICOLON@22..23 ";"
+      WHITESPACE@23..24 " "
+    ELSEIF_CLAUSE@24..32
+      ELSEIF_KW@24..30 "elseif"
+      BLOCK@30..32
+        SEMICOLON@30..31 ";"
+        WHITESPACE@31..32 " "
+    END_KW@32..35 "end"
+  NEWLINE@35..36 "\n"
+
+diagnostic [0..2]: expected a condition
+diagnostic [7..9]: expected a condition
+diagnostic [24..30]: expected a condition

@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **622 allowlisted**,
-63 divergence, 0 unsupported. Dir corpus: **146 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **624 allowlisted**,
+61 divergence, 0 unsupported. Dir corpus: **147 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,37 +52,44 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23q)
+## Latest session (2026-06-23r)
 
-**Multi-value `$(…)` interpolation → `(error …)`.** A `$(…)` string interpolation
-must hold a single expression; a multi-value parenthesized form is invalid and
-JuliaSyntax renders the operand as `(error …)`. Fatou used to parse the `$(…)`
-interior with `parse_expr_in_brackets` (one expression), which stopped dead at a
-`;`/`,`/generator and leaked the rest as an unterminated-string mess. Fix:
-`parse_interpolation` (`expr.rs`) now reuses the shared `parse_paren`, so the
-operand becomes a faithful `PAREN_EXPR` (single expr), `PAREN_BLOCK` (`$(x;y)`),
-`TUPLE_EXPR` (`$(x,y)`, empty `$()`), or `GENERATOR` (`$(x for …)`) subtree, and
-records an `InvalidInterpolation` diagnostic for the three multi-value kinds.
-`project_interpolation` (`sexpr.rs`) reconstructs the error from the inner node
-kind — block → `project_block_args`, tuple → `project_args`, generator → keep
-nested — flattening block/tuple children and unwrapping a `PAREN_EXPR` for the
-valid single-expr case (`"$((x,y))"` ⇒ `(string (tuple-p x y))`, `"$(a=1)"` ⇒
-`(string (= a 1))`). New `DiagnosticKind::InvalidInterpolation`. JS 619 → 622
-(`"$(x;y)"`, `"$(x,y)"`, `"$(x for y in z)"`); dir 145 → 146. Fixture
-`string_interp_error`. Green; clippy/fmt clean.
+**Missing `if`/`elseif` condition → zero-width `(error)`.** An `if`/`elseif`
+whose condition slot is empty is recovery; JuliaSyntax synthesizes a zero-width
+`(error)` in the slot (`if end` ⇒ `(if (error) (block))`, `if; end`,
+`if \n end`, `if true; elseif; end` ⇒ `… (elseif (error) (block))`). Fatou
+already parsed these with an absent `CONDITION` node and a `MissingCondition`
+diagnostic; the gap was purely projector-side. Two-line fix: (1)
+`parse_condition` (`structural.rs`) now anchors the `MissingCondition` diagnostic
+at the **opening keyword** token (`after_kw - 1`) instead of the post-keyword
+trivia, mirroring `MissingEnd` so the projector can find it by `keyword_start`;
+(2) new `missing_condition(node)` helper (`sexpr.rs`) emits `(error)` when
+`diag_count_from(keyword_start(node), MissingCondition) > 0`, wired into both
+`project_if` (main cond) and `project_if_tail` (the `ELSEIF_CLAUSE` cond). No CST
+change, no new `DiagnosticKind`. JS 622 → 624 (`if end`, `if \n end`); dir
+146 → 147. Fixture `if_missing_condition`. Green; clippy/fmt clean.
 
-**Key insight:** the gap was a *parser* shortcut, not a projector gap — `$(…)`
-is just a parenthesized expression, so reusing `parse_paren` makes the CST
-faithful and the multi-value-is-error rule falls out of the node kind (no
-invented structure; the char-error pure-projector precedent applies). The CST
-shape for *all* `$(…)` interpolations changed (the parens now nest a real
-`PAREN_EXPR`), so six existing interpolation snapshots were re-accepted — a
-uniform, faithful wrap. Empty `$()` now correctly projects `(error)` too (not in
-the corpus, so no count movement). **Deferred:** `$(x y)` juxtaposition-in-parens
-→ `(parens x (error-t y))` (a different error path, not exercised here).
+**Key insight:** a textbook diagnostics-side-channel win — the CST was already
+faithful (missing = absence + diagnostic), so the only work was re-anchoring the
+diagnostic to a keyword the projector can locate and reading it back as `(error)`.
+**Deferred:** `while end` (no separator) recovers *differently* in JuliaSyntax —
+`(while (error end) (block (error)) (error-t))` (the `end` is consumed into the
+condition, then a synthesized block-`(error)` and missing-`end` `(error-t)`), a
+distinct recovery path. `while; end` *does* match the clean `(while (error)
+(block))` shape but `while` projects via `project_each`, not `project_if`, so it
+stays divergent (not in the corpus) until its projector grows the same hook.
 
 ## Earlier sessions
 
+- **2026-06-23q** — Multi-value `$(…)` interpolation → `(error …)`: a `$(…)`
+  string interpolation holds a single expression, so a multi-value parenthesized
+  form is invalid (`"$(x;y)"`, `"$(x,y)"`, `"$(x for y in z)"`). `parse_interpolation`
+  (`expr.rs`) now reuses `parse_paren` (faithful `PAREN_EXPR`/`PAREN_BLOCK`/
+  `TUPLE_EXPR`/`GENERATOR` subtree) + records `InvalidInterpolation`;
+  `project_interpolation` (`sexpr.rs`) reconstructs the error from the inner node
+  kind, unwrapping a `PAREN_EXPR` for the valid single-expr case. New
+  `DiagnosticKind::InvalidInterpolation`. JS 619 → 622; dir 145 → 146. Fixture
+  `string_interp_error`. (Gap was a parser shortcut, not a projector gap.)
 - **2026-06-23p** — Lone syntactic operator → `(error op)`: a syntactic operator
   with no value meaning used where an atom is expected is `(error op)` (`=`, `+=`,
   `.+=`, `&&`, `||`, `->`, `...`, `?`/`?x`); applies in every atom position, the

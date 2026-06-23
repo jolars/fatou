@@ -1174,12 +1174,25 @@ fn project_for_spec(elems: &[SyntaxElement]) -> String {
 
 // --- Control flow ----------------------------------------------------------
 
+/// The condition slot of an `if`/`elseif` whose `CONDITION` node is absent. An
+/// empty condition (`if end`, `if; end`) is recovery: JuliaSyntax synthesizes a
+/// zero-width `(error)`, recorded here as a `MissingCondition` diagnostic anchored
+/// at the opening keyword. Without the diagnostic the slot stays empty (defensive;
+/// the parser always records one when the condition is missing).
+fn missing_condition(node: &SyntaxNode) -> String {
+    if diag_count_from(keyword_start(node), DiagnosticKind::MissingCondition) > 0 {
+        "(error)".to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn project_if(node: &SyntaxNode) -> String {
     let cond = node
         .children()
         .find(|c| c.kind() == CONDITION)
         .map(|c| project(&c))
-        .unwrap_or_default();
+        .unwrap_or_else(|| missing_condition(node));
     let then_block = node
         .children()
         .find(|c| c.kind() == BLOCK)
@@ -1214,7 +1227,7 @@ fn project_if_tail(clauses: &[SyntaxNode]) -> Option<String> {
                 .children()
                 .find(|c| c.kind() == CONDITION)
                 .map(|c| project(&c))
-                .unwrap_or_default();
+                .unwrap_or_else(|| missing_condition(first));
             let block = first
                 .children()
                 .find(|c| c.kind() == BLOCK)

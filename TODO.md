@@ -13,6 +13,17 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Missing-condition `(error)` (error-shape slice, diagnostics model). An
+  `if`/`elseif` (and `while`) whose condition slot is empty (`if end`, `if; end`,
+  `if true; elseif; end`) is recovery: JuliaSyntax synthesizes a zero-width
+  `(error)` there (`if end` ⇒ `(if (error) (block))`). Fatou already records a
+  `MissingCondition` diagnostic; it is now anchored at the opening keyword
+  (mirroring `MissingEnd`), and `project_if`/`project_if_tail` reconstruct the
+  `(error)` via the new `missing_condition` helper
+  (`diag_count_from(keyword_start, …)`). No CST change. Fixture
+  `if_missing_condition`. JS 622 → 624; dir 146 → 147. Deferred: `while end`
+  (no separator) recovers differently in JuliaSyntax —
+  `(while (error end) (block (error)) (error-t))`.
 - [x] Typed error-node taxonomy (error-shape parity, Phase 0 + first slice). The
   parser now emits in-tree typed error nodes the projector renders to
   JuliaSyntax's shape, so error cases compare like any other instead of being

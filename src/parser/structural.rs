@@ -1332,13 +1332,17 @@ fn parse_condition(
             cond.end
         }
         None => {
-            let tok = &ctx.tokens()[after_kw.min(ctx.tokens().len() - 1)];
+            // Anchor at the opening keyword (`if`/`elseif`/`while`), mirroring
+            // `MissingEnd`, so the projector can reconstruct the zero-width
+            // `(error)` JuliaSyntax emits in the empty condition slot via
+            // `diag_count_from(keyword_start(node), …)`.
+            let kw = &ctx.tokens()[after_kw - 1];
             push_diagnostic(
                 diagnostics,
                 DiagnosticKind::MissingCondition,
                 "expected a condition",
-                tok.start,
-                tok.end,
+                kw.start,
+                kw.end,
             );
             cond_start
         }
