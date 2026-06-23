@@ -197,6 +197,16 @@ through), so the grammar can grow incrementally.
   marker; `push_trailing_errors`/`project_block_child_folding_error` (`sexpr.rs`)
   render it. Unblocks dir `do_blocks`; fixtures `incomplete_block`/
   `incomplete_begin`. Dir allow 131 → 134.
+- [x] Incomplete-`try` truncation `(error-t)` (finishes the missing-`end`
+  family). A `try` requires a `catch`/`finally`; with neither, JuliaSyntax
+  splices a marker for the missing handler *and* (if `end` is absent) the
+  missing `end`: `try x` ⇒ `(try (block x) (error-t) (error-t))`, `try x end` ⇒
+  `(try (block x) (error-t))`, `try x catch e y` ⇒ `(try (block x) (catch e
+  (block y)) (error-t))`. `parse_try_expr` (`structural.rs`) splices the
+  missing-handler `ERROR_TRIVIA` before `expect_end` when no `catch`/`finally`
+  was seen (`else` does not count); `project_try` (`sexpr.rs`) renders
+  `ERROR_TRIVIA` children in document order. Fixture `incomplete_try`. JS allow
+  590 → 591; dir 134 → 135.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

@@ -1038,6 +1038,9 @@ fn project_try(node: &SyntaxNode) -> String {
             }
             FINALLY_CLAUSE => parts.push(format!("(finally {})", project_block_child(&clause))),
             ELSE_CLAUSE => parts.push(format!("(else {})", project_block_child(&clause))),
+            // Truncation markers (missing `catch`/`finally`, missing `end`) land
+            // in document order: `try x` ⇒ `(try (block x) (error-t) (error-t))`.
+            ERROR_TRIVIA => parts.push(project_error("error-t", &clause)),
             _ => {}
         }
     }

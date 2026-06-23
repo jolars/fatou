@@ -268,9 +268,14 @@ pub(crate) fn parse_try_expr(
 
     let mut i = run_block(&ctx, &mut events, start + 1, TRY_TERMINATORS, diagnostics);
 
+    // A `try` requires a `catch` or `finally`; with neither, JuliaSyntax splices
+    // a truncation marker for the missing handler (`try x end` ⇒ `(try (block x)
+    // (error-t))`). `else` does not satisfy the requirement.
+    let mut saw_handler = false;
     loop {
         match ctx.token(i).map(|t| t.kind) {
             Some(TokKind::CatchKw) => {
+                saw_handler = true;
                 events.push(Event::Start(SyntaxKind::CATCH_CLAUSE));
                 events.push(Event::Tok(i));
                 // Optional exception variable on the `catch` line (`catch e`).
@@ -293,6 +298,7 @@ pub(crate) fn parse_try_expr(
                 events.push(Event::Finish);
             }
             Some(TokKind::FinallyKw) => {
+                saw_handler = true;
                 events.push(Event::Start(SyntaxKind::FINALLY_CLAUSE));
                 events.push(Event::Tok(i));
                 i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
@@ -306,6 +312,18 @@ pub(crate) fn parse_try_expr(
             }
             _ => break,
         }
+    }
+
+    if !saw_handler {
+        let kw = &ctx.tokens()[start];
+        push_diagnostic(
+            diagnostics,
+            "expected `catch` or `finally`",
+            kw.start,
+            kw.end,
+        );
+        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+        events.push(Event::Finish);
     }
 
     i = expect_end(&ctx, &mut events, i, start, diagnostics);

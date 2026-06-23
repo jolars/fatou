@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **590 allowlisted**,
-95 divergence, 0 unsupported. Dir corpus: **134 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **591 allowlisted**,
+94 divergence, 0 unsupported. Dir corpus: **135 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
-Grammar bullets through "missing-`end` truncation" are `[x]` in `TODO.md`.
+Grammar bullets through "incomplete-`try` truncation" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -33,28 +33,27 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23c)
+## Latest session (2026-06-23d)
 
-**Missing-`end` truncation `(error-t)`.** A block form cut off before its `end`
-(EOF or an unconsumable closer) gets a zero-width `ERROR_TRIVIA` as the
-construct's last child, mirroring JuliaSyntax's truncation marker: `if c\n x` ⇒
-`(if c (block x) (error-t))`, likewise `for`/`while`/`let`/`function`/`macro`/
-`struct`/`module`/`do`. For `begin`/`quote` (modeled *as* the block in
-JuliaSyntax) the marker folds *inside*: `begin\n x` ⇒ `(block x (error-t))`,
-`quote\n x` ⇒ `(quote (block x (error-t)))`. Nested complete blocks stay
-marker-free (`function f()\n if c\n x\n end` ⇒ `(function (call f) (block (if c
-(block x))) (error-t))`). Fix: `expect_end` (`structural.rs`) splices the empty
-marker when `end` is absent (one chokepoint for all forms); `push_trailing_errors`
-+ `project_block_child_folding_error` (`sexpr.rs`) render it (`while`/`for` via
-`project_each(child_nodes)` already pick it up). `try` stays divergent (wants
-*two* markers — deferred). Unblocks dir `do_blocks` (moved out of `blocked.txt`);
-fixtures `incomplete_block`/`incomplete_begin`. Dir allow 131 → 134; JS unchanged
-(corpus has no incomplete-EOF-body cases). Zero regressions; green; clippy/fmt
-clean.
+**Incomplete-`try` truncation `(error-t)` (finishes the missing-`end` family).**
+A `try` requires a `catch`/`finally`; with neither present JuliaSyntax splices a
+marker for the *missing handler*, and (separately, via the existing `expect_end`
+chokepoint) one for a *missing `end`*: `try x` ⇒ `(try (block x) (error-t)
+(error-t))`, `try\n x` same; `try x end` ⇒ `(try (block x) (error-t))` (handler
+marker only — `end` present); `try x catch e y` ⇒ `(try (block x) (catch e
+(block y)) (error-t))` (end marker only); `try x finally z` mirrors. Fix:
+`parse_try_expr` (`structural.rs`) tracks a `saw_handler` flag (set on
+`catch`/`finally`, **not** `else`) and splices the missing-handler `ERROR_TRIVIA`
++ a diagnostic before `expect_end` when false; `project_try` (`sexpr.rs`) gains
+an `ERROR_TRIVIA` arm so both markers render in document order. Fixture
+`incomplete_try`; dir-corpus case minted. JS allow 590 → 591 (`try x end` now
+PASS), dir 134 → 135. `try x else y end` stays FAIL (else-without-catch wants the
+else block error-wrapped — separate). Zero regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** (1) **incomplete `try`** ⇒ `(try (block x)
-(error-t) (error-t))` — two markers (missing catch/finally *and* end); finishes
-the missing-`end` family. (2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (.
+**Suggested next targets (ranked):** (1) **else-without-catch error-wrap**
+`try x else y end`⇒`(try (block x) (else (error (block y))) (error-t))` — the
+last try-family divergence; the marker already matches, only the `(else (error
+…))` wrap is missing. (2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (.
 A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`. (3) **paren-block
 string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘`
 string form). (4) **char cluster** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
@@ -64,6 +63,12 @@ string form). (4) **char cluster** — `'ab'`⇒`(char (ErrorOverLongCharacter))
 
 ## Earlier sessions
 
+- **2026-06-23c** — Missing-`end` truncation `(error-t)`: a block form cut off
+  before its `end` (EOF/unconsumable closer) gets a zero-width `ERROR_TRIVIA` last
+  child (`if c\n x`⇒`(if c (block x) (error-t))`); `begin`/`quote` fold it inside.
+  `expect_end` (`structural.rs`) splices it; `push_trailing_errors` renders.
+  Unblocked dir `do_blocks`; fixtures `incomplete_block`/`incomplete_begin`. Dir
+  131 → 134.
 - **2026-06-23b** — Generator/comprehension whitespace-error `(error-t)`: a `for`
   glued to the preceding element (`[(x)for x in xs]`) splices one zero-width
   `ERROR_TRIVIA` between body and first clause ⇒ `(generator x (error-t) (= x

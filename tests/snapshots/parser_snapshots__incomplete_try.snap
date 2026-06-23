@@ -1,0 +1,17 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..9
+  TRY_EXPR@0..9
+    TRY_KW@0..3 "try"
+    BLOCK@3..9
+      NEWLINE@3..4 "\n"
+      WHITESPACE@4..8 "    "
+      NAME@8..9
+        IDENT@8..9 "x"
+    ERROR_TRIVIA@9..9
+    ERROR_TRIVIA@9..9
+
+diagnostic [0..3]: expected `catch` or `finally`
+diagnostic [0..3]: expected `end`
