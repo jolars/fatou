@@ -770,6 +770,16 @@ fn parse_comma_tuple(
         end = comma_idx + 1;
 
         let item_start = ctx.skip_ws(end);
+        // A trailing comma before an assignment-family operator is a 1-tuple the
+        // assignment then binds (`x, = xs` ⇒ `(= (tuple x) xs)`): the operator is
+        // not a tuple element, so stop here and let the operator loop take it,
+        // rather than collecting it as a `(error op)` atom.
+        if ctx
+            .token(item_start)
+            .is_some_and(|t| is_lone_error_operator(t.kind))
+        {
+            break;
+        }
         match parse_expr_in(tokens, item_start, COMMA_ITEM_BP, diagnostics, flags) {
             Some(item) => {
                 push_range(&mut events, end, item.start);
@@ -1060,15 +1070,34 @@ fn parse_prefix(
         | TokKind::Char
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
+        // A lone syntactic operator (`=`, an assignment op, `&&`/`||`/`->`/`...`)
+        // has no value meaning, so JuliaSyntax emits `(error op)` wherever an atom
+        // is expected (`=` ⇒ `(error =)`, `.+=` ⇒ `(error (. +=))`, `[=]` ⇒
+        // `(vect (error =))`). It consumes only the operator; any following operand
+        // is left to the caller — the toplevel trailing-junk driver
+        // (`= x` ⇒ `(error =) (error-t x)`) or the operator loop's RHS
+        // (`a + =` ⇒ `(call-i a + (error =))`). Unlike `?`/binary-only operators
+        // below, it never applies as a prefix call.
+        k if is_lone_error_operator(k) => {
+            let op = &ctx.tokens()[start];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::LoneOperator,
+                "operator is not a valid value",
+                op.start,
+                op.end,
+            );
+            Some(error_operator_atom(start))
+        }
         // A binary-only operator in prefix position is invalid: JuliaSyntax
         // error-wraps the operator and applies it as a prefix call
-        // (`/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`).
-        // With nothing parseable following, the operator stays a bare value atom
-        // (`*` ⇒ `*`, `.&` ⇒ `(. &)`, `=>` ⇒ `=>`); the unary value operators
-        // (`+ - ! ~ <: >:`) are folded above and never reach here. Syntactic
-        // operators (`= :: && || -> ? . ...`) are excluded by `is_value_operator`
-        // and fall to `None` (an error, matching Julia).
-        k if is_value_operator(k) => {
+        // (`/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`,
+        // `?x` ⇒ `(call-pre (error ?) x)`). With nothing parseable following, a
+        // value operator stays a bare value atom (`*` ⇒ `*`, `.&` ⇒ `(. &)`,
+        // `=>` ⇒ `=>`) but a bare `?` is itself the error (`?` ⇒ `(error ?)`); the
+        // unary value operators (`+ - ! ~ <: >:`) are folded above and never reach
+        // here. Lone syntactic operators are handled by the arm above.
+        k if is_value_operator(k) || k == TokKind::Question => {
             let operand_start = ctx.skip_trivia(start + 1);
             // The operand binds at `PREFIX_BP` — tighter than the arithmetic
             // tiers (`/x + y` ⇒ `(call-i (call-pre (error /) x) + y)`) but below
@@ -1116,11 +1145,49 @@ fn parse_prefix(
                         events,
                     })
                 }
+                None if matches!(ctx.tokens()[start].kind, TokKind::Question) => {
+                    let op = &ctx.tokens()[start];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::LoneOperator,
+                        "operator is not a valid value",
+                        op.start,
+                        op.end,
+                    );
+                    Some(error_operator_atom(start))
+                }
                 None => Some(atom(SyntaxKind::OPERATOR_ATOM, start)),
             }
         }
         _ => None,
     }
+}
+
+/// An operator token wrapped as `ERROR > OPERATOR_ATOM > op` — JuliaSyntax's
+/// `(error op)` atom for a syntactic operator used where a value is expected. The
+/// `OPERATOR_ATOM` keeps the broadcast projection (`.+=` ⇒ `(. +=)`).
+fn error_operator_atom(start: usize) -> ExprParse {
+    ExprParse {
+        start,
+        end: start + 1,
+        events: vec![
+            Event::Start(SyntaxKind::ERROR),
+            Event::Start(SyntaxKind::OPERATOR_ATOM),
+            Event::Tok(start),
+            Event::Finish, // OPERATOR_ATOM
+            Event::Finish, // ERROR
+        ],
+    }
+}
+
+/// Whether `kind` is a syntactic operator that has no value meaning and so, where
+/// an atom is expected, is JuliaSyntax's `(error op)` — the assignment operators
+/// (`=`, `+=`, `.+=`, …), the short-circuits `&&`/`||`, the anonymous-function
+/// `->`, and the splat `...`. `?` is *not* here: it applies as a prefix call when
+/// an operand follows (handled in the value-operator arm).
+fn is_lone_error_operator(kind: TokKind) -> bool {
+    use TokKind::*;
+    is_assignment_op(kind) || matches!(kind, AndAnd | OrOr | Arrow | DotDotDot)
 }
 
 /// Whether `kind` is an operator that, alone in value position, is the operator

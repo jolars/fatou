@@ -69,6 +69,7 @@ keyword_args
 keyword_statements
 let_quote
 literals
+lone_operator_error
 loops
 macro_bracket_postfix
 macro_definition

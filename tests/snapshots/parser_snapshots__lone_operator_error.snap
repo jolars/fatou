@@ -1,0 +1,73 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..37
+  ERROR@0..1
+    OPERATOR_ATOM@0..1
+      EQ@0..1 "="
+  NEWLINE@1..2 "\n"
+  ERROR@2..4
+    OPERATOR_ATOM@2..4
+      PLUS_EQ@2..4 "+="
+  NEWLINE@4..5 "\n"
+  ERROR@5..8
+    OPERATOR_ATOM@5..8
+      DOT_PLUS_EQ@5..8 ".+="
+  NEWLINE@8..9 "\n"
+  ERROR@9..11
+    OPERATOR_ATOM@9..11
+      AND_AND@9..11 "&&"
+  NEWLINE@11..12 "\n"
+  ERROR@12..14
+    OPERATOR_ATOM@12..14
+      ARROW@12..14 "->"
+  NEWLINE@14..15 "\n"
+  ERROR@15..18
+    OPERATOR_ATOM@15..18
+      DOT_DOT_DOT@15..18 "..."
+  NEWLINE@18..19 "\n"
+  VECT_EXPR@19..22
+    LBRACKET@19..20 "["
+    ARG@20..21
+      ERROR@20..21
+        OPERATOR_ATOM@20..21
+          EQ@20..21 "="
+    RBRACKET@21..22 "]"
+  NEWLINE@22..23 "\n"
+  CALL_EXPR@23..27
+    NAME@23..24
+      IDENT@23..24 "f"
+    ARG_LIST@24..27
+      LPAREN@24..25 "("
+      ARG@25..26
+        ERROR@25..26
+          OPERATOR_ATOM@25..26
+            EQ@25..26 "="
+      RPAREN@26..27 ")"
+  NEWLINE@27..28 "\n"
+  UNARY_EXPR@28..34
+    ERROR@28..29
+      OPERATOR_ATOM@28..29
+        QUESTION@28..29 "?"
+    STRING_LITERAL@29..34
+      STRING_DELIM_OPEN@29..30 "\""
+      STRING_CONTENT@30..33 "str"
+      STRING_DELIM_CLOSE@33..34 "\""
+  NEWLINE@34..35 "\n"
+  ERROR@35..36
+    OPERATOR_ATOM@35..36
+      QUESTION@35..36 "?"
+  NEWLINE@36..37 "\n"
+
+diagnostic [0..1]: operator is not a valid value
+diagnostic [2..4]: operator is not a valid value
+diagnostic [5..8]: operator is not a valid value
+diagnostic [9..11]: operator is not a valid value
+diagnostic [12..14]: operator is not a valid value
+diagnostic [15..18]: operator is not a valid value
+diagnostic [20..21]: operator is not a valid value
+diagnostic [20..21]: operator is not a valid value
+diagnostic [25..26]: operator is not a valid value
+diagnostic [28..29]: invalid operator in prefix position
+diagnostic [35..36]: operator is not a valid value

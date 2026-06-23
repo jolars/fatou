@@ -154,6 +154,21 @@ through), so the grammar can grow incrementally.
   `array_trailing_junk`. JS allow 612 → 614; dir 143 → 144. **Deferred**: `;` in
   the junk run (`[a@b;c]`, needs `;`→`✘`), nested brackets/parens (`[a@b[c]]`,
   depth-tracking + toplevel stray-closer interaction).
+- [x] Lone syntactic operator `(error op)`. A syntactic operator with no value
+  meaning, used where an atom is expected, is JuliaSyntax's `(error op)`: the
+  assignment ops (`=` ⇒ `(error =)`, `+=`, `.+=` ⇒ `(error (. +=))`), the
+  short-circuits `&&`/`||`, the anonymous-function `->`, the splat `...`, and the
+  ternary `?` (`?` ⇒ `(error ?)` bare, `?x` ⇒ `(call-pre (error ?) x)` with an
+  operand). It applies in every atom position, so `[=]` ⇒ `(vect (error =))`,
+  `f(=)` ⇒ `(call f (error =))`, and a trailing operand at toplevel falls to the
+  junk driver (`= x` ⇒ `(error =) (error-t x)`). New `is_lone_error_operator` +
+  `error_operator_atom` arms in `parse_prefix` (`expr.rs`); `?` joins the
+  binary-only value-operator arm (bare-`None` branch emits the error atom);
+  `parse_comma_tuple` stops before a lone operator so the trailing-comma 1-tuple
+  destructure survives (`x, = xs` ⇒ `(= (tuple x) xs)`). New diagnostic
+  `LoneOperator`; projector untouched. Fixture `lone_operator_error`. JS allow
+  614 → 619; dir 144 → 145. **Deferred**: bare `?`/`/` consuming an operand across
+  a newline (`?\nx`, `/\nx` — pre-existing in the prefix-error path).
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒

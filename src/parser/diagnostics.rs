@@ -66,6 +66,9 @@ pub enum DiagnosticKind {
     /// A binary-only operator used in prefix position (`/x`, `.*x`) —
     /// JuliaSyntax error-wraps the operator and applies it as a prefix call.
     InvalidPrefixOperator,
+    /// A syntactic operator with no value meaning used where an atom is expected
+    /// (`=`, `+=`, `&&`, `||`, `->`, `...`, `?`) — JuliaSyntax emits `(error op)`.
+    LoneOperator,
     /// An `as` rename invalid in this position (`using A as B`).
     InvalidAsAlias,
     MissingOperand,

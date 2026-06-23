@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **614 allowlisted**,
-71 divergence, 0 unsupported. Dir corpus: **144 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **619 allowlisted**,
+66 divergence, 0 unsupported. Dir corpus: **145 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,33 +52,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23o)
+## Latest session (2026-06-23p)
 
-**Array-internal trailing junk: glued `@` → `(error-t ✘ …)`.** A macro `@`
-glued (no separating whitespace, `;`, or newline) to a preceding array element is
-not a new row element — JuliaSyntax bumps the rest of the array up to the closing
-`]` (or EOF) as one flat trailing-junk run: `[x@y]` ⇒ `(hcat x (error-t ✘ y))`,
-`[a b@c]` ⇒ `(hcat a b (error-t ✘ c))`, `[a@b c]` ⇒ `(hcat a (error-t ✘ b c))`,
-`[a@b, c]` ⇒ `(hcat a (error-t ✘ b ✘ c))`. The `@`/`,` render `✘`; other tokens
-keep their text. A *spaced* `@` (`[x @y]`) keeps a real separator run and stays a
-`(macrocall @y)` element; a leading `@` (`[@foo x]`) is the first element, never in
-the scan loop — both untouched. Fix is one arm in `parse_matrix`'s scan loop
-(`expr.rs`): on an **empty** separator run (`run.toks.is_empty()`) followed by
-`TokKind::At`, collect every token up to `close`/EOF into one `ERROR` element and
-push a `TrailingJunk` diagnostic at the `@`. The element flows through the existing
-`emit_cat_child` machinery (wrapped in `ARG`, dim-0 row sibling), so `project_error`
-+ `is_error_glyph` + `is_recovery_error` render `(error-t …)` with **no projector
-change**. Fixture `array_trailing_junk`. JS 612 → 614 (js-6be56bdb `[x@y]`,
-js-83672850 `[x@y`); dir 143 → 144. Green; clippy/fmt clean.
+**Lone syntactic operator → `(error op)`.** A syntactic operator with no value
+meaning, used where an atom is expected, is JuliaSyntax's `(error op)` atom:
+the assignment ops (`=` ⇒ `(error =)`, `+=`, `.+=` ⇒ `(error (. +=))`), the
+short-circuits `&&`/`||`, the anonymous-function `->`, the splat `...`, and the
+ternary `?` (`?` ⇒ `(error ?)` bare, `?x`/`?"str"` ⇒ `(call-pre (error ?) …)`
+with an operand). It applies in *every* atom position — `[=]` ⇒ `(vect (error
+=))`, `f(=)` ⇒ `(call f (error =))`, `a + =` ⇒ `(call-i a + (error =))` — and
+consumes only the operator, so a toplevel trailing operand falls to the existing
+junk driver (`= x` ⇒ `(error =) (error-t x)`) and an infix RHS to the operator
+loop. Fix: new `is_lone_error_operator` (`is_assignment_op | && || -> ...`) +
+`error_operator_atom` (`ERROR > OPERATOR_ATOM > op`) arms in `parse_prefix`
+(`expr.rs`); `?` joins the binary-only value-operator arm with a bare-`None`
+branch emitting the error atom. New `LoneOperator` diagnostic (non-recovery, so
+projector renders plain `(error …)`); `project_operator_atom` already gives `=`
+/`(. +=)` so **projector untouched**. JS 614 → 619 (`=`, `+=`, `.+=`, `?`,
+`?"str"`); dir 144 → 145. Fixture `lone_operator_error`. Green; clippy/fmt clean.
 
-**Key insight:** the empty-separator-run test is exactly the glued-`@` signal — a
-valid row needs whitespace, and after a complete element only `@` (and handled
-separators/closers) stops the operator loop, so an empty run + `@` is unambiguous.
-Reusing `ERROR`-element-in-`ARG` meant zero `sexpr.rs` change. Deferred: `;` inside
-the junk (`[a@b;c]`, needs `;`→`✘` in `is_error_glyph`), nested brackets/parens
-(`[a@b[c]]`, depth-tracking + a leftover toplevel stray closer).
+**Key insight:** these mirror JuliaSyntax's `parse_atom` emitting `(error op)`
+wherever a value is expected — so the fix is one prefix arm covering all
+positions, with the *rest* of each malformed line already handled by the
+trailing-junk driver and the operator loop. **Trap hit:** the bare-comma tuple
+loop (`parse_comma_tuple`) eagerly collected the `=` as a `(error =)` element,
+breaking the trailing-comma destructure `x, = xs` ⇒ `(= (tuple x) xs)`; guard it
+by stopping the loop before a lone operator. **Deferred (pre-existing, not this
+feature):** bare `?`/`/` consume an operand across a newline (`?\nx` ⇒
+`(call-pre (error ?) x)` vs Julia's two statements) — a latent bug in the
+2026-06-23n prefix-error operand parse (`skip_trivia` crosses newlines).
 
 ## Earlier sessions
+
+- **2026-06-23o** — Array-internal trailing junk: glued `@` → `(error-t ✘ …)`. A
+  macro `@` glued (no separating ws/`;`/newline) to a preceding array element is not
+  a new row — JuliaSyntax bumps the rest of the array to the `]`/EOF as one flat
+  trailing-junk run (`[x@y]` ⇒ `(hcat x (error-t ✘ y))`, `[a@b c]` ⇒ `(hcat a
+  (error-t ✘ b c))`); `@`/`,` render `✘`. One arm in `parse_matrix`'s scan loop
+  (`expr.rs`) on an empty separator run + `At` collects the run into one `ERROR`
+  element through the existing `emit_cat_child`/`ARG` machinery — **no projector
+  change**. Fixture `array_trailing_junk`. JS 612 → 614; dir 143 → 144. Deferred:
+  `;` in the junk (`[a@b;c]`), nested brackets (`[a@b[c]]`).
 
 - **2026-06-23n** — Binary-only operator in prefix position → error-wrapped prefix
   call. `/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`;
