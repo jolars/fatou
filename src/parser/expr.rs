@@ -2067,6 +2067,13 @@ fn parse_comprehension(
         if ctx.token(for_idx).map(|t| t.kind) != Some(TokKind::ForKw) {
             break;
         }
+        // JuliaSyntax requires whitespace before a comprehension/generator `for`;
+        // when it is glued to the preceding element (`[(x)for x in xs]`), splice a
+        // zero-width `(error-t)` marker between the body and the iteration clause.
+        if for_idx == pos {
+            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+            events.push(Event::Finish);
+        }
         push_range(&mut events, pos, for_idx);
         events.push(Event::Start(SyntaxKind::FOR_BINDING));
         events.push(Event::Tok(for_idx)); // `for`

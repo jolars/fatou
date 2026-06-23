@@ -893,10 +893,14 @@ fn project_generator(node: &SyntaxNode) -> String {
     // a `(cartesian_iterator …)` for comma-separated specs), and a trailing `if`
     // wraps the immediately preceding clause in a `(filter <clause> cond)`.
     let mut body = String::new();
+    // `for` glued to the body splices a zero-width `(error-t)` marker between
+    // the body and the first clause (`[(x)for x in xs]` → `(generator x
+    // (error-t) (= x xs))`); keep clauses and markers in source order.
     let mut clauses: Vec<String> = Vec::new();
     for child in node.children() {
         match child.kind() {
             FOR_BINDING => clauses.push(project_for_binding_node(&child)),
+            ERROR_TRIVIA => clauses.push("(error-t)".to_string()),
             COMPREHENSION_IF => {
                 if let (Some(cond), Some(last)) = (first_node(&child), clauses.last().cloned()) {
                     let n = clauses.len();

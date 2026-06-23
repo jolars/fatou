@@ -48,6 +48,7 @@ field_access_suffix
 function_forward_decl
 generator_arguments
 generators
+generator_whitespace_error
 import_operator_names
 import_paren_quote
 import_paths

@@ -177,6 +177,17 @@ through), so the grammar can grow incrementally.
   `(error-t)` nodes in order. Fixture `ternary_whitespace_error`. JS allow
   584 → 589; dir 129 → 130. **Deferred** (multi-marker incomplete forms): `a ? b`
   ⇒ `(? a b (error-t) (error-t) (error-t) (error))`, `a ?` similar.
+- [x] Generator/comprehension whitespace-error `(error-t)` (error-shape slice).
+  JuliaSyntax requires whitespace before a comprehension/generator `for`; when it
+  is glued to the preceding element (`[(x)for x in xs]`, `[f(x)for x in xs]`),
+  one zero-width `ERROR_TRIVIA` splices between the body and the first iteration
+  clause: `(generator x (error-t) (= x xs))`, also through a filter
+  (`[(x)for x in xs if y]` ⇒ `(generator x (error-t) (filter (= x xs) y))`).
+  `parse_comprehension` (`expr.rs`) emits the empty marker when `for_idx == pos`
+  (no trivia before `for`); `project_generator` renders an `ERROR_TRIVIA` child as
+  `(error-t)`, keeping clauses and markers in source order. Spaced forms
+  (`[(x) for …]`) stay marker-free. Fixture `generator_whitespace_error`. JS allow
+  589 → 590; dir 130 → 131.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

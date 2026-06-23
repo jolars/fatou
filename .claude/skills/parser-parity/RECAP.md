@@ -22,8 +22,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **589 allowlisted**,
-96 divergence, 0 unsupported. Dir corpus: **130 allowlisted**, 3 blocked
+JS corpus (**685 cases** — error shapes now harvested): **590 allowlisted**,
+95 divergence, 0 unsupported. Dir corpus: **131 allowlisted**, 3 blocked
 (do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
 total). Grammar bullets through "ternary whitespace-error"
 are `[x]` in `TODO.md`.
@@ -34,36 +34,38 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled — see latest session),
 `end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
 
-## Latest session (2026-06-23a)
+## Latest session (2026-06-23b)
 
-**Ternary whitespace-error `(error-t)`.** JuliaSyntax requires whitespace on both
-sides of `?` and `:` in a ternary; each missing side splices one zero-width
-`ERROR_TRIVIA`. `?`-markers sit between condition and true-branch (`a? b : c`,
-`a ?b : c` ⇒ `(? a (error-t) b c)`), `:`-markers between the branches (`a ? b: c`,
-`a ? b :c` ⇒ `(? a b (error-t) c)`); glued-both-sides doubles them (`a?b:c` ⇒
-`(? a (error-t) (error-t) b (error-t) (error-t) c)`). A missing `:` is itself one
-marker and the false-branch is now parsed greedily (even across a newline:
-`a ? b\nc` ⇒ `(? a b (error-t) c)`) rather than abandoned — `a ? b c` ⇒
-`(? a b (error-t) c)`, with any further junk (`a ? b c d`) left to the
-toplevel-leftover driver. Pure `expr.rs` (`parse_ternary`): count missing sides
-via `q_idx == cond.end`/`colon == then_br.end` (no leading ws) + an `is_trivia`
-check on the next token (no trailing ws), emit the empty markers in the event
-stream; the projector's `TERNARY_EXPR` arm already renders ordered child
-`(error-t)` nodes, untouched. Fixture `ternary_whitespace_error`. JS allow
-584 → 589; dir 129 → 130. Zero regressions; green; clippy/fmt clean. **Deferred**:
-the genuinely-incomplete forms (`a ? b`, `a ?`, `a ? b :`) where JuliaSyntax
-synthesizes multiple `(error-t)` plus a trailing `(error)` — stay un-allowlisted.
+**Generator/comprehension whitespace-error `(error-t)`.** JuliaSyntax requires
+whitespace before a comprehension/generator `for`; when it is glued to the
+preceding element (`[(x)for x in xs]`, `[f(x)for x in xs]`, `[x[1]for …]`), one
+zero-width `ERROR_TRIVIA` splices between the body and the first iteration clause
+⇒ `(generator x (error-t) (= x xs))`, also through a filter (`[(x)for x in xs if
+y]` ⇒ `(generator x (error-t) (filter (= x xs) y))`). Spaced forms (`[(x) for …]`,
+`[x for …]`) stay marker-free. Fix in `parse_comprehension` (`expr.rs`): emit the
+empty marker when `for_idx == pos` (no trivia before `for`); `project_generator`
+(`sexpr.rs`) renders an `ERROR_TRIVIA` child as `(error-t)`, keeping clauses and
+markers in source order. Fixture `generator_whitespace_error`. JS allow
+589 → 590; dir 130 → 131. Zero regressions; green; clippy/fmt clean.
 
 **Suggested next targets (ranked):** (1) **macro-path error-t**
 `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`.
 (2) **paren-block string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`
-(double-`✘`-wrapped string form). (3) **incomplete `do`**⇒`(block (error))`
-(unblocks dir `do_blocks`). (4) **lexer-classified named kinds**
-(`'ab'`⇒`(char (ErrorOverLongCharacter))`, `a--b`⇒`(call-i a
-(ErrorInvalidOperator) b)`). (5) **`;`-segment stray-closer** double-`✘`.
+(double-`✘`-wrapped string form; existing leftover driver emits `(error-t (string
+"x"))`). (3) **incomplete `do`**⇒`(block (error))` (unblocks dir `do_blocks`).
+(4) **lexer-classified named kinds** (`'ab'`⇒`(char (ErrorOverLongCharacter))`,
+`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`). (5) **`;`-segment stray-closer**
+double-`✘`. Also a char cluster (`'`/`''`⇒`(char (error))`, `'a`⇒`(char 'a'
+(error-t))`) — distinct recovery shapes each.
 
 ## Earlier sessions
 
+- **2026-06-23a** — Ternary whitespace-error `(error-t)`: missing ws on either
+  side of `?`/`:` splices a zero-width marker (`a? b : c`⇒`(? a (error-t) b c)`,
+  `a ? b: c`⇒`(? a b (error-t) c)`, `a?b:c` doubles each); a missing `:` is itself
+  one marker with the false-branch parsed greedily (`a ? b c`⇒`(? a b (error-t)
+  c)`). Pure `expr.rs` `parse_ternary`; projector untouched. Fixture
+  `ternary_whitespace_error`. JS 584 → 589; dir 129 → 130.
 - **2026-06-22z** — Lone-closer leading-`(error)` `✘`: a stray *closing* delimiter
   at statement start is JuliaSyntax's synthesized empty `(error)` plus an
   `(error-t ✘ …)` swallowing the rest of the line (`)` ⇒ `(error) (error-t ✘)`,
