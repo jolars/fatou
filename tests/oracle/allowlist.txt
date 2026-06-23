@@ -94,6 +94,7 @@ paren_block_juxtapose_error
 paren_macro_name
 paren_operator
 postfix_space_error
+prefix_operator_error
 public_statement
 public_stop_at_equals
 range_operator

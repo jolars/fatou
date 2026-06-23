@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **609 allowlisted**,
-76 divergence, 0 unsupported. Dir corpus: **142 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **612 allowlisted**,
+73 divergence, 0 unsupported. Dir corpus: **143 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,40 +52,47 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23m)
+## Latest session (2026-06-23n)
 
-**`public` stops at the first non-comma after a name.** `public` is a names-only
-compatibility shim (JuliaSyntax `parse_public`): it parses a comma-separated list
-of bare symbols and ends the statement at the first token that isn't a comma after
-a complete name; the leftover floats to the toplevel trailing-junk driver
-(`public x=1, y` ⇒ `(public x) (error-t = 1 ✘ y)`, `public a b` ⇒
-`(public a) (error-t b)`, `public x==y` ⇒ `(public x) (error-t == y)`). Crucially
-`export` does **not** behave this way — it re-enters the operator-precedence parser
-(`export x=1` ⇒ `(= (export x) 1)`, `export x::T` ⇒ `(::-i (export x) T)`), so the
-new stop is gated on `PUBLIC_STMT` only and export's name-list loop (which carries
-every same-line token) is untouched. `outer` differs again (`outer x=1` ⇒
-`outer (error-t x = 1)`) and stays deferred. Three-part fix: (1)
-`parse_name_list_stmt` (`structural.rs`) tracks `consumed_name` per loop iteration
-and, for public, breaks when the next significant token (`skip_ws`) isn't a comma —
-the existing toplevel `leftover_mark` driver in `core.rs` then collects the rest
-raw and wraps it in one `ERROR` (`TrailingJunk` diag → `(error-t …)`, commas render
-`✘`); (2) `name_run_item` (`sexpr.rs`) gained a keyword-token arm so a contextual
-keyword used as a name renders its text (`public export` ⇒ `(public export)`); (3)
-`project_public` filters trivia/commas directly instead of via `significant`
-(which drops keyword tokens), so the keyword-name survives. Fixture
-`public_stop_at_equals`. JS 607 → 609 (js-1beba79b, js-e151591c); dir 141 → 142.
-Green; clippy/fmt clean.
+**Binary-only operator in prefix position → error-wrapped prefix call.**
+JuliaSyntax rejects a non-unary operator used as a prefix and recovers it as a
+prefix *call* whose callee is the error-wrapped operator: `/x` ⇒
+`(call-pre (error /) x)`, `* <: A` ⇒ `(call-pre (error *) (<:-pre A))`, `=> x` ⇒
+`(call-pre (error =>) x)`; a broadcast operator heads `dotcall-pre` instead
+(`.*x` ⇒ `(dotcall-pre (error (. *)) x)`, `.<: x`). The operand binds at
+`PREFIX_BP` — tighter than the arithmetic tiers (`/x + y` ⇒
+`(call-i (call-pre (error /) x) + y)`) but below `^` (`/x^2` ⇒
+`(call-pre (error /) (call-i x ^ 2))`); a bare operator with no operand stays a
+value atom (`*` ⇒ `*`). Fix is entirely in the `is_value_operator` arm of
+`parse_prefix` (`expr.rs`): it now parses an operand at `PREFIX_BP` and, on
+success, emits `UNARY_EXPR > ERROR > OPERATOR_ATOM > op-token`, then the operand,
+plus an `InvalidPrefixOperator` diagnostic (new `DiagnosticKind`, in the
+"byte-bearing ERROR rendered as plain `(error …)`" bucket — no projector
+`(error-t)` machinery needed since it's not a recovery kind). `project_unary`
+gained an `ERROR`-headed branch that renders `(call-pre …)`/`(dotcall-pre …)`
+(dottedness from the wrapped op's text via `invalid_prefix_is_dotted`); the
+`OPERATOR_ATOM` wrapper is what makes a broadcast op project to `(. *)` inside the
+error. Fixture `prefix_operator_error`. JS 609 → 612 (js-b3d1db31 `/x`,
+js-9f8d2fe1 `* <: A`, js-aec1df42 `.<: x`); dir 142 → 143. Green; clippy/fmt clean.
 
-**Key insight:** this was *not* a new error-shape mechanism — the toplevel
-flat-trailing-junk driver (2026-06-23k) already wraps whatever a statement leaves
-behind. The whole fix was teaching `public` to *stop early* (leave the leftover)
-plus two small projector touches for the keyword-as-name corner. Probing export
-vs public side-by-side was essential: they look like one shared `parse_name_list_stmt`
-but diverge completely past the first non-name token, so the stop had to be
-public-gated.
+**Key insight:** reusing `UNARY_EXPR` with an `ERROR`-wrapped `OPERATOR_ATOM`
+callee kept the change tiny — the operand parse, the `(. op)` projection, and the
+plain-`(error)` rendering all fell out of existing machinery. The only real
+decision was the operand binding power (`PREFIX_BP`), confirmed by probing
+`/x + y` / `/x^2` before coding.
 
 ## Earlier sessions
 
+- **2026-06-23m** — `public` stops at the first non-comma after a name. `public` is
+  a names-only compatibility shim (JuliaSyntax `parse_public`): it ends the
+  statement at the first non-comma after a complete name, and the leftover floats
+  to the toplevel trailing-junk driver (`public x=1, y` ⇒
+  `(public x) (error-t = 1 ✘ y)`). `export` differs (re-enters the operator parser:
+  `export x=1` ⇒ `(= (export x) 1)`), so the stop is `PUBLIC_STMT`-gated. Fixes in
+  `parse_name_list_stmt` (`structural.rs`) + two projector touches (`name_run_item`
+  keyword-as-name arm, `project_public` keeps keyword-name tokens). Fixture
+  `public_stop_at_equals`. JS 607 → 609; dir 141 → 142. Deferred: `export` operator
+  re-entry, `outer` stop-at-`=`.
 - **2026-06-23l** — Block-body trailing junk. A separator-less glued statement
   inside a block ends it; the closing recovery (`bump_closing_token`) bumps the run
   as flat error tokens up to the closing keyword. Uniform CST (junk `ERROR` is

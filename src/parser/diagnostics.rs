@@ -63,6 +63,9 @@ pub enum DiagnosticKind {
     // kinds recorded for the side-channel only ---
     /// An `else` clause before any `catch` (`try x else y end`).
     ElseWithoutCatch,
+    /// A binary-only operator used in prefix position (`/x`, `.*x`) —
+    /// JuliaSyntax error-wraps the operator and applies it as a prefix call.
+    InvalidPrefixOperator,
     /// An `as` rename invalid in this position (`using A as B`).
     InvalidAsAlias,
     MissingOperand,

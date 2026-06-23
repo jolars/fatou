@@ -702,6 +702,24 @@ fn project_assignment(node: &SyntaxNode) -> String {
 }
 
 fn project_unary(node: &SyntaxNode) -> String {
+    // Invalid prefix: a binary-only operator used in prefix position is
+    // error-wrapped and applied as a prefix call (`/x` ⇒ `(call-pre (error /) x)`).
+    // A broadcast operator heads `dotcall-pre` instead (`.*x` ⇒
+    // `(dotcall-pre (error (. *)) x)`). The error-wrapped operator (an
+    // `OPERATOR_ATOM` inside the `ERROR`) projects to `/` or `(. *)`.
+    if let Some(err) = node.children().find(|c| c.kind() == ERROR) {
+        let operand = child_nodes(node)
+            .iter()
+            .find(|c| c.kind() != ERROR)
+            .map(project)
+            .unwrap_or_default();
+        let head = if invalid_prefix_is_dotted(&err) {
+            "dotcall-pre"
+        } else {
+            "call-pre"
+        };
+        return format!("({head} {} {operand})", project(&err));
+    }
     let op = match operator_token(node) {
         Some(t) => t,
         None => return format!("(unsupported {:?})", node.kind()),
@@ -718,6 +736,20 @@ fn project_unary(node: &SyntaxNode) -> String {
         DOT_TILDE => format!("(dotcall-pre ~ {operand})"),
         _ => format!("(call-pre {} {operand})", op.text()),
     }
+}
+
+/// Whether the operator error-wrapped inside an invalid-prefix `ERROR` node is a
+/// broadcast (dotted) operator (`.*`, `./`, `.<:`) — those head `dotcall-pre`.
+/// A leading `..` (the range operator) is not dotted in this sense.
+fn invalid_prefix_is_dotted(err: &SyntaxNode) -> bool {
+    err.descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| is_operator(t.kind()))
+        .map(|t| {
+            let b = t.text().as_bytes();
+            b.first() == Some(&b'.') && b.len() > 1 && b[1] != b'.'
+        })
+        .unwrap_or(false)
 }
 
 fn project_postfix(node: &SyntaxNode) -> String {

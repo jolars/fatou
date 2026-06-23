@@ -127,6 +127,19 @@ through), so the grammar can grow incrementally.
   `project_public` keeps keyword-name tokens that `significant` would drop.
   Fixture `public_stop_at_equals`. JS allow 607 → 609; dir 141 → 142.
   **Deferred**: `export` operator re-entry, `outer` stop-at-`=`.
+- [x] Invalid prefix operator `(error op)` (error-shape slice, diagnostics model).
+  A binary-only operator in prefix position is invalid: JuliaSyntax error-wraps the
+  operator and applies it as a prefix call (`/x` ⇒ `(call-pre (error /) x)`,
+  `* <: A` ⇒ `(call-pre (error *) (<:-pre A))`); a broadcast operator heads
+  `dotcall-pre` (`.*x` ⇒ `(dotcall-pre (error (. *)) x)`). The operand binds at
+  `PREFIX_BP` — tighter than the arithmetic tiers (`/x + y` ⇒
+  `(call-i (call-pre (error /) x) + y)`) but below `^`. The `is_value_operator` arm
+  of `parse_prefix` (`expr.rs`) now parses an operand; on success it wraps the
+  operator (an `OPERATOR_ATOM`, so a broadcast operator still projects to `(. op)`)
+  in an `ERROR` under a `UNARY_EXPR` and records an `InvalidPrefixOperator`
+  diagnostic; with no operand it stays a bare value atom (`*` ⇒ `*`). `project_unary`
+  detects the `ERROR`-headed shape and emits the prefix-call head. Fixture
+  `prefix_operator_error`. JS allow 609 → 612; dir 142 → 143.
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒

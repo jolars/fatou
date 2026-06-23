@@ -1060,13 +1060,65 @@ fn parse_prefix(
         | TokKind::Char
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
-        // A bare binary/value operator in prefix position is the operator used as
-        // a value atom (`.&` → `(. &)`, `*` → `*`, `=>` → `=>`). The unary value
-        // operators (`+ - ! ~ <: >:`) are folded above; this arm catches the
-        // binary-only and broadcast value operators that fall through. Syntactic
+        // A binary-only operator in prefix position is invalid: JuliaSyntax
+        // error-wraps the operator and applies it as a prefix call
+        // (`/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`).
+        // With nothing parseable following, the operator stays a bare value atom
+        // (`*` ⇒ `*`, `.&` ⇒ `(. &)`, `=>` ⇒ `=>`); the unary value operators
+        // (`+ - ! ~ <: >:`) are folded above and never reach here. Syntactic
         // operators (`= :: && || -> ? . ...`) are excluded by `is_value_operator`
         // and fall to `None` (an error, matching Julia).
-        k if is_value_operator(k) => Some(atom(SyntaxKind::OPERATOR_ATOM, start)),
+        k if is_value_operator(k) => {
+            let operand_start = ctx.skip_trivia(start + 1);
+            // The operand binds at `PREFIX_BP` — tighter than the arithmetic
+            // tiers (`/x + y` ⇒ `(call-i (call-pre (error /) x) + y)`) but below
+            // `^` (`/x^2` ⇒ `(call-pre (error /) (call-i x ^ 2))`). The
+            // array-element boundary never applies to a prefix operand.
+            let operand_flags = ExprFlags {
+                no_range: false,
+                array_mode: false,
+                ..flags
+            };
+            match parse_expr_in(
+                ctx.tokens(),
+                operand_start,
+                PREFIX_BP,
+                diagnostics,
+                operand_flags,
+            ) {
+                Some(operand) => {
+                    let op = &ctx.tokens()[start];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::InvalidPrefixOperator,
+                        "invalid operator in prefix position",
+                        op.start,
+                        op.end,
+                    );
+                    // Wrap the operator in an `ERROR` (an `OPERATOR_ATOM` so a
+                    // broadcast operator still projects to `(. op)`), then the
+                    // operand, under a `UNARY_EXPR` the projector renders as a
+                    // prefix call with the error-wrapped operator as callee.
+                    let mut events = vec![
+                        Event::Start(SyntaxKind::UNARY_EXPR),
+                        Event::Start(SyntaxKind::ERROR),
+                        Event::Start(SyntaxKind::OPERATOR_ATOM),
+                        Event::Tok(start),
+                        Event::Finish, // OPERATOR_ATOM
+                        Event::Finish, // ERROR
+                    ];
+                    push_range(&mut events, start + 1, operand.start);
+                    events.extend(operand.events);
+                    events.push(Event::Finish); // UNARY_EXPR
+                    Some(ExprParse {
+                        start,
+                        end: operand.end,
+                        events,
+                    })
+                }
+                None => Some(atom(SyntaxKind::OPERATOR_ATOM, start)),
+            }
+        }
         _ => None,
     }
 }
