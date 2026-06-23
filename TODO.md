@@ -13,6 +13,19 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [ ] **Design watch (diagnostics model): context-dependent recovery shapes.**
+  Recovery diagnostics are anchored *context-free* — by `(byte, DiagnosticKind)`,
+  with count for multiplicity — and the projector replays a fixed shape per kind.
+  This holds as long as a surface construct recovers the same way everywhere, but
+  some shapes depend on the *enclosing* context: e.g. an incomplete ternary
+  projects differently at toplevel (`x ? true` ⇒ `(? x true (error-t)…)`) than
+  inside a block (`if true; x ? true end` ⇒ `(… (block (if x true (error-t)
+  (error-t))))`, js-434fcafd/810e177c/74a9b301/471d5c84). A byte+kind anchor can't
+  express "this shape *because* of the enclosing block." When that cluster (or
+  similar) is taken, prefer extending the diagnostic record to carry the needed
+  context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
+  `DiagnosticKind` per context or pushing context-sensitivity into the projector
+  (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
 - [x] Array space/`;;` separator mismatch `(error-t)` (error-shape slice,
   diagnostics model). JuliaSyntax establishes a row-/column-major order from the
   first space or `;;` separator and flags a later conflicting one, splicing a
