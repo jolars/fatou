@@ -24,8 +24,7 @@ ROOT@0..35
   ERROR@31..34
     RPAREN@31..32 ")"
     WHITESPACE@32..33 " "
-    NAME@33..34
-      IDENT@33..34 "x"
+    IDENT@33..34 "x"
   NEWLINE@34..35 "\n"
 
 diagnostic [6..7]: trailing tokens after statement

@@ -1,1 +1,1 @@
-(toplevel (call f 2) (error-t 2) x (error-t y) (call-post x ') (error-t y))
+(toplevel (call f 2) (error-t 2) x (error-t y) (call-post x ') (error-t y) x (error-t y ✘ z) x (error-t ✘ y) x (error-t f ✘ y ✘) x (error-t a = b))

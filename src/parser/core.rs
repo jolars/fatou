@@ -45,6 +45,11 @@ pub fn parse(text: &str) -> ParseOutput {
         let mut has_semicolon = false;
         let mut leftover_mark: Option<usize> = None;
         let mut first_is_doc_string = false;
+        // A separator-less line: after the first complete statement, JuliaSyntax
+        // bumps the remainder as flat error tokens rather than re-parsing it. A
+        // line that carries a `;` keeps the per-segment behavior (deferred), so
+        // flat-junk collection is gated off when one is present.
+        let line_has_semicolon = rest_of_line_has_semicolon(&tokens, i);
         while i < tokens.len() {
             match tokens[i].kind {
                 TokKind::Newline => break,
@@ -58,7 +63,15 @@ pub fn parse(text: &str) -> ParseOutput {
                     i += 1;
                 }
                 _ => {
-                    if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
+                    if !line_has_semicolon && leftover_mark.is_some() && !first_is_doc_string {
+                        // Trailing junk after the first statement: collect raw
+                        // (no structural re-parse) so the wrapping below puts the
+                        // whole run in one ERROR node and the projector renders
+                        // delimiters, commas, and `@` as `✘` (`x y, z` ⇒
+                        // `x (error-t y ✘ z)`, `x@y` ⇒ `x (error-t ✘ y)`).
+                        line.push(Event::Tok(i));
+                        i += 1;
+                    } else if let Some(expr) = parse_stmt(&tokens, i, &mut diagnostics) {
                         if leftover_mark.is_none() {
                             first_is_doc_string = stmt_is_doc_string(&expr.events, &tokens);
                         }

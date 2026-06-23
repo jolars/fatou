@@ -12,8 +12,7 @@ ROOT@0..55
       END_KW@7..10 "end"
     RPAREN@10..11 ")"
   ERROR@11..12
-    NAME@11..12
-      IDENT@11..12 "x"
+    IDENT@11..12 "x"
   NEWLINE@12..13 "\n"
   PAREN_EXPR@13..26
     LPAREN@13..14 "("
@@ -27,8 +26,7 @@ ROOT@0..55
       END_KW@22..25 "end"
     RPAREN@25..26 ")"
   ERROR@26..27
-    NAME@26..27
-      IDENT@26..27 "x"
+    IDENT@26..27 "x"
   NEWLINE@27..28 "\n"
   PAREN_EXPR@28..38
     LPAREN@28..29 "("
@@ -43,8 +41,7 @@ ROOT@0..55
       END_KW@34..37 "end"
     RPAREN@37..38 ")"
   ERROR@38..39
-    NAME@38..39
-      IDENT@38..39 "y"
+    IDENT@38..39 "y"
   NEWLINE@39..40 "\n"
   PAREN_EXPR@40..53
     LPAREN@40..41 "("
@@ -63,8 +60,7 @@ ROOT@0..55
       END_KW@49..52 "end"
     RPAREN@52..53 ")"
   ERROR@53..54
-    NAME@53..54
-      IDENT@53..54 "z"
+    IDENT@53..54 "z"
   NEWLINE@54..55 "\n"
 
 diagnostic [11..12]: trailing tokens after statement

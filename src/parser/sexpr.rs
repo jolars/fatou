@@ -2452,13 +2452,15 @@ fn with_error_trivia(node: &SyntaxNode, mut parts: Vec<String>) -> Vec<String> {
 }
 
 fn project_error(head: &str, node: &SyntaxNode) -> String {
-    // A stray *closing* delimiter recovered into an error node is JuliaSyntax's
-    // `✘` error-token glyph (`var"x")` ⇒ `(error-t ✘)`); other recovered tokens
-    // and child nodes project normally, trivia/structure are dropped.
+    // A delimiter recovered into an error node is JuliaSyntax's `✘` error-token
+    // glyph: a recovery run bumps brackets, commas, and `@` as flat error tokens
+    // (`var"x")` ⇒ `(error-t ✘)`, `x y, z` ⇒ `x (error-t y ✘ z)`, `x@y` ⇒
+    // `x (error-t ✘ y)`). Other recovered tokens and child nodes project
+    // normally, trivia/structure are dropped.
     let parts: Vec<String> = node
         .children_with_tokens()
         .filter_map(|el| match &el {
-            NodeOrToken::Token(t) if is_close_delimiter(t.kind()) => Some("✘".to_string()),
+            NodeOrToken::Token(t) if is_error_glyph(t.kind()) => Some("✘".to_string()),
             NodeOrToken::Token(t) if is_drop_token(t.kind()) => None,
             _ => project_element(&el),
         })
@@ -2466,8 +2468,14 @@ fn project_error(head: &str, node: &SyntaxNode) -> String {
     sexp(head, parts)
 }
 
-fn is_close_delimiter(kind: SyntaxKind) -> bool {
-    matches!(kind, RPAREN | RBRACKET | RBRACE)
+/// Delimiter tokens that render as JuliaSyntax's `✘` error-token glyph when
+/// recovered into an error node: brackets (open and close), commas, and the
+/// macro `@` — each is bumped as a bare error token during recovery.
+fn is_error_glyph(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        LPAREN | RPAREN | LBRACKET | RBRACKET | LBRACE | RBRACE | COMMA | AT
+    )
 }
 
 fn sexp(head: &str, parts: Vec<String>) -> String {

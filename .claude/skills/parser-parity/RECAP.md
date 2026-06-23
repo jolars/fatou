@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **603 allowlisted**,
-82 divergence, 0 unsupported. Dir corpus: **140 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **605 allowlisted**,
+80 divergence, 0 unsupported. Dir corpus: **140 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,57 +52,55 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23j)
+## Latest session (2026-06-23k)
 
-**`const`-not-assignment error-wrap** (first error shape on the new diagnostics
-model). JuliaSyntax wraps a `const` whose declaration isn't a plain `=`
-assignment in `(error …)`: bare decl (`const x`⇒`(error (const x))`), non-`=`
-assignment (`const x += 1`, `const x .= 1`⇒`(error (const (.= x 1)))`), or a
-`global`/`local` decl without `=` (`const global x`⇒`(error (const (global x)))`,
-`global const x`⇒`(global (error (const x)))`). Valid: plain `=`, or
-`global`/`local`-wrapped `=` (`const global x = 1`). **Exempt:** a bare `const`
-field *directly* inside a struct body (`struct A const a end`⇒`(const a)`) — but
-the exemption is narrow (a `const` nested in an `if`/`begin` within the struct is
-still an error).
+**Flat trailing-junk runs.** JuliaSyntax bumps the leftover after a line's first
+statement as *flat error tokens*, not a re-parsed subtree: `x y, z` ⇒
+`x (error-t y ✘ z)`, `x@y` ⇒ `x (error-t ✘ y)`, `x f(y)` ⇒
+`x (error-t f ✘ y ✘)`, `x a=b` ⇒ `x (error-t a = b)` (brackets/commas/`@` render
+`✘`; operators and identifiers keep their text). Previously the `core.rs` driver
+re-parsed the leftover into structured nodes (`(tuple y z)`, `(macrocall @y)`,
+`(call f y)`), which the projector then rendered structurally — always a FAIL,
+since Julia flattens. Two-line fix: the driver now collects the run **raw** (no
+`parse_stmt`) once `leftover_mark` is set on a `;`-free, non-docstring line, and
+`project_error` renders the broader glyph set via new `is_error_glyph`
+(`( ) [ ] { } , @`, replacing the close-only `is_close_delimiter`). The existing
+leftover-wrapping code (lines 107-137) needed **no** change — it wraps raw tokens
+identically to parsed nodes. Extended fixture `toplevel_leftover_error`. JS
+603 → 605 (`x@y` js-da8ab15a, `outer i = rhs` js-d48e351c); dir 140 (the fixture
+was already allowlisted). Green; clippy/fmt clean.
 
-Implementation followed the rust-analyzer model cleanly: the CST topology
-`(const …)` is already faithful, so **no marker node**. A post-build CST walk
-`flag_invalid_const_decls` (`core.rs`, run on `cst` just before `ParseOutput`)
-records a zero-width `ConstNotAssignment` diagnostic at the `const` keyword start;
-`const_decl_is_assignment` unwraps `global`/`local` and checks for a direct `EQ`
-token in the `ASSIGNMENT_EXPR`; `is_struct_const_field` checks parent BLOCK →
-STRUCT_DEF for the exemption. The projector's `CONST_STMT` arm wraps
-`project_decl("const", …)` in `(error …)` when `diag_at(node start)`. New
-`DiagnosticKind::ConstNotAssignment` (its own "zero-width point driving a
-*wrapping* `(error …)`" group — distinct from the `(error-t)` markers and the
-byte-bearing `ERROR` nodes). Fixture `const_not_assignment`. JS 599 → 603; dir
-139 → 140. Green; clippy/fmt clean.
+**Gotcha that bit once:** the first pass regressed 3 allowlisted docstring cases
+(`"doc" foo` ⇒ `(doc (string "doc") foo)`): a docstring opener *owns* its trailing
+statement, so junk mode must check `!first_is_doc_string` too (the
+`fold_docstrings` pass needs the trailing statement as a real node, not raw junk).
+Two benign CST-only changes (no projection change, accepted): the leftover in
+`paren_block_juxtapose_error` / `return_stray_close` is now a raw `IDENT` token
+instead of a `NAME` node — more faithful (it's junk), same `(error-t x)`.
 
-**Gotcha that bit once:** first pass flagged struct const fields too —
-`struct A const a end` regressed (`struct_const_field`, `js-33d4b6c0`). Probing
-showed the exemption is *direct* struct-body membership only; added
-`is_struct_const_field` (parent BLOCK whose parent is STRUCT_DEF).
-
-**Pattern worth reusing:** semantic error-wraps where the CST is already correct
-are a great fit for a *post-build CST walk* that emits a diagnostic + a projector
-wrap — much cleaner than threading validity through the event stream. Candidates:
-other "this construct is syntactically fine but semantically illegal here"
-wraps.
-
-**Suggested next targets (ranked):** (1) **unterminated chars** —
-`'`⇒`(char (error))`, `'a`⇒`(char 'a' (error-t))`; touches the lexer + transpose
-disambiguation (`f.'`⇒`f (error-t ')`, `x 'y`⇒`x (error-t ' 'y')`); probe those
-first. (2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B))
-(error-t) (quote @x)))`, `@A.B.@x a` (deep: Fatou drops the trailing `.x`). (3)
-**paren-block string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`. (4)
-**`public` soft-keyword in block context** — `begin public A, B end`⇒
-`(block public (error-t A ✘ B))`, and `public experimental=true foo, bar`⇒
-`(public experimental) (error-t = true foo ✘ bar)` (public takes one bare name,
-then stops at `=`). Still-deferred import divergences: triple
-`import A: x, B: y, C: z` and double `import A as B as C`.
+**Scoping note:** the `✘`-glyph FAIL cluster has three distinct roots; this
+session took only the toplevel-flat one. Still open: (a) **block-body trailing
+junk** — `run_block_inner` (`structural.rs`) has *no* leftover driver, so
+`begin\n public A, B\n end` ⇒ Fatou `(block public (tuple A B))` vs Julia
+`(block public (error-t A ✘ B))` (js-d7b0ba21, js-803233ba); needs the same
+flat-junk logic ported into the block loop. (b) **`public`/`outer` stop at `=`**
+— `parse_name_list_stmt` (shared with `export`) carries *every* same-line token,
+but Julia's `public` takes bare names only and stops at `=` (`public x=1, y` ⇒
+`(public x) (error-t = 1 ✘ y)`, js-1beba79b/js-e151591c); risk: don't regress
+`export`. (c) **array-internal** `[x@y]` ⇒ `(hcat x (error-t ✘ y))`
+(js-6be56bdb/js-83672850).
 
 ## Earlier sessions
 
+- **2026-06-23j** — `const`-not-assignment error-wrap (first error shape on the
+  diagnostics model): JuliaSyntax wraps a `const` whose decl isn't a plain `=` in
+  `(error …)` (`const x`⇒`(error (const x))`, `const x += 1`, `const global x`),
+  but a bare `const` field *directly* in a struct body is exempt. Post-build CST
+  walk `flag_invalid_const_decls` (`core.rs`) records a `ConstNotAssignment`
+  diagnostic at the `const` keyword; projector's `CONST_STMT` arm wraps when
+  `diag_at`. Reusable pattern: semantic error-wraps where the CST is already
+  correct fit a post-build walk + projector wrap. Fixture `const_not_assignment`.
+  JS 599 → 603; dir 139 → 140.
 - **2026-06-23i** — Architecture reversal: error handling → the rust-analyzer
   model. Deleted `SyntaxKind::ERROR_TRIVIA`; the zero-width in-tree markers grown
   over the 2026-06-22o…2026-06-23h lineage became **diagnostics-only** (no node),

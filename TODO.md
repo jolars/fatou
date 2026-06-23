@@ -89,6 +89,18 @@ through), so the grammar can grow incrementally.
   (`stmt_is_doc_string`) is exempt so `fold_docstrings` still owns `"a"\nfoo`.
   Fixture `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
   **Deferred** (different shapes): `;`-line leftover (`a b; c`).
+- [x] Flat trailing-junk runs. JuliaSyntax bumps the leftover after a line's
+  first statement as *flat error tokens*, not a re-parsed subtree, so brackets,
+  commas, and `@` render as `✘`: `x y, z` ⇒ `x (error-t y ✘ z)`, `x@y` ⇒
+  `x (error-t ✘ y)`, `x f(y)` ⇒ `x (error-t f ✘ y ✘)`, `x a=b` ⇒
+  `x (error-t a = b)`; operators/identifiers keep their text. The `core.rs`
+  driver collects the run raw (no `parse_stmt`) once `leftover_mark` is set on a
+  `;`-free, non-docstring line; `project_error` renders the broader glyph set via
+  `is_error_glyph` (`( ) [ ] { } , @`). Extended fixture
+  `toplevel_leftover_error`. JS allow 603 → 605 (`x@y`, `outer i = rhs`).
+  **Deferred**: block-body trailing junk (`begin\n public A, B\n end` ⇒
+  `(block public (error-t A ✘ B))`) and `public`/`outer` stopping at `=`
+  (`public x=1, y`).
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒
