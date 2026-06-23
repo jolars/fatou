@@ -143,7 +143,67 @@ pub fn parse(text: &str) -> ParseOutput {
     let events = fold_docstrings(&events, &tokens, true);
 
     let cst = build_tree(&tokens, &events);
+    flag_invalid_const_decls(&cst, &mut diagnostics);
     ParseOutput { cst, diagnostics }
+}
+
+/// Flag each `const` whose declaration is not the plain `=` assignment
+/// JuliaSyntax requires. A bare declaration (`const x`), a non-`=` assignment
+/// (`const x += 1`, `const x .= 1`), or a `global`/`local` declaration without an
+/// `=` (`const global x`) is invalid, so JuliaSyntax wraps the whole `const` in
+/// `(error …)` (`const x` ⇒ `(error (const x))`). A valid `const x = 1` — or a
+/// `global`/`local`-wrapped `=` (`const global x = 1`) — is left alone. The
+/// diagnostic is a zero-width point at the `const` keyword start; the projector
+/// reconstructs the error wrapper from it (the CST topology stays faithful).
+fn flag_invalid_const_decls(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
+    for node in cst
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::CONST_STMT)
+    {
+        if !const_decl_is_assignment(&node) && !is_struct_const_field(&node) {
+            let pos = usize::from(node.text_range().start());
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::ConstNotAssignment,
+                "expected assignment after `const`",
+                pos,
+                pos,
+            );
+        }
+    }
+}
+
+/// Whether `node` is a `const` field declaration directly inside a struct body
+/// (`struct A const a end` ⇒ `(const a)`, not wrapped). Such a bare `const` is
+/// valid; the exemption is narrow — a `const` nested inside an `if`/`begin`
+/// within the struct (its block's parent is not the `STRUCT_DEF`) is still an
+/// error.
+fn is_struct_const_field(node: &SyntaxNode) -> bool {
+    node.parent()
+        .filter(|b| b.kind() == SyntaxKind::BLOCK)
+        .and_then(|b| b.parent())
+        .is_some_and(|p| p.kind() == SyntaxKind::STRUCT_DEF)
+}
+
+/// Whether a `const`'s declaration is a plain `=` assignment. The body is the
+/// `const`'s first child node, unwrapping any `global`/`local` declaration; it is
+/// valid only when it is an `ASSIGNMENT_EXPR` headed by a plain `=` (not
+/// `.=`/`+=`/…).
+fn const_decl_is_assignment(node: &SyntaxNode) -> bool {
+    let mut body = node.first_child();
+    while let Some(n) = body {
+        match n.kind() {
+            SyntaxKind::GLOBAL_STMT | SyntaxKind::LOCAL_STMT => body = n.first_child(),
+            SyntaxKind::ASSIGNMENT_EXPR => {
+                return n
+                    .children_with_tokens()
+                    .filter_map(|el| el.into_token())
+                    .any(|t| t.kind() == SyntaxKind::EQ);
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// Whether `kind` is a closing delimiter (`)`, `]`, `}`), which when stray at

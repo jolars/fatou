@@ -34,6 +34,7 @@ command_macro
 comments
 comprehension_blank_line
 comprehensions
+const_not_assignment
 control_flow
 curly_operator_call
 do_block

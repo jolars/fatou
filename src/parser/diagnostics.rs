@@ -42,6 +42,14 @@ pub enum DiagnosticKind {
     /// Anchored at the true-branch's end; pushed once per missing side.
     TernaryColonWhitespace,
 
+    // --- zero-width point driving a *wrapping* `(error …)` reconstruction: the
+    // CST topology is faithful; the projector wraps the whole node from the
+    // recorded diagnostic ---
+    /// A `const` whose declaration is not a plain `=` assignment (`const x`,
+    /// `const x += 1`, `const global x`) — JuliaSyntax wraps the `const` in
+    /// `(error …)`. Anchored at the `const` keyword start.
+    ConstNotAssignment,
+
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---
     /// A stray closing delimiter swallowing the rest of the line (`) x`).

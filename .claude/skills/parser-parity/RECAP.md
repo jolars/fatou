@@ -37,10 +37,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **599 allowlisted**,
-86 divergence, 0 unsupported. Dir corpus: **139 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **603 allowlisted**,
+82 divergence, 0 unsupported. Dir corpus: **140 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
-Grammar bullets through "import/as colon error shapes" are `[x]` in `TODO.md`.
+Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
 nodes** (2026-06-23i refactor) — same projected output, so counts unchanged.
 `TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA` mechanism
@@ -52,52 +52,68 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23i)
+## Latest session (2026-06-23j)
 
-**Architecture reversal: error handling → the rust-analyzer model.** Decided the
-zero-width in-tree marker (`ERROR_TRIVIA` → `(error-t)`) grown over the
-error-shape lineage (2026-06-22o…2026-06-23h) was the wrong representation. It
-mirrored JuliaSyntax's green tree, but JuliaSyntax keeps zero-width error tokens
-*in the tree* whereas rust-analyzer represents **missing** by **absence** plus a
-diagnostics side-channel, reserving in-tree `ERROR` nodes for present-but-
-unexpected source. Switched to that model. **Same projected output** (the
-projector reconstructs the shapes from diagnostics) so **zero allowlist movement**
-— 599/139 unchanged. This is a representation refactor, not a parity change.
+**`const`-not-assignment error-wrap** (first error shape on the new diagnostics
+model). JuliaSyntax wraps a `const` whose declaration isn't a plain `=`
+assignment in `(error …)`: bare decl (`const x`⇒`(error (const x))`), non-`=`
+assignment (`const x += 1`, `const x .= 1`⇒`(error (const (.= x 1)))`), or a
+`global`/`local` decl without `=` (`const global x`⇒`(error (const (global x)))`,
+`global const x`⇒`(global (error (const x)))`). Valid: plain `=`, or
+`global`/`local`-wrapped `=` (`const global x = 1`). **Exempt:** a bare `const`
+field *directly* inside a struct body (`struct A const a end`⇒`(const a)`) — but
+the exemption is narrow (a `const` nested in an `if`/`begin` within the struct is
+still an error).
 
-What changed: **`SyntaxKind::ERROR_TRIVIA` deleted** (one error kind, `ERROR`,
-remains). New `DiagnosticKind` enum on `ParseDiagnostic` (`diagnostics.rs`) and
-`push_diagnostic` takes a kind. The 15 emission sites split: the 12 zero-width
-markers (missing-`end`/-handler, dot/quote-colon/opener/glued-`for`/ternary
-whitespace, unterminated literal/arglist, string-suffix, string-juxtapose) now
-push **only a diagnostic** (no node); the 3 byte-bearing recoveries (`StrayCloser`,
-`TrailingJunk`, `ImportRecoveryColon`) wrap their run in a real `ERROR` node + a
-diagnostic. The projector (`sexpr.rs`) gained `diag_at`/`diag_count_from`/
-`is_recovery_error` (reading a thread-local `PROJ_DIAGS` set at the entry; chosen
-over threading a param through ~50 helpers) and reconstructs each shape by byte
-anchor: zero-width markers at a byte point, truncation markers at the construct's
-**opening keyword** (`keyword_start`, which special-cases `do`-blocks since the
-callee leads), byte-bearing recovery via range containment → `(error-t …)` head.
-`to_juliasyntax_sexpr` now takes `&[ParseDiagnostic]`. All `parser_snapshots`
-regenerated (markers gone from the CST, diagnostic lines added). Green; clippy/fmt
-clean. Plan: `~/.claude/plans/yeah-we-re-heading-the-swift-blossom.md`.
+Implementation followed the rust-analyzer model cleanly: the CST topology
+`(const …)` is already faithful, so **no marker node**. A post-build CST walk
+`flag_invalid_const_decls` (`core.rs`, run on `cst` just before `ParseOutput`)
+records a zero-width `ConstNotAssignment` diagnostic at the `const` keyword start;
+`const_decl_is_assignment` unwraps `global`/`local` and checks for a direct `EQ`
+token in the `ASSIGNMENT_EXPR`; `is_struct_const_field` checks parent BLOCK →
+STRUCT_DEF for the exemption. The projector's `CONST_STMT` arm wraps
+`project_decl("const", …)` in `(error …)` when `diag_at(node start)`. New
+`DiagnosticKind::ConstNotAssignment` (its own "zero-width point driving a
+*wrapping* `(error …)`" group — distinct from the `(error-t)` markers and the
+byte-bearing `ERROR` nodes). Fixture `const_not_assignment`. JS 599 → 603; dir
+139 → 140. Green; clippy/fmt clean.
 
-**Gotcha that bit once:** `do_blocks` regressed mid-refactor — `keyword_start` as
-"first non-trivia token" is wrong for a do-block (callee comes before `do`);
-`expect_end` anchors `MissingEnd` at the `do` keyword. Fixed by special-casing
-`DO_EXPR` to find the `DO_KW` token.
+**Gotcha that bit once:** first pass flagged struct const fields too —
+`struct A const a end` regressed (`struct_const_field`, `js-33d4b6c0`). Probing
+showed the exemption is *direct* struct-body membership only; added
+`is_struct_const_field` (parent BLOCK whose parent is STRUCT_DEF).
 
-**Suggested next targets (ranked, now via diagnostics not nodes):** (1)
-**unterminated chars** — `'`⇒`(char (error))`, `'a`⇒`(char 'a' (error-t))`;
-touches the lexer + transpose disambiguation (`f.'`, `x 'y`); probe those first.
-(2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t)
-(quote @x)))`, `@A.B.@x a` (deep: Fatou drops the trailing `.x`). (3)
+**Pattern worth reusing:** semantic error-wraps where the CST is already correct
+are a great fit for a *post-build CST walk* that emits a diagnostic + a projector
+wrap — much cleaner than threading validity through the event stream. Candidates:
+other "this construct is syntactically fine but semantically illegal here"
+wraps.
+
+**Suggested next targets (ranked):** (1) **unterminated chars** —
+`'`⇒`(char (error))`, `'a`⇒`(char 'a' (error-t))`; touches the lexer + transpose
+disambiguation (`f.'`⇒`f (error-t ')`, `x 'y`⇒`x (error-t ' 'y')`); probe those
+first. (2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (. A (quote B))
+(error-t) (quote @x)))`, `@A.B.@x a` (deep: Fatou drops the trailing `.x`). (3)
 **paren-block string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`. (4)
 **`public` soft-keyword in block context** — `begin public A, B end`⇒
-`(block public (error-t A ✘ B))`. Still-deferred import divergences: triple
+`(block public (error-t A ✘ B))`, and `public experimental=true foo, bar`⇒
+`(public experimental) (error-t = true foo ✘ bar)` (public takes one bare name,
+then stops at `=`). Still-deferred import divergences: triple
 `import A: x, B: y, C: z` and double `import A as B as C`.
 
 ## Earlier sessions
 
+- **2026-06-23i** — Architecture reversal: error handling → the rust-analyzer
+  model. Deleted `SyntaxKind::ERROR_TRIVIA`; the zero-width in-tree markers grown
+  over the 2026-06-22o…2026-06-23h lineage became **diagnostics-only** (no node),
+  reconstructed by the projector from the side-channel; the 3 byte-bearing
+  recoveries (`StrayCloser`/`TrailingJunk`/`ImportRecoveryColon`) stay real
+  `ERROR` nodes. New `DiagnosticKind` enum + `push_diagnostic(kind, …)`; projector
+  gained `diag_at`/`diag_count_from`/`is_recovery_error`/`keyword_start` reading a
+  thread-local `PROJ_DIAGS`; `to_juliasyntax_sexpr` takes `&[ParseDiagnostic]`.
+  Same projected output ⇒ zero allowlist movement (599/139). Gotcha: `keyword_start`
+  special-cases `DO_EXPR` (callee precedes `do`). Plan:
+  `~/.claude/plans/yeah-we-re-heading-the-swift-blossom.md`.
 - **2026-06-23h** — `import`/`as` colon error shapes (the last error-shape-lineage
   feature, before the 2026-06-23i representation reversal): a top-level `:` is the
   base/names split only as the *first* separator (`import A, B: y` ⇒ recovery, no

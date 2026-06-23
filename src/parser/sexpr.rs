@@ -269,7 +269,20 @@ fn project(node: &SyntaxNode) -> String {
         RETURN_EXPR => project_keyword_stmt("return", node),
         BREAK_EXPR => "(break)".to_string(),
         CONTINUE_EXPR => "(continue)".to_string(),
-        CONST_STMT => project_decl("const", node),
+        CONST_STMT => {
+            // A `const` whose declaration is not a plain `=` assignment is wrapped
+            // in `(error …)` (`const x` ⇒ `(error (const x))`); the parser records
+            // the diagnostic at the `const` keyword start.
+            let decl = project_decl("const", node);
+            if diag_at(
+                usize::from(node.text_range().start()),
+                DiagnosticKind::ConstNotAssignment,
+            ) {
+                format!("(error {decl})")
+            } else {
+                decl
+            }
+        }
         GLOBAL_STMT => project_decl("global", node),
         LOCAL_STMT => project_decl("local", node),
         IMPORT_STMT => project_import("import", node),

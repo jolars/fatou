@@ -248,6 +248,18 @@ through), so the grammar can grow incrementally.
   `ERROR_TRIVIA`; `project_import` reads the first separator to decide `:` grouping
   and collects `ERROR_TRIVIA` clauses. Fixture `import_as_colon_error`. JS allow
   597 → 599; dir 138 → 139.
+- [x] `const`-not-assignment error-wrap (error-shape slice, diagnostics model). A
+  `const` whose declaration is not a plain `=` assignment is wrapped in
+  `(error …)`: a bare decl (`const x` ⇒ `(error (const x))`), a non-`=`
+  assignment (`const x += 1`, `const x .= 1`), or a `global`/`local` decl without
+  an `=` (`const global x` ⇒ `(error (const (global x)))`,
+  `global const x` ⇒ `(global (error (const x)))`). A plain `=` — or a
+  `global`/`local`-wrapped `=` (`const global x = 1`) — stays valid, and a bare
+  `const` field directly inside a struct body (`struct A const a end`) is exempt.
+  A post-build CST walk (`flag_invalid_const_decls`, `core.rs`) records a
+  zero-width `ConstNotAssignment` diagnostic at the `const` keyword; the projector
+  wraps the faithful `(const …)` from the diagnostic (no marker node). Fixture
+  `const_not_assignment`. JS allow 599 → 603; dir 139 → 140.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
