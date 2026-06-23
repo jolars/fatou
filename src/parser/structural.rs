@@ -1410,8 +1410,15 @@ fn expect_end(
         events.push(Event::Tok(i));
         i + 1
     } else {
+        // A block form truncated before its `end` (EOF or an unconsumable
+        // closer) gets a zero-width `ERROR_TRIVIA` marker as the construct's
+        // last child, mirroring JuliaSyntax's truncation `(error-t)`
+        // (`if c\n x` ⇒ `(if c (block x) (error-t))`). The marker wraps no
+        // tokens; projectors render it `(error-t)`.
         let kw = &ctx.tokens()[open_start];
         push_diagnostic(diagnostics, "expected `end`", kw.start, kw.end);
+        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+        events.push(Event::Finish);
         i
     }
 }

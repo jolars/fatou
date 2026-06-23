@@ -36,6 +36,7 @@ comprehensions
 control_flow
 curly_operator_call
 do_block
+do_blocks
 doc_macro
 docstring
 dot_logical_operator
@@ -53,6 +54,8 @@ import_operator_names
 import_paren_quote
 import_paths
 import_unicode_dot_names
+incomplete_begin
+incomplete_block
 interpolation_expr
 interpolation_names
 juxtaposition

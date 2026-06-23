@@ -1,0 +1,20 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..18
+  BEGIN_EXPR@0..18
+    BEGIN_KW@0..5 "begin"
+    BLOCK@5..18
+      NEWLINE@5..6 "\n"
+      WHITESPACE@6..10 "    "
+      NAME@10..11
+        IDENT@10..11 "x"
+      NEWLINE@11..12 "\n"
+      WHITESPACE@12..16 "    "
+      NAME@16..17
+        IDENT@16..17 "y"
+      NEWLINE@17..18 "\n"
+    ERROR_TRIVIA@18..18
+
+diagnostic [0..5]: expected `end`

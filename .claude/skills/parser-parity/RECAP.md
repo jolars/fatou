@@ -23,43 +23,53 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 ## Progress
 
 JS corpus (**685 cases** — error shapes now harvested): **590 allowlisted**,
-95 divergence, 0 unsupported. Dir corpus: **131 allowlisted**, 3 blocked
-(do_blocks/end_index/numeric_literals; all FAIL not skip since `render` is
-total). Grammar bullets through "ternary whitespace-error"
-are `[x]` in `TODO.md`.
+95 divergence, 0 unsupported. Dir corpus: **134 allowlisted**, 2 blocked
+(end_index/numeric_literals; both FAIL not skip since `render` is total).
+Grammar bullets through "missing-`end` truncation" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
 **float**-literal display normalization (`2.`/`1f0`/hex floats/`1.0e-1000`; the
-integer half is now handled — see latest session),
-`end`/`[1 +2]`/unterminated-string/incomplete-`do` error shapes (dir `blocked.txt`).
+integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
+(dir `blocked.txt`).
 
-## Latest session (2026-06-23b)
+## Latest session (2026-06-23c)
 
-**Generator/comprehension whitespace-error `(error-t)`.** JuliaSyntax requires
-whitespace before a comprehension/generator `for`; when it is glued to the
-preceding element (`[(x)for x in xs]`, `[f(x)for x in xs]`, `[x[1]for …]`), one
-zero-width `ERROR_TRIVIA` splices between the body and the first iteration clause
-⇒ `(generator x (error-t) (= x xs))`, also through a filter (`[(x)for x in xs if
-y]` ⇒ `(generator x (error-t) (filter (= x xs) y))`). Spaced forms (`[(x) for …]`,
-`[x for …]`) stay marker-free. Fix in `parse_comprehension` (`expr.rs`): emit the
-empty marker when `for_idx == pos` (no trivia before `for`); `project_generator`
-(`sexpr.rs`) renders an `ERROR_TRIVIA` child as `(error-t)`, keeping clauses and
-markers in source order. Fixture `generator_whitespace_error`. JS allow
-589 → 590; dir 130 → 131. Zero regressions; green; clippy/fmt clean.
+**Missing-`end` truncation `(error-t)`.** A block form cut off before its `end`
+(EOF or an unconsumable closer) gets a zero-width `ERROR_TRIVIA` as the
+construct's last child, mirroring JuliaSyntax's truncation marker: `if c\n x` ⇒
+`(if c (block x) (error-t))`, likewise `for`/`while`/`let`/`function`/`macro`/
+`struct`/`module`/`do`. For `begin`/`quote` (modeled *as* the block in
+JuliaSyntax) the marker folds *inside*: `begin\n x` ⇒ `(block x (error-t))`,
+`quote\n x` ⇒ `(quote (block x (error-t)))`. Nested complete blocks stay
+marker-free (`function f()\n if c\n x\n end` ⇒ `(function (call f) (block (if c
+(block x))) (error-t))`). Fix: `expect_end` (`structural.rs`) splices the empty
+marker when `end` is absent (one chokepoint for all forms); `push_trailing_errors`
++ `project_block_child_folding_error` (`sexpr.rs`) render it (`while`/`for` via
+`project_each(child_nodes)` already pick it up). `try` stays divergent (wants
+*two* markers — deferred). Unblocks dir `do_blocks` (moved out of `blocked.txt`);
+fixtures `incomplete_block`/`incomplete_begin`. Dir allow 131 → 134; JS unchanged
+(corpus has no incomplete-EOF-body cases). Zero regressions; green; clippy/fmt
+clean.
 
-**Suggested next targets (ranked):** (1) **macro-path error-t**
-`A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`.
-(2) **paren-block string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`
-(double-`✘`-wrapped string form; existing leftover driver emits `(error-t (string
-"x"))`). (3) **incomplete `do`**⇒`(block (error))` (unblocks dir `do_blocks`).
-(4) **lexer-classified named kinds** (`'ab'`⇒`(char (ErrorOverLongCharacter))`,
-`a--b`⇒`(call-i a (ErrorInvalidOperator) b)`). (5) **`;`-segment stray-closer**
-double-`✘`. Also a char cluster (`'`/`''`⇒`(char (error))`, `'a`⇒`(char 'a'
-(error-t))`) — distinct recovery shapes each.
+**Suggested next targets (ranked):** (1) **incomplete `try`** ⇒ `(try (block x)
+(error-t) (error-t))` — two markers (missing catch/finally *and* end); finishes
+the missing-`end` family. (2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (.
+A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`. (3) **paren-block
+string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘`
+string form). (4) **char cluster** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
+`'\xq'`⇒`(char (ErrorInvalidEscapeSequence))`, `''`/`'`⇒`(char (error))`,
+`'a`⇒`(char 'a' (error-t))` (needs lexer-classified named kinds; ~5 JS cases).
+(5) **`;`-segment stray-closer** double-`✘`.
 
 ## Earlier sessions
 
+- **2026-06-23b** — Generator/comprehension whitespace-error `(error-t)`: a `for`
+  glued to the preceding element (`[(x)for x in xs]`) splices one zero-width
+  `ERROR_TRIVIA` between body and first clause ⇒ `(generator x (error-t) (= x
+  xs))`, also through a filter; spaced forms stay marker-free. `parse_comprehension`
+  emits the marker when `for_idx == pos`; `project_generator` renders it. Fixture
+  `generator_whitespace_error`. JS allow 589 → 590; dir 130 → 131.
 - **2026-06-23a** — Ternary whitespace-error `(error-t)`: missing ws on either
   side of `?`/`:` splices a zero-width marker (`a? b : c`⇒`(? a (error-t) b c)`,
   `a ? b: c`⇒`(? a b (error-t) c)`, `a?b:c` doubles each); a missing `:` is itself

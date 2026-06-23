@@ -2,10 +2,6 @@
 # one-line rationale. A blocked case is a known divergence (or an error-recovery
 # case), not a passing test. `allowlist ∪ blocked` covers the whole corpus.
 
-# Fixture ends with an intentionally incomplete `do` (Fatou parse diagnostic);
-# skipped by the harness until error-shape parity exists.
-do_blocks
-
 # Bare `end` is accepted by Fatou inside vect literals and call arguments, where
 # JuliaSyntax emits `(error-t)` — the `end` index marker is valid only inside
 # `ref` indexing.

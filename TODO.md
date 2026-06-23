@@ -188,6 +188,15 @@ through), so the grammar can grow incrementally.
   `(error-t)`, keeping clauses and markers in source order. Spaced forms
   (`[(x) for …]`) stay marker-free. Fixture `generator_whitespace_error`. JS allow
   589 → 590; dir 130 → 131.
+- [x] Missing-`end` truncation `(error-t)` (error-shape slice). A block form cut
+  off before its `end` (EOF or an unconsumable closer) gets a zero-width
+  `ERROR_TRIVIA` as the construct's last child: `if c\n x` ⇒ `(if c (block x)
+  (error-t))`, likewise `for`/`while`/`let`/`function`/`macro`/`struct`/`module`/
+  `do`. For `begin`/`quote` (modeled *as* the block) the marker folds inside:
+  `begin\n x` ⇒ `(block x (error-t))`. `expect_end` (`structural.rs`) splices the
+  marker; `push_trailing_errors`/`project_block_child_folding_error` (`sexpr.rs`)
+  render it. Unblocks dir `do_blocks`; fixtures `incomplete_block`/
+  `incomplete_begin`. Dir allow 131 → 134.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

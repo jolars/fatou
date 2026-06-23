@@ -95,7 +95,7 @@ fn project(node: &SyntaxNode) -> String {
         BLOCK => sexp("block", stmt_strings(node)),
         // `begin … end` wraps a `BLOCK`; project that directly so it lowers to a
         // single `(block …)` rather than a doubled `(block (block …))`.
-        BEGIN_EXPR => project_block_child(node),
+        BEGIN_EXPR => project_block_child_folding_error(node),
 
         NAME => name_text(node),
         LITERAL => project_literal(node),
@@ -160,14 +160,15 @@ fn project(node: &SyntaxNode) -> String {
 
         IF_EXPR => project_if(node),
         WHILE_EXPR => sexp("while", project_each(child_nodes(node))),
-        FOR_EXPR => sexp(
-            "for",
-            vec![project_for_binding(node), project_block_child(node)],
-        ),
+        FOR_EXPR => {
+            let mut parts = vec![project_for_binding(node), project_block_child(node)];
+            push_trailing_errors(node, &mut parts);
+            sexp("for", parts)
+        }
         FUNCTION_DEF => project_function_like("function", node),
         MACRO_DEF => project_function_like("macro", node),
         LET_EXPR => project_let(node),
-        QUOTE_EXPR => sexp("quote", vec![project_block_child(node)]),
+        QUOTE_EXPR => sexp("quote", vec![project_block_child_folding_error(node)]),
         QUOTE_SYM => project_quote_sym(node),
         TRY_EXPR => project_try(node),
         STRUCT_DEF => project_struct(node),
@@ -986,6 +987,7 @@ fn project_if(node: &SyntaxNode) -> String {
     if let Some(tail) = project_if_tail(&clauses) {
         parts.push(tail);
     }
+    push_trailing_errors(node, &mut parts);
     sexp("if", parts)
 }
 
@@ -1047,10 +1049,9 @@ fn project_struct(node: &SyntaxNode) -> String {
         .children_with_tokens()
         .any(|el| el.kind() == MUTABLE_KW);
     let head = if mutable { "struct-mut" } else { "struct" };
-    sexp(
-        head,
-        vec![project_signature(node), project_block_child(node)],
-    )
+    let mut parts = vec![project_signature(node), project_block_child(node)];
+    push_trailing_errors(node, &mut parts);
+    sexp(head, parts)
 }
 
 fn project_primitive(node: &SyntaxNode) -> String {
@@ -1070,10 +1071,9 @@ fn project_module(node: &SyntaxNode) -> String {
         .children_with_tokens()
         .any(|el| el.kind() == BAREMODULE_KW);
     let head = if bare { "module-bare" } else { "module" };
-    sexp(
-        head,
-        vec![project_signature(node), project_block_child(node)],
-    )
+    let mut parts = vec![project_signature(node), project_block_child(node)];
+    push_trailing_errors(node, &mut parts);
+    sexp(head, parts)
 }
 
 fn project_quote_sym(node: &SyntaxNode) -> String {
@@ -1098,7 +1098,9 @@ fn project_let(node: &SyntaxNode) -> String {
         Some(b) => sexp("block", project_let_bindings(&b)),
         None => "(block)".to_string(),
     };
-    sexp("let", vec![bindings, project_block_child(node)])
+    let mut parts = vec![bindings, project_block_child(node)];
+    push_trailing_errors(node, &mut parts);
+    sexp("let", parts)
 }
 
 fn project_let_bindings(node: &SyntaxNode) -> Vec<String> {
@@ -1135,7 +1137,9 @@ fn project_do(node: &SyntaxNode) -> String {
         None => "(tuple)".to_string(),
     };
     let block = project_block_child(node);
-    sexp("do", vec![call, params, block])
+    let mut parts = vec![call, params, block];
+    push_trailing_errors(node, &mut parts);
+    sexp("do", parts)
 }
 
 fn do_param_strings(node: &SyntaxNode) -> Vec<String> {
@@ -2133,10 +2137,9 @@ fn project_function_like(head: &str, node: &SyntaxNode) -> String {
     if is_forward_declaration(node) {
         sexp(head, vec![project_signature(node)])
     } else {
-        sexp(
-            head,
-            vec![project_signature(node), project_block_child(node)],
-        )
+        let mut parts = vec![project_signature(node), project_block_child(node)];
+        push_trailing_errors(node, &mut parts);
+        sexp(head, parts)
     }
 }
 
@@ -2218,6 +2221,28 @@ fn project_block_child(node: &SyntaxNode) -> String {
         .find(|c| c.kind() == BLOCK)
         .map(|c| project(&c))
         .unwrap_or_else(|| "(block)".to_string())
+}
+
+/// Append `(error-t)` to `parts` for each direct `ERROR_TRIVIA` child — the
+/// truncation marker `expect_end` splices when a block form is missing its
+/// `end` (`if c\n x` ⇒ `(if c (block x) (error-t))`).
+fn push_trailing_errors(node: &SyntaxNode, parts: &mut Vec<String>) {
+    for c in node.children().filter(|c| c.kind() == ERROR_TRIVIA) {
+        parts.push(project_error("error-t", &c));
+    }
+}
+
+/// Project a block-form's `BLOCK` child, folding a trailing `ERROR_TRIVIA`
+/// sibling *into* the block — for constructs that JuliaSyntax models *as* the
+/// block (`begin`, `quote`), so the truncation marker lands inside it
+/// (`begin\n x` ⇒ `(block x (error-t))`).
+fn project_block_child_folding_error(node: &SyntaxNode) -> String {
+    let Some(block) = node.children().find(|c| c.kind() == BLOCK) else {
+        return "(block)".to_string();
+    };
+    let mut parts = stmt_strings(&block);
+    push_trailing_errors(node, &mut parts);
+    sexp("block", parts)
 }
 
 fn child_nodes(node: &SyntaxNode) -> Vec<SyntaxNode> {
