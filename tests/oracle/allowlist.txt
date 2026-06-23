@@ -106,6 +106,7 @@ struct_const_field
 struct_module
 symbols
 ternary
+ternary_whitespace_error
 tilde_operator
 toplevel_leftover_error
 toplevel_semicolon

@@ -3534,6 +3534,13 @@ fn parse_ternary(
     let tokens = ctx.tokens();
     let inside_brackets = flags.inside_brackets;
 
+    // JuliaSyntax requires whitespace on both sides of `?` and `:`; each missing
+    // side splices one empty `(error-t)` marker. For `?` the markers sit between
+    // the condition and the true-branch (`a? b : c` ⇒ `(? a (error-t) b c)`); a
+    // glued `?` on both sides yields two (`a?b…` ⇒ `(? a (error-t) (error-t) b …)`).
+    let ws_after = |idx: usize| ctx.token(idx + 1).is_some_and(|t| t.kind.is_trivia());
+    let q_errors = usize::from(q_idx == cond.end) + usize::from(!ws_after(q_idx));
+
     // True-branch: `no_range` so a bare `:` ends it (the ternary separator). A
     // real range in the true-branch must therefore be parenthesized, as in Julia.
     let then_start = ctx.skip_trivia(q_idx + 1);
@@ -3560,7 +3567,37 @@ fn parse_ternary(
     } else {
         ctx.skip_ws(then_br.end)
     };
-    if ctx.token(colon).map(|t| t.kind) != Some(TokKind::Colon) {
+    let has_colon = ctx.token(colon).map(|t| t.kind) == Some(TokKind::Colon);
+
+    // A present `:` counts its surrounding whitespace; a missing `:` is itself one
+    // marker (`a ? b c` ⇒ `(? a b (error-t) c)`), with the false-branch beginning
+    // right after the true-branch.
+    let (colon_errors, else_start) = if has_colon {
+        let errors = usize::from(colon == then_br.end) + usize::from(!ws_after(colon));
+        (errors, ctx.skip_trivia(colon + 1))
+    } else {
+        (1, ctx.skip_trivia(then_br.end))
+    };
+
+    // False-branch: inherit `no_range` so an enclosing ternary's `:` still ends
+    // it (`a ? b ? c : d : e`), while a top-level else may hold a range.
+    let else_flags = ExprFlags {
+        array_mode: false,
+        ..flags
+    };
+    let Some(else_br) = parse_expr_in(tokens, else_start, TERNARY_R, diagnostics, else_flags)
+    else {
+        if has_colon {
+            let op = &tokens[colon];
+            push_diagnostic(
+                diagnostics,
+                "expected expression after `:`",
+                op.start,
+                op.end,
+            );
+            return Err(error_expr_to_line_end(tokens, cond.start, colon + 1));
+        }
+        // No `:` and no false-branch: recover with the condition and true-branch.
         let op = &tokens[q_idx];
         push_diagnostic(
             diagnostics,
@@ -3568,7 +3605,6 @@ fn parse_ternary(
             op.start,
             op.end,
         );
-        // Recover: a ternary holding the condition, `?`, and true-branch only.
         let mut events = vec![Event::Start(SyntaxKind::TERNARY_EXPR)];
         events.extend(cond.events);
         push_range(&mut events, cond.end, q_idx);
@@ -3581,36 +3617,33 @@ fn parse_ternary(
             end: then_br.end,
             events,
         });
-    }
-
-    // False-branch: inherit `no_range` so an enclosing ternary's `:` still ends
-    // it (`a ? b ? c : d : e`), while a top-level else may hold a range.
-    let else_start = ctx.skip_trivia(colon + 1);
-    let else_flags = ExprFlags {
-        array_mode: false,
-        ..flags
-    };
-    let Some(else_br) = parse_expr_in(tokens, else_start, TERNARY_R, diagnostics, else_flags)
-    else {
-        let op = &tokens[colon];
-        push_diagnostic(
-            diagnostics,
-            "expected expression after `:`",
-            op.start,
-            op.end,
-        );
-        return Err(error_expr_to_line_end(tokens, cond.start, colon + 1));
     };
 
     let mut events = vec![Event::Start(SyntaxKind::TERNARY_EXPR)];
     events.extend(cond.events);
     push_range(&mut events, cond.end, q_idx);
     events.push(Event::Tok(q_idx)); // `?`
+    for _ in 0..q_errors {
+        events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+        events.push(Event::Finish);
+    }
     push_range(&mut events, q_idx + 1, then_br.start);
     events.extend(then_br.events);
-    push_range(&mut events, then_br.end, colon);
-    events.push(Event::Tok(colon)); // `:`
-    push_range(&mut events, colon + 1, else_br.start);
+    if has_colon {
+        push_range(&mut events, then_br.end, colon);
+        for _ in 0..colon_errors {
+            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+            events.push(Event::Finish);
+        }
+        events.push(Event::Tok(colon)); // `:`
+        push_range(&mut events, colon + 1, else_br.start);
+    } else {
+        for _ in 0..colon_errors {
+            events.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+            events.push(Event::Finish);
+        }
+        push_range(&mut events, then_br.end, else_br.start);
+    }
     events.extend(else_br.events);
     events.push(Event::Finish);
     Ok(ExprParse {

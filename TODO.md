@@ -162,6 +162,21 @@ through), so the grammar can grow incrementally.
   Fixture `stray_closer_start`. JS allow 583 → 584; dir 128 → 129. **Deferred**:
   the `;`-segment forms (`) ; x` ⇒ `(error) (error-t ✘ ✘ x)`, `x; )` ⇒
   `(toplevel-; x (error) (error-t ✘))`) emit a subtle double-`✘` marker.
+- [x] Ternary whitespace-error `(error-t)` (error-shape slice). JuliaSyntax
+  requires whitespace on both sides of `?` and `:`; each missing side splices one
+  zero-width `ERROR_TRIVIA`. `?` markers sit between condition and true-branch
+  (`a? b : c`/`a ?b : c` ⇒ `(? a (error-t) b c)`), `:` markers between the
+  branches (`a ? b: c`/`a ? b :c` ⇒ `(? a b (error-t) c)`); a glued-both-sides
+  operator doubles them (`a?b:c` ⇒ `(? a (error-t) (error-t) b (error-t)
+  (error-t) c)`). A missing `:` is itself one marker, and the false-branch is now
+  parsed greedily (even across a newline) rather than abandoned: `a ? b c` ⇒
+  `(? a b (error-t) c)`. `parse_ternary` (`expr.rs`) counts the missing sides via
+  `q_idx == cond.end`/`colon == then_br.end` (no leading ws) and an `is_trivia`
+  check on the following token (no trailing ws), then emits the empty markers in
+  the event stream; the projector's `TERNARY_EXPR` arm already renders child
+  `(error-t)` nodes in order. Fixture `ternary_whitespace_error`. JS allow
+  584 → 589; dir 129 → 130. **Deferred** (multi-marker incomplete forms): `a ? b`
+  ⇒ `(? a b (error-t) (error-t) (error-t) (error))`, `a ?` similar.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
