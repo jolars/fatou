@@ -694,7 +694,21 @@ pub(crate) fn parse_import_stmt(
     let ctx = ParserCtx::new(tokens);
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
-    let mut i = parse_import_clause(&ctx, &mut events, start + 1, diagnostics);
+    // An `as` rename is valid in an `import` base path (`import A as B`) and in
+    // any name list after a `:` (`using A: x as y`), but *not* in a `using` base
+    // path (`using A as B`) — there JuliaSyntax wraps the alias in `(error …)`.
+    // Track whether we've crossed the top-level `:` so base-position aliases in a
+    // `using` are wrapped while post-`:` ones stay clean.
+    let is_using = node_kind == SyntaxKind::USING_STMT;
+    let mut seen_colon = false;
+
+    let mut i = parse_import_clause(
+        &ctx,
+        &mut events,
+        start + 1,
+        is_using && !seen_colon,
+        diagnostics,
+    );
 
     // Comma-separated further clauses, plus an optional single `:` that switches
     // from the base path to the list of imported names. Both separators feed the
@@ -702,10 +716,19 @@ pub(crate) fn parse_import_stmt(
     loop {
         let sep = ctx.skip_ws(i);
         match ctx.token(sep).map(|t| t.kind) {
-            Some(TokKind::Comma | TokKind::Colon) => {
+            Some(kind @ (TokKind::Comma | TokKind::Colon)) => {
                 push_range(&mut events, i, sep);
                 events.push(Event::Tok(sep));
-                i = parse_import_clause(&ctx, &mut events, sep + 1, diagnostics);
+                if kind == TokKind::Colon {
+                    seen_colon = true;
+                }
+                i = parse_import_clause(
+                    &ctx,
+                    &mut events,
+                    sep + 1,
+                    is_using && !seen_colon,
+                    diagnostics,
+                );
             }
             _ => break,
         }
@@ -735,6 +758,7 @@ fn parse_import_clause(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
     after_sep: usize,
+    wrap_alias_error: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let path_start = ctx.skip_ws(after_sep);
@@ -755,6 +779,11 @@ fn parse_import_clause(
     if is_as_kw(ctx, as_idx) {
         let alias_start = ctx.skip_ws(as_idx + 1);
         if matches!(ctx.token(alias_start).map(|t| t.kind), Some(TokKind::Ident)) {
+            // A `using`-base alias is invalid: wrap the whole rename in an
+            // `(error …)` node so the projector emits `(error (as …))`.
+            if wrap_alias_error {
+                events.push(Event::Start(SyntaxKind::ERROR));
+            }
             events.push(Event::Start(SyntaxKind::IMPORT_ALIAS));
             events.extend(path_events);
             push_range(events, path_end, as_idx);
@@ -762,6 +791,9 @@ fn parse_import_clause(
             push_range(events, as_idx + 1, alias_start);
             events.push(Event::Tok(alias_start)); // alias name
             events.push(Event::Finish);
+            if wrap_alias_error {
+                events.push(Event::Finish);
+            }
             return alias_start + 1;
         }
     }

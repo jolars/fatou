@@ -133,6 +133,7 @@ unclosed_delimiter
 unicode_operators
 unterminated_command
 unterminated_string
+using_as_error
 var_identifier_suffix
 var_macro_name
 vect_newline_comma

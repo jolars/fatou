@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **595 allowlisted**,
-90 divergence, 0 unsupported. Dir corpus: **137 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **597 allowlisted**,
+88 divergence, 0 unsupported. Dir corpus: **138 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
-Grammar bullets through "char-literal error classification" are `[x]` in `TODO.md`.
+Grammar bullets through "using-base as error-wrap" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -33,39 +33,54 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23f)
+## Latest session (2026-06-23g)
 
-**Char-literal error classification (closed-but-invalid bodies).** A `'…'` whose
-body `decode_char` can't reduce to one codepoint maps to JuliaSyntax's error
-shapes: empty `''`⇒`(char (error))`, malformed escape `'\xq'`/`'\400'`⇒
-`(char (ErrorInvalidEscapeSequence))`, anything else multi-codepoint `'ab'`/`'αβ'`/
-`'\xff\xff'`⇒`(char (ErrorOverLongCharacter))`; a lone non-UTF-8 byte `'\xff'`/
-`'\377'` stays a valid one-byte `Char` (`'\xff'`). Pure projector: the CST keeps
-one lossless `CHAR` token, and the refined `None` arm of `project_char`
-(`sexpr.rs`) delegates to a new `classify_char_error` (empty / bad-escape /
-single-byte / over-long; bad-escape wins over over-long, matching Julia). Also
-fixed the octal escape to reject values past `0xff` (`\400`⇒None) via
-`u8::try_from`. Fixture `char_errors`; dir case minted. JS allow 592 → 595, dir
-136 → 137. Zero regressions; green; clippy/fmt clean.
+**`using`-base `as` rename error-wrap.** An `as` rename is valid in an `import`
+base path (`import A as B`) and in any name list after a top-level `:`
+(`using A: x as y`, `import A: x as y`), but invalid in a `using` *base* path —
+there JuliaSyntax wraps the whole alias in `(error …)`: `using A as B` ⇒
+`(using (error (as (importpath A) B)))`, `using A, B as C` ⇒
+`(using (importpath A) (error (as (importpath B) C)))`. Fatou already parsed the
+valid forms; only the error-wrap was missing. `parse_import_stmt`
+(`structural.rs`) now tracks `is_using` + whether it has crossed the top-level
+`:` (`seen_colon`) and passes `wrap_alias_error` to `parse_import_clause`, which
+wraps the `IMPORT_ALIAS` in an `ERROR` node in that position; `project_import`
+(`sexpr.rs`) adds `ERROR` to its clause filter so the wrapped alias projects as
+`(error (as …))`. No diagnostic emitted (keeps the dir case PASS, not SKIP).
+Fixture `using_as_error`; dir case minted. JS allow 595 → 597; dir 137 → 138.
+Zero regressions; green; clippy/fmt clean.
 
-**Deferred — unterminated chars (lexer work):** `'`⇒`(char (error))` and
-`'a`⇒`(char 'a' (error-t))` need the lexer to lex an unterminated `'` (not after a
-value) as a char token instead of `Unknown`; entangled with the transpose-position
-siblings `f.'`⇒`(toplevel f (error-t '))` and `x 'y`⇒`(toplevel x (error-t ' 'y'))`.
+**Deferred — remaining `import`/`as` error shapes:** `import A as B: x` ⇒
+`(import (: (error (as …)) (importpath x)))` (an `as` *then* a top-level `:` —
+the base alias becomes an error), and `import A: x, B: y` ⇒
+`(import (: (importpath A) (importpath x) (importpath B) (error-t (importpath y))))`
+(a second `:` segment in the names list is recovery — the trailing `B: y` becomes
+an `(error-t …)`). Both touch `parse_import_stmt`'s separator loop, not the clause.
 
-**Suggested next targets (ranked):** (1) **unterminated chars** (above) — finishes
-the char cluster but touches the lexer + transpose disambiguation; probe `f.'`/
-`x 'y` first. (2) **macro-path error-t** `A.@B.x`⇒
+**Suggested next targets (ranked):** (1) **`import`/`as` error shapes** (deferred
+above) — `import A as B: x`, `import A: x, B: y`; same file, builds on this
+session. (2) **unterminated chars** — `'`⇒`(char (error))`, `'a`⇒
+`(char 'a' (error-t))`; touches the lexer + transpose disambiguation (`f.'`,
+`x 'y`); probe those first. (3) **macro-path error-t** `A.@B.x`⇒
 `(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a` (deep: Fatou
-currently drops the trailing `.x`). (3) **paren-block string-juxtapose**
-`(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘` string form). (4)
+currently drops the trailing `.x`). (4) **paren-block string-juxtapose**
+`(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘` string form). (5)
 **`public` soft-keyword in block context** — `begin public A, B end`⇒
 `(block public (error-t A ✘ B))` (toplevel `public A, B` already works; in a
-block `public` is a plain ident + error recovery). (5) **`;`-segment stray-closer**
-double-`✘`.
+block `public` is a plain ident + error recovery).
 
 ## Earlier sessions
 
+- **2026-06-23f** — Char-literal error classification (closed-but-invalid
+  bodies): a `'…'` whose body `decode_char` can't reduce to one codepoint maps to
+  JuliaSyntax's error shapes — empty `''`⇒`(char (error))`, malformed escape
+  `'\xq'`/`'\400'`⇒`(char (ErrorInvalidEscapeSequence))`, other multi-codepoint
+  `'ab'`/`'αβ'`⇒`(char (ErrorOverLongCharacter))`; a lone non-UTF-8 byte
+  `'\xff'`/`'\377'` stays a valid one-byte `Char`. Pure projector: the refined
+  `None` arm of `project_char` delegates to `classify_char_error` (bad-escape wins
+  over over-long); the octal escape now rejects values past `0xff`. Fixture
+  `char_errors`. JS 592 → 595; dir 136 → 137. Deferred: unterminated chars (lexer
+  work, entangled with transpose siblings `f.'`/`x 'y`).
 - **2026-06-23e** — `else`-without-`catch` error-wrap (last try-family
   divergence): an `else` *before* any `catch` is recovery, so JuliaSyntax wraps
   its block in `(error …)` (`try x else y end`⇒`(try (block x) (else (error

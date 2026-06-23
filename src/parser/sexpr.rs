@@ -1210,9 +1210,11 @@ fn project_import(head: &str, node: &SyntaxNode) -> String {
     // top-level `:` token (when present) splits the base path from the list of
     // imported names. Read those nodes directly.
     let has_colon = node.children_with_tokens().any(|el| el.kind() == COLON);
+    // An `ERROR` child wraps an invalid `as` rename in a `using` base path
+    // (`using A as B` ⇒ `(using (error (as …)))`).
     let clauses: Vec<String> = node
         .children()
-        .filter(|c| matches!(c.kind(), IMPORT_PATH | IMPORT_ALIAS))
+        .filter(|c| matches!(c.kind(), IMPORT_PATH | IMPORT_ALIAS | ERROR))
         .map(|c| project(&c))
         .collect();
 

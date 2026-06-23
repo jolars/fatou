@@ -226,6 +226,15 @@ through), so the grammar can grow incrementally.
   Fixture `char_errors`. JS allow 592 → 595; dir 136 → 137. **Deferred:**
   unterminated chars (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`) need
   lexer changes (the lone `'` currently lexes as `Unknown`).
+- [x] `using`-base `as` rename error-wrap (error-shape slice). An `as` rename is
+  valid in an `import` base path (`import A as B`) and in any name list after a
+  top-level `:` (`using A: x as y`), but invalid in a `using` base path: there
+  JuliaSyntax wraps the alias in `(error …)` (`using A as B` ⇒
+  `(using (error (as (importpath A) B)))`, `using A, B as C` ⇒
+  `(using (importpath A) (error (as …)))`). `parse_import_stmt` tracks whether
+  it has crossed the top-level `:` and tells `parse_import_clause` to wrap a
+  `using`-base alias in an `ERROR` node; `project_import` collects the `ERROR`
+  child as a clause. Fixture `using_as_error`. JS allow 595 → 597; dir 137 → 138.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

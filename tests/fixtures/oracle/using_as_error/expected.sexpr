@@ -1,0 +1,1 @@
+(toplevel (using (error (as (importpath A) B))) (using (importpath A) (error (as (importpath B) C))))
