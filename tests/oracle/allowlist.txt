@@ -16,6 +16,7 @@ based_int_display
 begin_index
 binary_precedence
 block_form_operand
+block_trailing_junk
 bracescat
 braces_generator
 broadcast_bitwise_operators

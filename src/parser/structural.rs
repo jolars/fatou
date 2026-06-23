@@ -1474,24 +1474,40 @@ fn run_block_inner(
     let tokens = ctx.tokens();
     events.push(Event::Start(SyntaxKind::BLOCK));
     let mut i = start;
+    let mut parsed_any = false;
 
     loop {
-        // Trivia and `;` statement separators belong to the block.
-        while matches!(
-            tokens.get(i).map(|t| t.kind),
-            Some(k) if k.is_trivia() || k == TokKind::Semicolon
-        ) {
-            events.push(Event::Tok(i));
-            i += 1;
+        // Trivia and `;` statement separators belong to the block. A newline or
+        // `;` marks a statement boundary; a following statement with neither
+        // between it and the previous one is glued trailing junk, not a new
+        // statement.
+        let mut saw_separator = false;
+        while let Some(k) = tokens.get(i).map(|t| t.kind) {
+            if k.is_trivia() || k == TokKind::Semicolon {
+                if matches!(k, TokKind::Newline | TokKind::Semicolon) {
+                    saw_separator = true;
+                }
+                events.push(Event::Tok(i));
+                i += 1;
+            } else {
+                break;
+            }
         }
         match tokens.get(i).map(|t| t.kind) {
             None => break,
             Some(k) if terminators.contains(&k) => break,
+            // A statement glued to the previous one with no `;`/newline between
+            // is trailing junk: JuliaSyntax (`parse_Nary`) ends the block here and
+            // leaves the remainder for the closing recovery (`expect_end`), which
+            // bumps it as flat error tokens up to the closing keyword
+            // (`begin x y end` ⇒ `(block x (error-t y))`).
+            Some(_) if parsed_any && !saw_separator => break,
             Some(_) => {
                 let parsed = parse_block_stmt(tokens, i, public_context, diagnostics);
                 if let Some(stmt) = parsed {
                     events.extend(stmt.events);
                     i = stmt.end;
+                    parsed_any = true;
                 } else {
                     events.push(Event::Tok(i));
                     i += 1;
@@ -1504,7 +1520,20 @@ fn run_block_inner(
     i
 }
 
-/// Emit the closing `end` keyword, or a diagnostic if it is missing.
+/// Close a block form: recover any trailing junk, then consume the `end`.
+///
+/// This mirrors JuliaSyntax's `bump_closing_token`. There are three cases:
+///
+/// - The `end` is right here — consume it.
+/// - A non-closer token is glued before the `end` (the block stopped at
+///   separator-less junk) — bump the run as flat error tokens up to the closing
+///   keyword (a byte-bearing `ERROR` node the projector renders `(error-t …)`),
+///   then consume the `end` if one follows. JuliaSyntax emits *only* this marker,
+///   so no missing-`end` marker is added when the run reaches EOF.
+/// - Neither — the form was truncated before its `end` (EOF or a foreign closer
+///   like `)`); record a zero-width `MissingEnd` diagnostic at the opening keyword
+///   (no node, per the rust-analyzer model), which the projector replays as the
+///   truncation `(error-t)` (`if c\n x` ⇒ `(if c (block x) (error-t))`).
 fn expect_end(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
@@ -1512,23 +1541,81 @@ fn expect_end(
     open_start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    if ctx.token(i).map(|t| t.kind) == Some(TokKind::EndKw) {
-        events.push(Event::Tok(i));
-        i + 1
-    } else {
-        // A block form truncated before its `end` (EOF or an unconsumable
-        // closer) records a `MissingEnd` diagnostic at the opening keyword; the
-        // projector replays it as JuliaSyntax's truncation `(error-t)`
-        // (`if c\n x` ⇒ `(if c (block x) (error-t))`). No node is added to the
-        // tree (the rust-analyzer model: absence + diagnostic).
-        let kw = &ctx.tokens()[open_start];
-        push_diagnostic(
-            diagnostics,
-            DiagnosticKind::MissingEnd,
-            "expected `end`",
-            kw.start,
-            kw.end,
-        );
-        i
+    let mut i = i;
+    match ctx.token(i).map(|t| t.kind) {
+        Some(TokKind::EndKw) => {
+            events.push(Event::Tok(i));
+            i + 1
+        }
+        Some(k) if !is_block_junk_stopper(k) => {
+            i = collect_block_junk(ctx, events, i, diagnostics);
+            if ctx.token(i).map(|t| t.kind) == Some(TokKind::EndKw) {
+                events.push(Event::Tok(i));
+                i + 1
+            } else {
+                i
+            }
+        }
+        _ => {
+            let kw = &ctx.tokens()[open_start];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::MissingEnd,
+                "expected `end`",
+                kw.start,
+                kw.end,
+            );
+            i
+        }
     }
+}
+
+/// Tokens that halt a trailing-junk recovery run: the closing keywords of every
+/// block form (`end`, `else`, `elseif`, `catch`, `finally`) and the bracket
+/// closers — JuliaSyntax's `is_closing_token` minus `,`/`;` (which a run
+/// swallows). EOF also halts the run (the `while let` bound in
+/// [`collect_block_junk`]).
+fn is_block_junk_stopper(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::EndKw
+            | TokKind::ElseKw
+            | TokKind::ElseifKw
+            | TokKind::CatchKw
+            | TokKind::FinallyKw
+            | TokKind::RParen
+            | TokKind::RBracket
+            | TokKind::RBrace
+    )
+}
+
+/// Bump a trailing-junk run — every token up to (but not including) the next
+/// block/bracket closer — into one `ERROR` node, flagged with a `TrailingJunk`
+/// diagnostic so the projector renders it `(error-t …)`. The caller guarantees
+/// the first token is not a stopper, so the node is never zero-width.
+fn collect_block_junk(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    mut i: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let tokens = ctx.tokens();
+    let first = i;
+    events.push(Event::Start(SyntaxKind::ERROR));
+    while let Some(k) = tokens.get(i).map(|t| t.kind) {
+        if is_block_junk_stopper(k) {
+            break;
+        }
+        events.push(Event::Tok(i));
+        i += 1;
+    }
+    events.push(Event::Finish);
+    push_diagnostic(
+        diagnostics,
+        DiagnosticKind::TrailingJunk,
+        "trailing tokens after statement",
+        tokens[first].start,
+        tokens[first].end,
+    );
+    i
 }

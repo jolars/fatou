@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **605 allowlisted**,
-80 divergence, 0 unsupported. Dir corpus: **140 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **607 allowlisted**,
+78 divergence, 0 unsupported. Dir corpus: **141 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,46 +52,60 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23k)
+## Latest session (2026-06-23l)
 
-**Flat trailing-junk runs.** JuliaSyntax bumps the leftover after a line's first
-statement as *flat error tokens*, not a re-parsed subtree: `x y, z` ⇒
-`x (error-t y ✘ z)`, `x@y` ⇒ `x (error-t ✘ y)`, `x f(y)` ⇒
-`x (error-t f ✘ y ✘)`, `x a=b` ⇒ `x (error-t a = b)` (brackets/commas/`@` render
-`✘`; operators and identifiers keep their text). Previously the `core.rs` driver
-re-parsed the leftover into structured nodes (`(tuple y z)`, `(macrocall @y)`,
-`(call f y)`), which the projector then rendered structurally — always a FAIL,
-since Julia flattens. Two-line fix: the driver now collects the run **raw** (no
-`parse_stmt`) once `leftover_mark` is set on a `;`-free, non-docstring line, and
-`project_error` renders the broader glyph set via new `is_error_glyph`
-(`( ) [ ] { } , @`, replacing the close-only `is_close_delimiter`). The existing
-leftover-wrapping code (lines 107-137) needed **no** change — it wraps raw tokens
-identically to parsed nodes. Extended fixture `toplevel_leftover_error`. JS
-603 → 605 (`x@y` js-da8ab15a, `outer i = rhs` js-d48e351c); dir 140 (the fixture
-was already allowlisted). Green; clippy/fmt clean.
+**Block-body trailing junk.** JuliaSyntax ends a block at the first
+separator-less glued token (`parse_Nary` only continues across a newline/`;`),
+then the closing recovery (`bump_closing_token`) bumps the run as flat error
+tokens up to the closing keyword. Placement splits by form: `begin`/`quote` are
+modeled *as* the block, so the run lands **inside** it (`begin\n public A, B\n end`
+⇒ `(block public (error-t A ✘ B))`); `if`/`while`/etc. emit the block first, so
+the run is a **sibling** of it (`if true\n public A, B\n end` ⇒
+`(if true (block public) (error-t A ✘ B))`). Three-part fix, **no `junk_inside`
+flag needed** — the CST is uniform (junk `ERROR` is always a sibling of `BLOCK`,
+child of the construct) and the *projector* decides placement: (1)
+`run_block_inner` (`structural.rs`) tracks `saw_separator` and `parsed_any` and
+breaks the statement loop at glued junk; (2) `expect_end` became the full close
+(JuliaSyntax `bump_closing_token`): at `end` consume it, at a non-stopper bump the
+run via new `collect_block_junk` (stops at `end`/`else`/`elseif`/`catch`/`finally`/
+`) ] }` per new `is_block_junk_stopper`, swallows `,`/`;`/newlines) then consume
+`end`, else record the existing zero-width `MissingEnd`; (3)
+`project_block_child_folding_error` folds the sibling `ERROR` into the begin/quote
+block (alongside the existing `MissingEnd` fold), `project_if` projects it after
+the then-block. `while` auto-projects it (uses `project_each(child_nodes)`).
+Fixture `block_trailing_junk`. JS 605 → 607 (js-d7b0ba21, js-803233ba); dir
+140 → 141. Green; clippy/fmt clean.
 
-**Gotcha that bit once:** the first pass regressed 3 allowlisted docstring cases
-(`"doc" foo` ⇒ `(doc (string "doc") foo)`): a docstring opener *owns* its trailing
-statement, so junk mode must check `!first_is_doc_string` too (the
-`fold_docstrings` pass needs the trailing statement as a real node, not raw junk).
-Two benign CST-only changes (no projection change, accepted): the leftover in
-`paren_block_juxtapose_error` / `return_stray_close` is now a raw `IDENT` token
-instead of a `NAME` node — more faithful (it's junk), same `(error-t x)`.
+**Key insight that simplified it:** the junk and missing-`end` markers never
+stack — `bump_closing_token` emits *exactly one* recovery marker (the junk run
+*or* the zero-width missing-`end`). So `expect_end` collects junk *xor* records
+`MissingEnd`; `begin x y` (junk, no `end`) ⇒ `(block x (error-t y))`, not a
+doubled marker. The uniform-CST + projector-fold approach also avoided churning
+the 6 existing begin/quote snapshots (their `end` stays a child of the construct,
+outside the `BLOCK`; only the malformed-junk shape changed).
 
-**Scoping note:** the `✘`-glyph FAIL cluster has three distinct roots; this
-session took only the toplevel-flat one. Still open: (a) **block-body trailing
-junk** — `run_block_inner` (`structural.rs`) has *no* leftover driver, so
-`begin\n public A, B\n end` ⇒ Fatou `(block public (tuple A B))` vs Julia
-`(block public (error-t A ✘ B))` (js-d7b0ba21, js-803233ba); needs the same
-flat-junk logic ported into the block loop. (b) **`public`/`outer` stop at `=`**
-— `parse_name_list_stmt` (shared with `export`) carries *every* same-line token,
-but Julia's `public` takes bare names only and stops at `=` (`public x=1, y` ⇒
-`(public x) (error-t = 1 ✘ y)`, js-1beba79b/js-e151591c); risk: don't regress
-`export`. (c) **array-internal** `[x@y]` ⇒ `(hcat x (error-t ✘ y))`
-(js-6be56bdb/js-83672850).
+**Scoping note:** still-open `✘`-glyph FAIL roots: (a) **`public`/`outer` stop at
+`=`** — `parse_name_list_stmt` (shared with `export`) carries *every* same-line
+token, but Julia's `public` takes bare names only and stops at `=`
+(`public x=1, y` ⇒ `(public x) (error-t = 1 ✘ y)`, js-1beba79b/js-e151591c); risk:
+don't regress `export`. (b) **array-internal** `[x@y]` ⇒ `(hcat x (error-t ✘ y))`
+(js-6be56bdb/js-83672850). Also deferred from this session:
+for/let/module/struct/try/do block junk (the sibling `ERROR` is in the CST but
+their explicit projectors don't yet emit it — only `if`/`while`/`begin`/`quote`
+do), and junk-then-`else` (`if true\n x y\n else z\n end`, where Julia stops the
+run at `else` and re-floats `else z`/`end` to toplevel).
 
 ## Earlier sessions
 
+- **2026-06-23k** — Flat trailing-junk runs (toplevel): JuliaSyntax bumps a
+  separator-less line's leftover as *flat error tokens*, not a re-parsed subtree
+  (`x y, z` ⇒ `x (error-t y ✘ z)`, `x@y` ⇒ `x (error-t ✘ y)`); brackets/commas/`@`
+  render `✘`, operators/identifiers keep text. The `core.rs` driver collects the
+  run raw (no `parse_stmt`) once `leftover_mark` is set on a `;`-free,
+  non-docstring line; `project_error` renders the broader glyph set via
+  `is_error_glyph` (`( ) [ ] { } , @`). Gotcha: must check `!first_is_doc_string`
+  (a docstring opener owns its trailing statement). Fixture
+  `toplevel_leftover_error`. JS 603 → 605.
 - **2026-06-23j** — `const`-not-assignment error-wrap (first error shape on the
   diagnostics model): JuliaSyntax wraps a `const` whose decl isn't a plain `=` in
   `(error …)` (`const x`⇒`(error (const x))`, `const x += 1`, `const global x`),

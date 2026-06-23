@@ -1158,6 +1158,11 @@ fn project_if(node: &SyntaxNode) -> String {
         .filter(|c| matches!(c.kind(), ELSEIF_CLAUSE | ELSE_CLAUSE))
         .collect();
     let mut parts = vec![cond, then_block];
+    // A trailing-junk `ERROR` glued after the then-block is a sibling of the
+    // block inside the `if` (`if c\n x y\n end` ⇒ `(if c (block x) (error-t y))`).
+    if let Some(err) = node.children().find(|c| c.kind() == ERROR) {
+        parts.push(project(&err));
+    }
     if let Some(tail) = project_if_tail(&clauses) {
         parts.push(tail);
     }
@@ -2517,6 +2522,12 @@ fn project_block_child_folding_error(node: &SyntaxNode) -> String {
         return "(block)".to_string();
     };
     let mut parts = stmt_strings(&block);
+    // A trailing-junk `ERROR` sibling of the block folds *into* it for the forms
+    // JuliaSyntax models *as* the block, so the recovery lands inside
+    // (`begin x y end` ⇒ `(block x (error-t y))`).
+    for err in node.children().filter(|c| c.kind() == ERROR) {
+        parts.push(project(&err));
+    }
     push_trailing_errors(node, &mut parts);
     sexp("block", parts)
 }

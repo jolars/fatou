@@ -98,9 +98,22 @@ through), so the grammar can grow incrementally.
   `;`-free, non-docstring line; `project_error` renders the broader glyph set via
   `is_error_glyph` (`( ) [ ] { } , @`). Extended fixture
   `toplevel_leftover_error`. JS allow 603 → 605 (`x@y`, `outer i = rhs`).
-  **Deferred**: block-body trailing junk (`begin\n public A, B\n end` ⇒
-  `(block public (error-t A ✘ B))`) and `public`/`outer` stopping at `=`
-  (`public x=1, y`).
+  **Deferred**: `public`/`outer` stopping at `=` (`public x=1, y`).
+- [x] Block-body trailing-junk `(error-t)` (error-shape slice). A statement
+  glued to the previous one inside a block with no `;`/newline between is junk:
+  JuliaSyntax (`parse_Nary`) ends the block there and the closing recovery
+  (`bump_closing_token`) bumps the run as flat error tokens up to the closing
+  keyword. `begin`/`quote` are modeled *as* the block so the run lands inside
+  (`begin\n public A, B\n end` ⇒ `(block public (error-t A ✘ B))`); other forms
+  leave it a sibling of the block (`if true\n x y\n end` ⇒
+  `(if true (block x) (error-t y))`, also `while`). `run_block_inner`
+  (`structural.rs`) stops the statement loop at a separator-less token;
+  `expect_end` (now a full close: junk-or-missing-`end` + consume `end`) bumps the
+  run via `collect_block_junk`; `project_block_child_folding_error` folds the
+  sibling `ERROR` into the block, `project_if` projects it. Fixture
+  `block_trailing_junk`. JS allow 605 → 607; dir 140 → 141. **Deferred**:
+  for/let/module/struct/try/do junk (sibling `ERROR` not yet projected),
+  junk-then-`else` (`if true\n x y\n else z\n end`).
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒

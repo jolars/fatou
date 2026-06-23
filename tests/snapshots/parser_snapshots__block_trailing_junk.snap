@@ -1,0 +1,87 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..90
+  BEGIN_EXPR@0..23
+    BEGIN_KW@0..5 "begin"
+    BLOCK@5..14
+      NEWLINE@5..6 "\n"
+      WHITESPACE@6..7 " "
+      NAME@7..13
+        IDENT@7..13 "public"
+      WHITESPACE@13..14 " "
+    ERROR@14..20
+      IDENT@14..15 "A"
+      COMMA@15..16 ","
+      WHITESPACE@16..17 " "
+      IDENT@17..18 "B"
+      NEWLINE@18..19 "\n"
+      WHITESPACE@19..20 " "
+    END_KW@20..23 "end"
+  NEWLINE@23..24 "\n"
+  IF_EXPR@24..49
+    IF_KW@24..26 "if"
+    WHITESPACE@26..27 " "
+    CONDITION@27..31
+      LITERAL@27..31
+        TRUE_KW@27..31 "true"
+    BLOCK@31..40
+      NEWLINE@31..32 "\n"
+      WHITESPACE@32..33 " "
+      NAME@33..39
+        IDENT@33..39 "public"
+      WHITESPACE@39..40 " "
+    ERROR@40..46
+      IDENT@40..41 "A"
+      COMMA@41..42 ","
+      WHITESPACE@42..43 " "
+      IDENT@43..44 "B"
+      NEWLINE@44..45 "\n"
+      WHITESPACE@45..46 " "
+    END_KW@46..49 "end"
+  NEWLINE@49..50 "\n"
+  WHILE_EXPR@50..67
+    WHILE_KW@50..55 "while"
+    WHITESPACE@55..56 " "
+    CONDITION@56..57
+      NAME@56..57
+        IDENT@56..57 "c"
+    BLOCK@57..61
+      NEWLINE@57..58 "\n"
+      WHITESPACE@58..59 " "
+      NAME@59..60
+        IDENT@59..60 "x"
+      WHITESPACE@60..61 " "
+    ERROR@61..64
+      IDENT@61..62 "y"
+      NEWLINE@62..63 "\n"
+      WHITESPACE@63..64 " "
+    END_KW@64..67 "end"
+  NEWLINE@67..68 "\n"
+  BEGIN_EXPR@68..89
+    BEGIN_KW@68..73 "begin"
+    BLOCK@73..80
+      NEWLINE@73..74 "\n"
+      WHITESPACE@74..75 " "
+      NAME@75..76
+        IDENT@75..76 "a"
+      NEWLINE@76..77 "\n"
+      WHITESPACE@77..78 " "
+      NAME@78..79
+        IDENT@78..79 "x"
+      WHITESPACE@79..80 " "
+    ERROR@80..86
+      IDENT@80..81 "y"
+      NEWLINE@81..82 "\n"
+      WHITESPACE@82..83 " "
+      IDENT@83..84 "z"
+      NEWLINE@84..85 "\n"
+      WHITESPACE@85..86 " "
+    END_KW@86..89 "end"
+  NEWLINE@89..90 "\n"
+
+diagnostic [14..15]: trailing tokens after statement
+diagnostic [40..41]: trailing tokens after statement
+diagnostic [61..62]: trailing tokens after statement
+diagnostic [80..81]: trailing tokens after statement
