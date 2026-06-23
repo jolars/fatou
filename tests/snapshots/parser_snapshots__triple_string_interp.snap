@@ -14,17 +14,18 @@ ROOT@0..35
       STRING_CONTENT@7..17 "\n  value: "
       INTERPOLATION@17..30
         DOLLAR@17..18 "$"
-        LPAREN@18..19 "("
-        CALL_EXPR@19..29
-          NAME@19..26
-            IDENT@19..26 "compute"
-          ARG_LIST@26..29
-            LPAREN@26..27 "("
-            ARG@27..28
-              NAME@27..28
-                IDENT@27..28 "x"
-            RPAREN@28..29 ")"
-        RPAREN@29..30 ")"
+        PAREN_EXPR@18..30
+          LPAREN@18..19 "("
+          CALL_EXPR@19..29
+            NAME@19..26
+              IDENT@19..26 "compute"
+            ARG_LIST@26..29
+              LPAREN@26..27 "("
+              ARG@27..28
+                NAME@27..28
+                  IDENT@27..28 "x"
+              RPAREN@28..29 ")"
+          RPAREN@29..30 ")"
       STRING_CONTENT@30..31 "\n"
       STRING_DELIM_CLOSE@31..34 "\"\"\""
   NEWLINE@34..35 "\n"

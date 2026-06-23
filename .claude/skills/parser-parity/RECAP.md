@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **619 allowlisted**,
-66 divergence, 0 unsupported. Dir corpus: **145 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **622 allowlisted**,
+63 divergence, 0 unsupported. Dir corpus: **146 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,38 +52,44 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23p)
+## Latest session (2026-06-23q)
 
-**Lone syntactic operator → `(error op)`.** A syntactic operator with no value
-meaning, used where an atom is expected, is JuliaSyntax's `(error op)` atom:
-the assignment ops (`=` ⇒ `(error =)`, `+=`, `.+=` ⇒ `(error (. +=))`), the
-short-circuits `&&`/`||`, the anonymous-function `->`, the splat `...`, and the
-ternary `?` (`?` ⇒ `(error ?)` bare, `?x`/`?"str"` ⇒ `(call-pre (error ?) …)`
-with an operand). It applies in *every* atom position — `[=]` ⇒ `(vect (error
-=))`, `f(=)` ⇒ `(call f (error =))`, `a + =` ⇒ `(call-i a + (error =))` — and
-consumes only the operator, so a toplevel trailing operand falls to the existing
-junk driver (`= x` ⇒ `(error =) (error-t x)`) and an infix RHS to the operator
-loop. Fix: new `is_lone_error_operator` (`is_assignment_op | && || -> ...`) +
-`error_operator_atom` (`ERROR > OPERATOR_ATOM > op`) arms in `parse_prefix`
-(`expr.rs`); `?` joins the binary-only value-operator arm with a bare-`None`
-branch emitting the error atom. New `LoneOperator` diagnostic (non-recovery, so
-projector renders plain `(error …)`); `project_operator_atom` already gives `=`
-/`(. +=)` so **projector untouched**. JS 614 → 619 (`=`, `+=`, `.+=`, `?`,
-`?"str"`); dir 144 → 145. Fixture `lone_operator_error`. Green; clippy/fmt clean.
+**Multi-value `$(…)` interpolation → `(error …)`.** A `$(…)` string interpolation
+must hold a single expression; a multi-value parenthesized form is invalid and
+JuliaSyntax renders the operand as `(error …)`. Fatou used to parse the `$(…)`
+interior with `parse_expr_in_brackets` (one expression), which stopped dead at a
+`;`/`,`/generator and leaked the rest as an unterminated-string mess. Fix:
+`parse_interpolation` (`expr.rs`) now reuses the shared `parse_paren`, so the
+operand becomes a faithful `PAREN_EXPR` (single expr), `PAREN_BLOCK` (`$(x;y)`),
+`TUPLE_EXPR` (`$(x,y)`, empty `$()`), or `GENERATOR` (`$(x for …)`) subtree, and
+records an `InvalidInterpolation` diagnostic for the three multi-value kinds.
+`project_interpolation` (`sexpr.rs`) reconstructs the error from the inner node
+kind — block → `project_block_args`, tuple → `project_args`, generator → keep
+nested — flattening block/tuple children and unwrapping a `PAREN_EXPR` for the
+valid single-expr case (`"$((x,y))"` ⇒ `(string (tuple-p x y))`, `"$(a=1)"` ⇒
+`(string (= a 1))`). New `DiagnosticKind::InvalidInterpolation`. JS 619 → 622
+(`"$(x;y)"`, `"$(x,y)"`, `"$(x for y in z)"`); dir 145 → 146. Fixture
+`string_interp_error`. Green; clippy/fmt clean.
 
-**Key insight:** these mirror JuliaSyntax's `parse_atom` emitting `(error op)`
-wherever a value is expected — so the fix is one prefix arm covering all
-positions, with the *rest* of each malformed line already handled by the
-trailing-junk driver and the operator loop. **Trap hit:** the bare-comma tuple
-loop (`parse_comma_tuple`) eagerly collected the `=` as a `(error =)` element,
-breaking the trailing-comma destructure `x, = xs` ⇒ `(= (tuple x) xs)`; guard it
-by stopping the loop before a lone operator. **Deferred (pre-existing, not this
-feature):** bare `?`/`/` consume an operand across a newline (`?\nx` ⇒
-`(call-pre (error ?) x)` vs Julia's two statements) — a latent bug in the
-2026-06-23n prefix-error operand parse (`skip_trivia` crosses newlines).
+**Key insight:** the gap was a *parser* shortcut, not a projector gap — `$(…)`
+is just a parenthesized expression, so reusing `parse_paren` makes the CST
+faithful and the multi-value-is-error rule falls out of the node kind (no
+invented structure; the char-error pure-projector precedent applies). The CST
+shape for *all* `$(…)` interpolations changed (the parens now nest a real
+`PAREN_EXPR`), so six existing interpolation snapshots were re-accepted — a
+uniform, faithful wrap. Empty `$()` now correctly projects `(error)` too (not in
+the corpus, so no count movement). **Deferred:** `$(x y)` juxtaposition-in-parens
+→ `(parens x (error-t y))` (a different error path, not exercised here).
 
 ## Earlier sessions
 
+- **2026-06-23p** — Lone syntactic operator → `(error op)`: a syntactic operator
+  with no value meaning used where an atom is expected is `(error op)` (`=`, `+=`,
+  `.+=`, `&&`, `||`, `->`, `...`, `?`/`?x`); applies in every atom position, the
+  trailing operand falling to the junk driver. New `is_lone_error_operator` +
+  `error_operator_atom` arms (`expr.rs`); `parse_comma_tuple` guards the
+  trailing-comma destructure. Fixture `lone_operator_error`. JS 614 → 619; dir
+  144 → 145.
 - **2026-06-23o** — Array-internal trailing junk: glued `@` → `(error-t ✘ …)`. A
   macro `@` glued (no separating ws/`;`/newline) to a preceding array element is not
   a new row — JuliaSyntax bumps the rest of the array to the `]`/EOF as one flat

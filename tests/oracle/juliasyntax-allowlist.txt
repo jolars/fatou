@@ -3,6 +3,7 @@
 # (no Julia needed). Seed/refresh from `juliasyntax_full_report`. The report's
 # divergence + unsupported buckets are the backlog for growing parser parity.
 
+js-0026fb4f
 js-006f1f57
 js-00f6acf2
 js-013ac273
@@ -418,6 +419,7 @@ js-a3fb44cc
 js-a5897938
 js-a5e912fa
 js-a60ca8aa
+js-a60e7cdd
 js-a643eeec
 js-a669ac63
 js-a73c4b25
@@ -459,6 +461,7 @@ js-b10fa164
 js-b125918f
 js-b1495613
 js-b2c5bc29
+js-b32e242a
 js-b3691b92
 js-b3d1db31
 js-b47ce3a1

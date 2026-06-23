@@ -1574,34 +1574,35 @@ fn parse_interpolation(
 
     match ctx.token(next).map(|t| t.kind) {
         Some(TokKind::LParen) => {
-            events.push(Event::Tok(next)); // `(`
-            let inner_start = ctx.skip_trivia(next + 1);
-            push_range(events, next + 1, inner_start);
-
-            if ctx.token(inner_start).map(|t| t.kind) == Some(TokKind::RParen) {
-                events.push(Event::Tok(inner_start)); // empty `$()`
+            // The parenthesized interpolation operand parses exactly like any
+            // other parenthesized expression: a single expression (`$(x+y)`) is a
+            // `PAREN_EXPR` the projector unwraps, while the multi-value forms
+            // `$(x;y)` (`PAREN_BLOCK`), `$(x,y)` (`TUPLE_EXPR`), `$(x for …)`
+            // (`GENERATOR`), and the empty `$()` (`TUPLE_EXPR`) are what
+            // JuliaSyntax rejects as a `(error …)` interpolation.
+            let Some(inner) = parse_paren(ctx, next, diagnostics) else {
                 events.push(Event::Finish);
-                return inner_start + 1;
-            }
-
-            let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, diagnostics)
-            else {
-                events.push(Event::Finish);
-                return inner_start;
+                return next + 1;
             };
-            events.extend(inner.events);
-
-            let close = ctx.skip_trivia(inner.end);
-            if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
-                push_range(events, inner.end, close);
-                events.push(Event::Tok(close)); // `)`
-                events.push(Event::Finish);
-                close + 1
-            } else {
-                push_range(events, inner.end, close);
-                events.push(Event::Finish);
-                close
+            if matches!(
+                inner.events.first(),
+                Some(Event::Start(
+                    SyntaxKind::PAREN_BLOCK | SyntaxKind::TUPLE_EXPR | SyntaxKind::GENERATOR
+                ))
+            ) {
+                let dollar_tok = &ctx.tokens()[dollar];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::InvalidInterpolation,
+                    "interpolation expects a single expression",
+                    dollar_tok.start,
+                    dollar_tok.end,
+                );
             }
+            let end = inner.end;
+            events.extend(inner.events);
+            events.push(Event::Finish);
+            end
         }
         Some(TokKind::Ident) => {
             events.push(Event::Tok(next));

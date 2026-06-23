@@ -32,14 +32,15 @@ ROOT@0..54
     WHITESPACE@34..35 " "
     INTERPOLATION@35..41
       DOLLAR@35..36 "$"
-      LPAREN@36..37 "("
-      BINARY_EXPR@37..40
-        NAME@37..38
-          IDENT@37..38 "a"
-        STAR@38..39 "*"
-        NAME@39..40
-          IDENT@39..40 "b"
-      RPAREN@40..41 ")"
+      PAREN_EXPR@36..41
+        LPAREN@36..37 "("
+        BINARY_EXPR@37..40
+          NAME@37..38
+            IDENT@37..38 "a"
+          STAR@38..39 "*"
+          NAME@39..40
+            IDENT@39..40 "b"
+        RPAREN@40..41 ")"
   NEWLINE@41..42 "\n"
   EXPORT_STMT@42..53
     EXPORT_KW@42..48 "export"

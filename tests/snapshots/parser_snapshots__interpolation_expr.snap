@@ -9,16 +9,17 @@ ROOT@0..52
   NEWLINE@2..3 "\n"
   INTERPOLATION@3..11
     DOLLAR@3..4 "$"
-    LPAREN@4..5 "("
-    BINARY_EXPR@5..10
-      NAME@5..6
-        IDENT@5..6 "x"
-      WHITESPACE@6..7 " "
-      PLUS@7..8 "+"
-      WHITESPACE@8..9 " "
-      NAME@9..10
-        IDENT@9..10 "y"
-    RPAREN@10..11 ")"
+    PAREN_EXPR@4..11
+      LPAREN@4..5 "("
+      BINARY_EXPR@5..10
+        NAME@5..6
+          IDENT@5..6 "x"
+        WHITESPACE@6..7 " "
+        PLUS@7..8 "+"
+        WHITESPACE@8..9 " "
+        NAME@9..10
+          IDENT@9..10 "y"
+      RPAREN@10..11 ")"
   NEWLINE@11..12 "\n"
   BINARY_EXPR@12..16
     NAME@12..13
@@ -34,16 +35,17 @@ ROOT@0..52
     DOT@18..19 "."
     INTERPOLATION@19..27
       DOLLAR@19..20 "$"
-      LPAREN@20..21 "("
-      BINARY_EXPR@21..26
-        NAME@21..22
-          IDENT@21..22 "x"
-        WHITESPACE@22..23 " "
-        PLUS@23..24 "+"
-        WHITESPACE@24..25 " "
-        NAME@25..26
-          IDENT@25..26 "y"
-      RPAREN@26..27 ")"
+      PAREN_EXPR@20..27
+        LPAREN@20..21 "("
+        BINARY_EXPR@21..26
+          NAME@21..22
+            IDENT@21..22 "x"
+          WHITESPACE@22..23 " "
+          PLUS@23..24 "+"
+          WHITESPACE@24..25 " "
+          NAME@25..26
+            IDENT@25..26 "y"
+        RPAREN@26..27 ")"
   NEWLINE@27..28 "\n"
   BINARY_EXPR@28..32
     NAME@28..29

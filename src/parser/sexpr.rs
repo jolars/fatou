@@ -2383,9 +2383,19 @@ fn escape_string_value(s: &str) -> String {
 }
 
 fn project_interpolation(node: &SyntaxNode) -> String {
-    // `$name` → the bare identifier; `$(expr)` → the projected sub-expression.
+    // `$name` → the bare identifier; `$(expr)` → the projected sub-expression. A
+    // `$(…)` whose parens hold a multi-value form is invalid: JuliaSyntax renders
+    // a block (`$(x;y)`), tuple (`$(x,y)`, empty `$()`), or generator
+    // (`$(x for …)`) operand as `(error …)`, flattening block/tuple children and
+    // keeping the generator nested. A single expression is a `PAREN_EXPR` the
+    // normal `project` unwraps.
     if let Some(inner) = first_node(node) {
-        return project(&inner);
+        return match inner.kind() {
+            PAREN_BLOCK => sexp("error", project_block_args(&inner)),
+            TUPLE_EXPR => sexp("error", project_args(&inner)),
+            GENERATOR => sexp("error", vec![project_generator(&inner)]),
+            _ => project(&inner),
+        };
     }
     node.children_with_tokens()
         .filter_map(|el| el.into_token())

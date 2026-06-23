@@ -29,17 +29,18 @@ ROOT@0..88
       STRING_CONTENT@50..56 "\n  b: "
       INTERPOLATION@56..63
         DOLLAR@56..57 "$"
-        LPAREN@57..58 "("
-        CALL_EXPR@58..62
-          NAME@58..59
-            IDENT@58..59 "f"
-          ARG_LIST@59..62
-            LPAREN@59..60 "("
-            ARG@60..61
-              NAME@60..61
-                IDENT@60..61 "z"
-            RPAREN@61..62 ")"
-        RPAREN@62..63 ")"
+        PAREN_EXPR@57..63
+          LPAREN@57..58 "("
+          CALL_EXPR@58..62
+            NAME@58..59
+              IDENT@58..59 "f"
+            ARG_LIST@59..62
+              LPAREN@59..60 "("
+              ARG@60..61
+                NAME@60..61
+                  IDENT@60..61 "z"
+              RPAREN@61..62 ")"
+          RPAREN@62..63 ")"
       STRING_CONTENT@63..66 "\n  "
       STRING_DELIM_CLOSE@66..69 "\"\"\""
   NEWLINE@69..70 "\n"

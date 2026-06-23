@@ -18,16 +18,17 @@ ROOT@0..34
       STRING_CONTENT@16..18 ", "
       INTERPOLATION@18..26
         DOLLAR@18..19 "$"
-        LPAREN@19..20 "("
-        BINARY_EXPR@20..25
-          LITERAL@20..21
-            INTEGER@20..21 "1"
-          WHITESPACE@21..22 " "
-          PLUS@22..23 "+"
-          WHITESPACE@23..24 " "
-          LITERAL@24..25
-            INTEGER@24..25 "2"
-        RPAREN@25..26 ")"
+        PAREN_EXPR@19..26
+          LPAREN@19..20 "("
+          BINARY_EXPR@20..25
+            LITERAL@20..21
+              INTEGER@20..21 "1"
+            WHITESPACE@21..22 " "
+            PLUS@22..23 "+"
+            WHITESPACE@23..24 " "
+            LITERAL@24..25
+              INTEGER@24..25 "2"
+          RPAREN@25..26 ")"
       STRING_CONTENT@26..32 " items"
       STRING_DELIM_CLOSE@32..33 "\""
   NEWLINE@33..34 "\n"

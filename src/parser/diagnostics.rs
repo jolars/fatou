@@ -80,6 +80,11 @@ pub enum DiagnosticKind {
     MissingTernaryTrue,
     MissingTernaryFalse,
     MissingTernaryColon,
+    /// A `$(…)` string interpolation whose parens hold a multi-value form — a
+    /// block (`$(x;y)`), tuple (`$(x,y)`), generator (`$(x for …)`), or the empty
+    /// `$()` — rather than a single expression. JuliaSyntax renders the operand as
+    /// `(error …)`; the projector reconstructs that shape from the CST topology.
+    InvalidInterpolation,
 }
 
 /// A parse-time diagnostic: a classified message anchored to a byte range in the

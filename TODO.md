@@ -169,6 +169,19 @@ through), so the grammar can grow incrementally.
   `LoneOperator`; projector untouched. Fixture `lone_operator_error`. JS allow
   614 → 619; dir 144 → 145. **Deferred**: bare `?`/`/` consuming an operand across
   a newline (`?\nx`, `/\nx` — pre-existing in the prefix-error path).
+- [x] Multi-value `$(…)` interpolation `(error …)`. A `$(…)` string interpolation
+  must hold a single expression; a multi-value parenthesized form is invalid and
+  JuliaSyntax renders the operand as `(error …)`, flattening block/tuple children
+  and keeping a generator nested: `"$(x;y)"` ⇒ `(string (error x y))`, `"$(x,y)"`
+  ⇒ `(string (error x y))`, `"$(x for y in z)"` ⇒ `(string (error (generator x
+  (= y z))))`, empty `"$()"` ⇒ `(string (error))`. A single expression `"$(x+y)"`
+  stays valid and `"$((x,y))"` ⇒ `(string (tuple-p x y))`. `parse_interpolation`
+  (`expr.rs`) now parses the `$(…)` operand with the shared `parse_paren` (so the
+  parens become a faithful `PAREN_EXPR`/`PAREN_BLOCK`/`TUPLE_EXPR`/`GENERATOR`
+  subtree) and records an `InvalidInterpolation` diagnostic for the multi-value
+  kinds; `project_interpolation` (`sexpr.rs`) reconstructs `(error …)` from the
+  inner node kind and unwraps a `PAREN_EXPR`. Fixture `string_interp_error`. JS
+  allow 619 → 622; dir 145 → 146.
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒
