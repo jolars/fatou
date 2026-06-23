@@ -235,6 +235,19 @@ through), so the grammar can grow incrementally.
   it has crossed the top-level `:` and tells `parse_import_clause` to wrap a
   `using`-base alias in an `ERROR` node; `project_import` collects the `ERROR`
   child as a clause. Fixture `using_as_error`. JS allow 595 → 597; dir 137 → 138.
+- [x] `import`/`as` colon error shapes (error-shape slice). A top-level `:` is the
+  base/names split only as the *first* separator; after a comma any `:` is recovery
+  (`import A, B: y` ⇒ `(import (importpath A) (importpath B) (error-t (importpath
+  y)))`, no `:` group), and a *second* colon in the names list is recovery too
+  (`import A: x, B: y` ⇒ `(: A x B (error-t y))`). An `import` base alias that
+  precedes a valid `:` is invalid (`import A as B: x` ⇒ `(import (: (error (as …))
+  x))`), and a `using` base alias before a `:` stacks both invalidities
+  (`using A as B: x` ⇒ `(error (error (as …)))`). `parse_import_stmt` probes the
+  base clause's following separator for `valid_colon`, passes an error-wrap *depth*
+  to `parse_import_clause`, and wraps a post-recovery-colon clause in
+  `ERROR_TRIVIA`; `project_import` reads the first separator to decide `:` grouping
+  and collects `ERROR_TRIVIA` clauses. Fixture `import_as_colon_error`. JS allow
+  597 → 599; dir 138 → 139.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

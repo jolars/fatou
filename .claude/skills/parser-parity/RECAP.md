@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **597 allowlisted**,
-88 divergence, 0 unsupported. Dir corpus: **138 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **599 allowlisted**,
+86 divergence, 0 unsupported. Dir corpus: **139 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
-Grammar bullets through "using-base as error-wrap" are `[x]` in `TODO.md`.
+Grammar bullets through "import/as colon error shapes" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -33,43 +33,49 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23g)
+## Latest session (2026-06-23h)
 
-**`using`-base `as` rename error-wrap.** An `as` rename is valid in an `import`
-base path (`import A as B`) and in any name list after a top-level `:`
-(`using A: x as y`, `import A: x as y`), but invalid in a `using` *base* path —
-there JuliaSyntax wraps the whole alias in `(error …)`: `using A as B` ⇒
-`(using (error (as (importpath A) B)))`, `using A, B as C` ⇒
-`(using (importpath A) (error (as (importpath B) C)))`. Fatou already parsed the
-valid forms; only the error-wrap was missing. `parse_import_stmt`
-(`structural.rs`) now tracks `is_using` + whether it has crossed the top-level
-`:` (`seen_colon`) and passes `wrap_alias_error` to `parse_import_clause`, which
-wraps the `IMPORT_ALIAS` in an `ERROR` node in that position; `project_import`
-(`sexpr.rs`) adds `ERROR` to its clause filter so the wrapped alias projects as
-`(error (as …))`. No diagnostic emitted (keeps the dir case PASS, not SKIP).
-Fixture `using_as_error`; dir case minted. JS allow 595 → 597; dir 137 → 138.
-Zero regressions; green; clippy/fmt clean.
+**`import`/`as` colon error shapes.** Finished the deferred import/`as` recovery
+work. Three intertwined rules, all matched: (a) a top-level `:` is the base/names
+split **only as the first separator** (right after the base path) — after a comma
+any `:` is recovery, so `import A, B: y` ⇒ `(import (importpath A) (importpath B)
+(error-t (importpath y)))` with **no** `:` group; (b) a *second* colon in the
+names list is recovery too — `import A: x, B: y` ⇒ `(: A x B (error-t y))`,
+`import A: x: y` ⇒ `(: A x (error-t y))`; (c) a base alias that precedes a valid
+`:` is invalid — `import A as B: x` ⇒ `(import (: (error (as …)) x))`, and a
+`using` base alias before a `:` **stacks** both invalidities, `using A as B: x` ⇒
+`(error (error (as …)))`. `parse_import_stmt` (`structural.rs`) probes the base
+clause's following separator (`valid_colon`), passes an error-wrap **depth**
+(0/1/2) to `parse_import_clause` (replacing the old `wrap_alias_error: bool`), and
+wraps the clause after a recovery colon in `ERROR_TRIVIA` (then stops grouping).
+`project_import` (`sexpr.rs`) now reads the **first separator** token to decide
+`:` grouping (not "any colon present") and collects `ERROR`/`ERROR_TRIVIA`
+clauses. No diagnostics emitted. Fixture `import_as_colon_error`; dir case minted.
+JS allow 597 → 599; dir 138 → 139. Zero regressions; green; clippy/fmt clean.
 
-**Deferred — remaining `import`/`as` error shapes:** `import A as B: x` ⇒
-`(import (: (error (as …)) (importpath x)))` (an `as` *then* a top-level `:` —
-the base alias becomes an error), and `import A: x, B: y` ⇒
-`(import (: (importpath A) (importpath x) (importpath B) (error-t (importpath y))))`
-(a second `:` segment in the names list is recovery — the trailing `B: y` becomes
-an `(error-t …)`). Both touch `parse_import_stmt`'s separator loop, not the clause.
+**Deferred (still divergent, not allowlisted):** the *triple* `import A: x, B: y,
+C: z` nests as `(call-i (import (: A x B (error-t y C))) : z)` — a second recovery
+colon spills into a binary `:` call; left as a remaining divergence. `import A as
+B as C` ⇒ `(import (as A B)) (error-t as C)` (double `as`) also untackled.
 
-**Suggested next targets (ranked):** (1) **`import`/`as` error shapes** (deferred
-above) — `import A as B: x`, `import A: x, B: y`; same file, builds on this
-session. (2) **unterminated chars** — `'`⇒`(char (error))`, `'a`⇒
-`(char 'a' (error-t))`; touches the lexer + transpose disambiguation (`f.'`,
-`x 'y`); probe those first. (3) **macro-path error-t** `A.@B.x`⇒
-`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a` (deep: Fatou
-currently drops the trailing `.x`). (4) **paren-block string-juxtapose**
-`(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘` string form). (5)
+**Suggested next targets (ranked):** (1) **unterminated chars** — `'`⇒
+`(char (error))`, `'a`⇒`(char 'a' (error-t))`; touches the lexer + transpose
+disambiguation (`f.'`, `x 'y`); probe those first. (2) **macro-path error-t**
+`A.@B.x`⇒`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a` (deep:
+Fatou currently drops the trailing `.x`). (3) **paren-block string-juxtapose**
+`(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘` string form). (4)
 **`public` soft-keyword in block context** — `begin public A, B end`⇒
 `(block public (error-t A ✘ B))` (toplevel `public A, B` already works; in a
 block `public` is a plain ident + error recovery).
 
 ## Earlier sessions
+
+- **2026-06-23g** — `using`-base `as` rename error-wrap: an `as` rename is invalid
+  in a `using` base path, so JuliaSyntax wraps the alias `(error (as …))`
+  (`using A as B`, `using A, B as C`). `parse_import_stmt` passed a
+  `wrap_alias_error` bool to `parse_import_clause`; `project_import` collected the
+  `ERROR` clause. Fixture `using_as_error`. JS 595 → 597; dir 137 → 138.
+  (Superseded this session: the bool became an error-wrap depth.)
 
 - **2026-06-23f** — Char-literal error classification (closed-but-invalid
   bodies): a `'…'` whose body `decode_char` can't reduce to one codepoint maps to

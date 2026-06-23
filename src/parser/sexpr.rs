@@ -1209,16 +1209,32 @@ fn project_import(head: &str, node: &SyntaxNode) -> String {
     // the parser: each clause is an `IMPORT_PATH` or `IMPORT_ALIAS` node, and a
     // top-level `:` token (when present) splits the base path from the list of
     // imported names. Read those nodes directly.
-    let has_colon = node.children_with_tokens().any(|el| el.kind() == COLON);
-    // An `ERROR` child wraps an invalid `as` rename in a `using` base path
-    // (`using A as B` ⇒ `(using (error (as …)))`).
-    let clauses: Vec<String> = node
-        .children()
-        .filter(|c| matches!(c.kind(), IMPORT_PATH | IMPORT_ALIAS | ERROR))
-        .map(|c| project(&c))
-        .collect();
+    // The base/names `:` split is the *first* separator after the base path; a
+    // `:` after a comma is recovery (no grouping), e.g. `import A, B: y` ⇒
+    // `(import (importpath A) (importpath B) (error-t (importpath y)))`.
+    let mut first_sep: Option<SyntaxKind> = None;
+    let mut clauses: Vec<String> = Vec::new();
+    for el in node.children_with_tokens() {
+        match el {
+            // `ERROR` wraps an invalid `as` rename (`using A as B`, `import A as
+            // B: x`); `ERROR_TRIVIA` wraps a clause after a recovery `:`.
+            NodeOrToken::Node(n)
+                if matches!(n.kind(), IMPORT_PATH | IMPORT_ALIAS | ERROR | ERROR_TRIVIA) =>
+            {
+                clauses.push(project(&n));
+            }
+            NodeOrToken::Token(t)
+                if matches!(t.kind(), COLON | COMMA)
+                    && !clauses.is_empty()
+                    && first_sep.is_none() =>
+            {
+                first_sep = Some(t.kind());
+            }
+            _ => {}
+        }
+    }
 
-    if has_colon && !clauses.is_empty() {
+    if first_sep == Some(COLON) && !clauses.is_empty() {
         // `(: <base> <name> …)` — the first clause is the base path.
         format!("({head} {})", sexp(":", clauses))
     } else {
