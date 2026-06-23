@@ -272,10 +272,12 @@ pub(crate) fn parse_try_expr(
     // a truncation marker for the missing handler (`try x end` ⇒ `(try (block x)
     // (error-t))`). `else` does not satisfy the requirement.
     let mut saw_handler = false;
+    let mut saw_catch = false;
     loop {
         match ctx.token(i).map(|t| t.kind) {
             Some(TokKind::CatchKw) => {
                 saw_handler = true;
+                saw_catch = true;
                 events.push(Event::Start(SyntaxKind::CATCH_CLAUSE));
                 events.push(Event::Tok(i));
                 // Optional exception variable on the `catch` line (`catch e`).
@@ -294,7 +296,18 @@ pub(crate) fn parse_try_expr(
             Some(TokKind::ElseKw) => {
                 events.push(Event::Start(SyntaxKind::ELSE_CLAUSE));
                 events.push(Event::Tok(i));
-                i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
+                if saw_catch {
+                    i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
+                } else {
+                    // `else` before any `catch` is invalid; JuliaSyntax wraps the
+                    // else block in an `(error …)` node (`try x else y end` ⇒
+                    // `(try (block x) (else (error (block y))) (error-t))`).
+                    let kw = &ctx.tokens()[i];
+                    push_diagnostic(diagnostics, "`else` without `catch`", kw.start, kw.end);
+                    events.push(Event::Start(SyntaxKind::ERROR));
+                    i = run_block(&ctx, &mut events, i + 1, TRY_TERMINATORS, diagnostics);
+                    events.push(Event::Finish);
+                }
                 events.push(Event::Finish);
             }
             Some(TokKind::FinallyKw) => {

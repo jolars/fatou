@@ -1,0 +1,28 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..25
+  TRY_EXPR@0..24
+    TRY_KW@0..3 "try"
+    BLOCK@3..10
+      NEWLINE@3..4 "\n"
+      WHITESPACE@4..8 "    "
+      NAME@8..9
+        IDENT@8..9 "x"
+      NEWLINE@9..10 "\n"
+    ELSE_CLAUSE@10..21
+      ELSE_KW@10..14 "else"
+      ERROR@14..21
+        BLOCK@14..21
+          NEWLINE@14..15 "\n"
+          WHITESPACE@15..19 "    "
+          NAME@19..20
+            IDENT@19..20 "y"
+          NEWLINE@20..21 "\n"
+    ERROR_TRIVIA@21..21
+    END_KW@21..24 "end"
+  NEWLINE@24..25 "\n"
+
+diagnostic [10..14]: `else` without `catch`
+diagnostic [0..3]: expected `catch` or `finally`

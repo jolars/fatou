@@ -1037,7 +1037,15 @@ fn project_try(node: &SyntaxNode) -> String {
                 parts.push(format!("(catch {var} {block})"));
             }
             FINALLY_CLAUSE => parts.push(format!("(finally {})", project_block_child(&clause))),
-            ELSE_CLAUSE => parts.push(format!("(else {})", project_block_child(&clause))),
+            ELSE_CLAUSE => {
+                // `else` without a preceding `catch` is error-recovery: the else
+                // block is wrapped in an `(error …)` node in the CST.
+                if let Some(err) = clause.children().find(|c| c.kind() == ERROR) {
+                    parts.push(format!("(else {})", project(&err)));
+                } else {
+                    parts.push(format!("(else {})", project_block_child(&clause)));
+                }
+            }
             // Truncation markers (missing `catch`/`finally`, missing `end`) land
             // in document order: `try x` ⇒ `(try (block x) (error-t) (error-t))`.
             ERROR_TRIVIA => parts.push(project_error("error-t", &clause)),

@@ -22,10 +22,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **591 allowlisted**,
-94 divergence, 0 unsupported. Dir corpus: **135 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **592 allowlisted**,
+93 divergence, 0 unsupported. Dir corpus: **136 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
-Grammar bullets through "incomplete-`try` truncation" are `[x]` in `TODO.md`.
+Grammar bullets through "`else`-without-`catch` error-wrap" are `[x]` in `TODO.md`.
 
 Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
 associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
@@ -33,36 +33,46 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23d)
+## Latest session (2026-06-23e)
 
-**Incomplete-`try` truncation `(error-t)` (finishes the missing-`end` family).**
-A `try` requires a `catch`/`finally`; with neither present JuliaSyntax splices a
-marker for the *missing handler*, and (separately, via the existing `expect_end`
-chokepoint) one for a *missing `end`*: `try x` ⇒ `(try (block x) (error-t)
-(error-t))`, `try\n x` same; `try x end` ⇒ `(try (block x) (error-t))` (handler
-marker only — `end` present); `try x catch e y` ⇒ `(try (block x) (catch e
-(block y)) (error-t))` (end marker only); `try x finally z` mirrors. Fix:
-`parse_try_expr` (`structural.rs`) tracks a `saw_handler` flag (set on
-`catch`/`finally`, **not** `else`) and splices the missing-handler `ERROR_TRIVIA`
-+ a diagnostic before `expect_end` when false; `project_try` (`sexpr.rs`) gains
-an `ERROR_TRIVIA` arm so both markers render in document order. Fixture
-`incomplete_try`; dir-corpus case minted. JS allow 590 → 591 (`try x end` now
-PASS), dir 134 → 135. `try x else y end` stays FAIL (else-without-catch wants the
-else block error-wrapped — separate). Zero regressions; green; clippy/fmt clean.
+**`else`-without-`catch` error-wrap (last try-family divergence).** An `else`
+clause that precedes any `catch` is recovery: JuliaSyntax wraps the else block in
+an `(error …)` node, while an `else` *after* a `catch` stays plain. The
+missing-handler/missing-`end` markers already matched from 2026-06-23d, so the
+only gap was the wrap: `try x else y end`⇒`(try (block x) (else (error (block y)))
+(error-t))`, `try else y end`⇒`(try (block) (else (error (block y))) (error-t))`,
+`try x else y finally z end`⇒`(… (else (error (block y))) (finally (block z)))`
+(finally satisfies `saw_handler` so no error-t, but else still wraps); contrast
+`try x catch e z else y end`⇒`(… (catch e (block z)) (else (block y)))` (plain).
+Fix: `parse_try_expr` (`structural.rs`) adds a `saw_catch` flag (catch-only, set
+alongside `saw_handler`) and, in the `ElseKw` arm when false, wraps the else
+`run_block` in an `ERROR` node + emits a "`else` without `catch`" diagnostic; the
+`ELSE_CLAUSE` arm of `project_try` (`sexpr.rs`) projects that `ERROR` child as
+`(else (error …))` else falls back to `(else (block …))`. Fixture
+`try_else_without_catch`; dir case minted. JS allow 591 → 592, dir 135 → 136.
+Zero regressions; green; clippy/fmt clean.
 
-**Suggested next targets (ranked):** (1) **else-without-catch error-wrap**
-`try x else y end`⇒`(try (block x) (else (error (block y))) (error-t))` — the
-last try-family divergence; the marker already matches, only the `(else (error
-…))` wrap is missing. (2) **macro-path error-t** `A.@B.x`⇒`(macrocall (. (.
-A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`. (3) **paren-block
-string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)` (double-`✘`
-string form). (4) **char cluster** — `'ab'`⇒`(char (ErrorOverLongCharacter))`,
-`'\xq'`⇒`(char (ErrorInvalidEscapeSequence))`, `''`/`'`⇒`(char (error))`,
-`'a`⇒`(char 'a' (error-t))` (needs lexer-classified named kinds; ~5 JS cases).
-(5) **`;`-segment stray-closer** double-`✘`.
+**Out-of-order edge deferred:** `try x finally z else y end`⇒`(try (block x)
+(finally (block z)) (error-t)) (error-t else y end)` — an `else` *after* `finally`
+isn't consumed by the try at all; it spills to a separate toplevel `(error-t …)`.
+Different recovery path, left FAIL.
+
+**Suggested next targets (ranked):** (1) **macro-path error-t** `A.@B.x`⇒
+`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.B.@x a`. (2)
+**paren-block string-juxtapose** `(begin end)"x"`⇒`(block) (error-t ✘ "x" ✘)`
+(double-`✘` string form). (3) **char cluster** — `'ab'`⇒
+`(char (ErrorOverLongCharacter))`, `'\xq'`⇒`(char (ErrorInvalidEscapeSequence))`,
+`''`/`'`⇒`(char (error))`, `'a`⇒`(char 'a' (error-t))` (needs lexer-classified
+named kinds; ~5 JS cases). (4) **`;`-segment stray-closer** double-`✘`.
 
 ## Earlier sessions
 
+- **2026-06-23d** — Incomplete-`try` truncation `(error-t)`: a `try` with no
+  `catch`/`finally` splices a missing-handler marker, and `expect_end` adds a
+  missing-`end` one (`try x`⇒`(try (block x) (error-t) (error-t))`, `try x end`⇒
+  `(try (block x) (error-t))`). `parse_try_expr` tracks `saw_handler` (catch/finally,
+  not else); `project_try` renders `ERROR_TRIVIA` children in order. JS 590 → 591;
+  dir 134 → 135.
 - **2026-06-23c** — Missing-`end` truncation `(error-t)`: a block form cut off
   before its `end` (EOF/unconsumable closer) gets a zero-width `ERROR_TRIVIA` last
   child (`if c\n x`⇒`(if c (block x) (error-t))`); `begin`/`quote` fold it inside.

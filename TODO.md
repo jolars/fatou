@@ -207,6 +207,15 @@ through), so the grammar can grow incrementally.
   was seen (`else` does not count); `project_try` (`sexpr.rs`) renders
   `ERROR_TRIVIA` children in document order. Fixture `incomplete_try`. JS allow
   590 → 591; dir 134 → 135.
+- [x] `else`-without-`catch` error-wrap (last try-family divergence). An `else`
+  clause preceding any `catch` is recovery: JuliaSyntax wraps the else block in
+  an `(error …)` node (`try x else y end` ⇒ `(try (block x) (else (error (block
+  y))) (error-t))`, also `try x else y finally z end` ⇒ `(… (else (error (block
+  y))) (finally (block z)))`); an `else` *after* a `catch` stays plain
+  (`try x catch e z else y end`). `parse_try_expr` (`structural.rs`) tracks a
+  `saw_catch` flag and wraps the else `run_block` in an `ERROR` node when false;
+  the `ELSE_CLAUSE` arm of `project_try` (`sexpr.rs`) projects that `ERROR`
+  child. Fixture `try_else_without_catch`. JS allow 591 → 592; dir 135 → 136.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,

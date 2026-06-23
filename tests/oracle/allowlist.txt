@@ -122,6 +122,7 @@ triple_string_dedent
 triple_string_interp
 try_catch
 try_catch_variants
+try_else_without_catch
 tuples
 type_annotations
 typed_concat
