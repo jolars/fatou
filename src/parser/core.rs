@@ -63,6 +63,25 @@ pub fn parse(text: &str) -> ParseOutput {
                         line.extend(expr.events);
                         i = expr.end;
                         leftover_mark.get_or_insert(line.len());
+                    } else if leftover_mark.is_none()
+                        && is_close_delimiter_tok(tokens[i].kind)
+                        && !rest_of_line_has_semicolon(&tokens, i)
+                    {
+                        // A stray *closing* delimiter at statement start (no
+                        // preceding statement) is JuliaSyntax's leading empty
+                        // `(error)` plus an `(error-t ✘ …)` that swallows the
+                        // rest of the line: `)` ⇒ `(error) (error-t ✘)`,
+                        // `) x` ⇒ `(error) (error-t ✘ x)`, `)))` ⇒ `… ✘ ✘ ✘`.
+                        // The `;`-segment forms emit a subtler double marker, so
+                        // they are left to the loose-token fallback below.
+                        line.push(Event::Start(SyntaxKind::ERROR));
+                        line.push(Event::Finish);
+                        line.push(Event::Start(SyntaxKind::ERROR_TRIVIA));
+                        while i < tokens.len() && tokens[i].kind != TokKind::Newline {
+                            line.push(Event::Tok(i));
+                            i += 1;
+                        }
+                        line.push(Event::Finish);
                     } else {
                         line.push(Event::Tok(i));
                         i += 1;
@@ -102,6 +121,22 @@ pub fn parse(text: &str) -> ParseOutput {
 
     let cst = build_tree(&tokens, &events);
     ParseOutput { cst, diagnostics }
+}
+
+/// Whether `kind` is a closing delimiter (`)`, `]`, `}`), which when stray at
+/// statement start drives JuliaSyntax's leading-`(error)` recovery.
+fn is_close_delimiter_tok(kind: TokKind) -> bool {
+    matches!(kind, TokKind::RParen | TokKind::RBracket | TokKind::RBrace)
+}
+
+/// Whether the logical line starting at `start` (up to the next newline or EOF)
+/// carries a top-level `;`. The stray-closer recovery only applies to the clean
+/// separator-less form; `;`-segment lines keep the loose-token fallback.
+fn rest_of_line_has_semicolon(tokens: &[Token], start: usize) -> bool {
+    tokens[start..]
+        .iter()
+        .take_while(|t| t.kind != TokKind::Newline)
+        .any(|t| t.kind == TokKind::Semicolon)
 }
 
 /// Whether an event carries significant (non-trivia) content: any node opener,

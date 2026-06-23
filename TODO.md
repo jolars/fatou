@@ -150,6 +150,18 @@ through), so the grammar can grow incrementally.
   127 → 128. **Deferred**: lone closer `)` ⇒ `(error) (error-t ✘)` (synthesized
   leading `(error)`; swallows the rest of the line, `) x` ⇒ `(error)
   (error-t ✘ x)`; the `;`-segment forms emit a subtle `✘ ✘` double-marker).
+- [x] Lone-closer leading-`(error)` (error-shape slice). A stray *closing*
+  delimiter at statement start (no preceding statement) is JuliaSyntax's
+  synthesized empty `(error)` plus an `(error-t ✘ …)` that swallows the rest of
+  the line: `)` ⇒ `(error) (error-t ✘)`, `) x` ⇒ `(error) (error-t ✘ x)`,
+  `)))` ⇒ `(error) (error-t ✘ ✘ ✘)`, `] x`, `}`. The `parse` driver (`core.rs`),
+  when `parse_stmt` declines on a close-delimiter token with no leftover mark yet
+  and the line carries no `;`, emits an empty `ERROR` node then wraps the
+  delimiter run plus the rest of the line in one `ERROR_TRIVIA`. Projector
+  untouched (empty `ERROR` ⇒ `(error)`, close-delimiter tokens ⇒ `✘` already).
+  Fixture `stray_closer_start`. JS allow 583 → 584; dir 128 → 129. **Deferred**:
+  the `;`-segment forms (`) ; x` ⇒ `(error) (error-t ✘ ✘ x)`, `x; )` ⇒
+  `(toplevel-; x (error) (error-t ✘))`) emit a subtle double-`✘` marker.
 - [x] More leading-keyword block forms: `for … end`, `while … end`, `let … end`,
   `try/catch/else/finally`, `struct`/`mutable struct`,
   `module`/`baremodule`, `quote … end`. Headers (`for i in xs`,
