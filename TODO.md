@@ -140,6 +140,20 @@ through), so the grammar can grow incrementally.
   diagnostic; with no operand it stays a bare value atom (`*` ⇒ `*`). `project_unary`
   detects the `ERROR`-headed shape and emits the prefix-call head. Fixture
   `prefix_operator_error`. JS allow 609 → 612; dir 142 → 143.
+- [x] Array-internal trailing-junk `(error-t)` (error-shape slice). A macro `@`
+  glued (no separating whitespace, `;`, or newline) to a preceding array element
+  is not a new row element: JuliaSyntax bumps the rest of the array up to the
+  closing `]` (or EOF) as one flat trailing-junk run (`[x@y]` ⇒
+  `(hcat x (error-t ✘ y))`, `[a b@c]` ⇒ `(hcat a b (error-t ✘ c))`,
+  `[a@b c]` ⇒ `(hcat a (error-t ✘ b c))`); the `@`/`,` render as `✘`,
+  other tokens keep their text. A spaced `@` (`[x @y]`) stays a macrocall element.
+  The `parse_matrix` scan loop (`expr.rs`) detects the empty-separator glued `@`,
+  collects the run into one `ERROR` element, and records a `TrailingJunk`
+  diagnostic so the projector renders `(error-t …)` (the existing array child
+  machinery wraps it in `ARG` and `is_error_glyph` handles the glyphs). Fixture
+  `array_trailing_junk`. JS allow 612 → 614; dir 143 → 144. **Deferred**: `;` in
+  the junk run (`[a@b;c]`, needs `;`→`✘`), nested brackets/parens (`[a@b[c]]`,
+  depth-tracking + toplevel stray-closer interaction).
 - [x] String-juxtapose-error `(error-t)` (error-shape slice). A string literal
   glued (no whitespace) to another term is an invalid juxtaposition JuliaSyntax
   recovers as `(juxtapose lhs (error-t) rhs)`: `"a"x` ⇒

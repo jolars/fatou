@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **612 allowlisted**,
-73 divergence, 0 unsupported. Dir corpus: **143 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **614 allowlisted**,
+71 divergence, 0 unsupported. Dir corpus: **144 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,37 +52,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23n)
+## Latest session (2026-06-23o)
 
-**Binary-only operator in prefix position → error-wrapped prefix call.**
-JuliaSyntax rejects a non-unary operator used as a prefix and recovers it as a
-prefix *call* whose callee is the error-wrapped operator: `/x` ⇒
-`(call-pre (error /) x)`, `* <: A` ⇒ `(call-pre (error *) (<:-pre A))`, `=> x` ⇒
-`(call-pre (error =>) x)`; a broadcast operator heads `dotcall-pre` instead
-(`.*x` ⇒ `(dotcall-pre (error (. *)) x)`, `.<: x`). The operand binds at
-`PREFIX_BP` — tighter than the arithmetic tiers (`/x + y` ⇒
-`(call-i (call-pre (error /) x) + y)`) but below `^` (`/x^2` ⇒
-`(call-pre (error /) (call-i x ^ 2))`); a bare operator with no operand stays a
-value atom (`*` ⇒ `*`). Fix is entirely in the `is_value_operator` arm of
-`parse_prefix` (`expr.rs`): it now parses an operand at `PREFIX_BP` and, on
-success, emits `UNARY_EXPR > ERROR > OPERATOR_ATOM > op-token`, then the operand,
-plus an `InvalidPrefixOperator` diagnostic (new `DiagnosticKind`, in the
-"byte-bearing ERROR rendered as plain `(error …)`" bucket — no projector
-`(error-t)` machinery needed since it's not a recovery kind). `project_unary`
-gained an `ERROR`-headed branch that renders `(call-pre …)`/`(dotcall-pre …)`
-(dottedness from the wrapped op's text via `invalid_prefix_is_dotted`); the
-`OPERATOR_ATOM` wrapper is what makes a broadcast op project to `(. *)` inside the
-error. Fixture `prefix_operator_error`. JS 609 → 612 (js-b3d1db31 `/x`,
-js-9f8d2fe1 `* <: A`, js-aec1df42 `.<: x`); dir 142 → 143. Green; clippy/fmt clean.
+**Array-internal trailing junk: glued `@` → `(error-t ✘ …)`.** A macro `@`
+glued (no separating whitespace, `;`, or newline) to a preceding array element is
+not a new row element — JuliaSyntax bumps the rest of the array up to the closing
+`]` (or EOF) as one flat trailing-junk run: `[x@y]` ⇒ `(hcat x (error-t ✘ y))`,
+`[a b@c]` ⇒ `(hcat a b (error-t ✘ c))`, `[a@b c]` ⇒ `(hcat a (error-t ✘ b c))`,
+`[a@b, c]` ⇒ `(hcat a (error-t ✘ b ✘ c))`. The `@`/`,` render `✘`; other tokens
+keep their text. A *spaced* `@` (`[x @y]`) keeps a real separator run and stays a
+`(macrocall @y)` element; a leading `@` (`[@foo x]`) is the first element, never in
+the scan loop — both untouched. Fix is one arm in `parse_matrix`'s scan loop
+(`expr.rs`): on an **empty** separator run (`run.toks.is_empty()`) followed by
+`TokKind::At`, collect every token up to `close`/EOF into one `ERROR` element and
+push a `TrailingJunk` diagnostic at the `@`. The element flows through the existing
+`emit_cat_child` machinery (wrapped in `ARG`, dim-0 row sibling), so `project_error`
++ `is_error_glyph` + `is_recovery_error` render `(error-t …)` with **no projector
+change**. Fixture `array_trailing_junk`. JS 612 → 614 (js-6be56bdb `[x@y]`,
+js-83672850 `[x@y`); dir 143 → 144. Green; clippy/fmt clean.
 
-**Key insight:** reusing `UNARY_EXPR` with an `ERROR`-wrapped `OPERATOR_ATOM`
-callee kept the change tiny — the operand parse, the `(. op)` projection, and the
-plain-`(error)` rendering all fell out of existing machinery. The only real
-decision was the operand binding power (`PREFIX_BP`), confirmed by probing
-`/x + y` / `/x^2` before coding.
+**Key insight:** the empty-separator-run test is exactly the glued-`@` signal — a
+valid row needs whitespace, and after a complete element only `@` (and handled
+separators/closers) stops the operator loop, so an empty run + `@` is unambiguous.
+Reusing `ERROR`-element-in-`ARG` meant zero `sexpr.rs` change. Deferred: `;` inside
+the junk (`[a@b;c]`, needs `;`→`✘` in `is_error_glyph`), nested brackets/parens
+(`[a@b[c]]`, depth-tracking + a leftover toplevel stray closer).
 
 ## Earlier sessions
 
+- **2026-06-23n** — Binary-only operator in prefix position → error-wrapped prefix
+  call. `/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`;
+  operand binds at `PREFIX_BP` (tighter than arithmetic, below `^`); bare `*` stays
+  a value atom. Fix in the `is_value_operator` arm of `parse_prefix` (`expr.rs`):
+  emits `UNARY_EXPR > ERROR > OPERATOR_ATOM > op` + operand, new
+  `InvalidPrefixOperator` diagnostic; `project_unary` renders the prefix-call head.
+  Fixture `prefix_operator_error`. JS 609 → 612; dir 142 → 143.
 - **2026-06-23m** — `public` stops at the first non-comma after a name. `public` is
   a names-only compatibility shim (JuliaSyntax `parse_public`): it ends the
   statement at the first non-comma after a complete name, and the leftover floats
@@ -106,14 +110,16 @@ decision was the operand binding power (`PREFIX_BP`), confirmed by probing
   not yet projected), junk-then-`else`.
 
 **Scoping note — next-target candidates** (still-open `✘`-glyph FAIL roots):
-(a) **array-internal** `[x@y]` ⇒ `(hcat x (error-t ✘ y))` (js-6be56bdb,
-js-83672850) — trailing junk *inside* a bracket array, analogous to the toplevel
-flat-junk driver but in array context; Fatou currently parses `@y` as a macrocall
-element. (b) **`outer` stop-at-`=`** — `outer x=1` ⇒ `outer (error-t x = 1)` (note
+(a) **`outer` stop-at-`=`** — `outer x=1` ⇒ `outer (error-t x = 1)` (note
 `outer` itself becomes the bare value and the *whole* `x = 1` is junk, unlike
-`public`). (c) for/let/module/struct/try/do block junk (sibling `ERROR` is in the
+`public`). (b) for/let/module/struct/try/do block junk (sibling `ERROR` is in the
 CST but their explicit projectors don't emit it — only `if`/`while`/`begin`/`quote`
-do).
+do). (c) **`;;` ncat whitespace-error** — `[a b ;; c]` ⇒
+`(ncat-2 (row a b (error-t)) c)`, `[a ;; b c]` ⇒ `(ncat-2 a (row b (error-t) c))`
+(js-e8b41b39, js-b5967309, js-578363a4): a space-separated row adjacent to a `;;`
+column separator splices a zero-width `(error-t)` whitespace marker into the row.
+Sibling array junk with `;`/nested brackets (`[a@b;c]`, `[a@b[c]]`) is deferred
+from this session.
 
 ## Earlier sessions
 

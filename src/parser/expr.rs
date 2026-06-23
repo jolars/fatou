@@ -1990,6 +1990,39 @@ fn parse_matrix(
                 seps.push(run);
                 break q + 1;
             }
+            // A macro `@` glued to the preceding element (no separating
+            // whitespace, `;`, or newline) is not a new row element: JuliaSyntax
+            // bumps the rest of the array — every token up to the closing `]` (or
+            // EOF) — as one flat trailing-junk run (`[x@y]` ⇒
+            // `(hcat x (error-t ✘ y))`, `[a b@c]` ⇒ `(hcat a b (error-t ✘ c))`).
+            // A spaced `@` (`[x @y]`) keeps a real separator run and stays a
+            // macrocall element, so the run must be empty to trigger this.
+            Some(TokKind::At) if run.toks.is_empty() => {
+                seps.push(run);
+                let mut j = q;
+                while let Some(k) = ctx.token(j).map(|t| t.kind) {
+                    if k == close {
+                        break;
+                    }
+                    j += 1;
+                }
+                let mut events = vec![Event::Start(SyntaxKind::ERROR)];
+                push_range(&mut events, q, j);
+                events.push(Event::Finish);
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::TrailingJunk,
+                    "trailing tokens in array",
+                    tokens[q].start,
+                    tokens[q].end,
+                );
+                elems.push(ExprParse {
+                    start: q,
+                    end: j,
+                    events,
+                });
+                pos = j;
+            }
             _ => {
                 seps.push(run);
                 let el = match parse_element(tokens, q, diagnostics) {

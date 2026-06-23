@@ -1,0 +1,1 @@
+(toplevel (hcat x (error-t ✘ y)) (hcat a b (error-t ✘ c)) (hcat a (error-t ✘ b c)) (hcat a (error-t ✘ b + c)) (hcat a (error-t ✘ 1)) (hcat a (error-t ✘ b ✘ c)))

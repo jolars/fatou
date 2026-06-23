@@ -1,0 +1,89 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..45
+  MATRIX_EXPR@0..5
+    LBRACKET@0..1 "["
+    ARG@1..2
+      NAME@1..2
+        IDENT@1..2 "x"
+    ARG@2..4
+      ERROR@2..4
+        AT@2..3 "@"
+        IDENT@3..4 "y"
+    RBRACKET@4..5 "]"
+  NEWLINE@5..6 "\n"
+  MATRIX_EXPR@6..13
+    LBRACKET@6..7 "["
+    ARG@7..8
+      NAME@7..8
+        IDENT@7..8 "a"
+    WHITESPACE@8..9 " "
+    ARG@9..10
+      NAME@9..10
+        IDENT@9..10 "b"
+    ARG@10..12
+      ERROR@10..12
+        AT@10..11 "@"
+        IDENT@11..12 "c"
+    RBRACKET@12..13 "]"
+  NEWLINE@13..14 "\n"
+  MATRIX_EXPR@14..21
+    LBRACKET@14..15 "["
+    ARG@15..16
+      NAME@15..16
+        IDENT@15..16 "a"
+    ARG@16..20
+      ERROR@16..20
+        AT@16..17 "@"
+        IDENT@17..18 "b"
+        WHITESPACE@18..19 " "
+        IDENT@19..20 "c"
+    RBRACKET@20..21 "]"
+  NEWLINE@21..22 "\n"
+  MATRIX_EXPR@22..29
+    LBRACKET@22..23 "["
+    ARG@23..24
+      NAME@23..24
+        IDENT@23..24 "a"
+    ARG@24..28
+      ERROR@24..28
+        AT@24..25 "@"
+        IDENT@25..26 "b"
+        PLUS@26..27 "+"
+        IDENT@27..28 "c"
+    RBRACKET@28..29 "]"
+  NEWLINE@29..30 "\n"
+  MATRIX_EXPR@30..35
+    LBRACKET@30..31 "["
+    ARG@31..32
+      NAME@31..32
+        IDENT@31..32 "a"
+    ARG@32..34
+      ERROR@32..34
+        AT@32..33 "@"
+        INTEGER@33..34 "1"
+    RBRACKET@34..35 "]"
+  NEWLINE@35..36 "\n"
+  MATRIX_EXPR@36..44
+    LBRACKET@36..37 "["
+    ARG@37..38
+      NAME@37..38
+        IDENT@37..38 "a"
+    ARG@38..43
+      ERROR@38..43
+        AT@38..39 "@"
+        IDENT@39..40 "b"
+        COMMA@40..41 ","
+        WHITESPACE@41..42 " "
+        IDENT@42..43 "c"
+    RBRACKET@43..44 "]"
+  NEWLINE@44..45 "\n"
+
+diagnostic [2..3]: trailing tokens in array
+diagnostic [10..11]: trailing tokens in array
+diagnostic [16..17]: trailing tokens in array
+diagnostic [24..25]: trailing tokens in array
+diagnostic [32..33]: trailing tokens in array
+diagnostic [38..39]: trailing tokens in array
