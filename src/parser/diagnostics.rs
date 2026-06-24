@@ -66,6 +66,12 @@ pub enum DiagnosticKind {
     /// valid forward-declaration form `(function f)` and is left alone. Anchored
     /// at the `SIGNATURE` node's start.
     InvalidFunctionSignature,
+    /// A `catch` variable that is not a plain identifier (`catch e+3`,
+    /// `catch e.f`, `catch f(e)`) — JuliaSyntax wraps the variable expression in
+    /// `(error …)` (`(catch (error (call-i e + 3)) …)`). A bare identifier,
+    /// `$`-interpolation, or `var"…"` non-standard identifier is left alone.
+    /// Anchored at the catch-variable node's start.
+    CatchVarNotIdentifier,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

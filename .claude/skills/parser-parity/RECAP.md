@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **642 allowlisted**,
-43 divergence, 0 unsupported. Dir corpus: **157 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **643 allowlisted**,
+42 divergence, 0 unsupported. Dir corpus: **158 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,31 +52,51 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-24b)
+## Latest session (2026-06-24c)
 
-**String-literal escape error classification** (the `Char` sibling of the
-2026-06-23f char-error work). A single-quoted `"…"` whose `STRING_CONTENT` token
-holds a malformed backslash escape projects as one JuliaSyntax error part, *per
-content token* and dropping the valid surrounding text: `"\xqqq"`/`"ok\xqq"`/
-`"\400"` ⇒ `(string (ErrorInvalidEscapeSequence))`, `"a\xq$b"` ⇒ `(string
-(ErrorInvalidEscapeSequence) b)` (the interpolation survives). The boundary that
-made this finicky: valid bytes that aren't UTF-8 (`"\xff"`) are a *valid*
-one-byte-per-byte Julia string, displayed `(string "\xff")`, **not** an escape
-error. The CST was already faithful (real `STRING_LITERAL` tokens); the fix is
-pure projector. `decode_string_chunks` (`sexpr.rs`) previously folded both
-failure modes into `None` (raw-source fallback); it now returns
-`Result<_, StringDecodeError>` distinguishing `BadEscape` (malformed escape) from
-`BadUtf8` (non-UTF-8 bytes). `decoded_string_parts` pushes a single
-`(ErrorInvalidEscapeSequence)` for a `BadEscape` token and keeps the whole-string
-raw fallback for `BadUtf8`. Only one JS string case existed (`js-fc03650e`); the
-char case already used the same error head, so no projector head was invented.
-Fixture `string_escape_error` (5 lines exercising error/interp/octal-overflow/
-byte-string; the adjacent error-string lines also confirm `(doc …)` grouping
-matches Julia). JS 641 → 642; dir 156 → 157. Green; clippy/fmt clean, no
-regressions.
+**Non-identifier `catch` variable error-wrap** (another post-build-walk +
+projector-wrap error shape, the sibling of const-not-assignment 2026-06-23j and
+bare-name-function 2026-06-24a). A `catch` variable must be a plain identifier
+(`catch e`), a `$`-interpolation (`catch $e`), or a `var"…"` non-standard
+identifier (`catch var"e"`); any other expression is invalid and JuliaSyntax
+wraps it in `(error …)` (`try x catch e+3 y end` ⇒ `(catch (error (call-i e + 3))
+(block y))`; same for `catch e.f`/`catch f(e)`/`catch 3`/`catch e[1]`). The CST
+is already faithful — the catch var is parsed as its natural expression — so the
+fix is a post-build walk `flag_invalid_catch_vars` (`core.rs`) recording a
+`CatchVarNotIdentifier` diag at the var node's start when its kind isn't
+`NAME`/`INTERPOLATION`/`NONSTANDARD_IDENTIFIER`, plus a `project_try`
+`CATCH_CLAUSE` arm that error-wraps `var` on `diag_at`. Fixture `catch_var_error`.
+JS 642 → 643; dir 157 → 158. Green; clippy/fmt clean, no regressions. Deferred:
+parenthesized identifier `catch (e)` (valid in JS, unwrapped to `e`, but Fatou
+would wrap the `PAREN_EXPR`; not in the corpus, needs projector paren-unwrapping).
+
+**Next-target survey** (42 JS FAILs left): (a) **deliberate, do not fix** —
+comparison chains (`x<y<z`, `x .< y<z`, `x==y<z`), associative flattening
+(`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects `[x+y+z]`), juxtaposition
+`(2)(3)x`; (b) **float display (blocked)** — `1.0e-1000`, `-0xf.0p0`, `0x…p+0`,
+prime+float `10.0e1000'`/`10.0f100'`; (c) **char/prime lexer (deferred)** — `'`,
+`'a`, `f.'`, `x 'y`; (d) **invalid-operator table** — `a--b`/`a :< b`/`a**b`,
+distinct heads `(ErrorInvalidOperator)`/`(error : <)`/`(Error**)`, a big op-table,
+too large for one session; (e) **macro dotted-name error shapes** — `A.@B.x`,
+`@A.B.@x a`, `@A.$x a`, `@M.(x)`, deeply nested multi-`(error-t)`; (f)
+**ternary-in-block** (`if true; x ? true end` + siblings) — fragile,
+context-dependent; (g) **misc error shapes** — `: end`, `:(end)`, `a[:(end)]`,
+`function` (bare kw), `+ (a,b)`, `export (x::T)`, `@doc x\nend`, `@[x] y z`,
+`x.3`, `"notdoc"]`. Cleanest next pick: **`@doc x\nend`** (js-bc08a2b0) ⇒
+`(macrocall @doc x) (error end)`, likely a small toplevel-driver tweak.
 
 ## Earlier sessions
 
+- **2026-06-24b** — String-literal escape error classification (the `Char`
+  sibling of the 2026-06-23f char-error work). A single-quoted `"…"` whose
+  `STRING_CONTENT` holds a malformed backslash escape projects as one
+  `(ErrorInvalidEscapeSequence)` *per content token*, dropping valid surrounding
+  text (`"\xqqq"`/`"ok\xqq"`/`"\400"` ⇒ `(string (ErrorInvalidEscapeSequence))`,
+  `"a\xq$b"` keeps the interpolation); valid-but-non-UTF-8 bytes (`"\xff"`) stay a
+  *valid* `(string "\xff")`. Pure projector: `decode_string_chunks` now returns
+  `Result<_, StringDecodeError>` distinguishing `BadEscape` (→ error part) from
+  `BadUtf8` (→ raw fallback). Fixture `string_escape_error`. JS 641 → 642; dir
+  156 → 157.
 - **2026-06-24a** — Bare-name `function`/`macro` signature with a body →
   `(error <name>)`. A bare-identifier signature is the valid forward-declaration
   form only while the body is empty (`function f end` ⇒ `(function f)`); once a

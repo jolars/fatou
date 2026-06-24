@@ -1,0 +1,75 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..88
+  TRY_EXPR@0..41
+    TRY_KW@0..3 "try"
+    BLOCK@3..16
+      NEWLINE@3..4 "\n"
+      WHITESPACE@4..8 "    "
+      CALL_EXPR@8..15
+        NAME@8..13
+          IDENT@8..13 "risky"
+        ARG_LIST@13..15
+          LPAREN@13..14 "("
+          RPAREN@14..15 ")"
+      NEWLINE@15..16 "\n"
+    CATCH_CLAUSE@16..38
+      CATCH_KW@16..21 "catch"
+      WHITESPACE@21..22 " "
+      NAME@22..23
+        IDENT@22..23 "e"
+      BLOCK@23..38
+        NEWLINE@23..24 "\n"
+        WHITESPACE@24..28 "    "
+        CALL_EXPR@28..37
+          NAME@28..34
+            IDENT@28..34 "handle"
+          ARG_LIST@34..37
+            LPAREN@34..35 "("
+            ARG@35..36
+              NAME@35..36
+                IDENT@35..36 "e"
+            RPAREN@36..37 ")"
+        NEWLINE@37..38 "\n"
+    END_KW@38..41 "end"
+  NEWLINE@41..42 "\n"
+  NEWLINE@42..43 "\n"
+  TRY_EXPR@43..87
+    TRY_KW@43..46 "try"
+    BLOCK@46..59
+      NEWLINE@46..47 "\n"
+      WHITESPACE@47..51 "    "
+      CALL_EXPR@51..58
+        NAME@51..56
+          IDENT@51..56 "risky"
+        ARG_LIST@56..58
+          LPAREN@56..57 "("
+          RPAREN@57..58 ")"
+      NEWLINE@58..59 "\n"
+    CATCH_CLAUSE@59..84
+      CATCH_KW@59..64 "catch"
+      WHITESPACE@64..65 " "
+      BINARY_EXPR@65..70
+        NAME@65..66
+          IDENT@65..66 "e"
+        WHITESPACE@66..67 " "
+        PLUS@67..68 "+"
+        WHITESPACE@68..69 " "
+        LITERAL@69..70
+          INTEGER@69..70 "3"
+      BLOCK@70..84
+        NEWLINE@70..71 "\n"
+        WHITESPACE@71..75 "    "
+        CALL_EXPR@75..83
+          NAME@75..81
+            IDENT@75..81 "handle"
+          ARG_LIST@81..83
+            LPAREN@81..82 "("
+            RPAREN@82..83 ")"
+        NEWLINE@83..84 "\n"
+    END_KW@84..87 "end"
+  NEWLINE@87..88 "\n"
+
+diagnostic [65..65]: catch variable must be an identifier

@@ -158,6 +158,7 @@ pub fn parse(text: &str) -> ParseOutput {
     let cst = build_tree(&tokens, &events);
     flag_invalid_const_decls(&cst, &mut diagnostics);
     flag_invalid_function_signatures(&cst, &mut diagnostics);
+    flag_invalid_catch_vars(&cst, &mut diagnostics);
     ParseOutput { cst, diagnostics }
 }
 
@@ -212,6 +213,38 @@ fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<Pars
                 diagnostics,
                 DiagnosticKind::InvalidFunctionSignature,
                 "invalid function signature: expected a call, not a bare name",
+                pos,
+                pos,
+            );
+        }
+    }
+}
+
+/// Flag each `catch` clause whose variable is not a plain identifier. The catch
+/// variable must be a bare identifier (`catch e`), a `$`-interpolation
+/// (`catch $e`), or a `var"…"` non-standard identifier (`catch var"e"`); any
+/// other expression (`catch e+3`, `catch e.f`, `catch f(e)`, `catch 3`) is
+/// invalid and JuliaSyntax wraps it in `(error …)` (`catch e+3` ⇒ `(catch
+/// (error (call-i e + 3)) …)`). The diagnostic is a zero-width point at the
+/// catch-variable node's start; the projector reconstructs the error wrapper
+/// from it (the CST topology stays faithful).
+fn flag_invalid_catch_vars(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
+    for node in cst
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::CATCH_CLAUSE)
+    {
+        let Some(var) = node.children().find(|c| c.kind() != SyntaxKind::BLOCK) else {
+            continue;
+        };
+        if !matches!(
+            var.kind(),
+            SyntaxKind::NAME | SyntaxKind::INTERPOLATION | SyntaxKind::NONSTANDARD_IDENTIFIER
+        ) {
+            let pos = usize::from(var.text_range().start());
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::CatchVarNotIdentifier,
+                "catch variable must be an identifier",
                 pos,
                 pos,
             );

@@ -1355,11 +1355,23 @@ fn project_try(node: &SyntaxNode) -> String {
             CATCH_CLAUSE => {
                 // The catch-variable is the first child node before the body
                 // block; it may be a plain NAME, a `$`-interpolation, or a
-                // `var"…"` non-standard identifier. Absent ⇒ `false`.
+                // `var"…"` non-standard identifier. Absent ⇒ `false`. A
+                // non-identifier variable (`catch e+3`) is flagged invalid by
+                // the post-build walk and error-wrapped here.
                 let var = clause
                     .children()
                     .find(|c| c.kind() != BLOCK)
-                    .map(|c| project(&c))
+                    .map(|c| {
+                        let projected = project(&c);
+                        if diag_at(
+                            usize::from(c.text_range().start()),
+                            DiagnosticKind::CatchVarNotIdentifier,
+                        ) {
+                            format!("(error {projected})")
+                        } else {
+                            projected
+                        }
+                    })
                     .unwrap_or_else(|| "false".to_string());
                 let block = project_block_child(&clause);
                 parts.push(format!("(catch {var} {block})"));

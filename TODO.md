@@ -26,6 +26,19 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Non-identifier `catch` variable `(error <expr>)` (error-shape slice,
+  diagnostics model). A `catch` variable must be a plain identifier (`catch e`),
+  a `$`-interpolation (`catch $e`), or a `var"…"` non-standard identifier
+  (`catch var"e"`); any other expression (`catch e+3`, `catch e.f`, `catch
+  f(e)`, `catch 3`) is invalid and JuliaSyntax wraps it in `(error …)` (`catch
+  e+3 y end` ⇒ `(catch (error (call-i e + 3)) (block y))`). A post-build walk
+  `flag_invalid_catch_vars` (`core.rs`) records a `CatchVarNotIdentifier`
+  diagnostic at the catch-variable node's start when its kind is not
+  `NAME`/`INTERPOLATION`/`NONSTANDARD_IDENTIFIER`; `project_try`'s `CATCH_CLAUSE`
+  arm error-wraps the variable when flagged (the CST stays faithful). Fixture
+  `catch_var_error`. JS 642 → 643; dir 157 → 158. Deferred: a parenthesized
+  identifier (`catch (e)`) is valid in JuliaSyntax (unwrapped to `e`) but Fatou
+  would wrap it — not in the corpus, needs projector paren-unwrapping.
 - [x] Bare-name `function`/`macro` signature with a body `(error <name>)`
   (error-shape slice, diagnostics model). A `function`/`macro` whose signature is
   a bare identifier is the valid forward-declaration form only while its body is
