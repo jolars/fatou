@@ -165,6 +165,10 @@ pub enum SyntaxKind {
     SLASH_SLASH,
     CARET,
     PERCENT,
+    // Invalid doubled operators `**`/`--` (project `(Error**)` /
+    // `(ErrorInvalidOperator)`).
+    STAR_STAR,
+    MINUS_MINUS,
     EQ_EQ,
     NOT_EQ,
     LT,
@@ -210,6 +214,9 @@ pub enum SyntaxKind {
     DOT_PLUS,
     DOT_MINUS,
     DOT_STAR,
+    // Broadcast invalid doubled operators `.**`/`.--`.
+    DOT_STAR_STAR,
+    DOT_MINUS_MINUS,
     DOT_SLASH,
     DOT_SLASH_SLASH,
     DOT_CARET,

@@ -26,6 +26,20 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Invalid doubled operators `**`/`--` (and broadcast `.**`/`.--`). Julia has
+  no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a *single* error
+  operator at a fixed low precedence tier (looser than `+`, tighter than `:`/`==`,
+  left-associative) and heads the infix call with the error token itself: `a**b` ⇒
+  `(call-i a (Error**) b)`, `a--b` ⇒ `(call-i a (ErrorInvalidOperator) b)`, with
+  the dotted forms `dotcall-i` (`a .** b` ⇒ `(dotcall-i a (Error**) b)`). The
+  `-->` arrow is matched before `--`, so it is unaffected; a missing right operand
+  reuses the shared `(error)` synthesis (`a-- ` ⇒ `(call-i a (ErrorInvalidOperator)
+  (error))`). New `StarStar`/`MinusMinus`/`DotStarStar`/`DotMinusMinus` `TokKind`s
+  (longest-match before single `*`/`-` and the dotted table) + `SyntaxKind`s +
+  `infix_binding_power` tier `(18, 19)` + `infix_head`/`is_operator` arms. Fixture
+  `invalid_doubled_operators`. JS 644 → 645; dir 159 → 160. Deferred: prefix `**a`/
+  `--a` ⇒ `(call-pre (error (Error**)) a)` (not in the corpus); the `:<`-style
+  multi-token invalid operator `(error : <)` is a different shape.
 - [x] Non-identifier `catch` variable `(error <expr>)` (error-shape slice,
   diagnostics model). A `catch` variable must be a plain identifier (`catch e`),
   a `$`-interpolation (`catch $e`), or a `var"…"` non-standard identifier

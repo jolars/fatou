@@ -71,6 +71,7 @@ incomplete_block
 incomplete_try
 interpolation_expr
 interpolation_names
+invalid_doubled_operators
 juxtaposition
 keyword_args
 keyword_name_error

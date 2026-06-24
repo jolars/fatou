@@ -87,6 +87,13 @@ pub(crate) enum TokKind {
     SlashSlash,
     Caret,
     Percent,
+    /// The invalid doubled operators `**` and `--` (and broadcast `.**`/`.--`).
+    /// Julia has no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a
+    /// single error operator at a fixed low precedence tier (between `+` and `:`)
+    /// and projects it as `(Error**)` / `(ErrorInvalidOperator)`. `-->` (the
+    /// arrow) is matched before `--`, so it is unaffected.
+    StarStar,
+    MinusMinus,
     EqEq,
     NotEq,
     Lt,
@@ -142,6 +149,10 @@ pub(crate) enum TokKind {
     DotPlus,
     DotMinus,
     DotStar,
+    /// Broadcast forms of the invalid doubled operators `.**`/`.--` (project
+    /// `(dotcall-i a (Error**) b)` / `(dotcall-i a (ErrorInvalidOperator) b)`).
+    DotStarStar,
+    DotMinusMinus,
     DotSlash,
     DotSlashSlash,
     DotCaret,
@@ -906,6 +917,10 @@ impl<'a> Lexer<'a> {
                 (Some(b'<'), Some(b':')) => Some(TokKind::DotSubtype),
                 (Some(b'>'), Some(b':')) => Some(TokKind::DotSupertype),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
+                // Broadcast invalid doubled operators `.**`/`.--` (the `.-->`
+                // arrow is matched above, so `.--` here is never the arrow).
+                (Some(b'*'), Some(b'*')) => Some(TokKind::DotStarStar),
+                (Some(b'-'), Some(b'-')) => Some(TokKind::DotMinusMinus),
                 (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
                 (Some(b'|'), Some(b'>')) => Some(TokKind::DotPipeGt),
                 (Some(b'&'), Some(b'&')) => Some(TokKind::DotAndAnd),
@@ -992,8 +1007,12 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        // Two-char operators next (longest match).
+        // Two-char operators next (longest match). The invalid doubled operators
+        // `**`/`--` lex as single error tokens (`-->` is matched above as a
+        // 3-char op, so `--` here is never the start of an arrow).
         let two = match (b0, b1) {
+            (Some(b'*'), Some(b'*')) => Some(TokKind::StarStar),
+            (Some(b'-'), Some(b'-')) => Some(TokKind::MinusMinus),
             (Some(b'/'), Some(b'/')) => Some(TokKind::SlashSlash),
             (Some(b'='), Some(b'=')) => Some(TokKind::EqEq),
             (Some(b'='), Some(b'>')) => Some(TokKind::FatArrow),

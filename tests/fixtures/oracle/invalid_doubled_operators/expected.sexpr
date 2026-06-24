@@ -1,0 +1,1 @@
+(toplevel (call-i a (ErrorInvalidOperator) b) (call-i a (Error**) b) (dotcall-i a (ErrorInvalidOperator) b) (dotcall-i a (Error**) b) (call-i (call-i a + b) (ErrorInvalidOperator) c) (call-i (call-i a (Error**) b) : c))

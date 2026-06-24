@@ -368,6 +368,11 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         PLUS => CallI("+"),
         MINUS => CallI("-"),
         STAR => CallI("*"),
+        // Invalid doubled operators: JuliaSyntax heads the infix call with the
+        // error token itself (`a**b` ⇒ `(call-i a (Error**) b)`, `a--b` ⇒
+        // `(call-i a (ErrorInvalidOperator) b)`).
+        STAR_STAR => CallI("(Error**)"),
+        MINUS_MINUS => CallI("(ErrorInvalidOperator)"),
         SLASH => CallI("/"),
         SLASH_SLASH => CallI("//"),
         CARET => CallI("^"),
@@ -406,6 +411,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_PLUS => DotCallI("+"),
         DOT_MINUS => DotCallI("-"),
         DOT_STAR => DotCallI("*"),
+        DOT_STAR_STAR => DotCallI("(Error**)"),
+        DOT_MINUS_MINUS => DotCallI("(ErrorInvalidOperator)"),
         DOT_SLASH => DotCallI("/"),
         DOT_SLASH_SLASH => DotCallI("//"),
         DOT_CARET => DotCallI("^"),
@@ -497,6 +504,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
         EQ | PLUS
             | MINUS
             | STAR
+            | STAR_STAR
+            | MINUS_MINUS
             | SLASH
             | SLASH_SLASH
             | CARET
@@ -534,6 +543,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_PLUS
             | DOT_MINUS
             | DOT_STAR
+            | DOT_STAR_STAR
+            | DOT_MINUS_MINUS
             | DOT_SLASH
             | DOT_SLASH_SLASH
             | DOT_CARET

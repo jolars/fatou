@@ -4238,6 +4238,12 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // precedence 10) and is left-associative, building an ordinary
         // `(call-i a .. b)`.
         TokKind::Colon | TokKind::DotDot => (14, 15),
+        // The invalid doubled operators `**`/`--` (and broadcast `.**`/`.--`)
+        // sit at their own low tier, looser than `+` and tighter than `:`/`==`
+        // (`a+b**c` ⇒ `(a+b)**c`, `a**b:c` ⇒ `(a**b):c`), left-associative.
+        TokKind::StarStar | TokKind::MinusMinus | TokKind::DotStarStar | TokKind::DotMinusMinus => {
+            (18, 19)
+        }
         // Bitwise-or `|` shares the `+` (plus) precedence family, left-associative
         // (`a | b & c` ⇒ `(a | (b & c))`, `a & b | c` ⇒ `((a & b) | c)`).
         TokKind::Plus
