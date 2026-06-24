@@ -26,6 +26,13 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Short-circuit `&&`/`||` (and broadcast `.&&`/`.||`) right-associativity.
+  JuliaSyntax nests these right (`a && b && c` ⇒ `(&& a (&& b c))`); Fatou's
+  binding powers were left-associative despite a doc comment claiming otherwise.
+  Flipped `OrOr`/`DotOrOr` to `(6, 5)` and `AndAnd`/`DotAndAnd` to `(8, 7)` in
+  `infix_binding_power` (`expr.rs`) so `r_bp < l_bp`; tier band (ternary 3 <
+  arrow 3–4 < `||` 5–6 < `&&` 7–8 < comparison 10–11) and the missing-rhs path
+  (`a &&` ⇒ `(&& a (error))`) are unchanged. Fixture `short_circuit_assoc`.
 - [x] `end`/`begin` index marker scoped to genuine `ref` indexing (+ misplaced-
   `end` recovery). The marker is enabled *only* by indexing (the single-element/
   comma/empty `[…]` after a value, `a[end]`/`Int[1,2,end]`), not by bare vector

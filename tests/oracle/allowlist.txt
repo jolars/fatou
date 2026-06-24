@@ -119,6 +119,7 @@ raw_string
 raw_triple_string
 regex_string
 return_stray_close
+short_circuit_assoc
 short_function_def
 signed_literals
 splat

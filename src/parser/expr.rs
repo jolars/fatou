@@ -4376,8 +4376,11 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::LongArrow
         | TokKind::LeftRightArrow
         | TokKind::DotLongArrow => (4, 3),
-        TokKind::OrOr | TokKind::DotOrOr => (5, 6),
-        TokKind::AndAnd | TokKind::DotAndAnd => (7, 8),
+        // Short-circuit `||`/`&&` (and broadcast `.||`/`.&&`) are
+        // right-associative (`a && b && c` ⇒ `(&& a (&& b c))`), so `r_bp <
+        // l_bp`; `&&` binds tighter than `||`, both looser than the comparisons.
+        TokKind::OrOr | TokKind::DotOrOr => (6, 5),
+        TokKind::AndAnd | TokKind::DotAndAnd => (8, 7),
         // `where` is not an ordinary infix operator: it is a left-associative
         // chain handled directly in the operator loop (see `parse_where_chain`),
         // binding tighter than every binary operator but looser than

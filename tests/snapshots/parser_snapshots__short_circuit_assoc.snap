@@ -1,0 +1,73 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..53
+  BINARY_EXPR@0..11
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    AND_AND@2..4 "&&"
+    WHITESPACE@4..5 " "
+    BINARY_EXPR@5..11
+      NAME@5..6
+        IDENT@5..6 "b"
+      WHITESPACE@6..7 " "
+      AND_AND@7..9 "&&"
+      WHITESPACE@9..10 " "
+      NAME@10..11
+        IDENT@10..11 "c"
+  NEWLINE@11..12 "\n"
+  BINARY_EXPR@12..23
+    NAME@12..13
+      IDENT@12..13 "a"
+    WHITESPACE@13..14 " "
+    OR_OR@14..16 "||"
+    WHITESPACE@16..17 " "
+    BINARY_EXPR@17..23
+      NAME@17..18
+        IDENT@17..18 "b"
+      WHITESPACE@18..19 " "
+      OR_OR@19..21 "||"
+      WHITESPACE@21..22 " "
+      NAME@22..23
+        IDENT@22..23 "c"
+  NEWLINE@23..24 "\n"
+  BINARY_EXPR@24..35
+    BINARY_EXPR@24..30
+      NAME@24..25
+        IDENT@24..25 "a"
+      WHITESPACE@25..26 " "
+      AND_AND@26..28 "&&"
+      WHITESPACE@28..29 " "
+      NAME@29..30
+        IDENT@29..30 "b"
+    WHITESPACE@30..31 " "
+    OR_OR@31..33 "||"
+    WHITESPACE@33..34 " "
+    NAME@34..35
+      IDENT@34..35 "c"
+  NEWLINE@35..36 "\n"
+  BINARY_EXPR@36..47
+    NAME@36..37
+      IDENT@36..37 "a"
+    WHITESPACE@37..38 " "
+    OR_OR@38..40 "||"
+    WHITESPACE@40..41 " "
+    BINARY_EXPR@41..47
+      NAME@41..42
+        IDENT@41..42 "b"
+      WHITESPACE@42..43 " "
+      AND_AND@43..45 "&&"
+      WHITESPACE@45..46 " "
+      NAME@46..47
+        IDENT@46..47 "c"
+  NEWLINE@47..48 "\n"
+  BINARY_EXPR@48..53
+    NAME@48..49
+      IDENT@48..49 "a"
+    WHITESPACE@49..50 " "
+    AND_AND@50..52 "&&"
+    NEWLINE@52..53 "\n"
+
+diagnostic [50..52]: expected right-hand side for operator

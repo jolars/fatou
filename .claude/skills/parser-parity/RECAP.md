@@ -37,91 +37,68 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **647 allowlisted**,
-38 divergence, 0 unsupported. Dir corpus: **164 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **649 allowlisted**,
+36 divergence, 0 unsupported. Dir corpus: **165 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
-Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
-**Error shapes are now reconstructed from diagnostics, not in-tree marker
-nodes** (2026-06-23i refactor) — same projected output, so counts unchanged.
-`TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA` mechanism
-(historical log); the *output shapes* they cite are still correct.
+Grammar bullets through "short-circuit right-associativity" are `[x]` in
+`TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
+marker nodes** (2026-06-23i refactor) — same projected output, so counts
+unchanged. `TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA`
+mechanism (historical log); the *output shapes* they cite are still correct.
 
-Deliberate (recorded) divergences, do not "fix": comparison chains (nested),
-associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right),
-**float**-literal display normalization (`2.`/`1f0`/hex floats/`1.0e-1000`; the
-integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
-(dir `blocked.txt`).
+**Divergence-ledger audit (2026-06-24, in progress):** the old "deliberate, do
+not fix" list was mostly mislabeled for a linter/LSP. Verdicts: `&&`/`||`
+associativity was a *bug* (fixed C1, this session); comparison chains and
+arithmetic `+`/`*` flattening are *faithfulness gaps worth closing* (planned C3,
+C2 — see plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md`). Genuinely
+permanent: **float**-literal display normalization (`2.`/`1f0`/hex floats/
+`1.0e-1000`; needs Julia's `show`). Still recorded/deferred: n-ary juxtaposition
+`(2)(3)x` (flattening + the `(2)(3)`→`(call 2 3)` misparse, out of scope here);
+`end`/`[1 +2]`/unterminated-string error shapes; word-op comparison chains
+`a isa b isa c` (will be deferred in C3 — separate `word_operator` parse branch).
 
-## Latest session (2026-06-24h)
+## Latest session (2026-06-24i — C1 of the divergence-ledger campaign)
 
-**`end`/`begin` index marker scoped to genuine `ref` indexing + misplaced-`end`
-recovery** (unblocks dir `end_index`). Root cause: Fatou enabled the `end` marker
-for *every* `[…]` bracket (and `parse_element` hard-coded `end_marker: true`),
-where JuliaSyntax enables it *only* for genuine indexing — the single-element/
-comma/empty `[…]` after a value (`a[end]`, `Int[1,2,end]`) — and *not* for bare
-vector literals (`[1,2,end]`), typed concatenations (`a[1 end]`), calls
-(`f(end)`), or braces (`{end}`). The flag is **inherited** by everything nested
-inside an index, so `a[[end]]`/`a[(end)]`/`a[f(end)]`/`a[g(end)+1]` keep `end` a
-marker (verified each against Julia). Threaded an `inherited_end_marker: bool`
-through `parse_postfix_chain`→`parse_postfix`→{`parse_arg_list`,
-`parse_typed_concat`}, plus `parse_bracket_literal`/`parse_braces`/`parse_paren`/
-`parse_element`/`parse_matrix`/`parse_expr_in_brackets` (entry points fed
-`flags.end_marker`); only an indexing `ARG_LIST` closed by `]` *sets* it
-(`parse_arg_list`: `inherited || (RBracket && ARG_LIST)`, and `begin_marker =
-end_marker`). Trap solved: `parse_typed_concat`'s *first* element parses in
-indexing position (passes `true`) so `a[2:end]` stays `(ref a (call-i 2 : end))`
-even though it briefly explores the typed-concat path; its matrix body uses the
-inherited value (`a[1 end]` → error). **Recovery:** a bare `end` where it is not a
-valid marker terminates the (now unterminated) list via the `UnterminatedArgList`
-`(error-t)` and breaks *without* consuming the closer, so the toplevel leftover
-driver bumps `end <closer>` as a junk run — `[1,2,end]` ⇒ `(vect 1 2 (error-t))
-(error-t end ✘)`, `f(end)` ⇒ `(call f (error-t)) (error-t end ✘)`; nesting falls
-out via the recursive break (`g([1,2,end])` ⇒ `(call g (vect 1 2 (error-t))
-(error-t)) (error-t end ✘ ✘)`). Gated on `parsed_element || close == RParen` (a
-non-leading `end` in any list, or a leading `end` in a *call*). Fixtures
-`end_index` (the unblocked corpus case) + `end_marker_propagation` (5 nested
-cases). dir 162 → 164 (blocked 2 → 1); JS held 647 (no corpus micro-case). Green;
-clippy/fmt clean, zero regressions. **Deferred** (out of corpus, left divergent):
-leading `end` in a vector/braces literal (`[end]` ⇒ `(vect (error end))`, `{end}`
-⇒ `(braces (error end))`), `(end)` paren at toplevel, full matrix `end`-recovery
-(`[1 2 end]` ⇒ `(hcat 1 2 (error-t)) (error-t end ✘)`), and marker propagation
-into quotes (`a[:(end)]`) and macro-call args.
-
-**Next-target survey** (38 JS FAILs): (a) **deliberate, do
-not fix** — comparison chains (`x<y<z`/`x .< y<z`/`x==y<z`), associative flattening
-(`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects `[x+y+z]`), juxtaposition
-`(2)(3)x`; (b) **float display (blocked, bigger than it looks)** — `x.3`,
-`-0xf.0p0`, `0x…p+0`, `1.0e-1000`, prime+float `10.0e1000'`/`10.0f100'`: needs
-JuliaSyntax's full Float64/Float32 `show` (Ryu shortest round-trip, sci-notation
-thresholds, `1f0`→`1.0f0`, overflow→`(ErrorNumericOverflow)`), *not* a leading-zero
-hack; (c) **char/prime lexer (deferred)** — `'`, `'a`, `f.'`, `x 'y`; (d)
-**invalid-operator** — `a :< b`⇒`(call-i a (error : <) b)` (a *two-token* glued op
-`:`+`<`, needs a paired error token + 2-token error head); (e) **macro dotted-name
-error shapes** — `A.@B.x`, `@A.B.@x a`, `@A.$x a`, `@M.(x)`, `@[x] y z` — each a
-*distinct, deep* parser gap, NOT a clean cluster (e.g. `@A.B.@x a` currently drops
-`A.B` entirely; `A.@B.x` drops `.x`); (f) **ternary-in-block** (`if true; x ? true
-end` + siblings) — fragile: the recovered ternary head flips between `?` and `if`
-by context (`x ? true` alone ⇒ `(? …)`, but `if true; x ? true end` ⇒ `(if true
-(block (if x true (error-t) (error-t))))`); (g) **bare block keyword** —
-`function`/`macro`/`struct`/`mutable struct`/`while x`/`begin` with no
-signature/body/`end` (js-78f9ac01 `function` ⇒ `(function (error (error)) (block
-(error)) (error-t))`). Most real-world-relevant (incomplete-editor states) but
-*intricate*: **two** interacting sub-features — (1) a signature error (`(error
-(error))` fn/macro, `(error)` struct) and (2) a missing-statement `(error)` inside
-an EOF-*truncated* empty body — and signature recovery can consume the `end`
-(`function\nend` ⇒ `(function (error (error end)) (block (error)) (error-t))`). The
-missing-statement rule is gated by truncation, not emptiness: `function f()
-end`/`begin end`/`while x end` stay `(block)` (explicit `end`); `function
-;end`/`if x;` stay `(block)` (`;`); only EOF-truncation inserts `(error)`. Broad —
-guard the many passing `… end` cases; likely a 2-session feature; (h) **misc error
-shapes** — `:(end)`, `a[:(end)]`, `export (x::T)`⇒`(export (error (::-i x T)))`
-(export-item validation; the export parser is a carry-verbatim shim), `"notdoc"]`.
-**Cleanest next pick:** no clean multi-case cluster remains — the frontier is
-mostly deliberate/blocked/deferred/fragile/deep-gap. Highest *value* is
-bare-block-keyword (g) but budget ~2 sessions; the contained 1-case wins from
-(h) are mostly export/colon-end shapes, each a distinct narrow path.
+**`&&`/`||` right-associativity** (the `&&`/`||` row of the ledger audit; flips
+js-5d39e3d6 `x && y && z`, js-3fcc48ca `x || y || z`). One-line root cause: the
+binding powers were left-associative (`||`=(5,6), `&&`=(7,8)) despite a doc
+comment claiming right-assoc; Julia is right-assoc (`a && b && c` ⇒ `(&& a (&& b
+c))`). Flipped to `(6,5)`/`(8,7)` in `infix_binding_power` (`expr.rs`); the band
+(ternary 3 < arrow 3–4 < `||` 5–6 < `&&` 7–8 < comparison 10–11) and the
+missing-rhs path (`a &&` ⇒ `(&& a (error))`, binding-power-independent) are
+intact. Projector untouched (`&&`/`||` already `Special` heads). Fixtures
+`short_circuit_assoc` (parser snapshot includes the `a &&` guard; oracle dir
+fixture is a clean 4-line subset). JS 647 → 649 (zero regressions); dir 164 →
+165. Green; clippy/fmt clean. **Next (per plan):** C3 flat comparison chains
+(new `COMPARISON_EXPR` node + `project_comparison`; defer word-op chains), then
+C2 flat `+`/`*` (reuse `BINARY_EXPR` N-ary; likely a fresh context). Plan:
+`~/.claude/plans/yes-let-s-do-it-ticklish-deer.md`.
 
 ## Earlier sessions
+
+- **2026-06-24h** — `end`/`begin` index marker scoped to genuine `ref` indexing
+  + misplaced-`end` recovery (unblocks dir `end_index`). The marker is enabled
+  *only* by genuine indexing (single-element/comma/empty `[…]` after a value) and
+  *inherited* by everything nested inside; a bare `end` elsewhere recovers via
+  `UnterminatedArgList` + a toplevel junk run. `inherited_end_marker` threads
+  through the postfix/bracket/matrix parsers. Fixtures `end_index` +
+  `end_marker_propagation`. dir 162 → 164.
+
+**Backlog survey** (carried from 2026-06-24h; the comparison/flatten "deliberate"
+items (a) are now the active campaign — see Progress): (b) **float display
+(blocked)** — `x.3`, hex floats, `1.0e-1000`, prime+float: needs JuliaSyntax's
+full Float32/64 `show`; (c) **char/prime lexer (deferred)** — `'`, `'a`, `f.'`,
+`x 'y`; (d) **invalid-operator** — `a :< b`⇒`(call-i a (error : <) b)` (two-token
+glued op, needs a paired error token + 2-token error head); (e) **macro
+dotted-name error shapes** — `A.@B.x`, `@A.B.@x a`, `@A.$x a`, `@M.(x)`, `@[x] y
+z` — each a *distinct, deep* parser gap, NOT a clean cluster; (f)
+**ternary-in-block** (`if true; x ? true end`) — fragile, the recovered ternary
+head flips between `?` and `if` by context; (g) **bare block keyword** —
+`function`/`macro`/`struct`/`while x`/`begin` with no signature/body/`end`
+(js-78f9ac01). Most real-world-relevant (incomplete-editor states) but *intricate*
+(two interacting sub-features; signature recovery can consume the `end`); ~2
+sessions; (h) **misc error shapes** — `:(end)`, `a[:(end)]`, `export (x::T)`,
+`"notdoc"]`, each a distinct narrow path.
 
 - **2026-06-24g** — Prefix-operator spaced call-form paren → zero-width `(error)`
   (flips js-4f46be13 `+ (a,b)`). A unary-prefix-capable operator (`+ - ~ ! .+ .-
