@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **633 allowlisted**,
-52 divergence, 0 unsupported. Dir corpus: **151 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **634 allowlisted**,
+51 divergence, 0 unsupported. Dir corpus: **152 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,32 +52,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23v)
+## Latest session (2026-06-23w)
 
-**Empty comma-list slot → flat `(error-t ✘ …)`.** An empty element slot *after a
-real element* in any comma-separated list (`,` where the previous slot produced
-nothing) is invalid; JuliaSyntax bails, bumping the offending comma and
-everything after it up to the closer as one flat trailing-junk run: `[x,,]` ⇒
-`(vect x (error-t ✘))`, `[x,,y]` ⇒ `(vect x (error-t ✘ y))`, `[x,y,,z]` ⇒
-`(vect x y (error-t ✘ z))`, `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`, and the
-`(…)`/`{…}` analogues. A trailing comma (`[x,]`) stays clean; a `,;` is a normal
-parameters split (`f(a,;c)` ⇒ `(call f a (parameters c))`); the params+bail
-combo nests correctly (`f(a;b,,c)` ⇒ `(call f a (parameters b) (error-t ✘ c))`).
+**Range-colon newline stop + unified missing-rhs `(error)`.** The range `:` is
+the lone binary operator that does *not* carry its right operand across a newline
+at statement scope or inside array brackets (where a newline is a row separator);
+other operators (`+`, `..`, `|>`, `::`, `->`) continue onto the next line. So
+`1:\n2` ⇒ `(call-i 1 : (error)) 2` and `[1:\n2]` ⇒ `(vcat (call-i 1 : (error)) 2)`,
+while a paren keeps newlines insignificant (`(1:\n2)` ⇒ `(call-i 1 : 2)`,
+`f(1:\n2)` ⇒ `(call f (call-i 1 : 2))`). The same change moves the colon's
+pre-existing missing-rhs off `error_expr_to_line_end` onto the shared `(error)`
+synthesis, so `1:` ⇒ `(call-i 1 : (error))`, `1:2:` ⇒ `(call-i 1 : 2 (error))`,
+`[1:]` ⇒ `(vect (call-i 1 : (error)))` all match now too.
 
-Implementation (reuses the existing `@`-junk machinery — no new node kind or
-projector arm): `parse_arg_list` (`expr.rs`) now tracks `slot_empty`/
-`parsed_element`; on a `Comma` with `slot_empty && parsed_element` it scans to
-the closer, builds an `ERROR` node over `[comma, close)`, records a `TrailingJunk`
-diagnostic at the comma, emits the closer, and breaks. `project_error`/
-`is_recovery_error` already render the byte-bearing `ERROR` as `(error-t ✘ …)`
-(commas are `is_error_glyph`). Fixture `list_empty_comma`. JS 631 → 633; dir
-150 → 151. Green; clippy/fmt clean, no regressions. **Deferred:** a *leading*
-empty slot (`[,x]` ⇒ `(vect (error) x)`, `[,,x]` ⇒ `(vect (error) (error-t ✘ x))`)
-needs a projector-synthesized zero-width `(error)` at the head (rust-analyzer
-model), left divergent (not in corpus); nested brackets inside the junk run
-(`[x,,g(y)]`) over-consume, same deferral as the `@`-junk case.
+Implementation: `parse_colon_range` (`expr.rs`) computes `newline_significant =
+!inside_brackets || array_mode`; when a newline follows the colon (via `skip_ws`)
+it forces the rhs missing, records the existing `MissingOperand` diagnostic at the
+colon, and returns the LHS-only node — `build_binary_missing_rhs(BINARY_EXPR, …)`
+for a bare colon (`step == None`) or new `build_range3_missing_rhs` for a trailing
+step colon (`step == Some`). `project_binary` already replays the 2-operand
+`(call-i a : (error))`; `project_range` gained a 2-operand arm that emits
+`(call-i a : b (error))` when the last `COLON` token carries `MissingOperand`.
+Fixture `colon_range_newline` (covers statement, stepped, array, paren-continues).
+JS 633 → 634; dir 151 → 152. Green; clippy/fmt clean, no regressions.
 
 ## Earlier sessions
+
+- **2026-06-23v** — Empty comma-list slot → flat `(error-t ✘ …)`: an empty element
+  slot *after a real element* in any comma list bails, bumping the comma and the
+  rest up to the closer as one trailing-junk run (`[x,,]` ⇒ `(vect x (error-t ✘))`,
+  `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`); a trailing comma stays clean and `,;`
+  is a normal parameters split. `parse_arg_list` tracks `slot_empty`/
+  `parsed_element` and reuses the `@`-junk machinery (`ERROR` over `[comma, close)`
+  + `TrailingJunk` diag), no new node/projector arm. Fixture `list_empty_comma`.
+  JS 631 → 633; dir 150 → 151. Deferred: leading empty slot (`[,x]`), nested
+  brackets in the junk run.
 
 - **2026-06-23u** — `else if` → `elseif` recovery → zero-width `(error-t)`:
   `else if` on one line (`if a … else if b … end`) is recovered as an `elseif`
@@ -139,27 +148,18 @@ model), left divergent (not in corpus); nested brackets inside the junk run
   emits `UNARY_EXPR > ERROR > OPERATOR_ATOM > op` + operand, new
   `InvalidPrefixOperator` diagnostic; `project_unary` renders the prefix-call head.
   Fixture `prefix_operator_error`. JS 609 → 612; dir 142 → 143.
-- **2026-06-23m** — `public` stops at the first non-comma after a name. `public` is
-  a names-only compatibility shim (JuliaSyntax `parse_public`): it ends the
-  statement at the first non-comma after a complete name, and the leftover floats
-  to the toplevel trailing-junk driver (`public x=1, y` ⇒
-  `(public x) (error-t = 1 ✘ y)`). `export` differs (re-enters the operator parser:
-  `export x=1` ⇒ `(= (export x) 1)`), so the stop is `PUBLIC_STMT`-gated. Fixes in
-  `parse_name_list_stmt` (`structural.rs`) + two projector touches (`name_run_item`
-  keyword-as-name arm, `project_public` keeps keyword-name tokens). Fixture
-  `public_stop_at_equals`. JS 607 → 609; dir 141 → 142. Deferred: `export` operator
-  re-entry, `outer` stop-at-`=`.
-- **2026-06-23l** — Block-body trailing junk. A separator-less glued statement
-  inside a block ends it; the closing recovery (`bump_closing_token`) bumps the run
-  as flat error tokens up to the closing keyword. Uniform CST (junk `ERROR` is
-  always a sibling of `BLOCK`, child of the construct); the projector decides
-  placement — `begin`/`quote` fold it inside (`begin\n x y\n end` ⇒ `(block x
-  (error-t y))`), `if`/`while` keep it a sibling. `run_block_inner` breaks the
-  loop at glued junk; `expect_end` became the full close (`collect_block_junk` xor
-  zero-width `MissingEnd`, the two never stack); `project_block_child_folding_error`
-  + `project_if` render it. Fixture `block_trailing_junk`. JS 605 → 607; dir
-  140 → 141. Deferred: for/let/module/struct/try/do junk (sibling `ERROR` in CST,
-  not yet projected), junk-then-`else`.
+- **2026-06-23m** — `public` stops at the first non-comma after a name (a
+  names-only shim, `parse_public`); leftover floats to the toplevel junk driver
+  (`public x=1, y` ⇒ `(public x) (error-t = 1 ✘ y)`). `export` differs (re-enters
+  the operator parser), so the stop is `PUBLIC_STMT`-gated. Fixture
+  `public_stop_at_equals`. JS 607 → 609; dir 141 → 142.
+- **2026-06-23l** — Block-body trailing junk: a separator-less glued statement
+  inside a block ends it; `bump_closing_token` bumps the run as flat error tokens
+  up to the closing keyword. Uniform CST (junk `ERROR` always a `BLOCK` sibling);
+  the projector places it — `begin`/`quote` fold it inside (`begin\n x y\n end` ⇒
+  `(block x (error-t y))`), `if`/`while` keep it a sibling. Fixture
+  `block_trailing_junk`. JS 605 → 607; dir 140 → 141. Deferred:
+  for/let/module/struct/try/do junk (sibling `ERROR` in CST, not yet projected).
 
 **Scoping note — next-target candidates** (still-open `✘`-glyph FAIL roots):
 (a) **`outer` stop-at-`=`** — `outer x=1` ⇒ `outer (error-t x = 1)` (note
@@ -190,13 +190,12 @@ fragile.
   `toplevel_leftover_error`. JS 603 → 605.
 - **2026-06-23j** — `const`-not-assignment error-wrap (first error shape on the
   diagnostics model): JuliaSyntax wraps a `const` whose decl isn't a plain `=` in
-  `(error …)` (`const x`⇒`(error (const x))`, `const x += 1`, `const global x`),
-  but a bare `const` field *directly* in a struct body is exempt. Post-build CST
-  walk `flag_invalid_const_decls` (`core.rs`) records a `ConstNotAssignment`
-  diagnostic at the `const` keyword; projector's `CONST_STMT` arm wraps when
-  `diag_at`. Reusable pattern: semantic error-wraps where the CST is already
-  correct fit a post-build walk + projector wrap. Fixture `const_not_assignment`.
-  JS 599 → 603; dir 139 → 140.
+  `(error …)` (`const x`⇒`(error (const x))`, `const x += 1`), but a bare `const`
+  field directly in a struct body is exempt. Post-build CST walk
+  `flag_invalid_const_decls` records a `ConstNotAssignment` diag; projector's
+  `CONST_STMT` arm wraps when `diag_at`. Reusable pattern: semantic error-wraps
+  where the CST is already correct fit a post-build walk + projector wrap. Fixture
+  `const_not_assignment`. JS 599 → 603; dir 139 → 140.
 - **2026-06-23i** — Architecture reversal: error handling → the rust-analyzer
   model. Deleted `SyntaxKind::ERROR_TRIVIA`; the zero-width in-tree markers grown
   over the 2026-06-22o…2026-06-23h lineage became **diagnostics-only** (no node),
@@ -208,31 +207,23 @@ fragile.
   Same projected output ⇒ zero allowlist movement (599/139). Gotcha: `keyword_start`
   special-cases `DO_EXPR` (callee precedes `do`). Plan:
   `~/.claude/plans/yeah-we-re-heading-the-swift-blossom.md`.
-- **2026-06-23h** — `import`/`as` colon error shapes (the last error-shape-lineage
-  feature, before the 2026-06-23i representation reversal): a top-level `:` is the
-  base/names split only as the *first* separator (`import A, B: y` ⇒ recovery, no
-  `:` group); a second names-list colon is recovery; a base alias before a valid
-  `:` is invalid and a `using` base alias stacks both. `parse_import_stmt` passed
-  an error-wrap depth (0/1/2) to `parse_import_clause`. Fixture
-  `import_as_colon_error`. JS 597 → 599; dir 138 → 139.
+- **2026-06-23h** — `import`/`as` colon error shapes: a top-level `:` is the
+  base/names split only as the *first* separator (`import A, B: y` ⇒ recovery); a
+  second names-list colon is recovery; a base alias before a valid `:` is invalid
+  and a `using` base alias stacks both. `parse_import_stmt` passes an error-wrap
+  depth (0/1/2) to `parse_import_clause`. Fixture `import_as_colon_error`. JS
+  597 → 599; dir 138 → 139.
+- **2026-06-23g** — `using`-base `as` rename error-wrap (`using A as B` ⇒
+  `(error (as …))`, invalid in a `using` base path); fixture `using_as_error`.
+  JS 595 → 597; dir 137 → 138. (Superseded: the bool became an error-wrap depth.)
 
-- **2026-06-23g** — `using`-base `as` rename error-wrap: an `as` rename is invalid
-  in a `using` base path, so JuliaSyntax wraps the alias `(error (as …))`
-  (`using A as B`, `using A, B as C`). `parse_import_stmt` passed a
-  `wrap_alias_error` bool to `parse_import_clause`; `project_import` collected the
-  `ERROR` clause. Fixture `using_as_error`. JS 595 → 597; dir 137 → 138.
-  (Superseded this session: the bool became an error-wrap depth.)
-
-- **2026-06-23f** — Char-literal error classification (closed-but-invalid
-  bodies): a `'…'` whose body `decode_char` can't reduce to one codepoint maps to
-  JuliaSyntax's error shapes — empty `''`⇒`(char (error))`, malformed escape
-  `'\xq'`/`'\400'`⇒`(char (ErrorInvalidEscapeSequence))`, other multi-codepoint
-  `'ab'`/`'αβ'`⇒`(char (ErrorOverLongCharacter))`; a lone non-UTF-8 byte
-  `'\xff'`/`'\377'` stays a valid one-byte `Char`. Pure projector: the refined
-  `None` arm of `project_char` delegates to `classify_char_error` (bad-escape wins
-  over over-long); the octal escape now rejects values past `0xff`. Fixture
-  `char_errors`. JS 592 → 595; dir 136 → 137. Deferred: unterminated chars (lexer
-  work, entangled with transpose siblings `f.'`/`x 'y`).
+- **2026-06-23f** — Char-literal error classification (closed-but-invalid bodies):
+  empty `''`⇒`(char (error))`, malformed escape `'\xq'`⇒`(char
+  (ErrorInvalidEscapeSequence))`, other multi-codepoint `'ab'`⇒`(char
+  (ErrorOverLongCharacter))`; a lone non-UTF-8 byte `'\xff'` stays a valid `Char`.
+  Pure projector: `project_char`'s `None` arm delegates to `classify_char_error`.
+  Fixture `char_errors`. JS 592 → 595; dir 136 → 137. Deferred: unterminated chars
+  (lexer work, entangled with transpose siblings `f.'`/`x 'y`).
 - **2026-06-23e** — `else`-without-`catch` error-wrap (last try-family
   divergence): an `else` *before* any `catch` is recovery, so JuliaSyntax wraps
   its block in `(error …)` (`try x else y end`⇒`(try (block x) (else (error

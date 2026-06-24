@@ -79,6 +79,22 @@ through), so the grammar can grow incrementally.
   `(= <: (error))`, `.+ =` ⇒ `(= (. +) (error))`, `<: = x` ⇒ `(= <: x)`).
   Fixture `operator_missing_rhs`. JS 624 → 627 (`<: =`, `.+ =`, `var"x"+`);
   dir 147 → 148.
+- [x] Range-colon newline stop + missing-rhs `(error)` (error-shape slice,
+  diagnostics model). The range `:` is the one binary operator that does not
+  consume a right operand across a newline at statement scope or inside array
+  brackets (where a newline is a row separator), unlike `+`/`..`/`|>`/`::` which
+  continue onto the next line: `1:\n2` ⇒ `(call-i 1 : (error)) 2`, `[1:\n2]` ⇒
+  `(vcat (call-i 1 : (error)) 2)`, while a paren keeps newlines insignificant
+  (`(1:\n2)` ⇒ `(call-i 1 : 2)`). This also moves the colon's pre-existing
+  missing-rhs path off `error_expr_to_line_end` onto the same `(error)` synthesis,
+  so `1:` ⇒ `(call-i 1 : (error))` and the stepped `1:2:` ⇒
+  `(call-i 1 : 2 (error))`. `parse_colon_range` checks for a newline after the
+  colon when `!inside_brackets || array_mode`, then builds the LHS-only colon node
+  (`build_binary_missing_rhs` for a bare colon, new `build_range3_missing_rhs` for
+  a trailing step colon) with the existing `MissingOperand` diagnostic;
+  `project_binary` already reconstructs the 2-operand `(error)`, and `project_range`
+  gained a 2-operand-with-missing-third arm. Fixture `colon_range_newline`. JS
+  633 → 634; dir 151 → 152.
 - [x] Missing-condition `(error)` (error-shape slice, diagnostics model). An
   `if`/`elseif` (and `while`) whose condition slot is empty (`if end`, `if; end`,
   `if true; elseif; end`) is recovery: JuliaSyntax synthesizes a zero-width

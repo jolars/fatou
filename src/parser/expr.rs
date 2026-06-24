@@ -842,6 +842,25 @@ fn build_range3(a: ExprParse, b: ExprParse, c: ExprParse) -> ExprParse {
     }
 }
 
+/// Build a stepped range whose third operand is absent: `a`, `b`, and the gap up
+/// to `gap_end` (the second colon and surrounding trivia), with no third operand.
+/// The projector replays JuliaSyntax's zero-width `(error)` from the
+/// `MissingOperand` diagnostic at the trailing colon (`1:2:` ⇒
+/// `(call-i 1 : 2 (error))`).
+fn build_range3_missing_rhs(a: ExprParse, b: ExprParse, gap_end: usize) -> ExprParse {
+    let mut events = vec![Event::Start(SyntaxKind::RANGE_EXPR)];
+    events.extend(a.events);
+    push_range(&mut events, a.end, b.start);
+    events.extend(b.events);
+    push_range(&mut events, b.end, gap_end);
+    events.push(Event::Finish);
+    ExprParse {
+        start: a.start,
+        end: gap_end,
+        events,
+    }
+}
+
 /// Parse a range `:` chain starting at the colon `first_colon` (the first operand
 /// `lhs` is already parsed and the caller has cleared the binding-power check).
 /// Mirrors JuliaSyntax's `parse_range`: every second colon folds three operands
@@ -862,8 +881,27 @@ fn parse_colon_range(
     let mut step: Option<ExprParse> = None;
     let mut op_idx = first_colon;
     loop {
+        // The range colon does not consume a right operand across a newline unless
+        // newlines are insignificant (inside parens). At statement scope and inside
+        // array brackets (where a newline is a row separator) a newline ends the
+        // range, leaving the colon's right operand absent (`1:\n2` ⇒
+        // `(call-i 1 : (error)) 2`, `[1:\n2]` ⇒ `(vcat (call-i 1 : (error)) 2)`),
+        // unlike other operators, which continue onto the next line.
+        let newline_significant = !flags.inside_brackets || flags.array_mode;
+        let newline_stop = newline_significant
+            && ctx.token(ctx.skip_ws(op_idx + 1)).map(|t| t.kind) == Some(TokKind::Newline);
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
-        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
+        let rhs = if newline_stop {
+            None
+        } else {
+            parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags)
+        };
+        let Some(rhs) = rhs else {
+            // Missing right operand: keep the colon node and synthesize a zero-width
+            // `(error)` operand (the projector replays it from the `MissingOperand`
+            // diagnostic at the colon) rather than error-wrapping to line end — a
+            // bare `1:` ⇒ `(call-i 1 : (error))`, a stepped `1:2:` ⇒
+            // `(call-i 1 : 2 (error))`.
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
@@ -872,7 +910,10 @@ fn parse_colon_range(
                 op.start,
                 op.end,
             );
-            return error_expr_to_line_end(tokens, head.start, op_idx + 1);
+            return match step.take() {
+                None => build_binary_missing_rhs(SyntaxKind::BINARY_EXPR, head, op_idx + 1),
+                Some(mid) => build_range3_missing_rhs(head, mid, op_idx + 1),
+            };
         };
         let last_end = rhs.end;
         match step.take() {

@@ -30,6 +30,7 @@ call_and_index
 char_errors
 char_escapes
 colon_range
+colon_range_newline
 colon_stray_close
 colon_value_atom
 command_literal

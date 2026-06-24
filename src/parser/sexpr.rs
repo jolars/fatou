@@ -716,6 +716,25 @@ fn operator_missing_rhs(op: &SyntaxToken) -> bool {
 /// one `(call ...)` node rather than nesting two binary colons.
 fn project_range(node: &SyntaxNode) -> String {
     let operands = child_nodes(node);
+    // A stepped range with its third operand absent (`1:2:` ⇒
+    // `(call-i 1 : 2 (error))`) keeps two operands and a `MissingOperand`
+    // diagnostic on the trailing colon.
+    if operands.len() == 2 {
+        if node
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .filter(|t| t.kind() == COLON)
+            .last()
+            .is_some_and(|colon| operator_missing_rhs(&colon))
+        {
+            return format!(
+                "(call-i {} : {} (error))",
+                project(&operands[0]),
+                project(&operands[1]),
+            );
+        }
+        return project_flat(significant(node));
+    }
     if operands.len() != 3 {
         return project_flat(significant(node));
     }
