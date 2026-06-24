@@ -1,0 +1,41 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..38
+  FUNCTION_DEF@0..23
+    FUNCTION_KW@0..8 "function"
+    NEWLINE@8..9 "\n"
+    WHITESPACE@9..10 " "
+    SIGNATURE@10..13
+      CALL_EXPR@10..13
+        NAME@10..11
+          IDENT@10..11 "f"
+        ARG_LIST@11..13
+          LPAREN@11..12 "("
+          RPAREN@12..13 ")"
+    BLOCK@13..20
+      WHITESPACE@13..14 " "
+      NEWLINE@14..15 "\n"
+      WHITESPACE@15..16 " "
+      NAME@16..17
+        IDENT@16..17 "x"
+      WHITESPACE@17..18 " "
+      NEWLINE@18..19 "\n"
+      WHITESPACE@19..20 " "
+    END_KW@20..23 "end"
+  NEWLINE@23..24 "\n"
+  MACRO_DEF@24..38
+    MACRO_KW@24..29 "macro"
+    NEWLINE@29..30 "\n"
+    WHITESPACE@30..31 " "
+    SIGNATURE@31..34
+      CALL_EXPR@31..34
+        NAME@31..32
+          IDENT@31..32 "g"
+        ARG_LIST@32..34
+          LPAREN@32..33 "("
+          RPAREN@33..34 ")"
+    BLOCK@34..35
+      WHITESPACE@34..35 " "
+    END_KW@35..38 "end"

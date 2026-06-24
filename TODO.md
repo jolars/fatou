@@ -41,6 +41,12 @@ through), so the grammar can grow incrementally.
   dispatching the block form; the atom enters the operator loop so postfix calls
   apply. `name_text` (`sexpr.rs`) falls back to a keyword token so `(error try)`
   renders. Fixture `keyword_name_error`. JS 635 → 639; dir 153 → 154.
+- [x] Newline between `function`/`macro` and its signature. A newline after the
+  opening keyword is insignificant, so the signature may start on the next line
+  (`function\n f() end` ⇒ `(function (call f) (block))`); `parse_function_like`
+  now skips newlines (not just horizontal whitespace) before the signature, and
+  the newline becomes trivia between the keyword and the `SIGNATURE` node.
+  Fixture `function_signature_newline`. JS 639 → 640; dir 154 → 155.
 - [x] Suffixed operator in prefix position `(error op)` (error-shape slice,
   diagnostics model). A sub/superscript- or prime-suffixed arithmetic operator
   (`+₁`, `-₁`, `.+₁`) is not a valid unary prefix: JuliaSyntax error-wraps it and

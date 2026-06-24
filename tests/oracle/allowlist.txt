@@ -54,6 +54,7 @@ export_name_list
 field_access_space
 field_access_suffix
 function_forward_decl
+function_signature_newline
 generator_arguments
 generators
 generator_whitespace_error

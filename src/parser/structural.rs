@@ -125,8 +125,10 @@ fn parse_function_like(
 
     // Signature, e.g. `g(x)` (a call) or `g(x)::T`. A `::` return type stays a
     // bare annotation and a trailing `where` binds the whole signature (rather
-    // than the return type), so parse it with `no_decl_where`.
-    let sig_start = ctx.skip_ws(start + 1);
+    // than the return type), so parse it with `no_decl_where`. A newline between
+    // the keyword and the signature is insignificant (`function\n f() end` ⇒
+    // `(function (call f) (block))`), so skip newlines too.
+    let sig_start = ctx.skip_ws_and_newlines(start + 1);
     let mut i = if let Some(sig) = parse_signature_expr(tokens, sig_start, diagnostics) {
         push_range(&mut events, start + 1, sig.start);
         events.push(Event::Start(SyntaxKind::SIGNATURE));

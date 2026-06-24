@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **639 allowlisted**,
-46 divergence, 0 unsupported. Dir corpus: **154 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **640 allowlisted**,
+45 divergence, 0 unsupported. Dir corpus: **155 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,38 +52,41 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23y)
+## Latest session (2026-06-23z)
 
-**Reserved keyword as a signature name → `(error <kw>)`.** A hard reserved
-keyword used as the name of a `struct`/`module`/`function`/`macro` is not a block
-opener but a misused name; JuliaSyntax error-wraps it. Four shapes nailed:
-`struct try end` ⇒ `(struct (error try) (block))`, `module do\nend` ⇒
-`(module (error do) (block))`, and the call-shaped function/macro forms
-`function begin() end` ⇒ `(function (call (error begin)) (block))`,
-`macro while(ex) end` ⇒ `(macro (call (error while) ex) (block))` (the glued `()`
-attaches via the normal postfix chain). Excluded: the contextual words Julia keeps
-as plain names there (`mutable`, `where`, `true`/`false`, and the
-identifier-lexed `abstract`/`primitive`/`outer`/`in`/`isa`/`public`).
+**Newline between `function`/`macro` and its signature** (a real parser bug, not
+an error shape). A newline after the opening keyword is insignificant in Julia, so
+the signature may begin on the next line: `function\n f() end` ⇒ `(function (call
+f) (block))`, `macro\n f() end` ⇒ `(macro (call f) (block))`. Fatou's
+`parse_function_like` (`structural.rs`) computed `sig_start` with `skip_ws` (only
+horizontal whitespace), so a leading newline made the signature parse fail; the
+body block then absorbed the signature tokens and the projector duplicated the
+lone `BLOCK` into both signature and body slots (`(function (block (call f))
+(block (call f)))`). One-line fix: `skip_ws` → `skip_ws_and_newlines` for
+`sig_start`; the newline now becomes trivia between `FUNCTION_KW`/`MACRO_KW` and
+the `SIGNATURE` node. Fixture `function_signature_newline` (covers both the
+function and macro forms). JS 639 → 640 (js-e811d4a1 `function\n f() end`); dir
+154 → 155. Green; clippy/fmt clean, no regressions.
 
-Implementation: a new `name_context` flag on `ExprFlags`, set by
-`parse_signature_expr` (function/macro) and the new `parse_name_signature_expr`
-(struct/module, replacing the bare `parse_expr` in `structural.rs`'s
-`parse_signature`). In `parse_expr_in`, when `name_context` and the leading token
-is an `is_name_error_keyword`, build a `ERROR > NAME > <kw>` atom
-(`keyword_name_error_atom`) + `InvalidNameKeyword` diagnostic *instead of*
-dispatching the block form; the atom enters the operator loop with
-`lhs_is_block_keyword=false` so postfix calls apply. Projector: the only change is
-`name_text` falling back to a keyword token (a `NAME` normally wraps an `IDENT`),
-so `project_error`'s default `error` head renders `(error try)`. Fixture
-`keyword_name_error`. JS 635 → 639 (struct try / module do / function begin /
-macro while); dir 153 → 154. Green; clippy/fmt clean, no regressions.
-
-**Note on siblings (not done):** `function f body end` ⇒ `(function (error f)
-(block body))` is a *different* divergence (a bare-identifier signature with
-trailing tokens, not a keyword name); `struct mutable end`/`struct outer end`
-already pass-through as `(struct-mut …)` style and weren't touched.
+**Side effect (acceptable, not a regression):** `function\n end` shifts shape —
+`sig_start` now lands on `end`, which `name_context` error-wraps, so Fatou emits
+`(function (error end) (block) (error-t))` (vs the prior no-signature `(function
+(block) …)`). Both are error shapes and neither fully matches JuliaSyntax's
+`(function (error (error end)) (block (error)) (error-t))`; not in the passing
+corpus either way.
 
 ## Earlier sessions
+
+- **2026-06-23y** — Reserved keyword as a signature name → `(error <kw>)`. A hard
+  reserved keyword used as a `struct`/`module`/`function`/`macro` name is a misused
+  name, not a block opener; JuliaSyntax error-wraps it (`struct try end` ⇒
+  `(struct (error try) (block))`, `function begin() end` ⇒ `(function (call (error
+  begin)) (block))`). New `name_context` `ExprFlag` builds an `ERROR > NAME > <kw>`
+  atom; projector's `name_text` falls back to a keyword token. Contextual words
+  (`mutable`/`where`/`true`/`outer`/…) excluded. Fixture `keyword_name_error`. JS
+  635 → 639; dir 153 → 154. Sibling not done: `function f body end` ⇒ `(function
+  (error f) (block body))` is a *different* divergence (a bare-identifier signature
+  with trailing tokens, not a keyword name).
 
 - **2026-06-23x** — Suffixed operator in prefix position → `(error op)`: a
   sub/superscript- or prime-suffixed arithmetic operator (`+₁`, `-₁`, `.+₁`) is
