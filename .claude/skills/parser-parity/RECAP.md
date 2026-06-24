@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **645 allowlisted**,
-40 divergence, 0 unsupported. Dir corpus: **160 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **646 allowlisted**,
+39 divergence, 0 unsupported. Dir corpus: **161 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,65 +52,79 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-24e)
+## Latest session (2026-06-24f)
 
-**Invalid doubled operators `**`/`--`** (and broadcast `.**`/`.--`), the
-operator-recipe slice of the invalid-operator backlog (flips js-90827a2e `a--b`).
-Julia has no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a *single*
-error operator at a fixed low precedence tier — looser than `+`, tighter than
-`:`/`==`, left-associative (`a+b**c` ⇒ `(a+b)**c`, `a**b:c` ⇒ `(a**b):c`) — and
-heads the infix call with the error token itself: `a**b` ⇒ `(call-i a (Error**)
-b)`, `a--b` ⇒ `(call-i a (ErrorInvalidOperator) b)`; the dotted forms are
-`dotcall-i`. Clean 5-file recipe: new `TokKind`s `StarStar`/`MinusMinus`/
-`DotStarStar`/`DotMinusMinus` (longest-match before single `*`/`-`; `-->` matched
-first so the arrow is safe; `.--`/.`**` in the dotted-3 table), `SyntaxKind`s,
-`tree_builder` map, `infix_binding_power` tier `(18, 19)` (the open slot between
-range `(14,15)` and additive `(20,21)`), and `infix_head` arms `CallI("(Error**)")`/
-`CallI("(ErrorInvalidOperator)")` + dotted `DotCallI(…)` + `is_operator`. The
-shared missing-rhs synthesis gives `a-- ` ⇒ `(call-i a (ErrorInvalidOperator)
-(error))` for free. Fixture `invalid_doubled_operators`. JS 644 → 645; dir
-159 → 160. Green; clippy/fmt clean, no regressions. **Deferred** (out of scope,
-not in corpus): prefix `**a`/`--a` ⇒ `(call-pre (error (Error**)) a)` (parse_prefix
-returns `None`, so the operator is currently dropped from the projection — lossless
-but divergent); the `:<`-style multi-token invalid operator `(error : <)`
-(js-147fac91 `a :< b`) is a different shape (two glued tokens, not a doubled one).
+**Colon-space-before-closing-keyword → bare `:` Colon atom** (error-shape slice,
+flips js-4a2410ee `: end`). A value-position prefix `:` followed by a *space* then
+a closing block keyword (`end`/`else`/`elseif`/`catch`/`finally`) is not a quotable
+symbol — JuliaSyntax parses `:` as the bare Colon value atom and spills the keyword
+as trailing junk: `: end` ⇒ `(toplevel : (error-t end))`, `: catch z` ⇒
+`(toplevel : (error-t catch z))`. Whitespace-sensitive (the *glued* `:end` still
+quotes ⇒ `(quote-: end)`) and context-sensitive: an index `a[: end]` (`end_marker`)
+keeps `end` quotable, and a field-access RHS `A.: end` keeps the quote. Two edits,
+both narrow: (1) `parse_quote_sym` gains `value_position`/`end_marker` params and
+declines early (→ `parse_prefix`'s Colon `OPERATOR_ATOM` `.or_else` fallback) for
+the spaced-closer case, *before* recording the `QuoteColonWhitespace` diagnostic so
+the bare `:` carries none; the field-access caller passes `value_position=false` via
+a new `field_access_rhs` `ExprFlag` set at the `.`-RHS `parse_prefix` call (import
+callers in `structural.rs` pass `false,false`). (2) `project_error` renders a
+recovered closing block keyword verbatim (`is_closing_block_keyword_kind`) instead
+of dropping it as a structural keyword via `is_drop_token` — this also fixes the
+general trailing-junk case `x end` ⇒ `x (error-t end)`. Fixture
+`colon_space_closer_keyword` (5 closers + `: for`/`:end`/`a[: end]` contrasts). JS
+645 → 646; dir 160 → 161. Green; clippy/fmt clean, zero regressions. **Deferred**
+(out of corpus): vect/parens contexts (`[: end]` ⇒ `(vect : (error-t)) (error-t
+end ✘)`, `(: end)`) where `end_marker` is currently set in a vect so Fatou still
+quotes — a ref-vs-vect `end`-validity distinction, not measured by any corpus case.
 
-**Next-target survey** (40 JS FAILs left, re-probed this session): (a)
-**deliberate, do not fix** — comparison chains (`x<y<z`, `x .< y<z`, `x==y<z`),
-associative flattening (`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects
-`[x+y+z]`), juxtaposition `(2)(3)x`; (b) **float display (blocked, and *bigger*
-than it looks)** — `x.3`⇒`(error-t 0.3)` is *only* a `.3`→`0.3` display diff (the
-trailing-junk structure already matches), but doing it right means JuliaSyntax's
-full Float64/Float32 `show` (Ryu shortest round-trip, scientific-notation
-thresholds, `1f0`→`1.0f0`, overflow→`(ErrorNumericOverflow)`, underflow `1.0e-1000`
-→`0.0`) — a large, finicky port, *not* a leading-zero hack (that would be a
-compensating-projector smell). Same bucket: `-0xf.0p0`, `0x…p+0`, prime+float
-`10.0e1000'`/`10.0f100'`; (c) **char/prime lexer (deferred)** — `'`, `'a`, `f.'`,
-`x 'y`; (d) **invalid-operator (remaining)** — `a :< b`⇒`(call-i a (error : <) b)`
-(a *two-token* glued invalid op `:`+`<`, a different shape from this session's
-doubled ops; would need lexing `:<` as a paired error token + a 2-token error
-head); (e) **macro dotted-name error shapes** — `A.@B.x`, `@A.B.@x a`, `@A.$x a`,
-`@M.(x)`, deeply nested multi-`(error-t)`; (f) **ternary-in-block** (`if true; x ?
-true end` + siblings) — fragile, context-dependent (see the Design-watch bullet in
-`TODO.md`); (g) **bare block keyword** — `function`/`macro`/`struct`/`mutable
-struct` with no signature/body/`end` (js-78f9ac01 `function` ⇒ `(function (error
-(error)) (block (error)) (error-t))`, `struct`⇒`(struct (error) (block (error))
-(error-t))`); this needs *two* sub-features — an empty-signature error (`(error
-(error))` for fn/macro, `(error)` for struct) **and** a general "empty block
-truncated by EOF/closer (no `;`/stmt) ⇒ insert a missing-statement `(error)`
-inside the block" rule that applies to *all* block forms (`while x`⇒`(while x
-(block (error)) (error-t))`, `begin`⇒`(block (error) (error-t))`, but `if x;`⇒
-`(if x (block) (error-t))` — a `;`/newline suppresses it). Worth it (real
-incomplete-editor states) but broad; (h) **misc error shapes** — `: end`
-(toplevel-only: `:` + space + a block-*closer* keyword ⇒ bare `:` + junk, but
-`a[: end]` keeps the quote — context-sensitive), `:(end)`, `a[:(end)]`, `export
-(x::T)`⇒`(export (error (::-i x T)))` (export-item validation; the export parser
-is a carry-verbatim shim, would need real paren-group parsing), `+ (a,b)`,
-`@[x] y z`, `"notdoc"]`. **Cleanest next pick:** the **bare-block-keyword** family
-(g) — 4+ real-world cases, one coherent feature, though it touches `run_block`/
-block projection broadly so guard the many passing `… end` cases.
+**Next-target survey** (39 JS FAILs after this session): (a) **deliberate, do
+not fix** — comparison chains (`x<y<z`/`x .< y<z`/`x==y<z`), associative flattening
+(`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects `[x+y+z]`), juxtaposition
+`(2)(3)x`; (b) **float display (blocked, bigger than it looks)** — `x.3`,
+`-0xf.0p0`, `0x…p+0`, `1.0e-1000`, prime+float `10.0e1000'`/`10.0f100'`: needs
+JuliaSyntax's full Float64/Float32 `show` (Ryu shortest round-trip, sci-notation
+thresholds, `1f0`→`1.0f0`, overflow→`(ErrorNumericOverflow)`), *not* a leading-zero
+hack; (c) **char/prime lexer (deferred)** — `'`, `'a`, `f.'`, `x 'y`; (d)
+**invalid-operator** — `a :< b`⇒`(call-i a (error : <) b)` (a *two-token* glued op
+`:`+`<`, needs a paired error token + 2-token error head); (e) **macro dotted-name
+error shapes** — `A.@B.x`, `@A.B.@x a`, `@A.$x a`, `@M.(x)`, `@[x] y z` — each a
+*distinct, deep* parser gap, NOT a clean cluster (e.g. `@A.B.@x a` currently drops
+`A.B` entirely; `A.@B.x` drops `.x`); (f) **ternary-in-block** (`if true; x ? true
+end` + siblings) — fragile: the recovered ternary head flips between `?` and `if`
+by context (`x ? true` alone ⇒ `(? …)`, but `if true; x ? true end` ⇒ `(if true
+(block (if x true (error-t) (error-t))))`); (g) **bare block keyword** —
+`function`/`macro`/`struct`/`mutable struct`/`while x`/`begin` with no
+signature/body/`end` (js-78f9ac01 `function` ⇒ `(function (error (error)) (block
+(error)) (error-t))`). Most real-world-relevant (incomplete-editor states) but, on
+this session's deeper probe, *intricate*: **two** interacting sub-features — (1) a
+signature error (`(error (error))` fn/macro, `(error)` struct) and (2) a
+missing-statement `(error)` inside an EOF-*truncated* empty body — and signature
+recovery can consume the `end` (`function\nend` ⇒ `(function (error (error end))
+(block (error)) (error-t))`). The missing-statement rule is gated by truncation,
+not emptiness: `function f() end`/`begin end`/`while x end` stay `(block)` (explicit
+`end`); `function ;end`/`if x;` stay `(block)` (`;`); only EOF-truncation inserts
+`(error)`. Broad — guard the many passing `… end` cases; likely a 2-session
+feature; (h) **misc error shapes** — `:(end)`, `a[:(end)]`, `export (x::T)`⇒
+`(export (error (::-i x T)))` (export-item validation; the export parser is a
+carry-verbatim shim), `+ (a,b)`⇒`(call + (error) a b)` (prefix-operator spaced
+paren — note `(error)`, unlike the `f (a)` `(error-t)`), `"notdoc"]`. **Cleanest
+next pick:** no clean multi-case cluster remains — the frontier is mostly
+deliberate/blocked/deferred/fragile/deep-gap. Highest *value* is bare-block-keyword
+(g) but budget ~2 sessions; lowest-*risk* contained 1-case win is `+ (a,b)` (h)
+(one prefix-operator path).
 
 ## Earlier sessions
+
+- **2026-06-24e** — Invalid doubled operators `**`/`--` (and broadcast `.**`/
+  `.--`), the operator-recipe slice of the invalid-operator backlog (flips
+  js-90827a2e `a--b`). Julia has no `**`/`--`, so JuliaSyntax lexes each as a
+  *single* error operator at a fixed low tier (looser than `+`, tighter than
+  `:`/`==`, left-assoc) heading the infix call with the error token: `a**b` ⇒
+  `(call-i a (Error**) b)`, `a--b` ⇒ `(call-i a (ErrorInvalidOperator) b)`; dotted
+  forms `dotcall-i`. New `StarStar`/`MinusMinus`/`DotStarStar`/`DotMinusMinus`
+  `TokKind`s, tier `(18, 19)`, `infix_head`/`is_operator` arms. Fixture
+  `invalid_doubled_operators`. JS 644 → 645; dir 159 → 160. Deferred: prefix
+  `**a`/`--a` (call-pre, not in corpus); `:<`-style two-token invalid op.
 
 - **2026-06-24d** — Stray middle/closing block keyword error-wrap (`@doc x\nend`,
   js-bc08a2b0). A block keyword that only closes/continues an enclosing block

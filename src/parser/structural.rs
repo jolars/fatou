@@ -1001,7 +1001,9 @@ fn parse_import_path(
             (Some(TokKind::Dot), Some(TokKind::Colon)) => {
                 // A quoted symbol component (`A.:+` → `(quote-: +)`, `A.:(+)` →
                 // `(quote-: +)`). The `:` and everything after it is a `QUOTE_SYM`.
-                let Some(quote) = parse_quote_sym(ctx, i + 1, diagnostics) else {
+                // A field-access RHS, not a value position, so a closing block
+                // keyword after the `:` stays quoted.
+                let Some(quote) = parse_quote_sym(ctx, i + 1, diagnostics, false, false) else {
                     break;
                 };
                 body.push(Event::Tok(i)); // separating `.`
@@ -1013,7 +1015,7 @@ fn parse_import_path(
             {
                 // A parenthesized quoted symbol (`A.(:+)` → `(quote-: +)`). The
                 // parens wrap a `QUOTE_SYM`; both project away to the bare quote.
-                let Some(quote) = parse_quote_sym(ctx, i + 2, diagnostics) else {
+                let Some(quote) = parse_quote_sym(ctx, i + 2, diagnostics, false, false) else {
                     break;
                 };
                 let rparen = quote.end;

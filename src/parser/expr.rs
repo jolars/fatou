@@ -78,6 +78,12 @@ struct ExprFlags {
     /// form. Matches JuliaSyntax, which parses the signature name with the block
     /// keywords disabled and recovers a stray one as `(error <kw>)`.
     name_context: bool,
+    /// Parsing the right-hand side of a field-access dot (`A.:sym`), where a
+    /// `:`-quote stays a quote even when a space precedes a closing block keyword
+    /// (`A.: end` ⇒ `(. A (quote-: (error-t) end))`). At value position the same
+    /// `: end` falls back to a bare `:` Colon atom (`is_closing_block_keyword`),
+    /// so the colon-quote parser only applies that fallback when this is off.
+    field_access_rhs: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -272,6 +278,7 @@ fn parse_expr_in(
         no_where,
         no_decl_where,
         name_context,
+        field_access_rhs: _,
     } = flags;
     let ctx = ParserCtx::new(tokens);
 
@@ -641,7 +648,15 @@ fn parse_expr_in(
         // RHS prefix-only and let the outer postfix chain attach any suffix. Other
         // operators parse a full right operand at their binding power.
         let rhs_result = if op_kind == TokKind::Dot {
-            parse_prefix(&ctx, rhs_operand, diagnostics, flags)
+            parse_prefix(
+                &ctx,
+                rhs_operand,
+                diagnostics,
+                ExprFlags {
+                    field_access_rhs: true,
+                    ..flags
+                },
+            )
         } else {
             parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags)
         };
@@ -1223,8 +1238,10 @@ fn parse_prefix(
         // `None` and we fall through to an `OPERATOR_ATOM` (`a[:]` ⇒ `(ref a :)`,
         // `:` ⇒ `:`). Without the fallthrough the bare `:` token is dropped by the
         // projector's delimiter filter.
-        TokKind::Colon => parse_quote_sym(ctx, start, diagnostics)
-            .or_else(|| Some(atom(SyntaxKind::OPERATOR_ATOM, start))),
+        TokKind::Colon => {
+            parse_quote_sym(ctx, start, diagnostics, !flags.field_access_rhs, flags.end_marker)
+                .or_else(|| Some(atom(SyntaxKind::OPERATOR_ATOM, start)))
+        }
         // A prefix `$` is an interpolation (`$x`, `$(x + y)`). It parses
         // everywhere — Julia only rejects it outside a quote during lowering,
         // not at parse time — so the field-access right-hand side (`f.$x`) and
@@ -1467,6 +1484,20 @@ fn is_quotable_operator(kind: TokKind) -> bool {
     )
 }
 
+/// Whether `kind` is a middle/closing block keyword (`end`/`else`/`elseif`/
+/// `catch`/`finally`) — one that only closes or continues an enclosing block and
+/// so cannot stand as a value. Mirrors `core::is_stray_block_keyword_tok`.
+fn is_closing_block_keyword(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::EndKw
+            | TokKind::ElseKw
+            | TokKind::ElseifKw
+            | TokKind::CatchKw
+            | TokKind::FinallyKw
+    )
+}
+
 /// Parse a prefix `:` quote into a `QUOTE_SYM` node: `:name`/`:end` (a symbol)
 /// or `:(expr)` (a quoted expression). Returns `None` for a bare `:` that is not
 /// followed by a quotable token (e.g. the index colon in `a[:]`), so the caller
@@ -1475,8 +1506,26 @@ pub(super) fn parse_quote_sym(
     ctx: &ParserCtx<'_>,
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
+    value_position: bool,
+    end_marker: bool,
 ) -> Option<ExprParse> {
     let next = ctx.skip_trivia(start + 1);
+    // A space-separated *closing* block keyword (`end`/`else`/`elseif`/`catch`/
+    // `finally`) at value position is not a quotable symbol: `: end` ⇒ a bare `:`
+    // Colon atom with the keyword spilling as trailing junk. Decline before
+    // recording the whitespace diagnostic so the bare `:` carries none. The glued
+    // form still quotes (`:end`, hence the spacing gate); an index `a[: end]`
+    // (`end_marker`) keeps `end` quotable; a field-access RHS `A.: end`
+    // (`!value_position`) keeps the quote.
+    if value_position
+        && next > start + 1
+        && ctx
+            .token(next)
+            .is_some_and(|t| is_closing_block_keyword(t.kind))
+        && !(ctx.token(next).map(|t| t.kind) == Some(TokKind::EndKw) && end_marker)
+    {
+        return None;
+    }
     let mut events = vec![Event::Start(SyntaxKind::QUOTE_SYM), Event::Tok(start)];
     push_range(&mut events, start + 1, next);
     // Whitespace (or a newline) between the `:` and the quoted symbol is
@@ -1573,7 +1622,8 @@ pub(super) fn parse_quote_sym(
                 events,
             })
         }
-        // `:end`, `:function`, … — a keyword used as a symbol.
+        // `:end`, `:function`, … — a keyword used as a symbol. (A value-position
+        // `: end` with a closing block keyword declined above.)
         k if k.is_keyword() => {
             events.push(Event::Tok(next));
             events.push(Event::Finish);

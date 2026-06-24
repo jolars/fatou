@@ -2744,6 +2744,13 @@ fn project_error(head: &str, node: &SyntaxNode) -> String {
         .children_with_tokens()
         .filter_map(|el| match &el {
             NodeOrToken::Token(t) if is_error_glyph(t.kind()) => Some("✘".to_string()),
+            // A middle/closing block keyword (`end`/`else`/`elseif`/`catch`/
+            // `finally`) recovered into a trailing-junk run renders verbatim
+            // (`: end` ⇒ `(error-t end)`, `: catch z` ⇒ `(error-t catch z)`),
+            // unlike a structural keyword (dropped below).
+            NodeOrToken::Token(t) if is_closing_block_keyword_kind(t.kind()) => {
+                Some(t.text().to_string())
+            }
             NodeOrToken::Token(t) if is_drop_token(t.kind()) => None,
             _ => project_element(&el),
         })
@@ -2759,6 +2766,13 @@ fn is_error_glyph(kind: SyntaxKind) -> bool {
         kind,
         LPAREN | RPAREN | LBRACKET | RBRACKET | LBRACE | RBRACE | COMMA | AT
     )
+}
+
+/// Whether `kind` is a middle/closing block keyword (`end`/`else`/`elseif`/
+/// `catch`/`finally`). When recovered into a trailing-junk `(error-t …)` run such
+/// a keyword is rendered verbatim rather than dropped as a structural keyword.
+fn is_closing_block_keyword_kind(kind: SyntaxKind) -> bool {
+    matches!(kind, END_KW | ELSE_KW | ELSEIF_KW | CATCH_KW | FINALLY_KW)
 }
 
 fn sexp(head: &str, parts: Vec<String>) -> String {

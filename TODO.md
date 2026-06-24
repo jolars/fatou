@@ -40,6 +40,21 @@ through), so the grammar can grow incrementally.
   `invalid_doubled_operators`. JS 644 → 645; dir 159 → 160. Deferred: prefix `**a`/
   `--a` ⇒ `(call-pre (error (Error**)) a)` (not in the corpus); the `:<`-style
   multi-token invalid operator `(error : <)` is a different shape.
+- [x] Colon-space-before-closing-keyword → bare `:` Colon atom (error-shape
+  slice). A value-position prefix `:` followed by a space then a *closing* block
+  keyword (`end`/`else`/`elseif`/`catch`/`finally`) is not a quotable symbol:
+  JuliaSyntax parses the `:` as the bare Colon value atom and spills the keyword
+  as trailing junk (`: end` ⇒ `(toplevel : (error-t end))`, `: catch z` ⇒
+  `(toplevel : (error-t catch z))`). The glued form still quotes (`:end` ⇒
+  `(quote-: end)`, hence a spacing gate); an index `a[: end]` (`end_marker`) keeps
+  `end` quotable; a field-access RHS `A.: end` keeps the quote (new
+  `field_access_rhs` `ExprFlag` set at the `.`-RHS `parse_prefix` call). Two
+  changes: `parse_quote_sym` gains `value_position`/`end_marker` params and
+  declines (→ `parse_prefix`'s Colon `OPERATOR_ATOM` fallback) for that case
+  before recording the whitespace diagnostic; `project_error` renders a recovered
+  closing block keyword verbatim (`is_closing_block_keyword_kind`) instead of
+  dropping it as a structural keyword (also fixes `x end` ⇒ `x (error-t end)`).
+  Fixture `colon_space_closer_keyword`. JS 645 → 646; dir 160 → 161.
 - [x] Non-identifier `catch` variable `(error <expr>)` (error-shape slice,
   diagnostics model). A `catch` variable must be a plain identifier (`catch e`),
   a `$`-interpolation (`catch $e`), or a `var"…"` non-standard identifier
