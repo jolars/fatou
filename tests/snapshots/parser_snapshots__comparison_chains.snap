@@ -1,0 +1,172 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..126
+  BINARY_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    LT@2..3 "<"
+    WHITESPACE@3..4 " "
+    NAME@4..5
+      IDENT@4..5 "b"
+  NEWLINE@5..6 "\n"
+  BINARY_EXPR@6..12
+    NAME@6..7
+      IDENT@6..7 "a"
+    WHITESPACE@7..8 " "
+    SUBTYPE@8..10 "<:"
+    WHITESPACE@10..11 " "
+    NAME@11..12
+      IDENT@11..12 "b"
+  NEWLINE@12..13 "\n"
+  COMPARISON_EXPR@13..23
+    NAME@13..14
+      IDENT@13..14 "a"
+    WHITESPACE@14..15 " "
+    LT@15..16 "<"
+    WHITESPACE@16..17 " "
+    NAME@17..18
+      IDENT@17..18 "b"
+    WHITESPACE@18..19 " "
+    LE@19..21 "<="
+    WHITESPACE@21..22 " "
+    NAME@22..23
+      IDENT@22..23 "c"
+  NEWLINE@23..24 "\n"
+  COMPARISON_EXPR@24..37
+    NAME@24..25
+      IDENT@24..25 "a"
+    WHITESPACE@25..26 " "
+    LT@26..27 "<"
+    WHITESPACE@27..28 " "
+    NAME@28..29
+      IDENT@28..29 "b"
+    WHITESPACE@29..30 " "
+    LT@30..31 "<"
+    WHITESPACE@31..32 " "
+    NAME@32..33
+      IDENT@32..33 "c"
+    WHITESPACE@33..34 " "
+    LT@34..35 "<"
+    WHITESPACE@35..36 " "
+    NAME@36..37
+      IDENT@36..37 "d"
+  NEWLINE@37..38 "\n"
+  COMPARISON_EXPR@38..49
+    NAME@38..39
+      IDENT@38..39 "a"
+    WHITESPACE@39..40 " "
+    EQ_EQ@40..42 "=="
+    WHITESPACE@42..43 " "
+    NAME@43..44
+      IDENT@43..44 "b"
+    WHITESPACE@44..45 " "
+    NOT_EQ@45..47 "!="
+    WHITESPACE@47..48 " "
+    NAME@48..49
+      IDENT@48..49 "c"
+  NEWLINE@49..50 "\n"
+  COMPARISON_EXPR@50..61
+    NAME@50..51
+      IDENT@50..51 "a"
+    WHITESPACE@51..52 " "
+    SUBTYPE@52..54 "<:"
+    WHITESPACE@54..55 " "
+    NAME@55..56
+      IDENT@55..56 "b"
+    WHITESPACE@56..57 " "
+    SUBTYPE@57..59 "<:"
+    WHITESPACE@59..60 " "
+    NAME@60..61
+      IDENT@60..61 "c"
+  NEWLINE@61..62 "\n"
+  COMPARISON_EXPR@62..73
+    NAME@62..63
+      IDENT@62..63 "a"
+    WHITESPACE@63..64 " "
+    DOT_LT@64..66 ".<"
+    WHITESPACE@66..67 " "
+    NAME@67..68
+      IDENT@67..68 "b"
+    WHITESPACE@68..69 " "
+    DOT_LT@69..71 ".<"
+    WHITESPACE@71..72 " "
+    NAME@72..73
+      IDENT@72..73 "c"
+  NEWLINE@73..74 "\n"
+  COMPARISON_EXPR@74..84
+    NAME@74..75
+      IDENT@74..75 "a"
+    WHITESPACE@75..76 " "
+    DOT_LT@76..78 ".<"
+    WHITESPACE@78..79 " "
+    NAME@79..80
+      IDENT@79..80 "b"
+    WHITESPACE@80..81 " "
+    LT@81..82 "<"
+    WHITESPACE@82..83 " "
+    NAME@83..84
+      IDENT@83..84 "c"
+  NEWLINE@84..85 "\n"
+  BINARY_EXPR@85..99
+    BINARY_EXPR@85..90
+      NAME@85..86
+        IDENT@85..86 "a"
+      WHITESPACE@86..87 " "
+      LT@87..88 "<"
+      WHITESPACE@88..89 " "
+      NAME@89..90
+        IDENT@89..90 "b"
+    WHITESPACE@90..91 " "
+    AND_AND@91..93 "&&"
+    WHITESPACE@93..94 " "
+    BINARY_EXPR@94..99
+      NAME@94..95
+        IDENT@94..95 "c"
+      WHITESPACE@95..96 " "
+      LT@96..97 "<"
+      WHITESPACE@97..98 " "
+      NAME@98..99
+        IDENT@98..99 "d"
+  NEWLINE@99..100 "\n"
+  COMPARISON_EXPR@100..117
+    BINARY_EXPR@100..105
+      NAME@100..101
+        IDENT@100..101 "a"
+      WHITESPACE@101..102 " "
+      PLUS@102..103 "+"
+      WHITESPACE@103..104 " "
+      NAME@104..105
+        IDENT@104..105 "b"
+    WHITESPACE@105..106 " "
+    LT@106..107 "<"
+    WHITESPACE@107..108 " "
+    NAME@108..109
+      IDENT@108..109 "c"
+    WHITESPACE@109..110 " "
+    LT@110..111 "<"
+    WHITESPACE@111..112 " "
+    BINARY_EXPR@112..117
+      NAME@112..113
+        IDENT@112..113 "d"
+      WHITESPACE@113..114 " "
+      PLUS@114..115 "+"
+      WHITESPACE@115..116 " "
+      NAME@116..117
+        IDENT@116..117 "e"
+  NEWLINE@117..118 "\n"
+  COMPARISON_EXPR@118..125
+    NAME@118..119
+      IDENT@118..119 "a"
+    WHITESPACE@119..120 " "
+    LT@120..121 "<"
+    WHITESPACE@121..122 " "
+    NAME@122..123
+      IDENT@122..123 "b"
+    WHITESPACE@123..124 " "
+    LT@124..125 "<"
+  NEWLINE@125..126 "\n"
+
+diagnostic [124..125]: expected right-hand side for operator

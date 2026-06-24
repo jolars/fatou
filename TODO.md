@@ -26,6 +26,20 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Flat comparison chains. A run of two or more comparison-tier operators
+  (`< <= > >= == !=`, the subtype relations `<:`/`>:`, their broadcast
+  `.`-variants, and Unicode comparisons) folds into one flat `COMPARISON_EXPR`
+  (`a < b <= c` ⇒ `(comparison a < b <= c)`), matching JuliaSyntax's
+  `parse_comparison`; a lone comparison stays an ordinary binary (`a < b` ⇒
+  `(call-i a < b)`, `a <: b` ⇒ `(<: a b)`). New `COMPARISON_EXPR` kind, a
+  collect-then-choose `parse_comparison_chain` + arity-general `build_flat`/
+  `build_flat_missing_rhs` (`expr.rs`, mirroring `parse_colon_range`/
+  `build_range3`), and `project_comparison` rendering dotted operators as
+  `(. op)` (`a .< b .< c` ⇒ `(comparison a (. <) b (. <) c)`) and a dangling
+  trailing operator as `(error)` (`sexpr.rs`). Fixture `comparison_chains`.
+  Deferred (recorded divergence): the word operators `in`/`isa` chain in Julia
+  (`a isa b isa c` ⇒ `(comparison …)`) but parse in a separate `word_operator`
+  branch and stay nested.
 - [x] Short-circuit `&&`/`||` (and broadcast `.&&`/`.||`) right-associativity.
   JuliaSyntax nests these right (`a && b && c` ⇒ `(&& a (&& b c))`); Fatou's
   binding powers were left-associative despite a doc comment claiming otherwise.

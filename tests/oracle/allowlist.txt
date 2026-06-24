@@ -38,6 +38,7 @@ colon_value_atom
 command_literal
 command_macro
 comments
+comparison_chains
 comprehension_blank_line
 comprehensions
 const_not_assignment

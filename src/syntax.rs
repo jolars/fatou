@@ -23,6 +23,7 @@ pub enum SyntaxKind {
     NAME,
     BINARY_EXPR,
     RANGE_EXPR,
+    COMPARISON_EXPR,
     UNARY_EXPR,
     PAREN_EXPR,
     TUPLE_EXPR,

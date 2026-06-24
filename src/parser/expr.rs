@@ -617,6 +617,20 @@ fn parse_expr_in(
             continue;
         }
 
+        // A run of two or more comparison-tier operators folds into one flat
+        // `COMPARISON_EXPR` (`a < b <= c` ⇒ `(comparison a < b <= c)`), exactly as
+        // JuliaSyntax's `parse_comparison`; a lone comparison stays an ordinary
+        // binary (`a < b` ⇒ `(call-i a < b)`, `a <: b` ⇒ `(<: a b)`). Handled
+        // before the generic path so the whole chain is collected at once.
+        if is_comparison_op(op_kind) {
+            let (l_bp, _) = infix_binding_power(op_kind).expect("comparison binds");
+            if l_bp < min_bp {
+                break;
+            }
+            lhs = parse_comparison_chain(tokens, &ctx, lhs, op_idx, diagnostics, flags);
+            continue;
+        }
+
         // Ternary `cond ? then : else` — right-associative, just above
         // assignment and below `||`. Handled specially (like assignment) so the
         // `:` separator is consumed here rather than parsed as a range operator.
@@ -1010,6 +1024,157 @@ fn parse_colon_range(
         Some(mid) => build_binary(SyntaxKind::BINARY_EXPR, head, mid),
         None => head,
     }
+}
+
+/// The comparison-precedence operators (JuliaSyntax tier 10): the symbolic
+/// relations/equalities `< <= > >= == !=`, the subtype relations `<:`/`>:`, their
+/// broadcast `.`-variants, and any Unicode comparison operator. A run of two or
+/// more of these folds into one flat `COMPARISON_EXPR`. The word operators
+/// `in`/`isa` share the tier but are parsed in a separate branch and stay nested
+/// (a recorded divergence — see the `word_operator` handling in the loop).
+fn is_comparison_op(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::EqEq
+            | TokKind::NotEq
+            | TokKind::Lt
+            | TokKind::Le
+            | TokKind::Gt
+            | TokKind::Ge
+            | TokKind::Subtype
+            | TokKind::Supertype
+            | TokKind::DotEqEq
+            | TokKind::DotNotEq
+            | TokKind::DotLt
+            | TokKind::DotLe
+            | TokKind::DotGt
+            | TokKind::DotGe
+            | TokKind::DotSubtype
+            | TokKind::DotSupertype
+            | TokKind::UniComparison
+    )
+}
+
+/// Build a flat n-ary node of `kind` from its operands, capturing each operator
+/// (and surrounding trivia) in the gap between adjacent operands. Mirrors
+/// `build_range3`, generalized to any arity (`operands.len() >= 2`).
+fn build_flat(kind: SyntaxKind, operands: Vec<ExprParse>) -> ExprParse {
+    let mut iter = operands.into_iter();
+    let first = iter.next().expect("flat node needs at least one operand");
+    let start = first.start;
+    let mut end = first.end;
+    let mut events = vec![Event::Start(kind)];
+    events.extend(first.events);
+    for operand in iter {
+        push_range(&mut events, end, operand.start);
+        events.extend(operand.events);
+        end = operand.end;
+    }
+    events.push(Event::Finish);
+    ExprParse { start, end, events }
+}
+
+/// Build a flat n-ary node whose final right operand is absent: the operands
+/// collected so far plus the gap up to `gap_end` (the dangling operator and
+/// trivia). The projector replays the zero-width `(error)` from the
+/// `MissingOperand` diagnostic (`a < b <` ⇒ `(comparison a < b < (error))`).
+fn build_flat_missing_rhs(kind: SyntaxKind, operands: Vec<ExprParse>, gap_end: usize) -> ExprParse {
+    let mut iter = operands.into_iter();
+    let first = iter.next().expect("flat node needs at least one operand");
+    let start = first.start;
+    let mut end = first.end;
+    let mut events = vec![Event::Start(kind)];
+    events.extend(first.events);
+    for operand in iter {
+        push_range(&mut events, end, operand.start);
+        events.extend(operand.events);
+        end = operand.end;
+    }
+    push_range(&mut events, end, gap_end);
+    events.push(Event::Finish);
+    ExprParse {
+        start,
+        end: gap_end,
+        events,
+    }
+}
+
+/// Parse a comparison chain starting at the operator `first_op` (the first
+/// operand `lhs` is already parsed and the caller has cleared the binding-power
+/// check). Mirrors JuliaSyntax's `parse_comparison`: each operand parses at the
+/// comparison tier's right power, and the run continues while the next operator
+/// is also comparison-tier. A single operator yields an ordinary two-operand
+/// node (`a < b` ⇒ `(call-i a < b)`, `a <: b` ⇒ `(<: a b)`); two or more fold
+/// into one flat `COMPARISON_EXPR`.
+fn parse_comparison_chain(
+    tokens: &[Token],
+    ctx: &ParserCtx<'_>,
+    lhs: ExprParse,
+    first_op: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    flags: ExprFlags,
+) -> ExprParse {
+    let first_op_kind = tokens[first_op].kind;
+    let mut operands = vec![lhs];
+    let mut op_count = 0usize;
+    let mut op_idx = first_op;
+    loop {
+        let (_, r_bp) = infix_binding_power(tokens[op_idx].kind).expect("comparison binds");
+        let rhs_operand = ctx.skip_trivia(op_idx + 1);
+        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
+            // Missing right operand: keep the operator(s) and synthesize a
+            // zero-width `(error)`, replayed by the projector from the
+            // `MissingOperand` diagnostic anchored at the dangling operator.
+            let op = &tokens[op_idx];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::MissingOperand,
+                "expected right-hand side for operator",
+                op.start,
+                op.end,
+            );
+            op_count += 1;
+            return if op_count == 1 {
+                build_binary_missing_rhs(
+                    operator_node_kind(first_op_kind),
+                    pop_one(operands),
+                    op_idx + 1,
+                )
+            } else {
+                build_flat_missing_rhs(SyntaxKind::COMPARISON_EXPR, operands, op_idx + 1)
+            };
+        };
+        let last_end = rhs.end;
+        operands.push(rhs);
+        op_count += 1;
+        // Continue only on another comparison operator at the same level (not an
+        // array-element boundary, e.g. `[a <b]` splitting into elements).
+        let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
+            Some((idx, kind)) if is_comparison_op(kind) => {
+                let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
+                (!split).then_some(idx)
+            }
+            _ => None,
+        };
+        match continues {
+            Some(idx) => op_idx = idx,
+            None => break,
+        }
+    }
+    if op_count == 1 {
+        let mut iter = operands.into_iter();
+        let a = iter.next().expect("lhs present");
+        let b = iter.next().expect("one rhs collected");
+        build_binary(operator_node_kind(first_op_kind), a, b)
+    } else {
+        build_flat(SyntaxKind::COMPARISON_EXPR, operands)
+    }
+}
+
+/// Take the sole element of a one-element operand vector (the bare `lhs` of a
+/// comparison whose first operator has no right operand).
+fn pop_one(operands: Vec<ExprParse>) -> ExprParse {
+    operands.into_iter().next().expect("comparison lhs present")
 }
 
 fn parse_prefix(

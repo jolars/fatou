@@ -37,44 +37,61 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **649 allowlisted**,
-36 divergence, 0 unsupported. Dir corpus: **165 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **653 allowlisted**,
+32 divergence, 0 unsupported. Dir corpus: **166 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
-Grammar bullets through "short-circuit right-associativity" are `[x]` in
-`TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
+Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
 unchanged. `TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA`
 mechanism (historical log); the *output shapes* they cite are still correct.
 
 **Divergence-ledger audit (2026-06-24, in progress):** the old "deliberate, do
 not fix" list was mostly mislabeled for a linter/LSP. Verdicts: `&&`/`||`
-associativity was a *bug* (fixed C1, this session); comparison chains and
-arithmetic `+`/`*` flattening are *faithfulness gaps worth closing* (planned C3,
-C2 — see plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md`). Genuinely
+associativity was a *bug* (fixed C1); comparison chains were a faithfulness gap
+(fixed C3); arithmetic `+`/`*` flattening is the last item (C2, not yet started
+— see plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md`). Genuinely
 permanent: **float**-literal display normalization (`2.`/`1f0`/hex floats/
 `1.0e-1000`; needs Julia's `show`). Still recorded/deferred: n-ary juxtaposition
 `(2)(3)x` (flattening + the `(2)(3)`→`(call 2 3)` misparse, out of scope here);
 `end`/`[1 +2]`/unterminated-string error shapes; word-op comparison chains
 `a isa b isa c` (will be deferred in C3 — separate `word_operator` parse branch).
 
-## Latest session (2026-06-24i — C1 of the divergence-ledger campaign)
+## Latest session (2026-06-24j — C3 of the divergence-ledger campaign)
 
-**`&&`/`||` right-associativity** (the `&&`/`||` row of the ledger audit; flips
-js-5d39e3d6 `x && y && z`, js-3fcc48ca `x || y || z`). One-line root cause: the
-binding powers were left-associative (`||`=(5,6), `&&`=(7,8)) despite a doc
-comment claiming right-assoc; Julia is right-assoc (`a && b && c` ⇒ `(&& a (&& b
-c))`). Flipped to `(6,5)`/`(8,7)` in `infix_binding_power` (`expr.rs`); the band
-(ternary 3 < arrow 3–4 < `||` 5–6 < `&&` 7–8 < comparison 10–11) and the
-missing-rhs path (`a &&` ⇒ `(&& a (error))`, binding-power-independent) are
-intact. Projector untouched (`&&`/`||` already `Special` heads). Fixtures
-`short_circuit_assoc` (parser snapshot includes the `a &&` guard; oracle dir
-fixture is a clean 4-line subset). JS 647 → 649 (zero regressions); dir 164 →
-165. Green; clippy/fmt clean. **Next (per plan):** C3 flat comparison chains
-(new `COMPARISON_EXPR` node + `project_comparison`; defer word-op chains), then
-C2 flat `+`/`*` (reuse `BINARY_EXPR` N-ary; likely a fresh context). Plan:
+**Flat comparison chains** (flips js-c32f9f82 `x<y<z`, js-e5c7f303 `x==y<z`,
+js-0661a137 `x .< y<z`, js-604ad0dd `x .< y .< z`). A run of ≥2 comparison-tier
+operators folds into one flat `COMPARISON_EXPR` (`a < b <= c` ⇒ `(comparison a <
+b <= c)`), matching JuliaSyntax's `parse_comparison`; a lone comparison is
+unchanged (`a < b` ⇒ `(call-i a < b)`, `a <: b` ⇒ `(<: a b)`). Mechanism mirrors
+`parse_colon_range`/`build_range3`: a dispatch block right after the colon-range
+case calls **collect-then-choose** `parse_comparison_chain` (collect the run at
+`r_bp=11`, continue while `next_operator` is comparison-tier respecting array
+boundaries; `op_count==1` → `build_binary(operator_node_kind(first), …)`, else
+`build_flat(COMPARISON_EXPR, …)`). New arity-general `build_flat` /
+`build_flat_missing_rhs` + `is_comparison_op` (`expr.rs`). Projector:
+`project_comparison` walks children in source order, rendering dotted ops as
+`(. op)` (`a .< b .< c` ⇒ `(comparison a (. <) b (. <) c)`) and a dangling
+trailing op as `(error)` (`a < b <` ⇒ `(comparison a < b < (error))`). The
+`COMPARISON_EXPR` node falls through `signature_eventually_call` to `false`
+(correct; no `structural.rs` edit). Fixture `comparison_chains` (parser snapshot
+incl. the missing-rhs guard; oracle dir a clean 10-line subset). JS 649 → 653
+(zero regressions); dir 165 → 166. Green; clippy/fmt clean. **Deferred (recorded
+divergence):** word-op chains `a isa b isa c` / `a < b isa c` stay nested
+(separate `word_operator` branch) — un-allowlisted in the JS corpus. **Next (per
+plan):** C2 flat `+`/`*` (reuse `BINARY_EXPR` N-ary via the same `build_flat`;
+rework `project_binary` for N>2). Recommend a **fresh context** — C2 is the
+highest-blast-radius change (touches the most common operators) and the plan
+scopes it to its own context. Plan:
 `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md`.
 
 ## Earlier sessions
+
+- **2026-06-24i** — `&&`/`||` right-associativity (C1 of the ledger campaign;
+  flips js-5d39e3d6 `x && y && z`, js-3fcc48ca `x || y || z`). The binding powers
+  were left-assoc (`||`=(5,6), `&&`=(7,8)) despite a doc comment claiming
+  right-assoc; flipped to `(6,5)`/`(8,7)` in `infix_binding_power`. Band and the
+  missing-rhs path (`a &&` ⇒ `(&& a (error))`) intact; projector untouched.
+  Fixture `short_circuit_assoc`. JS 647 → 649; dir 164 → 165.
 
 - **2026-06-24h** — `end`/`begin` index marker scoped to genuine `ref` indexing
   + misplaced-`end` recovery (unblocks dir `end_index`). The marker is enabled

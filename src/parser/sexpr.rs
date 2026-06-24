@@ -240,6 +240,7 @@ fn project(node: &SyntaxNode) -> String {
 
         BINARY_EXPR => project_binary(node),
         RANGE_EXPR => project_range(node),
+        COMPARISON_EXPR => project_comparison(node),
         ASSIGNMENT_EXPR => project_assignment(node),
         UNARY_EXPR => project_unary(node),
         POSTFIX_EXPR => project_postfix(node),
@@ -794,6 +795,35 @@ fn project_range(node: &SyntaxNode) -> String {
         project(&operands[1]),
         project(&operands[2]),
     )
+}
+
+/// Project a comparison chain (`a < b <= c` ⇒ `(comparison a < b <= c)`). The
+/// operands and operator tokens are emitted in source order; a plain operator
+/// renders as its text, a dotted-broadcast comparison as `(. op)`
+/// (`a .< b .< c` ⇒ `(comparison a (. <) b (. <) c)`). A dangling trailing
+/// operator with no right operand replays the zero-width `(error)` from the
+/// `MissingOperand` diagnostic (`a < b <` ⇒ `(comparison a < b < (error))`).
+fn project_comparison(node: &SyntaxNode) -> String {
+    let mut parts = Vec::new();
+    let mut last_op = None;
+    for el in significant(node) {
+        match el {
+            NodeOrToken::Node(n) => parts.push(project(&n)),
+            NodeOrToken::Token(t) => {
+                let text = t.text();
+                if text.starts_with('.') && text.len() > 1 && text.as_bytes()[1] != b'.' {
+                    parts.push(format!("(. {})", &text[1..]));
+                } else {
+                    parts.push(text.to_string());
+                }
+                last_op = Some(t);
+            }
+        }
+    }
+    if last_op.is_some_and(|op| operator_missing_rhs(&op)) {
+        parts.push("(error)".to_string());
+    }
+    sexp("comparison", parts)
 }
 
 fn project_assignment(node: &SyntaxNode) -> String {
