@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **635 allowlisted**,
-50 divergence, 0 unsupported. Dir corpus: **153 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **639 allowlisted**,
+46 divergence, 0 unsupported. Dir corpus: **154 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,32 +52,48 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23x)
+## Latest session (2026-06-23y)
 
-**Suffixed operator in prefix position → `(error op)`.** A sub/superscript- or
-prime-suffixed arithmetic operator (`+₁`, `-₁`, `.+₁`) is not a valid unary
-prefix: JuliaSyntax error-wraps it and applies it as a prefix call (`+₁ x` ⇒
-`(call-pre (error +₁) x)`, `.+₁ x` ⇒ `(dotcall-pre (error (. +₁)) x)`), exactly
-the 2026-06-23n binary-only-in-prefix shape, so the projector's prefix-call path
-was already in place. Glued to `(` the suffixed operator is instead always a plain
-call, bypassing the single-arg prefix-application heuristic (`+₁(x)` ⇒
-`(call +₁ x)`); a bare suffixed operator stays a value atom (`+₁` ⇒ `+₁`), infix
-is unchanged (`a +₁ b` ⇒ `(call-i a +₁ b)`), and `&` keeps its syntactic-prefix
-reading (`&₁ x` ⇒ `(& x)`, suffix dropped).
+**Reserved keyword as a signature name → `(error <kw>)`.** A hard reserved
+keyword used as the name of a `struct`/`module`/`function`/`macro` is not a block
+opener but a misused name; JuliaSyntax error-wraps it. Four shapes nailed:
+`struct try end` ⇒ `(struct (error try) (block))`, `module do\nend` ⇒
+`(module (error do) (block))`, and the call-shaped function/macro forms
+`function begin() end` ⇒ `(function (call (error begin)) (block))`,
+`macro while(ex) end` ⇒ `(macro (call (error while) ex) (block))` (the glued `()`
+attaches via the normal postfix chain). Excluded: the contextual words Julia keeps
+as plain names there (`mutable`, `where`, `true`/`false`, and the
+identifier-lexed `abstract`/`primitive`/`outer`/`in`/`isa`/`public`).
 
-Implementation: the `Plus | Minus | DotPlus | DotMinus | … | UniRadical` arm of
-`parse_prefix` (`expr.rs`) computes `op_suffixed` (`tok.text.chars().any(
-is_op_suffix_char)` over those four kinds only — `&`/`!`/`~`/radicals don't take a
-suffix). It feeds the paren-call gate (`op_suffixed || unary_op_paren_is_call`) so
-a glued `(` always forms a `CALL_EXPR`, and a new pre-build branch on a following
-operand emits `UNARY_EXPR > ERROR > OPERATOR_ATOM` + `InvalidPrefixOperator` diag
-(the existing 2026-06-23n machinery). Two projector fixes so the suffix survives
-(both keyed on text via `op_has_suffix`, not the suffix-dropping `operator_func_repr`/
-kind): `project_operator_atom`'s `DotCallI` arm and `project_call`'s operator-callee
-arm. Fixture `suffixed_prefix_operator`. JS 634 → 635; dir 152 → 153. Green;
-clippy/fmt clean, no regressions.
+Implementation: a new `name_context` flag on `ExprFlags`, set by
+`parse_signature_expr` (function/macro) and the new `parse_name_signature_expr`
+(struct/module, replacing the bare `parse_expr` in `structural.rs`'s
+`parse_signature`). In `parse_expr_in`, when `name_context` and the leading token
+is an `is_name_error_keyword`, build a `ERROR > NAME > <kw>` atom
+(`keyword_name_error_atom`) + `InvalidNameKeyword` diagnostic *instead of*
+dispatching the block form; the atom enters the operator loop with
+`lhs_is_block_keyword=false` so postfix calls apply. Projector: the only change is
+`name_text` falling back to a keyword token (a `NAME` normally wraps an `IDENT`),
+so `project_error`'s default `error` head renders `(error try)`. Fixture
+`keyword_name_error`. JS 635 → 639 (struct try / module do / function begin /
+macro while); dir 153 → 154. Green; clippy/fmt clean, no regressions.
+
+**Note on siblings (not done):** `function f body end` ⇒ `(function (error f)
+(block body))` is a *different* divergence (a bare-identifier signature with
+trailing tokens, not a keyword name); `struct mutable end`/`struct outer end`
+already pass-through as `(struct-mut …)` style and weren't touched.
 
 ## Earlier sessions
+
+- **2026-06-23x** — Suffixed operator in prefix position → `(error op)`: a
+  sub/superscript- or prime-suffixed arithmetic operator (`+₁`, `-₁`, `.+₁`) is
+  not a valid unary prefix; JuliaSyntax error-wraps it and applies it as a prefix
+  call (`+₁ x` ⇒ `(call-pre (error +₁) x)`), reusing the 2026-06-23n
+  binary-only-in-prefix machinery. Glued `(` forces a plain call (`+₁(x)` ⇒
+  `(call +₁ x)`); bare stays a value atom. `parse_prefix`'s `Plus|Minus|DotPlus|
+  DotMinus` arm computes `op_suffixed`; two projector fixes key the suffix on the
+  token text (`op_has_suffix`). Fixture `suffixed_prefix_operator`. JS 634 → 635;
+  dir 152 → 153.
 
 - **2026-06-23w** — Range-colon newline stop + unified missing-rhs `(error)`: the
   range `:` is the lone binary operator that does not carry its right operand
@@ -292,44 +308,26 @@ fragile.
   (`is_close_delimiter`) as `✘`. JS 576 → 581.
 
 The **error-shape lineage** (the current frontier; entries share the
-`ERROR_TRIVIA`/`project_error`/leftover-driver machinery, so kept in brief):
+`ERROR_TRIVIA`/`project_error`/leftover-driver machinery, condensed — see git for
+detail):
 
-- **2026-06-22v** — Paren-block juxtapose-error: `(begin end)x`⇒`(block)
-  (error-t x)`, `(if c end)y`⇒`(if c (block)) (error-t y)`; new `lhs_is_paren_block`
-  (a `PAREN_EXPR` wrapping a block-keyword form) suppresses both juxtapose checks
-  so the toplevel-leftover driver wraps the trailing run; postfix/infix still
-  apply. Pure `expr.rs` change. JS 575 → 576.
-- **2026-06-22u** — String-juxtapose-error: `"a"x`⇒`(juxtapose (string "a")
-  (error-t) x)`, `2"a"` mirror; `should_juxtapose_string_error` runs before
-  numeric `should_juxtapose`, `build_string_juxtapose_error` splices the marker;
-  numbers/`@`/operators/`end` break it (docstring fold keeps numeric forms). JS
-  571 → 575.
-- **2026-06-22t** — Separate-toplevel trailing-junk: `x y`⇒`x (error-t y)`,
-  `f(2)2`⇒`(call f 2) (error-t 2)`; the `parse` driver (`core.rs`) records
-  `leftover_mark` and wraps the recovered run in one `ERROR_TRIVIA` sibling; a
-  bare docstring opener is exempt. JS 568 → 571.
-- **2026-06-22s** — Field-access/colon-quote space: `x .y`⇒`(. x (error-t)
-  (quote y))` (operator-loop `Dot` arm via `build_binary_dot_error` when
-  `op_idx > lhs.end`; broadcast `.+` is one token so `a .+ b` is untouched),
-  `: foo`⇒`(quote-: (error-t) foo)` (`parse_quote_sym`); both compose. JS
-  564 → 568.
-- **2026-06-22r** — Whitespace-before-postfix-opener: `f (a)`⇒`(call f (error-t)
-  a)`, `a [i]`/`S {a}`/`f. (x)`; `parse_postfix` splices the marker when
-  `open_idx > lhs.end`; array-mode space-split (`[f (x)]`⇒`(hcat f x)`) untouched.
-  JS 559 → 564.
-- **2026-06-22q** — `var"…"` glued-suffix: `var"x"y`⇒`(var x (error-t))`;
-  `parse_string_literal`'s close-delim arm pushes the glued token as a sibling +
-  appends `ERROR_TRIVIA`, `project_var` emits `(error-t)`. JS 556 → 559.
-- **2026-06-22p** — Unterminated-string: `"str`⇒`(string "str" (error-t))`,
-  `var"x`⇒`(var x (error-t))`; `with_error_trivia` appends the marker + drops a
-  sole filler `""`; single-quoted strings span literal newlines (consume to EOF).
-  JS 555 → 556.
-- **2026-06-22o** — Typed error-node taxonomy (Phase 0). New `ERROR_TRIVIA`
-  (`(error-t)`, the `TRIVIA_FLAG` truncation marker) before the `ERROR` sentinel;
-  `project_error(head, node)` wraps recovered tokens; harness `render()` made
-  total; harvest kept `(error …)` cases → JS corpus 575 → 685 (+110 = the visible
-  backlog). First slice: unterminated arglist `f(a`⇒`(call f a (error-t))`. JS
-  553 → 555.
+- **2026-06-22v** — Paren-block juxtapose-error (`(begin end)x`⇒`(block)
+  (error-t x)`); `lhs_is_paren_block` suppresses both juxtapose checks. JS 575 → 576.
+- **2026-06-22u** — String-juxtapose-error (`"a"x`⇒`(juxtapose (string "a")
+  (error-t) x)`); `should_juxtapose_string_error` before the numeric case. JS 571 → 575.
+- **2026-06-22t** — Separate-toplevel trailing-junk (`x y`⇒`x (error-t y)`); the
+  `core.rs` driver records `leftover_mark` + one `ERROR_TRIVIA` sibling. JS 568 → 571.
+- **2026-06-22s** — Field-access/colon-quote space (`x .y`⇒`(. x (error-t)
+  (quote y))`, `: foo`⇒`(quote-: (error-t) foo)`); broadcast `.+` untouched. JS 564 → 568.
+- **2026-06-22r** — Whitespace-before-postfix-opener (`f (a)`⇒`(call f (error-t)
+  a)`); `parse_postfix` splices when `open_idx > lhs.end`. JS 559 → 564.
+- **2026-06-22q** — `var"…"` glued-suffix (`var"x"y`⇒`(var x (error-t))`). JS 556 → 559.
+- **2026-06-22p** — Unterminated-string (`"str`⇒`(string "str" (error-t))`);
+  `with_error_trivia` appends the marker. JS 555 → 556.
+- **2026-06-22o** — Typed error-node taxonomy (Phase 0): new `ERROR_TRIVIA`,
+  `project_error(head, node)`, total `render()`; harvest kept `(error …)` cases →
+  JS corpus 575 → 685 (the visible backlog). First slice `f(a`⇒`(call f a
+  (error-t))`. JS 553 → 555.
 
 **Pre-error-shape feature work** (2026-06-17a through 2026-06-22n, JS allow
 251 → 553 — the oracle build-out, then operators, literals, strings, char/escape

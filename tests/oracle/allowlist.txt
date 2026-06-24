@@ -70,6 +70,7 @@ interpolation_expr
 interpolation_names
 juxtaposition
 keyword_args
+keyword_name_error
 keyword_statements
 let_quote
 list_empty_comma

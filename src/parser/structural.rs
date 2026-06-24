@@ -16,8 +16,8 @@ use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
-    parse_block_stmt, parse_expr, parse_for_binding, parse_prefix_interpolation, parse_quote_sym,
-    parse_signature_expr, push_var_macro_name,
+    parse_block_stmt, parse_expr, parse_for_binding, parse_name_signature_expr,
+    parse_prefix_interpolation, parse_quote_sym, parse_signature_expr, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -1392,7 +1392,7 @@ fn parse_signature(
     }
 
     events.push(Event::Start(SyntaxKind::SIGNATURE));
-    let i = if let Some(expr) = parse_expr(ctx.tokens(), sig_start, 0, diagnostics) {
+    let i = if let Some(expr) = parse_name_signature_expr(ctx.tokens(), sig_start, 0, diagnostics) {
         events.extend(expr.events);
         expr.end
     } else if ctx.token(sig_start).map(|t| t.kind) == Some(TokKind::Dollar) {

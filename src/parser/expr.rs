@@ -71,6 +71,13 @@ struct ExprFlags {
     /// (`f(x)::T where U` ⇒ `(::-i (call f x) (where T U))`). Resets inside
     /// brackets, so argument annotations still capture their own `where`.
     no_decl_where: bool,
+    /// Parsing the *name* of a `struct`/`module`/`function`/`macro` signature,
+    /// where a leading reserved keyword used as the name is error-wrapped
+    /// (`struct try end` ⇒ `(struct (error try) …)`, `function begin() end` ⇒
+    /// `(function (call (error begin)) …)`) rather than dispatched to its block
+    /// form. Matches JuliaSyntax, which parses the signature name with the block
+    /// keywords disabled and recovers a stray one as `(error <kw>)`.
+    name_context: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -221,9 +228,27 @@ pub(crate) fn parse_signature_expr(
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         no_decl_where: true,
+        name_context: true,
         ..ExprFlags::default()
     };
     parse_expr_in(tokens, start, 0, diagnostics, flags)
+}
+
+/// Parse the name expression of a `struct`/`module` signature, where a leading
+/// reserved keyword used as the name is error-wrapped (`struct try end` ⇒
+/// `(struct (error try) …)`) rather than dispatched to its block form. See
+/// [`ExprFlags::name_context`].
+pub(crate) fn parse_name_signature_expr(
+    tokens: &[Token],
+    start: usize,
+    min_bp: u8,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        name_context: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, min_bp, diagnostics, flags)
 }
 
 fn parse_expr_in(
@@ -246,6 +271,7 @@ fn parse_expr_in(
         no_word_op,
         no_where,
         no_decl_where,
+        name_context,
     } = flags;
     let ctx = ParserCtx::new(tokens);
 
@@ -272,7 +298,30 @@ fn parse_expr_in(
     // elsewhere) open a type declaration only when immediately followed by the
     // contextual `type`; the pair of adjacent identifiers is unambiguous, so this
     // fires in any expression position (`x = abstract type A end`).
-    let block_form = if let Some(decl_word) = type_decl_keyword(&ctx, start) {
+    // In signature-name position a leading reserved keyword is not a block
+    // opener but a misused name: JuliaSyntax error-wraps it (`struct try end` ⇒
+    // `(struct (error try) …)`, `function begin() end` ⇒
+    // `(function (call (error begin)) …)`). Build the `(error <kw>)` atom and let
+    // the operator/postfix loop apply any glued call (`begin()` ⇒ a `CALL_EXPR`).
+    let name_error_atom = (name_context
+        && ctx
+            .token(start)
+            .is_some_and(|t| is_name_error_keyword(t.kind)))
+    .then(|| {
+        let pos = ctx.token(start).map_or(start, |t| t.start);
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::InvalidNameKeyword,
+            "reserved keyword used as a name",
+            pos,
+            ctx.token(start).map_or(pos, |t| t.end),
+        );
+        keyword_name_error_atom(start)
+    });
+
+    let block_form = if name_error_atom.is_some() {
+        None
+    } else if let Some(decl_word) = type_decl_keyword(&ctx, start) {
         Some(match decl_word {
             TypeDecl::Abstract => parse_abstract_type(tokens, start, diagnostics),
             TypeDecl::Primitive => parse_primitive_type(tokens, start, diagnostics),
@@ -383,9 +432,12 @@ fn parse_expr_in(
     // side. `lhs_is_block_keyword` suppresses those two checks for the bare block
     // form (the first loop iteration) and is cleared once any operator builds a
     // binary node on top of it.
-    let (mut lhs, mut lhs_is_block_keyword) = match block_form {
-        Some(parsed) => (parsed?, true),
-        None => (parse_prefix(&ctx, start, diagnostics, flags)?, false),
+    let (mut lhs, mut lhs_is_block_keyword) = match (name_error_atom, block_form) {
+        // The error-wrapped keyword name is an ordinary atom: a glued call
+        // (`begin()`) still attaches via the postfix chain.
+        (Some(atom), _) => (atom, false),
+        (None, Some(parsed)) => (parsed?, true),
+        (None, None) => (parse_prefix(&ctx, start, diagnostics, flags)?, false),
     };
 
     loop {
@@ -1300,6 +1352,36 @@ fn parse_prefix(
 /// An operator token wrapped as `ERROR > OPERATOR_ATOM > op` — JuliaSyntax's
 /// `(error op)` atom for a syntactic operator used where a value is expected. The
 /// `OPERATOR_ATOM` keeps the broadcast projection (`.+=` ⇒ `(. +=)`).
+/// Build the `(error <kw>)` atom for a reserved keyword misused as a signature
+/// name. The keyword token is wrapped in a `NAME` (it is standing in for an
+/// identifier) inside an `ERROR` node; the projector renders it `(error try)`.
+fn keyword_name_error_atom(start: usize) -> ExprParse {
+    ExprParse {
+        start,
+        end: start + 1,
+        events: vec![
+            Event::Start(SyntaxKind::ERROR),
+            Event::Start(SyntaxKind::NAME),
+            Event::Tok(start),
+            Event::Finish, // NAME
+            Event::Finish, // ERROR
+        ],
+    }
+}
+
+/// Whether `kind` is a hard reserved keyword that JuliaSyntax error-wraps when it
+/// appears as a signature name. The contextual words Julia keeps as plain names
+/// in that position (`mutable`, `where`, `true`/`false`; and `abstract`/
+/// `primitive`/`type`/`outer`/`in`/`isa`/`public`, which Fatou already lexes as
+/// identifiers) are excluded.
+fn is_name_error_keyword(kind: TokKind) -> bool {
+    kind.is_keyword()
+        && !matches!(
+            kind,
+            TokKind::MutableKw | TokKind::WhereKw | TokKind::TrueKw | TokKind::FalseKw
+        )
+}
+
 fn error_operator_atom(start: usize) -> ExprParse {
     ExprParse {
         start,

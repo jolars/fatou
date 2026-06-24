@@ -95,6 +95,11 @@ pub enum DiagnosticKind {
     /// `$()` — rather than a single expression. JuliaSyntax renders the operand as
     /// `(error …)`; the projector reconstructs that shape from the CST topology.
     InvalidInterpolation,
+    /// A reserved keyword used as the name in a `struct`/`module`/`function`/
+    /// `macro` signature (`struct try end`, `function begin() end`) — JuliaSyntax
+    /// error-wraps the keyword as the name (`(error try)`). Anchored at the
+    /// keyword. The CST holds a real `ERROR` node around the keyword.
+    InvalidNameKeyword,
 }
 
 /// A parse-time diagnostic: a classified message anchored to a byte range in the

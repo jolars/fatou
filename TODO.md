@@ -26,6 +26,21 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Reserved keyword as a signature name `(error <kw>)` (error-shape slice,
+  diagnostics model). A hard reserved keyword used as the name of a
+  `struct`/`module`/`function`/`macro` is not a block opener but a misused name:
+  JuliaSyntax error-wraps it (`struct try end` ⇒ `(struct (error try) (block))`,
+  `module do\nend` ⇒ `(module (error do) (block))`), and a glued call still
+  attaches (`function begin() end` ⇒ `(function (call (error begin)) (block))`,
+  `macro while(ex) end` ⇒ `(macro (call (error while) ex) (block))`). The
+  contextual words Julia keeps as plain names there (`mutable`, `where`,
+  `true`/`false`, and the identifier-lexed `abstract`/`primitive`/`outer`/…) are
+  excluded. A new `name_context` `ExprFlag` (set by `parse_signature_expr` and the
+  new `parse_name_signature_expr`) makes `parse_expr_in` build a
+  `ERROR > NAME > <kw>` atom + `InvalidNameKeyword` diagnostic instead of
+  dispatching the block form; the atom enters the operator loop so postfix calls
+  apply. `name_text` (`sexpr.rs`) falls back to a keyword token so `(error try)`
+  renders. Fixture `keyword_name_error`. JS 635 → 639; dir 153 → 154.
 - [x] Suffixed operator in prefix position `(error op)` (error-shape slice,
   diagnostics model). A sub/superscript- or prime-suffixed arithmetic operator
   (`+₁`, `-₁`, `.+₁`) is not a valid unary prefix: JuliaSyntax error-wraps it and

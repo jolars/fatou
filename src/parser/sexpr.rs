@@ -2716,7 +2716,10 @@ fn project_first(node: &SyntaxNode) -> String {
 fn name_text(node: &SyntaxNode) -> String {
     node.children_with_tokens()
         .filter_map(|el| el.into_token())
-        .find(|t| t.kind() == IDENT)
+        // A `NAME` normally wraps an `IDENT`; a reserved keyword misused as a
+        // signature name (`struct try end` ⇒ `(error try)`) is wrapped here too,
+        // so fall back to its keyword text.
+        .find(|t| t.kind() == IDENT || is_keyword(t.kind()))
         .map(|t| t.text().to_string())
         .unwrap_or_default()
 }
