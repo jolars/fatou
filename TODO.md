@@ -26,6 +26,18 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Empty comma-list slot `(error-t)` (error-shape slice, diagnostics model).
+  An empty element slot after a real element in a comma-separated list (`,` where
+  the previous slot produced nothing) is invalid: JuliaSyntax bails, bumping the
+  offending comma and everything after it up to the closer as one flat
+  trailing-junk run (`[x,,]` ⇒ `(vect x (error-t ✘))`, `[x,,y]` ⇒
+  `(vect x (error-t ✘ y))`, `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`; also
+  `(…)`/`{…}`). A trailing comma (`[x,]`) stays clean. `parse_arg_list` tracks an
+  element-slot flag and, on the empty-slot comma, builds an `ERROR` node over the
+  run + records a `TrailingJunk` diagnostic; the existing `project_error`/
+  `is_recovery_error` path renders `(error-t …)`. Fixture `list_empty_comma`.
+  JS 631 → 633; dir 150 → 151. Deferred: a leading empty slot (`[,x]` ⇒
+  `(vect (error) x)`) and nested brackets inside the junk run (`[x,,g(y)]`).
 - [x] `else if` → `elseif` recovery `(error-t)` (error-shape slice, diagnostics
   model). `else if` written on one line (`if a … else if b … end`) is a common
   cross-language mistake; JuliaSyntax recovers it as an `elseif` clause,

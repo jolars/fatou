@@ -71,6 +71,7 @@ juxtaposition
 keyword_args
 keyword_statements
 let_quote
+list_empty_comma
 literals
 lone_operator_error
 loops

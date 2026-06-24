@@ -3134,6 +3134,12 @@ fn parse_arg_list(
     let mut events = vec![Event::Start(list_kind), Event::Tok(open_idx)];
     let mut i = open_idx + 1;
     let mut in_params = false;
+    // Element-slot tracking for empty-comma recovery. `slot_empty` is true at the
+    // start of an element slot (after the opener or a separator) until an element
+    // is parsed into it; `parsed_element` records whether any real element has
+    // been seen yet.
+    let mut slot_empty = true;
+    let mut parsed_element = false;
 
     loop {
         // Interior trivia belongs to the current container (the list, or the
@@ -3172,8 +3178,46 @@ fn parse_arg_list(
                 break;
             }
             Some(TokKind::Comma) => {
+                // An empty element slot after a real element (a `,` where the
+                // previous slot produced nothing) is invalid: JuliaSyntax bails,
+                // bumping the offending comma and everything after it up to the
+                // closer as one flat trailing-junk run (`[x,,]` ⇒
+                // `(vect x (error-t ✘))`, `[x,,y]` ⇒ `(vect x (error-t ✘ y))`,
+                // `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`). A trailing comma
+                // (`[x,]`, slot empty but the closer follows) stays clean, and a
+                // leading empty slot (`[,x]`, no element yet) is left divergent.
+                if slot_empty && parsed_element {
+                    let mut j = i;
+                    while let Some(k) = tokens.get(j).map(|t| t.kind) {
+                        if k == close {
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if in_params {
+                        events.push(Event::Finish); // close PARAMETERS first
+                        in_params = false;
+                    }
+                    events.push(Event::Start(SyntaxKind::ERROR));
+                    push_range(&mut events, i, j);
+                    events.push(Event::Finish);
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::TrailingJunk,
+                        "extra comma in list",
+                        tokens[i].start,
+                        tokens[i].end,
+                    );
+                    i = j;
+                    if tokens.get(i).map(|t| t.kind) == Some(close) {
+                        events.push(Event::Tok(i));
+                        i += 1;
+                    }
+                    break;
+                }
                 events.push(Event::Tok(i));
                 i += 1;
+                slot_empty = true;
             }
             // `;` splits positional arguments from keyword parameters, and each
             // subsequent `;` starts a fresh `PARAMETERS` group: `(a; b; c,d)` ⇒
@@ -3187,9 +3231,12 @@ fn parse_arg_list(
                 in_params = true;
                 events.push(Event::Tok(i));
                 i += 1;
+                slot_empty = true;
             }
             Some(_) => {
-                i = parse_one_arg(ctx, &mut events, i, end_marker, begin_marker, diagnostics)
+                i = parse_one_arg(ctx, &mut events, i, end_marker, begin_marker, diagnostics);
+                slot_empty = false;
+                parsed_element = true;
             }
         }
     }

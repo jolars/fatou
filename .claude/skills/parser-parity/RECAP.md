@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **631 allowlisted**,
-54 divergence, 0 unsupported. Dir corpus: **150 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **633 allowlisted**,
+52 divergence, 0 unsupported. Dir corpus: **151 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,32 +52,42 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23u)
+## Latest session (2026-06-23v)
 
-**`else if` → `elseif` recovery → zero-width `(error-t)`.** `else if` written on
-one line (`if a … else if b … end`) is a common cross-language mistake;
-JuliaSyntax recovers it as an `elseif` clause, consuming *both* keywords and
-splicing a zero-width `(error-t)` into the missing else position
-(`if a xx else if b yy end` ⇒ `(if a (block xx) (error-t) (elseif b (block yy)))`;
-`else zz` after it folds into the elseif's tail block, an extra `end` spills to
-toplevel junk). A **newline** between the keywords (`else\nif`) keeps the genuine
-else-block-containing-`if` reading — so the peek uses `skip_ws` (horizontal only),
-not `skip_ws_and_newlines`.
+**Empty comma-list slot → flat `(error-t ✘ …)`.** An empty element slot *after a
+real element* in any comma-separated list (`,` where the previous slot produced
+nothing) is invalid; JuliaSyntax bails, bumping the offending comma and
+everything after it up to the closer as one flat trailing-junk run: `[x,,]` ⇒
+`(vect x (error-t ✘))`, `[x,,y]` ⇒ `(vect x (error-t ✘ y))`, `[x,y,,z]` ⇒
+`(vect x y (error-t ✘ z))`, `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`, and the
+`(…)`/`{…}` analogues. A trailing comma (`[x,]`) stays clean; a `,;` is a normal
+parameters split (`f(a,;c)` ⇒ `(call f a (parameters c))`); the params+bail
+combo nests correctly (`f(a;b,,c)` ⇒ `(call f a (parameters b) (error-t ✘ c))`).
 
-Implementation (parser records, projector reconstructs — no new CST node kind):
-`parse_if_expr`'s `ElseKw` arm (`structural.rs`) peeks past horizontal whitespace;
-if the next token is `if`, it opens an `ELSEIF_CLAUSE` over **both** the `else`
-and `if` tokens (with the inter-keyword ws via `push_range`), records an `ElseIf`
-diagnostic anchored at the opening `if` keyword, parses the condition+block, and
-`continue`s the clause loop (so a trailing real `else`/`elseif` parses normally).
-The `ELSEIF_CLAUSE` carrying two keyword tokens is harmless — `project_if_tail`
-keys on `CONDITION`/`BLOCK` children only. `project_if` (`sexpr.rs`) pushes the
-`(error-t)` from `diag_count_from(keyword_start(node), ElseIf)` after the
-then-block (and any in-block ERROR junk), before the tail. New `DiagnosticKind::
-ElseIf`. Fixture `else_if_recovery`. JS 630 → 631; dir 149 → 150. Green;
-clippy/fmt clean, no regressions.
+Implementation (reuses the existing `@`-junk machinery — no new node kind or
+projector arm): `parse_arg_list` (`expr.rs`) now tracks `slot_empty`/
+`parsed_element`; on a `Comma` with `slot_empty && parsed_element` it scans to
+the closer, builds an `ERROR` node over `[comma, close)`, records a `TrailingJunk`
+diagnostic at the comma, emits the closer, and breaks. `project_error`/
+`is_recovery_error` already render the byte-bearing `ERROR` as `(error-t ✘ …)`
+(commas are `is_error_glyph`). Fixture `list_empty_comma`. JS 631 → 633; dir
+150 → 151. Green; clippy/fmt clean, no regressions. **Deferred:** a *leading*
+empty slot (`[,x]` ⇒ `(vect (error) x)`, `[,,x]` ⇒ `(vect (error) (error-t ✘ x))`)
+needs a projector-synthesized zero-width `(error)` at the head (rust-analyzer
+model), left divergent (not in corpus); nested brackets inside the junk run
+(`[x,,g(y)]`) over-consume, same deferral as the `@`-junk case.
 
 ## Earlier sessions
+
+- **2026-06-23u** — `else if` → `elseif` recovery → zero-width `(error-t)`:
+  `else if` on one line (`if a … else if b … end`) is recovered as an `elseif`
+  clause consuming both keywords, splicing a zero-width `(error-t)` into the
+  missing else position (`if a xx else if b yy end` ⇒
+  `(if a (block xx) (error-t) (elseif b (block yy)))`); a newline between the
+  keywords keeps the genuine else-block-`if` reading. `parse_if_expr`'s `ElseKw`
+  arm peeks past horizontal ws, opens an `ELSEIF_CLAUSE` over both keywords,
+  records an `ElseIf` diagnostic at the opening `if`. Fixture `else_if_recovery`.
+  JS 630 → 631; dir 149 → 150.
 
 - **2026-06-23t** — Array space/`;;` separator mismatch → zero-width `(error-t)`:
   JuliaSyntax establishes a row-/column-major order from the first space/`;;`
@@ -168,8 +178,6 @@ recovery** — `if true; x ? true end` ⇒ `(if true (block (if x true (error-t)
 incomplete ternary inside a block recovers with an `if`-headed node and two
 `(error-t)`; context-dependent (differs from the toplevel `x ? true` shape), so
 fragile.
-
-## Earlier sessions
 
 - **2026-06-23k** — Flat trailing-junk runs (toplevel): JuliaSyntax bumps a
   separator-less line's leftover as *flat error tokens*, not a re-parsed subtree

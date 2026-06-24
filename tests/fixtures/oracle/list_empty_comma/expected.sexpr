@@ -1,0 +1,1 @@
+(toplevel (vect x (error-t ✘ y)) (vect a b (error-t ✘ c)) (call f x (error-t ✘ y)) (tuple-p a (error-t ✘ b)) (braces x (error-t ✘ y)))
