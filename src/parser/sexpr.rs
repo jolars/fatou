@@ -408,7 +408,14 @@ fn project_operator_atom(node: &SyntaxNode) -> String {
         .iter()
         .find_map(|el| match el {
             NodeOrToken::Token(t) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
-                Some(operator_func_repr(t.kind()))
+                // A suffixed broadcast operator (`.+₁`) keeps its suffix, which
+                // `operator_func_repr` (keyed on kind) would drop; strip the
+                // leading broadcast dot from the text instead.
+                Some(if op_has_suffix(t.text()) {
+                    format!("(. {})", &t.text()[1..])
+                } else {
+                    operator_func_repr(t.kind())
+                })
             }
             // Dotted broadcast operators whose head is not `DotCallI` — the
             // short-circuit `.&&`/`.||` and the assignment forms `.=`/`.+=` quote
@@ -868,7 +875,18 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
                 break;
             }
             NodeOrToken::Token(t) if is_operator(t.kind()) => {
-                parts.push(operator_func_repr(t.kind()));
+                // A suffixed operator callee (`+₁(x)` → `(call +₁ x)`) keeps its
+                // suffix, which `operator_func_repr` (keyed on kind) would drop.
+                parts.push(if op_has_suffix(t.text()) {
+                    match t.text().strip_prefix('.') {
+                        Some(rest) if matches!(infix_head(t.kind()), InfixHead::DotCallI(_)) => {
+                            format!("(. {rest})")
+                        }
+                        _ => t.text().to_string(),
+                    }
+                } else {
+                    operator_func_repr(t.kind())
+                });
                 break;
             }
             NodeOrToken::Token(_) => {}

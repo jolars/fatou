@@ -124,6 +124,7 @@ string_juxtapose_error
 string_macro_suffix
 struct_const_field
 struct_module
+suffixed_prefix_operator
 symbols
 ternary
 ternary_whitespace_error

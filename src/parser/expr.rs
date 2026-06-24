@@ -1014,6 +1014,14 @@ fn parse_prefix(
             // rule (`<:(a, b)` -> `(<: a b)`, `<:(a)` -> `(<:-pre a)`); the
             // projector heads the call node with the operator. Unary `::` keeps
             // its prefix handling (its paren-call shape differs and is deferred).
+            // A *suffixed* operator (`+₁`) is never a unary prefix, so glued to
+            // `(` it is always a plain call (`+₁(x)` → `(call +₁ x)`), bypassing
+            // the single-arg prefix-application heuristic; without parens it is
+            // an error-wrapped prefix call (handled below).
+            let op_suffixed = matches!(
+                tok.kind,
+                TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus
+            ) && tok.text.chars().any(is_op_suffix_char);
             if matches!(
                 tok.kind,
                 TokKind::Plus
@@ -1026,7 +1034,7 @@ fn parse_prefix(
                     | TokKind::Subtype
                     | TokKind::Supertype
             ) && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen)
-                && unary_op_paren_is_call(ctx, start + 1)
+                && (op_suffixed || unary_op_paren_is_call(ctx, start + 1))
             {
                 let (list_events, end) = parse_arg_list(
                     ctx,
@@ -1094,6 +1102,39 @@ fn parse_prefix(
                 }
                 return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
             };
+            // A *suffixed* arithmetic operator (`+₁`, `.-₂`) is not a valid
+            // unary prefix operator: JuliaSyntax error-wraps it and applies it
+            // as a prefix call (`+₁ x` ⇒ `(call-pre (error +₁) x)`, `.+₁ x` ⇒
+            // `(dotcall-pre (error (. +₁)) x)`), mirroring the binary-only-in-
+            // prefix arm below. Only the suffix-taking value operators reach
+            // here suffixed; `&` keeps its syntactic-prefix reading
+            // (`&₁ x` ⇒ `(& x)`), and a bare suffixed operator with no operand
+            // stays a value atom (`+₁` ⇒ `+₁`, handled by the `None` arm).
+            if op_suffixed {
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::InvalidPrefixOperator,
+                    "invalid operator in prefix position",
+                    tok.start,
+                    tok.end,
+                );
+                let mut events = vec![
+                    Event::Start(SyntaxKind::UNARY_EXPR),
+                    Event::Start(SyntaxKind::ERROR),
+                    Event::Start(SyntaxKind::OPERATOR_ATOM),
+                    Event::Tok(start),
+                    Event::Finish, // OPERATOR_ATOM
+                    Event::Finish, // ERROR
+                ];
+                push_range(&mut events, start + 1, operand.start);
+                events.extend(operand.events);
+                events.push(Event::Finish); // UNARY_EXPR
+                return Some(ExprParse {
+                    start,
+                    end: operand.end,
+                    events,
+                });
+            }
             let mut events = vec![Event::Start(node)];
             push_range(&mut events, start, operand.start);
             events.extend(operand.events);

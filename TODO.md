@@ -26,6 +26,23 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Suffixed operator in prefix position `(error op)` (error-shape slice,
+  diagnostics model). A sub/superscript- or prime-suffixed arithmetic operator
+  (`+₁`, `-₁`, `.+₁`) is not a valid unary prefix: JuliaSyntax error-wraps it and
+  applies it as a prefix call (`+₁ x` ⇒ `(call-pre (error +₁) x)`, `.+₁ x` ⇒
+  `(dotcall-pre (error (. +₁)) x)`), reusing the binary-only-in-prefix machinery.
+  Glued to `(` the suffixed operator is instead always a plain call, bypassing the
+  single-arg prefix-application heuristic (`+₁(x)` ⇒ `(call +₁ x)`); a bare
+  suffixed operator with no operand stays a value atom (`+₁` ⇒ `+₁`), an infix one
+  is unchanged (`a +₁ b` ⇒ `(call-i a +₁ b)`), and `&` keeps its syntactic-prefix
+  reading (`&₁ x` ⇒ `(& x)`). The `Plus | Minus | DotPlus | DotMinus` arm of
+  `parse_prefix` (`expr.rs`) tests the operator text for an `is_op_suffix_char`;
+  on a following operand it builds the `ERROR > OPERATOR_ATOM` prefix call and
+  records an `InvalidPrefixOperator` diagnostic. The projector's
+  `project_operator_atom`/`project_call` operator-callee arms now key the suffixed
+  form on the token text (not the kind, which drops the suffix), keeping the `(. op)`
+  broadcast wrapping. Fixture `suffixed_prefix_operator`. JS 634 → 635; dir
+  152 → 153.
 - [x] Empty comma-list slot `(error-t)` (error-shape slice, diagnostics model).
   An empty element slot after a real element in a comma-separated list (`,` where
   the previous slot produced nothing) is invalid: JuliaSyntax bails, bumping the

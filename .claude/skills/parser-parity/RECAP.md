@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **634 allowlisted**,
-51 divergence, 0 unsupported. Dir corpus: **152 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **635 allowlisted**,
+50 divergence, 0 unsupported. Dir corpus: **153 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,31 +52,42 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23w)
+## Latest session (2026-06-23x)
 
-**Range-colon newline stop + unified missing-rhs `(error)`.** The range `:` is
-the lone binary operator that does *not* carry its right operand across a newline
-at statement scope or inside array brackets (where a newline is a row separator);
-other operators (`+`, `..`, `|>`, `::`, `->`) continue onto the next line. So
-`1:\n2` ⇒ `(call-i 1 : (error)) 2` and `[1:\n2]` ⇒ `(vcat (call-i 1 : (error)) 2)`,
-while a paren keeps newlines insignificant (`(1:\n2)` ⇒ `(call-i 1 : 2)`,
-`f(1:\n2)` ⇒ `(call f (call-i 1 : 2))`). The same change moves the colon's
-pre-existing missing-rhs off `error_expr_to_line_end` onto the shared `(error)`
-synthesis, so `1:` ⇒ `(call-i 1 : (error))`, `1:2:` ⇒ `(call-i 1 : 2 (error))`,
-`[1:]` ⇒ `(vect (call-i 1 : (error)))` all match now too.
+**Suffixed operator in prefix position → `(error op)`.** A sub/superscript- or
+prime-suffixed arithmetic operator (`+₁`, `-₁`, `.+₁`) is not a valid unary
+prefix: JuliaSyntax error-wraps it and applies it as a prefix call (`+₁ x` ⇒
+`(call-pre (error +₁) x)`, `.+₁ x` ⇒ `(dotcall-pre (error (. +₁)) x)`), exactly
+the 2026-06-23n binary-only-in-prefix shape, so the projector's prefix-call path
+was already in place. Glued to `(` the suffixed operator is instead always a plain
+call, bypassing the single-arg prefix-application heuristic (`+₁(x)` ⇒
+`(call +₁ x)`); a bare suffixed operator stays a value atom (`+₁` ⇒ `+₁`), infix
+is unchanged (`a +₁ b` ⇒ `(call-i a +₁ b)`), and `&` keeps its syntactic-prefix
+reading (`&₁ x` ⇒ `(& x)`, suffix dropped).
 
-Implementation: `parse_colon_range` (`expr.rs`) computes `newline_significant =
-!inside_brackets || array_mode`; when a newline follows the colon (via `skip_ws`)
-it forces the rhs missing, records the existing `MissingOperand` diagnostic at the
-colon, and returns the LHS-only node — `build_binary_missing_rhs(BINARY_EXPR, …)`
-for a bare colon (`step == None`) or new `build_range3_missing_rhs` for a trailing
-step colon (`step == Some`). `project_binary` already replays the 2-operand
-`(call-i a : (error))`; `project_range` gained a 2-operand arm that emits
-`(call-i a : b (error))` when the last `COLON` token carries `MissingOperand`.
-Fixture `colon_range_newline` (covers statement, stepped, array, paren-continues).
-JS 633 → 634; dir 151 → 152. Green; clippy/fmt clean, no regressions.
+Implementation: the `Plus | Minus | DotPlus | DotMinus | … | UniRadical` arm of
+`parse_prefix` (`expr.rs`) computes `op_suffixed` (`tok.text.chars().any(
+is_op_suffix_char)` over those four kinds only — `&`/`!`/`~`/radicals don't take a
+suffix). It feeds the paren-call gate (`op_suffixed || unary_op_paren_is_call`) so
+a glued `(` always forms a `CALL_EXPR`, and a new pre-build branch on a following
+operand emits `UNARY_EXPR > ERROR > OPERATOR_ATOM` + `InvalidPrefixOperator` diag
+(the existing 2026-06-23n machinery). Two projector fixes so the suffix survives
+(both keyed on text via `op_has_suffix`, not the suffix-dropping `operator_func_repr`/
+kind): `project_operator_atom`'s `DotCallI` arm and `project_call`'s operator-callee
+arm. Fixture `suffixed_prefix_operator`. JS 634 → 635; dir 152 → 153. Green;
+clippy/fmt clean, no regressions.
 
 ## Earlier sessions
+
+- **2026-06-23w** — Range-colon newline stop + unified missing-rhs `(error)`: the
+  range `:` is the lone binary operator that does not carry its right operand
+  across a newline at statement scope or inside array brackets (`1:\n2` ⇒
+  `(call-i 1 : (error)) 2`, `[1:\n2]` ⇒ `(vcat (call-i 1 : (error)) 2)`), while a
+  paren keeps newlines insignificant (`(1:\n2)` ⇒ `(call-i 1 : 2)`). The same
+  change moved the colon's missing-rhs onto the shared `(error)` synthesis (`1:` ⇒
+  `(call-i 1 : (error))`, `1:2:` ⇒ `(call-i 1 : 2 (error))`). `parse_colon_range`
+  computes `newline_significant`; `project_range` gained a 2-operand
+  missing-third arm. Fixture `colon_range_newline`. JS 633 → 634; dir 151 → 152.
 
 - **2026-06-23v** — Empty comma-list slot → flat `(error-t ✘ …)`: an empty element
   slot *after a real element* in any comma list bails, bumping the comma and the
