@@ -26,6 +26,24 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Bare-name `function`/`macro` signature with a body `(error <name>)`
+  (error-shape slice, diagnostics model). A `function`/`macro` whose signature is
+  a bare identifier is the valid forward-declaration form only while its body is
+  truly empty (`function f end` ⇒ `(function f)`); once a body statement is
+  present (`function f body end`) or the block is explicitly opened with a `;`
+  (`function f; end`), the bare name is no longer a valid signature: JuliaSyntax
+  error-wraps it (`(function (error f) (block body))`, `(macro (error f) (block
+  body))`, `(function (error ($ f)) (block body))`). A post-build walk
+  `flag_invalid_function_signatures` (`core.rs`) records an
+  `InvalidFunctionSignature` diagnostic at the `SIGNATURE` start when the
+  signature is a bare `NAME`/`INTERPOLATION` and the body is non-empty (a
+  statement node, or a `;` separator); `is_forward_declaration` now requires the
+  signature be a bare name *and* unflagged, and `project_function_like`
+  error-wraps the signature when flagged (the CST stays faithful). Fixture
+  `function_bare_name_signature`. JS 640 → 641; dir 155 → 156. Deferred: a
+  bare-name signature with *trailing* junk (`function f g h end` ⇒
+  `(function (error f) (block g) (error-t h))`) — the block-body trailing-junk
+  `(error-t)` is in the CST but not yet projected for `function` forms.
 - [x] Reserved keyword as a signature name `(error <kw>)` (error-shape slice,
   diagnostics model). A hard reserved keyword used as the name of a
   `struct`/`module`/`function`/`macro` is not a block opener but a misused name:

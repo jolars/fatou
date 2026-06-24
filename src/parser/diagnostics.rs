@@ -59,6 +59,13 @@ pub enum DiagnosticKind {
     /// `const x += 1`, `const global x`) — JuliaSyntax wraps the `const` in
     /// `(error …)`. Anchored at the `const` keyword start.
     ConstNotAssignment,
+    /// A `function`/`macro` whose signature is a bare identifier (`f`, `$f`) but
+    /// which has a non-empty body (`function f body end`, `function f; end`) —
+    /// JuliaSyntax error-wraps the name (`(function (error f) (block body))`). A
+    /// bare-name header with a truly empty body (`function f end`) is instead the
+    /// valid forward-declaration form `(function f)` and is left alone. Anchored
+    /// at the `SIGNATURE` node's start.
+    InvalidFunctionSignature,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

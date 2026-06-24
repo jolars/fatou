@@ -2571,21 +2571,52 @@ fn quote_raw(s: &str) -> String {
 /// signature and block (`function f() end` → `(function (call f) (block))`).
 fn project_function_like(head: &str, node: &SyntaxNode) -> String {
     if is_forward_declaration(node) {
-        sexp(head, vec![project_signature(node)])
-    } else {
-        let mut parts = vec![project_signature(node), project_block_child(node)];
-        push_trailing_errors(node, &mut parts);
-        sexp(head, parts)
+        return sexp(head, vec![project_signature(node)]);
     }
+    // A bare-identifier signature with a non-empty body is invalid (`function f
+    // body end`); JuliaSyntax error-wraps the name (`(function (error f) (block
+    // body))`). The `InvalidFunctionSignature` diagnostic, anchored at the
+    // `SIGNATURE`'s start, marks exactly that case.
+    let sig = if invalid_bare_signature(node) {
+        format!("(error {})", project_signature(node))
+    } else {
+        project_signature(node)
+    };
+    let mut parts = vec![sig, project_block_child(node)];
+    push_trailing_errors(node, &mut parts);
+    sexp(head, parts)
 }
 
 /// A `function`/`macro` header is a forward declaration when its signature is a
-/// bare name (`f`, `$f`) rather than a call (`f()`) or other expression.
+/// bare name (`f`, `$f`) rather than a call (`f()`) or other expression — and the
+/// body is empty enough to keep it a declaration. A bare name with a body is
+/// instead an invalid signature (`invalid_bare_signature`), not a declaration.
 fn is_forward_declaration(node: &SyntaxNode) -> bool {
+    signature_is_bare_name(node) && !invalid_bare_signature(node)
+}
+
+/// Whether the signature's first node is a bare name (`f`, `$f`) rather than a
+/// call or other expression.
+fn signature_is_bare_name(node: &SyntaxNode) -> bool {
     node.children()
         .find(|c| c.kind() == SIGNATURE)
         .and_then(|sig| first_node(&sig))
         .map(|inner| matches!(inner.kind(), NAME | INTERPOLATION))
+        .unwrap_or(false)
+}
+
+/// Whether the signature is a bare name marked invalid by the parser (a bare-name
+/// header with a non-empty body — `InvalidFunctionSignature`, anchored at the
+/// `SIGNATURE`'s start).
+fn invalid_bare_signature(node: &SyntaxNode) -> bool {
+    node.children()
+        .find(|c| c.kind() == SIGNATURE)
+        .map(|sig| {
+            diag_at(
+                usize::from(sig.text_range().start()),
+                DiagnosticKind::InvalidFunctionSignature,
+            )
+        })
         .unwrap_or(false)
 }
 

@@ -1,0 +1,82 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..105
+  FUNCTION_DEF@0..14
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..10
+      NAME@9..10
+        IDENT@9..10 "f"
+    BLOCK@10..11
+      WHITESPACE@10..11 " "
+    END_KW@11..14 "end"
+  NEWLINE@14..15 "\n"
+  FUNCTION_DEF@15..34
+    FUNCTION_KW@15..23 "function"
+    WHITESPACE@23..24 " "
+    SIGNATURE@24..25
+      NAME@24..25
+        IDENT@24..25 "f"
+    BLOCK@25..31
+      WHITESPACE@25..26 " "
+      NAME@26..30
+        IDENT@26..30 "body"
+      WHITESPACE@30..31 " "
+    END_KW@31..34 "end"
+  NEWLINE@34..35 "\n"
+  FUNCTION_DEF@35..50
+    FUNCTION_KW@35..43 "function"
+    WHITESPACE@43..44 " "
+    SIGNATURE@44..45
+      NAME@44..45
+        IDENT@44..45 "f"
+    BLOCK@45..47
+      SEMICOLON@45..46 ";"
+      WHITESPACE@46..47 " "
+    END_KW@47..50 "end"
+  NEWLINE@50..51 "\n"
+  MACRO_DEF@51..67
+    MACRO_KW@51..56 "macro"
+    WHITESPACE@56..57 " "
+    SIGNATURE@57..58
+      NAME@57..58
+        IDENT@57..58 "f"
+    BLOCK@58..64
+      WHITESPACE@58..59 " "
+      NAME@59..63
+        IDENT@59..63 "body"
+      WHITESPACE@63..64 " "
+    END_KW@64..67 "end"
+  NEWLINE@67..68 "\n"
+  FUNCTION_DEF@68..88
+    FUNCTION_KW@68..76 "function"
+    WHITESPACE@76..77 " "
+    SIGNATURE@77..79
+      INTERPOLATION@77..79
+        DOLLAR@77..78 "$"
+        IDENT@78..79 "f"
+    BLOCK@79..85
+      WHITESPACE@79..80 " "
+      NAME@80..84
+        IDENT@80..84 "body"
+      WHITESPACE@84..85 " "
+    END_KW@85..88 "end"
+  NEWLINE@88..89 "\n"
+  FUNCTION_DEF@89..104
+    FUNCTION_KW@89..97 "function"
+    WHITESPACE@97..98 " "
+    SIGNATURE@98..100
+      INTERPOLATION@98..100
+        DOLLAR@98..99 "$"
+        IDENT@99..100 "f"
+    BLOCK@100..101
+      WHITESPACE@100..101 " "
+    END_KW@101..104 "end"
+  NEWLINE@104..105 "\n"
+
+diagnostic [24..24]: invalid function signature: expected a call, not a bare name
+diagnostic [44..44]: invalid function signature: expected a call, not a bare name
+diagnostic [57..57]: invalid function signature: expected a call, not a bare name
+diagnostic [77..77]: invalid function signature: expected a call, not a bare name

@@ -157,6 +157,7 @@ pub fn parse(text: &str) -> ParseOutput {
 
     let cst = build_tree(&tokens, &events);
     flag_invalid_const_decls(&cst, &mut diagnostics);
+    flag_invalid_function_signatures(&cst, &mut diagnostics);
     ParseOutput { cst, diagnostics }
 }
 
@@ -183,6 +184,54 @@ fn flag_invalid_const_decls(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnos
                 pos,
             );
         }
+    }
+}
+
+/// Flag each `function`/`macro` whose signature is a bare identifier name but
+/// which carries a non-empty body. A header like `function f end` (a bare name
+/// with a truly empty body) is the valid forward-declaration form `(function f)`,
+/// but once a body is present (`function f body end`) or the body block is
+/// explicitly opened with a `;` (`function f; end`), the bare name is no longer a
+/// valid signature: JuliaSyntax error-wraps it (`(function (error f) (block
+/// body))`). The diagnostic is a zero-width point at the `SIGNATURE` node's start;
+/// the projector reconstructs the error wrapper from it (the CST stays faithful).
+fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
+    for node in cst
+        .descendants()
+        .filter(|n| matches!(n.kind(), SyntaxKind::FUNCTION_DEF | SyntaxKind::MACRO_DEF))
+    {
+        let Some(sig) = node.children().find(|c| c.kind() == SyntaxKind::SIGNATURE) else {
+            continue;
+        };
+        let sig_is_bare_name = sig.first_child().is_some_and(|inner| {
+            matches!(inner.kind(), SyntaxKind::NAME | SyntaxKind::INTERPOLATION)
+        });
+        if sig_is_bare_name && !function_body_is_empty(&node) {
+            let pos = usize::from(sig.text_range().start());
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::InvalidFunctionSignature,
+                "invalid function signature: expected a call, not a bare name",
+                pos,
+                pos,
+            );
+        }
+    }
+}
+
+/// Whether a `function`/`macro`'s body is syntactically empty — no statement
+/// nodes and no `;` separator opening the block. A bare-name header keeps the
+/// forward-declaration form only while this holds; a `;` (`function f; end`) or
+/// any body statement marks the block as genuinely opened.
+fn function_body_is_empty(node: &SyntaxNode) -> bool {
+    match node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+        Some(block) => {
+            block.first_child().is_none()
+                && !block
+                    .children_with_tokens()
+                    .any(|el| el.kind() == SyntaxKind::SEMICOLON)
+        }
+        None => true,
     }
 }
 
