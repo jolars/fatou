@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **657 allowlisted**,
-28 divergence, 0 unsupported. Dir corpus: **167 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **659 allowlisted**,
+26 divergence, 0 unsupported. Dir corpus: **168 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,38 +58,49 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-24k — C2, final commit of the divergence-ledger campaign)
+## Latest session (2026-06-24l — unterminated char literals)
 
-**Flat arithmetic chains for `+`/`*`** (flips js-81be47a1 `a + b + c`,
-js-2cdf798a `a * b * c`, js-99360f4e `[x+y+z]`, js-516f4fd7 `[x+y + z]`). A run of
-≥2 of the *same* plain `+`/`*` operator folds into one flat variadic `BINARY_EXPR`
-(`a + b + c` ⇒ `(call-i a + b c)`), matching JuliaSyntax's variadic chains; a lone
-`+`/`*` is unchanged (`a + b` ⇒ `(call-i a + b)`). Mixed operators break the run
-and nest (`a + b - c` ⇒ `(call-i (call-i a + b) - c)`); precedence preserved
-(`a + b * c` ⇒ `(call-i a + (call-i b * c))`). Mechanism mirrors C3's
-`parse_comparison_chain`: a dispatch block right after the comparison case calls
-**collect-then-choose** `parse_flat_arith_chain` (continue only while
-`next_operator` is the *identical* token kind, respecting array boundaries),
-reusing `build_flat`/`build_flat_missing_rhs`. New `is_flat_arith_op(&Token)`
-(`expr.rs`) — takes the **token**, not just the kind, so it can reject *suffixed*
-operators (`+₁` lexes as `TokKind::Plus`; Julia nests `a +₁ b +₁ c`). Projector:
-`project_binary`'s old dead `!=2 → project_flat` fallback replaced by
-`project_flat_arith` (`sexpr.rs`) for `operands.len() >= 3` *or* a 2-operand node
-whose last operator carries a `MissingOperand` diag (`a + b +` ⇒ `(call-i a + b
-(error))`). Excluded (nest in Julia): dotted `.+`/`.*` (different TokKind),
-left-assoc `-`, suffixed ops. Fixtures: parser `arithmetic_chains` (incl. the
-`a +` missing-rhs guard); oracle dir clean 8-line subset. Side effect: `a +`
-missing-rhs now routes through the flat path, so its CST node ends right after the
-`+` (op_idx+1) instead of absorbing trailing whitespace — same projection, a
-1-line `operator_missing_rhs` snapshot reshape (more consistent with how complete
-binary nodes end at their last significant token). JS 653 → 657 (zero
-regressions); dir 166 → 167. Green; clippy/fmt clean. **The ledger campaign
-(C1+C3+C2) is complete** — the "deliberate divergence" list now collapses to float
-display. **Next target (from the backlog survey below, no active plan):** pick a
-small high-value cluster — e.g. **char/prime lexer** (`'`, `'a`, `f.'`, `x 'y`;
-deferred root (c)) or the **word-op comparison chains** `a isa b isa c` /
-`a < b isa c` (would close the last comparison-chain deferral; needs the
-`word_operator` branch ~expr.rs:560 to feed into `parse_comparison_chain`).
+**Char-start `'` with no closing quote → recovered char** (flips js-265fda17
+`'` ⇒ `(char (error))`, js-6808df30 `'a` ⇒ `(char 'a' (error-t))`). Previously
+the lone `'` lexed as a single `Unknown` byte (`(error)`); now `lex_char_literal`
+(`lexer.rs`, renamed from `lex_char_or_unknown` since it never produces `Unknown`)
+always emits a `Char` token. Two coupled lexer facts matched to Julia: (1) a
+**newline is char content, not a terminator** — the scan stops only at the next
+`'` or EOF (`'\n'` is the newline char; `'a\nb'` closes across the newline), so the
+old `b'\n' => break` arm is gone; (2) an unterminated token spans the opening quote
+and any content (`start..idx`, no close). The parser's split-out `TokKind::Char`
+arm (`expr.rs`) tests `char_token_terminated` (text len ≥ 2 ending in `'`) and, when
+unterminated, records `UnterminatedLiteral` at the quote — same diagnostic the
+string/cmd/var unterminated paths use. `project_char` (`sexpr.rs`, now takes the
+`SyntaxToken` for its byte anchor) gates on that diag: empty content ⇒ `(char
+(error))` (no `(error-t)`, same as closed `''`), else decode the body and append
+`(error-t)` (`'a` ⇒ `(char 'a' (error-t))`, `'a\n` ⇒ `(char (ErrorOverLongCharacter)
+(error-t))`, `'\n` ⇒ `(char '\n' (error-t))`). Refactored `decode_char`/
+`classify_char_error` to expose body-only variants (`decode_char_body`/
+`classify_char_body`) shared by the terminated and unterminated paths. Fixtures:
+parser + oracle-dir `char_unterminated` (single `'a`, **no trailing newline** — a
+trailing newline becomes content and any second `'` closes the first, so an
+unterminated char can only sit at EOF). Transpose (`A'` ⇒ `(call-post A ')`) is
+value-position and routes through `prev_ends_value` → unaffected. JS 657 → 659
+(zero regressions); dir 167 → 168. Green; clippy/fmt clean. **Deferred siblings**
+(still FAIL, entangled): `f.'` ⇒ `(toplevel f (error-t '))` (the removed `.'`
+operator, recovery), `x 'y` ⇒ `(toplevel x (error-t ' 'y'))` (space-before-`'`
+trailing-junk split), and the prime-suffixed float-overflow cases `10.0e1000'`/
+`10.0f100'` ⇒ `(call-post (ErrorNumericOverflow) ')` (need float-overflow display
++ postfix prime). **Next target (no active plan):** pick a small high-value
+cluster — e.g. the **ternary-in-block** cluster (js-434fcafd/js-74a9b301/
+js-810e177c, `if true; x ? true …`; deferred root (f), fragile recovered-ternary
+head) or **misc narrow error shapes** (`:(end)`/`a[:(end)]`/`export (x::T)`).
+
+## Earlier sessions
+
+- **2026-06-24k** — C2 flat arithmetic chains for `+`/`*` (final commit of the
+  divergence-ledger campaign; flips js-81be47a1 `a + b + c`, js-2cdf798a `a * b * c`,
+  js-99360f4e `[x+y+z]`, js-516f4fd7). A run of ≥2 of the *same* plain `+`/`*` folds
+  into one flat variadic `BINARY_EXPR` via collect-then-choose
+  `parse_flat_arith_chain` (mirrors C3); `is_flat_arith_op(&Token)` rejects suffixed
+  ops; `project_flat_arith` renders ≥3 operands or a 2-operand missing-rhs. Excluded:
+  dotted `.+`/`.*`, left-assoc `-`, suffixed. JS 653 → 657; dir 166 → 167.
 
 ## Earlier sessions
 
@@ -119,8 +130,11 @@ deferred root (c)) or the **word-op comparison chains** `a isa b isa c` /
 **Backlog survey** (carried from 2026-06-24h; the comparison/flatten "deliberate"
 items (a) are now the active campaign — see Progress): (b) **float display
 (blocked)** — `x.3`, hex floats, `1.0e-1000`, prime+float: needs JuliaSyntax's
-full Float32/64 `show`; (c) **char/prime lexer (deferred)** — `'`, `'a`, `f.'`,
-`x 'y`; (d) **invalid-operator** — `a :< b`⇒`(call-i a (error : <) b)` (two-token
+full Float32/64 `show`; (c) **char/prime lexer (partly done 2026-06-24l)** — bare
+unterminated chars `'`/`'a` landed; *still deferred:* `f.'` (removed `.'`
+operator), `x 'y` (space-before-`'` junk split), prime-suffixed float overflow
+`10.0e1000'`/`10.0f100'` (entangled with float display); (d) **invalid-operator**
+— `a :< b`⇒`(call-i a (error : <) b)` (two-token
 glued op, needs a paired error token + 2-token error head); (e) **macro
 dotted-name error shapes** — `A.@B.x`, `@A.B.@x a`, `@A.$x a`, `@M.(x)`, `@[x] y
 z` — each a *distinct, deep* parser gap, NOT a clean cluster; (f)

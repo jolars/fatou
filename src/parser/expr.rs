@@ -1545,13 +1545,29 @@ fn parse_prefix(
         TokKind::StringPrefix | TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
             Some(parse_string_literal(ctx, start, diagnostics))
         }
+        // A char literal with no closing quote (`'`, `'a`) is recovered: the node
+        // is still a `LITERAL > CHAR`, but we record `UnterminatedLiteral` at the
+        // opening quote so the projector replays JuliaSyntax's missing-close marker
+        // (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`).
+        TokKind::Char => {
+            let tok = &ctx.tokens()[start];
+            if !char_token_terminated(&tok.text) {
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::UnterminatedLiteral,
+                    "unterminated character literal",
+                    tok.start,
+                    tok.start,
+                );
+            }
+            Some(atom(SyntaxKind::LITERAL, start))
+        }
         TokKind::Integer
         | TokKind::BinInt
         | TokKind::OctInt
         | TokKind::HexInt
         | TokKind::Float
         | TokKind::Float32
-        | TokKind::Char
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
         // A lone syntactic operator (`=`, an assignment op, `&&`/`||`/`->`/`...`)
@@ -1687,6 +1703,13 @@ fn is_name_error_keyword(kind: TokKind) -> bool {
             kind,
             TokKind::MutableKw | TokKind::WhereKw | TokKind::TrueKw | TokKind::FalseKw
         )
+}
+
+/// A char-literal token is terminated when it carries a closing quote: text of
+/// length ≥ 2 ending in `'` (the empty `''` and a normal `'a'` both qualify). A
+/// bare `'` or content with no closing quote (`'a`) is unterminated.
+fn char_token_terminated(text: &str) -> bool {
+    text.len() >= 2 && text.ends_with('\'')
 }
 
 fn error_operator_atom(start: usize) -> ExprParse {

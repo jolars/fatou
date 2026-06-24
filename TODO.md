@@ -591,9 +591,16 @@ through), so the grammar can grow incrementally.
   `'\xff'`/`'\377'` stays a valid one-byte `Char`. The CST keeps a single lossless
   `CHAR` token; the refined `None` arm of `project_char` (`sexpr.rs`) classifies
   via `classify_char_error`, and the octal escape now rejects values past `0xff`.
-  Fixture `char_errors`. JS allow 592 → 595; dir 136 → 137. **Deferred:**
-  unterminated chars (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`) need
-  lexer changes (the lone `'` currently lexes as `Unknown`).
+  Fixture `char_errors`. JS allow 592 → 595; dir 136 → 137.
+- [x] Unterminated char literals (the lexer sibling of the closed-body work). A
+  `'` in char-start position with no closing quote is recovered as a char rather
+  than the old `Unknown` single byte: the lexer (`lex_char_literal`) spans the
+  opening quote and any content to the next `'` or EOF (a newline is *content*,
+  matching Julia — `'\n'` is the newline char), and the parser records
+  `UnterminatedLiteral` at the quote. `project_char` replays JuliaSyntax's
+  missing-close marker: empty `'` ⇒ `(char (error))`, content `'a` ⇒
+  `(char 'a' (error-t))`, over-long `'a\n` ⇒ `(char (ErrorOverLongCharacter)
+  (error-t))`. Fixture `char_unterminated`. JS allow 657 → 659; dir 167 → 168.
 - [x] String-literal escape error classification (the `Char` sibling of the
   above). A single-quoted `"…"` `STRING_CONTENT` token holding a malformed
   backslash escape projects as one JuliaSyntax error part, per content token and

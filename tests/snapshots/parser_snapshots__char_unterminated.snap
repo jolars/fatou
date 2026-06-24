@@ -1,0 +1,9 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..2
+  LITERAL@0..2
+    CHAR@0..2 "'a"
+
+diagnostic [0..0]: unterminated character literal

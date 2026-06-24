@@ -413,7 +413,7 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
                 self.push_op(TokKind::Transpose, start);
             }
-            b'\'' => self.lex_char_or_unknown(start),
+            b'\'' => self.lex_char_literal(start),
             b'0'..=b'9' => self.lex_number(start),
             b'.' if self.peek(1).is_some_and(|c| c.is_ascii_digit()) => self.lex_number(start),
             _ => {
@@ -694,16 +694,21 @@ impl<'a> Lexer<'a> {
     }
 
     /// `'` begins a char literal when it is *not* a postfix adjoint/transpose
-    /// (see [`Self::prev_ends_value`]). We lex it as a char when a closing `'`
-    /// is found within a short window (one char, or a backslash escape);
-    /// otherwise it is an [`TokKind::Unknown`] single byte.
-    fn lex_char_or_unknown(&mut self, start: usize) {
+    /// (see [`Self::prev_ends_value`]). It is always lexed as a [`TokKind::Char`]:
+    /// a closing `'` (within one char or a backslash escape) terminates it; a
+    /// newline or end of input without one leaves an *unterminated* char token
+    /// spanning the opening quote and any content. JuliaSyntax also reads the
+    /// unterminated form as a char and recovers with a missing-close marker
+    /// (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`); the parser flags
+    /// it with `UnterminatedLiteral` and the projector replays that shape.
+    fn lex_char_literal(&mut self, start: usize) {
         // Scan to the closing `'`, skipping a backslash escape's following byte
         // so an escaped quote (`'\''`) does not terminate the literal. The
         // content may be several escapes (`'\xce\xb1'`) or over-long (`'ab'`);
         // validity (single codepoint, well-formed escapes) is decided later. A
-        // newline or end of input without a closing quote leaves the lone `'` a
-        // postfix transpose token (`TokKind::Unknown`).
+        // newline is *content*, not a terminator — Julia scans to the next `'`
+        // or end of input (`'\n'` is the newline char; `'a\n` is unterminated
+        // over-long content), so the only stop short of `'` is EOF.
         let mut idx = self.pos + 1;
         let mut found = false;
         while idx < self.bytes.len() {
@@ -712,7 +717,6 @@ impl<'a> Lexer<'a> {
                     found = true;
                     break;
                 }
-                b'\n' => break,
                 b'\\' => {
                     idx += 1;
                     if idx < self.bytes.len() {
@@ -723,13 +727,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if found {
-            self.pos = idx + 1;
-            self.push(TokKind::Char, start, self.pos);
-        } else {
-            self.pos += 1;
-            self.push(TokKind::Unknown, start, self.pos);
-        }
+        // Include the closing quote when present; otherwise span only the opening
+        // quote and content (no close) so the parser can detect the unterminated
+        // form from the token text.
+        self.pos = if found { idx + 1 } else { idx };
+        self.push(TokKind::Char, start, self.pos);
     }
 
     fn lex_number(&mut self, start: usize) {

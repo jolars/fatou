@@ -1955,7 +1955,7 @@ fn project_literal(node: &SyntaxNode) -> String {
 /// text for now (float canonicalization is a separate, deferred follow-up).
 fn literal_token_text(tok: &SyntaxToken) -> String {
     match tok.kind() {
-        CHAR => project_char(tok.text()),
+        CHAR => project_char(tok),
         TRUE_KW => "true".to_string(),
         FALSE_KW => "false".to_string(),
         INTEGER => tok.text().replace('_', ""),
@@ -2011,7 +2011,28 @@ fn octal_bits(digits: &str) -> usize {
 /// `(char (ErrorInvalidEscapeSequence))`, a lone non-UTF-8 byte `'\xff'` stays a
 /// valid one-byte `Char`, and anything else multi-codepoint `'ab'` ⇒
 /// `(char (ErrorOverLongCharacter))`.
-fn project_char(text: &str) -> String {
+fn project_char(tok: &SyntaxToken) -> String {
+    let text = tok.text();
+    // An unterminated char (no closing quote) is flagged with `UnterminatedLiteral`
+    // at the opening quote. JuliaSyntax reads it as a char and recovers with a
+    // missing-close marker: empty content `'` ⇒ `(char (error))` (the bare empty
+    // shape, no `(error-t)`), non-empty `'a` ⇒ `(char 'a' (error-t))`.
+    let start = usize::from(tok.text_range().start());
+    if diag_at(start, DiagnosticKind::UnterminatedLiteral) {
+        let inner = text.strip_prefix('\'').unwrap_or(text);
+        if inner.is_empty() {
+            return "(char (error))".to_string();
+        }
+        return match decode_char_body(inner) {
+            Some(c) => format!("(char '{}' (error-t))", display_char(c)),
+            None => match classify_char_body(inner) {
+                CharError::Empty => "(char (error))".to_string(),
+                CharError::BadEscape => "(char (ErrorInvalidEscapeSequence) (error-t))".to_string(),
+                CharError::OverLong => "(char (ErrorOverLongCharacter) (error-t))".to_string(),
+                CharError::SingleByte(b) => format!("(char '\\x{b:02x}' (error-t))"),
+            },
+        };
+    }
     match decode_char(text) {
         Some(c) => format!("(char '{}')", display_char(c)),
         None => match classify_char_error(text) {
@@ -2045,6 +2066,12 @@ fn classify_char_error(text: &str) -> CharError {
         .strip_prefix('\'')
         .and_then(|s| s.strip_suffix('\''))
         .unwrap_or("");
+    classify_char_body(inner)
+}
+
+/// Classify a char-literal *body* (the text between the quotes, already stripped).
+/// Shared by the terminated (`classify_char_error`) and unterminated paths.
+fn classify_char_body(inner: &str) -> CharError {
     if inner.is_empty() {
         return CharError::Empty;
     }
@@ -2070,6 +2097,12 @@ fn classify_char_error(text: &str) -> CharError {
 /// directly. Returns `None` for empty, malformed, or over-long content.
 fn decode_char(text: &str) -> Option<char> {
     let inner = text.strip_prefix('\'')?.strip_suffix('\'')?;
+    decode_char_body(inner)
+}
+
+/// Decode a char-literal *body* (already stripped of quotes) to its single
+/// codepoint. Shared by the terminated and unterminated paths.
+fn decode_char_body(inner: &str) -> Option<char> {
     if inner.is_empty() {
         return None;
     }
@@ -2991,7 +3024,7 @@ fn project_element(el: &SyntaxElement) -> Option<String> {
             IDENT | INTEGER | BIN_INT | OCT_INT | HEX_INT | FLOAT | FLOAT32 => {
                 Some(t.text().to_string())
             }
-            CHAR => Some(project_char(t.text())),
+            CHAR => Some(project_char(t)),
             TRUE_KW => Some("true".to_string()),
             FALSE_KW => Some("false".to_string()),
             END_KW => Some("end".to_string()),
