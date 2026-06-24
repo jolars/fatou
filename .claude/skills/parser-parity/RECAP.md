@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **659 allowlisted**,
-26 divergence, 0 unsupported. Dir corpus: **168 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **661 allowlisted**,
+24 divergence, 0 unsupported. Dir corpus: **169 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,42 +58,47 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-24l — unterminated char literals)
+## Latest session (2026-06-24m — docstring + stray closer)
 
-**Char-start `'` with no closing quote → recovered char** (flips js-265fda17
-`'` ⇒ `(char (error))`, js-6808df30 `'a` ⇒ `(char 'a' (error-t))`). Previously
-the lone `'` lexed as a single `Unknown` byte (`(error)`); now `lex_char_literal`
-(`lexer.rs`, renamed from `lex_char_or_unknown` since it never produces `Unknown`)
-always emits a `Char` token. Two coupled lexer facts matched to Julia: (1) a
-**newline is char content, not a terminator** — the scan stops only at the next
-`'` or EOF (`'\n'` is the newline char; `'a\nb'` closes across the newline), so the
-old `b'\n' => break` arm is gone; (2) an unterminated token spans the opening quote
-and any content (`start..idx`, no close). The parser's split-out `TokKind::Char`
-arm (`expr.rs`) tests `char_token_terminated` (text len ≥ 2 ending in `'`) and, when
-unterminated, records `UnterminatedLiteral` at the quote — same diagnostic the
-string/cmd/var unterminated paths use. `project_char` (`sexpr.rs`, now takes the
-`SyntaxToken` for its byte anchor) gates on that diag: empty content ⇒ `(char
-(error))` (no `(error-t)`, same as closed `''`), else decode the body and append
-`(error-t)` (`'a` ⇒ `(char 'a' (error-t))`, `'a\n` ⇒ `(char (ErrorOverLongCharacter)
-(error-t))`, `'\n` ⇒ `(char '\n' (error-t))`). Refactored `decode_char`/
-`classify_char_error` to expose body-only variants (`decode_char_body`/
-`classify_char_body`) shared by the terminated and unterminated paths. Fixtures:
-parser + oracle-dir `char_unterminated` (single `'a`, **no trailing newline** — a
-trailing newline becomes content and any second `'` closes the first, so an
-unterminated char can only sit at EOF). Transpose (`A'` ⇒ `(call-post A ')`) is
-value-position and routes through `prev_ends_value` → unaffected. JS 657 → 659
-(zero regressions); dir 167 → 168. Green; clippy/fmt clean. **Deferred siblings**
-(still FAIL, entangled): `f.'` ⇒ `(toplevel f (error-t '))` (the removed `.'`
-operator, recovery), `x 'y` ⇒ `(toplevel x (error-t ' 'y'))` (space-before-`'`
-trailing-junk split), and the prime-suffixed float-overflow cases `10.0e1000'`/
-`10.0f100'` ⇒ `(call-post (ErrorNumericOverflow) ')` (need float-overflow display
-+ postfix prime). **Next target (no active plan):** pick a small high-value
-cluster — e.g. the **ternary-in-block** cluster (js-434fcafd/js-74a9b301/
-js-810e177c, `if true; x ? true …`; deferred root (f), fragile recovered-ternary
-head) or **misc narrow error shapes** (`:(end)`/`a[:(end)]`/`export (x::T)`).
+**A doc-eligible string is a docstring only when a *real* statement follows it**
+(flips js-c74994ac `"notdoc" ]` ⇒ `(string "notdoc") (error-t ✘)`, js-f9c36919
+`"notdoc"\n]` ⇒ `(string "notdoc") (error) (error-t ✘)`). Two coupled bugs in the
+doc machinery (`core.rs`): (1) the speculative `first_is_doc_string` flag
+suppressed trailing-junk recovery for the whole line, so a stray closer after the
+string (`]`) was bumped as a bare leaf and silently dropped by the projector
+(non-lossless projection); (2) `fold_docstrings`/`doc_target` happily folded an
+error-recovery node as the documented target, wrapping `(string) (error)` into a
+spurious `(doc …)`. Three changes: the line driver now tracks `doc_no_target` (set
+in the bare-leaf `else` when a doc-string's leftover can't start a statement) and
+folds it into the raw-junk-collection gate so the rest of the line collects flat
+(`"doc" ] x` ⇒ `(string "doc") (error-t ✘ x)`); the leftover-wrap filter defers to
+`fold_docstrings` only when the leftover *begins* with a real statement subtree
+(new `leftover_starts_with_subtree`) instead of blanket-skipping on
+`first_is_doc_string`; and `doc_target` returns `None` when the next subtree is an
+`ERROR`. Real docs still fold (`"doc" foo`/`"doc"\nfoo` ⇒ `(doc (string) foo)`).
+Pure `core.rs` (projector untouched). Fixture parser + oracle-dir
+`docstring_stray_closer` (`"notdoc" ]`). JS 659 → 661 (zero regressions); dir
+168 → 169. Green; clippy/fmt clean. **Next target (no active plan):** the
+backlog's remaining narrow shapes — `export (x::T)` ⇒ `(export (error (::-i x
+T)))` (needs real expression parsing inside the export list + a multi-case
+validity predicate: `(x)`/`(+)`/`(var"a")` strip-and-keep, but `((x))`/`(@m)`/
+`(x.y)`/`(a,b)`/`(x::T)` error-wrap — *intricate*), or the `:(end)` quote-paren
+cluster (js-b1ac400e/js-557adcf4: `:(end)` ⇒ `(quote-: (error-t)) (error-t end
+✘)`, the `(quote-: (error-t))` zero-width recovery shared by `a[:(end)]`), or the
+**ternary-in-block** cluster (deferred root (f); see the design-watch bullet — it
+needs the diagnostic record to carry enclosing-block context, *not* a compensating
+projector).
 
 ## Earlier sessions
 
+- **2026-06-24l** — Unterminated char literals (flips js-265fda17 `'` ⇒ `(char
+  (error))`, js-6808df30 `'a` ⇒ `(char 'a' (error-t))`). `lex_char_literal`
+  (`lexer.rs`) always emits a `Char` token; a newline is char *content* (scan stops
+  at the next `'` or EOF), an unterminated token spans `start..idx` with no close.
+  The split-out `TokKind::Char` arm (`expr.rs`) records `UnterminatedLiteral` at the
+  quote; `project_char` gates on it (empty ⇒ `(char (error))`, else decode body +
+  `(error-t)`). JS 657 → 659; dir 167 → 168. Deferred siblings: `f.'`, `x 'y`,
+  prime-suffixed float overflow `10.0e1000'`/`10.0f100'`.
 - **2026-06-24k** — C2 flat arithmetic chains for `+`/`*` (final commit of the
   divergence-ledger campaign; flips js-81be47a1 `a + b + c`, js-2cdf798a `a * b * c`,
   js-99360f4e `[x+y+z]`, js-516f4fd7). A run of ≥2 of the *same* plain `+`/`*` folds

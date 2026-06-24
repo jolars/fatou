@@ -364,6 +364,20 @@ through), so the grammar can grow incrementally.
   (`stmt_is_doc_string`) is exempt so `fold_docstrings` still owns `"a"\nfoo`.
   Fixture `toplevel_leftover_error`. JS allow 568 → 571; dir 121 → 122.
   **Deferred** (different shapes): `;`-line leftover (`a b; c`).
+- [x] Docstring followed by a stray closer (error-shape slice). A doc-eligible
+  string is a docstring only when a *real* statement follows it; a leftover that
+  can't start a statement (a stray closer/keyword) leaves the string a plain
+  statement and recovers the closer as junk (`"notdoc" ]` ⇒ `(string "notdoc")
+  (error-t ✘)`, `"notdoc"\n]` ⇒ `(string "notdoc") (error) (error-t ✘)`, `"doc"
+  ] x` ⇒ `(string "doc") (error-t ✘ x)`); a real target still folds (`"doc" foo`
+  ⇒ `(doc (string "doc") foo)`). Previously the speculative docstring flag
+  suppressed trailing-junk recovery and the fold consumed the recovery node as a
+  target. Three changes in `core.rs`: the line driver tracks `doc_no_target` (set
+  when a doc-string's leftover can't start a statement) to re-enable the raw junk
+  collection; the leftover-wrap filter defers to `fold_docstrings` only when the
+  leftover *begins* with a real statement subtree (`leftover_starts_with_subtree`);
+  and `doc_target` rejects an `ERROR` recovery node as a documentable target.
+  Fixture `docstring_stray_closer`. JS 659 → 661; dir 168 → 169.
 - [x] Flat trailing-junk runs. JuliaSyntax bumps the leftover after a line's
   first statement as *flat error tokens*, not a re-parsed subtree, so brackets,
   commas, and `@` render as `✘`: `x y, z` ⇒ `x (error-t y ✘ z)`, `x@y` ⇒

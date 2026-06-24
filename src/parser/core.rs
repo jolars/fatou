@@ -45,6 +45,11 @@ pub fn parse(text: &str) -> ParseOutput {
         let mut has_semicolon = false;
         let mut leftover_mark: Option<usize> = None;
         let mut first_is_doc_string = false;
+        // A doc-eligible string is only a docstring when a *real* statement
+        // follows it. If the leftover after the string can't start a statement
+        // (a stray closer/keyword: `"doc" ]`), the string is a plain statement
+        // and the remainder is junk — un-gate the raw trailing-junk collection.
+        let mut doc_no_target = false;
         // A separator-less line: after the first complete statement, JuliaSyntax
         // bumps the remainder as flat error tokens rather than re-parsing it. A
         // line that carries a `;` keeps the per-segment behavior (deferred), so
@@ -63,7 +68,10 @@ pub fn parse(text: &str) -> ParseOutput {
                     i += 1;
                 }
                 _ => {
-                    if !line_has_semicolon && leftover_mark.is_some() && !first_is_doc_string {
+                    if !line_has_semicolon
+                        && leftover_mark.is_some()
+                        && (!first_is_doc_string || doc_no_target)
+                    {
                         // Trailing junk after the first statement: collect raw
                         // (no structural re-parse) so the wrapping below puts the
                         // whole run in one ERROR node and the projector renders
@@ -129,6 +137,12 @@ pub fn parse(text: &str) -> ParseOutput {
                         i += 1;
                         leftover_mark = Some(line.len());
                     } else {
+                        // A leftover token that can't start a statement. After a
+                        // doc-eligible string this means the string has no
+                        // documentable target, so the rest of the line is junk.
+                        if first_is_doc_string && leftover_mark.is_some() {
+                            doc_no_target = true;
+                        }
                         line.push(Event::Tok(i));
                         i += 1;
                     }
@@ -143,8 +157,13 @@ pub fn parse(text: &str) -> ParseOutput {
         } else if let Some(mark) = leftover_mark.filter(|&m| {
             // Junk after the first statement on a separator-less line — but a
             // bare docstring (`"a"\nfoo`) owns its trailing statement, so leave
-            // that to `fold_docstrings`.
-            !first_is_doc_string && line[m..].iter().any(|e| is_significant_event(e, &tokens))
+            // that to `fold_docstrings`. A docstring defers only when its
+            // leftover actually begins with a documentable statement subtree
+            // (`"doc" foo`); a leftover that opens with junk (`"doc" ]`) is
+            // recovered here so the stray closer becomes `(error-t ✘)`.
+            let tail = &line[m..];
+            let defer_to_doc = first_is_doc_string && leftover_starts_with_subtree(tail, &tokens);
+            !defer_to_doc && tail.iter().any(|e| is_significant_event(e, &tokens))
         }) {
             events.extend(line[..mark].iter().cloned());
             let tail = &line[mark..];
@@ -366,6 +385,17 @@ fn is_significant_event(event: &Event, tokens: &[Token]) -> bool {
     }
 }
 
+/// Whether the first significant event in `tail` opens a node (a real statement
+/// subtree). A docstring's trailing leftover defers to `fold_docstrings` only
+/// when it begins with such a subtree (its documentable target); a leftover that
+/// opens with a bare junk token is recovered as trailing junk instead.
+fn leftover_starts_with_subtree(tail: &[Event], tokens: &[Token]) -> bool {
+    matches!(
+        tail.iter().find(|e| is_significant_event(e, tokens)),
+        Some(Event::Start(_))
+    )
+}
+
 /// Whether a statement's events open a bare (doc-eligible) `STRING_LITERAL` —
 /// the first inner token is not a `STRING_PREFIX`. Such a statement starts a
 /// potential docstring, so a trailing statement on the same logical line is left
@@ -472,6 +502,10 @@ fn doc_target(items: &[Item], start: usize, tokens: &[Token]) -> Option<usize> {
     let mut j = start + 1;
     while j < items.len() {
         match &items[j] {
+            // An error-recovery node is never a documentable target (`"doc"\n]`
+            // ⇒ `(string) (error) (error-t ✘)`, not a `(doc …)`); the string is
+            // a plain statement.
+            Item::Subtree(SyntaxKind::ERROR, _) => return None,
             Item::Subtree(..) => return Some(j),
             Item::Leaf(t) => {
                 let kind = tokens[*t].kind;

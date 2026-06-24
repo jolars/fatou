@@ -50,6 +50,7 @@ do_block
 do_blocks
 doc_macro
 docstring
+docstring_stray_closer
 dot_logical_operator
 dotted_operator_quote
 else_if_recovery
