@@ -468,6 +468,17 @@ through), so the grammar can grow incrementally.
   Fixture `char_errors`. JS allow 592 → 595; dir 136 → 137. **Deferred:**
   unterminated chars (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`) need
   lexer changes (the lone `'` currently lexes as `Unknown`).
+- [x] String-literal escape error classification (the `Char` sibling of the
+  above). A single-quoted `"…"` `STRING_CONTENT` token holding a malformed
+  backslash escape projects as one JuliaSyntax error part, per content token and
+  dropping the valid surrounding text: `"\xqqq"`/`"ok\xqq"`/`"\400"` ⇒ `(string
+  (ErrorInvalidEscapeSequence))`, `"a\xq$b"` ⇒ `(string (ErrorInvalidEscapeSequence)
+  b)`; valid bytes that aren't UTF-8 (`"\xff"`) stay a faithful byte-string
+  (`(string "\xff")`). The CST is unchanged (real `STRING_LITERAL` tokens);
+  `decode_string_chunks` (`sexpr.rs`) now returns a `StringDecodeError` so
+  `decoded_string_parts` can split a bad escape (`BadEscape` ⇒ error part) from
+  non-UTF-8 bytes (`BadUtf8` ⇒ raw-source fallback). Fixture
+  `string_escape_error`. JS allow 641 → 642; dir 156 → 157.
 - [x] `using`-base `as` rename error-wrap (error-shape slice). An `as` rename is
   valid in an `import` base path (`import A as B`) and in any name list after a
   top-level `:` (`using A: x as y`), but invalid in a `using` base path: there

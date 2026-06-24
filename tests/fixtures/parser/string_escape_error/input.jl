@@ -1,0 +1,5 @@
+"\xqqq"
+"ok\xqq"
+"a\xq$b"
+"\400"
+"\xff"

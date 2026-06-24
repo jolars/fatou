@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **641 allowlisted**,
-44 divergence, 0 unsupported. Dir corpus: **156 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **642 allowlisted**,
+43 divergence, 0 unsupported. Dir corpus: **157 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,36 +52,40 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-24a)
+## Latest session (2026-06-24b)
 
-**Bare-name `function`/`macro` signature with a body → `(error <name>)`**
-(error-shape slice, diagnostics model; the sibling RECAP 2026-06-23y flagged as
-"not done"). A bare-identifier signature is the valid forward-declaration form
-*only while the body is truly empty*: `function f end` ⇒ `(function f)` (and
-newlines stay trivia, `function f\nend` is still that form). The moment a body
-statement appears (`function f body end`) or the block is explicitly opened with
-a `;` (`function f; end`, even with no statements), the bare name is an invalid
-signature and JuliaSyntax error-wraps it: `(function (error f) (block body))`,
-`(macro (error f) (block body))`, `(function (error ($ f)) (block body))`. Fatou's
-CST was already faithful (`SIGNATURE > NAME f`, real `BLOCK > body`), but the
-projector's `is_forward_declaration` returned true for *any* bare-name signature,
-so it emitted `(function f)` and dropped the block. Fix mirrors the
-const-not-assignment pattern: a post-build walk `flag_invalid_function_signatures`
-(`core.rs`) records an `InvalidFunctionSignature` diagnostic at the `SIGNATURE`
-start when the signature is a bare `NAME`/`INTERPOLATION` and the body is
-non-empty (first child node present, or a `SEMICOLON` token in the block);
-`is_forward_declaration` now requires bare-name *and* unflagged, and
-`project_function_like` wraps the signature in `(error …)` when flagged. Fixture
-`function_bare_name_signature` (forward form + 5 error forms). JS 640 → 641
-(js-217d6a60); dir 155 → 156. Green; clippy/fmt clean, no regressions.
-
-**Deferred (acceptable):** `function f g h end` ⇒
-`(function (error f) (block g) (error-t h))` — the error-wrap lands correctly but
-the *trailing* block-body junk `(error-t h)` is not projected for `function`
-forms (the same for/let/module/struct/try/do block-junk projector gap noted in
-2026-06-23l, scoping note (b)).
+**String-literal escape error classification** (the `Char` sibling of the
+2026-06-23f char-error work). A single-quoted `"…"` whose `STRING_CONTENT` token
+holds a malformed backslash escape projects as one JuliaSyntax error part, *per
+content token* and dropping the valid surrounding text: `"\xqqq"`/`"ok\xqq"`/
+`"\400"` ⇒ `(string (ErrorInvalidEscapeSequence))`, `"a\xq$b"` ⇒ `(string
+(ErrorInvalidEscapeSequence) b)` (the interpolation survives). The boundary that
+made this finicky: valid bytes that aren't UTF-8 (`"\xff"`) are a *valid*
+one-byte-per-byte Julia string, displayed `(string "\xff")`, **not** an escape
+error. The CST was already faithful (real `STRING_LITERAL` tokens); the fix is
+pure projector. `decode_string_chunks` (`sexpr.rs`) previously folded both
+failure modes into `None` (raw-source fallback); it now returns
+`Result<_, StringDecodeError>` distinguishing `BadEscape` (malformed escape) from
+`BadUtf8` (non-UTF-8 bytes). `decoded_string_parts` pushes a single
+`(ErrorInvalidEscapeSequence)` for a `BadEscape` token and keeps the whole-string
+raw fallback for `BadUtf8`. Only one JS string case existed (`js-fc03650e`); the
+char case already used the same error head, so no projector head was invented.
+Fixture `string_escape_error` (5 lines exercising error/interp/octal-overflow/
+byte-string; the adjacent error-string lines also confirm `(doc …)` grouping
+matches Julia). JS 641 → 642; dir 156 → 157. Green; clippy/fmt clean, no
+regressions.
 
 ## Earlier sessions
+
+- **2026-06-24a** — Bare-name `function`/`macro` signature with a body →
+  `(error <name>)`. A bare-identifier signature is the valid forward-declaration
+  form only while the body is empty (`function f end` ⇒ `(function f)`); once a
+  body statement appears or the block is explicitly opened with `;`, JuliaSyntax
+  error-wraps the name (`function f body end` ⇒ `(function (error f) (block
+  body))`). Post-build walk `flag_invalid_function_signatures` (`core.rs`) +
+  `project_function_like` wrap. Fixture `function_bare_name_signature`. JS
+  640 → 641; dir 155 → 156. Deferred: trailing block-body junk
+  (`function f g h end`) not projected (shared for/let/module/struct/try/do gap).
 
 - **2026-06-23z** — Newline between `function`/`macro` and its signature (a real
   parser bug). A newline after the opening keyword is insignificant, so the

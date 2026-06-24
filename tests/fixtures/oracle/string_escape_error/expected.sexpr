@@ -1,0 +1,1 @@
+(toplevel (doc (string (ErrorInvalidEscapeSequence)) (string (ErrorInvalidEscapeSequence))) (doc (string (ErrorInvalidEscapeSequence) b) (string (ErrorInvalidEscapeSequence))) (string "\xff"))

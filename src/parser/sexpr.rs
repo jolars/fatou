@@ -2415,10 +2415,25 @@ fn decoded_string_parts(node: &SyntaxNode) -> Option<Vec<String>> {
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(t) if t.kind() == STRING_CONTENT => {
-                for chunk in decode_string_chunks(t.text())? {
-                    if !chunk.is_empty() {
-                        parts.push(format!("\"{}\"", escape_string_value(&chunk)));
+                match decode_string_chunks(t.text()) {
+                    Ok(chunks) => {
+                        for chunk in chunks {
+                            if !chunk.is_empty() {
+                                parts.push(format!("\"{}\"", escape_string_value(&chunk)));
+                            }
+                        }
                     }
+                    // A malformed escape collapses the whole content token to one
+                    // JuliaSyntax error part — `"ok\xqq"` ⇒ `(string
+                    // (ErrorInvalidEscapeSequence))`, the valid surrounding text is
+                    // dropped, matching JuliaSyntax's per-`String`-token error.
+                    Err(StringDecodeError::BadEscape) => {
+                        parts.push("(ErrorInvalidEscapeSequence)".to_string());
+                    }
+                    // Valid bytes that aren't UTF-8 (`"\xff"`) stay a faithful
+                    // byte-string: fall back to the raw-source rendering for the
+                    // whole literal (matches JuliaSyntax's `\xff` show).
+                    Err(StringDecodeError::BadUtf8) => return None,
                 }
             }
             NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
@@ -2428,6 +2443,17 @@ fn decoded_string_parts(node: &SyntaxNode) -> Option<Vec<String>> {
         }
     }
     Some(parts)
+}
+
+/// Why `decode_string_chunks` could not reduce a `STRING_CONTENT` token to its
+/// literal value. The two failures project differently: a malformed escape is
+/// JuliaSyntax's `(ErrorInvalidEscapeSequence)`, while well-formed bytes that
+/// aren't UTF-8 are a valid byte-string we render from the raw source.
+enum StringDecodeError {
+    /// A malformed backslash escape (`\xq`, `\q`, `\400`).
+    BadEscape,
+    /// Well-formed bytes that don't decode as UTF-8 (`\xff`).
+    BadUtf8,
 }
 
 fn raw_string_parts(node: &SyntaxNode) -> Vec<String> {
@@ -2449,9 +2475,9 @@ fn raw_string_parts(node: &SyntaxNode) -> Vec<String> {
 /// Decode one `STRING_CONTENT` token's source into its literal value, split into
 /// chunks at each `\`-newline line continuation (JuliaSyntax keeps one `String`
 /// per chunk). A continuation drops the backslash, the newline (`\n`/`\r`/`\r\n`),
-/// and the run of spaces/tabs that follow. Returns `None` on a malformed escape
-/// or invalid UTF-8.
-fn decode_string_chunks(text: &str) -> Option<Vec<String>> {
+/// and the run of spaces/tabs that follow. Returns a `StringDecodeError` on a
+/// malformed escape (`BadEscape`) or valid-but-non-UTF-8 bytes (`BadUtf8`).
+fn decode_string_chunks(text: &str) -> Result<Vec<String>, StringDecodeError> {
     let mut chunks: Vec<Vec<u8>> = vec![Vec::new()];
     let mut buf = [0u8; 4];
     let mut chars = text.chars().peekable();
@@ -2472,12 +2498,13 @@ fn decode_string_chunks(text: &str) -> Option<Vec<String>> {
                 }
                 chunks.push(Vec::new());
             }
-            _ => decode_escape_into(&mut chars, chunks.last_mut().unwrap())?,
+            _ => decode_escape_into(&mut chars, chunks.last_mut().unwrap())
+                .ok_or(StringDecodeError::BadEscape)?,
         }
     }
     chunks
         .into_iter()
-        .map(|c| String::from_utf8(c).ok())
+        .map(|c| String::from_utf8(c).map_err(|_| StringDecodeError::BadUtf8))
         .collect()
 }
 

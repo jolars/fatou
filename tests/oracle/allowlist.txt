@@ -119,6 +119,7 @@ splat
 splat_precedence
 stray_close_delimiter_error
 stray_closer_start
+string_escape_error
 string_escapes
 string_interp_error
 string_interp_ident_boundary
