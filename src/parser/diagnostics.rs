@@ -41,6 +41,10 @@ pub enum DiagnosticKind {
     /// Disallowed/absent whitespace around a ternary `:` (`a ? b: c`, `a ? b c`).
     /// Anchored at the true-branch's end; pushed once per missing side.
     TernaryColonWhitespace,
+    /// `else if` written on one line (`if a … else if b … end`) — JuliaSyntax
+    /// recovers it as an `elseif` clause, splicing a zero-width `(error-t)` into
+    /// the (missing) else position. Anchored at the opening `if` keyword.
+    ElseIf,
     /// A space and `;;` separator mixed in one array (`[a b ;; c]`,
     /// `[a ;; b c]`) — JuliaSyntax establishes a row-/column-major order from the
     /// first space/`;;` separator and flags a later conflicting one, splicing a

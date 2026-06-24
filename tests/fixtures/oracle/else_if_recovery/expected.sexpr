@@ -1,0 +1,1 @@
+(toplevel (if a (block xx) (error-t) (elseif b (block yy))))

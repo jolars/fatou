@@ -26,6 +26,18 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] `else if` → `elseif` recovery `(error-t)` (error-shape slice, diagnostics
+  model). `else if` written on one line (`if a … else if b … end`) is a common
+  cross-language mistake; JuliaSyntax recovers it as an `elseif` clause,
+  consuming both keywords and splicing a zero-width `(error-t)` into the missing
+  else position (`if a xx else if b yy end` ⇒
+  `(if a (block xx) (error-t) (elseif b (block yy)))`). A newline between them
+  (`else\nif`) keeps the genuine else-block-containing-`if` reading.
+  `parse_if_expr`'s `ElseKw` arm peeks past horizontal whitespace; on `if` it
+  opens an `ELSEIF_CLAUSE` over both keywords, records an `ElseIf` diagnostic at
+  the opening `if`, and continues the clause loop. `project_if` emits the
+  `(error-t)` from `diag_count_from(keyword_start, ElseIf)` before the tail.
+  Fixture `else_if_recovery`. JS 630 → 631; dir 149 → 150.
 - [x] Array space/`;;` separator mismatch `(error-t)` (error-shape slice,
   diagnostics model). JuliaSyntax establishes a row-/column-major order from the
   first space or `;;` separator and flags a later conflicting one, splicing a

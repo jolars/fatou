@@ -1270,6 +1270,11 @@ fn project_if(node: &SyntaxNode) -> String {
     if let Some(err) = node.children().find(|c| c.kind() == ERROR) {
         parts.push(project(&err));
     }
+    // `else if` recovery: a zero-width `(error-t)` for the missing else block
+    // sits between the then-block and the recovered `elseif` clause.
+    for _ in 0..diag_count_from(keyword_start(node), DiagnosticKind::ElseIf) {
+        parts.push("(error-t)".to_string());
+    }
     if let Some(tail) = project_if_tail(&clauses) {
         parts.push(tail);
     }

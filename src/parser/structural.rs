@@ -53,6 +53,29 @@ pub(crate) fn parse_if_expr(
                 events.push(Event::Finish);
             }
             Some(TokKind::ElseKw) => {
+                // `else if` on one line is a common mistake; JuliaSyntax recovers
+                // it as an `elseif` clause (consuming both keywords) and splices a
+                // zero-width `(error-t)` into the missing else position. A newline
+                // between them (`else\nif`) keeps the genuine else-block-with-`if`.
+                let after_else = ctx.skip_ws(i + 1);
+                if ctx.token(after_else).map(|t| t.kind) == Some(TokKind::IfKw) {
+                    let kw = &ctx.tokens()[start];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::ElseIf,
+                        "`else if` should be `elseif`",
+                        kw.start,
+                        kw.end,
+                    );
+                    events.push(Event::Start(SyntaxKind::ELSEIF_CLAUSE));
+                    events.push(Event::Tok(i));
+                    push_range(&mut events, i + 1, after_else);
+                    events.push(Event::Tok(after_else));
+                    let cond_end = parse_condition(&ctx, &mut events, after_else + 1, diagnostics);
+                    i = run_block(&ctx, &mut events, cond_end, IF_TERMINATORS, diagnostics);
+                    events.push(Event::Finish);
+                    continue;
+                }
                 events.push(Event::Start(SyntaxKind::ELSE_CLAUSE));
                 events.push(Event::Tok(i));
                 i = run_block(&ctx, &mut events, i + 1, END_ONLY, diagnostics);

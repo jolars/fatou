@@ -46,6 +46,7 @@ doc_macro
 docstring
 dot_logical_operator
 dotted_operator_quote
+else_if_recovery
 empty_semicolon_param_group
 escaped_dollar
 export_name_list

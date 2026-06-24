@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **630 allowlisted**,
-55 divergence, 0 unsupported. Dir corpus: **149 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **631 allowlisted**,
+54 divergence, 0 unsupported. Dir corpus: **150 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,55 +52,51 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-23t)
+## Latest session (2026-06-23u)
 
-**Array space/`;;` separator mismatch → zero-width `(error-t)`.** JuliaSyntax
-tracks an array "order" (a `Ref` in `parse_array_separator`): the first
-**space** separator makes it row-major, the first **`;;`** makes it
-column-major. A later separator of the *conflicting* kind — a `;;` in a
-row-major array, or a space in a column-major one — is a whitespace error, and
-JuliaSyntax splices a zero-width `(error-t)` right after the element preceding
-the offending separator (`[a b ;; c]` ⇒ `(ncat-2 (row a b (error-t)) c)`,
-`[a ;; b c]` ⇒ `(ncat-2 a (row b (error-t) c))`, `[a b ;; c ;; d]` ⇒
-`(ncat-2 (row a b (error-t)) c (error-t) d)`). Only `;` runs of **exactly two**
-participate; single `;`, newlines, and `;;;`-or-longer runs are order-neutral
-(`[a b ;;; c]`, `[a; b ;; c]` ⇒ no error).
+**`else if` → `elseif` recovery → zero-width `(error-t)`.** `else if` written on
+one line (`if a … else if b … end`) is a common cross-language mistake;
+JuliaSyntax recovers it as an `elseif` clause, consuming *both* keywords and
+splicing a zero-width `(error-t)` into the missing else position
+(`if a xx else if b yy end` ⇒ `(if a (block xx) (error-t) (elseif b (block yy)))`;
+`else zz` after it folds into the elseif's tail block, an extra `end` spills to
+toplevel junk). A **newline** between the keywords (`else\nif`) keeps the genuine
+else-block-containing-`if` reading — so the peek uses `skip_ws` (horizontal only),
+not `skip_ws_and_newlines`.
 
-Implementation (parser records, projector reconstructs — no CST change): a new
-loop in `parse_matrix` (`expr.rs`) walks the between-element `SepRun`s tracking
-an `ArrayOrder` (`Unknown`/`RowMajor`/`ColumnMajor`); the first space/`;;` sets
-it, a later conflict records an `ArraySeparatorMismatch` diagnostic anchored at
-`tokens[elems[k].end-1].end`. Projector (`sexpr.rs`): new `project_cat_children`
-appends `(error-t)` after any **bare `ARG`** whose end carries the diag — *only*
-`ARG`s, never `MATRIX_ROW`s, since when the offending element is a row's last
-element the anchor coincides with the row's end and the recursion into the row
-handles it inside, so no double-count at any nesting. Wired into
-`matrix_head_and_children` and the `MATRIX_ROW` arm of `project_cat_child`.
-Fixture `array_separator_mismatch` (4 single-line cases). JS 627 → 630; dir
-148 → 149. Green; clippy/fmt clean, no regressions.
-
-**Deferred:** `;;` immediately before a newline is a line continuation →
-`(hcat …)` (`[a b ;; \n c]`, js-82572497) in row-major, but a plain `;;` in
-column-major (`[a ;; \n b]`); a structural dim-drop, not a marker, needs
-newline-after-last-semicolon tracking in `SepRun` (still a FAIL, no regression).
+Implementation (parser records, projector reconstructs — no new CST node kind):
+`parse_if_expr`'s `ElseKw` arm (`structural.rs`) peeks past horizontal whitespace;
+if the next token is `if`, it opens an `ELSEIF_CLAUSE` over **both** the `else`
+and `if` tokens (with the inter-keyword ws via `push_range`), records an `ElseIf`
+diagnostic anchored at the opening `if` keyword, parses the condition+block, and
+`continue`s the clause loop (so a trailing real `else`/`elseif` parses normally).
+The `ELSEIF_CLAUSE` carrying two keyword tokens is harmless — `project_if_tail`
+keys on `CONDITION`/`BLOCK` children only. `project_if` (`sexpr.rs`) pushes the
+`(error-t)` from `diag_count_from(keyword_start(node), ElseIf)` after the
+then-block (and any in-block ERROR junk), before the tail. New `DiagnosticKind::
+ElseIf`. Fixture `else_if_recovery`. JS 630 → 631; dir 149 → 150. Green;
+clippy/fmt clean, no regressions.
 
 ## Earlier sessions
 
-- **2026-06-23s** — Missing operator right-operand → zero-width `(error)`: any
+- **2026-06-23t** — Array space/`;;` separator mismatch → zero-width `(error-t)`:
+  JuliaSyntax establishes a row-/column-major order from the first space/`;;`
+  separator and flags a later conflicting one (`[a b ;; c]` ⇒
+  `(ncat-2 (row a b (error-t)) c)`); only `;` runs of exactly two participate.
+  `parse_matrix` walks separator runs tracking `ArrayOrder`, records
+  `ArraySeparatorMismatch` at the offending element's end; `project_cat_children`
+  reconstructs after the bare `ARG` it anchors. Fixture `array_separator_mismatch`.
+  JS 627 → 630; dir 148 → 149. Deferred: `;;\n` line continuation → `hcat`.
+
+- **2026-06-23s** — Missing operator right-operand → zero-width `(error)`: an
   infix/assignment operator with an absent right operand keeps its node and
-  synthesizes `(error)` there instead of error-wrapping `lhs op` to line end
-  (`x =` ⇒ `(= x (error))`, `a +` ⇒ `(call-i a + (error))`, `a &&` ⇒
-  `(&& a (error))`). The operator loop's missing-RHS branch now builds the node
-  with only the LHS (`build_binary_missing_rhs` + `operator_node_kind`) and
-  records the existing `MissingOperand` diagnostic; `project_binary`/
-  `project_assignment` reconstruct via `operator_missing_rhs`, head logic shared
-  through `infix_call_string`. Paired with a prefix value-fallback (a value-form
-  prefix op directly before a bare `=` is its value: `<: =` ⇒ `(= <: (error))`,
-  `.+ =` ⇒ `(= (. +) (error))`; `&`/`::`/`?` excluded). Fixture
-  `operator_missing_rhs` (`;`-separated, since trailing operators continue across
-  newlines so missing-RHS only fires at EOF/`;`/closer). JS 624 → 627; dir
-  147 → 148. Deferred: `::`/`->` projectors, word ops (`in`/`isa`), `where` still
-  use `error_expr_to_line_end`.
+  synthesizes `(error)` there (`x =` ⇒ `(= x (error))`, `a +` ⇒
+  `(call-i a + (error))`) rather than error-wrapping `lhs op` to line end;
+  `build_binary_missing_rhs`+`operator_node_kind` build the LHS-only node,
+  `project_binary`/`project_assignment` reconstruct via `operator_missing_rhs`.
+  Paired with a prefix value-fallback (`<: =` ⇒ `(= <: (error))`). Fixture
+  `operator_missing_rhs`. JS 624 → 627; dir 147 → 148. Deferred: `::`/`->`
+  projectors, word ops, `where` still use `error_expr_to_line_end`.
 - **2026-06-23r** — Missing `if`/`elseif` condition → zero-width `(error)`: an
   empty condition slot (`if end`, `if; end`, `if true; elseif; end`) is recovery;
   JuliaSyntax synthesizes `(error)` there. Pure projector win — Fatou already had
