@@ -122,6 +122,28 @@ fn is_recovery_error(node: &SyntaxNode) -> bool {
     })
 }
 
+/// The keyword text of a stray-block-keyword `ERROR` node (one carrying a
+/// `StrayKeyword` diagnostic at its range), or `None` for any other error node.
+/// JuliaSyntax renders such a node as `(error <kw>)` (`@doc x\nend` ⇒
+/// `(macrocall @doc x) (error end)`), so the keyword token's text is surfaced
+/// rather than dropped as a structural keyword.
+fn stray_keyword_text(node: &SyntaxNode) -> Option<String> {
+    let r = node.text_range();
+    let (s, e) = (usize::from(r.start()), usize::from(r.end()));
+    let has_diag = PROJ_DIAGS.with(|d| {
+        d.borrow()
+            .iter()
+            .any(|(k, ds, de)| matches!(k, DiagnosticKind::StrayKeyword) && *ds >= s && *de <= e)
+    });
+    if !has_diag {
+        return None;
+    }
+    node.children_with_tokens().find_map(|el| match el {
+        NodeOrToken::Token(t) if is_keyword(t.kind()) => Some(t.text().to_string()),
+        _ => None,
+    })
+}
+
 /// Canonical form of a JuliaSyntax s-expression string. Tokenizes on whitespace
 /// and parentheses (preserving `"…"` string literals as atoms) and rejoins with
 /// single-space separation, so pretty-print spacing no longer affects equality.
@@ -303,14 +325,24 @@ fn project(node: &SyntaxNode) -> String {
         // `TRIVIA_FLAG`-tagged `(error-t)` (a recovered run); `is_recovery_error`
         // recovers that distinction from the diagnostics side-channel. A stray
         // closing delimiter recovered into the node renders as `✘`.
-        ERROR => project_error(
-            if is_recovery_error(node) {
-                "error-t"
+        ERROR => {
+            // A stray middle/closing block keyword (`end`, `else`, `elseif`,
+            // `catch`, `finally`) where a statement was expected is wrapped
+            // alone in `(error <kw>)` — the keyword text is rendered, unlike the
+            // dropped-keyword default of a recovery run.
+            if let Some(kw) = stray_keyword_text(node) {
+                format!("(error {kw})")
             } else {
-                "error"
-            },
-            node,
-        ),
+                project_error(
+                    if is_recovery_error(node) {
+                        "error-t"
+                    } else {
+                        "error"
+                    },
+                    node,
+                )
+            }
+        }
 
         other => format!("(unsupported {other:?})"),
     }

@@ -105,6 +105,29 @@ pub fn parse(text: &str) -> ParseOutput {
                             run_start,
                             tokens[i - 1].end,
                         );
+                    } else if leftover_mark.is_none() && is_stray_block_keyword_tok(tokens[i].kind)
+                    {
+                        // A middle/closing block keyword (`end`, `else`,
+                        // `elseif`, `catch`, `finally`) where a statement is
+                        // expected is not a block opener; JuliaSyntax wraps it
+                        // alone in `(error <kw>)` and bumps the rest of the line
+                        // as a separate trailing-junk run (`end y z` ⇒
+                        // `(error end) (error-t y z)`). Emit the wrapped keyword
+                        // as the line's first "statement" and set `leftover_mark`
+                        // so the existing trailing-junk machinery handles the
+                        // remainder.
+                        line.push(Event::Start(SyntaxKind::ERROR));
+                        line.push(Event::Tok(i));
+                        line.push(Event::Finish);
+                        push_diagnostic(
+                            &mut diagnostics,
+                            DiagnosticKind::StrayKeyword,
+                            "unexpected block keyword",
+                            tokens[i].start,
+                            tokens[i].end,
+                        );
+                        i += 1;
+                        leftover_mark = Some(line.len());
                     } else {
                         line.push(Event::Tok(i));
                         i += 1;
@@ -305,6 +328,22 @@ fn const_decl_is_assignment(node: &SyntaxNode) -> bool {
 /// statement start drives JuliaSyntax's leading-`(error)` recovery.
 fn is_close_delimiter_tok(kind: TokKind) -> bool {
     matches!(kind, TokKind::RParen | TokKind::RBracket | TokKind::RBrace)
+}
+
+/// Whether `kind` is a middle/closing block keyword (`end`, `else`, `elseif`,
+/// `catch`, `finally`) — a token that only closes or continues an enclosing
+/// block. Where a statement is expected one of these is stray, so JuliaSyntax
+/// wraps it alone in `(error <kw>)` (`@doc x\nend` ⇒ `(macrocall @doc x) (error
+/// end)`, `end y z` ⇒ `(error end) (error-t y z)`).
+fn is_stray_block_keyword_tok(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::EndKw
+            | TokKind::ElseKw
+            | TokKind::ElseifKw
+            | TokKind::CatchKw
+            | TokKind::FinallyKw
+    )
 }
 
 /// Whether the logical line starting at `start` (up to the next newline or EOF)

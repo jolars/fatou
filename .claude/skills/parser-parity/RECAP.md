@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **643 allowlisted**,
-42 divergence, 0 unsupported. Dir corpus: **158 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **644 allowlisted**,
+41 divergence, 0 unsupported. Dir corpus: **159 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,25 +52,27 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-24c)
+## Latest session (2026-06-24d)
 
-**Non-identifier `catch` variable error-wrap** (another post-build-walk +
-projector-wrap error shape, the sibling of const-not-assignment 2026-06-23j and
-bare-name-function 2026-06-24a). A `catch` variable must be a plain identifier
-(`catch e`), a `$`-interpolation (`catch $e`), or a `var"…"` non-standard
-identifier (`catch var"e"`); any other expression is invalid and JuliaSyntax
-wraps it in `(error …)` (`try x catch e+3 y end` ⇒ `(catch (error (call-i e + 3))
-(block y))`; same for `catch e.f`/`catch f(e)`/`catch 3`/`catch e[1]`). The CST
-is already faithful — the catch var is parsed as its natural expression — so the
-fix is a post-build walk `flag_invalid_catch_vars` (`core.rs`) recording a
-`CatchVarNotIdentifier` diag at the var node's start when its kind isn't
-`NAME`/`INTERPOLATION`/`NONSTANDARD_IDENTIFIER`, plus a `project_try`
-`CATCH_CLAUSE` arm that error-wraps `var` on `diag_at`. Fixture `catch_var_error`.
-JS 642 → 643; dir 157 → 158. Green; clippy/fmt clean, no regressions. Deferred:
-parenthesized identifier `catch (e)` (valid in JS, unwrapped to `e`, but Fatou
-would wrap the `PAREN_EXPR`; not in the corpus, needs projector paren-unwrapping).
+**Stray middle/closing block keyword error-wrap** (`@doc x\nend`, js-bc08a2b0,
+the next-pick from 2026-06-24c). A block keyword that only closes or continues an
+enclosing block (`end`, `else`, `elseif`, `catch`, `finally`) appearing where a
+statement is expected is not a block opener; JuliaSyntax wraps it alone in
+`(error <kw>)` and bumps the rest of the line as a *separate* trailing-junk run
+(`@doc x\nend` ⇒ `(macrocall @doc x) (error end)`, `end y z` ⇒
+`(error end) (error-t y z)`, bare `else`/`elseif`/`catch`/`finally` ⇒
+`(error else)`…). These keywords already returned `None` from `parse_stmt` and
+fell to the dropped-loose-token branch; the fix adds a branch in the `parse`
+driver (`core.rs`, after the stray-closer one) that wraps the keyword in an
+`ERROR` node, records a new `StrayKeyword` diagnostic, advances, and sets
+`leftover_mark` so the existing trailing-junk machinery handles the remainder for
+free. Projector (`sexpr.rs`): the `ERROR` arm first checks `stray_keyword_text`
+(reads `StrayKeyword` from `PROJ_DIAGS`, returns the wrapped keyword token's
+text) and renders `(error <kw>)`, surfacing the keyword that `project_error`'s
+default would drop as structural. Fixture `stray_block_keyword`. JS 643 → 644;
+dir 158 → 159. Green; clippy/fmt clean, no regressions.
 
-**Next-target survey** (42 JS FAILs left): (a) **deliberate, do not fix** —
+**Next-target survey** (41 JS FAILs left): (a) **deliberate, do not fix** —
 comparison chains (`x<y<z`, `x .< y<z`, `x==y<z`), associative flattening
 (`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects `[x+y+z]`), juxtaposition
 `(2)(3)x`; (b) **float display (blocked)** — `1.0e-1000`, `-0xf.0p0`, `0x…p+0`,
@@ -81,12 +83,20 @@ too large for one session; (e) **macro dotted-name error shapes** — `A.@B.x`,
 `@A.B.@x a`, `@A.$x a`, `@M.(x)`, deeply nested multi-`(error-t)`; (f)
 **ternary-in-block** (`if true; x ? true end` + siblings) — fragile,
 context-dependent; (g) **misc error shapes** — `: end`, `:(end)`, `a[:(end)]`,
-`function` (bare kw), `+ (a,b)`, `export (x::T)`, `@doc x\nend`, `@[x] y z`,
-`x.3`, `"notdoc"]`. Cleanest next pick: **`@doc x\nend`** (js-bc08a2b0) ⇒
-`(macrocall @doc x) (error end)`, likely a small toplevel-driver tweak.
+`function` (bare kw), `+ (a,b)`, `export (x::T)`, `@[x] y z`, `x.3`, `"notdoc"]`.
+Cleanest next pick: **`function`** (bare kw, js-78f9ac01) ⇒ `(function (error))`
+— a lone `function`/`macro`/`struct` keyword with no signature, likely a small
+`parse_function_like` recovery; or **`x.3`** (js-d89d29e0) ⇒ `(. x (error 3))`
+(field access with a non-identifier name), a focused projector/parser tweak.
 
 ## Earlier sessions
 
+- **2026-06-24c** — Non-identifier `catch` variable error-wrap (post-build walk
+  `flag_invalid_catch_vars` + `project_try` `CATCH_CLAUSE` wrap; sibling of
+  const-not-assignment and bare-name-function). A `catch` var must be a plain
+  identifier, `$`-interpolation, or `var"…"`; anything else (`catch e+3`/`e.f`/
+  `f(e)`/`3`) is `(error …)`. Fixture `catch_var_error`. JS 642 → 643; dir
+  157 → 158.
 - **2026-06-24b** — String-literal escape error classification (the `Char`
   sibling of the 2026-06-23f char-error work). A single-quoted `"…"` whose
   `STRING_CONTENT` holds a malformed backslash escape projects as one
@@ -247,22 +257,13 @@ incomplete ternary inside a block recovers with an `if`-headed node and two
 `(error-t)`; context-dependent (differs from the toplevel `x ? true` shape), so
 fragile.
 
-- **2026-06-23k** — Flat trailing-junk runs (toplevel): JuliaSyntax bumps a
-  separator-less line's leftover as *flat error tokens*, not a re-parsed subtree
-  (`x y, z` ⇒ `x (error-t y ✘ z)`, `x@y` ⇒ `x (error-t ✘ y)`); brackets/commas/`@`
-  render `✘`, operators/identifiers keep text. The `core.rs` driver collects the
-  run raw (no `parse_stmt`) once `leftover_mark` is set on a `;`-free,
-  non-docstring line; `project_error` renders the broader glyph set via
-  `is_error_glyph` (`( ) [ ] { } , @`). Gotcha: must check `!first_is_doc_string`
-  (a docstring opener owns its trailing statement). Fixture
+- **2026-06-23k** — Flat trailing-junk runs (toplevel): a separator-less line's
+  leftover bumps as *flat error tokens* (`x y, z` ⇒ `x (error-t y ✘ z)`,
+  `x@y` ⇒ `x (error-t ✘ y)`); `core.rs` driver + `is_error_glyph`. Fixture
   `toplevel_leftover_error`. JS 603 → 605.
-- **2026-06-23j** — `const`-not-assignment error-wrap (first error shape on the
-  diagnostics model): JuliaSyntax wraps a `const` whose decl isn't a plain `=` in
-  `(error …)` (`const x`⇒`(error (const x))`, `const x += 1`), but a bare `const`
-  field directly in a struct body is exempt. Post-build CST walk
-  `flag_invalid_const_decls` records a `ConstNotAssignment` diag; projector's
-  `CONST_STMT` arm wraps when `diag_at`. Reusable pattern: semantic error-wraps
-  where the CST is already correct fit a post-build walk + projector wrap. Fixture
+- **2026-06-23j** — `const`-not-assignment error-wrap (first diagnostics-model
+  error shape): `const x`⇒`(error (const x))`, struct-field `const` exempt;
+  post-build `flag_invalid_const_decls` + `CONST_STMT` projector wrap. Fixture
   `const_not_assignment`. JS 599 → 603; dir 139 → 140.
 - **2026-06-23i** — Architecture reversal: error handling → the rust-analyzer
   model. Deleted `SyntaxKind::ERROR_TRIVIA`; the zero-width in-tree markers grown

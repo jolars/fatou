@@ -113,6 +113,12 @@ pub enum DiagnosticKind {
     /// error-wraps the keyword as the name (`(error try)`). Anchored at the
     /// keyword. The CST holds a real `ERROR` node around the keyword.
     InvalidNameKeyword,
+    /// A middle/closing block keyword (`end`, `else`, `elseif`, `catch`,
+    /// `finally`) appearing where a statement is expected (`@doc x\nend`,
+    /// `end y z`) — JuliaSyntax wraps the keyword alone in `(error <kw>)` and
+    /// bumps the rest of the line as a separate trailing-junk run. Anchored at
+    /// the keyword token; the CST holds a real `ERROR` node around it.
+    StrayKeyword,
 }
 
 /// A parse-time diagnostic: a classified message anchored to a byte range in the

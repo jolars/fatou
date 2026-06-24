@@ -39,6 +39,18 @@ through), so the grammar can grow incrementally.
   `catch_var_error`. JS 642 → 643; dir 157 → 158. Deferred: a parenthesized
   identifier (`catch (e)`) is valid in JuliaSyntax (unwrapped to `e`) but Fatou
   would wrap it — not in the corpus, needs projector paren-unwrapping.
+- [x] Stray middle/closing block keyword `(error <kw>)` (error-shape slice,
+  diagnostics model). A block keyword that only closes or continues an enclosing
+  block (`end`, `else`, `elseif`, `catch`, `finally`) where a statement is
+  expected is not a block opener; JuliaSyntax wraps it alone in `(error <kw>)`
+  and bumps the rest of the line as a separate trailing-junk run (`@doc x\nend` ⇒
+  `(macrocall @doc x) (error end)`, `end y z` ⇒ `(error end) (error-t y z)`,
+  `else`/`elseif`/`catch`/`finally` ⇒ `(error else)` …). The `parse` driver
+  (`core.rs`) wraps the keyword in an `ERROR` node, records a `StrayKeyword`
+  diagnostic, and sets `leftover_mark` so the existing trailing-junk machinery
+  handles the remainder; `project`'s `ERROR` arm (`sexpr.rs`) renders the keyword
+  text via `stray_keyword_text` (unlike the dropped-keyword recovery default).
+  Fixture `stray_block_keyword`. JS 643 → 644; dir 158 → 159.
 - [x] Bare-name `function`/`macro` signature with a body `(error <name>)`
   (error-shape slice, diagnostics model). A `function`/`macro` whose signature is
   a bare identifier is the valid forward-declaration form only while its body is

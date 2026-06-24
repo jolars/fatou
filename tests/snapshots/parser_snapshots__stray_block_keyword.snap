@@ -1,0 +1,44 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..45
+  MACRO_CALL@0..6
+    MACRO_NAME@0..4
+      AT@0..1 "@"
+      IDENT@1..4 "doc"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "x"
+  NEWLINE@6..7 "\n"
+  ERROR@7..10
+    END_KW@7..10 "end"
+  NEWLINE@10..11 "\n"
+  ERROR@11..14
+    END_KW@11..14 "end"
+  WHITESPACE@14..15 " "
+  ERROR@15..18
+    IDENT@15..16 "y"
+    WHITESPACE@16..17 " "
+    IDENT@17..18 "z"
+  NEWLINE@18..19 "\n"
+  ERROR@19..23
+    ELSE_KW@19..23 "else"
+  NEWLINE@23..24 "\n"
+  ERROR@24..30
+    ELSEIF_KW@24..30 "elseif"
+  NEWLINE@30..31 "\n"
+  ERROR@31..36
+    CATCH_KW@31..36 "catch"
+  NEWLINE@36..37 "\n"
+  ERROR@37..44
+    FINALLY_KW@37..44 "finally"
+  NEWLINE@44..45 "\n"
+
+diagnostic [7..10]: unexpected block keyword
+diagnostic [11..14]: unexpected block keyword
+diagnostic [15..16]: trailing tokens after statement
+diagnostic [19..23]: unexpected block keyword
+diagnostic [24..30]: unexpected block keyword
+diagnostic [31..36]: unexpected block keyword
+diagnostic [37..44]: unexpected block keyword

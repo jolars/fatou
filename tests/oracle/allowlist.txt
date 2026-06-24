@@ -118,6 +118,7 @@ short_function_def
 signed_literals
 splat
 splat_precedence
+stray_block_keyword
 stray_close_delimiter_error
 stray_closer_start
 string_escape_error
