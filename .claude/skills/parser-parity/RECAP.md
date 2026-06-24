@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **646 allowlisted**,
-39 divergence, 0 unsupported. Dir corpus: **161 allowlisted**, 2 blocked
+JS corpus (**685 cases** — error shapes now harvested): **647 allowlisted**,
+38 divergence, 0 unsupported. Dir corpus: **162 allowlisted**, 2 blocked
 (end_index/numeric_literals; both FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
@@ -52,32 +52,33 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-24f)
+## Latest session (2026-06-24g)
 
-**Colon-space-before-closing-keyword → bare `:` Colon atom** (error-shape slice,
-flips js-4a2410ee `: end`). A value-position prefix `:` followed by a *space* then
-a closing block keyword (`end`/`else`/`elseif`/`catch`/`finally`) is not a quotable
-symbol — JuliaSyntax parses `:` as the bare Colon value atom and spills the keyword
-as trailing junk: `: end` ⇒ `(toplevel : (error-t end))`, `: catch z` ⇒
-`(toplevel : (error-t catch z))`. Whitespace-sensitive (the *glued* `:end` still
-quotes ⇒ `(quote-: end)`) and context-sensitive: an index `a[: end]` (`end_marker`)
-keeps `end` quotable, and a field-access RHS `A.: end` keeps the quote. Two edits,
-both narrow: (1) `parse_quote_sym` gains `value_position`/`end_marker` params and
-declines early (→ `parse_prefix`'s Colon `OPERATOR_ATOM` `.or_else` fallback) for
-the spaced-closer case, *before* recording the `QuoteColonWhitespace` diagnostic so
-the bare `:` carries none; the field-access caller passes `value_position=false` via
-a new `field_access_rhs` `ExprFlag` set at the `.`-RHS `parse_prefix` call (import
-callers in `structural.rs` pass `false,false`). (2) `project_error` renders a
-recovered closing block keyword verbatim (`is_closing_block_keyword_kind`) instead
-of dropping it as a structural keyword via `is_drop_token` — this also fixes the
-general trailing-junk case `x end` ⇒ `x (error-t end)`. Fixture
-`colon_space_closer_keyword` (5 closers + `: for`/`:end`/`a[: end]` contrasts). JS
-645 → 646; dir 160 → 161. Green; clippy/fmt clean, zero regressions. **Deferred**
-(out of corpus): vect/parens contexts (`[: end]` ⇒ `(vect : (error-t)) (error-t
-end ✘)`, `(: end)`) where `end_marker` is currently set in a vect so Fatou still
-quotes — a ref-vs-vect `end`-validity distinction, not measured by any corpus case.
+**Prefix-operator spaced call-form paren → zero-width `(error)`** (error-shape
+slice, flips js-4f46be13 `+ (a,b)`). A unary-prefix-capable operator (`+ - ~ !
+.+ .- .~ <: >:`) separated by *horizontal whitespace* from a *call-form* `(`
+(comma/splat/empty/leading-`;` params — the `unary_op_paren_is_call` predicate)
+heads a call with a zero-width `(error)` flagging the disallowed space: `+ (a,b)`
+⇒ `(call + (error) a b)`, `+ (a...)` ⇒ `(call + (error) (... a))`, `+ ()` ⇒
+`(call + (error))`, `<: (a,b)` ⇒ `(<: (error) a b)`. A *single* operand or a
+*block* paren stays a prefix application (`+ (a)` ⇒ `(call-pre + a)`, `+ (a; b)` ⇒
+`(call-pre + (block-p a b))`); the glued form is unchanged (`+(a,b)` ⇒ `(call + a
+b)`). Distinct from the identifier-callee whitespace shape `f (a)` ⇒ `(call f
+(error-t) a)`: a *valid unary operator* projects zero-width `(error)`, not
+`(error-t)`. The unary-call arm in `parse_prefix` (`expr.rs`) now finds the `(`
+past horizontal ws via `ctx.skip_ws` (only horizontal ws triggers; a newline ends
+the statement), gates the spaced path on `!op_suffixed && unary_op_paren_is_call`,
+records a new `PrefixOpenerWhitespace` diagnostic at the opener, and `push_range`s
+the ws trivia into the `CALL_EXPR`; `project_call`'s `CALL_EXPR` arm reads that
+diag to splice `(error)` between callee and args (mirroring the existing
+`OpenerWhitespace` → `(error-t)` check). Fixture `prefix_operator_spaced_call` (6
+spaced-call cases + 3 contrasts). JS 646 → 647; dir 161 → 162. Green; clippy/fmt
+clean, zero regressions. **Deferred** (out of corpus): suffixed/non-unary
+operators spaced (`+₁ (a)` ⇒ `(call +₁ (error-t) a)`, `* (a,b)` ⇒ `(call *
+(error-t) a b)`) — both project like an *identifier* callee (`(error-t)`), a
+separate shape; Fatou currently mis-models them as `(call-pre (error …) …)`.
 
-**Next-target survey** (39 JS FAILs after this session): (a) **deliberate, do
+**Next-target survey** (38 JS FAILs after 24g): (a) **deliberate, do
 not fix** — comparison chains (`x<y<z`/`x .< y<z`/`x==y<z`), associative flattening
 (`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects `[x+y+z]`), juxtaposition
 `(2)(3)x`; (b) **float display (blocked, bigger than it looks)** — `x.3`,
@@ -95,26 +96,33 @@ by context (`x ? true` alone ⇒ `(? …)`, but `if true; x ? true end` ⇒ `(if
 (block (if x true (error-t) (error-t))))`); (g) **bare block keyword** —
 `function`/`macro`/`struct`/`mutable struct`/`while x`/`begin` with no
 signature/body/`end` (js-78f9ac01 `function` ⇒ `(function (error (error)) (block
-(error)) (error-t))`). Most real-world-relevant (incomplete-editor states) but, on
-this session's deeper probe, *intricate*: **two** interacting sub-features — (1) a
-signature error (`(error (error))` fn/macro, `(error)` struct) and (2) a
-missing-statement `(error)` inside an EOF-*truncated* empty body — and signature
-recovery can consume the `end` (`function\nend` ⇒ `(function (error (error end))
-(block (error)) (error-t))`). The missing-statement rule is gated by truncation,
-not emptiness: `function f() end`/`begin end`/`while x end` stay `(block)` (explicit
-`end`); `function ;end`/`if x;` stay `(block)` (`;`); only EOF-truncation inserts
-`(error)`. Broad — guard the many passing `… end` cases; likely a 2-session
-feature; (h) **misc error shapes** — `:(end)`, `a[:(end)]`, `export (x::T)`⇒
-`(export (error (::-i x T)))` (export-item validation; the export parser is a
-carry-verbatim shim), `+ (a,b)`⇒`(call + (error) a b)` (prefix-operator spaced
-paren — note `(error)`, unlike the `f (a)` `(error-t)`), `"notdoc"]`. **Cleanest
-next pick:** no clean multi-case cluster remains — the frontier is mostly
-deliberate/blocked/deferred/fragile/deep-gap. Highest *value* is bare-block-keyword
-(g) but budget ~2 sessions; lowest-*risk* contained 1-case win is `+ (a,b)` (h)
-(one prefix-operator path).
+(error)) (error-t))`). Most real-world-relevant (incomplete-editor states) but
+*intricate*: **two** interacting sub-features — (1) a signature error (`(error
+(error))` fn/macro, `(error)` struct) and (2) a missing-statement `(error)` inside
+an EOF-*truncated* empty body — and signature recovery can consume the `end`
+(`function\nend` ⇒ `(function (error (error end)) (block (error)) (error-t))`). The
+missing-statement rule is gated by truncation, not emptiness: `function f()
+end`/`begin end`/`while x end` stay `(block)` (explicit `end`); `function
+;end`/`if x;` stay `(block)` (`;`); only EOF-truncation inserts `(error)`. Broad —
+guard the many passing `… end` cases; likely a 2-session feature; (h) **misc error
+shapes** — `:(end)`, `a[:(end)]`, `export (x::T)`⇒`(export (error (::-i x T)))`
+(export-item validation; the export parser is a carry-verbatim shim), `"notdoc"]`.
+**Cleanest next pick:** no clean multi-case cluster remains — the frontier is
+mostly deliberate/blocked/deferred/fragile/deep-gap. Highest *value* is
+bare-block-keyword (g) but budget ~2 sessions; the contained 1-case wins from
+(h) are mostly export/colon-end shapes, each a distinct narrow path.
 
 ## Earlier sessions
 
+- **2026-06-24f** — Colon-space-before-closing-keyword → bare `:` Colon atom
+  (flips js-4a2410ee `: end`). A value-position prefix `:` then a *space* then a
+  closing block keyword (`end`/`else`/`elseif`/`catch`/`finally`) is the bare
+  Colon value atom with the keyword spilled as junk (`: end` ⇒ `(toplevel :
+  (error-t end))`); whitespace-sensitive (`:end` ⇒ `(quote-: end)`) and
+  context-sensitive (`a[: end]`/`A.: end` keep the quote). `parse_quote_sym` gains
+  `value_position`/`end_marker` params + declines for the spaced-closer case;
+  `project_error` renders the closer verbatim (also fixes `x end` ⇒ `x (error-t
+  end)`). Fixture `colon_space_closer_keyword`. JS 645 → 646; dir 160 → 161.
 - **2026-06-24e** — Invalid doubled operators `**`/`--` (and broadcast `.**`/
   `.--`), the operator-recipe slice of the invalid-operator backlog (flips
   js-90827a2e `a--b`). Julia has no `**`/`--`, so JuliaSyntax lexes each as a

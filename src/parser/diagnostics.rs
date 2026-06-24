@@ -32,6 +32,11 @@ pub enum DiagnosticKind {
     /// Disallowed whitespace before a postfix/broadcast opener (`f (a)`, `f. (x)`).
     /// Anchored at the opener's start.
     OpenerWhitespace,
+    /// Disallowed whitespace before the call-form `(` of a unary-prefix operator
+    /// (`+ (a,b)` → `(call + (error) a b)`). Distinct from `OpenerWhitespace`: a
+    /// valid unary operator callee projects a zero-width `(error)`, not the
+    /// `(error-t)` of an identifier callee. Anchored at the opener's start.
+    PrefixOpenerWhitespace,
     /// An argument list with no closing delimiter (`f(a`). Anchored at the opener's
     /// start.
     UnterminatedArgList,

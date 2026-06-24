@@ -1089,7 +1089,7 @@ fn parse_prefix(
                 tok.kind,
                 TokKind::Plus | TokKind::Minus | TokKind::DotPlus | TokKind::DotMinus
             ) && tok.text.chars().any(is_op_suffix_char);
-            if matches!(
+            let is_unary_paren_op = matches!(
                 tok.kind,
                 TokKind::Plus
                     | TokKind::Minus
@@ -1100,17 +1100,42 @@ fn parse_prefix(
                     | TokKind::DotTilde
                     | TokKind::Subtype
                     | TokKind::Supertype
-            ) && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen)
-                && (op_suffixed || unary_op_paren_is_call(ctx, start + 1))
-            {
+            );
+            // A unary operator can head a call when the `(` is glued (existing
+            // heuristic) or — for a *call-form* paren (comma/splat/empty/leading
+            // `;`) only — separated by horizontal whitespace, where the space is
+            // a disallowed-opener error: `+ (a,b)` → `(call + (error) a b)`, but
+            // a single operand or block stays a prefix application (`+ (a)` →
+            // `(call-pre + a)`, `+ (a; b)` → `(call-pre + (block-p a b))`). A
+            // suffixed operator is not a valid unary prefix and projects like an
+            // identifier callee (`(error-t)`), a deferred shape, so the spaced
+            // path excludes it.
+            let paren_idx = ctx.skip_ws(start + 1);
+            let spaced = paren_idx > start + 1;
+            let next_is_lparen = ctx.token(paren_idx).map(|t| t.kind) == Some(TokKind::LParen);
+            let glued_call =
+                !spaced && (op_suffixed || unary_op_paren_is_call(ctx, paren_idx));
+            let spaced_call = spaced && !op_suffixed && unary_op_paren_is_call(ctx, paren_idx);
+            if is_unary_paren_op && next_is_lparen && (glued_call || spaced_call) {
+                if spaced_call {
+                    let opener = &ctx.tokens()[paren_idx];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::PrefixOpenerWhitespace,
+                        "whitespace before opener",
+                        opener.start,
+                        opener.start,
+                    );
+                }
                 let (list_events, end) = parse_arg_list(
                     ctx,
-                    start + 1,
+                    paren_idx,
                     TokKind::RParen,
                     SyntaxKind::ARG_LIST,
                     diagnostics,
                 );
                 let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
+                push_range(&mut events, start + 1, paren_idx);
                 events.extend(list_events);
                 events.push(Event::Finish);
                 return Some(ExprParse { start, end, events });

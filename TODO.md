@@ -55,6 +55,22 @@ through), so the grammar can grow incrementally.
   closing block keyword verbatim (`is_closing_block_keyword_kind`) instead of
   dropping it as a structural keyword (also fixes `x end` ⇒ `x (error-t end)`).
   Fixture `colon_space_closer_keyword`. JS 645 → 646; dir 160 → 161.
+- [x] Prefix-operator spaced call-form paren → zero-width `(error)` (error-shape
+  slice). A unary-prefix-capable operator (`+ - ~ ! .+ .- .~ <: >:`) separated by
+  horizontal whitespace from a *call-form* `(` (comma/splat/empty/leading-`;`
+  params) heads a call with a zero-width `(error)` flagging the disallowed space
+  (`+ (a,b)` ⇒ `(call + (error) a b)`, `+ (a...)` ⇒ `(call + (error) (... a))`,
+  `<: (a,b)` ⇒ `(<: (error) a b)`); a single operand or block paren stays a prefix
+  application (`+ (a)` ⇒ `(call-pre + a)`, `+ (a; b)` ⇒ `(call-pre + (block-p a
+  b))`) and the glued call is unchanged (`+(a,b)` ⇒ `(call + a b)`). Distinct from
+  the identifier-callee `f (a)` ⇒ `(call f (error-t) a)`: a valid unary operator
+  projects `(error)`, not `(error-t)`. The unary-call arm in `parse_prefix`
+  (`expr.rs`) now finds the `(` past horizontal whitespace and, for the spaced
+  call-form, records a `PrefixOpenerWhitespace` diagnostic at the opener; the
+  `CALL_EXPR` arm of `project_call` reads it to splice `(error)` between callee and
+  args. Fixture `prefix_operator_spaced_call`. JS 646 → 647; dir 161 → 162.
+  Deferred (out of corpus): suffixed/non-unary operators spaced (`+₁ (a)`, `*
+  (a,b)`) project like an identifier callee (`(error-t)`), a different shape.
 - [x] Non-identifier `catch` variable `(error <expr>)` (error-shape slice,
   diagnostics model). A `catch` variable must be a plain identifier (`catch e`),
   a `$`-interpolation (`catch $e`), or a `var"…"` non-standard identifier

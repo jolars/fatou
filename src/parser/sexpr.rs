@@ -945,6 +945,15 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
         ) {
             parts.push("(error-t)".to_string());
         }
+        // A unary-prefix operator callee with a space before its call-form `(`
+        // flags the space as a zero-width `(error)` (`+ (a,b)` → `(call +
+        // (error) a b)`), unlike the `(error-t)` of an identifier callee.
+        if diag_at(
+            usize::from(arg_list.text_range().start()),
+            DiagnosticKind::PrefixOpenerWhitespace,
+        ) {
+            parts.push("(error)".to_string());
+        }
         parts.extend(project_args(&arg_list));
     } else if let Some(generator) = node.children().find(|c| c.kind() == GENERATOR) {
         // A bare generator argument: `sum(x for x in xs)` → `(call sum (generator …))`.

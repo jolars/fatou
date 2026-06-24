@@ -1,0 +1,125 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..69
+  CALL_EXPR@0..7
+    PLUS@0..1 "+"
+    WHITESPACE@1..2 " "
+    ARG_LIST@2..7
+      LPAREN@2..3 "("
+      ARG@3..4
+        NAME@3..4
+          IDENT@3..4 "a"
+      COMMA@4..5 ","
+      ARG@5..6
+        NAME@5..6
+          IDENT@5..6 "b"
+      RPAREN@6..7 ")"
+  NEWLINE@7..8 "\n"
+  CALL_EXPR@8..15
+    MINUS@8..9 "-"
+    WHITESPACE@9..10 " "
+    ARG_LIST@10..15
+      LPAREN@10..11 "("
+      ARG@11..12
+        NAME@11..12
+          IDENT@11..12 "a"
+      COMMA@12..13 ","
+      ARG@13..14
+        NAME@13..14
+          IDENT@13..14 "b"
+      RPAREN@14..15 ")"
+  NEWLINE@15..16 "\n"
+  CALL_EXPR@16..23
+    TILDE@16..17 "~"
+    WHITESPACE@17..18 " "
+    ARG_LIST@18..23
+      LPAREN@18..19 "("
+      ARG@19..20
+        NAME@19..20
+          IDENT@19..20 "a"
+      COMMA@20..21 ","
+      ARG@21..22
+        NAME@21..22
+          IDENT@21..22 "b"
+      RPAREN@22..23 ")"
+  NEWLINE@23..24 "\n"
+  CALL_EXPR@24..32
+    SUBTYPE@24..26 "<:"
+    WHITESPACE@26..27 " "
+    ARG_LIST@27..32
+      LPAREN@27..28 "("
+      ARG@28..29
+        NAME@28..29
+          IDENT@28..29 "a"
+      COMMA@29..30 ","
+      ARG@30..31
+        NAME@30..31
+          IDENT@30..31 "b"
+      RPAREN@31..32 ")"
+  NEWLINE@32..33 "\n"
+  CALL_EXPR@33..37
+    PLUS@33..34 "+"
+    WHITESPACE@34..35 " "
+    ARG_LIST@35..37
+      LPAREN@35..36 "("
+      RPAREN@36..37 ")"
+  NEWLINE@37..38 "\n"
+  CALL_EXPR@38..46
+    PLUS@38..39 "+"
+    WHITESPACE@39..40 " "
+    ARG_LIST@40..46
+      LPAREN@40..41 "("
+      ARG@41..45
+        SPLAT_EXPR@41..45
+          NAME@41..42
+            IDENT@41..42 "a"
+          DOT_DOT_DOT@42..45 "..."
+      RPAREN@45..46 ")"
+  NEWLINE@46..47 "\n"
+  UNARY_EXPR@47..52
+    PLUS@47..48 "+"
+    WHITESPACE@48..49 " "
+    PAREN_EXPR@49..52
+      LPAREN@49..50 "("
+      NAME@50..51
+        IDENT@50..51 "a"
+      RPAREN@51..52 ")"
+  NEWLINE@52..53 "\n"
+  UNARY_EXPR@53..61
+    PLUS@53..54 "+"
+    WHITESPACE@54..55 " "
+    PAREN_BLOCK@55..61
+      LPAREN@55..56 "("
+      ARG@56..57
+        NAME@56..57
+          IDENT@56..57 "a"
+      PARAMETERS@57..60
+        SEMICOLON@57..58 ";"
+        WHITESPACE@58..59 " "
+        ARG@59..60
+          NAME@59..60
+            IDENT@59..60 "b"
+      RPAREN@60..61 ")"
+  NEWLINE@61..62 "\n"
+  CALL_EXPR@62..68
+    PLUS@62..63 "+"
+    ARG_LIST@63..68
+      LPAREN@63..64 "("
+      ARG@64..65
+        NAME@64..65
+          IDENT@64..65 "a"
+      COMMA@65..66 ","
+      ARG@66..67
+        NAME@66..67
+          IDENT@66..67 "b"
+      RPAREN@67..68 ")"
+  NEWLINE@68..69 "\n"
+
+diagnostic [2..2]: whitespace before opener
+diagnostic [10..10]: whitespace before opener
+diagnostic [18..18]: whitespace before opener
+diagnostic [27..27]: whitespace before opener
+diagnostic [35..35]: whitespace before opener
+diagnostic [40..40]: whitespace before opener

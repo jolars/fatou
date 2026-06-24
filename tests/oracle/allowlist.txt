@@ -109,6 +109,7 @@ paren_macro_name
 paren_operator
 postfix_space_error
 prefix_operator_error
+prefix_operator_spaced_call
 public_statement
 public_stop_at_equals
 range_operator
