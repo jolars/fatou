@@ -451,6 +451,12 @@ fn parse_expr_in(
         (None, None) => (parse_prefix(&ctx, start, diagnostics, flags)?, false),
     };
 
+    // A glued colon operator (`a :< b`) consumes exactly one colon-tier operation
+    // and does not chain: a following colon-tier operator (`a :< b :< c`,
+    // `a :< b:c`) is left as trailing junk while a looser one (`a :< b == c`)
+    // still binds. Tracks that one was consumed so the colon branches break.
+    let mut glued_colon_done = false;
+
     loop {
         if !lhs_is_block_keyword {
             lhs = parse_postfix_chain(&ctx, lhs, array_mode, flags.end_marker, diagnostics);
@@ -604,11 +610,62 @@ fn parse_expr_in(
             break;
         }
 
+        // A range colon glued directly to a single `<`/`>` (no whitespace between
+        // them) is the invalid operator `:<`/`:>`: JuliaSyntax lexes the pair as
+        // one error operator at the colon precedence tier and heads the infix
+        // call with both tokens error-wrapped (`a :< b` ⇒ `(call-i a (error : <)
+        // b)`). Only a bare `<`/`>` glues — `:<=`/`:>:` keep the range reading and
+        // a prefix `:<` stays a quote. The operator consumes one operation and
+        // does not chain (a following colon-tier op falls to the junk driver).
+        if op_kind == TokKind::Colon
+            && matches!(
+                ctx.token(op_idx + 1).map(|t| t.kind),
+                Some(TokKind::Lt | TokKind::Gt)
+            )
+        {
+            if glued_colon_done {
+                break;
+            }
+            let (l_bp, r_bp) = infix_binding_power(TokKind::Colon).expect("colon binds");
+            if l_bp < min_bp {
+                break;
+            }
+            let colon = &tokens[op_idx];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::InvalidGluedOperator,
+                "invalid operator",
+                colon.start,
+                colon.start,
+            );
+            let lt_idx = op_idx + 1;
+            let rhs_operand = ctx.skip_trivia(lt_idx + 1);
+            lhs = match parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) {
+                Some(rhs) => build_binary(SyntaxKind::BINARY_EXPR, lhs, rhs),
+                None => {
+                    let lt = &tokens[lt_idx];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::MissingOperand,
+                        "expected right-hand side for operator",
+                        colon.start,
+                        lt.end,
+                    );
+                    build_binary_missing_rhs(SyntaxKind::BINARY_EXPR, lhs, lt_idx + 1)
+                }
+            };
+            glued_colon_done = true;
+            continue;
+        }
+
         // Range `:` collapses a stepped chain into a single 3-operand call
         // (`a:b:c` ⇒ `(call-i a : b c)`, `a:b:c:d:e` ⇒ `(call-i (call-i a : b c)
         // : d e)`), exactly as JuliaSyntax's `parse_range`, so it is handled
         // before the generic left-associative path.
         if op_kind == TokKind::Colon {
+            if glued_colon_done {
+                break;
+            }
             let (l_bp, _) = infix_binding_power(TokKind::Colon).expect("colon binds");
             if l_bp < min_bp {
                 break;

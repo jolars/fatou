@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **661 allowlisted**,
-24 divergence, 0 unsupported. Dir corpus: **169 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **662 allowlisted**,
+23 divergence, 0 unsupported. Dir corpus: **170 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,39 +58,50 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-24m — docstring + stray closer)
+## Latest session (2026-06-24n — glued colon operator `:<`/`:>`)
 
-**A doc-eligible string is a docstring only when a *real* statement follows it**
-(flips js-c74994ac `"notdoc" ]` ⇒ `(string "notdoc") (error-t ✘)`, js-f9c36919
-`"notdoc"\n]` ⇒ `(string "notdoc") (error) (error-t ✘)`). Two coupled bugs in the
-doc machinery (`core.rs`): (1) the speculative `first_is_doc_string` flag
-suppressed trailing-junk recovery for the whole line, so a stray closer after the
-string (`]`) was bumped as a bare leaf and silently dropped by the projector
-(non-lossless projection); (2) `fold_docstrings`/`doc_target` happily folded an
-error-recovery node as the documented target, wrapping `(string) (error)` into a
-spurious `(doc …)`. Three changes: the line driver now tracks `doc_no_target` (set
-in the bare-leaf `else` when a doc-string's leftover can't start a statement) and
-folds it into the raw-junk-collection gate so the rest of the line collects flat
-(`"doc" ] x` ⇒ `(string "doc") (error-t ✘ x)`); the leftover-wrap filter defers to
-`fold_docstrings` only when the leftover *begins* with a real statement subtree
-(new `leftover_starts_with_subtree`) instead of blanket-skipping on
-`first_is_doc_string`; and `doc_target` returns `None` when the next subtree is an
-`ERROR`. Real docs still fold (`"doc" foo`/`"doc"\nfoo` ⇒ `(doc (string) foo)`).
-Pure `core.rs` (projector untouched). Fixture parser + oracle-dir
-`docstring_stray_closer` (`"notdoc" ]`). JS 659 → 661 (zero regressions); dir
-168 → 169. Green; clippy/fmt clean. **Next target (no active plan):** the
-backlog's remaining narrow shapes — `export (x::T)` ⇒ `(export (error (::-i x
-T)))` (needs real expression parsing inside the export list + a multi-case
-validity predicate: `(x)`/`(+)`/`(var"a")` strip-and-keep, but `((x))`/`(@m)`/
-`(x.y)`/`(a,b)`/`(x::T)` error-wrap — *intricate*), or the `:(end)` quote-paren
-cluster (js-b1ac400e/js-557adcf4: `:(end)` ⇒ `(quote-: (error-t)) (error-t end
-✘)`, the `(quote-: (error-t))` zero-width recovery shared by `a[:(end)]`), or the
-**ternary-in-block** cluster (deferred root (f); see the design-watch bullet — it
-needs the diagnostic record to carry enclosing-block context, *not* a compensating
-projector).
+**A range colon glued directly to a single `<`/`>` is one invalid operator at the
+colon tier** (backlog item d, the two-token sibling of `**`/`--`). `a :< b` ⇒
+`(call-i a (error : <) b)` (flips js-147fac91), heading the infix call with *both*
+operator tokens error-wrapped. Disambiguation is whitespace-sensitive on the
+*right* of the colon only: `a :< b`/`a:<b`/`a :<b` all glue (the `<`/`>` is the
+token immediately after the colon, `ctx.token(op_idx + 1)`), but a space between
+(`a : < b`) keeps the bare-colon-plus-invalid-prefix reading, `:<=`/`:>:` keep the
+range reading (only a *single* `<`/`>` glues), and a *prefix* `:<` stays a quote
+(`(quote-: <)`, untouched — the new branch is infix-only). Precedence is colon's
+own `(14, 15)`: the rhs (parsed at `r_bp = 15`) absorbs tighter ops (`a :< b + c`
+⇒ `a :< (b+c)`) but not looser (`a :< b == c` ⇒ `(call-i (call-i a (error : <) b)
+== c)`). It consumes exactly one operation and does **not** chain — a `glued_colon_done`
+flag breaks the colon branches so a following colon-tier op falls to the junk
+driver (`a :< b :< c` ⇒ `… b) (error-t : < c)`, `a :< b:c` likewise). Three files:
+new `InvalidGluedOperator` diagnostic (`diagnostics.rs`); a glued branch in the
+operator loop (`expr.rs`) recording the diag at the colon (zero-width) and building
+a plain `BINARY_EXPR` over `[lhs, rhs]` whose gap captures both loose op tokens
+(missing rhs via `build_binary_missing_rhs` → `(call-i a (error : <) (error))`);
+and a `project_binary` arm (`sexpr.rs`) that, on the colon-anchored diag, joins all
+the node's loose operator tokens into the `(error : <)` head. Fixture +
+oracle-dir `glued_colon_operator`. JS 661 → 662 (zero regressions); dir 169 → 170.
+Green; clippy/fmt clean. **Deferred (not in corpus):** the range-chain interaction
+`a:b :< c` ⇒ `(call-i a : b (error : <) c)` (needs `parse_colon_range` to fold the
+glued op as a step instead of chaining a plain `:` onto the leftover `<`); and
+`a :< b -> c` (a pre-existing arrow-vs-comparison precedence divergence — `a < b ->
+c` already diverges identically, orthogonal to this work). **Next target (no active
+plan):** the `:(end)` quote-paren cluster (js-b1ac400e `:(end)` ⇒ `(quote-:
+(error-t)) (error-t end ✘)` — Fatou currently consumes `(` into the quote body as
+`(error ✘)` instead of a zero-width `(error-t)`; the harder sibling js-557adcf4
+`a[:(end)]` shares the recovery but adds matrix-structure divergence), or the
+remaining narrow shapes (`export (x::T)`, the macro dotted-name cluster — each a
+distinct deep gap).
 
 ## Earlier sessions
 
+- **2026-06-24m** — Docstring + stray closer: a doc-eligible string is a docstring
+  only when a *real* statement follows (flips js-c74994ac `"notdoc" ]`, js-f9c36919
+  `"notdoc"\n]`). Two coupled `core.rs` bugs: speculative `first_is_doc_string`
+  suppressed trailing-junk recovery; `fold_docstrings` folded an error node as the
+  doc target. Fixed via `doc_no_target`/`leftover_starts_with_subtree` +
+  `doc_target` returning `None` on `ERROR`. Fixture `docstring_stray_closer`. JS
+  659 → 661; dir 168 → 169.
 - **2026-06-24l** — Unterminated char literals (flips js-265fda17 `'` ⇒ `(char
   (error))`, js-6808df30 `'a` ⇒ `(char 'a' (error-t))`). `lex_char_literal`
   (`lexer.rs`) always emits a `Char` token; a newline is char *content* (scan stops

@@ -124,6 +124,13 @@ pub enum DiagnosticKind {
     /// bumps the rest of the line as a separate trailing-junk run. Anchored at
     /// the keyword token; the CST holds a real `ERROR` node around it.
     StrayKeyword,
+    /// A range colon glued directly to a single `<` or `>` (`a :< b`, `a:>b`) —
+    /// JuliaSyntax lexes the pair as one invalid operator at the colon
+    /// precedence tier and heads the infix call with both tokens error-wrapped
+    /// (`a :< b` ⇒ `(call-i a (error : <) b)`). Recorded as a zero-width point at
+    /// the colon; the two operator tokens stay loose children of the
+    /// `BINARY_EXPR`.
+    InvalidGluedOperator,
 }
 
 /// A parse-time diagnostic: a classified message anchored to a byte range in the

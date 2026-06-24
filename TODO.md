@@ -96,6 +96,24 @@ through), so the grammar can grow incrementally.
   `invalid_doubled_operators`. JS 644 → 645; dir 159 → 160. Deferred: prefix `**a`/
   `--a` ⇒ `(call-pre (error (Error**)) a)` (not in the corpus); the `:<`-style
   multi-token invalid operator `(error : <)` is a different shape.
+- [x] Glued colon operator `:<`/`:>` (the two-token sibling of the doubled
+  operators). A range colon glued directly to a single `<`/`>` (`a :< b`, `a:>b`)
+  is one invalid operator at the colon precedence tier `(14, 15)` heading the
+  infix call with *both* operator tokens error-wrapped: `a :< b` ⇒ `(call-i a
+  (error : <) b)`. Only a bare `<`/`>` glues — `:<=` keeps the range reading
+  (`(call-i a : (call-pre (error <=) b))`) and `:>:` is `:` then the `>:` operator;
+  a prefix `:<` stays a quote (`(quote-: <)`). It consumes exactly one operation
+  and does not chain: a following colon-tier op falls to the junk driver (`a :< b
+  :< c` ⇒ `(call-i a (error : <) b) (error-t : < c)`, `a :< b:c` likewise) while a
+  looser op still binds (`a :< b == c` ⇒ `(call-i (call-i a (error : <) b) == c)`);
+  a missing rhs reuses the shared `(error)` synthesis (`a :<` ⇒ `(call-i a (error
+  : <) (error))`). New `InvalidGluedOperator` diagnostic + a glued branch in the
+  operator loop building a plain `BINARY_EXPR` whose two loose op tokens the
+  projector wraps. Fixture `glued_colon_operator`. JS 661 → 662; dir 169 → 170.
+  Deferred: the range-chain interaction `a:b :< c` ⇒ `(call-i a : b (error : <) c)`
+  (needs `parse_colon_range` to fold the glued op as a step) and the
+  `a :< b -> c` arrow case (a pre-existing arrow-vs-comparison precedence
+  divergence, orthogonal).
 - [x] Colon-space-before-closing-keyword → bare `:` Colon atom (error-shape
   slice). A value-position prefix `:` followed by a space then a *closing* block
   keyword (`end`/`else`/`elseif`/`catch`/`finally`) is not a quotable symbol:

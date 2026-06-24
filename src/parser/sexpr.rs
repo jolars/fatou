@@ -661,6 +661,30 @@ fn project_binary(node: &SyntaxNode) -> String {
         Some(t) => t,
         None => return format!("(unsupported {:?})", node.kind()),
     };
+    // A range colon glued to a single `<`/`>` (`InvalidGluedOperator` recorded at
+    // the colon) heads the call with both operator tokens error-wrapped: `a :< b`
+    // ⇒ `(call-i a (error : <) b)`, the missing-rhs form `a :<` ⇒ `(call-i a
+    // (error : <) (error))`.
+    if op.kind() == COLON
+        && diag_at(
+            usize::from(op.text_range().start()),
+            DiagnosticKind::InvalidGluedOperator,
+        )
+    {
+        let head: Vec<String> = node
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .filter(|t| is_operator(t.kind()))
+            .map(|t| t.text().to_string())
+            .collect();
+        let operands = child_nodes(node);
+        let lhs = project(&operands[0]);
+        let rhs = operands
+            .get(1)
+            .map(project)
+            .unwrap_or_else(|| "(error)".to_string());
+        return format!("(call-i {lhs} (error {}) {rhs})", head.join(" "));
+    }
     // A field-access dot with disallowed leading whitespace (`x .y`) records a
     // `DotWhitespace` diagnostic at the dot's end; splice `(error-t)` before the
     // quoted field name in the `Dot` arm below.
