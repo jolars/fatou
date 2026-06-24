@@ -6,6 +6,7 @@ abstract_primitive_type
 ampersand_operator
 anon_function_signature
 anonymous_functions
+arithmetic_chains
 array_literals
 array_separator_mismatch
 array_space_call

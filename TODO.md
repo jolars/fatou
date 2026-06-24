@@ -26,6 +26,20 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Flat arithmetic chains for `+`/`*`. A run of two or more of the *same*
+  plain `+`/`*` operator folds into one flat variadic `BINARY_EXPR`
+  (`a + b + c` ⇒ `(call-i a + b c)`, `a * b * c * d` ⇒ `(call-i a * b c d)`),
+  matching JuliaSyntax's variadic chains; a lone `+`/`*` stays an ordinary
+  binary (`a + b` ⇒ `(call-i a + b)`). Mixed operators break the run and nest
+  (`a + b - c` ⇒ `(call-i (call-i a + b) - c)`); precedence is preserved
+  (`a + b * c` ⇒ `(call-i a + (call-i b * c))`). Excluded (nest in Julia):
+  dotted `.+`/`.*`, left-associative `-`, and *suffixed* operators
+  (`a +₁ b +₁ c` ⇒ `(call-i (call-i a +₁ b) +₁ c)`). New `is_flat_arith_op` +
+  collect-then-choose `parse_flat_arith_chain` reusing `build_flat`/
+  `build_flat_missing_rhs` (`expr.rs`); `project_binary` gains an n-ary
+  `project_flat_arith` path (`sexpr.rs`) replaying a dangling trailing operator
+  as `(error)` (`a + b +` ⇒ `(call-i a + b (error))`). Fixture
+  `arithmetic_chains`.
 - [x] Flat comparison chains. A run of two or more comparison-tier operators
   (`< <= > >= == !=`, the subtype relations `<:`/`>:`, their broadcast
   `.`-variants, and Unicode comparisons) folds into one flat `COMPARISON_EXPR`

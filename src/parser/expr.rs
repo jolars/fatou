@@ -631,6 +631,21 @@ fn parse_expr_in(
             continue;
         }
 
+        // A run of two or more of the *same* `+`/`*` operator folds into one flat
+        // n-ary `BINARY_EXPR` (`a + b + c` ⇒ `(call-i a + b c)`), exactly as
+        // JuliaSyntax's variadic `parse_with_chains`; a lone `+`/`*` stays an
+        // ordinary binary (`a + b` ⇒ `(call-i a + b)`). Mixed operators break the
+        // run and nest via the generic path (`a + b - c` ⇒ `(call-i (call-i a + b)
+        // - c)`). Dotted `.+`/`.*` do *not* flatten and are excluded.
+        if is_flat_arith_op(&tokens[op_idx]) {
+            let (l_bp, _) = infix_binding_power(op_kind).expect("arith binds");
+            if l_bp < min_bp {
+                break;
+            }
+            lhs = parse_flat_arith_chain(tokens, &ctx, lhs, op_idx, diagnostics, flags);
+            continue;
+        }
+
         // Ternary `cond ? then : else` — right-associative, just above
         // assignment and below `||`. Handled specially (like assignment) so the
         // `:` separator is consumed here rather than parsed as a range operator.
@@ -1175,6 +1190,85 @@ fn parse_comparison_chain(
 /// comparison whose first operator has no right operand).
 fn pop_one(operands: Vec<ExprParse>) -> ExprParse {
     operands.into_iter().next().expect("comparison lhs present")
+}
+
+/// The plain `+`/`*` operators that fold a same-operator run into one flat
+/// variadic call. Dotted `.+`/`.*` are excluded (they nest in JuliaSyntax), as
+/// is `-` (left-associative, not variadic) and the missing `++` operator. A
+/// *suffixed* operator (`+₁`, `*₂`) is non-syntactic and never folds
+/// (`a +₁ b +₁ c` ⇒ `(call-i (call-i a +₁ b) +₁ c)`).
+fn is_flat_arith_op(tok: &Token) -> bool {
+    matches!(tok.kind, TokKind::Plus | TokKind::Star) && !tok.text.chars().any(is_op_suffix_char)
+}
+
+/// Parse a flat arithmetic chain starting at the operator `first_op` (the first
+/// operand `lhs` is already parsed and the caller has cleared the binding-power
+/// check). Mirrors JuliaSyntax's variadic `+`/`*` folding: each operand parses at
+/// the operator's right power, and the run continues only while the next operator
+/// is the *identical* token kind. A single operator yields an ordinary
+/// two-operand node (`a + b` ⇒ `(call-i a + b)`); two or more fold into one flat
+/// `BINARY_EXPR` projecting as a variadic call (`a + b + c` ⇒ `(call-i a + b c)`).
+fn parse_flat_arith_chain(
+    tokens: &[Token],
+    ctx: &ParserCtx<'_>,
+    lhs: ExprParse,
+    first_op: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+    flags: ExprFlags,
+) -> ExprParse {
+    let first_op_kind = tokens[first_op].kind;
+    let mut operands = vec![lhs];
+    let mut op_count = 0usize;
+    let mut op_idx = first_op;
+    loop {
+        let (_, r_bp) = infix_binding_power(tokens[op_idx].kind).expect("arith binds");
+        let rhs_operand = ctx.skip_trivia(op_idx + 1);
+        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
+            // Missing right operand: keep the operator(s) and synthesize a
+            // zero-width `(error)`, replayed by the projector from the
+            // `MissingOperand` diagnostic anchored at the dangling operator
+            // (`a +` ⇒ `(call-i a + (error))`, `a + b +` ⇒ `(call-i a + b
+            // (error))`).
+            let op = &tokens[op_idx];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::MissingOperand,
+                "expected right-hand side for operator",
+                op.start,
+                op.end,
+            );
+            op_count += 1;
+            return if op_count == 1 {
+                build_binary_missing_rhs(SyntaxKind::BINARY_EXPR, pop_one(operands), op_idx + 1)
+            } else {
+                build_flat_missing_rhs(SyntaxKind::BINARY_EXPR, operands, op_idx + 1)
+            };
+        };
+        let last_end = rhs.end;
+        operands.push(rhs);
+        op_count += 1;
+        // Continue only on another instance of the *same* operator at this level
+        // (not an array-element boundary, e.g. `[a +b]` splitting into elements).
+        let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
+            Some((idx, kind)) if kind == first_op_kind && is_flat_arith_op(&tokens[idx]) => {
+                let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
+                (!split).then_some(idx)
+            }
+            _ => None,
+        };
+        match continues {
+            Some(idx) => op_idx = idx,
+            None => break,
+        }
+    }
+    if op_count == 1 {
+        let mut iter = operands.into_iter();
+        let a = iter.next().expect("lhs present");
+        let b = iter.next().expect("one rhs collected");
+        build_binary(SyntaxKind::BINARY_EXPR, a, b)
+    } else {
+        build_flat(SyntaxKind::BINARY_EXPR, operands)
+    }
 }
 
 fn parse_prefix(

@@ -683,6 +683,19 @@ fn project_binary(node: &SyntaxNode) -> String {
         return infix_call_string(&op, &lhs, "(error)")
             .unwrap_or_else(|| format!("(. {lhs} {dot_error}(error))"));
     }
+    // A flat arithmetic chain (`a + b + c` ⇒ `(call-i a + b c)`): two or more
+    // operands joined by a single repeated `+`/`*`, projecting as one variadic
+    // infix call. A trailing dangling operator (`a + b +`) keeps two operands and
+    // a `MissingOperand` diagnostic on the last operator, replayed as `(error)`.
+    let last_op_missing = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|t| is_operator(t.kind()))
+        .last()
+        .is_some_and(|t| operator_missing_rhs(&t));
+    if operands.len() >= 3 || (operands.len() == 2 && last_op_missing) {
+        return project_flat_arith(&op, &operands, last_op_missing);
+    }
     if operands.len() != 2 {
         return project_flat(significant(node));
     }
@@ -710,6 +723,28 @@ fn project_binary(node: &SyntaxNode) -> String {
         // Non-dot heads are handled by `infix_call_string` above.
         _ => unreachable!("non-dot infix head handled by infix_call_string"),
     }
+}
+
+/// Project a flat arithmetic chain (`a + b + c` ⇒ `(call-i a + b c)`): the
+/// single repeated operator heads a variadic infix call over all operands. A
+/// trailing dangling operator appends a zero-width `(error)`. The operator is a
+/// `CallI` head (`+`/`*`); any unexpected non-`CallI` operator still joins
+/// faithfully under `call-i` so a divergence surfaces.
+fn project_flat_arith(op: &SyntaxToken, operands: &[SyntaxNode], last_op_missing: bool) -> String {
+    let (head, op_text) = match infix_head(op.kind()) {
+        InfixHead::CallI(text) => ("call-i", text.to_string()),
+        InfixHead::DotCallI(text) => ("dotcall-i", text.to_string()),
+        InfixHead::Special(text) => ("call-i", text.to_string()),
+        InfixHead::Dot => ("call-i", op.text().to_string()),
+    };
+    let mut parts = Vec::with_capacity(operands.len() + 2);
+    parts.push(project(&operands[0]));
+    parts.push(op_text);
+    parts.extend(operands[1..].iter().map(project));
+    if last_op_missing {
+        parts.push("(error)".to_string());
+    }
+    sexp(head, parts)
 }
 
 /// Format a non-field-access infix operator from its operator token and
