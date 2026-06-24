@@ -38,8 +38,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 ## Progress
 
 JS corpus (**685 cases** — error shapes now harvested): **647 allowlisted**,
-38 divergence, 0 unsupported. Dir corpus: **162 allowlisted**, 2 blocked
-(end_index/numeric_literals; both FAIL not skip since `render` is total).
+38 divergence, 0 unsupported. Dir corpus: **164 allowlisted**, 1 blocked
+(numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "const-not-assignment error-wrap" are `[x]` in `TODO.md`.
 **Error shapes are now reconstructed from diagnostics, not in-tree marker
 nodes** (2026-06-23i refactor) — same projected output, so counts unchanged.
@@ -52,33 +52,42 @@ associative `a*b*c` (nested binary), n-ary juxtaposition `(2)(3)x` (nests right)
 integer half is now handled), `end`/`[1 +2]`/unterminated-string error shapes
 (dir `blocked.txt`).
 
-## Latest session (2026-06-24g)
+## Latest session (2026-06-24h)
 
-**Prefix-operator spaced call-form paren → zero-width `(error)`** (error-shape
-slice, flips js-4f46be13 `+ (a,b)`). A unary-prefix-capable operator (`+ - ~ !
-.+ .- .~ <: >:`) separated by *horizontal whitespace* from a *call-form* `(`
-(comma/splat/empty/leading-`;` params — the `unary_op_paren_is_call` predicate)
-heads a call with a zero-width `(error)` flagging the disallowed space: `+ (a,b)`
-⇒ `(call + (error) a b)`, `+ (a...)` ⇒ `(call + (error) (... a))`, `+ ()` ⇒
-`(call + (error))`, `<: (a,b)` ⇒ `(<: (error) a b)`. A *single* operand or a
-*block* paren stays a prefix application (`+ (a)` ⇒ `(call-pre + a)`, `+ (a; b)` ⇒
-`(call-pre + (block-p a b))`); the glued form is unchanged (`+(a,b)` ⇒ `(call + a
-b)`). Distinct from the identifier-callee whitespace shape `f (a)` ⇒ `(call f
-(error-t) a)`: a *valid unary operator* projects zero-width `(error)`, not
-`(error-t)`. The unary-call arm in `parse_prefix` (`expr.rs`) now finds the `(`
-past horizontal ws via `ctx.skip_ws` (only horizontal ws triggers; a newline ends
-the statement), gates the spaced path on `!op_suffixed && unary_op_paren_is_call`,
-records a new `PrefixOpenerWhitespace` diagnostic at the opener, and `push_range`s
-the ws trivia into the `CALL_EXPR`; `project_call`'s `CALL_EXPR` arm reads that
-diag to splice `(error)` between callee and args (mirroring the existing
-`OpenerWhitespace` → `(error-t)` check). Fixture `prefix_operator_spaced_call` (6
-spaced-call cases + 3 contrasts). JS 646 → 647; dir 161 → 162. Green; clippy/fmt
-clean, zero regressions. **Deferred** (out of corpus): suffixed/non-unary
-operators spaced (`+₁ (a)` ⇒ `(call +₁ (error-t) a)`, `* (a,b)` ⇒ `(call *
-(error-t) a b)`) — both project like an *identifier* callee (`(error-t)`), a
-separate shape; Fatou currently mis-models them as `(call-pre (error …) …)`.
+**`end`/`begin` index marker scoped to genuine `ref` indexing + misplaced-`end`
+recovery** (unblocks dir `end_index`). Root cause: Fatou enabled the `end` marker
+for *every* `[…]` bracket (and `parse_element` hard-coded `end_marker: true`),
+where JuliaSyntax enables it *only* for genuine indexing — the single-element/
+comma/empty `[…]` after a value (`a[end]`, `Int[1,2,end]`) — and *not* for bare
+vector literals (`[1,2,end]`), typed concatenations (`a[1 end]`), calls
+(`f(end)`), or braces (`{end}`). The flag is **inherited** by everything nested
+inside an index, so `a[[end]]`/`a[(end)]`/`a[f(end)]`/`a[g(end)+1]` keep `end` a
+marker (verified each against Julia). Threaded an `inherited_end_marker: bool`
+through `parse_postfix_chain`→`parse_postfix`→{`parse_arg_list`,
+`parse_typed_concat`}, plus `parse_bracket_literal`/`parse_braces`/`parse_paren`/
+`parse_element`/`parse_matrix`/`parse_expr_in_brackets` (entry points fed
+`flags.end_marker`); only an indexing `ARG_LIST` closed by `]` *sets* it
+(`parse_arg_list`: `inherited || (RBracket && ARG_LIST)`, and `begin_marker =
+end_marker`). Trap solved: `parse_typed_concat`'s *first* element parses in
+indexing position (passes `true`) so `a[2:end]` stays `(ref a (call-i 2 : end))`
+even though it briefly explores the typed-concat path; its matrix body uses the
+inherited value (`a[1 end]` → error). **Recovery:** a bare `end` where it is not a
+valid marker terminates the (now unterminated) list via the `UnterminatedArgList`
+`(error-t)` and breaks *without* consuming the closer, so the toplevel leftover
+driver bumps `end <closer>` as a junk run — `[1,2,end]` ⇒ `(vect 1 2 (error-t))
+(error-t end ✘)`, `f(end)` ⇒ `(call f (error-t)) (error-t end ✘)`; nesting falls
+out via the recursive break (`g([1,2,end])` ⇒ `(call g (vect 1 2 (error-t))
+(error-t)) (error-t end ✘ ✘)`). Gated on `parsed_element || close == RParen` (a
+non-leading `end` in any list, or a leading `end` in a *call*). Fixtures
+`end_index` (the unblocked corpus case) + `end_marker_propagation` (5 nested
+cases). dir 162 → 164 (blocked 2 → 1); JS held 647 (no corpus micro-case). Green;
+clippy/fmt clean, zero regressions. **Deferred** (out of corpus, left divergent):
+leading `end` in a vector/braces literal (`[end]` ⇒ `(vect (error end))`, `{end}`
+⇒ `(braces (error end))`), `(end)` paren at toplevel, full matrix `end`-recovery
+(`[1 2 end]` ⇒ `(hcat 1 2 (error-t)) (error-t end ✘)`), and marker propagation
+into quotes (`a[:(end)]`) and macro-call args.
 
-**Next-target survey** (38 JS FAILs after 24g): (a) **deliberate, do
+**Next-target survey** (38 JS FAILs): (a) **deliberate, do
 not fix** — comparison chains (`x<y<z`/`x .< y<z`/`x==y<z`), associative flattening
 (`a+b+c`/`a*b*c`/`x&&y&&z`/`x||y||z`, also in vects `[x+y+z]`), juxtaposition
 `(2)(3)x`; (b) **float display (blocked, bigger than it looks)** — `x.3`,
@@ -114,6 +123,16 @@ bare-block-keyword (g) but budget ~2 sessions; the contained 1-case wins from
 
 ## Earlier sessions
 
+- **2026-06-24g** — Prefix-operator spaced call-form paren → zero-width `(error)`
+  (flips js-4f46be13 `+ (a,b)`). A unary-prefix-capable operator (`+ - ~ ! .+ .-
+  .~ <: >:`) separated by horizontal whitespace from a *call-form* `(` (the
+  `unary_op_paren_is_call` predicate) heads a call with a zero-width `(error)`
+  flagging the disallowed space (`+ (a,b)` ⇒ `(call + (error) a b)`); a single
+  operand/block paren stays `call-pre` and the glued form is unchanged. New
+  `PrefixOpenerWhitespace` diag spliced by `project_call`. Fixture
+  `prefix_operator_spaced_call`. JS 646 → 647; dir 161 → 162. Deferred: suffixed/
+  non-unary spaced operators (`+₁ (a)`/`* (a,b)`) project like an identifier
+  callee (`(error-t)`).
 - **2026-06-24f** — Colon-space-before-closing-keyword → bare `:` Colon atom
   (flips js-4a2410ee `: end`). A value-position prefix `:` then a *space* then a
   closing block keyword (`end`/`else`/`elseif`/`catch`/`finally`) is the bare

@@ -26,6 +26,27 @@ through), so the grammar can grow incrementally.
   context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
   `DiagnosticKind` per context or pushing context-sensitivity into the projector
   (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] `end`/`begin` index marker scoped to genuine `ref` indexing (+ misplaced-
+  `end` recovery). The marker is enabled *only* by indexing (the single-element/
+  comma/empty `[…]` after a value, `a[end]`/`Int[1,2,end]`), not by bare vector
+  literals (`[1,2,end]`), typed concatenations (`a[1 end]`), calls (`f(end)`), or
+  braces, and it is *inherited* by everything nested inside an index so
+  `a[[end]]`/`a[(end)]`/`a[f(end)]`/`a[g(end)+1]` keep `end` a marker. An
+  `inherited_end_marker` now threads through `parse_postfix_chain`/`parse_postfix`/
+  `parse_arg_list`/`parse_bracket_literal`/`parse_braces`/`parse_paren`/
+  `parse_element`/`parse_matrix`/`parse_typed_concat`/`parse_expr_in_brackets`
+  (only an indexing `ARG_LIST` closed by `]` *sets* it; `parse_typed_concat`'s
+  first element parses in indexing position so `a[2:end]` stays a `ref`). A bare
+  `end` where it is not a valid marker terminates the (now unterminated) list with
+  a synthesized `(error-t)` and the toplevel leftover driver bumps `end <closer>`
+  as a trailing-junk run (`[1,2,end]` ⇒ `(vect 1 2 (error-t)) (error-t end ✘)`,
+  `f(end)` ⇒ `(call f (error-t)) (error-t end ✘)`); nesting falls out via the
+  recursive break (`g([1,2,end])` ⇒ `(call g (vect 1 2 (error-t)) (error-t))
+  (error-t end ✘ ✘)`). Unblocks dir `end_index`; fixtures `end_index` (the
+  unblocked case) + `end_marker_propagation`. dir 162 → 164; JS held 647 (no
+  corpus micro-case). Deferred: leading `end` in a vector/braces literal (`[end]`
+  ⇒ `(vect (error end))`, `{end}`), `(end)` paren, full matrix `end`-recovery
+  (`[1 2 end]`), and marker propagation into quotes/macro-call args.
 - [x] Invalid doubled operators `**`/`--` (and broadcast `.**`/`.--`). Julia has
   no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a *single* error
   operator at a fixed low precedence tier (looser than `+`, tighter than `:`/`==`,

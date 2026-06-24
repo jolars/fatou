@@ -1,0 +1,5 @@
+a[[end]]
+a[(end)]
+a[f(end)]
+a[g(end) + 1]
+a[[1, end]]

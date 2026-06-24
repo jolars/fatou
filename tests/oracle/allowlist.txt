@@ -51,6 +51,8 @@ dot_logical_operator
 dotted_operator_quote
 else_if_recovery
 empty_semicolon_param_group
+end_index
+end_marker_propagation
 escaped_dollar
 export_name_list
 field_access_space

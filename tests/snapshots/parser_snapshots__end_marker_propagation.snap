@@ -1,0 +1,91 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..54
+  INDEX_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "a"
+    ARG_LIST@1..8
+      LBRACKET@1..2 "["
+      ARG@2..7
+        VECT_EXPR@2..7
+          LBRACKET@2..3 "["
+          ARG@3..6
+            END_MARKER@3..6
+              END_KW@3..6 "end"
+          RBRACKET@6..7 "]"
+      RBRACKET@7..8 "]"
+  NEWLINE@8..9 "\n"
+  INDEX_EXPR@9..17
+    NAME@9..10
+      IDENT@9..10 "a"
+    ARG_LIST@10..17
+      LBRACKET@10..11 "["
+      ARG@11..16
+        PAREN_EXPR@11..16
+          LPAREN@11..12 "("
+          END_MARKER@12..15
+            END_KW@12..15 "end"
+          RPAREN@15..16 ")"
+      RBRACKET@16..17 "]"
+  NEWLINE@17..18 "\n"
+  INDEX_EXPR@18..27
+    NAME@18..19
+      IDENT@18..19 "a"
+    ARG_LIST@19..27
+      LBRACKET@19..20 "["
+      ARG@20..26
+        CALL_EXPR@20..26
+          NAME@20..21
+            IDENT@20..21 "f"
+          ARG_LIST@21..26
+            LPAREN@21..22 "("
+            ARG@22..25
+              END_MARKER@22..25
+                END_KW@22..25 "end"
+            RPAREN@25..26 ")"
+      RBRACKET@26..27 "]"
+  NEWLINE@27..28 "\n"
+  INDEX_EXPR@28..41
+    NAME@28..29
+      IDENT@28..29 "a"
+    ARG_LIST@29..41
+      LBRACKET@29..30 "["
+      ARG@30..40
+        BINARY_EXPR@30..40
+          CALL_EXPR@30..36
+            NAME@30..31
+              IDENT@30..31 "g"
+            ARG_LIST@31..36
+              LPAREN@31..32 "("
+              ARG@32..35
+                END_MARKER@32..35
+                  END_KW@32..35 "end"
+              RPAREN@35..36 ")"
+          WHITESPACE@36..37 " "
+          PLUS@37..38 "+"
+          WHITESPACE@38..39 " "
+          LITERAL@39..40
+            INTEGER@39..40 "1"
+      RBRACKET@40..41 "]"
+  NEWLINE@41..42 "\n"
+  INDEX_EXPR@42..53
+    NAME@42..43
+      IDENT@42..43 "a"
+    ARG_LIST@43..53
+      LBRACKET@43..44 "["
+      ARG@44..52
+        VECT_EXPR@44..52
+          LBRACKET@44..45 "["
+          ARG@45..46
+            LITERAL@45..46
+              INTEGER@45..46 "1"
+          COMMA@46..47 ","
+          WHITESPACE@47..48 " "
+          ARG@48..51
+            END_MARKER@48..51
+              END_KW@48..51 "end"
+          RBRACKET@51..52 "]"
+      RBRACKET@52..53 "]"
+  NEWLINE@53..54 "\n"

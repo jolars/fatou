@@ -74,13 +74,13 @@ ROOT@0..88
     LITERAL@48..49
       INTEGER@48..49 "1"
   NEWLINE@49..50 "\n"
-  ASSIGNMENT_EXPR@50..65
+  ASSIGNMENT_EXPR@50..61
     NAME@50..51
       IDENT@50..51 "v"
     WHITESPACE@51..52 " "
     EQ@52..53 "="
     WHITESPACE@53..54 " "
-    VECT_EXPR@54..65
+    VECT_EXPR@54..61
       LBRACKET@54..55 "["
       ARG@55..56
         LITERAL@55..56
@@ -92,10 +92,9 @@ ROOT@0..88
           INTEGER@58..59 "2"
       COMMA@59..60 ","
       WHITESPACE@60..61 " "
-      ARG@61..64
-        END_MARKER@61..64
-          END_KW@61..64 "end"
-      RBRACKET@64..65 "]"
+  ERROR@61..65
+    END_KW@61..64 "end"
+    RBRACKET@64..65 "]"
   NEWLINE@65..66 "\n"
   INDEX_EXPR@66..80
     NAME@66..72
@@ -114,11 +113,17 @@ ROOT@0..88
             RBRACKET@78..79 "]"
       RBRACKET@79..80 "]"
   NEWLINE@80..81 "\n"
-  CALL_EXPR@81..87
+  CALL_EXPR@81..83
     NAME@81..82
       IDENT@81..82 "f"
-    ARG_LIST@82..87
+    ARG_LIST@82..83
       LPAREN@82..83 "("
-      END_KW@83..86 "end"
-      RPAREN@86..87 ")"
+  ERROR@83..87
+    END_KW@83..86 "end"
+    RPAREN@86..87 ")"
   NEWLINE@87..88 "\n"
+
+diagnostic [54..54]: unterminated argument list
+diagnostic [61..64]: trailing tokens after statement
+diagnostic [82..82]: unterminated argument list
+diagnostic [83..86]: trailing tokens after statement

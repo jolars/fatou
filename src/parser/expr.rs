@@ -213,10 +213,14 @@ pub(crate) fn parse_expr_in_brackets(
     tokens: &[Token],
     start: usize,
     min_bp: u8,
+    // Inherited index-marker context for the bracketed expression.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         inside_brackets: true,
+        end_marker,
+        begin_marker: end_marker,
         ..ExprFlags::default()
     };
     parse_expr_in(tokens, start, min_bp, diagnostics, flags)
@@ -449,7 +453,7 @@ fn parse_expr_in(
 
     loop {
         if !lhs_is_block_keyword {
-            lhs = parse_postfix_chain(&ctx, lhs, array_mode, diagnostics);
+            lhs = parse_postfix_chain(&ctx, lhs, array_mode, flags.end_marker, diagnostics);
         }
 
         // Invalid string juxtaposition (`"a"x`, `"a""b"`, `2"a"`): a string
@@ -1132,6 +1136,7 @@ fn parse_prefix(
                     paren_idx,
                     TokKind::RParen,
                     SyntaxKind::ARG_LIST,
+                    flags.end_marker,
                     diagnostics,
                 );
                 let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
@@ -1250,6 +1255,7 @@ fn parse_prefix(
                 start + 1,
                 TokKind::RParen,
                 SyntaxKind::ARG_LIST,
+                flags.end_marker,
                 diagnostics,
             );
             let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
@@ -1273,9 +1279,9 @@ fn parse_prefix(
         // quoted contexts (`:($x)`) reuse the same node.
         TokKind::Dollar => Some(parse_prefix_interpolation(ctx, start, diagnostics)),
         TokKind::At => Some(parse_macro(ctx, start, diagnostics, flags.inside_brackets)),
-        TokKind::LParen => parse_paren(ctx, start, diagnostics),
-        TokKind::LBracket => Some(parse_bracket_literal(ctx, start, diagnostics)),
-        TokKind::LBrace => parse_braces(ctx, start, diagnostics),
+        TokKind::LParen => parse_paren(ctx, start, flags.end_marker, diagnostics),
+        TokKind::LBracket => Some(parse_bracket_literal(ctx, start, flags.end_marker, diagnostics)),
+        TokKind::LBrace => parse_braces(ctx, start, flags.end_marker, diagnostics),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
         TokKind::StringPrefix | TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
             Some(parse_string_literal(ctx, start, diagnostics))
@@ -1594,7 +1600,7 @@ pub(super) fn parse_quote_sym(
         }
         // `:(expr)` — the parenthesized expression is the quoted form.
         TokKind::LParen => {
-            let paren = parse_paren(ctx, next, diagnostics)?;
+            let paren = parse_paren(ctx, next, false, diagnostics)?;
             let end = paren.end;
             events.extend(paren.events);
             events.push(Event::Finish);
@@ -1871,7 +1877,7 @@ fn parse_interpolation(
             // `$(x;y)` (`PAREN_BLOCK`), `$(x,y)` (`TUPLE_EXPR`), `$(x for …)`
             // (`GENERATOR`), and the empty `$()` (`TUPLE_EXPR`) are what
             // JuliaSyntax rejects as a `(error …)` interpolation.
-            let Some(inner) = parse_paren(ctx, next, diagnostics) else {
+            let Some(inner) = parse_paren(ctx, next, false, diagnostics) else {
                 events.push(Event::Finish);
                 return next + 1;
             };
@@ -1921,6 +1927,9 @@ fn atom(kind: SyntaxKind, idx: usize) -> ExprParse {
 fn parse_paren(
     ctx: &ParserCtx<'_>,
     start: usize,
+    // Inherited index-marker context. A paren is not itself indexing, but
+    // `a[(end)]` inherits the marker into the parenthesized expression.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let inner_start = ctx.skip_trivia(start + 1);
@@ -1944,6 +1953,7 @@ fn parse_paren(
                 start,
                 TokKind::RParen,
                 paren_list_kind(ctx, start),
+                end_marker,
                 diagnostics,
             );
             return Some(ExprParse { start, end, events });
@@ -1970,7 +1980,8 @@ fn parse_paren(
         }
     }
 
-    let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, diagnostics) else {
+    let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, end_marker, diagnostics)
+    else {
         return Some(error_expr_with_range(start, inner_start));
     };
 
@@ -1999,6 +2010,7 @@ fn parse_paren(
             start,
             TokKind::RParen,
             paren_list_kind(ctx, start),
+            end_marker,
             diagnostics,
         );
         return Some(ExprParse { start, end, events });
@@ -2094,11 +2106,17 @@ fn op_can_lead_array_element(op: &Token) -> bool {
 fn parse_element(
     tokens: &[Token],
     start: usize,
+    // Whether `end`/`begin` are index markers in this element, inherited from an
+    // enclosing indexing bracket. A bare literal (`[1 2 end]`) is an array
+    // constructor where `end` is *not* a marker; only `a[[1 end]]` (a literal
+    // nested inside indexing) inherits the marker.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         array_mode: true,
-        end_marker: true,
+        end_marker,
+        begin_marker: end_marker,
         ..ExprFlags::default()
     };
     parse_expr_in(tokens, start, 0, diagnostics, flags)
@@ -2151,6 +2169,9 @@ fn newline_run_precedes_for(ctx: &ParserCtx<'_>, look: usize) -> bool {
 fn parse_bracket_literal(
     ctx: &ParserCtx<'_>,
     lbrk: usize,
+    // Inherited index-marker context. A bare `[…]` literal does not enable `end`,
+    // but `a[[…]]` (a literal nested in indexing) inherits it.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     let tokens = ctx.tokens();
@@ -2160,6 +2181,7 @@ fn parse_bracket_literal(
             lbrk,
             TokKind::RBracket,
             SyntaxKind::VECT_EXPR,
+            end_marker,
             diagnostics,
         );
         ExprParse {
@@ -2186,7 +2208,7 @@ fn parse_bracket_literal(
     ) {
         return empty;
     }
-    let Some(first) = parse_element(tokens, first_start, diagnostics) else {
+    let Some(first) = parse_element(tokens, first_start, end_marker, diagnostics) else {
         return vect(diagnostics);
     };
 
@@ -2234,6 +2256,7 @@ fn parse_bracket_literal(
             TokKind::RBracket,
             SyntaxKind::VECT_EXPR,
             SyntaxKind::MATRIX_EXPR,
+            end_marker,
             diagnostics,
         ),
     }
@@ -2316,6 +2339,7 @@ fn parse_empty_ncat(
 /// elements left unwrapped); the projector recovers each group's dimension from
 /// its separator tokens and heads it `hcat`/`vcat`/`ncat-d` (top) or
 /// `row`/`nrow-d` (nested).
+#[allow(clippy::too_many_arguments)]
 fn parse_matrix(
     ctx: &ParserCtx<'_>,
     lbrk: usize,
@@ -2323,6 +2347,9 @@ fn parse_matrix(
     close: TokKind,
     comma_kind: SyntaxKind,
     matrix_kind: SyntaxKind,
+    // Inherited index-marker context for the matrix elements (see
+    // [`parse_element`]).
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     let tokens = ctx.tokens();
@@ -2394,7 +2421,7 @@ fn parse_matrix(
             }
             _ => {
                 seps.push(run);
-                let el = match parse_element(tokens, q, diagnostics) {
+                let el = match parse_element(tokens, q, end_marker, diagnostics) {
                     Some(el) => el,
                     None => ExprParse {
                         start: q,
@@ -2593,7 +2620,7 @@ fn parse_comprehension(
             pos = if_idx + 1;
             let cond_start = ctx.skip_trivia(pos);
             push_range(&mut events, pos, cond_start);
-            if let Some(cond) = parse_expr_in_brackets(tokens, cond_start, 0, diagnostics) {
+            if let Some(cond) = parse_expr_in_brackets(tokens, cond_start, 0, false, diagnostics) {
                 events.extend(cond.events);
                 pos = cond.end;
             } else {
@@ -2671,7 +2698,7 @@ fn parse_for_specs(
             pos = in_idx + 1;
             let iter_start = ctx.skip_trivia(pos);
             push_range(events, pos, iter_start);
-            if let Some(iter) = parse_expr_in_brackets(tokens, iter_start, 0, diagnostics) {
+            if let Some(iter) = parse_expr_in_brackets(tokens, iter_start, 0, false, diagnostics) {
                 events.extend(iter.events);
                 pos = iter.end;
             } else {
@@ -2696,6 +2723,10 @@ fn parse_postfix_chain(
     ctx: &ParserCtx<'_>,
     mut lhs: ExprParse,
     array_mode: bool,
+    // Whether `end`/`begin` are index markers here, inherited from an enclosing
+    // indexing bracket (`a[…]`). A nested call/index/curly propagates it so
+    // `a[f(end)]` keeps `end` a marker.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     loop {
@@ -2730,6 +2761,7 @@ fn parse_postfix_chain(
                     next,
                     TokKind::RParen,
                     SyntaxKind::CALL_EXPR,
+                    end_marker,
                     diagnostics,
                 )
             }
@@ -2740,6 +2772,7 @@ fn parse_postfix_chain(
                     next,
                     TokKind::RBracket,
                     SyntaxKind::INDEX_EXPR,
+                    end_marker,
                     diagnostics,
                 )
             }
@@ -2751,6 +2784,7 @@ fn parse_postfix_chain(
                     next,
                     TokKind::RBrace,
                     SyntaxKind::CURLY_EXPR,
+                    end_marker,
                     diagnostics,
                 )
             }
@@ -2766,6 +2800,7 @@ fn parse_postfix_chain(
                     lparen,
                     TokKind::RParen,
                     SyntaxKind::ARG_LIST,
+                    end_marker,
                     diagnostics,
                 );
                 let mut events = vec![Event::Start(SyntaxKind::DOT_CALL_EXPR)];
@@ -2831,6 +2866,10 @@ fn parse_postfix(
     open_idx: usize,
     close: TokKind,
     node: SyntaxKind,
+    // Inherited index-marker context (see [`parse_postfix_chain`]). An indexing
+    // `[…]` (handled by `parse_arg_list`) turns it on for its contents; calls,
+    // curlies, and typed concatenations merely propagate it.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     // A single element followed by `for` is a generator argument:
@@ -2839,11 +2878,13 @@ fn parse_postfix(
     // outer node; the generator clauses reuse the comprehension machinery.
     let first_start = ctx.skip_trivia(open_idx + 1);
     if ctx.token(first_start).map(|t| t.kind) != Some(close) {
-        let end_marker = close == TokKind::RBracket;
+        // An indexing `[…]` (`a[x for …]`) is a marker context; a call/curly
+        // generator inherits the enclosing one.
+        let gen_end_marker = end_marker || close == TokKind::RBracket;
         let flags = ExprFlags {
             inside_brackets: true,
-            end_marker,
-            begin_marker: end_marker,
+            end_marker: gen_end_marker,
+            begin_marker: gen_end_marker,
             ..ExprFlags::default()
         };
         let diag_mark = diagnostics.len();
@@ -2881,13 +2922,19 @@ fn parse_postfix(
     // concatenation (`T[x y]` → `(typed_hcat T x y)`), not an index. A comma
     // list, single element, or empty `T[]` stays an `INDEX_EXPR`.
     if close == TokKind::RBracket
-        && let Some(typed) = parse_typed_concat(ctx, &lhs, open_idx, diagnostics)
+        && let Some(typed) = parse_typed_concat(ctx, &lhs, open_idx, end_marker, diagnostics)
     {
         return typed;
     }
 
-    let (list_events, end) =
-        parse_arg_list(ctx, open_idx, close, SyntaxKind::ARG_LIST, diagnostics);
+    let (list_events, end) = parse_arg_list(
+        ctx,
+        open_idx,
+        close,
+        SyntaxKind::ARG_LIST,
+        end_marker,
+        diagnostics,
+    );
     let mut events = vec![Event::Start(node)];
     events.extend(lhs.events);
     push_range(&mut events, lhs.end, open_idx);
@@ -2924,6 +2971,10 @@ fn parse_typed_concat(
     ctx: &ParserCtx<'_>,
     lhs: &ExprParse,
     open_idx: usize,
+    // Inherited index-marker context. A typed concatenation (`T[x y]`) is an
+    // array constructor, not indexing, so it never *enables* the marker — but it
+    // propagates an enclosing one into its elements.
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let diag_mark = diagnostics.len();
@@ -2955,7 +3006,12 @@ fn parse_typed_concat(
     ) {
         return Some(wrap(empty));
     }
-    let first = parse_element(ctx.tokens(), first_start, diagnostics)?;
+    // The first element is parsed in indexing position (a postfix `[`), so `end`
+    // is a marker there (`a[2:end]` ⇒ `(ref a (call-i 2 : end))`). If this turns
+    // out to be a typed concatenation (a space-separated array constructor), the
+    // marker does *not* carry to the remaining elements — only an inherited
+    // context does (`a[1 end]` errors, but `b[a[1 end]]` inherits).
+    let first = parse_element(ctx.tokens(), first_start, true, diagnostics)?;
     // Look at the first separator: a `,`, `]`, end, or `for` means this is an
     // index/comprehension, not a concatenation.
     let mut look = first.end;
@@ -2978,6 +3034,7 @@ fn parse_typed_concat(
                 TokKind::RBracket,
                 SyntaxKind::VECT_EXPR,
                 SyntaxKind::MATRIX_EXPR,
+                end_marker,
                 diagnostics,
             );
             // A lone element with only a trailing newline collapses to the
@@ -3164,11 +3221,13 @@ fn parse_macro_args(
     // Paren form `@m(a, b)`: the `(` must be adjacent (no whitespace), otherwise
     // `@m (a, b)` is the space form with a single parenthesized argument.
     if ctx.token(name_end).map(|t| t.kind) == Some(TokKind::LParen) {
+        // Marker propagation into macro-call arguments (`a[@m(end)]`) is deferred.
         let (list_events, end) = parse_arg_list(
             ctx,
             name_end,
             TokKind::RParen,
             SyntaxKind::ARG_LIST,
+            false,
             diagnostics,
         );
         events.extend(list_events);
@@ -3290,12 +3349,20 @@ fn macro_leaf_is_doc(ctx: &ParserCtx<'_>, name_end: usize) -> bool {
 fn parse_braces(
     ctx: &ParserCtx<'_>,
     start: usize,
+    // Inherited index-marker context (a `{…}` literal does not enable it).
+    end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let tokens = ctx.tokens();
     let braces = |diagnostics: &mut Vec<ParseDiagnostic>| {
-        let (events, end) =
-            parse_arg_list(ctx, start, TokKind::RBrace, SyntaxKind::BRACES, diagnostics);
+        let (events, end) = parse_arg_list(
+            ctx,
+            start,
+            TokKind::RBrace,
+            SyntaxKind::BRACES,
+            end_marker,
+            diagnostics,
+        );
         ExprParse { start, end, events }
     };
 
@@ -3314,7 +3381,7 @@ fn parse_braces(
     ) {
         return Some(empty);
     }
-    let Some(first) = parse_element(tokens, first_start, diagnostics) else {
+    let Some(first) = parse_element(tokens, first_start, end_marker, diagnostics) else {
         return Some(braces(diagnostics));
     };
 
@@ -3344,6 +3411,7 @@ fn parse_braces(
             TokKind::RBrace,
             SyntaxKind::BRACES,
             SyntaxKind::BRACESCAT_EXPR,
+            end_marker,
             diagnostics,
         )),
     }
@@ -3360,16 +3428,19 @@ fn parse_arg_list(
     open_idx: usize,
     close: TokKind,
     list_kind: SyntaxKind,
+    // Inherited index-marker context. *Indexing* — the sole `ARG_LIST` closed by
+    // `]` (`a[end]`; vector literals build a `VECT_EXPR`, calls close with `)`) —
+    // enables `end`/`begin` markers for its contents; every other list merely
+    // propagates the enclosing context, so `[1, end]` errors at toplevel but the
+    // inner vect of `a[[1, end]]` inherits the marker.
+    inherited_end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> (Vec<Event>, usize) {
     let tokens = ctx.tokens();
-    // `end` is the index marker only inside square brackets — indexing (`a[end]`)
-    // and vector literals (`[end]`), both of which close with `]`.
-    let end_marker = close == TokKind::RBracket;
-    // `begin` is the index marker only in *indexing* position, which is the sole
-    // `ARG_LIST` closed by `]` (vector literals build a `VECT_EXPR`, calls close
-    // with `)`); a vector literal's `[begin … end]` stays a block.
-    let begin_marker = end_marker && list_kind == SyntaxKind::ARG_LIST;
+    let end_marker =
+        inherited_end_marker || (close == TokKind::RBracket && list_kind == SyntaxKind::ARG_LIST);
+    // `begin` and `end` share one index-marker context.
+    let begin_marker = end_marker;
     let mut events = vec![Event::Start(list_kind), Event::Tok(open_idx)];
     let mut i = open_idx + 1;
     let mut in_params = false;
@@ -3471,6 +3542,30 @@ fn parse_arg_list(
                 events.push(Event::Tok(i));
                 i += 1;
                 slot_empty = true;
+            }
+            // A bare `end` where it is not a valid index marker is a misplaced
+            // block-closer keyword: JuliaSyntax implicitly closes the (now
+            // unterminated) bracket with a synthesized `(error-t)` and bumps the
+            // `end` and the real closer up as a trailing-junk run (`[1, 2, end]` ⇒
+            // `(vect 1 2 (error-t)) (error-t end ✘)`, `f(end)` ⇒ `(call f
+            // (error-t)) (error-t end ✘)`). This fires for a non-leading `end` in
+            // any list and for a leading `end` in a call (`f(end)`); a *leading*
+            // `end` in a vector/braces literal (`[end]` ⇒ `(vect (error end))`) is
+            // a different `(error <kw>)` wrap, left divergent for now.
+            Some(TokKind::EndKw) if !end_marker && (parsed_element || close == TokKind::RParen) => {
+                if in_params {
+                    events.push(Event::Finish); // close PARAMETERS first
+                    in_params = false;
+                }
+                let opener = &tokens[open_idx];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::UnterminatedArgList,
+                    "unterminated argument list",
+                    opener.start,
+                    opener.start,
+                );
+                break;
             }
             Some(_) => {
                 i = parse_one_arg(ctx, &mut events, i, end_marker, begin_marker, diagnostics);
