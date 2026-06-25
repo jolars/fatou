@@ -54,8 +54,12 @@ tasks:
     cmds:
       - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
 
-  # Placeholder until the Runic.jl differential gauge lands (see TODO.md).
-  # runic-compat:
-  #   desc: Measure soft Runic.jl compatibility (writes RUNIC_COMPAT.md)
-  #   cmds:
-  #     - cargo test --test runic_compat -- --ignored --nocapture
+  runic-report:
+    desc: Triage formatter parity vs Runic.jl (writes tests/oracle/runic-report.txt)
+    cmds:
+      - cargo test --test runic_oracle -- --ignored runic_full_report --nocapture
+
+  update-runic-corpus:
+    desc: Regenerate the pinned Runic oracle corpus (needs devenv Julia)
+    cmds:
+      - bash scripts/update-runic-corpus.sh

@@ -1,13 +1,15 @@
 //! Formatter entry points.
 //!
-//! Walking-skeleton stage: the per-construct rules that build native IR are not
-//! implemented yet (see `TODO.md`). `format` therefore reproduces its input via
-//! the parser's lossless CST, which keeps it byte-identical and idempotent while
-//! the IR/printer foundation is exercised by [`print_document`] and the rules
-//! land incrementally. The deterministic-layout target style is Runic.jl's.
+//! Walking-skeleton stage: [`format`] parses to the lossless CST, lowers it to
+//! the layout IR via [`rules::lower`](crate::formatter::rules::lower), and prints
+//! it. Constructs with a rule are reshaped to the deterministic target style
+//! (Runic.jl's); everything else is lowered transparently, so it stays
+//! byte-identical and the whole pass remains idempotent while rules land
+//! incrementally. [`print_document`] exercises the IR/printer foundation directly.
 
 use crate::formatter::ir::Ir;
 use crate::formatter::printer::print;
+use crate::formatter::rules::lower;
 use crate::formatter::style::FormatStyle;
 use crate::parser::parse;
 
@@ -33,16 +35,10 @@ pub fn format(input: &str) -> Result<String, FormatError> {
     format_with_style(input, FormatStyle::default())
 }
 
-/// Format `input` with the given style. Currently a lossless passthrough routed
-/// through the layout engine (see the module docs).
+/// Format `input` with the given style: parse to the lossless CST, lower it to
+/// the layout IR, and print (see the module docs).
 pub fn format_with_style(input: &str, style: FormatStyle) -> Result<String, FormatError> {
-    let reconstructed: String = parse(input)
-        .cst
-        .descendants_with_tokens()
-        .filter_map(|el| el.into_token())
-        .map(|tok| tok.text().to_string())
-        .collect();
-    let doc = Ir::text(reconstructed);
+    let doc = lower(&parse(input).cst);
     Ok(print(&doc, style))
 }
 
@@ -57,20 +53,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_is_lossless_identity() {
-        for input in [
-            "x = 1\n",
-            "function g(x)\n    x ^ 2\nend\n",
-            "# comment\ny = a + b\n",
+    fn normalizes_operator_spacing() {
+        // Spaced operators get exactly one space on each side; the tight `^`
+        // keeps its operands packed. Unhandled constructs (the `function`/`if`
+        // headers, blocks) stay byte-identical around the reshaped expressions.
+        for (input, expected) in [
+            ("x=1\n", "x = 1\n"),
+            ("y= a+b\n", "y = a + b\n"),
+            (
+                "function g(x)\n    x ^ 2\nend\n",
+                "function g(x)\n    x^2\nend\n",
+            ),
+            ("# comment\ny = a + b\n", "# comment\ny = a + b\n"),
         ] {
-            assert_eq!(format(input).unwrap(), input);
+            assert_eq!(format(input).unwrap(), expected);
         }
     }
 
     #[test]
     fn format_is_idempotent() {
-        let input = "if a\n    b\nelse\n    c\nend\n";
-        let once = format(input).unwrap();
-        assert_eq!(format(&once).unwrap(), once);
+        for input in ["x=1\n", "z = a*b + c\n", "if a\n    b\nelse\n    c\nend\n"] {
+            let once = format(input).unwrap();
+            assert_eq!(format(&once).unwrap(), once, "not idempotent for {input:?}");
+        }
     }
 }

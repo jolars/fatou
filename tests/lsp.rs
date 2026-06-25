@@ -90,11 +90,58 @@ fn initialize_format_and_shutdown() {
         other => panic!("expected a formatting response, got {other:?}"),
     }
 
-    // --- shutdown / exit ---
+    // --- open an unformatted document; formatting returns a real edit ---
+    let messy = Uri::from_str("file:///work/b.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: messy.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "x=1\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _messy_diag = client.receiver.recv().unwrap();
     client
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(3),
+            method: "textDocument/formatting".to_string(),
+            params: serde_json::to_value(DocumentFormattingParams {
+                text_document: TextDocumentIdentifier { uri: messy.clone() },
+                options: FormattingOptions {
+                    tab_size: 4,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let messy_response = client.receiver.recv().unwrap();
+    match messy_response {
+        Message::Response(resp) => {
+            let edits: Option<Vec<TextEdit>> =
+                serde_json::from_value(resp.result.unwrap()).unwrap();
+            let edits = edits.expect("formatting edits");
+            assert_eq!(edits.len(), 1, "expected a single whole-document edit");
+            assert_eq!(edits[0].new_text, "x = 1\n");
+        }
+        other => panic!("expected a formatting response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

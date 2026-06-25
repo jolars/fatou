@@ -55,18 +55,26 @@ gate**. We do not match Runic; we measure how often Runic would leave Fatou's
 output unchanged, treating its maturity as a free differential oracle for our
 own inconsistencies.
 
-- The gauge (once it lands) measures the *fixed point*
-  `runic(fatou(x)) == fatou(x)`, not a head-to-head diff. This cancels out the
-  persistent-line-break difference by construction, leaving only genuine rule
-  divergences.
 - Divergences triage into two buckets. **Adopt** when Runic's output is simply
   more idiomatic and Fatou is being inconsistent (fix the rule). **Record** when
-  the divergence is a deliberate Fatou choice (an allowlist entry with a
-  rationale).
+  the divergence is a deliberate Fatou choice (a blocked entry with a rationale).
 - Diverging from Runic is allowed but should **raise tension**: a conscious,
   documented decision, never a silent one.
 
-The harness itself is deferred (`TODO.md`).
+**Bootstrap gate (landed).** While the formatter grows, the oracle is a concrete
+**direct-parity** gate (a strengthening of the soft fixed-point framing above):
+`format(input) == runic(input)`, where each fixture's `expected.jl` is pinned from
+`Runic.format_string`. The harness (`tests/runic_oracle.rs`) diffs each fixture and
+gates regressions via `tests/oracle/runic-allowlist.txt`; deliberate divergences
+(notably Tenet 1 — Runic *preserves* user whitespace around `&&`/`||`, Fatou
+canonicalizes them as spaced) are recorded in `runic-blocked.txt` with a rationale,
+and `allowlist ∪ blocked` must cover the corpus. The corpus
+(`tests/fixtures/formatter/`) is minted by `scripts/update-runic-corpus.{sh,jl}`
+and version-pinned in `.runic-source`. **To grow formatter parity, use the
+`formatter-parity` skill** (`.claude/skills/formatter-parity/`) — it documents the
+loop (probe → rule → fixture → re-triage → allowlist) and keeps a rolling
+`RECAP.md`. The optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`)
+remains future work (`TODO.md`).
 
 ## Parser oracle
 
@@ -139,8 +147,12 @@ build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
 CST and uses a Wadler/Prettier-style document IR (`ir.rs`) printed by a single
 best-fit layout engine (`printer.rs`) that makes all line-break decisions.
 `style.rs` is `FormatStyle`; `check.rs` exposes `check_paths`. Target style is
-Runic.jl's. The per-construct rules are deferred; today `core::format` is a
-lossless passthrough routed through the layout engine.
+Runic.jl's. `rules::lower` (`rules.rs`) walks the CST into IR; constructs with a
+rule are reshaped (operator/assignment spacing has landed) and everything else is
+lowered *transparently* (verbatim tokens, recurse into children), so unhandled
+syntax stays byte-identical and the pass stays idempotent while rules land
+incrementally. The Runic differential oracle (`tests/runic_oracle.rs`) gates
+parity; grow it with the `formatter-parity` skill.
 
 **Linter** (`src/linter/`): `check_paths` parses each file and reports
 `LintStatus` (`Clean` / `Findings` / `ParseDiagnostics`); parse diagnostics
@@ -184,6 +196,8 @@ indent_width) and `[lint]` (select, ignore). Defaults follow Julia conventions
 - Integration tests in `tests/*.rs`; fixtures in
   `tests/fixtures/{parser,formatter}/<case>/`. Parser fixtures hold `input.jl`
   (snapshot the CST + diagnostics, assert losslessness); formatter fixtures hold
-  `input.jl` + `expected.jl`.
+  `input.jl` + a Runic-minted `expected.jl` (the direct-parity oracle in
+  `tests/runic_oracle.rs`; `tests/formatter.rs` guards idempotence over all
+  fixtures).
 - `insta` snapshots live in `tests/snapshots/`.
 - `tests/lsp.rs` drives the language server over an in-memory connection.

@@ -17,14 +17,22 @@ leverage.
 
 ## Formatter
 
-- [ ] Per-construct IR rules (`src/formatter/rules/`): replace the lossless
-  passthrough in `core::format` with native IR builders per construct
-  (assignments, binary chains, calls/arg-lists, blocks, control flow),
-  printed by the existing best-fit engine.
+- [x] Runic.jl differential formatter oracle (direct parity; see `AGENTS.md` and
+  the `formatter-parity` skill). `scripts/update-runic-corpus.{sh,jl}` mint a
+  pinned `expected.jl = Runic.format_string(input)` per fixture
+  (`tests/fixtures/formatter/<slug>/`, version-pinned in `.runic-source`); the
+  harness (`tests/runic_oracle.rs`) gates `format(input) == expected.jl` via
+  `tests/oracle/runic-allowlist.txt` (CI-safe — no Julia at test time),
+  `runic_full_report` (`#[ignore]`d) writes a triage report, and
+  `runic-{allowlist,blocked}.txt` partition the corpus (coverage enforced). The
+  optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`) is still
+  future work.
+- [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
+  passthrough in `core::format` with native IR builders per construct, printed by
+  the existing best-fit engine. **Landed:** operator/assignment spacing
+  (`lower_binary`). **Next:** comparison chains, calls/arg-lists, unary, blocks,
+  control flow — see the `formatter-parity` RECAP's ranked targets.
 - [ ] Range formatting (`textDocument/rangeFormatting`).
-- [ ] Runic-compat gauge: a `#[ignore]`d test measuring the fixed point
-  `runic(fatou(x)) == fatou(x)`, plus an allowlist with rationales.
-  `task   runic-compat` (placeholder in `Taskfile.yml`).
 
 ## Linter
 

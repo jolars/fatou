@@ -1,0 +1,9 @@
+# Runic formatter oracle allowlist — slugs whose Fatou formatting matches the
+# pinned expected.jl (Runic.format_string output). Guarded against regression by
+# `runic_allowlist` (no Julia needed). Seed/refresh from `runic_full_report`.
+# One slug per line.
+
+assignment
+assignment_spacing
+binary_spacing
+tight_operators
