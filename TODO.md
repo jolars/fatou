@@ -30,8 +30,9 @@ leverage.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing
-  (`lower_binary`). **Next:** comparison chains, calls/arg-lists, unary, blocks,
-  control flow — see the `formatter-parity` RECAP's ranked targets.
+  (`lower_binary`), comparison chains (`lower_comparison`). **Next:**
+  calls/arg-lists, unary, blocks, control flow — see the `formatter-parity`
+  RECAP's ranked targets.
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 
 ## Linter

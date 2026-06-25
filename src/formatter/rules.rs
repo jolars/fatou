@@ -22,6 +22,7 @@ pub fn lower(root: &SyntaxNode) -> Ir {
 fn lower_node(node: &SyntaxNode) -> Ir {
     match node.kind() {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
+        SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
         _ => lower_transparent(node),
     }
 }
@@ -76,6 +77,60 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     } else {
         Ir::concat([lhs, Ir::text(" "), op_text, Ir::text(" "), rhs])
     }
+}
+
+/// Lay out a comparison chain (`a == b == c`, `x < y <= z`) with a single space
+/// on each side of every operator. The node alternates operand/operator and may
+/// hold more than two operands; comparison operators are never tight, so every
+/// gap is one space.
+///
+/// As with [`lower_binary`], only the clean alternating shape is reshaped: any
+/// interleaved comment or newline, error recovery, or a degenerate operand count
+/// falls back to the verbatim transparent lowering.
+fn lower_comparison(node: &SyntaxNode) -> Ir {
+    // Children in source order, with incidental whitespace dropped: operands
+    // become lowered `Ir`, operator tokens become their text. The result must
+    // alternate operand, operator, operand, … starting and ending on an operand.
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut expect_operand = true;
+    let mut operand_count = 0usize;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if !expect_operand {
+                    return lower_transparent(node);
+                }
+                if operand_count > 0 {
+                    parts.push(Ir::text(" "));
+                }
+                parts.push(lower_node(&child));
+                operand_count += 1;
+                expect_operand = false;
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE => {
+                    return lower_transparent(node);
+                }
+                _ => {
+                    if expect_operand {
+                        return lower_transparent(node);
+                    }
+                    parts.push(Ir::text(" "));
+                    parts.push(Ir::text(tok.text().to_string()));
+                    expect_operand = true;
+                }
+            },
+        }
+    }
+
+    // A well-formed chain ends on an operand and has at least two of them.
+    if expect_operand || operand_count < 2 {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
 }
 
 /// Binary operators the target style keeps tight (no surrounding spaces).

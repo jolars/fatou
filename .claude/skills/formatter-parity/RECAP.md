@@ -29,45 +29,45 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**6 fixtures**): **4 allowlisted**, 2 blocked
+Dir corpus (**7 fixtures**): **5 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
-Rules landed: operator/assignment spacing (`lower_binary`).
+Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
+(`lower_comparison`).
 
-## Latest session (bootstrap)
+## Latest session (comparison chains)
 
-Built the formatter's Runic differential oracle from scratch and landed the first
-layout rule:
+Landed `COMPARISON_EXPR` spacing:
 
-- **Rule**: `src/formatter/rules.rs` with `lower`/`lower_node`/`lower_transparent`
-  and `lower_binary` — `BINARY_EXPR`/`ASSIGNMENT_EXPR` get one space on each side
-  of the operator, except the tight `^`. `core::format_with_style` now routes
-  through `rules::lower` instead of the verbatim-collect passthrough. Bails to
-  transparent on any non-whitespace trivia / non-2-operand shape.
-- **Oracle infra**: `scripts/update-runic-corpus.{sh,jl}` (mirror of the
-  JuliaSyntax ones; `Runic.format_string` → `expected.jl`, pins `.runic-source`),
-  `tests/runic_oracle.rs` (allowlist gate + `runic_full_report` ignored triage +
-  disjoint/coverage checks), `tests/oracle/runic-{allowlist,blocked}.txt`,
-  `runic-report.txt` gitignored.
-- **Decisions**: direct parity as the gate (strengthens AGENTS.md's soft
-  fixed-point framing for the bootstrap phase); `&&`/`||` canonicalized as spaced
-  (blocked divergence); `^` tight.
-- **LSP/editor**: formatting was already wired in `src/lsp.rs`; added
-  `docs/editors/neovim.md` + README pointer so it's usable from nvim now.
-- **Tests**: `tests/formatter.rs` narrowed to idempotence-only (parity moved to
-  the oracle). All green.
+- **Rule**: `lower_comparison` in `src/formatter/rules.rs`. The node alternates
+  operand/operator and may hold >2 operands (`a == b == c`); comparison ops are
+  never tight, so every gap is one space. Walks children in source order,
+  dropping incidental whitespace, building `[operand, " ", op, " ", operand, …]`.
+  Bails to `lower_transparent` on any interleaved comment/newline, a
+  non-alternating shape, or `<2` operands.
+- **Fixture**: `comparison_chains/` (`a==b`, `a<b<=c`, `1<2<3<4`, `i<=n>=0`,
+  `x != y`). Parity holds; allowlisted.
+- **Trap found**: Fatou's **lexer** mis-tokenizes `===`, `!==`, and tight `x!=y`
+  (`x!` is read as an identifier). These are **parser gaps**, not formatter bugs —
+  the formatter correctly bails to transparent on the resulting ERROR nodes. Kept
+  them out of the fixture; spaced `!=` works fine. Revisit when the parser grows
+  `===`/`!==`.
 
 ### Ranked next targets
 
-1. **Comparison chains** (`COMPARISON_EXPR`: `a == b == c`) — Runic spaces them;
-   currently lowered transparently. Small, high-value.
-2. **Calls / arg-lists** (`CALL_EXPR`/`ARG_LIST`): normalize `f( a ,b )` →
+1. **Calls / arg-lists** (`CALL_EXPR`/`ARG_LIST`): normalize `f( a ,b )` →
    `f(a, b)` — comma spacing, no inner-paren padding. Watch the break/group case
    for long arg lists (needs `Ir::group` + `Ir::Line`).
-3. **Unary** (`UNARY_EXPR`): `- a` → `-a`; confirm Runic.
-4. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
+2. **Unary** (`UNARY_EXPR`): `- a` → `-a`; confirm Runic.
+3. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
 
 ## Earlier sessions
 
-(none yet — this is the bootstrap)
+- **bootstrap**: built the Runic differential oracle from scratch
+  (`scripts/update-runic-corpus.{sh,jl}`, `tests/runic_oracle.rs`,
+  `runic-{allowlist,blocked}.txt`) and landed the first rule, `lower_binary`
+  (`BINARY_EXPR`/`ASSIGNMENT_EXPR` → one space each side, `^` tight; `&&`/`||`
+  canonicalized-spaced and blocked as a Tenet-1 divergence). `core::format` now
+  routes through `rules::lower`; `tests/formatter.rs` narrowed to idempotence.
+  Wired nvim formatting docs.

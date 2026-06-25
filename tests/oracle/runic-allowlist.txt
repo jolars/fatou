@@ -6,4 +6,5 @@
 assignment
 assignment_spacing
 binary_spacing
+comparison_chains
 tight_operators
