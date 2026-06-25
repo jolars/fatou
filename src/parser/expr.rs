@@ -2647,6 +2647,13 @@ struct SepRun {
     toks: Vec<usize>,
     semis: usize,
     has_newline: bool,
+    /// A newline appears *after* the last `;` in the run (`;; \n` but not
+    /// `\n ;;`). Only this position makes a `;;` a line continuation.
+    newline_after_semis: bool,
+    /// A `;;` immediately followed by a newline inside a row-major array: a line
+    /// continuation that JuliaSyntax treats like a space separator
+    /// (`[a b ;; \n c]` ⇒ `(hcat a b c)`), so its effective dimension is 0.
+    continuation: bool,
 }
 
 impl SepRun {
@@ -2654,7 +2661,9 @@ impl SepRun {
     /// (`between` = false) only separates via `;` — a trailing newline is just
     /// whitespace (`[x\n]` is a `vect`, not a `vcat`).
     fn dim(&self, between: bool) -> usize {
-        if self.semis > 0 {
+        if self.continuation {
+            0
+        } else if self.semis > 0 {
             self.semis
         } else if self.has_newline && between {
             1
@@ -2732,12 +2741,22 @@ fn parse_matrix(
             toks: Vec::new(),
             semis: 0,
             has_newline: false,
+            newline_after_semis: false,
+            continuation: false,
         };
         let mut q = pos;
         while let Some(k) = ctx.token(q).map(|t| t.kind) {
             match k {
-                TokKind::Semicolon => run.semis += 1,
-                TokKind::Newline => run.has_newline = true,
+                TokKind::Semicolon => {
+                    run.semis += 1;
+                    run.newline_after_semis = false;
+                }
+                TokKind::Newline => {
+                    run.has_newline = true;
+                    if run.semis > 0 {
+                        run.newline_after_semis = true;
+                    }
+                }
                 TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment => {}
                 _ => break,
             }
@@ -2819,13 +2838,16 @@ fn parse_matrix(
     // single `;`, newlines, and `;;;`-or-longer runs are order-neutral. We record
     // each conflict as a diagnostic at the element's end byte; the projector
     // reconstructs the marker. (A `;;` immediately followed by a newline is a line
-    // continuation collapsing to `hcat` rather than a conflict; that structural
-    // case is not handled here, so `[a b ;; \n c]` stays divergent.)
+    // continuation collapsing to `hcat` rather than a conflict: a `;;` directly
+    // followed by a newline inside an already-row-major array behaves exactly
+    // like a space separator (`[a b ;; \n c]` ⇒ `(hcat a b c)`), so we mark it a
+    // continuation — dimension 0, no conflict.)
     let mut order = ArrayOrder::Unknown;
     for k in 0..n.saturating_sub(1) {
-        let sep = &seps[k];
-        let is_space = sep.semis == 0 && !sep.has_newline;
-        let is_double_semi = sep.semis == 2;
+        let is_space = seps[k].semis == 0 && !seps[k].has_newline;
+        let is_double_semi = seps[k].semis == 2;
+        let newline_after_semis = seps[k].newline_after_semis;
+        let mut continuation = false;
         let conflict = match order {
             ArrayOrder::Unknown => {
                 if is_space {
@@ -2835,9 +2857,17 @@ fn parse_matrix(
                 }
                 false
             }
-            ArrayOrder::RowMajor => is_double_semi,
+            ArrayOrder::RowMajor => {
+                if is_double_semi && newline_after_semis {
+                    continuation = true;
+                    false
+                } else {
+                    is_double_semi
+                }
+            }
             ArrayOrder::ColumnMajor => is_space,
         };
+        seps[k].continuation = continuation;
         if conflict {
             let anchor = tokens[elems[k].end - 1].end;
             push_diagnostic(

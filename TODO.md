@@ -289,9 +289,20 @@ through), so the grammar can grow incrementally.
   `ArraySeparatorMismatch` diagnostic at the offending element's end byte;
   `project_cat_children` reconstructs the marker after the bare `ARG` it anchors
   to (the row recursion handles in-row markers). Fixture
-  `array_separator_mismatch`. JS 627 → 630; dir 148 → 149. Deferred: `;;`
-  immediately before a newline is a line continuation collapsing to `hcat`
-  (`[a b ;; \n c]` ⇒ `(hcat a b c)`), a structural change not handled here.
+  `array_separator_mismatch`. JS 627 → 630; dir 148 → 149.
+- [x] Array `;;` line continuation collapsing to `hcat`. A `;;` directly followed
+  by a newline (`;; \n`, not `\n ;;`) inside an already-row-major array (a plain
+  space separator seen first) is not a conflict but a line continuation that
+  JuliaSyntax folds into the row, so its effective dimension is 0
+  (`[a b ;; \n c]` ⇒ `(hcat a b c)`, `[1 2 ;; \n 3 4 ;;; \n 5 6 ;; \n 7 8]` ⇒
+  `(ncat-3 (row 1 2 3 4) (row 5 6 7 8))`); a column-major `[a ;; \n b]` stays
+  `(ncat-2 a b)`. `parse_matrix` marks the `SepRun` a `continuation`
+  (`dim` ⇒ 0, no `ArraySeparatorMismatch`) using its global `ArrayOrder`;
+  `group_dimension` re-derives the same row-major order locally and counts a
+  continuation run as 0. No diagnostic (valid syntax). Fixture
+  `array_line_continuation`. JS 665 → 666; dir 173 → 174. Deferred: a continuation
+  whose establishing space lives in an outer group (`[a b ;;; c ;; \n d]`) — the
+  projector's local order doesn't see it; not in corpus.
 - [x] Missing operator right-operand `(error)` (error-shape slice, diagnostics
   model). Any infix/assignment operator whose right operand is absent keeps its
   node and synthesizes a zero-width `(error)` there (`x =` ⇒ `(= x (error))`,

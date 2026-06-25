@@ -1269,29 +1269,53 @@ fn project_cat_child(node: &SyntaxNode) -> String {
 /// the runs lying *between* direct child nodes (a `;` run counts its length, a
 /// newline counts 1), plus any trailing semicolon run after the last child
 /// (a trailing newline does not separate, so it is ignored).
+///
+/// A `;;` immediately followed by a newline (`;; \n`) inside a row-major group —
+/// one where a plain space separator was already seen — is a *line continuation*
+/// that JuliaSyntax folds into the row, so it counts as dimension 0 rather than
+/// 2 (`[a b ;; \n c]` ⇒ `(hcat a b c)`). We re-derive the row-major order locally
+/// the same way JuliaSyntax does (first space ⇒ row-major).
 fn group_dimension(node: &SyntaxNode) -> usize {
     let mut d = 0;
     let mut seen_node = false;
+    let mut row_major = false;
     let mut semis = 0usize;
     let mut newline = false;
+    let mut newline_after_semis = false;
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Node(n) if matches!(n.kind(), ARG | MATRIX_ROW) => {
                 if seen_node {
-                    let run = if semis > 0 {
+                    let is_space = semis == 0 && !newline;
+                    let continuation = semis == 2 && newline_after_semis && row_major;
+                    let run = if continuation {
+                        0
+                    } else if semis > 0 {
                         semis
                     } else {
                         usize::from(newline)
                     };
+                    if is_space {
+                        row_major = true;
+                    }
                     d = d.max(run);
                 }
                 seen_node = true;
                 semis = 0;
                 newline = false;
+                newline_after_semis = false;
             }
             NodeOrToken::Token(t) => match t.kind() {
-                SEMICOLON => semis += 1,
-                NEWLINE => newline = true,
+                SEMICOLON => {
+                    semis += 1;
+                    newline_after_semis = false;
+                }
+                NEWLINE => {
+                    newline = true;
+                    if semis > 0 {
+                        newline_after_semis = true;
+                    }
+                }
                 _ => {}
             },
             _ => {}

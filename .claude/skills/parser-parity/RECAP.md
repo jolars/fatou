@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **665 allowlisted**,
-20 divergence, 0 unsupported. Dir corpus: **173 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **666 allowlisted**,
+19 divergence, 0 unsupported. Dir corpus: **174 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,34 +58,50 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25a — invalid bracketed macro name `@[x]`)
+## Latest session (2026-06-25b — array `;;` line continuation → `hcat`)
 
-**A `[`/`{` directly after `@` is an invalid macro name** (one slice of the macro
-cluster, flips js-b2e95475 `@[x] y z`). JuliaSyntax parses the bracketed
-expression and error-wraps it as the macro name, with space-form args still
-following: `@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`, `@{x} y` ⇒
-`(macrocall (error (braces x)) y)`, `@[x]` ⇒ `(macrocall (error (vect x)))`. The
-bug before: `@` followed by `[` fell through to the empty-name fallthrough, and
-`parse_macro_args`'s bracket-arg arm ate `[x]` as `@`'s argument (`(macrocall @.
-(vect x))`), leaving `y z` as toplevel trailing junk. A name identifier before the
-bracket — `@m[a]` — never reaches the new arm (the `Ident` arm consumes `m` and
-`[a]` is the argument), so it's untouched. Three-file fix mirroring the
-export/catch error-wrap pattern: a new `LBracket`/`LBrace` arm in
-`parse_macro_name_body` (`expr.rs`) calls `parse_prefix` to parse the bracketed
-expression as the `MACRO_NAME` body and records a new `InvalidMacroName`
-zero-width diagnostic at its start (`diagnostics.rs`); `project_macro_name`
-(`sexpr.rs`) checks the name's first child node for that diagnostic and emits
-`(error <projection>)`. Fixture + oracle-dir `macro_name_brackets`. JS 664 → 665
-(zero regressions); dir 172 → 173. Green; clippy/fmt clean. **Next target (no
-active plan):** the remaining macro cluster siblings are each a *distinct* error
-head — `@(x+y)` ⇒ `(error-i x + y)`, `@(f(x))` ⇒ `(error f x)`, `@:foo` ⇒ `(error
-(quote-: foo))`, `@M.(x)` ⇒ `(dotcall @M (error-t) x)`, `A.@B.x`/`@A.$x a`/`@A.B.@x
-a` (dotted-name `@` reflow) — pick one, none cluster cleanly; or the bare block
-keyword `function` (js-78f9ac01, item g, ~2 sessions). The ternary-in-block family
+**A `;;` directly followed by a newline inside a row-major array is a line
+continuation, not a conflict** (flips js-82572497 `[a b ;; \n c]` ⇒
+`(hcat a b c)`; deferred root (c)). JuliaSyntax establishes row-/column-major
+order from the first space/`;;` separator; a `;;` (exactly two) immediately
+followed by a newline (`;; \n`, *not* `\n ;;`) in an *already-row-major* array
+behaves exactly like a space separator (dim 0, folds into the row), so
+`[a b ;; \n c]` ⇒ `(hcat a b c)` and `[1 2 ;; \n 3 4 ;;; \n 5 6 ;; \n 7 8]` ⇒
+`(ncat-3 (row 1 2 3 4) (row 5 6 7 8))`; a column-major `[a ;; \n b]` (no prior
+space) stays `(ncat-2 a b)`. **No diagnostic — valid syntax.** Two-file
+structural fix (no side-channel): `parse_matrix` (`expr.rs`) tracks a new
+`SepRun.newline_after_semis` + `continuation` flag, set in the existing *global*
+`ArrayOrder` loop (RowMajor + `;;` + newline-after-semis ⇒ `continuation`, no
+`ArraySeparatorMismatch`); `SepRun::dim` returns 0 for a continuation, so the CST
+flattens. `group_dimension` (`sexpr.rs`) re-derives the same row-major order
+*locally* (first pure-space run ⇒ row-major) and counts a continuation `;;`-run
+as 0, so the head is `hcat`/`ncat-d`. Parser-global + projector-local agree on
+every corpus/fixture case (the parser's grouping puts a local space in each
+`MATRIX_ROW`). Fixture + oracle-dir `array_line_continuation`. JS 665 → 666 (zero
+regressions); dir 173 → 174. Green; clippy/fmt clean. **Deferred:** a continuation
+whose establishing space lives in an *outer* group (`[a b ;;; c ;; \n d]` ⇒
+`(ncat-3 (row a b) (row c d))`) — the projector's *local* order can't see it;
+not in corpus, stays divergent. **Next target (no active plan):** the macro
+cluster siblings (`@M.(x)`, `A.@B.x`, `@A.$x a`, `@A.B.@x a` — dotted-name `@`
+reflow, each distinct, none cluster cleanly); the bare block keyword `function`
+(js-78f9ac01, item g, ~2 sessions); or `a[:(end)]` (js-557adcf4 — needs trailing
+junk inside `typed_hcat` + toplevel junk). The ternary-in-block family
 (js-434fcafd/810e177c/74a9b301/471d5c84) is gated on the diagnostics-model
-"Design watch" in `TODO.md` (head flips `?`↔`if` by enclosing context).
+"Design watch" in `TODO.md`.
 
 ## Earlier sessions
+
+- **2026-06-25a** — Invalid bracketed macro name `@[x]` (one macro-cluster slice,
+  flips js-b2e95475 `@[x] y z`). A `[`/`{` directly after `@` is parsed as the
+  bracketed expression and error-wrapped as the macro name with space-form args
+  following (`@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`, `@{x} y` ⇒
+  `(macrocall (error (braces x)) y)`); `@m[a]` (name before bracket) untouched.
+  New `LBracket`/`LBrace` arm in `parse_macro_name_body` + `InvalidMacroName` diag
+  + `project_macro_name` error-wrap. Fixture `macro_name_brackets`. JS 664 → 665;
+  dir 172 → 173. Remaining macro-cluster siblings are each a distinct error head:
+  `@(x+y)` ⇒ `(error-i x + y)`, `@(f(x))` ⇒ `(error f x)`, `@:foo` ⇒
+  `(error (quote-: foo))`, `@M.(x)` ⇒ `(dotcall @M (error-t) x)`, `A.@B.x`/
+  `@A.$x a`/`@A.B.@x a` (dotted-name `@` reflow) — none cluster cleanly.
 
 - **2026-06-24p** — Parenthesized `export` item (backlog item h, `export (x::T)`,
   flips js-62113d6b). A paren wrapping a lone symbol unwraps (`export (x)` ⇒ `x`,
@@ -359,11 +375,8 @@ sessions; (h) **misc error shapes** — `:(end)`, `a[:(end)]`, `export (x::T)`,
 stop-at-`=`** — `outer x=1` ⇒ `outer (error-t x = 1)` (`outer` is the bare value,
 the whole `x = 1` is junk, unlike `public`); (b) **for/let/module/struct/try/do
 block junk** — sibling `ERROR` is in the CST but their explicit projectors don't
-emit it (only `if`/`while`/`begin`/`quote` do); (c) **`;;\n` line-continuation →
-`hcat`** (js-82572497, `[a b ;; \n c]` ⇒ `(hcat a b c)`): a `;;` right before a
-newline in a *row-major* array is a continuation (dim drops, collapsing to
-`hcat`), but in a *column-major* one (`[a ;; \n b]`) stays a plain `;;` — needs
-newline-after-last-`;` tracking in `SepRun` + a structural dim override.
+emit it (only `if`/`while`/`begin`/`quote` do). (Root (c), `;;\n`
+line-continuation, was done 2026-06-25b.)
 
 - **2026-06-23k** — Flat trailing-junk runs (toplevel): a separator-less line's
   leftover bumps as *flat error tokens* (`x y, z` ⇒ `x (error-t y ✘ z)`,
