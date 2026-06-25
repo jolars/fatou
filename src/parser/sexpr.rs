@@ -1115,7 +1115,16 @@ fn project_args(container: &SyntaxNode) -> Vec<String> {
     for el in significant(container) {
         match el {
             NodeOrToken::Node(n) => match n.kind() {
-                ARG => out.push(project_first(&n)),
+                ARG => {
+                    out.push(project_first(&n));
+                    // A misplaced-`end` recovery in a bracket that collapsed to a
+                    // `vect` (`[1 end]` ⇒ `(vect 1 (error-t))`) splices a zero-width
+                    // marker after the last real element, like its matrix sibling.
+                    let end = usize::from(n.text_range().end());
+                    for _ in 0..diag_count_at(end, DiagnosticKind::MatrixKeywordRecovery) {
+                        out.push("(error-t)".to_string());
+                    }
+                }
                 KEYWORD_ARG => out.push(project_keyword_arg(&n)),
                 PARAMETERS => out.push(project_parameters(&n)),
                 _ => out.push(project(&n)),
@@ -1238,6 +1247,9 @@ fn project_cat_children(children: &[SyntaxNode]) -> Vec<String> {
         if child.kind() == ARG {
             let end = usize::from(child.text_range().end());
             for _ in 0..diag_count_at(end, DiagnosticKind::ArraySeparatorMismatch) {
+                out.push("(error-t)".to_string());
+            }
+            for _ in 0..diag_count_at(end, DiagnosticKind::MatrixKeywordRecovery) {
                 out.push("(error-t)".to_string());
             }
         }

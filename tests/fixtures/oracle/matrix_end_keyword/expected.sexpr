@@ -1,0 +1,1 @@
+(toplevel (typed_hcat a (quote-: (error-t)) (error-t)) (error-t end ✘ ✘) (typed_hcat a 1 (error-t)) (error-t end ✘) (typed_hcat a 1 2 (error-t)) (error-t end ✘) (vect 1 (error-t)) (error-t end ✘) (hcat 1 2 (error-t)) (error-t end ✘) (vcat 1 (error-t)) (error-t end ✘) (braces 1 (error-t)) (error-t end ✘))

@@ -62,6 +62,14 @@ pub enum DiagnosticKind {
     /// zero-width `(error-t)` after the element preceding it. Anchored at that
     /// element's end byte.
     ArraySeparatorMismatch,
+    /// A misplaced `end` keyword as a non-leading space-separated array element
+    /// (`a[1 end]`, `[1 2 end]`, `a[:(end)]`) — `end` is only a valid index marker
+    /// as the sole/leading element, so JuliaSyntax stops the array, splices a
+    /// zero-width `(error-t)` after the last real element, and bumps the `end` plus
+    /// the remaining closers up as a trailing-junk run (`a[1 end]` ⇒
+    /// `(typed_hcat a 1 (error-t)) (error-t end ✘)`). Anchored at the last parsed
+    /// element's end byte.
+    MatrixKeywordRecovery,
 
     // --- zero-width point driving a *wrapping* `(error …)` reconstruction: the
     // CST topology is faithful; the projector wraps the whole node from the

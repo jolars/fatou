@@ -1,0 +1,110 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..65
+  TYPED_MATRIX_EXPR@0..4
+    NAME@0..1
+      IDENT@0..1 "a"
+    MATRIX_EXPR@1..4
+      LBRACKET@1..2 "["
+      ARG@2..4
+        QUOTE_SYM@2..4
+          COLON@2..3 ":"
+          LPAREN@3..4 "("
+  ERROR@4..9
+    END_KW@4..7 "end"
+    RPAREN@7..8 ")"
+    RBRACKET@8..9 "]"
+  NEWLINE@9..10 "\n"
+  TYPED_MATRIX_EXPR@10..14
+    NAME@10..11
+      IDENT@10..11 "a"
+    MATRIX_EXPR@11..14
+      LBRACKET@11..12 "["
+      ARG@12..13
+        LITERAL@12..13
+          INTEGER@12..13 "1"
+      WHITESPACE@13..14 " "
+  ERROR@14..18
+    END_KW@14..17 "end"
+    RBRACKET@17..18 "]"
+  NEWLINE@18..19 "\n"
+  TYPED_MATRIX_EXPR@19..25
+    NAME@19..20
+      IDENT@19..20 "a"
+    MATRIX_EXPR@20..25
+      LBRACKET@20..21 "["
+      ARG@21..22
+        LITERAL@21..22
+          INTEGER@21..22 "1"
+      WHITESPACE@22..23 " "
+      ARG@23..24
+        LITERAL@23..24
+          INTEGER@23..24 "2"
+      WHITESPACE@24..25 " "
+  ERROR@25..29
+    END_KW@25..28 "end"
+    RBRACKET@28..29 "]"
+  NEWLINE@29..30 "\n"
+  VECT_EXPR@30..33
+    LBRACKET@30..31 "["
+    ARG@31..32
+      LITERAL@31..32
+        INTEGER@31..32 "1"
+    WHITESPACE@32..33 " "
+  ERROR@33..37
+    END_KW@33..36 "end"
+    RBRACKET@36..37 "]"
+  NEWLINE@37..38 "\n"
+  MATRIX_EXPR@38..43
+    LBRACKET@38..39 "["
+    ARG@39..40
+      LITERAL@39..40
+        INTEGER@39..40 "1"
+    WHITESPACE@40..41 " "
+    ARG@41..42
+      LITERAL@41..42
+        INTEGER@41..42 "2"
+    WHITESPACE@42..43 " "
+  ERROR@43..47
+    END_KW@43..46 "end"
+    RBRACKET@46..47 "]"
+  NEWLINE@47..48 "\n"
+  MATRIX_EXPR@48..52
+    LBRACKET@48..49 "["
+    ARG@49..50
+      LITERAL@49..50
+        INTEGER@49..50 "1"
+    SEMICOLON@50..51 ";"
+    WHITESPACE@51..52 " "
+  ERROR@52..56
+    END_KW@52..55 "end"
+    RBRACKET@55..56 "]"
+  NEWLINE@56..57 "\n"
+  BRACES@57..60
+    LBRACE@57..58 "{"
+    ARG@58..59
+      LITERAL@58..59
+        INTEGER@58..59 "1"
+    WHITESPACE@59..60 " "
+  ERROR@60..64
+    END_KW@60..63 "end"
+    RBRACE@63..64 "}"
+  NEWLINE@64..65 "\n"
+
+diagnostic [4..4]: expected expression after `:(`
+diagnostic [4..4]: misplaced `end` in array
+diagnostic [4..7]: trailing tokens after statement
+diagnostic [13..13]: misplaced `end` in array
+diagnostic [14..17]: trailing tokens after statement
+diagnostic [24..24]: misplaced `end` in array
+diagnostic [25..28]: trailing tokens after statement
+diagnostic [32..32]: misplaced `end` in array
+diagnostic [33..36]: trailing tokens after statement
+diagnostic [42..42]: misplaced `end` in array
+diagnostic [43..46]: trailing tokens after statement
+diagnostic [50..50]: misplaced `end` in array
+diagnostic [52..55]: trailing tokens after statement
+diagnostic [59..59]: misplaced `end` in array
+diagnostic [60..63]: trailing tokens after statement

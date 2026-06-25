@@ -102,6 +102,7 @@ macros
 macro_sigil_leading
 macro_sigil_trailing
 matrices
+matrix_end_keyword
 multi_clause_generators
 multi_param_groups
 ncat

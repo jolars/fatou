@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **675 allowlisted**,
-10 divergence, 0 unsupported. Dir corpus: **179 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **676 allowlisted**,
+9 divergence, 0 unsupported. Dir corpus: **180 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,40 +58,53 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25g — leading-`@` dotted macro `$`/inner-`@` reflow)
+## Latest session (2026-06-25h — misplaced `end` keyword in space-separated array)
 
-**The final two macro dotted-name reflows now match JuliaSyntax** (flips
-js-704830e1 `@A.$x a` and js-fe911108 `@A.B.@x a`), closing the macro dotted-name
-cluster. A leading-`@` macro whose dotted path carries an interpolation or a
-second sigil relocates the macro sigil onto the **final** component and recovers
-the excess with zero-width markers: final `$x` ⇒ `(inert (error x))` (`@A.$x a` ⇒
-`(macrocall (. A (inert (error x))) a)`); doubled sigil ⇒ `(quote (error-t) @x)`
-(`@A.B.@x a` ⇒ `(macrocall (. (. A (quote B)) (quote (error-t) @x)) a)`). A
-**non-final** `$x` is a *valid* `(inert ($ x))` with no recovery (`@A.$x.y` ⇒ `(.
-(. A (inert ($ x))) (quote @y))`). **CST stays flat/lossless** (the name's
-`@ A . $ x` tokens). Parser: `parse_macro_name_body`'s Ident arm now consumes the
-full `.ident`/`.$ident`/`.@ident` chain and records a new `MacroSigilLeading` diag
-at the `@` when the path is invalid (final `$` or any inner/extra `@`). Projector:
-new `project_leading_macro_path` (entered structurally on a `.$`/`.@` step) walks
-the tokens and applies a single rule set — non-final ident `(quote B)`, final ident
-`(quote @x)`, non-final `$x` `(inert ($ x))`, final `$x` `(inert (error x))`, any
-`@x` `(quote (error-t) …)`, plus an `(error-t)` in the final dot-step when an inner
-`@` exists — gating the error pieces on the diag. This rule set reproduces **all
-10** probed forms incl. the exotic doubled-`@` ones (`@A.@B.x`, `@A.@B`,
-`@A.$x.@y`, `@A.$x.$y`, `@A.b.$x`), though only the two are in the corpus. Valid
-`@A.x`/`@A.B.x`/`@$x`/`Base.@time f()`/`@time` verified untouched. Fixture +
-oracle-dir `macro_sigil_leading`. JS 673 → 675 (zero regressions); dir 178 → 179.
-Green; clippy/fmt clean. **Next target (no active plan):** `a[:(end)]`
-(js-557adcf4), which first needs the general `a[1 end]` keyword-in-matrix recovery
-(Fatou silently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`; Julia wants
-`(typed_hcat a 1 (error-t)) (error-t end ✘)` — a chunk). The rest of the 10-case
-FAIL set is float-display normalization (blocked: `1.0e-1000`, `x.3`, `-0xf.0p0`,
-`0x123456789abcdefp+0`, prime+float `10.0e1000'`/`10.0f100'`), `f.'`/`x 'y`
-char-lexer, and `(2)(3)x` (out of scope). The macro dotted-name cluster is now
-fully cleared.
+**The last addressable matrix-recovery FAIL now matches JuliaSyntax** (flips
+js-557adcf4 `a[:(end)]`). `end` is a valid index marker only as the sole/leading
+bracket element; once another element precedes it (`a[1 end]`, `[1 2 end]`,
+`a[:(end)]`) JuliaSyntax stops the array, splices a zero-width `(error-t)` after
+the last real element, and bumps the `end` plus the remaining closers up as a
+trailing-junk run handled by the top-level leftover driver:
+`a[1 end]` ⇒ `(typed_hcat a 1 (error-t)) (error-t end ✘)`,
+`[1 end]` ⇒ `(vect 1 (error-t)) (error-t end ✘)`,
+`a[:(end)]` ⇒ `(typed_hcat a (quote-: (error-t)) (error-t)) (error-t end ✘ ✘)`.
+**Parser:** a new `EndKw` arm in `parse_matrix`'s scan loop (`expr.rs`) ends the
+array *before* the keyword — `break q` without consuming a closer — and records a
+new `MatrixKeywordRecovery` diag at the last element's end byte; the unconsumed
+`end <closers>` then flows to the existing `core.rs` leftover driver (so the `✘`
+glyphs and `end` text come for free). **Projector:** `project_cat_children` *and*
+`project_args` splice one `(error-t)` per `MatrixKeywordRecovery` diag at an `ARG`
+end (the bare-`[…]` n=1 collapse goes through `VECT_EXPR`/`project_args`, the
+matrix/braces forms through `project_cat_children`). **Head selection:** a typed
+concat keeps its matrix head even at one element — `parse_typed_concat` rewrites
+the collapsed `VECT_EXPR` start event to `MATRIX_EXPR` when the recovery fired —
+while a bare `[…]` stays `vect`/`hcat`/`vcat` by element count + separator (all
+verified vs Julia: `[1 end]`→vect, `[1 2 end]`→hcat, `[1; end]`→vcat,
+`{1 end}`→braces). CST stays flat/lossless. Valid `a[end]`/`a[1, end]`/`a[1:end]`/
+`a[1 2]` untouched. Fixture + oracle-dir `matrix_end_keyword`. JS 675 → 676 (zero
+regressions); dir 179 → 180. Green; clippy/fmt clean. **Next target (no active
+plan):** the JS corpus is effectively exhausted — the remaining **9 divergences**
+are all permanent/out-of-scope: float-display normalization (`1.0e-1000`, `x.3`,
+`-0xf.0p0`, `0x123456789abcdefp+0`, prime+float `10.0e1000'`/`10.0f100'` — needs
+Julia's `show`), `f.'`/`x 'y` char-lexer (entangled with the removed transpose
+`'`/`.'` operators), and `(2)(3)x` (`(2)(3)`→`(call 2 3)` n-ary juxtaposition
+misparse, out of scope). Future growth is **error-shape parity** (a separate
+phase) or a JuliaSyntax version bump (re-harvest + re-triage). Consider the
+char-lexer pair as the one remaining non-display target if the transpose operator
+is reintroduced.
 
 ## Earlier sessions
 
+- **2026-06-25g** — Leading-`@` dotted macro `$`/inner-`@` reflow (flips
+  js-704830e1 `@A.$x a`, js-fe911108 `@A.B.@x a`; closes the macro dotted-name
+  cluster). A leading-`@` macro whose dotted path carries an interpolation or a
+  second sigil relocates the sigil onto the **final** component and recovers the
+  excess with zero-width markers (final `$x` ⇒ `(inert (error x))`; doubled sigil ⇒
+  `(quote (error-t) @x)`); a non-final `$x` is a valid `(inert ($ x))`.
+  `parse_macro_name_body` consumes the full `.ident`/`.$ident`/`.@ident` chain +
+  `MacroSigilLeading` diag; `project_leading_macro_path` replays. Fixture
+  `macro_sigil_leading`. JS 673 → 675; dir 178 → 179.
 - **2026-06-25f** — Misplaced macro sigil `A.@B.x` (trailing form; flips
   js-27604c64). A `@` on a non-final component with a `.ident` continuation
   relocates the sigil to the final component, splicing `(error-t)` at every dotted

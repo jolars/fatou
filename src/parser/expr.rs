@@ -2779,6 +2779,27 @@ fn parse_matrix(
             // `(hcat x (error-t ✘ y))`, `[a b@c]` ⇒ `(hcat a b (error-t ✘ c))`).
             // A spaced `@` (`[x @y]`) keeps a real separator run and stays a
             // macrocall element, so the run must be empty to trigger this.
+            // A misplaced `end` keyword as a non-leading array element: `end` is a
+            // valid index marker only as the sole/leading element, so once another
+            // element precedes it (`a[1 end]`, `[1 2 end]`, `a[:(end)]`) JuliaSyntax
+            // stops the array, splices a zero-width `(error-t)` after the last real
+            // element, and bumps the `end` plus the remaining closers up as a
+            // trailing-junk run handled by the top-level leftover driver. We stop
+            // the array *before* the `end` (without consuming the closer) and record
+            // a `MatrixKeywordRecovery` diagnostic at the last element's end; the
+            // projector splices the marker and the leftover driver renders the run.
+            Some(TokKind::EndKw) => {
+                seps.push(run);
+                let anchor = tokens[elems[elems.len() - 1].end - 1].end;
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::MatrixKeywordRecovery,
+                    "misplaced `end` in array",
+                    anchor,
+                    anchor,
+                );
+                break q;
+            }
             Some(TokKind::At) if run.toks.is_empty() => {
                 seps.push(run);
                 let mut j = q;
@@ -3441,7 +3462,7 @@ fn parse_typed_concat(
             None
         }
         _ => {
-            let body = parse_matrix(
+            let mut body = parse_matrix(
                 ctx,
                 open_idx,
                 first,
@@ -3451,6 +3472,19 @@ fn parse_typed_concat(
                 end_marker,
                 diagnostics,
             );
+            // A misplaced-`end` recovery (`a[1 end]`, `a[:(end)]`) keeps the typed
+            // array head even with a single real element (`(typed_hcat a 1
+            // (error-t))`), unlike a clean lone element. `parse_matrix` collapses a
+            // single element to the comma kind, so rewrite the body node to the
+            // matrix kind when the recovery fired.
+            let recovered = diagnostics[diag_mark..]
+                .iter()
+                .any(|d| d.kind == DiagnosticKind::MatrixKeywordRecovery);
+            if let (true, Some(Event::Start(k @ SyntaxKind::VECT_EXPR))) =
+                (recovered, body.events.first_mut())
+            {
+                *k = SyntaxKind::MATRIX_EXPR;
+            }
             // A lone element with only a trailing newline collapses to the
             // comma kind (`T[x\n]` → `(ref T x)`), so it stays an index.
             if matches!(

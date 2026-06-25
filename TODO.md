@@ -13,6 +13,25 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Misplaced `end` keyword in a space-separated array → `(error-t)` + spilled
+  junk (js-557adcf4, closing the last addressable matrix-recovery FAIL). `end` is
+  a valid index marker only as the sole/leading bracket element, so once another
+  element precedes it (`a[1 end]`, `[1 2 end]`, `a[:(end)]`) JuliaSyntax stops the
+  array, splices a zero-width `(error-t)` after the last real element, and bumps
+  the `end` plus the remaining closers up as a trailing-junk run handled by the
+  top-level leftover driver (`a[1 end]` ⇒ `(typed_hcat a 1 (error-t)) (error-t end
+  ✘)`, `[1 end]` ⇒ `(vect 1 (error-t)) (error-t end ✘)`, `a[:(end)]` ⇒
+  `(typed_hcat a (quote-: (error-t)) (error-t)) (error-t end ✘ ✘)`). A new `EndKw`
+  arm in `parse_matrix`'s scan loop ends the array before the keyword (without
+  consuming a closer) and records a `MatrixKeywordRecovery` diagnostic at the last
+  element's end; `project_cat_children`/`project_args` splice the marker. A typed
+  concatenation keeps its matrix head even at one element (`parse_typed_concat`
+  rewrites the collapsed `VECT_EXPR` to `MATRIX_EXPR` when the recovery fired),
+  while a bare `[…]` stays `vect`/`hcat`/`vcat` by element count and separator.
+  Fixture `matrix_end_keyword`. JS 675 → 676; dir 179 → 180. Deferred: the
+  `else`/`catch`/`elseif`/`finally` siblings (`a[1 else]` recovers with a `ref`
+  head, a different path) and a leading `end` in a bare literal (`[end]` ⇒
+  `(vect (error end))`).
 - [x] Misplaced macro sigil in a qualified macro name `A.@B.x` (a slice of the
   macro dotted-name cluster, js-27604c64). A qualified macro whose `@` names a
   non-final component with a trailing `.ident` continuation is invalid;
@@ -150,8 +169,9 @@ through), so the grammar can grow incrementally.
   (error-t end ✘ ✘)`). Unblocks dir `end_index`; fixtures `end_index` (the
   unblocked case) + `end_marker_propagation`. dir 162 → 164; JS held 647 (no
   corpus micro-case). Deferred: leading `end` in a vector/braces literal (`[end]`
-  ⇒ `(vect (error end))`, `{end}`), `(end)` paren, full matrix `end`-recovery
-  (`[1 2 end]`), and marker propagation into quotes/macro-call args.
+  ⇒ `(vect (error end))`, `{end}`), `(end)` paren, and marker propagation into
+  quotes/macro-call args. (Full matrix `end`-recovery `[1 2 end]` landed later —
+  see the misplaced-`end`-in-array entry above.)
 - [x] Invalid doubled operators `**`/`--` (and broadcast `.**`/`.--`). Julia has
   no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a *single* error
   operator at a fixed low precedence tier (looser than `+`, tighter than `:`/`==`,
@@ -196,8 +216,8 @@ through), so the grammar can grow incrementally.
   child, ends the quote right after it, and records an `EmptyQuoteParen`
   diagnostic at the `(`'s end; `project_quote_sym` reads that diagnostic off the
   loose `(` and emits `(error-t)`. Fixture `quote_paren_empty`. JS 662 → 663; dir
-  170 → 171. Deferred: the bracketed sibling `a[:(end)]` (js-557adcf4) — same
-  quote recovery but adds a `typed_hcat` matrix-structure divergence.
+  170 → 171. The bracketed sibling `a[:(end)]` (js-557adcf4) landed later via the
+  misplaced-`end`-in-array recovery (see above).
 - [x] Invalid bracketed macro name `@[x]`/`@{x}` → error-wrapped name (error-shape
   slice). A `[`/`{` directly after `@` is not a valid macro name: JuliaSyntax
   parses the bracketed expression and error-wraps it as the name, with the
