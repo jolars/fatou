@@ -13,6 +13,23 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Bare block keyword `function`/`macro` empty-recovery shape (the `function`
+  slice of backlog item g, js-78f9ac01). A `function`/`macro` keyword with no
+  signature and no `end` recovers with two zero-width pieces: an empty-signature
+  `(error (error))` and an empty-truncated-body `(block (error))` (`function` ⇒
+  `(function (error (error)) (block (error)) (error-t))`, likewise `macro`). Pure
+  projector, reconstructed from the existing `MissingEnd` diagnostic (same model
+  as `MissingCondition`): `project_block_child` (`sexpr.rs`) appends `(error)`
+  to an *empty* body block when the form carries a `MissingEnd` (general — also
+  corrects `function f()`/`for x in y`, latent), and `project_function_like`
+  emits `(error (error))` when the function/macro has no `SIGNATURE` node
+  (`function;end` ⇒ `(function (error (error)) (block))`). Fixture
+  `bare_function_keyword`. JS 670 → 671; dir 175 → 176. **Deferred (rest of item
+  g):** `struct` (bare-keyword signature is `(error)` not `(error (error))`),
+  `begin`/`while` empty-body `(error)` (different body-projection paths,
+  `project_block_child_folding_error`/`project_each`), and the bare-name
+  truncated signature `function f` ⇒ `(error f)` — each a distinct path, none in
+  the corpus.
 - [x] Incomplete ternary recovered as `if` (the ternary slice of the old
   "Design watch: context-dependent recovery shapes"). When a ternary's missing
   `:`/false-branch is terminated by a *closing block keyword*

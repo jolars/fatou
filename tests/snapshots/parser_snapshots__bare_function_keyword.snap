@@ -1,0 +1,10 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..8
+  FUNCTION_DEF@0..8
+    FUNCTION_KW@0..8 "function"
+    BLOCK@8..8
+
+diagnostic [0..8]: expected `end`

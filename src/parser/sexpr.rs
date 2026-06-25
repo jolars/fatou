@@ -2874,7 +2874,12 @@ fn project_function_like(head: &str, node: &SyntaxNode) -> String {
     // body end`); JuliaSyntax error-wraps the name (`(function (error f) (block
     // body))`). The `InvalidFunctionSignature` diagnostic, anchored at the
     // `SIGNATURE`'s start, marks exactly that case.
-    let sig = if invalid_bare_signature(node) {
+    let sig = if !node.children().any(|c| c.kind() == SIGNATURE) {
+        // No signature at all (`function`, `function;end`) is JuliaSyntax's
+        // empty-signature recovery: an error wrapping an empty error,
+        // `(error (error))`. (`struct`/`module` differ — handled elsewhere.)
+        "(error (error))".to_string()
+    } else if invalid_bare_signature(node) {
         format!("(error {})", project_signature(node))
     } else {
         project_signature(node)
@@ -3005,10 +3010,25 @@ fn stmt_strings(node: &SyntaxNode) -> Vec<String> {
 
 /// The `BLOCK` child of a block-bearing construct, projected (empty if absent).
 fn project_block_child(node: &SyntaxNode) -> String {
-    node.children()
-        .find(|c| c.kind() == BLOCK)
-        .map(|c| project(&c))
-        .unwrap_or_else(|| "(block)".to_string())
+    match node.children().find(|c| c.kind() == BLOCK) {
+        Some(block) => {
+            let mut parts = stmt_strings(&block);
+            // A block form truncated before its `end` (a `MissingEnd` diagnostic)
+            // with an *empty* body gets a zero-width `(error)` placeholder for the
+            // missing first statement: JuliaSyntax tries to parse a statement, hits
+            // the truncation, and synthesizes one (`function f()` ⇒ `(function
+            // (call f) (block (error)) (error-t))`). A body with content, or a
+            // properly closed empty body (`function f() end` ⇒ `(block)`), gets no
+            // such marker.
+            if parts.is_empty()
+                && diag_count_from(keyword_start(node), DiagnosticKind::MissingEnd) > 0
+            {
+                parts.push("(error)".to_string());
+            }
+            sexp("block", parts)
+        }
+        None => "(block)".to_string(),
+    }
 }
 
 /// Append `(error-t)` to `parts` for each `MissingEnd` diagnostic anchored at the

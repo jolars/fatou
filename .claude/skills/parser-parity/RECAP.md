@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **670 allowlisted**,
-15 divergence, 0 unsupported. Dir corpus: **175 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **671 allowlisted**,
+14 divergence, 0 unsupported. Dir corpus: **176 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,38 +58,53 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25c — incomplete ternary recovered as `if`)
+## Latest session (2026-06-25d — bare `function`/`macro` empty-recovery shape)
 
-**An incomplete ternary terminated by a closing block keyword re-heads `?` → `if`**
-(flips js-434fcafd/810e177c/74a9b301/471d5c84, the whole "Design watch:
-context-dependent recovery" ternary cluster). When a ternary's missing
-`:`/false-branch is terminated by `end`/`elseif`/`else`/`catch`/`finally`,
-JuliaSyntax builds a `K"if"` node (not `K"?"`) with one zero-width `(error-t)`
-per missing piece: no colon ⇒ `(if x true (error-t) (error-t))`, colon present
-but false missing ⇒ `(if x true (error-t))`; the keyword spills to the enclosing
-block (or the toplevel-junk driver: `x ? true end` ⇒ `(if x true (error-t)
-(error-t)) (error-t end)`). **Key finding that dissolved the Design watch:** the
-head flip is decided *locally* by the terminator token, **not** the enclosing
-block — even toplevel `x ? true end` re-heads to `if`, while EOF/newline keeps
-`?` (a different, still-divergent toplevel shape, absent from the corpus). So the
-recommended "enclosing-kind tag" was unnecessary; the existing byte+kind anchor
-sufficed. Both missing-branch arms of `parse_ternary` (`expr.rs`) peek
-`is_closing_block_keyword(terminator)`; when true they build a `TERNARY_EXPR`
-(keeping `?`/`:` as loose tokens) + one `IncompleteTernaryIf` diagnostic per
-marker at the `?`'s end. `project_ternary` (`sexpr.rs`) keys the `if` head and
-marker count off `diag_count_at`. Three files (diag kind, parser, projector),
-no enclosing-context machinery. Fixture + oracle-dir `ternary_incomplete_if`.
-JS 666 → 670 (zero regressions); dir 174 → 175. Green; clippy/fmt clean.
-**Deferred:** toplevel incomplete ternary with an EOF/newline terminator (`x ?
-true` ⇒ `(? x true (error-t)…)`, `x ? true :` ⇒ `(? x true (error-t) (error))`) —
-`?`-head, different error count, divergent but not in the corpus. **Next target
-(no active plan):** the macro dotted-name cluster (`@M.(x)`, `A.@B.x`, `@A.$x a`,
-`@A.B.@x a` — each a distinct deep `@`-reflow, none cluster); the bare block
-keyword `function` (js-78f9ac01, item g, ~2 sessions, `(function (error (error))
-(block (error)) (error-t))`); or `a[:(end)]` (js-557adcf4 — second `(error-t)`
-inside `typed_hcat` + matrix truncation + toplevel `(error-t end ✘ ✘)`). The rest
-of the FAIL set is float-display normalization (blocked) plus `f.'`/`x 'y`
-char-lexer and `(2)(3)x` (out of scope).
+**The bare block keyword `function`/`macro` (no signature, no `end`) now matches
+JuliaSyntax's two-part empty recovery** (flips js-78f9ac01, the `function` slice
+of backlog item g). `function` ⇒ `(function (error (error)) (block (error))
+(error-t))`, likewise `macro`. Two zero-width pieces, both **pure projector,
+reconstructed from the already-recorded `MissingEnd` diagnostic** (same model as
+`MissingCondition` — no new parser machinery, no new diagnostic kind):
+(1) `project_block_child` (`sexpr.rs`) now appends `(error)` to an *empty* body
+block whenever the form carries a `MissingEnd` — general, so it *also* corrects
+the latent `function f()` ⇒ `(block (error))` and `for x in y` ⇒ `(block
+(error))` (both diverging-not-passing before, zero regression); a content-bearing
+or properly-closed-empty body (`function f() end` ⇒ `(block)`) is untouched.
+(2) `project_function_like` emits `(error (error))` for the signature when the
+FUNCTION_DEF/MACRO_DEF has **no `SIGNATURE` node** (empty signature) — covers both
+the truncated `function` and the closed `function;end` ⇒ `(function (error
+(error)) (block))`. Valid forms (`function f end` forward-decl, `function f() end`,
+`function f() x end`) verified unchanged. Fixture + oracle-dir
+`bare_function_keyword`. JS 670 → 671 (zero regressions); dir 175 → 176. Green;
+clippy/fmt clean. **Deferred (rest of item g):** `struct` bare keyword (signature
+is `(error)`, single, not `(error (error))`); `begin`/`while` empty-body `(error)`
+(they project bodies via `project_block_child_folding_error`/`project_each`, not
+`project_block_child`); bare-name truncated signature `function f` ⇒ `(error f)` +
+`(block (error))` (the bare-name-with-no-`end` case, distinct from the
+2026-06-24a body-present case) — each a separate path, none in the corpus.
+**Next target (no active plan):** the macro dotted-name cluster (`@M.(x)` ⇒
+`(macrocall (dotcall @M (error-t) x))`, `A.@B.x`, `@A.$x a`, `@A.B.@x a` — each a
+distinct deep `@`-reflow, none cluster), or `a[:(end)]` (js-557adcf4) — but the
+latter first needs the general `a[1 end]` keyword-in-matrix recovery (Fatou
+currently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`), which is itself a
+chunk. The rest of the FAIL set is float-display normalization (blocked) plus
+`f.'`/`x 'y` char-lexer and `(2)(3)x` (out of scope).
+
+## Earlier sessions
+
+- **2026-06-25c** — Incomplete ternary recovered as `if` (flips
+  js-434fcafd/810e177c/74a9b301/471d5c84). A ternary whose missing `:`/false
+  branch is terminated by a closing block keyword (`end`/`elseif`/`else`/`catch`/
+  `finally`) re-heads `?` → `if` with one zero-width `(error-t)` per missing piece
+  (no colon ⇒ `(if x true (error-t) (error-t))`, false missing ⇒ `(if x true
+  (error-t))`). The flip is decided *locally* by the terminator, not the enclosing
+  block (even toplevel `x ? true end` re-heads). Both missing-branch arms of
+  `parse_ternary` peek `is_closing_block_keyword`, build `TERNARY_EXPR` + one
+  `IncompleteTernaryIf` diag per marker at the `?`'s end; `project_ternary` keys
+  the `if` head and count off it. Fixture `ternary_incomplete_if`. JS 666 → 670;
+  dir 174 → 175. Deferred: toplevel EOF/newline-terminated incomplete ternary
+  (stays `?`-head, not in corpus).
 
 ## Earlier sessions
 

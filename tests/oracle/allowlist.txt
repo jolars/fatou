@@ -14,6 +14,7 @@ array_space_call
 array_trailing_junk
 arrow_pipe_bitshift_operators
 augmented_assignment
+bare_function_keyword
 bare_operator
 bare_tuple
 based_int_display
