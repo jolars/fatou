@@ -2043,6 +2043,26 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         return v;
     }
 
+    // Prefix form with a `$`/inner-`@` dotted path (`@A.$x`, `@A.$x.y`,
+    // `@A.B.@x`): JuliaSyntax builds the dotted module path and relocates the
+    // macro sigil onto the final component. A `$` final or any inner/extra `@`
+    // is recovered with zero-width `(error-t)`/`(error …)` (recorded as
+    // `MacroSigilLeading`); a non-final `$` is a *valid* interpolation
+    // (`@A.$x.y`), so the extended path is entered on structure (a `.$`/`.@`
+    // step), not the diagnostic alone. Everything is derived from the lossless
+    // token sequence; the diagnostic only gates the error pieces.
+    let sig_toks: Vec<SyntaxToken> = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|t| matches!(t.kind(), IDENT | DOT | DOLLAR | AT))
+        .collect();
+    if sig_toks
+        .windows(2)
+        .any(|w| w[0].kind() == DOT && matches!(w[1].kind(), DOLLAR | AT))
+    {
+        return project_leading_macro_path(&sig_toks);
+    }
+
     // Prefix form (`@m`, `@A.x`, `@A.B.x`): a flat run of component tokens after
     // the `@`. The last component is the macro name; the rest form the module
     // path, nested left-to-right the same way field access is.
@@ -2075,6 +2095,73 @@ fn project_macro_name(node: &SyntaxNode) -> String {
             format!("(. {path} (quote @{macro_name}))")
         }
     }
+}
+
+/// Project a leading-`@` qualified macro name whose dotted path carries a `$`
+/// interpolation or an inner/extra `@` sigil (`sig_toks` is the name's flat run
+/// of significant tokens `@`, `IDENT`, `.`, `$`/`@`, …). JuliaSyntax builds the
+/// module path left-to-right and relocates the macro sigil onto the final
+/// component:
+/// - a non-final ident is `(quote B)`, the final ident `(quote @x)` (the sigil);
+/// - a non-final `$x` is the valid `(inert ($ x))`, a final `$x` the recovered
+///   `(inert (error x))` (an interpolation cannot take the sigil);
+/// - any `@x` component is a misplaced/extra sigil: inner ⇒ `(quote (error-t) B)`,
+///   final ⇒ `(quote (error-t) @x)`, and an inner `@` also splices a zero-width
+///   `(error-t)` into the final dot step.
+///
+/// The error pieces are gated on the recorded `MacroSigilLeading` diagnostic; a
+/// fully valid path (`@A.$x.y`) carries none and renders without recovery.
+fn project_leading_macro_path(sig_toks: &[SyntaxToken]) -> String {
+    let at_start = usize::from(sig_toks[0].text_range().start());
+    let invalid = diag_at(at_start, DiagnosticKind::MacroSigilLeading);
+
+    // Walk the dotted components after the leading `@` sigil (`sig_toks[0]`).
+    let mut comps: Vec<(SyntaxKind, String)> = Vec::new();
+    let mut i = 1;
+    if sig_toks.get(i).map(|t| t.kind()) == Some(IDENT) {
+        comps.push((IDENT, sig_toks[i].text().to_string()));
+        i += 1;
+    }
+    while sig_toks.get(i).map(|t| t.kind()) == Some(DOT) {
+        i += 1; // `.`
+        match sig_toks.get(i).map(|t| t.kind()) {
+            Some(IDENT) => {
+                comps.push((IDENT, sig_toks[i].text().to_string()));
+                i += 1;
+            }
+            Some(k @ (DOLLAR | AT)) => {
+                let name = sig_toks
+                    .get(i + 1)
+                    .map(|t| t.text().to_string())
+                    .unwrap_or_default();
+                comps.push((k, name));
+                i += 2;
+            }
+            _ => break,
+        }
+    }
+
+    let Some(((_, root), steps)) = comps.split_first() else {
+        return "@.".to_string();
+    };
+    let last = steps.len().saturating_sub(1);
+    let inner_at = steps[..last].iter().any(|(k, _)| *k == AT);
+
+    let mut path = root.clone();
+    for (idx, (kind, name)) in steps.iter().enumerate() {
+        let is_final = idx == last;
+        let step = match (*kind, is_final) {
+            (DOLLAR, true) if invalid => format!("(inert (error {name}))"),
+            (DOLLAR, _) => format!("(inert ($ {name}))"),
+            (AT, true) if invalid => format!("(quote (error-t) @{name})"),
+            (AT, false) if invalid => format!("(quote (error-t) {name})"),
+            (_, true) if invalid && inner_at => format!("(error-t) (quote @{name})"),
+            (_, true) => format!("(quote @{name})"),
+            (_, false) => format!("(quote {name})"),
+        };
+        path = format!("(. {path} {step})");
+    }
+    path
 }
 
 /// The macro-name component text in a trailing-form `MACRO_NAME` — the token

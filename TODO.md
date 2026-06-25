@@ -22,10 +22,24 @@ through), so the grammar can grow incrementally.
   `(error-t)`). The parser records a `MacroSigilTrailing` diagnostic at the `@`
   (in `parse_qualified_macro`, gated on `@ ident . ident`); `project_macro_name`
   replays it, leaving valid `A.B.@x`/`@A.B.x`/`Base.@time f()` untouched. Fixture
-  `macro_sigil_trailing`. JS 672 → 673; dir 177 → 178. **Deferred:** the other
-  two dotted-name reflows `@A.$x a` (`(macrocall (. A (inert (error x))) a)`) and
-  `@A.B.@x a` (double `@`, `(macrocall (. (. A (quote B)) (quote (error-t) @x))
-  a)`), each a distinct deep `@`-reflow.
+  `macro_sigil_trailing`. JS 672 → 673; dir 177 → 178. The other two dotted-name
+  reflows landed next (see below).
+- [x] Leading-`@` qualified macro name with a `$`/inner-`@` dotted path (the
+  final two slices of the macro dotted-name cluster, js-704830e1/js-fe911108). A
+  leading-`@` macro whose dotted path carries an interpolation or a second sigil
+  relocates the macro sigil onto the final component and recovers the excess with
+  zero-width markers: a final `$x` ⇒ `(inert (error x))` (`@A.$x a` ⇒
+  `(macrocall (. A (inert (error x))) a)`), a doubled sigil ⇒ `(quote (error-t)
+  @x)` (`@A.B.@x a` ⇒ `(macrocall (. (. A (quote B)) (quote (error-t) @x)) a)`); a
+  *non-final* `$x` is a valid `(inert ($ x))` (`@A.$x.y` ⇒ `(. (. A (inert ($ x)))
+  (quote @y))`, no recovery). `parse_macro_name_body` now consumes the full
+  `.ident`/`.$ident`/`.@ident` chain and records a `MacroSigilLeading` diagnostic
+  at the `@` when the path is invalid (final `$` or any inner/extra `@`);
+  `project_leading_macro_path` (`sexpr.rs`) walks the lossless token structure and
+  gates the error pieces on that diagnostic, leaving valid `@A.x`/`@A.B.x`/
+  `Base.@time f()` untouched. Fixture `macro_sigil_leading`. JS 673 → 675; dir
+  178 → 179. The exotic doubled-`@` forms (`@A.@B.x`, `@A.$x.@y`, …) also match
+  Julia though they are not in the corpus.
 - [x] Broadcast call on a macro name `@M.(x)` (a slice of the macro dotted-name
   cluster, js-2516c70f). A broadcast `.(…)` applied to a macro is invalid — a
   macro cannot be broadcast — so JuliaSyntax re-heads the dotcall under a

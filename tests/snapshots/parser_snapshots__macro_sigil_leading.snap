@@ -1,0 +1,42 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..26
+  MACRO_CALL@0..7
+    MACRO_NAME@0..5
+      AT@0..1 "@"
+      IDENT@1..2 "A"
+      DOT@2..3 "."
+      DOLLAR@3..4 "$"
+      IDENT@4..5 "x"
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "a"
+  NEWLINE@7..8 "\n"
+  MACRO_CALL@8..17
+    MACRO_NAME@8..15
+      AT@8..9 "@"
+      IDENT@9..10 "A"
+      DOT@10..11 "."
+      IDENT@11..12 "B"
+      DOT@12..13 "."
+      AT@13..14 "@"
+      IDENT@14..15 "x"
+    WHITESPACE@15..16 " "
+    NAME@16..17
+      IDENT@16..17 "a"
+  NEWLINE@17..18 "\n"
+  MACRO_CALL@18..25
+    MACRO_NAME@18..25
+      AT@18..19 "@"
+      IDENT@19..20 "A"
+      DOT@20..21 "."
+      DOLLAR@21..22 "$"
+      IDENT@22..23 "x"
+      DOT@23..24 "."
+      IDENT@24..25 "y"
+  NEWLINE@25..26 "\n"
+
+diagnostic [0..0]: invalid qualified macro name
+diagnostic [8..8]: invalid qualified macro name

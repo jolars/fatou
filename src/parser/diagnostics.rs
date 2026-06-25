@@ -107,6 +107,14 @@ pub enum DiagnosticKind {
     /// zero-width marker (`A.@B.x` ⇒ `(macrocall (. (. A (quote B)) (error-t)
     /// (quote @x)))`). Anchored at the `@` sigil.
     MacroSigilTrailing,
+    /// A leading-`@` qualified macro name whose dotted path is structurally
+    /// invalid: the final component is a `$`-interpolation (`@A.$x` ⇒
+    /// `(macrocall (. A (inert (error x))))`) or the path carries a second `@`
+    /// sigil (`@A.B.@x` ⇒ `(macrocall (. (. A (quote B)) (quote (error-t) @x)))`).
+    /// JuliaSyntax relocates the sigil to the final component, turning the
+    /// excess sigil/interpolation into zero-width `(error-t)`/`(error …)`.
+    /// Anchored at the leading `@` sigil.
+    MacroSigilLeading,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

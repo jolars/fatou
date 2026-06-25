@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **673 allowlisted**,
-12 divergence, 0 unsupported. Dir corpus: **178 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **675 allowlisted**,
+10 divergence, 0 unsupported. Dir corpus: **179 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,38 +58,46 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25f — misplaced macro sigil `A.@B.x`)
+## Latest session (2026-06-25g — leading-`@` dotted macro `$`/inner-`@` reflow)
 
-**`A.@B.x` (a qualified macro whose `@` names a non-final component) now matches
-JuliaSyntax's sigil-relocation re-head** (flips js-27604c64, the second clean
-slice of the macro dotted-name cluster). A `@` sitting on a non-final component
-with a trailing `.ident` continuation is invalid; JuliaSyntax relocates the sigil
-to the final component and splices a zero-width `(error-t)` at *every* dotted step
-*after* the `@`-named one: `A.@B.x` ⇒ `(macrocall (. (. A (quote B)) (error-t)
-(quote @x)))`, `A.@B.C.x` ⇒ two `(error-t)` (`(. (. (. A (quote B)) (error-t)
-(quote C)) (error-t) (quote @x))`). **The CST is unchanged/lossless** (flat
-`NAME(A) . @ B . x` tokens); the re-head is a **projector replay from a recorded
-diagnostic** (same model as `@M.(x)`). Parser: `parse_qualified_macro` records a
-new `MacroSigilTrailing` diag at the `@`, gated on the token pattern `@ ident .
-ident`. Projector: a new branch in `project_macro_name`'s trailing-form path
-reconstructs the chain — first component after the module is the sigil-named one
-(plain `(quote B)`), every later step gets `(error-t)`, the last also carries the
-relocated `@`. Count is derived from the (lossless) structure, the diag is just
-the boolean gate. Valid `A.B.@x`/`@A.B.x`/`A.@B`/`Base.@time f()`/`@A.x` all
-verified untouched. Fixture + oracle-dir `macro_sigil_trailing`. JS 672 → 673
-(zero regressions); dir 177 → 178. Green; clippy/fmt clean. **Next target (no
-active plan):** the other two macro dotted-name reflows, each distinct: `@A.$x a`
-⇒ `(macrocall (. A (inert (error x))) a)` (Fatou currently mis-nests: `(. (macrocall
-@A) (inert ($ x))) (error-t a)`), and `@A.B.@x a` ⇒ `(macrocall (. (. A (quote B))
-(quote (error-t) @x)) a)` (double `@`; Fatou drops `A.B.`: `(macrocall @x a)`). Or
-`a[:(end)]` (js-557adcf4), which first needs the general `a[1 end]` keyword-in-matrix
-recovery (Fatou silently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`; Julia
-wants `(typed_hcat a 1 (error-t)) (error-t end ✘)` — a chunk). Rest of the FAIL set
-is float-display normalization (blocked) plus `f.'`/`x 'y` char-lexer and `(2)(3)x`
-(out of scope).
+**The final two macro dotted-name reflows now match JuliaSyntax** (flips
+js-704830e1 `@A.$x a` and js-fe911108 `@A.B.@x a`), closing the macro dotted-name
+cluster. A leading-`@` macro whose dotted path carries an interpolation or a
+second sigil relocates the macro sigil onto the **final** component and recovers
+the excess with zero-width markers: final `$x` ⇒ `(inert (error x))` (`@A.$x a` ⇒
+`(macrocall (. A (inert (error x))) a)`); doubled sigil ⇒ `(quote (error-t) @x)`
+(`@A.B.@x a` ⇒ `(macrocall (. (. A (quote B)) (quote (error-t) @x)) a)`). A
+**non-final** `$x` is a *valid* `(inert ($ x))` with no recovery (`@A.$x.y` ⇒ `(.
+(. A (inert ($ x))) (quote @y))`). **CST stays flat/lossless** (the name's
+`@ A . $ x` tokens). Parser: `parse_macro_name_body`'s Ident arm now consumes the
+full `.ident`/`.$ident`/`.@ident` chain and records a new `MacroSigilLeading` diag
+at the `@` when the path is invalid (final `$` or any inner/extra `@`). Projector:
+new `project_leading_macro_path` (entered structurally on a `.$`/`.@` step) walks
+the tokens and applies a single rule set — non-final ident `(quote B)`, final ident
+`(quote @x)`, non-final `$x` `(inert ($ x))`, final `$x` `(inert (error x))`, any
+`@x` `(quote (error-t) …)`, plus an `(error-t)` in the final dot-step when an inner
+`@` exists — gating the error pieces on the diag. This rule set reproduces **all
+10** probed forms incl. the exotic doubled-`@` ones (`@A.@B.x`, `@A.@B`,
+`@A.$x.@y`, `@A.$x.$y`, `@A.b.$x`), though only the two are in the corpus. Valid
+`@A.x`/`@A.B.x`/`@$x`/`Base.@time f()`/`@time` verified untouched. Fixture +
+oracle-dir `macro_sigil_leading`. JS 673 → 675 (zero regressions); dir 178 → 179.
+Green; clippy/fmt clean. **Next target (no active plan):** `a[:(end)]`
+(js-557adcf4), which first needs the general `a[1 end]` keyword-in-matrix recovery
+(Fatou silently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`; Julia wants
+`(typed_hcat a 1 (error-t)) (error-t end ✘)` — a chunk). The rest of the 10-case
+FAIL set is float-display normalization (blocked: `1.0e-1000`, `x.3`, `-0xf.0p0`,
+`0x123456789abcdefp+0`, prime+float `10.0e1000'`/`10.0f100'`), `f.'`/`x 'y`
+char-lexer, and `(2)(3)x` (out of scope). The macro dotted-name cluster is now
+fully cleared.
 
 ## Earlier sessions
 
+- **2026-06-25f** — Misplaced macro sigil `A.@B.x` (trailing form; flips
+  js-27604c64). A `@` on a non-final component with a `.ident` continuation
+  relocates the sigil to the final component, splicing `(error-t)` at every dotted
+  step after the `@`-named one (`A.@B.x` ⇒ `(. (. A (quote B)) (error-t) (quote
+  @x))`). Projector replay from a `MacroSigilTrailing` diag (`parse_qualified_macro`).
+  Fixture `macro_sigil_trailing`. JS 672 → 673; dir 177 → 178.
 - **2026-06-25e** — Broadcast call on a macro name `@M.(x)` (first clean slice of
   the macro dotted-name cluster, flips js-2516c70f). A broadcast `.(…)` on a macro
   is invalid; JuliaSyntax wraps the dotcall in a macrocall and splices a zero-width

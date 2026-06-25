@@ -3585,14 +3585,54 @@ fn parse_macro_name_body(
         Some(TokKind::Ident) => {
             events.push(Event::Tok(start));
             let mut i = start + 1;
-            // Adjacent `.ident` chain: `@Mod.mac`. No whitespace skipping — a
-            // space before a `.` makes it a (broadcast) argument, not the name.
-            while ctx.token(i).map(|t| t.kind) == Some(TokKind::Dot)
-                && ctx.token(i + 1).map(|t| t.kind) == Some(TokKind::Ident)
-            {
-                events.push(Event::Tok(i)); // `.`
-                events.push(Event::Tok(i + 1)); // ident
-                i += 2;
+            // Adjacent dotted-path continuation, no whitespace skipping (a space
+            // before a `.` makes it a broadcast argument, not the name). Each step
+            // is `.ident` (`@Mod.mac`), `.$ident` (an interpolated component, valid
+            // when non-final), or `.@ident` (a misplaced inner sigil). The final
+            // component carries the macro sigil; a `$` final or any inner/extra `@`
+            // makes the path invalid, recovered by JuliaSyntax with zero-width
+            // markers — recorded below and replayed by the projector.
+            let mut saw_dollar_final = false;
+            let mut saw_inner_at = false;
+            while ctx.token(i).map(|t| t.kind) == Some(TokKind::Dot) {
+                match ctx.token(i + 1).map(|t| t.kind) {
+                    Some(TokKind::Ident) => {
+                        events.push(Event::Tok(i)); // `.`
+                        events.push(Event::Tok(i + 1)); // ident
+                        i += 2;
+                        saw_dollar_final = false;
+                    }
+                    Some(TokKind::Dollar)
+                        if ctx.token(i + 2).map(|t| t.kind) == Some(TokKind::Ident) =>
+                    {
+                        events.push(Event::Tok(i)); // `.`
+                        events.push(Event::Tok(i + 1)); // `$`
+                        events.push(Event::Tok(i + 2)); // ident
+                        i += 3;
+                        saw_dollar_final = true;
+                    }
+                    Some(TokKind::At)
+                        if ctx.token(i + 2).map(|t| t.kind) == Some(TokKind::Ident) =>
+                    {
+                        events.push(Event::Tok(i)); // `.`
+                        events.push(Event::Tok(i + 1)); // `@`
+                        events.push(Event::Tok(i + 2)); // ident
+                        i += 3;
+                        saw_dollar_final = false;
+                        saw_inner_at = true;
+                    }
+                    _ => break,
+                }
+            }
+            if saw_dollar_final || saw_inner_at {
+                let at_start = ctx.tokens()[start - 1].start;
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::MacroSigilLeading,
+                    "invalid qualified macro name",
+                    at_start,
+                    at_start,
+                );
             }
             i
         }
