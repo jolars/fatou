@@ -1084,6 +1084,8 @@ pub(super) fn is_op_name(kind: TokKind) -> bool {
             | Percent
             | EqEq
             | NotEq
+            | EqEqEq
+            | NotEqEq
             | Lt
             | Le
             | Gt

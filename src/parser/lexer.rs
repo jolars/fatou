@@ -96,6 +96,10 @@ pub(crate) enum TokKind {
     MinusMinus,
     EqEq,
     NotEq,
+    /// `===` (identity) and `!==` (its negation): 3-char comparison-tier
+    /// operators that must beat `==`/`!=` in longest match.
+    EqEqEq,
+    NotEqEq,
     Lt,
     Le,
     Gt,
@@ -876,6 +880,14 @@ impl<'a> Lexer<'a> {
         self.pos += self.char_at(self.pos).len_utf8();
         loop {
             let c = self.char_at(self.pos);
+            // A `!` immediately followed by `=` is the start of the `!=`/`!==`
+            // operator, not an identifier suffix — stop here so the operator
+            // lexer can claim it (`a!=b` ⇒ `a` `!=` `b`, `a!!=b` ⇒ `a!` `!=`
+            // `b`), while a `!` followed by anything else stays in the
+            // identifier (`a!b`, `push!`).
+            if c == '!' && self.peek(1) == Some(b'=') {
+                break;
+            }
             if self.pos < self.bytes.len() && is_ident_continue(c) {
                 self.pos += c.len_utf8();
             } else {
@@ -1011,6 +1023,9 @@ impl<'a> Lexer<'a> {
         let three = match (b0, b1, self.peek(2)) {
             (Some(b'-'), Some(b'-'), Some(b'>')) => Some(TokKind::LongArrow),
             (Some(b'>'), Some(b'>'), Some(b'>')) => Some(TokKind::UShr),
+            // Identity `===` beats `==`; its negation `!==` beats `!=`.
+            (Some(b'='), Some(b'='), Some(b'=')) => Some(TokKind::EqEqEq),
+            (Some(b'!'), Some(b'='), Some(b'=')) => Some(TokKind::NotEqEq),
             _ => None,
         };
         if let Some(kind) = three {
@@ -1191,6 +1206,8 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | Percent
             | EqEq
             | NotEq
+            | EqEqEq
+            | NotEqEq
             | Lt
             | Le
             | Gt
@@ -1446,6 +1463,35 @@ mod tests {
     #[test]
     fn bang_in_identifier() {
         assert_eq!(kinds("push!"), vec![TokKind::Ident]);
+        // A `!` stays in the identifier unless immediately followed by `=`, where
+        // it begins the `!=`/`!==` operator instead (matching Julia's munch).
+        assert_eq!(kinds("a!b"), vec![TokKind::Ident]);
+        assert_eq!(
+            kinds("a!=b"),
+            vec![TokKind::Ident, TokKind::NotEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a!==b"),
+            vec![TokKind::Ident, TokKind::NotEqEq, TokKind::Ident]
+        );
+        // Only the `!` before the `=` splits off: `a!` stays an identifier.
+        assert_eq!(
+            kinds("a!!=b"),
+            vec![TokKind::Ident, TokKind::NotEq, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn identity_operators() {
+        // `===`/`!==` beat `==`/`!=` in longest match.
+        assert_eq!(
+            kinds("a===b"),
+            vec![TokKind::Ident, TokKind::EqEqEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a==b"),
+            vec![TokKind::Ident, TokKind::EqEq, TokKind::Ident]
+        );
     }
 
     #[test]

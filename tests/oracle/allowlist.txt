@@ -72,6 +72,7 @@ generator_arguments
 generators
 generator_whitespace_error
 glued_colon_operator
+identity_operators
 if_missing_condition
 import_as_colon_error
 import_operator_names

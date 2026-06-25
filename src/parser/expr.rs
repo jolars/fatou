@@ -1121,6 +1121,8 @@ fn is_comparison_op(kind: TokKind) -> bool {
         kind,
         TokKind::EqEq
             | TokKind::NotEq
+            | TokKind::EqEqEq
+            | TokKind::NotEqEq
             | TokKind::Lt
             | TokKind::Le
             | TokKind::Gt
@@ -4653,6 +4655,8 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | Percent
             | EqEq
             | NotEq
+            | EqEqEq
+            | NotEqEq
             | Lt
             | Le
             | Gt
@@ -4971,6 +4975,8 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // at it.
         TokKind::EqEq
         | TokKind::NotEq
+        | TokKind::EqEqEq
+        | TokKind::NotEqEq
         | TokKind::Lt
         | TokKind::Le
         | TokKind::Gt

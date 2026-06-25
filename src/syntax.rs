@@ -172,6 +172,8 @@ pub enum SyntaxKind {
     MINUS_MINUS,
     EQ_EQ,
     NOT_EQ,
+    EQ_EQ_EQ,
+    NOT_EQ_EQ,
     LT,
     LE,
     GT,

@@ -92,6 +92,8 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::MinusMinus => SyntaxKind::MINUS_MINUS,
         TokKind::EqEq => SyntaxKind::EQ_EQ,
         TokKind::NotEq => SyntaxKind::NOT_EQ,
+        TokKind::EqEqEq => SyntaxKind::EQ_EQ_EQ,
+        TokKind::NotEqEq => SyntaxKind::NOT_EQ_EQ,
         TokKind::Lt => SyntaxKind::LT,
         TokKind::Le => SyntaxKind::LE,
         TokKind::Gt => SyntaxKind::GT,

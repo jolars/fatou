@@ -392,6 +392,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         PIPE => CallI("|"),
         EQ_EQ => CallI("=="),
         NOT_EQ => CallI("!="),
+        EQ_EQ_EQ => CallI("==="),
+        NOT_EQ_EQ => CallI("!=="),
         LT => CallI("<"),
         LE => CallI("<="),
         GT => CallI(">"),
@@ -513,6 +515,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | PERCENT
             | EQ_EQ
             | NOT_EQ
+            | EQ_EQ_EQ
+            | NOT_EQ_EQ
             | LT
             | LE
             | GT

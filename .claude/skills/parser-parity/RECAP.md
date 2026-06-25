@@ -38,7 +38,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 ## Progress
 
 JS corpus (**685 cases** — error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **181 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **182 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,107 +58,46 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Queued next target (from formatter-parity, 2026-06-25)
+## Latest session (2026-06-25k — identity/inequality operators `===`/`!==`/`!=`)
 
-**Lexer gap: identity/inequality operators `===`, `!==`, and tight `!=`.** Surfaced
-while landing the formatter's comparison-chain rule — Fatou's **lexer** can't
-tokenize these. JuliaSyntax ground truth (`JuliaSyntax.parse(Expr, s)`):
+Landed the lexer gap queued from formatter-parity. `===`/`!==`/`!=` now lex and
+project faithfully; the `!` maximal-munch is resolved.
 
-- `x!=y` ⇒ `x != y` — but Fatou reads `x!` as an identifier, then `= y`.
-- `x === y` / `a===b` ⇒ identity op `===` — Fatou splits into `==` + `=`.
-- `x!==y` ⇒ `x !== y` — mangled.
-- `f!` ⇒ identifier `f!` (correct in Fatou; the constraint to preserve).
-
-**The hard part is maximal munch:** `!=` / `!==` must win over the `x!` identifier
-reading, yet a lone trailing `!` (`f!`, `push!`) stays part of the identifier. JS
-resolves this in the lexer (an `!` immediately followed by `=` is the operator;
-otherwise it's an identifier suffix). Fix is parser/lexer-side; add `===`/`!==`/`!=`
-tokens + the munch rule, then a corpus fixture (`x != y`, `a === b`, `a !== b`,
-`f!`, `g!(x)`). Formatter already handles spacing once these tokenize — the
-formatter's `comparison_chains` fixture deliberately omits them and notes this in
-its RECAP. No parser change made yet; this is a clean fresh-session pickup.
-
-## Latest session (2026-06-25j — projector faithfulness audit, de-risking the formatter)
-
-**Audit, no parser change.** Before building the formatter (which consumes the CST
-directly, with no projector to lean on), audited `src/parser/sexpr.rs` for
-*compensation*: arms that read sibling/parent context or synthesize a head their
-children don't justify, papering over a wrong CST so the oracle passes anyway. Used
-projector smells as a detector for latent CST bugs that would become silent
-formatter mis-prints. **Method:** classify every non-trivial valid-code arm by what
-it reads — (1) local subtree (faithful), (2) sibling/positional (smell), (3)
-synthesizes head (smell), (4) diagnostics (OK if pure replay) — then probe each
-(2)/(3) against JuliaSyntax ground truth (`parse` CST + `--to sexpr` vs
-`JuliaSyntax.parseall`).
-
-**Result: zero new latent CST bugs.** Every high-value valid-code arm is faithful;
-the only divergences are two *already-recorded* deferrals. No repro fixtures filed,
-no parser change, oracle still green by construction (JS 677, dir 181).
-
-**Ledger** (arm → class → probe → verdict):
-
-- `project_range` (3, arity synth `a:b:c`⇒`(call-i a : b c)`) — **faithful**.
-  `1:2:3:4`⇒`(call-i (call-i 1 : 2 3) : 4)`, `1:2:3:4:5`⇒`(call-i (call-i 1 : 2 3)
-  : 4 5)` (JS folds `(1:2:3):4:5` as a stepped range too — the 4-operand form is a
-  `BINARY_EXPR`, 5-operand a nested `RANGE_EXPR`; both project right).
-- `project_comparison` (1, flat `COMPARISON_EXPR`, CST-shape change) — **faithful**.
-  `a<b==c>d`⇒`(comparison a < b == c > d)`, dotted `a .< b .> c`⇒`(comparison a
-  (. <) b (. >) c)` — match JS. Flat tree is formatter-sane.
-- flat arith `parse_flat_arith_chain` (1, CST-shape change) — **faithful**. Same-op
-  runs flatten (`a*b*c/d`⇒`(call-i (call-i a * b c) / d)`), mixed ops do **not**
-  collapse (`a+b-c`⇒`(call-i (call-i a + b) - c)`), dotted `.+` stays nested
-  (`a .+ b .+ c`⇒`(dotcall-i (dotcall-i a + b) + c)`) — all match JS.
-- `project_where` (3, variadic head) — **faithful**. CST nests `WHERE_EXPR`
-  left-assoc; `A where B where C`⇒`(where (where A B) C)` matches JS (projector reads
-  the nesting locally, never flattens).
-- `project_generator` filter nesting (2, `COMPREHENSION_IF` rewrites `clauses.last()`
-  by sibling order) — **faithful**. `[x for x in a if b for y in c if d]`⇒two
-  `(filter …)` each on its preceding clause; comma form ⇒ `(filter (cartesian_iterator
-  …) c)` — match JS. Multi-`for` no-`if` (`for x for y`) also matches.
-- `project_type_annotation` (arity) — **faithful**. `a::b::c`⇒`(::-i (::-i a b) c)`
-  (CST nests `TYPE_ANNOTATION`, never hits the 3-operand `project_flat` fallback).
-- `project_call` op-callee / `<:`,`>:` head override (3) — **faithful**.
-  `<:(a,b)`⇒`(<: a b)`, `<:{T}`⇒`(curly <: T)`, `*(x,y)`⇒`(call * x y)`,
-  `.*(x,y)`⇒`(call (. *) x y)`, `!(a,b)`⇒`(call ! a b)` — pure operator-as-callee
-  encoding, all match JS.
-- word-op `in`/`isa` in `project_binary` (3, `call-i` from a loose `IDENT`) —
-  **faithful for the valid single op** (`a isa B`⇒`(call-i a isa B)`,
-  `x in y`⇒`(call-i x in y)`). **Chains deferred (already recorded):** `a isa b isa
-  c`⇒ Fatou `(call-i (call-i a isa b) isa c)` (nested) vs JS `(comparison a isa b isa
-  c)`. `<:`/`>:` chains *do* fold (`A <: B <: C`⇒`(comparison …)` both) — those go
-  through the operator path, not the word-op path.
-- spot-checks all **faithful** (match JS exactly): `A'`/`A''` postfix transpose,
-  `f(x...)` splat, `a -> a+1` arrow, `a, b = 1, 2` bare-tuple assign, `a = b = c`
-  right-assoc chain, `x.y.z` field access, `a.:+` quoted-op field, `f.(x,y)`
-  dotcall, `f(x; y=1, z...)` parameters/kwargs/splat, `a && b && c` short-circuit,
-  `[a;b;c]`/`[a b; c d]` vcat/row, `x ? y : z` ternary, `r"raw"` string macro.
-
-**One confirmed projector limitation (already deferred, now pinned):** matrix
-`;;\n` line-continuation in an *outer* group — `[a b ;;; c ;;\n d]` ⇒ Fatou
-`(ncat-3 (row a b) (nrow-2 c d))` vs JS `(ncat-3 (row a b) (row c d))`. Root cause:
-`group_dimension` re-derives row-major order *locally per group*, but here the
-establishing space (`a b`) lives in the outer group, invisible to the inner
-`MATRIX_ROW@…` (`c ;; \n d`), so its `row_major` stays false and the `;;\n`
-continuation isn't folded (counts dim 2, not 0). This is the recorded 2026-06-25b
-deferral. **Does not threaten the formatter:** the cat *dimension* is a
-projection-only artifact; the formatter reprints the lossless token stream (the
-`;;`/newline tokens are preserved in the `MATRIX_ROW`), so a wrong `ncat-d` number
-never reaches output. **Proper fix (queued, parser side):** thread the
-established row-/column-major order down into nested matrix groups so the parser
-records the continuation structurally (extend the `SepRun.continuation` mechanism
-from 2026-06-25b across group boundaries), rather than the projector re-deriving it.
-
-**Takeaways for the formatter:** (a) the divergence-campaign CST rewrites (flat
-`COMPARISON_EXPR`, flat same-op `BINARY_EXPR`) are genuine, well-formed trees — a
-non-projector consumer gets nested-for-mixed-ops and flat-for-same-op, exactly like
-JS; safe to build on. (b) The projector's only non-local reads are the matrix
-`group_dimension` order re-derivation (projection-only, no formatter impact) and the
-diagnostics-replay error shapes (sanctioned, fire only on broken code). No arm
-invents structure on valid code. **The CST is faithful where the formatter will read
-it.** Next: formatter work can proceed; the one queued parser item is the
-matrix-continuation outer-group fix (low priority, projection-only).
+- **Two new tokens** `EqEqEq` (`===`) / `NotEqEq` (`!==`), lexed in the 3-char
+  ASCII block so longest-match beats `==`/`!=`. Full 5-file recipe + the sibling
+  operator lists: `lexer.rs` (`TokKind`, lex, `op_takes_suffix`), `syntax.rs`
+  (`EQ_EQ_EQ`/`NOT_EQ_EQ`), `tree_builder.rs`, `expr.rs` (`is_comparison_op`,
+  `is_operator_call_name`, `infix_binding_power` → comparison tier `(10,11)`),
+  `sexpr.rs` (`infix_head` `CallI("===")`/`CallI("!==")`, `is_operator`),
+  `structural.rs` (`is_op_name`). Single op ⇒ `(call-i a === b)`; a run folds into
+  `(comparison …)` via the existing chain machinery — no projector special-casing.
+- **The munch fix** (the crux): `!` is an ident-continue char, so `x!=y` greedily
+  lexed `x!` as an identifier before the operator table ran. `scan_ident` now
+  **stops at a `!` immediately followed by `=`** (`self.peek(1) == b'='`), so
+  `a!=b`⇒`a` `!=` `b` and `a!!=b`⇒`a!` `!=` `b`, while `a!b`, `f!`, `push!` stay
+  identifiers. Matches JuliaSyntax exactly (probed `a!b`/`a!=b`/`a!!=b`/`a!==b`).
+- **Verified faithful** against JS ground truth: all of `a === b`, `a !== b`,
+  chains, `===(a,b)`⇒`(call === a b)`, `:(===)`⇒`(quote-: ===)`, tight `a!==b`.
+  Bonus: the formatter (the original motivation) now normalizes `x===y`→`x === y`,
+  `x!=y`→`x != y` once these tokenize.
+- **Fixtures**: parser snapshot `identity_operators` + oracle dir slug (parity
+  confirmed); lexer unit tests `bang_in_identifier` (extended) + `identity_operators`.
+- **Counts**: JS 677 (held, no new unblocks/regressions), dir 181 → **182**.
+- **Deferred**: the broadcast dotted forms `.===`/`.!==` (4-char dotted ops, a
+  separate surface — `x .=== y` currently errors, **not a regression**, it errored
+  before too). Natural next pickup if wanted: add `DotEqEqEq`/`DotNotEqEq` mirroring
+  `DotEqEq`/`DotNotEq` (4-char dotted lex arm at the `.//=`/`.-->` tier).
 
 ## Earlier sessions
+
+- **2026-06-25j** — Projector faithfulness audit (no parser change), de-risking the
+  formatter: classified every non-trivial valid-code `sexpr.rs` arm by what it reads
+  and probed each non-local one against JS. **Zero latent CST bugs** — every
+  high-value arm is faithful; only non-local reads are matrix `group_dimension` order
+  (projection-only, no formatter impact) and diagnostics-replay error shapes
+  (sanctioned). Flat `COMPARISON_EXPR`/same-op `BINARY_EXPR` rewrites are well-formed
+  trees safe to build on. One queued parser item: matrix-continuation outer-group fix
+  (low priority, projection-only). JS 677, dir 181 unchanged.
 
 - **2026-06-25i** — Misplaced `.'` prime → trailing-junk recovery (flips
   js-128bdd20 `f.'`). A `'` abutting a field-access `.` lexes as the removed

@@ -1,0 +1,105 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..90
+  BINARY_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ_EQ_EQ@2..5 "==="
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "b"
+  NEWLINE@7..8 "\n"
+  BINARY_EXPR@8..15
+    NAME@8..9
+      IDENT@8..9 "a"
+    WHITESPACE@9..10 " "
+    NOT_EQ_EQ@10..13 "!=="
+    WHITESPACE@13..14 " "
+    NAME@14..15
+      IDENT@14..15 "b"
+  NEWLINE@15..16 "\n"
+  BINARY_EXPR@16..22
+    NAME@16..17
+      IDENT@16..17 "a"
+    WHITESPACE@17..18 " "
+    NOT_EQ@18..20 "!="
+    WHITESPACE@20..21 " "
+    NAME@21..22
+      IDENT@21..22 "b"
+  NEWLINE@22..23 "\n"
+  COMPARISON_EXPR@23..36
+    NAME@23..24
+      IDENT@23..24 "a"
+    WHITESPACE@24..25 " "
+    EQ_EQ_EQ@25..28 "==="
+    WHITESPACE@28..29 " "
+    NAME@29..30
+      IDENT@29..30 "b"
+    WHITESPACE@30..31 " "
+    EQ_EQ_EQ@31..34 "==="
+    WHITESPACE@34..35 " "
+    NAME@35..36
+      IDENT@35..36 "c"
+  NEWLINE@36..37 "\n"
+  COMPARISON_EXPR@37..49
+    NAME@37..38
+      IDENT@37..38 "a"
+    WHITESPACE@38..39 " "
+    NOT_EQ_EQ@39..42 "!=="
+    WHITESPACE@42..43 " "
+    NAME@43..44
+      IDENT@43..44 "b"
+    WHITESPACE@44..45 " "
+    EQ_EQ@45..47 "=="
+    WHITESPACE@47..48 " "
+    NAME@48..49
+      IDENT@48..49 "c"
+  NEWLINE@49..50 "\n"
+  COMPARISON_EXPR@50..61
+    NAME@50..51
+      IDENT@50..51 "a"
+    WHITESPACE@51..52 " "
+    NOT_EQ@52..54 "!="
+    WHITESPACE@54..55 " "
+    NAME@55..56
+      IDENT@55..56 "b"
+    WHITESPACE@56..57 " "
+    NOT_EQ@57..59 "!="
+    WHITESPACE@59..60 " "
+    NAME@60..61
+      IDENT@60..61 "c"
+  NEWLINE@61..62 "\n"
+  COMPARISON_EXPR@62..75
+    NAME@62..63
+      IDENT@62..63 "x"
+    WHITESPACE@63..64 " "
+    EQ_EQ_EQ@64..67 "==="
+    WHITESPACE@67..68 " "
+    NAME@68..69
+      IDENT@68..69 "y"
+    WHITESPACE@69..70 " "
+    NOT_EQ_EQ@70..73 "!=="
+    WHITESPACE@73..74 " "
+    NAME@74..75
+      IDENT@74..75 "z"
+  NEWLINE@75..76 "\n"
+  BINARY_EXPR@76..80
+    NAME@76..77
+      IDENT@76..77 "a"
+    NOT_EQ@77..79 "!="
+    NAME@79..80
+      IDENT@79..80 "b"
+  NEWLINE@80..81 "\n"
+  CALL_EXPR@81..89
+    NAME@81..86
+      IDENT@81..86 "push!"
+    ARG_LIST@86..89
+      LPAREN@86..87 "("
+      ARG@87..88
+        NAME@87..88
+          IDENT@87..88 "x"
+      RPAREN@88..89 ")"
+  NEWLINE@89..90 "\n"

@@ -7,12 +7,11 @@ leverage.
 
 ## Parser
 
-- [ ] Lexer: identity/inequality operators `===`, `!==`, and tight `!=`. Fatou
-  mis-tokenizes these (`x!=y` reads `x!` as an identifier + `= y`; `===`/`!==`
-  split into `==`/`!=` + `=`), where JuliaSyntax gives `x != y` / `x === y` /
-  `x !== y` while keeping a lone trailing `!` (`f!`, `push!`) an identifier — the
-  maximal-munch crux. Surfaced by the formatter's comparison-chain rule; details
-  queued at the top of `.claude/skills/parser-parity/RECAP.md`.
+- [x] Lexer: identity/inequality operators `===`, `!==`, and tight `!=`. New
+  `EqEqEq`/`NotEqEq` tokens (longest-match, beat `==`/`!=`); `scan_ident` now
+  stops at a `!` immediately followed by `=` so `a!=b`⇒`a` `!=` `b` while `f!`,
+  `push!`, `a!b` stay identifiers. Project as `(call-i a === b)` / fold into
+  `(comparison …)`. Deferred: the broadcast dotted forms `.===`/`.!==`.
 
 ### Incremental
 
