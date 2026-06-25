@@ -1593,6 +1593,19 @@ fn project_quote_sym(node: &SyntaxNode) -> String {
                     prefix = "(error-t) ";
                 }
             }
+            // `:(end)`/`:(else)`/`:(catch)` — a quote-paren whose body can't start
+            // an expression. The `(` is a loose child carrying an
+            // `EmptyQuoteParen` diagnostic; the quoted form is a zero-width
+            // `(error-t)` (the keyword spilled to the trailing-junk driver).
+            NodeOrToken::Token(t)
+                if t.kind() == LPAREN
+                    && diag_at(
+                        usize::from(t.text_range().end()),
+                        DiagnosticKind::EmptyQuoteParen,
+                    ) =>
+            {
+                return format!("(quote-: {prefix}(error-t))");
+            }
             NodeOrToken::Token(t) if is_trivia(t.kind()) => continue,
             NodeOrToken::Token(t) => return format!("(quote-: {prefix}{})", t.text()),
         }

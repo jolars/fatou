@@ -119,6 +119,7 @@ prefix_operator_error
 prefix_operator_spaced_call
 public_statement
 public_stop_at_equals
+quote_paren_empty
 range_operator
 raw_string
 raw_triple_string

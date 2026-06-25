@@ -1937,6 +1937,34 @@ pub(super) fn parse_quote_sym(
                 events,
             })
         }
+        // `:(end)`/`:(else)`/`:(catch)` — the paren body opens with a closing
+        // block keyword, which can't start an expression. JuliaSyntax recovers
+        // with a zero-width `(error-t)` quoted form (the quote spans `:(`), then
+        // spills the keyword and the rest of the line to the trailing-junk driver
+        // (`:(end)` ⇒ `(quote-: (error-t)) (error-t end ✘)`). The `(` stays a
+        // loose `QUOTE_SYM` child; an `EmptyQuoteParen` diagnostic at its end
+        // drives the projector's `(error-t)` reconstruction.
+        TokKind::LParen
+            if ctx
+                .token(ctx.skip_trivia(next + 1))
+                .is_some_and(|t| is_closing_block_keyword(t.kind)) =>
+        {
+            events.push(Event::Tok(next)); // `(`
+            events.push(Event::Finish); // QUOTE_SYM
+            let lparen = &ctx.tokens()[next];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::EmptyQuoteParen,
+                "expected expression after `:(`",
+                lparen.end,
+                lparen.end,
+            );
+            Some(ExprParse {
+                start,
+                end: next + 1,
+                events,
+            })
+        }
         // `:(expr)` — the parenthesized expression is the quoted form.
         TokKind::LParen => {
             let paren = parse_paren(ctx, next, false, diagnostics)?;

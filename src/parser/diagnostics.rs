@@ -20,6 +20,12 @@ pub enum DiagnosticKind {
     /// Disallowed whitespace after `:` before a quoted symbol (`: foo`). Anchored
     /// at the `:`'s end.
     QuoteColonWhitespace,
+    /// A quote-paren `:(…)` whose body can't start an expression — a closing
+    /// block keyword (`:(end)`, `:(else)`, `:(catch)`) — so the quoted form is a
+    /// zero-width `(error-t)` and the keyword spills to the trailing-junk driver
+    /// (`:(end)` ⇒ `(quote-: (error-t)) (error-t end ✘)`). Anchored at the `(`'s
+    /// end; the `(` stays a loose token child of the `QUOTE_SYM`.
+    EmptyQuoteParen,
     /// A numeric/flag suffix glued after a string-macro close (`var"x"2`).
     /// Anchored at the literal's start.
     StringSuffixSpace,

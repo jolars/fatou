@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **662 allowlisted**,
-23 divergence, 0 unsupported. Dir corpus: **170 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **663 allowlisted**,
+22 divergence, 0 unsupported. Dir corpus: **171 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,42 +58,46 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-24n — glued colon operator `:<`/`:>`)
+## Latest session (2026-06-24o — empty quote-paren `:(end)`)
 
-**A range colon glued directly to a single `<`/`>` is one invalid operator at the
-colon tier** (backlog item d, the two-token sibling of `**`/`--`). `a :< b` ⇒
-`(call-i a (error : <) b)` (flips js-147fac91), heading the infix call with *both*
-operator tokens error-wrapped. Disambiguation is whitespace-sensitive on the
-*right* of the colon only: `a :< b`/`a:<b`/`a :<b` all glue (the `<`/`>` is the
-token immediately after the colon, `ctx.token(op_idx + 1)`), but a space between
-(`a : < b`) keeps the bare-colon-plus-invalid-prefix reading, `:<=`/`:>:` keep the
-range reading (only a *single* `<`/`>` glues), and a *prefix* `:<` stays a quote
-(`(quote-: <)`, untouched — the new branch is infix-only). Precedence is colon's
-own `(14, 15)`: the rhs (parsed at `r_bp = 15`) absorbs tighter ops (`a :< b + c`
-⇒ `a :< (b+c)`) but not looser (`a :< b == c` ⇒ `(call-i (call-i a (error : <) b)
-== c)`). It consumes exactly one operation and does **not** chain — a `glued_colon_done`
-flag breaks the colon branches so a following colon-tier op falls to the junk
-driver (`a :< b :< c` ⇒ `… b) (error-t : < c)`, `a :< b:c` likewise). Three files:
-new `InvalidGluedOperator` diagnostic (`diagnostics.rs`); a glued branch in the
-operator loop (`expr.rs`) recording the diag at the colon (zero-width) and building
-a plain `BINARY_EXPR` over `[lhs, rhs]` whose gap captures both loose op tokens
-(missing rhs via `build_binary_missing_rhs` → `(call-i a (error : <) (error))`);
-and a `project_binary` arm (`sexpr.rs`) that, on the colon-anchored diag, joins all
-the node's loose operator tokens into the `(error : <)` head. Fixture +
-oracle-dir `glued_colon_operator`. JS 661 → 662 (zero regressions); dir 169 → 170.
-Green; clippy/fmt clean. **Deferred (not in corpus):** the range-chain interaction
-`a:b :< c` ⇒ `(call-i a : b (error : <) c)` (needs `parse_colon_range` to fold the
-glued op as a step instead of chaining a plain `:` onto the leftover `<`); and
-`a :< b -> c` (a pre-existing arrow-vs-comparison precedence divergence — `a < b ->
-c` already diverges identically, orthogonal to this work). **Next target (no active
-plan):** the `:(end)` quote-paren cluster (js-b1ac400e `:(end)` ⇒ `(quote-:
-(error-t)) (error-t end ✘)` — Fatou currently consumes `(` into the quote body as
-`(error ✘)` instead of a zero-width `(error-t)`; the harder sibling js-557adcf4
-`a[:(end)]` shares the recovery but adds matrix-structure divergence), or the
-remaining narrow shapes (`export (x::T)`, the macro dotted-name cluster — each a
-distinct deep gap).
+**A quote-paren `:(…)` whose body opens with a closing block keyword can't start
+an expression** (backlog item h, the `:(end)` narrow shape). JuliaSyntax makes the
+quoted form a zero-width `(error-t)` (the `quote` node spans `:(`) and spills the
+keyword and rest of the line to the trailing-junk driver: `:(end)` ⇒ `(quote-:
+(error-t)) (error-t end ✘)` (flips js-b1ac400e); `:(else)`/`:(catch)`/`:( end)`/
+`:(end x)` likewise. The bug before: Fatou ran `parse_paren`, which bailed by
+wrapping the `(` in a byte-bearing `ERROR` → `(quote-: (error ✘))`. Fix: a new
+branch in `parse_quote_sym`'s `:(` arm (`expr.rs`) — when `skip_trivia(next+1)` is
+an `is_closing_block_keyword`, keep `(` as a loose `QUOTE_SYM` child, end the quote
+at `next+1`, and record a zero-width `EmptyQuoteParen` diagnostic at the `(`'s end;
+the keyword+`)` then fall to the existing trailing-junk driver (`(error-t end ✘)`,
+already correct). `project_quote_sym` (`sexpr.rs`) gains an arm: a loose `LPAREN`
+child carrying `EmptyQuoteParen` projects `(error-t)`. Normal/glued forms untouched
+(`:(x)` ⇒ `(quote-: x)`, `:()` ⇒ `(quote-: (tuple-p))`, `:(=)` ⇒ `(quote-: =)`,
+`:foo` ⇒ `(quote-: foo)`). Three files: new `EmptyQuoteParen` diagnostic
+(`diagnostics.rs`); the `parse_quote_sym` branch (`expr.rs`); the
+`project_quote_sym` arm (`sexpr.rs`). Fixture + oracle-dir `quote_paren_empty`.
+JS 662 → 663 (zero regressions); dir 170 → 171. Green; clippy/fmt clean.
+**Deferred (FAIL, in corpus):** the bracketed sibling `a[:(end)]` (js-557adcf4) —
+the quote recovery now fires correctly inside, but `a[…]` projects as `typed_hcat`
+with its own matrix-structure divergence (Julia wants `(typed_hcat a (quote-:
+(error-t)) (error-t))` plus a separate `(error-t end ✘ ✘)`; Fatou drops the inner
+`(error-t)` and the trailing junk). **Next target (no active plan):** `export
+(x::T)` (js-62113d6b ⇒ `(export (error (::-i x T)))` — `export` currently carries
+parenthesized items through as loose tokens; needs `parse_name_list_stmt` to parse
+a parenthesized item and error-wrap a non-symbol), or the macro dotted-name cluster
+(`A.@B.x`, `@A.$x a`, `@A.B.@x a`, `@M.(x)`, `@[x] y z` — each a distinct deep gap).
 
 ## Earlier sessions
+
+- **2026-06-24n** — Glued colon operator `:<`/`:>` (two-token sibling of `**`/`--`).
+  A range colon glued to a single `<`/`>` is one invalid op at the colon tier
+  `(14,15)`: `a :< b` ⇒ `(call-i a (error : <) b)` (flips js-147fac91). Glue is
+  whitespace-sensitive on the colon's right only; `:<=`/`:>:` keep the range
+  reading; prefix `:<` stays a quote. Consumes one op, no chaining (`glued_colon_done`
+  flag). New `InvalidGluedOperator` diag + operator-loop branch (`expr.rs`) +
+  `project_binary` arm joining both loose op tokens. Fixture `glued_colon_operator`.
+  JS 661 → 662; dir 169 → 170.
 
 - **2026-06-24m** — Docstring + stray closer: a doc-eligible string is a docstring
   only when a *real* statement follows (flips js-c74994ac `"notdoc" ]`, js-f9c36919

@@ -114,6 +114,20 @@ through), so the grammar can grow incrementally.
   (needs `parse_colon_range` to fold the glued op as a step) and the
   `a :< b -> c` arrow case (a pre-existing arrow-vs-comparison precedence
   divergence, orthogonal).
+- [x] Empty quote-paren `:(end)` → zero-width `(error-t)` (error-shape slice). A
+  quote-paren `:(…)` whose body opens with a *closing* block keyword (`end`/
+  `else`/`elseif`/`catch`/`finally`) can't start an expression: JuliaSyntax makes
+  the quoted form a zero-width `(error-t)` (the `quote` spans `:(`) and spills the
+  keyword and the rest of the line to the trailing-junk driver (`:(end)` ⇒
+  `(quote-: (error-t)) (error-t end ✘)`, `:(else)`/`:(catch)` likewise, `:(end x)`
+  ⇒ `… (error-t end x ✘)`). The glued/normal forms are untouched (`:(x)` ⇒
+  `(quote-: x)`, `:()` ⇒ `(quote-: (tuple-p))`, `:(=)` ⇒ `(quote-: =)`). A new
+  branch in `parse_quote_sym`'s `:(` arm keeps the `(` as a loose `QUOTE_SYM`
+  child, ends the quote right after it, and records an `EmptyQuoteParen`
+  diagnostic at the `(`'s end; `project_quote_sym` reads that diagnostic off the
+  loose `(` and emits `(error-t)`. Fixture `quote_paren_empty`. JS 662 → 663; dir
+  170 → 171. Deferred: the bracketed sibling `a[:(end)]` (js-557adcf4) — same
+  quote recovery but adds a `typed_hcat` matrix-structure divergence.
 - [x] Colon-space-before-closing-keyword → bare `:` Colon atom (error-shape
   slice). A value-position prefix `:` followed by a space then a *closing* block
   keyword (`end`/`else`/`elseif`/`catch`/`finally`) is not a quotable symbol:
