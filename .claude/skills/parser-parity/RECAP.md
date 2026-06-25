@@ -58,38 +58,97 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25i — misplaced `.'` prime → trailing-junk recovery)
+## Latest session (2026-06-25j — projector faithfulness audit, de-risking the formatter)
 
-**The clean half of the char-lexer/transpose pair now matches JuliaSyntax**
-(flips js-128bdd20 `f.'`). The removed `.'` transpose operator: a `'` that
-directly abuts a field-access `.` is not the start of a char literal but the
-old prime operator, recovered as trailing junk (`f.'` ⇒ `f (error-t ')`,
-`a.'` ⇒ `a (error-t ')`). **Three-file fix:** (1) **lexer** `prev_is_dot()` —
-lex `'` as `Transpose` (not `Char`) when the immediately preceding token is
-`Dot`, mirroring `prev_ends_value` (whitespace-sensitive: spaced `f. '` stays a
-char); (2) **parser** operator loop ends the value at a `.`-immediately-followed-
-by-`Transpose`, so `.'` falls to the existing `core.rs` toplevel leftover driver
-(no new node/diag — reuses `TrailingJunk`); (3) **projector** `project_error`
-renders a `TRANSPOSE` token as its `'` glyph and drops a bundled field-access
-`DOT` (JuliaSyntax shows only the `'`). Fixture + oracle-dir `dot_prime_recovery`.
-JS 676 → 677 (zero regressions); dir 180 → 181. Green; clippy/fmt clean. Valid
-transpose (`f'`, `a.b'`, `x''`, `[a 'b']`, `x = 'a'`) untouched.
-**Remaining 8 JS divergences are all permanent/out-of-scope:** float-display
-normalization (6: `x.3`→`0.3`, `-0xf.0p0`→`-15.0`, `1.0e-1000`→`0.0`, hex
-float→`8.19…e16`, two `'`-suffixed overflows — need Julia's float `show`); the
-char-lexer sibling **`x 'y`** (the *other* half of this pair, **genuinely
-deferred**: JuliaSyntax tokenizes `'`-after-value-across-horizontal-ws as
-transpose at toplevel but as a **char inside `[...]`/`(...)`** — `[a 'b']` ⇒
-`(char 'b')` — so faithfully handling `x 'y` ⇒ `(error-t ' 'y')` needs
-**bracket-depth-aware `'` lexing** Fatou's flat lexer lacks; naively enabling it
-would break the common valid `[a 'b']`, which isn't in the corpus to catch it);
-and `(2)(3)x` (n-ary juxtaposition misparse, out of scope). Also out of corpus:
-`f.'x` ⇒ JuliaSyntax `(juxtapose f (error-t ') x)` (juxtapose-after-junk, same
-family as `x 'y`). **Next target (no active plan):** the JS corpus is now down to
-these permanent/blocked items; real future growth is **error-shape parity** (a
-separate phase), the **`x 'y` bracket-context lexer** refactor (if the float
-work is also taken on, since both are lexer-display work), or a **JuliaSyntax
-version bump** (re-harvest + re-triage).
+**Audit, no parser change.** Before building the formatter (which consumes the CST
+directly, with no projector to lean on), audited `src/parser/sexpr.rs` for
+*compensation*: arms that read sibling/parent context or synthesize a head their
+children don't justify, papering over a wrong CST so the oracle passes anyway. Used
+projector smells as a detector for latent CST bugs that would become silent
+formatter mis-prints. **Method:** classify every non-trivial valid-code arm by what
+it reads — (1) local subtree (faithful), (2) sibling/positional (smell), (3)
+synthesizes head (smell), (4) diagnostics (OK if pure replay) — then probe each
+(2)/(3) against JuliaSyntax ground truth (`parse` CST + `--to sexpr` vs
+`JuliaSyntax.parseall`).
+
+**Result: zero new latent CST bugs.** Every high-value valid-code arm is faithful;
+the only divergences are two *already-recorded* deferrals. No repro fixtures filed,
+no parser change, oracle still green by construction (JS 677, dir 181).
+
+**Ledger** (arm → class → probe → verdict):
+
+- `project_range` (3, arity synth `a:b:c`⇒`(call-i a : b c)`) — **faithful**.
+  `1:2:3:4`⇒`(call-i (call-i 1 : 2 3) : 4)`, `1:2:3:4:5`⇒`(call-i (call-i 1 : 2 3)
+  : 4 5)` (JS folds `(1:2:3):4:5` as a stepped range too — the 4-operand form is a
+  `BINARY_EXPR`, 5-operand a nested `RANGE_EXPR`; both project right).
+- `project_comparison` (1, flat `COMPARISON_EXPR`, CST-shape change) — **faithful**.
+  `a<b==c>d`⇒`(comparison a < b == c > d)`, dotted `a .< b .> c`⇒`(comparison a
+  (. <) b (. >) c)` — match JS. Flat tree is formatter-sane.
+- flat arith `parse_flat_arith_chain` (1, CST-shape change) — **faithful**. Same-op
+  runs flatten (`a*b*c/d`⇒`(call-i (call-i a * b c) / d)`), mixed ops do **not**
+  collapse (`a+b-c`⇒`(call-i (call-i a + b) - c)`), dotted `.+` stays nested
+  (`a .+ b .+ c`⇒`(dotcall-i (dotcall-i a + b) + c)`) — all match JS.
+- `project_where` (3, variadic head) — **faithful**. CST nests `WHERE_EXPR`
+  left-assoc; `A where B where C`⇒`(where (where A B) C)` matches JS (projector reads
+  the nesting locally, never flattens).
+- `project_generator` filter nesting (2, `COMPREHENSION_IF` rewrites `clauses.last()`
+  by sibling order) — **faithful**. `[x for x in a if b for y in c if d]`⇒two
+  `(filter …)` each on its preceding clause; comma form ⇒ `(filter (cartesian_iterator
+  …) c)` — match JS. Multi-`for` no-`if` (`for x for y`) also matches.
+- `project_type_annotation` (arity) — **faithful**. `a::b::c`⇒`(::-i (::-i a b) c)`
+  (CST nests `TYPE_ANNOTATION`, never hits the 3-operand `project_flat` fallback).
+- `project_call` op-callee / `<:`,`>:` head override (3) — **faithful**.
+  `<:(a,b)`⇒`(<: a b)`, `<:{T}`⇒`(curly <: T)`, `*(x,y)`⇒`(call * x y)`,
+  `.*(x,y)`⇒`(call (. *) x y)`, `!(a,b)`⇒`(call ! a b)` — pure operator-as-callee
+  encoding, all match JS.
+- word-op `in`/`isa` in `project_binary` (3, `call-i` from a loose `IDENT`) —
+  **faithful for the valid single op** (`a isa B`⇒`(call-i a isa B)`,
+  `x in y`⇒`(call-i x in y)`). **Chains deferred (already recorded):** `a isa b isa
+  c`⇒ Fatou `(call-i (call-i a isa b) isa c)` (nested) vs JS `(comparison a isa b isa
+  c)`. `<:`/`>:` chains *do* fold (`A <: B <: C`⇒`(comparison …)` both) — those go
+  through the operator path, not the word-op path.
+- spot-checks all **faithful** (match JS exactly): `A'`/`A''` postfix transpose,
+  `f(x...)` splat, `a -> a+1` arrow, `a, b = 1, 2` bare-tuple assign, `a = b = c`
+  right-assoc chain, `x.y.z` field access, `a.:+` quoted-op field, `f.(x,y)`
+  dotcall, `f(x; y=1, z...)` parameters/kwargs/splat, `a && b && c` short-circuit,
+  `[a;b;c]`/`[a b; c d]` vcat/row, `x ? y : z` ternary, `r"raw"` string macro.
+
+**One confirmed projector limitation (already deferred, now pinned):** matrix
+`;;\n` line-continuation in an *outer* group — `[a b ;;; c ;;\n d]` ⇒ Fatou
+`(ncat-3 (row a b) (nrow-2 c d))` vs JS `(ncat-3 (row a b) (row c d))`. Root cause:
+`group_dimension` re-derives row-major order *locally per group*, but here the
+establishing space (`a b`) lives in the outer group, invisible to the inner
+`MATRIX_ROW@…` (`c ;; \n d`), so its `row_major` stays false and the `;;\n`
+continuation isn't folded (counts dim 2, not 0). This is the recorded 2026-06-25b
+deferral. **Does not threaten the formatter:** the cat *dimension* is a
+projection-only artifact; the formatter reprints the lossless token stream (the
+`;;`/newline tokens are preserved in the `MATRIX_ROW`), so a wrong `ncat-d` number
+never reaches output. **Proper fix (queued, parser side):** thread the
+established row-/column-major order down into nested matrix groups so the parser
+records the continuation structurally (extend the `SepRun.continuation` mechanism
+from 2026-06-25b across group boundaries), rather than the projector re-deriving it.
+
+**Takeaways for the formatter:** (a) the divergence-campaign CST rewrites (flat
+`COMPARISON_EXPR`, flat same-op `BINARY_EXPR`) are genuine, well-formed trees — a
+non-projector consumer gets nested-for-mixed-ops and flat-for-same-op, exactly like
+JS; safe to build on. (b) The projector's only non-local reads are the matrix
+`group_dimension` order re-derivation (projection-only, no formatter impact) and the
+diagnostics-replay error shapes (sanctioned, fire only on broken code). No arm
+invents structure on valid code. **The CST is faithful where the formatter will read
+it.** Next: formatter work can proceed; the one queued parser item is the
+matrix-continuation outer-group fix (low priority, projection-only).
+
+## Earlier sessions
+
+- **2026-06-25i** — Misplaced `.'` prime → trailing-junk recovery (flips
+  js-128bdd20 `f.'`). A `'` abutting a field-access `.` lexes as the removed
+  transpose op, recovered as trailing junk (`f.'` ⇒ `f (error-t ')`). 3-file fix:
+  lexer `prev_is_dot()` (lex `'` as `Transpose` after `Dot`; spaced `f. '` stays a
+  char), operator-loop ends the value at `.`+`Transpose` (reuses `TrailingJunk`),
+  projector renders the `'` glyph + drops the bundled `DOT`. Fixture
+  `dot_prime_recovery`. JS 676 → 677; dir 180 → 181. Remaining 8 JS divergences all
+  permanent/out-of-scope: float-display (6), the `x 'y` char-lexer sibling (needs
+  bracket-depth-aware `'` lexing), `(2)(3)x` juxtaposition.
 
 ## Earlier sessions
 
