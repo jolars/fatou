@@ -58,6 +58,13 @@ The report (`tests/oracle/runic-report.txt`) is gitignored and regenerated.
 - **Tenet-1 divergence** — Runic preserves user whitespace / is non-deterministic;
   Fatou canonicalizes. Record in `runic-blocked.txt` with a rationale.
 - **Semantic rewrite** — return-insertion and friends. Deferred; blocked.
+- **Upstream (parser/lexer) blocker** — the construct never tokenizes/parses
+  cleanly, so Fatou can only bail to transparent (it sees ERROR nodes, not the
+  real shape). **Not fixable in this skill** — `rules.rs` is the only growth
+  surface here. Keep the broken shape out of the fixture (use a parser-safe
+  variant), and **hand the gap off** (see the workflow's conclusion step) so it
+  reaches the `parser-parity` skill. Example: `===`/`!==`/tight `!=` mis-lex
+  (`x!=y` read as `x!` + `=`), found while landing comparison chains.
 
 ## The rule recipe
 
@@ -119,9 +126,22 @@ worked example: collapse incidental whitespace to one space, except the tight `^
    ```
 8. **Update `TODO.md`** (mark a formatter bullet `[x]`/trim the backlog) and
    **`RECAP.md`**.
-9. **Commit.** Conventional Commits; subject ≤ 60 chars. New layout capability =
-   `feat(formatter)`; test-infra-only = `test(formatter)`. The pre-commit hook runs
-   clippy + rustfmt — never `--no-verify`. Don't push unless asked.
+9. **Hand off any upstream (parser/lexer) blocker you hit.** Formatter work
+   routinely surfaces gaps that aren't yours to fix — a construct that won't
+   tokenize or parse, leaving you only the transparent bail. Don't let it die in
+   this skill's RECAP. Record it where the fixer will look:
+   - a **"Queued next target"** note at the top of
+     `.claude/skills/parser-parity/RECAP.md`, and/or a bullet under `TODO.md`'s
+     **Parser** section;
+   - include the **JuliaSyntax ground truth** (`julia --startup-file=no -e 'using
+     JuliaSyntax; print(JuliaSyntax.parse(Expr, "CODE"))'`), what Fatou does
+     instead, and the crux (e.g. a maximal-munch interaction);
+   - cross-reference it from this skill's `RECAP.md` and from the formatter
+     fixture that had to route around it.
+10. **Commit.** Conventional Commits; subject ≤ 60 chars. New layout capability =
+   `feat(formatter)`; test-infra-only = `test(formatter)`; a handoff/RECAP-only
+   change = `docs(...)`. The pre-commit hook runs clippy + rustfmt — never
+   `--no-verify`. Don't push unless asked.
 
 ## Session boundaries
 
@@ -165,3 +185,5 @@ exists so you don't have to span more than one target in a context.
 4. Files changed, by failure bucket.
 5. Ranked next target. If ending uncommitted/with regressions, say so and list the
    red tests.
+6. Any **upstream (parser/lexer) blocker** surfaced, and where it was handed off
+   (parser-parity RECAP / `TODO.md`). "None" if clean.
