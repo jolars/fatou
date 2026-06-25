@@ -58,6 +58,26 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
+## Queued next target (from formatter-parity, 2026-06-25)
+
+**Lexer gap: identity/inequality operators `===`, `!==`, and tight `!=`.** Surfaced
+while landing the formatter's comparison-chain rule — Fatou's **lexer** can't
+tokenize these. JuliaSyntax ground truth (`JuliaSyntax.parse(Expr, s)`):
+
+- `x!=y` ⇒ `x != y` — but Fatou reads `x!` as an identifier, then `= y`.
+- `x === y` / `a===b` ⇒ identity op `===` — Fatou splits into `==` + `=`.
+- `x!==y` ⇒ `x !== y` — mangled.
+- `f!` ⇒ identifier `f!` (correct in Fatou; the constraint to preserve).
+
+**The hard part is maximal munch:** `!=` / `!==` must win over the `x!` identifier
+reading, yet a lone trailing `!` (`f!`, `push!`) stays part of the identifier. JS
+resolves this in the lexer (an `!` immediately followed by `=` is the operator;
+otherwise it's an identifier suffix). Fix is parser/lexer-side; add `===`/`!==`/`!=`
+tokens + the munch rule, then a corpus fixture (`x != y`, `a === b`, `a !== b`,
+`f!`, `g!(x)`). Formatter already handles spacing once these tokenize — the
+formatter's `comparison_chains` fixture deliberately omits them and notes this in
+its RECAP. No parser change made yet; this is a clean fresh-session pickup.
+
 ## Latest session (2026-06-25j — projector faithfulness audit, de-risking the formatter)
 
 **Audit, no parser change.** Before building the formatter (which consumes the CST
