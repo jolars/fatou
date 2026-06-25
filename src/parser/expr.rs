@@ -4686,6 +4686,48 @@ fn parse_ternary(
     };
     let Some(else_br) = parse_expr_in(tokens, else_start, TERNARY_R, diagnostics, else_flags)
     else {
+        // When the missing branch is terminated by a closing block keyword
+        // (`x ? true end`, `x ? true : elseif …`), JuliaSyntax re-heads the
+        // recovered node from `?` to `if`, splicing one zero-width `(error-t)`
+        // per missing piece (no colon ⇒ two, colon present ⇒ one). The keyword
+        // is left for the enclosing block (or the toplevel-junk driver). We
+        // record `IncompleteTernaryIf` once per marker at the `?`'s end and let
+        // the projector key the `if` head and marker count off the count.
+        let terminator_is_closer = ctx
+            .token(else_start)
+            .is_some_and(|t| is_closing_block_keyword(t.kind));
+        if terminator_is_closer {
+            let markers = if has_colon { 1 } else { 2 };
+            let q_end = tokens[q_idx].end;
+            for _ in 0..markers {
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::IncompleteTernaryIf,
+                    "incomplete ternary recovered as `if`",
+                    q_end,
+                    q_end,
+                );
+            }
+            let mut events = vec![Event::Start(SyntaxKind::TERNARY_EXPR)];
+            events.extend(cond.events);
+            push_range(&mut events, cond.end, q_idx);
+            events.push(Event::Tok(q_idx)); // `?`
+            push_range(&mut events, q_idx + 1, then_br.start);
+            events.extend(then_br.events);
+            let end = if has_colon {
+                push_range(&mut events, then_br.end, colon);
+                events.push(Event::Tok(colon)); // `:`
+                colon + 1
+            } else {
+                then_br.end
+            };
+            events.push(Event::Finish);
+            return Ok(ExprParse {
+                start: cond.start,
+                end,
+                events,
+            });
+        }
         if has_colon {
             let op = &tokens[colon];
             push_diagnostic(

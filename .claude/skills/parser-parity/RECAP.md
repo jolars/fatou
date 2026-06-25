@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **666 allowlisted**,
-19 divergence, 0 unsupported. Dir corpus: **174 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **670 allowlisted**,
+15 divergence, 0 unsupported. Dir corpus: **175 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,39 +58,52 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25b — array `;;` line continuation → `hcat`)
+## Latest session (2026-06-25c — incomplete ternary recovered as `if`)
 
-**A `;;` directly followed by a newline inside a row-major array is a line
-continuation, not a conflict** (flips js-82572497 `[a b ;; \n c]` ⇒
-`(hcat a b c)`; deferred root (c)). JuliaSyntax establishes row-/column-major
-order from the first space/`;;` separator; a `;;` (exactly two) immediately
-followed by a newline (`;; \n`, *not* `\n ;;`) in an *already-row-major* array
-behaves exactly like a space separator (dim 0, folds into the row), so
-`[a b ;; \n c]` ⇒ `(hcat a b c)` and `[1 2 ;; \n 3 4 ;;; \n 5 6 ;; \n 7 8]` ⇒
-`(ncat-3 (row 1 2 3 4) (row 5 6 7 8))`; a column-major `[a ;; \n b]` (no prior
-space) stays `(ncat-2 a b)`. **No diagnostic — valid syntax.** Two-file
-structural fix (no side-channel): `parse_matrix` (`expr.rs`) tracks a new
-`SepRun.newline_after_semis` + `continuation` flag, set in the existing *global*
-`ArrayOrder` loop (RowMajor + `;;` + newline-after-semis ⇒ `continuation`, no
-`ArraySeparatorMismatch`); `SepRun::dim` returns 0 for a continuation, so the CST
-flattens. `group_dimension` (`sexpr.rs`) re-derives the same row-major order
-*locally* (first pure-space run ⇒ row-major) and counts a continuation `;;`-run
-as 0, so the head is `hcat`/`ncat-d`. Parser-global + projector-local agree on
-every corpus/fixture case (the parser's grouping puts a local space in each
-`MATRIX_ROW`). Fixture + oracle-dir `array_line_continuation`. JS 665 → 666 (zero
-regressions); dir 173 → 174. Green; clippy/fmt clean. **Deferred:** a continuation
-whose establishing space lives in an *outer* group (`[a b ;;; c ;; \n d]` ⇒
-`(ncat-3 (row a b) (row c d))`) — the projector's *local* order can't see it;
-not in corpus, stays divergent. **Next target (no active plan):** the macro
-cluster siblings (`@M.(x)`, `A.@B.x`, `@A.$x a`, `@A.B.@x a` — dotted-name `@`
-reflow, each distinct, none cluster cleanly); the bare block keyword `function`
-(js-78f9ac01, item g, ~2 sessions); or `a[:(end)]` (js-557adcf4 — needs trailing
-junk inside `typed_hcat` + toplevel junk). The ternary-in-block family
-(js-434fcafd/810e177c/74a9b301/471d5c84) is gated on the diagnostics-model
-"Design watch" in `TODO.md`.
+**An incomplete ternary terminated by a closing block keyword re-heads `?` → `if`**
+(flips js-434fcafd/810e177c/74a9b301/471d5c84, the whole "Design watch:
+context-dependent recovery" ternary cluster). When a ternary's missing
+`:`/false-branch is terminated by `end`/`elseif`/`else`/`catch`/`finally`,
+JuliaSyntax builds a `K"if"` node (not `K"?"`) with one zero-width `(error-t)`
+per missing piece: no colon ⇒ `(if x true (error-t) (error-t))`, colon present
+but false missing ⇒ `(if x true (error-t))`; the keyword spills to the enclosing
+block (or the toplevel-junk driver: `x ? true end` ⇒ `(if x true (error-t)
+(error-t)) (error-t end)`). **Key finding that dissolved the Design watch:** the
+head flip is decided *locally* by the terminator token, **not** the enclosing
+block — even toplevel `x ? true end` re-heads to `if`, while EOF/newline keeps
+`?` (a different, still-divergent toplevel shape, absent from the corpus). So the
+recommended "enclosing-kind tag" was unnecessary; the existing byte+kind anchor
+sufficed. Both missing-branch arms of `parse_ternary` (`expr.rs`) peek
+`is_closing_block_keyword(terminator)`; when true they build a `TERNARY_EXPR`
+(keeping `?`/`:` as loose tokens) + one `IncompleteTernaryIf` diagnostic per
+marker at the `?`'s end. `project_ternary` (`sexpr.rs`) keys the `if` head and
+marker count off `diag_count_at`. Three files (diag kind, parser, projector),
+no enclosing-context machinery. Fixture + oracle-dir `ternary_incomplete_if`.
+JS 666 → 670 (zero regressions); dir 174 → 175. Green; clippy/fmt clean.
+**Deferred:** toplevel incomplete ternary with an EOF/newline terminator (`x ?
+true` ⇒ `(? x true (error-t)…)`, `x ? true :` ⇒ `(? x true (error-t) (error))`) —
+`?`-head, different error count, divergent but not in the corpus. **Next target
+(no active plan):** the macro dotted-name cluster (`@M.(x)`, `A.@B.x`, `@A.$x a`,
+`@A.B.@x a` — each a distinct deep `@`-reflow, none cluster); the bare block
+keyword `function` (js-78f9ac01, item g, ~2 sessions, `(function (error (error))
+(block (error)) (error-t))`); or `a[:(end)]` (js-557adcf4 — second `(error-t)`
+inside `typed_hcat` + matrix truncation + toplevel `(error-t end ✘ ✘)`). The rest
+of the FAIL set is float-display normalization (blocked) plus `f.'`/`x 'y`
+char-lexer and `(2)(3)x` (out of scope).
 
 ## Earlier sessions
 
+- **2026-06-25b** — Array `;;` line continuation → `hcat` (flips js-82572497
+  `[a b ;; \n c]` ⇒ `(hcat a b c)`; deferred root (c)). A `;;` (exactly two)
+  immediately followed by a newline (`;; \n`, *not* `\n ;;`) in an *already*
+  row-major array behaves like a space separator (dim 0, folds into the row);
+  a column-major `[a ;; \n b]` stays `(ncat-2 a b)`. **No diagnostic — valid
+  syntax.** `parse_matrix` (`expr.rs`) tracks `SepRun.newline_after_semis` +
+  `continuation` (set in the global `ArrayOrder` loop; `dim` returns 0);
+  `group_dimension` (`sexpr.rs`) re-derives row-major order *locally* and counts
+  a continuation `;;`-run as 0. Fixture `array_line_continuation`. JS 665 → 666;
+  dir 173 → 174. Deferred: a continuation whose establishing space lives in an
+  *outer* group (`[a b ;;; c ;; \n d]`) — local order can't see it; not in corpus.
 - **2026-06-25a** — Invalid bracketed macro name `@[x]` (one macro-cluster slice,
   flips js-b2e95475 `@[x] y z`). A `[`/`{` directly after `@` is parsed as the
   bracketed expression and error-wrapped as the macro name with space-form args

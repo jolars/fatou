@@ -1,0 +1,1 @@
+(toplevel (if true (block (if x true (error-t) (error-t)))) (if true (block (if x true (error-t) (error-t))) (elseif true (block))) (if true (block (if x true (error-t))) (elseif true (block))) (if x true (error-t) (error-t)) (error-t end))

@@ -599,6 +599,20 @@ fn project_ternary(node: &SyntaxNode) -> String {
         .filter_map(|el| el.into_token())
         .find(|t| t.kind() == QUESTION)
         .map(|t| usize::from(t.text_range().end()));
+    // An incomplete ternary terminated by a closing block keyword is re-headed
+    // `?` → `if` with one trailing `(error-t)` per missing piece (`x ? true end`
+    // ⇒ `(if x true (error-t) (error-t))`, `x ? true : elseif …` ⇒
+    // `(if x true (error-t))`).
+    if let Some(qe) = q_end {
+        let markers = diag_count_at(qe, DiagnosticKind::IncompleteTernaryIf);
+        if markers > 0 {
+            let mut parts: Vec<String> = nodes.iter().map(project).collect();
+            for _ in 0..markers {
+                parts.push("(error-t)".to_string());
+            }
+            return sexp("if", parts);
+        }
+    }
     let mut parts = Vec::new();
     for (i, n) in nodes.iter().enumerate() {
         parts.push(project(n));

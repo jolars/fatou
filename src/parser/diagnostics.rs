@@ -150,6 +150,15 @@ pub enum DiagnosticKind {
     /// the colon; the two operator tokens stay loose children of the
     /// `BINARY_EXPR`.
     InvalidGluedOperator,
+    /// An incomplete ternary whose missing `:`/false-branch is terminated by a
+    /// closing block keyword (`end`/`elseif`/`else`/`catch`/`finally`) — `x ? true
+    /// end`, `x ? true : elseif …`. JuliaSyntax re-heads the recovered node from
+    /// `?` to `if`, splicing one zero-width `(error-t)` per missing piece (no
+    /// colon ⇒ two markers `(if x true (error-t) (error-t))`; colon present but
+    /// false missing ⇒ one `(if x true (error-t))`). Recorded as a zero-width
+    /// point at the `?`'s end, pushed once per trailing marker; the projector
+    /// keys head and marker count off the multiplicity.
+    IncompleteTernaryIf,
 }
 
 /// A parse-time diagnostic: a classified message anchored to a byte range in the

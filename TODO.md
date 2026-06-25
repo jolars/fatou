@@ -13,19 +13,30 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
-- [ ] **Design watch (diagnostics model): context-dependent recovery shapes.**
-  Recovery diagnostics are anchored *context-free* — by `(byte, DiagnosticKind)`,
-  with count for multiplicity — and the projector replays a fixed shape per kind.
-  This holds as long as a surface construct recovers the same way everywhere, but
-  some shapes depend on the *enclosing* context: e.g. an incomplete ternary
-  projects differently at toplevel (`x ? true` ⇒ `(? x true (error-t)…)`) than
-  inside a block (`if true; x ? true end` ⇒ `(… (block (if x true (error-t)
-  (error-t))))`, js-434fcafd/810e177c/74a9b301/471d5c84). A byte+kind anchor can't
-  express "this shape *because* of the enclosing block." When that cluster (or
-  similar) is taken, prefer extending the diagnostic record to carry the needed
-  context (e.g. an enclosing-kind tag) over either minting a hyper-specialized
-  `DiagnosticKind` per context or pushing context-sensitivity into the projector
-  (the latter is the forbidden "compensating projector" smell). Watch, not a bug.
+- [x] Incomplete ternary recovered as `if` (the ternary slice of the old
+  "Design watch: context-dependent recovery shapes"). When a ternary's missing
+  `:`/false-branch is terminated by a *closing block keyword*
+  (`end`/`elseif`/`else`/`catch`/`finally`), JuliaSyntax re-heads the recovered
+  node `?` → `if`, splicing one zero-width `(error-t)` per missing piece: no
+  colon ⇒ `(if x true (error-t) (error-t))` (`if true; x ? true end`,
+  js-434fcafd/810e177c/74a9b301), colon present but false missing ⇒
+  `(if x true (error-t))` (`if true; x ? true : elseif …`, js-471d5c84); the
+  keyword is left for the enclosing block (or the toplevel-junk driver, `x ?
+  true end` ⇒ `(if x true (error-t) (error-t)) (error-t end)`). **Key finding:**
+  the head flip is decided *locally* by the terminator token, **not** by the
+  enclosing block — even at toplevel `x ? true end` re-heads to `if`, while a
+  ternary terminated by EOF/newline stays `?` (a separate, still-divergent
+  toplevel shape with a different error count, not in the corpus). So no
+  enclosing-kind tag was needed: both missing-branch arms of `parse_ternary`
+  (`expr.rs`) peek `is_closing_block_keyword(terminator)` and, when true, build a
+  `TERNARY_EXPR` (keeping the `?`/`:` as loose tokens) plus one
+  `IncompleteTernaryIf` diagnostic per marker at the `?`'s end;
+  `project_ternary` (`sexpr.rs`) keys the `if` head and marker count off the
+  count. Fixture `ternary_incomplete_if`. **Design watch closed for this
+  cluster** — the context that mattered was a local lookahead, not the enclosing
+  node, so the byte+kind diagnostic anchor sufficed without an enclosing-kind
+  extension. (The toplevel incomplete-ternary `?`-head shapes with EOF/newline
+  terminators remain deferred — divergent but absent from the corpus.)
 - [x] Flat arithmetic chains for `+`/`*`. A run of two or more of the *same*
   plain `+`/`*` operator folds into one flat variadic `BINARY_EXPR`
   (`a + b + c` ⇒ `(call-i a + b c)`, `a * b * c * d` ⇒ `(call-i a * b c d)`),

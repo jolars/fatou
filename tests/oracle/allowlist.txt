@@ -148,6 +148,7 @@ struct_module
 suffixed_prefix_operator
 symbols
 ternary
+ternary_incomplete_if
 ternary_whitespace_error
 tilde_operator
 toplevel_leftover_error
