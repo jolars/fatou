@@ -101,6 +101,12 @@ pub enum DiagnosticKind {
     /// the dotcall with a zero-width marker (`@M.(x)` ⇒
     /// `(macrocall (dotcall @M (error-t) x))`). Anchored at the broadcast `(` opener.
     MacroDotBroadcast,
+    /// A misplaced macro sigil in a qualified macro name: the `@` sits on a
+    /// non-final component with a trailing `.ident` continuation (`A.@B.x`).
+    /// JuliaSyntax relocates the sigil to the final component and splices a
+    /// zero-width marker (`A.@B.x` ⇒ `(macrocall (. (. A (quote B)) (error-t)
+    /// (quote @x)))`). Anchored at the `@` sigil.
+    MacroSigilTrailing,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **672 allowlisted**,
-13 divergence, 0 unsupported. Dir corpus: **177 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **673 allowlisted**,
+12 divergence, 0 unsupported. Dir corpus: **178 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,39 +58,46 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25e — broadcast call on a macro name `@M.(x)`)
+## Latest session (2026-06-25f — misplaced macro sigil `A.@B.x`)
 
-**`@M.(x)` (broadcast `.(…)` applied to a macro) now matches JuliaSyntax's
-macrocall-over-dotcall re-head** (flips js-2516c70f, the first clean slice of the
-macro dotted-name cluster). A macro can't be broadcast, so JuliaSyntax wraps the
-dotcall in a macrocall and splices a zero-width `(error-t)` after the name:
-`@M.(x)` ⇒ `(macrocall (dotcall @M (error-t) x))`, `@M.(x,y)` ⇒ one `(error-t)`
-before the args. **The CST is unchanged** (`(dotcall (macrocall @M) x)`); the
-re-head is a **projector replay from a recorded diagnostic** (same model as the
-2026-06-25c ternary→`if`). Parser: the broadcast-call arm of `parse_postfix_chain`
-records a new `MacroDotBroadcast` diag at the broadcast `(` opener, gated on the
-lhs's first event being `Start(MACRO_CALL)` (computed before the events move).
-Projector: new `project_dot_call` (replacing the bare `project_call("dotcall", …)`
-dispatch) re-heads when the dotcall's first child is a MACRO_CALL carrying that
-diag — projects the inner MACRO_NAME as `@M`, splices `(error-t)`, wraps in
-`macrocall`; plain `f.(x)`/`M.(x)` and qualified `@A.x`/`@A.B.x`/`Base.@time f()`
-all verified untouched. Fixture + oracle-dir `macro_broadcast_call`. JS 671 → 672
-(zero regressions); dir 176 → 177. Green; clippy/fmt clean. **Deferred:** macro
-args *after* the broadcast (`@M.(x) y` ⇒ `(macrocall (dotcall @M (error-t) x) y)`
-in Julia; Fatou's macrocall wraps `@M` alone so `y` falls to trailing junk — not
-in the corpus). **Next target (no active plan):** the rest of the macro
-dotted-name cluster — each a distinct deep `@`-reflow, none clusters: `A.@B.x` ⇒
-`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.$x a` ⇒ `(macrocall
-(. A (inert (error x))) a)`, `@A.B.@x a` ⇒ `(macrocall (. (. A (quote B)) (quote
-(error-t) @x)) a)` (Fatou currently drops `.x` / mis-nests these). Or `a[:(end)]`
-(js-557adcf4), which first needs the general `a[1 end]` keyword-in-matrix recovery
-(Fatou silently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`; Julia wants
-`(typed_hcat a 1 (error-t)) (error-t end ✘)` — a chunk). Rest of the FAIL set is
-float-display normalization (blocked) plus `f.'`/`x 'y` char-lexer and `(2)(3)x`
+**`A.@B.x` (a qualified macro whose `@` names a non-final component) now matches
+JuliaSyntax's sigil-relocation re-head** (flips js-27604c64, the second clean
+slice of the macro dotted-name cluster). A `@` sitting on a non-final component
+with a trailing `.ident` continuation is invalid; JuliaSyntax relocates the sigil
+to the final component and splices a zero-width `(error-t)` at *every* dotted step
+*after* the `@`-named one: `A.@B.x` ⇒ `(macrocall (. (. A (quote B)) (error-t)
+(quote @x)))`, `A.@B.C.x` ⇒ two `(error-t)` (`(. (. (. A (quote B)) (error-t)
+(quote C)) (error-t) (quote @x))`). **The CST is unchanged/lossless** (flat
+`NAME(A) . @ B . x` tokens); the re-head is a **projector replay from a recorded
+diagnostic** (same model as `@M.(x)`). Parser: `parse_qualified_macro` records a
+new `MacroSigilTrailing` diag at the `@`, gated on the token pattern `@ ident .
+ident`. Projector: a new branch in `project_macro_name`'s trailing-form path
+reconstructs the chain — first component after the module is the sigil-named one
+(plain `(quote B)`), every later step gets `(error-t)`, the last also carries the
+relocated `@`. Count is derived from the (lossless) structure, the diag is just
+the boolean gate. Valid `A.B.@x`/`@A.B.x`/`A.@B`/`Base.@time f()`/`@A.x` all
+verified untouched. Fixture + oracle-dir `macro_sigil_trailing`. JS 672 → 673
+(zero regressions); dir 177 → 178. Green; clippy/fmt clean. **Next target (no
+active plan):** the other two macro dotted-name reflows, each distinct: `@A.$x a`
+⇒ `(macrocall (. A (inert (error x))) a)` (Fatou currently mis-nests: `(. (macrocall
+@A) (inert ($ x))) (error-t a)`), and `@A.B.@x a` ⇒ `(macrocall (. (. A (quote B))
+(quote (error-t) @x)) a)` (double `@`; Fatou drops `A.B.`: `(macrocall @x a)`). Or
+`a[:(end)]` (js-557adcf4), which first needs the general `a[1 end]` keyword-in-matrix
+recovery (Fatou silently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`; Julia
+wants `(typed_hcat a 1 (error-t)) (error-t end ✘)` — a chunk). Rest of the FAIL set
+is float-display normalization (blocked) plus `f.'`/`x 'y` char-lexer and `(2)(3)x`
 (out of scope).
 
 ## Earlier sessions
 
+- **2026-06-25e** — Broadcast call on a macro name `@M.(x)` (first clean slice of
+  the macro dotted-name cluster, flips js-2516c70f). A broadcast `.(…)` on a macro
+  is invalid; JuliaSyntax wraps the dotcall in a macrocall and splices a zero-width
+  `(error-t)` after the name (`@M.(x)` ⇒ `(macrocall (dotcall @M (error-t) x))`).
+  CST unchanged; projector replay from a new `MacroDotBroadcast` diag at the
+  broadcast `(` (recorded in `parse_postfix_chain`, gated on lhs `MACRO_CALL`);
+  new `project_dot_call` re-heads. Fixture `macro_broadcast_call`. JS 671 → 672;
+  dir 176 → 177. Deferred: macro args after the broadcast (`@M.(x) y`).
 - **2026-06-25d** — Bare block keyword `function`/`macro` empty-recovery shape
   (flips js-78f9ac01, the `function` slice of backlog item g). `function` ⇒
   `(function (error (error)) (block (error)) (error-t))`, likewise `macro`. Two

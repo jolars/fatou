@@ -1,0 +1,1 @@
+(toplevel (macrocall (. (. A (quote B)) (error-t) (quote @x))) (macrocall (. (. A (quote B)) (error-t) (quote @x)) y) (macrocall (. (. (. A (quote B)) (error-t) (quote C)) (error-t) (quote @x))))

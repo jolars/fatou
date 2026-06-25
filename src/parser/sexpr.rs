@@ -1988,6 +1988,49 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         .children()
         .find(|c| matches!(c.kind(), NAME | BINARY_EXPR | INTERPOLATION))
     {
+        // Misplaced macro sigil (`A.@B.x`): the `@` names a non-final component
+        // with a trailing `.ident` continuation (recorded as `MacroSigilTrailing`).
+        // JuliaSyntax relocates the sigil to the final component and splices a
+        // zero-width `(error-t)` before it: `A.@B.x` ⇒
+        // `(. (. A (quote B)) (error-t) (quote @x))`.
+        if var_name.is_none()
+            && let Some(at_start) = node
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .find(|t| t.kind() == AT)
+                .map(|t| usize::from(t.text_range().start()))
+            && diag_at(at_start, DiagnosticKind::MacroSigilTrailing)
+        {
+            let mut after_at = false;
+            let comps: Vec<String> = node
+                .children_with_tokens()
+                .filter_map(|el| el.into_token())
+                .filter_map(|t| {
+                    if t.kind() == AT {
+                        after_at = true;
+                        return None;
+                    }
+                    if after_at && (t.kind() == IDENT || is_macro_name_part_token(t.kind())) {
+                        Some(t.text().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            // The first component after the module is the one the sigil named
+            // (plain `(quote B)`); every later step gets an `(error-t)`, and the
+            // final one also carries the relocated `@`.
+            if let [first, rest @ ..] = comps.as_slice() {
+                let mut path = format!("(. {} (quote {first}))", project(&module));
+                if let Some((last, mids)) = rest.split_last() {
+                    for c in mids {
+                        path = format!("(. {path} (error-t) (quote {c}))");
+                    }
+                    path = format!("(. {path} (error-t) (quote @{last}))");
+                }
+                return path;
+            }
+        }
         let name = match &var_name {
             Some(v) => v.clone(),
             None => format!("@{}", macro_name_after_at(node)),

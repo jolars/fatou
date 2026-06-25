@@ -1,0 +1,44 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..25
+  MACRO_CALL@0..6
+    MACRO_NAME@0..6
+      NAME@0..1
+        IDENT@0..1 "A"
+      DOT@1..2 "."
+      AT@2..3 "@"
+      IDENT@3..4 "B"
+      DOT@4..5 "."
+      IDENT@5..6 "x"
+  NEWLINE@6..7 "\n"
+  MACRO_CALL@7..15
+    MACRO_NAME@7..13
+      NAME@7..8
+        IDENT@7..8 "A"
+      DOT@8..9 "."
+      AT@9..10 "@"
+      IDENT@10..11 "B"
+      DOT@11..12 "."
+      IDENT@12..13 "x"
+    WHITESPACE@13..14 " "
+    NAME@14..15
+      IDENT@14..15 "y"
+  NEWLINE@15..16 "\n"
+  MACRO_CALL@16..24
+    MACRO_NAME@16..24
+      NAME@16..17
+        IDENT@16..17 "A"
+      DOT@17..18 "."
+      AT@18..19 "@"
+      IDENT@19..20 "B"
+      DOT@20..21 "."
+      IDENT@21..22 "C"
+      DOT@22..23 "."
+      IDENT@23..24 "x"
+  NEWLINE@24..25 "\n"
+
+diagnostic [2..2]: misplaced macro sigil
+diagnostic [9..9]: misplaced macro sigil
+diagnostic [18..18]: misplaced macro sigil

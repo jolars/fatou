@@ -13,6 +13,19 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Misplaced macro sigil in a qualified macro name `A.@B.x` (a slice of the
+  macro dotted-name cluster, js-27604c64). A qualified macro whose `@` names a
+  non-final component with a trailing `.ident` continuation is invalid;
+  JuliaSyntax relocates the sigil to the final component and splices a zero-width
+  `(error-t)` at *every* dotted step after the `@`-named one (`A.@B.x` ⇒
+  `(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `A.@B.C.x` ⇒ two
+  `(error-t)`). The parser records a `MacroSigilTrailing` diagnostic at the `@`
+  (in `parse_qualified_macro`, gated on `@ ident . ident`); `project_macro_name`
+  replays it, leaving valid `A.B.@x`/`@A.B.x`/`Base.@time f()` untouched. Fixture
+  `macro_sigil_trailing`. JS 672 → 673; dir 177 → 178. **Deferred:** the other
+  two dotted-name reflows `@A.$x a` (`(macrocall (. A (inert (error x))) a)`) and
+  `@A.B.@x a` (double `@`, `(macrocall (. (. A (quote B)) (quote (error-t) @x))
+  a)`), each a distinct deep `@`-reflow.
 - [x] Broadcast call on a macro name `@M.(x)` (a slice of the macro dotted-name
   cluster, js-2516c70f). A broadcast `.(…)` applied to a macro is invalid — a
   macro cannot be broadcast — so JuliaSyntax re-heads the dotcall under a

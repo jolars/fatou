@@ -3508,6 +3508,23 @@ fn parse_qualified_macro(
     let at_idx = ctx.skip_trivia(dot_idx + 1);
     push_range(&mut events, dot_idx + 1, at_idx);
     events.push(Event::Tok(at_idx)); // `@`
+    // A misplaced macro sigil: the `@` names a non-final component with a glued
+    // `.ident` continuation (`A.@B.x`). JuliaSyntax relocates the sigil to the
+    // final component and splices a zero-width marker; record it for the
+    // projector to replay.
+    if ctx.token(at_idx + 1).map(|t| t.kind) == Some(TokKind::Ident)
+        && ctx.token(at_idx + 2).map(|t| t.kind) == Some(TokKind::Dot)
+        && ctx.token(at_idx + 3).map(|t| t.kind) == Some(TokKind::Ident)
+    {
+        let at_start = ctx.tokens()[at_idx].start;
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::MacroSigilTrailing,
+            "misplaced macro sigil",
+            at_start,
+            at_start,
+        );
+    }
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     events.push(Event::Finish); // close MACRO_NAME
 

@@ -99,6 +99,7 @@ macro_directive_names
 macro_name_brackets
 macro_operator_names
 macros
+macro_sigil_trailing
 matrices
 multi_clause_generators
 multi_param_groups
