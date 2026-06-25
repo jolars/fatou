@@ -3140,6 +3140,11 @@ fn project_error(head: &str, node: &SyntaxNode) -> String {
             NodeOrToken::Token(t) if is_closing_block_keyword_kind(t.kind()) => {
                 Some(t.text().to_string())
             }
+            // A misplaced prime (`f.'` ⇒ `f (error-t ')`) recovered into the
+            // junk run renders as its `'` glyph; the leading field-access `.`
+            // that JuliaSyntax bundles with it is dropped (it shows only `'`).
+            NodeOrToken::Token(t) if t.kind() == TRANSPOSE => Some(t.text().to_string()),
+            NodeOrToken::Token(t) if t.kind() == DOT => None,
             NodeOrToken::Token(t) if is_drop_token(t.kind()) => None,
             _ => project_element(&el),
         })

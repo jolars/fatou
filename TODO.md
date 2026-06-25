@@ -1036,7 +1036,11 @@ through), so the grammar can grow incrementally.
   `Char` literal — matching Julia's whitespace sensitivity (`A'` transpose vs
   `A '` char). The postfix chain (`parse_postfix_chain`) wraps the operand in a
   `POSTFIX_EXPR` and re-loops, so it chains (`A''`) and composes with later
-  suffixes (`A'[i]`, mirroring JuliaSyntax's `(ref (call A ') i)`).
+  suffixes (`A'[i]`, mirroring JuliaSyntax's `(ref (call A ') i)`). A `'` that
+  abuts a field-access `.` is the removed `.'` transpose operator, lexed as a
+  `Transpose` and recovered as a trailing-junk run (`f.'` ⇒ `f (error-t ')`):
+  the operator loop ends the value at a `.`-then-`'`, so `.'` falls to the
+  toplevel leftover driver; `project_error` renders the prime and drops the `.`.
 - [x] Bare `end` inside indexing (`a[end]`). An `end_marker` flag, threaded
   through the Pratt parser alongside `inside_brackets`/`no_range`/`array_mode`,
   enables a bare `end` to parse as an `END_MARKER` atom rather than a block

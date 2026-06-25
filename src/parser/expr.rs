@@ -595,6 +595,18 @@ fn parse_expr_in(
             break;
         }
 
+        // A `.` immediately followed by a `'` is the removed `.'` transpose
+        // operator, not a field access: JuliaSyntax ends the value and recovers
+        // `.'` as a trailing-junk run (`f.'` ⇒ `f (error-t ')`). End the chain
+        // here so `.'` falls to the toplevel leftover driver (`core.rs`). The
+        // lexer only emits `Transpose` after `.` when the prime abuts it, so a
+        // spaced `f. '` stays a char literal and is unaffected.
+        if op_kind == TokKind::Dot
+            && ctx.token(op_idx + 1).map(|t| t.kind) == Some(TokKind::Transpose)
+        {
+            break;
+        }
+
         // A `.` whose right-hand side begins with `@` is a qualified macro call
         // (`Base.@time f()`): the whole `Base.@time` is the macro name and the
         // rest are its arguments — not a field access wrapping a macro call.

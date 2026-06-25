@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **676 allowlisted**,
-9 divergence, 0 unsupported. Dir corpus: **180 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **677 allowlisted**,
+8 divergence, 0 unsupported. Dir corpus: **181 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,43 +58,48 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25h — misplaced `end` keyword in space-separated array)
+## Latest session (2026-06-25i — misplaced `.'` prime → trailing-junk recovery)
 
-**The last addressable matrix-recovery FAIL now matches JuliaSyntax** (flips
-js-557adcf4 `a[:(end)]`). `end` is a valid index marker only as the sole/leading
-bracket element; once another element precedes it (`a[1 end]`, `[1 2 end]`,
-`a[:(end)]`) JuliaSyntax stops the array, splices a zero-width `(error-t)` after
-the last real element, and bumps the `end` plus the remaining closers up as a
-trailing-junk run handled by the top-level leftover driver:
-`a[1 end]` ⇒ `(typed_hcat a 1 (error-t)) (error-t end ✘)`,
-`[1 end]` ⇒ `(vect 1 (error-t)) (error-t end ✘)`,
-`a[:(end)]` ⇒ `(typed_hcat a (quote-: (error-t)) (error-t)) (error-t end ✘ ✘)`.
-**Parser:** a new `EndKw` arm in `parse_matrix`'s scan loop (`expr.rs`) ends the
-array *before* the keyword — `break q` without consuming a closer — and records a
-new `MatrixKeywordRecovery` diag at the last element's end byte; the unconsumed
-`end <closers>` then flows to the existing `core.rs` leftover driver (so the `✘`
-glyphs and `end` text come for free). **Projector:** `project_cat_children` *and*
-`project_args` splice one `(error-t)` per `MatrixKeywordRecovery` diag at an `ARG`
-end (the bare-`[…]` n=1 collapse goes through `VECT_EXPR`/`project_args`, the
-matrix/braces forms through `project_cat_children`). **Head selection:** a typed
-concat keeps its matrix head even at one element — `parse_typed_concat` rewrites
-the collapsed `VECT_EXPR` start event to `MATRIX_EXPR` when the recovery fired —
-while a bare `[…]` stays `vect`/`hcat`/`vcat` by element count + separator (all
-verified vs Julia: `[1 end]`→vect, `[1 2 end]`→hcat, `[1; end]`→vcat,
-`{1 end}`→braces). CST stays flat/lossless. Valid `a[end]`/`a[1, end]`/`a[1:end]`/
-`a[1 2]` untouched. Fixture + oracle-dir `matrix_end_keyword`. JS 675 → 676 (zero
-regressions); dir 179 → 180. Green; clippy/fmt clean. **Next target (no active
-plan):** the JS corpus is effectively exhausted — the remaining **9 divergences**
-are all permanent/out-of-scope: float-display normalization (`1.0e-1000`, `x.3`,
-`-0xf.0p0`, `0x123456789abcdefp+0`, prime+float `10.0e1000'`/`10.0f100'` — needs
-Julia's `show`), `f.'`/`x 'y` char-lexer (entangled with the removed transpose
-`'`/`.'` operators), and `(2)(3)x` (`(2)(3)`→`(call 2 3)` n-ary juxtaposition
-misparse, out of scope). Future growth is **error-shape parity** (a separate
-phase) or a JuliaSyntax version bump (re-harvest + re-triage). Consider the
-char-lexer pair as the one remaining non-display target if the transpose operator
-is reintroduced.
+**The clean half of the char-lexer/transpose pair now matches JuliaSyntax**
+(flips js-128bdd20 `f.'`). The removed `.'` transpose operator: a `'` that
+directly abuts a field-access `.` is not the start of a char literal but the
+old prime operator, recovered as trailing junk (`f.'` ⇒ `f (error-t ')`,
+`a.'` ⇒ `a (error-t ')`). **Three-file fix:** (1) **lexer** `prev_is_dot()` —
+lex `'` as `Transpose` (not `Char`) when the immediately preceding token is
+`Dot`, mirroring `prev_ends_value` (whitespace-sensitive: spaced `f. '` stays a
+char); (2) **parser** operator loop ends the value at a `.`-immediately-followed-
+by-`Transpose`, so `.'` falls to the existing `core.rs` toplevel leftover driver
+(no new node/diag — reuses `TrailingJunk`); (3) **projector** `project_error`
+renders a `TRANSPOSE` token as its `'` glyph and drops a bundled field-access
+`DOT` (JuliaSyntax shows only the `'`). Fixture + oracle-dir `dot_prime_recovery`.
+JS 676 → 677 (zero regressions); dir 180 → 181. Green; clippy/fmt clean. Valid
+transpose (`f'`, `a.b'`, `x''`, `[a 'b']`, `x = 'a'`) untouched.
+**Remaining 8 JS divergences are all permanent/out-of-scope:** float-display
+normalization (6: `x.3`→`0.3`, `-0xf.0p0`→`-15.0`, `1.0e-1000`→`0.0`, hex
+float→`8.19…e16`, two `'`-suffixed overflows — need Julia's float `show`); the
+char-lexer sibling **`x 'y`** (the *other* half of this pair, **genuinely
+deferred**: JuliaSyntax tokenizes `'`-after-value-across-horizontal-ws as
+transpose at toplevel but as a **char inside `[...]`/`(...)`** — `[a 'b']` ⇒
+`(char 'b')` — so faithfully handling `x 'y` ⇒ `(error-t ' 'y')` needs
+**bracket-depth-aware `'` lexing** Fatou's flat lexer lacks; naively enabling it
+would break the common valid `[a 'b']`, which isn't in the corpus to catch it);
+and `(2)(3)x` (n-ary juxtaposition misparse, out of scope). Also out of corpus:
+`f.'x` ⇒ JuliaSyntax `(juxtapose f (error-t ') x)` (juxtapose-after-junk, same
+family as `x 'y`). **Next target (no active plan):** the JS corpus is now down to
+these permanent/blocked items; real future growth is **error-shape parity** (a
+separate phase), the **`x 'y` bracket-context lexer** refactor (if the float
+work is also taken on, since both are lexer-display work), or a **JuliaSyntax
+version bump** (re-harvest + re-triage).
 
 ## Earlier sessions
+
+- **2026-06-25h** — Misplaced `end` keyword in space-separated array (flips
+  js-557adcf4 `a[:(end)]`). `end` is a valid index marker only as the sole/leading
+  bracket element; once another element precedes it the array ends, a zero-width
+  `(error-t)` splices after the last real element, and `end <closers>` bumps up as
+  trailing junk: `a[1 end]` ⇒ `(typed_hcat a 1 (error-t)) (error-t end ✘)`. New
+  `EndKw` arm in `parse_matrix` + `MatrixKeywordRecovery` diag; projector splices
+  via `project_cat_children`/`project_args`. JS 675 → 676; dir 179 → 180.
 
 - **2026-06-25g** — Leading-`@` dotted macro `$`/inner-`@` reflow (flips
   js-704830e1 `@A.$x a`, js-fe911108 `@A.B.@x a`; closes the macro dotted-name
@@ -141,9 +146,6 @@ is reintroduced.
   the `if` head and count off it. Fixture `ternary_incomplete_if`. JS 666 → 670;
   dir 174 → 175. Deferred: toplevel EOF/newline-terminated incomplete ternary
   (stays `?`-head, not in corpus).
-
-## Earlier sessions
-
 - **2026-06-25b** — Array `;;` line continuation → `hcat` (flips js-82572497
   `[a b ;; \n c]` ⇒ `(hcat a b c)`; deferred root (c)). A `;;` (exactly two)
   immediately followed by a newline (`;; \n`, *not* `\n ;;`) in an *already*

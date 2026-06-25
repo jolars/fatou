@@ -54,6 +54,7 @@ doc_macro
 docstring
 docstring_stray_closer
 dot_logical_operator
+dot_prime_recovery
 dotted_operator_quote
 else_if_recovery
 empty_semicolon_param_group

@@ -409,7 +409,7 @@ impl<'a> Lexer<'a> {
             b'#' => self.lex_comment(start),
             b'"' => self.lex_open_string(start, false),
             b'`' => self.lex_open_cmd(start, false),
-            b'\'' if self.prev_ends_value() => {
+            b'\'' if self.prev_ends_value() || self.prev_is_dot() => {
                 self.pos += 1;
                 self.push_op(TokKind::Transpose, start);
             }
@@ -691,6 +691,16 @@ impl<'a> Lexer<'a> {
                     | TokKind::Transpose
             )
         )
+    }
+
+    /// Whether the immediately preceding token is a field-access `.`. A `'`
+    /// directly after a `.` is the removed `.'` transpose operator (`f.'`), not
+    /// the start of a char literal: JuliaSyntax lexes it as a prime token and
+    /// recovers `.'` as trailing junk (`f.'` ⇒ `f (error-t ')`). As with
+    /// [`Self::prev_ends_value`] the check is on the *immediately* preceding
+    /// token, so a space (`f. '`) leaves the `'` a char literal.
+    fn prev_is_dot(&self) -> bool {
+        self.tokens.last().map(|t| t.kind) == Some(TokKind::Dot)
     }
 
     /// `'` begins a char literal when it is *not* a postfix adjoint/transpose
