@@ -11,7 +11,11 @@ leverage.
   `EqEqEq`/`NotEqEq` tokens (longest-match, beat `==`/`!=`); `scan_ident` now
   stops at a `!` immediately followed by `=` so `a!=b`⇒`a` `!=` `b` while `f!`,
   `push!`, `a!b` stay identifiers. Project as `(call-i a === b)` / fold into
-  `(comparison …)`. Deferred: the broadcast dotted forms `.===`/`.!==`.
+  `(comparison …)`.
+- [x] Lexer: broadcast identity/inequality operators `.===`/`.!==`. New
+  `DotEqEqEq`/`DotNotEqEq` tokens, lexed as 4-char dotted ops (longest-match,
+  beat the 3-char `.==`/`.!=`). Single op ⇒ `(dotcall-i a === b)`; a run folds
+  into `(comparison a (. ===) b …)` via the existing chain machinery.
 
 ### Incremental
 

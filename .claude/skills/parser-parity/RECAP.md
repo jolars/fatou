@@ -38,7 +38,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 ## Progress
 
 JS corpus (**685 cases** — error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **182 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **183 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,37 +58,46 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25k — identity/inequality operators `===`/`!==`/`!=`)
+## Latest session (2026-06-25l — broadcast identity ops `.===`/`.!==`)
 
-Landed the lexer gap queued from formatter-parity. `===`/`!==`/`!=` now lex and
-project faithfully; the `!` maximal-munch is resolved.
+Landed the deferred next-pickup from 2026-06-25k: the 4-char dotted forms now
+lex and project faithfully (`x .=== y` previously mis-lexed `.==` + `(error =)`).
 
-- **Two new tokens** `EqEqEq` (`===`) / `NotEqEq` (`!==`), lexed in the 3-char
-  ASCII block so longest-match beats `==`/`!=`. Full 5-file recipe + the sibling
-  operator lists: `lexer.rs` (`TokKind`, lex, `op_takes_suffix`), `syntax.rs`
-  (`EQ_EQ_EQ`/`NOT_EQ_EQ`), `tree_builder.rs`, `expr.rs` (`is_comparison_op`,
-  `is_operator_call_name`, `infix_binding_power` → comparison tier `(10,11)`),
-  `sexpr.rs` (`infix_head` `CallI("===")`/`CallI("!==")`, `is_operator`),
-  `structural.rs` (`is_op_name`). Single op ⇒ `(call-i a === b)`; a run folds into
-  `(comparison …)` via the existing chain machinery — no projector special-casing.
-- **The munch fix** (the crux): `!` is an ident-continue char, so `x!=y` greedily
-  lexed `x!` as an identifier before the operator table ran. `scan_ident` now
-  **stops at a `!` immediately followed by `=`** (`self.peek(1) == b'='`), so
-  `a!=b`⇒`a` `!=` `b` and `a!!=b`⇒`a!` `!=` `b`, while `a!b`, `f!`, `push!` stay
-  identifiers. Matches JuliaSyntax exactly (probed `a!b`/`a!=b`/`a!!=b`/`a!==b`).
-- **Verified faithful** against JS ground truth: all of `a === b`, `a !== b`,
-  chains, `===(a,b)`⇒`(call === a b)`, `:(===)`⇒`(quote-: ===)`, tight `a!==b`.
-  Bonus: the formatter (the original motivation) now normalizes `x===y`→`x === y`,
-  `x!=y`→`x != y` once these tokenize.
-- **Fixtures**: parser snapshot `identity_operators` + oracle dir slug (parity
-  confirmed); lexer unit tests `bang_in_identifier` (extended) + `identity_operators`.
-- **Counts**: JS 677 (held, no new unblocks/regressions), dir 181 → **182**.
-- **Deferred**: the broadcast dotted forms `.===`/`.!==` (4-char dotted ops, a
-  separate surface — `x .=== y` currently errors, **not a regression**, it errored
-  before too). Natural next pickup if wanted: add `DotEqEqEq`/`DotNotEqEq` mirroring
-  `DotEqEq`/`DotNotEq` (4-char dotted lex arm at the `.//=`/`.-->` tier).
+- **Two new tokens** `DotEqEqEq` (`.===`) / `DotNotEqEq` (`.!==`), lexed as
+  **4-char dotted ops** in the same block as `.//=`/`.-->` (before the 3-char
+  table) so longest-match beats `.==`/`.!=`. Full 5-file recipe + sibling lists:
+  `lexer.rs` (`TokKind`, 4-char lex arm, `op_takes_suffix`), `syntax.rs`
+  (`DOT_EQ_EQ_EQ`/`DOT_NOT_EQ_EQ`), `tree_builder.rs`, `expr.rs`
+  (`is_comparison_op`, `is_value_operator`, `is_operator_call_name`,
+  `infix_binding_power` → comparison tier `(10,11)`), `sexpr.rs` (`infix_head`
+  `DotCallI("===")`/`DotCallI("!==")`, `is_operator`), `structural.rs`
+  (`is_op_name`). Single op ⇒ `(dotcall-i a === b)`; a run folds into
+  `(comparison a (. ===) b …)` via the existing chain machinery.
+- **Also fixed a latent AST gap**: `ast/nodes.rs::is_operator_kind`
+  (`BinaryExpr::op_token`) was missing the non-dotted `EQ_EQ_EQ`/`NOT_EQ_EQ`
+  (oversight from 2026-06-25k); added those plus the new dotted kinds. Affects
+  the formatter's operator-token lookup, not the projector.
+- **Verified faithful** against JS ground truth: `x .=== y`⇒`(dotcall-i x === y)`,
+  `x .!== y`, chains `a .=== b .=== c`⇒`(comparison a (. ===) b (. ===) c)`,
+  mixed `a .!== b .== c`. Siblings unregressed: `.==`/`.!=` still 3-char, `.=`
+  still `DotEq` assignment.
+- **Fixtures**: parser snapshot `broadcast_identity_operators` + oracle dir slug
+  (parity confirmed); lexer unit test extended in `broadcasting_operators`.
+- **Counts**: JS 677 (held — these aren't in the JS corpus, no unblocks/
+  regressions), dir 182 → **183**.
+- **Frontier note**: the JS harvested backlog is now **exhausted** of fixable
+  cases — all 8 remaining FAILs are permanent/out-of-scope (float display ×6,
+  `(2)(3)x` juxtaposition, `x 'y` char-lexer). Next work is real-world-value
+  constructs not in the corpus, or the float-display `show` problem.
 
 ## Earlier sessions
+
+- **2026-06-25k** — Identity/inequality operators `===`/`!==`/`!=`. Two tokens
+  `EqEqEq`/`NotEqEq` (3-char ASCII block, longest-match beats `==`/`!=`); the
+  crux was the `!` munch — `scan_ident` now stops at `!` immediately followed by
+  `=` so `a!=b`⇒`a !=  b` while `f!`/`push!`/`a!b` stay identifiers. Single op ⇒
+  `(call-i a === b)`; runs fold into `(comparison …)`. Fixture
+  `identity_operators`. JS 677 (held); dir 181 → 182.
 
 - **2026-06-25j** — Projector faithfulness audit (no parser change), de-risking the
   formatter: classified every non-trivial valid-code `sexpr.rs` arm by what it reads
@@ -108,8 +117,6 @@ project faithfully; the `!` maximal-munch is resolved.
   `dot_prime_recovery`. JS 676 → 677; dir 180 → 181. Remaining 8 JS divergences all
   permanent/out-of-scope: float-display (6), the `x 'y` char-lexer sibling (needs
   bracket-depth-aware `'` lexing), `(2)(3)x` juxtaposition.
-
-## Earlier sessions
 
 - **2026-06-25h** — Misplaced `end` keyword in space-separated array (flips
   js-557adcf4 `a[:(end)]`). `end` is a valid index marker only as the sole/leading

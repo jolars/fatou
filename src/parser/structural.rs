@@ -1241,6 +1241,8 @@ fn is_dotted_op_name(kind: TokKind) -> bool {
             | DotPercent
             | DotEqEq
             | DotNotEq
+            | DotEqEqEq
+            | DotNotEqEq
             | DotLt
             | DotLe
             | DotGt

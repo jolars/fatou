@@ -1131,6 +1131,8 @@ fn is_comparison_op(kind: TokKind) -> bool {
             | TokKind::Supertype
             | TokKind::DotEqEq
             | TokKind::DotNotEq
+            | TokKind::DotEqEqEq
+            | TokKind::DotNotEqEq
             | TokKind::DotLt
             | TokKind::DotLe
             | TokKind::DotGt
@@ -1831,6 +1833,8 @@ fn is_value_operator(kind: TokKind) -> bool {
                 | DotTilde
                 | DotEqEq
                 | DotNotEq
+                | DotEqEqEq
+                | DotNotEqEq
                 | DotLt
                 | DotLe
                 | DotGt
@@ -4677,6 +4681,8 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | DotPercent
             | DotEqEq
             | DotNotEq
+            | DotEqEqEq
+            | DotNotEqEq
             | DotLt
             | DotLe
             | DotGt
@@ -4985,6 +4991,8 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::Supertype
         | TokKind::DotEqEq
         | TokKind::DotNotEq
+        | TokKind::DotEqEqEq
+        | TokKind::DotNotEqEq
         | TokKind::DotLt
         | TokKind::DotLe
         | TokKind::DotGt

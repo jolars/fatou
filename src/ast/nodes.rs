@@ -255,6 +255,8 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::PERCENT
             | SyntaxKind::EQ_EQ
             | SyntaxKind::NOT_EQ
+            | SyntaxKind::EQ_EQ_EQ
+            | SyntaxKind::NOT_EQ_EQ
             | SyntaxKind::LT
             | SyntaxKind::LE
             | SyntaxKind::GT
@@ -278,6 +280,8 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::DOT_PERCENT
             | SyntaxKind::DOT_EQ_EQ
             | SyntaxKind::DOT_NOT_EQ
+            | SyntaxKind::DOT_EQ_EQ_EQ
+            | SyntaxKind::DOT_NOT_EQ_EQ
             | SyntaxKind::DOT_LT
             | SyntaxKind::DOT_LE
             | SyntaxKind::DOT_GT

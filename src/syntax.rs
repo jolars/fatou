@@ -227,6 +227,8 @@ pub enum SyntaxKind {
     DOT_EQ,
     DOT_EQ_EQ,
     DOT_NOT_EQ,
+    DOT_EQ_EQ_EQ,
+    DOT_NOT_EQ_EQ,
     DOT_LT,
     DOT_LE,
     DOT_GT,

@@ -143,6 +143,8 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::DotEq => SyntaxKind::DOT_EQ,
         TokKind::DotEqEq => SyntaxKind::DOT_EQ_EQ,
         TokKind::DotNotEq => SyntaxKind::DOT_NOT_EQ,
+        TokKind::DotEqEqEq => SyntaxKind::DOT_EQ_EQ_EQ,
+        TokKind::DotNotEqEq => SyntaxKind::DOT_NOT_EQ_EQ,
         TokKind::DotLt => SyntaxKind::DOT_LT,
         TokKind::DotLe => SyntaxKind::DOT_LE,
         TokKind::DotGt => SyntaxKind::DOT_GT,

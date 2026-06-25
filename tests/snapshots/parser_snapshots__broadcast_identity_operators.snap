@@ -1,0 +1,65 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..65
+  BINARY_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    DOT_EQ_EQ_EQ@2..6 ".==="
+    WHITESPACE@6..7 " "
+    NAME@7..8
+      IDENT@7..8 "y"
+  NEWLINE@8..9 "\n"
+  BINARY_EXPR@9..17
+    NAME@9..10
+      IDENT@9..10 "x"
+    WHITESPACE@10..11 " "
+    DOT_NOT_EQ_EQ@11..15 ".!=="
+    WHITESPACE@15..16 " "
+    NAME@16..17
+      IDENT@16..17 "y"
+  NEWLINE@17..18 "\n"
+  COMPARISON_EXPR@18..33
+    NAME@18..19
+      IDENT@18..19 "a"
+    WHITESPACE@19..20 " "
+    DOT_EQ_EQ_EQ@20..24 ".==="
+    WHITESPACE@24..25 " "
+    NAME@25..26
+      IDENT@25..26 "b"
+    WHITESPACE@26..27 " "
+    DOT_EQ_EQ_EQ@27..31 ".==="
+    WHITESPACE@31..32 " "
+    NAME@32..33
+      IDENT@32..33 "c"
+  NEWLINE@33..34 "\n"
+  COMPARISON_EXPR@34..48
+    NAME@34..35
+      IDENT@34..35 "a"
+    WHITESPACE@35..36 " "
+    DOT_NOT_EQ_EQ@36..40 ".!=="
+    WHITESPACE@40..41 " "
+    NAME@41..42
+      IDENT@41..42 "b"
+    WHITESPACE@42..43 " "
+    DOT_EQ_EQ@43..46 ".=="
+    WHITESPACE@46..47 " "
+    NAME@47..48
+      IDENT@47..48 "c"
+  NEWLINE@48..49 "\n"
+  COMPARISON_EXPR@49..64
+    NAME@49..50
+      IDENT@49..50 "x"
+    WHITESPACE@50..51 " "
+    DOT_EQ_EQ_EQ@51..55 ".==="
+    WHITESPACE@55..56 " "
+    NAME@56..57
+      IDENT@56..57 "y"
+    WHITESPACE@57..58 " "
+    DOT_NOT_EQ_EQ@58..62 ".!=="
+    WHITESPACE@62..63 " "
+    NAME@63..64
+      IDENT@63..64 "z"
+  NEWLINE@64..65 "\n"

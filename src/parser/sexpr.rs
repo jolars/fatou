@@ -423,6 +423,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_TILDE => DotCallI("~"),
         DOT_EQ_EQ => DotCallI("=="),
         DOT_NOT_EQ => DotCallI("!="),
+        DOT_EQ_EQ_EQ => DotCallI("==="),
+        DOT_NOT_EQ_EQ => DotCallI("!=="),
         DOT_LT => DotCallI("<"),
         DOT_LE => DotCallI("<="),
         DOT_GT => DotCallI(">"),
@@ -557,6 +559,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_EQ
             | DOT_EQ_EQ
             | DOT_NOT_EQ
+            | DOT_EQ_EQ_EQ
+            | DOT_NOT_EQ_EQ
             | DOT_LT
             | DOT_LE
             | DOT_GT

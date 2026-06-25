@@ -164,6 +164,10 @@ pub(crate) enum TokKind {
     DotEq,
     DotEqEq,
     DotNotEq,
+    /// The broadcast identity/inequality operators `.===`/`.!==` (project
+    /// `(dotcall-i a === b)`/`(dotcall-i a !== b)`).
+    DotEqEqEq,
+    DotNotEqEq,
     DotLt,
     DotLe,
     DotGt,
@@ -933,6 +937,18 @@ impl<'a> Lexer<'a> {
                 self.push_op(TokKind::DotLongArrow, start);
                 return;
             }
+            // The 4-char broadcast identity ops `.===`/`.!==` must beat the
+            // 3-char `.==`/`.!=`.
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'='), Some(b'='), Some(b'=')) {
+                self.pos += 4;
+                self.push_op(TokKind::DotEqEqEq, start);
+                return;
+            }
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'!'), Some(b'='), Some(b'=')) {
+                self.pos += 4;
+                self.push_op(TokKind::DotNotEqEq, start);
+                return;
+            }
             let dotted3 = match (b1, self.peek(2)) {
                 (Some(b'='), Some(b'=')) => Some(TokKind::DotEqEq),
                 (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
@@ -1232,6 +1248,8 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | DotPercent
             | DotEqEq
             | DotNotEq
+            | DotEqEqEq
+            | DotNotEqEq
             | DotLt
             | DotLe
             | DotGt
@@ -1590,6 +1608,9 @@ mod tests {
         assert_eq!(kinds("x .== y").get(2), Some(&TokKind::DotEqEq));
         assert_eq!(kinds("x .= y").get(2), Some(&TokKind::DotEq));
         assert_eq!(kinds("a .<= b").get(2), Some(&TokKind::DotLe));
+        // Longest match: the 4-char `.===`/`.!==` beat the 3-char `.==`/`.!=`.
+        assert_eq!(kinds("x .=== y").get(2), Some(&TokKind::DotEqEqEq));
+        assert_eq!(kinds("x .!== y").get(2), Some(&TokKind::DotNotEqEq));
         // A `.` fuses to operators but never to an ident (`a.b` field access).
         assert_eq!(
             kinds("a.b"),

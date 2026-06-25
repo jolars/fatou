@@ -25,6 +25,7 @@ block_trailing_junk
 bracescat
 braces_generator
 broadcast_bitwise_operators
+broadcast_identity_operators
 broadcasting
 broadcast_type_comparison
 broadcast_unicode_operator
