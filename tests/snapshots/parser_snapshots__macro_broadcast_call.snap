@@ -1,0 +1,20 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..7
+  DOT_CALL_EXPR@0..6
+    MACRO_CALL@0..2
+      MACRO_NAME@0..2
+        AT@0..1 "@"
+        IDENT@1..2 "M"
+    DOT@2..3 "."
+    ARG_LIST@3..6
+      LPAREN@3..4 "("
+      ARG@4..5
+        NAME@4..5
+          IDENT@4..5 "x"
+      RPAREN@5..6 ")"
+  NEWLINE@6..7 "\n"
+
+diagnostic [3..3]: broadcast call on a macro name

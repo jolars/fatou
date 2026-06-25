@@ -3200,6 +3200,13 @@ fn parse_postfix_chain(
                     end_marker,
                     diagnostics,
                 );
+                // A broadcast call on a macro name (`@M.(x)`) is invalid — a macro
+                // cannot be broadcast. The projector re-heads it as a macrocall
+                // wrapping the dotcall with a zero-width `(error-t)`.
+                let lhs_is_macrocall = matches!(
+                    lhs.events.first(),
+                    Some(Event::Start(SyntaxKind::MACRO_CALL))
+                );
                 let mut events = vec![Event::Start(SyntaxKind::DOT_CALL_EXPR)];
                 events.extend(lhs.events);
                 push_range(&mut events, lhs.end, next);
@@ -3214,6 +3221,16 @@ fn parse_postfix_chain(
                         diagnostics,
                         DiagnosticKind::OpenerWhitespace,
                         "whitespace before opener",
+                        opener.start,
+                        opener.start,
+                    );
+                }
+                if lhs_is_macrocall {
+                    let opener = &ctx.tokens()[lparen];
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::MacroDotBroadcast,
+                        "broadcast call on a macro name",
                         opener.start,
                         opener.start,
                     );

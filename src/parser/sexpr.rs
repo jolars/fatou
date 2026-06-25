@@ -254,7 +254,7 @@ fn project(node: &SyntaxNode) -> String {
         CALL_EXPR => project_call("call", node),
         INDEX_EXPR => project_call("ref", node),
         CURLY_EXPR => project_call("curly", node),
-        DOT_CALL_EXPR => project_call("dotcall", node),
+        DOT_CALL_EXPR => project_dot_call(node),
         BRACES => sexp("braces", project_args(node)),
 
         TUPLE_EXPR => sexp("tuple-p", project_args(node)),
@@ -998,6 +998,33 @@ fn project_where(node: &SyntaxNode) -> String {
 }
 
 // --- Calls / args ----------------------------------------------------------
+
+/// Project a broadcast call `f.(args)` → `(dotcall f args…)`. A broadcast applied
+/// to a macro name (`@M.(x)`) is invalid — a macro cannot be broadcast — so
+/// JuliaSyntax re-heads it as a macrocall wrapping the dotcall and splices a
+/// zero-width `(error-t)` after the name (`@M.(x)` ⇒
+/// `(macrocall (dotcall @M (error-t) x))`). The parser records `MacroDotBroadcast`
+/// at the broadcast opener.
+fn project_dot_call(node: &SyntaxNode) -> String {
+    if let Some(callee) = node.children().next()
+        && callee.kind() == MACRO_CALL
+        && let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST)
+        && diag_at(
+            usize::from(arg_list.text_range().start()),
+            DiagnosticKind::MacroDotBroadcast,
+        )
+    {
+        let name = callee
+            .children()
+            .find(|c| c.kind() == MACRO_NAME)
+            .map(|c| project_macro_name(&c))
+            .unwrap_or_else(|| "@?".to_string());
+        let mut parts = vec![name, "(error-t)".to_string()];
+        parts.extend(project_args(&arg_list));
+        return format!("(macrocall (dotcall {}))", parts.join(" "));
+    }
+    project_call("dotcall", node)
+}
 
 fn project_call(head: &str, node: &SyntaxNode) -> String {
     let mut parts = Vec::new();

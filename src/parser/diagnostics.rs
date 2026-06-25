@@ -96,6 +96,11 @@ pub enum DiagnosticKind {
     /// name (`@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`). Anchored at the
     /// bracketed expression's start.
     InvalidMacroName,
+    /// A broadcast call `.(…)` applied to a macro name (`@M.(x)`) — invalid, since
+    /// a macro cannot be broadcast. JuliaSyntax re-heads it as a macrocall wrapping
+    /// the dotcall with a zero-width marker (`@M.(x)` ⇒
+    /// `(macrocall (dotcall @M (error-t) x))`). Anchored at the broadcast `(` opener.
+    MacroDotBroadcast,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

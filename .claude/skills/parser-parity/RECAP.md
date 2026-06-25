@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **671 allowlisted**,
-14 divergence, 0 unsupported. Dir corpus: **176 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **672 allowlisted**,
+13 divergence, 0 unsupported. Dir corpus: **177 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,41 +58,49 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25d — bare `function`/`macro` empty-recovery shape)
+## Latest session (2026-06-25e — broadcast call on a macro name `@M.(x)`)
 
-**The bare block keyword `function`/`macro` (no signature, no `end`) now matches
-JuliaSyntax's two-part empty recovery** (flips js-78f9ac01, the `function` slice
-of backlog item g). `function` ⇒ `(function (error (error)) (block (error))
-(error-t))`, likewise `macro`. Two zero-width pieces, both **pure projector,
-reconstructed from the already-recorded `MissingEnd` diagnostic** (same model as
-`MissingCondition` — no new parser machinery, no new diagnostic kind):
-(1) `project_block_child` (`sexpr.rs`) now appends `(error)` to an *empty* body
-block whenever the form carries a `MissingEnd` — general, so it *also* corrects
-the latent `function f()` ⇒ `(block (error))` and `for x in y` ⇒ `(block
-(error))` (both diverging-not-passing before, zero regression); a content-bearing
-or properly-closed-empty body (`function f() end` ⇒ `(block)`) is untouched.
-(2) `project_function_like` emits `(error (error))` for the signature when the
-FUNCTION_DEF/MACRO_DEF has **no `SIGNATURE` node** (empty signature) — covers both
-the truncated `function` and the closed `function;end` ⇒ `(function (error
-(error)) (block))`. Valid forms (`function f end` forward-decl, `function f() end`,
-`function f() x end`) verified unchanged. Fixture + oracle-dir
-`bare_function_keyword`. JS 670 → 671 (zero regressions); dir 175 → 176. Green;
-clippy/fmt clean. **Deferred (rest of item g):** `struct` bare keyword (signature
-is `(error)`, single, not `(error (error))`); `begin`/`while` empty-body `(error)`
-(they project bodies via `project_block_child_folding_error`/`project_each`, not
-`project_block_child`); bare-name truncated signature `function f` ⇒ `(error f)` +
-`(block (error))` (the bare-name-with-no-`end` case, distinct from the
-2026-06-24a body-present case) — each a separate path, none in the corpus.
-**Next target (no active plan):** the macro dotted-name cluster (`@M.(x)` ⇒
-`(macrocall (dotcall @M (error-t) x))`, `A.@B.x`, `@A.$x a`, `@A.B.@x a` — each a
-distinct deep `@`-reflow, none cluster), or `a[:(end)]` (js-557adcf4) — but the
-latter first needs the general `a[1 end]` keyword-in-matrix recovery (Fatou
-currently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`), which is itself a
-chunk. The rest of the FAIL set is float-display normalization (blocked) plus
-`f.'`/`x 'y` char-lexer and `(2)(3)x` (out of scope).
+**`@M.(x)` (broadcast `.(…)` applied to a macro) now matches JuliaSyntax's
+macrocall-over-dotcall re-head** (flips js-2516c70f, the first clean slice of the
+macro dotted-name cluster). A macro can't be broadcast, so JuliaSyntax wraps the
+dotcall in a macrocall and splices a zero-width `(error-t)` after the name:
+`@M.(x)` ⇒ `(macrocall (dotcall @M (error-t) x))`, `@M.(x,y)` ⇒ one `(error-t)`
+before the args. **The CST is unchanged** (`(dotcall (macrocall @M) x)`); the
+re-head is a **projector replay from a recorded diagnostic** (same model as the
+2026-06-25c ternary→`if`). Parser: the broadcast-call arm of `parse_postfix_chain`
+records a new `MacroDotBroadcast` diag at the broadcast `(` opener, gated on the
+lhs's first event being `Start(MACRO_CALL)` (computed before the events move).
+Projector: new `project_dot_call` (replacing the bare `project_call("dotcall", …)`
+dispatch) re-heads when the dotcall's first child is a MACRO_CALL carrying that
+diag — projects the inner MACRO_NAME as `@M`, splices `(error-t)`, wraps in
+`macrocall`; plain `f.(x)`/`M.(x)` and qualified `@A.x`/`@A.B.x`/`Base.@time f()`
+all verified untouched. Fixture + oracle-dir `macro_broadcast_call`. JS 671 → 672
+(zero regressions); dir 176 → 177. Green; clippy/fmt clean. **Deferred:** macro
+args *after* the broadcast (`@M.(x) y` ⇒ `(macrocall (dotcall @M (error-t) x) y)`
+in Julia; Fatou's macrocall wraps `@M` alone so `y` falls to trailing junk — not
+in the corpus). **Next target (no active plan):** the rest of the macro
+dotted-name cluster — each a distinct deep `@`-reflow, none clusters: `A.@B.x` ⇒
+`(macrocall (. (. A (quote B)) (error-t) (quote @x)))`, `@A.$x a` ⇒ `(macrocall
+(. A (inert (error x))) a)`, `@A.B.@x a` ⇒ `(macrocall (. (. A (quote B)) (quote
+(error-t) @x)) a)` (Fatou currently drops `.x` / mis-nests these). Or `a[:(end)]`
+(js-557adcf4), which first needs the general `a[1 end]` keyword-in-matrix recovery
+(Fatou silently drops the `end`: `a[1 end]` ⇒ `(typed_hcat a 1 )`; Julia wants
+`(typed_hcat a 1 (error-t)) (error-t end ✘)` — a chunk). Rest of the FAIL set is
+float-display normalization (blocked) plus `f.'`/`x 'y` char-lexer and `(2)(3)x`
+(out of scope).
 
 ## Earlier sessions
 
+- **2026-06-25d** — Bare block keyword `function`/`macro` empty-recovery shape
+  (flips js-78f9ac01, the `function` slice of backlog item g). `function` ⇒
+  `(function (error (error)) (block (error)) (error-t))`, likewise `macro`. Two
+  zero-width pieces, pure projector from the recorded `MissingEnd` diag:
+  `project_block_child` appends `(error)` to an empty body block carrying a
+  `MissingEnd` (also corrects latent `function f()`/`for x in y`);
+  `project_function_like` emits `(error (error))` when no `SIGNATURE` node.
+  Fixture `bare_function_keyword`. JS 670 → 671; dir 175 → 176. Deferred: `struct`
+  bare keyword (signature `(error)`, single), `begin`/`while` empty-body, bare-name
+  truncated `function f` ⇒ `(error f)`.
 - **2026-06-25c** — Incomplete ternary recovered as `if` (flips
   js-434fcafd/810e177c/74a9b301/471d5c84). A ternary whose missing `:`/false
   branch is terminated by a closing block keyword (`end`/`elseif`/`else`/`catch`/

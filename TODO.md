@@ -13,6 +13,21 @@ precedence), prefix unary, calls, indexing, and the `function … end`,
 *all* input regardless of grammar coverage (unparsed tokens are carried
 through), so the grammar can grow incrementally.
 
+- [x] Broadcast call on a macro name `@M.(x)` (a slice of the macro dotted-name
+  cluster, js-2516c70f). A broadcast `.(…)` applied to a macro is invalid — a
+  macro cannot be broadcast — so JuliaSyntax re-heads the dotcall under a
+  macrocall and splices a zero-width `(error-t)` after the name (`@M.(x)` ⇒
+  `(macrocall (dotcall @M (error-t) x))`, `@M.(x,y)` ⇒ one `(error-t)` before
+  the args). The parser records a `MacroDotBroadcast` diagnostic at the broadcast
+  `(` opener (the broadcast-call arm of `parse_postfix_chain`, gated on the lhs
+  being a `MACRO_CALL`); `project_dot_call` (`sexpr.rs`) replays the re-head when
+  the dotcall's callee is a macrocall carrying that diagnostic, leaving plain
+  `f.(x)`/`M.(x)` untouched. Fixture `macro_broadcast_call`. JS 671 → 672; dir
+  176 → 177. **Deferred:** macro args *after* the broadcast (`@M.(x) y` ⇒
+  `(macrocall (dotcall @M (error-t) x) y)` in Julia, but Fatou's macrocall is
+  built around `@M` alone so `y` falls to trailing junk — not in the corpus); the
+  rest of the dotted-name cluster (`A.@B.x`, `@A.$x a`, `@A.B.@x a`) is each a
+  distinct deep `@`-reflow.
 - [x] Bare block keyword `function`/`macro` empty-recovery shape (the `function`
   slice of backlog item g, js-78f9ac01). A `function`/`macro` keyword with no
   signature and no `end` recovers with two zero-width pieces: an empty-signature
