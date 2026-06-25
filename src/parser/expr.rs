@@ -3549,6 +3549,30 @@ fn parse_macro_name_body(
             }
             start
         }
+        // A `[`/`{` directly after `@` is an invalid macro name: JuliaSyntax
+        // parses the bracketed expression and error-wraps it as the name
+        // (`@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`, `@{x} y` ⇒
+        // `(macrocall (error (braces x)) y)`). Parse it as the name body, record
+        // `InvalidMacroName`, and let the space-form arguments follow. (A name
+        // identifier before the bracket — `@m[a]` — never reaches here; the
+        // `Ident` arm consumes the name and `[a]` becomes the argument.)
+        Some(TokKind::LBracket | TokKind::LBrace) => {
+            if let Some(expr) = parse_prefix(ctx, start, diagnostics, ExprFlags::default()) {
+                let name_start = ctx.tokens()[start].start;
+                let end = expr.end;
+                events.extend(expr.events);
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::InvalidMacroName,
+                    "invalid macro name",
+                    name_start,
+                    name_start,
+                );
+                end
+            } else {
+                start
+            }
+        }
         // An operator, `$`, or keyword directly after `@` names the macro
         // (`@+`, `@!`, `@..`, `@$`, `@end`). A lone `:` (`@:`) is left to error.
         Some(k) if is_macro_name_token(k) => {

@@ -1894,6 +1894,18 @@ fn project_macrocall(node: &SyntaxNode) -> String {
 }
 
 fn project_macro_name(node: &SyntaxNode) -> String {
+    // An invalid bracketed macro name (`@[x]` ⇒ `(error (vect x))`, `@{x}` ⇒
+    // `(error (braces x))`): the parser parses the bracketed expression as a child
+    // node and records `InvalidMacroName` at its start. Error-wrap its projection.
+    if let Some(child) = node.children().next()
+        && diag_at(
+            usize::from(child.text_range().start()),
+            DiagnosticKind::InvalidMacroName,
+        )
+    {
+        return format!("(error {})", project(&child));
+    }
+
     // A `var"…"` non-standard identifier name (`@var"#"` ⇒ `(var @#)`): the `@`
     // sigil prefixes the identifier content. JuliaSyntax folds the `@` into the
     // `var` name itself rather than wrapping it as a separate macro-name token.

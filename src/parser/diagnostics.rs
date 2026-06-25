@@ -91,6 +91,11 @@ pub enum DiagnosticKind {
     /// unwrapped form and is left alone. Anchored at the parenthesized node's
     /// start.
     InvalidExportItem,
+    /// A macro name that is a non-identifier bracketed expression (`@[x]`,
+    /// `@{x}`) — JuliaSyntax parses the expression and error-wraps it as the macro
+    /// name (`@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`). Anchored at the
+    /// bracketed expression's start.
+    InvalidMacroName,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

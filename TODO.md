@@ -128,6 +128,20 @@ through), so the grammar can grow incrementally.
   loose `(` and emits `(error-t)`. Fixture `quote_paren_empty`. JS 662 → 663; dir
   170 → 171. Deferred: the bracketed sibling `a[:(end)]` (js-557adcf4) — same
   quote recovery but adds a `typed_hcat` matrix-structure divergence.
+- [x] Invalid bracketed macro name `@[x]`/`@{x}` → error-wrapped name (error-shape
+  slice). A `[`/`{` directly after `@` is not a valid macro name: JuliaSyntax
+  parses the bracketed expression and error-wraps it as the name, with the
+  space-form arguments still following (`@[x] y z` ⇒ `(macrocall (error (vect x))
+  y z)`, `@{x} y` ⇒ `(macrocall (error (braces x)) y)`, `@[x]` ⇒ `(macrocall
+  (error (vect x)))`). A name identifier before the bracket is untouched — `@m[a]`
+  keeps `m` as the name and `[a]` as the single argument. A new `LBracket`/
+  `LBrace` arm in `parse_macro_name_body` (`expr.rs`) parses the expression as the
+  `MACRO_NAME` body and records an `InvalidMacroName` diagnostic at its start;
+  `project_macro_name` (`sexpr.rs`) reads that diagnostic off the name's first
+  child node and emits `(error <projection>)`. Fixture `macro_name_brackets`. JS
+  664 → 665; dir 172 → 173. Deferred: the paren/quote siblings `@(x+y)` ⇒
+  `(error-i x + y)`, `@(f(x))` ⇒ `(error f x)`, `@:foo` ⇒ `(error (quote-: foo))`
+  (each error-wraps a different inner head; not in the corpus).
 - [x] Colon-space-before-closing-keyword → bare `:` Colon atom (error-shape
   slice). A value-position prefix `:` followed by a space then a *closing* block
   keyword (`end`/`else`/`elseif`/`catch`/`finally`) is not a quotable symbol:

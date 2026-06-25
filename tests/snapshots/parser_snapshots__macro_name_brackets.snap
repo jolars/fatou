@@ -1,0 +1,48 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..21
+  MACRO_CALL@0..8
+    MACRO_NAME@0..4
+      AT@0..1 "@"
+      VECT_EXPR@1..4
+        LBRACKET@1..2 "["
+        ARG@2..3
+          NAME@2..3
+            IDENT@2..3 "x"
+        RBRACKET@3..4 "]"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "y"
+    WHITESPACE@6..7 " "
+    NAME@7..8
+      IDENT@7..8 "z"
+  NEWLINE@8..9 "\n"
+  MACRO_CALL@9..15
+    MACRO_NAME@9..13
+      AT@9..10 "@"
+      BRACES@10..13
+        LBRACE@10..11 "{"
+        ARG@11..12
+          NAME@11..12
+            IDENT@11..12 "x"
+        RBRACE@12..13 "}"
+    WHITESPACE@13..14 " "
+    NAME@14..15
+      IDENT@14..15 "y"
+  NEWLINE@15..16 "\n"
+  MACRO_CALL@16..20
+    MACRO_NAME@16..20
+      AT@16..17 "@"
+      VECT_EXPR@17..20
+        LBRACKET@17..18 "["
+        ARG@18..19
+          NAME@18..19
+            IDENT@18..19 "x"
+        RBRACKET@19..20 "]"
+  NEWLINE@20..21 "\n"
+
+diagnostic [1..1]: invalid macro name
+diagnostic [10..10]: invalid macro name
+diagnostic [17..17]: invalid macro name

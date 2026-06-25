@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **664 allowlisted**,
-21 divergence, 0 unsupported. Dir corpus: **172 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **665 allowlisted**,
+20 divergence, 0 unsupported. Dir corpus: **173 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,37 +58,42 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-24p — parenthesized `export` item)
+## Latest session (2026-06-25a — invalid bracketed macro name `@[x]`)
 
-**An `export` item may be parenthesized, but only around a single symbol**
-(backlog item h, `export (x::T)`, flips js-62113d6b). JuliaSyntax unwraps a paren
-that wraps a lone identifier/operator/`var"…"`/`$`-interpolation (`export (x)` ⇒
-`x`, `export (+)` ⇒ `+`, `export ($a)` ⇒ `($ a)`, `export (var"x")` ⇒ `(var x)`)
-and error-wraps any other parenthesized form (`export (x::T)` ⇒ `(error (::-i x
-T))`, `export (x, y)` ⇒ `(error (tuple-p x y))`, `export ()` ⇒ `(error (tuple-p))`,
-`export ((x))` ⇒ `(error x)`, `export (1)` ⇒ `(error 1)`). The bug before: export
-carried parens as loose tokens, so the projector dropped them (`(x)`→`x` by luck,
-but `(x::T)`→loose `x :: T`). Fix follows the const/catch/function error-wrap
-pattern: a new `LParen` arm in `parse_name_list_stmt` (`structural.rs`, export-only
-via `!is_public`) parses the item with `parse_paren` (now `pub(crate)`) into a real
-`PAREN_EXPR`/`TUPLE_EXPR` child; the `flag_invalid_export_items` post-build walk
-(`core.rs`) records a zero-width `InvalidExportItem` diagnostic at the node start
-when `export_paren_is_symbol` is false (the single significant child isn't a
-`NAME`/`NONSTANDARD_IDENTIFIER`/`INTERPOLATION` node or a lone operator token, or
-it's a `TUPLE_EXPR`); `project_export` (`sexpr.rs`) unwraps via `project` and
-error-wraps when the diag is present. `public` is untouched (`public (x)` is a
-call). Four files: new `InvalidExportItem` diag (`diagnostics.rs`); `parse_paren`
-made `pub(crate)` + export `LParen` arm (`expr.rs`/`structural.rs`); the walk
-(`core.rs`); the projector arm (`sexpr.rs`, `ident_run` removed — folded into
-`project_export`). Fixture + oracle-dir `export_paren_item`. Also retightened the
-`interpolation_names` snapshot (its `export ($f)` now nests a `PAREN_EXPR`; same
-projection). JS 663 → 664 (zero regressions); dir 171 → 172. Green; clippy/fmt
-clean. **Next target (no active plan):** the macro dotted-name cluster (`A.@B.x`
-js-27604c64, `@A.$x a` js-704830e1, `@A.B.@x a` js-fe911108, `@M.(x)` js-2516c70f,
-`@[x] y z` js-b2e95475 — each a distinct deep gap), or the ternary-in-block family
-(js-434fcafd/471d5c84/74a9b301/810e177c — fragile, recovered head flips `?`↔`if`).
+**A `[`/`{` directly after `@` is an invalid macro name** (one slice of the macro
+cluster, flips js-b2e95475 `@[x] y z`). JuliaSyntax parses the bracketed
+expression and error-wraps it as the macro name, with space-form args still
+following: `@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`, `@{x} y` ⇒
+`(macrocall (error (braces x)) y)`, `@[x]` ⇒ `(macrocall (error (vect x)))`. The
+bug before: `@` followed by `[` fell through to the empty-name fallthrough, and
+`parse_macro_args`'s bracket-arg arm ate `[x]` as `@`'s argument (`(macrocall @.
+(vect x))`), leaving `y z` as toplevel trailing junk. A name identifier before the
+bracket — `@m[a]` — never reaches the new arm (the `Ident` arm consumes `m` and
+`[a]` is the argument), so it's untouched. Three-file fix mirroring the
+export/catch error-wrap pattern: a new `LBracket`/`LBrace` arm in
+`parse_macro_name_body` (`expr.rs`) calls `parse_prefix` to parse the bracketed
+expression as the `MACRO_NAME` body and records a new `InvalidMacroName`
+zero-width diagnostic at its start (`diagnostics.rs`); `project_macro_name`
+(`sexpr.rs`) checks the name's first child node for that diagnostic and emits
+`(error <projection>)`. Fixture + oracle-dir `macro_name_brackets`. JS 664 → 665
+(zero regressions); dir 172 → 173. Green; clippy/fmt clean. **Next target (no
+active plan):** the remaining macro cluster siblings are each a *distinct* error
+head — `@(x+y)` ⇒ `(error-i x + y)`, `@(f(x))` ⇒ `(error f x)`, `@:foo` ⇒ `(error
+(quote-: foo))`, `@M.(x)` ⇒ `(dotcall @M (error-t) x)`, `A.@B.x`/`@A.$x a`/`@A.B.@x
+a` (dotted-name `@` reflow) — pick one, none cluster cleanly; or the bare block
+keyword `function` (js-78f9ac01, item g, ~2 sessions). The ternary-in-block family
+(js-434fcafd/810e177c/74a9b301/471d5c84) is gated on the diagnostics-model
+"Design watch" in `TODO.md` (head flips `?`↔`if` by enclosing context).
 
 ## Earlier sessions
+
+- **2026-06-24p** — Parenthesized `export` item (backlog item h, `export (x::T)`,
+  flips js-62113d6b). A paren wrapping a lone symbol unwraps (`export (x)` ⇒ `x`,
+  `export (+)` ⇒ `+`); any other parenthesized form error-wraps (`export (x::T)`
+  ⇒ `(error (::-i x T))`, `export (x, y)` ⇒ `(error (tuple-p x y))`). New `LParen`
+  arm in `parse_name_list_stmt` (export-only) parses a real `PAREN_EXPR`/
+  `TUPLE_EXPR`; `flag_invalid_export_items` walk records `InvalidExportItem`;
+  `project_export` unwraps/error-wraps. JS 663 → 664; dir 171 → 172.
 
 - **2026-06-24o** — Empty quote-paren `:(end)`: a `:(…)` whose body opens with a
   closing block keyword can't start an expression; JuliaSyntax makes the quoted
