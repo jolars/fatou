@@ -2291,7 +2291,7 @@ fn atom(kind: SyntaxKind, idx: usize) -> ExprParse {
     }
 }
 
-fn parse_paren(
+pub(crate) fn parse_paren(
     ctx: &ParserCtx<'_>,
     start: usize,
     // Inherited index-marker context. A paren is not itself indexing, but

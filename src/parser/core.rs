@@ -201,7 +201,78 @@ pub fn parse(text: &str) -> ParseOutput {
     flag_invalid_const_decls(&cst, &mut diagnostics);
     flag_invalid_function_signatures(&cst, &mut diagnostics);
     flag_invalid_catch_vars(&cst, &mut diagnostics);
+    flag_invalid_export_items(&cst, &mut diagnostics);
     ParseOutput { cst, diagnostics }
+}
+
+/// Flag each parenthesized `export` item that is not a single symbol. An export
+/// item may be parenthesized, but only around a single identifier, operator,
+/// `var"…"`, or `$`-interpolation (`export (x)`/`export (+)`/`export ($a)`),
+/// which JuliaSyntax unwraps to the bare symbol. Any other parenthesized form
+/// (`export (x::T)`, `export (x, y)`, `export ()`, `export ((x))`) is invalid and
+/// JuliaSyntax error-wraps the parsed expression (`(export (error (::-i x T)))`).
+/// The diagnostic is a zero-width point at the parenthesized node's start; the
+/// projector reconstructs the error wrapper from it (the CST stays faithful).
+fn flag_invalid_export_items(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
+    for stmt in cst
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::EXPORT_STMT)
+    {
+        for item in stmt
+            .children()
+            .filter(|c| matches!(c.kind(), SyntaxKind::PAREN_EXPR | SyntaxKind::TUPLE_EXPR))
+        {
+            if !export_paren_is_symbol(&item) {
+                let pos = usize::from(item.text_range().start());
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::InvalidExportItem,
+                    "invalid `export` item: expected a single symbol",
+                    pos,
+                    pos,
+                );
+            }
+        }
+    }
+}
+
+/// Whether a parenthesized `export` item wraps a single symbol that JuliaSyntax
+/// unwraps: a lone identifier (`(x)`), `var"…"` (`(var"x")`), `$`-interpolation
+/// (`($a)`), or operator (`(+)`). A `(x, y)` tuple, an empty `()`, a nested paren
+/// (`((x))`), a literal (`(1)`), or any compound expression (`(x::T)`, `(a+b)`)
+/// is not. A `TUPLE_EXPR` (a comma/empty paren) is always invalid.
+fn export_paren_is_symbol(item: &SyntaxNode) -> bool {
+    if item.kind() != SyntaxKind::PAREN_EXPR {
+        return false;
+    }
+    let mut significant = item.children_with_tokens().filter(|el| {
+        !matches!(
+            el.kind(),
+            SyntaxKind::WHITESPACE
+                | SyntaxKind::NEWLINE
+                | SyntaxKind::COMMENT
+                | SyntaxKind::BLOCK_COMMENT
+                | SyntaxKind::LPAREN
+                | SyntaxKind::RPAREN
+        )
+    });
+    let Some(first) = significant.next() else {
+        return false;
+    };
+    if significant.next().is_some() {
+        return false;
+    }
+    match first {
+        // A symbol-shaped node: a bare name, `var"…"`, or `$`-interpolation. A
+        // `LITERAL`, `TYPE_ANNOTATION`, nested `PAREN_EXPR`, etc. is not.
+        rowan::NodeOrToken::Node(n) => matches!(
+            n.kind(),
+            SyntaxKind::NAME | SyntaxKind::NONSTANDARD_IDENTIFIER | SyntaxKind::INTERPOLATION
+        ),
+        // The only bare token a `PAREN_EXPR` carries is the lone operator-value
+        // form (`(+)`, `(:)`), which `parse_paren` builds for `is_paren_value_op`.
+        rowan::NodeOrToken::Token(_) => true,
+    }
 }
 
 /// Flag each `const` whose declaration is not the plain `=` assignment

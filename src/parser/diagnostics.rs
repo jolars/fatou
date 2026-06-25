@@ -83,6 +83,14 @@ pub enum DiagnosticKind {
     /// `$`-interpolation, or `var"…"` non-standard identifier is left alone.
     /// Anchored at the catch-variable node's start.
     CatchVarNotIdentifier,
+    /// An `export` item parenthesized around something other than a single symbol
+    /// (`export (x::T)`, `export (x, y)`, `export ()`, `export ((x))`) —
+    /// JuliaSyntax error-wraps the parenthesized expression (`(export (error
+    /// (::-i x T)))`). A paren around a single identifier, operator, `var"…"`, or
+    /// `$`-interpolation (`export (x)`, `export (+)`, `export ($a)`) is the valid
+    /// unwrapped form and is left alone. Anchored at the parenthesized node's
+    /// start.
+    InvalidExportItem,
 
     // --- byte-bearing recovery: the run is wrapped in a real `ERROR` node and the
     // projector renders it as `(error-t …)` (the diagnostic falls inside the node) ---

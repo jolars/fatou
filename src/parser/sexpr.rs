@@ -1697,7 +1697,28 @@ fn project_decl(head: &str, node: &SyntaxNode) -> String {
 }
 
 fn project_export(node: &SyntaxNode) -> String {
-    let items: Vec<String> = ident_run(node);
+    // Each item is a bare name (`export x`), an interpolation/macro name, or a
+    // parenthesized item. A parenthesized item that wraps a single symbol is
+    // unwrapped by `project` (`(x)` ⇒ `x`, `(+)` ⇒ `+`); anything else is flagged
+    // `InvalidExportItem` by the post-build walk and error-wrapped here (`(x::T)`
+    // ⇒ `(error (::-i x T))`, `(x, y)` ⇒ `(error (tuple-p x y))`).
+    let items: Vec<String> = significant(node)
+        .into_iter()
+        .filter_map(|el| match el {
+            NodeOrToken::Node(n) if matches!(n.kind(), PAREN_EXPR | TUPLE_EXPR) => {
+                let projected = project(&n);
+                if diag_at(
+                    usize::from(n.text_range().start()),
+                    DiagnosticKind::InvalidExportItem,
+                ) {
+                    Some(format!("(error {projected})"))
+                } else {
+                    Some(projected)
+                }
+            }
+            _ => name_run_item(el),
+        })
+        .collect();
     sexp("export", items)
 }
 
@@ -2999,13 +3020,6 @@ fn operator_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     node.children_with_tokens()
         .filter_map(|el| el.into_token())
         .find(|t| is_operator(t.kind()))
-}
-
-fn ident_run(node: &SyntaxNode) -> Vec<String> {
-    significant(node)
-        .into_iter()
-        .filter_map(name_run_item)
-        .collect()
 }
 
 /// Project one element of an `export`/`public` name list: a bare identifier, a

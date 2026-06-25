@@ -37,8 +37,8 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-JS corpus (**685 cases** — error shapes now harvested): **663 allowlisted**,
-22 divergence, 0 unsupported. Dir corpus: **171 allowlisted**, 1 blocked
+JS corpus (**685 cases** — error shapes now harvested): **664 allowlisted**,
+21 divergence, 0 unsupported. Dir corpus: **172 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor) — same projected output, so counts
@@ -58,37 +58,44 @@ chains `a isa b isa c` / mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-24o — empty quote-paren `:(end)`)
+## Latest session (2026-06-24p — parenthesized `export` item)
 
-**A quote-paren `:(…)` whose body opens with a closing block keyword can't start
-an expression** (backlog item h, the `:(end)` narrow shape). JuliaSyntax makes the
-quoted form a zero-width `(error-t)` (the `quote` node spans `:(`) and spills the
-keyword and rest of the line to the trailing-junk driver: `:(end)` ⇒ `(quote-:
-(error-t)) (error-t end ✘)` (flips js-b1ac400e); `:(else)`/`:(catch)`/`:( end)`/
-`:(end x)` likewise. The bug before: Fatou ran `parse_paren`, which bailed by
-wrapping the `(` in a byte-bearing `ERROR` → `(quote-: (error ✘))`. Fix: a new
-branch in `parse_quote_sym`'s `:(` arm (`expr.rs`) — when `skip_trivia(next+1)` is
-an `is_closing_block_keyword`, keep `(` as a loose `QUOTE_SYM` child, end the quote
-at `next+1`, and record a zero-width `EmptyQuoteParen` diagnostic at the `(`'s end;
-the keyword+`)` then fall to the existing trailing-junk driver (`(error-t end ✘)`,
-already correct). `project_quote_sym` (`sexpr.rs`) gains an arm: a loose `LPAREN`
-child carrying `EmptyQuoteParen` projects `(error-t)`. Normal/glued forms untouched
-(`:(x)` ⇒ `(quote-: x)`, `:()` ⇒ `(quote-: (tuple-p))`, `:(=)` ⇒ `(quote-: =)`,
-`:foo` ⇒ `(quote-: foo)`). Three files: new `EmptyQuoteParen` diagnostic
-(`diagnostics.rs`); the `parse_quote_sym` branch (`expr.rs`); the
-`project_quote_sym` arm (`sexpr.rs`). Fixture + oracle-dir `quote_paren_empty`.
-JS 662 → 663 (zero regressions); dir 170 → 171. Green; clippy/fmt clean.
-**Deferred (FAIL, in corpus):** the bracketed sibling `a[:(end)]` (js-557adcf4) —
-the quote recovery now fires correctly inside, but `a[…]` projects as `typed_hcat`
-with its own matrix-structure divergence (Julia wants `(typed_hcat a (quote-:
-(error-t)) (error-t))` plus a separate `(error-t end ✘ ✘)`; Fatou drops the inner
-`(error-t)` and the trailing junk). **Next target (no active plan):** `export
-(x::T)` (js-62113d6b ⇒ `(export (error (::-i x T)))` — `export` currently carries
-parenthesized items through as loose tokens; needs `parse_name_list_stmt` to parse
-a parenthesized item and error-wrap a non-symbol), or the macro dotted-name cluster
-(`A.@B.x`, `@A.$x a`, `@A.B.@x a`, `@M.(x)`, `@[x] y z` — each a distinct deep gap).
+**An `export` item may be parenthesized, but only around a single symbol**
+(backlog item h, `export (x::T)`, flips js-62113d6b). JuliaSyntax unwraps a paren
+that wraps a lone identifier/operator/`var"…"`/`$`-interpolation (`export (x)` ⇒
+`x`, `export (+)` ⇒ `+`, `export ($a)` ⇒ `($ a)`, `export (var"x")` ⇒ `(var x)`)
+and error-wraps any other parenthesized form (`export (x::T)` ⇒ `(error (::-i x
+T))`, `export (x, y)` ⇒ `(error (tuple-p x y))`, `export ()` ⇒ `(error (tuple-p))`,
+`export ((x))` ⇒ `(error x)`, `export (1)` ⇒ `(error 1)`). The bug before: export
+carried parens as loose tokens, so the projector dropped them (`(x)`→`x` by luck,
+but `(x::T)`→loose `x :: T`). Fix follows the const/catch/function error-wrap
+pattern: a new `LParen` arm in `parse_name_list_stmt` (`structural.rs`, export-only
+via `!is_public`) parses the item with `parse_paren` (now `pub(crate)`) into a real
+`PAREN_EXPR`/`TUPLE_EXPR` child; the `flag_invalid_export_items` post-build walk
+(`core.rs`) records a zero-width `InvalidExportItem` diagnostic at the node start
+when `export_paren_is_symbol` is false (the single significant child isn't a
+`NAME`/`NONSTANDARD_IDENTIFIER`/`INTERPOLATION` node or a lone operator token, or
+it's a `TUPLE_EXPR`); `project_export` (`sexpr.rs`) unwraps via `project` and
+error-wraps when the diag is present. `public` is untouched (`public (x)` is a
+call). Four files: new `InvalidExportItem` diag (`diagnostics.rs`); `parse_paren`
+made `pub(crate)` + export `LParen` arm (`expr.rs`/`structural.rs`); the walk
+(`core.rs`); the projector arm (`sexpr.rs`, `ident_run` removed — folded into
+`project_export`). Fixture + oracle-dir `export_paren_item`. Also retightened the
+`interpolation_names` snapshot (its `export ($f)` now nests a `PAREN_EXPR`; same
+projection). JS 663 → 664 (zero regressions); dir 171 → 172. Green; clippy/fmt
+clean. **Next target (no active plan):** the macro dotted-name cluster (`A.@B.x`
+js-27604c64, `@A.$x a` js-704830e1, `@A.B.@x a` js-fe911108, `@M.(x)` js-2516c70f,
+`@[x] y z` js-b2e95475 — each a distinct deep gap), or the ternary-in-block family
+(js-434fcafd/471d5c84/74a9b301/810e177c — fragile, recovered head flips `?`↔`if`).
 
 ## Earlier sessions
+
+- **2026-06-24o** — Empty quote-paren `:(end)`: a `:(…)` whose body opens with a
+  closing block keyword can't start an expression; JuliaSyntax makes the quoted
+  form a zero-width `(error-t)` (`:(end)` ⇒ `(quote-: (error-t)) (error-t end ✘)`,
+  flips js-b1ac400e). New branch in `parse_quote_sym`'s `:(` arm + `EmptyQuoteParen`
+  diag + `project_quote_sym` arm. Fixture `quote_paren_empty`. JS 662 → 663; dir
+  170 → 171.
 
 - **2026-06-24n** — Glued colon operator `:<`/`:>` (two-token sibling of `**`/`--`).
   A range colon glued to a single `<`/`>` is one invalid op at the colon tier

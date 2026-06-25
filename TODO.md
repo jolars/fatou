@@ -738,7 +738,13 @@ through), so the grammar can grow incrementally.
   or after a comma continues the list onto the next line (`export a, \n b`); a
   bare newline after a complete name ends the statement (`export a \n b` is two
   statements). The projector's shared `name_run_item` reads operator-token names
-  as their bare text.
+  as their bare text. A parenthesized `export` item is parsed as a real node via
+  `parse_paren`: a paren wrapping a single symbol is unwrapped (`export (x)` ⇒
+  `x`, `export (+)` ⇒ `+`, `export ($a)`/`export (var"x")`), while any other
+  parenthesized form is error-wrapped (`export (x::T)` ⇒ `(error (::-i x T))`,
+  `export (x, y)` ⇒ `(error (tuple-p x y))`, `export ()`/`export ((x))`/`export
+  (1)`); the `flag_invalid_export_items` post-build walk records the
+  `InvalidExportItem` diagnostic the projector reads.
 - [x] Anonymous functions and `->`; short-form function definitions
   (`f(x) = …`). The `->` operator (already lexed, Julia precedence `(4, 3)` —
   right-associative, tighter than `=`) builds a dedicated `ARROW_EXPR` in the

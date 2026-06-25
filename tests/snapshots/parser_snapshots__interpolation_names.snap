@@ -45,9 +45,10 @@ ROOT@0..54
   EXPORT_STMT@42..53
     EXPORT_KW@42..48 "export"
     WHITESPACE@48..49 " "
-    LPAREN@49..50 "("
-    INTERPOLATION@50..52
-      DOLLAR@50..51 "$"
-      IDENT@51..52 "f"
-    RPAREN@52..53 ")"
+    PAREN_EXPR@49..53
+      LPAREN@49..50 "("
+      INTERPOLATION@50..52
+        DOLLAR@50..51 "$"
+        IDENT@51..52 "f"
+      RPAREN@52..53 ")"
   NEWLINE@53..54 "\n"

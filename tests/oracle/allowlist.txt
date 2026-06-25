@@ -59,6 +59,7 @@ end_index
 end_marker_propagation
 escaped_dollar
 export_name_list
+export_paren_item
 field_access_space
 field_access_suffix
 function_bare_name_signature

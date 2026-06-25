@@ -1,0 +1,92 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..95
+  EXPORT_STMT@0..10
+    EXPORT_KW@0..6 "export"
+    WHITESPACE@6..7 " "
+    PAREN_EXPR@7..10
+      LPAREN@7..8 "("
+      NAME@8..9
+        IDENT@8..9 "x"
+      RPAREN@9..10 ")"
+  NEWLINE@10..11 "\n"
+  EXPORT_STMT@11..21
+    EXPORT_KW@11..17 "export"
+    WHITESPACE@17..18 " "
+    PAREN_EXPR@18..21
+      LPAREN@18..19 "("
+      PLUS@19..20 "+"
+      RPAREN@20..21 ")"
+  NEWLINE@21..22 "\n"
+  EXPORT_STMT@22..33
+    EXPORT_KW@22..28 "export"
+    WHITESPACE@28..29 " "
+    PAREN_EXPR@29..33
+      LPAREN@29..30 "("
+      INTERPOLATION@30..32
+        DOLLAR@30..31 "$"
+        IDENT@31..32 "a"
+      RPAREN@32..33 ")"
+  NEWLINE@33..34 "\n"
+  EXPORT_STMT@34..49
+    EXPORT_KW@34..40 "export"
+    WHITESPACE@40..41 " "
+    PAREN_EXPR@41..49
+      LPAREN@41..42 "("
+      NONSTANDARD_IDENTIFIER@42..48
+        STRING_PREFIX@42..45 "var"
+        STRING_DELIM_OPEN@45..46 "\""
+        STRING_CONTENT@46..47 "x"
+        STRING_DELIM_CLOSE@47..48 "\""
+      RPAREN@48..49 ")"
+  NEWLINE@49..50 "\n"
+  EXPORT_STMT@50..63
+    EXPORT_KW@50..56 "export"
+    WHITESPACE@56..57 " "
+    PAREN_EXPR@57..63
+      LPAREN@57..58 "("
+      TYPE_ANNOTATION@58..62
+        NAME@58..59
+          IDENT@58..59 "x"
+        COLON_COLON@59..61 "::"
+        NAME@61..62
+          IDENT@61..62 "T"
+      RPAREN@62..63 ")"
+  NEWLINE@63..64 "\n"
+  EXPORT_STMT@64..77
+    EXPORT_KW@64..70 "export"
+    WHITESPACE@70..71 " "
+    TUPLE_EXPR@71..77
+      LPAREN@71..72 "("
+      ARG@72..73
+        NAME@72..73
+          IDENT@72..73 "x"
+      COMMA@73..74 ","
+      WHITESPACE@74..75 " "
+      ARG@75..76
+        NAME@75..76
+          IDENT@75..76 "y"
+      RPAREN@76..77 ")"
+  NEWLINE@77..78 "\n"
+  EXPORT_STMT@78..94
+    EXPORT_KW@78..84 "export"
+    WHITESPACE@84..85 " "
+    IDENT@85..86 "x"
+    COMMA@86..87 ","
+    WHITESPACE@87..88 " "
+    PAREN_EXPR@88..94
+      LPAREN@88..89 "("
+      TYPE_ANNOTATION@89..93
+        NAME@89..90
+          IDENT@89..90 "b"
+        COLON_COLON@90..92 "::"
+        NAME@92..93
+          IDENT@92..93 "T"
+      RPAREN@93..94 ")"
+  NEWLINE@94..95 "\n"
+
+diagnostic [57..57]: invalid `export` item: expected a single symbol
+diagnostic [71..71]: invalid `export` item: expected a single symbol
+diagnostic [88..88]: invalid `export` item: expected a single symbol

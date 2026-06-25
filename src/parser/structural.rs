@@ -16,7 +16,7 @@ use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
-    parse_block_stmt, parse_expr, parse_for_binding, parse_name_signature_expr,
+    parse_block_stmt, parse_expr, parse_for_binding, parse_name_signature_expr, parse_paren,
     parse_prefix_interpolation, parse_quote_sym, parse_signature_expr, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
@@ -697,6 +697,21 @@ pub(crate) fn parse_name_list_stmt(
             Some(TokKind::At) => {
                 i = push_macro_name(&ctx, &mut events, i, diagnostics);
                 consumed_name = true;
+            }
+            // A parenthesized `export` item (`export (x)`, `export (x::T)`) is
+            // parsed as a real node so the projector can unwrap a single-symbol
+            // paren or error-wrap any other parenthesized expression. `public`
+            // has no paren form (`public (x)` is a call), so this is export-only.
+            Some(TokKind::LParen) if !is_public => {
+                if let Some(item) = parse_paren(&ctx, i, false, diagnostics) {
+                    events.extend(item.events);
+                    i = item.end;
+                    consumed_name = true;
+                } else {
+                    events.push(Event::Tok(i));
+                    i += 1;
+                    consumed_name = true;
+                }
             }
             // A comma separates names and allows the list to continue onto the
             // next line (a newline right after the comma is skipped).
