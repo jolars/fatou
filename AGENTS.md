@@ -48,7 +48,7 @@ and includes a Julia toolchain.
 ## Runic compatibility (soft target)
 
 Fatou tracks a **soft, one-directional compatibility target** with the
-[Runic.jl](https://github.com/fredrikekre/Runic.jl) formatter — Julia's
+[Runic.jl](https://github.com/fredrikekre/Runic.jl) formatter—Julia's
 deterministic, no-configuration formatter, and the philosophical match for
 Tenet 1. This is **strictly subordinate to Tenet 1** and is **never a quality
 gate**. We do not match Runic; we measure how often Runic would leave Fatou's
@@ -66,12 +66,12 @@ own inconsistencies.
 `format(input) == runic(input)`, where each fixture's `expected.jl` is pinned from
 `Runic.format_string`. The harness (`tests/runic_oracle.rs`) diffs each fixture and
 gates regressions via `tests/oracle/runic-allowlist.txt`; deliberate divergences
-(notably Tenet 1 — Runic *preserves* user whitespace around `&&`/`||`, Fatou
+(notably Tenet 1: Runic *preserves* user whitespace around `&&`/`||`, Fatou
 canonicalizes them as spaced) are recorded in `runic-blocked.txt` with a rationale,
 and `allowlist ∪ blocked` must cover the corpus. The corpus
 (`tests/fixtures/formatter/`) is minted by `scripts/update-runic-corpus.{sh,jl}`
 and version-pinned in `.runic-source`. **To grow formatter parity, use the
-`formatter-parity` skill** (`.claude/skills/formatter-parity/`) — it documents the
+`formatter-parity` skill** (`.claude/skills/formatter-parity/`). It documents the
 loop (probe → rule → fixture → re-triage → allowlist) and keeps a rolling
 `RECAP.md`. The optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`)
 remains future work (`TODO.md`).
@@ -86,7 +86,7 @@ diffs each fixture against a pinned `expected.sexpr` and gates regressions via
 allowlists (no Julia needed at test time → CI-safe). A curated dir corpus
 (`tests/fixtures/oracle/`) and a harvested JuliaSyntax sub-corpus
 (`juliasyntax.jsonl`) feed it. **To grow parser parity against the oracle, use
-the `parser-parity` skill** (`.claude/skills/parser-parity/`) — it documents the
+the `parser-parity` skill** (`.claude/skills/parser-parity/`). It documents the
 loop (probe → grammar + projector → fixture → re-triage → allowlist) and keeps a
 rolling `RECAP.md`. See `TODO.md` for the current standing and backlog.
 
@@ -112,9 +112,10 @@ cargo run -- lint --check <dir>              # lint
 cargo run -- lsp                             # run the language server on stdio
 ```
 
-Snapshot tests use `insta`: review/accept with `cargo insta review` /
-`cargo insta accept`. Logging honors `RUST_LOG` (e.g. `RUST_LOG=debug`) via
-`env_logger`. `task <name>` (Taskfile.yml) wraps the common workflows.
+Snapshot tests use `insta`: review/accept with
+`cargo insta review`/`cargo insta accept`. Logging honors `RUST_LOG` (e.g.
+`RUST_LOG=debug`) via `env_logger`. `task <name>` (Taskfile.yml) wraps the
+common workflows.
 
 ## Architecture
 
@@ -127,8 +128,8 @@ parse_expr (expr.rs, Pratt) + structural.rs (recursive descent) → Vec<Event>
 build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
 ```
 
-- `core.rs` drives the loop; `events.rs` defines `Event` (start node / token /
-  finish node); `cursor.rs`, `context.rs`, `diagnostics.rs`, `recovery.rs`
+- `core.rs` drives the loop; `events.rs` defines `Event` (start node/token/finish
+  node); `cursor.rs`, `context.rs`, `diagnostics.rs`, `recovery.rs`
   support the parser. `src/syntax.rs` defines `SyntaxKind` (rowan-style
   `SCREAMING_SNAKE_CASE`) and the `JuliaLanguage` binding.
 - **Losslessness is the core invariant:** all whitespace, newlines, and comments
@@ -140,7 +141,7 @@ build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
 - `src/ast/nodes.rs` (`src/ast.rs`) provides zero-cost typed AST wrappers over
   the CST via rowan's `AstNode` support.
 - `src/incremental.rs` models file text → CST as a `salsa` query
-  (`parsed_document`). The token/block reparse *splicing* is deferred — today a
+  (`parsed_document`). The token/block reparse *splicing* is deferred; today a
   text edit triggers a full parse (still correct).
 
 **Formatter** (`src/formatter/`, public API in `src/formatter.rs`): consumes the
@@ -155,7 +156,7 @@ incrementally. The Runic differential oracle (`tests/runic_oracle.rs`) gates
 parity; grow it with the `formatter-parity` skill.
 
 **Linter** (`src/linter/`): `check_paths` parses each file and reports
-`LintStatus` (`Clean` / `Findings` / `ParseDiagnostics`); parse diagnostics
+`LintStatus` (`Clean`/`Findings`/`ParseDiagnostics`); parse diagnostics
 block linting a file. The `Rule` trait + registry (`rules.rs`), `# fatou-ignore`
 suppression (`suppression.rs`), diagnostics (`diagnostic.rs`), and rendering
 (`render.rs`) are in place; no rules ship yet.
@@ -189,7 +190,7 @@ indent_width) and `[lint]` (select, ignore). Defaults follow Julia conventions
 
 - **Conventional Commits** (`type(scope): subject`) and **semantic versioning**.
 - Subject line ≤ 60 chars (≤ 72 fine). Bodies short and to the point.
-- **Never edit the changelog by hand** — `versionary` generates it.
+- **Never edit the changelog by hand**—`versionary` generates it.
 
 ## Testing layout
 

@@ -11,21 +11,21 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
   fully model**. The transparent fallback (tokens verbatim, recurse into child
   nodes) is what keeps unhandled syntax lossless and the whole pass idempotent.
 - **Direct parity is the gate**, but Fatou is **not** a Runic clone. Runic
-  *preserves* user whitespace where Tenet 1 demands determinism — it normalizes
+  *preserves* user whitespace where Tenet 1 demands determinism—it normalizes
   neither `a&&b` nor `a && b` (same for `||`). Fatou canonicalizes (`&&`/`||` →
   spaced) and **records** the divergence in `runic-blocked.txt`. `^` is the
   opposite: Runic *always* packs it tight (`a ^ b` → `a^b`), so tight is the
   deterministic match. Probe **both** spacings before writing a rule.
 - **Idempotence is universal** (`tests/formatter.rs`, all fixtures). Parity is
   per-allowlisted-slug (`tests/runic_oracle.rs`). Keep them separate.
-- **Coverage is enforced** — `runic_corpus_fully_triaged` fails if a fixture is in
+- **Coverage is enforced**—`runic_corpus_fully_triaged` fails if a fixture is in
   neither allowlist nor blocked. A new fixture forces an accept-or-record decision.
 - **Reseed the allowlist with the `grep -E '^#|^$'` header-preserving recipe.**
-- **Report is gitignored; `expected.jl` is generated** — never hand-edit; mint via
+- **Report is gitignored; `expected.jl` is generated**—never hand-edit; mint via
   `scripts/update-runic-corpus.sh`.
-- **`format <file>` rewrites in place** — pipe via stdin to inspect output.
-- **Corpus pinned** to Runic in `.runic-source` (currently Runic 1.5.0 /
-  Julia 1.12.6). Bump ⇒ re-run the script, re-triage.
+- **`format <file>` rewrites in place**—pipe via stdin to inspect output.
+- **Corpus pinned** to Runic in `.runic-source` (currently Runic 1.5.0/Julia
+  1.12.6). Bump ⇒ re-run the script, re-triage.
 
 ## Progress
 
@@ -43,7 +43,7 @@ bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections).
 
 The headline target landed for the no-comment/no-blank-line common case. A
 bracket goes vertical iff its content spans ≥2 source lines, detected by **any
-`NEWLINE` token among its descendants** (`has_newline_token`) — this gives the
+`NEWLINE` token among its descendants** (`has_newline_token`)—this gives the
 **contagion** for free (`foo(g(a,\nb), c)` breaks the outer call because g's
 newline is a descendant) while *not* triggering on a `\n` buried inside an
 un-reflowable string (we'd only half-break it). Both `lower_arg_list` and
@@ -52,7 +52,7 @@ un-reflowable string (we'd only half-break it). Both `lower_arg_list` and
 The layout is **source-driven, not width-based** (so it sidesteps the `fits`
 engine entirely): emit a framing `HardLine` after the open bracket and before the
 close (close lands at the bracket's own indent, content one step in via
-`Ir::indent`), then walk items. **Inter-item space-vs-break is preserved** — the
+`Ir::indent`), then walk items. **Inter-item space-vs-break is preserved**—the
 source's comma-gap newline count decides `Sep::Newline` (→ `,` + `HardLine`) vs
 `Sep::Space` (→ `, `); Runic only adds the *framing* breaks, never explodes
 same-line items (`), c` stays). Trailing comma per `adds_trailing_comma`: calls
@@ -67,7 +67,7 @@ on call/nested/vect/tuple/braces/index/kwarg cases. Fixture `multiline_brackets/
   bracket, any unexpected child/token. Splats need no special-casing: `x...` is an
   `ARG` wrapping `SPLAT_EXPR`, lowered transparently.
 - **Known divergence (out of scope):** a bracket whose only newline lives inside a
-  triple-quoted string — Runic breaks the bracket *and* re-indents the string body;
+  triple-quoted string—Runic breaks the bracket *and* re-indents the string body;
   Fatou (token-based detection) leaves it inline. String reindentation is a
   separate construct.
 
@@ -75,45 +75,45 @@ on call/nested/vect/tuple/braces/index/kwarg cases. Fixture `multiline_brackets/
 
 Two small "tighten an operator to no spaces" rules, both confirmed against Runic:
 
-- **Range `:`** — Runic *always* packs ranges tight (`1 : 2` → `1:2`, `a : b` →
+- **Range `:`**—Runic *always* packs ranges tight (`1 : 2` → `1:2`, `a : b` →
   `a:b`, `1:length(x)`). Two parser shapes: the two-operand range `a:b` is a
   `BINARY_EXPR` with a `COLON` op (fixed by adding `COLON` to `is_tight_binop` —
   Fatou was *mangling* `1:2` → `1 : 2`, a latent bug with no fixture); the stepped
   `1:2:10` is a `RANGE_EXPR` (new `lower_range`: alternate operand/`:`, all tight,
   ≥2 operands, bail on comment/newline/non-alternating). Fixture `range_colon/`.
-- **`::`** — `TYPE_ANNOTATION` node (was transparent, so `x :: Int` leaked
+- **`::`**—`TYPE_ANNOTATION` node (was transparent, so `x :: Int` leaked
   through). Runic packs tight (`x::Int`). New `lower_type_annotation`: lower
   operands, emit `::` with no spaces, bail on comment/newline/extra token/missing
   `::`. Handles `x::Int`, bare `::Int`, call args `f(x::Int)`. Fixture
   `type_annotations/`.
 - **Divergence noted (out of scope, kept out of fixtures):** Runic *parenthesizes*
-  compound range operands (`a + 1 : b` → `(a + 1):b`) — a semantic rewrite, not a
+  compound range operands (`a + 1 : b` → `(a + 1):b`)—a semantic rewrite, not a
   spacing rule. Fatou tightens the colon and recurses (`a + 1:b`), lossless and
   idempotent but unparenthesized; correct only for simple operands (literals,
   names, calls, indices), which is what the fixture uses.
 
 ### Ranked next targets
 
-1. **Matrices** — single-line is **pure preservation**: Runic does *not* even
+1. **Matrices**—single-line is **pure preservation**: Runic does *not* even
    collapse `[1  2   3]` → stays `[1  2   3]`; `[1 2; 3 4]`, `[1;2;3]`, `[1 2 ;3 4]`
    all preserved. Fatou's transparent fallback already matches, so a `matrices/`
    fixture would PASS rule-free (regression lock only, no rule). Cheap win.
    Multiline matrices `[1 2\n3 4]` are **not** the bracket rule (they're a distinct
-   `MATRIX_EXPR`, not `VECT_EXPR`/`ARG_LIST`) — probe separately before claiming.
-2. **Blank-line + comment preservation inside broken brackets** — the multi-line
+   `MATRIX_EXPR`, not `VECT_EXPR`/`ARG_LIST`)—probe separately before claiming.
+2. **Blank-line + comment preservation inside broken brackets**—the multi-line
    rule's two big bails. Both need an IR primitive Fatou lacks: a **bare newline**
-   (blank line with *no* indent — our `HardLine` always re-indents, so two
+   (blank line with *no* indent—our `HardLine` always re-indents, so two
    `HardLine`s would leave trailing whitespace on the blank line). Add e.g.
    `Ir::BlankLine` (emit `\n` at column 0) to the printer, then relax the
    `newlines >= 2` bail in `lower_multiline_bracket`. Comments inside the bracket
    are the harder half (placement + the trailing-`#`-forces-newline interaction).
-3. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
+3. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
 
 ## Earlier sessions
 
 - **tuple/vector/brace collections**: `lower_collection` (`TUPLE_EXPR`/`VECT_EXPR`/
-  `BRACES`) — open/close verbatim, drop incidental ws, join `ARG`s with `", "`,
+  `BRACES`)—open/close verbatim, drop incidental ws, join `ARG`s with `", "`,
   drop trailing comma **except** the semantic 1-tuple `(a,)`. Bails on `;`-row
   matrix (`PARAMETERS`), comment/newline, doubled comma, non-`ARG`. `(a)` is a
   `PAREN_EXPR` (untouched); space-separated matrices are `MATRIX_EXPR` (transparent,
@@ -123,7 +123,7 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
   (`; `-led, `", "`-joined kwargs). Comma spacing, no bracket padding, single-line
   trailing-comma drop. Bails on comment/newline/doubled comma → multi-line passes
   through. Fixture `call_arg_lists/`.
-- **comparison chains**: `lower_comparison` (`COMPARISON_EXPR`) — alternating
+- **comparison chains**: `lower_comparison` (`COMPARISON_EXPR`)—alternating
   operand/operator, every gap one space, >2 operands ok; bails on
   comment/newline/non-alternating/<2 operands. Fixture `comparison_chains/`.
   Surfaced a lexer gap (`===`/`!==`/tight `x!=y` mis-lex) handed to parser-parity;

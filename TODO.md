@@ -10,7 +10,7 @@ leverage.
 - [x] Lexer: identity/inequality operators `===`, `!==`, and tight `!=`. New
   `EqEqEq`/`NotEqEq` tokens (longest-match, beat `==`/`!=`); `scan_ident` now
   stops at a `!` immediately followed by `=` so `a!=b`⇒`a` `!=` `b` while `f!`,
-  `push!`, `a!b` stay identifiers. Project as `(call-i a === b)` / fold into
+  `push!`, `a!b` stay identifiers. Project as `(call-i a === b)`/fold into
   `(comparison …)`.
 - [x] Lexer: broadcast identity/inequality operators `.===`/`.!==`. New
   `DotEqEqEq`/`DotNotEqEq` tokens, lexed as 4-char dotted ops (longest-match,
@@ -32,7 +32,7 @@ leverage.
   pinned `expected.jl = Runic.format_string(input)` per fixture
   (`tests/fixtures/formatter/<slug>/`, version-pinned in `.runic-source`); the
   harness (`tests/runic_oracle.rs`) gates `format(input) == expected.jl` via
-  `tests/oracle/runic-allowlist.txt` (CI-safe — no Julia at test time),
+  `tests/oracle/runic-allowlist.txt` (CI-safe, no Julia at test time),
   `runic_full_report` (`#[ignore]`d) writes a triage report, and
   `runic-{allowlist,blocked}.txt` partition the corpus (coverage enforced). The
   optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`) is still
@@ -51,10 +51,10 @@ leverage.
   lines, contagious via descendant `NEWLINE` tokens, source space-vs-break
   preserved between items, per-bracket trailing comma). **Next:** blank-line and
   comment preservation inside broken brackets (needs a bare-newline IR primitive),
-  blocks, control flow — see the `formatter-parity` RECAP's ranked targets.
+  blocks, control flow—see the `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; matrices `[1 2]`/`[1 2; 3 4]`
   are space-separated and left transparent; compound range operands like
-  `a + 1:b` Runic *parenthesizes* — a semantic rewrite, out of scope.)
+  `a + 1:b` Runic *parenthesizes*—a semantic rewrite, out of scope.)
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 
 ## Linter
@@ -72,12 +72,12 @@ leverage.
 - [ ] Dedicated lint thread owning the persistent `IncrementalDatabase` (salsa
   is single-writer) + a rayon read pool for latency-sensitive read requests,
   replacing the single-threaded loop in `src/lsp.rs`.
-- [ ] Hover, go-to-definition, references, document symbols, rename — these need
+- [ ] Hover, go-to-definition, references, document symbols, rename—these need
   a per-file semantic model (scopes, bindings, read sites) that does not
   exist yet.
 - [ ] Incremental (range) document sync instead of full-document sync.
 
-## Semantic / project analysis
+## Semantic/project analysis
 
 - [ ] Per-file `SemanticModel` (scope tree, bindings, read sites).
 - [ ] Cross-file/project resolution and a Julia package/module index (the rough
@@ -85,8 +85,8 @@ leverage.
 
 ## Tooling
 
-- [ ] `build.rs` generating shell completions + man pages (clap_complete /
-  clap_mangen), as arity does.
+- [ ] `build.rs` generating shell completions + man pages
+  (clap_complete/clap_mangen), as arity does.
 - [x] JuliaSyntax.jl differential parser harness (the parser oracle; see
   `AGENTS.md`), run via the Julia toolchain in the devenv. A *projector*
   (`src/parser/sexpr.rs`, `to_juliasyntax_sexpr`/`normalize_sexpr`, also
@@ -100,17 +100,17 @@ leverage.
   `.juliasyntax-source`); `oracle_allowlist` guards the 34 matching cases
   (no Julia needed → CI-safe), `oracle_full_report` (`#[ignore]`d) writes a
   triage report, and `tests/oracle/{allowlist,blocked}.txt` (keyed by slug)
-  partition the corpus — 4 blocked with rationales (numeric-literal display
+  partition the corpus—4 blocked with rationales (numeric-literal display
   normalization, `end`/unterminated-string and incomplete-`do` error shapes). A harvested **JuliaSyntax sub-corpus**
   (`scripts/harvest-juliasyntax-corpus.jl` → `tests/fixtures/oracle/juliasyntax.jsonl`,
   575 micro-cases extracted from JuliaSyntax's own `test/parser.jl`, expected
   regenerated via our pinned `parseall`) is gated opt-in by `oracle_juliasyntax`
   against `tests/oracle/juliasyntax-allowlist.txt` (251 cases); the
   `juliasyntax_full_report` divergence (282) + unsupported (42) buckets are the
-  **prioritized parser-growth backlog** — e.g. associative n-ary flattening
+  **prioritized parser-growth backlog**—e.g. associative n-ary flattening
   (`a*b*c`) and unicode operators (lexer).
   **Follow-ups:** work the backlog up the allowlist; continue the error-shape
-  parity slices (the taxonomy infrastructure has landed — see the typed
+  parity slices (the taxonomy infrastructure has landed—see the typed
   error-node bullet above); wire the oracle gates into CI.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.
 - [ ] `smol_str` interning for symbol names once the semantic model lands.

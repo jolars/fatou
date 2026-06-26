@@ -42,7 +42,7 @@ Both pinned to the JuliaSyntax version in
 - **Not a pass-rate chase.** A passing case can hide a wrong CST if the projector
   compensates. The projector must stay a faithful encoding translation; if a
   session's diff is mostly in `sexpr.rs` (beyond a genuine new node's mapping),
-  that's a smell — the fix probably belongs in the parser.
+  that's a smell—the fix probably belongs in the parser.
 - **Not "make Fatou's tree identical to Julia's."** Some divergences are
   deliberate Fatou modeling choices (comparison chains stay nested; associative
   `a*b*c` stays nested binary; numeric-literal display). Those are **recorded**
@@ -54,32 +54,32 @@ Both pinned to the JuliaSyntax version in
 
 ## Failure buckets (classify before fixing)
 
-- **Projector gap** — Fatou parses fine, but the projector emits the wrong shape
+- **Projector gap**: Fatou parses fine, but the projector emits the wrong shape
   (missing node-kind arm, wrong head, encoding not unwrapped). Fix `sexpr.rs`.
-- **Parser gap** — Fatou can't parse it (diagnostics → UNSUPPORTED) or parses it
+- **Parser gap**: Fatou can't parse it (diagnostics → UNSUPPORTED) or parses it
   loosely (header passthrough as loose tokens). Fix `lexer.rs`/`expr.rs`. This is
   the bulk of the backlog and the main growth work.
-- **Modeling divergence** — Fatou intentionally differs (associative flattening,
+- **Modeling divergence**: Fatou intentionally differs (associative flattening,
   comparison chains). Record, don't fix: dir → `blocked.txt` with rationale; JS →
   leave un-allowlisted.
-- **Display normalization** — numeric literals (oct/bin→hex, `1_000`→`1000`,
+- **Display normalization**: numeric literals (oct/bin→hex, `1_000`→`1000`,
   float canonicalization). Permanent divergence; blocked.
-- **Error-shape** — recovery nodes. Deferred.
+- **Error-shape**: recovery nodes. Deferred.
 
 ## The operator recipe (5 files)
 
-Adding an infix/prefix operator touches exactly these, in order — miss one and it
+Adding an infix/prefix operator touches exactly these, in order—miss one and it
 won't lex, won't get a kind, or won't project:
 
-1. `src/parser/lexer.rs` — add a `TokKind` variant + lex it (longest-match: the
+1. `src/parser/lexer.rs`: add a `TokKind` variant + lex it (longest-match: the
    3-char dotted table, then the 2-char table, then 1-char). `=>`/`.=>` is the
    worked example (commit `c6448f2`).
-2. `src/syntax.rs` — add the `SyntaxKind` operator token (keep `ERROR` last).
-3. `src/parser/tree_builder.rs` — map `TokKind::X => SyntaxKind::X`.
-4. `src/parser/expr.rs` — add to `infix_binding_power` (probe Julia for the tier
+2. `src/syntax.rs`: add the `SyntaxKind` operator token (keep `ERROR` last).
+3. `src/parser/tree_builder.rs`: map `TokKind::X => SyntaxKind::X`.
+4. `src/parser/expr.rs`: add to `infix_binding_power` (probe Julia for the tier
    and associativity first; right-assoc has `r_bp < l_bp`). Default operators
    build a `BINARY_EXPR`; assignment-like ones need a node-kind arm too.
-5. `src/parser/sexpr.rs` — add to `infix_head` (`CallI`/`Special`/`DotCallI`/
+5. `src/parser/sexpr.rs`: add to `infix_head` (`CallI`/`Special`/`DotCallI`/
    `Dot`) **and** `is_operator`.
 
 Non-operator features (markers, quotes, literals) are usually just `parse_prefix`
@@ -90,7 +90,7 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
 
 1. **Read `RECAP.md`** (traps, latest session, ranked next targets). Prefer a
    user-named target.
-2. **Baseline**: `cargo test` — note it's green. "No regression" = still green at
+2. **Baseline**: `cargo test`—note it's green. "No regression" = still green at
    the end.
 3. **Regenerate the report**:
    ```sh
@@ -105,14 +105,14 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
    julia --startup-file=no -e 'using JuliaSyntax;
      print(JuliaSyntax.parseall(JuliaSyntax.SyntaxNode, raw"""<CODE>"""; ignore_errors=true))'
    ```
-   **Trap:** inputs containing `"` or `$` break shell `raw"""…"""` — write the
-   snippets to a temp file and loop `eachline` instead. Probe precedence /
-   associativity explicitly (`a OP b OP c`, `a OP b ⊕ c`, both orders) before
-   choosing a binding-power tier.
+   **Trap:** inputs containing `"` or `$` break shell `raw"""…"""`—write the
+   snippets to a temp file and loop `eachline` instead. Probe
+   precedence/associativity explicitly (`a OP b OP c`, `a OP b ⊕ c`, both orders)
+   before choosing a binding-power tier.
 6. **Classify** into a bucket, then apply the **smallest** fix. Inspect the
    current CST shape via `cargo run -q -- parse <file>` and the projection via
    `cargo run -q -- parse --to sexpr <file>`.
-7. **TDD fixture** — add `tests/fixtures/parser/<name>/input.jl` (valid cases that
+7. **TDD fixture**—add `tests/fixtures/parser/<name>/input.jl` (valid cases that
    should match Julia; keep deferred edge cases out so it can be allowlisted),
    verify losslessness (`cargo run -q -- parse --verify --quiet <file>`), then
    review and accept the snapshot:
@@ -120,7 +120,7 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
    cargo test --test parser_snapshots        # writes .snap.new
    cargo insta review                         # or: cargo insta accept
    ```
-   **Read the CST before accepting** — confirm the shape is what you intend.
+   **Read the CST before accepting**—confirm the shape is what you intend.
 8. **Wire into the oracle dir corpus**:
    ```sh
    mkdir -p tests/fixtures/oracle/<name>
@@ -152,41 +152,42 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
     ```
 11. **Update `TODO.md`** (mark a grammar bullet `[x]` mirroring the existing
     style; trim the construct from the oracle backlog list) and **`RECAP.md`**.
-12. **Commit.** Conventional Commits; subject ≤ 60 chars. New parsing capability /
-    public API = `feat(parser)`; test-infra-only = `test(parser)`. The pre-commit
-    hook runs clippy + rustfmt — never `--no-verify`. Don't push unless asked.
+12. **Commit.** Conventional Commits; subject ≤ 60 chars. New parsing
+    capability/public API = `feat(parser)`; test-infra-only = `test(parser)`. The
+    pre-commit hook runs clippy + rustfmt—never `--no-verify`. Don't push unless
+    asked.
 
 ## Session boundaries
 
 A committed target with `RECAP.md` updated (the end of step 12) **is a clean
-stop** — `RECAP.md` is the handoff, so nothing valuable lives only in the chat
+stop**—`RECAP.md` is the handoff, so nothing valuable lives only in the chat
 context. When the user asks to keep going, recommend by where you are:
 
-- **Fresh session** — default at a committed boundary. The next session re-reads
+- **Fresh session**—default at a committed boundary. The next session re-reads
   `RECAP.md` (step 1) and continues; a fresh, lean context keeps attention on the
   new target (exploration dumps, snapshot reviews, and triage reports from the
   finished target are pure ballast for the next one).
-- **Compact & continue** — when the user wants the *next* target immediately and
+- **Compact & continue**—when the user wants the *next* target immediately and
   doesn't want to re-establish the green baseline. RECAP still protects the work.
-- **Continue as-is** — only mid-target: uncommitted work, a half-applied fix, or a
+- **Continue as-is**—only mid-target: uncommitted work, a half-applied fix, or a
   failing test you're chasing. Don't span more than one target in a context.
 
-So: one target per context window is the intended cadence — the rolling log exists
+So: one target per context window is the intended cadence—the rolling log exists
 precisely so you don't have to.
 
 ## Key files
 
-- `src/parser/sexpr.rs` — projector (`to_juliasyntax_sexpr`, `normalize_sexpr`,
+- `src/parser/sexpr.rs`: projector (`to_juliasyntax_sexpr`, `normalize_sexpr`,
   `infix_head`, `is_operator`, per-kind `project_*`). The faithful diagnostic.
-- `src/parser/expr.rs` — Pratt parser: `parse_prefix`, `infix_binding_power`
+- `src/parser/expr.rs`: Pratt parser: `parse_prefix`, `infix_binding_power`
   (the precedence table ~line 1525), `ExprFlags` (threaded context like
   `end_marker`/`begin_marker`), the operator loop.
-- `src/parser/lexer.rs` — `TokKind` + tokenization (operator tables ~line 757).
-- `src/syntax.rs` — `SyntaxKind` (`ERROR` must stay last).
-- `src/parser/tree_builder.rs` — `TokKind` → `SyntaxKind` mapping.
-- `tests/juliasyntax_oracle.rs` — harness (allowlist gates + ignored reports).
-- `scripts/update-juliasyntax-corpus.{sh,jl}` — regen pinned `expected.sexpr`.
-- `scripts/harvest-juliasyntax-corpus.jl` — re-extract the JS corpus (run on a
+- `src/parser/lexer.rs`: `TokKind` + tokenization (operator tables ~line 757).
+- `src/syntax.rs`: `SyntaxKind` (`ERROR` must stay last).
+- `src/parser/tree_builder.rs`: `TokKind` → `SyntaxKind` mapping.
+- `tests/juliasyntax_oracle.rs`: harness (allowlist gates + ignored reports).
+- `scripts/update-juliasyntax-corpus.{sh,jl}`: regen pinned `expected.sexpr`.
+- `scripts/harvest-juliasyntax-corpus.jl`: re-extract the JS corpus (run on a
   JuliaSyntax version bump, then re-triage).
 
 ## Traps
@@ -210,7 +211,7 @@ precisely so you don't have to.
 ## Report-back format
 
 1. Construct landed (e.g. "pair operator `=>`").
-2. JS corpus: pass / divergence / unsupported before → after (+ regressions: must
+2. JS corpus: pass/divergence/unsupported before → after (+ regressions: must
    be zero).
 3. Dir allowlist + JS allowlist counts before → after.
 4. Files changed, by failure bucket.
