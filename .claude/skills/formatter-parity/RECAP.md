@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**13 fixtures**): **11 allowlisted**, 2 blocked
+Dir corpus (**14 fixtures**): **12 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
@@ -37,9 +37,35 @@ Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
 `lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
 (`lower_collection`), tight range `:` (`lower_range` + `COLON` in
 `is_tight_binop`), `::` type annotations (`lower_type_annotation`), multi-line
-bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections).
+bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
+multi-line matrix breaking (`lower_matrix`).
 
-## Latest session (single-line matrices — regression lock, no rule)
+## Latest session (multi-line matrix breaking)
+
+**Surprise:** multi-line matrices are **not** pure preservation (the prior recap's
+guess). Runic *reframes* a `MATRIX_EXPR` that spans ≥2 lines exactly like
+`lower_multiline_bracket`: `[` + `HardLine`, each source line re-indented one step,
+`HardLine` + `]`. The interior is otherwise kept **verbatim**—intra-row spacing
+(`1  2`), multi-space same-line gaps (`1 2;   3 4;`), same-line `;`-rows, and `;`
+placement (`1 2 ;`, trailing `3 4;`) are all preserved; only each line's
+leading/trailing whitespace is dropped for the standard indent. Single-line
+matrices still have **no rule**—`has_newline_token` gate returns transparent, which
+is byte-identical (the `matrices/` regression lock still holds).
+
+`lower_matrix` (new arm): splits children on `NEWLINE` into lines of `(is_ws, ir)`
+elements, trims end-whitespace per line, drops leading/trailing empty lines (a bare
+newline after `[`/before `]` is absorbed into the framing break), emits
+`HardLine`+line per content line. **Row shapes:** a multi-element row is a
+`MATRIX_ROW` node; a single-element row (newline-separated column `[1\n2\n3]`) is a
+bare `ARG`—**both** handled, lowered via `lower_node` so nested calls/indices still
+normalize inside rows (`f( x )`→`f(x)`). **Bails to transparent (kept out of the
+fixture, lossless):** a blank line (≥2 consecutive `NEWLINE`s ⇒ an empty *middle*
+line, which the IR can't emit without a bare un-indented newline), a comment
+(direct `COMMENT` child token), missing/extra bracket, any unexpected token. Verified
+byte-identical to Runic across row/column/2D/mixed-`;`/multispace/trailing-`;`/
+nested/leading-newline/trailing-newline shapes. Fixture `multiline_matrices/`.
+
+## Earlier session (single-line matrices — regression lock, no rule)
 
 Top-ranked cheap win, landed exactly as predicted: **rule-free PASS**. Runic
 *preserves* single-line matrices verbatim—no whitespace collapse even in
@@ -110,18 +136,19 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
-1. **Blank-line + comment preservation inside broken brackets**—the multi-line
-   rule's two big bails. Both need an IR primitive Fatou lacks: a **bare newline**
-   (blank line with *no* indent—our `HardLine` always re-indents, so two
-   `HardLine`s would leave trailing whitespace on the blank line). Add e.g.
-   `Ir::BlankLine` (emit `\n` at column 0) to the printer, then relax the
-   `newlines >= 2` bail in `lower_multiline_bracket`. Comments inside the bracket
-   are the harder half (placement + the trailing-`#`-forces-newline interaction).
+1. **Blank-line + comment preservation inside broken brackets *and matrices***—now
+   the shared bail of **both** `lower_multiline_bracket` and `lower_matrix`. Both
+   need an IR primitive Fatou lacks: a **bare newline** (blank line with *no*
+   indent—our `HardLine` always re-indents, so two `HardLine`s would leave trailing
+   whitespace on the blank line). Add e.g. `Ir::BlankLine` (emit `\n` at column 0)
+   to the printer, then relax the blank-line bail in both rules. Comments are the
+   harder half (placement + the trailing-`#`-forces-newline interaction).
 2. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
-3. **Multiline matrices** (`[1 2\n3 4]`)—distinct `MATRIX_EXPR`/`MATRIX_ROW`
-   shape, not the `lower_multiline_bracket` path. Probe Runic first (single-line
-   is pure preservation; multiline likely is too, but unverified). Cheap if so.
+3. **Long single-line bracket/matrix reflow** (width-based breaking)—Fatou's
+   breaking is purely source-driven (newline-triggered). Runic also breaks on
+   width. Probe whether Runic reflows a long single-line `[…]`/call past the margin;
+   if so this needs the `fits` engine, not just `HardLine`s.
 
 ## Earlier sessions
 

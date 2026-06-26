@@ -49,7 +49,10 @@ leverage.
   (`lower_type_annotation`), multi-line arg-list/collection breaking
   (`lower_multiline_bracket`: framing breaks + indent when content spans ≥2 source
   lines, contagious via descendant `NEWLINE` tokens, source space-vs-break
-  preserved between items, per-bracket trailing comma). **Next:** blank-line and
+  preserved between items, per-bracket trailing comma), multi-line matrix breaking
+  (`lower_matrix`: framing breaks + reindent each source line when a `MATRIX_EXPR`
+  spans ≥2 lines, interior preserved verbatim—intra-row spacing, same-line
+  `;`-rows, `;` placement; bails on blank line/comment). **Next:** blank-line and
   comment preservation inside broken brackets (needs a bare-newline IR primitive),
   blocks, control flow—see the `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

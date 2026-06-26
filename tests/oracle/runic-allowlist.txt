@@ -11,6 +11,7 @@ collections
 comparison_chains
 matrices
 multiline_brackets
+multiline_matrices
 range_colon
 tight_operators
 type_annotations

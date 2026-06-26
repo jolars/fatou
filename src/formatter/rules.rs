@@ -25,6 +25,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
         SyntaxKind::RANGE_EXPR => lower_range(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
+        SyntaxKind::MATRIX_EXPR => lower_matrix(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -562,6 +563,100 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
         } else if want_trailing {
             inner.push(Ir::text(","));
         }
+    }
+
+    Ir::concat([
+        Ir::text(open),
+        Ir::indent(Ir::concat(inner)),
+        Ir::HardLine, // framing break before the close bracket
+        Ir::text(close),
+    ])
+}
+
+/// Lay out a matrix literal (`[1 2; 3 4]`) that spans multiple source lines,
+/// matching the target style: a framing break right after `[` and right before
+/// `]`, with each source line re-indented one step. The matrix interior is
+/// otherwise preserved **verbatim** — intra-row spacing, multi-space gaps,
+/// same-line `;`-separated rows, and `;` placement are all kept (Runic does not
+/// normalize inside a matrix); only the leading and trailing whitespace of each
+/// source line is dropped in favor of the standard indent. Nested handled
+/// constructs still normalize because each row is lowered recursively.
+///
+/// A single-line matrix (no `NEWLINE` among its children) has no rule: it is left
+/// to the transparent fallback, which is byte-identical to Runic's verbatim
+/// preservation. This arm only reshapes once the matrix already spans ≥2 lines.
+///
+/// Only the clean shape is reshaped. A blank line (≥2 consecutive newlines in any
+/// gap, which surfaces as an empty interior line the IR can't emit without a bare
+/// un-indented newline), a comment, or any unexpected token falls back to the
+/// verbatim transparent lowering.
+fn lower_matrix(node: &SyntaxNode) -> Ir {
+    if !has_newline_token(node) {
+        return lower_transparent(node);
+    }
+
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    // Each source line is a list of `(is_whitespace, ir)` elements. Whitespace at
+    // the ends of a line is trimmed (replaced by the framing indent); interior
+    // whitespace is preserved verbatim. A new line starts at every `NEWLINE`.
+    let mut lines: Vec<Vec<(bool, Ir)>> = vec![Vec::new()];
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LBRACKET => open = Some(tok.text().to_string()),
+                SyntaxKind::RBRACKET => close = Some(tok.text().to_string()),
+                SyntaxKind::NEWLINE => lines.push(Vec::new()),
+                SyntaxKind::WHITESPACE => lines
+                    .last_mut()
+                    .unwrap()
+                    .push((true, Ir::text(tok.text().to_string()))),
+                SyntaxKind::SEMICOLON => lines.last_mut().unwrap().push((false, Ir::text(";"))),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                // A row is a multi-element `MATRIX_ROW`, or a bare `ARG` when the
+                // row holds a single element (a newline-separated column vector).
+                SyntaxKind::MATRIX_ROW | SyntaxKind::ARG => {
+                    lines.last_mut().unwrap().push((false, lower_node(&child)))
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (Some(open), Some(close)) = (open, close) else {
+        return lower_transparent(node);
+    };
+
+    // Trim leading/trailing whitespace from every line.
+    for line in &mut lines {
+        while line.first().is_some_and(|(ws, _)| *ws) {
+            line.remove(0);
+        }
+        while line.last().is_some_and(|(ws, _)| *ws) {
+            line.pop();
+        }
+    }
+
+    // Drop leading and trailing empty lines (a bare newline after `[` or before
+    // `]` is absorbed into the framing break). An empty line that remains between
+    // two content lines is a blank line we can't express — bail to verbatim.
+    let first = lines.iter().position(|l| !l.is_empty());
+    let last = lines.iter().rposition(|l| !l.is_empty());
+    let (Some(first), Some(last)) = (first, last) else {
+        return lower_transparent(node);
+    };
+    let content = &lines[first..=last];
+    if content.iter().any(|l| l.is_empty()) {
+        return lower_transparent(node);
+    }
+
+    let mut inner: Vec<Ir> = Vec::with_capacity(content.len() * 2);
+    for line in content {
+        inner.push(Ir::HardLine); // framing break / re-indent for this line
+        inner.extend(line.iter().map(|(_, ir)| ir.clone()));
     }
 
     Ir::concat([
