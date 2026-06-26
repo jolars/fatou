@@ -29,40 +29,51 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**7 fixtures**): **5 allowlisted**, 2 blocked
+Dir corpus (**8 fixtures**): **6 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
-(`lower_comparison`).
+(`lower_comparison`), call/index arg lists (`lower_arg_list` +
+`lower_keyword_arg`/`lower_parameters`).
 
-## Latest session (comparison chains)
+## Latest session (call/index arg lists)
 
-Landed `COMPARISON_EXPR` spacing:
+Landed `ARG_LIST` normalization (shared by `CALL_EXPR` and `INDEX_EXPR`):
 
-- **Rule**: `lower_comparison` in `src/formatter/rules.rs`. The node alternates
-  operand/operator and may hold >2 operands (`a == b == c`); comparison ops are
-  never tight, so every gap is one space. Walks children in source order,
-  dropping incidental whitespace, building `[operand, " ", op, " ", operand, …]`.
-  Bails to `lower_transparent` on any interleaved comment/newline, a
-  non-alternating shape, or `<2` operands.
-- **Fixture**: `comparison_chains/` (`a==b`, `a<b<=c`, `1<2<3<4`, `i<=n>=0`,
-  `x != y`). Parity holds; allowlisted.
-- **Trap found**: Fatou's **lexer** mis-tokenizes `===`, `!==`, and tight `x!=y`
-  (`x!` is read as an identifier). These are **parser gaps**, not formatter bugs —
-  the formatter correctly bails to transparent on the resulting ERROR nodes. Kept
-  them out of the fixture; spaced `!=` works fine. Revisit when the parser grows
-  `===`/`!==`.
+- **Rules**: `lower_arg_list` walks the bracketed list — emits the open/close
+  bracket verbatim, drops incidental whitespace, joins `ARG`/`KEYWORD_ARG` items
+  with `", "` (no space before comma), and **drops a single-line trailing comma**
+  (`g(a,)` → `g(a)`). A trailing `PARAMETERS` node attaches without a comma (the
+  `;` is the separator). `lower_keyword_arg` spaces the `=` (`f(x=1)` →
+  `f(x = 1)`); `lower_parameters` emits `; ` then `", "`-joined kwargs
+  (`f(a; b=1)` → `f(a; b = 1)`). All three bail to `lower_transparent` on any
+  comment/newline, doubled/orphaned comma, missing separator, or unexpected child
+  — so **multi-line arg lists pass through byte-identical** (left for a later
+  group/break rule).
+- **Fixture**: `call_arg_lists/` (`f( a ,b )`, `foo(1,2,3)`, `g(a,)`, `a[ 1 , 2 ]`,
+  `f(x=1)`, `f(a; b=1)`, `f(a, b; c=2, d=3)`, splat `f(a, b...)`, `println("x")`).
+  Parity holds; allowlisted.
+- **Note**: tuples `(a, b)` and vectors `[1, 2]` are *not* `ARG_LIST` (separate
+  nodes) — kept out of this fixture, queued as a next target. `f (x)` (space
+  before opener) is a Julia parse error, so it's not a case to handle.
 
 ### Ranked next targets
 
-1. **Calls / arg-lists** (`CALL_EXPR`/`ARG_LIST`): normalize `f( a ,b )` →
-   `f(a, b)` — comma spacing, no inner-paren padding. Watch the break/group case
-   for long arg lists (needs `Ir::group` + `Ir::Line`).
-2. **Unary** (`UNARY_EXPR`): `- a` → `-a`; confirm Runic.
-3. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
+1. **Unary** (`UNARY_EXPR`): `- a` → `-a`; confirm Runic.
+2. **Tuples / vectors / matrices** (`(a, b)`, `[1, 2]`, `[1, 2; 3, 4]`): same
+   comma/bracket spacing as arg lists but distinct nodes — could share a helper.
+3. **Calls/arg-lists multi-line break** — long lists need `Ir::group` + `Ir::Line`
+   + `Ir::indent` (Runic indents 4, keeps the trailing comma when broken).
+4. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
 
 ## Earlier sessions
+
+- **comparison chains**: `lower_comparison` (`COMPARISON_EXPR`) — alternating
+  operand/operator, every gap one space, >2 operands ok; bails on
+  comment/newline/non-alternating/<2 operands. Fixture `comparison_chains/`.
+  Surfaced a lexer gap (`===`/`!==`/tight `x!=y` mis-lex) handed to parser-parity;
+  since landed upstream (`429fc22`, `d7028d3`).
 
 - **bootstrap**: built the Runic differential oracle from scratch
   (`scripts/update-runic-corpus.{sh,jl}`, `tests/runic_oracle.rs`,

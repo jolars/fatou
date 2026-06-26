@@ -23,6 +23,9 @@ fn lower_node(node: &SyntaxNode) -> Ir {
     match node.kind() {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
+        SyntaxKind::ARG_LIST => lower_arg_list(node),
+        SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
+        SyntaxKind::PARAMETERS => lower_parameters(node),
         _ => lower_transparent(node),
     }
 }
@@ -127,6 +130,145 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
 
     // A well-formed chain ends on an operand and has at least two of them.
     if expect_operand || operand_count < 2 {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a call/index argument list (`f(a, b)`, `a[1, 2]`) with normalized
+/// punctuation: no padding inside the brackets, no space before a comma, one
+/// space after it, and a single-line trailing comma dropped (`g(a,)` → `g(a)`).
+///
+/// Items are `ARG`/`KEYWORD_ARG` nodes separated by commas; an optional trailing
+/// `PARAMETERS` node carries `;`-separated keyword arguments and attaches without
+/// a comma. Only the clean single-line shape is reshaped: any interleaved comment
+/// or newline, a doubled/orphaned comma, or an unexpected child falls back to the
+/// verbatim transparent lowering (which keeps multi-line arg lists byte-identical).
+fn lower_arg_list(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut first_item = true;
+    let mut pending_comma = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LPAREN
+                | SyntaxKind::RPAREN
+                | SyntaxKind::LBRACKET
+                | SyntaxKind::RBRACKET => parts.push(Ir::text(tok.text().to_string())),
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COMMA => {
+                    if pending_comma {
+                        return lower_transparent(node);
+                    }
+                    pending_comma = true;
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
+                    if !first_item {
+                        if !pending_comma {
+                            return lower_transparent(node);
+                        }
+                        parts.push(Ir::text(", "));
+                    }
+                    parts.push(lower_node(&child));
+                    first_item = false;
+                    pending_comma = false;
+                }
+                // `;`-separated parameters attach directly (the `;` is the
+                // separator), so they must not follow a comma.
+                SyntaxKind::PARAMETERS => {
+                    if pending_comma {
+                        return lower_transparent(node);
+                    }
+                    parts.push(lower_node(&child));
+                    first_item = false;
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a keyword argument (`x = 1`) with a single space on each side of the
+/// `=`. Bails to the transparent lowering on a comment/newline or any shape
+/// other than `<lhs> = <rhs>`.
+fn lower_keyword_arg(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut seen_eq = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => parts.push(lower_node(&child)),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::EQ if !seen_eq => {
+                    seen_eq = true;
+                    parts.push(Ir::text(" = "));
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    if !seen_eq {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a `;`-separated parameter block (`; a = 1, b = 2`): one space after
+/// the leading semicolon, items separated by `, `. Bails to the transparent
+/// lowering on a comment/newline, a doubled/orphaned comma, an unexpected child,
+/// or a missing semicolon.
+fn lower_parameters(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut first_item = true;
+    let mut pending_comma = false;
+    let mut seen_semi = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::SEMICOLON if !seen_semi => {
+                    seen_semi = true;
+                    parts.push(Ir::text(";"));
+                }
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COMMA => {
+                    if pending_comma {
+                        return lower_transparent(node);
+                    }
+                    pending_comma = true;
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => {
+                if !matches!(child.kind(), SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG) {
+                    return lower_transparent(node);
+                }
+                if first_item {
+                    parts.push(Ir::text(" "));
+                } else {
+                    if !pending_comma {
+                        return lower_transparent(node);
+                    }
+                    parts.push(Ir::text(", "));
+                }
+                parts.push(lower_node(&child));
+                first_item = false;
+                pending_comma = false;
+            }
+        }
+    }
+
+    if !seen_semi {
         return lower_transparent(node);
     }
 
