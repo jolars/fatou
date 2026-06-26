@@ -1079,6 +1079,7 @@ pub(super) fn is_op_name(kind: TokKind) -> bool {
         Plus | Minus
             | Star
             | Slash
+            | Backslash
             | SlashSlash
             | Caret
             | Percent
@@ -1201,6 +1202,7 @@ fn is_call_infix_operator(kind: TokKind) -> bool {
         Plus | Minus
             | Star
             | Slash
+            | Backslash
             | SlashSlash
             | Caret
             | Percent

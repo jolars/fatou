@@ -84,6 +84,7 @@ pub(crate) enum TokKind {
     Minus,
     Star,
     Slash,
+    Backslash,
     SlashSlash,
     Caret,
     Percent,
@@ -127,6 +128,7 @@ pub(crate) enum TokKind {
     MinusEq,
     StarEq,
     SlashEq,
+    BackslashEq,
     SlashSlashEq,
     CaretEq,
     PercentEq,
@@ -158,6 +160,7 @@ pub(crate) enum TokKind {
     DotStarStar,
     DotMinusMinus,
     DotSlash,
+    DotBackslash,
     DotSlashSlash,
     DotCaret,
     DotPercent,
@@ -196,6 +199,7 @@ pub(crate) enum TokKind {
     DotMinusEq,
     DotStarEq,
     DotSlashEq,
+    DotBackslashEq,
     DotSlashSlashEq,
     DotCaretEq,
     DotPercentEq,
@@ -970,6 +974,7 @@ impl<'a> Lexer<'a> {
                 (Some(b'-'), Some(b'=')) => Some(TokKind::DotMinusEq),
                 (Some(b'*'), Some(b'=')) => Some(TokKind::DotStarEq),
                 (Some(b'/'), Some(b'=')) => Some(TokKind::DotSlashEq),
+                (Some(b'\\'), Some(b'=')) => Some(TokKind::DotBackslashEq),
                 (Some(b'^'), Some(b'=')) => Some(TokKind::DotCaretEq),
                 (Some(b'%'), Some(b'=')) => Some(TokKind::DotPercentEq),
                 _ => None,
@@ -984,6 +989,7 @@ impl<'a> Lexer<'a> {
                 Some(b'-') => Some(TokKind::DotMinus),
                 Some(b'*') => Some(TokKind::DotStar),
                 Some(b'/') => Some(TokKind::DotSlash),
+                Some(b'\\') => Some(TokKind::DotBackslash),
                 Some(b'^') => Some(TokKind::DotCaret),
                 Some(b'%') => Some(TokKind::DotPercent),
                 Some(b'=') => Some(TokKind::DotEq),
@@ -1077,6 +1083,7 @@ impl<'a> Lexer<'a> {
             (Some(b'-'), Some(b'=')) => Some(TokKind::MinusEq),
             (Some(b'*'), Some(b'=')) => Some(TokKind::StarEq),
             (Some(b'/'), Some(b'=')) => Some(TokKind::SlashEq),
+            (Some(b'\\'), Some(b'=')) => Some(TokKind::BackslashEq),
             (Some(b'^'), Some(b'=')) => Some(TokKind::CaretEq),
             (Some(b'%'), Some(b'=')) => Some(TokKind::PercentEq),
             (Some(b'|'), Some(b'=')) => Some(TokKind::PipeEq),
@@ -1095,6 +1102,7 @@ impl<'a> Lexer<'a> {
             Some(b'-') => Some(TokKind::Minus),
             Some(b'*') => Some(TokKind::Star),
             Some(b'/') => Some(TokKind::Slash),
+            Some(b'\\') => Some(TokKind::Backslash),
             Some(b'^') => Some(TokKind::Caret),
             Some(b'%') => Some(TokKind::Percent),
             Some(b'<') => Some(TokKind::Lt),
@@ -1217,6 +1225,7 @@ fn op_takes_suffix(kind: TokKind) -> bool {
         Plus | Minus
             | Star
             | Slash
+            | Backslash
             | SlashSlash
             | Caret
             | Percent
@@ -1243,6 +1252,7 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | DotMinus
             | DotStar
             | DotSlash
+            | DotBackslash
             | DotSlashSlash
             | DotCaret
             | DotPercent
@@ -1552,6 +1562,35 @@ mod tests {
                 TokKind::Whitespace,
                 TokKind::Ident,
             ]
+        );
+    }
+
+    #[test]
+    fn left_division_operators() {
+        // `\` (left division) is a single-char infix operator; its augmented and
+        // broadcast forms follow the slash family. The backslash byte must not be
+        // confused with a string escape here (it never starts a string).
+        assert_eq!(
+            kinds("a\\b"),
+            vec![TokKind::Ident, TokKind::Backslash, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a\\=b"),
+            vec![TokKind::Ident, TokKind::BackslashEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a .\\ b"),
+            vec![
+                TokKind::Ident,
+                TokKind::Whitespace,
+                TokKind::DotBackslash,
+                TokKind::Whitespace,
+                TokKind::Ident,
+            ]
+        );
+        assert_eq!(
+            kinds("a.\\=b"),
+            vec![TokKind::Ident, TokKind::DotBackslashEq, TokKind::Ident]
         );
     }
 

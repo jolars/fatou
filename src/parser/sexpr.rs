@@ -375,6 +375,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         STAR_STAR => CallI("(Error**)"),
         MINUS_MINUS => CallI("(ErrorInvalidOperator)"),
         SLASH => CallI("/"),
+        BACKSLASH => CallI("\\"),
         SLASH_SLASH => CallI("//"),
         CARET => CallI("^"),
         PERCENT => CallI("%"),
@@ -417,6 +418,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_STAR_STAR => DotCallI("(Error**)"),
         DOT_MINUS_MINUS => DotCallI("(ErrorInvalidOperator)"),
         DOT_SLASH => DotCallI("/"),
+        DOT_BACKSLASH => DotCallI("\\"),
         DOT_SLASH_SLASH => DotCallI("//"),
         DOT_CARET => DotCallI("^"),
         DOT_PERCENT => DotCallI("%"),
@@ -512,6 +514,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | STAR_STAR
             | MINUS_MINUS
             | SLASH
+            | BACKSLASH
             | SLASH_SLASH
             | CARET
             | PERCENT
@@ -553,6 +556,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_STAR_STAR
             | DOT_MINUS_MINUS
             | DOT_SLASH
+            | DOT_BACKSLASH
             | DOT_SLASH_SLASH
             | DOT_CARET
             | DOT_PERCENT
@@ -576,6 +580,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | MINUS_EQ
             | STAR_EQ
             | SLASH_EQ
+            | BACKSLASH_EQ
             | SLASH_SLASH_EQ
             | CARET_EQ
             | PERCENT_EQ
@@ -585,6 +590,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_MINUS_EQ
             | DOT_STAR_EQ
             | DOT_SLASH_EQ
+            | DOT_BACKSLASH_EQ
             | DOT_SLASH_SLASH_EQ
             | DOT_CARET_EQ
             | DOT_PERCENT_EQ

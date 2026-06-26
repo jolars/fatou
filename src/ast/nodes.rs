@@ -251,6 +251,7 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::MINUS
             | SyntaxKind::STAR
             | SyntaxKind::SLASH
+            | SyntaxKind::BACKSLASH
             | SyntaxKind::CARET
             | SyntaxKind::PERCENT
             | SyntaxKind::EQ_EQ
@@ -276,6 +277,7 @@ fn is_operator_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::DOT_MINUS
             | SyntaxKind::DOT_STAR
             | SyntaxKind::DOT_SLASH
+            | SyntaxKind::DOT_BACKSLASH
             | SyntaxKind::DOT_CARET
             | SyntaxKind::DOT_PERCENT
             | SyntaxKind::DOT_EQ_EQ

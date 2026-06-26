@@ -17,12 +17,11 @@ leverage.
   beat the 3-char `.==`/`.!=`). Single op ⇒ `(dotcall-i a === b)`; a run folds
   into `(comparison a (. ===) b …)` via the existing chain machinery.
 
-- [ ] Lexer: left-division `\` binary operator. `a\b` currently lexes the `\` to
-  an `ERROR` token (`a` `(error \ b)`), so the formatter can only bail to
-  transparent. JuliaSyntax: `a\b` ⇒ `(call-i a \ b)`; Runic spaces it (`a \ b`).
-  Surfaced by formatter-parity while landing tight dot-access. Add a `Backslash`
-  TokKind + the 5-file operator recipe (it's a normal infix op, same tier as `/`),
-  then formatter-parity can add a spacing fixture (`\` is a normal spaced binop).
+- [x] Lexer: left-division `\` binary operator (plus `\=`, `.\`, `.\=`). New
+  `Backslash`/`BackslashEq`/`DotBackslash`/`DotBackslashEq` tokens mirror the
+  slash family via the 5-file operator recipe (same `*`/`/` times tier, left-assoc).
+  `a\b` ⇒ `(call-i a \ b)`, `a .\ b` ⇒ `(dotcall-i a \ b)`, `a\=b` ⇒ `(\= a b)`,
+  `a.\=b` ⇒ `(.\= a b)`; formatter-parity can now add the spacing fixture.
 
 ### Incremental
 

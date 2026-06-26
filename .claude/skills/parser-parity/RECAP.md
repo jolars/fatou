@@ -4,18 +4,21 @@ Rolling log. Read top-to-bottom: persistent traps → progress → latest sessio
 earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in the
 "Earlier sessions" list each new session.
 
-## Queued next target (handed off from formatter-parity, 2026-06-26)
+## Queued next targets
 
-**Left-division `\` mis-lexes to `ERROR`.** `a\b` ⇒ Fatou `(NAME a)` +
-`(ERROR \ b)` (the `\` never becomes an operator token), so the formatter can
-only bail to transparent. JuliaSyntax ground truth: `a\b` ⇒ `(call-i a \ b)` —
-`\` is an ordinary infix binary operator (left division), same precedence tier as
-`/` (left-assoc). Runic spaces it (`A\b` → `A \ b`). Fix via the 5-file operator
-recipe: new `Backslash` `TokKind` + lex (single char, no longest-match conflict —
-`\\` only matters inside strings), `syntax.rs` kind, `tree_builder.rs` map,
-`expr.rs` `infix_binding_power` (mirror `/`), `sexpr.rs` `infix_head`/`is_operator`.
-Once it parses, formatter-parity adds a trivial spacing fixture (`\` is a normal
-spaced binop, no `is_tight_binop` entry). Cross-ref: `TODO.md` Parser section.
+**Handoff to formatter-parity (2026-06-26):** left-division `\` now parses as a
+normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter-parity can add the
+spacing fixture (`A\b` → `A \ b`; `\` is a normal spaced binop, no `is_tight_binop`
+entry). Broadcast `.\` and assignment `\=`/`.\=` also landed.
+
+**Parser bug surfaced this session (not yet fixed):** a *binary-only operator in
+prefix position* reaches across a statement-scope newline. `/\n(/)` (two lines:
+`/` then `(/)`) ⇒ Fatou `(call-pre (error /) /)` but Julia `(toplevel / /)` (each
+line a bare operator-value statement). Same for `\`. The 2026-06-23n
+`InvalidPrefixOperator` path (`parse_prefix`, `is_value_operator` arm) doesn't
+honor the newline that ends the statement; it should fall back to the bare
+operator-value atom when the next token is across a newline at statement scope.
+Not in the JS corpus; low-frequency but a real divergence.
 
 ## Persistent traps & invariants
 
@@ -52,7 +55,7 @@ spaced binop, no `is_tight_binop` entry). Cross-ref: `TODO.md` Parser section.
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **183 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **184 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -72,40 +75,49 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-25l—broadcast identity ops `.===`/`.!==`)
+## Latest session (2026-06-26a—left-division `\` family)
 
-Landed the deferred next-pickup from 2026-06-25k: the 4-char dotted forms now
-lex and project faithfully (`x .=== y` previously mis-lexed `.==` + `(error =)`).
+Landed the formatter-parity handoff: `\` and its siblings now lex and project
+faithfully (previously `\` hit the `Unknown`→`ERROR` fallthrough). A real-world
+construct (linear solve `A\b`), not in either corpus—so done for parity coverage,
+not a corpus unblock.
 
-- **Two new tokens** `DotEqEqEq` (`.===`)/`DotNotEqEq` (`.!==`), lexed as
-  **4-char dotted ops** in the same block as `.//=`/`.-->` (before the 3-char
-  table) so longest-match beats `.==`/`.!=`. Full 5-file recipe + sibling lists:
-  `lexer.rs` (`TokKind`, 4-char lex arm, `op_takes_suffix`), `syntax.rs`
-  (`DOT_EQ_EQ_EQ`/`DOT_NOT_EQ_EQ`), `tree_builder.rs`, `expr.rs`
-  (`is_comparison_op`, `is_value_operator`, `is_operator_call_name`,
-  `infix_binding_power` → comparison tier `(10,11)`), `sexpr.rs` (`infix_head`
-  `DotCallI("===")`/`DotCallI("!==")`, `is_operator`), `structural.rs`
-  (`is_op_name`). Single op ⇒ `(dotcall-i a === b)`; a run folds into
-  `(comparison a (. ===) b …)` via the existing chain machinery.
-- **Also fixed a latent AST gap**: `ast/nodes.rs::is_operator_kind`
-  (`BinaryExpr::op_token`) was missing the non-dotted `EQ_EQ_EQ`/`NOT_EQ_EQ`
-  (oversight from 2026-06-25k); added those plus the new dotted kinds. Affects
-  the formatter's operator-token lookup, not the projector.
-- **Verified faithful** against JS ground truth: `x .=== y`⇒`(dotcall-i x === y)`,
-  `x .!== y`, chains `a .=== b .=== c`⇒`(comparison a (. ===) b (. ===) c)`,
-  mixed `a .!== b .== c`. Siblings unregressed: `.==`/`.!=` still 3-char, `.=`
-  still `DotEq` assignment.
-- **Fixtures**: parser snapshot `broadcast_identity_operators` + oracle dir slug
-  (parity confirmed); lexer unit test extended in `broadcasting_operators`.
-- **Counts**: JS 677 (held—these aren't in the JS corpus, no unblocks/
-  regressions), dir 182 → **183**.
-- **Frontier note**: the JS harvested backlog is now **exhausted** of fixable
-  cases—all 8 remaining FAILs are permanent/out-of-scope (float display ×6,
-  `(2)(3)x` juxtaposition, `x 'y` char-lexer). Next work is real-world-value
-  constructs not in the corpus, or the float-display `show` problem.
+- **Four new tokens** `Backslash` (`\`)/`BackslashEq` (`\=`)/`DotBackslash` (`.\`)/
+  `DotBackslashEq` (`.\=`), mirroring the slash family exactly. Longest-match
+  discipline forced the whole family: a lone `Backslash` would make `a\=b`
+  *newly* mis-lex as `\` + `=`, so `\=` (and the dotted pair) had to land too.
+  Full 5-file recipe + sibling lists: `lexer.rs` (`TokKind`, single-char `\`,
+  2-char `\=`, dotted-2 `.\`, dotted-3 `.\=`, `op_takes_suffix`), `syntax.rs`
+  (`BACKSLASH`/`BACKSLASH_EQ`/`DOT_BACKSLASH`/`DOT_BACKSLASH_EQ`),
+  `tree_builder.rs`, `expr.rs` (`is_assignment_op`, `is_value_operator`,
+  `is_operator_call_name`, `is_paren_quotable_op`, `infix_binding_power` → times
+  tier `(24,25)` left-assoc), `structural.rs` (`is_op_name`,
+  `is_call_infix_operator`), `sexpr.rs` (`infix_head` `CallI("\\")`/
+  `DotCallI("\\")`, `is_operator` ×4), `ast/nodes.rs` (`is_operator_kind`).
+- **Assignment forms are projector-free**: `project_assignment` heads on the
+  operator's verbatim text, so `\=`/`.\=` ⇒ `(\= …)`/`(.\= …)` with no per-kind
+  arm.
+- **Verified faithful** against JS ground truth (9+5 probes, byte-identical):
+  `a\b`⇒`(call-i a \ b)`, chain `a\b\c` left-assoc, mixed `a\b/c` same tier,
+  `a .\ b`⇒`(dotcall-i a \ b)`, `a\=b`⇒`(\= a b)`, `a.\=b`⇒`(.\= a b)`, value
+  `\`⇒`\`, `\(a,b)`⇒`(call \ a b)`, `:\`⇒`(quote-: \)`, `-a\b` unary binds tighter,
+  `a\b^c` `^` binds tighter.
+- **Fixtures**: parser snapshot `left_division` + oracle dir slug `left_division`
+  (parity confirmed); lexer unit test `left_division_operators`.
+- **Counts**: JS 677 (held—no backslash in the JS corpus), dir 183 → **184**.
+- **Surfaced a pre-existing bug** (see Queued next targets): binary-only operators
+  in prefix position (`/`, `\`) reach across a statement-scope newline
+  (`/\n(/)`⇒`(call-pre (error /) /)` vs Julia `/ /`). Not introduced here; the
+  fixture sidesteps it.
 
 ## Earlier sessions
 
+- **2026-06-25l**—Broadcast identity ops `.===`/`.!==`. Two tokens `DotEqEqEq`/
+  `DotNotEqEq`, 4-char dotted lex (beat `.==`/`.!=`); single ⇒ `(dotcall-i a === b)`,
+  runs fold to `(comparison a (. ===) b …)`. Also fixed `ast/nodes.rs::is_operator_kind`
+  missing `EQ_EQ_EQ`/`NOT_EQ_EQ`. Fixture `broadcast_identity_operators`. JS 677
+  (held); dir 182 → 183. Frontier note: JS harvested backlog exhausted of fixable
+  cases (8 remaining FAILs all permanent/out-of-scope).
 - **2026-06-25k**—Identity/inequality operators `===`/`!==`/`!=`. Two tokens
   `EqEqEq`/`NotEqEq` (3-char ASCII block, longest-match beats `==`/`!=`); the
   crux was the `!` munch—`scan_ident` now stops at `!` immediately followed by

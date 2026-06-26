@@ -1827,6 +1827,7 @@ fn is_value_operator(kind: TokKind) -> bool {
                 | DotMinus
                 | DotStar
                 | DotSlash
+                | DotBackslash
                 | DotSlashSlash
                 | DotCaret
                 | DotPercent
@@ -4519,6 +4520,7 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::MinusEq
             | TokKind::StarEq
             | TokKind::SlashEq
+            | TokKind::BackslashEq
             | TokKind::SlashSlashEq
             | TokKind::CaretEq
             | TokKind::PercentEq
@@ -4528,6 +4530,7 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::DotMinusEq
             | TokKind::DotStarEq
             | TokKind::DotSlashEq
+            | TokKind::DotBackslashEq
             | TokKind::DotSlashSlashEq
             | TokKind::DotCaretEq
             | TokKind::DotPercentEq
@@ -4654,6 +4657,7 @@ fn is_operator_call_name(kind: TokKind) -> bool {
     matches!(
         kind,
         Star | Slash
+            | Backslash
             | SlashSlash
             | Caret
             | Percent
@@ -4676,6 +4680,7 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | LeftRightArrow
             | DotStar
             | DotSlash
+            | DotBackslash
             | DotSlashSlash
             | DotCaret
             | DotPercent
@@ -4738,6 +4743,7 @@ fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
                 | MinusEq
                 | StarEq
                 | SlashEq
+                | BackslashEq
                 | SlashSlashEq
                 | CaretEq
                 | PercentEq
@@ -5026,11 +5032,13 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // (`a & b * c` ⇒ `((a & b) * c)`, `a + b & c` ⇒ `(a + (b & c))`).
         TokKind::Star
         | TokKind::Slash
+        | TokKind::Backslash
         | TokKind::Percent
         | TokKind::Amp
         | TokKind::DotAmp
         | TokKind::DotStar
         | TokKind::DotSlash
+        | TokKind::DotBackslash
         | TokKind::DotPercent => (24, 25),
         // Rational `//` (and broadcast `.//`) bind tighter than `*`/`/` but
         // looser than `^`, and are left-associative (`a//b//c` ⇒ `(a//b)//c`).
