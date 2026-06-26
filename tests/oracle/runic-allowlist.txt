@@ -3,6 +3,7 @@
 # `runic_allowlist` (no Julia needed). Seed/refresh from `runic_full_report`.
 # One slug per line.
 
+arrow_functions
 assignment
 assignment_spacing
 binary_spacing

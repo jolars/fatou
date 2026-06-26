@@ -29,10 +29,11 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**18 fixtures**): **16 allowlisted**, 2 blocked
+Dir corpus (**19 fixtures**): **17 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
-Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
+Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
+spacing (`lower_arrow`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
 `lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
 (`lower_collection`), tight range `:` (`lower_range` + `COLON` in
@@ -41,7 +42,22 @@ bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
 multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 (interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive).
 
-## Latest session (leading/trailing-gap blank lines)
+## Latest session (anonymous-function arrow spacing)
+
+Closed a clean operator-spacing gap outside the ranked list (cheaper than the
+ranked #1 comment work). `ARROW_EXPR` (`x->y`, `(a,b)->a+b`) was **transparent**, so
+Fatou leaked `x->y` while Runic always spaces the arrow (`x -> y`). New `lower_arrow`
+(arm on `ARROW_EXPR`): collect operand nodes, require a single `ARROW` token, emit
+`lhs -> rhs` with one space each side, **recursing into both operands** so a nested
+arrow (`x -> y -> z`, right-assoc), a normalized lhs tuple (`(x,y)` → `(x, y)`), or a
+body inside an arg list (`map(x->x^2, a)` → `map(x -> x^2, a)`) all keep formatting.
+The catch-all `_ => lower_transparent` bails on a comment/newline (a multi-line body
+like `x->\n y`, which Runic reindents — a separate construct) or a second arrow.
+Verified byte-identical to Runic on `x->y`/`()->y`/chained/`map`/`f = x -> x+1`.
+Idempotent (the spaced form re-parses to the same shape). Fixture
+`arrow_functions/`. Corpus 16→17 pass, divergence held at 2; allowlist 16→17.
+
+## Earlier session (leading/trailing-gap blank lines)
 
 Closed ranked target #2. Runic preserves a blank line right after the open bracket
 (**leading** gap) and right before the close (**trailing** gap), in both broken
@@ -198,6 +214,14 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
+0. **Ternary spacing** (`a ?  b  :  c` → `a ? b : c`) — *cheap, probed this
+   session*. Runic normalizes to one space around both `?` and `:`; Fatou is
+   transparent (leaks the input spacing). A `TERNARY_EXPR`-style node (probe the
+   CST kind) handled like `lower_arrow`/`lower_comparison`: alternate
+   operand/`?`/operand/`:`/operand, one space each gap, bail on comment/newline.
+   (`a ?b : c` is a *parse* error in Julia — space after `?` is mandatory — so the
+   fixture must use spaced or tight-both forms.) `where` adds braces
+   (`where T` → `where {T}`), a semantic rewrite — defer/block, not this.
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard

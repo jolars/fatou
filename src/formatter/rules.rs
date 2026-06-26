@@ -22,6 +22,7 @@ pub fn lower(root: &SyntaxNode) -> Ir {
 fn lower_node(node: &SyntaxNode) -> Ir {
     match node.kind() {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
+        SyntaxKind::ARROW_EXPR => lower_arrow(node),
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
         SyntaxKind::RANGE_EXPR => lower_range(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
@@ -86,6 +87,37 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     } else {
         Ir::concat([lhs, Ir::text(" "), op_text, Ir::text(" "), rhs])
     }
+}
+
+/// Lay out an anonymous-function arrow (`x -> y`, `(a, b) -> a + b`) with a single
+/// space on each side of the `->`. Operand nodes are lowered recursively, so a
+/// nested arrow (`x -> y -> z`, right-associative) or a normalized body
+/// (`map(x -> x^2, a)`) keeps formatting. The target style always spaces the
+/// arrow.
+///
+/// As with [`lower_binary`], only the clean single-line shape `<lhs> -> <rhs>` is
+/// reshaped: an interleaved comment or newline (a multi-line body), error
+/// recovery, or a missing operand falls back to the verbatim transparent lowering.
+fn lower_arrow(node: &SyntaxNode) -> Ir {
+    let mut operands: Vec<SyntaxNode> = Vec::new();
+    let mut op: Option<SyntaxToken> = None;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => operands.push(child),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::ARROW if op.is_none() => op = Some(tok),
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (Some(_), [lhs, rhs]) = (op, operands.as_slice()) else {
+        return lower_transparent(node);
+    };
+
+    Ir::concat([lower_node(lhs), Ir::text(" -> "), lower_node(rhs)])
 }
 
 /// Lay out a comparison chain (`a == b == c`, `x < y <= z`) with a single space

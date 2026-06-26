@@ -56,7 +56,9 @@ leverage.
   brackets and matrices (new `Ir::BlankLine` bare-newline primitive; blanks kept
   everywhere—between items/rows and in the leading gap (after the open bracket) and
   trailing gap (before the close), capped at 2 per Runic; one newline is the framing
-  break, the rest become blanks). **Next:** comment preservation inside broken
+  break, the rest become blanks), anonymous-function arrow spacing (`lower_arrow`:
+  `x->y` → `x -> y`, one space each side, operands recursed; bails on a multi-line
+  body). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
