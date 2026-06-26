@@ -7,5 +7,6 @@ assignment
 assignment_spacing
 binary_spacing
 call_arg_lists
+collections
 comparison_chains
 tight_operators

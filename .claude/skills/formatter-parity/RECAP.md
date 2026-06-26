@@ -29,46 +29,51 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**8 fixtures**): **6 allowlisted**, 2 blocked
+Dir corpus (**9 fixtures**): **7 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
-`lower_keyword_arg`/`lower_parameters`).
+`lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
+(`lower_collection`).
 
-## Latest session (call/index arg lists)
+## Latest session (tuple/vector/brace collections)
 
-Landed `ARG_LIST` normalization (shared by `CALL_EXPR` and `INDEX_EXPR`):
+Landed `lower_collection`, shared by `TUPLE_EXPR`, `VECT_EXPR`, and `BRACES`:
 
-- **Rules**: `lower_arg_list` walks the bracketed list — emits the open/close
-  bracket verbatim, drops incidental whitespace, joins `ARG`/`KEYWORD_ARG` items
-  with `", "` (no space before comma), and **drops a single-line trailing comma**
-  (`g(a,)` → `g(a)`). A trailing `PARAMETERS` node attaches without a comma (the
-  `;` is the separator). `lower_keyword_arg` spaces the `=` (`f(x=1)` →
-  `f(x = 1)`); `lower_parameters` emits `; ` then `", "`-joined kwargs
-  (`f(a; b=1)` → `f(a; b = 1)`). All three bail to `lower_transparent` on any
-  comment/newline, doubled/orphaned comma, missing separator, or unexpected child
-  — so **multi-line arg lists pass through byte-identical** (left for a later
-  group/break rule).
-- **Fixture**: `call_arg_lists/` (`f( a ,b )`, `foo(1,2,3)`, `g(a,)`, `a[ 1 , 2 ]`,
-  `f(x=1)`, `f(a; b=1)`, `f(a, b; c=2, d=3)`, splat `f(a, b...)`, `println("x")`).
-  Parity holds; allowlisted.
-- **Note**: tuples `(a, b)` and vectors `[1, 2]` are *not* `ARG_LIST` (separate
-  nodes) — kept out of this fixture, queued as a next target. `f (x)` (space
-  before opener) is a Julia parse error, so it's not a case to handle.
+- **Rule**: emits the open/close bracket verbatim, drops incidental whitespace,
+  joins `ARG` items with `", "` (no space before comma), and **drops the trailing
+  comma** (`[a, b,]` → `[a, b]`) **except** a single-element tuple, where the comma
+  is semantic and kept (`(a,)` stays `(a,)`). Bails to `lower_transparent` on a
+  `;`-row matrix (`PARAMETERS` child, e.g. `[1, 2; 3, 4]` — already canonical so it
+  still passes), comment/newline, doubled/orphaned comma, or any non-`ARG` child.
+- **Fixture**: `collections/` (`( a , b )`, `(1,2,3)`, `(a,)`, `(a, b,)`,
+  `[ 1 , 2 ]`, `[1,2,3]`, `[a, b,]`, `[a,]`, `{a, b}`, `{a,b,}`, nested
+  `[ [1,2] , [3,4] ]`, empty `()`/`[]`/`{}`). Parity holds; allowlisted.
+- **Notes**: `(a)` is a `PAREN_EXPR` (not a tuple) so it's untouched. Space-
+  separated matrices `[1 2]`/`[1 2; 3 4]` are a distinct `MATRIX_EXPR` node and
+  never reach this rule (left transparent — Runic preserves them too). **Unary is
+  not a target**: Runic *preserves* unary spacing (`- a` → `- a`, `-a` → `-a`,
+  `! a` → `! a`), so there's no normalization to do — the transparent fallback
+  already matches.
 
 ### Ranked next targets
 
-1. **Unary** (`UNARY_EXPR`): `- a` → `-a`; confirm Runic.
-2. **Tuples / vectors / matrices** (`(a, b)`, `[1, 2]`, `[1, 2; 3, 4]`): same
-   comma/bracket spacing as arg lists but distinct nodes — could share a helper.
-3. **Calls/arg-lists multi-line break** — long lists need `Ir::group` + `Ir::Line`
-   + `Ir::indent` (Runic indents 4, keeps the trailing comma when broken).
-4. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
+1. **Multi-line break for arg-lists/collections** — long lists need `Ir::group` +
+   `Ir::Line` + `Ir::indent` (Runic indents 4, keeps the trailing comma when
+   broken). The single-line rules already bail on multi-line, so this is additive.
+2. **Matrices** (`MATRIX_EXPR` `[1 2; 3 4]`, vcat `[1;2;3]`): Runic preserves the
+   space/`;` layout — probe carefully; likely mostly transparent already.
+3. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
 
 ## Earlier sessions
 
+- **call/index arg lists**: `lower_arg_list` (`ARG_LIST`, shared by `CALL_EXPR`/
+  `INDEX_EXPR`) + `lower_keyword_arg` (`f(x=1)` → `f(x = 1)`) + `lower_parameters`
+  (`; `-led, `", "`-joined kwargs). Comma spacing, no bracket padding, single-line
+  trailing-comma drop. Bails on comment/newline/doubled comma → multi-line passes
+  through. Fixture `call_arg_lists/`.
 - **comparison chains**: `lower_comparison` (`COMPARISON_EXPR`) — alternating
   operand/operator, every gap one space, >2 operands ok; bails on
   comment/newline/non-alternating/<2 operands. Fixture `comparison_chains/`.

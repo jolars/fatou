@@ -24,6 +24,9 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
+        SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
+            lower_collection(node)
+        }
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
         _ => lower_transparent(node),
@@ -186,6 +189,64 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                     }
                     parts.push(lower_node(&child));
                     first_item = false;
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a bracketed collection literal — a tuple `(a, b)`, a vector `[1, 2]`,
+/// or a brace set `{a, b}` — with normalized punctuation: no padding inside the
+/// brackets, no space before a comma, one space after it.
+///
+/// The trailing comma is dropped (`[a, b,]` → `[a, b]`) **except** for a
+/// single-element tuple, where the comma is semantic and kept (`(a,)` stays
+/// `(a,)`, the one-tuple). Items are `ARG` nodes separated by commas; anything
+/// richer — a `;`-separated matrix row (`PARAMETERS`), an interleaved comment or
+/// newline, a doubled/orphaned comma, or an unexpected child — falls back to the
+/// verbatim transparent lowering. Space-separated matrices are a distinct
+/// `MATRIX_EXPR` node and never reach here.
+fn lower_collection(node: &SyntaxNode) -> Ir {
+    let keep_singleton_comma = node.kind() == SyntaxKind::TUPLE_EXPR;
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut item_count = 0usize;
+    let mut pending_comma = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::LBRACE => {
+                    parts.push(Ir::text(tok.text().to_string()))
+                }
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
+                    if pending_comma && keep_singleton_comma && item_count == 1 {
+                        parts.push(Ir::text(","));
+                    }
+                    parts.push(Ir::text(tok.text().to_string()));
+                }
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COMMA => {
+                    if pending_comma {
+                        return lower_transparent(node);
+                    }
+                    pending_comma = true;
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::ARG => {
+                    if item_count > 0 {
+                        if !pending_comma {
+                            return lower_transparent(node);
+                        }
+                        parts.push(Ir::text(", "));
+                    }
+                    parts.push(lower_node(&child));
+                    item_count += 1;
+                    pending_comma = false;
                 }
                 _ => return lower_transparent(node),
             },

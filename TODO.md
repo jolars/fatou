@@ -42,9 +42,12 @@ leverage.
   the existing best-fit engine. **Landed:** operator/assignment spacing
   (`lower_binary`), comparison chains (`lower_comparison`), call/index arg lists
   (`lower_arg_list` + `lower_keyword_arg`/`lower_parameters`: comma spacing, no
-  bracket padding, single-line trailing-comma drop, `;`-kwargs). **Next:** unary,
-  tuples/vectors, blocks, control flow — see the `formatter-parity` RECAP's
-  ranked targets.
+  bracket padding, single-line trailing-comma drop, `;`-kwargs), tuple/vector/
+  brace collections (`lower_collection`: comma spacing, no bracket padding,
+  trailing-comma drop with the 1-tuple `(a,)` comma kept). **Next:** multi-line
+  arg-list/collection breaking, blocks, control flow — see the `formatter-parity`
+  RECAP's ranked targets. (Unary spacing is Runic-preserved, so no rule; matrices
+  `[1 2]`/`[1 2; 3 4]` are space-separated and left transparent.)
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 
 ## Linter
