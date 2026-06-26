@@ -18,5 +18,6 @@ matrix_gap_blank_lines
 multiline_brackets
 multiline_matrices
 range_colon
+ternary_spacing
 tight_operators
 type_annotations

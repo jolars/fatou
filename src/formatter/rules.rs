@@ -24,6 +24,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
         SyntaxKind::ARROW_EXPR => lower_arrow(node),
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
+        SyntaxKind::TERNARY_EXPR => lower_ternary(node),
         SyntaxKind::RANGE_EXPR => lower_range(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::MATRIX_EXPR => lower_matrix(node),
@@ -168,6 +169,54 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
 
     // A well-formed chain ends on an operand and has at least two of them.
     if expect_operand || operand_count < 2 {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a ternary conditional (`a ? b : c`) with a single space on each side of
+/// both the `?` and the `:`. The node alternates operand/`?`/operand/`:`/operand;
+/// a nested ternary (`a ? b : c ? d : e`, right-associative) is the final operand
+/// and is lowered recursively, so it keeps normalizing. The target style normalizes
+/// to one space around each operator.
+///
+/// As with [`lower_comparison`], only the clean single-line alternating shape with
+/// `?`/`:` operators is reshaped: any interleaved comment or newline (a multi-line
+/// ternary), error recovery, or an unexpected token falls back to the verbatim
+/// transparent lowering.
+fn lower_ternary(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut expect_operand = true;
+    let mut operand_count = 0usize;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if !expect_operand {
+                    return lower_transparent(node);
+                }
+                if operand_count > 0 {
+                    parts.push(Ir::text(" "));
+                }
+                parts.push(lower_node(&child));
+                operand_count += 1;
+                expect_operand = false;
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::QUESTION | SyntaxKind::COLON if !expect_operand => {
+                    parts.push(Ir::text(" "));
+                    parts.push(Ir::text(tok.text().to_string()));
+                    expect_operand = true;
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    // A well-formed ternary ends on an operand and has three of them.
+    if expect_operand || operand_count != 3 {
         return lower_transparent(node);
     }
 

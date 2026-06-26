@@ -58,7 +58,9 @@ leverage.
   trailing gap (before the close), capped at 2 per Runic; one newline is the framing
   break, the rest become blanks), anonymous-function arrow spacing (`lower_arrow`:
   `x->y` → `x -> y`, one space each side, operands recursed; bails on a multi-line
-  body). **Next:** comment preservation inside broken
+  body), ternary spacing (`lower_ternary`: `a ?  b  :  c` → `a ? b : c`, one space
+  around `?` and `:`, operands recursed so nested `a ? b : c ? d : e` keeps
+  normalizing; bails on a multi-line ternary). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
