@@ -38,3 +38,28 @@ jobs:
         run: cargo audit
       - name: cargo deny
         run: cargo deny check
+
+  versionary:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, supply-chain]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      # A PAT (RELEASE_TOKEN) is used so the tag it pushes triggers the
+      # tag-driven publish-crates workflow; tags pushed with the default
+      # GITHUB_TOKEN would not start downstream runs.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - id: versionary
+        uses: jolars/versionary@v0
+        with:
+          github-token: ${{ secrets.RELEASE_TOKEN }}
