@@ -14,6 +14,7 @@ categories = [
   "parsing",
   "parser-implementations",
 ]
+include = ["/src/**/*.rs", "/Cargo.toml", "/README.md", "/LICENSE"]
 
 [lib]
 name = "fatou"
