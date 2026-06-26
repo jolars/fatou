@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**12 fixtures**): **10 allowlisted**, 2 blocked
+Dir corpus (**13 fixtures**): **11 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
@@ -39,7 +39,23 @@ Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
 `is_tight_binop`), `::` type annotations (`lower_type_annotation`), multi-line
 bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections).
 
-## Latest session (multi-line bracket breaking)
+## Latest session (single-line matrices — regression lock, no rule)
+
+Top-ranked cheap win, landed exactly as predicted: **rule-free PASS**. Runic
+*preserves* single-line matrices verbatim—no whitespace collapse even in
+`[1  2   3]`, and `[1 2 ;3 4]` keeps the space before `;`. `MATRIX_EXPR` (with
+`MATRIX_ROW` children for `;`-separated rows) has no `lower_node` arm, so the
+transparent fallback emits every token verbatim → byte-identical to Runic. The
+`matrices/` fixture is a **regression lock only**: it pins the preservation so a
+future bracket/break rule can't start mangling matrices. Covered shapes: row
+`[1 2 3]`, column `[1; 2; 3]`, 2D `[1 2; 3 4]`, names/floats, **nested call/index
+operands** (`[f(x) g(y)]`, `[x[1] x[2]; …]` — these exercise handled descendants
+staying normalized inside a transparent matrix), multi-space, odd `;` spacing.
+Multiline matrices (`[1 2\n3 4]`) deliberately **not** in the fixture—distinct
+shape, probe separately before claiming (likely also preserved, but unverified).
+Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
+
+## Earlier session (multi-line bracket breaking)
 
 The headline target landed for the no-comment/no-blank-line common case. A
 bracket goes vertical iff its content spans ≥2 source lines, detected by **any
@@ -94,21 +110,18 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
-1. **Matrices**—single-line is **pure preservation**: Runic does *not* even
-   collapse `[1  2   3]` → stays `[1  2   3]`; `[1 2; 3 4]`, `[1;2;3]`, `[1 2 ;3 4]`
-   all preserved. Fatou's transparent fallback already matches, so a `matrices/`
-   fixture would PASS rule-free (regression lock only, no rule). Cheap win.
-   Multiline matrices `[1 2\n3 4]` are **not** the bracket rule (they're a distinct
-   `MATRIX_EXPR`, not `VECT_EXPR`/`ARG_LIST`)—probe separately before claiming.
-2. **Blank-line + comment preservation inside broken brackets**—the multi-line
+1. **Blank-line + comment preservation inside broken brackets**—the multi-line
    rule's two big bails. Both need an IR primitive Fatou lacks: a **bare newline**
    (blank line with *no* indent—our `HardLine` always re-indents, so two
    `HardLine`s would leave trailing whitespace on the blank line). Add e.g.
    `Ir::BlankLine` (emit `\n` at column 0) to the printer, then relax the
    `newlines >= 2` bail in `lower_multiline_bracket`. Comments inside the bracket
    are the harder half (placement + the trailing-`#`-forces-newline interaction).
-3. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
+2. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
+3. **Multiline matrices** (`[1 2\n3 4]`)—distinct `MATRIX_EXPR`/`MATRIX_ROW`
+   shape, not the `lower_multiline_bracket` path. Probe Runic first (single-line
+   is pure preservation; multiline likely is too, but unverified). Cheap if so.
 
 ## Earlier sessions
 

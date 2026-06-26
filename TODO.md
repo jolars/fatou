@@ -52,8 +52,9 @@ leverage.
   preserved between items, per-bracket trailing comma). **Next:** blank-line and
   comment preservation inside broken brackets (needs a bare-newline IR primitive),
   blocks, control flow—see the `formatter-parity` RECAP's ranked targets.
-  (Unary spacing is Runic-preserved, so no rule; matrices `[1 2]`/`[1 2; 3 4]`
-  are space-separated and left transparent; compound range operands like
+  (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
+  `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,
+  locked by the `matrices/` regression fixture, no rule; compound range operands like
   `a + 1:b` Runic *parenthesizes*—a semantic rewrite, out of scope.)
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 

@@ -9,6 +9,7 @@ binary_spacing
 call_arg_lists
 collections
 comparison_chains
+matrices
 multiline_brackets
 range_colon
 tight_operators
