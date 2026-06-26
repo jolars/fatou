@@ -1690,13 +1690,28 @@ fn parse_prefix(
                 array_mode: false,
                 ..flags
             };
-            match parse_expr_in(
-                ctx.tokens(),
-                operand_start,
-                PREFIX_BP,
-                diagnostics,
-                operand_flags,
-            ) {
+            // A binary-only operator does not reach across a significant newline
+            // for its operand: at statement scope and inside array brackets (where
+            // a newline is a row separator) the newline ends the statement/row, so
+            // the operator stays a bare value atom (`/\nx` ⇒ `/` then `x`,
+            // `[/\nx]` ⇒ `(vcat / x)`, `?\nx` ⇒ `(error ?)` then `x`); inside
+            // parens the newline is insignificant and the operand is consumed
+            // (`(/\nx)` ⇒ `(call-pre (error /) x)`). Mirrors the range colon.
+            let newline_significant = !flags.inside_brackets || flags.array_mode;
+            let newline_stop = newline_significant
+                && ctx.token(ctx.skip_ws(start + 1)).map(|t| t.kind) == Some(TokKind::Newline);
+            let operand = if newline_stop {
+                None
+            } else {
+                parse_expr_in(
+                    ctx.tokens(),
+                    operand_start,
+                    PREFIX_BP,
+                    diagnostics,
+                    operand_flags,
+                )
+            };
+            match operand {
                 Some(operand) => {
                     let op = &ctx.tokens()[start];
                     push_diagnostic(

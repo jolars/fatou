@@ -1,0 +1,49 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..25
+  OPERATOR_ATOM@0..1
+    SLASH@0..1 "/"
+  NEWLINE@1..2 "\n"
+  NAME@2..3
+    IDENT@2..3 "x"
+  NEWLINE@3..4 "\n"
+  OPERATOR_ATOM@4..6
+    DOT_STAR@4..6 ".*"
+  NEWLINE@6..7 "\n"
+  NAME@7..8
+    IDENT@7..8 "y"
+  NEWLINE@8..9 "\n"
+  ERROR@9..10
+    OPERATOR_ATOM@9..10
+      QUESTION@9..10 "?"
+  NEWLINE@10..11 "\n"
+  NAME@11..12
+    IDENT@11..12 "z"
+  NEWLINE@12..13 "\n"
+  MATRIX_EXPR@13..18
+    LBRACKET@13..14 "["
+    ARG@14..15
+      OPERATOR_ATOM@14..15
+        STAR@14..15 "*"
+    NEWLINE@15..16 "\n"
+    ARG@16..17
+      NAME@16..17
+        IDENT@16..17 "w"
+    RBRACKET@17..18 "]"
+  NEWLINE@18..19 "\n"
+  PAREN_EXPR@19..24
+    LPAREN@19..20 "("
+    UNARY_EXPR@20..23
+      ERROR@20..21
+        OPERATOR_ATOM@20..21
+          SLASH@20..21 "/"
+      NEWLINE@21..22 "\n"
+      NAME@22..23
+        IDENT@22..23 "v"
+    RPAREN@23..24 ")"
+  NEWLINE@24..25 "\n"
+
+diagnostic [9..10]: operator is not a valid value
+diagnostic [20..21]: invalid operator in prefix position

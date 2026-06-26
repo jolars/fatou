@@ -11,14 +11,14 @@ normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter-parity can add t
 spacing fixture (`A\b` → `A \ b`; `\` is a normal spaced binop, no `is_tight_binop`
 entry). Broadcast `.\` and assignment `\=`/`.\=` also landed.
 
-**Parser bug surfaced this session (not yet fixed):** a *binary-only operator in
-prefix position* reaches across a statement-scope newline. `/\n(/)` (two lines:
-`/` then `(/)`) ⇒ Fatou `(call-pre (error /) /)` but Julia `(toplevel / /)` (each
-line a bare operator-value statement). Same for `\`. The 2026-06-23n
-`InvalidPrefixOperator` path (`parse_prefix`, `is_value_operator` arm) doesn't
-honor the newline that ends the statement; it should fall back to the bare
-operator-value atom when the next token is across a newline at statement scope.
-Not in the JS corpus; low-frequency but a real divergence.
+**No specific parser target queued.** The JS harvested backlog is exhausted of
+fixable cases (8 remaining FAILs all permanent/out-of-scope: float display ×6,
+`(2)(3)x` juxtaposition, `x 'y` char-lexer). Next parser work is real-world-value
+constructs not in the corpus, or the float-display `show` problem. *Deferred
+sibling of the 2026-06-26b fix:* the **suffixed**-unary-operator prefix arm
+(`+₁ x`, `parse_prefix` ~line 1518) still consumes its operand across a newline;
+same `newline_significant` gate would fix it, but it's a far rarer construct (not
+in either corpus).
 
 ## Persistent traps & invariants
 
@@ -55,7 +55,7 @@ Not in the JS corpus; low-frequency but a real divergence.
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **184 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **185 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -75,43 +75,40 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-26a—left-division `\` family)
+## Latest session (2026-06-26b—prefix operators stop at significant newline)
 
-Landed the formatter-parity handoff: `\` and its siblings now lex and project
-faithfully (previously `\` hit the `Unknown`→`ERROR` fallthrough). A real-world
-construct (linear solve `A\b`), not in either corpus—so done for parity coverage,
-not a corpus unblock.
+A correctness fix surfaced while fixturing 2026-06-26a: binary-only operators in
+prefix position were reaching across a newline for their operand, producing a
+wrong tree **and a false-positive diagnostic on valid code** (bad for the
+linter/LSP). Pre-existing (all binary-only prefix ops, not just `\`).
 
-- **Four new tokens** `Backslash` (`\`)/`BackslashEq` (`\=`)/`DotBackslash` (`.\`)/
-  `DotBackslashEq` (`.\=`), mirroring the slash family exactly. Longest-match
-  discipline forced the whole family: a lone `Backslash` would make `a\=b`
-  *newly* mis-lex as `\` + `=`, so `\=` (and the dotted pair) had to land too.
-  Full 5-file recipe + sibling lists: `lexer.rs` (`TokKind`, single-char `\`,
-  2-char `\=`, dotted-2 `.\`, dotted-3 `.\=`, `op_takes_suffix`), `syntax.rs`
-  (`BACKSLASH`/`BACKSLASH_EQ`/`DOT_BACKSLASH`/`DOT_BACKSLASH_EQ`),
-  `tree_builder.rs`, `expr.rs` (`is_assignment_op`, `is_value_operator`,
-  `is_operator_call_name`, `is_paren_quotable_op`, `infix_binding_power` → times
-  tier `(24,25)` left-assoc), `structural.rs` (`is_op_name`,
-  `is_call_infix_operator`), `sexpr.rs` (`infix_head` `CallI("\\")`/
-  `DotCallI("\\")`, `is_operator` ×4), `ast/nodes.rs` (`is_operator_kind`).
-- **Assignment forms are projector-free**: `project_assignment` heads on the
-  operator's verbatim text, so `\=`/`.\=` ⇒ `(\= …)`/`(.\= …)` with no per-kind
-  arm.
-- **Verified faithful** against JS ground truth (9+5 probes, byte-identical):
-  `a\b`⇒`(call-i a \ b)`, chain `a\b\c` left-assoc, mixed `a\b/c` same tier,
-  `a .\ b`⇒`(dotcall-i a \ b)`, `a\=b`⇒`(\= a b)`, `a.\=b`⇒`(.\= a b)`, value
-  `\`⇒`\`, `\(a,b)`⇒`(call \ a b)`, `:\`⇒`(quote-: \)`, `-a\b` unary binds tighter,
-  `a\b^c` `^` binds tighter.
-- **Fixtures**: parser snapshot `left_division` + oracle dir slug `left_division`
-  (parity confirmed); lexer unit test `left_division_operators`.
-- **Counts**: JS 677 (held—no backslash in the JS corpus), dir 183 → **184**.
-- **Surfaced a pre-existing bug** (see Queued next targets): binary-only operators
-  in prefix position (`/`, `\`) reach across a statement-scope newline
-  (`/\n(/)`⇒`(call-pre (error /) /)` vs Julia `/ /`). Not introduced here; the
-  fixture sidesteps it.
+- **Root**: the `is_value_operator(k) || k == Question` arm of `parse_prefix`
+  (`expr.rs` ~line 1673) used `skip_trivia(start+1)`, skipping newlines
+  unconditionally, then parsed an operand at `PREFIX_BP`.
+- **Fix**: gate the operand parse with the same `newline_significant =
+  !inside_brackets || array_mode` formula the range colon uses (line 1059). When a
+  significant newline separates the operator from its operand, the operand
+  resolves to `None`, so the existing match arms produce the right shape: value
+  ops → bare atom, `?` → `(error ?)`. One-spot change, no projector/diag changes.
+- **Verified faithful** (10 probes, byte-identical to JS): statement scope
+  `/\nx`⇒`/` then `x`, `.*\nx`⇒`(. *)` then `x`, `=>\nx`, `?\nx`⇒`(error ?)` then
+  `x`; array `[/\nx]`⇒`(vcat / x)`; paren stays insignificant `(/\nx)`⇒`(call-pre
+  (error /) x)`, `f(/\nx)`; same-line unchanged `/x`/`/ x`⇒`(call-pre (error /) x)`,
+  `[/ x]`⇒`(vect (call-pre (error /) x))`.
+- **Fixtures**: parser snapshot + oracle dir slug `prefix_operator_newline`.
+- **Counts**: JS 677 (held—not in the JS corpus, no regressions), dir 184 → **185**.
+- **Deferred sibling**: the *suffixed*-unary arm (`+₁ x`, ~line 1518) still
+  crosses newlines; same gate fixes it but it's far rarer (see Queued next targets).
 
 ## Earlier sessions
 
+- **2026-06-26a**—Left-division `\` family (`\`, `\=`, `.\`, `.\=`). Four tokens
+  mirroring the slash family via the 5-file recipe (times tier `(24,25)`,
+  left-assoc); longest-match forced the whole family (a lone `\` would mis-lex
+  `a\=b`). `a\b`⇒`(call-i a \ b)`, `a .\ b`⇒`(dotcall-i a \ b)`, `a\=b`⇒`(\= a b)`
+  (assignment projector is text-based, no per-kind arm). Fixtures `left_division`
+  (parser + oracle) + lexer unit test. JS 677 (held); dir 183 → 184. Surfaced the
+  prefix-newline bug fixed in 2026-06-26b. Formatter-parity handoff: `\` spacing.
 - **2026-06-25l**—Broadcast identity ops `.===`/`.!==`. Two tokens `DotEqEqEq`/
   `DotNotEqEq`, 4-char dotted lex (beat `.==`/`.!=`); single ⇒ `(dotcall-i a === b)`,
   runs fold to `(comparison a (. ===) b …)`. Also fixed `ast/nodes.rs::is_operator_kind`

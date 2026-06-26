@@ -22,6 +22,13 @@ leverage.
   slash family via the 5-file operator recipe (same `*`/`/` times tier, left-assoc).
   `a\b` ⇒ `(call-i a \ b)`, `a .\ b` ⇒ `(dotcall-i a \ b)`, `a\=b` ⇒ `(\= a b)`,
   `a.\=b` ⇒ `(.\= a b)`; formatter-parity can now add the spacing fixture.
+- [x] Parser: binary-only prefix operators stop at a significant newline. `/`,
+  `\`, `.*`, `=>`, `?` etc. in prefix position no longer reach across a
+  statement-scope (or array-row) newline for their operand — `/\nx` ⇒ `/` then
+  `x` (was a spurious `(call-pre (error /) x)` + false diagnostic), `[/\nx]` ⇒
+  `(vcat / x)`, `?\nx` ⇒ `(error ?)` then `x`; inside parens the newline stays
+  insignificant (`(/\nx)` ⇒ `(call-pre (error /) x)`). Mirrors the range colon's
+  `newline_significant` gate.
 
 ### Incremental
 
