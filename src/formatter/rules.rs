@@ -798,11 +798,13 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
 /// Binary operators the target style keeps tight (no surrounding spaces).
 /// Everything else binary gets a space on each side.
 ///
-/// Two operators qualify. The *plain* `^`: Runic always packs it (`a ^ b` →
-/// `a^b`). And the range `:` in its two-operand `BINARY_EXPR` form (`a : b` →
-/// `a:b`); Runic packs every range colon tight. The broadcast `.^` (`DOT_CARET`)
-/// is spaced like other dotted operators, and the *stepped* range `a:b:c` parses
-/// as a `RANGE_EXPR` handled by [`lower_range`].
+/// Three operators qualify. The *plain* `^`: Runic always packs it (`a ^ b` →
+/// `a^b`). The range `:` in its two-operand `BINARY_EXPR` form (`a : b` →
+/// `a:b`); Runic packs every range colon tight. And the field-access `.`
+/// (`a.b.c`): Julia *requires* it tight — `a . b` is a parse error — so a space
+/// here would emit invalid code. The broadcast `.^` (`DOT_CARET`) is spaced like
+/// other dotted operators, and the *stepped* range `a:b:c` parses as a
+/// `RANGE_EXPR` handled by [`lower_range`].
 ///
 /// Note `&&`/`||` are deliberately **not** here. Runic *preserves* the user's
 /// spacing around them (it normalizes neither `a&&b` nor `a && b`), which Tenet 1
@@ -811,5 +813,8 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
 /// written tight therefore diverge from Runic and are recorded in
 /// `tests/oracle/runic-blocked.txt`.
 fn is_tight_binop(kind: SyntaxKind) -> bool {
-    matches!(kind, SyntaxKind::CARET | SyntaxKind::COLON)
+    matches!(
+        kind,
+        SyntaxKind::CARET | SyntaxKind::COLON | SyntaxKind::DOT
+    )
 }

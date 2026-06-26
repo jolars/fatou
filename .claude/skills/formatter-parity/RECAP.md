@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**20 fixtures**): **18 allowlisted**, 2 blocked
+Dir corpus (**21 fixtures**): **19 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -37,13 +37,34 @@ spacing (`lower_arrow`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
 `lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
 (`lower_collection`), tight range `:` (`lower_range` + `COLON` in
-`is_tight_binop`), `::` type annotations (`lower_type_annotation`), multi-line
+`is_tight_binop`), `::` type annotations (`lower_type_annotation`), tight
+field-access `.` (`DOT` in `is_tight_binop`), multi-line
 bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
 multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 (interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive),
 ternary spacing (`lower_ternary`).
 
-## Latest session (ternary spacing)
+## Latest session (tight field-access `.`)
+
+Fixed a **latent mangling bug** (not a missing rule — a *wrong* one), found by
+probing transparent constructs after the corpus went fully triaged. Field access
+`a.b.c` parses as a nested `BINARY_EXPR` with a `DOT` operator, so `lower_binary`
+treated `.` as a normal spaced binop and emitted `a . b . c` — which is **invalid
+Julia** (`a . b` is a JuliaSyntax/Runic *parse error*: "whitespace is not allowed
+here"). Same family as the old range-colon latent bug. One-line fix: add
+`SyntaxKind::DOT` to `is_tight_binop` (alongside `CARET`/`COLON`). The broadcast
+operators (`.+`/`.^` = `DOT_CARET` etc.) are distinct tokens, so they stay spaced
+(`a.b .+ c` → `a.b .+ c`, verified). Verified byte-identical to Runic on
+`a.b.c`/`obj.field = 1`/`Base.Iterators.flatten`/`a.b().c`/`df.x[1]`/`a.b .+ c`,
+and `a . b . c` (spaced input) normalizes to `a.b.c`. Idempotent. Fixture
+`dot_access/`. Corpus 18→19 pass, divergence held at 2; allowlist 18→19.
+
+**Upstream blocker surfaced & handed off:** left-division `\` (`a\b`) mis-lexes
+to an `ERROR` token (the formatter can only bail to transparent); JuliaSyntax:
+`(call-i a \ b)`, Runic spaces it. Queued at the top of `parser-parity/RECAP.md`
++ a `TODO.md` Parser bullet (5-file operator recipe, tier of `/`).
+
+## Earlier session (ternary spacing)
 
 Closed ranked target #0 (cheap, pre-probed). `TERNARY_EXPR` (`a ? b : c`) was
 **transparent**, so Fatou leaked the input spacing (`a ?  b  :  c`) while Runic
@@ -231,6 +252,13 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
+0. **Curly-brace type-param padding** (cheap, pre-probed). `Vector{ Int }` →
+   Runic `Vector{Int}`; Fatou leaks the inner padding (transparent). The node is
+   `CURLY_EXPR` with a brace `ARG_LIST` (`LBRACE`/`RBRACE`) child — `lower_arg_list`
+   doesn't handle the brace bracket, so it falls through. Likely a small extension
+   to `lower_arg_list`/a sibling `lower_curly` that strips bracket padding and
+   comma-spaces type params (`Dict{ A ,B }` → `Dict{A, B}` — probe the comma + the
+   empty `Foo{}` + the where-bound `Foo{T} where {T}` cases first).
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard

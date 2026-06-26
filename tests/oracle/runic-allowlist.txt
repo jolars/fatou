@@ -12,6 +12,7 @@ bracket_gap_blank_lines
 call_arg_lists
 collections
 comparison_chains
+dot_access
 matrices
 matrix_blank_lines
 matrix_gap_blank_lines

@@ -4,6 +4,19 @@ Rolling log. Read top-to-bottom: persistent traps → progress → latest sessio
 earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in the
 "Earlier sessions" list each new session.
 
+## Queued next target (handed off from formatter-parity, 2026-06-26)
+
+**Left-division `\` mis-lexes to `ERROR`.** `a\b` ⇒ Fatou `(NAME a)` +
+`(ERROR \ b)` (the `\` never becomes an operator token), so the formatter can
+only bail to transparent. JuliaSyntax ground truth: `a\b` ⇒ `(call-i a \ b)` —
+`\` is an ordinary infix binary operator (left division), same precedence tier as
+`/` (left-assoc). Runic spaces it (`A\b` → `A \ b`). Fix via the 5-file operator
+recipe: new `Backslash` `TokKind` + lex (single char, no longest-match conflict —
+`\\` only matters inside strings), `syntax.rs` kind, `tree_builder.rs` map,
+`expr.rs` `infix_binding_power` (mirror `/`), `sexpr.rs` `infix_head`/`is_operator`.
+Once it parses, formatter-parity adds a trivial spacing fixture (`\` is a normal
+spaced binop, no `is_tight_binop` entry). Cross-ref: `TODO.md` Parser section.
+
 ## Persistent traps & invariants
 
 - **Projector is faithful, never compensating.** Translate encoding (wrappers,

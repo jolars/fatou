@@ -17,6 +17,13 @@ leverage.
   beat the 3-char `.==`/`.!=`). Single op ⇒ `(dotcall-i a === b)`; a run folds
   into `(comparison a (. ===) b …)` via the existing chain machinery.
 
+- [ ] Lexer: left-division `\` binary operator. `a\b` currently lexes the `\` to
+  an `ERROR` token (`a` `(error \ b)`), so the formatter can only bail to
+  transparent. JuliaSyntax: `a\b` ⇒ `(call-i a \ b)`; Runic spaces it (`a \ b`).
+  Surfaced by formatter-parity while landing tight dot-access. Add a `Backslash`
+  TokKind + the 5-file operator recipe (it's a normal infix op, same tier as `/`),
+  then formatter-parity can add a spacing fixture (`\` is a normal spaced binop).
+
 ### Incremental
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -60,7 +67,10 @@ leverage.
   `x->y` → `x -> y`, one space each side, operands recursed; bails on a multi-line
   body), ternary spacing (`lower_ternary`: `a ?  b  :  c` → `a ? b : c`, one space
   around `?` and `:`, operands recursed so nested `a ? b : c ? d : e` keeps
-  normalizing; bails on a multi-line ternary). **Next:** comment preservation inside broken
+  normalizing; bails on a multi-line ternary), tight field-access `.` (`DOT` in
+  `is_tight_binop`: fixed a latent mangling bug where `a.b.c` parsed as a
+  `BINARY_EXPR`/`DOT` and got spaced to the invalid `a . b . c`; Julia *requires*
+  the dot tight). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
