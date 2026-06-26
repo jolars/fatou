@@ -9,4 +9,6 @@ binary_spacing
 call_arg_lists
 collections
 comparison_chains
+range_colon
 tight_operators
+type_annotations

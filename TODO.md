@@ -44,10 +44,13 @@ leverage.
   (`lower_arg_list` + `lower_keyword_arg`/`lower_parameters`: comma spacing, no
   bracket padding, single-line trailing-comma drop, `;`-kwargs), tuple/vector/
   brace collections (`lower_collection`: comma spacing, no bracket padding,
-  trailing-comma drop with the 1-tuple `(a,)` comma kept). **Next:** multi-line
-  arg-list/collection breaking, blocks, control flow — see the `formatter-parity`
-  RECAP's ranked targets. (Unary spacing is Runic-preserved, so no rule; matrices
-  `[1 2]`/`[1 2; 3 4]` are space-separated and left transparent.)
+  trailing-comma drop with the 1-tuple `(a,)` comma kept), tight range `:`
+  (`lower_range` + `COLON` in `is_tight_binop`) and `::` type annotations
+  (`lower_type_annotation`). **Next:** multi-line arg-list/collection breaking,
+  blocks, control flow — see the `formatter-parity` RECAP's ranked targets.
+  (Unary spacing is Runic-preserved, so no rule; matrices `[1 2]`/`[1 2; 3 4]`
+  are space-separated and left transparent; compound range operands like
+  `a + 1:b` Runic *parenthesizes* — a semantic rewrite, out of scope.)
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 
 ## Linter

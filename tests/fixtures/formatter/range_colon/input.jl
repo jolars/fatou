@@ -1,0 +1,10 @@
+1:2
+1 : 2
+a:b
+a : b
+1:2:10
+1 : 2 : 10
+1:length(x)
+1 : length(x)
+x[1:end]
+x[1 : end]

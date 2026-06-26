@@ -29,46 +29,80 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**9 fixtures**): **7 allowlisted**, 2 blocked
+Dir corpus (**11 fixtures**): **9 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
 `lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
-(`lower_collection`).
+(`lower_collection`), tight range `:` (`lower_range` + `COLON` in
+`is_tight_binop`), `::` type annotations (`lower_type_annotation`).
 
-## Latest session (tuple/vector/brace collections)
+## Latest session (tight range `:` and `::` type annotations)
 
-Landed `lower_collection`, shared by `TUPLE_EXPR`, `VECT_EXPR`, and `BRACES`:
+Two small "tighten an operator to no spaces" rules, both confirmed against Runic:
 
-- **Rule**: emits the open/close bracket verbatim, drops incidental whitespace,
-  joins `ARG` items with `", "` (no space before comma), and **drops the trailing
-  comma** (`[a, b,]` → `[a, b]`) **except** a single-element tuple, where the comma
-  is semantic and kept (`(a,)` stays `(a,)`). Bails to `lower_transparent` on a
-  `;`-row matrix (`PARAMETERS` child, e.g. `[1, 2; 3, 4]` — already canonical so it
-  still passes), comment/newline, doubled/orphaned comma, or any non-`ARG` child.
-- **Fixture**: `collections/` (`( a , b )`, `(1,2,3)`, `(a,)`, `(a, b,)`,
-  `[ 1 , 2 ]`, `[1,2,3]`, `[a, b,]`, `[a,]`, `{a, b}`, `{a,b,}`, nested
-  `[ [1,2] , [3,4] ]`, empty `()`/`[]`/`{}`). Parity holds; allowlisted.
-- **Notes**: `(a)` is a `PAREN_EXPR` (not a tuple) so it's untouched. Space-
-  separated matrices `[1 2]`/`[1 2; 3 4]` are a distinct `MATRIX_EXPR` node and
-  never reach this rule (left transparent — Runic preserves them too). **Unary is
-  not a target**: Runic *preserves* unary spacing (`- a` → `- a`, `-a` → `-a`,
-  `! a` → `! a`), so there's no normalization to do — the transparent fallback
-  already matches.
+- **Range `:`** — Runic *always* packs ranges tight (`1 : 2` → `1:2`, `a : b` →
+  `a:b`, `1:length(x)`). Two parser shapes: the two-operand range `a:b` is a
+  `BINARY_EXPR` with a `COLON` op (fixed by adding `COLON` to `is_tight_binop` —
+  Fatou was *mangling* `1:2` → `1 : 2`, a latent bug with no fixture); the stepped
+  `1:2:10` is a `RANGE_EXPR` (new `lower_range`: alternate operand/`:`, all tight,
+  ≥2 operands, bail on comment/newline/non-alternating). Fixture `range_colon/`.
+- **`::`** — `TYPE_ANNOTATION` node (was transparent, so `x :: Int` leaked
+  through). Runic packs tight (`x::Int`). New `lower_type_annotation`: lower
+  operands, emit `::` with no spaces, bail on comment/newline/extra token/missing
+  `::`. Handles `x::Int`, bare `::Int`, call args `f(x::Int)`. Fixture
+  `type_annotations/`.
+- **Divergence noted (out of scope, kept out of fixtures):** Runic *parenthesizes*
+  compound range operands (`a + 1 : b` → `(a + 1):b`) — a semantic rewrite, not a
+  spacing rule. Fatou tightens the colon and recurses (`a + 1:b`), lossless and
+  idempotent but unparenthesized; correct only for simple operands (literals,
+  names, calls, indices), which is what the fixture uses.
 
 ### Ranked next targets
 
-1. **Multi-line break for arg-lists/collections** — long lists need `Ir::group` +
-   `Ir::Line` + `Ir::indent` (Runic indents 4, keeps the trailing comma when
-   broken). The single-line rules already bail on multi-line, so this is additive.
-2. **Matrices** (`MATRIX_EXPR` `[1 2; 3 4]`, vcat `[1;2;3]`): Runic preserves the
-   space/`;` layout — probe carefully; likely mostly transparent already.
+1. **Multi-line break for arg-lists/collections** — the headline target, but
+   **larger than the RECAP previously assumed**. Fully probed this session; the
+   real Runic behavior:
+   - **NOT width-based.** Runic never auto-breaks a long single line
+     (`foo(<90 chars on one line>)` stays one line). The trigger is whether the
+     bracket's **content text spans ≥2 source lines** (a `\n` anywhere inside,
+     *including inside a triple-quoted string* — so detect by `node.text()`
+     containing `'\n'`, **not** a `NEWLINE` token kind).
+   - **Contagious / propagating.** `foo([\n1,\n2\n])` breaks the *outer* call too,
+     even though the only newline is inside the inner vector. A bracket goes
+     vertical iff any descendant spans lines. (`Ir::Group` + a forced break would
+     model this via the `fits`-fails-on-`HardLine` contagion, but our `Ir` has no
+     "force-break" flag yet.)
+   - **Preserves internal line breaks, not "explode every item."** `foo(g(a,\nb),
+     c)` → `g(...)` breaks but `c` stays on the **same line** as g's `)` (`), c`).
+     Runic only adds *framing* newlines (after the open bracket, before the close)
+     + 4-space indent; between items it keeps the source's space-vs-newline.
+     **Blank lines between items are preserved** (even 2+ consecutive).
+   - **Per-bracket trailing comma when multiline:** call `foo(...)` **preserves**
+     (keeps iff present, never adds); index `x[...]`, tuple `(...)`, vect `[...]`,
+     braces `{...}` **always add** a trailing comma.
+   - Plan: detect multiline by text `\n`; bail to transparent on comments,
+     `PARAMETERS`/`;`-semicolons, and splats for v1; emit framing `HardLine`s +
+     `Indent`, preserve inter-item space/newline, apply the per-bracket trailing
+     comma. Watch idempotence (already-canonical must round-trip) and nested indent
+     (inner list's items land at +8). Probably wants an `Ir` force-break primitive.
+2. **Matrices** — single-line is **pure preservation**: Runic does *not* even
+   collapse `[1  2   3]` → stays `[1  2   3]`; `[1 2; 3 4]`, `[1;2;3]`, `[1 2 ;3 4]`
+   all preserved. Fatou's transparent fallback already matches, so a `matrices/`
+   fixture would PASS rule-free (regression lock only, no rule). Multiline matrices
+   `[1 2\n3 4]` get the framing treatment (folds into target #1).
 3. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
 
 ## Earlier sessions
 
+- **tuple/vector/brace collections**: `lower_collection` (`TUPLE_EXPR`/`VECT_EXPR`/
+  `BRACES`) — open/close verbatim, drop incidental ws, join `ARG`s with `", "`,
+  drop trailing comma **except** the semantic 1-tuple `(a,)`. Bails on `;`-row
+  matrix (`PARAMETERS`), comment/newline, doubled comma, non-`ARG`. `(a)` is a
+  `PAREN_EXPR` (untouched); space-separated matrices are `MATRIX_EXPR` (transparent,
+  Runic preserves). Unary is Runic-preserved → no rule. Fixture `collections/`.
 - **call/index arg lists**: `lower_arg_list` (`ARG_LIST`, shared by `CALL_EXPR`/
   `INDEX_EXPR`) + `lower_keyword_arg` (`f(x=1)` → `f(x = 1)`) + `lower_parameters`
   (`; `-led, `", "`-joined kwargs). Comma spacing, no bracket padding, single-line

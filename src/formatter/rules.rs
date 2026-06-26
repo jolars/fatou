@@ -23,6 +23,8 @@ fn lower_node(node: &SyntaxNode) -> Ir {
     match node.kind() {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
+        SyntaxKind::RANGE_EXPR => lower_range(node),
+        SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -133,6 +135,78 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
 
     // A well-formed chain ends on an operand and has at least two of them.
     if expect_operand || operand_count < 2 {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a stepped range expression (`1:2:10`, `a:b:c`) with every `:` packed
+/// tight: no spaces around any colon, matching the target style. The node
+/// alternates operand/`:`, starting and ending on an operand with at least two of
+/// them. (The two-operand range `a:b` parses as a `BINARY_EXPR` and is tightened
+/// by [`lower_binary`] via [`is_tight_binop`]; this arm handles the `RANGE_EXPR`
+/// the parser folds from a step.)
+///
+/// As with the other operator rules, only the clean alternating shape is
+/// reshaped: an interleaved comment or newline, error recovery, or a degenerate
+/// operand count falls back to the verbatim transparent lowering.
+fn lower_range(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut expect_operand = true;
+    let mut operand_count = 0usize;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if !expect_operand {
+                    return lower_transparent(node);
+                }
+                parts.push(lower_node(&child));
+                operand_count += 1;
+                expect_operand = false;
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COLON if !expect_operand => {
+                    parts.push(Ir::text(":"));
+                    expect_operand = true;
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    if expect_operand || operand_count < 2 {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a type annotation (`x::Int`, `::Int`) with the `::` packed tight: no
+/// surrounding spaces, matching the target style. Operand nodes are lowered
+/// recursively. Bails to the transparent lowering on a comment/newline or any
+/// unexpected token (or a missing `::`).
+fn lower_type_annotation(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut seen_colons = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => parts.push(lower_node(&child)),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COLON_COLON if !seen_colons => {
+                    seen_colons = true;
+                    parts.push(Ir::text("::"));
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    if !seen_colons {
         return lower_transparent(node);
     }
 
@@ -339,9 +413,11 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
 /// Binary operators the target style keeps tight (no surrounding spaces).
 /// Everything else binary gets a space on each side.
 ///
-/// Only the *plain* `^` qualifies: Runic always packs it (`a ^ b` → `a^b`), so
-/// tight is the deterministic match. The broadcast `.^` (`DOT_CARET`) is spaced
-/// like other dotted operators, and range `:` is a separate `RANGE_EXPR`.
+/// Two operators qualify. The *plain* `^`: Runic always packs it (`a ^ b` →
+/// `a^b`). And the range `:` in its two-operand `BINARY_EXPR` form (`a : b` →
+/// `a:b`); Runic packs every range colon tight. The broadcast `.^` (`DOT_CARET`)
+/// is spaced like other dotted operators, and the *stepped* range `a:b:c` parses
+/// as a `RANGE_EXPR` handled by [`lower_range`].
 ///
 /// Note `&&`/`||` are deliberately **not** here. Runic *preserves* the user's
 /// spacing around them (it normalizes neither `a&&b` nor `a && b`), which Tenet 1
@@ -350,5 +426,5 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
 /// written tight therefore diverge from Runic and are recorded in
 /// `tests/oracle/runic-blocked.txt`.
 fn is_tight_binop(kind: SyntaxKind) -> bool {
-    matches!(kind, SyntaxKind::CARET)
+    matches!(kind, SyntaxKind::CARET | SyntaxKind::COLON)
 }
