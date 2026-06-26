@@ -44,6 +44,10 @@ pub fn print(doc: &Ir, style: FormatStyle) -> String {
                 }
             }
             Ir::HardLine => col = newline(&mut out, indent),
+            Ir::BlankLine => {
+                out.push('\n');
+                col = 0;
+            }
             Ir::Group(inner) => {
                 let mode = if fits(inner, width.saturating_sub(col)) {
                     Mode::Flat
@@ -86,7 +90,7 @@ fn fits(doc: &Ir, remaining: usize) -> bool {
             Ir::Indent(inner) | Ir::Group(inner) => stack.push(inner),
             Ir::Line => remaining -= 1,
             Ir::SoftLine => {}
-            Ir::HardLine => return false,
+            Ir::HardLine | Ir::BlankLine => return false,
         }
     }
     remaining >= 0

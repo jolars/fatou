@@ -16,6 +16,11 @@ pub enum Ir {
     SoftLine,
     /// Always a newline (+ indent); forces every enclosing group to break.
     HardLine,
+    /// A bare newline at column zero (no indent); forces every enclosing group
+    /// to break. Used to emit a *blank* line between elements of an already-broken
+    /// layout, where a [`HardLine`](Ir::HardLine) would leave the indent as trailing
+    /// whitespace on the otherwise-empty line.
+    BlankLine,
     /// Increase the indent of the contained document by one step.
     Indent(Rc<Ir>),
     /// A group laid out flat if it fits the line width, otherwise broken.

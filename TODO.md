@@ -52,9 +52,11 @@ leverage.
   preserved between items, per-bracket trailing comma), multi-line matrix breaking
   (`lower_matrix`: framing breaks + reindent each source line when a `MATRIX_EXPR`
   spans ≥2 lines, interior preserved verbatim—intra-row spacing, same-line
-  `;`-rows, `;` placement; bails on blank line/comment). **Next:** blank-line and
-  comment preservation inside broken brackets (needs a bare-newline IR primitive),
-  blocks, control flow—see the `formatter-parity` RECAP's ranked targets.
+  `;`-rows, `;` placement; bails on comment), interior blank-line preservation in
+  broken brackets and matrices (new `Ir::BlankLine` bare-newline primitive; blanks
+  between items/rows kept, capped at 2 per Runic; leading/trailing-gap blanks still
+  bail). **Next:** comment preservation inside broken brackets/matrices (the harder
+  half), blocks, control flow—see the `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,
   locked by the `matrices/` regression fixture, no rule; compound range operands like

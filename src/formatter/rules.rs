@@ -433,11 +433,18 @@ fn has_newline_token(node: &SyntaxNode) -> bool {
 }
 
 /// The separator between two consecutive items of a broken bracket: the target
-/// style preserves the source's choice of a same-line space versus a line break.
+/// style preserves the source's choice of a same-line space versus a line break,
+/// and—when broken—how many blank lines the source kept between them (Runic caps
+/// blank lines at [`MAX_BLANK_LINES`]).
 enum Sep {
     Space,
-    Newline,
+    Newline { blanks: usize },
 }
+
+/// The maximum number of consecutive blank lines the target style keeps; anything
+/// more is collapsed to this. Runic caps blanks at two everywhere (top level,
+/// inside brackets, inside matrices).
+const MAX_BLANK_LINES: usize = 2;
 
 /// Whether a broken bracket grows a trailing comma. Calls *preserve* the source
 /// (keep iff already present, never add); every other bracket — index `x[…]`,
@@ -459,15 +466,18 @@ fn adds_trailing_comma(node: &SyntaxNode) -> bool {
 ///   bracket lands back at the bracket's own indent.
 /// - **Inter-item layout is preserved, not exploded.** Between two items the
 ///   source's choice is kept: a same-line space stays a space (`), c`), a line
-///   break stays a break. Runic only adds the *framing* breaks.
+///   break stays a break, and a blank line stays a blank line (capped at
+///   [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]). Runic only adds the *framing*
+///   breaks.
 /// - **Trailing comma** follows [`adds_trailing_comma`].
 ///
-/// Only a clean shape is reshaped. Anything this v1 does not fully model falls
-/// back to the verbatim transparent lowering: a comment, a `;`-separated
-/// `PARAMETERS` block or bare semicolon, a blank line (≥2 consecutive newlines in
-/// any gap, which would need a bare un-indented newline the IR can't yet emit), a
-/// doubled or leading comma, two items with no comma between them, an empty
-/// bracket, or any unexpected child or token.
+/// Only a clean shape is reshaped. Anything this does not fully model falls back
+/// to the verbatim transparent lowering: a comment, a `;`-separated `PARAMETERS`
+/// block or bare semicolon, a blank line in the *leading* gap (between the open
+/// bracket and the first item) or the *trailing* gap (between the last item and
+/// the close bracket), where the framing break already owns the gap; a doubled or
+/// leading comma, two items with no comma between them, an empty bracket, or any
+/// unexpected child or token.
 fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
@@ -502,12 +512,14 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
             },
             NodeOrToken::Node(child) => match child.kind() {
                 SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
-                    // A blank line between elements would need a bare newline the
-                    // printer can't emit (it always re-indents); leave it verbatim.
-                    if newlines >= 2 {
-                        return lower_transparent(node);
-                    }
                     if items.is_empty() {
+                        // A blank line *before the first item* (between the open
+                        // bracket and the item) is left to the verbatim fallback:
+                        // the framing break already owns that gap, so a leading
+                        // blank isn't yet expressible here.
+                        if newlines >= 2 {
+                            return lower_transparent(node);
+                        }
                         if leading_comma {
                             return lower_transparent(node);
                         }
@@ -516,7 +528,9 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                             return lower_transparent(node);
                         }
                         seps.push(if newlines >= 1 {
-                            Sep::Newline
+                            Sep::Newline {
+                                blanks: (newlines - 1).min(MAX_BLANK_LINES),
+                            }
                         } else {
                             Sep::Space
                         });
@@ -557,7 +571,12 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
         if i + 1 < n {
             inner.push(Ir::text(","));
             match seps[i] {
-                Sep::Newline => inner.push(Ir::HardLine),
+                Sep::Newline { blanks } => {
+                    for _ in 0..blanks {
+                        inner.push(Ir::BlankLine);
+                    }
+                    inner.push(Ir::HardLine);
+                }
                 Sep::Space => inner.push(Ir::text(" ")),
             }
         } else if want_trailing {
@@ -586,10 +605,10 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
 /// to the transparent fallback, which is byte-identical to Runic's verbatim
 /// preservation. This arm only reshapes once the matrix already spans ≥2 lines.
 ///
-/// Only the clean shape is reshaped. A blank line (≥2 consecutive newlines in any
-/// gap, which surfaces as an empty interior line the IR can't emit without a bare
-/// un-indented newline), a comment, or any unexpected token falls back to the
-/// verbatim transparent lowering.
+/// Interior blank lines between rows are preserved (capped at [`MAX_BLANK_LINES`]
+/// via an [`Ir::BlankLine`]); leading and trailing empty lines are dropped into
+/// the framing break. Only the clean shape is reshaped: a comment or any
+/// unexpected token falls back to the verbatim transparent lowering.
 fn lower_matrix(node: &SyntaxNode) -> Ir {
     if !has_newline_token(node) {
         return lower_transparent(node);
@@ -648,13 +667,21 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
     let (Some(first), Some(last)) = (first, last) else {
         return lower_transparent(node);
     };
+    // Interior empty lines are blank lines: emit a bare newline each (a `HardLine`
+    // would leave the indent as trailing whitespace), capped at `MAX_BLANK_LINES`
+    // consecutive. Leading/trailing empty lines were already dropped above.
     let content = &lines[first..=last];
-    if content.iter().any(|l| l.is_empty()) {
-        return lower_transparent(node);
-    }
-
     let mut inner: Vec<Ir> = Vec::with_capacity(content.len() * 2);
+    let mut pending_blanks = 0usize;
     for line in content {
+        if line.is_empty() {
+            pending_blanks += 1;
+            continue;
+        }
+        for _ in 0..pending_blanks.min(MAX_BLANK_LINES) {
+            inner.push(Ir::BlankLine);
+        }
+        pending_blanks = 0;
         inner.push(Ir::HardLine); // framing break / re-indent for this line
         inner.extend(line.iter().map(|(_, ir)| ir.clone()));
     }
