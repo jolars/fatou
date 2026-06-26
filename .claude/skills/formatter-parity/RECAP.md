@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**16 fixtures**): **14 allowlisted**, 2 blocked
+Dir corpus (**18 fixtures**): **16 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
@@ -38,10 +38,40 @@ Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
 (`lower_collection`), tight range `:` (`lower_range` + `COLON` in
 `is_tight_binop`), `::` type annotations (`lower_type_annotation`), multi-line
 bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
-multi-line matrix breaking (`lower_matrix`), interior blank-line preservation in
-both (the `Ir::BlankLine` primitive).
+multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
+(interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive).
 
-## Latest session (interior blank-line preservation)
+## Latest session (leading/trailing-gap blank lines)
+
+Closed ranked target #2. Runic preserves a blank line right after the open bracket
+(**leading** gap) and right before the close (**trailing** gap), in both broken
+brackets *and* matrices, capped at 2 (same `MAX_BLANK_LINES`). Previously Fatou
+**bailed** (brackets) or **silently dropped** (matrices, an ungated divergence) —
+both now land. Verified byte-identical to Runic across call/vect/tuple/braces/index
+leading + trailing, matrix leading/trailing/both, and the 3+→2 cap.
+
+**The framing-vs-blank accounting** (the whole trick): one source newline in a gap
+is the *framing break* the layout always adds; every newline beyond the first is a
+preserved blank. So `blanks = newlines.saturating_sub(1).min(MAX)`.
+
+- **Bracket** (`lower_multiline_bracket`): the leading-gap `newlines >= 2` bail
+  became `leading_blanks = newlines.saturating_sub(1).min(MAX)`, pushed as
+  `BlankLine`s *before* the framing `HardLine`. The trailing-gap bail likewise
+  became `trailing_blanks`, pushed into `inner` *after* the item loop (before the
+  closing framing `HardLine`). `leading_comma`/doubled-comma still bail.
+- **Matrix** (`lower_matrix`): `first`/`last` (positions of the first/last
+  non-empty line) already bound the content span. The empty lines outside it are
+  the framing `[`/`]` lines plus blanks: `leading_blanks = first.saturating_sub(1)`,
+  `trailing_blanks = (len-1-last).saturating_sub(1)`, both `.min(MAX)`. Emitted as
+  `BlankLine`s around the content loop. No `first==0` edge issue —
+  `saturating_sub(1)` gives 0 when the first source line already carries content.
+
+Idempotent (re-parse: a leading blank is 2 newlines after `[` → `saturating_sub(1)`
+= 1 → fixed point; same trailing). Fixtures `bracket_gap_blank_lines/`,
+`matrix_gap_blank_lines/`. The matrix leading/trailing **ungated divergence** noted
+in the prior recap is now **closed**.
+
+## Earlier session (interior blank-line preservation)
 
 **New IR primitive:** `Ir::BlankLine` — a bare `\n` at **column 0** (the printer
 pushes `\n`, sets `col=0`, skips the indent). This is the piece both broken
@@ -168,20 +198,15 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
-1. **Comment preservation inside broken brackets *and matrices***—the remaining
-   half of the old target #1 (blank lines now land; see latest session). Comments
-   are the hard part: placement (own-line vs trailing `# …`), the trailing-`#`-
-   forces-the-next-token-onto-a-newline interaction, and the matrix-row case. Both
+1. **Comment preservation inside broken brackets *and matrices***—now the top
+   blank-line work is fully done (interior + leading/trailing gaps), this is the
+   last piece of the old "blank lines + comments" target #1. Comments are the hard
+   part: placement (own-line vs trailing `# …`), the trailing-`#`-forces-the-next-
+   token-onto-a-newline interaction, and the matrix-row case. Both
    `lower_multiline_bracket` and `lower_matrix` still bail on any `COMMENT`.
-2. **Leading/trailing-gap blank lines** (cheap follow-on to this session)—Runic
-   preserves a blank right after the open bracket / before the close, and right
-   after `[` / before `]` in a matrix; Fatou still bails (brackets) or silently
-   drops (matrices — an ungated divergence). The matrix leading/trailing drop is
-   the one to fix first: emit a `BlankLine` for a dropped leading/trailing empty
-   line instead of absorbing it. Probe the exact framing interaction first.
-3. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
+2. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
-4. **Long single-line bracket/matrix reflow** (width-based breaking)—Fatou's
+3. **Long single-line bracket/matrix reflow** (width-based breaking)—Fatou's
    breaking is purely source-driven (newline-triggered). Runic also breaks on
    width. Probe whether Runic reflows a long single-line `[…]`/call past the margin;
    if so this needs the `fits` engine, not just `HardLine`s.

@@ -7,11 +7,13 @@ assignment
 assignment_spacing
 binary_spacing
 bracket_blank_lines
+bracket_gap_blank_lines
 call_arg_lists
 collections
 comparison_chains
 matrices
 matrix_blank_lines
+matrix_gap_blank_lines
 multiline_brackets
 multiline_matrices
 range_colon
