@@ -223,6 +223,10 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
 /// or newline, a doubled/orphaned comma, or an unexpected child falls back to the
 /// verbatim transparent lowering (which keeps multi-line arg lists byte-identical).
 fn lower_arg_list(node: &SyntaxNode) -> Ir {
+    if has_newline_token(node) {
+        return lower_multiline_bracket(node);
+    }
+
     let mut parts: Vec<Ir> = Vec::new();
     let mut first_item = true;
     let mut pending_comma = false;
@@ -284,6 +288,10 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
 /// verbatim transparent lowering. Space-separated matrices are a distinct
 /// `MATRIX_EXPR` node and never reach here.
 fn lower_collection(node: &SyntaxNode) -> Ir {
+    if has_newline_token(node) {
+        return lower_multiline_bracket(node);
+    }
+
     let keep_singleton_comma = node.kind() == SyntaxKind::TUPLE_EXPR;
     let mut parts: Vec<Ir> = Vec::new();
     let mut item_count = 0usize;
@@ -408,6 +416,160 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
     }
 
     Ir::concat(parts)
+}
+
+/// Whether `node` contains a `NEWLINE` token anywhere in its descendants. This
+/// is the trigger for vertical bracket layout: the target style breaks a bracket
+/// across lines iff its content already spans ≥2 source lines, and the trigger is
+/// **contagious** — `foo(g(a,\nb), c)` breaks the outer call too because the inner
+/// call's newline is a descendant. A `NEWLINE` token (not a `\n` buried inside a
+/// string or comment) is the precise signal: a bracket whose only newline lives
+/// inside an un-reflowable string is left for the transparent fallback rather than
+/// half-broken.
+fn has_newline_token(node: &SyntaxNode) -> bool {
+    node.descendants_with_tokens()
+        .any(|el| el.kind() == SyntaxKind::NEWLINE)
+}
+
+/// The separator between two consecutive items of a broken bracket: the target
+/// style preserves the source's choice of a same-line space versus a line break.
+enum Sep {
+    Space,
+    Newline,
+}
+
+/// Whether a broken bracket grows a trailing comma. Calls *preserve* the source
+/// (keep iff already present, never add); every other bracket — index `x[…]`,
+/// tuple `(…)`, vector `[…]`, brace set `{…}` — *adds* one.
+fn adds_trailing_comma(node: &SyntaxNode) -> bool {
+    match node.kind() {
+        SyntaxKind::ARG_LIST => node
+            .parent()
+            .is_some_and(|p| p.kind() == SyntaxKind::INDEX_EXPR),
+        _ => true,
+    }
+}
+
+/// Lay out a bracketed list — a call/index `ARG_LIST` or a `(…)`/`[…]`/`{…}`
+/// collection — that spans multiple source lines, matching the target style:
+///
+/// - **Framing.** A line break is added right after the open bracket and right
+///   before the close bracket, with the content indented one step. The close
+///   bracket lands back at the bracket's own indent.
+/// - **Inter-item layout is preserved, not exploded.** Between two items the
+///   source's choice is kept: a same-line space stays a space (`), c`), a line
+///   break stays a break. Runic only adds the *framing* breaks.
+/// - **Trailing comma** follows [`adds_trailing_comma`].
+///
+/// Only a clean shape is reshaped. Anything this v1 does not fully model falls
+/// back to the verbatim transparent lowering: a comment, a `;`-separated
+/// `PARAMETERS` block or bare semicolon, a blank line (≥2 consecutive newlines in
+/// any gap, which would need a bare un-indented newline the IR can't yet emit), a
+/// doubled or leading comma, two items with no comma between them, an empty
+/// bracket, or any unexpected child or token.
+fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    let mut items: Vec<Ir> = Vec::new();
+    let mut seps: Vec<Sep> = Vec::new();
+    // Whitespace state for the gap since the last item (or the open bracket).
+    let mut newlines = 0usize;
+    let mut comma = false;
+    let mut leading_comma = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::LBRACE => {
+                    open = Some(tok.text().to_string())
+                }
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
+                    close = Some(tok.text().to_string())
+                }
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::NEWLINE => newlines += 1,
+                SyntaxKind::COMMA => {
+                    if comma {
+                        return lower_transparent(node);
+                    }
+                    if items.is_empty() {
+                        leading_comma = true;
+                    }
+                    comma = true;
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
+                    // A blank line between elements would need a bare newline the
+                    // printer can't emit (it always re-indents); leave it verbatim.
+                    if newlines >= 2 {
+                        return lower_transparent(node);
+                    }
+                    if items.is_empty() {
+                        if leading_comma {
+                            return lower_transparent(node);
+                        }
+                    } else {
+                        if !comma {
+                            return lower_transparent(node);
+                        }
+                        seps.push(if newlines >= 1 {
+                            Sep::Newline
+                        } else {
+                            Sep::Space
+                        });
+                    }
+                    items.push(lower_node(&child));
+                    newlines = 0;
+                    comma = false;
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    // The final gap runs from the last item to the close bracket.
+    if newlines >= 2 {
+        return lower_transparent(node);
+    }
+    let trailing_comma = comma;
+
+    let (Some(open), Some(close)) = (open, close) else {
+        return lower_transparent(node);
+    };
+    if items.is_empty() {
+        return lower_transparent(node);
+    }
+
+    let want_trailing = if adds_trailing_comma(node) {
+        true
+    } else {
+        trailing_comma
+    };
+
+    let n = items.len();
+    let mut inner: Vec<Ir> = Vec::with_capacity(n * 2 + 1);
+    inner.push(Ir::HardLine); // framing break after the open bracket
+    for (i, item) in items.into_iter().enumerate() {
+        inner.push(item);
+        if i + 1 < n {
+            inner.push(Ir::text(","));
+            match seps[i] {
+                Sep::Newline => inner.push(Ir::HardLine),
+                Sep::Space => inner.push(Ir::text(" ")),
+            }
+        } else if want_trailing {
+            inner.push(Ir::text(","));
+        }
+    }
+
+    Ir::concat([
+        Ir::text(open),
+        Ir::indent(Ir::concat(inner)),
+        Ir::HardLine, // framing break before the close bracket
+        Ir::text(close),
+    ])
 }
 
 /// Binary operators the target style keeps tight (no surrounding spaces).

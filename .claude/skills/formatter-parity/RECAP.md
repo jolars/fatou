@@ -29,16 +29,49 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**11 fixtures**): **9 allowlisted**, 2 blocked
+Dir corpus (**12 fixtures**): **10 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
 `lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
 (`lower_collection`), tight range `:` (`lower_range` + `COLON` in
-`is_tight_binop`), `::` type annotations (`lower_type_annotation`).
+`is_tight_binop`), `::` type annotations (`lower_type_annotation`), multi-line
+bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections).
 
-## Latest session (tight range `:` and `::` type annotations)
+## Latest session (multi-line bracket breaking)
+
+The headline target landed for the no-comment/no-blank-line common case. A
+bracket goes vertical iff its content spans ≥2 source lines, detected by **any
+`NEWLINE` token among its descendants** (`has_newline_token`) — this gives the
+**contagion** for free (`foo(g(a,\nb), c)` breaks the outer call because g's
+newline is a descendant) while *not* triggering on a `\n` buried inside an
+un-reflowable string (we'd only half-break it). Both `lower_arg_list` and
+`lower_collection` dispatch to the shared `lower_multiline_bracket` at the top.
+
+The layout is **source-driven, not width-based** (so it sidesteps the `fits`
+engine entirely): emit a framing `HardLine` after the open bracket and before the
+close (close lands at the bracket's own indent, content one step in via
+`Ir::indent`), then walk items. **Inter-item space-vs-break is preserved** — the
+source's comma-gap newline count decides `Sep::Newline` (→ `,` + `HardLine`) vs
+`Sep::Space` (→ `, `); Runic only adds the *framing* breaks, never explodes
+same-line items (`), c` stays). Trailing comma per `adds_trailing_comma`: calls
+**preserve** (keep iff present), index/tuple/vect/braces **add**. Idempotent
+(framing breaks re-parse to the same `NEWLINE` tokens) and verified against Runic
+on call/nested/vect/tuple/braces/index/kwarg cases. Fixture `multiline_brackets/`.
+
+- **Bails to transparent (kept out of the fixture, lossless):** comments,
+  `PARAMETERS`/bare `;`, **blank lines** (≥2 consecutive newlines in any gap —
+  Runic preserves them but our `HardLine` always re-indents, so a bare blank line
+  isn't yet expressible), doubled/leading comma, two items with no comma, empty
+  bracket, any unexpected child/token. Splats need no special-casing: `x...` is an
+  `ARG` wrapping `SPLAT_EXPR`, lowered transparently.
+- **Known divergence (out of scope):** a bracket whose only newline lives inside a
+  triple-quoted string — Runic breaks the bracket *and* re-indents the string body;
+  Fatou (token-based detection) leaves it inline. String reindentation is a
+  separate construct.
+
+## Earlier session (tight range `:` and `::` type annotations)
 
 Two small "tighten an operator to no spaces" rules, both confirmed against Runic:
 
@@ -61,37 +94,19 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
-1. **Multi-line break for arg-lists/collections** — the headline target, but
-   **larger than the RECAP previously assumed**. Fully probed this session; the
-   real Runic behavior:
-   - **NOT width-based.** Runic never auto-breaks a long single line
-     (`foo(<90 chars on one line>)` stays one line). The trigger is whether the
-     bracket's **content text spans ≥2 source lines** (a `\n` anywhere inside,
-     *including inside a triple-quoted string* — so detect by `node.text()`
-     containing `'\n'`, **not** a `NEWLINE` token kind).
-   - **Contagious / propagating.** `foo([\n1,\n2\n])` breaks the *outer* call too,
-     even though the only newline is inside the inner vector. A bracket goes
-     vertical iff any descendant spans lines. (`Ir::Group` + a forced break would
-     model this via the `fits`-fails-on-`HardLine` contagion, but our `Ir` has no
-     "force-break" flag yet.)
-   - **Preserves internal line breaks, not "explode every item."** `foo(g(a,\nb),
-     c)` → `g(...)` breaks but `c` stays on the **same line** as g's `)` (`), c`).
-     Runic only adds *framing* newlines (after the open bracket, before the close)
-     + 4-space indent; between items it keeps the source's space-vs-newline.
-     **Blank lines between items are preserved** (even 2+ consecutive).
-   - **Per-bracket trailing comma when multiline:** call `foo(...)` **preserves**
-     (keeps iff present, never adds); index `x[...]`, tuple `(...)`, vect `[...]`,
-     braces `{...}` **always add** a trailing comma.
-   - Plan: detect multiline by text `\n`; bail to transparent on comments,
-     `PARAMETERS`/`;`-semicolons, and splats for v1; emit framing `HardLine`s +
-     `Indent`, preserve inter-item space/newline, apply the per-bracket trailing
-     comma. Watch idempotence (already-canonical must round-trip) and nested indent
-     (inner list's items land at +8). Probably wants an `Ir` force-break primitive.
-2. **Matrices** — single-line is **pure preservation**: Runic does *not* even
+1. **Matrices** — single-line is **pure preservation**: Runic does *not* even
    collapse `[1  2   3]` → stays `[1  2   3]`; `[1 2; 3 4]`, `[1;2;3]`, `[1 2 ;3 4]`
    all preserved. Fatou's transparent fallback already matches, so a `matrices/`
-   fixture would PASS rule-free (regression lock only, no rule). Multiline matrices
-   `[1 2\n3 4]` get the framing treatment (folds into target #1).
+   fixture would PASS rule-free (regression lock only, no rule). Cheap win.
+   Multiline matrices `[1 2\n3 4]` are **not** the bracket rule (they're a distinct
+   `MATRIX_EXPR`, not `VECT_EXPR`/`ARG_LIST`) — probe separately before claiming.
+2. **Blank-line + comment preservation inside broken brackets** — the multi-line
+   rule's two big bails. Both need an IR primitive Fatou lacks: a **bare newline**
+   (blank line with *no* indent — our `HardLine` always re-indents, so two
+   `HardLine`s would leave trailing whitespace on the blank line). Add e.g.
+   `Ir::BlankLine` (emit `\n` at column 0) to the printer, then relax the
+   `newlines >= 2` bail in `lower_multiline_bracket`. Comments inside the bracket
+   are the harder half (placement + the trailing-`#`-forces-newline interaction).
 3. **Blocks / control flow indentation** — bigger; needs `HardLine`/`Indent` and
    careful idempotence. Return-insertion stays out (semantic, blocked).
 
