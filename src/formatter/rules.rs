@@ -34,6 +34,10 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         }
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
+        SyntaxKind::RETURN_EXPR
+        | SyntaxKind::CONST_STMT
+        | SyntaxKind::GLOBAL_STMT
+        | SyntaxKind::LOCAL_STMT => lower_keyword_stmt(node),
         _ => lower_transparent(node),
     }
 }
@@ -119,6 +123,46 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
     };
 
     Ir::concat([lower_node(lhs), Ir::text(" -> "), lower_node(rhs)])
+}
+
+/// Lay out a keyword statement (`return x`, `const x = 1`, `global y`, `local z`)
+/// with a single space between the leading keyword and its operand. The operand
+/// is lowered recursively, so its own normalization still applies
+/// (`return  x+1` → `return x + 1`, `const  x=1` → `const x = 1`). A bare keyword
+/// (`return`) emits the keyword alone.
+///
+/// Only the clean shape `<kw> [ws] <operand>?` is reshaped. Anything else—an
+/// interleaved comment (Runic preserves the spacing around a trailing comment), a
+/// comma-separated name list (`global a, b`, a bare-tuple shape we don't model),
+/// or any unexpected token—falls back to the verbatim transparent lowering.
+fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
+    let mut kw: Option<SyntaxToken> = None;
+    let mut operands: Vec<SyntaxNode> = Vec::new();
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => operands.push(child),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                _ if kw.is_none() => kw = Some(tok),
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let Some(kw) = kw else {
+        return lower_transparent(node);
+    };
+
+    match operands.as_slice() {
+        [] => Ir::text(kw.text().to_string()),
+        [operand] => Ir::concat([
+            Ir::text(kw.text().to_string()),
+            Ir::text(" "),
+            lower_node(operand),
+        ]),
+        _ => lower_transparent(node),
+    }
 }
 
 /// Lay out a comparison chain (`a == b == c`, `x < y <= z`) with a single space

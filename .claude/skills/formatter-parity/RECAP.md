@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**22 fixtures**): **20 allowlisted**, 2 blocked
+Dir corpus (**23 fixtures**): **21 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -43,9 +43,29 @@ bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
 multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 (interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive),
 ternary spacing (`lower_ternary`), curly type-param padding (`lower_arg_list`
-extended to brace `ARG_LIST`s).
+extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`).
 
-## Latest session (curly type-param padding)
+## Latest session (keyword-statement spacing)
+
+`RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT` were **transparent**, so the
+incidental space between the keyword and its operand leaked (`return  x` →
+`return  x`); Runic collapses it to exactly one (`return x`, `const x = 1`,
+`global z`, `local w`). New `lower_keyword_stmt` (one arm for all four nodes): walk
+children, the first non-ws token is the keyword, then expect **at most one operand
+node and nothing else**. Emit `kw` + `" "` + `lower_node(operand)` (so the operand
+keeps normalizing: `return  x+1` → `return x + 1`, `return  f(a,b)` →
+`return f(a, b)`, `const  y=2` → `const y = 2`), or just `kw` for a bare `return`.
+Bails to transparent on anything past one operand—**comments** (`return  x  # c`:
+Runic keeps the trailing `  # c` spacing, transparent preserves it; bare
+`return  # comment` is byte-identical too) and **comma name lists**
+(`global a, b`, a bare-tuple shape we don't model). `return  x,y` likewise bails
+(its operand is a `BARE_TUPLE_EXPR`, whose `x,y`→`x, y` comma spacing is a separate
+unlanded construct). Verified byte-identical to Runic across the fixture
+(name/binop/call/paren-tuple/`^` operands, bare `return`, `const`/`global`/`local`).
+Idempotent. Fixture `keyword_statements/`. Corpus 20→21 pass, divergence held at 2;
+allowlist 20→21. No upstream blocker surfaced.
+
+## Earlier session (curly type-param padding)
 
 Closed ranked target #0 (cheap, pre-probed). A `CURLY_EXPR` (`Vector{Int}`,
 `Dict{A, B}`) wraps a brace-bracketed `ARG_LIST` (`LBRACE`/`RBRACE` tokens), but
@@ -247,29 +267,13 @@ on call/nested/vect/tuple/braces/index/kwarg cases. Fixture `multiline_brackets/
   Fatou (token-based detection) leaves it inline. String reindentation is a
   separate construct.
 
-## Earlier session (tight range `:` and `::` type annotations)
-
-Two small "tighten an operator to no spaces" rules, both confirmed against Runic:
-
-- **Range `:`**—Runic *always* packs ranges tight (`1 : 2` → `1:2`, `a : b` →
-  `a:b`, `1:length(x)`). Two parser shapes: the two-operand range `a:b` is a
-  `BINARY_EXPR` with a `COLON` op (fixed by adding `COLON` to `is_tight_binop` —
-  Fatou was *mangling* `1:2` → `1 : 2`, a latent bug with no fixture); the stepped
-  `1:2:10` is a `RANGE_EXPR` (new `lower_range`: alternate operand/`:`, all tight,
-  ≥2 operands, bail on comment/newline/non-alternating). Fixture `range_colon/`.
-- **`::`**—`TYPE_ANNOTATION` node (was transparent, so `x :: Int` leaked
-  through). Runic packs tight (`x::Int`). New `lower_type_annotation`: lower
-  operands, emit `::` with no spaces, bail on comment/newline/extra token/missing
-  `::`. Handles `x::Int`, bare `::Int`, call args `f(x::Int)`. Fixture
-  `type_annotations/`.
-- **Divergence noted (out of scope, kept out of fixtures):** Runic *parenthesizes*
-  compound range operands (`a + 1 : b` → `(a + 1):b`)—a semantic rewrite, not a
-  spacing rule. Fatou tightens the colon and recurses (`a + 1:b`), lossless and
-  idempotent but unparenthesized; correct only for simple operands (literals,
-  names, calls, indices), which is what the fixture uses.
-
 ### Ranked next targets
 
+0. **Bare-tuple comma spacing** (cheap, surfaced this session). `x,y` → `x, y`
+   (`BARE_TUPLE_EXPR`, currently transparent). Runic spaces the comma like every
+   other list. A `lower_bare_tuple` modeled on `lower_collection` (no brackets,
+   `", "`-join the `ARG`/name children, recurse). Would also bring `return x, y`
+   and `global a, b` to parity for free. Probe trailing-comma + `;` shapes first.
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard
@@ -296,6 +300,13 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
   (`; `-led, `", "`-joined kwargs). Comma spacing, no bracket padding, single-line
   trailing-comma drop. Bails on comment/newline/doubled comma → multi-line passes
   through. Fixture `call_arg_lists/`.
+- **tight range `:` and `::` type annotations**: Runic packs both tight. `COLON`
+  added to `is_tight_binop` (two-operand `a:b` is a `BINARY_EXPR`; fixed a latent
+  `1:2`→`1 : 2` mangle); stepped `1:2:10` is a `RANGE_EXPR` (`lower_range`, all
+  tight). `::` is `TYPE_ANNOTATION` (`lower_type_annotation`, tight, bare `::Int`
+  ok). Fixtures `range_colon/`, `type_annotations/`. Divergence (out of fixtures):
+  Runic parenthesizes compound range operands (`a + 1 : b`→`(a + 1):b`), a semantic
+  rewrite; Fatou tightens + recurses unparenthesized (simple operands only).
 - **comparison chains**: `lower_comparison` (`COMPARISON_EXPR`)—alternating
   operand/operator, every gap one space, >2 operands ok; bails on
   comment/newline/non-alternating/<2 operands. Fixture `comparison_chains/`.

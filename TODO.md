@@ -79,7 +79,11 @@ leverage.
   the dot tight), curly type-parameter padding (`Vector{ Int }` → `Vector{Int}`,
   `Dict{ A ,B }` → `Dict{A, B}`: `CURLY_EXPR`'s brace `ARG_LIST` now flows through
   `lower_arg_list` by accepting `LBRACE`/`RBRACE`—same comma spacing, no padding,
-  trailing-comma drop). **Next:** comment preservation inside broken
+  trailing-comma drop), keyword-statement spacing (`lower_keyword_stmt` over
+  `RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT`: `return  x` → `return x`,
+  one space between the keyword and its recursed operand, bare `return` kept;
+  bails on a trailing comment or a comma-separated name list `global a, b`).
+  **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

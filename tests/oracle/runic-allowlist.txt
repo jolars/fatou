@@ -14,6 +14,7 @@ collections
 comparison_chains
 curly_type_params
 dot_access
+keyword_statements
 matrices
 matrix_blank_lines
 matrix_gap_blank_lines
