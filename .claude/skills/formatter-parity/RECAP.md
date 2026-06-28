@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**23 fixtures**): **21 allowlisted**, 2 blocked
+Dir corpus (**24 fixtures**): **22 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -43,27 +43,45 @@ bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
 multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 (interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive),
 ternary spacing (`lower_ternary`), curly type-param padding (`lower_arg_list`
-extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`).
+extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`),
+bare-tuple comma spacing (`lower_bare_tuple`).
 
-## Latest session (keyword-statement spacing)
+## Latest session (bare-tuple comma spacing)
 
-`RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT` were **transparent**, so the
-incidental space between the keyword and its operand leaked (`return  x` →
-`return  x`); Runic collapses it to exactly one (`return x`, `const x = 1`,
-`global z`, `local w`). New `lower_keyword_stmt` (one arm for all four nodes): walk
-children, the first non-ws token is the keyword, then expect **at most one operand
-node and nothing else**. Emit `kw` + `" "` + `lower_node(operand)` (so the operand
-keeps normalizing: `return  x+1` → `return x + 1`, `return  f(a,b)` →
-`return f(a, b)`, `const  y=2` → `const y = 2`), or just `kw` for a bare `return`.
-Bails to transparent on anything past one operand—**comments** (`return  x  # c`:
-Runic keeps the trailing `  # c` spacing, transparent preserves it; bare
-`return  # comment` is byte-identical too) and **comma name lists**
-(`global a, b`, a bare-tuple shape we don't model). `return  x,y` likewise bails
-(its operand is a `BARE_TUPLE_EXPR`, whose `x,y`→`x, y` comma spacing is a separate
-unlanded construct). Verified byte-identical to Runic across the fixture
-(name/binop/call/paren-tuple/`^` operands, bare `return`, `const`/`global`/`local`).
-Idempotent. Fixture `keyword_statements/`. Corpus 20→21 pass, divergence held at 2;
-allowlist 20→21. No upstream blocker surfaced.
+`BARE_TUPLE_EXPR` (`x, y`, `a, b, c`, the lhs/rhs of a multiple assignment
+`a, b = 1, 2`, a multi-value `return x, y`) was **transparent**, so `x,y` leaked;
+Runic `", "`-joins it like every other list. New `lower_bare_tuple`: the node holds
+element nodes **directly** separated by `COMMA` tokens — no brackets, **not**
+`ARG`-wrapped (unlike `lower_collection`). Walk children, drop incidental ws,
+alternate element/comma, emit `lower_node(el)` joined by `", "` (each element
+recursed, so `f(x),g(y)` → `f(x), g(y)`, `x...,y` → `x..., y`, `(x,y),z` →
+`(x, y), z`). Bails to transparent on a leading/doubled/**trailing** comma (a
+trailing comma in a bare tuple is a parse error at this level anyway) or a
+comment/newline. `a,b = 1,2` and `return x,y` work for free: those are
+`ASSIGNMENT_EXPR`/`RETURN_EXPR` whose operand is a `BARE_TUPLE_EXPR`, reached by
+the existing recursion. Verified byte-identical to Runic across
+name/literal/call/index/dot/splat/paren elements, spacing variants, the multiple
+assignment, and `return x, y`. Idempotent. Fixture `bare_tuples/`. Corpus 21→22
+pass, divergence held at 2; allowlist 21→22. No upstream blocker surfaced.
+
+**Note (kept out of the fixture):** `global a, b`/`local a, b` are **not**
+bare tuples — the parser puts the `NAME`/`COMMA` children **directly** in the
+`GLOBAL_STMT`/`LOCAL_STMT` node, so `lower_keyword_stmt` still bails (>1 operand)
+and they leak (`global a,b` → `global a,b`). A separate comma-list shape; see the
+ranked targets.
+
+## Earlier session (keyword-statement spacing)
+
+`RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT` were **transparent**, leaking
+the space between keyword and operand (`return  x`); Runic collapses to one
+(`return x`, `const x = 1`). New `lower_keyword_stmt` (one arm for all four): first
+non-ws token is the keyword, then expect **≤1 operand node and nothing else**; emit
+`kw " " lower_node(operand)` (operand recursed: `return  x+1` → `return x + 1`) or
+just `kw` for bare `return`. Bails past one operand—comments (`return  x  # c`:
+Runic keeps the trailing spacing, transparent preserves it) and comma name lists
+(`global a, b`, handled by the next session's bare-tuple work for the
+`BARE_TUPLE_EXPR` cases, but `global`/`local`'s own comma children still bail).
+Idempotent. Fixture `keyword_statements/`. Corpus 20→21, allowlist 20→21.
 
 ## Earlier session (curly type-param padding)
 
@@ -235,45 +253,15 @@ Multiline matrices (`[1 2\n3 4]`) deliberately **not** in the fixture—distinct
 shape, probe separately before claiming (likely also preserved, but unverified).
 Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
 
-## Earlier session (multi-line bracket breaking)
-
-The headline target landed for the no-comment/no-blank-line common case. A
-bracket goes vertical iff its content spans ≥2 source lines, detected by **any
-`NEWLINE` token among its descendants** (`has_newline_token`)—this gives the
-**contagion** for free (`foo(g(a,\nb), c)` breaks the outer call because g's
-newline is a descendant) while *not* triggering on a `\n` buried inside an
-un-reflowable string (we'd only half-break it). Both `lower_arg_list` and
-`lower_collection` dispatch to the shared `lower_multiline_bracket` at the top.
-
-The layout is **source-driven, not width-based** (so it sidesteps the `fits`
-engine entirely): emit a framing `HardLine` after the open bracket and before the
-close (close lands at the bracket's own indent, content one step in via
-`Ir::indent`), then walk items. **Inter-item space-vs-break is preserved**—the
-source's comma-gap newline count decides `Sep::Newline` (→ `,` + `HardLine`) vs
-`Sep::Space` (→ `, `); Runic only adds the *framing* breaks, never explodes
-same-line items (`), c` stays). Trailing comma per `adds_trailing_comma`: calls
-**preserve** (keep iff present), index/tuple/vect/braces **add**. Idempotent
-(framing breaks re-parse to the same `NEWLINE` tokens) and verified against Runic
-on call/nested/vect/tuple/braces/index/kwarg cases. Fixture `multiline_brackets/`.
-
-- **Bails to transparent (kept out of the fixture, lossless):** comments,
-  `PARAMETERS`/bare `;`, **blank lines** (≥2 consecutive newlines in any gap —
-  Runic preserves them but our `HardLine` always re-indents, so a bare blank line
-  isn't yet expressible), doubled/leading comma, two items with no comma, empty
-  bracket, any unexpected child/token. Splats need no special-casing: `x...` is an
-  `ARG` wrapping `SPLAT_EXPR`, lowered transparently.
-- **Known divergence (out of scope):** a bracket whose only newline lives inside a
-  triple-quoted string—Runic breaks the bracket *and* re-indents the string body;
-  Fatou (token-based detection) leaves it inline. String reindentation is a
-  separate construct.
-
 ### Ranked next targets
 
-0. **Bare-tuple comma spacing** (cheap, surfaced this session). `x,y` → `x, y`
-   (`BARE_TUPLE_EXPR`, currently transparent). Runic spaces the comma like every
-   other list. A `lower_bare_tuple` modeled on `lower_collection` (no brackets,
-   `", "`-join the `ARG`/name children, recurse). Would also bring `return x, y`
-   and `global a, b` to parity for free. Probe trailing-comma + `;` shapes first.
+0. **`global`/`local` comma name lists** (cheap, surfaced this session). `global a,b`
+   → `global a, b` (likewise `local`). Unlike a bare tuple, the parser puts the
+   `NAME`/`COMMA` children **directly** in the `GLOBAL_STMT`/`LOCAL_STMT` node, so
+   `lower_keyword_stmt` bails today. Extend it: after the keyword, `", "`-join the
+   comma-separated children (one space after the kw before the first). Probe
+   `const a = 1, b = 2` (does `const` take a comma list, or is it the nested
+   `ASSIGNMENT_EXPR`/bare-tuple shape that already works?).
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard
@@ -307,6 +295,16 @@ on call/nested/vect/tuple/braces/index/kwarg cases. Fixture `multiline_brackets/
   ok). Fixtures `range_colon/`, `type_annotations/`. Divergence (out of fixtures):
   Runic parenthesizes compound range operands (`a + 1 : b`→`(a + 1):b`), a semantic
   rewrite; Fatou tightens + recurses unparenthesized (simple operands only).
+- **multi-line bracket breaking**: `lower_multiline_bracket` (shared by
+  `lower_arg_list`/`lower_collection`)—a bracket goes vertical iff content spans ≥2
+  source lines (`has_newline_token` on descendants, contagious; ignores `\n` inside
+  strings). Source-driven (no `fits`): framing `HardLine` after open + before close,
+  content `Ir::indent`ed one step; inter-item space-vs-break preserved from the
+  source comma-gap newline count; trailing comma per `adds_trailing_comma` (calls
+  preserve, index/tuple/vect/braces add). Bails on comment/`PARAMETERS`/bare `;`/
+  doubled-leading comma/empty/unexpected. Fixture `multiline_brackets/`. Known
+  divergence (out of scope): a bracket whose only newline is inside a triple-quoted
+  string—Runic breaks + reindents the string; Fatou leaves it inline.
 - **comparison chains**: `lower_comparison` (`COMPARISON_EXPR`)—alternating
   operand/operator, every gap one space, >2 operands ok; bails on
   comment/newline/non-alternating/<2 operands. Fixture `comparison_chains/`.

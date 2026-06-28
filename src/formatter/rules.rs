@@ -32,6 +32,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
         }
+        SyntaxKind::BARE_TUPLE_EXPR => lower_bare_tuple(node),
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
         SyntaxKind::RETURN_EXPR
@@ -463,6 +464,55 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
                 _ => return lower_transparent(node),
             },
         }
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a bare (bracketless) tuple — `x, y`, `a, b, c`, the lhs/rhs of a
+/// multiple assignment (`a, b = 1, 2`), a multi-value `return x, y` — with
+/// normalized comma punctuation: no space before a comma, one space after it.
+/// Elements are bare nodes (not `ARG`-wrapped) separated by commas; each is
+/// lowered recursively so its own normalization still applies (`f(x),g(y)` →
+/// `f(x), g(y)`).
+///
+/// Only the clean alternating shape `<el> , <el> [ , <el> ]…` is reshaped. A
+/// leading/doubled/trailing comma (the trailing form is a parse error at this
+/// level anyway), an interleaved comment or newline, or any unexpected token
+/// falls back to the verbatim transparent lowering.
+fn lower_bare_tuple(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut item_count = 0usize;
+    let mut pending_comma = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::COMMA => {
+                    if pending_comma || item_count == 0 {
+                        return lower_transparent(node);
+                    }
+                    pending_comma = true;
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => {
+                if item_count > 0 {
+                    if !pending_comma {
+                        return lower_transparent(node);
+                    }
+                    parts.push(Ir::text(", "));
+                }
+                parts.push(lower_node(&child));
+                item_count += 1;
+                pending_comma = false;
+            }
+        }
+    }
+
+    if pending_comma {
+        return lower_transparent(node);
     }
 
     Ir::concat(parts)
