@@ -295,9 +295,11 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
     Ir::concat(parts)
 }
 
-/// Lay out a call/index argument list (`f(a, b)`, `a[1, 2]`) with normalized
-/// punctuation: no padding inside the brackets, no space before a comma, one
-/// space after it, and a single-line trailing comma dropped (`g(a,)` → `g(a)`).
+/// Lay out a call/index argument list (`f(a, b)`, `a[1, 2]`) — or a curly type
+/// parameter list (`Vector{Int}`, `Dict{A, B}`) — with normalized punctuation: no
+/// padding inside the brackets, no space before a comma, one space after it, and a
+/// single-line trailing comma dropped (`g(a,)` → `g(a)`, `Array{Int,}` →
+/// `Array{Int}`).
 ///
 /// Items are `ARG`/`KEYWORD_ARG` nodes separated by commas; an optional trailing
 /// `PARAMETERS` node carries `;`-separated keyword arguments and attaches without
@@ -319,7 +321,9 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                 SyntaxKind::LPAREN
                 | SyntaxKind::RPAREN
                 | SyntaxKind::LBRACKET
-                | SyntaxKind::RBRACKET => parts.push(Ir::text(tok.text().to_string())),
+                | SyntaxKind::RBRACKET
+                | SyntaxKind::LBRACE
+                | SyntaxKind::RBRACE => parts.push(Ir::text(tok.text().to_string())),
                 SyntaxKind::WHITESPACE => {}
                 SyntaxKind::COMMA => {
                     if pending_comma {

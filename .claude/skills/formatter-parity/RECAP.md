@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**21 fixtures**): **19 allowlisted**, 2 blocked
+Dir corpus (**22 fixtures**): **20 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -42,9 +42,27 @@ field-access `.` (`DOT` in `is_tight_binop`), multi-line
 bracket breaking (`lower_multiline_bracket`, shared by arg-lists + collections),
 multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 (interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive),
-ternary spacing (`lower_ternary`).
+ternary spacing (`lower_ternary`), curly type-param padding (`lower_arg_list`
+extended to brace `ARG_LIST`s).
 
-## Latest session (tight field-access `.`)
+## Latest session (curly type-param padding)
+
+Closed ranked target #0 (cheap, pre-probed). A `CURLY_EXPR` (`Vector{Int}`,
+`Dict{A, B}`) wraps a brace-bracketed `ARG_LIST` (`LBRACE`/`RBRACE` tokens), but
+`lower_arg_list` only recognized `()`/`[]` brackets, so it hit the catch-all and
+**bailed to transparent** — leaking the inner padding (`Vector{ Int }`). One-line
+fix: add `LBRACE`/`RBRACE` to the bracket-token arm of `lower_arg_list`. Type
+params then get the same normalization as call/index args: strip bracket padding
+(`Vector{ Int }` → `Vector{Int}`), no space before a comma + one after
+(`Dict{ A ,B }` → `Dict{A, B}`, `Array{Int,2}` → `Array{Int, 2}`), trailing comma
+dropped (`Array{Int,}` → `Array{Int}`), and the `; `-led `PARAMETERS` case
+(`x{a; b}`) flows through `lower_parameters` unchanged. Empty `Foo{}`, nested
+`Vector{Vector{Int}}`, `where {T}` (its `BRACES` is a separate node, untouched),
+and `x::Vector{Int}` all verified byte-identical to Runic. Idempotent. Fixture
+`curly_type_params/`. Corpus 19→20 pass, divergence held at 2; allowlist 19→20.
+No upstream blocker surfaced.
+
+## Earlier session (tight field-access `.`)
 
 Fixed a **latent mangling bug** (not a missing rule — a *wrong* one), found by
 probing transparent constructs after the corpus went fully triaged. Field access
@@ -252,13 +270,6 @@ Two small "tighten an operator to no spaces" rules, both confirmed against Runic
 
 ### Ranked next targets
 
-0. **Curly-brace type-param padding** (cheap, pre-probed). `Vector{ Int }` →
-   Runic `Vector{Int}`; Fatou leaks the inner padding (transparent). The node is
-   `CURLY_EXPR` with a brace `ARG_LIST` (`LBRACE`/`RBRACE`) child — `lower_arg_list`
-   doesn't handle the brace bracket, so it falls through. Likely a small extension
-   to `lower_arg_list`/a sibling `lower_curly` that strips bracket padding and
-   comma-spaces type params (`Dict{ A ,B }` → `Dict{A, B}` — probe the comma + the
-   empty `Foo{}` + the where-bound `Foo{T} where {T}` cases first).
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard

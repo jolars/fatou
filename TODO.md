@@ -76,7 +76,10 @@ leverage.
   normalizing; bails on a multi-line ternary), tight field-access `.` (`DOT` in
   `is_tight_binop`: fixed a latent mangling bug where `a.b.c` parsed as a
   `BINARY_EXPR`/`DOT` and got spaced to the invalid `a . b . c`; Julia *requires*
-  the dot tight). **Next:** comment preservation inside broken
+  the dot tight), curly type-parameter padding (`Vector{ Int }` → `Vector{Int}`,
+  `Dict{ A ,B }` → `Dict{A, B}`: `CURLY_EXPR`'s brace `ARG_LIST` now flows through
+  `lower_arg_list` by accepting `LBRACE`/`RBRACE`—same comma spacing, no padding,
+  trailing-comma drop). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
