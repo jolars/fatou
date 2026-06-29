@@ -9,6 +9,7 @@ assignment_spacing
 bare_tuples
 begin_quote_blocks
 binary_spacing
+block_comments
 bracket_blank_lines
 bracket_gap_blank_lines
 call_arg_lists

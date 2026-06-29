@@ -205,9 +205,14 @@ leverage.
   leading `if`/`elseif` `CONDITION` and the optional `catch e` variable are
   lowered recursively; an empty branch body bails the whole construct to the
   transparent fallback rather than partially reshape it; layout-only, never
-  `return`-inserted; locked by `if_blocks/` + `try_blocks/`).
-  **Next:** comment preservation inside broken brackets/matrices/blocks (the
-  harder half), then `function`/`do`/`macro` bodies (which need `lower_block_body`
+  `return`-inserted; locked by `if_blocks/` + `try_blocks/`), own-line line
+  comments in block bodies (`lower_block_body` extended: a `COMMENT` token on an
+  otherwise-empty line becomes its own statement line, re-indented to the body;
+  shared by `begin`/`quote`/`let`/loops/`if`/`try`; a *trailing* comment still
+  bails the whole block to transparent; locked by `block_comments/`).
+  **Next:** trailing comments in block bodies, then comment preservation inside
+  broken brackets/matrices (the harder half), then `function`/`do`/`macro` bodies
+  (which need `lower_block_body`
   but are `return`-inserted—a deferred semantic rewrite)—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

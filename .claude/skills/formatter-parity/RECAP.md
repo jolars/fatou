@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**41 fixtures**): **39 allowlisted**, 2 blocked
+Dir corpus (**42 fixtures**): **40 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -60,62 +60,65 @@ comprehension/generator `for`-binding `in` normalization (`lower_for_binding`),
 `while`/`for` loop-body indentation (`lower_loop`, second reuse of
 `lower_block_body`), `if`/`elseif`/`else` + `try`/`catch`/`else`/`finally` branch
 structure (`lower_if`/`lower_try` + shared `lower_branch_clause`, third reuse of
-`lower_block_body`).
+`lower_block_body`), own-line line-comment preservation in block bodies
+(`lower_block_body` extended).
 
-## Latest session (`if`/`try` branch structure — `lower_if`/`lower_try` + `lower_branch_clause`)
+## Latest session (own-line line comments in block bodies — `lower_block_body` extended)
 
-The **third reuse** of `lower_block_body`, generalizing from single-body blocks
-to a **chain of branches**, each its own `BLOCK`. Two arms (`IF_EXPR`, `TRY_EXPR`)
-plus one shared clause renderer. `lower_if` validates the `if`/`end` framing,
-captures the leading `CONDITION` + first `BLOCK`, collects the trailing
-`ELSEIF_CLAUSE`/`ELSE_CLAUSE` nodes, then emits `"if " + lower_node(condition) +
-body + <clauses> + HardLine + "end"`. `lower_try` is the same minus the leading
-condition (`try` has a bare body) and accepts `CATCH_CLAUSE`/`ELSE_CLAUSE`/
-`FINALLY_CLAUSE`. Both delegate every body to `lower_block_body` and every
-non-leading clause to **`lower_branch_clause`**, which renders one clause as
-`HardLine + <kw>` (keyword at column 0) + an optional space-separated header + the
-indented body. The header is **lowered recursively**: an `elseif` `CONDITION`
-falls through to transparent (its inner binary normalizes, so `elseif c >d` →
-`elseif c > d`), and a `catch` variable (the clause's first child node before its
-`BLOCK` — a `NAME`, `$`-interp, or `var"…"`) is recursed and prefixed with one
-space (`catch e`); a bare `catch`/`else`/`finally` emits no header.
-
-Like the loop/`begin`/`let` rules, a **non-empty** body always explodes vertical
-even on one line (`if e; f; end` → `if e⏎    f⏎end`); the new wrinkle is the
-**all-or-nothing chain**: an **empty** branch body anywhere makes
-`lower_block_body` return `None`, and rather than partially reshape the chain the
-**whole construct** bails to the transparent fallback (byte-identical to Runic on
-the already-formatted empty-branch case). No return-insertion risk — only
-`function`/`do`/`macro` bodies are `return`-inserted, and those are still
-transparent (deferred). Verified byte-identical on under-indented `if`/`elseif`/
-`else`, one-line `if e; f; end`, nested `if` inside a branch body (recurses,
-indents further), `try`/`catch`/`finally`, bare `catch`, named `catch err`, and
-full `try`/`catch err`/`else`/`finally`; idempotent. Fixtures `if_blocks/`,
-`try_blocks/`. Corpus 37→39 pass, divergence held at 2; allowlist 37→39.
-
-`&&`/`||` inside conditions stay the pre-existing Tenet-1 divergence (`if a&&b` →
-Fatou `if a && b`, Runic preserves `a&&b`), so the fixtures avoid them. No new
-parser blocker surfaced — `if`/`try`/`catch`/`else`/`finally` all parse cleanly
-(including the catch variable and the `try … else` form).
+The **first comment-preservation** rule, and a one-arm extension to the shared
+`lower_block_body` engine, so it lands across **every** vertical block at once
+(`begin`/`quote`/`let`/`while`/`for`/`if`/`try`). Before, `lower_block_body`
+bailed (`None` → transparent) on **any** `COMMENT` token. New token arm:
+`COMMENT if lines.last().is_empty()` — an own-line comment (the current line holds
+no statement yet) is pushed as its own one-element statement line (its text
+`trim_end_matches([' ', '\t'])`'d, mirroring `lower_trivia`), so the body's
+`HardLine` + re-indent renders it at the body indent, exactly matching Runic's
+re-indentation. `expect_sep` is set after it (a following node with no separator
+bails). A **trailing** comment (the current line already holds a statement) does
+*not* match the guard, falls to `_ => return None`, and still bails the whole
+block to transparent — unmodeled, deferred. `BLOCK_COMMENT` (`#= … =#`) likewise
+still bails. Verified byte-identical to Runic on leading/interior/last-position
+own-line comments in `begin`/`let`/`for`/`while`/`if`-`else`/`try`-`catch`, and
+nested (`begin` containing an `if`, each level's comments re-indented); idempotent.
+Fixture `block_comments/`. Corpus 39→40 pass, divergence held at 2; allowlist
+39→40. No parser blocker surfaced (line comments tokenize cleanly as `COMMENT`
+children of the `BLOCK`).
 
 ### Ranked next targets
 
-1. **Comment preservation inside broken brackets *and matrices and blocks***. All
-   of `lower_multiline_bracket`, `lower_matrix`, and `lower_block_body` bail on any
-   `COMMENT`. Now the highest-leverage target: it unblocks comments in every
-   vertical construct landed so far (brackets, matrices, `begin`/`let`/loops/`if`/
-   `try`). Placement (own-line vs trailing `# …`), the trailing-`#`-forces-
-   next-token-onto-newline interaction.
-2. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
+1. **Trailing comments in block bodies** (`x = 1 # note`). The natural follow-up:
+   `lower_block_body` currently bails the whole block on a trailing comment. Runic
+   recurses the statement and preserves the pre-`#` whitespace (≥1 space), so
+   `z=3# x` → `z = 3 # x` but `y = 2    # x` keeps four spaces — a **Tenet-1
+   divergence**: Fatou must canonicalize to one space (diverging when input has
+   more) and record it in `runic-blocked.txt` (or keep multi-space inputs out of
+   the fixture). The line model (`Vec<Vec<Ir>>`, `; `-joined) needs a way to attach
+   a trailing comment to a line (space-joined, always last), not `; `-joined.
+2. **Comment preservation inside broken brackets *and matrices***.
+   `lower_multiline_bracket` and `lower_matrix` still bail on any `COMMENT`.
+   Placement (own-line vs trailing `# …`), the trailing-`#`-forces-next-token-
+   onto-newline interaction.
+3. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
    **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
    could still land *if* return-insertion is modeled or the fixture dodges it;
    currently deferred.
-3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
+4. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven (newline-triggered); Runic also breaks on
    width. Needs the `fits` engine, not just `HardLine`s.
 
 ## Earlier sessions
 
+- **`if`/`try` branch structure (`lower_if`/`lower_try` + `lower_branch_clause`,
+  third reuse of `lower_block_body`)**: generalized the single-body engine to a
+  **chain of branches**, each its own `BLOCK`. Two arms (`IF_EXPR`, `TRY_EXPR`)
+  emit `<kw> [header] body <clauses> HardLine "end"`; every body delegates to
+  `lower_block_body`, every non-leading clause to `lower_branch_clause` (keyword at
+  column 0 via `HardLine`, an optional recursively-lowered header — `elseif`
+  `CONDITION`, `catch` variable — then the indented body). Non-empty body always
+  explodes vertical; an **empty** branch body anywhere bails the **whole** chain to
+  transparent rather than partially reshape it. `&&`/`||` in conditions stay the
+  Tenet-1 divergence, kept out of the fixtures. Fixtures `if_blocks/`,
+  `try_blocks/`. Corpus 37→39.
 - **`while`/`for` loop indentation (`lower_loop`, second reuse of `lower_block_body`)**:
   one arm on `WHILE_EXPR`/`FOR_EXPR` (`<kw> <header> BLOCK end`); the header is a
   recursively-lowered `CONDITION` (`while`) or `FOR_BINDING` (`for`, supplying the

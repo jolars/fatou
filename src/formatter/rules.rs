@@ -1966,6 +1966,15 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
                     lines.push(Vec::new());
                     expect_sep = false;
                 }
+                // An own-line line comment is rendered as its own statement line
+                // (re-indented to the body), matching Runic. A *trailing* comment
+                // (the current line already holds a statement) is unmodeled — bail
+                // to the transparent fallback for the whole block.
+                SyntaxKind::COMMENT if lines.last().unwrap().is_empty() => {
+                    let text = tok.text().trim_end_matches([' ', '\t']);
+                    lines.last_mut().unwrap().push(Ir::text(text));
+                    expect_sep = true;
+                }
                 _ => return None,
             },
         }
