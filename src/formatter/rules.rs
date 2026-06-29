@@ -33,6 +33,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
         SyntaxKind::STRUCT_DEF => lower_struct(node),
+        SyntaxKind::MODULE_DEF => lower_module(node),
         SyntaxKind::IF_EXPR => lower_if(node),
         SyntaxKind::TRY_EXPR => lower_try(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
@@ -1768,6 +1769,87 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
     Ir::concat(parts)
 }
 
+/// Lay out a `module`/`baremodule` definition. The shape mirrors the other block
+/// rules (`[BARE]MODULE_KW SIGNATURE BLOCK END_KW`), but the body is *conditionally*
+/// indented: Runic does **not** indent a module body when the module sits alone at
+/// the file's top level (the file-as-a-module-wrapper convention) or is nested
+/// directly inside a non-module block. It *does* indent when the module shares the
+/// top level with a sibling, or when it has a `module` ancestor (a nested module).
+/// See [`module_should_indent`] for the exact predicate, which reproduces Runic's
+/// `indent_toplevel`/`indent_module` decision.
+///
+/// Module bodies are declarations, never `return`-inserted, so there is no
+/// semantic-rewrite risk here (a `function` *inside* the body still would be, so
+/// fixtures keep those out). An **empty** body (`module E end`) makes the body
+/// engine return `None`, and the transparent fallback preserves the source
+/// byte-for-byte. Any unmodeled shape — a missing signature or `end`, a body
+/// comment the engine rejects, an unexpected child — also falls back to the
+/// verbatim transparent lowering.
+fn lower_module(node: &SyntaxNode) -> Ir {
+    let mut kw: Option<&'static str> = None;
+    let mut signature: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::SIGNATURE if signature.is_none() && block.is_none() => {
+                    signature = Some(child)
+                }
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::MODULE_KW if kw.is_none() => kw = Some("module "),
+                SyntaxKind::BAREMODULE_KW if kw.is_none() => kw = Some("baremodule "),
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (Some(kw), Some(signature), Some(block), true) = (kw, signature, block, saw_end) else {
+        return lower_transparent(node);
+    };
+    let body = if module_should_indent(node) {
+        lower_block_body(&block)
+    } else {
+        build_block_body(&block)
+    };
+    let Some(body) = body else {
+        return lower_transparent(node);
+    };
+
+    Ir::concat([
+        Ir::text(kw),
+        lower_node(&signature),
+        body,
+        Ir::HardLine,
+        Ir::text("end"),
+    ])
+}
+
+/// Whether a module's body is indented, reproducing Runic's decision. A module
+/// with a `module` ancestor is always indented. Otherwise it is indented only
+/// when it sits at the file's top level (directly under `ROOT`) alongside at
+/// least one sibling node — a lone top-level module, or a module nested inside a
+/// non-module block, keeps its body flush.
+fn module_should_indent(node: &SyntaxNode) -> bool {
+    if node
+        .ancestors()
+        .skip(1)
+        .any(|a| a.kind() == SyntaxKind::MODULE_DEF)
+    {
+        return true;
+    }
+    match node.parent() {
+        Some(parent) if parent.kind() == SyntaxKind::ROOT => parent.children().count() > 1,
+        _ => false,
+    }
+}
+
 /// Lay out a `let` block (`let x = 1 … end`) by indenting its body one step,
 /// matching the target style. The shape is `let [LET_BINDINGS] BLOCK end`; the
 /// header is `let` plus, when present, a space and the recursively-lowered
@@ -2111,6 +2193,16 @@ impl BodyLine {
 /// Two statements with no separator, a node after a comment, or any unexpected
 /// token returns `None`.
 fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
+    build_block_body(block).map(Ir::indent)
+}
+
+/// The body engine shared by [`lower_block_body`] (which wraps the result in one
+/// indent step) and the module rule (which keeps the body flush at the ambient
+/// column — Runic does not indent a module body unless the module is nested under
+/// another module or shares the file's top level with a sibling). Returns the
+/// vertically-broken lines without any indent wrapper, or `None` for an empty
+/// block or any shape this does not model.
+fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
     // `expect_sep` guards against two adjacent statement nodes with no `;`/newline
     // between them, and against a node following a comment on the same line.
     let mut lines: Vec<BodyLine> = vec![BodyLine::default()];
@@ -2225,7 +2317,7 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
         inner.push(Ir::BlankLine);
     }
 
-    Some(Ir::indent(Ir::concat(inner)))
+    Some(Ir::concat(inner))
 }
 
 /// Binary operators the target style keeps tight (no surrounding spaces).

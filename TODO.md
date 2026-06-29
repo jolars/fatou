@@ -235,7 +235,16 @@ leverage.
   `SIGNATURE` header is lowered recursively so `struct Bar<:Animal` →
   `struct Bar <: Animal`; a non-empty body always explodes vertical, an empty
   `struct Empty end` bails to transparent; field bodies are declarations, never
-  `return`-inserted; locked by `struct_blocks/`).
+  `return`-inserted; locked by `struct_blocks/`), `module`/`baremodule` body
+  indentation (`lower_module` over `MODULE_DEF`, sharing the body engine split out
+  as `build_block_body`: the body is *conditionally* indented per Runic's
+  `indent_toplevel`/`indent_module` rule — flush when the module is the lone
+  top-level node or is nested in a non-module block, indented when it shares the
+  top level with a sibling or has a `module` ancestor (`module_should_indent`);
+  the `SIGNATURE` is lowered recursively; an empty `module E end` bails to
+  transparent; module bodies are declarations, never `return`-inserted; locked by
+  `module_blocks/` + `module_siblings/` + `module_baremodule/` +
+  `module_leading_comment/`).
   **Next:** `function`/`do`/`macro` bodies
   (which need `lower_block_body`
   but are `return`-inserted—a deferred semantic rewrite), then long single-line

@@ -36,6 +36,10 @@ matrix_blank_lines
 matrix_block_comments
 matrix_comments
 matrix_gap_blank_lines
+module_baremodule
+module_blocks
+module_leading_comment
+module_siblings
 multiline_brackets
 multiline_matrices
 named_tuples

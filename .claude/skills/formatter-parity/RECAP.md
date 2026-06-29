@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**52 fixtures**): **47 allowlisted**, 5 blocked
+Dir corpus (**56 fixtures**): **51 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -73,50 +73,68 @@ line comments verbatim), block-comment (`#= … =#`) preservation in block bodie
 (`lower_block_body` gained a `BLOCK_COMMENT` arm), block-comment preservation
 inside broken brackets and matrices (`lower_multiline_bracket` + `lower_matrix`
 `COMMENT` arms widened to `BLOCK_COMMENT`), `struct`/`mutable struct` field-body
-indentation (`lower_struct`, fourth reuse of `lower_block_body`).
+indentation (`lower_struct`, fourth reuse of `lower_block_body`),
+`module`/`baremodule` **conditionally-indented** bodies (`lower_module` +
+`module_should_indent`, with the body engine split into `build_block_body`).
 
-## Latest session (struct / mutable struct field bodies)
+## Latest session (module / baremodule bodies)
 
-Fresh target (not on the prior ranked list, picked as a clean `lower_block_body`
-reuse that—unlike `function`—is **never** `return`-inserted, since struct field
-bodies are declarations, not expressions). CST: `STRUCT_DEF` =
-`[MUTABLE_KW] STRUCT_KW SIGNATURE BLOCK END_KW`. The new `lower_struct` arm is a
-near-copy of `lower_loop`: collect the optional `mutable`, the `struct` keyword,
-the `SIGNATURE` header, the `BLOCK`, and `end`; emit `["mutable "?] "struct " +
-lower_node(signature) + lower_block_body(block) + HardLine + "end"`. The
-`SIGNATURE` is lowered recursively (no `lower_node` arm → `lower_transparent`),
-which normalizes a tight supertype binary (`struct Bar<:Animal` →
-`struct Bar <: Animal`) and keeps `{T}` type params verbatim.
+The first block whose body indent is **conditional**, reproducing Runic's
+`indent_toplevel`/`indent_module` rule exactly (read from
+`runestone.jl:3021,3130`). A module body is indented **iff** it has a `module`
+ancestor, **or** it sits directly under `ROOT` alongside ≥1 sibling node; a lone
+top-level module (the file-as-a-module-wrapper convention) and a module nested in
+a non-module block (e.g. inside `begin`) keep their body **flush**. Runic's
+`count(!is_whitespace, kids) > 1` maps cleanly to `node.parent().children().count()
+> 1` — comments are tokens (not `children()` nodes) and JuliaSyntax treats them as
+whitespace, so a leading `# header` does **not** make the module non-sole (verified
+`module_leading_comment`). `module_should_indent` is the predicate: an
+`ancestors().skip(1)` scan for `MODULE_DEF`, else the `ROOT`-parent sibling count.
 
-Everything else falls out of the shared engine: a non-empty one-line body
-explodes vertical (`struct Pair x; y end` → `struct Pair⏎    x; y⏎end`), an
-**empty** `struct Empty end` (whose `BLOCK` holds only `WHITESPACE`, no statement
-line) makes `lower_block_body` return `None` → transparent → byte-identical
-preservation. Blank-line capping (≤2), trailing line comments, and short-form
-inner constructors (`Foo() = new(0)`, an `ASSIGNMENT_EXPR`, not a function body)
-all worked with zero extra code. Verified byte-identical to Runic across simple,
-mutable, parametric, subtype, one-line, empty, blank-gap, and ctor cases;
-idempotent. Fixture `struct_blocks/`. Corpus 46→47 pass, divergence held at 5 (no
-new block); allowlist 46→47. No parser blocker (struct tokenizes/parses cleanly).
+To support a flush body, `lower_block_body` was split: the new `build_block_body`
+returns the vertically-broken lines **without** the indent wrapper (its `HardLine`s
+ride the ambient column), and `lower_block_body` is now just
+`build_block_body(block).map(Ir::indent)`. `lower_module` picks `lower_block_body`
+(indented) or `build_block_body` (flush) by the predicate. `lower_module` itself is
+a near-copy of `lower_struct`: collect `[BARE]MODULE_KW`, `SIGNATURE`, `BLOCK`,
+`END_KW`; emit `kw + lower_node(sig) + body + HardLine + "end"`. Empty body
+(`module E end`) → `None` → transparent → byte-identical (works regardless of the
+indent decision, so nested empty modules need no special care).
 
-Kept out of the fixture: long-form inner constructors (`function Foo() … end`
-inside a struct) — those **are** return-inserted by Runic (function body), the
-deferred `control_flow` semantic rewrite. Module bodies are a separate, distinct
-shape (Runic does **not** indent module contents — body stays at column 0), so
-`module` is not covered here.
+Verified byte-identical to Runic across: lone top-level module (flush) with a
+nested module (indented) and capped blank lines; a module sharing the top level
+with a sibling statement (indented); a `baremodule` (flush) containing a nested
+empty module; a leading-comment file (still flush). Idempotent. Fixtures
+`module_blocks/`, `module_siblings/`, `module_baremodule/`,
+`module_leading_comment/`. Corpus 47→51 pass, divergence held at 5 (no new block);
+allowlist 47→51. No parser blocker (module/baremodule tokenize/parse cleanly).
+
+Kept out of the fixtures: a `function` inside a module body — Runic
+`return`-inserts it (the deferred `control_flow` semantic rewrite). Module bodies
+themselves are never `return`-inserted, only their function members.
 
 ### Ranked next targets
 
 1. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
    **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
-   could still land *if* return-insertion is modeled or the fixture dodges it;
-   currently deferred.
-2. **`module` bodies** — like the block rules but Runic keeps the body at column 0
-   (no indent), unlike every other block. A `lower_block_body`-style engine with a
-   zero-step indent; low risk, no return-insertion. Probe `module M … end`.
-3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
+   could still land *if* return-insertion is modeled or the fixture dodges it
+   (e.g. a body whose last statement is already an explicit `return`, or a one-liner
+   Runic won't touch); currently deferred.
+2. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven (newline-triggered); Runic also breaks on
    width. Needs the `fits` engine, not just `HardLine`s.
+
+## Earlier sessions
+
+- **struct / mutable struct field bodies (`lower_struct`, fourth `lower_block_body`
+  reuse)**: CST `[MUTABLE_KW] STRUCT_KW SIGNATURE BLOCK END_KW`; a near-copy of
+  `lower_loop` emitting `["mutable "?] "struct " + lower_node(sig) + body + HardLine
+  + "end"`. Non-empty body explodes vertical; empty `struct Empty end` → `None` →
+  transparent. The recursively-lowered `SIGNATURE` normalizes a tight supertype
+  (`struct Bar<:Animal` → `struct Bar <: Animal`). Field bodies are declarations,
+  never `return`-inserted. Long-form inner constructors (`function Foo()…end`, which
+  Runic return-inserts) and `module` kept out. Fixture `struct_blocks/`. Corpus
+  46→47.
 
 ## Earlier sessions
 
