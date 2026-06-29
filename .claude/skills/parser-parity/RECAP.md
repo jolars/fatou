@@ -6,6 +6,25 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Handoff from formatter-parity (2026-06-29):** `global`/`local` followed by a
+**multiple assignment** parses to a degenerate *flat token soup* instead of a
+nested tree. Fatou produces e.g. for `global a, b = 1, 2` a `GLOBAL_STMT` holding
+loose `NAME COMMA IDENT EQ INTEGER COMMA INTEGER` children (no `ASSIGNMENT_EXPR`,
+no `BARE_TUPLE_EXPR`); for `local a, b = f(x), g(y)` even the calls are unwrapped
+(`IDENT LPAREN IDENT RPAREN` flat, no `CALL_EXPR`); `global a, b::Int` has no
+`TYPE_ANNOTATION`. JuliaSyntax ground truth (green tree):
+`global a, b = 1, 2` ⇒ `global ((tuple a b) = (tuple 1 2))`,
+`local a, b = f(x), g(y)` ⇒ `local ((tuple a b) = (tuple (call f x) (call g y)))`.
+Crux: inside a `global`/`local`, the parser must parse a full statement/expression
+(a multiple-assignment whose lhs/rhs are bare tuples), not greedily flatten a
+name/comma list. The clean **no-`=` name list** (`global a, b`) already parses
+right and formats right; only the assignment/`::` forms flatten. **Why it matters
+for formatter-parity:** once the parser nests these properly, the formatter's
+*existing* rules (keyword-stmt single-operand arm → `lower_binary` `=` → recursed
+`BARE_TUPLE_EXPR`/`CALL_EXPR`) handle `global a,b=1,2` → `global a, b = 1, 2` for
+free—no new formatter code. Cross-ref: formatter-parity RECAP "Earlier session
+(global/local comma name lists)" and its ranked target #0.
+
 **Handoff to formatter-parity (2026-06-26):** left-division `\` now parses as a
 normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter-parity can add the
 spacing fixture (`A\b` → `A \ b`; `\` is a normal spaced binop, no `is_tight_binop`

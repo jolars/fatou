@@ -7,6 +7,15 @@ leverage.
 
 ## Parser
 
+- [ ] Parser: `global`/`local` + multiple assignment parses to a flat token soup.
+  `global a, b = 1, 2` lands as loose `NAME COMMA IDENT EQ INTEGER COMMA INTEGER`
+  children of `GLOBAL_STMT` (no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR`); `local a, b =
+  f(x), g(y)` leaves the calls unwrapped; `global a, b::Int` has no
+  `TYPE_ANNOTATION`. JuliaSyntax: `global ((tuple a b) = (tuple 1 2))`. Inside
+  `global`/`local`, parse a full multiple-assignment (bare-tuple lhs/rhs), don't
+  flatten the comma list. The no-`=` name list (`global a, b`) already parses
+  right. Unblocks formatter-parity ranked target #0 (handed off; see
+  parser-parity RECAP "Queued next targets", 2026-06-29).
 - [x] Lexer: identity/inequality operators `===`, `!==`, and tight `!=`. New
   `EqEqEq`/`NotEqEq` tokens (longest-match, beat `==`/`!=`); `scan_ident` now
   stops at a `!` immediately followed by `=` so `a!=b`⇒`a` `!=` `b` while `f!`,
@@ -90,7 +99,12 @@ leverage.
   parser drops `NAME`/`IDENT`/`COMMA` directly into the statement node, so this is
   a flat name list, not an operand subtree; `", "`-joins the clean
   item/`COMMA` alternation, bails on the `=`/`::` assignment-list forms
-  `global a, b = 1, 2`, a comment, or a leading/trailing comma). **Next:** comment
+  `global a, b = 1, 2`, a comment, or a leading/trailing comma), `using`/`import`
+  comma + selector lists (`lower_import_stmt` over `USING_STMT`/`IMPORT_STMT`:
+  `using A,B` → `using A, B`, `using A: x,y` → `using A: x, y`—item(`IMPORT_PATH`/
+  `IMPORT_ALIAS` node)/separator alternation, `COMMA` → `", "`, selector `COLON` →
+  `": "`, paths recursed transparently; bails on comment/newline or a
+  leading/trailing/doubled separator). **Next:** comment
   preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.

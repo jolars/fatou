@@ -39,6 +39,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         | SyntaxKind::CONST_STMT
         | SyntaxKind::GLOBAL_STMT
         | SyntaxKind::LOCAL_STMT => lower_keyword_stmt(node),
+        SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => lower_import_stmt(node),
         _ => lower_transparent(node),
     }
 }
@@ -198,6 +199,64 @@ fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
 
     // A dangling `expect_item` means a leading or trailing comma (or an empty
     // list); neither is a clean name list.
+    if expect_item {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out a `using`/`import` statement: the keyword, then a comma-separated list
+/// of `IMPORT_PATH`/`IMPORT_ALIAS` items, optionally `:`-led into a selector list
+/// (`using A: x, y`). Runic spaces every comma (`, `) and packs the selector colon
+/// tight-left, space-right (`A: x`); the paths themselves (`A.B`, `.A`, `Foo as
+/// Bar`) are lowered transparently, so their internal tokens pass through verbatim.
+///
+/// Only the clean alternating shape—item, separator, item, …—is reshaped. A
+/// comment/newline (a multi-line import Runic may reflow), a leading/trailing/
+/// doubled separator, or any unexpected token bails to the lossless transparent
+/// lowering.
+fn lower_import_stmt(node: &SyntaxNode) -> Ir {
+    let mut kw: Option<SyntaxToken> = None;
+    let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
+
+    for el in node.children_with_tokens() {
+        match &el {
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
+            NodeOrToken::Token(tok) if kw.is_none() => kw = Some(tok.clone()),
+            _ => rest.push(el),
+        }
+    }
+
+    let Some(kw) = kw else {
+        return lower_transparent(node);
+    };
+
+    // Alternate item (a path/alias node) and separator (`,` → `, `, the selector
+    // `:` → `: `), starting and ending on an item.
+    let mut parts: Vec<Ir> = vec![Ir::text(kw.text().to_string()), Ir::text(" ")];
+    let mut expect_item = true;
+
+    for el in &rest {
+        match el {
+            NodeOrToken::Node(child) if expect_item => {
+                parts.push(lower_node(child));
+                expect_item = false;
+            }
+            NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COMMA => {
+                parts.push(Ir::text(", "));
+                expect_item = true;
+            }
+            NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COLON => {
+                parts.push(Ir::text(": "));
+                expect_item = true;
+            }
+            _ => return lower_transparent(node),
+        }
+    }
+
+    // A dangling `expect_item` means a leading/trailing/doubled separator or an
+    // empty list—none is the clean shape this rule models.
     if expect_item {
         return lower_transparent(node);
     }

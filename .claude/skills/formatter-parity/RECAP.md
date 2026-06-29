@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**25 fixtures**): **23 allowlisted**, 2 blocked
+Dir corpus (**26 fixtures**): **24 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -45,45 +45,44 @@ multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 ternary spacing (`lower_ternary`), curly type-param padding (`lower_arg_list`
 extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`),
 bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
-(`lower_keyword_stmt` extended).
+(`lower_keyword_stmt` extended), `using`/`import` comma + selector lists
+(`lower_import_stmt`).
 
-## Latest session (`global`/`local` comma name lists)
+## Latest session (`using`/`import` comma + selector lists)
 
-Closed ranked target #0 (cheap, surfaced last session). `global a,b`/`local x,y,z`
-leaked (`global a,b`): the parser drops the `NAME`/`IDENT`/`COMMA` children
-**directly** into `GLOBAL_STMT`/`LOCAL_STMT` (a flat name list, **not** an operand
-subtree—and asymmetric: the *first* name is a `NAME` node, the rest are bare
-`IDENT` tokens), so `lower_keyword_stmt`'s old "≤1 operand else bail" hit the
-second token and fell to transparent. Restructured it: collect the keyword + the
-rest (whitespace dropped); a bare keyword or a **single operand node** keep the old
-arms (`return x`, `const a = 1, b = 2` whose lone `ASSIGNMENT_EXPR` recurses—still
-byte-identical); otherwise parse a clean **item/`COMMA`** alternation where an item
-is a `NAME` node (recursed) or a bare `IDENT` token, and `", "`-join it. Bails to
-transparent on anything off the happy path: the `=`/`::` assignment-list forms
-(`global a, b = 1, 2`, `global a, b::Int`—`EQ`/`COLON_COLON` land flat between
-items and break the alternation; kept out of the fixture, lossless), a
-comment/newline, or a leading/trailing/doubled comma. Verified byte-identical to
-Runic on `global a,b`, `global  a ,  b` (ws collapse), `local x,y,z`,
-`global one, two, three`, single `global g`/`local single`. Idempotent. Fixture
-`global_local_names/`. Corpus 22→23 pass, divergence held at 2; allowlist 22→23.
-No upstream blocker surfaced.
+`USING_STMT`/`IMPORT_STMT` were **transparent**, leaking comma spacing
+(`using A,B` stayed `using A,B`); Runic `", "`-joins them. Probing the next ranked
+target (assignment-list `global`/`local`) showed it's an **upstream parser
+blocker** (see below), so I pivoted to this clean adjacent win surfaced while
+probing. These parse *cleanly*: keyword token, then a comma-separated list of
+`IMPORT_PATH`/`IMPORT_ALIAS` **nodes**, optionally `:`-led into a selector list
+(`using A: x, y`). New `lower_import_stmt`: keyword + space, then a strict
+item(node)/separator alternation—`COMMA` → `", "`, the selector `COLON` → `": "`
+(Runic packs the selector colon tight-left/space-right); items are lowered via
+`lower_node` so the paths (`A.B`, `.A`, `..B.C`, `Foo as Bar`) pass through
+transparently (their internal dots/`as` are verbatim). Bails to transparent on a
+comment/newline (a multi-line import Runic may reflow) or a
+leading/trailing/doubled separator. Verified byte-identical to Runic on
+`using A,B`, `import A.B, C.D`, `using A: x,y`, `using A:x,y,z`,
+`import Base: +, -`, `import A: x as y`, `using .A, ..B.C`, single
+`using LinearAlgebra`. Idempotent. Fixture `import_using_lists/`. Corpus 23→24
+pass, divergence held at 2; allowlist 23→24.
 
-## Earlier session (curly type-param padding)
+**Divergence kept out of the fixture (Tenet-1 corner):** with a *leading* space on
+the selector colon, Runic is non-deterministic—`using A :x` → `using A:x` and
+`using A : x` → `using A:x` (it drops the space-after, treating `:x` symbol-like),
+whereas `using A:x` → `using A: x`. Fatou canonicalizes to `using A: x` regardless;
+rare hand-spacing, left unrecorded as a blocked slug since no fixture exercises it.
 
-Closed ranked target #0 (cheap, pre-probed). A `CURLY_EXPR` (`Vector{Int}`,
-`Dict{A, B}`) wraps a brace-bracketed `ARG_LIST` (`LBRACE`/`RBRACE` tokens), but
-`lower_arg_list` only recognized `()`/`[]` brackets, so it hit the catch-all and
-**bailed to transparent** — leaking the inner padding (`Vector{ Int }`). One-line
-fix: add `LBRACE`/`RBRACE` to the bracket-token arm of `lower_arg_list`. Type
-params then get the same normalization as call/index args: strip bracket padding
-(`Vector{ Int }` → `Vector{Int}`), no space before a comma + one after
-(`Dict{ A ,B }` → `Dict{A, B}`, `Array{Int,2}` → `Array{Int, 2}`), trailing comma
-dropped (`Array{Int,}` → `Array{Int}`), and the `; `-led `PARAMETERS` case
-(`x{a; b}`) flows through `lower_parameters` unchanged. Empty `Foo{}`, nested
-`Vector{Vector{Int}}`, `where {T}` (its `BRACES` is a separate node, untouched),
-and `x::Vector{Int}` all verified byte-identical to Runic. Idempotent. Fixture
-`curly_type_params/`. Corpus 19→20 pass, divergence held at 2; allowlist 19→20.
-No upstream blocker surfaced.
+**Upstream parser blocker surfaced & handed off:** assignment-list
+`global`/`local` (`global a, b = 1, 2`, `local a, b = f(x), g(y)`,
+`global a, b::Int`) parses to a **flat token soup**—`GLOBAL_STMT` holds loose
+`NAME COMMA IDENT EQ INTEGER COMMA INTEGER` (no `ASSIGNMENT_EXPR`/
+`BARE_TUPLE_EXPR`; even calls unwrapped). JuliaSyntax green tree:
+`global ((tuple a b) = (tuple 1 2))`. A formatter rule here would be a fragile
+hand-normalizer papering over the parser; once the parser nests it properly the
+existing keyword-stmt + `lower_binary` + bare-tuple recursion handles it for free.
+Queued at the top of `parser-parity/RECAP.md` + a `TODO.md` Parser bullet.
 
 ## Earlier session (tight field-access `.`)
 
@@ -240,13 +239,13 @@ Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
 
 ### Ranked next targets
 
-0. **Assignment-list `global`/`local`** (`global a, b = 1, 2`, `global a, b::Int`).
-   These land *flat* in the statement node (`NAME COMMA IDENT EQ INTEGER COMMA
-   INTEGER`—no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR` wrapper, the `=`/`::` are loose
-   tokens), so the new name-list parser bails. Runic spaces both the commas and the
-   `=`/`::` (`global a,b=1,2` → `global a, b = 1, 2`). Needs a flat operator+comma
-   normalizer over the loose token soup—trickier than the clean name list; probe
-   the exact `=`/`::`/`,` interleavings first.
+0. **Assignment-list `global`/`local`** (`global a, b = 1, 2`, `global a, b::Int`)
+   — **BLOCKED on the parser, handed off (2026-06-29).** These land as a flat token
+   soup (no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR`/`CALL_EXPR`); JuliaSyntax nests them
+   `global ((tuple a b) = (tuple 1 2))`. Don't write a formatter hack—once the
+   parser nests it, the existing keyword-stmt + `lower_binary` + bare-tuple
+   recursion handles it for free. Resume here only after the parser-parity bullet
+   lands (parser-parity RECAP "Queued next targets", `TODO.md` Parser).
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard
@@ -262,6 +261,17 @@ Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
 
 ## Earlier sessions
 
+- **`global`/`local` comma name lists**: `lower_keyword_stmt` extended. The parser
+  drops `NAME`/`IDENT`/`COMMA` flat into `GLOBAL_STMT`/`LOCAL_STMT` (asymmetric:
+  first item a `NAME` node, rest bare `IDENT` tokens). Keeps the bare-keyword and
+  single-operand-node arms (`return x`, `const a = 1, b = 2`); else `", "`-joins a
+  clean item/`COMMA` alternation. Bails on the `=`/`::` assignment-list forms (a
+  parser blocker, handed off), comments, stray commas. Fixture `global_local_names/`.
+- **curly type-param padding**: added `LBRACE`/`RBRACE` to `lower_arg_list`'s
+  bracket arm, so a `CURLY_EXPR`'s brace `ARG_LIST` gets the same normalization as
+  call/index args (`Vector{ Int }` → `Vector{Int}`, `Dict{ A ,B }` → `Dict{A, B}`,
+  trailing comma dropped, `; `-led `PARAMETERS` via `lower_parameters`). Fixture
+  `curly_type_params/`.
 - **bare-tuple comma spacing**: `lower_bare_tuple` (`BARE_TUPLE_EXPR`)—elements
   held **directly**, `COMMA`-separated, **not** `ARG`-wrapped; alternate
   element/comma, `", "`-join recursed elements (`f(x),g(y)` → `f(x), g(y)`,

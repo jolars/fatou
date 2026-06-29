@@ -16,6 +16,7 @@ comparison_chains
 curly_type_params
 dot_access
 global_local_names
+import_using_lists
 keyword_statements
 matrices
 matrix_blank_lines
