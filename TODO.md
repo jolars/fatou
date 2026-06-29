@@ -118,8 +118,14 @@ leverage.
   exponent marker lowercased and exponent/integral leading zeros stripped; only
   `FLOAT`/`FLOAT32` tokens are rewritten, every other literal passes through
   verbatim; underscored and hex `0x…p…` floats are left untouched, mirroring
-  Runic's `format_float_literals`; locked by `float_literals/`). **Next:**
-  comment preservation inside broken
+  Runic's `format_float_literals`; locked by `float_literals/`), hex-integer
+  zero-padding (`lower_literal` over `HEX_INT` + `normalize_hex`: `0xF` → `0x0F`,
+  `0x12345` → `0x00012345`—pad the literal's **byte span** to the next of
+  `0x`+2/4/8/16/32 chars by inserting `0`s after `0x`; underscores count toward
+  the span (`0x1_2` → `0x01_2`), digit case is preserved, BigInt literals
+  (span ≥ 34) and already-canonical spans are left verbatim; octal/binary
+  untouched, mirroring Runic's `format_hex_literals`; locked by `hex_literals/`).
+  **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

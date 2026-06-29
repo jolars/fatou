@@ -309,10 +309,12 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
 }
 
 /// Lay out a literal (`42`, `1.`, `0xFF`, `true`, `:sym`): every token but a
-/// **float** passes through verbatim; a `FLOAT`/`FLOAT32` token is normalized to
-/// the target style's canonical form via [`normalize_float`] (`.5` → `0.5`,
-/// `1.` → `1.0`, `1E10` → `1.0e10`, `1f0` → `1.0f0`). Integer, hex/oct/bin, and
-/// boolean literals are untouched. A float we don't fully model (an underscored
+/// **float** or **hex integer** passes through verbatim. A `FLOAT`/`FLOAT32`
+/// token is normalized to the target style's canonical form via
+/// [`normalize_float`] (`.5` → `0.5`, `1.` → `1.0`, `1E10` → `1.0e10`,
+/// `1f0` → `1.0f0`); a `HEX_INT` token is zero-padded to a fixed width via
+/// [`normalize_hex`] (`0xF` → `0x0F`). Decimal, octal, and binary integers and
+/// boolean literals are untouched. A token we don't fully model (an underscored
 /// or hex float, or any shape that doesn't parse cleanly) is left verbatim.
 fn lower_literal(node: &SyntaxNode) -> Ir {
     Ir::concat(node.children_with_tokens().map(|el| match el {
@@ -321,9 +323,40 @@ fn lower_literal(node: &SyntaxNode) -> Ir {
             SyntaxKind::FLOAT | SyntaxKind::FLOAT32 => {
                 Ir::text(normalize_float(tok.text()).unwrap_or_else(|| tok.text().to_string()))
             }
+            SyntaxKind::HEX_INT => {
+                Ir::text(normalize_hex(tok.text()).unwrap_or_else(|| tok.text().to_string()))
+            }
             _ => Ir::text(tok.text().to_string()),
         },
     }))
+}
+
+/// Zero-pad a hexadecimal integer literal to Runic's fixed widths, or return
+/// `None` to leave it verbatim. Runic's `format_hex_literals` pads the literal
+/// (`0x` prefix included) to the next of the canonical spans `0x` + 2/4/8/16/32
+/// hex chars (the widths of `UInt8`/`UInt16`/`UInt32`/`UInt64`/`UInt128`), by
+/// inserting `0`s right after the `0x`. The byte span—**not** the digit count—is
+/// what is measured, so underscores count toward the width (`0x1_2` → `0x01_2`).
+///
+/// A literal already at a canonical span, or one whose span is ≥ 34 (a BigInt
+/// hex literal, wider than `UInt128`), is returned `None` (left verbatim). The
+/// digit case is preserved (`0xDEADBEEF` is untouched, not lowercased). Output
+/// always lands exactly on a canonical span, so the rule is idempotent.
+fn normalize_hex(text: &str) -> Option<String> {
+    // Canonical total spans: `0x` (2 bytes) + 2/4/8/16/32 hex chars.
+    const TARGETS: [usize; 5] = [4, 6, 10, 18, 34];
+    let rest = text.strip_prefix("0x")?;
+    let span = text.len();
+    // Already canonical, or a BigInt literal wider than UInt128: leave verbatim.
+    if span >= 34 || TARGETS.contains(&span) {
+        return None;
+    }
+    let target = *TARGETS.iter().find(|&&t| t > span)?;
+    let mut out = String::with_capacity(target);
+    out.push_str("0x");
+    out.extend(std::iter::repeat_n('0', target - span));
+    out.push_str(rest);
+    Some(out)
 }
 
 /// Normalize a decimal float literal to the target style's canonical form, or

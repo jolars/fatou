@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**29 fixtures**): **27 allowlisted**, 2 blocked
+Dir corpus (**30 fixtures**): **28 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -48,30 +48,34 @@ bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
 (`lower_keyword_stmt` extended), `using`/`import` comma + selector lists
 (`lower_import_stmt`), `global`/`local` multiple assignment (rule-free PASS,
 parser-unblocked), `where`-clause brace normalization (`lower_where`),
-float-literal normalization (`lower_literal` + `normalize_float`).
+float-literal normalization (`lower_literal` + `normalize_float`), hex-integer
+zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`).
 
-## Latest session (float-literal normalization — `lower_literal` + `normalize_float`)
+## Latest session (hex-integer zero-padding — `lower_literal` + `normalize_hex`)
 
-`LITERAL` was **transparent**, so float tokens leaked their source spelling while
-Runic canonicalizes them (`format_float_literals`). This is the first **token-text**
-rule (value-preserving, not layout): `.5` → `0.5`, `1.` → `1.0`, `1E10` → `1.0e10`,
-`1f0` → `1.0f0`, `1.50` → `1.5`, `007.50` → `7.5`, `1.000e05` → `1.0e5`. New
-`lower_literal` arm on `LITERAL` passes every token through verbatim **except** a
-`FLOAT`/`FLOAT32`, which is run through `normalize_float`; child nodes still recurse.
-`normalize_float` reimplements Runic's algorithm: bail (verbatim) on an underscored
-or hex `0x…` float; else hand-parse `[sign][int][.frac][marker[sign]exp]` and rebuild
-canonically—int leading zeros stripped (min one digit), decimal point always present
-with min one frac digit, frac trailing zeros stripped (min one), exponent marker
-lowercased (`E`→`e`, `f` Float32 marker kept) with exp leading zeros stripped, Unicode
-minus `−`→`-`. Returns `None` (→ verbatim) on any trailing/unparsed char, so an
-unmodeled shape is never mangled. No happy-path short-circuit needed: the algorithm is
-a fixed point on already-canonical forms (idempotent). Verified byte-identical to Runic
-on `.5`/`1.`/`1E10`/`1f0`/`1.5E+10`/`2.5e3`/`007.50`/`1.50`/`0.0`/`00.00`/`1.000e05`/
-`9.`/`3f5`/`.0`, hex `0x1.8p3` and underscored `100_000.0` left untouched, and floats
-nested in collections (`[1., .5, 2.0e3]`) and call args (`g(1., x=.5)`). Idempotent.
-Fixture `float_literals/`. Corpus 26→27 pass, divergence held at 2; allowlist 26→27.
-No parser work needed. (Adjacent future target spotted: Runic's `format_hex_literals`
-zero-pads short hex ints to fixed widths—`0xF`→`0x0F`—a separate token rule, not done.)
+The `HEX_INT` token leaked its source spelling while Runic's `format_hex_literals`
+zero-pads it to a fixed width. Second **token-text** rule, sibling to last
+session's float one: `0xF` → `0x0F`, `0xabc` → `0x0abc`, `0x12345` →
+`0x00012345`, `0xffffffffff` → `0x000000ffffffffff`. Runic's algorithm pads the
+literal's **byte span** (`0x` prefix included) to the next of the canonical spans
+`0x` + 2/4/8/16/32 hex chars (`UInt8`…`UInt128` widths) by inserting `0`s right
+after `0x`. New `lower_literal` arm on `HEX_INT` runs the text through
+`normalize_hex`; everything else (decimal/octal/binary ints, bools, the float
+arm) is unchanged. `normalize_hex`: strip the `0x` prefix (→ `None`/verbatim if
+absent), measure `text.len()`; if span ≥ 34 (a BigInt hex literal wider than
+`UInt128`) or already a canonical span, return `None`; else find the first
+canonical span > current and prepend that many `0`s after `0x`. Crucially the
+**byte span, not the digit count**, is measured, so underscores count toward the
+width (`0x1_2` → `0x01_2`, span 5 → 6) — matching Runic exactly. Digit case is
+preserved (`0xDEADBEEF`/`0xff` untouched, never lowercased). Output always lands
+on a canonical span, so re-running returns `None` → idempotent. Hex **floats**
+(`0x1.8p3`) lex as `FLOAT`, where `normalize_float` already bails on `0x`;
+octal/binary have distinct kinds Runic leaves alone. Verified byte-identical to
+Runic on `0xF`/`0xabc`/`0x1`/`0x12345`/`0x1_2`/`0xffffffffff`/`0x0000`/`0xff`/
+`0xDEADBEEF`/`0x1234567890abcdef`, hex float `0x1.8p3`, `0b101`/`0o17` left
+untouched, and hex nested in collections (`[0xF, 0x12345, 0xff]`) and call args
+(`f(0xF, x = 0x1)`). Idempotent. Fixture `hex_literals/`. Corpus 27→28 pass,
+divergence held at 2; allowlist 27→28. No parser work needed.
 
 ## Earlier session (`where`-clause brace normalization — `lower_where`)
 
@@ -200,6 +204,16 @@ Idempotent (the spaced form re-parses to the same shape). Fixture
 
 ## Earlier sessions
 
+- **float-literal normalization (`lower_literal` + `normalize_float`)**: first
+  **token-text** rule. `lower_literal` arm on `LITERAL` passes tokens verbatim
+  except `FLOAT`/`FLOAT32`, run through `normalize_float` (reimplements Runic's
+  `format_float_literals`): `.5` → `0.5`, `1.` → `1.0`, `1E10` → `1.0e10`,
+  `1f0` → `1.0f0`, `1.50` → `1.5`. Hand-parses `[sign][int][.frac][marker[sign]exp]`
+  and rebuilds canonically (int leading zeros stripped, point always present with
+  ≥1 frac digit, frac trailing zeros stripped, marker lowercased, exp leading
+  zeros stripped, Unicode minus → `-`); `None`/verbatim on underscored/hex floats
+  or any unparsed char. Idempotent (fixed point on canonical forms). Fixture
+  `float_literals/`.
 - **`global`/`local` multiple assignment (rule-free PASS)**: the parser blocker
   landed upstream (`93e3d28`), so `global a, b = 1, 2` now nests as a single
   `ASSIGNMENT_EXPR(BARE_TUPLE = BARE_TUPLE)` operand and flows through
