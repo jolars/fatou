@@ -33,6 +33,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
         SyntaxKind::STRUCT_DEF => lower_struct(node),
+        SyntaxKind::FUNCTION_DEF | SyntaxKind::MACRO_DEF => lower_function(node),
         SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => lower_type_decl(node),
         SyntaxKind::MODULE_DEF => lower_module(node),
         SyntaxKind::IF_EXPR => lower_if(node),
@@ -1808,6 +1809,81 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
     parts.push(Ir::HardLine);
     parts.push(Ir::text("end"));
     Ir::concat(parts)
+}
+
+/// Lay out a `function`/`macro` definition. The shape mirrors the other block
+/// rules (`(FUNCTION_KW|MACRO_KW) SIGNATURE BLOCK END_KW`): the body is delegated
+/// to [`lower_block_body`], and the `SIGNATURE` (which carries the name, argument
+/// list, an optional `::` return type, and a `where` clause as one node) is
+/// lowered recursively so its inner spacing normalizes. The keyword is always
+/// followed by exactly one space, which also inserts the canonical space an
+/// anonymous `function(x)` is missing (`function (x)`).
+///
+/// Function and macro bodies are the one construct where Runic performs a
+/// **semantic rewrite**: it inserts an implicit `return` on the body's tail
+/// expression (`function f() x end` gains `return x`). Fatou is layout-only and
+/// never inserts a `return`, so this rule reshapes **only** when that rewrite is
+/// provably a no-op — when the body's last statement is already an explicit
+/// `return`. There Runic leaves the statements untouched and merely re-indents,
+/// which `lower_block_body` reproduces exactly. Every other tail (a bare
+/// expression, an `if`/`try`, a loop) — where Runic *would* insert or wrap a
+/// `return` — bails to the verbatim transparent lowering, as does an empty body
+/// (`function f() end`, which Runic likewise leaves on one line) or any unmodeled
+/// shape (a missing signature or `end`, an unexpected child).
+fn lower_function(node: &SyntaxNode) -> Ir {
+    let kw = match node.kind() {
+        SyntaxKind::FUNCTION_DEF => "function",
+        SyntaxKind::MACRO_DEF => "macro",
+        _ => return lower_transparent(node),
+    };
+
+    let mut signature: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_kw = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::SIGNATURE if signature.is_none() && block.is_none() => {
+                    signature = Some(child)
+                }
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::FUNCTION_KW | SyntaxKind::MACRO_KW if !saw_kw => saw_kw = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(signature), Some(block)) = (saw_kw, saw_end, signature, block) else {
+        return lower_transparent(node);
+    };
+
+    // Return-insertion guard: only reshape when Runic's implicit-return rewrite is
+    // a no-op, i.e. the body's tail statement is already an explicit `return`.
+    // Anything else (or an empty body, whose last child node is absent) bails so
+    // we never indent a body Runic would also have rewritten.
+    if block.children().last().map(|n| n.kind()) != Some(SyntaxKind::RETURN_EXPR) {
+        return lower_transparent(node);
+    }
+
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    Ir::concat([
+        Ir::text(kw),
+        Ir::text(" "),
+        lower_node(&signature),
+        body,
+        Ir::HardLine,
+        Ir::text("end"),
+    ])
 }
 
 /// Lay out an `abstract type`/`primitive type` declaration. These are bodyless

@@ -252,12 +252,20 @@ leverage.
   `type` to one space each but leaves the post-signature whitespace verbatim
   (`abstract type Foo   end` keeps `Foo   end`); the `SIGNATURE` is lowered
   recursively so `Bar<:Baz` → `Bar <: Baz`, and the trailing bits `LITERAL` + `end`
-  ride through verbatim; locked by `abstract_types/` + `primitive_types/`).
-  **Next:** `function`/`do`/`macro` bodies
-  (which need `lower_block_body`
-  but are `return`-inserted—a deferred semantic rewrite), then long single-line
-  bracket/matrix width-based reflow (needs the `fits` engine)—see the
-  `formatter-parity` RECAP's ranked targets.
+  ride through verbatim; locked by `abstract_types/` + `primitive_types/`),
+  `function`/`macro` definition bodies (`lower_function` over
+  `FUNCTION_DEF`/`MACRO_DEF`: fifth `lower_block_body` reuse; the `SIGNATURE` is
+  lowered recursively so the name/args/`::`return-type/`where` normalize and the
+  keyword always gets one trailing space (anonymous `function(x)` → `function (x)`);
+  these are the one construct Runic `return`-inserts, so the rule reshapes **only**
+  when that rewrite is a no-op—the body's tail statement is already an explicit
+  `return`—and bails to transparent on every other tail, an empty body, or any
+  unmodeled shape; locked by `function_blocks/`).
+  **Next:** `do` blocks (`DO_EXPR`, also `return`-inserted—same tail-return dodge
+  could apply), then long single-line bracket/matrix width-based reflow—**but**
+  probing shows Runic does **not** width-reflow (it is purely source-driven like
+  Fatou), so that target is a non-goal; see the `formatter-parity` RECAP's ranked
+  targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,
   locked by the `matrices/` regression fixture, no rule; compound range operands like

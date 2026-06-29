@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**59 fixtures**): **54 allowlisted**, 5 blocked
+Dir corpus (**60 fixtures**): **55 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -77,54 +77,65 @@ indentation (`lower_struct`, fourth reuse of `lower_block_body`),
 `module`/`baremodule` **conditionally-indented** bodies (`lower_module` +
 `module_should_indent`, with the body engine split into `build_block_body`),
 `abstract type`/`primitive type` keyword-region whitespace (`lower_type_decl`),
-multi-line ternary continuation indent (`lower_ternary` extended).
+multi-line ternary continuation indent (`lower_ternary` extended),
+`function`/`macro` definition bodies (`lower_function`, fifth `lower_block_body`
+reuse, gated by a return-insertion dodge).
 
-## Latest session (multi-line ternary continuation indent)
+## Latest session (function / macro definition bodies)
 
-Extended `lower_ternary` from single-line spacing to source-driven breaking. Runic
-keeps the ternary single-line unless the *source* already broke it (no width
-reflow — verified a 90-col single-line ternary stays put), keeps the operator
-trailing (`?` can't lead a line, so a break only ever lands in the gap *after* `?`
-or `:`), and indents the continuation **one level** relative to the statement
-(`x = a ? b :⏎    c`; nested in a function body the +4 is relative, modulo Runic's
-`return`-insertion which keeps such bodies out of fixtures).
+Landed `lower_function` (arm on `FUNCTION_DEF`/`MACRO_DEF`), the **fifth**
+`lower_block_body` reuse — shape `(FUNCTION_KW|MACRO_KW) WHITESPACE SIGNATURE BLOCK
+END_KW`, a near-copy of `lower_loop`. The `SIGNATURE` (one node carrying name, arg
+list, optional `::`return-type, and a `where` clause) is lowered recursively so its
+inner spacing normalizes (`function f(x)::Int where {T}`); the keyword always gets
+exactly one trailing space, which also supplies the space anonymous `function(x)`
+is missing (`function (x)`). Non-empty body explodes vertical; an empty body
+(`function empty() end`) bails to transparent (Runic also keeps it one-line).
 
-Implementation: the alternation loop now counts `NEWLINE`s per gap. The gap before
-an operand follows an operator, so a single newline there becomes `Ir::HardLine`
-(else a space); the whole body is wrapped in one `Ir::indent`. The crux is
-**chains**: `a ? b :⏎c ? d :⏎e` must stay flat at one level, not stair-step. The
-continuation ternary is the parent's else-operand, so it detects `parent().kind()
-== TERNARY_EXPR` and **skips its own indent**, riding the parent's single
-`Ir::indent` — verified flat across a 3-deep chain. Bails to transparent on: a
-newline *before* an operator (a parse error in real input), a blank line in a gap
-(>1 newline, which Runic preserves but we don't model), interleaved comment, error
-recovery, or operand count ≠ 3.
+The crux is **return-insertion**: function/macro bodies are the *one* construct
+Runic semantically rewrites (it inserts an implicit `return` on the tail
+expression — `function f() x end` → `… return x …`, verified across bare-expr,
+multi-stmt, and `if`/`try` tails). Fatou is layout-only and never inserts `return`,
+so the rule reshapes **only when that rewrite is provably a no-op**: the body's tail
+statement is already an explicit `return` (`block.children().last().kind() ==
+RETURN_EXPR`). Every other tail — and the empty body — bails to transparent. This is
+*sound but not complete*: Runic also skips insertion in some cases the guard rejects
+(e.g. `function c() return x; y end` — a stray tail after an earlier return — which
+Runic leaves but Fatou bails on); those just stay transparent (lossless, kept out of
+the fixture), never wrong.
 
-Verified byte-identical to Runic across break-after-`:`, break-after-both, and a
-chain; idempotent (the re-indented continuation is a fixed point — the reparsed
-`NEWLINE WHITESPACE` gap drops the whitespace and re-emits the `HardLine`).
-Single-line `ternary_spacing/` unchanged. Fixture `ternary_multiline/`. Corpus
-53→54 pass, divergence held at 5 (no new block); allowlist 53→54. No parser blocker
-(all shapes tokenize/parse cleanly; only the parse-error `?`-leads-a-line shape is
-unreachable, handled by the defensive bail). Kept out: a breaking ternary in a
-parenthesized then-branch (the paren's own break engine drives the layout) and
-blank lines inside a ternary.
+Verified byte-identical to Runic across over/under-indented bodies, a one-liner
+(`function h(x) return x end` → exploded), an anonymous `function(x)` (keyword space
++ `return`), a `where`/return-type signature, a leading blank-line body, and a macro.
+Idempotent (re-indented bodies are `lower_block_body` fixed points). Fixture
+`function_blocks/`. Corpus 54→55 pass, divergence held at 5 (no new block); allowlist
+54→55. **No parser blocker** (all shapes tokenize/parse cleanly). `do` blocks
+(`DO_EXPR`) kept out — same return-insertion applies; the tail-return dodge could
+extend there next.
 
 ### Ranked next targets
 
-1. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
-   **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
-   could still land *if* return-insertion is modeled or the fixture dodges it
-   (e.g. a body whose last statement is already an explicit `return`); deferred.
-2. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
-   breaking is purely source-driven; Runic also breaks on width. Needs the `fits`
-   engine, not just `HardLine`s. (Now the most actionable non-deferred target: the
-   ternary just confirmed Runic does *not* width-reflow ternaries, but it does
-   reflow brackets/matrices.)
-3. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
+1. **`do` blocks** (`DO_EXPR` = `CALL_EXPR DO_KW <params> BLOCK END_KW`) — also
+   `return`-inserted, so the same tail-`return` dodge from this session likely
+   applies. The most direct extension. (Anonymous `function`/`do` whose body does
+   *not* end in `return` stays deferred until return-insertion is modeled.)
+2. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
    own break engine drives the layout (`a ? (⏎    b ? c :⏎    d⏎) : e`); the
    continuation indent is relative to the paren, not the statement. Out of scope of
-   this session's `lower_ternary` (kept out of the fixture).
+   the `lower_ternary` work (kept out of its fixture).
+3. ~~Long single-line bracket/matrix width reflow~~ — **NON-GOAL.** Probing this
+   session disproved the earlier claim: Runic does **not** width-reflow brackets,
+   matrices, calls, or ternaries (verified a 94-col array, a long call, and a long
+   array all stay single-line). Runic's breaking is **purely source-driven**, same
+   as Fatou. Adding width reflow would *diverge* from Runic, not approach it.
+
+- **multi-line ternary continuation indent (`lower_ternary` extended)**: source-driven
+  breaking (no width reflow — Runic keeps a ternary single-line unless the source
+  broke it); operator stays trailing (`?`/`: ` can't lead a line), continuation
+  indented one level; a right-assoc chain rides the parent's single `Ir::indent`
+  flat (detects `parent().kind() == TERNARY_EXPR`, skips its own indent). Bails on a
+  newline before an operator, a blank line in a gap, comment, error, or operand
+  count ≠ 3. Fixture `ternary_multiline/`. Corpus 53→54.
 
 ## Earlier sessions
 

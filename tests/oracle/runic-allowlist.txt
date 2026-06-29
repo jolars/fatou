@@ -24,6 +24,7 @@ curly_type_params
 dot_access
 export_public_lists
 float_literals
+function_blocks
 global_local_assignment
 global_local_names
 hex_literals
