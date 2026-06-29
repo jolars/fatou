@@ -230,7 +230,12 @@ leverage.
   header/multi-line kept verbatim; brackets ride the trailing one with one
   canonical space—the existing `bracket_comment_spacing_divergence`; matrices are
   verbatim so no divergence; locked by `bracket_block_comments/` +
-  `matrix_block_comments/`).
+  `matrix_block_comments/`), `struct`/`mutable struct` field-body indentation
+  (`lower_struct` over `STRUCT_DEF`, fourth reuse of `lower_block_body`: the
+  `SIGNATURE` header is lowered recursively so `struct Bar<:Animal` →
+  `struct Bar <: Animal`; a non-empty body always explodes vertical, an empty
+  `struct Empty end` bails to transparent; field bodies are declarations, never
+  `return`-inserted; locked by `struct_blocks/`).
   **Next:** `function`/`do`/`macro` bodies
   (which need `lower_block_body`
   but are `return`-inserted—a deferred semantic rewrite), then long single-line

@@ -42,6 +42,7 @@ named_tuples
 paren_blocks
 paren_padding
 range_colon
+struct_blocks
 ternary_spacing
 tight_operators
 trailing_comments

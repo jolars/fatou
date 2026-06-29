@@ -32,6 +32,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
+        SyntaxKind::STRUCT_DEF => lower_struct(node),
         SyntaxKind::IF_EXPR => lower_if(node),
         SyntaxKind::TRY_EXPR => lower_try(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
@@ -1703,6 +1704,68 @@ fn lower_block_expr(node: &SyntaxNode) -> Ir {
     };
 
     Ir::concat([Ir::text(kw), body, Ir::HardLine, Ir::text("end")])
+}
+
+/// Lay out a `struct`/`mutable struct` definition by indenting its field body
+/// one step, reusing the [`lower_block_body`] engine the other block rules
+/// share. The shape is `[MUTABLE_KW] STRUCT_KW SIGNATURE BLOCK END_KW`; the
+/// `SIGNATURE` header (the type name, optional `{…}` type parameters, and an
+/// optional `<: Super` supertype) is lowered recursively, so its inner spacing
+/// normalizes (`struct Bar<:Animal` → `struct Bar <: Animal`).
+///
+/// Like the loop and `begin`/`let` rules, a **non-empty** body is always
+/// exploded to the vertical form even when the source wrote it on one line
+/// (`struct Foo x; y end` → `struct Foo⏎    x; y⏎end`). An **empty** body
+/// (`struct Empty end`, whose `BLOCK` holds only whitespace) makes
+/// `lower_block_body` return `None`, and the transparent fallback preserves the
+/// source layout byte-for-byte, matching the target. Struct field bodies are
+/// declarations, never `return`-inserted (only function bodies are), so there is
+/// no semantic-rewrite risk. Any shape this does not fully model — a body
+/// comment the engine rejects, a missing signature or `end`, an unexpected
+/// child — also falls back to the verbatim transparent lowering.
+fn lower_struct(node: &SyntaxNode) -> Ir {
+    let mut mutable = false;
+    let mut signature: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_struct = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::SIGNATURE if signature.is_none() && block.is_none() => {
+                    signature = Some(child)
+                }
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::MUTABLE_KW if !mutable => mutable = true,
+                SyntaxKind::STRUCT_KW if !saw_struct => saw_struct = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(signature), Some(block)) = (saw_struct, saw_end, signature, block) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    let mut parts: Vec<Ir> = Vec::new();
+    if mutable {
+        parts.push(Ir::text("mutable "));
+    }
+    parts.push(Ir::text("struct "));
+    parts.push(lower_node(&signature));
+    parts.push(body);
+    parts.push(Ir::HardLine);
+    parts.push(Ir::text("end"));
+    Ir::concat(parts)
 }
 
 /// Lay out a `let` block (`let x = 1 … end`) by indenting its body one step,

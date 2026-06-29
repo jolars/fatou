@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**51 fixtures**): **46 allowlisted**, 5 blocked
+Dir corpus (**52 fixtures**): **47 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -72,34 +72,38 @@ gained a `GapLine`/`item_comments`/`header_comment` model; `lower_matrix` keeps
 line comments verbatim), block-comment (`#= … =#`) preservation in block bodies
 (`lower_block_body` gained a `BLOCK_COMMENT` arm), block-comment preservation
 inside broken brackets and matrices (`lower_multiline_bracket` + `lower_matrix`
-`COMMENT` arms widened to `BLOCK_COMMENT`).
+`COMMENT` arms widened to `BLOCK_COMMENT`), `struct`/`mutable struct` field-body
+indentation (`lower_struct`, fourth reuse of `lower_block_body`).
 
-## Latest session (block comments in brackets + matrices)
+## Latest session (struct / mutable struct field bodies)
 
-Ranked target #3. The two comment models from the broken-bracket/matrix session
-already handled line comments; a `BLOCK_COMMENT` just fell through to their
-`_ => lower_transparent` bails. Probed Runic: inside brackets **and** matrices a
-block comment is preserved **verbatim** in every position (trailing on an item,
-own-line, on the open-bracket header line, multi-line continuation, same-line item
-after it like `1, #= a =# 2,`). So both arms were a one-line widening:
-`SyntaxKind::COMMENT` → `SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT`. A
-block-comment token always ends with `=#`, so the existing `trim_end_matches([' ',
-'\t'])` is a **no-op** for it (its multi-line interior and any trailing blanks stay
-byte-for-byte); a line comment's own trailing whitespace still trims as before.
+Fresh target (not on the prior ranked list, picked as a clean `lower_block_body`
+reuse that—unlike `function`—is **never** `return`-inserted, since struct field
+bodies are declarations, not expressions). CST: `STRUCT_DEF` =
+`[MUTABLE_KW] STRUCT_KW SIGNATURE BLOCK END_KW`. The new `lower_struct` arm is a
+near-copy of `lower_loop`: collect the optional `mutable`, the `struct` keyword,
+the `SIGNATURE` header, the `BLOCK`, and `end`; emit `["mutable "?] "struct " +
+lower_node(signature) + lower_block_body(block) + HardLine + "end"`. The
+`SIGNATURE` is lowered recursively (no `lower_node` arm → `lower_transparent`),
+which normalizes a tight supertype binary (`struct Bar<:Animal` →
+`struct Bar <: Animal`) and keeps `{T}` type params verbatim.
 
-Brackets: the trailing block comment rides after the comma with **one** canonical
-pre-`#=` space — the **same** Tenet-1 spacing divergence already blocked as
-`bracket_comment_spacing_divergence` (no new blocked fixture). The same-line
-`1, #= a =# 2,` case falls out for free (`Sep::Space` renders it). Matrices keep
-their interior verbatim, so block comments are a **zero-divergence** extension.
-The one shape kept out: a comment **before** the comma (`1 #= c =#,`) — Fatou
-normalizes the comma to right after the item (`1, #= c =#`) while Runic preserves
-source order; rare, unrecorded, out of the fixture. Verified byte-identical to
-Runic across trailing/own-line/header/multi-line in vector/call/index brackets and
-multi-element/column matrix rows; idempotent. Fixtures `bracket_block_comments/`,
-`matrix_block_comments/`. Corpus 44→46 pass, divergence held at 5 (no new block);
-allowlist 44→46. No parser blocker (block comments tokenize as one `BLOCK_COMMENT`,
-multi-line span included).
+Everything else falls out of the shared engine: a non-empty one-line body
+explodes vertical (`struct Pair x; y end` → `struct Pair⏎    x; y⏎end`), an
+**empty** `struct Empty end` (whose `BLOCK` holds only `WHITESPACE`, no statement
+line) makes `lower_block_body` return `None` → transparent → byte-identical
+preservation. Blank-line capping (≤2), trailing line comments, and short-form
+inner constructors (`Foo() = new(0)`, an `ASSIGNMENT_EXPR`, not a function body)
+all worked with zero extra code. Verified byte-identical to Runic across simple,
+mutable, parametric, subtype, one-line, empty, blank-gap, and ctor cases;
+idempotent. Fixture `struct_blocks/`. Corpus 46→47 pass, divergence held at 5 (no
+new block); allowlist 46→47. No parser blocker (struct tokenizes/parses cleanly).
+
+Kept out of the fixture: long-form inner constructors (`function Foo() … end`
+inside a struct) — those **are** return-inserted by Runic (function body), the
+deferred `control_flow` semantic rewrite. Module bodies are a separate, distinct
+shape (Runic does **not** indent module contents — body stays at column 0), so
+`module` is not covered here.
 
 ### Ranked next targets
 
@@ -107,12 +111,22 @@ multi-line span included).
    **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
    could still land *if* return-insertion is modeled or the fixture dodges it;
    currently deferred.
-2. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
+2. **`module` bodies** — like the block rules but Runic keeps the body at column 0
+   (no indent), unlike every other block. A `lower_block_body`-style engine with a
+   zero-step indent; low risk, no return-insertion. Probe `module M … end`.
+3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven (newline-triggered); Runic also breaks on
    width. Needs the `fits` engine, not just `HardLine`s.
 
 ## Earlier sessions
 
+- **block comments in brackets + matrices (`lower_multiline_bracket` +
+  `lower_matrix` `COMMENT` arms widened to `BLOCK_COMMENT`)**: a one-line widening
+  per arm — inside brackets and matrices a block comment is preserved **verbatim**
+  in every position. Brackets ride the trailing one with one canonical pre-`#=`
+  space (existing `bracket_comment_spacing_divergence`); matrices verbatim, no
+  divergence. Kept out: a comment before the comma (`1 #= c =#,`). Fixtures
+  `bracket_block_comments/`, `matrix_block_comments/`. Corpus 44→46.
 - **block comments in block bodies (`lower_block_body` `BLOCK_COMMENT` arm)**:
   lifted the `_ => return None` bail. A block comment is preserved **verbatim**
   except Runic re-indents *only the `#=` line* to the body indent; continuation
