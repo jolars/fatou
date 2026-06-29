@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**60 fixtures**): **55 allowlisted**, 5 blocked
+Dir corpus (**61 fixtures**): **56 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -79,51 +79,48 @@ indentation (`lower_struct`, fourth reuse of `lower_block_body`),
 `abstract type`/`primitive type` keyword-region whitespace (`lower_type_decl`),
 multi-line ternary continuation indent (`lower_ternary` extended),
 `function`/`macro` definition bodies (`lower_function`, fifth `lower_block_body`
-reuse, gated by a return-insertion dodge).
+reuse, gated by a return-insertion dodge), `do` blocks (`lower_do` +
+`lower_do_params`, sixth `lower_block_body` reuse, **no** return-insertion guard).
 
-## Latest session (function / macro definition bodies)
+## Latest session (do blocks)
 
-Landed `lower_function` (arm on `FUNCTION_DEF`/`MACRO_DEF`), the **fifth**
-`lower_block_body` reuse — shape `(FUNCTION_KW|MACRO_KW) WHITESPACE SIGNATURE BLOCK
-END_KW`, a near-copy of `lower_loop`. The `SIGNATURE` (one node carrying name, arg
-list, optional `::`return-type, and a `where` clause) is lowered recursively so its
-inner spacing normalizes (`function f(x)::Int where {T}`); the keyword always gets
-exactly one trailing space, which also supplies the space anonymous `function(x)`
-is missing (`function (x)`). Non-empty body explodes vertical; an empty body
-(`function empty() end`) bails to transparent (Runic also keeps it one-line).
+Landed `lower_do` (arm on `DO_EXPR`), the **sixth** `lower_block_body` reuse —
+shape `CALL_EXPR WHITESPACE DO_KW [WHITESPACE DO_PARAMS] BLOCK END_KW`. The twist
+vs. the other block rules: the head (the `CALL_EXPR` the `do` attaches to) sits
+*before* the `do` keyword, not after, so the loop tracks a `saw_do` flag — the
+single node before `do` is the head, after `do` come the optional `DO_PARAMS` then
+the `BLOCK`. Output is `lower_node(head) + " do" + (" " + params)? + body + HardLine
++ "end"`. Head and params are lowered recursively (head normalizes its own arg
+spacing `g(a,b)` → `g(a, b)`; params via `lower_do_params`).
 
-The crux is **return-insertion**: function/macro bodies are the *one* construct
-Runic semantically rewrites (it inserts an implicit `return` on the tail
-expression — `function f() x end` → `… return x …`, verified across bare-expr,
-multi-stmt, and `if`/`try` tails). Fatou is layout-only and never inserts `return`,
-so the rule reshapes **only when that rewrite is provably a no-op**: the body's tail
-statement is already an explicit `return` (`block.children().last().kind() ==
-RETURN_EXPR`). Every other tail — and the empty body — bails to transparent. This is
-*sound but not complete*: Runic also skips insertion in some cases the guard rejects
-(e.g. `function c() return x; y end` — a stray tail after an earlier return — which
-Runic leaves but Fatou bails on); those just stay transparent (lossless, kept out of
-the fixture), never wrong.
+`DO_PARAMS` is a comma list (`do x, y`) or a single destructuring tuple
+(`do (x, y)`). `lower_do_params` `", "`-joins items (each `lower_node`-recursed, so
+`do x,y` → `do x, y` and the tuple normalizes), returning `None` (→ whole `do`
+bails transparent) on a comment/newline, a leading/trailing/doubled comma, or an
+empty list.
 
-Verified byte-identical to Runic across over/under-indented bodies, a one-liner
-(`function h(x) return x end` → exploded), an anonymous `function(x)` (keyword space
-+ `return`), a `where`/return-type signature, a leading blank-line body, and a macro.
-Idempotent (re-indented bodies are `lower_block_body` fixed points). Fixture
-`function_blocks/`. Corpus 54→55 pass, divergence held at 5 (no new block); allowlist
-54→55. **No parser blocker** (all shapes tokenize/parse cleanly). `do` blocks
-(`DO_EXPR`) kept out — same return-insertion applies; the tail-return dodge could
-extend there next.
+The crux that **diverges from this skill's prior assumption**: `do` bodies are
+**NOT** `return`-inserted by Runic (the RECAP/TODO had predicted they were).
+Probed and disproved — `map(xs) do x; x + 1 end` keeps the bare tail `x + 1`, no
+`return` inserted (verified bare-expr, multi-stmt tails). So `lower_do` has **no**
+tail-return guard at all: any non-empty body reshapes freely (simpler than
+`lower_function`). An **empty** body (`foo() do … end`) makes `lower_block_body`
+return `None` → transparent (Runic keeps it as-is).
+
+Verified byte-identical to Runic across a bare tail, a multi-stmt body, tight-comma
+params, a destructuring tuple, a no-params `return` body, an over-indented body, an
+empty body, and a leading-blank body. Idempotent (re-indented bodies are
+`lower_block_body` fixed points). Fixture `do_blocks/`. Corpus 55→56 pass,
+divergence held at 5 (no new block); allowlist 55→56. **No parser blocker** (all
+shapes tokenize/parse cleanly).
 
 ### Ranked next targets
 
-1. **`do` blocks** (`DO_EXPR` = `CALL_EXPR DO_KW <params> BLOCK END_KW`) — also
-   `return`-inserted, so the same tail-`return` dodge from this session likely
-   applies. The most direct extension. (Anonymous `function`/`do` whose body does
-   *not* end in `return` stays deferred until return-insertion is modeled.)
-2. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
+1. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
    own break engine drives the layout (`a ? (⏎    b ? c :⏎    d⏎) : e`); the
    continuation indent is relative to the paren, not the statement. Out of scope of
    the `lower_ternary` work (kept out of its fixture).
-3. ~~Long single-line bracket/matrix width reflow~~ — **NON-GOAL.** Probing this
+2. ~~Long single-line bracket/matrix width reflow~~ — **NON-GOAL.** Probing this
    session disproved the earlier claim: Runic does **not** width-reflow brackets,
    matrices, calls, or ternaries (verified a 94-col array, a long call, and a long
    array all stay single-line). Runic's breaking is **purely source-driven**, same
@@ -139,6 +136,16 @@ extend there next.
 
 ## Earlier sessions
 
+- **function / macro definition bodies (`lower_function`, fifth `lower_block_body`
+  reuse)**: arm on `FUNCTION_DEF`/`MACRO_DEF`, shape `(FUNCTION_KW|MACRO_KW) WS
+  SIGNATURE BLOCK END_KW`, near-copy of `lower_loop`. `SIGNATURE` lowered recursively
+  (name/args/`::`return-type/`where` normalize); keyword gets one trailing space
+  (anonymous `function(x)` → `function (x)`). The crux is **return-insertion**:
+  function bodies are the *one* construct Runic semantically rewrites (inserts
+  implicit `return` on the tail). Fatou never inserts `return`, so the rule reshapes
+  **only when that rewrite is a no-op** — the body's tail statement is already an
+  explicit `RETURN_EXPR`; every other tail and the empty body bail to transparent
+  (sound, not complete). Fixture `function_blocks/`. Corpus 54→55.
 - **abstract / primitive type declarations (`lower_type_decl`)**: completes the
   type-declaration family — **bodyless one-liners** (`ABSTRACT_DEF`,
   `PRIMITIVE_DEF`), no body engine, no `return`-insertion risk. Canonical decls

@@ -21,6 +21,7 @@ collections
 comparison_chains
 comprehension_for_in
 curly_type_params
+do_blocks
 dot_access
 export_public_lists
 float_literals

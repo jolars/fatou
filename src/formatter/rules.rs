@@ -34,6 +34,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
         SyntaxKind::STRUCT_DEF => lower_struct(node),
         SyntaxKind::FUNCTION_DEF | SyntaxKind::MACRO_DEF => lower_function(node),
+        SyntaxKind::DO_EXPR => lower_do(node),
         SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => lower_type_decl(node),
         SyntaxKind::MODULE_DEF => lower_module(node),
         SyntaxKind::IF_EXPR => lower_if(node),
@@ -1884,6 +1885,109 @@ fn lower_function(node: &SyntaxNode) -> Ir {
         Ir::HardLine,
         Ir::text("end"),
     ])
+}
+
+/// Lay out a `do`-block (`CALL_EXPR do <params> BLOCK end`). The call head sits
+/// *before* the `do` keyword (`map(xs) do x`), with an optional `DO_PARAMS`
+/// argument list after it; both are lowered recursively (the head normalizes its
+/// own arg spacing, the params get `", "`-joined) and the body is delegated to
+/// the shared [`lower_block_body`] engine, exploding a non-empty body to the
+/// vertical form like the other block rules.
+///
+/// Unlike `function`/`macro` bodies, `do`-block bodies are **not**
+/// `return`-inserted by Runic (verified: a bare tail expression stays bare), so
+/// there is no semantic-rewrite guard here — any non-empty body may be reshaped.
+/// An **empty** body (`foo() do … end`) makes `lower_block_body` return `None`
+/// and the transparent fallback preserves the source. Any unmodeled shape — a
+/// comment or newline in the params, a missing head/keyword/`end`, an unexpected
+/// child — also bails to the verbatim transparent lowering.
+fn lower_do(node: &SyntaxNode) -> Ir {
+    let mut head: Option<SyntaxNode> = None;
+    let mut params: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_do = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if !saw_do && head.is_none() {
+                    head = Some(child);
+                } else if saw_do
+                    && child.kind() == SyntaxKind::DO_PARAMS
+                    && params.is_none()
+                    && block.is_none()
+                {
+                    params = Some(child);
+                } else if saw_do && child.kind() == SyntaxKind::BLOCK && block.is_none() {
+                    block = Some(child);
+                } else {
+                    return lower_transparent(node);
+                }
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::DO_KW if !saw_do => saw_do = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(head), Some(block)) = (saw_do, saw_end, head, block) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    let mut parts = vec![lower_node(&head), Ir::text(" do")];
+    if let Some(params) = params {
+        let Some(params_ir) = lower_do_params(&params) else {
+            return lower_transparent(node);
+        };
+        parts.push(Ir::text(" "));
+        parts.push(params_ir);
+    }
+    parts.push(body);
+    parts.push(Ir::HardLine);
+    parts.push(Ir::text("end"));
+    Ir::concat(parts)
+}
+
+/// Lower a `do`-block's `DO_PARAMS` list, `", "`-joining its comma-separated
+/// items (each lowered recursively, so a destructuring tuple `do (x, y)`
+/// normalizes too). Returns `None` for any shape this does not model — a comment
+/// or newline, a leading/trailing/doubled comma, an empty list — so the caller
+/// bails the whole `do`-block to the verbatim transparent lowering.
+fn lower_do_params(node: &SyntaxNode) -> Option<Ir> {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut expect_item = true;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) if expect_item => {
+                parts.push(lower_node(&child));
+                expect_item = false;
+            }
+            // A node when a comma was expected (two adjacent items).
+            NodeOrToken::Node(_) => return None,
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::COMMA if !expect_item => {
+                    parts.push(Ir::text(", "));
+                    expect_item = true;
+                }
+                SyntaxKind::WHITESPACE => {}
+                _ => return None,
+            },
+        }
+    }
+
+    // Reject an empty list and a trailing comma (`expect_item` still set).
+    if parts.is_empty() || expect_item {
+        return None;
+    }
+    Some(Ir::concat(parts))
 }
 
 /// Lay out an `abstract type`/`primitive type` declaration. These are bodyless

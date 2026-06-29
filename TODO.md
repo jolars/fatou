@@ -260,12 +260,18 @@ leverage.
   these are the one construct Runic `return`-inserts, so the rule reshapes **only**
   when that rewrite is a no-op—the body's tail statement is already an explicit
   `return`—and bails to transparent on every other tail, an empty body, or any
-  unmodeled shape; locked by `function_blocks/`).
-  **Next:** `do` blocks (`DO_EXPR`, also `return`-inserted—same tail-return dodge
-  could apply), then long single-line bracket/matrix width-based reflow—**but**
-  probing shows Runic does **not** width-reflow (it is purely source-driven like
-  Fatou), so that target is a non-goal; see the `formatter-parity` RECAP's ranked
-  targets.
+  unmodeled shape; locked by `function_blocks/`),
+  `do` blocks (`lower_do` over `DO_EXPR`: the call head sits *before* the `do`
+  keyword and is lowered recursively, the optional `DO_PARAMS` arg list is
+  `", "`-joined via `lower_do_params` (`do x,y` → `do x, y`, destructure `do (x, y)`
+  normalized), and the body delegates to `lower_block_body`. Unlike function bodies,
+  `do` bodies are **not** `return`-inserted by Runic, so there is no tail-return
+  guard—any non-empty body reshapes; an empty body bails to transparent; locked by
+  `do_blocks/`).
+  **Next:** multi-line ternary in a parenthesized branch (paren's own break engine
+  drives the layout); long single-line bracket/matrix width-based reflow is a
+  **non-goal**—probing shows Runic does **not** width-reflow (it is purely
+  source-driven like Fatou); see the `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,
   locked by the `matrices/` regression fixture, no rule; compound range operands like
