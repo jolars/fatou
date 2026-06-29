@@ -12,6 +12,7 @@ binary_spacing
 block_comments
 block_comments_in_blocks
 bracket_blank_lines
+bracket_block_comments
 bracket_comments
 bracket_gap_blank_lines
 call_arg_lists
@@ -32,6 +33,7 @@ let_blocks
 loop_blocks
 matrices
 matrix_blank_lines
+matrix_block_comments
 matrix_comments
 matrix_gap_blank_lines
 multiline_brackets

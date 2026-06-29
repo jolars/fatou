@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**49 fixtures**): **44 allowlisted**, 5 blocked
+Dir corpus (**51 fixtures**): **46 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -70,33 +70,36 @@ structure (`lower_if`/`lower_try` + shared `lower_branch_clause`, third reuse of
 preservation inside broken brackets and matrices (`lower_multiline_bracket`
 gained a `GapLine`/`item_comments`/`header_comment` model; `lower_matrix` keeps
 line comments verbatim), block-comment (`#= … =#`) preservation in block bodies
-(`lower_block_body` gained a `BLOCK_COMMENT` arm).
+(`lower_block_body` gained a `BLOCK_COMMENT` arm), block-comment preservation
+inside broken brackets and matrices (`lower_multiline_bracket` + `lower_matrix`
+`COMMENT` arms widened to `BLOCK_COMMENT`).
 
-## Latest session (block comments in block bodies)
+## Latest session (block comments in brackets + matrices)
 
-Lifted the `BLOCK_COMMENT` bail in `lower_block_body` (the `_ => return None`
-catch-all). Probed Runic: a block comment is preserved **verbatim** except that
-Runic re-indents *only the line the `#=` opens* to the body indent; continuation
-lines (and their leading whitespace) are kept byte-for-byte. So the rule is tiny —
-mirror the `COMMENT` arm but **don't trim** (block comment interiors keep trailing
-blanks too): fill the line's existing `comment` slot with `tok.text()` as-is.
-Own-line → its own line, the framing `HardLine` supplies the body indent for the
-`#=` line, embedded `\n`s print verbatim (over-indented `#=` pulled in, weird
-continuation indent left alone). Trailing → rides after the statement with **one**
-canonical pre-`#=` space — the **same Tenet-1 spacing divergence** as line
-comments (Runic preserves the user's ≥1 space), recorded as the new blocked
-fixture `block_comment_spacing_divergence/`.
+Ranked target #3. The two comment models from the broken-bracket/matrix session
+already handled line comments; a `BLOCK_COMMENT` just fell through to their
+`_ => lower_transparent` bails. Probed Runic: inside brackets **and** matrices a
+block comment is preserved **verbatim** in every position (trailing on an item,
+own-line, on the open-bracket header line, multi-line continuation, same-line item
+after it like `1, #= a =# 2,`). So both arms were a one-line widening:
+`SyntaxKind::COMMENT` → `SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT`. A
+block-comment token always ends with `=#`, so the existing `trim_end_matches([' ',
+'\t'])` is a **no-op** for it (its multi-line interior and any trailing blanks stay
+byte-for-byte); a line comment's own trailing whitespace still trims as before.
 
-The one wrinkle vs line comments: a block comment does **not** close its line, so
-`x = 1 #= c =#; y = 2` could put `y = 2` on the wrong side of the recorded comment.
-Guarded by a new `SEMICOLON` check (`return None` if the line already has a
-comment); the existing `expect_sep` already bails a node that follows. (An *inline*
-mid-expression `#= … =#` is trivia inside its owning node, which bails that node to
-transparent, so it never reaches block level.) Verified byte-identical to Runic
-across own-line/over-indented/multi-line-continuation/trailing in `begin` and
-`let`; idempotent. Fixture `block_comments_in_blocks/`. Corpus 43→44 pass,
-divergence 4→5 (the deliberate new block); allowlist 43→44. No parser blocker
-(block comments tokenize as one `BLOCK_COMMENT`, multi-line span included).
+Brackets: the trailing block comment rides after the comma with **one** canonical
+pre-`#=` space — the **same** Tenet-1 spacing divergence already blocked as
+`bracket_comment_spacing_divergence` (no new blocked fixture). The same-line
+`1, #= a =# 2,` case falls out for free (`Sep::Space` renders it). Matrices keep
+their interior verbatim, so block comments are a **zero-divergence** extension.
+The one shape kept out: a comment **before** the comma (`1 #= c =#,`) — Fatou
+normalizes the comma to right after the item (`1, #= c =#`) while Runic preserves
+source order; rare, unrecorded, out of the fixture. Verified byte-identical to
+Runic across trailing/own-line/header/multi-line in vector/call/index brackets and
+multi-element/column matrix rows; idempotent. Fixtures `bracket_block_comments/`,
+`matrix_block_comments/`. Corpus 44→46 pass, divergence held at 5 (no new block);
+allowlist 44→46. No parser blocker (block comments tokenize as one `BLOCK_COMMENT`,
+multi-line span included).
 
 ### Ranked next targets
 
@@ -107,13 +110,17 @@ divergence 4→5 (the deliberate new block); allowlist 43→44. No parser blocke
 2. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven (newline-triggered); Runic also breaks on
    width. Needs the `fits` engine, not just `HardLine`s.
-3. **`BLOCK_COMMENT` in brackets/matrices** — `lower_multiline_bracket` and
-   `lower_matrix` still bail on `BLOCK_COMMENT` (only block bodies handle it now).
-   The bracket comment model would need a block-comment variant; matrices preserve
-   their interior verbatim so it may be a near-free extension. Probe Runic first.
 
 ## Earlier sessions
 
+- **block comments in block bodies (`lower_block_body` `BLOCK_COMMENT` arm)**:
+  lifted the `_ => return None` bail. A block comment is preserved **verbatim**
+  except Runic re-indents *only the `#=` line* to the body indent; continuation
+  lines kept byte-for-byte. Mirror the `COMMENT` arm but **don't trim**. Trailing
+  rides with one canonical pre-`#=` space — Tenet-1 divergence
+  `block_comment_spacing_divergence/`. A `SEMICOLON` guard handles the "block
+  comment doesn't close its line" wrinkle (`x = 1 #= c =#; y = 2`). Fixture
+  `block_comments_in_blocks/`. Corpus 43→44, divergence 4→5.
 - **comments inside broken brackets + matrices**: lifted the `COMMENT` bail in
   `lower_multiline_bracket` (rewrite: `Sep::Newline` → `Sep::Break(Vec<GapLine>)`
   with `GapLine = Blank | Comment`, plus aligned `item_comments` for trailing and

@@ -1398,7 +1398,11 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                     }
                     comma = true;
                 }
-                SyntaxKind::COMMENT => {
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
+                    // A block-comment token always ends with `=#`, so the trim is a
+                    // no-op for it; its multi-line interior and any trailing blanks
+                    // are preserved verbatim, matching Runic. A line comment's own
+                    // trailing whitespace is trimmed as before.
                     let text = tok.text().trim_end_matches([' ', '\t']).to_string();
                     if newlines == 0 {
                         // Same line as the previous content: a trailing comment on
@@ -1563,14 +1567,18 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
                     .unwrap()
                     .push((true, Ir::text(tok.text().to_string()))),
                 SyntaxKind::SEMICOLON => lines.last_mut().unwrap().push((false, Ir::text(";"))),
-                // A line comment is kept verbatim as a non-whitespace line element
-                // (only its own trailing whitespace trimmed). The matrix interior
-                // is preserved, so the pre-`#` spacing matches Runic byte-for-byte;
-                // an own-line comment becomes a content line of its own.
-                SyntaxKind::COMMENT => lines.last_mut().unwrap().push((
-                    false,
-                    Ir::text(tok.text().trim_end_matches([' ', '\t']).to_string()),
-                )),
+                // A line or block comment is kept verbatim as a non-whitespace line
+                // element (a line comment's own trailing whitespace trimmed; a block
+                // comment ends with `=#` so the trim is a no-op, keeping its
+                // multi-line interior verbatim). The matrix interior is preserved, so
+                // the pre-comment spacing matches Runic byte-for-byte; an own-line
+                // comment becomes a content line of its own.
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
+                    lines.last_mut().unwrap().push((
+                        false,
+                        Ir::text(tok.text().trim_end_matches([' ', '\t']).to_string()),
+                    ))
+                }
                 _ => return lower_transparent(node),
             },
             NodeOrToken::Node(child) => match child.kind() {

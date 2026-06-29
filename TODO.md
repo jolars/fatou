@@ -224,7 +224,13 @@ leverage.
   (`lower_block_body` `BLOCK_COMMENT` arm: own-line/multi-line kept verbatim with
   only the `#=` line re-indented, trailing rides with one canonical space—the same
   Tenet-1 spacing divergence, recorded as `block_comment_spacing_divergence`;
-  locked by `block_comments_in_blocks/`).
+  locked by `block_comments_in_blocks/`), block-comment (`#= … =#`) preservation
+  inside broken brackets/matrices (`lower_multiline_bracket` + `lower_matrix`
+  `BLOCK_COMMENT` arms reusing the existing comment models: trailing/own-line/
+  header/multi-line kept verbatim; brackets ride the trailing one with one
+  canonical space—the existing `bracket_comment_spacing_divergence`; matrices are
+  verbatim so no divergence; locked by `bracket_block_comments/` +
+  `matrix_block_comments/`).
   **Next:** `function`/`do`/`macro` bodies
   (which need `lower_block_body`
   but are `return`-inserted—a deferred semantic rewrite), then long single-line
