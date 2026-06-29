@@ -7,15 +7,12 @@ leverage.
 
 ## Parser
 
-- [ ] Parser: `global`/`local` + multiple assignment parses to a flat token soup.
-  `global a, b = 1, 2` lands as loose `NAME COMMA IDENT EQ INTEGER COMMA INTEGER`
-  children of `GLOBAL_STMT` (no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR`); `local a, b =
-  f(x), g(y)` leaves the calls unwrapped; `global a, b::Int` has no
-  `TYPE_ANNOTATION`. JuliaSyntax: `global ((tuple a b) = (tuple 1 2))`. Inside
-  `global`/`local`, parse a full multiple-assignment (bare-tuple lhs/rhs), don't
-  flatten the comma list. The no-`=` name list (`global a, b`) already parses
-  right. Unblocks formatter-parity ranked target #0 (handed off; see
-  parser-parity RECAP "Queued next targets", 2026-06-29).
+- [x] Parser: `global`/`local` + multiple assignment now nests properly.
+  `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`, `local a, b =
+  f(x), g(y)` wraps the calls, `global a, b::Int` ⇒ `(global a (::-i b Int))`.
+  Switched `global`/`local` to `KwStmt::ExprTuple` (statement-level parse, like
+  `const`); the projector splices a single bare-tuple child. Unblocks
+  formatter-parity ranked target #0.
 - [x] Lexer: identity/inequality operators `===`, `!==`, and tight `!=`. New
   `EqEqEq`/`NotEqEq` tokens (longest-match, beat `==`/`!=`); `scan_ident` now
   stops at a `!` immediately followed by `=` so `a!=b`⇒`a` `!=` `b` while `f!`,

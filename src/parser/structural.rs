@@ -559,14 +559,11 @@ pub(crate) enum KwStmt {
     /// Just the keyword (`break`, `continue`); any trailing trivia is left to
     /// the enclosing block loop, exactly like a single-token atom.
     Bare,
-    /// An optional leading expression, then verbatim passthrough of the rest of
-    /// the line (`global a, b`, `local x`). A top-level comma is *not* folded
-    /// into a tuple: `global`/`local` carry a bare name list (`global a, b` ⇒
-    /// `(global a b)`), so each name is parsed separately.
-    Expr,
-    /// Like [`KwStmt::Expr`], but the operand allows a statement-level
-    /// bare-comma tuple (`return x, y` ⇒ `(return (tuple x y))`, `const x, y =
-    /// 1, 2` ⇒ `(const (= (tuple x y) (tuple 1 2)))`).
+    /// An optional leading expression parsed at statement level, so a top-level
+    /// bare comma folds into a tuple (`return x, y` ⇒ `(return (tuple x y))`,
+    /// `const x, y = 1, 2` ⇒ `(const (= (tuple x y) (tuple 1 2)))`,
+    /// `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`). Any
+    /// remaining same-line tokens are carried through verbatim.
     ExprTuple,
 }
 
@@ -612,7 +609,6 @@ pub(crate) fn parse_keyword_stmt(
         if !header_ends(&ctx, i) {
             let operand = match body {
                 KwStmt::ExprTuple => parse_block_stmt(tokens, i, false, diagnostics),
-                KwStmt::Expr => parse_expr(tokens, i, 0, diagnostics),
                 _ => None,
             };
             if let Some(expr) = operand {

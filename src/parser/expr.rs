@@ -410,7 +410,7 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::GLOBAL_STMT,
-                    KwStmt::Expr,
+                    KwStmt::ExprTuple,
                     false,
                     diagnostics,
                 );
@@ -420,7 +420,7 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::LOCAL_STMT,
-                    KwStmt::Expr,
+                    KwStmt::ExprTuple,
                     false,
                     diagnostics,
                 );

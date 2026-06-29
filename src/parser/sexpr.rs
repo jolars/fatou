@@ -1774,6 +1774,18 @@ fn project_keyword_stmt(head: &str, node: &SyntaxNode) -> String {
 }
 
 fn project_decl(head: &str, node: &SyntaxNode) -> String {
+    // A `global`/`local`/`const` whose body is a single bare comma list parses to
+    // one `BARE_TUPLE_EXPR`; JuliaSyntax splices its elements directly into the
+    // declaration (`global a, b` ⇒ `(global a b)`, not `(global (tuple a b))`). An
+    // assignment (`global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`)
+    // or a parenthesized tuple (`global (a, b)` ⇒ `(global (tuple-p a b))`) stays
+    // one child.
+    let nodes = child_nodes(node);
+    if let [only] = nodes.as_slice()
+        && only.kind() == BARE_TUPLE_EXPR
+    {
+        return sexp(head, project_each(child_nodes(only)));
+    }
     // `const x = 1` / `local y = 2` wrap a single assignment; `global a, b`
     // carries a bare name list. Both fall out of collecting every operand.
     let items: Vec<String> = significant(node)

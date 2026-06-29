@@ -1,0 +1,1 @@
+(toplevel (global (= (tuple a b) (tuple 1 2))) (local (= (tuple a b) (tuple (call f x) (call g y)))) (global a (::-i b Int)) (global (= (tuple x y z) (tuple 1 2 3))) (local (= (tuple m n) (call g))))

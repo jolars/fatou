@@ -72,6 +72,7 @@ function_signature_newline
 generator_arguments
 generators
 generator_whitespace_error
+global_local_assignment
 glued_colon_operator
 identity_operators
 if_missing_condition

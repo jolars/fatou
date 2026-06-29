@@ -114,11 +114,13 @@ ROOT@0..232
   GLOBAL_STMT@150..161
     GLOBAL_KW@150..156 "global"
     WHITESPACE@156..157 " "
-    NAME@157..158
-      IDENT@157..158 "a"
-    COMMA@158..159 ","
-    WHITESPACE@159..160 " "
-    IDENT@160..161 "b"
+    BARE_TUPLE_EXPR@157..161
+      NAME@157..158
+        IDENT@157..158 "a"
+      COMMA@158..159 ","
+      WHITESPACE@159..160 " "
+      NAME@160..161
+        IDENT@160..161 "b"
   NEWLINE@161..162 "\n"
   LOCAL_STMT@162..173
     LOCAL_KW@162..167 "local"

@@ -1,0 +1,129 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..102
+  GLOBAL_STMT@0..18
+    GLOBAL_KW@0..6 "global"
+    WHITESPACE@6..7 " "
+    ASSIGNMENT_EXPR@7..18
+      BARE_TUPLE_EXPR@7..11
+        NAME@7..8
+          IDENT@7..8 "a"
+        COMMA@8..9 ","
+        WHITESPACE@9..10 " "
+        NAME@10..11
+          IDENT@10..11 "b"
+      WHITESPACE@11..12 " "
+      EQ@12..13 "="
+      WHITESPACE@13..14 " "
+      BARE_TUPLE_EXPR@14..18
+        LITERAL@14..15
+          INTEGER@14..15 "1"
+        COMMA@15..16 ","
+        WHITESPACE@16..17 " "
+        LITERAL@17..18
+          INTEGER@17..18 "2"
+  NEWLINE@18..19 "\n"
+  LOCAL_STMT@19..42
+    LOCAL_KW@19..24 "local"
+    WHITESPACE@24..25 " "
+    ASSIGNMENT_EXPR@25..42
+      BARE_TUPLE_EXPR@25..29
+        NAME@25..26
+          IDENT@25..26 "a"
+        COMMA@26..27 ","
+        WHITESPACE@27..28 " "
+        NAME@28..29
+          IDENT@28..29 "b"
+      WHITESPACE@29..30 " "
+      EQ@30..31 "="
+      WHITESPACE@31..32 " "
+      BARE_TUPLE_EXPR@32..42
+        CALL_EXPR@32..36
+          NAME@32..33
+            IDENT@32..33 "f"
+          ARG_LIST@33..36
+            LPAREN@33..34 "("
+            ARG@34..35
+              NAME@34..35
+                IDENT@34..35 "x"
+            RPAREN@35..36 ")"
+        COMMA@36..37 ","
+        WHITESPACE@37..38 " "
+        CALL_EXPR@38..42
+          NAME@38..39
+            IDENT@38..39 "g"
+          ARG_LIST@39..42
+            LPAREN@39..40 "("
+            ARG@40..41
+              NAME@40..41
+                IDENT@40..41 "y"
+            RPAREN@41..42 ")"
+  NEWLINE@42..43 "\n"
+  GLOBAL_STMT@43..59
+    GLOBAL_KW@43..49 "global"
+    WHITESPACE@49..50 " "
+    BARE_TUPLE_EXPR@50..59
+      NAME@50..51
+        IDENT@50..51 "a"
+      COMMA@51..52 ","
+      WHITESPACE@52..53 " "
+      TYPE_ANNOTATION@53..59
+        NAME@53..54
+          IDENT@53..54 "b"
+        COLON_COLON@54..56 "::"
+        NAME@56..59
+          IDENT@56..59 "Int"
+  NEWLINE@59..60 "\n"
+  GLOBAL_STMT@60..84
+    GLOBAL_KW@60..66 "global"
+    WHITESPACE@66..67 " "
+    ASSIGNMENT_EXPR@67..84
+      BARE_TUPLE_EXPR@67..74
+        NAME@67..68
+          IDENT@67..68 "x"
+        COMMA@68..69 ","
+        WHITESPACE@69..70 " "
+        NAME@70..71
+          IDENT@70..71 "y"
+        COMMA@71..72 ","
+        WHITESPACE@72..73 " "
+        NAME@73..74
+          IDENT@73..74 "z"
+      WHITESPACE@74..75 " "
+      EQ@75..76 "="
+      WHITESPACE@76..77 " "
+      BARE_TUPLE_EXPR@77..84
+        LITERAL@77..78
+          INTEGER@77..78 "1"
+        COMMA@78..79 ","
+        WHITESPACE@79..80 " "
+        LITERAL@80..81
+          INTEGER@80..81 "2"
+        COMMA@81..82 ","
+        WHITESPACE@82..83 " "
+        LITERAL@83..84
+          INTEGER@83..84 "3"
+  NEWLINE@84..85 "\n"
+  LOCAL_STMT@85..101
+    LOCAL_KW@85..90 "local"
+    WHITESPACE@90..91 " "
+    ASSIGNMENT_EXPR@91..101
+      BARE_TUPLE_EXPR@91..95
+        NAME@91..92
+          IDENT@91..92 "m"
+        COMMA@92..93 ","
+        WHITESPACE@93..94 " "
+        NAME@94..95
+          IDENT@94..95 "n"
+      WHITESPACE@95..96 " "
+      EQ@96..97 "="
+      WHITESPACE@97..98 " "
+      CALL_EXPR@98..101
+        NAME@98..99
+          IDENT@98..99 "g"
+        ARG_LIST@99..101
+          LPAREN@99..100 "("
+          RPAREN@100..101 ")"
+  NEWLINE@101..102 "\n"

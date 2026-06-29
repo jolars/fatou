@@ -6,24 +6,13 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Handoff from formatter-parity (2026-06-29):** `global`/`local` followed by a
-**multiple assignment** parses to a degenerate *flat token soup* instead of a
-nested tree. Fatou produces e.g. for `global a, b = 1, 2` a `GLOBAL_STMT` holding
-loose `NAME COMMA IDENT EQ INTEGER COMMA INTEGER` children (no `ASSIGNMENT_EXPR`,
-no `BARE_TUPLE_EXPR`); for `local a, b = f(x), g(y)` even the calls are unwrapped
-(`IDENT LPAREN IDENT RPAREN` flat, no `CALL_EXPR`); `global a, b::Int` has no
-`TYPE_ANNOTATION`. JuliaSyntax ground truth (green tree):
-`global a, b = 1, 2` ⇒ `global ((tuple a b) = (tuple 1 2))`,
-`local a, b = f(x), g(y)` ⇒ `local ((tuple a b) = (tuple (call f x) (call g y)))`.
-Crux: inside a `global`/`local`, the parser must parse a full statement/expression
-(a multiple-assignment whose lhs/rhs are bare tuples), not greedily flatten a
-name/comma list. The clean **no-`=` name list** (`global a, b`) already parses
-right and formats right; only the assignment/`::` forms flatten. **Why it matters
-for formatter-parity:** once the parser nests these properly, the formatter's
-*existing* rules (keyword-stmt single-operand arm → `lower_binary` `=` → recursed
-`BARE_TUPLE_EXPR`/`CALL_EXPR`) handle `global a,b=1,2` → `global a, b = 1, 2` for
-free—no new formatter code. Cross-ref: formatter-parity RECAP "Earlier session
-(global/local comma name lists)" and its ranked target #0.
+**Handoff to formatter-parity (2026-06-29):** `global`/`local` + multiple
+assignment now nests properly (`global a, b = 1, 2` ⇒ `(global (= (tuple a b)
+(tuple 1 2)))`, `local a, b = f(x), g(y)` wraps the calls, `global a, b::Int` ⇒
+`(global a (::-i b Int))`). The formatter's *existing* rules (keyword-stmt
+single-operand arm → `lower_binary` `=` → recursed `BARE_TUPLE_EXPR`/`CALL_EXPR`)
+should now handle `global a,b=1,2` → `global a, b = 1, 2` for free—formatter-parity
+ranked target #0 is unblocked.
 
 **Handoff to formatter-parity (2026-06-26):** left-division `\` now parses as a
 normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter-parity can add the
@@ -74,7 +63,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **185 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **186 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -94,33 +83,49 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-26b—prefix operators stop at significant newline)
+## Latest session (2026-06-29—global/local multiple-assignment nesting)
 
-A correctness fix surfaced while fixturing 2026-06-26a: binary-only operators in
-prefix position were reaching across a newline for their operand, producing a
-wrong tree **and a false-positive diagnostic on valid code** (bad for the
-linter/LSP). Pre-existing (all binary-only prefix ops, not just `\`).
+The formatter-parity handoff: `global`/`local` followed by a multiple assignment
+parsed to flat token soup—`global a, b = 1, 2` held loose `NAME COMMA IDENT EQ
+INTEGER COMMA INTEGER` children with no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR`,
+`local a, b = f(x), g(y)` left calls unwrapped, `global a, b::Int` had no
+`TYPE_ANNOTATION`. Root: `global`/`local` used `KwStmt::Expr` (`parse_expr` bp 0,
+which stops at the first top-level comma), unlike `const`'s `KwStmt::ExprTuple`
+(`parse_block_stmt`, a statement-level parse that folds bare comma → tuple and
+handles assignment).
 
-- **Root**: the `is_value_operator(k) || k == Question` arm of `parse_prefix`
-  (`expr.rs` ~line 1673) used `skip_trivia(start+1)`, skipping newlines
-  unconditionally, then parsed an operand at `PREFIX_BP`.
-- **Fix**: gate the operand parse with the same `newline_significant =
-  !inside_brackets || array_mode` formula the range colon uses (line 1059). When a
-  significant newline separates the operator from its operand, the operand
-  resolves to `None`, so the existing match arms produce the right shape: value
-  ops → bare atom, `?` → `(error ?)`. One-spot change, no projector/diag changes.
-- **Verified faithful** (10 probes, byte-identical to JS): statement scope
-  `/\nx`⇒`/` then `x`, `.*\nx`⇒`(. *)` then `x`, `=>\nx`, `?\nx`⇒`(error ?)` then
-  `x`; array `[/\nx]`⇒`(vcat / x)`; paren stays insignificant `(/\nx)`⇒`(call-pre
-  (error /) x)`, `f(/\nx)`; same-line unchanged `/x`/`/ x`⇒`(call-pre (error /) x)`,
-  `[/ x]`⇒`(vect (call-pre (error /) x))`.
-- **Fixtures**: parser snapshot + oracle dir slug `prefix_operator_newline`.
-- **Counts**: JS 677 (held—not in the JS corpus, no regressions), dir 184 → **185**.
-- **Deferred sibling**: the *suffixed*-unary arm (`+₁ x`, ~line 1518) still
-  crosses newlines; same gate fixes it but it's far rarer (see Queued next targets).
+- **Fix (2-file)**: ① `expr.rs`—switch `global`/`local` from `KwStmt::Expr` to
+  `KwStmt::ExprTuple`. The `Expr` variant is now unused → **removed** (its
+  `parse_expr(bp 0)` arm in `structural.rs` deleted, `ExprTuple` doc updated).
+  ② `sexpr.rs` `project_decl`—a `global`/`local`/`const` body that is a single
+  bare `BARE_TUPLE_EXPR` splices its elements directly (`global a, b` ⇒ `(global
+  a b)`, not `(global (tuple a b))`); an `ASSIGNMENT_EXPR` or parenthesized
+  `TUPLE_EXPR` stays one child.
+- **Faithful** (13 probes, byte-identical to JS): `global a, b = 1, 2` ⇒
+  `(global (= (tuple a b) (tuple 1 2)))`, `local a, b = f(x), g(y)` ⇒
+  `(local (= (tuple a b) (tuple (call f x) (call g y))))`, `global a, b::Int` ⇒
+  `(global a (::-i b Int))`, `global (a, b)` ⇒ `(global (tuple-p a b))`,
+  `global a = 1, 2` ⇒ `(global (= a (tuple 1 2)))`. Pre-existing passing cases
+  held (`global x,y`, `global x += 1`, `global x ~ 1`, `global const x = 1`).
+- **Bonus**: `project_decl`'s flatten also corrects `const a, b` ⇒ `(error
+  (const a b))` (was `(const (tuple a b))`); not in the JS corpus, no count move.
+- **Fixtures**: parser snapshot + oracle dir slug `global_local_assignment`
+  (5 multi-line cases). `keyword_statements` snapshot re-accepted (`global a, b`
+  now a `BARE_TUPLE_EXPR`, same projection).
+- **Counts**: JS 677 (held—forms not in the JS corpus, no regressions), dir
+  185 → **186**.
+- **Next**: JS harvested backlog still exhausted of fixable cases (8 permanent
+  FAILs). Real-world targets: the deferred *suffixed*-unary prefix arm (`+₁ x`
+  crosses newlines, `expr.rs` ~line 1518), or float-display `show`.
 
 ## Earlier sessions
 
+- **2026-06-26b**—Prefix operators stop at significant newline (correctness fix +
+  false-positive diagnostic removal). Binary-only ops in prefix position reached
+  across a newline for their operand; gated the `is_value_operator(k) || k ==
+  Question` arm of `parse_prefix` with the range-colon `newline_significant`
+  formula. Fixtures parser + dir `prefix_operator_newline`. JS 677 (held); dir
+  184 → 185. Deferred sibling: suffixed-unary arm still crosses newlines.
 - **2026-06-26a**—Left-division `\` family (`\`, `\=`, `.\`, `.\=`). Four tokens
   mirroring the slash family via the 5-file recipe (times tier `(24,25)`,
   left-assoc); longest-match forced the whole family (a lone `\` would mis-lex
