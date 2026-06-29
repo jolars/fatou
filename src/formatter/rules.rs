@@ -33,6 +33,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
         SyntaxKind::STRUCT_DEF => lower_struct(node),
+        SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => lower_type_decl(node),
         SyntaxKind::MODULE_DEF => lower_module(node),
         SyntaxKind::IF_EXPR => lower_if(node),
         SyntaxKind::TRY_EXPR => lower_try(node),
@@ -1767,6 +1768,57 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
     parts.push(Ir::HardLine);
     parts.push(Ir::text("end"));
     Ir::concat(parts)
+}
+
+/// Lay out an `abstract type`/`primitive type` declaration. These are bodyless
+/// one-liners (`ABSTRACT_DEF` = `abstract type SIGNATURE end`, `PRIMITIVE_DEF` =
+/// `primitive type SIGNATURE <bits> end`). The only thing this normalizes beyond
+/// the transparent fallback is the **keyword-region whitespace**: Runic collapses
+/// the run after `abstract`/`primitive` and after `type` to a single space each,
+/// but leaves the whitespace *after* the signature untouched (`abstract type Foo
+/// end` keeps `Foo   end` verbatim, matching Runic). The `SIGNATURE` is lowered
+/// recursively, so a tight supertype normalizes (`Bar<:Baz` → `Bar <: Baz`); the
+/// trailing region (an optional bits `LITERAL` and the `end`, with their
+/// surrounding whitespace) is passed through verbatim like the transparent path.
+///
+/// Any shape this does not model — a comment or newline in the keyword region, a
+/// missing signature, fewer than two leading keyword tokens — falls back to the
+/// verbatim transparent lowering.
+fn lower_type_decl(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    // Number of leading keyword idents (`abstract`/`primitive`, then `type`) seen;
+    // their following whitespace is collapsed to a single space until the signature.
+    let mut kw_count = 0u8;
+    let mut seen_sig = false;
+    let mut iter = node.children_with_tokens().peekable();
+
+    while let Some(el) = iter.next() {
+        match el {
+            NodeOrToken::Node(child) if child.kind() == SyntaxKind::SIGNATURE && !seen_sig => {
+                parts.push(lower_node(&child));
+                seen_sig = true;
+            }
+            // After the signature, nodes (the bits `LITERAL`) lower normally.
+            NodeOrToken::Node(child) if seen_sig => parts.push(lower_node(&child)),
+            NodeOrToken::Node(_) => return lower_transparent(node),
+            NodeOrToken::Token(tok) if seen_sig => parts.push(lower_trivia(&tok, iter.peek())),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::IDENT if kw_count < 2 => {
+                    parts.push(Ir::text(tok.text().to_string()));
+                    kw_count += 1;
+                }
+                // Collapse a whitespace run in the keyword region to one space.
+                SyntaxKind::WHITESPACE => parts.push(Ir::text(" ")),
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    if kw_count == 2 && seen_sig {
+        Ir::concat(parts)
+    } else {
+        lower_transparent(node)
+    }
 }
 
 /// Lay out a `module`/`baremodule` definition. The shape mirrors the other block

@@ -244,7 +244,13 @@ leverage.
   the `SIGNATURE` is lowered recursively; an empty `module E end` bails to
   transparent; module bodies are declarations, never `return`-inserted; locked by
   `module_blocks/` + `module_siblings/` + `module_baremodule/` +
-  `module_leading_comment/`).
+  `module_leading_comment/`), `abstract type`/`primitive type` keyword-region
+  whitespace (`lower_type_decl` over `ABSTRACT_DEF`/`PRIMITIVE_DEF`: bodyless
+  one-liners where Runic collapses the run after `abstract`/`primitive` and after
+  `type` to one space each but leaves the post-signature whitespace verbatim
+  (`abstract type Foo   end` keeps `Foo   end`); the `SIGNATURE` is lowered
+  recursively so `Bar<:Baz` → `Bar <: Baz`, and the trailing bits `LITERAL` + `end`
+  ride through verbatim; locked by `abstract_types/` + `primitive_types/`).
   **Next:** `function`/`do`/`macro` bodies
   (which need `lower_block_body`
   but are `return`-inserted—a deferred semantic rewrite), then long single-line

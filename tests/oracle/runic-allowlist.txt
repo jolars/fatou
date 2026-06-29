@@ -3,6 +3,7 @@
 # `runic_allowlist` (no Julia needed). Seed/refresh from `runic_full_report`.
 # One slug per line.
 
+abstract_types
 arrow_functions
 assignment
 assignment_spacing
@@ -45,6 +46,7 @@ multiline_matrices
 named_tuples
 paren_blocks
 paren_padding
+primitive_types
 range_colon
 struct_blocks
 ternary_spacing
