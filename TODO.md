@@ -150,7 +150,16 @@ leverage.
   statement are lowered recursively so `(a=1;b=2)` → `(a = 1; b = 2)` and a nested
   block `((a;b);c)` → `((a; b); c)` keep normalizing; only the ≥2-statement form is
   reshaped—a single-statement `(a;)` keeps its trailing `;` via the transparent
-  fallback, matching Runic; bails on comment/newline; locked by `paren_blocks/`).
+  fallback, matching Runic; bails on comment/newline; locked by `paren_blocks/`),
+  comprehension/generator `for`-binding `in` normalization (`lower_for_binding`
+  over `FOR_BINDING`: `[i for i = 1:3]` → `[i for i in 1:3]`,
+  `[i for i ∈ s]` → `[i for i in s]`—rewrite the `=`/`∈` iteration operator to the
+  keyword `in`; comma-separated bindings (`i = 1:3, j = 1:3`) each normalized and
+  `", "`-joined, a trailing `if cond` filter reproduced with one space around `if`;
+  the `for` keyword is emitted iff a child of this node, so the same arm normalizes
+  a `for`-loop binding; targets and iterables lowered recursively; bails on
+  comment/newline or any unmodeled binding shape; locked by
+  `comprehension_for_in/`).
   **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.

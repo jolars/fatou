@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**35 fixtures**): **33 allowlisted**, 2 blocked
+Dir corpus (**36 fixtures**): **34 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -53,41 +53,40 @@ zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
 `export`/`public` name lists (`lower_export_stmt`), trailing-whitespace trimming
 (`lower_trivia` in the transparent path), named-tuple element spacing
 (`lower_collection` extended to `KEYWORD_ARG`), parenthesized-expression padding
-(`lower_paren`), `;`-block padding and separators (`lower_paren_block`).
+(`lower_paren`), `;`-block padding and separators (`lower_paren_block`),
+comprehension/generator `for`-binding `in` normalization (`lower_for_binding`).
 
-## Latest session (`;`-block padding and separators — `lower_paren_block`)
+## Latest session (`for`-binding `in` normalization — `lower_for_binding`)
 
-A new `lower_node` arm on `PAREN_BLOCK`, the sibling target flagged last session:
-the `;`-block `(a; b)` (a `begin`-less block expression) is a distinct node from
-the single-value `PAREN_EXPR` and the comma `TUPLE_EXPR`, and it was
-**transparent**, so `( a ; b )` leaked as `( a ; b )` against Runic's `(a; b)`.
-The CST: `LPAREN`, optional `WHITESPACE`, a leading statement node, then **one
-`PARAMETERS` node per `; <stmt>`** (each carrying `SEMICOLON` + optional
-`WHITESPACE` + optional statement), optional `WHITESPACE`, `RPAREN`. The new arm
-(modeled on `lower_paren`) walks the top-level children: a `PARAMETERS` child is
-routed through a `paren_block_statement` helper that extracts its lone statement
-(`Ok(Some)`), reports an arg-less trailing `;` as `Ok(None)` (dropped), or `Err`
-on any unmodeled shape (comment, newline, stray comma, second statement); every
-other child node is a statement lowered via `lower_node`; `WHITESPACE` is dropped
-and one `LPAREN`/`RPAREN` accepted. The collected statements are joined with
-`"; "` (tight-left/space-right separator, matching Runic). Recursing each
-statement keeps everything normalizing: `(a=1;b=2)` → `(a = 1; b = 2)` (the
-assignments parse as `KEYWORD_ARG` inside the block), nested `((a;b);c)` →
-`((a; b); c)`, `(f(x) ;g(y))` → `(f(x); g(y))`. **Guard:** only the ≥2-statement
-form is reshaped. A single-statement block always carries a trailing `;` (a bare
-`(a)` is a `PAREN_EXPR`, not `PAREN_BLOCK`), and Runic *preserves* that `;`
-(`(a;)` → `(a;)`)—the transparent fallback already matches for the unpadded form,
-so `statements.len() < 2` bails. Verified byte-identical to Runic on `(a; b)`,
-`( a ; b )`, `(x; y; z)`, `(a;b;)` → `(a; b)`, `(a=1;b=2)`, `((a;b);c)`,
-`(f(x) ;g(y))`, `( a; b; c )`, and the preserved `(a;)`. Idempotent. Fixture
-`paren_blocks/` (single-line; multi-line and commented blocks bail, left for the
-comment-preservation target). Corpus 32→33 pass, divergence held at 2; allowlist
-32→33. No parser work needed.
-
-**Divergence kept out of the fixture (Tenet-1 corner):** a *padded*
-single-statement block `( a ; )` → Runic strips to `(a;)`, but Fatou bails to
-transparent (the `len < 2` guard) and only trims part of the padding (`( a ;)`).
-Rare hand-spacing, no fixture exercises it, left unrecorded as a blocked slug.
+A new `lower_node` arm on `FOR_BINDING`, the iteration clause of a comprehension
+or generator (`[x for i = 1:3]`, `(x for i ∈ s)`) and of a `for` loop. It was
+**transparent**, so the `=` form spaced through `lower_binary` (`i = 1:3`) and the
+`∈` form spaced through `lower_binary` (`i ∈ 1:3`), against Runic's canonical
+keyword `in` (`for i in 1:3`). This is a **token-level canonicalization**, the
+same family as the float/hex literal rules, not pure layout. **Three CST shapes**
+the binding takes (probed via `parse`): `=` → a wrapped `ASSIGNMENT_EXPR(NAME EQ
+rhs)`; `∈` → a wrapped `BINARY_EXPR(NAME UNICODE_OP("∈") rhs)`; already-`in` → a
+**flat** triple `NAME`, `IDENT("in")`, `rhs` (no wrapping node). The arm collects
+the post-keyword elements (whitespace dropped), partitions them on `COMMA` into
+binding groups plus an optional trailing `if <filter>` tail, then `lower_for_spec`
+maps each group: a lone wrapped node is split by `for_iteration_operands` (accepts
+only `EQ`/`∈`, operand count 2) and a flat triple is matched directly; either way
+it emits `lower_node(target) + " in " + lower_node(iterable)`. Groups `", "`-join;
+a filter emits `" if " + lower_node`. **Keyword placement is the subtlety:** the
+`FOR_KW` is a *child of `FOR_BINDING`* in a comprehension/generator but a child of
+the parent `FOR_EXPR` in a `for` loop—so `"for "` is emitted **iff** the keyword
+is present, letting the one arm normalize a loop binding too
+(`for i = 1:3 … end` → `for i in 1:3 … end`, body left transparent—control flow is
+deferred, but the binding line still canonicalizes, matching Runic). Targets and
+iterables are recursed (`[i*j for i=1:2 for j=1:2]` → `[i * j for i in 1:2 for
+j in 1:2]`; the multi-`for` form is sibling `FOR_BINDING`s, each handled). Bails on
+comment/newline, a filter that isn't a single expression node, or any unmodeled
+binding shape. Verified byte-identical to Runic on the `=`/`∈`/`in` forms,
+multi-binding (`i = 1:3, j = 1:3` and `i in a, j in b`), generator `()`, `if`
+filter, nested `for`, and a `Dict(… for (v,i) = pairs)` generator. Idempotent
+(output `in` reparses to the flat form → fixed point). Fixture
+`comprehension_for_in/`. Corpus 33→34 pass, divergence held at 2; allowlist 33→34.
+No parser work needed.
 
 ### Ranked next targets
 
@@ -106,6 +105,17 @@ Rare hand-spacing, no fixture exercises it, left unrecorded as a blocked slug.
 
 ## Earlier sessions
 
+- **`;`-block padding and separators (`lower_paren_block`)**: `PAREN_BLOCK`
+  (`(a; b)`, a `begin`-less block, distinct from `PAREN_EXPR`/`TUPLE_EXPR`) was
+  transparent. New arm walks `LPAREN`, a leading statement, then one `PARAMETERS`
+  per `; <stmt>` (routed through `paren_block_statement`: lone statement, or `None`
+  for an arg-less trailing `;`, or `Err` on an unmodeled shape), `RPAREN`;
+  statements `"; "`-joined (tight-left/space-right) and recursed
+  (`(a=1;b=2)` → `(a = 1; b = 2)`, `((a;b);c)` → `((a; b); c)`). Only the
+  ≥2-statement form is reshaped—a single-statement `(a;)` keeps its `;` via the
+  transparent fallback (Runic preserves it). Bails on comment/newline. Fixture
+  `paren_blocks/`. Divergence kept out: a padded single-statement `( a ; )` →
+  Runic `(a;)` but Fatou only part-trims (`( a ;)`); rare, no fixture, unrecorded.
 - **parenthesized-expression padding (`lower_paren`)**: `PAREN_EXPR` (`( a + b )`)
   was transparent, leaking the whitespace flanking the single inner expression.
   New arm (modeled on `lower_arrow`): drop `WHITESPACE`, accept one

@@ -38,6 +38,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::BARE_TUPLE_EXPR => lower_bare_tuple(node),
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
+        SyntaxKind::FOR_BINDING => lower_for_binding(node),
         SyntaxKind::RETURN_EXPR
         | SyntaxKind::CONST_STMT
         | SyntaxKind::GLOBAL_STMT
@@ -1131,6 +1132,147 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
     }
 
     Ir::concat(parts)
+}
+
+/// Lay out a `for` binding — the iteration clause of a comprehension or generator
+/// (`[x for i = 1:3]`, `(x for i ∈ s)`) or a `for` loop (`for i = 1:3 … end`) —
+/// normalizing the iteration operator to the keyword `in`, the target style's
+/// canonical form: `for i = 1:3` → `for i in 1:3`, `for i ∈ s` → `for i in s`.
+/// An already-`in` binding keeps `in` with one space on each side. Multiple
+/// comma-separated bindings (`for i = 1:3, j = 1:3`) are each normalized and
+/// `", "`-joined, and a trailing comprehension filter (`for i = 1:3 if cond`) is
+/// reproduced with one space around `if`. Targets and iterables are lowered
+/// recursively, so their own spacing keeps normalizing.
+///
+/// The `for` keyword is a child of this node in a comprehension/generator but of
+/// the parent in a `for` loop, so it is emitted iff present. Only the clean
+/// single-line shape is reshaped: an interleaved comment or newline, a filter that
+/// is not a single expression, or any binding shape this does not model falls back
+/// to the verbatim transparent lowering.
+fn lower_for_binding(node: &SyntaxNode) -> Ir {
+    let mut for_kw = false;
+    let mut els: Vec<SyntaxElement> = Vec::new();
+
+    for el in node.children_with_tokens() {
+        match &el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::FOR_KW if !for_kw && els.is_empty() => for_kw = true,
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE => {
+                    return lower_transparent(node);
+                }
+                _ => els.push(el),
+            },
+            NodeOrToken::Node(_) => els.push(el),
+        }
+    }
+
+    // Partition the post-`for` elements into comma-separated binding groups plus
+    // an optional trailing `if <filter>` tail.
+    let mut groups: Vec<Vec<SyntaxElement>> = vec![Vec::new()];
+    let mut filter: Option<SyntaxNode> = None;
+
+    let mut iter = els.into_iter();
+    while let Some(el) = iter.next() {
+        match &el {
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::COMMA => {
+                groups.push(Vec::new());
+            }
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::IF_KW => {
+                // The remainder is the filter: exactly one expression node.
+                let rest: Vec<SyntaxElement> = iter.collect();
+                match rest.as_slice() {
+                    [NodeOrToken::Node(f)] => filter = Some(f.clone()),
+                    _ => return lower_transparent(node),
+                }
+                break;
+            }
+            _ => groups.last_mut().unwrap().push(el),
+        }
+    }
+
+    let mut specs: Vec<Ir> = Vec::with_capacity(groups.len());
+    for group in &groups {
+        match lower_for_spec(group) {
+            Some(ir) => specs.push(ir),
+            None => return lower_transparent(node),
+        }
+    }
+    if specs.is_empty() {
+        return lower_transparent(node);
+    }
+
+    let mut parts: Vec<Ir> = Vec::with_capacity(specs.len() * 2 + 2);
+    if for_kw {
+        parts.push(Ir::text("for "));
+    }
+    for (i, spec) in specs.into_iter().enumerate() {
+        if i > 0 {
+            parts.push(Ir::text(", "));
+        }
+        parts.push(spec);
+    }
+    if let Some(filter) = filter {
+        parts.push(Ir::text(" if "));
+        parts.push(lower_node(&filter));
+    }
+    Ir::concat(parts)
+}
+
+/// Lower one `for`-binding group (`<target> <op> <iterable>`) to `<target> in
+/// <iterable>`, normalizing the iteration operator to `in`. Two CST shapes occur:
+/// a wrapped `=`/`∈` binding is a single `ASSIGNMENT_EXPR`/`BINARY_EXPR` node,
+/// while an already-`in` binding is the flat triple `target`, `in`, `iterable`.
+/// Returns `None` (the caller bails to transparent) on any other shape.
+fn lower_for_spec(group: &[SyntaxElement]) -> Option<Ir> {
+    match group {
+        // Wrapped `=` (`ASSIGNMENT_EXPR`) or `∈` (`BINARY_EXPR`) binding.
+        [NodeOrToken::Node(node)]
+            if matches!(
+                node.kind(),
+                SyntaxKind::ASSIGNMENT_EXPR | SyntaxKind::BINARY_EXPR
+            ) =>
+        {
+            let (lhs, rhs) = for_iteration_operands(node)?;
+            Some(Ir::concat([lhs, Ir::text(" in "), rhs]))
+        }
+        // Flat `in` binding: target, the `in` keyword, iterable.
+        [
+            NodeOrToken::Node(target),
+            NodeOrToken::Token(kw),
+            NodeOrToken::Node(iterable),
+        ] if kw.kind() == SyntaxKind::IDENT && kw.text() == "in" => Some(Ir::concat([
+            lower_node(target),
+            Ir::text(" in "),
+            lower_node(iterable),
+        ])),
+        _ => None,
+    }
+}
+
+/// Split a wrapped `for`-binding node (`i = 1:3` or `i ∈ s`) into its lowered
+/// target and iterable, accepting only the `=` and `∈` iteration operators.
+/// Returns `None` on any other operator, a stray comment, or an operand count ≠ 2.
+fn for_iteration_operands(node: &SyntaxNode) -> Option<(Ir, Ir)> {
+    let mut operands: Vec<SyntaxNode> = Vec::new();
+    let mut op_count = 0usize;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => operands.push(child),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::EQ => op_count += 1,
+                SyntaxKind::UNICODE_OP if tok.text() == "∈" => op_count += 1,
+                _ => return None,
+            },
+        }
+    }
+
+    let (1, [lhs, rhs]) = (op_count, operands.as_slice()) else {
+        return None;
+    };
+    Some((lower_node(lhs), lower_node(rhs)))
 }
 
 /// Whether `node` contains a `NEWLINE` token anywhere in its descendants. This

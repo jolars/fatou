@@ -13,6 +13,7 @@ bracket_gap_blank_lines
 call_arg_lists
 collections
 comparison_chains
+comprehension_for_in
 curly_type_params
 dot_access
 export_public_lists
