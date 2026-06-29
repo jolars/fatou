@@ -1,6 +1,23 @@
 # Runic formatter oracle blocked list — slugs deliberately diverging from Runic
 # or not yet supported, each with a one-line rationale. A blocked case is a known
 # divergence, not a passing test. `allowlist ∪ blocked` covers the whole corpus.
+#
+# ── FOUNDATIONAL DIVERGENCE: line breaking is not shared ──────────────────────
+# Runic is NOT line-width-sensitive. It *preserves* the user's line breaks and
+# normalizes only the spacing and indentation within whatever layout the source
+# already chose. Fatou is the opposite (Tenet 1): it *fully reflows*, laying out
+# each construct from scratch under `line_width`, ignoring source breaks and user
+# whitespace entirely. Same tokens => same output, regardless of input form.
+#
+# Consequence for this oracle: for any construct whose layout depends on a source
+# break, `format(input)` and `runic(input)` diverge in BOTH directions — Fatou
+# collapses user breaks that fit within `line_width`, and breaks lines that
+# exceed it where Runic leaves them long. These are deliberate Tenet-1
+# divergences, not parity gaps, and Runic-pinned `expected.jl` is the WRONG
+# target for them. Until Fatou's reflow engine lands, some fixtures pass only
+# because Fatou currently still mirrors Runic's break-preservation ("false
+# parity"); those are being audited out (see RECAP.md) and either re-minted to a
+# Fatou-authored `expected.jl` or recorded here.
 
 # Tenet 1 divergence: Runic *preserves* the user's spacing around `&&`/`||`
 # (it normalizes neither `a&&b` nor `a && b`). Fatou must be deterministic, so it

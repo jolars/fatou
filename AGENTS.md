@@ -27,10 +27,20 @@ and includes a Julia toolchain.
 
 ## Tenets
 
-1. **Deterministic, rule-based formatting.** Output is decided solely by the
-   formatter's rules and the layout engine. Push back against hard-coding
-   special cases for specific constructs. Fatou does **not** honor "persistent
-   line breaks": the input's existing line breaks never influence the result.
+1. **Deterministic, canonical formatting.** Output is decided solely by the
+   formatter's rules and the layout engine, never by how the input happens to be
+   written. Semantically-equivalent inputs **must** format identically: the
+   input's line breaks, whitespace, operator spelling (`in` vs `∈`, `a*b` vs
+   `a * b`), and numeric-literal form never influence the result. Fatou does
+   **not** honor "persistent line breaks"; it **fully reflows**, laying out each
+   construct from scratch under `line_width` and breaking only where width or
+   semantics require it, regardless of where the source broke. Push back against
+   hard-coding special cases for specific constructs. This is the deepest,
+   deliberate divergence from Runic (our soft oracle, see below): Runic
+   *preserves* the user's line breaks and is **not line-width-sensitive**,
+   whereas preserving the user's form would make Fatou's output depend on its
+   input, which Tenet 1 forbids. Such divergences are deliberate, recorded
+   choices, never silent non-determinism.
 2. **Incremental parsing is first-class**, not an afterthought. Parser/CST work
    must keep the `salsa`-based reparse path (`src/incremental.rs`) viable.
 3. **Parsing is the parser's job.** Never paper over parser mistakes in the
