@@ -15,6 +15,7 @@ collections
 comparison_chains
 curly_type_params
 dot_access
+global_local_assignment
 global_local_names
 import_using_lists
 keyword_statements

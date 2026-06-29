@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**26 fixtures**): **24 allowlisted**, 2 blocked
+Dir corpus (**27 fixtures**): **25 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -46,9 +46,32 @@ ternary spacing (`lower_ternary`), curly type-param padding (`lower_arg_list`
 extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`),
 bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
 (`lower_keyword_stmt` extended), `using`/`import` comma + selector lists
-(`lower_import_stmt`).
+(`lower_import_stmt`), `global`/`local` multiple assignment (rule-free PASS,
+parser-unblocked).
 
-## Latest session (`using`/`import` comma + selector lists)
+## Latest session (`global`/`local` multiple assignment — rule-free PASS)
+
+The parser blocker that target #0 was parked on **landed upstream** (`93e3d28`,
+`feat(parser): nest global/local multiple assignment`). `global`/`local` now parse
+their body at statement level (`KwStmt::ExprTuple`, like `const`), so
+`global a, b = 1, 2` nests as `GLOBAL_STMT → GLOBAL_KW + ASSIGNMENT_EXPR(BARE_TUPLE
+= BARE_TUPLE)` instead of the old flat token soup. That single nested operand node
+flows straight through `lower_keyword_stmt`'s **single-operand-node arm** (`[Node]`)
+→ `lower_node` → `lower_binary` (assignment) → bare-tuple recursion on each side —
+**no new rule needed**. Same for `global a, b::Int` (→ single `BARE_TUPLE_EXPR(NAME,
+COMMA, TYPE_ANNOTATION)` child → `lower_bare_tuple` + `lower_type_annotation`) and
+the bare list `global a, b` (now also a `BARE_TUPLE_EXPR` node, not the old flat
+`NAME/IDENT/COMMA`). Verified byte-identical to Runic on `global a,b = 1,2`,
+`local a,b = f(x),g(y)`, `global  a ,b = 1 , 2` (messy input → `global a, b = 1,
+2`), `local x,y,z = 1,2,3`, `global a,b::Int`, `global a, b, c::Float64`,
+`global x = 1`, `local c`, `const p, q = 1, 2`. Idempotent. Fixture
+`global_local_assignment/` is a regression lock (mirrors the parser fixture name).
+Corpus 24→25 pass, divergence held at 2; allowlist 24→25. No code change to
+`rules.rs` — the parser fix is what unblocked it. (The old flat-token comma-name
+branch in `lower_keyword_stmt` is now effectively unreachable for `global`/`local`
+but stays as a lossless fallback; not removed.)
+
+## Earlier session (`using`/`import` comma + selector lists)
 
 `USING_STMT`/`IMPORT_STMT` were **transparent**, leaking comma spacing
 (`using A,B` stayed `using A,B`); Runic `", "`-joins them. Probing the next ranked
@@ -196,56 +219,11 @@ vector/2D-matrix, the cap, and mixed same-line+blank. Idempotent (re-parsing 1
 blank = 2 newlines → blanks=1; 2 blanks = 3 newlines → blanks=2, both fixed
 points). Fixtures `bracket_blank_lines/`, `matrix_blank_lines/`.
 
-## Earlier session (multi-line matrix breaking)
-
-**Surprise:** multi-line matrices are **not** pure preservation (the prior recap's
-guess). Runic *reframes* a `MATRIX_EXPR` that spans ≥2 lines exactly like
-`lower_multiline_bracket`: `[` + `HardLine`, each source line re-indented one step,
-`HardLine` + `]`. The interior is otherwise kept **verbatim**—intra-row spacing
-(`1  2`), multi-space same-line gaps (`1 2;   3 4;`), same-line `;`-rows, and `;`
-placement (`1 2 ;`, trailing `3 4;`) are all preserved; only each line's
-leading/trailing whitespace is dropped for the standard indent. Single-line
-matrices still have **no rule**—`has_newline_token` gate returns transparent, which
-is byte-identical (the `matrices/` regression lock still holds).
-
-`lower_matrix` (new arm): splits children on `NEWLINE` into lines of `(is_ws, ir)`
-elements, trims end-whitespace per line, drops leading/trailing empty lines (a bare
-newline after `[`/before `]` is absorbed into the framing break), emits
-`HardLine`+line per content line. **Row shapes:** a multi-element row is a
-`MATRIX_ROW` node; a single-element row (newline-separated column `[1\n2\n3]`) is a
-bare `ARG`—**both** handled, lowered via `lower_node` so nested calls/indices still
-normalize inside rows (`f( x )`→`f(x)`). **Bails to transparent (kept out of the
-fixture, lossless):** a blank line (≥2 consecutive `NEWLINE`s ⇒ an empty *middle*
-line, which the IR can't emit without a bare un-indented newline), a comment
-(direct `COMMENT` child token), missing/extra bracket, any unexpected token. Verified
-byte-identical to Runic across row/column/2D/mixed-`;`/multispace/trailing-`;`/
-nested/leading-newline/trailing-newline shapes. Fixture `multiline_matrices/`.
-
-## Earlier session (single-line matrices — regression lock, no rule)
-
-Top-ranked cheap win, landed exactly as predicted: **rule-free PASS**. Runic
-*preserves* single-line matrices verbatim—no whitespace collapse even in
-`[1  2   3]`, and `[1 2 ;3 4]` keeps the space before `;`. `MATRIX_EXPR` (with
-`MATRIX_ROW` children for `;`-separated rows) has no `lower_node` arm, so the
-transparent fallback emits every token verbatim → byte-identical to Runic. The
-`matrices/` fixture is a **regression lock only**: it pins the preservation so a
-future bracket/break rule can't start mangling matrices. Covered shapes: row
-`[1 2 3]`, column `[1; 2; 3]`, 2D `[1 2; 3 4]`, names/floats, **nested call/index
-operands** (`[f(x) g(y)]`, `[x[1] x[2]; …]` — these exercise handled descendants
-staying normalized inside a transparent matrix), multi-space, odd `;` spacing.
-Multiline matrices (`[1 2\n3 4]`) deliberately **not** in the fixture—distinct
-shape, probe separately before claiming (likely also preserved, but unverified).
-Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
-
 ### Ranked next targets
 
-0. **Assignment-list `global`/`local`** (`global a, b = 1, 2`, `global a, b::Int`)
-   — **BLOCKED on the parser, handed off (2026-06-29).** These land as a flat token
-   soup (no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR`/`CALL_EXPR`); JuliaSyntax nests them
-   `global ((tuple a b) = (tuple 1 2))`. Don't write a formatter hack—once the
-   parser nests it, the existing keyword-stmt + `lower_binary` + bare-tuple
-   recursion handles it for free. Resume here only after the parser-parity bullet
-   lands (parser-parity RECAP "Queued next targets", `TODO.md` Parser).
+(Target #0 — assignment-list `global`/`local` — **landed this session** as a
+rule-free PASS once the parser fix `93e3d28` nested it. See latest session.)
+
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard
@@ -261,6 +239,16 @@ Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
 
 ## Earlier sessions
 
+- **multi-line matrix breaking**: `lower_matrix` (new arm) reframes a
+  `MATRIX_EXPR` spanning ≥2 lines like `lower_multiline_bracket` (`[` + `HardLine`,
+  each source line re-indented, `HardLine` + `]`); interior kept verbatim (intra-row
+  spacing, `;` placement). Multi-element row = `MATRIX_ROW` node, single-element
+  column row = bare `ARG`, both lowered via `lower_node`. Bails on blank line,
+  comment, missing/extra bracket. Fixture `multiline_matrices/`.
+- **single-line matrices (regression lock, no rule)**: Runic *preserves* single-line
+  matrices verbatim (no whitespace collapse, `;`-spacing kept); `MATRIX_EXPR` has no
+  arm so the transparent fallback matches byte-for-byte. `matrices/` fixture pins the
+  preservation so a future break rule can't start mangling them.
 - **`global`/`local` comma name lists**: `lower_keyword_stmt` extended. The parser
   drops `NAME`/`IDENT`/`COMMA` flat into `GLOBAL_STMT`/`LOCAL_STMT` (asymmetric:
   first item a `NAME` node, rest bare `IDENT` tokens). Keeps the bare-keyword and

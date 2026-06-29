@@ -101,7 +101,12 @@ leverage.
   `using A,B` → `using A, B`, `using A: x,y` → `using A: x, y`—item(`IMPORT_PATH`/
   `IMPORT_ALIAS` node)/separator alternation, `COMMA` → `", "`, selector `COLON` →
   `": "`, paths recursed transparently; bails on comment/newline or a
-  leading/trailing/doubled separator). **Next:** comment
+  leading/trailing/doubled separator), `global`/`local` multiple assignment
+  (`global a,b = 1,2` → `global a, b = 1, 2`, `local a,b = f(x),g(y)`,
+  `global a,b::Int`—rule-free PASS once the parser nested these as a single
+  `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR` operand; the existing keyword-stmt
+  single-operand arm + `lower_binary` + bare-tuple recursion handle it, locked by
+  the `global_local_assignment/` fixture). **Next:** comment
   preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
