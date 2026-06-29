@@ -6,20 +6,23 @@ quote
     b
 end
 begin
-    x = 1
+    x=1
     y = 2
 end
 begin
-    a; b; c
+    a;
+    b;
+    c
 end
 begin
-    f(x) = x + 1
+    f(x) = x+1
     begin
         inner
     end
 end
 begin
     p
+
 
 
     q

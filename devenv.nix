@@ -14,8 +14,6 @@
     pkgs.go-task
     pkgs.llvmPackages.bintools
     pkgs.prettier
-    # Runic.jl and JuliaSyntax.jl (the formatter compat oracle and parser
-    # oracle, see AGENTS.md) install via the Julia environment, not nixpkgs.
     pkgs.ruff
     pkgs.shfmt
     pkgs.wasm-pack
@@ -37,7 +35,6 @@
 
       package = (
         pkgs.julia-bin.withPackages [
-          "Runic"
           "JuliaFormatter"
           "Makie"
           "CairoMakie"

@@ -45,36 +45,45 @@ and includes a Julia toolchain.
    format-clean by construction (or withhold it for that shape); don't run the
    formatter inside `--fix`.
 
-## Runic compatibility (soft target)
+## JuliaFormatter compatibility (soft target)
 
 Fatou tracks a **soft, one-directional compatibility target** with the
-[Runic.jl](https://github.com/fredrikekre/Runic.jl) formatter—Julia's
-deterministic, no-configuration formatter, and the philosophical match for
-Tenet 1. This is **strictly subordinate to Tenet 1** and is **never a quality
-gate**. We do not match Runic; we measure how often Runic would leave Fatou's
-output unchanged, treating its maturity as a free differential oracle for our
-own inconsistencies.
+[JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl) formatter, the
+de-facto-standard Julia formatter, pinned to its **`DefaultStyle`**. This is
+**strictly subordinate to Tenet 1** and is **never a quality gate**. We do not
+match JuliaFormatter; we measure how often JuliaFormatter would leave Fatou's
+output unchanged, treating its maturity as a free differential oracle for our own
+inconsistencies. (The target was previously Runic.jl; it was flipped to
+JuliaFormatter and the corpus re-baselined.)
 
-- Divergences triage into two buckets. **Adopt** when Runic's output is simply
-  more idiomatic and Fatou is being inconsistent (fix the rule). **Record** when
-  the divergence is a deliberate Fatou choice (a blocked entry with a rationale).
-- Diverging from Runic is allowed but should **raise tension**: a conscious,
-  documented decision, never a silent one.
+- Mind the philosophical mismatch: JuliaFormatter `DefaultStyle` is largely
+  **preservation**-oriented (it leaves operator/assignment spacing and numeric
+  literals as the user wrote them), whereas Fatou is **deterministic** (Tenet 1).
+  So a large class of divergences is Fatou canonicalizing where JuliaFormatter
+  preserves. JuliaFormatter is configurable upstream; we pin one fixed style so
+  the oracle stays a stable, deterministic reference.
+- Divergences triage into two buckets. **Adopt** when JuliaFormatter's output is
+  simply more idiomatic and Fatou is being inconsistent (fix the rule). **Record**
+  when the divergence is a deliberate Fatou choice (a blocked entry with a
+  rationale).
+- Diverging from JuliaFormatter is allowed but should **raise tension**: a
+  conscious, documented decision, never a silent one.
 
 **Bootstrap gate (landed).** While the formatter grows, the oracle is a concrete
 **direct-parity** gate (a strengthening of the soft fixed-point framing above):
-`format(input) == runic(input)`, where each fixture's `expected.jl` is pinned from
-`Runic.format_string`. The harness (`tests/runic_oracle.rs`) diffs each fixture and
-gates regressions via `tests/oracle/runic-allowlist.txt`; deliberate divergences
-(notably Tenet 1: Runic *preserves* user whitespace around `&&`/`||`, Fatou
-canonicalizes them as spaced) are recorded in `runic-blocked.txt` with a rationale,
-and `allowlist ∪ blocked` must cover the corpus. The corpus
-(`tests/fixtures/formatter/`) is minted by `scripts/update-runic-corpus.{sh,jl}`
-and version-pinned in `.runic-source`. **To grow formatter parity, use the
-`formatter-parity` skill** (`.claude/skills/formatter-parity/`). It documents the
-loop (probe → rule → fixture → re-triage → allowlist) and keeps a rolling
-`RECAP.md`. The optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`)
-remains future work (`TODO.md`).
+`format(input) == juliaformatter(input)`, where each fixture's `expected.jl` is
+pinned from `JuliaFormatter.format_text` (DefaultStyle). The harness
+(`tests/juliaformatter_oracle.rs`) diffs each fixture and gates regressions via
+`tests/oracle/juliaformatter-allowlist.txt`; deliberate divergences and
+not-yet-at-parity cases are recorded in `juliaformatter-blocked.txt` with a
+rationale, and `allowlist ∪ blocked` must cover the corpus. The corpus
+(`tests/fixtures/formatter/`) is minted by
+`scripts/update-juliaformatter-corpus.{sh,jl}` and version-pinned in
+`.juliaformatter-source`. **To grow formatter parity, use the `formatter-parity`
+skill** (`.claude/skills/formatter-parity/`). It documents the loop (probe → rule
+→ fixture → re-triage → allowlist) and keeps a rolling `RECAP.md`. The optional
+long-term fixed-point gauge (`juliaformatter(fatou(x)) == fatou(x)`) remains
+future work (`TODO.md`).
 
 ## Parser oracle
 

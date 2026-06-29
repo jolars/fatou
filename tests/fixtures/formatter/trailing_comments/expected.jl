@@ -1,9 +1,10 @@
 begin
     x = 1 # note
-    z = 3 # tight
-    y = 2; w = 4 # after two
+    z=3# tight
+    y = 2;
+    w = 4 # after two
 end
-for i in 1:3
+for i = 1:3
     f(i) # loop comment
 end
 while c

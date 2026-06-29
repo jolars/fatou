@@ -1,5 +1,4 @@
 baremodule B
 const X = 1
-module E
-end
+module E end
 end

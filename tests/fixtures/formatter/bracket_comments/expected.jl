@@ -29,7 +29,8 @@ u = [
     # trailer
 ]
 t = foo(
-    a, b, # pair
+    a,
+    b, # pair
     c,
 )
 s = x[
@@ -37,5 +38,5 @@ s = x[
     2,
 ]
 r = foo(
-    a # no comma last
+    a, # no comma last
 )

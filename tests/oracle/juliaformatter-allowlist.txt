@@ -1,0 +1,23 @@
+# JuliaFormatter formatter oracle allowlist — slugs whose Fatou formatting
+# matches the pinned expected.jl (JuliaFormatter.format_text, DefaultStyle).
+# Guarded against regression by `juliaformatter_allowlist` (no Julia needed).
+# Seed/refresh from `juliaformatter_full_report`. One slug per line.
+
+assignment
+bare_tuples
+call_arg_lists
+collections
+do_blocks
+dot_access
+export_public_lists
+global_local_assignment
+global_local_names
+import_using_lists
+matrix_comments
+named_tuples
+paren_blank_line_divergence
+paren_padding
+range_colon
+tight_operators
+try_blocks
+type_annotations

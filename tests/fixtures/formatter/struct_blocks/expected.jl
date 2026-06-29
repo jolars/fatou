@@ -1,11 +1,11 @@
 struct Foo
     x::Int
-    y
+    y::Any
 end
 
 mutable struct Bar
-    a
-    b
+    a::Any
+    b::Any
 end
 
 struct Point{T}
@@ -13,24 +13,25 @@ struct Point{T}
     y::T
 end
 
-struct Dog <: Animal
-    name
+struct Dog<:Animal
+    name::Any
 end
 
 struct Pair
-    x; y
+    x::Any;
+    y::Any
 end
 
 struct Empty end
 
 struct Spaced
-    x
+    x::Any
 
 
-    y
+    y::Any
 end
 
 struct WithCtor
-    val
+    val::Any
     WithCtor() = new(0)
 end
