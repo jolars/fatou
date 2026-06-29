@@ -29,9 +29,10 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**42 fixtures**): **40 allowlisted**, 2 blocked
+Dir corpus (**44 fixtures**): **41 allowlisted**, 3 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
-`control_flow` = Runic return-insertion, a semantic rewrite, deferred).
+`control_flow` = Runic return-insertion, a semantic rewrite, deferred;
+`trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
 spacing (`lower_arrow`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
@@ -61,53 +62,55 @@ comprehension/generator `for`-binding `in` normalization (`lower_for_binding`),
 `lower_block_body`), `if`/`elseif`/`else` + `try`/`catch`/`else`/`finally` branch
 structure (`lower_if`/`lower_try` + shared `lower_branch_clause`, third reuse of
 `lower_block_body`), own-line line-comment preservation in block bodies
-(`lower_block_body` extended).
+(`lower_block_body` extended), trailing line-comment preservation in block bodies
+(`lower_block_body` line model gained a per-line `comment` field).
 
-## Latest session (own-line line comments in block bodies — `lower_block_body` extended)
+## Latest session (trailing comments in block bodies — `lower_block_body` line model)
 
-The **first comment-preservation** rule, and a one-arm extension to the shared
-`lower_block_body` engine, so it lands across **every** vertical block at once
-(`begin`/`quote`/`let`/`while`/`for`/`if`/`try`). Before, `lower_block_body`
-bailed (`None` → transparent) on **any** `COMMENT` token. New token arm:
-`COMMENT if lines.last().is_empty()` — an own-line comment (the current line holds
-no statement yet) is pushed as its own one-element statement line (its text
-`trim_end_matches([' ', '\t'])`'d, mirroring `lower_trivia`), so the body's
-`HardLine` + re-indent renders it at the body indent, exactly matching Runic's
-re-indentation. `expect_sep` is set after it (a following node with no separator
-bails). A **trailing** comment (the current line already holds a statement) does
-*not* match the guard, falls to `_ => return None`, and still bails the whole
-block to transparent — unmodeled, deferred. `BLOCK_COMMENT` (`#= … =#`) likewise
-still bails. Verified byte-identical to Runic on leading/interior/last-position
-own-line comments in `begin`/`let`/`for`/`while`/`if`-`else`/`try`-`catch`, and
-nested (`begin` containing an `if`, each level's comments re-indented); idempotent.
-Fixture `block_comments/`. Corpus 39→40 pass, divergence held at 2; allowlist
-39→40. No parser blocker surfaced (line comments tokenize cleanly as `COMMENT`
-children of the `BLOCK`).
+The follow-up to own-line comments, landing across **every** vertical block at
+once (`begin`/`quote`/`let`/`while`/`for`/`if`/`try`). The line model changed from
+`Vec<Vec<Ir>>` (statements only, `; `-joined) to `Vec<BodyLine>`, where
+`BodyLine { stmts: Vec<Ir>, comment: Option<Ir> }` carries an optional trailing
+comment. The `COMMENT` arm is now unconditional (no more own-line-only guard): a
+comment sets `line.comment` (text `trim_end_matches([' ', '\t'])`'d), bailing
+`None` only if the line already has one (a second comment per line is impossible —
+a comment runs to EOL). `expect_sep` is set after a comment so a node following
+without a newline bails. Rendering: after the `; `-joined stmts, if `comment` is
+`Some`, push **one** space (only when a statement precedes — an own-line comment
+sits flush at the body indent) then the comment. The blank-line span detection
+switched from `line.is_empty()` to `BodyLine::is_blank()` (no stmts *and* no
+comment), so an own-line comment still counts as content. The **one canonical
+space** before `#` is a **Tenet-1 divergence**: Runic preserves the user's ≥1
+pre-`#` whitespace verbatim (`y = 2    #` keeps four spaces), Fatou collapses to
+one (`z=3#` → `z = 3 #`, `y = 2    #` → `y = 2 #`). Recorded as the new blocked
+fixture `trailing_comment_spacing_divergence/` (mirroring `logical_tight_divergence`).
+Verified byte-identical to Runic on trailing comments in every block kind incl.
+`;`-joined lines (`y = 2; w = 4 # …`) and mixed own-line+trailing; idempotent.
+Fixture `trailing_comments/`. Corpus 40→41 pass, divergence 2→3 (the deliberate
+new block); allowlist 40→41. No parser blocker (comments tokenize as `COMMENT`).
 
 ### Ranked next targets
 
-1. **Trailing comments in block bodies** (`x = 1 # note`). The natural follow-up:
-   `lower_block_body` currently bails the whole block on a trailing comment. Runic
-   recurses the statement and preserves the pre-`#` whitespace (≥1 space), so
-   `z=3# x` → `z = 3 # x` but `y = 2    # x` keeps four spaces — a **Tenet-1
-   divergence**: Fatou must canonicalize to one space (diverging when input has
-   more) and record it in `runic-blocked.txt` (or keep multi-space inputs out of
-   the fixture). The line model (`Vec<Vec<Ir>>`, `; `-joined) needs a way to attach
-   a trailing comment to a line (space-joined, always last), not `; `-joined.
-2. **Comment preservation inside broken brackets *and matrices***.
+1. **Comment preservation inside broken brackets *and matrices***.
    `lower_multiline_bracket` and `lower_matrix` still bail on any `COMMENT`.
    Placement (own-line vs trailing `# …`), the trailing-`#`-forces-next-token-
    onto-newline interaction.
-3. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
+2. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
    **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
    could still land *if* return-insertion is modeled or the fixture dodges it;
    currently deferred.
-4. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
+3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven (newline-triggered); Runic also breaks on
    width. Needs the `fits` engine, not just `HardLine`s.
 
 ## Earlier sessions
 
+- **own-line line comments in block bodies (`lower_block_body` extended)**: the
+  first comment-preservation rule, a one-arm extension landing across every
+  vertical block. A `COMMENT` on an otherwise-empty line became its own statement
+  line (text `trim_end_matches`'d), re-indented to the body via the existing
+  `HardLine`. A *trailing* comment still bailed the whole block to transparent
+  (lifted this session). `BLOCK_COMMENT` still bails. Fixture `block_comments/`.
 - **`if`/`try` branch structure (`lower_if`/`lower_try` + `lower_branch_clause`,
   third reuse of `lower_block_body`)**: generalized the single-body engine to a
   **chain of branches**, each its own `BLOCK`. Two arms (`IF_EXPR`, `TRY_EXPR`)

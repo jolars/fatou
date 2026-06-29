@@ -39,6 +39,7 @@ paren_padding
 range_colon
 ternary_spacing
 tight_operators
+trailing_comments
 trailing_whitespace
 try_blocks
 type_annotations

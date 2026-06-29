@@ -1932,6 +1932,21 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
     Some(Ir::concat(parts))
 }
 
+/// One source line of a block body: zero or more statements (`; `-joined) plus an
+/// optional trailing line comment.
+#[derive(Default)]
+struct BodyLine {
+    stmts: Vec<Ir>,
+    comment: Option<Ir>,
+}
+
+impl BodyLine {
+    /// A line carrying neither a statement nor a comment — a blank line.
+    fn is_blank(&self) -> bool {
+        self.stmts.is_empty() && self.comment.is_none()
+    }
+}
+
 /// Lower the statements of a `BLOCK` into an indented, vertically-broken body,
 /// returning `None` (the caller bails to the transparent lowering) for an empty
 /// block or any shape this does not model.
@@ -1942,12 +1957,18 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
 /// still applies and a nested block indents further. Blank lines are preserved
 /// (capped at [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]): between statements,
 /// after the keyword (leading), and before `end` (trailing) — the framing break
-/// the layout always adds absorbs one newline on each side. A comment, two
-/// statements with no separator, or any unexpected token returns `None`.
+/// the layout always adds absorbs one newline on each side.
+///
+/// Line comments are preserved. An **own-line** comment becomes its own line,
+/// re-indented to the body. A **trailing** comment (the line already holds a
+/// statement) is attached after it with a single space — a Tenet-1 divergence:
+/// Runic preserves the user's pre-`#` whitespace (≥1 space) verbatim, but Fatou
+/// canonicalizes to exactly one space. Two statements with no separator, a node
+/// after a comment, or any unexpected token returns `None`.
 fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
-    // Each line is a list of statements to be `; `-joined. `expect_sep` guards
-    // against two adjacent statement nodes with no `;`/newline between them.
-    let mut lines: Vec<Vec<Ir>> = vec![Vec::new()];
+    // `expect_sep` guards against two adjacent statement nodes with no `;`/newline
+    // between them, and against a node following a comment on the same line.
+    let mut lines: Vec<BodyLine> = vec![BodyLine::default()];
     let mut expect_sep = false;
 
     for el in block.children_with_tokens() {
@@ -1956,23 +1977,28 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
                 if expect_sep {
                     return None;
                 }
-                lines.last_mut().unwrap().push(lower_node(&child));
+                lines.last_mut().unwrap().stmts.push(lower_node(&child));
                 expect_sep = true;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::WHITESPACE => {}
                 SyntaxKind::SEMICOLON => expect_sep = false,
                 SyntaxKind::NEWLINE => {
-                    lines.push(Vec::new());
+                    lines.push(BodyLine::default());
                     expect_sep = false;
                 }
-                // An own-line line comment is rendered as its own statement line
-                // (re-indented to the body), matching Runic. A *trailing* comment
-                // (the current line already holds a statement) is unmodeled — bail
-                // to the transparent fallback for the whole block.
-                SyntaxKind::COMMENT if lines.last().unwrap().is_empty() => {
+                // A line comment closes its line: own-line (the line is empty) or
+                // trailing (a statement precedes it). Either way it becomes the
+                // line's `comment`; `expect_sep` then bails a node that follows
+                // without an intervening newline. A second comment on one line is
+                // impossible (a comment runs to end of line), so guard with `None`.
+                SyntaxKind::COMMENT => {
+                    let line = lines.last_mut().unwrap();
+                    if line.comment.is_some() {
+                        return None;
+                    }
                     let text = tok.text().trim_end_matches([' ', '\t']);
-                    lines.last_mut().unwrap().push(Ir::text(text));
+                    line.comment = Some(Ir::text(text));
                     expect_sep = true;
                 }
                 _ => return None,
@@ -1984,8 +2010,8 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
     // keyword) and trailing (before `end`) framing lines plus any kept blanks:
     // one empty line on each side is absorbed into the framing break, the rest
     // become preserved blanks (capped at `MAX_BLANK_LINES`). All-empty ⇒ `None`.
-    let first = lines.iter().position(|l| !l.is_empty())?;
-    let last = lines.iter().rposition(|l| !l.is_empty()).unwrap();
+    let first = lines.iter().position(|l| !l.is_blank())?;
+    let last = lines.iter().rposition(|l| !l.is_blank()).unwrap();
     let leading_blanks = first.saturating_sub(1).min(MAX_BLANK_LINES);
     let trailing_blanks = (lines.len() - 1 - last)
         .saturating_sub(1)
@@ -2001,7 +2027,7 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
     // would leave the indent as trailing whitespace), capped at `MAX_BLANK_LINES`.
     let mut pending_blanks = 0usize;
     for line in content {
-        if line.is_empty() {
+        if line.is_blank() {
             pending_blanks += 1;
             continue;
         }
@@ -2010,11 +2036,19 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
         }
         pending_blanks = 0;
         inner.push(Ir::HardLine); // framing break / re-indent for this line
-        for (j, stmt) in line.iter().enumerate() {
+        for (j, stmt) in line.stmts.iter().enumerate() {
             if j > 0 {
                 inner.push(Ir::text("; "));
             }
             inner.push(stmt.clone());
+        }
+        if let Some(comment) = &line.comment {
+            // One canonical space before a trailing comment; an own-line comment
+            // (no preceding statement) sits flush at the body indent.
+            if !line.stmts.is_empty() {
+                inner.push(Ir::text(" "));
+            }
+            inner.push(comment.clone());
         }
     }
     for _ in 0..trailing_blanks {

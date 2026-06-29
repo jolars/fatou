@@ -11,3 +11,8 @@ logical_tight_divergence
 # expression. Return-insertion is not implemented (it is a semantic rewrite, not
 # a layout rule); deferred.
 control_flow
+
+# Tenet 1 divergence: Runic *preserves* the user's pre-`#` whitespace on a
+# trailing comment (≥1 space verbatim). Fatou must be deterministic, so it
+# canonicalizes to exactly one space; multi-space input therefore diverges.
+trailing_comment_spacing_divergence
