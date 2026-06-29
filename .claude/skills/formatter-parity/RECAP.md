@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**24 fixtures**): **22 allowlisted**, 2 blocked
+Dir corpus (**25 fixtures**): **23 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -44,44 +44,29 @@ multi-line matrix breaking (`lower_matrix`), blank-line preservation in both
 (interior **and** leading/trailing gaps, via the `Ir::BlankLine` primitive),
 ternary spacing (`lower_ternary`), curly type-param padding (`lower_arg_list`
 extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`),
-bare-tuple comma spacing (`lower_bare_tuple`).
+bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
+(`lower_keyword_stmt` extended).
 
-## Latest session (bare-tuple comma spacing)
+## Latest session (`global`/`local` comma name lists)
 
-`BARE_TUPLE_EXPR` (`x, y`, `a, b, c`, the lhs/rhs of a multiple assignment
-`a, b = 1, 2`, a multi-value `return x, y`) was **transparent**, so `x,y` leaked;
-Runic `", "`-joins it like every other list. New `lower_bare_tuple`: the node holds
-element nodes **directly** separated by `COMMA` tokens — no brackets, **not**
-`ARG`-wrapped (unlike `lower_collection`). Walk children, drop incidental ws,
-alternate element/comma, emit `lower_node(el)` joined by `", "` (each element
-recursed, so `f(x),g(y)` → `f(x), g(y)`, `x...,y` → `x..., y`, `(x,y),z` →
-`(x, y), z`). Bails to transparent on a leading/doubled/**trailing** comma (a
-trailing comma in a bare tuple is a parse error at this level anyway) or a
-comment/newline. `a,b = 1,2` and `return x,y` work for free: those are
-`ASSIGNMENT_EXPR`/`RETURN_EXPR` whose operand is a `BARE_TUPLE_EXPR`, reached by
-the existing recursion. Verified byte-identical to Runic across
-name/literal/call/index/dot/splat/paren elements, spacing variants, the multiple
-assignment, and `return x, y`. Idempotent. Fixture `bare_tuples/`. Corpus 21→22
-pass, divergence held at 2; allowlist 21→22. No upstream blocker surfaced.
-
-**Note (kept out of the fixture):** `global a, b`/`local a, b` are **not**
-bare tuples — the parser puts the `NAME`/`COMMA` children **directly** in the
-`GLOBAL_STMT`/`LOCAL_STMT` node, so `lower_keyword_stmt` still bails (>1 operand)
-and they leak (`global a,b` → `global a,b`). A separate comma-list shape; see the
-ranked targets.
-
-## Earlier session (keyword-statement spacing)
-
-`RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT` were **transparent**, leaking
-the space between keyword and operand (`return  x`); Runic collapses to one
-(`return x`, `const x = 1`). New `lower_keyword_stmt` (one arm for all four): first
-non-ws token is the keyword, then expect **≤1 operand node and nothing else**; emit
-`kw " " lower_node(operand)` (operand recursed: `return  x+1` → `return x + 1`) or
-just `kw` for bare `return`. Bails past one operand—comments (`return  x  # c`:
-Runic keeps the trailing spacing, transparent preserves it) and comma name lists
-(`global a, b`, handled by the next session's bare-tuple work for the
-`BARE_TUPLE_EXPR` cases, but `global`/`local`'s own comma children still bail).
-Idempotent. Fixture `keyword_statements/`. Corpus 20→21, allowlist 20→21.
+Closed ranked target #0 (cheap, surfaced last session). `global a,b`/`local x,y,z`
+leaked (`global a,b`): the parser drops the `NAME`/`IDENT`/`COMMA` children
+**directly** into `GLOBAL_STMT`/`LOCAL_STMT` (a flat name list, **not** an operand
+subtree—and asymmetric: the *first* name is a `NAME` node, the rest are bare
+`IDENT` tokens), so `lower_keyword_stmt`'s old "≤1 operand else bail" hit the
+second token and fell to transparent. Restructured it: collect the keyword + the
+rest (whitespace dropped); a bare keyword or a **single operand node** keep the old
+arms (`return x`, `const a = 1, b = 2` whose lone `ASSIGNMENT_EXPR` recurses—still
+byte-identical); otherwise parse a clean **item/`COMMA`** alternation where an item
+is a `NAME` node (recursed) or a bare `IDENT` token, and `", "`-join it. Bails to
+transparent on anything off the happy path: the `=`/`::` assignment-list forms
+(`global a, b = 1, 2`, `global a, b::Int`—`EQ`/`COLON_COLON` land flat between
+items and break the alternation; kept out of the fixture, lossless), a
+comment/newline, or a leading/trailing/doubled comma. Verified byte-identical to
+Runic on `global a,b`, `global  a ,  b` (ws collapse), `local x,y,z`,
+`global one, two, three`, single `global g`/`local single`. Idempotent. Fixture
+`global_local_names/`. Corpus 22→23 pass, divergence held at 2; allowlist 22→23.
+No upstream blocker surfaced.
 
 ## Earlier session (curly type-param padding)
 
@@ -255,13 +240,13 @@ Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
 
 ### Ranked next targets
 
-0. **`global`/`local` comma name lists** (cheap, surfaced this session). `global a,b`
-   → `global a, b` (likewise `local`). Unlike a bare tuple, the parser puts the
-   `NAME`/`COMMA` children **directly** in the `GLOBAL_STMT`/`LOCAL_STMT` node, so
-   `lower_keyword_stmt` bails today. Extend it: after the keyword, `", "`-join the
-   comma-separated children (one space after the kw before the first). Probe
-   `const a = 1, b = 2` (does `const` take a comma list, or is it the nested
-   `ASSIGNMENT_EXPR`/bare-tuple shape that already works?).
+0. **Assignment-list `global`/`local`** (`global a, b = 1, 2`, `global a, b::Int`).
+   These land *flat* in the statement node (`NAME COMMA IDENT EQ INTEGER COMMA
+   INTEGER`—no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR` wrapper, the `=`/`::` are loose
+   tokens), so the new name-list parser bails. Runic spaces both the commas and the
+   `=`/`::` (`global a,b=1,2` → `global a, b = 1, 2`). Needs a flat operator+comma
+   normalizer over the loose token soup—trickier than the clean name list; probe
+   the exact `=`/`::`/`,` interleavings first.
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
    last piece of the old "blank lines + comments" target #1. Comments are the hard
@@ -277,6 +262,17 @@ Files: `tests/fixtures/formatter/matrices/{input,expected}.jl`, allowlist (+1).
 
 ## Earlier sessions
 
+- **bare-tuple comma spacing**: `lower_bare_tuple` (`BARE_TUPLE_EXPR`)—elements
+  held **directly**, `COMMA`-separated, **not** `ARG`-wrapped; alternate
+  element/comma, `", "`-join recursed elements (`f(x),g(y)` → `f(x), g(y)`,
+  `x...,y` → `x..., y`). `a,b = 1,2`/`return x,y` flow through the existing
+  `ASSIGNMENT`/`RETURN` recursion. Bails on leading/doubled/trailing comma or
+  comment/newline. Fixture `bare_tuples/`.
+- **keyword-statement spacing**: `lower_keyword_stmt`
+  (`RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT`)—keyword + one space +
+  recursed operand (`return  x+1` → `return x + 1`), bare `return` kept. Later
+  extended to `global`/`local` comma name lists (see latest session). Fixture
+  `keyword_statements/`.
 - **tuple/vector/brace collections**: `lower_collection` (`TUPLE_EXPR`/`VECT_EXPR`/
   `BRACES`)—open/close verbatim, drop incidental ws, join `ARG`s with `", "`,
   drop trailing comma **except** the semantic 1-tuple `(a,)`. Bails on `;`-row

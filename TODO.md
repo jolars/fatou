@@ -81,12 +81,17 @@ leverage.
   `lower_arg_list` by accepting `LBRACE`/`RBRACE`—same comma spacing, no padding,
   trailing-comma drop), keyword-statement spacing (`lower_keyword_stmt` over
   `RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT`: `return  x` → `return x`,
-  one space between the keyword and its recursed operand, bare `return` kept;
-  bails on a trailing comment or a comma-separated name list `global a, b`),
+  one space between the keyword and its recursed operand, bare `return` kept),
   bare-tuple comma spacing (`lower_bare_tuple` over `BARE_TUPLE_EXPR`: `x,y` →
   `x, y`, `a,b = 1,2` → `a, b = 1, 2`, `return x,y` → `return x, y`; bracketless,
   `", "`-joins the recursed bare elements; bails on leading/doubled/trailing comma
-  or a comment/newline). **Next:** comment preservation inside broken
+  or a comment/newline), `global`/`local` comma name lists (`lower_keyword_stmt`
+  extended: `global a,b` → `global a, b`, `local x,y,z` → `local x, y, z`—the
+  parser drops `NAME`/`IDENT`/`COMMA` directly into the statement node, so this is
+  a flat name list, not an operand subtree; `", "`-joins the clean
+  item/`COMMA` alternation, bails on the `=`/`::` assignment-list forms
+  `global a, b = 1, 2`, a comment, or a leading/trailing comma). **Next:** comment
+  preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

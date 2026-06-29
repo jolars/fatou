@@ -137,17 +137,16 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
 /// comma-separated name list (`global a, b`, a bare-tuple shape we don't model),
 /// or any unexpected token—falls back to the verbatim transparent lowering.
 fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
+    // First non-whitespace token is the keyword; everything after it (sans
+    // incidental whitespace) is the operand sequence.
     let mut kw: Option<SyntaxToken> = None;
-    let mut operands: Vec<SyntaxNode> = Vec::new();
+    let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
 
     for el in node.children_with_tokens() {
-        match el {
-            NodeOrToken::Node(child) => operands.push(child),
-            NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
-                _ if kw.is_none() => kw = Some(tok),
-                _ => return lower_transparent(node),
-            },
+        match &el {
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
+            NodeOrToken::Token(tok) if kw.is_none() => kw = Some(tok.clone()),
+            _ => rest.push(el),
         }
     }
 
@@ -155,15 +154,55 @@ fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    match operands.as_slice() {
-        [] => Ir::text(kw.text().to_string()),
-        [operand] => Ir::concat([
-            Ir::text(kw.text().to_string()),
-            Ir::text(" "),
-            lower_node(operand),
-        ]),
-        _ => lower_transparent(node),
+    // Bare keyword (`return`), or a single operand node (`return x`,
+    // `const x = 1`, `local a = 1`)—the operand is recursed so its own spacing
+    // normalizes.
+    match rest.as_slice() {
+        [] => return Ir::text(kw.text().to_string()),
+        [NodeOrToken::Node(operand)] => {
+            return Ir::concat([
+                Ir::text(kw.text().to_string()),
+                Ir::text(" "),
+                lower_node(operand),
+            ]);
+        }
+        _ => {}
     }
+
+    // Comma name list (`global a, b`, `local x, y, z`): the parser drops the
+    // `NAME`/`IDENT`/`COMMA` children directly into the statement node, so this
+    // is *not* an operand subtree. Accept only the clean alternating shape—an
+    // item (a `NAME` node or a bare `IDENT` token) then a `COMMA`—and `", "`-join
+    // it. Anything else (an `=`/`::` assignment-list form, a comment, a trailing
+    // comma) bails to the lossless transparent passthrough.
+    let mut parts: Vec<Ir> = vec![Ir::text(kw.text().to_string()), Ir::text(" ")];
+    let mut expect_item = true;
+
+    for el in &rest {
+        match el {
+            NodeOrToken::Node(child) if expect_item => {
+                parts.push(lower_node(child));
+                expect_item = false;
+            }
+            NodeOrToken::Token(tok) if expect_item && tok.kind() == SyntaxKind::IDENT => {
+                parts.push(Ir::text(tok.text().to_string()));
+                expect_item = false;
+            }
+            NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COMMA => {
+                parts.push(Ir::text(", "));
+                expect_item = true;
+            }
+            _ => return lower_transparent(node),
+        }
+    }
+
+    // A dangling `expect_item` means a leading or trailing comma (or an empty
+    // list); neither is a clean name list.
+    if expect_item {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
 }
 
 /// Lay out a comparison chain (`a == b == c`, `x < y <= z`) with a single space
