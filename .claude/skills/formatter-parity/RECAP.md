@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**34 fixtures**): **32 allowlisted**, 2 blocked
+Dir corpus (**35 fixtures**): **33 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -53,93 +53,41 @@ zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
 `export`/`public` name lists (`lower_export_stmt`), trailing-whitespace trimming
 (`lower_trivia` in the transparent path), named-tuple element spacing
 (`lower_collection` extended to `KEYWORD_ARG`), parenthesized-expression padding
-(`lower_paren`).
+(`lower_paren`), `;`-block padding and separators (`lower_paren_block`).
 
-## Latest session (parenthesized-expression padding — `lower_paren`)
+## Latest session (`;`-block padding and separators — `lower_paren_block`)
 
-A new `lower_node` arm on `PAREN_EXPR`. Found by sweeping single-line forms after
-the corpus was fully triaged: `( a + b )` was **transparent**, so Fatou kept the
-incidental whitespace flanking the inner expression—`( a + b )` stayed
-`( a + b )`, diverging from Runic's `(a + b)`. (The inner binary still got spaced
-via the transparent recursion; only the padding tokens leaked.) A `PAREN_EXPR` is
-`LPAREN`, optional `WHITESPACE`, **exactly one** inner node, optional `WHITESPACE`,
-`RPAREN`. The new arm (modeled on `lower_arrow`) collects children, drops
-`WHITESPACE`, accepts one `LPAREN`/`RPAREN` each, and requires a single inner
-operand; it then emits `"(" + lower_node(inner) + ")"`. Recursing the inner node
-keeps everything normalizing: nested parens `( (a) )` → `((a))`, and the inner
-expression's own spacing (`((a + b) * c)`). The catch-all `_` arm bails to
-`lower_transparent` on a comment, newline (a multi-line paren Runic *reflows and
-reindents*—out of scope, target #1), error recovery, or a missing/extra operand.
-Two sibling shapes never reach here: the `;`-block `(a; b)` parses to a distinct
-`PAREN_BLOCK` (still leaks `(a ; b)`—a later target) and a tuple `(a, b)`/`(a,)`
-is a `TUPLE_EXPR` (already handled by `lower_collection`). Verified byte-identical
-to Runic on `( a + b )`, `(  x  )`, `( x )`, `( (a) )`, `( a )* ( b )` →
-`(a) * (b)`, `(f(a) )`, `( -x )` → `(-x)`, `return ( x )`, and the
-already-canonical `(a)`/`(a + b)`/`((a + b) * c)`. Idempotent (the unpadded form
-is a fixed point). Fixture `paren_padding/` (single-line; multi-line and
-commented parens kept out, left for the comment-preservation target). Corpus
-31→32 pass, divergence held at 2; allowlist 31→32. No parser work needed.
+A new `lower_node` arm on `PAREN_BLOCK`, the sibling target flagged last session:
+the `;`-block `(a; b)` (a `begin`-less block expression) is a distinct node from
+the single-value `PAREN_EXPR` and the comma `TUPLE_EXPR`, and it was
+**transparent**, so `( a ; b )` leaked as `( a ; b )` against Runic's `(a; b)`.
+The CST: `LPAREN`, optional `WHITESPACE`, a leading statement node, then **one
+`PARAMETERS` node per `; <stmt>`** (each carrying `SEMICOLON` + optional
+`WHITESPACE` + optional statement), optional `WHITESPACE`, `RPAREN`. The new arm
+(modeled on `lower_paren`) walks the top-level children: a `PARAMETERS` child is
+routed through a `paren_block_statement` helper that extracts its lone statement
+(`Ok(Some)`), reports an arg-less trailing `;` as `Ok(None)` (dropped), or `Err`
+on any unmodeled shape (comment, newline, stray comma, second statement); every
+other child node is a statement lowered via `lower_node`; `WHITESPACE` is dropped
+and one `LPAREN`/`RPAREN` accepted. The collected statements are joined with
+`"; "` (tight-left/space-right separator, matching Runic). Recursing each
+statement keeps everything normalizing: `(a=1;b=2)` → `(a = 1; b = 2)` (the
+assignments parse as `KEYWORD_ARG` inside the block), nested `((a;b);c)` →
+`((a; b); c)`, `(f(x) ;g(y))` → `(f(x); g(y))`. **Guard:** only the ≥2-statement
+form is reshaped. A single-statement block always carries a trailing `;` (a bare
+`(a)` is a `PAREN_EXPR`, not `PAREN_BLOCK`), and Runic *preserves* that `;`
+(`(a;)` → `(a;)`)—the transparent fallback already matches for the unpadded form,
+so `statements.len() < 2` bails. Verified byte-identical to Runic on `(a; b)`,
+`( a ; b )`, `(x; y; z)`, `(a;b;)` → `(a; b)`, `(a=1;b=2)`, `((a;b);c)`,
+`(f(x) ;g(y))`, `( a; b; c )`, and the preserved `(a;)`. Idempotent. Fixture
+`paren_blocks/` (single-line; multi-line and commented blocks bail, left for the
+comment-preservation target). Corpus 32→33 pass, divergence held at 2; allowlist
+32→33. No parser work needed.
 
-## Earlier session (`using`/`import` comma + selector lists)
-
-`USING_STMT`/`IMPORT_STMT` were **transparent**, leaking comma spacing
-(`using A,B` stayed `using A,B`); Runic `", "`-joins them. Probing the next ranked
-target (assignment-list `global`/`local`) showed it's an **upstream parser
-blocker** (see below), so I pivoted to this clean adjacent win surfaced while
-probing. These parse *cleanly*: keyword token, then a comma-separated list of
-`IMPORT_PATH`/`IMPORT_ALIAS` **nodes**, optionally `:`-led into a selector list
-(`using A: x, y`). New `lower_import_stmt`: keyword + space, then a strict
-item(node)/separator alternation—`COMMA` → `", "`, the selector `COLON` → `": "`
-(Runic packs the selector colon tight-left/space-right); items are lowered via
-`lower_node` so the paths (`A.B`, `.A`, `..B.C`, `Foo as Bar`) pass through
-transparently (their internal dots/`as` are verbatim). Bails to transparent on a
-comment/newline (a multi-line import Runic may reflow) or a
-leading/trailing/doubled separator. Verified byte-identical to Runic on
-`using A,B`, `import A.B, C.D`, `using A: x,y`, `using A:x,y,z`,
-`import Base: +, -`, `import A: x as y`, `using .A, ..B.C`, single
-`using LinearAlgebra`. Idempotent. Fixture `import_using_lists/`. Corpus 23→24
-pass, divergence held at 2; allowlist 23→24.
-
-**Divergence kept out of the fixture (Tenet-1 corner):** with a *leading* space on
-the selector colon, Runic is non-deterministic—`using A :x` → `using A:x` and
-`using A : x` → `using A:x` (it drops the space-after, treating `:x` symbol-like),
-whereas `using A:x` → `using A: x`. Fatou canonicalizes to `using A: x` regardless;
-rare hand-spacing, left unrecorded as a blocked slug since no fixture exercises it.
-
-**Upstream parser blocker surfaced & handed off:** assignment-list
-`global`/`local` (`global a, b = 1, 2`, `local a, b = f(x), g(y)`,
-`global a, b::Int`) parses to a **flat token soup**—`GLOBAL_STMT` holds loose
-`NAME COMMA IDENT EQ INTEGER COMMA INTEGER` (no `ASSIGNMENT_EXPR`/
-`BARE_TUPLE_EXPR`; even calls unwrapped). JuliaSyntax green tree:
-`global ((tuple a b) = (tuple 1 2))`. A formatter rule here would be a fragile
-hand-normalizer papering over the parser; once the parser nests it properly the
-existing keyword-stmt + `lower_binary` + bare-tuple recursion handles it for free.
-Queued at the top of `parser-parity/RECAP.md` + a `TODO.md` Parser bullet.
-
-## Earlier session (tight field-access `.`)
-
-Fixed a **latent mangling bug** (not a missing rule — a *wrong* one), found by
-probing transparent constructs after the corpus went fully triaged. Field access
-`a.b.c` parses as a nested `BINARY_EXPR` with a `DOT` operator, so `lower_binary`
-treated `.` as a normal spaced binop and emitted `a . b . c` — which is **invalid
-Julia** (`a . b` is a JuliaSyntax/Runic *parse error*: "whitespace is not allowed
-here"). Same family as the old range-colon latent bug. One-line fix: add
-`SyntaxKind::DOT` to `is_tight_binop` (alongside `CARET`/`COLON`). The broadcast
-operators (`.+`/`.^` = `DOT_CARET` etc.) are distinct tokens, so they stay spaced
-(`a.b .+ c` → `a.b .+ c`, verified). Verified byte-identical to Runic on
-`a.b.c`/`obj.field = 1`/`Base.Iterators.flatten`/`a.b().c`/`df.x[1]`/`a.b .+ c`,
-and `a . b . c` (spaced input) normalizes to `a.b.c`. Idempotent. Fixture
-`dot_access/`. Corpus 18→19 pass, divergence held at 2; allowlist 18→19.
-
-**Upstream blocker surfaced & handed off:** left-division `\` (`a\b`) mis-lexes
-to an `ERROR` token (the formatter can only bail to transparent); JuliaSyntax:
-`(call-i a \ b)`, Runic spaces it. Queued at the top of `parser-parity/RECAP.md`
-+ a `TODO.md` Parser bullet (5-file operator recipe, tier of `/`).
-
-(Ternary spacing `lower_ternary` and anonymous-function arrow spacing
-`lower_arrow` — both operand/operator alternation rules modeled on
-`lower_comparison`, recursing into operands, bailing on comment/newline — are now
-in the "Earlier sessions" bullet list below.)
+**Divergence kept out of the fixture (Tenet-1 corner):** a *padded*
+single-statement block `( a ; )` → Runic strips to `(a;)`, but Fatou bails to
+transparent (the `len < 2` guard) and only trims part of the padding (`( a ;)`).
+Rare hand-spacing, no fixture exercises it, left unrecorded as a blocked slug.
 
 ### Ranked next targets
 
@@ -158,6 +106,30 @@ in the "Earlier sessions" bullet list below.)
 
 ## Earlier sessions
 
+- **parenthesized-expression padding (`lower_paren`)**: `PAREN_EXPR` (`( a + b )`)
+  was transparent, leaking the whitespace flanking the single inner expression.
+  New arm (modeled on `lower_arrow`): drop `WHITESPACE`, accept one
+  `LPAREN`/`RPAREN`, require one inner operand, emit `"(" + lower_node(inner) +
+  ")"`; recursion normalizes nested parens (`( (a) )` → `((a))`) and inner spacing.
+  Bails on comment/newline/error/extra operand. The `;`-block `(a; b)` is a
+  separate `PAREN_BLOCK` (handled this session); tuples are `TUPLE_EXPR`. Fixture
+  `paren_padding/`.
+- **`using`/`import` comma + selector lists (`lower_import_stmt`)**:
+  `USING_STMT`/`IMPORT_STMT` were transparent, leaking comma spacing; Runic
+  `", "`-joins them and packs the selector `:` tight-left/space-right
+  (`using A: x, y`). Item(`IMPORT_PATH`/`IMPORT_ALIAS` node)/separator alternation,
+  paths recursed transparently (`A.B`, `.A`, `Foo as Bar`); bails on
+  comment/newline or a leading/trailing/doubled separator. Fixture
+  `import_using_lists/`. (Surfaced the assignment-list `global`/`local` parser
+  blocker, since landed upstream `93e3d28`.) Divergence kept out: a *leading*-space
+  selector colon (`using A :x`) is Runic-non-deterministic; Fatou canonicalizes to
+  `using A: x`, no fixture exercises it.
+- **tight field-access `.` (`DOT` in `is_tight_binop`)**: a *wrong-rule* latent
+  mangle—`a.b.c` is a nested `BINARY_EXPR` with a `DOT` op, so `lower_binary`
+  spaced it to the invalid `a . b . c`. One-line fix: add `SyntaxKind::DOT` to
+  `is_tight_binop`. Broadcast ops (`.+` = `DOT_CARET` etc.) are distinct tokens,
+  stay spaced. Fixture `dot_access/`. (Surfaced the left-division `\` mis-lex
+  blocker, handed to parser-parity.)
 - **named-tuple element spacing (`lower_collection` + `KEYWORD_ARG`)**: a one-line
   item-kind extension, not a new arm. A named tuple `(a=1, b=2)` is a `TUPLE_EXPR`
   whose elements are `KEYWORD_ARG` nodes; `lower_collection`'s item match only

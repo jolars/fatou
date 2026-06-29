@@ -143,7 +143,15 @@ leverage.
   so nested parens `( (a) )` → `((a))` and the inner spacing keep normalizing;
   the `;`-block `(a; b)` is a distinct `PAREN_BLOCK` and a tuple `(a, b)` is a
   `TUPLE_EXPR`, so neither reaches the arm; bails on comment/newline (a multi-line
-  paren Runic reflows), locked by `paren_padding/`). **Next:** comment preservation inside broken
+  paren Runic reflows), locked by `paren_padding/`), `;`-block padding and
+  separators (`lower_paren_block` over `PAREN_BLOCK`: `( a ; b )` → `(a; b)`,
+  `(a;b;)` → `(a; b)`—each `;` packed tight-left/space-right, the padding stripped,
+  a trailing arg-less `;` dropped; the leading statement and each `PARAMETERS`
+  statement are lowered recursively so `(a=1;b=2)` → `(a = 1; b = 2)` and a nested
+  block `((a;b);c)` → `((a; b); c)` keep normalizing; only the ≥2-statement form is
+  reshaped—a single-statement `(a;)` keeps its trailing `;` via the transparent
+  fallback, matching Runic; bails on comment/newline; locked by `paren_blocks/`).
+  **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

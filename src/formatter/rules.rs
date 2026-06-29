@@ -34,6 +34,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
             lower_collection(node)
         }
         SyntaxKind::PAREN_EXPR => lower_paren(node),
+        SyntaxKind::PAREN_BLOCK => lower_paren_block(node),
         SyntaxKind::BARE_TUPLE_EXPR => lower_bare_tuple(node),
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
@@ -190,6 +191,97 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
     };
 
     Ir::concat([Ir::text("("), lower_node(inner), Ir::text(")")])
+}
+
+/// Lay out a `;`-block `(a; b)` (a `PAREN_BLOCK`, distinct from the single-value
+/// `PAREN_EXPR` and the comma tuple `TUPLE_EXPR`). The block is `LPAREN`, a
+/// leading statement node, then one `PARAMETERS` node per `; <stmt>` (each
+/// carrying the `SEMICOLON`, optional whitespace, and the statement), then
+/// `RPAREN`. Runic packs each separator tight-left/space-right and strips the
+/// padding flanking the inner expressions: `( a ; b )` → `(a; b)`,
+/// `(a;b;)` → `(a; b)` (a trailing `;` produces an arg-less `PARAMETERS` that is
+/// dropped). Every statement is lowered recursively, so a nested block
+/// (`((a;b);c)` → `((a; b); c)`) and each statement's own spacing keep
+/// normalizing.
+///
+/// Only the multi-statement single-line shape is reshaped. A single-statement
+/// block (`(a;)`, always carrying a trailing `;` since a bare `(a)` is a
+/// `PAREN_EXPR`) is left to the transparent fallback—Runic *preserves* the
+/// trailing `;` there (`(a;)` → `(a;)`), which the verbatim lowering already
+/// matches for the unpadded form. An interleaved comment or newline (a
+/// multi-line block Runic may reflow and reindent), error recovery, or any other
+/// unexpected child also falls back to the transparent lowering.
+fn lower_paren_block(node: &SyntaxNode) -> Ir {
+    let mut statements: Vec<Ir> = Vec::new();
+    let mut saw_lparen = false;
+    let mut saw_rparen = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if child.kind() == SyntaxKind::PARAMETERS {
+                    match paren_block_statement(&child) {
+                        Ok(Some(ir)) => statements.push(ir),
+                        Ok(None) => {} // trailing `;` — arg-less, dropped
+                        Err(()) => return lower_transparent(node),
+                    }
+                } else {
+                    statements.push(lower_node(&child));
+                }
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::LPAREN if !saw_lparen => saw_lparen = true,
+                SyntaxKind::RPAREN if !saw_rparen => saw_rparen = true,
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    if !saw_lparen || !saw_rparen || statements.len() < 2 {
+        return lower_transparent(node);
+    }
+
+    let mut parts: Vec<Ir> = Vec::with_capacity(statements.len() * 2 + 1);
+    parts.push(Ir::text("("));
+    for (i, stmt) in statements.into_iter().enumerate() {
+        if i > 0 {
+            parts.push(Ir::text("; "));
+        }
+        parts.push(stmt);
+    }
+    parts.push(Ir::text(")"));
+    Ir::concat(parts)
+}
+
+/// Extract the lowered statement from a `PARAMETERS` node inside a `PAREN_BLOCK`:
+/// `SEMICOLON`, optional whitespace, and at most one statement node. Returns the
+/// lowered statement, `None` for an arg-less trailing `;`, or `Err` on any
+/// unmodeled shape (comment, newline, a stray comma, or a second statement).
+fn paren_block_statement(params: &SyntaxNode) -> Result<Option<Ir>, ()> {
+    let mut statement: Option<Ir> = None;
+    let mut saw_semicolon = false;
+
+    for el in params.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if statement.is_some() {
+                    return Err(());
+                }
+                statement = Some(lower_node(&child));
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::SEMICOLON if !saw_semicolon => saw_semicolon = true,
+                _ => return Err(()),
+            },
+        }
+    }
+
+    if !saw_semicolon {
+        return Err(());
+    }
+    Ok(statement)
 }
 
 /// Lay out a `where` clause (`f(x) where T`, `Tuple{T} where {T <: Real}`) with a
