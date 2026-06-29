@@ -6,6 +6,21 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Handoff from formatter-parity (2026-06-29):** one-line space-separated `for`
+body folds into `FOR_BINDING`. `for i in 1:3 x += i end` should parse as a
+for-loop with body `x += i` — JuliaSyntax ground truth
+`(for (in i (call : 1 3)) (block (+= x i)))` (probe: `julia --startup-file=no -e
+'using JuliaSyntax; print(JuliaSyntax.parse(Expr, "for i in 1:3 x += i end"))'`).
+Fatou instead greedily extends the `for`-binding past the iterable, swallowing
+`x += i` as flat tokens and leaving an empty `BLOCK` (so the loop has no body).
+The crux is the binding's right edge: with no `;`/newline separator, the parser
+doesn't stop the iterable at `1:3`. One-line `while` (`while c x end`) already
+separates `CONDITION`/`BLOCK` correctly, so the gap is specific to the
+`for`-binding extension. Formatter-parity's `lower_loop` routes around it
+(`;`-separated and multi-line for-bodies parse fine and are the fixture); fixing
+this would let the one-line `for` body explode like the `while` one. See
+`TODO.md` Parser section and formatter-parity RECAP's `loop_blocks` session.
+
 **Handoff to formatter-parity (2026-06-29):** `global`/`local` + multiple
 assignment now nests properly (`global a, b = 1, 2` ⇒ `(global (= (tuple a b)
 (tuple 1 2)))`, `local a, b = f(x), g(y)` wraps the calls, `global a, b::Int` ⇒

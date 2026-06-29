@@ -36,6 +36,15 @@ leverage.
   insignificant (`(/\nx)` ⇒ `(call-pre (error /) x)`). Mirrors the range colon's
   `newline_significant` gate.
 
+- [ ] Parser: one-line space-separated `for` body folds into `FOR_BINDING`.
+  `for i in 1:3 x += i end` should parse as a for-loop with body `x += i`
+  (JuliaSyntax: `(for (in i (call : 1 3)) (block (+= x i)))`), but Fatou's
+  `for`-binding parser greedily extends past the iterable and consumes
+  `x += i` as flat tokens, leaving an empty `BLOCK`. One-line `while`
+  (`while c x end`) separates `CONDITION`/`BLOCK` correctly, so this is specific
+  to the `for`-binding extension. Surfaced by formatter-parity (`lower_loop`);
+  the loop fixture routes around it with `;`-separated and multi-line bodies.
+
 ### Incremental
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
@@ -174,10 +183,22 @@ leverage.
   binding/body separator `;` opens the `BLOCK`; empty body keeps its source layout
   via the transparent fallback; tight multi-binding headers (`let x=1,y=2`) are not
   normalized—the parser leaves later bindings as flat tokens—so kept out of the
-  fixture; locked by `let_blocks/`).
-  **Next:** remaining block headers reusing `lower_block_body`—`if`/`while`/`for`
-  (layout-only; no return-insertion) before `function`/`do` (which need it). Then
-  comment preservation inside broken brackets/matrices (the harder half)—see the
+  fixture; locked by `let_blocks/`), `while`/`for` loop-body indentation
+  (`lower_loop` over `WHILE_EXPR`/`FOR_EXPR`: `while c⏎x end` → `while c⏎    x⏎
+  end`—the header is the recursively-lowered `CONDITION` (`while`) or `FOR_BINDING`
+  (`for`, supplying the `for ` prefix the binding omits, so `for i = 1:3` →
+  `for i in 1:3`), then `lower_block_body` for the body; a non-empty one-line body
+  is exploded vertical (`while c; x; y; end` → `while c⏎    x; y⏎end`); empty body
+  keeps its source layout via the transparent fallback; loop bodies are never
+  `return`-inserted; locked by `loop_blocks/`. Multi-binding `for i = 1:3, j = 1:3`
+  leaves its 2nd+ bindings as flat tokens (the `let`/`global`/`local` parser
+  asymmetry), so only the first normalizes—kept out of the fixture; one-line
+  space-separated `for i in 1:3 x end` mis-parses the body into `FOR_BINDING`
+  (empty `BLOCK`)—a parser blocker handed off, kept out of the fixture).
+  **Next:** `if`/`elseif`/`else` and `try`/`catch`/`finally` branch structure
+  reusing `lower_block_body` (each branch its own `BLOCK`; layout-only, no
+  return-insertion) before `function`/`do` (which need it). Then comment
+  preservation inside broken brackets/matrices/blocks (the harder half)—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,

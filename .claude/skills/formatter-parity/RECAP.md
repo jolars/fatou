@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**38 fixtures**): **36 allowlisted**, 2 blocked
+Dir corpus (**39 fixtures**): **37 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -56,46 +56,57 @@ zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
 (`lower_paren`), `;`-block padding and separators (`lower_paren_block`),
 comprehension/generator `for`-binding `in` normalization (`lower_for_binding`),
 `begin`/`quote` block-body indentation (`lower_block_expr` + `lower_block_body`),
-`let` block-body indentation (`lower_let`, first reuse of `lower_block_body`).
+`let` block-body indentation (`lower_let`, first reuse of `lower_block_body`),
+`while`/`for` loop-body indentation (`lower_loop`, second reuse of
+`lower_block_body`).
 
-## Latest session (`let` block indentation — `lower_let`, first reuse of `lower_block_body`)
+## Latest session (`while`/`for` loop indentation — `lower_loop`, second reuse of `lower_block_body`)
 
-The **first reuse** of `lower_block_body`, proving the body engine generalizes
-past `begin`/`quote`. New `lower_node` arm on `LET_EXPR` (shape
-`let [LET_BINDINGS] BLOCK end`): validate the `let`/`end` framing and a single
-`BLOCK` (else transparent), lower the optional binding list, delegate the body to
-`lower_block_body`, and emit `"let"` + (`" "` + bindings)? + body + `HardLine` +
-`"end"`. Like `begin`/`quote`, a **non-empty** body is always exploded vertical,
-even one written on a single line: the binding/body separator `;` *opens* the
-`BLOCK` (its first child is a `SEMICOLON`, not a `NEWLINE`), so `let x = 1; y = 2
-end` → `let x = 1⏎    y = 2⏎end`—the leading `;` in `lower_block_body` just sets
-`expect_sep = false` and the body statement lands on its own indented line, while
-**later** same-line `;` still keep statements together
-(`let x = 1; y = 2; z = 3 end` → body `y = 2; z = 3` on one line). An **empty**
-body (`let end`, `let⏎end`, `let x = 1⏎end`) makes `lower_block_body` return
-`None` → transparent fallback, byte-identical to Runic's preservation. The
-header's `LET_BINDINGS` is **lowered recursively** (so `let x=1` → `let x = 1`)
-but not reshaped: the parser wraps only the *first* binding in an
-`ASSIGNMENT_EXPR` and leaves the second-and-later bindings as **flat tokens**
-(`COMMA`, `IDENT`, `EQ`, `INTEGER`, …), so a tight multi-binding header
-(`let x=1,y=2`) won't normalize past the first—kept out of the fixture (an
-already-spaced `let x = 1, y = 2` passes via verbatim transparent). No
-return-insertion risk: `let` is not a function body. `let` *inside* a function
-gets a `return` prefix from Runic, but that's the **function's** rewrite (still
-transparent), so fixtures stay top-level. Verified byte-identical on single-line
-explosion, `;`-body split, multi-statement same-line `;`, multi-binding, blank
-lines (capped at 2), and empty body; idempotent. Fixture `let_blocks/`. Corpus
-35→36 pass, divergence held at 2; allowlist 35→36. No parser work needed (the
-`LET_BINDINGS` flat-token asymmetry mirrors the already-known global/local case;
-not exercised, so not handed off anew).
+The **second reuse** of `lower_block_body`, generalizing the body engine from
+keyword-only blocks (`begin`/`quote`/`let`) to loops with a real header. One arm
+on `WHILE_EXPR`/`FOR_EXPR` (shape `<kw> <header> BLOCK end`): validate the
+keyword/`end` framing, capture the single header node (`CONDITION` for `while`,
+`FOR_BINDING` for `for`) and the single `BLOCK`, delegate the body to
+`lower_block_body`, and emit `kw + " " + lower_node(header) + body + HardLine +
+"end"`. The header is **lowered recursively**: a `CONDITION` falls through to
+transparent (its lone child binary expr normalizes), and a `FOR_BINDING` routes
+to the existing `lower_for_binding`, which rewrites the iteration operator to `in`
+(`for i = 1:3` → `for i in 1:3`). The `for` keyword is the **loop's** child here,
+not the binding's, so `lower_for_binding` emits no `for ` prefix and `lower_loop`
+supplies it (the `for_kw` flag in `lower_for_binding` stays false for a loop).
+Like the other block rules, a **non-empty** body is always exploded vertical even
+on one line (`while c; x; y; end` → `while c⏎    x; y⏎end`—the leading `;` opens
+the `BLOCK`); an **empty** body (`while c end`, `for i in y end`) makes
+`lower_block_body` return `None` → transparent fallback, byte-identical to Runic.
+No return-insertion risk: loop bodies are never `return`-inserted (only function
+bodies). Verified byte-identical on multi-line + one-line `while`, `;`-body
+`while`/`for`, `=`→`in` for-binding, `in`-form binding, nested loop, and empty
+body; idempotent. Fixture `loop_blocks/`. Corpus 36→37 pass, divergence held at 2;
+allowlist 36→37.
+
+Two `for` shapes kept **out** of the fixture (pre-existing gaps, not regressions):
+(a) **multi-binding** `for i = 1:3, j = 1:3` — the parser wraps only the first
+binding as `ASSIGNMENT_EXPR` and leaves the 2nd+ as flat tokens (the same
+`let`/`global`/`local` asymmetry), so `lower_for_binding` bails on the tail and
+only the first `=` normalizes (the loop body still explodes correctly); (b) **one-
+line space-separated** `for i in 1:3 x += i end` — a **parser blocker**: the
+`for`-binding greedily extends past the iterable and swallows `x += i` as flat
+tokens, leaving an empty `BLOCK`. JuliaSyntax parses it as a real loop body, and
+one-line `while c x end` separates `CONDITION`/`BLOCK` fine, so the gap is
+specific to the for-binding extension. **Handed off** to parser-parity (RECAP
+"Queued next targets" + `TODO.md` Parser section).
 
 ### Ranked next targets
 
-1. **`if`/`while`/`for` block headers reusing `lower_block_body`** (layout-only,
-   no return-insertion). `while <cond>`/`for <binding>` are the next-smallest
-   (single header expression; `lower_for_binding` already normalizes the `for`
-   line). `if` adds the `elseif`/`else` branch structure (each branch its own
-   `BLOCK`); `try` adds `catch`/`finally`. Defer `function`/`do`/`macro` — Runic
+1. **`if`/`elseif`/`else` and `try`/`catch`/`finally` branch structure reusing
+   `lower_block_body`** (layout-only, no return-insertion). `IF_EXPR` is
+   `IF_KW CONDITION BLOCK (ELSEIF_CLAUSE)* (ELSE_CLAUSE)? END_KW`; each
+   `ELSEIF_CLAUSE` is `ELSEIF_KW CONDITION BLOCK`, each `ELSE_CLAUSE` is
+   `ELSE_KW BLOCK`. The header reuse is identical to `lower_loop` (recurse the
+   `CONDITION`, delegate each `BLOCK` to `lower_block_body`); the new work is the
+   branch chain — emit each clause keyword at column 0 (`HardLine` + `"elseif "`/
+   `"else"`) between the indented bodies. `try` adds `catch`/`finally` clauses
+   (and a bound variable on `catch e`). Defer `function`/`do`/`macro` — Runic
    return-inserts those (semantic, blocked).
 2. **Comment preservation inside broken brackets *and matrices and blocks***. All
    of `lower_multiline_bracket`, `lower_matrix`, and `lower_block_body` bail on any
@@ -107,6 +118,15 @@ not exercised, so not handed off anew).
 
 ## Earlier sessions
 
+- **`let` block indentation (`lower_let`, first reuse of `lower_block_body`)**:
+  arm on `LET_EXPR` (`let [LET_BINDINGS] BLOCK end`)—validate the `let`/`end`
+  framing + single `BLOCK`, lower the optional bindings, delegate the body to
+  `lower_block_body`, emit `"let"` + (`" "` + bindings)? + body + `HardLine` +
+  `"end"`. Non-empty body always explodes vertical (the binding/body `;` opens the
+  `BLOCK`); empty body → `None` → transparent. The `LET_BINDINGS` header is lowered
+  recursively but not reshaped—the parser leaves 2nd+ bindings as flat tokens, so
+  tight multi-binding `let x=1,y=2` is kept out of the fixture. No return-insertion
+  (let isn't a function body). Fixture `let_blocks/`.
 - **`begin`/`quote` block indentation (`lower_block_expr` + `lower_block_body`)**:
   the first **vertical-block** rule. `lower_block_expr` (arm on `BEGIN_EXPR`/
   `QUOTE_EXPR`, shape `<kw> BLOCK <end>`) emits `kw + lower_block_body + HardLine +

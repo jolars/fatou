@@ -31,6 +31,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::MATRIX_EXPR => lower_matrix(node),
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
         SyntaxKind::LET_EXPR => lower_let(node),
+        SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -1681,6 +1682,73 @@ fn lower_let(node: &SyntaxNode) -> Ir {
     parts.push(Ir::HardLine);
     parts.push(Ir::text("end"));
     Ir::concat(parts)
+}
+
+/// Lay out a `while` or `for` loop by indenting its body one step, reusing the
+/// [`lower_block_body`] engine that `begin`/`quote`/`let` already share. The
+/// shape is `<kw> <header> BLOCK end`, where the header is a `CONDITION`
+/// (`while`) or a `FOR_BINDING` (`for`); both are lowered recursively, so the
+/// condition's inner spacing normalizes and `lower_for_binding` rewrites the
+/// iteration operator to `in` (`for i = 1:3` → `for i in 1:3`). The `for`
+/// keyword is the loop's own child here, not the binding's, so
+/// `lower_for_binding` emits no `for ` prefix and this rule supplies it.
+///
+/// A **non-empty** body is always exploded to the vertical form, even when the
+/// source wrote it on one line (`while x; y; z; end` → `while x⏎    y; z⏎end`):
+/// the leading `;` opens the `BLOCK`, so the body statements live inside it. An
+/// **empty** body (`while x end`, `for i in y end`) makes `lower_block_body`
+/// return `None`, and the transparent fallback preserves the source layout
+/// byte-for-byte, matching the target. Loop bodies are never `return`-inserted
+/// (only function bodies are), so there is no semantic-rewrite risk. Any shape
+/// this does not fully model — a body comment, a missing `end`, an unexpected
+/// child — also falls back to the verbatim transparent lowering.
+fn lower_loop(node: &SyntaxNode) -> Ir {
+    let kw = match node.kind() {
+        SyntaxKind::WHILE_EXPR => "while",
+        SyntaxKind::FOR_EXPR => "for",
+        _ => return lower_transparent(node),
+    };
+
+    let mut header: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_kw = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::CONDITION | SyntaxKind::FOR_BINDING
+                    if header.is_none() && block.is_none() =>
+                {
+                    header = Some(child)
+                }
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHILE_KW | SyntaxKind::FOR_KW if !saw_kw => saw_kw = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(header), Some(block)) = (saw_kw, saw_end, header, block) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    Ir::concat([
+        Ir::text(kw),
+        Ir::text(" "),
+        lower_node(&header),
+        body,
+        Ir::HardLine,
+        Ir::text("end"),
+    ])
 }
 
 /// Lower the statements of a `BLOCK` into an indented, vertically-broken body,
