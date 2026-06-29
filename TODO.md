@@ -159,9 +159,19 @@ leverage.
   the `for` keyword is emitted iff a child of this node, so the same arm normalizes
   a `for`-loop binding; targets and iterables lowered recursively; bails on
   comment/newline or any unmodeled binding shape; locked by
-  `comprehension_for_in/`).
-  **Next:** comment preservation inside broken
-  brackets/matrices (the harder half), blocks, control flow—see the
+  `comprehension_for_in/`), `begin`/`quote` block-body indentation
+  (`lower_block_expr` + `lower_block_body` over `BEGIN_EXPR`/`QUOTE_EXPR`:
+  `begin x end` → `begin⏎    x⏎end`—a non-empty block is always exploded vertical
+  and each statement indented one step; `;`-separated statements stay on one line
+  (`begin x; y end` → `⏎    x; y`); blank lines preserved capped at 2; statements
+  lowered recursively so inner spacing normalizes and nested blocks indent further;
+  an empty block keeps its source layout via the transparent fallback; bails on a
+  body comment, two statements with no separator, or a missing `end`; locked by
+  `begin_quote_blocks/`. `lower_block_body` is the reusable body engine for future
+  block constructs).
+  **Next:** other block headers reusing `lower_block_body`—`let`/`if`/`while`/`for`
+  (layout-only; no return-insertion) before `function`/`do` (which need it). Then
+  comment preservation inside broken brackets/matrices (the harder half)—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,

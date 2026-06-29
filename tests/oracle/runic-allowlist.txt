@@ -7,6 +7,7 @@ arrow_functions
 assignment
 assignment_spacing
 bare_tuples
+begin_quote_blocks
 binary_spacing
 bracket_blank_lines
 bracket_gap_blank_lines

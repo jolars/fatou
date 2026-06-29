@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**36 fixtures**): **34 allowlisted**, 2 blocked
+Dir corpus (**37 fixtures**): **35 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -54,57 +54,67 @@ zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
 (`lower_trivia` in the transparent path), named-tuple element spacing
 (`lower_collection` extended to `KEYWORD_ARG`), parenthesized-expression padding
 (`lower_paren`), `;`-block padding and separators (`lower_paren_block`),
-comprehension/generator `for`-binding `in` normalization (`lower_for_binding`).
+comprehension/generator `for`-binding `in` normalization (`lower_for_binding`),
+`begin`/`quote` block-body indentation (`lower_block_expr` + `lower_block_body`).
 
-## Latest session (`for`-binding `in` normalization — `lower_for_binding`)
+## Latest session (`begin`/`quote` block indentation — `lower_block_expr` + `lower_block_body`)
 
-A new `lower_node` arm on `FOR_BINDING`, the iteration clause of a comprehension
-or generator (`[x for i = 1:3]`, `(x for i ∈ s)`) and of a `for` loop. It was
-**transparent**, so the `=` form spaced through `lower_binary` (`i = 1:3`) and the
-`∈` form spaced through `lower_binary` (`i ∈ 1:3`), against Runic's canonical
-keyword `in` (`for i in 1:3`). This is a **token-level canonicalization**, the
-same family as the float/hex literal rules, not pure layout. **Three CST shapes**
-the binding takes (probed via `parse`): `=` → a wrapped `ASSIGNMENT_EXPR(NAME EQ
-rhs)`; `∈` → a wrapped `BINARY_EXPR(NAME UNICODE_OP("∈") rhs)`; already-`in` → a
-**flat** triple `NAME`, `IDENT("in")`, `rhs` (no wrapping node). The arm collects
-the post-keyword elements (whitespace dropped), partitions them on `COMMA` into
-binding groups plus an optional trailing `if <filter>` tail, then `lower_for_spec`
-maps each group: a lone wrapped node is split by `for_iteration_operands` (accepts
-only `EQ`/`∈`, operand count 2) and a flat triple is matched directly; either way
-it emits `lower_node(target) + " in " + lower_node(iterable)`. Groups `", "`-join;
-a filter emits `" if " + lower_node`. **Keyword placement is the subtlety:** the
-`FOR_KW` is a *child of `FOR_BINDING`* in a comprehension/generator but a child of
-the parent `FOR_EXPR` in a `for` loop—so `"for "` is emitted **iff** the keyword
-is present, letting the one arm normalize a loop binding too
-(`for i = 1:3 … end` → `for i in 1:3 … end`, body left transparent—control flow is
-deferred, but the binding line still canonicalizes, matching Runic). Targets and
-iterables are recursed (`[i*j for i=1:2 for j=1:2]` → `[i * j for i in 1:2 for
-j in 1:2]`; the multi-`for` form is sibling `FOR_BINDING`s, each handled). Bails on
-comment/newline, a filter that isn't a single expression node, or any unmodeled
-binding shape. Verified byte-identical to Runic on the `=`/`∈`/`in` forms,
-multi-binding (`i = 1:3, j = 1:3` and `i in a, j in b`), generator `()`, `if`
-filter, nested `for`, and a `Dict(… for (v,i) = pairs)` generator. Idempotent
-(output `in` reparses to the flat form → fixed point). Fixture
-`comprehension_for_in/`. Corpus 33→34 pass, divergence held at 2; allowlist 33→34.
-No parser work needed.
+The first **vertical-block** rule: a new `lower_node` arm on `BEGIN_EXPR`/
+`QUOTE_EXPR` (shape `<kw> BLOCK <end>`) that indents the body one step. Unlike the
+bracket/matrix rules, this is **not** source-driven: Runic *always* explodes a
+non-empty block to the vertical form, even one written on a single line
+(`begin x end` → `begin⏎    x⏎end`); only an **empty** block keeps its layout
+(`begin end`, `begin⏎end`), handled by bailing to the transparent fallback (which
+is byte-identical to Runic's preservation there). `lower_block_expr` validates the
+`<kw> BLOCK <end>` shape (one `BLOCK`, a seen `END_KW`; else transparent), then
+emits `kw + lower_block_body + HardLine + "end"`. The reusable **`lower_block_body`**
+is the body engine: it walks the `BLOCK` grouping statements into **lines** (a
+`NEWLINE` starts a new line; a `;` keeps the next statement on the current line, so
+`begin x; y end` → `⏎    x; y` via a `"; "`-join), mirrors the matrix
+`lines: Vec<Vec<Ir>>` + blank-line accounting (leading/trailing/interior blanks
+capped at `MAX_BLANK_LINES`, framing break absorbs one newline per side), and
+returns an `Ir::indent(...)` body or `None` (caller → transparent) for an empty
+block or any unmodeled shape (a body comment, two statements with no separator).
+Each statement is `lower_node`-recursed, so inner spacing normalizes
+(`begin x=1 end` → `begin⏎    x = 1⏎end`, `f(x) = x+1` → `f(x) = x + 1`) and a
+**nested block indents further** (the printer's indent stack composes). No
+return-insertion risk: `begin`/`quote` are not function bodies, so the layout-only
+rule is full parity. Verified byte-identical to Runic on single-line explosion,
+multi-line, `;`-separated, nested `begin`, inner normalization, and capped blank
+lines; idempotent (vertical output reparses to the same line grouping → fixed
+point). Fixture `begin_quote_blocks/`. Corpus 34→35 pass, divergence held at 2;
+allowlist 34→35. No parser work needed.
 
 ### Ranked next targets
 
-1. **Comment preservation inside broken brackets *and matrices***—now the top
-   blank-line work is fully done (interior + leading/trailing gaps), this is the
-   last piece of the old "blank lines + comments" target #1. Comments are the hard
-   part: placement (own-line vs trailing `# …`), the trailing-`#`-forces-the-next-
-   token-onto-a-newline interaction, and the matrix-row case. Both
-   `lower_multiline_bracket` and `lower_matrix` still bail on any `COMMENT`.
-2. **Blocks/control flow indentation**—bigger; needs `HardLine`/`Indent` and
-   careful idempotence. Return-insertion stays out (semantic, blocked).
-3. **Long single-line bracket/matrix reflow** (width-based breaking)—Fatou's
-   breaking is purely source-driven (newline-triggered). Runic also breaks on
-   width. Probe whether Runic reflows a long single-line `[…]`/call past the margin;
-   if so this needs the `fits` engine, not just `HardLine`s.
+1. **Other block headers reusing `lower_block_body`**: `let`/`if`/`while`/`for`
+   are layout-only (no return-insertion) and all wrap a `BLOCK`, so each is a new
+   arm that lowers its header (`let <bindings>`, `if <cond>`/`elseif`/`else`,
+   `while <cond>`, `for <binding>` — `lower_for_binding` already normalizes the
+   binding line) then delegates the body to `lower_block_body`. `let` is the
+   smallest (header = optional comma-joined `LET_BINDINGS`). `if`/`try` add the
+   else/elseif/catch/finally branch structure (each its own `BLOCK`). Defer
+   `function`/`do`/`macro` — Runic return-inserts those (semantic, blocked).
+2. **Comment preservation inside broken brackets *and matrices*** — the last piece
+   of the old blank-lines+comments target. Placement (own-line vs trailing `# …`),
+   the trailing-`#`-forces-next-token-onto-newline interaction, the matrix-row
+   case. Both `lower_multiline_bracket` and `lower_matrix` (and now
+   `lower_block_body`) bail on any `COMMENT`.
+3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
+   breaking is purely source-driven (newline-triggered); Runic also breaks on
+   width. Needs the `fits` engine, not just `HardLine`s.
 
 ## Earlier sessions
 
+- **`for`-binding `in` normalization (`lower_for_binding`)**: a `FOR_BINDING` arm
+  normalizing the iteration operator to keyword `in` across three CST shapes
+  (`=` → wrapped `ASSIGNMENT_EXPR`, `∈` → wrapped `BINARY_EXPR`, already-`in` →
+  flat triple). Partitions post-keyword elements on `COMMA` into binding groups
+  plus an optional `if` filter tail; the `for` keyword is a child in a
+  comprehension/generator but the parent in a `for` loop, so `"for "` is emitted
+  iff present (normalizing a loop binding line too, body left transparent). Targets
+  and iterables recursed; bails on comment/newline or any unmodeled shape. Fixture
+  `comprehension_for_in/`.
 - **`;`-block padding and separators (`lower_paren_block`)**: `PAREN_BLOCK`
   (`(a; b)`, a `begin`-less block, distinct from `PAREN_EXPR`/`TUPLE_EXPR`) was
   transparent. New arm walks `LPAREN`, a leading statement, then one `PARAMETERS`

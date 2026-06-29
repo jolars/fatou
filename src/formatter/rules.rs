@@ -29,6 +29,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::RANGE_EXPR => lower_range(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::MATRIX_EXPR => lower_matrix(node),
+        SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -1568,6 +1569,139 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
         Ir::HardLine, // framing break before the close bracket
         Ir::text(close),
     ])
+}
+
+/// Lay out a keyword block whose body is a bare `BLOCK` — `begin … end` and
+/// `quote … end` — by indenting each statement one step, matching the target
+/// style. The shape is `<kw> BLOCK <end>`; the body is lowered by
+/// [`lower_block_body`].
+///
+/// A **non-empty** block is always exploded to the vertical form, even if the
+/// source wrote it on one line: `begin x end` → `begin⏎    x⏎end`. An **empty**
+/// block keeps its source layout (`begin end`, `begin⏎end`) via the transparent
+/// fallback, which is byte-identical to Runic's preservation there. Any shape
+/// this does not fully model — a comment in the body, two statements with no
+/// separator, a missing `end`, or an unexpected child — also falls back to the
+/// verbatim transparent lowering.
+fn lower_block_expr(node: &SyntaxNode) -> Ir {
+    let kw = match node.kind() {
+        SyntaxKind::BEGIN_EXPR => "begin",
+        SyntaxKind::QUOTE_EXPR => "quote",
+        _ => return lower_transparent(node),
+    };
+
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) if child.kind() == SyntaxKind::BLOCK => {
+                if block.is_some() {
+                    return lower_transparent(node);
+                }
+                block = Some(child);
+            }
+            NodeOrToken::Node(_) => return lower_transparent(node),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::BEGIN_KW | SyntaxKind::QUOTE_KW => {}
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (Some(block), true) = (block, saw_end) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    Ir::concat([Ir::text(kw), body, Ir::HardLine, Ir::text("end")])
+}
+
+/// Lower the statements of a `BLOCK` into an indented, vertically-broken body,
+/// returning `None` (the caller bails to the transparent lowering) for an empty
+/// block or any shape this does not model.
+///
+/// Statements are grouped into **lines**: a `NEWLINE` starts a new line, while a
+/// `;` keeps the next statement on the current line (`begin x; y end` →
+/// `⏎    x; y`). Each statement is lowered recursively, so its own normalization
+/// still applies and a nested block indents further. Blank lines are preserved
+/// (capped at [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]): between statements,
+/// after the keyword (leading), and before `end` (trailing) — the framing break
+/// the layout always adds absorbs one newline on each side. A comment, two
+/// statements with no separator, or any unexpected token returns `None`.
+fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
+    // Each line is a list of statements to be `; `-joined. `expect_sep` guards
+    // against two adjacent statement nodes with no `;`/newline between them.
+    let mut lines: Vec<Vec<Ir>> = vec![Vec::new()];
+    let mut expect_sep = false;
+
+    for el in block.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if expect_sep {
+                    return None;
+                }
+                lines.last_mut().unwrap().push(lower_node(&child));
+                expect_sep = true;
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::SEMICOLON => expect_sep = false,
+                SyntaxKind::NEWLINE => {
+                    lines.push(Vec::new());
+                    expect_sep = false;
+                }
+                _ => return None,
+            },
+        }
+    }
+
+    // Locate the content span. Empty lines outside it are the leading (after the
+    // keyword) and trailing (before `end`) framing lines plus any kept blanks:
+    // one empty line on each side is absorbed into the framing break, the rest
+    // become preserved blanks (capped at `MAX_BLANK_LINES`). All-empty ⇒ `None`.
+    let first = lines.iter().position(|l| !l.is_empty())?;
+    let last = lines.iter().rposition(|l| !l.is_empty()).unwrap();
+    let leading_blanks = first.saturating_sub(1).min(MAX_BLANK_LINES);
+    let trailing_blanks = (lines.len() - 1 - last)
+        .saturating_sub(1)
+        .min(MAX_BLANK_LINES);
+    let content = &lines[first..=last];
+
+    let mut inner: Vec<Ir> =
+        Vec::with_capacity(content.len() * 2 + leading_blanks + trailing_blanks);
+    for _ in 0..leading_blanks {
+        inner.push(Ir::BlankLine);
+    }
+    // Interior empty lines are blank lines: emit a bare newline each (a `HardLine`
+    // would leave the indent as trailing whitespace), capped at `MAX_BLANK_LINES`.
+    let mut pending_blanks = 0usize;
+    for line in content {
+        if line.is_empty() {
+            pending_blanks += 1;
+            continue;
+        }
+        for _ in 0..pending_blanks.min(MAX_BLANK_LINES) {
+            inner.push(Ir::BlankLine);
+        }
+        pending_blanks = 0;
+        inner.push(Ir::HardLine); // framing break / re-indent for this line
+        for (j, stmt) in line.iter().enumerate() {
+            if j > 0 {
+                inner.push(Ir::text("; "));
+            }
+            inner.push(stmt.clone());
+        }
+    }
+    for _ in 0..trailing_blanks {
+        inner.push(Ir::BlankLine);
+    }
+
+    Some(Ir::indent(Ir::concat(inner)))
 }
 
 /// Binary operators the target style keeps tight (no surrounding spaces).
