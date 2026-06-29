@@ -262,28 +262,55 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
     Ir::concat([lower_node(lhs), Ir::text(" -> "), lower_node(rhs)])
 }
 
-/// Lay out a parenthesized expression (`(a + b)`) with **no padding** inside the
-/// parentheses: `( a + b )` → `(a + b)`, `(  x  )` → `(x)`. Runic strips the
-/// incidental whitespace flanking the inner expression. The single inner node is
-/// lowered recursively, so a nested paren (`( (a) )` → `((a))`) and the inner
+/// Lay out a parenthesized expression (`(a + b)`).
+///
+/// **Single-line** (no `NEWLINE` token anywhere in the subtree): **no padding**
+/// inside the parentheses—`( a + b )` → `(a + b)`, `(  x  )` → `(x)`. Runic strips
+/// the incidental whitespace flanking the inner expression. The single inner node
+/// is lowered recursively, so a nested paren (`( (a) )` → `((a))`) and the inner
 /// expression's own spacing keep normalizing.
 ///
-/// As with [`lower_arrow`], only the clean single-line shape `( <expr> )` is
-/// reshaped: an interleaved comment or newline (a multi-line paren Runic may
-/// reflow and reindent), error recovery, or a missing/extra operand falls back to
-/// the verbatim transparent lowering. The `;`-block form `(a; b)` is a distinct
-/// `PAREN_BLOCK` node, and a tuple `(a, b)` is a `TUPLE_EXPR`, so neither reaches
-/// here.
+/// **Multi-line** (the subtree spans ≥2 source lines): Runic forces a framing
+/// break right after `(` and right before `)`, with the inner expression indented
+/// one step—`x = (\n1 + 2\n)` → `(` alone, `1 + 2` at `+4`, `)` flush. The break is
+/// *contagious*: even when the paren's own gaps carry no newline but a descendant
+/// breaks (`(f(a,\nb))`), the paren explodes. The inner node is lowered
+/// recursively, so a broken binary's continuation indent composes on top of the
+/// paren's content indent (`(a +\nb)` → `a` at `+4`, `b` at `+8`).
+///
+/// As with [`lower_arrow`], only clean shapes are reshaped: an interleaved comment
+/// (in a direct gap), a blank line inside the parentheses (a gap of more than one
+/// newline, which Runic preserves and this rule does not model), error recovery,
+/// or a missing/extra operand falls back to the verbatim transparent lowering. The
+/// `;`-block form `(a; b)` is a distinct `PAREN_BLOCK` node, and a tuple `(a, b)`
+/// is a `TUPLE_EXPR`, so neither reaches here.
 fn lower_paren(node: &SyntaxNode) -> Ir {
-    let mut operands: Vec<SyntaxNode> = Vec::new();
+    let mut inner: Option<SyntaxNode> = None;
+    let mut extra_operand = false;
     let mut saw_lparen = false;
     let mut saw_rparen = false;
+    // Newlines in the gap before / after the inner operand, used to spot a blank
+    // line (a gap of more than one newline) that this rule does not model.
+    let mut leading_newlines = 0usize;
+    let mut trailing_newlines = 0usize;
 
     for el in node.children_with_tokens() {
         match el {
-            NodeOrToken::Node(child) => operands.push(child),
+            NodeOrToken::Node(child) => {
+                if inner.is_some() {
+                    extra_operand = true;
+                }
+                inner = Some(child);
+            }
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::WHITESPACE => {}
+                SyntaxKind::NEWLINE => {
+                    if inner.is_none() {
+                        leading_newlines += 1;
+                    } else {
+                        trailing_newlines += 1;
+                    }
+                }
                 SyntaxKind::LPAREN if !saw_lparen => saw_lparen = true,
                 SyntaxKind::RPAREN if !saw_rparen => saw_rparen = true,
                 _ => return lower_transparent(node),
@@ -291,11 +318,26 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
         }
     }
 
-    let (true, true, [inner]) = (saw_lparen, saw_rparen, operands.as_slice()) else {
+    let (true, true, false, Some(inner)) = (saw_lparen, saw_rparen, extra_operand, inner) else {
         return lower_transparent(node);
     };
 
-    Ir::concat([Ir::text("("), lower_node(inner), Ir::text(")")])
+    if !has_newline_token(node) {
+        return Ir::concat([Ir::text("("), lower_node(&inner), Ir::text(")")]);
+    }
+
+    // A blank line in either direct gap is unmodeled — Runic preserves it; this
+    // rule does not — so bail to the verbatim transparent lowering.
+    if leading_newlines > 1 || trailing_newlines > 1 {
+        return lower_transparent(node);
+    }
+
+    Ir::concat([
+        Ir::text("("),
+        Ir::indent(Ir::concat([Ir::HardLine, lower_node(&inner)])),
+        Ir::HardLine,
+        Ir::text(")"),
+    ])
 }
 
 /// Lay out a `;`-block `(a; b)` (a `PAREN_BLOCK`, distinct from the single-value

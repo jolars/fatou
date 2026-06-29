@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**62 fixtures**): **57 allowlisted**, 5 blocked
+Dir corpus (**63 fixtures**): **58 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -82,69 +82,68 @@ multi-line ternary continuation indent (`lower_ternary` extended),
 reuse, gated by a return-insertion dodge), `do` blocks (`lower_do` +
 `lower_do_params`, sixth `lower_block_body` reuse, **no** return-insertion guard),
 n-ary binary spacing + multi-line operator continuation indent (`lower_binary`
-generalized + `binary_group_breaks`).
+generalized + `binary_group_breaks`), multi-line parenthesized-expression breaking
+(`lower_paren` extended).
 
-## Latest session (n-ary binary + continuation indent)
+## Latest session (multi-line parenthesized-expression breaking)
 
-Rewrote `lower_binary` from a two-operand special case to the **full flat
-operand/operator alternation** (like `lower_comparison`). The parser flattens
-same-precedence chains into one n-ary `BINARY_EXPR` (`a + b + c + d` is a single
-node, four operands, three `+`), and the old `[lhs, rhs]` slice-match bailed to
-transparent on the second operator — so tight chains like `a+b+c+d` were **never
-normalized** (a latent missing-rule). Now each operator is spaced per
-`is_tight_binop` individually, so `a+b+c+d` → `a + b + c + d`, `a*b*c` →
-`a * b * c`, while `a^b^c` (right-assoc nested, tight) stays packed.
+Extended `lower_paren` (was single-line only — any newline bailed to transparent)
+to **explode a multi-line paren vertical**, the engine the prior #1/#2 targets
+needed. Trigger is `has_newline_token(node)` (the subtree spans ≥2 lines), so the
+break is **contagious**: `(f(a,\nb))` — paren gaps empty, the newline buried in
+the call's arg list — still explodes (verified against Runic). Output mirrors
+`lower_multiline_bracket`'s framing: `"("` + `indent(HardLine + lower_node(inner))`
++ `HardLine` + `")"`, i.e. `(` keeps its line, the inner expression sits at `+4`,
+`)` is flush.
 
-The second half is the **multi-line continuation indent**, mirroring
-`lower_ternary`'s model: a `NEWLINE` in an operator gap becomes an `Ir::HardLine`
-(operators are always trailing — a newline *before* an operator bails), and the
-continuation indents one level. The crux vs. ternary is **gating the indent**.
-Two rules, both verified against Runic:
+Two facts made this a clean ~40-line extension with no new IR:
 
-1. **One shared level across nesting.** `a = b =⏎c`, `a + b *⏎c + d`, `a =⏎b =⏎c`
-   all keep every continuation at a single `+4`, never compounding. So only the
-   **outermost** group node owns the indent: a node wraps in `Ir::indent` iff its
-   parent is **not** a `BINARY_EXPR`/`ASSIGNMENT_EXPR` (`is_group_root`). An inner
-   group node rides the parent's single wrap.
-2. **Indent only on a real group break.** `x = f(a,⏎b)` and `x = a + f(b,⏎c)` —
-   where the only newline lives inside a non-group descendant (a broken call arg
-   list) — must **not** indent the whole expression (the call breaks on its own at
-   `+4`). So the group-root wrap is gated on `binary_group_breaks(node)`: a
-   recursive predicate that returns true only for a `NEWLINE` directly after an
-   operator, descending **only** through nested binary/assignment operands. A break
-   buried in a bracket isn't a group break.
+1. **The inner is lowered recursively, so continuation indents compose for free.**
+   `(a +\nb)` → the binary's parent is `PAREN_EXPR` (a group root by
+   `is_group_root`), so `lower_binary` already owns its `+4` continuation indent;
+   stacked on the paren's content indent that lands `b` at `+8` — byte-matching
+   Runic. A nested broken call (`(f(a,\nb))`) likewise rides the paren indent at
+   `+4`.
+2. **The enclosing `=` adds no indent.** `binary_group_breaks(ASSIGNMENT)` is false
+   for `x = (…\n…)` (no newline directly in the assignment's operator gap, and it
+   descends only through binary/assignment operands, never into the paren), so
+   `x = (` stays put and the content is `+4`, not `+8`.
 
-Bonus: inside a broken bracket (`f(a +⏎b)`) the binary's parent is `ARG`
-(non-group) → it owns its indent, which composes on top of the bracket's content
-indent → continuation at `+8`, matching Runic. Verified byte-identical across flat
-n-ary spacing, break-after-`=`, compound `+=`, `=>` pairs, chained assignments,
-mixed-precedence chains, and the in-bracket case; all idempotent. Fixture
-`binary_continuation/`. Corpus 56→57 pass, divergence held at 5; allowlist 56→57.
-**No parser blocker.**
-
-Kept **out** of the fixture (Runic-quirk / out-of-scope, would diverge): a blank
-line in a continuation gap (`a +⏎⏎b`, >1 newline → transparent like ternary); a
-*parenthesized* operand that breaks (`y = (a +⏎b) + c` needs the paren's own break
-engine, next target); and a group break **combined** with a breaking bracket
-descendant (`y = a +⏎f(b,⏎c)`), where Runic does **not** compound the call's
-content indent — a line-based quirk Fatou's IR-based indent would over-indent.
+Blank lines inside the parens (a direct gap with >1 newline) are **bailed to
+transparent** — Runic preserves them (`(\n\na + b\n\n)`) and this rule doesn't
+model the gap accounting; an interleaved comment in a direct gap bails the same
+way. Both kept out of the fixture. Single-line parens unchanged (no newline →
+existing no-padding path). Fixture `paren_multiline/` (basic break, binary
+continuation at `+8`, contagious call break, nested parens, single-line
+regression). Corpus 57→58 pass, divergence held at 5; allowlist 57→58. **No parser
+blocker.**
 
 ### Ranked next targets
 
-1. **Multi-line parenthesized-expression breaking (`lower_paren`)** — `x = (⏎1 +
-   2⏎)` → `(` alone, content `+4`, `)` flush; and `(a +⏎b)` → the inner binary's
-   continuation rides the paren content at `+8` (Runic output verified this
-   session). This is the engine the prior #1 (ternary in a paren) needs, and it
-   composes with the binary continuation just landed. Currently `lower_paren` bails
-   to transparent on any newline.
-2. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
-   own break engine drives the layout (`a ? (⏎    b ? c :⏎    d⏎) : e`); the
-   continuation indent is relative to the paren, not the statement. Needs #1 first.
-3. ~~Long single-line bracket/matrix width reflow~~ — **NON-GOAL.** Probing this
-   session disproved the earlier claim: Runic does **not** width-reflow brackets,
-   matrices, calls, or ternaries (verified a 94-col array, a long call, and a long
-   array all stay single-line). Runic's breaking is **purely source-driven**, same
-   as Fatou. Adding width reflow would *diverge* from Runic, not approach it.
+1. **Multi-line ternary in a parenthesized branch** — now unblocked by the paren
+   break engine: `a ? (\n    b ? c :\n    d\n) : e`. The paren drives the layout;
+   the ternary continuation indents relative to the paren content. Probe whether
+   `lower_ternary` already composes (likely, mirroring how `lower_binary` did this
+   session) or needs a group-root tweak.
+2. **Blank lines / comments inside a broken paren** (`(\n\na + b\n\n)`,
+   `(  # c\n  a\n)`) — port the `lower_multiline_bracket` `GapLine` accounting
+   (`Sep::Break(Vec<GapLine>)`, leading/trailing gaps, header comment) to the paren
+   gaps so the currently-bailed shapes reach parity. Closes the divergence this
+   session deliberately left transparent.
+3. **Multi-line parenthesized operand of a binary/ternary** (`y = (a +\nb) + c`) —
+   verify the paren break composes when the paren is itself an operand in a broken
+   group; the RECAP's old #1 noted Runic puts the inner binary's continuation at
+   `+8` here too.
+
+## Earlier sessions
+
+- **n-ary binary + continuation indent (`lower_binary` generalized +
+  `binary_group_breaks`)**: rewrote `lower_binary` from a `[lhs, rhs]` slice-match
+  to the full flat operand/operator alternation (so tight chains `a+b+c+d` finally
+  normalize), plus a multi-line continuation indent mirroring `lower_ternary` —
+  one shared `+4` level owned by the outermost group root (`is_group_root`) and
+  gated on a real group break (`binary_group_breaks`, not a break buried in a
+  bracket). Fixture `binary_continuation/`. Corpus 56→57.
 
 - **multi-line ternary continuation indent (`lower_ternary` extended)**: source-driven
   breaking (no width reflow — Runic keeps a ternary single-line unless the source
@@ -153,8 +152,6 @@ content indent — a line-based quirk Fatou's IR-based indent would over-indent.
   flat (detects `parent().kind() == TERNARY_EXPR`, skips its own indent). Bails on a
   newline before an operator, a blank line in a gap, comment, error, or operand
   count ≠ 3. Fixture `ternary_multiline/`. Corpus 53→54.
-
-## Earlier sessions
 
 - **do blocks (`lower_do` + `lower_do_params`, sixth `lower_block_body` reuse)**:
   arm on `DO_EXPR`, shape `CALL_EXPR WS DO_KW [WS DO_PARAMS] BLOCK END_KW`. The head

@@ -48,6 +48,7 @@ multiline_brackets
 multiline_matrices
 named_tuples
 paren_blocks
+paren_multiline
 paren_padding
 primitive_types
 range_colon
