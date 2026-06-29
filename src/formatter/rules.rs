@@ -41,6 +41,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         | SyntaxKind::GLOBAL_STMT
         | SyntaxKind::LOCAL_STMT => lower_keyword_stmt(node),
         SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => lower_import_stmt(node),
+        SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => lower_export_stmt(node),
         SyntaxKind::LITERAL => lower_literal(node),
         _ => lower_transparent(node),
     }
@@ -301,6 +302,81 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
 
     // A dangling `expect_item` means a leading/trailing/doubled separator or an
     // empty list—none is the clean shape this rule models.
+    if expect_item {
+        return lower_transparent(node);
+    }
+
+    Ir::concat(parts)
+}
+
+/// Lay out an `export`/`public` statement: the keyword, one space, then the
+/// comma-separated name list `", "`-joined (`export a,b` → `export a, b`,
+/// `public foo,bar` → `public foo, bar`). Runic spaces every comma (tight-left,
+/// space-right) and leaves the names themselves alone.
+///
+/// Unlike the `using`/`import` list, an exported name is **not** always a single
+/// node: it may be an identifier, an operator (`export +, -`), a macro
+/// (`export @m`), or a `var"…"` form (several adjacent tokens). So the rule
+/// tracks comma boundaries rather than a strict node/separator alternation: the
+/// first token of each name gets a leading space, and any further tokens of the
+/// *same* name are glued verbatim (no incidental whitespace exists between them).
+/// Bails to the lossless transparent lowering on a comment/newline (a multi-line
+/// list Runic may reflow) or a leading/trailing/doubled comma.
+fn lower_export_stmt(node: &SyntaxNode) -> Ir {
+    let mut kw: Option<SyntaxToken> = None;
+    let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
+
+    for el in node.children_with_tokens() {
+        match &el {
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
+            NodeOrToken::Token(tok)
+                if matches!(
+                    tok.kind(),
+                    SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE
+                ) =>
+            {
+                return lower_transparent(node);
+            }
+            NodeOrToken::Token(tok) if kw.is_none() => kw = Some(tok.clone()),
+            _ => rest.push(el),
+        }
+    }
+
+    let Some(kw) = kw else {
+        return lower_transparent(node);
+    };
+
+    let mut parts: Vec<Ir> = vec![Ir::text(kw.text().to_string())];
+    // `expect_item` is true after the keyword and after each comma: the next item
+    // token opens a new name and takes a leading space. While false, we are inside
+    // a name—a comma closes it, any other token is glued on verbatim.
+    let mut expect_item = true;
+
+    for el in &rest {
+        match el {
+            NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COMMA => {
+                parts.push(Ir::text(","));
+                expect_item = true;
+            }
+            // A comma where an item is expected is a leading/doubled comma.
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::COMMA => {
+                return lower_transparent(node);
+            }
+            _ => {
+                if expect_item {
+                    parts.push(Ir::text(" "));
+                    expect_item = false;
+                }
+                parts.push(match el {
+                    NodeOrToken::Node(child) => lower_node(child),
+                    NodeOrToken::Token(tok) => Ir::text(tok.text().to_string()),
+                });
+            }
+        }
+    }
+
+    // A dangling `expect_item` means a trailing comma or an empty list—neither is
+    // a clean name list.
     if expect_item {
         return lower_transparent(node);
     }

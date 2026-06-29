@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**30 fixtures**): **28 allowlisted**, 2 blocked
+Dir corpus (**31 fixtures**): **29 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -49,33 +49,39 @@ bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
 (`lower_import_stmt`), `global`/`local` multiple assignment (rule-free PASS,
 parser-unblocked), `where`-clause brace normalization (`lower_where`),
 float-literal normalization (`lower_literal` + `normalize_float`), hex-integer
-zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`).
+zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
+`export`/`public` name lists (`lower_export_stmt`).
 
-## Latest session (hex-integer zero-padding — `lower_literal` + `normalize_hex`)
+## Latest session (`export`/`public` name lists — `lower_export_stmt`)
 
-The `HEX_INT` token leaked its source spelling while Runic's `format_hex_literals`
-zero-pads it to a fixed width. Second **token-text** rule, sibling to last
-session's float one: `0xF` → `0x0F`, `0xabc` → `0x0abc`, `0x12345` →
-`0x00012345`, `0xffffffffff` → `0x000000ffffffffff`. Runic's algorithm pads the
-literal's **byte span** (`0x` prefix included) to the next of the canonical spans
-`0x` + 2/4/8/16/32 hex chars (`UInt8`…`UInt128` widths) by inserting `0`s right
-after `0x`. New `lower_literal` arm on `HEX_INT` runs the text through
-`normalize_hex`; everything else (decimal/octal/binary ints, bools, the float
-arm) is unchanged. `normalize_hex`: strip the `0x` prefix (→ `None`/verbatim if
-absent), measure `text.len()`; if span ≥ 34 (a BigInt hex literal wider than
-`UInt128`) or already a canonical span, return `None`; else find the first
-canonical span > current and prepend that many `0`s after `0x`. Crucially the
-**byte span, not the digit count**, is measured, so underscores count toward the
-width (`0x1_2` → `0x01_2`, span 5 → 6) — matching Runic exactly. Digit case is
-preserved (`0xDEADBEEF`/`0xff` untouched, never lowercased). Output always lands
-on a canonical span, so re-running returns `None` → idempotent. Hex **floats**
-(`0x1.8p3`) lex as `FLOAT`, where `normalize_float` already bails on `0x`;
-octal/binary have distinct kinds Runic leaves alone. Verified byte-identical to
-Runic on `0xF`/`0xabc`/`0x1`/`0x12345`/`0x1_2`/`0xffffffffff`/`0x0000`/`0xff`/
-`0xDEADBEEF`/`0x1234567890abcdef`, hex float `0x1.8p3`, `0b101`/`0o17` left
-untouched, and hex nested in collections (`[0xF, 0x12345, 0xff]`) and call args
-(`f(0xF, x = 0x1)`). Idempotent. Fixture `hex_literals/`. Corpus 27→28 pass,
-divergence held at 2; allowlist 27→28. No parser work needed.
+`EXPORT_STMT`/`PUBLIC_STMT` were **transparent**, leaking comma spacing
+(`export a,b` stayed `export a,b`); Runic's `spaces_in_export_public` `", "`-joins
+them (`export a, b`, `public foo, bar`). The corpus was already fully triaged, so
+this came from surveying Runic's pass list (`Runic.jl` `format_node!`) for an
+unhandled cheap win — `spaces_in_export_public` sits right after the done
+`spaces_in_import_using`. Both keywords parse cleanly: `export` has an
+`EXPORT_KW`, `public` is a leading bare `IDENT` (contextual keyword); the names
+follow as flat children. **Crux vs the import rule:** an exported name is **not**
+always one node — it can be an `IDENT`, an operator token (`export +, -` →
+`PLUS`/`MINUS`), a `MACRO_NAME` node (`export @m`), or a multi-token `var"…"`
+(`STRING_PREFIX`+delims+content). So a strict node/separator alternation (what
+`lower_import_stmt`/the global-name arm use) won't do. Instead `lower_export_stmt`
+tracks **comma boundaries**: emit the keyword, then `expect_item` is true after
+the keyword and after each comma — the first token of a name takes a leading
+space and clears the flag; while the flag is false a `COMMA` emits `","` and
+re-arms it, any other token/node is **glued verbatim** (no incidental whitespace
+exists inside a name). Child nodes recurse via `lower_node` (`MACRO_NAME` stays
+transparent → `@m`). Bails to `lower_transparent` on a comment/newline (a
+multi-line list Runic may reflow) or a leading/trailing/doubled comma (a dangling
+`expect_item`). Verified byte-identical to Runic on `export a,b`, `export a, b, c`,
+`export +, -`, `export @mac, foo`, `export var"x", y`, `public foo,bar`,
+`export single`, and `export a ,b` (space-before-comma → normalized). Idempotent.
+A lone `public` identifier (`public = 1`) isn't a `PUBLIC_STMT`, untouched.
+**Known comment divergence** (out of fixture, not blocked — same as the import
+rule): `export a,b # names` bails verbatim while Runic still spaces the comma;
+that's the deferred comment-preservation target #1, not a Tenet-1 corner. Fixture
+`export_public_lists/`. Corpus 28→29 pass, divergence held at 2; allowlist 28→29.
+No parser work needed.
 
 ## Earlier session (`where`-clause brace normalization — `lower_where`)
 
@@ -156,36 +162,10 @@ to an `ERROR` token (the formatter can only bail to transparent); JuliaSyntax:
 `(call-i a \ b)`, Runic spaces it. Queued at the top of `parser-parity/RECAP.md`
 + a `TODO.md` Parser bullet (5-file operator recipe, tier of `/`).
 
-## Earlier session (ternary spacing)
-
-Closed ranked target #0 (cheap, pre-probed). `TERNARY_EXPR` (`a ? b : c`) was
-**transparent**, so Fatou leaked the input spacing (`a ?  b  :  c`) while Runic
-normalizes to one space around both `?` and `:`. New `lower_ternary` (arm on
-`TERNARY_EXPR`), modeled on `lower_comparison`: walk children dropping incidental
-whitespace, alternate operand/operator, push one space then the operator text for a
-`QUESTION`/`COLON` token (any other token bails), and **recurse into operands** so a
-nested right-associative ternary (`a ? b : c ? d : e`, the rhs is itself a
-`TERNARY_EXPR`) and normalized operands (`a ? b+1 : c*2` → `a ? b + 1 : c * 2`) keep
-formatting. Bails to `lower_transparent` on a comment/newline (a multi-line ternary —
-which Runic *preserves* anyway, so the bail is byte-identical) or operand count ≠ 3.
-Verified byte-identical to Runic on `q/r/s/t/u/v` (literal/call/index/binop operands,
-nested). Idempotent (the spaced form re-parses to the same shape). Fixture
-`ternary_spacing/`. Corpus 17→18 pass, divergence held at 2; allowlist 17→18.
-
-## Earlier session (anonymous-function arrow spacing)
-
-Closed a clean operator-spacing gap outside the ranked list (cheaper than the
-ranked #1 comment work). `ARROW_EXPR` (`x->y`, `(a,b)->a+b`) was **transparent**, so
-Fatou leaked `x->y` while Runic always spaces the arrow (`x -> y`). New `lower_arrow`
-(arm on `ARROW_EXPR`): collect operand nodes, require a single `ARROW` token, emit
-`lhs -> rhs` with one space each side, **recursing into both operands** so a nested
-arrow (`x -> y -> z`, right-assoc), a normalized lhs tuple (`(x,y)` → `(x, y)`), or a
-body inside an arg list (`map(x->x^2, a)` → `map(x -> x^2, a)`) all keep formatting.
-The catch-all `_ => lower_transparent` bails on a comment/newline (a multi-line body
-like `x->\n y`, which Runic reindents — a separate construct) or a second arrow.
-Verified byte-identical to Runic on `x->y`/`()->y`/chained/`map`/`f = x -> x+1`.
-Idempotent (the spaced form re-parses to the same shape). Fixture
-`arrow_functions/`. Corpus 16→17 pass, divergence held at 2; allowlist 16→17.
+(Ternary spacing `lower_ternary` and anonymous-function arrow spacing
+`lower_arrow` — both operand/operator alternation rules modeled on
+`lower_comparison`, recursing into operands, bailing on comment/newline — are now
+in the "Earlier sessions" bullet list below.)
 
 ### Ranked next targets
 
@@ -204,6 +184,28 @@ Idempotent (the spaced form re-parses to the same shape). Fixture
 
 ## Earlier sessions
 
+- **ternary spacing (`lower_ternary`)**: `TERNARY_EXPR` (`a ? b : c`) was
+  transparent; one space around `?` and `:`. Walk children dropping incidental
+  whitespace, alternate operand/operator (space + `QUESTION`/`COLON` text),
+  recurse into operands (nested right-assoc ternary + operand normalization keep
+  formatting); bails on comment/newline or operand count ≠ 3. Fixture
+  `ternary_spacing/`.
+- **anonymous-function arrow spacing (`lower_arrow`)**: `ARROW_EXPR` (`x->y`) was
+  transparent; Runic always spaces the arrow (`x -> y`). Collect operands, require
+  one `ARROW`, emit `lhs -> rhs`, recurse both operands (nested arrows, lhs tuple
+  normalization, arrow inside an arg list keep formatting); bails on
+  comment/newline or a second arrow. Fixture `arrow_functions/`.
+- **hex-integer zero-padding (`lower_literal` + `normalize_hex`)**: second
+  **token-text** rule (sibling to the float one). New `lower_literal` arm on
+  `HEX_INT` runs the text through `normalize_hex`, mirroring Runic's
+  `format_hex_literals`: pad the literal's **byte span** (`0x` included) to the
+  next canonical span `0x`+2/4/8/16/32 chars by inserting `0`s after `0x`
+  (`0xF` → `0x0F`, `0x12345` → `0x00012345`). Byte span (not digit count) is
+  measured, so underscores count (`0x1_2` → `0x01_2`); digit case preserved
+  (`0xDEADBEEF` untouched); BigInt (span ≥ 34) and already-canonical spans →
+  `None`/verbatim. Hex floats are `FLOAT` (handled by `normalize_float`'s `0x`
+  bail); octal/binary untouched. Output always lands on a canonical span →
+  idempotent. Fixture `hex_literals/`.
 - **float-literal normalization (`lower_literal` + `normalize_float`)**: first
   **token-text** rule. `lower_literal` arm on `LITERAL` passes tokens verbatim
   except `FLOAT`/`FLOAT32`, run through `normalize_float` (reimplements Runic's

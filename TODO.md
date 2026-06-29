@@ -124,8 +124,14 @@ leverage.
   `0x`+2/4/8/16/32 chars by inserting `0`s after `0x`; underscores count toward
   the span (`0x1_2` → `0x01_2`), digit case is preserved, BigInt literals
   (span ≥ 34) and already-canonical spans are left verbatim; octal/binary
-  untouched, mirroring Runic's `format_hex_literals`; locked by `hex_literals/`).
-  **Next:** comment preservation inside broken
+  untouched, mirroring Runic's `format_hex_literals`; locked by `hex_literals/`),
+  `export`/`public` name lists (`lower_export_stmt` over `EXPORT_STMT`/
+  `PUBLIC_STMT`: `export a,b` → `export a, b`, `public foo,bar` →
+  `public foo, bar`—keyword + space, commas `", "`-joined; a name may be an
+  identifier, operator (`export +, -`), macro (`export @m`), or `var"…"` form, so
+  the rule glues the tokens of one name and only spaces comma boundaries; bails on
+  comment/newline or a leading/trailing/doubled comma; locked by
+  `export_public_lists/`). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
