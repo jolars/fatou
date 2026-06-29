@@ -975,12 +975,16 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
     }
 
     let body = Ir::concat(parts);
-    // The outermost ternary owns the continuation indent; a right-associative
-    // continuation (the parent's else-operand) rides the parent's indent so the
-    // chain stays flat at one level.
+    // The outermost ternary owns the continuation indent; every nested ternary
+    // rides it. Runic adds the continuation level once per ternary nest and shares
+    // it across all inner ternaries, regardless of what separates them (a
+    // right-associative else-operand, but also a parenthesized branch, a call
+    // argument, or a binary operand). So a ternary skips its own indent whenever
+    // *any* ancestor is itself a ternary, not only a direct one.
     if node
-        .parent()
-        .is_some_and(|p| p.kind() == SyntaxKind::TERNARY_EXPR)
+        .ancestors()
+        .skip(1)
+        .any(|a| a.kind() == SyntaxKind::TERNARY_EXPR)
     {
         body
     } else {

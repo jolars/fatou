@@ -98,7 +98,10 @@ leverage.
   body), ternary spacing (`lower_ternary`: `a ?  b  :  c` → `a ? b : c`, one space
   around `?` and `:`, operands recursed so nested `a ? b : c ? d : e` keeps
   normalizing; a multi-line ternary keeps the operator trailing and indents the
-  continuation one level, with a right-associative chain held flat at one level),
+  continuation one level, with a right-associative chain held flat at one level;
+  a ternary nested anywhere under another ternary (through a parenthesized branch,
+  call argument, or binary operand) rides the outer ternary's single continuation
+  level rather than adding its own, locked by `ternary_paren_branch/`),
   tight field-access `.` (`DOT` in
   `is_tight_binop`: fixed a latent mangling bug where `a.b.c` parsed as a
   `BINARY_EXPR`/`DOT` and got spaced to the invalid `a . b . c`; Julia *requires*

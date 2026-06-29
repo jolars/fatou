@@ -54,6 +54,7 @@ primitive_types
 range_colon
 struct_blocks
 ternary_multiline
+ternary_paren_branch
 ternary_spacing
 tight_operators
 trailing_comments
