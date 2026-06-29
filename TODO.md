@@ -197,11 +197,18 @@ leverage.
   leaves its 2nd+ bindings as flat tokens (the `let`/`global`/`local` parser
   asymmetry), so only the first normalizes—kept out of the fixture; one-line
   space-separated `for i in 1:3 x end` mis-parses the body into `FOR_BINDING`
-  (empty `BLOCK`)—a parser blocker handed off, kept out of the fixture).
-  **Next:** `if`/`elseif`/`else` and `try`/`catch`/`finally` branch structure
-  reusing `lower_block_body` (each branch its own `BLOCK`; layout-only, no
-  return-insertion) before `function`/`do` (which need it). Then comment
-  preservation inside broken brackets/matrices/blocks (the harder half)—see the
+  (empty `BLOCK`)—a parser blocker handed off, kept out of the fixture),
+  `if`/`elseif`/`else` and `try`/`catch`/`else`/`finally` branch structure
+  (`lower_if`/`lower_try` over `IF_EXPR`/`TRY_EXPR` with a shared
+  `lower_branch_clause`: each branch its own `BLOCK` delegated to
+  `lower_block_body`, branch keywords emitted at column 0 via `HardLine`; the
+  leading `if`/`elseif` `CONDITION` and the optional `catch e` variable are
+  lowered recursively; an empty branch body bails the whole construct to the
+  transparent fallback rather than partially reshape it; layout-only, never
+  `return`-inserted; locked by `if_blocks/` + `try_blocks/`).
+  **Next:** comment preservation inside broken brackets/matrices/blocks (the
+  harder half), then `function`/`do`/`macro` bodies (which need `lower_block_body`
+  but are `return`-inserted—a deferred semantic rewrite)—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,

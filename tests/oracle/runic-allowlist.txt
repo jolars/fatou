@@ -22,6 +22,7 @@ float_literals
 global_local_assignment
 global_local_names
 hex_literals
+if_blocks
 import_using_lists
 keyword_statements
 let_blocks
@@ -38,5 +39,6 @@ range_colon
 ternary_spacing
 tight_operators
 trailing_whitespace
+try_blocks
 type_annotations
 where_clauses

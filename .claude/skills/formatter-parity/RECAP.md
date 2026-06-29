@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**39 fixtures**): **37 allowlisted**, 2 blocked
+Dir corpus (**41 fixtures**): **39 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -58,66 +58,73 @@ comprehension/generator `for`-binding `in` normalization (`lower_for_binding`),
 `begin`/`quote` block-body indentation (`lower_block_expr` + `lower_block_body`),
 `let` block-body indentation (`lower_let`, first reuse of `lower_block_body`),
 `while`/`for` loop-body indentation (`lower_loop`, second reuse of
+`lower_block_body`), `if`/`elseif`/`else` + `try`/`catch`/`else`/`finally` branch
+structure (`lower_if`/`lower_try` + shared `lower_branch_clause`, third reuse of
 `lower_block_body`).
 
-## Latest session (`while`/`for` loop indentation — `lower_loop`, second reuse of `lower_block_body`)
+## Latest session (`if`/`try` branch structure — `lower_if`/`lower_try` + `lower_branch_clause`)
 
-The **second reuse** of `lower_block_body`, generalizing the body engine from
-keyword-only blocks (`begin`/`quote`/`let`) to loops with a real header. One arm
-on `WHILE_EXPR`/`FOR_EXPR` (shape `<kw> <header> BLOCK end`): validate the
-keyword/`end` framing, capture the single header node (`CONDITION` for `while`,
-`FOR_BINDING` for `for`) and the single `BLOCK`, delegate the body to
-`lower_block_body`, and emit `kw + " " + lower_node(header) + body + HardLine +
-"end"`. The header is **lowered recursively**: a `CONDITION` falls through to
-transparent (its lone child binary expr normalizes), and a `FOR_BINDING` routes
-to the existing `lower_for_binding`, which rewrites the iteration operator to `in`
-(`for i = 1:3` → `for i in 1:3`). The `for` keyword is the **loop's** child here,
-not the binding's, so `lower_for_binding` emits no `for ` prefix and `lower_loop`
-supplies it (the `for_kw` flag in `lower_for_binding` stays false for a loop).
-Like the other block rules, a **non-empty** body is always exploded vertical even
-on one line (`while c; x; y; end` → `while c⏎    x; y⏎end`—the leading `;` opens
-the `BLOCK`); an **empty** body (`while c end`, `for i in y end`) makes
-`lower_block_body` return `None` → transparent fallback, byte-identical to Runic.
-No return-insertion risk: loop bodies are never `return`-inserted (only function
-bodies). Verified byte-identical on multi-line + one-line `while`, `;`-body
-`while`/`for`, `=`→`in` for-binding, `in`-form binding, nested loop, and empty
-body; idempotent. Fixture `loop_blocks/`. Corpus 36→37 pass, divergence held at 2;
-allowlist 36→37.
+The **third reuse** of `lower_block_body`, generalizing from single-body blocks
+to a **chain of branches**, each its own `BLOCK`. Two arms (`IF_EXPR`, `TRY_EXPR`)
+plus one shared clause renderer. `lower_if` validates the `if`/`end` framing,
+captures the leading `CONDITION` + first `BLOCK`, collects the trailing
+`ELSEIF_CLAUSE`/`ELSE_CLAUSE` nodes, then emits `"if " + lower_node(condition) +
+body + <clauses> + HardLine + "end"`. `lower_try` is the same minus the leading
+condition (`try` has a bare body) and accepts `CATCH_CLAUSE`/`ELSE_CLAUSE`/
+`FINALLY_CLAUSE`. Both delegate every body to `lower_block_body` and every
+non-leading clause to **`lower_branch_clause`**, which renders one clause as
+`HardLine + <kw>` (keyword at column 0) + an optional space-separated header + the
+indented body. The header is **lowered recursively**: an `elseif` `CONDITION`
+falls through to transparent (its inner binary normalizes, so `elseif c >d` →
+`elseif c > d`), and a `catch` variable (the clause's first child node before its
+`BLOCK` — a `NAME`, `$`-interp, or `var"…"`) is recursed and prefixed with one
+space (`catch e`); a bare `catch`/`else`/`finally` emits no header.
 
-Two `for` shapes kept **out** of the fixture (pre-existing gaps, not regressions):
-(a) **multi-binding** `for i = 1:3, j = 1:3` — the parser wraps only the first
-binding as `ASSIGNMENT_EXPR` and leaves the 2nd+ as flat tokens (the same
-`let`/`global`/`local` asymmetry), so `lower_for_binding` bails on the tail and
-only the first `=` normalizes (the loop body still explodes correctly); (b) **one-
-line space-separated** `for i in 1:3 x += i end` — a **parser blocker**: the
-`for`-binding greedily extends past the iterable and swallows `x += i` as flat
-tokens, leaving an empty `BLOCK`. JuliaSyntax parses it as a real loop body, and
-one-line `while c x end` separates `CONDITION`/`BLOCK` fine, so the gap is
-specific to the for-binding extension. **Handed off** to parser-parity (RECAP
-"Queued next targets" + `TODO.md` Parser section).
+Like the loop/`begin`/`let` rules, a **non-empty** body always explodes vertical
+even on one line (`if e; f; end` → `if e⏎    f⏎end`); the new wrinkle is the
+**all-or-nothing chain**: an **empty** branch body anywhere makes
+`lower_block_body` return `None`, and rather than partially reshape the chain the
+**whole construct** bails to the transparent fallback (byte-identical to Runic on
+the already-formatted empty-branch case). No return-insertion risk — only
+`function`/`do`/`macro` bodies are `return`-inserted, and those are still
+transparent (deferred). Verified byte-identical on under-indented `if`/`elseif`/
+`else`, one-line `if e; f; end`, nested `if` inside a branch body (recurses,
+indents further), `try`/`catch`/`finally`, bare `catch`, named `catch err`, and
+full `try`/`catch err`/`else`/`finally`; idempotent. Fixtures `if_blocks/`,
+`try_blocks/`. Corpus 37→39 pass, divergence held at 2; allowlist 37→39.
+
+`&&`/`||` inside conditions stay the pre-existing Tenet-1 divergence (`if a&&b` →
+Fatou `if a && b`, Runic preserves `a&&b`), so the fixtures avoid them. No new
+parser blocker surfaced — `if`/`try`/`catch`/`else`/`finally` all parse cleanly
+(including the catch variable and the `try … else` form).
 
 ### Ranked next targets
 
-1. **`if`/`elseif`/`else` and `try`/`catch`/`finally` branch structure reusing
-   `lower_block_body`** (layout-only, no return-insertion). `IF_EXPR` is
-   `IF_KW CONDITION BLOCK (ELSEIF_CLAUSE)* (ELSE_CLAUSE)? END_KW`; each
-   `ELSEIF_CLAUSE` is `ELSEIF_KW CONDITION BLOCK`, each `ELSE_CLAUSE` is
-   `ELSE_KW BLOCK`. The header reuse is identical to `lower_loop` (recurse the
-   `CONDITION`, delegate each `BLOCK` to `lower_block_body`); the new work is the
-   branch chain — emit each clause keyword at column 0 (`HardLine` + `"elseif "`/
-   `"else"`) between the indented bodies. `try` adds `catch`/`finally` clauses
-   (and a bound variable on `catch e`). Defer `function`/`do`/`macro` — Runic
-   return-inserts those (semantic, blocked).
-2. **Comment preservation inside broken brackets *and matrices and blocks***. All
+1. **Comment preservation inside broken brackets *and matrices and blocks***. All
    of `lower_multiline_bracket`, `lower_matrix`, and `lower_block_body` bail on any
-   `COMMENT`. Placement (own-line vs trailing `# …`), the trailing-`#`-forces-
+   `COMMENT`. Now the highest-leverage target: it unblocks comments in every
+   vertical construct landed so far (brackets, matrices, `begin`/`let`/loops/`if`/
+   `try`). Placement (own-line vs trailing `# …`), the trailing-`#`-forces-
    next-token-onto-newline interaction.
+2. **`function`/`do`/`macro` bodies** reuse `lower_block_body` for layout but Runic
+   **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
+   could still land *if* return-insertion is modeled or the fixture dodges it;
+   currently deferred.
 3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven (newline-triggered); Runic also breaks on
    width. Needs the `fits` engine, not just `HardLine`s.
 
 ## Earlier sessions
 
+- **`while`/`for` loop indentation (`lower_loop`, second reuse of `lower_block_body`)**:
+  one arm on `WHILE_EXPR`/`FOR_EXPR` (`<kw> <header> BLOCK end`); the header is a
+  recursively-lowered `CONDITION` (`while`) or `FOR_BINDING` (`for`, supplying the
+  `for ` prefix the binding omits so `for i = 1:3` → `for i in 1:3`), the body
+  delegated to `lower_block_body`. Non-empty one-line body explodes vertical
+  (`while c; x; y; end` → `while c⏎    x; y⏎end`); empty body → transparent. Two
+  `for` shapes kept out (multi-binding `for i=1:3, j=1:3` leaves 2nd+ bindings flat;
+  one-line space-separated `for i in 1:3 x end` is a parser blocker, handed off).
+  Fixture `loop_blocks/`.
 - **`let` block indentation (`lower_let`, first reuse of `lower_block_body`)**:
   arm on `LET_EXPR` (`let [LET_BINDINGS] BLOCK end`)—validate the `let`/`end`
   framing + single `BLOCK`, lower the optional bindings, delegate the body to

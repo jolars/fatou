@@ -32,6 +32,8 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
+        SyntaxKind::IF_EXPR => lower_if(node),
+        SyntaxKind::TRY_EXPR => lower_try(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -1749,6 +1751,185 @@ fn lower_loop(node: &SyntaxNode) -> Ir {
         Ir::HardLine,
         Ir::text("end"),
     ])
+}
+
+/// Lay out an `if`/`elseif`/`else` chain, indenting each branch body one step
+/// and emitting the branch keywords at column 0, reusing the
+/// [`lower_block_body`] engine the other block rules share. The shape is
+/// `IF_KW CONDITION BLOCK (ELSEIF_CLAUSE)* (ELSE_CLAUSE)? END_KW`; each
+/// `ELSEIF_CLAUSE` is `ELSEIF_KW CONDITION BLOCK` and the `ELSE_CLAUSE` is
+/// `ELSE_KW BLOCK`. The leading condition is lowered recursively (its inner
+/// spacing normalizes), the body of every branch is delegated to
+/// `lower_block_body`, and each subsequent clause is rendered by
+/// [`lower_branch_clause`] as a `HardLine` + keyword at column 0 followed by its
+/// indented body.
+///
+/// Like the loop and `begin`/`quote`/`let` rules, a **non-empty** body is always
+/// exploded to the vertical form even when the source wrote it on one line
+/// (`if x; y; end` → `if x⏎    y⏎end`). An **empty** branch body makes
+/// `lower_block_body` return `None`; rather than partially reshape the chain, the
+/// whole `if` falls back to the verbatim transparent lowering. `if` bodies are
+/// never `return`-inserted (only function bodies are), so there is no
+/// semantic-rewrite risk. Any unmodeled shape — a body comment, a missing `end`,
+/// an unexpected child — also bails to transparent.
+fn lower_if(node: &SyntaxNode) -> Ir {
+    let mut condition: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut clauses: Vec<SyntaxNode> = Vec::new();
+    let mut saw_if = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::CONDITION if condition.is_none() && block.is_none() => {
+                    condition = Some(child)
+                }
+                SyntaxKind::BLOCK if condition.is_some() && block.is_none() => block = Some(child),
+                SyntaxKind::ELSEIF_CLAUSE | SyntaxKind::ELSE_CLAUSE if block.is_some() => {
+                    clauses.push(child)
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::IF_KW if !saw_if => saw_if = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(condition), Some(block)) = (saw_if, saw_end, condition, block) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    let mut parts: Vec<Ir> = vec![Ir::text("if"), Ir::text(" "), lower_node(&condition), body];
+    for clause in &clauses {
+        let Some(clause_ir) = lower_branch_clause(clause) else {
+            return lower_transparent(node);
+        };
+        parts.push(clause_ir);
+    }
+    parts.push(Ir::HardLine);
+    parts.push(Ir::text("end"));
+    Ir::concat(parts)
+}
+
+/// Lay out a `try`/`catch`/`else`/`finally` block, indenting the `try` body and
+/// each clause body one step with the keywords at column 0, reusing the
+/// [`lower_block_body`] engine. The shape is
+/// `TRY_KW BLOCK (CATCH_CLAUSE)? (ELSE_CLAUSE)? (FINALLY_CLAUSE)? END_KW`; the
+/// `try` body is delegated to `lower_block_body` and each clause to
+/// [`lower_branch_clause`]. A `catch` clause may carry a bound variable
+/// (`catch e`), which is the clause's first child node before its `BLOCK` and is
+/// lowered recursively (a plain `NAME`, a `$`-interpolation, or a `var"…"`).
+///
+/// As with `if` and the loops, a **non-empty** body always explodes vertical; an
+/// **empty** body (any branch) makes `lower_block_body` return `None` and the
+/// whole `try` falls back to the verbatim transparent lowering. `try` bodies are
+/// never `return`-inserted, so there is no semantic-rewrite risk. Any unmodeled
+/// shape bails to transparent.
+fn lower_try(node: &SyntaxNode) -> Ir {
+    let mut block: Option<SyntaxNode> = None;
+    let mut clauses: Vec<SyntaxNode> = Vec::new();
+    let mut saw_try = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                SyntaxKind::CATCH_CLAUSE | SyntaxKind::ELSE_CLAUSE | SyntaxKind::FINALLY_CLAUSE
+                    if block.is_some() =>
+                {
+                    clauses.push(child)
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::TRY_KW if !saw_try => saw_try = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(block)) = (saw_try, saw_end, block) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    let mut parts: Vec<Ir> = vec![Ir::text("try"), body];
+    for clause in &clauses {
+        let Some(clause_ir) = lower_branch_clause(clause) else {
+            return lower_transparent(node);
+        };
+        parts.push(clause_ir);
+    }
+    parts.push(Ir::HardLine);
+    parts.push(Ir::text("end"));
+    Ir::concat(parts)
+}
+
+/// Render one clause of an `if`/`try` chain (`elseif`/`else`/`catch`/`finally`)
+/// as a `HardLine` + the keyword at column 0, an optional space-separated header
+/// (the `elseif` condition or the `catch` variable), and the indented body. The
+/// header, when present, is lowered recursively. Returns `None` (the caller bails
+/// the whole construct to transparent) for an empty body or any unmodeled shape.
+fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
+    let kw = match clause.kind() {
+        SyntaxKind::ELSEIF_CLAUSE => "elseif",
+        SyntaxKind::ELSE_CLAUSE => "else",
+        SyntaxKind::CATCH_CLAUSE => "catch",
+        SyntaxKind::FINALLY_CLAUSE => "finally",
+        _ => return None,
+    };
+
+    let mut header: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_kw = false;
+
+    for el in clause.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                _ if block.is_none() && header.is_none() => header = Some(child),
+                _ => return None,
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::ELSEIF_KW
+                | SyntaxKind::ELSE_KW
+                | SyntaxKind::CATCH_KW
+                | SyntaxKind::FINALLY_KW
+                    if !saw_kw =>
+                {
+                    saw_kw = true
+                }
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return None,
+            },
+        }
+    }
+
+    let (true, Some(block)) = (saw_kw, block) else {
+        return None;
+    };
+    let body = lower_block_body(&block)?;
+
+    let mut parts: Vec<Ir> = vec![Ir::HardLine, Ir::text(kw)];
+    if let Some(header) = header {
+        parts.push(Ir::text(" "));
+        parts.push(lower_node(&header));
+    }
+    parts.push(body);
+    Some(Ir::concat(parts))
 }
 
 /// Lower the statements of a `BLOCK` into an indented, vertically-broken body,
