@@ -217,11 +217,18 @@ leverage.
   per-line `comment` field: a `COMMENT` after a statement is space-joined and
   always last; one canonical space before `#`—a Tenet-1 divergence from Runic,
   which preserves the user's ≥1 pre-`#` whitespace, recorded as
-  `trailing_comment_spacing_divergence`; locked by `trailing_comments/`).
-  **Next:** comment preservation inside
-  broken brackets/matrices (the harder half), then `function`/`do`/`macro` bodies
+  `trailing_comment_spacing_divergence`; locked by `trailing_comments/`),
+  comment preservation inside broken brackets/matrices
+  (`lower_multiline_bracket` gained a comment model; locked by `bracket_comments/`
+  + `matrix_comments/`), block-comment (`#= … =#`) preservation in block bodies
+  (`lower_block_body` `BLOCK_COMMENT` arm: own-line/multi-line kept verbatim with
+  only the `#=` line re-indented, trailing rides with one canonical space—the same
+  Tenet-1 spacing divergence, recorded as `block_comment_spacing_divergence`;
+  locked by `block_comments_in_blocks/`).
+  **Next:** `function`/`do`/`macro` bodies
   (which need `lower_block_body`
-  but are `return`-inserted—a deferred semantic rewrite)—see the
+  but are `return`-inserted—a deferred semantic rewrite), then long single-line
+  bracket/matrix width-based reflow (needs the `fits` engine)—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
   `[1 2; 3 4]` are pure preservation—transparent fallback already matches Runic,

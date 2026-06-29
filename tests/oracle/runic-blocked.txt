@@ -22,3 +22,9 @@ trailing_comment_spacing_divergence
 # canonicalizes to one space, so multi-space input diverges. (Matrix interiors
 # are kept verbatim, so matrix comments match Runic and need no entry.)
 bracket_comment_spacing_divergence
+
+# Tenet 1 divergence (same as above, block comment in a block body): Runic
+# preserves the user's pre-`#=` whitespace on a trailing block comment; Fatou
+# canonicalizes to one space, so multi-space input diverges. (Own-line and
+# multi-line block comments match Runic and need no entry.)
+block_comment_spacing_divergence

@@ -2031,12 +2031,14 @@ impl BodyLine {
 /// after the keyword (leading), and before `end` (trailing) — the framing break
 /// the layout always adds absorbs one newline on each side.
 ///
-/// Line comments are preserved. An **own-line** comment becomes its own line,
-/// re-indented to the body. A **trailing** comment (the line already holds a
-/// statement) is attached after it with a single space — a Tenet-1 divergence:
-/// Runic preserves the user's pre-`#` whitespace (≥1 space) verbatim, but Fatou
-/// canonicalizes to exactly one space. Two statements with no separator, a node
-/// after a comment, or any unexpected token returns `None`.
+/// Comments (line `#` and block `#= … =#`) are preserved. An **own-line** comment
+/// becomes its own line, re-indented to the body; a multi-line block comment keeps
+/// its continuation lines verbatim (only the `#=` line takes the body indent). A
+/// **trailing** comment (the line already holds a statement) is attached after it
+/// with a single space — a Tenet-1 divergence: Runic preserves the user's pre-`#`
+/// whitespace (≥1 space) verbatim, but Fatou canonicalizes to exactly one space.
+/// Two statements with no separator, a node after a comment, or any unexpected
+/// token returns `None`.
 fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
     // `expect_sep` guards against two adjacent statement nodes with no `;`/newline
     // between them, and against a node following a comment on the same line.
@@ -2054,7 +2056,16 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
             }
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::WHITESPACE => {}
-                SyntaxKind::SEMICOLON => expect_sep = false,
+                // A `;` after a comment would put a following statement on the
+                // wrong side of the recorded comment, so bail. (A line comment runs
+                // to end of line so this never arises there, but an inline block
+                // comment can be followed by `; stmt` on the same line.)
+                SyntaxKind::SEMICOLON => {
+                    if lines.last().unwrap().comment.is_some() {
+                        return None;
+                    }
+                    expect_sep = false;
+                }
                 SyntaxKind::NEWLINE => {
                     lines.push(BodyLine::default());
                     expect_sep = false;
@@ -2071,6 +2082,22 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
                     }
                     let text = tok.text().trim_end_matches([' ', '\t']);
                     line.comment = Some(Ir::text(text));
+                    expect_sep = true;
+                }
+                // A block comment is preserved verbatim — its interior (including
+                // continuation-line indentation) is kept byte-for-byte (Runic only
+                // re-indents the line the `#=` opens, which the framing `HardLine`
+                // here supplies). Own-line or trailing, it fills the line's
+                // `comment` slot exactly like a line comment; `expect_sep`/the
+                // `;`-guard then bail any content that would follow it on the same
+                // line (an unmodeled inline `#= … =#` mid-expression bails its
+                // owning node, so it never reaches block level).
+                SyntaxKind::BLOCK_COMMENT => {
+                    let line = lines.last_mut().unwrap();
+                    if line.comment.is_some() {
+                        return None;
+                    }
+                    line.comment = Some(Ir::text(tok.text()));
                     expect_sep = true;
                 }
                 _ => return None,

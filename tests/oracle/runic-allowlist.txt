@@ -10,6 +10,7 @@ bare_tuples
 begin_quote_blocks
 binary_spacing
 block_comments
+block_comments_in_blocks
 bracket_blank_lines
 bracket_comments
 bracket_gap_blank_lines
