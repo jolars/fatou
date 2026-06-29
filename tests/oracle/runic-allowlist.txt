@@ -28,3 +28,4 @@ range_colon
 ternary_spacing
 tight_operators
 type_annotations
+where_clauses

@@ -106,8 +106,14 @@ leverage.
   `global a,b::Int`—rule-free PASS once the parser nested these as a single
   `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR` operand; the existing keyword-stmt
   single-operand arm + `lower_binary` + bare-tuple recursion handle it, locked by
-  the `global_local_assignment/` fixture). **Next:** comment
-  preservation inside broken
+  the `global_local_assignment/` fixture), `where`-clause brace normalization
+  (`lower_where` over `WHERE_EXPR`: `f(x) where T` → `f(x) where {T}`—one space
+  each side of `where`, the bound **always** brace-wrapped; an already-braced
+  bound is normalized in place via `lower_collection` (`where { T , S }` →
+  `where {T, S}`), any other bound is wrapped and recursed (`where T<:Real` →
+  `where {T <: Real}`); nested `where` and the bound's own spacing keep
+  normalizing; bails on comment/newline, locked by `where_clauses/`). **Next:**
+  comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

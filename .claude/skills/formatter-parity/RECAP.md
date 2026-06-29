@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**27 fixtures**): **25 allowlisted**, 2 blocked
+Dir corpus (**28 fixtures**): **26 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -47,9 +47,32 @@ extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`)
 bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
 (`lower_keyword_stmt` extended), `using`/`import` comma + selector lists
 (`lower_import_stmt`), `global`/`local` multiple assignment (rule-free PASS,
-parser-unblocked).
+parser-unblocked), `where`-clause brace normalization (`lower_where`).
 
-## Latest session (`global`/`local` multiple assignment — rule-free PASS)
+## Latest session (`where`-clause brace normalization — `lower_where`)
+
+`WHERE_EXPR` (`f(x) where T`) was **transparent**, so Fatou left the bound bare
+while Runic **always brace-wraps** it: `f(x) where T` → `f(x) where {T}`. New
+`lower_where` (arm on `WHERE_EXPR`), modeled on `lower_arrow`: collect the two
+operand nodes (lhs, bound) and require a single `WHERE_KW`; emit
+`lower_node(lhs)` + `" where "` + the brace-wrapped bound. The bound rule is the
+crux: if it's **already a `BRACES` node**, lower it in place (so
+`lower_collection` normalizes `where { T , S }` → `where {T, S}`); **any other**
+bound (bare `NAME`, a `<:`/`>:` `BINARY_EXPR`, a `PAREN_EXPR`, a `CURLY_EXPR`) is
+wrapped `{` + `lower_node(bound)` + `}` and recursed, so `where T<:Real` →
+`where {T <: Real}`, `where (T)` → `where {(T)}`, `where Tuple{T}` →
+`where {Tuple{T}}`. Nested `where` (`f(x) where T where S` is a left-nested
+`WHERE_EXPR`) falls out of recursing the lhs → `f(x) where {T} where {S}`. Bails
+to `lower_transparent` on a comment/newline (a multi-line clause Runic may
+reflow), error recovery, or operand count ≠ 2. Verified byte-identical to Runic
+on `f(x) where T`, `where T<:Real`, `where {T}`, `where { T }`, `where {T,S}`,
+nested, tight `f(x)where T`, `Tuple{T} where T`, `Array{T,N} where {T,N}`,
+`where (T)`, `where Tuple{T}`, `where T>:Int`, `g(x)::T where T`. Idempotent
+(`where {T}` re-parses to a `BRACES` bound → fixed point). Fixture
+`where_clauses/`. Corpus 25→26 pass, divergence held at 2; allowlist 25→26. No
+parser work needed — `WHERE_EXPR` already nested cleanly.
+
+## Earlier session (`global`/`local` multiple assignment — rule-free PASS)
 
 The parser blocker that target #0 was parked on **landed upstream** (`93e3d28`,
 `feat(parser): nest global/local multiple assignment`). `global`/`local` now parse
@@ -158,71 +181,7 @@ Verified byte-identical to Runic on `x->y`/`()->y`/chained/`map`/`f = x -> x+1`.
 Idempotent (the spaced form re-parses to the same shape). Fixture
 `arrow_functions/`. Corpus 16→17 pass, divergence held at 2; allowlist 16→17.
 
-## Earlier session (leading/trailing-gap blank lines)
-
-Closed ranked target #2. Runic preserves a blank line right after the open bracket
-(**leading** gap) and right before the close (**trailing** gap), in both broken
-brackets *and* matrices, capped at 2 (same `MAX_BLANK_LINES`). Previously Fatou
-**bailed** (brackets) or **silently dropped** (matrices, an ungated divergence) —
-both now land. Verified byte-identical to Runic across call/vect/tuple/braces/index
-leading + trailing, matrix leading/trailing/both, and the 3+→2 cap.
-
-**The framing-vs-blank accounting** (the whole trick): one source newline in a gap
-is the *framing break* the layout always adds; every newline beyond the first is a
-preserved blank. So `blanks = newlines.saturating_sub(1).min(MAX)`.
-
-- **Bracket** (`lower_multiline_bracket`): the leading-gap `newlines >= 2` bail
-  became `leading_blanks = newlines.saturating_sub(1).min(MAX)`, pushed as
-  `BlankLine`s *before* the framing `HardLine`. The trailing-gap bail likewise
-  became `trailing_blanks`, pushed into `inner` *after* the item loop (before the
-  closing framing `HardLine`). `leading_comma`/doubled-comma still bail.
-- **Matrix** (`lower_matrix`): `first`/`last` (positions of the first/last
-  non-empty line) already bound the content span. The empty lines outside it are
-  the framing `[`/`]` lines plus blanks: `leading_blanks = first.saturating_sub(1)`,
-  `trailing_blanks = (len-1-last).saturating_sub(1)`, both `.min(MAX)`. Emitted as
-  `BlankLine`s around the content loop. No `first==0` edge issue —
-  `saturating_sub(1)` gives 0 when the first source line already carries content.
-
-Idempotent (re-parse: a leading blank is 2 newlines after `[` → `saturating_sub(1)`
-= 1 → fixed point; same trailing). Fixtures `bracket_gap_blank_lines/`,
-`matrix_gap_blank_lines/`. The matrix leading/trailing **ungated divergence** noted
-in the prior recap is now **closed**.
-
-## Earlier session (interior blank-line preservation)
-
-**New IR primitive:** `Ir::BlankLine` — a bare `\n` at **column 0** (the printer
-pushes `\n`, sets `col=0`, skips the indent). This is the piece both broken
-brackets and matrices were missing: a `HardLine` always re-indents, so an
-otherwise-empty line would carry trailing indent whitespace; `BlankLine` emits the
-truly-empty line. In `fits` it forces a break like `HardLine` (never actually
-reached — multiline layouts use no `Group`).
-
-**Probed cap:** Runic keeps blank lines but **caps at 2** everywhere (top level,
-brackets, matrices): 1→1, 2→2, 3→2, 4→2. Encoded as `MAX_BLANK_LINES = 2`.
-
-**Bracket** (`lower_multiline_bracket`): the inter-item `Sep` now carries
-`Newline { blanks }` (`= (newlines-1).min(2)`); emit `blanks` × `BlankLine` then
-the `HardLine`. So `[1,\n\n2,3]` → `1,` blank `2,`. Mixed seps compose: `1, 2,`
-on one line then a blank then `3` is preserved. **Leading gap** (open→first item)
-and **trailing gap** (last item→close) still **bail to transparent** on a blank —
-the framing break owns those gaps and a blank there isn't yet expressible. (Runic
-*does* preserve leading/trailing-gap blanks; that's the next increment.)
-
-**Matrix** (`lower_matrix`): interior empty content lines are no longer a bail —
-each becomes a `BlankLine` (run capped at 2); leading/trailing empty lines are
-still dropped into the framing break (a **known, ungated divergence**: Runic keeps
-a blank right after `[`/before `]` in a matrix — kept out of the fixture, flagged
-below).
-
-Verified byte-identical to Runic across vector/call/tuple/braces/index/column-
-vector/2D-matrix, the cap, and mixed same-line+blank. Idempotent (re-parsing 1
-blank = 2 newlines → blanks=1; 2 blanks = 3 newlines → blanks=2, both fixed
-points). Fixtures `bracket_blank_lines/`, `matrix_blank_lines/`.
-
 ### Ranked next targets
-
-(Target #0 — assignment-list `global`/`local` — **landed this session** as a
-rule-free PASS once the parser fix `93e3d28` nested it. See latest session.)
 
 1. **Comment preservation inside broken brackets *and matrices***—now the top
    blank-line work is fully done (interior + leading/trailing gaps), this is the
@@ -239,6 +198,17 @@ rule-free PASS once the parser fix `93e3d28` nested it. See latest session.)
 
 ## Earlier sessions
 
+- **blank-line preservation (interior + leading/trailing gaps)**: new
+  `Ir::BlankLine` primitive (bare `\n` at column 0, skips indent). Runic keeps
+  blanks everywhere but **caps at 2** (`MAX_BLANK_LINES`). The accounting trick:
+  one source newline in a gap is the framing break the layout always adds, so
+  `blanks = newlines.saturating_sub(1).min(2)`. Applied to both
+  `lower_multiline_bracket` (inter-item `Sep::Newline { blanks }`, plus leading-
+  and trailing-gap blanks before/after the framing `HardLine`s) and `lower_matrix`
+  (interior empty lines → `BlankLine`; `leading = first.saturating_sub(1)`,
+  `trailing = (len-1-last).saturating_sub(1)`). Closed the old matrix
+  leading/trailing ungated divergence. Fixtures `bracket_blank_lines/`,
+  `matrix_blank_lines/`, `bracket_gap_blank_lines/`, `matrix_gap_blank_lines/`.
 - **multi-line matrix breaking**: `lower_matrix` (new arm) reframes a
   `MATRIX_EXPR` spanning ≥2 lines like `lower_multiline_bracket` (`[` + `HardLine`,
   each source line re-indented, `HardLine` + `]`); interior kept verbatim (intra-row

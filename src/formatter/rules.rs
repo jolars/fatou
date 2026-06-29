@@ -23,6 +23,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
     match node.kind() {
         SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR => lower_binary(node),
         SyntaxKind::ARROW_EXPR => lower_arrow(node),
+        SyntaxKind::WHERE_EXPR => lower_where(node),
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
         SyntaxKind::TERNARY_EXPR => lower_ternary(node),
         SyntaxKind::RANGE_EXPR => lower_range(node),
@@ -125,6 +126,48 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
     };
 
     Ir::concat([lower_node(lhs), Ir::text(" -> "), lower_node(rhs)])
+}
+
+/// Lay out a `where` clause (`f(x) where T`, `Tuple{T} where {T <: Real}`) with a
+/// single space on each side of `where` and the bound **always wrapped in
+/// braces**: `where T` → `where {T}`. A bound that is already a `{...}` brace node
+/// is normalized in place (via [`lower_collection`]), so `where { T , S }` →
+/// `where {T, S}`; any other bound (a bare name, a `<:`/`>:` subtype, a paren or
+/// curly expression) is wrapped: `where T<:Real` → `where {T <: Real}`. Both
+/// operands are lowered recursively, so a nested `where` (`f(x) where T where S`,
+/// itself a left-nested `WHERE_EXPR`) and the bound's own spacing keep
+/// normalizing.
+///
+/// As with [`lower_arrow`], only the clean single-line shape `<lhs> where <rhs>`
+/// is reshaped: an interleaved comment or newline (a multi-line clause Runic may
+/// reflow), error recovery, or a missing operand falls back to the verbatim
+/// transparent lowering.
+fn lower_where(node: &SyntaxNode) -> Ir {
+    let mut operands: Vec<SyntaxNode> = Vec::new();
+    let mut kw: Option<SyntaxToken> = None;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => operands.push(child),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHERE_KW if kw.is_none() => kw = Some(tok),
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (Some(_), [lhs, rhs]) = (kw, operands.as_slice()) else {
+        return lower_transparent(node);
+    };
+
+    let bound = if rhs.kind() == SyntaxKind::BRACES {
+        lower_node(rhs)
+    } else {
+        Ir::concat([Ir::text("{"), lower_node(rhs), Ir::text("}")])
+    };
+
+    Ir::concat([lower_node(lhs), Ir::text(" where "), bound])
 }
 
 /// Lay out a keyword statement (`return x`, `const x = 1`, `global y`, `local z`)
