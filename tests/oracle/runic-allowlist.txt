@@ -49,6 +49,7 @@ paren_padding
 primitive_types
 range_colon
 struct_blocks
+ternary_multiline
 ternary_spacing
 tight_operators
 trailing_comments

@@ -768,14 +768,28 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
 /// and is lowered recursively, so it keeps normalizing. The target style normalizes
 /// to one space around each operator.
 ///
-/// As with [`lower_comparison`], only the clean single-line alternating shape with
-/// `?`/`:` operators is reshaped: any interleaved comment or newline (a multi-line
-/// ternary), error recovery, or an unexpected token falls back to the verbatim
-/// transparent lowering.
+/// When the source breaks the ternary across lines, Runic keeps the operator
+/// trailing on the line it ends (`?` can't lead a line, so a break only ever lands
+/// in the gap *after* `?` or `:`) and indents the continuation by one level
+/// relative to the statement. We reproduce that: a `NEWLINE` in the gap after an
+/// operator becomes an [`Ir::HardLine`], and the whole body is wrapped in one
+/// [`Ir::indent`]. A right-associative chain (`a ? b :⏎c ? d :⏎e`) stays flat at a
+/// single level — the continuation ternary is the parent's else-operand, so it
+/// skips its own indent and rides the parent's, matching Runic.
+///
+/// Only the clean alternating shape with `?`/`:` operators is reshaped: an
+/// interleaved comment, a newline *before* an operator (a parse error in practice),
+/// a blank line inside a gap (>1 newline, which Runic preserves but we don't model),
+/// error recovery, or an unexpected token falls back to the verbatim transparent
+/// lowering.
 fn lower_ternary(node: &SyntaxNode) -> Ir {
     let mut parts: Vec<Ir> = Vec::new();
     let mut expect_operand = true;
     let mut operand_count = 0usize;
+    // Newlines seen in the current gap (between the last significant token and the
+    // next). A break only ever follows an operator; >1 newline is a blank line we
+    // don't model, so bail.
+    let mut newlines_in_gap = 0usize;
 
     for el in node.children_with_tokens() {
         match el {
@@ -784,15 +798,30 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
                     return lower_transparent(node);
                 }
                 if operand_count > 0 {
-                    parts.push(Ir::text(" "));
+                    // This operand follows an operator; the gap may break.
+                    if newlines_in_gap > 1 {
+                        return lower_transparent(node);
+                    }
+                    parts.push(if newlines_in_gap == 1 {
+                        Ir::HardLine
+                    } else {
+                        Ir::text(" ")
+                    });
                 }
                 parts.push(lower_node(&child));
                 operand_count += 1;
                 expect_operand = false;
+                newlines_in_gap = 0;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::WHITESPACE => {}
+                SyntaxKind::NEWLINE => newlines_in_gap += 1,
                 SyntaxKind::QUESTION | SyntaxKind::COLON if !expect_operand => {
+                    // `?`/`:` always sit on the line they end; a newline before one
+                    // is a parse error in real input, so treat it as unmodeled.
+                    if newlines_in_gap > 0 {
+                        return lower_transparent(node);
+                    }
                     parts.push(Ir::text(" "));
                     parts.push(Ir::text(tok.text().to_string()));
                     expect_operand = true;
@@ -807,7 +836,18 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    Ir::concat(parts)
+    let body = Ir::concat(parts);
+    // The outermost ternary owns the continuation indent; a right-associative
+    // continuation (the parent's else-operand) rides the parent's indent so the
+    // chain stays flat at one level.
+    if node
+        .parent()
+        .is_some_and(|p| p.kind() == SyntaxKind::TERNARY_EXPR)
+    {
+        body
+    } else {
+        Ir::indent(body)
+    }
 }
 
 /// Lay out a stepped range expression (`1:2:10`, `a:b:c`) with every `:` packed

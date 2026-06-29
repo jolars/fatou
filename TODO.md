@@ -97,7 +97,9 @@ leverage.
   `x->y` → `x -> y`, one space each side, operands recursed; bails on a multi-line
   body), ternary spacing (`lower_ternary`: `a ?  b  :  c` → `a ? b : c`, one space
   around `?` and `:`, operands recursed so nested `a ? b : c ? d : e` keeps
-  normalizing; bails on a multi-line ternary), tight field-access `.` (`DOT` in
+  normalizing; a multi-line ternary keeps the operator trailing and indents the
+  continuation one level, with a right-associative chain held flat at one level),
+  tight field-access `.` (`DOT` in
   `is_tight_binop`: fixed a latent mangling bug where `a.b.c` parsed as a
   `BINARY_EXPR`/`DOT` and got spaced to the invalid `a . b . c`; Julia *requires*
   the dot tight), curly type-parameter padding (`Vector{ Int }` → `Vector{Int}`,

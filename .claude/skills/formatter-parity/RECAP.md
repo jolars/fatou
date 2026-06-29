@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**58 fixtures**): **53 allowlisted**, 5 blocked
+Dir corpus (**59 fixtures**): **54 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -76,40 +76,39 @@ inside broken brackets and matrices (`lower_multiline_bracket` + `lower_matrix`
 indentation (`lower_struct`, fourth reuse of `lower_block_body`),
 `module`/`baremodule` **conditionally-indented** bodies (`lower_module` +
 `module_should_indent`, with the body engine split into `build_block_body`),
-`abstract type`/`primitive type` keyword-region whitespace (`lower_type_decl`).
+`abstract type`/`primitive type` keyword-region whitespace (`lower_type_decl`),
+multi-line ternary continuation indent (`lower_ternary` extended).
 
-## Latest session (abstract / primitive type declarations)
+## Latest session (multi-line ternary continuation indent)
 
-Completes the type-declaration family (struct/module → abstract/primitive). These
-are **bodyless one-liners** (`ABSTRACT_DEF` = `abstract type SIGNATURE end`,
-`PRIMITIVE_DEF` = `primitive type SIGNATURE <bits> end`), so there is no body
-engine and no `return`-insertion risk. The gap was narrow: canonical-input decls
-**already passed** (the `SIGNATURE`'s `BINARY_EXPR` lowers `<:` via recursion, and
-single spaces survive transparent). The only divergence was **non-canonical
-keyword whitespace**: `abstract type  Foo` leaked the double space because
-`ABSTRACT_DEF` was transparent.
+Extended `lower_ternary` from single-line spacing to source-driven breaking. Runic
+keeps the ternary single-line unless the *source* already broke it (no width
+reflow — verified a 90-col single-line ternary stays put), keeps the operator
+trailing (`?` can't lead a line, so a break only ever lands in the gap *after* `?`
+or `:`), and indents the continuation **one level** relative to the statement
+(`x = a ? b :⏎    c`; nested in a function body the +4 is relative, modulo Runic's
+`return`-insertion which keeps such bodies out of fixtures).
 
-Probing Runic pinned the exact rule: it collapses the whitespace run after
-`abstract`/`primitive` **and** after `type` to one space each, but leaves the
-whitespace *after the signature* untouched — `abstract type Foo   end` keeps
-`Foo   end` verbatim, and `primitive type MyInt <: Integer  16  end` keeps the
-2-space gaps around the bits literal. So `lower_type_decl` only normalizes the
-**keyword region**: emit the two leading keyword idents with a single collapsed
-space each (`kw_count < 2` gate), lower the `SIGNATURE` recursively, then pass the
-trailing region (optional bits `LITERAL`, `end`, and their whitespace) through via
-`lower_trivia`/`lower_node` exactly like the transparent path. Bails to transparent
-on a comment/newline in the keyword region, a missing signature, or < 2 keyword
-tokens.
+Implementation: the alternation loop now counts `NEWLINE`s per gap. The gap before
+an operand follows an operator, so a single newline there becomes `Ir::HardLine`
+(else a space); the whole body is wrapped in one `Ir::indent`. The crux is
+**chains**: `a ? b :⏎c ? d :⏎e` must stay flat at one level, not stair-step. The
+continuation ternary is the parent's else-operand, so it detects `parent().kind()
+== TERNARY_EXPR` and **skips its own indent**, riding the parent's single
+`Ir::indent` — verified flat across a 3-deep chain. Bails to transparent on: a
+newline *before* an operator (a parse error in real input), a blank line in a gap
+(>1 newline, which Runic preserves but we don't model), interleaved comment, error
+recovery, or operand count ≠ 3.
 
-Verified byte-identical to Runic across abstract (canonical, `<:` subtype,
-messy-whitespace) and primitive (sized, sized-subtype, messy-whitespace) cases;
-idempotent (the preserved trailing whitespace is a fixed point). Fixtures
-`abstract_types/`, `primitive_types/`. Corpus 51→53 pass, divergence held at 5 (no
-new block); allowlist 51→53. No parser blocker (both tokenize/parse cleanly).
-
-Note: the preserved pre-`end` whitespace is a Runic quirk (no rule governs it), not
-a Fatou choice — matching it is required for parity and is deterministic (pure
-function of input), so no Tenet-1 divergence.
+Verified byte-identical to Runic across break-after-`:`, break-after-both, and a
+chain; idempotent (the re-indented continuation is a fixed point — the reparsed
+`NEWLINE WHITESPACE` gap drops the whitespace and re-emits the `HardLine`).
+Single-line `ternary_spacing/` unchanged. Fixture `ternary_multiline/`. Corpus
+53→54 pass, divergence held at 5 (no new block); allowlist 53→54. No parser blocker
+(all shapes tokenize/parse cleanly; only the parse-error `?`-leads-a-line shape is
+unreachable, handled by the defensive bail). Kept out: a breaking ternary in a
+parenthesized then-branch (the paren's own break engine drives the layout) and
+blank lines inside a ternary.
 
 ### Ranked next targets
 
@@ -117,15 +116,30 @@ function of input), so no Tenet-1 divergence.
    **return-inserts** them (semantic rewrite, blocked as `control_flow`). Layout
    could still land *if* return-insertion is modeled or the fixture dodges it
    (e.g. a body whose last statement is already an explicit `return`); deferred.
-2. **Multi-line ternary continuation indent** — `a ? b :⏎c` → Runic indents the
-   continuation (`a ? b :⏎    c`); Fatou's `lower_ternary` only handles the
-   single-line form and leaves a wrapped ternary transparent. A contained
-   break/indent rule, no `fits` engine needed (source-driven, like the block rules).
-3. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
+2. **Long single-line bracket/matrix reflow** (width-based breaking) — Fatou's
    breaking is purely source-driven; Runic also breaks on width. Needs the `fits`
-   engine, not just `HardLine`s.
+   engine, not just `HardLine`s. (Now the most actionable non-deferred target: the
+   ternary just confirmed Runic does *not* width-reflow ternaries, but it does
+   reflow brackets/matrices.)
+3. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
+   own break engine drives the layout (`a ? (⏎    b ? c :⏎    d⏎) : e`); the
+   continuation indent is relative to the paren, not the statement. Out of scope of
+   this session's `lower_ternary` (kept out of the fixture).
 
 ## Earlier sessions
+
+- **abstract / primitive type declarations (`lower_type_decl`)**: completes the
+  type-declaration family — **bodyless one-liners** (`ABSTRACT_DEF`,
+  `PRIMITIVE_DEF`), no body engine, no `return`-insertion risk. Canonical decls
+  already passed; the only divergence was non-canonical keyword whitespace
+  (`abstract type  Foo`). The rule normalizes **only the keyword region**: two
+  leading keyword idents collapsed to one space each (`kw_count < 2` gate),
+  `SIGNATURE` recursed, trailing region (optional bits `LITERAL`, `end`, and their
+  whitespace) passed through verbatim like transparent — Runic leaves
+  `abstract type Foo   end`'s `Foo   end` and the gaps around a bits literal
+  untouched (a Runic quirk, deterministic, no Tenet-1 divergence). Bails on
+  comment/newline in the keyword region, missing signature, or < 2 keyword tokens.
+  Fixtures `abstract_types/`, `primitive_types/`. Corpus 51→53.
 
 - **module / baremodule conditionally-indented bodies (`lower_module` +
   `module_should_indent`, body engine split into `build_block_body`)**: the first
