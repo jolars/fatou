@@ -11,9 +11,11 @@
 # target leaves to the user. They graduate to the allowlist as rules are flipped
 # (or are reaffirmed as Tenet-1 divergences) via the `formatter-parity` skill.
 
-# --- Tenet 1: JuliaFormatter preserves the user's operator/assignment spacing
-# (`x=1`, `a*b`, `a==b`, `x->y`, `a&&b`, `return x+1`); Fatou canonicalizes to a
-# single deterministic form. Pending re-affirmation as deliberate divergences.
+# --- Tenet 1 (deliberate, permanent): JuliaFormatter preserves the user's
+# operator/assignment spacing (`x=1`, `a*b`, `a==b`, `x->y`, `a&&b`, `return x+1`);
+# Fatou canonicalizes to a single deterministic form so semantically-equivalent
+# inputs format identically. Preserving would make output depend on input — Tenet 1
+# forbids it. Will not be flipped to parity.
 assignment_spacing
 binary_spacing
 comparison_chains
@@ -23,14 +25,17 @@ keyword_statements
 function_blocks
 let_blocks
 
-# --- Tenet 1: JuliaFormatter preserves numeric-literal spelling (`0xF`, `1E10`,
-# `007.50`); Fatou normalizes hex byte-width padding and float form (Runic-shaped
-# rules, now divergent). Pending.
+# --- Tenet 1 (deliberate, permanent): JuliaFormatter preserves numeric-literal
+# spelling (`0xF`, `1E10`, `007.50`); Fatou normalizes hex byte-width padding and
+# float form to one deterministic spelling. Will not be flipped to parity.
 hex_literals
 float_literals
 
-# --- Missing rule: JuliaFormatter rewrites `for x in`/comprehension `in` to `=`
-# (leaving `∈` as-is); Fatou preserves `in`. Pending.
+# --- Tenet 1 (deliberate, permanent): JuliaFormatter's `for`-binding operator is
+# input-dependent (preserves `∈`, uses `=` for a range iterable and `in` otherwise),
+# so semantically-identical loops format differently by glyph/iterable. Fatou
+# canonicalizes the iteration operator to a single `in` so they format identically.
+# Will not be flipped to parity.
 comprehension_for_in
 
 # --- Wrong rule: JuliaFormatter packs comma-separated type params tight
