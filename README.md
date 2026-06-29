@@ -11,8 +11,8 @@ transport) and is modeled directly on the author's R tooling project, `arity`.
 
 > **Status: early groundwork.** The full architecture is in place; the parser
 > covers a growing Julia subset, the formatter has started landing per-construct
-> layout rules (gated against the JuliaFormatter.jl oracle), and no lint rules
-> ship yet. See `TODO.md` for the roadmap and `AGENTS.md` for the design tenets.
+> layout rules (gated against the Runic.jl oracle), and no lint rules ship yet.
+> See `TODO.md` for the roadmap and `AGENTS.md` for the design tenets.
 
 ## Usage
 

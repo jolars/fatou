@@ -54,12 +54,12 @@ tasks:
     cmds:
       - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
 
-  juliaformatter-report:
-    desc: Triage formatter parity vs JuliaFormatter.jl (writes tests/oracle/juliaformatter-report.txt)
+  runic-report:
+    desc: Triage formatter parity vs Runic.jl (writes tests/oracle/runic-report.txt)
     cmds:
-      - cargo test --test juliaformatter_oracle -- --ignored juliaformatter_full_report --nocapture
+      - cargo test --test runic_oracle -- --ignored runic_full_report --nocapture
 
-  update-juliaformatter-corpus:
-    desc: Regenerate the pinned JuliaFormatter oracle corpus (needs devenv Julia)
+  update-runic-corpus:
+    desc: Regenerate the pinned Runic oracle corpus (needs devenv Julia)
     cmds:
-      - bash scripts/update-juliaformatter-corpus.sh
+      - bash scripts/update-runic-corpus.sh

@@ -1,10 +1,9 @@
 //! Formatter fixtures: the universal **idempotence** invariant over every
 //! fixture (`format(format(x)) == format(x)`), regardless of whether the case is
-//! at JuliaFormatter parity. Direct JuliaFormatter parity
-//! (`format(input) == expected.jl`) is the oracle gate, owned by
-//! `juliaformatter_oracle.rs` and partitioned by the allowlist/blocked files —
-//! so a backlog fixture whose `expected.jl` Fatou cannot yet reproduce belongs
-//! there, not here.
+//! at Runic parity. Direct Runic parity (`format(input) == expected.jl`) is the
+//! oracle gate, owned by `runic_oracle.rs` and partitioned by the
+//! allowlist/blocked files — so a backlog fixture whose `expected.jl` Fatou
+//! cannot yet reproduce belongs there, not here.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -58,25 +58,16 @@ leverage.
 
 ## Formatter
 
-- [x] JuliaFormatter.jl differential formatter oracle (direct parity; see
-  `AGENTS.md` and the `formatter-parity` skill).
-  `scripts/update-juliaformatter-corpus.{sh,jl}` mint a pinned
-  `expected.jl = JuliaFormatter.format_text(input)` (DefaultStyle) per fixture
-  (`tests/fixtures/formatter/<slug>/`, version-pinned in `.juliaformatter-source`);
-  the harness (`tests/juliaformatter_oracle.rs`) gates
-  `format(input) == expected.jl` via `tests/oracle/juliaformatter-allowlist.txt`
-  (CI-safe, no Julia at test time), `juliaformatter_full_report` (`#[ignore]`d)
-  writes a triage report, and `juliaformatter-{allowlist,blocked}.txt` partition
-  the corpus (coverage enforced). The optional long-term fixed-point gauge
-  (`juliaformatter(fatou(x)) == fatou(x)`) is still future work.
-- [ ] Re-baseline backlog: the oracle target was flipped from Runic.jl to
-  JuliaFormatter.jl (DefaultStyle). JuliaFormatter is preservation-oriented (it
-  does not canonicalize operator/assignment spacing or numeric literals), so many
-  landed Runic-shaped rules below now diverge and are parked in
-  `juliaformatter-blocked.txt`. Flip them toward JuliaFormatter via the
-  `formatter-parity` skill: notably `^`/`:`/`.` and operator spacing,
-  hex/float-literal normalization, comma-tight `{A,B}`, `for x in` -> `for x =`,
-  module-body indent, and trailing-comma policy.
+- [x] Runic.jl differential formatter oracle (direct parity; see `AGENTS.md` and
+  the `formatter-parity` skill). `scripts/update-runic-corpus.{sh,jl}` mint a
+  pinned `expected.jl = Runic.format_string(input)` per fixture
+  (`tests/fixtures/formatter/<slug>/`, version-pinned in `.runic-source`); the
+  harness (`tests/runic_oracle.rs`) gates `format(input) == expected.jl` via
+  `tests/oracle/runic-allowlist.txt` (CI-safe, no Julia at test time),
+  `runic_full_report` (`#[ignore]`d) writes a triage report, and
+  `runic-{allowlist,blocked}.txt` partition the corpus (coverage enforced). The
+  optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`) is still
+  future work.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing

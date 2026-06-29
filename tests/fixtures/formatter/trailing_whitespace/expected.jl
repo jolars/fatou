@@ -1,7 +1,7 @@
 x = 1
 y = 2
-# leading comment   
-z = a + b  # tail   
+# leading comment
+z = a + b  # tail
 
 
 w = """

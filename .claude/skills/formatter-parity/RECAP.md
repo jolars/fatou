@@ -10,37 +10,34 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
   construct; build `Ir`; **bail to `lower_transparent` on any shape you don't
   fully model**. The transparent fallback (tokens verbatim, recurse into child
   nodes) is what keeps unhandled syntax lossless and the whole pass idempotent.
-- **Direct parity is the gate**, but Fatou is **not** a JuliaFormatter clone.
-  JuliaFormatter `DefaultStyle` is largely **preservation**-oriented—it leaves
-  operator/assignment spacing and numeric literals as the user wrote them
-  (normalizes neither `a*b` nor `a * b`; same for `=`, `==`, `&&`, `->`). Fatou
-  canonicalizes deterministically (Tenet 1) and **records** the divergence in
-  `juliaformatter-blocked.txt`. Probe **both** spacings before writing a rule—a
-  preserved operator is a divergence to block, not a rule to write.
+- **Direct parity is the gate**, but Fatou is **not** a Runic clone. Runic
+  *preserves* user whitespace where Tenet 1 demands determinism—it normalizes
+  neither `a&&b` nor `a && b` (same for `||`). Fatou canonicalizes (`&&`/`||` →
+  spaced) and **records** the divergence in `runic-blocked.txt`. `^` is the
+  opposite: Runic *always* packs it tight (`a ^ b` → `a^b`), so tight is the
+  deterministic match. Probe **both** spacings before writing a rule.
 - **Idempotence is universal** (`tests/formatter.rs`, all fixtures). Parity is
-  per-allowlisted-slug (`tests/juliaformatter_oracle.rs`). Keep them separate.
-- **Coverage is enforced**—`juliaformatter_corpus_fully_triaged` fails if a fixture
-  is in neither allowlist nor blocked. A new fixture forces an accept-or-record
-  decision.
+  per-allowlisted-slug (`tests/runic_oracle.rs`). Keep them separate.
+- **Coverage is enforced**—`runic_corpus_fully_triaged` fails if a fixture is in
+  neither allowlist nor blocked. A new fixture forces an accept-or-record decision.
 - **Reseed the allowlist with the `grep -E '^#|^$'` header-preserving recipe.**
 - **Report is gitignored; `expected.jl` is generated**—never hand-edit; mint via
-  `scripts/update-juliaformatter-corpus.sh`.
+  `scripts/update-runic-corpus.sh`.
 - **`format <file>` rewrites in place**—pipe via stdin to inspect output.
-- **Corpus pinned** to JuliaFormatter in `.juliaformatter-source` (currently
-  JuliaFormatter 2.1.6/Julia 1.12.6). Bump ⇒ re-run the script, re-triage.
+- **Corpus pinned** to Runic in `.runic-source` (currently Runic 1.5.0/Julia
+  1.12.6). Bump ⇒ re-run the script, re-triage.
 
 ## Progress
 
-Dir corpus (**65 fixtures**): **18 allowlisted**, 47 blocked — re-baselined after
-the oracle target flipped from Runic.jl to JuliaFormatter.jl (DefaultStyle, see
-Latest session). The blocked list is the new backlog, grouped by cause in
-`juliaformatter-blocked.txt` (preservation-vs-canonicalization Tenet-1
-divergences; missing/wrong structural rules; comment spacing). The rule inventory
-below was all built against **Runic**; most rules now diverge from JuliaFormatter
-and need flipping (probe the new target before touching any of them).
-
-Rules landed (Runic-era; now the flip backlog): operator/assignment spacing
-(`lower_binary`), arrow/anon-function
+Dir corpus (**65 fixtures**): **59 allowlisted**, 6 blocked
+(`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
+`control_flow` = Runic return-insertion, a semantic rewrite, deferred;
+`trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
+a block body; `bracket_comment_spacing_divergence` = the same divergence inside a
+broken bracket; `block_comment_spacing_divergence` = the same divergence on a
+trailing block comment in a block body; `paren_blank_line_divergence` = Fatou
+strips blank lines inside a parenthesized expression where Runic preserves them).
+Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
 spacing (`lower_arrow`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
 `lower_keyword_arg`/`lower_parameters`), tuple/vector/brace collections
@@ -91,58 +88,48 @@ generalized + `binary_group_breaks`), multi-line parenthesized-expression breaki
 (`lower_ternary` gate generalized from a direct ternary parent to any ternary
 ancestor).
 
-## Latest session (flip oracle target: Runic.jl → JuliaFormatter.jl)
+## Latest session (strip blank lines inside a broken paren — a divergence)
 
-Flipped the differential oracle from Runic.jl to **JuliaFormatter.jl
-(DefaultStyle)** on the user's call, and re-baselined the corpus. Infra only — no
-`src/formatter/` rule changes this session. Renamed the harness
-(`tests/juliaformatter_oracle.rs`), capture scripts
-(`scripts/update-juliaformatter-corpus.{sh,jl}`, now `import JuliaFormatter;
-format_text(src; margin=92, indent=4)`), triage files
-(`juliaformatter-{allowlist,blocked}.txt`), sidecar (`.juliaformatter-source` →
-JuliaFormatter 2.1.6/Julia 1.12.6), `Taskfile.yml` targets, `.gitignore`, and the
-docs (`AGENTS.md`, `README.md`, `TODO.md`, this skill). Dropped `Runic` from
-`devenv.nix`. Regenerated all 65 `expected.jl`.
+The RECAP #1 target ("blank lines / comments inside a broken paren") turned into a
+**deliberate divergence**, not a parity rule, on the user's call. Runic *preserves*
+blank lines inside a parenthesized expression (capped at two) and reindents the
+body; the natural port would have mirrored the matrix `BlankLine` accounting. But a
+single parenthesized **value** gains nothing from interior blanks, so Fatou keeps
+the source-driven break (`(` / `+4` body / `)`) and **strips** the blanks. Recorded
+as `paren_blank_line_divergence` in `runic-blocked.txt`.
 
-**Key finding:** JuliaFormatter `DefaultStyle` is far more *preservation*-oriented
-than Runic. It does **not** canonicalize operator/assignment spacing (`x=1`,
-`a*b`, `a==b`, `x->y`, `a&&b` all preserved) or numeric literals (`0xF`, `1E10`,
-`007.50` preserved), but it **does** add normalizations Fatou lacks (`for x in` →
-`for x =`, comma-tight `{A,B}`) and indents/structures blocks differently. Net:
-pass 59→**18**, blocked 6→**47**. The 47 are the new backlog. Notable triage
-flips: `paren_blank_line_divergence` and `control_flow` are no longer the Runic
-divergences they were (the former now *passes* — JuliaFormatter also strips
-interior paren blanks; the latter fails on indentation, not return-insertion,
-since DefaultStyle does not insert `return`). **No parser blocker.**
+Mechanically this was the *opposite* of work: `lower_paren` previously **bailed to
+transparent** when a gap had >1 newline (verbatim, blanks kept, no reindent). The
+fix dropped that bail and the newline counters entirely — blank-line gaps now fall
+straight through to the existing clean broken form, which already ignores how many
+newlines a gap held. Comments in a direct gap still bail to transparent (a `COMMENT`
+is a direct child of `PAREN_EXPR`, caught by the catch-all token arm), so the
+pre-`#` spacing divergence is *not* reopened here. Single-line and no-blank
+multi-line parens are unchanged. Fixture `paren_blank_line_divergence/` (blank both
+gaps, blank cap, leading-only). Corpus pass held at 59, divergence 5→6; allowlist
+held at 59. **No parser blocker.**
+
+Caveat for the next session: this makes parens **inconsistent** with brackets,
+matrices, and block bodies, which all *preserve* blanks (via `Ir::BlankLine`). The
+divergence is scoped to the single-value paren on the rationale that a lone
+parenthesized value has no "items" a blank could separate. If that inconsistency
+ever bites, revisit — the matrix-style accounting is a ~15-line add.
 
 ### Ranked next targets
 
-The whole rule set is Runic-shaped; flip toward JuliaFormatter highest-leverage
-first. Probe the new target for each before touching the rule.
-
-1. **Operator/assignment/literal spacing — decide the policy.** JuliaFormatter
-   *preserves* user spacing here; Fatou *canonicalizes*. Either reaffirm these as
-   deliberate Tenet-1 divergences (keep blocked, write rationale) or relax Fatou's
-   normalization. Biggest bucket: `assignment_spacing`, `binary_spacing`,
-   `comparison_chains`, `arrow_functions`, `logical_tight_divergence`,
-   `keyword_statements`, `function_blocks`, `let_blocks`, `hex_literals`,
-   `float_literals`.
-2. **`for x in` → `for x =`** (`comprehension_for_in`, also `block_comments`,
-   `loop_blocks`) — a *missing* normalization; JuliaFormatter rewrites `in`→`=`
-   (leaves `∈`). New/extended `lower_for_binding`.
-3. **Comma-tight type params** `{A,B}` (`curly_type_params`) — a *wrong* rule;
-   flip `lower_arg_list`'s brace path to pack tight.
-4. **Block/indent structure** (`control_flow`, `if_blocks`, `module_*`,
-   `struct_blocks`, `where_clauses`, `ternary_*`) — re-derive indentation against
-   JuliaFormatter; the `;`-statement splitting differs too.
+1. **Comments inside a broken paren** (`(  # c\n  a\n)`, `(\n  a  # trailing\n)`) —
+   a `COMMENT` is a direct child of `PAREN_EXPR` and currently bails the whole paren
+   to transparent. Handle it like the broken-bracket header/trailing comment (one
+   canonical pre-`#` space) — a *new* Tenet-1 spacing divergence sibling to the
+   bracket one. (Blank lines are now done as the strip divergence above.)
+2. **Multi-line parenthesized operand of a binary/ternary** (`y = (a +\nb) + c`) —
+   verify the paren break composes when the paren is itself an operand in a broken
+   group; Runic puts the inner binary's continuation at `+8` here too.
+3. **Ternary in the condition of a broken outer ternary** (`(b ? c :\n d) ? x : y`)
+   — needs Runic's asymmetric paren indent (open at the line column, close at the
+   outer continuation level), which Fatou's symmetric paren break can't yet emit.
 
 ## Earlier sessions
-
-- **strip blank lines inside a broken paren (Runic-era divergence)**: made "blank
-  lines inside a broken paren" a deliberate divergence — `lower_paren` dropped its
-  >1-newline transparent bail so blank gaps fall through to the clean broken form
-  (blanks stripped). Recorded as `paren_blank_line_divergence`. (Now *passes*
-  under JuliaFormatter, which also strips them — moved to the allowlist.)
 
 - **ternary continuation indent through a ternary ancestor (`lower_ternary` gate
   generalized)**: a one-line change — the outermost ternary in a nest owns a single

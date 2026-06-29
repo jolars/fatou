@@ -1,29 +1,29 @@
-//! JuliaFormatter.jl differential formatter oracle.
+//! Runic.jl differential formatter oracle.
 //!
 //! Formats each fixture's `input.jl` with Fatou and diffs the result against the
-//! pinned `expected.jl` captured from JuliaFormatter (`JuliaFormatter.format_text`,
-//! DefaultStyle). This is a **direct-parity** gate:
-//! `format(input) == juliaformatter(input)` (see `AGENTS.md`). Where Fatou
-//! deliberately diverges (Tenet 1: deterministic layout vs constructs not yet at
-//! parity), the case is recorded in `juliaformatter-blocked.txt` with a
-//! rationale, never silently.
+//! pinned `expected.jl` captured from Runic (`Runic.format_string`). This is a
+//! **direct-parity** gate: `format(input) == runic(input)` (see `AGENTS.md`).
+//! Where Fatou deliberately diverges (Tenet 1: deterministic layout vs Runic's
+//! whitespace preservation, e.g. `&&`/`||` spacing, or rules not yet
+//! implemented), the case is recorded in `runic-blocked.txt` with a rationale,
+//! never silently.
 //!
 //! Layout:
 //! - Corpus: `tests/fixtures/formatter/<slug>/` with `input.jl` + `expected.jl`
-//!   (the latter pinned by `scripts/update-juliaformatter-corpus.sh`). The pinned
-//!   tool versions live in `tests/fixtures/formatter/.juliaformatter-source`.
-//! - Allowlist: `tests/oracle/juliaformatter-allowlist.txt` — slugs at parity
-//!   with JuliaFormatter, guarded against regression.
-//! - Blocked list: `tests/oracle/juliaformatter-blocked.txt` — slugs deliberately
+//!   (the latter pinned by `scripts/update-runic-corpus.sh`). The pinned tool
+//!   versions live in `tests/fixtures/formatter/.runic-source`.
+//! - Allowlist: `tests/oracle/runic-allowlist.txt` — slugs at parity with Runic,
+//!   guarded against regression.
+//! - Blocked list: `tests/oracle/runic-blocked.txt` — slugs deliberately
 //!   diverging or not yet supported, each with a one-line rationale.
 //!
-//! `allowlist ∪ blocked` must cover the whole corpus (`juliaformatter_corpus_fully_triaged`).
+//! `allowlist ∪ blocked` must cover the whole corpus (`runic_corpus_fully_triaged`).
 //!
 //! Two test entry points:
-//! - `juliaformatter_allowlist`: fails if any allowlisted slug regresses. Runs
-//!   with no Julia dependency (the corpus is pinned), so it is CI-safe.
-//! - `juliaformatter_full_report` (ignored by default): runs every case and
-//!   writes a triage summary to `tests/oracle/juliaformatter-report.txt`.
+//! - `runic_allowlist`: fails if any allowlisted slug regresses. Runs with no
+//!   Julia dependency (the corpus is pinned), so it is CI-safe.
+//! - `runic_full_report` (ignored by default): runs every case and writes a
+//!   triage summary to `tests/oracle/runic-report.txt`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -32,9 +32,9 @@ use std::path::{Path, PathBuf};
 use fatou::formatter::format;
 
 const CORPUS_REL: &str = "tests/fixtures/formatter";
-const ALLOWLIST_REL: &str = "tests/oracle/juliaformatter-allowlist.txt";
-const BLOCKED_REL: &str = "tests/oracle/juliaformatter-blocked.txt";
-const REPORT_REL: &str = "tests/oracle/juliaformatter-report.txt";
+const ALLOWLIST_REL: &str = "tests/oracle/runic-allowlist.txt";
+const BLOCKED_REL: &str = "tests/oracle/runic-blocked.txt";
+const REPORT_REL: &str = "tests/oracle/runic-report.txt";
 
 struct Case {
     slug: String,
@@ -70,7 +70,7 @@ fn read_corpus() -> Vec<Case> {
     cases
 }
 
-/// Whether Fatou's formatting of this case matches JuliaFormatter's pinned output.
+/// Whether Fatou's formatting of this case matches Runic's pinned output.
 fn matches(case: &Case) -> bool {
     match format(&case.input) {
         Ok(formatted) => formatted == case.expected,
@@ -96,12 +96,12 @@ fn corpus_is_present() {
     let cases = read_corpus();
     assert!(
         !cases.is_empty(),
-        "formatter corpus is empty; check {CORPUS_REL} and run scripts/update-juliaformatter-corpus.sh"
+        "formatter corpus is empty; check {CORPUS_REL} and run scripts/update-runic-corpus.sh"
     );
 }
 
 #[test]
-fn juliaformatter_allowlist_and_blocked_are_disjoint() {
+fn runic_allowlist_and_blocked_are_disjoint() {
     let allow = read_slug_file(ALLOWLIST_REL);
     let blocked = read_slug_file(BLOCKED_REL);
     let overlap: Vec<_> = allow.intersection(&blocked).collect();
@@ -115,7 +115,7 @@ fn juliaformatter_allowlist_and_blocked_are_disjoint() {
 /// case may sit untriaged (the dir-corpus opt-out discipline). A new fixture
 /// forces a deliberate accept-or-record decision.
 #[test]
-fn juliaformatter_corpus_fully_triaged() {
+fn runic_corpus_fully_triaged() {
     let allow = read_slug_file(ALLOWLIST_REL);
     let blocked = read_slug_file(BLOCKED_REL);
     let untriaged: Vec<String> = read_corpus()
@@ -125,14 +125,14 @@ fn juliaformatter_corpus_fully_triaged() {
         .collect();
     assert!(
         untriaged.is_empty(),
-        "untriaged formatter fixtures (add to juliaformatter-allowlist.txt or juliaformatter-blocked.txt): {untriaged:?}\n\
-         re-run `cargo test --test juliaformatter_oracle -- --ignored juliaformatter_full_report` to triage"
+        "untriaged formatter fixtures (add to runic-allowlist.txt or runic-blocked.txt): {untriaged:?}\n\
+         re-run `cargo test --test runic_oracle -- --ignored runic_full_report` to triage"
     );
 }
 
-/// Guard against regressions: every allowlisted slug must still match JuliaFormatter.
+/// Guard against regressions: every allowlisted slug must still match Runic.
 #[test]
-fn juliaformatter_allowlist() {
+fn runic_allowlist() {
     let allowed = read_slug_file(ALLOWLIST_REL);
     if allowed.is_empty() {
         return; // baseline still being seeded
@@ -157,16 +157,16 @@ fn juliaformatter_allowlist() {
     assert!(
         regressions.is_empty(),
         "allowlisted formatter cases regressed: {regressions:?}\n\
-         re-run `cargo test --test juliaformatter_oracle -- --ignored juliaformatter_full_report` to triage"
+         re-run `cargo test --test runic_oracle -- --ignored runic_full_report` to triage"
     );
 }
 
 /// Full triage run (ignored by default): formats every case, writes a report,
-/// and prints a summary. Use it to seed `juliaformatter-allowlist.txt` /
-/// `juliaformatter-blocked.txt`.
+/// and prints a summary. Use it to seed `runic-allowlist.txt` /
+/// `runic-blocked.txt`.
 #[test]
-#[ignore = "diagnostic/triage run; writes tests/oracle/juliaformatter-report.txt"]
-fn juliaformatter_full_report() {
+#[ignore = "diagnostic/triage run; writes tests/oracle/runic-report.txt"]
+fn runic_full_report() {
     let cases = read_corpus();
     let allowed = read_slug_file(ALLOWLIST_REL);
     let blocked = read_slug_file(BLOCKED_REL);
@@ -199,6 +199,6 @@ fn juliaformatter_full_report() {
         blocked.len(),
     ));
 
-    fs::write(manifest_path(REPORT_REL), &report).expect("write juliaformatter-report.txt");
+    fs::write(manifest_path(REPORT_REL), &report).expect("write runic-report.txt");
     eprint!("{report}");
 }

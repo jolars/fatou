@@ -9,12 +9,11 @@ let
 end
 
 let x = 1, y = 2
-    x+y
+    x + y
 end
 
-let x = 1;
-    y = 2;
-    z = 3
+let x = 1
+    y = 2; z = 3
 end
 
 let

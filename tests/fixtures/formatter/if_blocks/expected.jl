@@ -9,8 +9,7 @@ else
     w
 end
 if e
-    ;
-    f;
+    f
 end
 outer = if g
     h

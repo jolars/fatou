@@ -1,10 +1,10 @@
 module M
 
-x=1
-y=2
+x = 1
+y = 2
 
 module Inner
-z=1
+    z = 1
 end
 
 end

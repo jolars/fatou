@@ -1,0 +1,36 @@
+# Runic formatter oracle blocked list — slugs deliberately diverging from Runic
+# or not yet supported, each with a one-line rationale. A blocked case is a known
+# divergence, not a passing test. `allowlist ∪ blocked` covers the whole corpus.
+
+# Tenet 1 divergence: Runic *preserves* the user's spacing around `&&`/`||`
+# (it normalizes neither `a&&b` nor `a && b`). Fatou must be deterministic, so it
+# canonicalizes them as spaced; tight-written input therefore diverges.
+logical_tight_divergence
+
+# Runic inserts an explicit `return` before a function's trailing block
+# expression. Return-insertion is not implemented (it is a semantic rewrite, not
+# a layout rule); deferred.
+control_flow
+
+# Tenet 1 divergence: Runic *preserves* the user's pre-`#` whitespace on a
+# trailing comment (≥1 space verbatim). Fatou must be deterministic, so it
+# canonicalizes to exactly one space; multi-space input therefore diverges.
+trailing_comment_spacing_divergence
+
+# Tenet 1 divergence (same as above, inside a broken bracket): Runic preserves
+# the user's pre-`#` whitespace on a trailing/own-line item comment; Fatou
+# canonicalizes to one space, so multi-space input diverges. (Matrix interiors
+# are kept verbatim, so matrix comments match Runic and need no entry.)
+bracket_comment_spacing_divergence
+
+# Tenet 1 divergence (same as above, block comment in a block body): Runic
+# preserves the user's pre-`#=` whitespace on a trailing block comment; Fatou
+# canonicalizes to one space, so multi-space input diverges. (Own-line and
+# multi-line block comments match Runic and need no entry.)
+block_comment_spacing_divergence
+
+# Deliberate divergence: Runic preserves blank lines inside a parenthesized
+# expression (capped at two). A single parenthesized value gains nothing from
+# interior blanks, so Fatou keeps the source-driven break but strips the blanks
+# (tight `(` / `+4` body / `)`); blank-padded input therefore diverges.
+paren_blank_line_divergence

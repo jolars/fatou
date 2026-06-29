@@ -10,7 +10,7 @@ let a = 1
     b = a + 1
 end
 
-for i = 1:3
+for i in 1:3
     # loop body comment
     f(i)
 end
