@@ -63,7 +63,9 @@ leverage.
   (`lower_arg_list` + `lower_keyword_arg`/`lower_parameters`: comma spacing, no
   bracket padding, single-line trailing-comma drop, `;`-kwargs), tuple/vector/
   brace collections (`lower_collection`: comma spacing, no bracket padding,
-  trailing-comma drop with the 1-tuple `(a,)` comma kept), tight range `:`
+  trailing-comma drop with the 1-tuple `(a,)` comma kept; accepts `KEYWORD_ARG`
+  elements so named tuples `(a=1,b=2)` → `(a = 1, b = 2)`, locked by
+  `named_tuples/`), tight range `:`
   (`lower_range` + `COLON` in `is_tight_binop`) and `::` type annotations
   (`lower_type_annotation`), multi-line arg-list/collection breaking
   (`lower_multiline_bracket`: framing breaks + indent when content spans ≥2 source

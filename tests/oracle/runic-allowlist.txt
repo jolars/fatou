@@ -27,6 +27,7 @@ matrix_blank_lines
 matrix_gap_blank_lines
 multiline_brackets
 multiline_matrices
+named_tuples
 range_colon
 ternary_spacing
 tight_operators

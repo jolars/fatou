@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**32 fixtures**): **30 allowlisted**, 2 blocked
+Dir corpus (**33 fixtures**): **31 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -51,58 +51,32 @@ parser-unblocked), `where`-clause brace normalization (`lower_where`),
 float-literal normalization (`lower_literal` + `normalize_float`), hex-integer
 zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
 `export`/`public` name lists (`lower_export_stmt`), trailing-whitespace trimming
-(`lower_trivia` in the transparent path).
+(`lower_trivia` in the transparent path), named-tuple element spacing
+(`lower_collection` extended to `KEYWORD_ARG`).
 
-## Latest session (trailing-whitespace trimming — `lower_trivia`)
+## Latest session (named-tuple element spacing — `lower_collection` + `KEYWORD_ARG`)
 
-The **first cross-cutting (non-construct) rule**: it lives in `lower_transparent`,
-not a `lower_node` arm, because trailing whitespace is a property of *trivia*, not
-of any one node. Surveying Runic's pass list (`runestone.jl`) for a cheap win,
-`trim_trailing_whitespace` (the very first pass) was unhandled—Fatou's transparent
-path emits every token verbatim, so trailing blanks on a line survived
-(`x = 1   \n` stayed). The fix routes transparent **tokens** through a new
-`lower_trivia(tok, next)` that takes one lookahead element (the `peekable()` next
-sibling): a `WHITESPACE` token whose **next sibling is a `NEWLINE`** is dropped
-(`Ir::text("")`)—that's exactly the trailing-blank/blank-line-with-spaces case,
-since Fatou lexes horizontal `WHITESPACE` and `NEWLINE` as **separate** tokens, so
-a `WHITESPACE` is never mid-content when a newline follows. A line `COMMENT`'s text
-is `trim_end_matches([' ', '\t'])`'d (`# hi   ` → `# hi`, trailing comment too).
-**Crucially left verbatim** (Runic preserves trailing blanks inside both):
-`STRING_CONTENT` (multi-line strings keep `line   `—it's one token, not
-`WHITESPACE`) and `BLOCK_COMMENT` (`#= … =#`). Handled constructs never emit
-trailing whitespace (the printer rebuilds newlines via `newline()` with no trailing
-pad; `lower_binary` & friends drop incidental ws), so the transparent path is the
-only leak surface—and comments always bail to transparent, so trailing-comment trim
-lands there too. Verified byte-identical to Runic on `x = 1   `/`y = 2\t`/leading &
-trailing comments/blank-line-with-spaces/multi-line string (preserved)/block comment
-(preserved). Idempotent (a second pass finds no trailing blanks). The `  ` *before*
-a trailing comment is kept (next sibling is `COMMENT`, not `NEWLINE`)—matches
-Runic, which keeps `x = 1  # tail`. Fixture `trailing_whitespace/` (toplevel only—no
-function bodies, to keep Runic's `return`-insertion out of `expected.jl`). Corpus
-29→30 pass, divergence held at 2; allowlist 29→30. No parser work needed.
-
-## Earlier session (`where`-clause brace normalization — `lower_where`)
-
-`WHERE_EXPR` (`f(x) where T`) was **transparent**, so Fatou left the bound bare
-while Runic **always brace-wraps** it: `f(x) where T` → `f(x) where {T}`. New
-`lower_where` (arm on `WHERE_EXPR`), modeled on `lower_arrow`: collect the two
-operand nodes (lhs, bound) and require a single `WHERE_KW`; emit
-`lower_node(lhs)` + `" where "` + the brace-wrapped bound. The bound rule is the
-crux: if it's **already a `BRACES` node**, lower it in place (so
-`lower_collection` normalizes `where { T , S }` → `where {T, S}`); **any other**
-bound (bare `NAME`, a `<:`/`>:` `BINARY_EXPR`, a `PAREN_EXPR`, a `CURLY_EXPR`) is
-wrapped `{` + `lower_node(bound)` + `}` and recursed, so `where T<:Real` →
-`where {T <: Real}`, `where (T)` → `where {(T)}`, `where Tuple{T}` →
-`where {Tuple{T}}`. Nested `where` (`f(x) where T where S` is a left-nested
-`WHERE_EXPR`) falls out of recursing the lhs → `f(x) where {T} where {S}`. Bails
-to `lower_transparent` on a comment/newline (a multi-line clause Runic may
-reflow), error recovery, or operand count ≠ 2. Verified byte-identical to Runic
-on `f(x) where T`, `where T<:Real`, `where {T}`, `where { T }`, `where {T,S}`,
-nested, tight `f(x)where T`, `Tuple{T} where T`, `Array{T,N} where {T,N}`,
-`where (T)`, `where Tuple{T}`, `where T>:Int`, `g(x)::T where T`. Idempotent
-(`where {T}` re-parses to a `BRACES` bound → fixed point). Fixture
-`where_clauses/`. Corpus 25→26 pass, divergence held at 2; allowlist 25→26. No
-parser work needed — `WHERE_EXPR` already nested cleanly.
+A **one-line item-kind extension**, not a new arm. A named tuple `(a=1, b=2)`
+parses to a `TUPLE_EXPR` whose elements are `KEYWORD_ARG` nodes (not the `ARG`
+wrappers a positional tuple uses). `lower_collection`'s node match only accepted
+`SyntaxKind::ARG`, bailing to `lower_transparent` on anything else—so a named tuple
+fell through to the verbatim path, which **still** recursed into each `KEYWORD_ARG`
+(→ `lower_keyword_arg` spaces the `=`) but left the **inter-element comma**
+untouched: `(a=1,b=2)` → `(a = 1,b = 2)` (comma not `", "`-joined), diverging from
+Runic's `(a = 1, b = 2)`. Found by probing assorted single-line forms after the
+corpus was fully triaged (pairs `a=>b`, broadcast `f.(x,y)`, string concat were
+already PASS via `lower_binary`/`lower_arg_list`; the named tuple was the lone
+leak). Fix: the item arm now matches `SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG`,
+so a `KEYWORD_ARG` element flows through the same `", "`-join + recurse path. The
+singleton-comma logic (`(x=1,)` keeps its trailing comma) and the trailing-comma
+drop are unchanged and still apply. Verified byte-identical to Runic on
+`(a=1, b=2)`, mixed positional+keyword `(1, b=2)` → `(1, b = 2)`, messy
+`( a=1 , b=2 )`, singleton `(x=1,)`, triple, and nested `(p=(x=1, y=2), q=3)`.
+Idempotent—the spaced form `(a = 1, b = 2)` re-parses with `KEYWORD_ARG` elements
+(not `ASSIGNMENT_EXPR`), a fixed point. Fixture `named_tuples/` (single-line; the
+multi-line `lower_multiline_bracket` path still bails on a `KEYWORD_ARG`, left for a
+later target). Corpus 30→31 pass, divergence held at 2; allowlist 30→31. No parser
+work needed.
 
 ## Earlier session (`using`/`import` comma + selector lists)
 
@@ -182,6 +156,26 @@ in the "Earlier sessions" bullet list below.)
 
 ## Earlier sessions
 
+- **`where`-clause brace normalization (`lower_where`)**: `WHERE_EXPR`
+  (`f(x) where T`) was transparent; Runic **always brace-wraps** the bound
+  (`f(x) where {T}`). New arm modeled on `lower_arrow`: emit `lower_node(lhs)` +
+  `" where "` + brace-wrapped bound. Crux is the bound: an existing `BRACES` node
+  is lowered in place (so `where { T , S }` → `where {T, S}`), any other bound
+  (bare `NAME`, `<:`/`>:`, paren, curly) is `{`+`lower_node(bound)`+`}`-wrapped and
+  recursed (`where T<:Real` → `where {T <: Real}`). Nested `where` falls out of
+  recursing the lhs. Bails on comment/newline, error recovery, or operand count
+  ≠ 2. Idempotent (`where {T}` re-parses to a `BRACES` bound). Fixture
+  `where_clauses/`.
+- **trailing-whitespace trimming (`lower_trivia`)**: the first cross-cutting
+  (non-construct) rule—lives in `lower_transparent`, not a `lower_node` arm.
+  Mirrors Runic's `trim_trailing_whitespace`: transparent **tokens** route through
+  `lower_trivia(tok, next)` (one `peekable()` lookahead); a `WHITESPACE` token
+  whose next sibling is a `NEWLINE` is dropped (Fatou lexes horizontal `WHITESPACE`
+  and `NEWLINE` separately, so it's never mid-content), and a line `COMMENT`'s text
+  is `trim_end_matches([' ', '\t'])`'d. `STRING_CONTENT` and `BLOCK_COMMENT` stay
+  verbatim (Runic keeps trailing blanks inside both). Handled constructs never emit
+  trailing whitespace, so the transparent path is the only leak surface. Fixture
+  `trailing_whitespace/` (toplevel only, to keep `return`-insertion out).
 - **`export`/`public` name lists (`lower_export_stmt`)**: `EXPORT_STMT`/
   `PUBLIC_STMT` were transparent, leaking comma spacing; Runic
   `spaces_in_export_public` `", "`-joins them (`export a,b` → `export a, b`). An

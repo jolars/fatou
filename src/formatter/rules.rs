@@ -854,7 +854,9 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
                 _ => return lower_transparent(node),
             },
             NodeOrToken::Node(child) => match child.kind() {
-                SyntaxKind::ARG => {
+                // `ARG` is a positional element; `KEYWORD_ARG` is a named-tuple
+                // element (`(a = 1, b = 2)`), lowered by `lower_keyword_arg`.
+                SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
                     if item_count > 0 {
                         if !pending_comma {
                             return lower_transparent(node);
