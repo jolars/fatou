@@ -29,13 +29,14 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**64 fixtures**): **59 allowlisted**, 5 blocked
+Dir corpus (**65 fixtures**): **59 allowlisted**, 6 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
 a block body; `bracket_comment_spacing_divergence` = the same divergence inside a
 broken bracket; `block_comment_spacing_divergence` = the same divergence on a
-trailing block comment in a block body).
+trailing block comment in a block body; `paren_blank_line_divergence` = Fatou
+strips blank lines inside a parenthesized expression where Runic preserves them).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
 spacing (`lower_arrow`), comparison chains
 (`lower_comparison`), call/index arg lists (`lower_arg_list` +
@@ -87,51 +88,61 @@ generalized + `binary_group_breaks`), multi-line parenthesized-expression breaki
 (`lower_ternary` gate generalized from a direct ternary parent to any ternary
 ancestor).
 
-## Latest session (ternary continuation indent through a ternary ancestor)
+## Latest session (strip blank lines inside a broken paren — a divergence)
 
-A one-line generalization of `lower_ternary`'s continuation-indent gate. The
-outermost ternary in a nest owns a single `+4` continuation level and every nested
-ternary rides it — Runic adds the level once per ternary nest, never per ternary.
-The old gate only recognized a **direct** `parent().kind() == TERNARY_EXPR`
-(right-assoc else-chains). But the nest can be threaded by anything: a
-parenthesized branch (`a ? (\n b ? c :\n d\n) : e`), a call argument
-(`a ? f(b ? c :\n d) : e`), or a binary operand (`a ? (z + (b ? c :\n d)) : e`).
-So the gate now skips the inner ternary's own indent whenever **any** ancestor is a
-`TERNARY_EXPR` (`node.ancestors().skip(1).any(...)`), not only the direct parent.
+The RECAP #1 target ("blank lines / comments inside a broken paren") turned into a
+**deliberate divergence**, not a parity rule, on the user's call. Runic *preserves*
+blank lines inside a parenthesized expression (capped at two) and reindents the
+body; the natural port would have mirrored the matrix `BlankLine` accounting. But a
+single parenthesized **value** gains nothing from interior blanks, so Fatou keeps
+the source-driven break (`(` / `+4` body / `)`) and **strips** the blanks. Recorded
+as `paren_blank_line_divergence` in `runic-blocked.txt`.
 
-This is the target the paren-break engine (prior session) unblocked: the outer
-ternary's `Ir::indent` wraps the whole multi-line region (so the broken paren's
-content lands at outer-continuation `+4` plus paren-content `+4` = `+8`, and the
-closing `)` at `+4`), and the inner ternary must **not** stack a third `+4` (Runic
-keeps `b ? c :` and `d` both at `+8`). Without a ternary ancestor the inner ternary
-still adds its own level (`(\n b ? c :\n d\n)` → `d` at `+8`, `b ? c` at `+4`;
-`z + (b ? c :\n d)` likewise) — these are the regression locks and are unchanged.
+Mechanically this was the *opposite* of work: `lower_paren` previously **bailed to
+transparent** when a gap had >1 newline (verbatim, blanks kept, no reindent). The
+fix dropped that bail and the newline counters entirely — blank-line gaps now fall
+straight through to the existing clean broken form, which already ignores how many
+newlines a gap held. Comments in a direct gap still bail to transparent (a `COMMENT`
+is a direct child of `PAREN_EXPR`, caught by the catch-all token arm), so the
+pre-`#` spacing divergence is *not* reopened here. Single-line and no-blank
+multi-line parens are unchanged. Fixture `paren_blank_line_divergence/` (blank both
+gaps, blank cap, leading-only). Corpus pass held at 59, divergence 5→6; allowlist
+held at 59. **No parser blocker.**
 
-No new IR, no new bail. The right-assoc chain (`a ? b : c ? d :\n e`) is unchanged
-(direct ternary parent ⊂ any ternary ancestor). Exotic shape kept out of the
-fixture: an inner ternary in the **condition** (first operand) of a broken outer
-ternary (`(b ? c :\n d) ? x : y`) — Runic indents the paren asymmetrically (`(` at
-col 0, `)` at `+4`) via the outer continuation; Fatou's symmetric paren break
-doesn't reproduce that yet. Fixture `ternary_paren_branch/` (paren branch,
-assigned, call arg, nested binary, plus two no-ancestor regression locks). Corpus
-58→59 pass, divergence held at 5; allowlist 58→59. **No parser blocker.**
+Caveat for the next session: this makes parens **inconsistent** with brackets,
+matrices, and block bodies, which all *preserve* blanks (via `Ir::BlankLine`). The
+divergence is scoped to the single-value paren on the rationale that a lone
+parenthesized value has no "items" a blank could separate. If that inconsistency
+ever bites, revisit — the matrix-style accounting is a ~15-line add.
 
 ### Ranked next targets
 
-1. **Blank lines / comments inside a broken paren** (`(\n\na + b\n\n)`,
-   `(  # c\n  a\n)`) — port the `lower_multiline_bracket` `GapLine` accounting
-   (`Sep::Break(Vec<GapLine>)`, leading/trailing gaps, header comment) to the paren
-   gaps so the currently-bailed shapes reach parity. Closes the divergence the
-   paren-break session left transparent.
+1. **Comments inside a broken paren** (`(  # c\n  a\n)`, `(\n  a  # trailing\n)`) —
+   a `COMMENT` is a direct child of `PAREN_EXPR` and currently bails the whole paren
+   to transparent. Handle it like the broken-bracket header/trailing comment (one
+   canonical pre-`#` space) — a *new* Tenet-1 spacing divergence sibling to the
+   bracket one. (Blank lines are now done as the strip divergence above.)
 2. **Multi-line parenthesized operand of a binary/ternary** (`y = (a +\nb) + c`) —
    verify the paren break composes when the paren is itself an operand in a broken
    group; Runic puts the inner binary's continuation at `+8` here too.
 3. **Ternary in the condition of a broken outer ternary** (`(b ? c :\n d) ? x : y`)
-   — the exotic shape this session deferred; needs Runic's asymmetric paren indent
-   (open at the line column, close at the outer continuation level), which Fatou's
-   symmetric paren break can't yet emit.
+   — needs Runic's asymmetric paren indent (open at the line column, close at the
+   outer continuation level), which Fatou's symmetric paren break can't yet emit.
 
 ## Earlier sessions
+
+- **ternary continuation indent through a ternary ancestor (`lower_ternary` gate
+  generalized)**: a one-line change — the outermost ternary in a nest owns a single
+  `+4` continuation level and every nested ternary rides it (Runic adds the level
+  once per nest). The old gate only recognized a **direct**
+  `parent().kind() == TERNARY_EXPR` (right-assoc else-chains); the gate now skips the
+  inner ternary's own indent whenever **any** ancestor is a `TERNARY_EXPR`
+  (`node.ancestors().skip(1).any(...)`), so a ternary threaded through a
+  parenthesized branch (`a ? (\n b ? c :\n d\n) : e`), call arg, or binary operand
+  also rides. Without a ternary ancestor the inner ternary still adds its own level
+  (regression locks). Exotic shape deferred: an inner ternary in the **condition**
+  of a broken outer ternary (Runic indents the paren asymmetrically). Fixture
+  `ternary_paren_branch/`. Corpus 58→59.
 
 - **multi-line parenthesized-expression breaking (`lower_paren` extended)**:
   extended `lower_paren` (was single-line only — any newline bailed to transparent)

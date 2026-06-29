@@ -279,20 +279,22 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
 /// paren's content indent (`(a +\nb)` → `a` at `+4`, `b` at `+8`).
 ///
 /// As with [`lower_arrow`], only clean shapes are reshaped: an interleaved comment
-/// (in a direct gap), a blank line inside the parentheses (a gap of more than one
-/// newline, which Runic preserves and this rule does not model), error recovery,
-/// or a missing/extra operand falls back to the verbatim transparent lowering. The
-/// `;`-block form `(a; b)` is a distinct `PAREN_BLOCK` node, and a tuple `(a, b)`
-/// is a `TUPLE_EXPR`, so neither reaches here.
+/// (in a direct gap), error recovery, or a missing/extra operand falls back to the
+/// verbatim transparent lowering. The `;`-block form `(a; b)` is a distinct
+/// `PAREN_BLOCK` node, and a tuple `(a, b)` is a `TUPLE_EXPR`, so neither reaches
+/// here.
+///
+/// **Blank lines are stripped** (a deliberate divergence from Runic, recorded as
+/// `paren_blank_line_divergence`): a single parenthesized value gains nothing from
+/// interior blank lines, so the broken form is always the tight framing
+/// (`(` / `+4` body / `)`) regardless of how many blank lines the source left in
+/// the gaps. Runic instead preserves them (capped at two); Fatou keeps the break
+/// but drops the blanks.
 fn lower_paren(node: &SyntaxNode) -> Ir {
     let mut inner: Option<SyntaxNode> = None;
     let mut extra_operand = false;
     let mut saw_lparen = false;
     let mut saw_rparen = false;
-    // Newlines in the gap before / after the inner operand, used to spot a blank
-    // line (a gap of more than one newline) that this rule does not model.
-    let mut leading_newlines = 0usize;
-    let mut trailing_newlines = 0usize;
 
     for el in node.children_with_tokens() {
         match el {
@@ -303,14 +305,7 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
                 inner = Some(child);
             }
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
-                SyntaxKind::NEWLINE => {
-                    if inner.is_none() {
-                        leading_newlines += 1;
-                    } else {
-                        trailing_newlines += 1;
-                    }
-                }
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::LPAREN if !saw_lparen => saw_lparen = true,
                 SyntaxKind::RPAREN if !saw_rparen => saw_rparen = true,
                 _ => return lower_transparent(node),
@@ -324,12 +319,6 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
 
     if !has_newline_token(node) {
         return Ir::concat([Ir::text("("), lower_node(&inner), Ir::text(")")]);
-    }
-
-    // A blank line in either direct gap is unmodeled — Runic preserves it; this
-    // rule does not — so bail to the verbatim transparent lowering.
-    if leading_newlines > 1 || trailing_newlines > 1 {
-        return lower_transparent(node);
     }
 
     Ir::concat([

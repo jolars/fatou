@@ -167,8 +167,11 @@ leverage.
   whose subtree spans ≥2 source lines instead explodes vertical—`(` then the inner
   expression at `+4` then `)` flush—the break being contagious from any descendant
   newline (`(f(a,\nb))`) and the inner binary's continuation indent composing on
-  top of the content indent (`(a +\nb)` → `b` at `+8`); bails on a comment or a
-  blank line in a direct gap, locked by `paren_multiline/`), `;`-block padding and
+  top of the content indent (`(a +\nb)` → `b` at `+8`); bails on a comment in a
+  direct gap, locked by `paren_multiline/`. Blank lines inside the parens are
+  **stripped** while the source-driven break is kept (a deliberate divergence from
+  Runic, which preserves them; recorded as `paren_blank_line_divergence`)),
+  `;`-block padding and
   separators (`lower_paren_block` over `PAREN_BLOCK`: `( a ; b )` → `(a; b)`,
   `(a;b;)` → `(a; b)`—each `;` packed tight-left/space-right, the padding stripped,
   a trailing arg-less `;` dropped; the leading statement and each `PARAMETERS`

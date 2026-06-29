@@ -28,3 +28,9 @@ bracket_comment_spacing_divergence
 # canonicalizes to one space, so multi-space input diverges. (Own-line and
 # multi-line block comments match Runic and need no entry.)
 block_comment_spacing_divergence
+
+# Deliberate divergence: Runic preserves blank lines inside a parenthesized
+# expression (capped at two). A single parenthesized value gains nothing from
+# interior blanks, so Fatou keeps the source-driven break but strips the blanks
+# (tight `(` / `+4` body / `)`); blank-padded input therefore diverges.
+paren_blank_line_divergence
