@@ -24,6 +24,7 @@ global_local_names
 hex_literals
 import_using_lists
 keyword_statements
+let_blocks
 matrices
 matrix_blank_lines
 matrix_gap_blank_lines

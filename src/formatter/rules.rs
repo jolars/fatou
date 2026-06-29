@@ -30,6 +30,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::MATRIX_EXPR => lower_matrix(node),
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
+        SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -1619,6 +1620,67 @@ fn lower_block_expr(node: &SyntaxNode) -> Ir {
     };
 
     Ir::concat([Ir::text(kw), body, Ir::HardLine, Ir::text("end")])
+}
+
+/// Lay out a `let` block (`let x = 1 … end`) by indenting its body one step,
+/// matching the target style. The shape is `let [LET_BINDINGS] BLOCK end`; the
+/// header is `let` plus, when present, a space and the recursively-lowered
+/// binding list, and the body is lowered by [`lower_block_body`].
+///
+/// A **non-empty** body is always exploded to the vertical form, even when the
+/// source wrote it on one line (`let x = 1; y = 2 end` → `let x = 1⏎    y = 2⏎
+/// end`): the binding-from-body separator `;` opens the `BLOCK`, so the body
+/// statements already live inside it. An **empty** body (`let end`, `let⏎end`,
+/// or `let x = 1⏎end`) keeps its source layout via the transparent fallback,
+/// which is byte-identical to the target's preservation there.
+///
+/// The binding list is lowered recursively (so `let x = 1` keeps its spacing),
+/// but it is not otherwise reshaped: the parser leaves the second and later
+/// bindings as flat tokens rather than wrapped nodes, so a tight multi-binding
+/// header (`let x=1,y=2`) is not normalized here and is kept out of the fixture.
+/// Any shape this does not fully model — a comment in the body, two statements
+/// with no separator, a missing `end`, or an unexpected child — also falls back
+/// to the verbatim transparent lowering.
+fn lower_let(node: &SyntaxNode) -> Ir {
+    let mut bindings: Option<SyntaxNode> = None;
+    let mut block: Option<SyntaxNode> = None;
+    let mut saw_let = false;
+    let mut saw_end = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::LET_BINDINGS if bindings.is_none() && block.is_none() => {
+                    bindings = Some(child)
+                }
+                SyntaxKind::BLOCK if block.is_none() => block = Some(child),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LET_KW if !saw_let => saw_let = true,
+                SyntaxKind::END_KW => saw_end = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, Some(block)) = (saw_let, saw_end, block) else {
+        return lower_transparent(node);
+    };
+    let Some(body) = lower_block_body(&block) else {
+        return lower_transparent(node);
+    };
+
+    let mut parts: Vec<Ir> = vec![Ir::text("let")];
+    if let Some(bindings) = bindings {
+        parts.push(Ir::text(" "));
+        parts.push(lower_node(&bindings));
+    }
+    parts.push(body);
+    parts.push(Ir::HardLine);
+    parts.push(Ir::text("end"));
+    Ir::concat(parts)
 }
 
 /// Lower the statements of a `BLOCK` into an indented, vertically-broken body,

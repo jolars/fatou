@@ -168,8 +168,14 @@ leverage.
   an empty block keeps its source layout via the transparent fallback; bails on a
   body comment, two statements with no separator, or a missing `end`; locked by
   `begin_quote_blocks/`. `lower_block_body` is the reusable body engine for future
-  block constructs).
-  **Next:** other block headers reusing `lower_block_body`—`let`/`if`/`while`/`for`
+  block constructs), `let` block-body indentation (`lower_let` over `LET_EXPR`:
+  `let x = 1; y = 2 end` → `let x = 1⏎    y = 2⏎end`—the first reuse of
+  `lower_block_body`; header is `let` + recursively-lowered `LET_BINDINGS`, the
+  binding/body separator `;` opens the `BLOCK`; empty body keeps its source layout
+  via the transparent fallback; tight multi-binding headers (`let x=1,y=2`) are not
+  normalized—the parser leaves later bindings as flat tokens—so kept out of the
+  fixture; locked by `let_blocks/`).
+  **Next:** remaining block headers reusing `lower_block_body`—`if`/`while`/`for`
   (layout-only; no return-insertion) before `function`/`do` (which need it). Then
   comment preservation inside broken brackets/matrices (the harder half)—see the
   `formatter-parity` RECAP's ranked targets.
