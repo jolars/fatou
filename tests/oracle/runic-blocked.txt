@@ -16,3 +16,9 @@ control_flow
 # trailing comment (≥1 space verbatim). Fatou must be deterministic, so it
 # canonicalizes to exactly one space; multi-space input therefore diverges.
 trailing_comment_spacing_divergence
+
+# Tenet 1 divergence (same as above, inside a broken bracket): Runic preserves
+# the user's pre-`#` whitespace on a trailing/own-line item comment; Fatou
+# canonicalizes to one space, so multi-space input diverges. (Matrix interiors
+# are kept verbatim, so matrix comments match Runic and need no entry.)
+bracket_comment_spacing_divergence

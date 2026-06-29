@@ -82,10 +82,14 @@ leverage.
   (`lower_type_annotation`), multi-line arg-list/collection breaking
   (`lower_multiline_bracket`: framing breaks + indent when content spans ≥2 source
   lines, contagious via descendant `NEWLINE` tokens, source space-vs-break
-  preserved between items, per-bracket trailing comma), multi-line matrix breaking
-  (`lower_matrix`: framing breaks + reindent each source line when a `MATRIX_EXPR`
-  spans ≥2 lines, interior preserved verbatim—intra-row spacing, same-line
-  `;`-rows, `;` placement; bails on comment), blank-line preservation in broken
+  preserved between items, per-bracket trailing comma; trailing/own-line/header
+  comments preserved—trailing item comments and the open-bracket comment ride
+  with one canonical pre-`#` space (a Tenet-1 divergence from Runic's verbatim
+  spacing), own-line comments become their own indented lines), multi-line matrix
+  breaking (`lower_matrix`: framing breaks + reindent each source line when a
+  `MATRIX_EXPR` spans ≥2 lines, interior preserved verbatim—intra-row spacing,
+  same-line `;`-rows, `;` placement, and now line comments kept verbatim as line
+  elements), blank-line preservation in broken
   brackets and matrices (new `Ir::BlankLine` bare-newline primitive; blanks kept
   everywhere—between items/rows and in the leading gap (after the open bracket) and
   trailing gap (before the close), capped at 2 per Runic; one newline is the framing

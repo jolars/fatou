@@ -11,6 +11,7 @@ begin_quote_blocks
 binary_spacing
 block_comments
 bracket_blank_lines
+bracket_comments
 bracket_gap_blank_lines
 call_arg_lists
 collections
@@ -30,6 +31,7 @@ let_blocks
 loop_blocks
 matrices
 matrix_blank_lines
+matrix_comments
 matrix_gap_blank_lines
 multiline_brackets
 multiline_matrices
