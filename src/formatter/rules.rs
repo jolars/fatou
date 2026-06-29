@@ -33,6 +33,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
         }
+        SyntaxKind::PAREN_EXPR => lower_paren(node),
         SyntaxKind::BARE_TUPLE_EXPR => lower_bare_tuple(node),
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
@@ -153,6 +154,42 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
     };
 
     Ir::concat([lower_node(lhs), Ir::text(" -> "), lower_node(rhs)])
+}
+
+/// Lay out a parenthesized expression (`(a + b)`) with **no padding** inside the
+/// parentheses: `( a + b )` → `(a + b)`, `(  x  )` → `(x)`. Runic strips the
+/// incidental whitespace flanking the inner expression. The single inner node is
+/// lowered recursively, so a nested paren (`( (a) )` → `((a))`) and the inner
+/// expression's own spacing keep normalizing.
+///
+/// As with [`lower_arrow`], only the clean single-line shape `( <expr> )` is
+/// reshaped: an interleaved comment or newline (a multi-line paren Runic may
+/// reflow and reindent), error recovery, or a missing/extra operand falls back to
+/// the verbatim transparent lowering. The `;`-block form `(a; b)` is a distinct
+/// `PAREN_BLOCK` node, and a tuple `(a, b)` is a `TUPLE_EXPR`, so neither reaches
+/// here.
+fn lower_paren(node: &SyntaxNode) -> Ir {
+    let mut operands: Vec<SyntaxNode> = Vec::new();
+    let mut saw_lparen = false;
+    let mut saw_rparen = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => operands.push(child),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::LPAREN if !saw_lparen => saw_lparen = true,
+                SyntaxKind::RPAREN if !saw_rparen => saw_rparen = true,
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    let (true, true, [inner]) = (saw_lparen, saw_rparen, operands.as_slice()) else {
+        return lower_transparent(node);
+    };
+
+    Ir::concat([Ir::text("("), lower_node(inner), Ir::text(")")])
 }
 
 /// Lay out a `where` clause (`f(x) where T`, `Tuple{T} where {T <: Real}`) with a

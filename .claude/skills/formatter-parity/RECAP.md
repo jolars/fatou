@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**33 fixtures**): **31 allowlisted**, 2 blocked
+Dir corpus (**34 fixtures**): **32 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -52,31 +52,33 @@ float-literal normalization (`lower_literal` + `normalize_float`), hex-integer
 zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
 `export`/`public` name lists (`lower_export_stmt`), trailing-whitespace trimming
 (`lower_trivia` in the transparent path), named-tuple element spacing
-(`lower_collection` extended to `KEYWORD_ARG`).
+(`lower_collection` extended to `KEYWORD_ARG`), parenthesized-expression padding
+(`lower_paren`).
 
-## Latest session (named-tuple element spacing — `lower_collection` + `KEYWORD_ARG`)
+## Latest session (parenthesized-expression padding — `lower_paren`)
 
-A **one-line item-kind extension**, not a new arm. A named tuple `(a=1, b=2)`
-parses to a `TUPLE_EXPR` whose elements are `KEYWORD_ARG` nodes (not the `ARG`
-wrappers a positional tuple uses). `lower_collection`'s node match only accepted
-`SyntaxKind::ARG`, bailing to `lower_transparent` on anything else—so a named tuple
-fell through to the verbatim path, which **still** recursed into each `KEYWORD_ARG`
-(→ `lower_keyword_arg` spaces the `=`) but left the **inter-element comma**
-untouched: `(a=1,b=2)` → `(a = 1,b = 2)` (comma not `", "`-joined), diverging from
-Runic's `(a = 1, b = 2)`. Found by probing assorted single-line forms after the
-corpus was fully triaged (pairs `a=>b`, broadcast `f.(x,y)`, string concat were
-already PASS via `lower_binary`/`lower_arg_list`; the named tuple was the lone
-leak). Fix: the item arm now matches `SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG`,
-so a `KEYWORD_ARG` element flows through the same `", "`-join + recurse path. The
-singleton-comma logic (`(x=1,)` keeps its trailing comma) and the trailing-comma
-drop are unchanged and still apply. Verified byte-identical to Runic on
-`(a=1, b=2)`, mixed positional+keyword `(1, b=2)` → `(1, b = 2)`, messy
-`( a=1 , b=2 )`, singleton `(x=1,)`, triple, and nested `(p=(x=1, y=2), q=3)`.
-Idempotent—the spaced form `(a = 1, b = 2)` re-parses with `KEYWORD_ARG` elements
-(not `ASSIGNMENT_EXPR`), a fixed point. Fixture `named_tuples/` (single-line; the
-multi-line `lower_multiline_bracket` path still bails on a `KEYWORD_ARG`, left for a
-later target). Corpus 30→31 pass, divergence held at 2; allowlist 30→31. No parser
-work needed.
+A new `lower_node` arm on `PAREN_EXPR`. Found by sweeping single-line forms after
+the corpus was fully triaged: `( a + b )` was **transparent**, so Fatou kept the
+incidental whitespace flanking the inner expression—`( a + b )` stayed
+`( a + b )`, diverging from Runic's `(a + b)`. (The inner binary still got spaced
+via the transparent recursion; only the padding tokens leaked.) A `PAREN_EXPR` is
+`LPAREN`, optional `WHITESPACE`, **exactly one** inner node, optional `WHITESPACE`,
+`RPAREN`. The new arm (modeled on `lower_arrow`) collects children, drops
+`WHITESPACE`, accepts one `LPAREN`/`RPAREN` each, and requires a single inner
+operand; it then emits `"(" + lower_node(inner) + ")"`. Recursing the inner node
+keeps everything normalizing: nested parens `( (a) )` → `((a))`, and the inner
+expression's own spacing (`((a + b) * c)`). The catch-all `_` arm bails to
+`lower_transparent` on a comment, newline (a multi-line paren Runic *reflows and
+reindents*—out of scope, target #1), error recovery, or a missing/extra operand.
+Two sibling shapes never reach here: the `;`-block `(a; b)` parses to a distinct
+`PAREN_BLOCK` (still leaks `(a ; b)`—a later target) and a tuple `(a, b)`/`(a,)`
+is a `TUPLE_EXPR` (already handled by `lower_collection`). Verified byte-identical
+to Runic on `( a + b )`, `(  x  )`, `( x )`, `( (a) )`, `( a )* ( b )` →
+`(a) * (b)`, `(f(a) )`, `( -x )` → `(-x)`, `return ( x )`, and the
+already-canonical `(a)`/`(a + b)`/`((a + b) * c)`. Idempotent (the unpadded form
+is a fixed point). Fixture `paren_padding/` (single-line; multi-line and
+commented parens kept out, left for the comment-preservation target). Corpus
+31→32 pass, divergence held at 2; allowlist 31→32. No parser work needed.
 
 ## Earlier session (`using`/`import` comma + selector lists)
 
@@ -156,6 +158,13 @@ in the "Earlier sessions" bullet list below.)
 
 ## Earlier sessions
 
+- **named-tuple element spacing (`lower_collection` + `KEYWORD_ARG`)**: a one-line
+  item-kind extension, not a new arm. A named tuple `(a=1, b=2)` is a `TUPLE_EXPR`
+  whose elements are `KEYWORD_ARG` nodes; `lower_collection`'s item match only
+  accepted `ARG`, so the named tuple fell to transparent—`=` got spaced via
+  recursion but the inter-element comma leaked (`(a=1,b=2)` → `(a = 1,b = 2)`).
+  Item arm now matches `ARG | KEYWORD_ARG`; singleton `(x=1,)` + trailing-comma
+  drop unchanged. Fixture `named_tuples/` (single-line; multi-line still bails).
 - **`where`-clause brace normalization (`lower_where`)**: `WHERE_EXPR`
   (`f(x) where T`) was transparent; Runic **always brace-wraps** the bound
   (`f(x) where {T}`). New arm modeled on `lower_arrow`: emit `lower_node(lhs)` +

@@ -137,7 +137,13 @@ leverage.
   transparent path, mirroring Runic's `trim_trailing_whitespace`: a `WHITESPACE`
   run right before a `NEWLINE` is dropped and a line `COMMENT`'s trailing blanks
   are stripped, while string content and block comments stay verbatim; locked by
-  `trailing_whitespace/`). **Next:** comment preservation inside broken
+  `trailing_whitespace/`), parenthesized-expression padding (`lower_paren` over
+  `PAREN_EXPR`: `( a + b )` → `(a + b)`, `(  x  )` → `(x)`—strip the incidental
+  whitespace flanking the single inner expression, which is lowered recursively
+  so nested parens `( (a) )` → `((a))` and the inner spacing keep normalizing;
+  the `;`-block `(a; b)` is a distinct `PAREN_BLOCK` and a tuple `(a, b)` is a
+  `TUPLE_EXPR`, so neither reaches the arm; bails on comment/newline (a multi-line
+  paren Runic reflows), locked by `paren_padding/`). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/
