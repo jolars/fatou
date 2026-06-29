@@ -12,7 +12,7 @@
 use rowan::NodeOrToken;
 
 use crate::formatter::ir::Ir;
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 /// Lower a parsed document (the `ROOT` node) into an `Ir` document.
 pub fn lower(root: &SyntaxNode) -> Ir {
@@ -52,10 +52,35 @@ fn lower_node(node: &SyntaxNode) -> Ir {
 /// whitespace and comments) byte-identical while still normalizing any handled
 /// descendant.
 fn lower_transparent(node: &SyntaxNode) -> Ir {
-    Ir::concat(node.children_with_tokens().map(|el| match el {
-        NodeOrToken::Node(child) => lower_node(&child),
-        NodeOrToken::Token(tok) => Ir::text(tok.text().to_string()),
-    }))
+    let mut parts = Vec::new();
+    let mut iter = node.children_with_tokens().peekable();
+    while let Some(el) = iter.next() {
+        match el {
+            NodeOrToken::Node(child) => parts.push(lower_node(&child)),
+            NodeOrToken::Token(tok) => parts.push(lower_trivia(&tok, iter.peek())),
+        }
+    }
+    Ir::concat(parts)
+}
+
+/// Lower a token in transparent context, trimming trailing horizontal
+/// whitespace the way Runic's `trim_trailing_whitespace` does: a `WHITESPACE`
+/// run sitting immediately before a line break is dropped, and a line
+/// `COMMENT`'s trailing blanks are stripped. String content and block comments
+/// are left verbatim—Runic preserves trailing whitespace inside both.
+fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
+    match tok.kind() {
+        SyntaxKind::WHITESPACE
+            if matches!(
+                next,
+                Some(NodeOrToken::Token(t)) if t.kind() == SyntaxKind::NEWLINE
+            ) =>
+        {
+            Ir::text("")
+        }
+        SyntaxKind::COMMENT => Ir::text(tok.text().trim_end_matches([' ', '\t'])),
+        _ => Ir::text(tok.text().to_string()),
+    }
 }
 
 /// Lay out a binary or assignment expression with normalized operator spacing:

@@ -30,5 +30,6 @@ multiline_matrices
 range_colon
 ternary_spacing
 tight_operators
+trailing_whitespace
 type_annotations
 where_clauses

@@ -131,7 +131,11 @@ leverage.
   identifier, operator (`export +, -`), macro (`export @m`), or `var"…"` form, so
   the rule glues the tokens of one name and only spaces comma boundaries; bails on
   comment/newline or a leading/trailing/doubled comma; locked by
-  `export_public_lists/`). **Next:** comment preservation inside broken
+  `export_public_lists/`), trailing-whitespace trimming (`lower_trivia` in the
+  transparent path, mirroring Runic's `trim_trailing_whitespace`: a `WHITESPACE`
+  run right before a `NEWLINE` is dropped and a line `COMMENT`'s trailing blanks
+  are stripped, while string content and block comments stay verbatim; locked by
+  `trailing_whitespace/`). **Next:** comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

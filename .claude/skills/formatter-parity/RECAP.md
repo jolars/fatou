@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**31 fixtures**): **29 allowlisted**, 2 blocked
+Dir corpus (**32 fixtures**): **30 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -50,38 +50,36 @@ bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
 parser-unblocked), `where`-clause brace normalization (`lower_where`),
 float-literal normalization (`lower_literal` + `normalize_float`), hex-integer
 zero-padding (`lower_literal` extended to `HEX_INT` + `normalize_hex`),
-`export`/`public` name lists (`lower_export_stmt`).
+`export`/`public` name lists (`lower_export_stmt`), trailing-whitespace trimming
+(`lower_trivia` in the transparent path).
 
-## Latest session (`export`/`public` name lists — `lower_export_stmt`)
+## Latest session (trailing-whitespace trimming — `lower_trivia`)
 
-`EXPORT_STMT`/`PUBLIC_STMT` were **transparent**, leaking comma spacing
-(`export a,b` stayed `export a,b`); Runic's `spaces_in_export_public` `", "`-joins
-them (`export a, b`, `public foo, bar`). The corpus was already fully triaged, so
-this came from surveying Runic's pass list (`Runic.jl` `format_node!`) for an
-unhandled cheap win — `spaces_in_export_public` sits right after the done
-`spaces_in_import_using`. Both keywords parse cleanly: `export` has an
-`EXPORT_KW`, `public` is a leading bare `IDENT` (contextual keyword); the names
-follow as flat children. **Crux vs the import rule:** an exported name is **not**
-always one node — it can be an `IDENT`, an operator token (`export +, -` →
-`PLUS`/`MINUS`), a `MACRO_NAME` node (`export @m`), or a multi-token `var"…"`
-(`STRING_PREFIX`+delims+content). So a strict node/separator alternation (what
-`lower_import_stmt`/the global-name arm use) won't do. Instead `lower_export_stmt`
-tracks **comma boundaries**: emit the keyword, then `expect_item` is true after
-the keyword and after each comma — the first token of a name takes a leading
-space and clears the flag; while the flag is false a `COMMA` emits `","` and
-re-arms it, any other token/node is **glued verbatim** (no incidental whitespace
-exists inside a name). Child nodes recurse via `lower_node` (`MACRO_NAME` stays
-transparent → `@m`). Bails to `lower_transparent` on a comment/newline (a
-multi-line list Runic may reflow) or a leading/trailing/doubled comma (a dangling
-`expect_item`). Verified byte-identical to Runic on `export a,b`, `export a, b, c`,
-`export +, -`, `export @mac, foo`, `export var"x", y`, `public foo,bar`,
-`export single`, and `export a ,b` (space-before-comma → normalized). Idempotent.
-A lone `public` identifier (`public = 1`) isn't a `PUBLIC_STMT`, untouched.
-**Known comment divergence** (out of fixture, not blocked — same as the import
-rule): `export a,b # names` bails verbatim while Runic still spaces the comma;
-that's the deferred comment-preservation target #1, not a Tenet-1 corner. Fixture
-`export_public_lists/`. Corpus 28→29 pass, divergence held at 2; allowlist 28→29.
-No parser work needed.
+The **first cross-cutting (non-construct) rule**: it lives in `lower_transparent`,
+not a `lower_node` arm, because trailing whitespace is a property of *trivia*, not
+of any one node. Surveying Runic's pass list (`runestone.jl`) for a cheap win,
+`trim_trailing_whitespace` (the very first pass) was unhandled—Fatou's transparent
+path emits every token verbatim, so trailing blanks on a line survived
+(`x = 1   \n` stayed). The fix routes transparent **tokens** through a new
+`lower_trivia(tok, next)` that takes one lookahead element (the `peekable()` next
+sibling): a `WHITESPACE` token whose **next sibling is a `NEWLINE`** is dropped
+(`Ir::text("")`)—that's exactly the trailing-blank/blank-line-with-spaces case,
+since Fatou lexes horizontal `WHITESPACE` and `NEWLINE` as **separate** tokens, so
+a `WHITESPACE` is never mid-content when a newline follows. A line `COMMENT`'s text
+is `trim_end_matches([' ', '\t'])`'d (`# hi   ` → `# hi`, trailing comment too).
+**Crucially left verbatim** (Runic preserves trailing blanks inside both):
+`STRING_CONTENT` (multi-line strings keep `line   `—it's one token, not
+`WHITESPACE`) and `BLOCK_COMMENT` (`#= … =#`). Handled constructs never emit
+trailing whitespace (the printer rebuilds newlines via `newline()` with no trailing
+pad; `lower_binary` & friends drop incidental ws), so the transparent path is the
+only leak surface—and comments always bail to transparent, so trailing-comment trim
+lands there too. Verified byte-identical to Runic on `x = 1   `/`y = 2\t`/leading &
+trailing comments/blank-line-with-spaces/multi-line string (preserved)/block comment
+(preserved). Idempotent (a second pass finds no trailing blanks). The `  ` *before*
+a trailing comment is kept (next sibling is `COMMENT`, not `NEWLINE`)—matches
+Runic, which keeps `x = 1  # tail`. Fixture `trailing_whitespace/` (toplevel only—no
+function bodies, to keep Runic's `return`-insertion out of `expected.jl`). Corpus
+29→30 pass, divergence held at 2; allowlist 29→30. No parser work needed.
 
 ## Earlier session (`where`-clause brace normalization — `lower_where`)
 
@@ -184,6 +182,15 @@ in the "Earlier sessions" bullet list below.)
 
 ## Earlier sessions
 
+- **`export`/`public` name lists (`lower_export_stmt`)**: `EXPORT_STMT`/
+  `PUBLIC_STMT` were transparent, leaking comma spacing; Runic
+  `spaces_in_export_public` `", "`-joins them (`export a,b` → `export a, b`). An
+  exported name isn't always one node (`IDENT`, operator `export +, -`, macro
+  `export @m`, `var"…"`), so the rule tracks **comma boundaries**—keyword, then
+  `expect_item` after the keyword and each comma takes a leading space on the
+  name's first token; while mid-name a `COMMA` re-arms and any other token is
+  glued verbatim. Bails on comment/newline or a leading/trailing/doubled comma.
+  Fixture `export_public_lists/`.
 - **ternary spacing (`lower_ternary`)**: `TERNARY_EXPR` (`a ? b : c`) was
   transparent; one space around `?` and `:`. Walk children dropping incidental
   whitespace, alternate operand/operator (space + `QUESTION`/`COLON` text),
