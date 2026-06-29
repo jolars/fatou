@@ -36,14 +36,17 @@ leverage.
   insignificant (`(/\nx)` ⇒ `(call-pre (error /) x)`). Mirrors the range colon's
   `newline_significant` gate.
 
-- [ ] Parser: one-line space-separated `for` body folds into `FOR_BINDING`.
-  `for i in 1:3 x += i end` should parse as a for-loop with body `x += i`
-  (JuliaSyntax: `(for (in i (call : 1 3)) (block (+= x i)))`), but Fatou's
-  `for`-binding parser greedily extends past the iterable and consumes
-  `x += i` as flat tokens, leaving an empty `BLOCK`. One-line `while`
-  (`while c x end`) separates `CONDITION`/`BLOCK` correctly, so this is specific
-  to the `for`-binding extension. Surfaced by formatter-parity (`lower_loop`);
-  the loop fixture routes around it with `;`-separated and multi-line bodies.
+- [x] Parser: one-line space-separated `for` body parses into the loop `BLOCK`.
+  `for i in 1:3 x += i end` ⇒ `(for (= i (call-i 1 : 3)) (block (+= x i)))`. The
+  statement `for`-binding now reuses the comprehension/generator spec parser
+  (`parse_for_specs`, parametrized by `bracketed`) so the binding stops at the
+  end of the last iterable and a same-line body falls through to the loop block
+  rather than being swallowed as flat tokens. Applies to `in`/`=`/comma and
+  cartesian forms (`for i in 1:3, j in 1:4 g(i,j) end`). The iterable is now a
+  real expression node, not loose passthrough tokens. (`∈` still projects as
+  `(call-i i ∈ xs)` rather than `(= i xs)`—a pre-existing, separate divergence
+  shared by generators and the multi-line form, since `∈` is a symbol operator
+  not suppressed by `no_word_op`.)
 
 ### Incremental
 

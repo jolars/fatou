@@ -189,22 +189,6 @@ pub(crate) fn parse_block_stmt(
     parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
-/// Parse a `for`-loop binding (`for i in xs`), where a following `in`/`isa` is
-/// the iteration separator handled by the caller rather than a comparison
-/// operator. The `=` form (`for i = 1:3`) is still parsed whole as an
-/// `ASSIGNMENT_EXPR`. See [`ExprFlags::no_word_op`].
-pub(crate) fn parse_for_binding(
-    tokens: &[Token],
-    start: usize,
-    diagnostics: &mut Vec<ParseDiagnostic>,
-) -> Option<ExprParse> {
-    let flags = ExprFlags {
-        no_word_op: true,
-        ..ExprFlags::default()
-    };
-    parse_expr_in(tokens, start, 0, diagnostics, flags)
-}
-
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
 /// insignificant and an operator may continue onto the next line. Note: this does
 /// *not* enable the `end` index marker — that is specific to square brackets and
@@ -3060,7 +3044,7 @@ fn parse_comprehension(
         push_range(&mut events, pos, for_idx);
         events.push(Event::Start(SyntaxKind::FOR_BINDING));
         events.push(Event::Tok(for_idx)); // `for`
-        pos = parse_for_specs(ctx, for_idx + 1, &mut events, diagnostics);
+        pos = parse_for_specs(ctx, for_idx + 1, &mut events, true, diagnostics);
         events.push(Event::Finish); // FOR_BINDING
 
         // Optional `if <cond>` filter on this clause.
@@ -3113,10 +3097,17 @@ fn parse_comprehension(
 /// whole as an `ASSIGNMENT_EXPR`). Commas are kept as tokens so the projector can
 /// group multiple specs into a `cartesian_iterator`. Returns the index past the
 /// last spec.
-fn parse_for_specs(
+///
+/// `bracketed` selects the scope: a comprehension/generator clause (`[x for i in
+/// xs]`) parses inside brackets, where newlines are insignificant; a statement
+/// `for`-loop binding (`for i in xs … end`) parses at statement scope, so the
+/// iterable stops at the end of the line and a same-line body (`for i in xs y
+/// end`) falls through to the loop block rather than being swallowed.
+pub(crate) fn parse_for_specs(
     ctx: &ParserCtx<'_>,
     mut pos: usize,
     events: &mut Vec<Event>,
+    bracketed: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
@@ -3127,7 +3118,7 @@ fn parse_for_specs(
         let var_start = ctx.skip_trivia(pos);
         push_range(events, pos, var_start);
         let var_flags = ExprFlags {
-            inside_brackets: true,
+            inside_brackets: bracketed,
             no_word_op: true,
             ..ExprFlags::default()
         };
@@ -3150,7 +3141,12 @@ fn parse_for_specs(
             pos = in_idx + 1;
             let iter_start = ctx.skip_trivia(pos);
             push_range(events, pos, iter_start);
-            if let Some(iter) = parse_expr_in_brackets(tokens, iter_start, 0, false, diagnostics) {
+            let iter = if bracketed {
+                parse_expr_in_brackets(tokens, iter_start, 0, false, diagnostics)
+            } else {
+                parse_expr(tokens, iter_start, 0, diagnostics)
+            };
+            if let Some(iter) = iter {
                 events.extend(iter.events);
                 pos = iter.end;
             } else {

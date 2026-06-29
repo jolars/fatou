@@ -1,0 +1,1 @@
+(toplevel (for (= i (call-i 1 : 3)) (block (+= x i))) (for (= i (call-i 1 : 3)) (block (call println i))) (for (= i xs) (block y)) (for (= (tuple-p i j) (call zip a b)) (block (call f i j))) (for (cartesian_iterator (= i (call-i 1 : 3)) (= j (call-i 1 : 4))) (block (call g i j))))

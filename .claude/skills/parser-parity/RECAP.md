@@ -6,20 +6,15 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Handoff from formatter-parity (2026-06-29):** one-line space-separated `for`
-body folds into `FOR_BINDING`. `for i in 1:3 x += i end` should parse as a
-for-loop with body `x += i` — JuliaSyntax ground truth
-`(for (in i (call : 1 3)) (block (+= x i)))` (probe: `julia --startup-file=no -e
-'using JuliaSyntax; print(JuliaSyntax.parse(Expr, "for i in 1:3 x += i end"))'`).
-Fatou instead greedily extends the `for`-binding past the iterable, swallowing
-`x += i` as flat tokens and leaving an empty `BLOCK` (so the loop has no body).
-The crux is the binding's right edge: with no `;`/newline separator, the parser
-doesn't stop the iterable at `1:3`. One-line `while` (`while c x end`) already
-separates `CONDITION`/`BLOCK` correctly, so the gap is specific to the
-`for`-binding extension. Formatter-parity's `lower_loop` routes around it
-(`;`-separated and multi-line for-bodies parse fine and are the fixture); fixing
-this would let the one-line `for` body explode like the `while` one. See
-`TODO.md` Parser section and formatter-parity RECAP's `loop_blocks` session.
+**Handoff to formatter-parity (2026-06-29b):** one-line space-separated `for`
+bodies now parse into the loop `BLOCK` (`for i in 1:3 x += i end` ⇒ `(for (= i
+(call-i 1 : 3)) (block (+= x i)))`), so the one-line `for` body explodes just
+like the one-line `while` body. Formatter-parity's `lower_loop` no longer needs
+to route around it; the same-line-body for-loop is now safe to use as a fixture
+(`in`/`=`/comma/cartesian all work). Caveat: `for i ∈ xs …` still projects the
+binding as `(call-i i ∈ xs)` not `(= i xs)` (pre-existing; `∈` is a symbol
+operator, not normalized to `=` in the for-binding—same divergence in generators
+and multi-line, unrelated to body separation).
 
 **Handoff to formatter-parity (2026-06-29):** `global`/`local` + multiple
 assignment now nests properly (`global a, b = 1, 2` ⇒ `(global (= (tuple a b)
@@ -78,7 +73,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **186 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **187 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -98,43 +93,52 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-29—global/local multiple-assignment nesting)
+## Latest session (2026-06-29b—one-line space-separated `for` body)
 
-The formatter-parity handoff: `global`/`local` followed by a multiple assignment
-parsed to flat token soup—`global a, b = 1, 2` held loose `NAME COMMA IDENT EQ
-INTEGER COMMA INTEGER` children with no `ASSIGNMENT_EXPR`/`BARE_TUPLE_EXPR`,
-`local a, b = f(x), g(y)` left calls unwrapped, `global a, b::Int` had no
-`TYPE_ANNOTATION`. Root: `global`/`local` used `KwStmt::Expr` (`parse_expr` bp 0,
-which stops at the first top-level comma), unlike `const`'s `KwStmt::ExprTuple`
-(`parse_block_stmt`, a statement-level parse that folds bare comma → tuple and
-handles assignment).
+The formatter-parity handoff: `for i in 1:3 x += i end` swallowed the same-line
+body into the `FOR_BINDING` (flat tokens) and left an empty `BLOCK`. Root: the
+statement `for`-binding parsed only the loop var via `parse_for_binding` (bp 0,
+`no_word_op`), then `parse_header`'s greedy `while !header_ends` loop bumped
+*everything* up to the next `newline`/`;`/`end` into the binding—so with no
+separator after the iterable, the body went into the binding. The generator
+already had a correct spec parser (`parse_for_specs`) that stops after each
+iterable; the statement loop just wasn't using it.
 
-- **Fix (2-file)**: ① `expr.rs`—switch `global`/`local` from `KwStmt::Expr` to
-  `KwStmt::ExprTuple`. The `Expr` variant is now unused → **removed** (its
-  `parse_expr(bp 0)` arm in `structural.rs` deleted, `ExprTuple` doc updated).
-  ② `sexpr.rs` `project_decl`—a `global`/`local`/`const` body that is a single
-  bare `BARE_TUPLE_EXPR` splices its elements directly (`global a, b` ⇒ `(global
-  a b)`, not `(global (tuple a b))`); an `ASSIGNMENT_EXPR` or parenthesized
-  `TUPLE_EXPR` stays one child.
-- **Faithful** (13 probes, byte-identical to JS): `global a, b = 1, 2` ⇒
-  `(global (= (tuple a b) (tuple 1 2)))`, `local a, b = f(x), g(y)` ⇒
-  `(local (= (tuple a b) (tuple (call f x) (call g y))))`, `global a, b::Int` ⇒
-  `(global a (::-i b Int))`, `global (a, b)` ⇒ `(global (tuple-p a b))`,
-  `global a = 1, 2` ⇒ `(global (= a (tuple 1 2)))`. Pre-existing passing cases
-  held (`global x,y`, `global x += 1`, `global x ~ 1`, `global const x = 1`).
-- **Bonus**: `project_decl`'s flatten also corrects `const a, b` ⇒ `(error
-  (const a b))` (was `(const (tuple a b))`); not in the JS corpus, no count move.
-- **Fixtures**: parser snapshot + oracle dir slug `global_local_assignment`
-  (5 multi-line cases). `keyword_statements` snapshot re-accepted (`global a, b`
-  now a `BARE_TUPLE_EXPR`, same projection).
+- **Fix (2-file)**: parametrize `parse_for_specs` with `bracketed: bool`
+  (`expr.rs`)—`true` keeps the comprehension's bracket scope (insignificant
+  newlines, `parse_expr_in_brackets` for the iterable), `false` is statement
+  scope (significant newlines, `parse_expr` for the iterable, so a same-line
+  body stops the binding). `parse_header` (`structural.rs`) special-cases
+  `FOR_BINDING` to call `parse_for_specs(…, bracketed=false, …)` and `return`
+  immediately—skipping the greedy bump loop. The now-unused `parse_for_binding`
+  (`expr.rs`) was removed.
+- **Faithful** (byte-identical to JS): `for i in 1:3 x += i end` ⇒ `(for (= i
+  (call-i 1 : 3)) (block (+= x i)))`, `for i = 1:3 println(i) end`, `for i in xs
+  y end`, `for (i,j) in zip(a,b) f(i,j) end`, `for i in 1:3, j in 1:4 g(i,j)
+  end`. Multi-line and `;`-separated forms held; the iterable is now a real
+  expression node (`BINARY_EXPR`/`NAME`), not loose passthrough tokens—the
+  `loops`/`block_form_operand` snapshots re-accepted with the same projection.
+- **Fixtures**: parser snapshot + oracle dir slug `for_oneline_body` (5 cases;
+  `∈` deliberately excluded—it stays a divergence). 
 - **Counts**: JS 677 (held—forms not in the JS corpus, no regressions), dir
-  185 → **186**.
-- **Next**: JS harvested backlog still exhausted of fixable cases (8 permanent
-  FAILs). Real-world targets: the deferred *suffixed*-unary prefix arm (`+₁ x`
+  186 → **187**.
+- **Next**: no parser target queued. JS harvested backlog still exhausted of
+  fixable cases (8 permanent FAILs: float display ×6, `(2)(3)x` juxtaposition,
+  `x 'y` char-lexer). Real-world candidates: `∈` for-binding `=`-normalization
+  (small, but needs suppressing the `∈` operator in the binding LHS + a projector
+  arm; shared with generators), the deferred *suffixed*-unary prefix arm (`+₁ x`
   crosses newlines, `expr.rs` ~line 1518), or float-display `show`.
 
 ## Earlier sessions
 
+- **2026-06-29**—`global`/`local` + multiple-assignment nesting. Switched
+  `global`/`local` from `KwStmt::Expr` to `KwStmt::ExprTuple` (`expr.rs`; the
+  `Expr` variant removed), so statement-level comma folds to a tuple and handles
+  assignment; `project_decl` (`sexpr.rs`) splices a bare `BARE_TUPLE_EXPR`'s
+  elements directly. `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1
+  2)))`, `local a, b = f(x), g(y)` wraps the calls, `global a, b::Int` ⇒
+  `(global a (::-i b Int))`. Bonus: `const a, b` ⇒ `(error (const a b))`.
+  Fixtures `global_local_assignment`. JS 677 (held); dir 185 → 186.
 - **2026-06-26b**—Prefix operators stop at significant newline (correctness fix +
   false-positive diagnostic removal). Binary-only ops in prefix position reached
   across a newline for their operand; gated the `is_value_operator(k) || k ==

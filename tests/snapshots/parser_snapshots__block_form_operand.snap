@@ -108,15 +108,16 @@ ROOT@0..210
     FOR_EXPR@99..114
       FOR_KW@99..102 "for"
       WHITESPACE@102..103 " "
-      FOR_BINDING@103..111
+      FOR_BINDING@103..110
         NAME@103..104
           IDENT@103..104 "i"
         WHITESPACE@104..105 " "
         IDENT@105..107 "in"
         WHITESPACE@107..108 " "
-        IDENT@108..110 "xs"
+        NAME@108..110
+          IDENT@108..110 "xs"
+      BLOCK@110..111
         WHITESPACE@110..111 " "
-      BLOCK@111..111
       END_KW@111..114 "end"
     COLON_COLON@114..116 "::"
     NAME@116..117

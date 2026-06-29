@@ -12,9 +12,12 @@ ROOT@0..95
       WHITESPACE@5..6 " "
       IDENT@6..8 "in"
       WHITESPACE@8..9 " "
-      INTEGER@9..10 "1"
-      COLON@10..11 ":"
-      INTEGER@11..13 "10"
+      BINARY_EXPR@9..13
+        LITERAL@9..10
+          INTEGER@9..10 "1"
+        COLON@10..11 ":"
+        LITERAL@11..13
+          INTEGER@11..13 "10"
     BLOCK@13..29
       NEWLINE@13..14 "\n"
       WHITESPACE@14..18 "    "

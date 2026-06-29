@@ -66,6 +66,7 @@ export_name_list
 export_paren_item
 field_access_space
 field_access_suffix
+for_oneline_body
 function_bare_name_signature
 function_forward_decl
 function_signature_newline

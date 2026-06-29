@@ -1,0 +1,179 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..140
+  FOR_EXPR@0..23
+    FOR_KW@0..3 "for"
+    WHITESPACE@3..4 " "
+    FOR_BINDING@4..12
+      NAME@4..5
+        IDENT@4..5 "i"
+      WHITESPACE@5..6 " "
+      IDENT@6..8 "in"
+      WHITESPACE@8..9 " "
+      BINARY_EXPR@9..12
+        LITERAL@9..10
+          INTEGER@9..10 "1"
+        COLON@10..11 ":"
+        LITERAL@11..12
+          INTEGER@11..12 "3"
+    BLOCK@12..20
+      WHITESPACE@12..13 " "
+      ASSIGNMENT_EXPR@13..19
+        NAME@13..14
+          IDENT@13..14 "x"
+        WHITESPACE@14..15 " "
+        PLUS_EQ@15..17 "+="
+        WHITESPACE@17..18 " "
+        NAME@18..19
+          IDENT@18..19 "i"
+      WHITESPACE@19..20 " "
+    END_KW@20..23 "end"
+  NEWLINE@23..24 "\n"
+  FOR_EXPR@24..50
+    FOR_KW@24..27 "for"
+    WHITESPACE@27..28 " "
+    FOR_BINDING@28..35
+      ASSIGNMENT_EXPR@28..35
+        NAME@28..29
+          IDENT@28..29 "i"
+        WHITESPACE@29..30 " "
+        EQ@30..31 "="
+        WHITESPACE@31..32 " "
+        BINARY_EXPR@32..35
+          LITERAL@32..33
+            INTEGER@32..33 "1"
+          COLON@33..34 ":"
+          LITERAL@34..35
+            INTEGER@34..35 "3"
+    BLOCK@35..47
+      WHITESPACE@35..36 " "
+      CALL_EXPR@36..46
+        NAME@36..43
+          IDENT@36..43 "println"
+        ARG_LIST@43..46
+          LPAREN@43..44 "("
+          ARG@44..45
+            NAME@44..45
+              IDENT@44..45 "i"
+          RPAREN@45..46 ")"
+      WHITESPACE@46..47 " "
+    END_KW@47..50 "end"
+  NEWLINE@50..51 "\n"
+  FOR_EXPR@51..68
+    FOR_KW@51..54 "for"
+    WHITESPACE@54..55 " "
+    FOR_BINDING@55..62
+      NAME@55..56
+        IDENT@55..56 "i"
+      WHITESPACE@56..57 " "
+      IDENT@57..59 "in"
+      WHITESPACE@59..60 " "
+      NAME@60..62
+        IDENT@60..62 "xs"
+    BLOCK@62..65
+      WHITESPACE@62..63 " "
+      NAME@63..64
+        IDENT@63..64 "y"
+      WHITESPACE@64..65 " "
+    END_KW@65..68 "end"
+  NEWLINE@68..69 "\n"
+  FOR_EXPR@69..104
+    FOR_KW@69..72 "for"
+    WHITESPACE@72..73 " "
+    FOR_BINDING@73..92
+      TUPLE_EXPR@73..79
+        LPAREN@73..74 "("
+        ARG@74..75
+          NAME@74..75
+            IDENT@74..75 "i"
+        COMMA@75..76 ","
+        WHITESPACE@76..77 " "
+        ARG@77..78
+          NAME@77..78
+            IDENT@77..78 "j"
+        RPAREN@78..79 ")"
+      WHITESPACE@79..80 " "
+      IDENT@80..82 "in"
+      WHITESPACE@82..83 " "
+      CALL_EXPR@83..92
+        NAME@83..86
+          IDENT@83..86 "zip"
+        ARG_LIST@86..92
+          LPAREN@86..87 "("
+          ARG@87..88
+            NAME@87..88
+              IDENT@87..88 "a"
+          COMMA@88..89 ","
+          WHITESPACE@89..90 " "
+          ARG@90..91
+            NAME@90..91
+              IDENT@90..91 "b"
+          RPAREN@91..92 ")"
+    BLOCK@92..101
+      WHITESPACE@92..93 " "
+      CALL_EXPR@93..100
+        NAME@93..94
+          IDENT@93..94 "f"
+        ARG_LIST@94..100
+          LPAREN@94..95 "("
+          ARG@95..96
+            NAME@95..96
+              IDENT@95..96 "i"
+          COMMA@96..97 ","
+          WHITESPACE@97..98 " "
+          ARG@98..99
+            NAME@98..99
+              IDENT@98..99 "j"
+          RPAREN@99..100 ")"
+      WHITESPACE@100..101 " "
+    END_KW@101..104 "end"
+  NEWLINE@104..105 "\n"
+  FOR_EXPR@105..139
+    FOR_KW@105..108 "for"
+    WHITESPACE@108..109 " "
+    FOR_BINDING@109..127
+      NAME@109..110
+        IDENT@109..110 "i"
+      WHITESPACE@110..111 " "
+      IDENT@111..113 "in"
+      WHITESPACE@113..114 " "
+      BINARY_EXPR@114..117
+        LITERAL@114..115
+          INTEGER@114..115 "1"
+        COLON@115..116 ":"
+        LITERAL@116..117
+          INTEGER@116..117 "3"
+      COMMA@117..118 ","
+      WHITESPACE@118..119 " "
+      NAME@119..120
+        IDENT@119..120 "j"
+      WHITESPACE@120..121 " "
+      IDENT@121..123 "in"
+      WHITESPACE@123..124 " "
+      BINARY_EXPR@124..127
+        LITERAL@124..125
+          INTEGER@124..125 "1"
+        COLON@125..126 ":"
+        LITERAL@126..127
+          INTEGER@126..127 "4"
+    BLOCK@127..136
+      WHITESPACE@127..128 " "
+      CALL_EXPR@128..135
+        NAME@128..129
+          IDENT@128..129 "g"
+        ARG_LIST@129..135
+          LPAREN@129..130 "("
+          ARG@130..131
+            NAME@130..131
+              IDENT@130..131 "i"
+          COMMA@131..132 ","
+          WHITESPACE@132..133 " "
+          ARG@133..134
+            NAME@133..134
+              IDENT@133..134 "j"
+          RPAREN@134..135 ")"
+      WHITESPACE@135..136 " "
+    END_KW@136..139 "end"
+  NEWLINE@139..140 "\n"
