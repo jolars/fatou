@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**61 fixtures**): **56 allowlisted**, 5 blocked
+Dir corpus (**62 fixtures**): **57 allowlisted**, 5 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred;
 `trailing_comment_spacing_divergence` = pre-`#` whitespace Tenet-1 divergence in
@@ -80,47 +80,67 @@ indentation (`lower_struct`, fourth reuse of `lower_block_body`),
 multi-line ternary continuation indent (`lower_ternary` extended),
 `function`/`macro` definition bodies (`lower_function`, fifth `lower_block_body`
 reuse, gated by a return-insertion dodge), `do` blocks (`lower_do` +
-`lower_do_params`, sixth `lower_block_body` reuse, **no** return-insertion guard).
+`lower_do_params`, sixth `lower_block_body` reuse, **no** return-insertion guard),
+n-ary binary spacing + multi-line operator continuation indent (`lower_binary`
+generalized + `binary_group_breaks`).
 
-## Latest session (do blocks)
+## Latest session (n-ary binary + continuation indent)
 
-Landed `lower_do` (arm on `DO_EXPR`), the **sixth** `lower_block_body` reuse —
-shape `CALL_EXPR WHITESPACE DO_KW [WHITESPACE DO_PARAMS] BLOCK END_KW`. The twist
-vs. the other block rules: the head (the `CALL_EXPR` the `do` attaches to) sits
-*before* the `do` keyword, not after, so the loop tracks a `saw_do` flag — the
-single node before `do` is the head, after `do` come the optional `DO_PARAMS` then
-the `BLOCK`. Output is `lower_node(head) + " do" + (" " + params)? + body + HardLine
-+ "end"`. Head and params are lowered recursively (head normalizes its own arg
-spacing `g(a,b)` → `g(a, b)`; params via `lower_do_params`).
+Rewrote `lower_binary` from a two-operand special case to the **full flat
+operand/operator alternation** (like `lower_comparison`). The parser flattens
+same-precedence chains into one n-ary `BINARY_EXPR` (`a + b + c + d` is a single
+node, four operands, three `+`), and the old `[lhs, rhs]` slice-match bailed to
+transparent on the second operator — so tight chains like `a+b+c+d` were **never
+normalized** (a latent missing-rule). Now each operator is spaced per
+`is_tight_binop` individually, so `a+b+c+d` → `a + b + c + d`, `a*b*c` →
+`a * b * c`, while `a^b^c` (right-assoc nested, tight) stays packed.
 
-`DO_PARAMS` is a comma list (`do x, y`) or a single destructuring tuple
-(`do (x, y)`). `lower_do_params` `", "`-joins items (each `lower_node`-recursed, so
-`do x,y` → `do x, y` and the tuple normalizes), returning `None` (→ whole `do`
-bails transparent) on a comment/newline, a leading/trailing/doubled comma, or an
-empty list.
+The second half is the **multi-line continuation indent**, mirroring
+`lower_ternary`'s model: a `NEWLINE` in an operator gap becomes an `Ir::HardLine`
+(operators are always trailing — a newline *before* an operator bails), and the
+continuation indents one level. The crux vs. ternary is **gating the indent**.
+Two rules, both verified against Runic:
 
-The crux that **diverges from this skill's prior assumption**: `do` bodies are
-**NOT** `return`-inserted by Runic (the RECAP/TODO had predicted they were).
-Probed and disproved — `map(xs) do x; x + 1 end` keeps the bare tail `x + 1`, no
-`return` inserted (verified bare-expr, multi-stmt tails). So `lower_do` has **no**
-tail-return guard at all: any non-empty body reshapes freely (simpler than
-`lower_function`). An **empty** body (`foo() do … end`) makes `lower_block_body`
-return `None` → transparent (Runic keeps it as-is).
+1. **One shared level across nesting.** `a = b =⏎c`, `a + b *⏎c + d`, `a =⏎b =⏎c`
+   all keep every continuation at a single `+4`, never compounding. So only the
+   **outermost** group node owns the indent: a node wraps in `Ir::indent` iff its
+   parent is **not** a `BINARY_EXPR`/`ASSIGNMENT_EXPR` (`is_group_root`). An inner
+   group node rides the parent's single wrap.
+2. **Indent only on a real group break.** `x = f(a,⏎b)` and `x = a + f(b,⏎c)` —
+   where the only newline lives inside a non-group descendant (a broken call arg
+   list) — must **not** indent the whole expression (the call breaks on its own at
+   `+4`). So the group-root wrap is gated on `binary_group_breaks(node)`: a
+   recursive predicate that returns true only for a `NEWLINE` directly after an
+   operator, descending **only** through nested binary/assignment operands. A break
+   buried in a bracket isn't a group break.
 
-Verified byte-identical to Runic across a bare tail, a multi-stmt body, tight-comma
-params, a destructuring tuple, a no-params `return` body, an over-indented body, an
-empty body, and a leading-blank body. Idempotent (re-indented bodies are
-`lower_block_body` fixed points). Fixture `do_blocks/`. Corpus 55→56 pass,
-divergence held at 5 (no new block); allowlist 55→56. **No parser blocker** (all
-shapes tokenize/parse cleanly).
+Bonus: inside a broken bracket (`f(a +⏎b)`) the binary's parent is `ARG`
+(non-group) → it owns its indent, which composes on top of the bracket's content
+indent → continuation at `+8`, matching Runic. Verified byte-identical across flat
+n-ary spacing, break-after-`=`, compound `+=`, `=>` pairs, chained assignments,
+mixed-precedence chains, and the in-bracket case; all idempotent. Fixture
+`binary_continuation/`. Corpus 56→57 pass, divergence held at 5; allowlist 56→57.
+**No parser blocker.**
+
+Kept **out** of the fixture (Runic-quirk / out-of-scope, would diverge): a blank
+line in a continuation gap (`a +⏎⏎b`, >1 newline → transparent like ternary); a
+*parenthesized* operand that breaks (`y = (a +⏎b) + c` needs the paren's own break
+engine, next target); and a group break **combined** with a breaking bracket
+descendant (`y = a +⏎f(b,⏎c)`), where Runic does **not** compound the call's
+content indent — a line-based quirk Fatou's IR-based indent would over-indent.
 
 ### Ranked next targets
 
-1. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
+1. **Multi-line parenthesized-expression breaking (`lower_paren`)** — `x = (⏎1 +
+   2⏎)` → `(` alone, content `+4`, `)` flush; and `(a +⏎b)` → the inner binary's
+   continuation rides the paren content at `+8` (Runic output verified this
+   session). This is the engine the prior #1 (ternary in a paren) needs, and it
+   composes with the binary continuation just landed. Currently `lower_paren` bails
+   to transparent on any newline.
+2. **Multi-line ternary in a parenthesized then/condition branch** — the paren's
    own break engine drives the layout (`a ? (⏎    b ? c :⏎    d⏎) : e`); the
-   continuation indent is relative to the paren, not the statement. Out of scope of
-   the `lower_ternary` work (kept out of its fixture).
-2. ~~Long single-line bracket/matrix width reflow~~ — **NON-GOAL.** Probing this
+   continuation indent is relative to the paren, not the statement. Needs #1 first.
+3. ~~Long single-line bracket/matrix width reflow~~ — **NON-GOAL.** Probing this
    session disproved the earlier claim: Runic does **not** width-reflow brackets,
    matrices, calls, or ternaries (verified a 94-col array, a long call, and a long
    array all stay single-line). Runic's breaking is **purely source-driven**, same
@@ -136,6 +156,14 @@ shapes tokenize/parse cleanly).
 
 ## Earlier sessions
 
+- **do blocks (`lower_do` + `lower_do_params`, sixth `lower_block_body` reuse)**:
+  arm on `DO_EXPR`, shape `CALL_EXPR WS DO_KW [WS DO_PARAMS] BLOCK END_KW`. The head
+  (the `CALL_EXPR`) sits *before* `do`, tracked via a `saw_do` flag; output
+  `lower_node(head) + " do" + (" " + params)? + body + HardLine + "end"`.
+  `DO_PARAMS` is a comma list or destructuring tuple, `", "`-joined via
+  `lower_do_params`. Crux: `do` bodies are **NOT** `return`-inserted by Runic
+  (disproved the prior assumption), so **no** tail-return guard — any non-empty body
+  reshapes; empty bails to transparent. Fixture `do_blocks/`. Corpus 55→56.
 - **function / macro definition bodies (`lower_function`, fifth `lower_block_body`
   reuse)**: arm on `FUNCTION_DEF`/`MACRO_DEF`, shape `(FUNCTION_KW|MACRO_KW) WS
   SIGNATURE BLOCK END_KW`, near-copy of `lower_loop`. `SIGNATURE` lowered recursively

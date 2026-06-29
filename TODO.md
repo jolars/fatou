@@ -267,7 +267,15 @@ leverage.
   normalized), and the body delegates to `lower_block_body`. Unlike function bodies,
   `do` bodies are **not** `return`-inserted by Runic, so there is no tail-return
   guard—any non-empty body reshapes; an empty body bails to transparent; locked by
-  `do_blocks/`).
+  `do_blocks/`), n-ary binary spacing + continuation indent (`lower_binary`
+  generalized from two operands to the full flat operand/operator alternation, so
+  same-precedence chains `a+b+c+d` → `a + b + c + d` now normalize, plus a
+  multi-line operator continuation: a `NEWLINE` in an operator gap becomes a
+  trailing-operator break with the continuation indented one level
+  (`y = a +⏎b` → `y = a +⏎    b`); nested binaries/assignments share the single
+  level via a `binary_group_breaks` gate so `a = b =⏎c` and `a + b *⏎c + d` stay
+  flat and a break buried in a non-group descendant (a broken call arg list)
+  doesn't pull the expression in; locked by `binary_continuation/`).
   **Next:** multi-line ternary in a parenthesized branch (paren's own break engine
   drives the layout); long single-line bracket/matrix width-based reflow is a
   **non-goal**—probing shows Runic does **not** width-reflow (it is purely

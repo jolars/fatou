@@ -97,44 +97,138 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 }
 
 /// Lay out a binary or assignment expression with normalized operator spacing:
-/// a single space on each side, except for the tight `^` the target style packs
-/// without spaces.
+/// a single space on each side, except for the tight operators (`^`, `:`, `.`)
+/// the target style packs without spaces. Same-precedence chains parse as a flat
+/// n-ary `BINARY_EXPR` (`a + b + c` is one node with three operands), so the rule
+/// walks the whole operand/operator alternation rather than assuming two operands.
 ///
-/// Only the clean shape `<lhs> [ws] <op> [ws] <rhs>` is reshaped; anything else
-/// (an interleaved comment or newline, error recovery, a missing operand) falls
-/// back to the verbatim-preserving transparent lowering so we never mangle a
-/// construct we don't fully understand.
+/// When the source breaks the expression across lines, Runic keeps the operator
+/// trailing on the line it ends (`a +⏎b`) and indents the continuation by one
+/// level. We reproduce that: a `NEWLINE` in an operator gap becomes an
+/// [`Ir::HardLine`], and the **outermost** breaking node in the binary/assignment
+/// group wraps the whole body in one [`Ir::indent`]. Nested binaries/assignments
+/// (`a = b =⏎c`, `a + b *⏎c`) share that single level — an inner node skips its own
+/// indent because its parent is also a group node, matching Runic, which never
+/// compounds the continuation indent across the chain. The indent is gated on an
+/// actual *group* break (a newline in one of the group's own operator gaps): a
+/// break that lives inside a non-group descendant (a call's broken arg list, say)
+/// must not pull the whole expression in.
+///
+/// Only the clean alternating shape is reshaped; anything else (an interleaved
+/// comment, a newline *before* an operator, a blank line in a gap, error recovery,
+/// a missing operand) falls back to the verbatim-preserving transparent lowering
+/// so we never mangle a construct we don't fully understand.
 fn lower_binary(node: &SyntaxNode) -> Ir {
-    let mut operands: Vec<SyntaxNode> = Vec::new();
-    let mut op: Option<SyntaxToken> = None;
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut expect_operand = true;
+    let mut operand_count = 0usize;
+    let mut op_count = 0usize;
+    let mut last_op_tight = false;
+    let mut newlines_in_gap = 0usize;
 
     for el in node.children_with_tokens() {
         match el {
-            NodeOrToken::Node(child) => operands.push(child),
-            NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
-                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE => {
+            NodeOrToken::Node(child) => {
+                if !expect_operand {
                     return lower_transparent(node);
                 }
-                _ if op.is_none() => op = Some(tok),
+                if operand_count > 0 {
+                    // This operand follows an operator; the gap may break.
+                    if newlines_in_gap > 1 {
+                        return lower_transparent(node);
+                    }
+                    if newlines_in_gap == 1 {
+                        parts.push(Ir::HardLine);
+                    } else if !last_op_tight {
+                        parts.push(Ir::text(" "));
+                    }
+                }
+                parts.push(lower_node(&child));
+                operand_count += 1;
+                expect_operand = false;
+                newlines_in_gap = 0;
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::NEWLINE => newlines_in_gap += 1,
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
+                    return lower_transparent(node);
+                }
+                _ if !expect_operand => {
+                    // An operator. Operators always sit on the line they end, so a
+                    // newline before one is unmodeled (a parse error in practice).
+                    if newlines_in_gap > 0 {
+                        return lower_transparent(node);
+                    }
+                    let tight = is_tight_binop(tok.kind());
+                    if !tight {
+                        parts.push(Ir::text(" "));
+                    }
+                    parts.push(Ir::text(tok.text().to_string()));
+                    last_op_tight = tight;
+                    expect_operand = true;
+                    op_count += 1;
+                }
                 _ => return lower_transparent(node),
             },
         }
     }
 
-    let (Some(op), [lhs, rhs]) = (op, operands.as_slice()) else {
+    // A well-formed chain ends on an operand, has at least two of them, and one
+    // fewer operator than operands.
+    if expect_operand || operand_count < 2 || op_count + 1 != operand_count {
         return lower_transparent(node);
-    };
-
-    let lhs = lower_node(lhs);
-    let rhs = lower_node(rhs);
-    let op_text = Ir::text(op.text().to_string());
-
-    if is_tight_binop(op.kind()) {
-        Ir::concat([lhs, op_text, rhs])
-    } else {
-        Ir::concat([lhs, Ir::text(" "), op_text, Ir::text(" "), rhs])
     }
+
+    let body = Ir::concat(parts);
+    // The continuation indent is owned by the outermost node in the
+    // binary/assignment group, and only when the group actually breaks.
+    let is_group_root = !node.parent().is_some_and(|p| {
+        matches!(
+            p.kind(),
+            SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR
+        )
+    });
+    if is_group_root && binary_group_breaks(node) {
+        Ir::indent(body)
+    } else {
+        body
+    }
+}
+
+/// Whether a binary/assignment group rooted at `node` contains a *continuation*
+/// break: a `NEWLINE` sitting in one of its own operator gaps (directly after an
+/// operator), descending only through nested `BINARY_EXPR`/`ASSIGNMENT_EXPR`
+/// operands. A newline buried inside a non-group descendant (a broken bracket,
+/// say) is **not** a group break — only a node that participates in the operator
+/// chain counts, so [`lower_binary`] adds its single continuation indent exactly
+/// when the chain itself wraps.
+fn binary_group_breaks(node: &SyntaxNode) -> bool {
+    let mut after_operator = false;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                after_operator = false;
+                if matches!(
+                    child.kind(),
+                    SyntaxKind::BINARY_EXPR | SyntaxKind::ASSIGNMENT_EXPR
+                ) && binary_group_breaks(&child)
+                {
+                    return true;
+                }
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::NEWLINE => {
+                    if after_operator {
+                        return true;
+                    }
+                }
+                _ => after_operator = true,
+            },
+        }
+    }
+    false
 }
 
 /// Lay out an anonymous-function arrow (`x -> y`, `(a, b) -> a + b`) with a single

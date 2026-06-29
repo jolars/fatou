@@ -9,6 +9,7 @@ assignment
 assignment_spacing
 bare_tuples
 begin_quote_blocks
+binary_continuation
 binary_spacing
 block_comments
 block_comments_in_blocks
