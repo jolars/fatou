@@ -112,7 +112,13 @@ leverage.
   bound is normalized in place via `lower_collection` (`where { T , S }` →
   `where {T, S}`), any other bound is wrapped and recursed (`where T<:Real` →
   `where {T <: Real}`); nested `where` and the bound's own spacing keep
-  normalizing; bails on comment/newline, locked by `where_clauses/`). **Next:**
+  normalizing; bails on comment/newline, locked by `where_clauses/`),
+  float-literal normalization (`lower_literal` over `LITERAL` + `normalize_float`:
+  `.5` → `0.5`, `1.` → `1.0`, `1E10` → `1.0e10`, `1f0` → `1.0f0`, `1.50` → `1.5`,
+  exponent marker lowercased and exponent/integral leading zeros stripped; only
+  `FLOAT`/`FLOAT32` tokens are rewritten, every other literal passes through
+  verbatim; underscored and hex `0x…p…` floats are left untouched, mirroring
+  Runic's `format_float_literals`; locked by `float_literals/`). **Next:**
   comment preservation inside broken
   brackets/matrices (the harder half), blocks, control flow—see the
   `formatter-parity` RECAP's ranked targets.

@@ -41,6 +41,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         | SyntaxKind::GLOBAL_STMT
         | SyntaxKind::LOCAL_STMT => lower_keyword_stmt(node),
         SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => lower_import_stmt(node),
+        SyntaxKind::LITERAL => lower_literal(node),
         _ => lower_transparent(node),
     }
 }
@@ -305,6 +306,134 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
     }
 
     Ir::concat(parts)
+}
+
+/// Lay out a literal (`42`, `1.`, `0xFF`, `true`, `:sym`): every token but a
+/// **float** passes through verbatim; a `FLOAT`/`FLOAT32` token is normalized to
+/// the target style's canonical form via [`normalize_float`] (`.5` → `0.5`,
+/// `1.` → `1.0`, `1E10` → `1.0e10`, `1f0` → `1.0f0`). Integer, hex/oct/bin, and
+/// boolean literals are untouched. A float we don't fully model (an underscored
+/// or hex float, or any shape that doesn't parse cleanly) is left verbatim.
+fn lower_literal(node: &SyntaxNode) -> Ir {
+    Ir::concat(node.children_with_tokens().map(|el| match el {
+        NodeOrToken::Node(child) => lower_node(&child),
+        NodeOrToken::Token(tok) => match tok.kind() {
+            SyntaxKind::FLOAT | SyntaxKind::FLOAT32 => {
+                Ir::text(normalize_float(tok.text()).unwrap_or_else(|| tok.text().to_string()))
+            }
+            _ => Ir::text(tok.text().to_string()),
+        },
+    }))
+}
+
+/// Normalize a decimal float literal to the target style's canonical form, or
+/// return `None` to leave it verbatim. The canonical form (matching Runic's
+/// `format_float_literals`) is `[sign] <int>.<frac> [e|f [sign] <exp>]` where:
+///
+/// - the integral part has its leading zeros stripped but keeps at least one
+///   digit (`.5` → `0`, `007.` → `7`);
+/// - the decimal point is always present, with at least one fractional digit
+///   (`1.` → `1.0`, `1e5` → `1.0e5`);
+/// - trailing zeros in the fraction are stripped, keeping at least one
+///   (`1.50` → `1.5`, `1.00` → `1.0`);
+/// - the exponent marker is lowercased (`E` → `e`; the `f` Float32 marker stays),
+///   with leading zeros stripped from the exponent; and
+/// - a Unicode minus (`−`, U+2212) is normalized to ASCII `-`.
+///
+/// Underscored and hex (`0x…p…`) floats are left verbatim (Runic skips them too),
+/// as is any token that doesn't parse cleanly into the shape above.
+fn normalize_float(text: &str) -> Option<String> {
+    // Underscored and hex floats are out of scope—Runic skips them as well.
+    if text.contains('_') || text.contains("0x") || text.contains("0X") {
+        return None;
+    }
+
+    let mut chars = text.chars().peekable();
+    let mut out = String::new();
+
+    // Optional leading sign (`+`, `-`, or Unicode minus → ASCII `-`).
+    match chars.peek() {
+        Some('+') => {
+            out.push('+');
+            chars.next();
+        }
+        Some('-') | Some('\u{2212}') => {
+            out.push('-');
+            chars.next();
+        }
+        _ => {}
+    }
+
+    // Integral digits.
+    let mut int_part = String::new();
+    while chars.peek().is_some_and(char::is_ascii_digit) {
+        int_part.push(chars.next().unwrap());
+    }
+
+    // Optional decimal point and fractional digits.
+    let mut frac_part = String::new();
+    if chars.peek() == Some(&'.') {
+        chars.next();
+        while chars.peek().is_some_and(char::is_ascii_digit) {
+            frac_part.push(chars.next().unwrap());
+        }
+    }
+
+    // Optional exponent: marker (`e`/`E`/`f`), an optional sign, then digits.
+    let mut marker = String::new();
+    let mut exp_part = String::new();
+    if matches!(chars.peek(), Some('e' | 'E' | 'f')) {
+        let m = chars.next().unwrap();
+        marker.push(if m == 'E' { 'e' } else { m });
+        match chars.peek() {
+            Some('+') => {
+                marker.push('+');
+                chars.next();
+            }
+            Some('-') | Some('\u{2212}') => {
+                marker.push('-');
+                chars.next();
+            }
+            _ => {}
+        }
+        while chars.peek().is_some_and(char::is_ascii_digit) {
+            exp_part.push(chars.next().unwrap());
+        }
+    }
+
+    // Any trailing character means a shape we don't model—leave it verbatim.
+    if chars.next().is_some() {
+        return None;
+    }
+
+    out.push_str(&strip_leading_zeros(&int_part));
+    out.push('.');
+    out.push_str(&strip_trailing_zeros(&frac_part));
+    if !marker.is_empty() {
+        out.push_str(&marker);
+        out.push_str(&strip_leading_zeros(&exp_part));
+    }
+    Some(out)
+}
+
+/// Strip leading zeros, collapsing an empty or all-zero string to a single `0`.
+fn strip_leading_zeros(s: &str) -> String {
+    let t = s.trim_start_matches('0');
+    if t.is_empty() {
+        "0".to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// Strip trailing zeros, collapsing an empty or all-zero string to a single `0`.
+fn strip_trailing_zeros(s: &str) -> String {
+    let t = s.trim_end_matches('0');
+    if t.is_empty() {
+        "0".to_string()
+    } else {
+        t.to_string()
+    }
 }
 
 /// Lay out a comparison chain (`a == b == c`, `x < y <= z`) with a single space

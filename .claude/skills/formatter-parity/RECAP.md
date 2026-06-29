@@ -29,7 +29,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Progress
 
-Dir corpus (**28 fixtures**): **26 allowlisted**, 2 blocked
+Dir corpus (**29 fixtures**): **27 allowlisted**, 2 blocked
 (`logical_tight_divergence` = `&&`/`||` whitespace Tenet-1 divergence;
 `control_flow` = Runic return-insertion, a semantic rewrite, deferred).
 Rules landed: operator/assignment spacing (`lower_binary`), arrow/anon-function
@@ -47,9 +47,33 @@ extended to brace `ARG_LIST`s), keyword-statement spacing (`lower_keyword_stmt`)
 bare-tuple comma spacing (`lower_bare_tuple`), `global`/`local` comma name lists
 (`lower_keyword_stmt` extended), `using`/`import` comma + selector lists
 (`lower_import_stmt`), `global`/`local` multiple assignment (rule-free PASS,
-parser-unblocked), `where`-clause brace normalization (`lower_where`).
+parser-unblocked), `where`-clause brace normalization (`lower_where`),
+float-literal normalization (`lower_literal` + `normalize_float`).
 
-## Latest session (`where`-clause brace normalization — `lower_where`)
+## Latest session (float-literal normalization — `lower_literal` + `normalize_float`)
+
+`LITERAL` was **transparent**, so float tokens leaked their source spelling while
+Runic canonicalizes them (`format_float_literals`). This is the first **token-text**
+rule (value-preserving, not layout): `.5` → `0.5`, `1.` → `1.0`, `1E10` → `1.0e10`,
+`1f0` → `1.0f0`, `1.50` → `1.5`, `007.50` → `7.5`, `1.000e05` → `1.0e5`. New
+`lower_literal` arm on `LITERAL` passes every token through verbatim **except** a
+`FLOAT`/`FLOAT32`, which is run through `normalize_float`; child nodes still recurse.
+`normalize_float` reimplements Runic's algorithm: bail (verbatim) on an underscored
+or hex `0x…` float; else hand-parse `[sign][int][.frac][marker[sign]exp]` and rebuild
+canonically—int leading zeros stripped (min one digit), decimal point always present
+with min one frac digit, frac trailing zeros stripped (min one), exponent marker
+lowercased (`E`→`e`, `f` Float32 marker kept) with exp leading zeros stripped, Unicode
+minus `−`→`-`. Returns `None` (→ verbatim) on any trailing/unparsed char, so an
+unmodeled shape is never mangled. No happy-path short-circuit needed: the algorithm is
+a fixed point on already-canonical forms (idempotent). Verified byte-identical to Runic
+on `.5`/`1.`/`1E10`/`1f0`/`1.5E+10`/`2.5e3`/`007.50`/`1.50`/`0.0`/`00.00`/`1.000e05`/
+`9.`/`3f5`/`.0`, hex `0x1.8p3` and underscored `100_000.0` left untouched, and floats
+nested in collections (`[1., .5, 2.0e3]`) and call args (`g(1., x=.5)`). Idempotent.
+Fixture `float_literals/`. Corpus 26→27 pass, divergence held at 2; allowlist 26→27.
+No parser work needed. (Adjacent future target spotted: Runic's `format_hex_literals`
+zero-pads short hex ints to fixed widths—`0xF`→`0x0F`—a separate token rule, not done.)
+
+## Earlier session (`where`-clause brace normalization — `lower_where`)
 
 `WHERE_EXPR` (`f(x) where T`) was **transparent**, so Fatou left the bound bare
 while Runic **always brace-wraps** it: `f(x) where T` → `f(x) where {T}`. New
@@ -71,28 +95,6 @@ nested, tight `f(x)where T`, `Tuple{T} where T`, `Array{T,N} where {T,N}`,
 (`where {T}` re-parses to a `BRACES` bound → fixed point). Fixture
 `where_clauses/`. Corpus 25→26 pass, divergence held at 2; allowlist 25→26. No
 parser work needed — `WHERE_EXPR` already nested cleanly.
-
-## Earlier session (`global`/`local` multiple assignment — rule-free PASS)
-
-The parser blocker that target #0 was parked on **landed upstream** (`93e3d28`,
-`feat(parser): nest global/local multiple assignment`). `global`/`local` now parse
-their body at statement level (`KwStmt::ExprTuple`, like `const`), so
-`global a, b = 1, 2` nests as `GLOBAL_STMT → GLOBAL_KW + ASSIGNMENT_EXPR(BARE_TUPLE
-= BARE_TUPLE)` instead of the old flat token soup. That single nested operand node
-flows straight through `lower_keyword_stmt`'s **single-operand-node arm** (`[Node]`)
-→ `lower_node` → `lower_binary` (assignment) → bare-tuple recursion on each side —
-**no new rule needed**. Same for `global a, b::Int` (→ single `BARE_TUPLE_EXPR(NAME,
-COMMA, TYPE_ANNOTATION)` child → `lower_bare_tuple` + `lower_type_annotation`) and
-the bare list `global a, b` (now also a `BARE_TUPLE_EXPR` node, not the old flat
-`NAME/IDENT/COMMA`). Verified byte-identical to Runic on `global a,b = 1,2`,
-`local a,b = f(x),g(y)`, `global  a ,b = 1 , 2` (messy input → `global a, b = 1,
-2`), `local x,y,z = 1,2,3`, `global a,b::Int`, `global a, b, c::Float64`,
-`global x = 1`, `local c`, `const p, q = 1, 2`. Idempotent. Fixture
-`global_local_assignment/` is a regression lock (mirrors the parser fixture name).
-Corpus 24→25 pass, divergence held at 2; allowlist 24→25. No code change to
-`rules.rs` — the parser fix is what unblocked it. (The old flat-token comma-name
-branch in `lower_keyword_stmt` is now effectively unreachable for `global`/`local`
-but stays as a lossless fallback; not removed.)
 
 ## Earlier session (`using`/`import` comma + selector lists)
 
@@ -198,6 +200,12 @@ Idempotent (the spaced form re-parses to the same shape). Fixture
 
 ## Earlier sessions
 
+- **`global`/`local` multiple assignment (rule-free PASS)**: the parser blocker
+  landed upstream (`93e3d28`), so `global a, b = 1, 2` now nests as a single
+  `ASSIGNMENT_EXPR(BARE_TUPLE = BARE_TUPLE)` operand and flows through
+  `lower_keyword_stmt`'s single-operand arm → `lower_binary` → bare-tuple recursion
+  with **no new rule**. Same for `global a, b::Int` and bare `global a, b`. Fixture
+  `global_local_assignment/` is a regression lock. Corpus 24→25, allowlist 24→25.
 - **blank-line preservation (interior + leading/trailing gaps)**: new
   `Ir::BlankLine` primitive (bare `\n` at column 0, skips indent). Runic keeps
   blanks everywhere but **caps at 2** (`MAX_BLANK_LINES`). The accounting trick:
