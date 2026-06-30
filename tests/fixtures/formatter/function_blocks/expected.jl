@@ -1,25 +1,25 @@
 function f(x)
-  return x + 1
+    return x + 1
 end
 function g(x)
-  y = x * 2
-  return y
+    y = x * 2
+    return y
 end
 function h(x)
-  return x
+    return x
 end
 g = function (x)
-  return x * 2
+    return x * 2
 end
 function k(x)::Int where {T}
 
-  return x
+    return x
 end
 macro m(x)
-  return esc(x)
+    return esc(x)
 end
 function empty() end
 function add(a, b)
-  c = a + b
-  c
+    c = a + b
+    c
 end

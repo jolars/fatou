@@ -168,7 +168,7 @@ for `.jl` files (via `ignore`); rejects non-`.jl` explicit file paths.
 
 **Config** (`src/config.rs`): `fatou.toml` with `[format]` (line_width,
 indent_width) and `[lint]` (select, ignore). Defaults follow Julia conventions
-(width 92, indent 2).
+(width 92, indent 4).
 
 ## Invariants & conventions
 

@@ -56,13 +56,13 @@ mod tests {
     fn normalizes_operator_spacing() {
         // Spaced operators get exactly one space on each side; the tight `^`
         // keeps its operands packed. The `function` body reflows to the canonical
-        // body indent (2 spaces) regardless of the source's indentation.
+        // body indent (4 spaces) regardless of the source's indentation.
         for (input, expected) in [
             ("x=1\n", "x = 1\n"),
             ("y= a+b\n", "y = a + b\n"),
             (
                 "function g(x)\n    x ^ 2\nend\n",
-                "function g(x)\n  x^2\nend\n",
+                "function g(x)\n    x^2\nend\n",
             ),
             ("# comment\ny = a + b\n", "# comment\ny = a + b\n"),
         ] {

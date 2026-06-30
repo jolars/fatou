@@ -1,18 +1,18 @@
 if a
-  x = 1
+    x = 1
 end
 if b > c
-  y
+    y
 elseif d
-  z
+    z
 else
-  w
+    w
 end
 if e
-  f
+    f
 end
 outer = if g
-  h
+    h
 else
-  i
+    i
 end

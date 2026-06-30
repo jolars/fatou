@@ -1,27 +1,27 @@
 begin
-  x
+    x
 end
 quote
-  a
-  b
+    a
+    b
 end
 begin
-  x = 1
-  y = 2
+    x = 1
+    y = 2
 end
 begin
-  a
-  b
-  c
+    a
+    b
+    c
 end
 begin
-  f(x) = x + 1
-  begin
-    inner
-  end
+    f(x) = x + 1
+    begin
+        inner
+    end
 end
 begin
-  p
+    p
 
-  q
+    q
 end
