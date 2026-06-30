@@ -87,48 +87,44 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (comment-bearing matrix reflow — killed the last matrix mirror)
+## Latest session (gated the six free non-comment bracket/matrix fixtures)
 
-`lower_matrix_multiline` (where a comment-bearing matrix routed) used to **mirror
-source line breaks**: it walked source lines, kept interior whitespace verbatim
-(so two-space pre-comment gaps and intra-row spacing leaked), and preserved blank
-lines — all input-dependent, a Tenet 1 violation. Rewrote it to the canonical form,
-a direct analog of last session's `lower_multiline_bracket`.
+Pure `test(formatter)` session, no code change. The six non-comment bracket/matrix
+inputs flagged last time all route through the width/reflow paths and collapse to
+canonical flat form (every case fits in the 92-col `line_width`): source breaks,
+blank lines, gap-blanks, and intra-row spacing are all dropped, and matrix rows
+join with `; `. Authored each `expected.jl` as that fully-reflowed form (verified
+input-independent, not merely captured) and locked them:
 
-The chosen canon (user confirmed: mirror the blessed bracket rules):
+- `multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines` — all flat.
+- `multiline_matrices` (incl. `framing = [...]` collapsing from a framed input),
+  `matrix_blank_lines`, `matrix_gap_blank_lines`.
 
-- **Always framed, one row per line.** Each `MATRIX_ROW`/bare-`ARG` is a complete
-  row (the CST never splits a row across nodes); `;` and `NEWLINE` are equivalent
-  layout-only row separators. New `lower_matrix_row` helper joins a row's elements
-  with a single space (bails `None` on an inline comment / empty / odd child).
-- **Trailing comment rides its row** at one leading space (`1 2  # row one` →
-  `1 2 # row one` — the only behavioral change vs old output; block-comment fixture
-  already matched). **Own-line comment** keeps its own line; **`[ # header`** rides
-  the open bracket. Same `on_line` flag (starts **true**), `items`/`item_comments`/
-  `gaps`/`leading`/`trailing`/`header_comment` structure as the bracket path.
-- **Blanks dropped** (consecutive `NEWLINE`s emit nothing) — diverges from
-  block-body policy on purpose, like brackets. The old `MAX_BLANK_LINES`/
-  `Ir::BlankLine` matrix usage is gone (both still live for block bodies).
-- Block comments preserved verbatim incl. internal newlines (`C`'s `#= multi\n
-  line =#`); `=#` makes the trailing trim a no-op.
-- `matrix_comments/` + `matrix_block_comments/` gated.
+Note: the `capped` cases in the two `*_blank_lines` matrix fixtures were named for
+the old `MAX_BLANK_LINES` cap; under the reflow engine blanks are just dropped, so
+the name is now only an input-independence case (output `[1 2; 3 4]`).
 
-Gate 7→9 fixtures; full suite (45) + clippy + fmt green.
+Gate 9→15 fixtures; full suite (45) + clippy + fmt green. **The collection/bracket/
+matrix family is now fully Tenet-1 — no source-break mirrors left in it.**
 
-**Traps for next time:** `lower_matrix_reflow` still inlines its own MATRIX_ROW
-walk (didn't refactor it onto `lower_matrix_row` to keep the change focused — could
-unify). A comment *inside* a `MATRIX_ROW` bails transparent (none in fixtures). The
-non-comment matrix/bracket fixtures (`multiline_matrices`, `matrix_blank_lines`,
-`matrix_gap_blank_lines`, `multiline_brackets`, `bracket_blank_lines`,
-`bracket_gap_blank_lines`) already produce canonical output via the width/reflow
-paths and are now trivially gateable (no code, `test(formatter)` commit).
-
-Next: knock out the six free non-comment bracket/matrix gates above. Also still
-open: stripping a leading blank right after a block opener. The collection/bracket/
-matrix family is now fully Tenet-1 (no source-break mirrors left in it); the
-remaining mirrors are in the block/statement families.
+Next: the remaining source-break mirrors are in the **block/statement families**
+(`lower_block_body`/`build_block_body`, `lower_keyword_stmt`, `lower_paren_block`,
+etc.). Also still open from before: stripping a leading blank right after a block
+opener, and unifying `lower_matrix_reflow`'s inline MATRIX_ROW walk onto
+`lower_matrix_row`.
 
 ## Earlier sessions
+
+- **Comment-bearing matrix reflow** (committed `845c7c4`): rewrote
+  `lower_matrix_multiline` from source-break mirror to the canonical form (direct
+  analog of `lower_multiline_bracket`) — always framed one row per line, new
+  `lower_matrix_row` joins a row's elements with one space, trailing comment rides
+  its row at one leading space, own-line comments keep their line, `[ # header`
+  rides the bracket, blanks dropped (the old `MAX_BLANK_LINES`/`Ir::BlankLine`
+  matrix usage is gone; both still live for block bodies), block comments verbatim.
+  `matrix_comments/` + `matrix_block_comments/` gated. Gate 7→9. Trap:
+  `lower_matrix_reflow` still inlines its own MATRIX_ROW walk (could unify onto
+  `lower_matrix_row`); a comment *inside* a `MATRIX_ROW` bails transparent.
 
 - **Comment-bearing bracket reflow** (committed `dbd0dcd`): rewrote
   `lower_multiline_bracket` from source-break mirror to canonical fully-exploded

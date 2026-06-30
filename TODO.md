@@ -84,10 +84,13 @@ leverage.
   way (always framed one row per line, row elements single-space joined, trailing
   comment rides its row at one leading space, own-line comments keep their line,
   blanks dropped), killing the last matrix source-break mirror;
-  `matrix_comments/` + `matrix_block_comments/` gated.
-  **Next:** gate the now-reflowed non-comment bracket/matrix fixtures
-  (`multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines`,
-  `multiline_matrices`, `matrix_blank_lines`, `matrix_gap_blank_lines`).
+  `matrix_comments/` + `matrix_block_comments/` gated. The six non-comment
+  bracket/matrix fixtures (`multiline_brackets`, `bracket_blank_lines`,
+  `bracket_gap_blank_lines`, `multiline_matrices`, `matrix_blank_lines`,
+  `matrix_gap_blank_lines`) are now gated too — the collection/bracket/matrix
+  family is fully Tenet-1 (no source-break mirrors left).
+  **Next:** the remaining source-break mirrors live in the block/statement
+  families.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing
