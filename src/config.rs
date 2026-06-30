@@ -1,6 +1,6 @@
 //! `fatou.toml` configuration: schema, defaults, and discovery.
 //!
-//! Defaults follow common Julia conventions (line width 92, 4-space indent).
+//! Defaults follow common Julia conventions (line width 92, 2-space indent).
 //! Discovery walks up from an anchor directory looking for a `fatou.toml`.
 
 use std::path::{Path, PathBuf};
@@ -10,7 +10,7 @@ use serde::Deserialize;
 pub const CONFIG_FILE_NAME: &str = "fatou.toml";
 
 const DEFAULT_LINE_WIDTH: u32 = 92;
-const DEFAULT_INDENT_WIDTH: u32 = 4;
+const DEFAULT_INDENT_WIDTH: u32 = 2;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -161,7 +161,7 @@ mod tests {
     fn defaults_are_julia_conventions() {
         let config = Config::default();
         assert_eq!(config.format.line_width, 92);
-        assert_eq!(config.format.indent_width, 4);
+        assert_eq!(config.format.indent_width, 2);
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
         let raw: RawConfig = toml::from_str("[format]\nline_width = 100\n").unwrap();
         let config = raw.into_config();
         assert_eq!(config.format.line_width, 100);
-        assert_eq!(config.format.indent_width, 4);
+        assert_eq!(config.format.indent_width, 2);
     }
 
     #[test]

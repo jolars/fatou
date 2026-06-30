@@ -23,7 +23,13 @@ pub fn print(doc: &Ir, style: FormatStyle) -> String {
         match ir {
             Ir::Text(s) => {
                 out.push_str(s);
-                col += s.chars().count();
+                // Text is normally newline-free, but the transparent lowering
+                // passes raw source newlines through as `Text`; honor them so the
+                // column tracking stays accurate for later groups' fit checks.
+                match s.rfind('\n') {
+                    Some(i) => col = s[i + 1..].chars().count(),
+                    None => col += s.chars().count(),
+                }
             }
             Ir::Concat(items) => {
                 for item in items.iter().rev() {
@@ -56,6 +62,11 @@ pub fn print(doc: &Ir, style: FormatStyle) -> String {
                 };
                 stack.push((indent, mode, inner));
             }
+            Ir::IfBreak(broken, flat) => {
+                let s = if mode == Mode::Break { broken } else { flat };
+                out.push_str(s);
+                col += s.chars().count();
+            }
         }
     }
 
@@ -81,6 +92,9 @@ fn fits(doc: &Ir, remaining: usize) -> bool {
             return false;
         }
         match ir {
+            // An embedded newline (only ever from raw transparent text) means the
+            // content can't sit flat on the current line.
+            Ir::Text(s) if s.contains('\n') => return false,
             Ir::Text(s) => remaining -= s.chars().count() as isize,
             Ir::Concat(items) => {
                 for item in items.iter().rev() {
@@ -90,6 +104,8 @@ fn fits(doc: &Ir, remaining: usize) -> bool {
             Ir::Indent(inner) | Ir::Group(inner) => stack.push(inner),
             Ir::Line => remaining -= 1,
             Ir::SoftLine => {}
+            // A group fits flat iff it fits flat; measure the flat string.
+            Ir::IfBreak(_, flat) => remaining -= flat.chars().count() as isize,
             Ir::HardLine | Ir::BlankLine => return false,
         }
     }
@@ -133,5 +149,39 @@ mod tests {
             indent_width: 4,
         };
         assert_eq!(print(&list_doc(), style), "[\n    a,\n    b,\n    c\n]");
+    }
+
+    fn trailing_comma_doc() -> Ir {
+        // group("(" indent(softline "a," line "b") ifbreak("," "") softline ")")
+        Ir::group(Ir::concat([
+            Ir::text("("),
+            Ir::indent(Ir::concat([
+                Ir::SoftLine,
+                Ir::text("a,"),
+                Ir::Line,
+                Ir::text("b"),
+                Ir::if_break(",", ""),
+            ])),
+            Ir::SoftLine,
+            Ir::text(")"),
+        ]))
+    }
+
+    #[test]
+    fn if_break_is_empty_when_flat() {
+        let style = FormatStyle {
+            line_width: 80,
+            indent_width: 4,
+        };
+        assert_eq!(print(&trailing_comma_doc(), style), "(a, b)");
+    }
+
+    #[test]
+    fn if_break_emits_when_broken() {
+        let style = FormatStyle {
+            line_width: 4,
+            indent_width: 4,
+        };
+        assert_eq!(print(&trailing_comma_doc(), style), "(\n    a,\n    b,\n)");
     }
 }

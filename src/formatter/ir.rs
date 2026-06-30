@@ -25,6 +25,11 @@ pub enum Ir {
     Indent(Rc<Ir>),
     /// A group laid out flat if it fits the line width, otherwise broken.
     Group(Rc<Ir>),
+    /// Conditional text: the first string when the enclosing group is broken,
+    /// the second when it is flat. The canonical use is a trailing separator that
+    /// only appears in the broken layout, e.g. `IfBreak(",", "")`. Measured as its
+    /// *flat* string when deciding whether a group fits.
+    IfBreak(Rc<str>, Rc<str>),
 }
 
 impl Ir {
@@ -42,5 +47,9 @@ impl Ir {
 
     pub fn indent(inner: Ir) -> Ir {
         Ir::Indent(Rc::new(inner))
+    }
+
+    pub fn if_break(broken: impl Into<Rc<str>>, flat: impl Into<Rc<str>>) -> Ir {
+        Ir::IfBreak(broken.into(), flat.into())
     }
 }

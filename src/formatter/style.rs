@@ -11,7 +11,7 @@ impl Default for FormatStyle {
     fn default() -> Self {
         FormatStyle {
             line_width: 92,
-            indent_width: 4,
+            indent_width: 2,
         }
     }
 }

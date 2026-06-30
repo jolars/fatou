@@ -1056,37 +1056,58 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
 }
 
 /// Lay out a call/index argument list (`f(a, b)`, `a[1, 2]`) — or a curly type
-/// parameter list (`Vector{Int}`, `Dict{A, B}`) — with normalized punctuation: no
-/// padding inside the brackets, no space before a comma, one space after it, and a
-/// single-line trailing comma dropped (`g(a,)` → `g(a)`, `Array{Int,}` →
-/// `Array{Int}`).
+/// parameter list (`Vector{Int}`, `Dict{A, B}`) — as a **width-driven group**:
+/// the [`printer`](crate::formatter::printer) collapses it to one line when it
+/// fits `line_width` and explodes it (one item per line, indented, close bracket
+/// flush) when it does not. Per Tenet 1, the layout depends **only** on width:
+/// the source's own line breaks and any source trailing comma are ignored, so
+/// `f(1,\n2)` and `f(1, 2)` both format to `f(1, 2)`.
 ///
-/// Items are `ARG`/`KEYWORD_ARG` nodes separated by commas; an optional trailing
-/// `PARAMETERS` node carries `;`-separated keyword arguments and attaches without
-/// a comma. Only the clean single-line shape is reshaped: any interleaved comment
-/// or newline, a doubled/orphaned comma, or an unexpected child falls back to the
-/// verbatim transparent lowering (which keeps multi-line arg lists byte-identical).
+/// Flat punctuation is normalized — no padding inside the brackets, no space
+/// before a comma, one space after it. A trailing comma is added **only in the
+/// broken layout** (via [`Ir::IfBreak`]); the flat form never carries one
+/// (`g(a,)` → `g(a)`).
+///
+/// Items are `ARG`/`KEYWORD_ARG` nodes separated by commas. Two cases keep their
+/// existing handling rather than the width-driven group:
+///
+/// - **Comments.** A list carrying an own-line or trailing comment cannot
+///   collapse, so it routes to the comment-aware [`lower_multiline_bracket`].
+///   (Comments are a separate, still-source-mirroring construct.)
+/// - **A `;`-separated `PARAMETERS` tail** (`f(a; b = 1)`): the `;` break is not
+///   yet modeled, so the list is emitted flat (single line), as before.
+///
+/// Any other unmodeled shape — a doubled/leading comma, two items with no comma
+/// between them, an unexpected child or token — falls back to the verbatim
+/// transparent lowering.
 fn lower_arg_list(node: &SyntaxNode) -> Ir {
-    if has_newline_token(node) {
+    // A comment can't be reflowed away; keep the comment-aware multiline path.
+    if arg_list_has_comment(node) {
         return lower_multiline_bracket(node);
     }
 
-    let mut parts: Vec<Ir> = Vec::new();
-    let mut first_item = true;
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    let mut items: Vec<Ir> = Vec::new();
+    // The `; …` keyword tail, if any. Its presence forces the flat layout.
+    let mut params: Option<Ir> = None;
     let mut pending_comma = false;
 
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::LPAREN
-                | SyntaxKind::RPAREN
-                | SyntaxKind::LBRACKET
-                | SyntaxKind::RBRACKET
-                | SyntaxKind::LBRACE
-                | SyntaxKind::RBRACE => parts.push(Ir::text(tok.text().to_string())),
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::LBRACE => {
+                    open = Some(tok.text().to_string())
+                }
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
+                    close = Some(tok.text().to_string())
+                }
+                // Source newlines carry no layout information under Tenet 1.
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COMMA => {
-                    if pending_comma {
+                    // A comma before any item (leading) or right after another
+                    // (doubled) is not a clean list.
+                    if pending_comma || items.is_empty() {
                         return lower_transparent(node);
                     }
                     pending_comma = true;
@@ -1095,31 +1116,77 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
             },
             NodeOrToken::Node(child) => match child.kind() {
                 SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
-                    if !first_item {
-                        if !pending_comma {
-                            return lower_transparent(node);
-                        }
-                        parts.push(Ir::text(", "));
+                    // An item after the `;` tail, or a second item with no comma
+                    // between, is unmodeled.
+                    if params.is_some() || (!items.is_empty() && !pending_comma) {
+                        return lower_transparent(node);
                     }
-                    parts.push(lower_node(&child));
-                    first_item = false;
+                    items.push(lower_node(&child));
                     pending_comma = false;
                 }
                 // `;`-separated parameters attach directly (the `;` is the
                 // separator), so they must not follow a comma.
                 SyntaxKind::PARAMETERS => {
-                    if pending_comma {
+                    if pending_comma || params.is_some() {
                         return lower_transparent(node);
                     }
-                    parts.push(lower_node(&child));
-                    first_item = false;
+                    params = Some(lower_node(&child));
                 }
                 _ => return lower_transparent(node),
             },
         }
     }
 
-    Ir::concat(parts)
+    let (Some(open), Some(close)) = (open, close) else {
+        return lower_transparent(node);
+    };
+
+    // The `;` tail isn't modeled as a breakable group yet: emit the flat form.
+    if let Some(params) = params {
+        let mut parts: Vec<Ir> = vec![Ir::text(open)];
+        for (i, item) in items.into_iter().enumerate() {
+            if i > 0 {
+                parts.push(Ir::text(", "));
+            }
+            parts.push(item);
+        }
+        parts.push(params);
+        parts.push(Ir::text(close));
+        return Ir::concat(parts);
+    }
+
+    // An empty list never breaks.
+    if items.is_empty() {
+        return Ir::concat([Ir::text(open), Ir::text(close)]);
+    }
+
+    // A width-driven group: flat `(a, b, c)`, or one item per indented line with
+    // a broken-only trailing comma when it doesn't fit.
+    let mut inner: Vec<Ir> = vec![Ir::SoftLine];
+    for (i, item) in items.into_iter().enumerate() {
+        if i > 0 {
+            inner.push(Ir::text(","));
+            inner.push(Ir::Line);
+        }
+        inner.push(item);
+    }
+    inner.push(Ir::if_break(",", ""));
+
+    Ir::group(Ir::concat([
+        Ir::text(open),
+        Ir::indent(Ir::concat(inner)),
+        Ir::SoftLine,
+        Ir::text(close),
+    ]))
+}
+
+/// Whether an argument list carries a comment among its **direct** children (an
+/// own-line or trailing comment between items, or on the brackets). Such a list
+/// can't collapse to one line, so it routes to the comment-aware multiline path.
+/// A comment nested *inside* an item is that item's own concern and doesn't count.
+fn arg_list_has_comment(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
 }
 
 /// Lay out a bracketed collection literal — a tuple `(a, b)`, a vector `[1, 2]`,

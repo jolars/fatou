@@ -66,8 +66,10 @@ Tenet 1.
 - Spacing/operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`; `&&`/`||`
   canonicalized spaced), `lower_arrow`, `lower_comparison`, `lower_ternary`,
   `lower_range`, `lower_type_annotation`, `lower_where`.
-- Collections/calls: `lower_arg_list` (+ `lower_keyword_arg`/`lower_parameters`),
-  `lower_collection`, `lower_bare_tuple`, curly type-params, named tuples.
+- Collections/calls: `lower_arg_list` (**now width-driven** — see latest session;
+  no longer mirrors source), `lower_keyword_arg`/`lower_parameters`,
+  `lower_collection` (still source-mirroring), `lower_bare_tuple`, curly
+  type-params, named tuples.
 - Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
   `lower_multiline_bracket`, `lower_matrix`, `lower_paren`/`lower_paren_block`,
   blank-line preservation via `Ir::BlankLine`, `binary_group_breaks` continuation
@@ -85,19 +87,44 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (the pivot)
+## Latest session (width-driven arg-list reflow — first reflow-engine construct)
 
-Removed the Runic target and stood up the hand-authored fixture machinery + the
-`formatter` skill (this session). Gate is green (empty corpus); stability green
-over all 65 inputs. Next: with the user, pick the first construct to author under
-Tenet 1 — strong candidate is the reflow engine groundwork (make `line_width`
-actually drive a simple construct's breaking, e.g. a call arg-list that collapses
-when it fits and breaks when it doesn't), since every break-mirroring rule depends
-on it.
+Made `line_width` actually drive breaking for **call/index argument lists**, the
+first real reflow construct (the printer already had best-fit groups; no rule
+used them for brackets). Two gated fixtures: `call_arg_lists` (all fit -> flat)
+and the new `arg_list_break` (too-wide calls explode one-item-per-line; a fitting
+inner call stays flat). Gate + stability green; clippy + fmt clean.
+
+What landed:
+
+- **`lower_arg_list` rewritten** (`rules.rs`): a clean, comment-free `ARG_LIST`
+  builds one `Ir::group` — flat `f(a, b)` when it fits, else one item per indented
+  line with a **broken-only trailing comma**. **Source line breaks and any source
+  trailing comma are ignored** (Tenet 1): `f(1,\n2)` and `f(1, 2)` both -> `f(1, 2)`.
+  Comment-bearing lists still route to the legacy `lower_multiline_bracket`
+  (source-mirroring, deferred); the `;`-`PARAMETERS` tail (`f(a; b=1)`) stays flat.
+- **New IR primitive `Ir::IfBreak(broken, flat)`** (`ir.rs` + `printer.rs`): emits
+  text by the enclosing group's mode; measured as `flat` in `fits`. Used for the
+  trailing comma. Unit-tested in `printer.rs`.
+- **Printer `col` fix** (`printer.rs`): the transparent path passes raw source
+  newlines through as `Text`, which never reset `col` — so `col` grew across the
+  whole file and falsely tripped the first real group (e.g. broke `println("x")`).
+  `Text` now resets `col` after an embedded newline; `fits` treats embedded
+  newlines as non-fitting. **Watch for this** when adding more groups: any rule
+  that still emits raw `\n` via `Text` relies on this reset.
+- **Default indent width 4 -> 2** (`config.rs`, `style.rs`, `AGENTS.md`; tests
+  updated). User decision this session.
+
+Next: extend the same width-driven group to `lower_collection` (tuple/vector/brace
+`(…)`/`[…]`/`{…}`), then revisit the bracket comment/blank-line paths and matrices,
+which still mirror source. Once collections reflow, `multiline_brackets` can be
+gated (it mixes calls + collections, so it's left ungated for now).
 
 ## Earlier sessions
 
-(Pre-pivot Runic-parity history lives in git: the `formatter-parity` skill's
-RECAP through 2026-06-30 logged ~50 constructs landed against the Runic oracle.
-Those rules survive in `rules.rs` per the inventory above; their parity status is
-no longer meaningful.)
+- **The pivot:** removed the Runic target, stood up the hand-authored fixture
+  machinery + the `formatter` skill. Gate started empty; stability green over all
+  65 inputs. (Pre-pivot Runic-parity history lives in git: the `formatter-parity`
+  skill's RECAP through 2026-06-30 logged ~50 constructs landed against the Runic
+  oracle. Those rules survive in `rules.rs` per the inventory above; their parity
+  status is no longer meaningful.)

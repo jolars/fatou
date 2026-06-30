@@ -65,10 +65,15 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
-- [ ] Width-driven reflow engine: make `line_width` actually drive breaking
+- [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
-  conformance and the headline formatter target.
+  conformance and the headline formatter target. **Landed:** call/index arg lists
+  (`lower_arg_list`) now build a width-driven `Ir::group` (flat when it fits,
+  one-item-per-line with a broken-only trailing comma via the new `Ir::IfBreak`
+  when it doesn't), ignoring source line breaks and trailing commas. **Next:**
+  apply the same to `lower_collection` (tuples/vectors/braces), then the bracket
+  comment/blank-line paths and matrices.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing
