@@ -87,33 +87,42 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gated the six free non-comment bracket/matrix fixtures)
+## Latest session (block-body `;`-separator normalization + 1-blank cap)
 
-Pure `test(formatter)` session, no code change. The six non-comment bracket/matrix
-inputs flagged last time all route through the width/reflow paths and collapse to
-canonical flat form (every case fits in the 92-col `line_width`): source breaks,
-blank lines, gap-blanks, and intra-row spacing are all dropped, and matrix rows
-join with `; `. Authored each `expected.jl` as that fully-reflowed form (verified
-input-independent, not merely captured) and locked them:
+Killed the last source-separator mirror in the block-body engine
+(`build_block_body`, `rules.rs`). Two changes:
 
-- `multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines` — all flat.
-- `multiline_matrices` (incl. `framing = [...]` collapsing from a framed input),
-  `matrix_blank_lines`, `matrix_gap_blank_lines`.
+- **`;` reflows like a newline.** The emit loop used to join statements collected
+  on one source line (separated by `;`) with `"; "`, so `begin a; b; c end` stayed
+  inline while the newline-separated form exploded — input-dependent. Now each
+  statement gets its own `HardLine`; a trailing comment rides the line's final
+  statement. `;` and newline are equivalent block separators in Julia, so the two
+  spellings now format identically (Tenet 1).
+- **Blank cap 2 → 1.** `MAX_BLANK_LINES` (used only by `build_block_body`) dropped
+  to 1: any run of blank lines in a block body condenses to a single blank line
+  (user call). `function_blocks` (one in-body blank) is unaffected.
 
-Note: the `capped` cases in the two `*_blank_lines` matrix fixtures were named for
-the old `MAX_BLANK_LINES` cap; under the reflow engine blanks are just dropped, so
-the name is now only an input-independence case (output `[1 2; 3 4]`).
+Gated `if_blocks` (`if e; f; end` → split) and `begin_quote_blocks` (`begin a; b;
+c end` → split; `p … q` blank run → one blank). Gate 15→17; full suite (45) +
+clippy + fmt green.
 
-Gate 9→15 fixtures; full suite (45) + clippy + fmt green. **The collection/bracket/
-matrix family is now fully Tenet-1 — no source-break mirrors left in it.**
+**Deferred:** `loop_blocks` and `let_blocks` have blank lines *between top-level
+constructs*, which pass through `lower_transparent` — a separate top-level
+source-break mirror (no cap, verbatim passthrough). Don't gate them until the
+top-level blank policy is decided. That's the next ranked block-family target,
+alongside `lower_paren_block` and `lower_keyword_stmt` re-eval.
 
-Next: the remaining source-break mirrors are in the **block/statement families**
-(`lower_block_body`/`build_block_body`, `lower_keyword_stmt`, `lower_paren_block`,
-etc.). Also still open from before: stripping a leading blank right after a block
-opener, and unifying `lower_matrix_reflow`'s inline MATRIX_ROW walk onto
-`lower_matrix_row`.
+Trap: `build_block_body` now uses a Rust let-chain (`if j == last && let Some(...)`)
+— fine on this toolchain.
 
 ## Earlier sessions
+
+- **Gated six free non-comment bracket/matrix fixtures** (committed `0bf4e6f`):
+  pure `test(formatter)`, no code. All route through the width/reflow paths and
+  collapse to canonical flat form (every case fits the 92-col `line_width`); locked
+  `multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines`,
+  `multiline_matrices`, `matrix_blank_lines`, `matrix_gap_blank_lines`. Gate 9→15.
+  The collection/bracket/matrix family is now fully Tenet-1.
 
 - **Comment-bearing matrix reflow** (committed `845c7c4`): rewrote
   `lower_matrix_multiline` from source-break mirror to the canonical form (direct

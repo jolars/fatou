@@ -1571,9 +1571,10 @@ fn has_newline_token(node: &SyntaxNode) -> bool {
 }
 
 /// The maximum number of consecutive blank lines the target style keeps; anything
-/// more is collapsed to this. Blanks are capped at two everywhere they survive
-/// (top level, inside matrices, inside block bodies).
-const MAX_BLANK_LINES: usize = 2;
+/// more is collapsed to this. A block body keeps at most a single blank line
+/// between statements (and at most one leading/trailing), so any run of blanks
+/// condenses to one.
+const MAX_BLANK_LINES: usize = 1;
 
 /// Lay out a comment-bearing bracketed list — a call/index `ARG_LIST` or a
 /// `(…)`/`[…]`/`{…}` collection — that the width-driven path
@@ -2771,10 +2772,11 @@ impl BodyLine {
 /// returning `None` (the caller bails to the transparent lowering) for an empty
 /// block or any shape this does not model.
 ///
-/// Statements are grouped into **lines**: a `NEWLINE` starts a new line, while a
-/// `;` keeps the next statement on the current line (`begin x; y end` →
-/// `⏎    x; y`). Each statement is lowered recursively, so its own normalization
-/// still applies and a nested block indents further. Blank lines are preserved
+/// Each statement gets its own line. `;` and `NEWLINE` are equivalent statement
+/// separators in a block, so `begin x; y end` and `begin x⏎y end` both reflow to
+/// `⏎    x⏎    y` — the source separator spelling never leaks (Tenet 1). Each
+/// statement is lowered recursively, so its own normalization still applies and a
+/// nested block indents further. Blank lines are preserved
 /// (capped at [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]): between statements,
 /// after the keyword (leading), and before `end` (trailing) — the framing break
 /// the layout always adds absorbs one newline on each side.
@@ -2892,20 +2894,28 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
             inner.push(Ir::BlankLine);
         }
         pending_blanks = 0;
-        inner.push(Ir::HardLine); // framing break / re-indent for this line
-        for (j, stmt) in line.stmts.iter().enumerate() {
-            if j > 0 {
-                inner.push(Ir::text("; "));
+        // Each statement gets its own line. Statements collected on one source line
+        // (joined by `;`) reflow one-per-line just like newline-separated ones.
+        if line.stmts.is_empty() {
+            // Own-line comment: its own line, flush at the body indent.
+            inner.push(Ir::HardLine);
+            if let Some(comment) = &line.comment {
+                inner.push(comment.clone());
             }
-            inner.push(stmt.clone());
-        }
-        if let Some(comment) = &line.comment {
-            // One canonical space before a trailing comment; an own-line comment
-            // (no preceding statement) sits flush at the body indent.
-            if !line.stmts.is_empty() {
-                inner.push(Ir::text(" "));
+        } else {
+            let last = line.stmts.len() - 1;
+            for (j, stmt) in line.stmts.iter().enumerate() {
+                inner.push(Ir::HardLine); // framing break / re-indent for this stmt
+                inner.push(stmt.clone());
+                // A trailing comment rides the final statement of the source line,
+                // one canonical space after it.
+                if j == last
+                    && let Some(comment) = &line.comment
+                {
+                    inner.push(Ir::text(" "));
+                    inner.push(comment.clone());
+                }
             }
-            inner.push(comment.clone());
         }
     }
     for _ in 0..trailing_blanks {

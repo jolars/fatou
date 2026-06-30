@@ -213,8 +213,9 @@ leverage.
   `comprehension_for_in/`), `begin`/`quote` block-body indentation
   (`lower_block_expr` + `lower_block_body` over `BEGIN_EXPR`/`QUOTE_EXPR`:
   `begin x end` → `begin⏎    x⏎end`—a non-empty block is always exploded vertical
-  and each statement indented one step; `;`-separated statements stay on one line
-  (`begin x; y end` → `⏎    x; y`); blank lines preserved capped at 2; statements
+  and each statement indented one step; `;` and newline are equivalent statement
+  separators so each statement gets its own line (`begin x; y end` →
+  `⏎  x⏎  y`, Tenet 1); blank lines preserved capped at 1; statements
   lowered recursively so inner spacing normalizes and nested blocks indent further;
   an empty block keeps its source layout via the transparent fallback; bails on a
   body comment, two statements with no separator, or a missing `end`; locked by
