@@ -87,51 +87,56 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (comment-bearing bracket reflow — killed the last call/collection mirror)
+## Latest session (comment-bearing matrix reflow — killed the last matrix mirror)
 
-`lower_multiline_bracket` (the path `lower_arg_list`/`lower_collection` route to
-when a bracket carries a comment) used to **mirror source line breaks**: two items
-on one source line (`a, b, # pair`) stayed on one line via a `Sep::Space`, blank
-lines were preserved, and calls kept the source trailing comma — all
-input-dependent, a Tenet 1 violation. Rewrote it to the canonical fully-exploded
-form.
+`lower_matrix_multiline` (where a comment-bearing matrix routed) used to **mirror
+source line breaks**: it walked source lines, kept interior whitespace verbatim
+(so two-space pre-comment gaps and intra-row spacing leaked), and preserved blank
+lines — all input-dependent, a Tenet 1 violation. Rewrote it to the canonical form,
+a direct analog of last session's `lower_multiline_bracket`.
 
-The chosen canon (user decided the blank-line fork):
+The chosen canon (user confirmed: mirror the blessed bracket rules):
 
-- **Always broken, one item per line.** `Sep`/`Sep::Space` deleted; every item
-  gets its own framed line, so same-source-line items split apart.
-- **Always a trailing comma** (the list is always broken), matching the
-  width-driven path — `r = foo(a # last)` → `foo(\n  a, # last\n)`. Killed
-  `adds_trailing_comma` (was the only "calls preserve source comma" carve-out).
-- **Blanks dropped** (user decision, vs the old preserve-capped-at-2 — diverges
-  from block-body policy on purpose: brackets aren't statement lists). `GapLine`
-  enum deleted; gaps are now `Vec<String>` of own-line comments.
-- **Comment attachment preserved** (the only remaining source dependence, deemed
-  content not layout): trailing comment rides its item after the comma (one
-  leading space); own-line comment keeps its own line; `[ # header` rides the open
-  bracket. Classified by an `on_line` flag (starts **true** — the open bracket is
-  the current line; reset on each `NEWLINE`).
-- `bracket_comments/` gated. Block-comment (`bracket_block_comments`) and
-  multi-space (`bracket_comment_spacing_divergence`) fixtures route here too and
-  now reflow sanely (e.g. `1, #= a =# 2,` splits `2` out; multiple spaces → one).
+- **Always framed, one row per line.** Each `MATRIX_ROW`/bare-`ARG` is a complete
+  row (the CST never splits a row across nodes); `;` and `NEWLINE` are equivalent
+  layout-only row separators. New `lower_matrix_row` helper joins a row's elements
+  with a single space (bails `None` on an inline comment / empty / odd child).
+- **Trailing comment rides its row** at one leading space (`1 2  # row one` →
+  `1 2 # row one` — the only behavioral change vs old output; block-comment fixture
+  already matched). **Own-line comment** keeps its own line; **`[ # header`** rides
+  the open bracket. Same `on_line` flag (starts **true**), `items`/`item_comments`/
+  `gaps`/`leading`/`trailing`/`header_comment` structure as the bracket path.
+- **Blanks dropped** (consecutive `NEWLINE`s emit nothing) — diverges from
+  block-body policy on purpose, like brackets. The old `MAX_BLANK_LINES`/
+  `Ir::BlankLine` matrix usage is gone (both still live for block bodies).
+- Block comments preserved verbatim incl. internal newlines (`C`'s `#= multi\n
+  line =#`); `=#` makes the trailing trim a no-op.
+- `matrix_comments/` + `matrix_block_comments/` gated.
 
-Gate 6→7 fixtures; full suite + clippy + fmt green.
+Gate 7→9 fixtures; full suite (45) + clippy + fmt green.
 
-**Traps for next time:** the open-bracket-line comment needs `on_line = true` at
-the *start* (and on seeing the open token) — a `false` start mis-classifies
-`[ # header` as own-line. `MAX_BLANK_LINES` is still live (matrices + block
-bodies); only the bracket path stopped using it. The non-comment bracket fixtures
-(`multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines`) already
-produce canonical output via the width path and are now trivially gateable (no
-code, `test(formatter)` commit).
+**Traps for next time:** `lower_matrix_reflow` still inlines its own MATRIX_ROW
+walk (didn't refactor it onto `lower_matrix_row` to keep the change focused — could
+unify). A comment *inside* a `MATRIX_ROW` bails transparent (none in fixtures). The
+non-comment matrix/bracket fixtures (`multiline_matrices`, `matrix_blank_lines`,
+`matrix_gap_blank_lines`, `multiline_brackets`, `bracket_blank_lines`,
+`bracket_gap_blank_lines`) already produce canonical output via the width/reflow
+paths and are now trivially gateable (no code, `test(formatter)` commit).
 
-Next: `lower_matrix_multiline` (comment-bearing matrices) is the last source-break
-mirror in the collection/bracket/matrix family. Or knock out the three free
-non-comment bracket gates above. Also still open: stripping a leading blank right
-after a block opener.
+Next: knock out the six free non-comment bracket/matrix gates above. Also still
+open: stripping a leading blank right after a block opener. The collection/bracket/
+matrix family is now fully Tenet-1 (no source-break mirrors left in it); the
+remaining mirrors are in the block/statement families.
 
 ## Earlier sessions
 
+- **Comment-bearing bracket reflow** (committed `dbd0dcd`): rewrote
+  `lower_multiline_bracket` from source-break mirror to canonical fully-exploded
+  form — always one item per line, always a trailing comma, blanks dropped, comment
+  attachment preserved (trailing rides item at one leading space, own-line keeps its
+  line, `[ # header` rides the bracket; `on_line` flag starts true). Killed
+  `adds_trailing_comma`/`Sep`/`GapLine`. `bracket_comments/` gated (also block-comment
+  + multi-space fixtures route here). Gate 6→7.
 - **Width-driven matrix reflow** (committed `8c41393`): made matrices
   input-independent. `lower_matrix` is now a dispatcher — comment-bearing →
   `lower_matrix_multiline` (verbatim, source-mirroring), else `lower_matrix_reflow`

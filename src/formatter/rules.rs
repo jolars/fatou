@@ -1866,122 +1866,173 @@ fn matrix_has_comment(node: &SyntaxNode) -> bool {
     })
 }
 
-/// Lay out a comment-bearing matrix literal that spans multiple source lines: a
-/// framing break right after `[` and right before `]`, each source line
-/// re-indented one step, the interior otherwise preserved **verbatim** so the
-/// pinned comments keep their place. Nested handled constructs still normalize
-/// because each row is lowered recursively.
-///
-/// Blank lines are preserved everywhere (capped at [`MAX_BLANK_LINES`] via an
-/// [`Ir::BlankLine`]): between rows, right after `[` (leading), and right before
-/// `]` (trailing). One empty line on each side is the framing `[`/`]` line itself
-/// and is absorbed into the framing break. Any unexpected token falls back to the
-/// verbatim transparent lowering.
+/// Lay out a comment-bearing matrix literal that cannot reflow flat. The canonical
+/// form mirrors [`lower_multiline_bracket`] (Tenet 1): always framed with one row
+/// per indented line, row elements joined by a single space, the `;`/newline row
+/// separators and all source spacing normalized away. A comment is the only
+/// surviving source dependence (it is content, not layout): a trailing comment
+/// rides its row canonicalized to one leading space; an own-line comment keeps its
+/// own line; a comment on the open-bracket line (`[ # header`) rides after `[`.
+/// Blank lines are dropped (a matrix is not a statement list). Nested handled
+/// constructs still normalize because each row element is lowered recursively. Any
+/// shape this does not fully model — a comment inside a `MATRIX_ROW`, a `;;`
+/// higher-dim separator surfacing as an unexpected token, or a missing bracket —
+/// falls back to the verbatim transparent lowering.
 fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
-    // Each source line is a list of `(is_whitespace, ir)` elements. Whitespace at
-    // the ends of a line is trimmed (replaced by the framing indent); interior
-    // whitespace is preserved verbatim. A new line starts at every `NEWLINE`.
-    let mut lines: Vec<Vec<(bool, Ir)>> = vec![Vec::new()];
+    // Each matrix row becomes one framed line; `items[i]` is its space-joined
+    // elements. Comments classify exactly as in `lower_multiline_bracket`.
+    let mut items: Vec<Ir> = Vec::new();
+    let mut item_comments: Vec<Option<String>> = Vec::new();
+    // Own-line comments preceding row `i`; `leading` flanks the first row and
+    // `trailing` (the final `gap`) the close bracket.
+    let mut gaps: Vec<Vec<String>> = Vec::new();
+    let mut gap: Vec<String> = Vec::new();
+    let mut leading: Vec<String> = Vec::new();
+    let mut header_comment: Option<String> = None;
+    // Whether content sits on the current source line, so a fresh comment can be
+    // classified trailing vs own-line. Starts true: the open bracket is the
+    // current line, so `[ # header` is a trailing comment on it.
+    let mut on_line = true;
 
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::LBRACKET => open = Some(tok.text().to_string()),
                 SyntaxKind::RBRACKET => close = Some(tok.text().to_string()),
-                SyntaxKind::NEWLINE => lines.push(Vec::new()),
-                SyntaxKind::WHITESPACE => lines
-                    .last_mut()
-                    .unwrap()
-                    .push((true, Ir::text(tok.text().to_string()))),
-                SyntaxKind::SEMICOLON => lines.last_mut().unwrap().push((false, Ir::text(";"))),
-                // A line or block comment is kept verbatim as a non-whitespace line
-                // element (a line comment's own trailing whitespace trimmed; a block
-                // comment ends with `=#` so the trim is a no-op, keeping its
-                // multi-line interior verbatim). The matrix interior is preserved, so
-                // the pre-comment spacing matches Runic byte-for-byte; an own-line
-                // comment becomes a content line of its own.
+                SyntaxKind::WHITESPACE => {}
+                // `;` and a source newline are equivalent row separators; both are
+                // layout-only here (rows are already framed one per line). Only the
+                // newline flips `on_line` for comment classification.
+                SyntaxKind::SEMICOLON => {}
+                SyntaxKind::NEWLINE => on_line = false,
                 SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
-                    lines.last_mut().unwrap().push((
-                        false,
-                        Ir::text(tok.text().trim_end_matches([' ', '\t']).to_string()),
-                    ))
+                    // A block-comment token always ends with `=#`, so the trim is a
+                    // no-op for it; its multi-line interior is preserved verbatim. A
+                    // line comment's own trailing whitespace is trimmed.
+                    let text = tok.text().trim_end_matches([' ', '\t']).to_string();
+                    if on_line {
+                        // Same line as the previous content: a trailing comment on
+                        // the last row, or — before any row — on the open bracket.
+                        let slot = match items.last_mut() {
+                            Some(_) => item_comments.last_mut().unwrap(),
+                            None => &mut header_comment,
+                        };
+                        if slot.is_some() {
+                            return lower_transparent(node);
+                        }
+                        *slot = Some(text);
+                    } else {
+                        // An own-line comment: a line of its own inside the gap.
+                        gap.push(text);
+                        on_line = true;
+                    }
                 }
                 _ => return lower_transparent(node),
             },
             NodeOrToken::Node(child) => match child.kind() {
-                // A row is a multi-element `MATRIX_ROW`, or a bare `ARG` when the
-                // row holds a single element (a newline-separated column vector).
+                // A whole horizontal row, or a bare `ARG` for a single-element
+                // (newline/`;`-separated) row.
                 SyntaxKind::MATRIX_ROW | SyntaxKind::ARG => {
-                    lines.last_mut().unwrap().push((false, lower_node(&child)))
+                    let row = if child.kind() == SyntaxKind::ARG {
+                        lower_node(&child)
+                    } else {
+                        match lower_matrix_row(&child) {
+                            Some(row) => row,
+                            None => return lower_transparent(node),
+                        }
+                    };
+                    if items.is_empty() {
+                        leading = std::mem::take(&mut gap);
+                    } else {
+                        gaps.push(std::mem::take(&mut gap));
+                    }
+                    items.push(row);
+                    item_comments.push(None);
+                    on_line = true;
                 }
                 _ => return lower_transparent(node),
             },
         }
     }
 
+    // The final gap runs from the last row to the close bracket.
+    let trailing = gap;
+
     let (Some(open), Some(close)) = (open, close) else {
         return lower_transparent(node);
     };
-
-    // Trim leading/trailing whitespace from every line.
-    for line in &mut lines {
-        while line.first().is_some_and(|(ws, _)| *ws) {
-            line.remove(0);
-        }
-        while line.last().is_some_and(|(ws, _)| *ws) {
-            line.pop();
-        }
-    }
-
-    // Locate the content span. Empty lines outside it are the open/close framing
-    // lines plus any blank lines the source kept: the line carrying `[` and the
-    // line carrying `]` are absorbed into the framing breaks, and one extra empty
-    // line on each side becomes a preserved blank (capped at `MAX_BLANK_LINES`).
-    let first = lines.iter().position(|l| !l.is_empty());
-    let last = lines.iter().rposition(|l| !l.is_empty());
-    let (Some(first), Some(last)) = (first, last) else {
+    if items.is_empty() {
         return lower_transparent(node);
-    };
-    // `first` empty lines precede the content; one is the framing `[` line, the
-    // rest are blanks. Likewise for the trailing empty lines before `]`.
-    let leading_blanks = first.saturating_sub(1).min(MAX_BLANK_LINES);
-    let trailing_blanks = (lines.len() - 1 - last)
-        .saturating_sub(1)
-        .min(MAX_BLANK_LINES);
-    // Interior empty lines are blank lines: emit a bare newline each (a `HardLine`
-    // would leave the indent as trailing whitespace), capped at `MAX_BLANK_LINES`
-    // consecutive.
-    let content = &lines[first..=last];
-    let mut inner: Vec<Ir> =
-        Vec::with_capacity(content.len() * 2 + leading_blanks + trailing_blanks);
-    for _ in 0..leading_blanks {
-        inner.push(Ir::BlankLine);
-    }
-    let mut pending_blanks = 0usize;
-    for line in content {
-        if line.is_empty() {
-            pending_blanks += 1;
-            continue;
-        }
-        for _ in 0..pending_blanks.min(MAX_BLANK_LINES) {
-            inner.push(Ir::BlankLine);
-        }
-        pending_blanks = 0;
-        inner.push(Ir::HardLine); // framing break / re-indent for this line
-        inner.extend(line.iter().map(|(_, ir)| ir.clone()));
-    }
-    for _ in 0..trailing_blanks {
-        inner.push(Ir::BlankLine);
     }
 
-    Ir::concat([
-        Ir::text(open),
-        Ir::indent(Ir::concat(inner)),
-        Ir::HardLine, // framing break before the close bracket
-        Ir::text(close),
-    ])
+    // Render a gap's own-line comments, each opening its own indented line.
+    fn render_gap(inner: &mut Vec<Ir>, comments: &[String]) {
+        for text in comments {
+            inner.push(Ir::HardLine);
+            inner.push(Ir::text(text.clone()));
+        }
+    }
+
+    let n = items.len();
+    let mut inner: Vec<Ir> = Vec::new();
+    render_gap(&mut inner, &leading);
+    inner.push(Ir::HardLine); // framing break after the open bracket
+    for (i, item) in items.into_iter().enumerate() {
+        inner.push(item);
+        // The trailing comment rides the row, canonicalized to one leading space
+        // (same-line attachment preserved, source spacing dropped).
+        if let Some(text) = &item_comments[i] {
+            inner.push(Ir::text(" "));
+            inner.push(Ir::text(text.clone()));
+        }
+        if i + 1 < n {
+            render_gap(&mut inner, &gaps[i]);
+            inner.push(Ir::HardLine);
+        }
+    }
+    render_gap(&mut inner, &trailing);
+
+    // A comment on the open-bracket line rides after it, canonicalized to one
+    // leading space (the same attachment-preserving rule as a trailing comment).
+    let mut out: Vec<Ir> = vec![Ir::text(open)];
+    if let Some(text) = header_comment {
+        out.push(Ir::text(" "));
+        out.push(Ir::text(text));
+    }
+    out.push(Ir::indent(Ir::concat(inner)));
+    out.push(Ir::HardLine); // framing break before the close bracket
+    out.push(Ir::text(close));
+    Ir::concat(out)
+}
+
+/// Join a `MATRIX_ROW`'s elements with a single space, lowering each recursively.
+/// Returns `None` for any shape the framed matrix path cannot model — an inline
+/// comment between row elements, an empty row, or an unexpected child — so the
+/// caller bails to the verbatim transparent lowering.
+fn lower_matrix_row(node: &SyntaxNode) -> Option<Ir> {
+    let mut elems: Vec<Ir> = Vec::new();
+    for sub in node.children_with_tokens() {
+        match sub {
+            NodeOrToken::Token(t) if t.kind() == SyntaxKind::WHITESPACE => {}
+            NodeOrToken::Node(arg) if arg.kind() == SyntaxKind::ARG => {
+                elems.push(lower_node(&arg));
+            }
+            _ => return None,
+        }
+    }
+    if elems.is_empty() {
+        return None;
+    }
+    let mut row: Vec<Ir> = Vec::new();
+    for (j, elem) in elems.into_iter().enumerate() {
+        if j > 0 {
+            row.push(Ir::text(" "));
+        }
+        row.push(elem);
+    }
+    Some(Ir::concat(row))
 }
 
 /// Lay out a keyword block whose body is a bare `BLOCK` — `begin … end` and

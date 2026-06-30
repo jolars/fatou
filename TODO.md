@@ -80,9 +80,14 @@ leverage.
   brackets (`lower_multiline_bracket`) now fully explode (one item per line,
   always a trailing comma, blanks dropped, comment attachment preserved), killing
   the last call/collection source-break mirror; `bracket_comments/` gated.
-  **Next:** gate the now-reflowed non-comment bracket fixtures (`multiline_brackets`,
-  `bracket_blank_lines`, `bracket_gap_blank_lines`); then `lower_matrix_multiline`
-  (the comment-bearing matrix path still mirrors source).
+  Comment-bearing matrices (`lower_matrix_multiline`) now canonicalize the same
+  way (always framed one row per line, row elements single-space joined, trailing
+  comment rides its row at one leading space, own-line comments keep their line,
+  blanks dropped), killing the last matrix source-break mirror;
+  `matrix_comments/` + `matrix_block_comments/` gated.
+  **Next:** gate the now-reflowed non-comment bracket/matrix fixtures
+  (`multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines`,
+  `multiline_matrices`, `matrix_blank_lines`, `matrix_gap_blank_lines`).
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing
