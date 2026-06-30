@@ -87,36 +87,40 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (block-body `;`-separator normalization + 1-blank cap)
+## Latest session (gate `keyword_statements`)
 
-Killed the last source-separator mirror in the block-body engine
-(`build_block_body`, `rules.rs`). Two changes:
+Locked the `return`/`const`/`global`/`local` re-eval — pure `test(formatter)`, no
+code. `lower_keyword_stmt` already emits the canonical form (one space after the
+keyword, recursed operand normalized: `return  x+1` → `return x + 1`,
+`const  y=2` → `const y = 2`, `return  x^2` → `return x^2` tight `^`, bare
+`return` kept). Authored `expected.jl` by hand; it matched output exactly and the
+gate went green with no rule change. Gate 17→18; full suite + clippy + fmt green.
 
-- **`;` reflows like a newline.** The emit loop used to join statements collected
-  on one source line (separated by `;`) with `"; "`, so `begin a; b; c end` stayed
-  inline while the newline-separated form exploded — input-dependent. Now each
-  statement gets its own `HardLine`; a trailing comment rides the line's final
-  statement. `;` and newline are equivalent block separators in Julia, so the two
-  spellings now format identically (Tenet 1).
-- **Blank cap 2 → 1.** `MAX_BLANK_LINES` (used only by `build_block_body`) dropped
-  to 1: any run of blank lines in a block body condenses to a single blank line
-  (user call). `function_blocks` (one in-body blank) is unaffected.
+Idempotence confirmed on `struct_blocks`, `try_blocks`, `loop_blocks`,
+`let_blocks` too — their bodies already reflow to canonical 4-space form (current
+indent default is **4**, commit `c552607`). `struct_blocks`/`try_blocks` are
+ready to gate as-is. **`loop_blocks`/`let_blocks` still blocked** on the top-level
+blank-line policy: blanks *between top-level constructs* pass verbatim through
+`lower_transparent` (uncapped, source-mirroring) — inconsistent with the
+block-body 1-blank cap. Decide that policy before gating them.
 
-Gated `if_blocks` (`if e; f; end` → split) and `begin_quote_blocks` (`begin a; b;
-c end` → split; `p … q` blank run → one blank). Gate 15→17; full suite (45) +
-clippy + fmt green.
+**Deferred (carried forward):** the top-level blank-line policy is undecided —
+blanks *between top-level constructs* pass verbatim through `lower_transparent`
+(no cap), inconsistent with the block-body 1-blank cap. Blocks `loop_blocks` and
+`let_blocks`. The other ranked re-eval targets are `struct_blocks`/`try_blocks`
+(ready now) and `lower_paren_block` (`paren_blocks`, `paren_multiline`).
 
-**Deferred:** `loop_blocks` and `let_blocks` have blank lines *between top-level
-constructs*, which pass through `lower_transparent` — a separate top-level
-source-break mirror (no cap, verbatim passthrough). Don't gate them until the
-top-level blank policy is decided. That's the next ranked block-family target,
-alongside `lower_paren_block` and `lower_keyword_stmt` re-eval.
-
-Trap: `build_block_body` now uses a Rust let-chain (`if j == last && let Some(...)`)
-— fine on this toolchain.
+Trap: `build_block_body` uses a Rust let-chain (`if j == last && let Some(...)`)
+— fine on this toolchain. Default indent width is **4** (commit `c552607`).
 
 ## Earlier sessions
 
+- **Block-body `;`-separator + 1-blank cap** (committed `d73ac02`): killed the
+  last source-separator mirror in `build_block_body` — `;` now reflows like a
+  newline (each statement its own `HardLine`, so `begin a; b; c end` and the
+  newline form format identically), and `MAX_BLANK_LINES` dropped 2→1 (a blank run
+  in a block body condenses to one). Gated `if_blocks` + `begin_quote_blocks`.
+  Gate 15→17.
 - **Gated six free non-comment bracket/matrix fixtures** (committed `0bf4e6f`):
   pure `test(formatter)`, no code. All route through the width/reflow paths and
   collapse to canonical flat form (every case fits the 92-col `line_width`); locked

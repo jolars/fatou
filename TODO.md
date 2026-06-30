@@ -133,7 +133,8 @@ leverage.
   `lower_arg_list` by accepting `LBRACE`/`RBRACE`—same comma spacing, no padding,
   trailing-comma drop), keyword-statement spacing (`lower_keyword_stmt` over
   `RETURN_EXPR`/`CONST_STMT`/`GLOBAL_STMT`/`LOCAL_STMT`: `return  x` → `return x`,
-  one space between the keyword and its recursed operand, bare `return` kept),
+  one space between the keyword and its recursed operand, bare `return` kept;
+  locked by `keyword_statements/`),
   bare-tuple comma spacing (`lower_bare_tuple` over `BARE_TUPLE_EXPR`: `x,y` →
   `x, y`, `a,b = 1,2` → `a, b = 1, 2`, `return x,y` → `return x, y`; bracketless,
   `", "`-joins the recursed bare elements; bails on leading/doubled/trailing comma
