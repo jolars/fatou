@@ -1,0 +1,24 @@
+[short, items]
+[
+  first_long_element,
+  second_long_element,
+  third_long_element,
+  fourth_long_element,
+  fifth_one,
+]
+(
+  alpha_value,
+  beta_value,
+  gamma_value,
+  delta_value,
+  epsilon_value,
+  zeta_value,
+  eta_longvalue,
+)
+{
+  first_set_member,
+  second_set_member,
+  third_set_member,
+  fourth_set_member,
+  fifth_set_members,
+}

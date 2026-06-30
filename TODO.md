@@ -69,11 +69,12 @@ leverage.
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
   conformance and the headline formatter target. **Landed:** call/index arg lists
-  (`lower_arg_list`) now build a width-driven `Ir::group` (flat when it fits,
-  one-item-per-line with a broken-only trailing comma via the new `Ir::IfBreak`
-  when it doesn't), ignoring source line breaks and trailing commas. **Next:**
-  apply the same to `lower_collection` (tuples/vectors/braces), then the bracket
-  comment/blank-line paths and matrices.
+  (`lower_arg_list`) and tuple/vector/brace collections (`lower_collection`) now
+  build a width-driven `Ir::group` (flat when it fits, one-item-per-line with a
+  broken-only trailing comma via `Ir::IfBreak` when it doesn't), ignoring source
+  line breaks and trailing commas; the one-tuple `(a,)` keeps its semantic comma
+  in both modes. **Next:** the bracket comment/blank-line paths and matrices,
+  which still mirror source.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing

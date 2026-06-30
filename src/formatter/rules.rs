@@ -1082,7 +1082,7 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
 /// transparent lowering.
 fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // A comment can't be reflowed away; keep the comment-aware multiline path.
-    if arg_list_has_comment(node) {
+    if bracket_has_comment(node) {
         return lower_multiline_bracket(node);
     }
 
@@ -1180,11 +1180,11 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     ]))
 }
 
-/// Whether an argument list carries a comment among its **direct** children (an
+/// Whether a bracketed node carries a comment among its **direct** children (an
 /// own-line or trailing comment between items, or on the brackets). Such a list
 /// can't collapse to one line, so it routes to the comment-aware multiline path.
 /// A comment nested *inside* an item is that item's own concern and doesn't count.
-fn arg_list_has_comment(node: &SyntaxNode) -> bool {
+fn bracket_has_comment(node: &SyntaxNode) -> bool {
     node.children_with_tokens()
         .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
 }
@@ -1193,38 +1193,44 @@ fn arg_list_has_comment(node: &SyntaxNode) -> bool {
 /// or a brace set `{a, b}` — with normalized punctuation: no padding inside the
 /// brackets, no space before a comma, one space after it.
 ///
-/// The trailing comma is dropped (`[a, b,]` → `[a, b]`) **except** for a
-/// single-element tuple, where the comma is semantic and kept (`(a,)` stays
-/// `(a,)`, the one-tuple). Items are `ARG` nodes separated by commas; anything
-/// richer — a `;`-separated matrix row (`PARAMETERS`), an interleaved comment or
-/// newline, a doubled/orphaned comma, or an unexpected child — falls back to the
-/// verbatim transparent lowering. Space-separated matrices are a distinct
-/// `MATRIX_EXPR` node and never reach here.
+/// Width-driven (Tenet 1): a clean, comment-free list builds one `Ir::group` —
+/// flat `[a, b]` when it fits `line_width`, else one element per indented line
+/// with a broken-only trailing comma. Source line breaks and any source trailing
+/// comma are ignored (`[a, b,]` and `[a,\n b]` both → `[a, b]`).
+///
+/// The single-element tuple is the exception: its comma is semantic (it
+/// distinguishes the one-tuple `(a,)` from a parenthesized expression), so it is
+/// emitted in **both** modes. Items are `ARG`/`KEYWORD_ARG` nodes separated by
+/// commas; anything richer — a `;`-separated matrix row (`PARAMETERS`), an
+/// interleaved comment (routed to the comment-aware multiline path), a
+/// doubled/orphaned comma, or an unexpected child — falls back to the verbatim
+/// transparent lowering. Space-separated matrices are a distinct `MATRIX_EXPR`
+/// node and never reach here.
 fn lower_collection(node: &SyntaxNode) -> Ir {
-    if has_newline_token(node) {
+    // A comment can't be reflowed away; keep the comment-aware multiline path.
+    if bracket_has_comment(node) {
         return lower_multiline_bracket(node);
     }
 
     let keep_singleton_comma = node.kind() == SyntaxKind::TUPLE_EXPR;
-    let mut parts: Vec<Ir> = Vec::new();
-    let mut item_count = 0usize;
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    let mut items: Vec<Ir> = Vec::new();
     let mut pending_comma = false;
 
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::LBRACE => {
-                    parts.push(Ir::text(tok.text().to_string()))
+                    open = Some(tok.text().to_string())
                 }
                 SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
-                    if pending_comma && keep_singleton_comma && item_count == 1 {
-                        parts.push(Ir::text(","));
-                    }
-                    parts.push(Ir::text(tok.text().to_string()));
+                    close = Some(tok.text().to_string())
                 }
-                SyntaxKind::WHITESPACE => {}
+                // Source newlines carry no layout information under Tenet 1.
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COMMA => {
-                    if pending_comma {
+                    if pending_comma || items.is_empty() {
                         return lower_transparent(node);
                     }
                     pending_comma = true;
@@ -1235,14 +1241,10 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
                 // `ARG` is a positional element; `KEYWORD_ARG` is a named-tuple
                 // element (`(a = 1, b = 2)`), lowered by `lower_keyword_arg`.
                 SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
-                    if item_count > 0 {
-                        if !pending_comma {
-                            return lower_transparent(node);
-                        }
-                        parts.push(Ir::text(", "));
+                    if !items.is_empty() && !pending_comma {
+                        return lower_transparent(node);
                     }
-                    parts.push(lower_node(&child));
-                    item_count += 1;
+                    items.push(lower_node(&child));
                     pending_comma = false;
                 }
                 _ => return lower_transparent(node),
@@ -1250,7 +1252,39 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
         }
     }
 
-    Ir::concat(parts)
+    let (Some(open), Some(close)) = (open, close) else {
+        return lower_transparent(node);
+    };
+
+    // An empty collection never breaks.
+    if items.is_empty() {
+        return Ir::concat([Ir::text(open), Ir::text(close)]);
+    }
+
+    // The one-tuple's comma is semantic: emit it in both modes. Every other list
+    // gets a trailing comma only when broken.
+    let trailing = if keep_singleton_comma && items.len() == 1 {
+        Ir::text(",")
+    } else {
+        Ir::if_break(",", "")
+    };
+
+    let mut inner: Vec<Ir> = vec![Ir::SoftLine];
+    for (i, item) in items.into_iter().enumerate() {
+        if i > 0 {
+            inner.push(Ir::text(","));
+            inner.push(Ir::Line);
+        }
+        inner.push(item);
+    }
+    inner.push(trailing);
+
+    Ir::group(Ir::concat([
+        Ir::text(open),
+        Ir::indent(Ir::concat(inner)),
+        Ir::SoftLine,
+        Ir::text(close),
+    ]))
 }
 
 /// Lay out a bare (bracketless) tuple — `x, y`, `a, b, c`, the lhs/rhs of a
