@@ -21,6 +21,16 @@ struct Pair x; y end
 
 struct Empty end
 
+struct Newline
+end
+
+mutable struct EmptyMut
+end
+
+struct EmptySuper <: Super
+
+end
+
 struct Spaced
 x
 

@@ -87,22 +87,29 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gate `keyword_statements`)
+## Latest session (gate `struct_blocks` + empty-body collapse)
 
-Locked the `return`/`const`/`global`/`local` re-eval — pure `test(formatter)`, no
-code. `lower_keyword_stmt` already emits the canonical form (one space after the
-keyword, recursed operand normalized: `return  x+1` → `return x + 1`,
-`const  y=2` → `const y = 2`, `return  x^2` → `return x^2` tight `^`, bare
-`return` kept). Authored `expected.jl` by hand; it matched output exactly and the
-gate went green with no rule change. Gate 17→18; full suite + clippy + fmt green.
+Gated `struct`/`mutable struct`. Non-empty bodies were already canonical (4-space
+reflow, `<:` spacing, `;`-vs-newline equivalent, 1-blank cap), but the **empty
+body** was a live Tenet-1 hole: `lower_struct` bailed to transparent on an empty
+`BLOCK`, so `struct E end`, `struct E⏎end`, and `struct E⏎⏎end` formatted three
+different ways. Fixed: empty bodies now collapse to the canonical inline
+`struct Name end` (user call — inline over exploded). New `block_is_empty(block)`
+helper (only WS/NEWLINE/`;` tokens, no nodes/comments) distinguishes a genuinely
+empty body from one `lower_block_body` rejects for an unmodeled shape — the latter
+still bails transparent. Added empty variants (`Newline`, `EmptyMut`,
+`EmptySuper <: Super`) to `input.jl` to exercise it. Gate 18→19; suite (45) +
+clippy + fmt green.
 
-Idempotence confirmed on `struct_blocks`, `try_blocks`, `loop_blocks`,
-`let_blocks` too — their bodies already reflow to canonical 4-space form (current
-indent default is **4**, commit `c552607`). `struct_blocks`/`try_blocks` are
-ready to gate as-is. **`loop_blocks`/`let_blocks` still blocked** on the top-level
-blank-line policy: blanks *between top-level constructs* pass verbatim through
-`lower_transparent` (uncapped, source-mirroring) — inconsistent with the
-block-body 1-blank cap. Decide that policy before gating them.
+`block_is_empty` is reusable: the same empty-body source-mirror exists in
+`lower_function`, `lower_loop`, `lower_let`, `lower_block_expr`, `lower_if`/
+`lower_try` (all bail transparent on empty). Folding them onto the same inline
+policy is the natural follow-up to make empty-block handling uniform.
+
+**Still blocked:** `loop_blocks`/`let_blocks` on the top-level blank-line policy
+(blanks *between* top-level constructs pass verbatim through `lower_transparent`,
+uncapped — inconsistent with the block-body 1-blank cap). `try_blocks` is ready to
+gate as-is. `lower_paren_block` (`paren_blocks`, `paren_multiline`) also pending.
 
 **Deferred (carried forward):** the top-level blank-line policy is undecided —
 blanks *between top-level constructs* pass verbatim through `lower_transparent`
@@ -115,6 +122,10 @@ Trap: `build_block_body` uses a Rust let-chain (`if j == last && let Some(...)`)
 
 ## Earlier sessions
 
+- **Gated `keyword_statements`** (committed `a069201`): pure `test(formatter)`, no
+  code — `lower_keyword_stmt` already emits the canonical `return`/`const`/
+  `global`/`local` form (one space after keyword, operand normalized, bare
+  `return` kept). Gate 17→18.
 - **Block-body `;`-separator + 1-blank cap** (committed `d73ac02`): killed the
   last source-separator mirror in `build_block_body` — `;` now reflows like a
   newline (each statement its own `HardLine`, so `begin a; b; c end` and the

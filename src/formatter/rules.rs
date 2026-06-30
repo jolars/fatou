@@ -2096,13 +2096,14 @@ fn lower_block_expr(node: &SyntaxNode) -> Ir {
 /// Like the loop and `begin`/`let` rules, a **non-empty** body is always
 /// exploded to the vertical form even when the source wrote it on one line
 /// (`struct Foo x; y end` → `struct Foo⏎    x; y⏎end`). An **empty** body
-/// (`struct Empty end`, whose `BLOCK` holds only whitespace) makes
-/// `lower_block_body` return `None`, and the transparent fallback preserves the
-/// source layout byte-for-byte, matching the target. Struct field bodies are
-/// declarations, never `return`-inserted (only function bodies are), so there is
-/// no semantic-rewrite risk. Any shape this does not fully model — a body
-/// comment the engine rejects, a missing signature or `end`, an unexpected
-/// child — also falls back to the verbatim transparent lowering.
+/// (whose `BLOCK` holds only whitespace, newline, or `;` tokens) collapses to
+/// the canonical inline `struct Name end`, regardless of how the source spaced
+/// it (`struct E⏎end`, `struct E⏎⏎end`, and `struct E end` all format the same —
+/// Tenet 1). Struct field bodies are declarations, never `return`-inserted (only
+/// function bodies are), so there is no semantic-rewrite risk. Any shape this
+/// does not fully model — a body comment the engine rejects, a missing signature
+/// or `end`, an unexpected child — falls back to the verbatim transparent
+/// lowering.
 fn lower_struct(node: &SyntaxNode) -> Ir {
     let mut mutable = false;
     let mut signature: Option<SyntaxNode> = None;
@@ -2132,9 +2133,6 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
     let (true, true, Some(signature), Some(block)) = (saw_struct, saw_end, signature, block) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
-        return lower_transparent(node);
-    };
 
     let mut parts: Vec<Ir> = Vec::new();
     if mutable {
@@ -2142,10 +2140,34 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
     }
     parts.push(Ir::text("struct "));
     parts.push(lower_node(&signature));
-    parts.push(body);
-    parts.push(Ir::HardLine);
-    parts.push(Ir::text("end"));
+    match lower_block_body(&block) {
+        Some(body) => {
+            parts.push(body);
+            parts.push(Ir::HardLine);
+            parts.push(Ir::text("end"));
+        }
+        // A genuinely empty body collapses to the inline `struct Name end`; a body
+        // `lower_block_body` rejected for an unmodeled shape still bails verbatim.
+        None if block_is_empty(&block) => parts.push(Ir::text(" end")),
+        None => return lower_transparent(node),
+    }
     Ir::concat(parts)
+}
+
+/// True iff `block` is an empty body — only whitespace, newline, and `;`
+/// separator tokens, with no statement nodes or comments. Distinguishes a body
+/// that should collapse to the inline form from one [`lower_block_body`] rejects
+/// for an unmodeled shape (which must bail to the verbatim transparent path).
+fn block_is_empty(block: &SyntaxNode) -> bool {
+    block.children_with_tokens().all(|el| {
+        matches!(
+            el,
+            NodeOrToken::Token(tok) if matches!(
+                tok.kind(),
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::SEMICOLON
+            )
+        )
+    })
 }
 
 /// Lay out a `function`/`macro` definition. The shape mirrors the other block

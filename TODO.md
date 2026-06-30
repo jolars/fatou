@@ -271,7 +271,9 @@ leverage.
   (`lower_struct` over `STRUCT_DEF`, fourth reuse of `lower_block_body`: the
   `SIGNATURE` header is lowered recursively so `struct Bar<:Animal` →
   `struct Bar <: Animal`; a non-empty body always explodes vertical, an empty
-  `struct Empty end` bails to transparent; field bodies are declarations, never
+  body collapses to the canonical inline `struct Name end` regardless of source
+  whitespace (`block_is_empty` distinguishes it from an unmodeled body, which
+  still bails to transparent); field bodies are declarations, never
   `return`-inserted; locked by `struct_blocks/`), `module`/`baremodule` body
   indentation (`lower_module` over `MODULE_DEF`, sharing the body engine split out
   as `build_block_body`: the body is *conditionally* indented per Runic's
