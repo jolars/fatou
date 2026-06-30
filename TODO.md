@@ -76,8 +76,13 @@ leverage.
   in both modes. Matrices (`lower_matrix_reflow`) now build a width-driven group
   too: flat `[a b; c d]` (rows joined by `; `, elements by a single space) when it
   fits, else framed one row per line; `;`-vs-newline row spelling and intra-row
-  spacing no longer leak into the output (`matrices/` gated). **Next:** the bracket
-  comment/blank-line paths (`lower_multiline_bracket`), which still mirror source.
+  spacing no longer leak into the output (`matrices/` gated). Comment-bearing
+  brackets (`lower_multiline_bracket`) now fully explode (one item per line,
+  always a trailing comma, blanks dropped, comment attachment preserved), killing
+  the last call/collection source-break mirror; `bracket_comments/` gated.
+  **Next:** gate the now-reflowed non-comment bracket fixtures (`multiline_brackets`,
+  `bracket_blank_lines`, `bracket_gap_blank_lines`); then `lower_matrix_multiline`
+  (the comment-bearing matrix path still mirrors source).
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing

@@ -87,50 +87,58 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (width-driven matrix reflow — killed source-break mirroring)
+## Latest session (comment-bearing bracket reflow — killed the last call/collection mirror)
 
-Made matrices fully input-independent. `lower_matrix` used to bail single-line
-matrices to `lower_transparent` (verbatim spacing → `[1  2   3]` and `[1 2 ;3 4]`
-survived) and lay out multiline matrices by **mirroring source line breaks**, so
-`[1 2; 3 4]` (one source line) and the same matrix across two lines, and `semi`
-(`;`-kept) vs `A` (no `;`), all formatted **differently** — a flagrant Tenet 1
-violation the user flagged when I first proposed a single-line-only fix.
+`lower_multiline_bracket` (the path `lower_arg_list`/`lower_collection` route to
+when a bracket carries a comment) used to **mirror source line breaks**: two items
+on one source line (`a, b, # pair`) stayed on one line via a `Sep::Space`, blank
+lines were preserved, and calls kept the source trailing comma — all
+input-dependent, a Tenet 1 violation. Rewrote it to the canonical fully-exploded
+form.
 
-The chosen canon (user decision): **single line when it fits, else stacked rows.**
+The chosen canon (user decided the blank-line fork):
 
-What landed:
+- **Always broken, one item per line.** `Sep`/`Sep::Space` deleted; every item
+  gets its own framed line, so same-source-line items split apart.
+- **Always a trailing comma** (the list is always broken), matching the
+  width-driven path — `r = foo(a # last)` → `foo(\n  a, # last\n)`. Killed
+  `adds_trailing_comma` (was the only "calls preserve source comma" carve-out).
+- **Blanks dropped** (user decision, vs the old preserve-capped-at-2 — diverges
+  from block-body policy on purpose: brackets aren't statement lists). `GapLine`
+  enum deleted; gaps are now `Vec<String>` of own-line comments.
+- **Comment attachment preserved** (the only remaining source dependence, deemed
+  content not layout): trailing comment rides its item after the comma (one
+  leading space); own-line comment keeps its own line; `[ # header` rides the open
+  bracket. Classified by an `on_line` flag (starts **true** — the open bracket is
+  the current line; reset on each `NEWLINE`).
+- `bracket_comments/` gated. Block-comment (`bracket_block_comments`) and
+  multi-space (`bracket_comment_spacing_divergence`) fixtures route here too and
+  now reflow sanely (e.g. `1, #= a =# 2,` splits `2` out; multiple spaces → one).
 
-- **`lower_matrix` is now a dispatcher.** Comment-bearing matrix → the old
-  verbatim multiline body (renamed `lower_matrix_multiline`, kept for pinned
-  comments; single-line block-comment case bails transparent). Everything else →
-  new **`lower_matrix_reflow`**.
-- **`lower_matrix_reflow`** parses the matrix into rows (split at `;` **and**
-  source `NEWLINE` — equivalent row separators in Julia), drops empty rows
-  (framing newline, blank line, trailing `;`), and emits **one `Ir::group`**: flat
-  `[a b; c d]` (rows joined by `Ir::if_break("", ";")` + `Ir::Line` → `; `;
-  elements by a single space) when it fits `line_width`, else framed one row per
-  indented line (the `;` vanishes, newline is the separator). `MATRIX_ROW` children
-  are unwrapped to their `ARG`s; spacing is fully normalized.
-- **`;;` is preserved, not collapsed.** Two adjacent `SEMICOLON` (the higher-dim
-  operator, semantically ≠ `;`) bails to transparent — `prev_was_semicolon` guard.
-- **`matrices/` gated** (M/N now `[1 2 3]`/`[1 2; 3 4]`). All ungated multiline
-  matrices now collapse to one line (they fit) and round-trip; stability green.
+Gate 6→7 fixtures; full suite + clippy + fmt green.
 
-Gate 5→6 fixtures; full suite + clippy + fmt green.
+**Traps for next time:** the open-bracket-line comment needs `on_line = true` at
+the *start* (and on seeing the open token) — a `false` start mis-classifies
+`[ # header` as own-line. `MAX_BLANK_LINES` is still live (matrices + block
+bodies); only the bracket path stopped using it. The non-comment bracket fixtures
+(`multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines`) already
+produce canonical output via the width path and are now trivially gateable (no
+code, `test(formatter)` commit).
 
-**Traps for next time:** default `line_width` is **92** (`style.rs`), not the 80
-in `printer.rs` tests — don't misjudge whether a case should break. Matrix rows
-have two CST shapes: a single-element row is a bare `ARG` child of `MATRIX_EXPR`;
-a multi-element row is a `MATRIX_ROW` wrapper. Both are handled; a comment inside a
-`MATRIX_ROW` is detected by `matrix_has_comment` and routes to the multiline path.
-
-Next: the bracket comment/blank-line paths (`lower_multiline_bracket`) are the
-last big source-break mirror. Once they reflow, `multiline_brackets` can be gated
-(it mixes calls + collections). Also consider stripping a leading blank right
-after a block opener (a cross-cutting blank-line-policy construct).
+Next: `lower_matrix_multiline` (comment-bearing matrices) is the last source-break
+mirror in the collection/bracket/matrix family. Or knock out the three free
+non-comment bracket gates above. Also still open: stripping a leading blank right
+after a block opener.
 
 ## Earlier sessions
 
+- **Width-driven matrix reflow** (committed `8c41393`): made matrices
+  input-independent. `lower_matrix` is now a dispatcher — comment-bearing →
+  `lower_matrix_multiline` (verbatim, source-mirroring), else `lower_matrix_reflow`
+  (one `Ir::group`: flat `[a b; c d]` when it fits, else framed one row per line;
+  rows split at `;` **and** `NEWLINE`, `;;` bails transparent). `matrices/` gated.
+  Trap: default `line_width` is **92** (`style.rs`), not the 80 in `printer.rs`
+  tests. Matrix rows have two CST shapes (bare `ARG` vs `MATRIX_ROW` wrapper).
 - **Function/macro body reflow** (committed `b04bfd6`): dropped the Runic-era
   `return`-tail guard in `lower_function` so any non-empty body reflows to the
   canonical 2-space indent (no `return` inserted; layout-only). Gated

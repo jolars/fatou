@@ -1570,62 +1570,34 @@ fn has_newline_token(node: &SyntaxNode) -> bool {
         .any(|el| el.kind() == SyntaxKind::NEWLINE)
 }
 
-/// The separator between two consecutive items of a broken bracket: the target
-/// style preserves the source's choice of a same-line space versus a line break.
-/// When broken, the gap may also carry own-line comments and blank lines (the
-/// latter capped at [`MAX_BLANK_LINES`]); [`GapLine`] records them in order.
-enum Sep {
-    Space,
-    Break(Vec<GapLine>),
-}
-
-/// One physical line inside a broken bracket's gap (the span between two items,
-/// before the first item, or after the last): either a preserved blank line or an
-/// own-line comment. Trailing comments (`item, # …`) are not gap lines — they ride
-/// on the item they follow.
-enum GapLine {
-    Blank,
-    Comment(String),
-}
-
 /// The maximum number of consecutive blank lines the target style keeps; anything
-/// more is collapsed to this. Runic caps blanks at two everywhere (top level,
-/// inside brackets, inside matrices).
+/// more is collapsed to this. Blanks are capped at two everywhere they survive
+/// (top level, inside matrices, inside block bodies).
 const MAX_BLANK_LINES: usize = 2;
 
-/// Whether a broken bracket grows a trailing comma. Calls *preserve* the source
-/// (keep iff already present, never add); every other bracket — index `x[…]`,
-/// tuple `(…)`, vector `[…]`, brace set `{…}` — *adds* one.
-fn adds_trailing_comma(node: &SyntaxNode) -> bool {
-    match node.kind() {
-        SyntaxKind::ARG_LIST => node
-            .parent()
-            .is_some_and(|p| p.kind() == SyntaxKind::INDEX_EXPR),
-        _ => true,
-    }
-}
-
-/// Lay out a bracketed list — a call/index `ARG_LIST` or a `(…)`/`[…]`/`{…}`
-/// collection — that spans multiple source lines, matching the target style:
+/// Lay out a comment-bearing bracketed list — a call/index `ARG_LIST` or a
+/// `(…)`/`[…]`/`{…}` collection — that the width-driven path
+/// ([`lower_arg_list`]/[`lower_collection`]) routes here because a comment cannot
+/// be reflowed away. Under Tenet 1 the layout is fully exploded, independent of
+/// the source's own line breaks:
 ///
-/// - **Framing.** A line break is added right after the open bracket and right
-///   before the close bracket, with the content indented one step. The close
-///   bracket lands back at the bracket's own indent.
-/// - **Inter-item layout is preserved, not exploded.** Between two items the
-///   source's choice is kept: a same-line space stays a space (`), c`), a line
-///   break stays a break, and a blank line stays a blank line (capped at
-///   [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]). Runic only adds the *framing*
-///   breaks.
-/// - **Leading and trailing blank lines are preserved** too: a blank in the
-///   *leading* gap (open bracket → first item) or the *trailing* gap (last item →
-///   close bracket) survives one newline of framing and keeps the rest as blanks
-///   (capped at [`MAX_BLANK_LINES`]).
-/// - **Trailing comma** follows [`adds_trailing_comma`].
+/// - **Always broken, one item per line.** A line break frames the content after
+///   the open bracket and before the close bracket (indented one step, close
+///   bracket flush), and every item lands on its own line — items that shared a
+///   source line (`a, b`) are split apart.
+/// - **A trailing comma is always added** (the list is always broken), matching
+///   the width-driven path's broken layout.
+/// - **Comments keep their attachment.** A trailing comment (`item, # …`) rides
+///   after its item's comma, canonicalized to one leading space; an own-line
+///   comment occupies its own line in place; a comment on the open-bracket line
+///   rides after the open bracket.
+/// - **Blank lines are dropped** (source formatting, like the width-driven path).
 ///
 /// Only a clean shape is reshaped. Anything this does not fully model falls back
-/// to the verbatim transparent lowering: a comment, a `;`-separated `PARAMETERS`
-/// block or bare semicolon, a doubled or leading comma, two items with no comma
-/// between them, an empty bracket, or any unexpected child or token.
+/// to the verbatim transparent lowering: a `;`-separated `PARAMETERS` block or
+/// bare semicolon, a doubled or leading comma, two items with no comma between
+/// them, two comments on one line, an empty bracket, or any unexpected child or
+/// token.
 fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
@@ -1633,27 +1605,22 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     // A trailing comment riding on item `i` (`item, # …`), rendered after its
     // comma. Aligned with `items`; a `None` slot is pushed for every item.
     let mut item_comments: Vec<Option<String>> = Vec::new();
-    let mut seps: Vec<Sep> = Vec::new();
-    // The gap being accumulated since the last item: own-line comments and blank
-    // lines, in order. Flushed into a `Sep::Break`, the leading gap, or the
-    // trailing gap when the next item or the close bracket arrives.
-    let mut gap: Vec<GapLine> = Vec::new();
-    let mut leading: Vec<GapLine> = Vec::new();
+    // The own-line comments preceding item `i` (the gap before it). Index `i`
+    // holds the comments between item `i-1` and item `i`; the leading gap (before
+    // the first item) and the trailing gap (after the last) flank them.
+    let mut gaps: Vec<Vec<String>> = Vec::new();
+    // Own-line comments accumulated since the last item, flushed when the next
+    // item or the close bracket arrives.
+    let mut gap: Vec<String> = Vec::new();
+    let mut leading: Vec<String> = Vec::new();
     let mut header_comment: Option<String> = None;
-    // Newlines since the last line-content token (item or own-line comment), used
-    // to size blank-line runs.
-    let mut newlines = 0usize;
+    // Whether any line content (item or own-line comment) sits on the current
+    // source line, so a fresh comment can be classified trailing vs own-line.
+    // Starts true: the open bracket is the current line, so a comment before any
+    // newline (`[ # header`) is a trailing comment on it, not an own-line comment.
+    let mut on_line = true;
     let mut comma = false;
     let mut leading_comma = false;
-
-    // Append `newlines`-worth of blank lines to the gap (one newline ends the
-    // previous line; the rest are blanks, capped), then reset the counter.
-    let flush_blanks = |gap: &mut Vec<GapLine>, newlines: &mut usize| {
-        for _ in 0..newlines.saturating_sub(1).min(MAX_BLANK_LINES) {
-            gap.push(GapLine::Blank);
-        }
-        *newlines = 0;
-    };
 
     for el in node.children_with_tokens() {
         match el {
@@ -1665,7 +1632,9 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                     close = Some(tok.text().to_string())
                 }
                 SyntaxKind::WHITESPACE => {}
-                SyntaxKind::NEWLINE => newlines += 1,
+                // A comment before the first newline rides on the open-bracket
+                // line; once a newline is seen, subsequent comments are own-line.
+                SyntaxKind::NEWLINE => on_line = false,
                 SyntaxKind::COMMA => {
                     if comma {
                         return lower_transparent(node);
@@ -1677,11 +1646,10 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                 }
                 SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
                     // A block-comment token always ends with `=#`, so the trim is a
-                    // no-op for it; its multi-line interior and any trailing blanks
-                    // are preserved verbatim, matching Runic. A line comment's own
-                    // trailing whitespace is trimmed as before.
+                    // no-op for it; its multi-line interior is preserved verbatim. A
+                    // line comment's own trailing whitespace is trimmed.
                     let text = tok.text().trim_end_matches([' ', '\t']).to_string();
-                    if newlines == 0 {
+                    if on_line {
                         // Same line as the previous content: a trailing comment on
                         // the last item, or — before any item — on the open bracket.
                         let slot = match items.last_mut() {
@@ -1694,18 +1662,14 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                         *slot = Some(text);
                     } else {
                         // An own-line comment: a line of its own inside the gap.
-                        flush_blanks(&mut gap, &mut newlines);
-                        gap.push(GapLine::Comment(text));
+                        gap.push(text);
+                        on_line = true;
                     }
                 }
                 _ => return lower_transparent(node),
             },
             NodeOrToken::Node(child) => match child.kind() {
                 SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
-                    // A same-line separator (`a, b`) needs no newline and no gap
-                    // content; capture it before `flush_blanks` zeroes the counter.
-                    let same_line = newlines == 0 && gap.is_empty();
-                    flush_blanks(&mut gap, &mut newlines);
                     if items.is_empty() {
                         if leading_comma {
                             return lower_transparent(node);
@@ -1715,15 +1679,12 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                         if !comma {
                             return lower_transparent(node);
                         }
-                        seps.push(if same_line {
-                            Sep::Space
-                        } else {
-                            Sep::Break(std::mem::take(&mut gap))
-                        });
+                        gaps.push(std::mem::take(&mut gap));
                     }
                     items.push(lower_node(&child));
                     item_comments.push(None);
                     comma = false;
+                    on_line = true;
                 }
                 _ => return lower_transparent(node),
             },
@@ -1731,9 +1692,7 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     }
 
     // The final gap runs from the last item to the close bracket.
-    flush_blanks(&mut gap, &mut newlines);
     let trailing = gap;
-    let trailing_comma = comma;
 
     let (Some(open), Some(close)) = (open, close) else {
         return lower_transparent(node);
@@ -1742,23 +1701,11 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    let want_trailing = if adds_trailing_comma(node) {
-        true
-    } else {
-        trailing_comma
-    };
-
-    // Render a gap's own-line comments and blank lines, in order. A comment opens
-    // its own indented line via a `HardLine`; a blank line is a bare newline.
-    fn render_gap(inner: &mut Vec<Ir>, lines: &[GapLine]) {
-        for line in lines {
-            match line {
-                GapLine::Blank => inner.push(Ir::BlankLine),
-                GapLine::Comment(text) => {
-                    inner.push(Ir::HardLine);
-                    inner.push(Ir::text(text.clone()));
-                }
-            }
+    // Render a gap's own-line comments, each opening its own indented line.
+    fn render_gap(inner: &mut Vec<Ir>, comments: &[String]) {
+        for text in comments {
+            inner.push(Ir::HardLine);
+            inner.push(Ir::text(text.clone()));
         }
     }
 
@@ -1768,30 +1715,23 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     inner.push(Ir::HardLine); // framing break after the open bracket
     for (i, item) in items.into_iter().enumerate() {
         inner.push(item);
-        let is_last = i + 1 == n;
-        if !is_last || want_trailing {
-            inner.push(Ir::text(","));
-        }
-        // The trailing comment rides after the comma, canonicalized to one
-        // leading space (a Tenet-1 divergence: Runic preserves the source spacing).
+        // Always broken, so every item — including the last — grows a comma.
+        inner.push(Ir::text(","));
+        // The trailing comment rides after the comma, canonicalized to one leading
+        // space (its same-line attachment is preserved, not its source spacing).
         if let Some(text) = &item_comments[i] {
             inner.push(Ir::text(" "));
             inner.push(Ir::text(text.clone()));
         }
-        if !is_last {
-            match &seps[i] {
-                Sep::Space => inner.push(Ir::text(" ")),
-                Sep::Break(lines) => {
-                    render_gap(&mut inner, lines);
-                    inner.push(Ir::HardLine);
-                }
-            }
+        if i + 1 < n {
+            render_gap(&mut inner, &gaps[i]);
+            inner.push(Ir::HardLine);
         }
     }
     render_gap(&mut inner, &trailing);
 
     // A comment on the open-bracket line rides after it, canonicalized to one
-    // leading space (the same Tenet-1 divergence as a trailing item comment).
+    // leading space (the same attachment-preserving rule as a trailing comment).
     let mut out: Vec<Ir> = vec![Ir::text(open)];
     if let Some(text) = header_comment {
         out.push(Ir::text(" "));
