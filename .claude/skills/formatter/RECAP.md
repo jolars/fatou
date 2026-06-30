@@ -87,45 +87,55 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (function/macro body reflow — dropped the Runic return guard)
+## Latest session (width-driven matrix reflow — killed source-break mirroring)
 
-Killed the last source-mirroring holdout among block constructs. `lower_function`
-carried a Runic-era guard: it bailed to `lower_transparent` unless the body's tail
-was already an explicit `return` (Runic inserted implicit returns; Fatou avoided
-diverging). With Runic gone and semantic rewrites out of scope, that guard just
-**prevented reflowing the common case** — a body with a bare-expression tail kept
-its **source indentation** (4→4, 8→8, etc.), a flagrant Tenet 1 violation. Every
-other block (`if`/`for`/`while`/`struct`/`let`/`module`) already re-indented to
-the canonical 2 spaces; functions/macros were the lone exception.
+Made matrices fully input-independent. `lower_matrix` used to bail single-line
+matrices to `lower_transparent` (verbatim spacing → `[1  2   3]` and `[1 2 ;3 4]`
+survived) and lay out multiline matrices by **mirroring source line breaks**, so
+`[1 2; 3 4]` (one source line) and the same matrix across two lines, and `semi`
+(`;`-kept) vs `A` (no `;`), all formatted **differently** — a flagrant Tenet 1
+violation the user flagged when I first proposed a single-line-only fix.
+
+The chosen canon (user decision): **single line when it fits, else stacked rows.**
 
 What landed:
 
-- **Guard removed** (`rules.rs` `lower_function`): any non-empty body now reflows
-  to the canonical body indent regardless of tail or source indent. No `return`
-  is inserted (layout-only). Empty body / unmodeled shape still bails to
-  transparent. Doc comment rewritten.
-- **`function_blocks` gated**: added a bare-tail case (`function add(a, b)` with
-  8-space source body → 2-space `c = a + b` / `c`) to actually exercise the fix —
-  the existing inputs were all `return`-tailed, so the bug was invisible. The `k`
-  case keeps its one leading blank after the signature (user choice; shared
-  capped blank-line behavior, not function-specific).
-- **Unit test fixed** (`core.rs::normalizes_operator_spacing`): it encoded the old
-  source-mirrored 4-space body; updated to the canonical 2-space form.
+- **`lower_matrix` is now a dispatcher.** Comment-bearing matrix → the old
+  verbatim multiline body (renamed `lower_matrix_multiline`, kept for pinned
+  comments; single-line block-comment case bails transparent). Everything else →
+  new **`lower_matrix_reflow`**.
+- **`lower_matrix_reflow`** parses the matrix into rows (split at `;` **and**
+  source `NEWLINE` — equivalent row separators in Julia), drops empty rows
+  (framing newline, blank line, trailing `;`), and emits **one `Ir::group`**: flat
+  `[a b; c d]` (rows joined by `Ir::if_break("", ";")` + `Ir::Line` → `; `;
+  elements by a single space) when it fits `line_width`, else framed one row per
+  indented line (the `;` vanishes, newline is the separator). `MATRIX_ROW` children
+  are unwrapped to their `ARG`s; spacing is fully normalized.
+- **`;;` is preserved, not collapsed.** Two adjacent `SEMICOLON` (the higher-dim
+  operator, semantically ≠ `;`) bails to transparent — `prev_was_semicolon` guard.
+- **`matrices/` gated** (M/N now `[1 2 3]`/`[1 2; 3 4]`). All ungated multiline
+  matrices now collapse to one line (they fit) and round-trip; stability green.
 
-Gate 4→5 fixtures; full suite + clippy + fmt green.
+Gate 5→6 fixtures; full suite + clippy + fmt green.
 
-**Trap for next time:** searching for more Runic-era guards — `grep RETURN_EXPR`
-came back clean after this (the guard was function-only), but other rules still
-carry "never `return`-inserted" rationale comments that are now just history.
+**Traps for next time:** default `line_width` is **92** (`style.rs`), not the 80
+in `printer.rs` tests — don't misjudge whether a case should break. Matrix rows
+have two CST shapes: a single-element row is a bare `ARG` child of `MATRIX_EXPR`;
+a multi-element row is a `MATRIX_ROW` wrapper. Both are handled; a comment inside a
+`MATRIX_ROW` is detected by `matrix_has_comment` and routes to the multiline path.
 
-Next: the bracket comment/blank-line paths (`lower_multiline_bracket`) and
-matrices (`lower_matrix`) still mirror source — the remaining reflow-engine
-targets. Once collections+brackets reflow, `multiline_brackets` can be gated (it
-mixes calls + collections). Also consider whether a leading blank right after a
-block opener should be stripped (a cross-cutting blank-line-policy construct).
+Next: the bracket comment/blank-line paths (`lower_multiline_bracket`) are the
+last big source-break mirror. Once they reflow, `multiline_brackets` can be gated
+(it mixes calls + collections). Also consider stripping a leading blank right
+after a block opener (a cross-cutting blank-line-policy construct).
 
 ## Earlier sessions
 
+- **Function/macro body reflow** (committed `b04bfd6`): dropped the Runic-era
+  `return`-tail guard in `lower_function` so any non-empty body reflows to the
+  canonical 2-space indent (no `return` inserted; layout-only). Gated
+  `function_blocks` with a bare-tail case; fixed `core.rs` unit test. Gate 4→5.
+  Trap: other rules still carry now-historical "never `return`-inserted" comments.
 - **Width-driven collection reflow** (committed `a6fe509`): `lower_collection`
   rewritten to mirror `lower_arg_list` — one `Ir::group`, flat when it fits else
   one element per indented line with a broken-only trailing comma; source breaks

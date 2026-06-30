@@ -1803,29 +1803,141 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     Ir::concat(out)
 }
 
-/// Lay out a matrix literal (`[1 2; 3 4]`) that spans multiple source lines,
-/// matching the target style: a framing break right after `[` and right before
-/// `]`, with each source line re-indented one step. The matrix interior is
-/// otherwise preserved **verbatim** — intra-row spacing, multi-space gaps,
-/// same-line `;`-separated rows, and `;` placement are all kept (Runic does not
-/// normalize inside a matrix); only the leading and trailing whitespace of each
-/// source line is dropped in favor of the standard indent. Nested handled
-/// constructs still normalize because each row is lowered recursively.
+/// Lay out a matrix literal (`[1 2; 3 4]`). The canonical form is width-driven
+/// (Tenet 1): a comment-free matrix builds one `Ir::group`, laid out flat on a
+/// single line — rows joined by `; `, elements within a row by a single space —
+/// when it fits `line_width`, else framed with one row per indented line and the
+/// `;` separators replaced by line breaks. Source line breaks, the `;`-vs-newline
+/// spelling of a row separator, and intra-row spacing never influence the result:
+/// `[1 2; 3 4]` and the same matrix written across source lines format identically.
 ///
-/// A single-line matrix (no `NEWLINE` among its children) has no rule: it is left
-/// to the transparent fallback, which is byte-identical to Runic's verbatim
-/// preservation. This arm only reshapes once the matrix already spans ≥2 lines.
+/// A comment can't be reflowed away, so a comment-bearing matrix routes to the
+/// verbatim-preserving multiline path (or the transparent fallback when it spans
+/// no line to frame).
+fn lower_matrix(node: &SyntaxNode) -> Ir {
+    if matrix_has_comment(node) {
+        return if has_newline_token(node) {
+            lower_matrix_multiline(node)
+        } else {
+            lower_transparent(node)
+        };
+    }
+    lower_matrix_reflow(node)
+}
+
+/// Width-driven layout for a clean (comment-free) matrix: parse it into rows
+/// (split at `;` and source newlines, which are equivalent row separators), then
+/// emit one `Ir::group` — flat `[a b; c d]` when it fits, else framed one row per
+/// indented line. Empty rows (a framing newline, a blank line, a trailing `;`) are
+/// dropped. A `;;` higher-dimensional separator, or any unexpected token or child,
+/// bails to the verbatim transparent lowering.
+fn lower_matrix_reflow(node: &SyntaxNode) -> Ir {
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    let mut rows: Vec<Vec<Ir>> = vec![Vec::new()];
+    let mut prev_was_semicolon = false;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LBRACKET => open = Some(tok.text().to_string()),
+                SyntaxKind::RBRACKET => close = Some(tok.text().to_string()),
+                // Whitespace carries no layout and is transparent to the `;;` check.
+                SyntaxKind::WHITESPACE => continue,
+                // `;` and a source newline both separate rows; a blank line or a
+                // redundant `;`-then-newline yields an empty row that is dropped
+                // below. Two adjacent `;` are the `;;` higher-dim operator, whose
+                // semantics differ from `;` — bail rather than silently collapse it.
+                SyntaxKind::SEMICOLON => {
+                    if prev_was_semicolon {
+                        return lower_transparent(node);
+                    }
+                    rows.push(Vec::new());
+                    prev_was_semicolon = true;
+                    continue;
+                }
+                SyntaxKind::NEWLINE => rows.push(Vec::new()),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::ARG => rows.last_mut().unwrap().push(lower_node(&child)),
+                // A `MATRIX_ROW` is a whole horizontal row; collect its elements.
+                SyntaxKind::MATRIX_ROW => {
+                    let row = rows.last_mut().unwrap();
+                    for sub in child.children_with_tokens() {
+                        match sub {
+                            NodeOrToken::Token(t) if t.kind() == SyntaxKind::WHITESPACE => {}
+                            NodeOrToken::Node(arg) if arg.kind() == SyntaxKind::ARG => {
+                                row.push(lower_node(&arg))
+                            }
+                            _ => return lower_transparent(node),
+                        }
+                    }
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+        prev_was_semicolon = false;
+    }
+
+    let (Some(open), Some(close)) = (open, close) else {
+        return lower_transparent(node);
+    };
+    rows.retain(|row| !row.is_empty());
+    if rows.is_empty() {
+        return Ir::concat([Ir::text(open), Ir::text(close)]);
+    }
+
+    let mut inner: Vec<Ir> = vec![Ir::SoftLine];
+    for (i, row) in rows.into_iter().enumerate() {
+        if i > 0 {
+            // Between rows: flat `;` + space -> `; `; broken nothing + newline.
+            inner.push(Ir::if_break("", ";"));
+            inner.push(Ir::Line);
+        }
+        for (j, elem) in row.into_iter().enumerate() {
+            if j > 0 {
+                inner.push(Ir::text(" "));
+            }
+            inner.push(elem);
+        }
+    }
+
+    Ir::group(Ir::concat([
+        Ir::text(open),
+        Ir::indent(Ir::concat(inner)),
+        Ir::SoftLine,
+        Ir::text(close),
+    ]))
+}
+
+/// Whether a matrix carries a comment among its direct children or inside one of
+/// its `MATRIX_ROW`s. Such a matrix can't reflow and routes to the multiline path.
+fn matrix_has_comment(node: &SyntaxNode) -> bool {
+    node.children_with_tokens().any(|el| match el {
+        NodeOrToken::Token(t) => {
+            matches!(t.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT)
+        }
+        NodeOrToken::Node(child) => {
+            child.kind() == SyntaxKind::MATRIX_ROW
+                && child
+                    .children_with_tokens()
+                    .any(|e| matches!(e.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
+        }
+    })
+}
+
+/// Lay out a comment-bearing matrix literal that spans multiple source lines: a
+/// framing break right after `[` and right before `]`, each source line
+/// re-indented one step, the interior otherwise preserved **verbatim** so the
+/// pinned comments keep their place. Nested handled constructs still normalize
+/// because each row is lowered recursively.
 ///
 /// Blank lines are preserved everywhere (capped at [`MAX_BLANK_LINES`] via an
 /// [`Ir::BlankLine`]): between rows, right after `[` (leading), and right before
 /// `]` (trailing). One empty line on each side is the framing `[`/`]` line itself
-/// and is absorbed into the framing break. Only the clean shape is reshaped: a
-/// comment or any unexpected token falls back to the verbatim transparent lowering.
-fn lower_matrix(node: &SyntaxNode) -> Ir {
-    if !has_newline_token(node) {
-        return lower_transparent(node);
-    }
-
+/// and is absorbed into the framing break. Any unexpected token falls back to the
+/// verbatim transparent lowering.
+fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
     // Each source line is a list of `(is_whitespace, ir)` elements. Whitespace at

@@ -73,8 +73,11 @@ leverage.
   build a width-driven `Ir::group` (flat when it fits, one-item-per-line with a
   broken-only trailing comma via `Ir::IfBreak` when it doesn't), ignoring source
   line breaks and trailing commas; the one-tuple `(a,)` keeps its semantic comma
-  in both modes. **Next:** the bracket comment/blank-line paths and matrices,
-  which still mirror source.
+  in both modes. Matrices (`lower_matrix_reflow`) now build a width-driven group
+  too: flat `[a b; c d]` (rows joined by `; `, elements by a single space) when it
+  fits, else framed one row per line; `;`-vs-newline row spelling and intra-row
+  spacing no longer leak into the output (`matrices/` gated). **Next:** the bracket
+  comment/blank-line paths (`lower_multiline_bracket`), which still mirror source.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing
