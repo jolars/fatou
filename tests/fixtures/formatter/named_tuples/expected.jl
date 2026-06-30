@@ -1,6 +1,0 @@
-nt = (a = 1, b = 2)
-mixed = (1, b = 2)
-messy = (a = 1, b = 2)
-single = (x = 1,)
-triple = (a = 1, b = 2, c = 3)
-nested = (p = (x = 1, y = 2), q = 3)

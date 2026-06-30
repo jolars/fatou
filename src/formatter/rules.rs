@@ -6,8 +6,10 @@
 //! while any handled descendant is still normalized. As rules land, nodes move
 //! from the transparent fallback to a dedicated arm.
 //!
-//! Target style is Runic.jl's (see `AGENTS.md`); the oracle gate lives in
-//! `tests/runic_oracle.rs`.
+//! The style is Fatou's own (see `AGENTS.md`); the hand-authored fixture gate
+//! lives in `tests/formatter.rs`. NOTE: many rules below still mirror the source's
+//! line breaks (a legacy of the removed Runic target), which Tenet 1 forbids; they
+//! are re-evaluated construct-by-construct as the width-driven reflow engine lands.
 
 use rowan::NodeOrToken;
 

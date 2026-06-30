@@ -35,12 +35,10 @@ and includes a Julia toolchain.
    **not** honor "persistent line breaks"; it **fully reflows**, laying out each
    construct from scratch under `line_width` and breaking only where width or
    semantics require it, regardless of where the source broke. Push back against
-   hard-coding special cases for specific constructs. This is the deepest,
-   deliberate divergence from Runic (our soft oracle, see below): Runic
-   *preserves* the user's line breaks and is **not line-width-sensitive**,
-   whereas preserving the user's form would make Fatou's output depend on its
-   input, which Tenet 1 forbids. Such divergences are deliberate, recorded
-   choices, never silent non-determinism.
+   hard-coding special cases for specific constructs. Honoring "persistent line
+   breaks" would make Fatou's output depend on its input, which this tenet
+   forbids. Any deviation from full reflow is a deliberate, recorded choice,
+   never silent non-determinism.
 2. **Incremental parsing is first-class**, not an afterthought. Parser/CST work
    must keep the `salsa`-based reparse path (`src/incremental.rs`) viable.
 3. **Parsing is the parser's job.** Never paper over parser mistakes in the
@@ -55,36 +53,23 @@ and includes a Julia toolchain.
    format-clean by construction (or withhold it for that shape); don't run the
    formatter inside `--fix`.
 
-## Runic compatibility (soft target)
+## Formatter testing
 
-Fatou tracks a **soft, one-directional compatibility target** with the
-[Runic.jl](https://github.com/fredrikekre/Runic.jl) formatter—Julia's
-deterministic, no-configuration formatter, and the philosophical match for
-Tenet 1. This is **strictly subordinate to Tenet 1** and is **never a quality
-gate**. We do not match Runic; we measure how often Runic would leave Fatou's
-output unchanged, treating its maturity as a free differential oracle for our
-own inconsistencies.
+Fatou owns its formatting style; there is **no external reference formatter**.
+(We used to track Runic.jl as a soft oracle; that target has been removed.) The
+gate is **hand-authored fixtures**: `tests/fixtures/formatter/<slug>/` holds an
+`input.jl` and a hand-written `expected.jl`, and `tests/formatter.rs` asserts
+`format(input.jl) == expected.jl`. **Presence of `expected.jl` is gate
+membership** — a fixture with only `input.jl` is a construct still being authored.
+There is no allowlist or blocked list. A second test
+(`formatter_is_idempotent_and_stable`) runs over **every** `input.jl` and checks
+`format(format(x)) == format(x)` plus clean reparse of the output.
 
-- Divergences triage into two buckets. **Adopt** when Runic's output is simply
-  more idiomatic and Fatou is being inconsistent (fix the rule). **Record** when
-  the divergence is a deliberate Fatou choice (a blocked entry with a rationale).
-- Diverging from Runic is allowed but should **raise tension**: a conscious,
-  documented decision, never a silent one.
-
-**Bootstrap gate (landed).** While the formatter grows, the oracle is a concrete
-**direct-parity** gate (a strengthening of the soft fixed-point framing above):
-`format(input) == runic(input)`, where each fixture's `expected.jl` is pinned from
-`Runic.format_string`. The harness (`tests/runic_oracle.rs`) diffs each fixture and
-gates regressions via `tests/oracle/runic-allowlist.txt`; deliberate divergences
-(notably Tenet 1: Runic *preserves* user whitespace around `&&`/`||`, Fatou
-canonicalizes them as spaced) are recorded in `runic-blocked.txt` with a rationale,
-and `allowlist ∪ blocked` must cover the corpus. The corpus
-(`tests/fixtures/formatter/`) is minted by `scripts/update-runic-corpus.{sh,jl}`
-and version-pinned in `.runic-source`. **To grow formatter parity, use the
-`formatter-parity` skill** (`.claude/skills/formatter-parity/`). It documents the
-loop (probe → rule → fixture → re-triage → allowlist) and keeps a rolling
-`RECAP.md`. The optional long-term fixed-point gauge (`runic(fatou(x)) == fatou(x)`)
-remains future work (`TODO.md`).
+`expected.jl` is authored under Tenet 1 (deterministic full reflow), never
+captured from any formatter. **To grow the formatter, use the `formatter`
+skill** (`.claude/skills/formatter/`). It documents the human-in-the-loop loop
+(propose → user edits `expected.jl` → push back → implement the rule) and keeps a
+rolling `RECAP.md`.
 
 ## Parser oracle
 
@@ -157,13 +142,13 @@ build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
 **Formatter** (`src/formatter/`, public API in `src/formatter.rs`): consumes the
 CST and uses a Wadler/Prettier-style document IR (`ir.rs`) printed by a single
 best-fit layout engine (`printer.rs`) that makes all line-break decisions.
-`style.rs` is `FormatStyle`; `check.rs` exposes `check_paths`. Target style is
-Runic.jl's. `rules::lower` (`rules.rs`) walks the CST into IR; constructs with a
-rule are reshaped (operator/assignment spacing has landed) and everything else is
-lowered *transparently* (verbatim tokens, recurse into children), so unhandled
-syntax stays byte-identical and the pass stays idempotent while rules land
-incrementally. The Runic differential oracle (`tests/runic_oracle.rs`) gates
-parity; grow it with the `formatter-parity` skill.
+`style.rs` is `FormatStyle`; `check.rs` exposes `check_paths`. Fatou owns its
+style (no external reference formatter). `rules::lower` (`rules.rs`) walks the CST
+into IR; constructs with a rule are reshaped and everything else is lowered
+*transparently* (verbatim tokens, recurse into children), so unhandled syntax
+stays byte-identical and the pass stays idempotent while rules land incrementally.
+Hand-authored fixtures (`tests/formatter.rs`) gate the output; grow them with the
+`formatter` skill.
 
 **Linter** (`src/linter/`): `check_paths` parses each file and reports
 `LintStatus` (`Clean`/`Findings`/`ParseDiagnostics`); parse diagnostics
@@ -207,8 +192,7 @@ indent_width) and `[lint]` (select, ignore). Defaults follow Julia conventions
 - Integration tests in `tests/*.rs`; fixtures in
   `tests/fixtures/{parser,formatter}/<case>/`. Parser fixtures hold `input.jl`
   (snapshot the CST + diagnostics, assert losslessness); formatter fixtures hold
-  `input.jl` + a Runic-minted `expected.jl` (the direct-parity oracle in
-  `tests/runic_oracle.rs`; `tests/formatter.rs` guards idempotence over all
-  fixtures).
+  `input.jl` + a hand-authored `expected.jl` (the gate in `tests/formatter.rs`,
+  which also guards idempotence + clean reparse over all fixtures).
 - `insta` snapshots live in `tests/snapshots/`.
 - `tests/lsp.rs` drives the language server over an in-memory connection.

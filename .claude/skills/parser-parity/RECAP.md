@@ -6,26 +6,26 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Handoff to formatter-parity (2026-06-29b):** one-line space-separated `for`
+**Handoff to formatter (2026-06-29b):** one-line space-separated `for`
 bodies now parse into the loop `BLOCK` (`for i in 1:3 x += i end` ⇒ `(for (= i
 (call-i 1 : 3)) (block (+= x i)))`), so the one-line `for` body explodes just
-like the one-line `while` body. Formatter-parity's `lower_loop` no longer needs
+like the one-line `while` body. Formatter's `lower_loop` no longer needs
 to route around it; the same-line-body for-loop is now safe to use as a fixture
 (`in`/`=`/comma/cartesian all work). Caveat: `for i ∈ xs …` still projects the
 binding as `(call-i i ∈ xs)` not `(= i xs)` (pre-existing; `∈` is a symbol
 operator, not normalized to `=` in the for-binding—same divergence in generators
 and multi-line, unrelated to body separation).
 
-**Handoff to formatter-parity (2026-06-29):** `global`/`local` + multiple
+**Handoff to formatter (2026-06-29):** `global`/`local` + multiple
 assignment now nests properly (`global a, b = 1, 2` ⇒ `(global (= (tuple a b)
 (tuple 1 2)))`, `local a, b = f(x), g(y)` wraps the calls, `global a, b::Int` ⇒
 `(global a (::-i b Int))`). The formatter's *existing* rules (keyword-stmt
 single-operand arm → `lower_binary` `=` → recursed `BARE_TUPLE_EXPR`/`CALL_EXPR`)
-should now handle `global a,b=1,2` → `global a, b = 1, 2` for free—formatter-parity
+should now handle `global a,b=1,2` → `global a, b = 1, 2` for free—formatter
 ranked target #0 is unblocked.
 
-**Handoff to formatter-parity (2026-06-26):** left-division `\` now parses as a
-normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter-parity can add the
+**Handoff to formatter (2026-06-26):** left-division `\` now parses as a
+normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter can add the
 spacing fixture (`A\b` → `A \ b`; `\` is a normal spaced binop, no `is_tight_binop`
 entry). Broadcast `.\` and assignment `\=`/`.\=` also landed.
 
@@ -95,7 +95,7 @@ executed.
 
 ## Latest session (2026-06-29b—one-line space-separated `for` body)
 
-The formatter-parity handoff: `for i in 1:3 x += i end` swallowed the same-line
+The formatter handoff: `for i in 1:3 x += i end` swallowed the same-line
 body into the `FOR_BINDING` (flat tokens) and left an empty `BLOCK`. Root: the
 statement `for`-binding parsed only the loop var via `parse_for_binding` (bp 0,
 `no_word_op`), then `parse_header`'s greedy `while !header_ends` loop bumped
@@ -151,7 +151,7 @@ iterable; the statement loop just wasn't using it.
   `a\=b`). `a\b`⇒`(call-i a \ b)`, `a .\ b`⇒`(dotcall-i a \ b)`, `a\=b`⇒`(\= a b)`
   (assignment projector is text-based, no per-kind arm). Fixtures `left_division`
   (parser + oracle) + lexer unit test. JS 677 (held); dir 183 → 184. Surfaced the
-  prefix-newline bug fixed in 2026-06-26b. Formatter-parity handoff: `\` spacing.
+  prefix-newline bug fixed in 2026-06-26b. Formatter handoff: `\` spacing.
 - **2026-06-25l**—Broadcast identity ops `.===`/`.!==`. Two tokens `DotEqEqEq`/
   `DotNotEqEq`, 4-char dotted lex (beat `.==`/`.!=`); single ⇒ `(dotcall-i a === b)`,
   runs fold to `(comparison a (. ===) b …)`. Also fixed `ast/nodes.rs::is_operator_kind`

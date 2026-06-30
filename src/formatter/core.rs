@@ -2,10 +2,10 @@
 //!
 //! Walking-skeleton stage: [`format`] parses to the lossless CST, lowers it to
 //! the layout IR via [`rules::lower`](crate::formatter::rules::lower), and prints
-//! it. Constructs with a rule are reshaped to the deterministic target style
-//! (Runic.jl's); everything else is lowered transparently, so it stays
-//! byte-identical and the whole pass remains idempotent while rules land
-//! incrementally. [`print_document`] exercises the IR/printer foundation directly.
+//! it. Constructs with a rule are reshaped to Fatou's deterministic style;
+//! everything else is lowered transparently, so it stays byte-identical and the
+//! whole pass remains idempotent while rules land incrementally.
+//! [`print_document`] exercises the IR/printer foundation directly.
 
 use crate::formatter::ir::Ir;
 use crate::formatter::printer::print;

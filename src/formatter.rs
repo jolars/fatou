@@ -2,11 +2,11 @@
 //! Wadler/Prettier-style document IR ([`ir`]) printed by a single best-fit
 //! layout engine ([`printer`]) that makes all line-break decisions.
 //!
-//! Target style is **Runic.jl**'s deterministic layout (Tenet 1: rule-based, no
-//! persistent line breaks). The per-construct [`rules`] lower the CST into IR; a
-//! transparent fallback keeps unhandled constructs byte-identical while coverage
-//! grows (see `rules` and `core`). The Runic differential oracle
-//! (`tests/runic_oracle.rs`) gates parity.
+//! The style is Fatou's own deterministic layout (Tenet 1: rule-based, no
+//! persistent line breaks); there is no external reference formatter. The
+//! per-construct [`rules`] lower the CST into IR; a transparent fallback keeps
+//! unhandled constructs byte-identical while coverage grows (see `rules` and
+//! `core`). Hand-authored fixtures (`tests/formatter.rs`) gate the output.
 
 pub mod check;
 pub mod core;
