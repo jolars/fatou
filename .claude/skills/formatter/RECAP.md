@@ -87,40 +87,59 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (width-driven arg-list reflow — first reflow-engine construct)
+## Latest session (function/macro body reflow — dropped the Runic return guard)
 
-Made `line_width` actually drive breaking for **call/index argument lists**, the
-first real reflow construct (the printer already had best-fit groups; no rule
-used them for brackets). Two gated fixtures: `call_arg_lists` (all fit -> flat)
-and the new `arg_list_break` (too-wide calls explode one-item-per-line; a fitting
-inner call stays flat). Gate + stability green; clippy + fmt clean.
+Killed the last source-mirroring holdout among block constructs. `lower_function`
+carried a Runic-era guard: it bailed to `lower_transparent` unless the body's tail
+was already an explicit `return` (Runic inserted implicit returns; Fatou avoided
+diverging). With Runic gone and semantic rewrites out of scope, that guard just
+**prevented reflowing the common case** — a body with a bare-expression tail kept
+its **source indentation** (4→4, 8→8, etc.), a flagrant Tenet 1 violation. Every
+other block (`if`/`for`/`while`/`struct`/`let`/`module`) already re-indented to
+the canonical 2 spaces; functions/macros were the lone exception.
 
 What landed:
 
-- **`lower_arg_list` rewritten** (`rules.rs`): a clean, comment-free `ARG_LIST`
-  builds one `Ir::group` — flat `f(a, b)` when it fits, else one item per indented
-  line with a **broken-only trailing comma**. **Source line breaks and any source
-  trailing comma are ignored** (Tenet 1): `f(1,\n2)` and `f(1, 2)` both -> `f(1, 2)`.
-  Comment-bearing lists still route to the legacy `lower_multiline_bracket`
-  (source-mirroring, deferred); the `;`-`PARAMETERS` tail (`f(a; b=1)`) stays flat.
-- **New IR primitive `Ir::IfBreak(broken, flat)`** (`ir.rs` + `printer.rs`): emits
-  text by the enclosing group's mode; measured as `flat` in `fits`. Used for the
-  trailing comma. Unit-tested in `printer.rs`.
-- **Printer `col` fix** (`printer.rs`): the transparent path passes raw source
-  newlines through as `Text`, which never reset `col` — so `col` grew across the
-  whole file and falsely tripped the first real group (e.g. broke `println("x")`).
-  `Text` now resets `col` after an embedded newline; `fits` treats embedded
-  newlines as non-fitting. **Watch for this** when adding more groups: any rule
-  that still emits raw `\n` via `Text` relies on this reset.
-- **Default indent width 4 -> 2** (`config.rs`, `style.rs`, `AGENTS.md`; tests
-  updated). User decision this session.
+- **Guard removed** (`rules.rs` `lower_function`): any non-empty body now reflows
+  to the canonical body indent regardless of tail or source indent. No `return`
+  is inserted (layout-only). Empty body / unmodeled shape still bails to
+  transparent. Doc comment rewritten.
+- **`function_blocks` gated**: added a bare-tail case (`function add(a, b)` with
+  8-space source body → 2-space `c = a + b` / `c`) to actually exercise the fix —
+  the existing inputs were all `return`-tailed, so the bug was invisible. The `k`
+  case keeps its one leading blank after the signature (user choice; shared
+  capped blank-line behavior, not function-specific).
+- **Unit test fixed** (`core.rs::normalizes_operator_spacing`): it encoded the old
+  source-mirrored 4-space body; updated to the canonical 2-space form.
 
-Next: extend the same width-driven group to `lower_collection` (tuple/vector/brace
-`(…)`/`[…]`/`{…}`), then revisit the bracket comment/blank-line paths and matrices,
-which still mirror source. Once collections reflow, `multiline_brackets` can be
-gated (it mixes calls + collections, so it's left ungated for now).
+Gate 4→5 fixtures; full suite + clippy + fmt green.
+
+**Trap for next time:** searching for more Runic-era guards — `grep RETURN_EXPR`
+came back clean after this (the guard was function-only), but other rules still
+carry "never `return`-inserted" rationale comments that are now just history.
+
+Next: the bracket comment/blank-line paths (`lower_multiline_bracket`) and
+matrices (`lower_matrix`) still mirror source — the remaining reflow-engine
+targets. Once collections+brackets reflow, `multiline_brackets` can be gated (it
+mixes calls + collections). Also consider whether a leading blank right after a
+block opener should be stripped (a cross-cutting blank-line-policy construct).
 
 ## Earlier sessions
+
+- **Width-driven collection reflow** (committed `a6fe509`): `lower_collection`
+  rewritten to mirror `lower_arg_list` — one `Ir::group`, flat when it fits else
+  one element per indented line with a broken-only trailing comma; source breaks
+  and trailing commas ignored; the one-tuple `(a,)` keeps its semantic comma in
+  both modes. Gated `collections` + `collection_break`. (RECAP wasn't updated that
+  session; reconciled here.)
+- **Width-driven arg-list reflow** (committed `2d3003d`): made `line_width`
+  actually drive breaking for call/index arg lists — the first reflow construct.
+  New IR primitive `Ir::IfBreak(broken, flat)` (broken-only trailing comma).
+  Printer `col` fix: `Text` now resets `col` after an embedded newline (the
+  transparent path emits raw `\n` as `Text`), and `fits` treats embedded newlines
+  as non-fitting — **watch this** when adding groups. Default indent width 4→2.
+  Gated `call_arg_lists` + `arg_list_break`. Comment-bearing lists and the
+  `;`-`PARAMETERS` tail (`f(a; b=1)`) still stay flat (deferred).
 
 - **The pivot:** removed the Runic target, stood up the hand-authored fixture
   machinery + the `formatter` skill. Gate started empty; stability green over all

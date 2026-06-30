@@ -17,3 +17,7 @@ macro m(x)
    return esc(x)
 end
 function empty() end
+function add(a, b)
+        c = a + b
+        c
+end

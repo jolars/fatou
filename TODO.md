@@ -274,10 +274,11 @@ leverage.
   `FUNCTION_DEF`/`MACRO_DEF`: fifth `lower_block_body` reuse; the `SIGNATURE` is
   lowered recursively so the name/args/`::`return-type/`where` normalize and the
   keyword always gets one trailing space (anonymous `function(x)` → `function (x)`);
-  these are the one construct Runic `return`-inserts, so the rule reshapes **only**
-  when that rewrite is a no-op—the body's tail statement is already an explicit
-  `return`—and bails to transparent on every other tail, an empty body, or any
-  unmodeled shape; locked by `function_blocks/`),
+  the Runic-era return-insertion guard was dropped (Tenet 1: Fatou is layout-only,
+  never inserts `return` and never inspects the tail), so **any** non-empty body
+  reflows to the canonical body indent regardless of tail or source indentation;
+  an empty body or unmodeled shape still bails to transparent; locked by
+  `function_blocks/`),
   `do` blocks (`lower_do` over `DO_EXPR`: the call head sits *before* the `do`
   keyword and is lowered recursively, the optional `DO_PARAMS` arg list is
   `", "`-joined via `lower_do_params` (`do x,y` → `do x, y`, destructure `do (x, y)`

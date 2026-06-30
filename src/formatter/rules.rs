@@ -2052,17 +2052,13 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
 /// followed by exactly one space, which also inserts the canonical space an
 /// anonymous `function(x)` is missing (`function (x)`).
 ///
-/// Function and macro bodies are the one construct where Runic performs a
-/// **semantic rewrite**: it inserts an implicit `return` on the body's tail
-/// expression (`function f() x end` gains `return x`). Fatou is layout-only and
-/// never inserts a `return`, so this rule reshapes **only** when that rewrite is
-/// provably a no-op — when the body's last statement is already an explicit
-/// `return`. There Runic leaves the statements untouched and merely re-indents,
-/// which `lower_block_body` reproduces exactly. Every other tail (a bare
-/// expression, an `if`/`try`, a loop) — where Runic *would* insert or wrap a
-/// `return` — bails to the verbatim transparent lowering, as does an empty body
-/// (`function f() end`, which Runic likewise leaves on one line) or any unmodeled
-/// shape (a missing signature or `end`, an unexpected child).
+/// Fatou is layout-only: it never inserts an implicit `return` and never inspects
+/// the body's tail. Any non-empty body is reshaped and re-indented to the
+/// canonical body indent regardless of how its tail is written (`function f() x
+/// end` lays out `x` at the body indent, untouched). An **empty** body
+/// (`function f() end`, which `lower_block_body` reports as `None`) stays on one
+/// line, as does any unmodeled shape (a missing signature or `end`, an unexpected
+/// child), via the verbatim transparent lowering.
 fn lower_function(node: &SyntaxNode) -> Ir {
     let kw = match node.kind() {
         SyntaxKind::FUNCTION_DEF => "function",
@@ -2096,14 +2092,6 @@ fn lower_function(node: &SyntaxNode) -> Ir {
     let (true, true, Some(signature), Some(block)) = (saw_kw, saw_end, signature, block) else {
         return lower_transparent(node);
     };
-
-    // Return-insertion guard: only reshape when Runic's implicit-return rewrite is
-    // a no-op, i.e. the body's tail statement is already an explicit `return`.
-    // Anything else (or an empty body, whose last child node is absent) bails so
-    // we never indent a body Runic would also have rewritten.
-    if block.children().last().map(|n| n.kind()) != Some(SyntaxKind::RETURN_EXPR) {
-        return lower_transparent(node);
-    }
 
     let Some(body) = lower_block_body(&block) else {
         return lower_transparent(node);
