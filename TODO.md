@@ -218,22 +218,25 @@ leverage.
   separators so each statement gets its own line (`begin x; y end` →
   `⏎  x⏎  y`, Tenet 1); blank lines preserved capped at 1; statements
   lowered recursively so inner spacing normalizes and nested blocks indent further;
-  an empty block keeps its source layout via the transparent fallback; bails on a
-  body comment, two statements with no separator, or a missing `end`; locked by
+  an empty block collapses to the canonical inline `begin end`/`quote end` via
+  the shared `push_block_body` helper (Tenet 1); bails on a body comment, two
+  statements with no separator, or a missing `end`; locked by
   `begin_quote_blocks/`. `lower_block_body` is the reusable body engine for future
   block constructs), `let` block-body indentation (`lower_let` over `LET_EXPR`:
   `let x = 1; y = 2 end` → `let x = 1⏎    y = 2⏎end`—the first reuse of
   `lower_block_body`; header is `let` + recursively-lowered `LET_BINDINGS`, the
-  binding/body separator `;` opens the `BLOCK`; empty body keeps its source layout
-  via the transparent fallback; tight multi-binding headers (`let x=1,y=2`) are not
+  binding/body separator `;` opens the `BLOCK`; an empty body collapses to the
+  canonical inline `let end` (or `let x = 1 end`) via `push_block_body` (Tenet 1);
+  tight multi-binding headers (`let x=1,y=2`) are not
   normalized—the parser leaves later bindings as flat tokens—so kept out of the
   fixture; locked by `let_blocks/`), `while`/`for` loop-body indentation
   (`lower_loop` over `WHILE_EXPR`/`FOR_EXPR`: `while c⏎x end` → `while c⏎    x⏎
   end`—the header is the recursively-lowered `CONDITION` (`while`) or `FOR_BINDING`
   (`for`, supplying the `for ` prefix the binding omits, so `for i = 1:3` →
   `for i in 1:3`), then `lower_block_body` for the body; a non-empty one-line body
-  is exploded vertical (`while c; x; y; end` → `while c⏎    x; y⏎end`); empty body
-  keeps its source layout via the transparent fallback; loop bodies are never
+  is exploded vertical (`while c; x; y; end` → `while c⏎    x; y⏎end`); an empty
+  body collapses to the canonical inline `while c end`/`for i in y end` via
+  `push_block_body` (Tenet 1); loop bodies are never
   `return`-inserted; locked by `loop_blocks/`. Multi-binding `for i = 1:3, j = 1:3`
   leaves its 2nd+ bindings as flat tokens (the `let`/`global`/`local` parser
   asymmetry), so only the first normalizes—kept out of the fixture; one-line
@@ -280,8 +283,9 @@ leverage.
   `indent_toplevel`/`indent_module` rule — flush when the module is the lone
   top-level node or is nested in a non-module block, indented when it shares the
   top level with a sibling or has a `module` ancestor (`module_should_indent`);
-  the `SIGNATURE` is lowered recursively; an empty `module E end` bails to
-  transparent; module bodies are declarations, never `return`-inserted; locked by
+  the `SIGNATURE` is lowered recursively; an empty body collapses to the canonical
+  inline `module M end` via `push_block_body` (Tenet 1); module bodies are
+  declarations, never `return`-inserted; locked by
   `module_blocks/` + `module_siblings/` + `module_baremodule/` +
   `module_leading_comment/`), `abstract type`/`primitive type` keyword-region
   whitespace (`lower_type_decl` over `ABSTRACT_DEF`/`PRIMITIVE_DEF`: bodyless
@@ -297,8 +301,9 @@ leverage.
   the Runic-era return-insertion guard was dropped (Tenet 1: Fatou is layout-only,
   never inserts `return` and never inspects the tail), so **any** non-empty body
   reflows to the canonical body indent regardless of tail or source indentation;
-  an empty body or unmodeled shape still bails to transparent; locked by
-  `function_blocks/`),
+  an empty body collapses to the canonical inline `function f() end` via
+  `push_block_body` (Tenet 1); an unmodeled shape still bails to transparent;
+  locked by `function_blocks/`),
   `do` blocks (`lower_do` over `DO_EXPR`: the call head sits *before* the `do`
   keyword and is lowered recursively, the optional `DO_PARAMS` arg list is
   `", "`-joined via `lower_do_params` (`do x,y` → `do x, y`, destructure `do (x, y)`

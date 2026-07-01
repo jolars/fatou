@@ -2043,10 +2043,10 @@ fn lower_matrix_row(node: &SyntaxNode) -> Option<Ir> {
 ///
 /// A **non-empty** block is always exploded to the vertical form, even if the
 /// source wrote it on one line: `begin x end` → `begin⏎    x⏎end`. An **empty**
-/// block keeps its source layout (`begin end`, `begin⏎end`) via the transparent
-/// fallback, which is byte-identical to Runic's preservation there. Any shape
-/// this does not fully model — a comment in the body, two statements with no
-/// separator, a missing `end`, or an unexpected child — also falls back to the
+/// block collapses to the canonical inline `begin end`/`quote end` via
+/// [`push_block_body`], regardless of how the source spaced it (Tenet 1). Any
+/// shape this does not fully model — a comment in the body, two statements with
+/// no separator, a missing `end`, or an unexpected child — falls back to the
 /// verbatim transparent lowering.
 fn lower_block_expr(node: &SyntaxNode) -> Ir {
     let kw = match node.kind() {
@@ -2079,11 +2079,41 @@ fn lower_block_expr(node: &SyntaxNode) -> Ir {
     let (Some(block), true) = (block, saw_end) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
-        return lower_transparent(node);
-    };
 
-    Ir::concat([Ir::text(kw), body, Ir::HardLine, Ir::text("end")])
+    let mut parts = vec![Ir::text(kw)];
+    if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
+        return lower_transparent(node);
+    }
+    Ir::concat(parts)
+}
+
+/// Append a block's body to `parts` under the shared empty-body policy, returning
+/// `false` when the caller must bail to the verbatim transparent lowering.
+///
+/// `render` produces the body IR (`None` for an empty or unmodeled body). A
+/// non-empty body explodes to the vertical form (body + `HardLine` + `end`); a
+/// genuinely empty body (only whitespace, newline, or `;` tokens, per
+/// [`block_is_empty`]) collapses to the canonical inline ` end`, so every
+/// spelling of an empty body formats identically (Tenet 1); any other `None`
+/// (a body shape the engine rejects) reports `false` so the caller bails.
+fn push_block_body(
+    parts: &mut Vec<Ir>,
+    block: &SyntaxNode,
+    render: impl FnOnce() -> Option<Ir>,
+) -> bool {
+    match render() {
+        Some(body) => {
+            parts.push(body);
+            parts.push(Ir::HardLine);
+            parts.push(Ir::text("end"));
+            true
+        }
+        None if block_is_empty(block) => {
+            parts.push(Ir::text(" end"));
+            true
+        }
+        None => false,
+    }
 }
 
 /// Lay out a `struct`/`mutable struct` definition by indenting its field body
@@ -2140,16 +2170,8 @@ fn lower_struct(node: &SyntaxNode) -> Ir {
     }
     parts.push(Ir::text("struct "));
     parts.push(lower_node(&signature));
-    match lower_block_body(&block) {
-        Some(body) => {
-            parts.push(body);
-            parts.push(Ir::HardLine);
-            parts.push(Ir::text("end"));
-        }
-        // A genuinely empty body collapses to the inline `struct Name end`; a body
-        // `lower_block_body` rejected for an unmodeled shape still bails verbatim.
-        None if block_is_empty(&block) => parts.push(Ir::text(" end")),
-        None => return lower_transparent(node),
+    if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
+        return lower_transparent(node);
     }
     Ir::concat(parts)
 }
@@ -2181,10 +2203,11 @@ fn block_is_empty(block: &SyntaxNode) -> bool {
 /// Fatou is layout-only: it never inserts an implicit `return` and never inspects
 /// the body's tail. Any non-empty body is reshaped and re-indented to the
 /// canonical body indent regardless of how its tail is written (`function f() x
-/// end` lays out `x` at the body indent, untouched). An **empty** body
-/// (`function f() end`, which `lower_block_body` reports as `None`) stays on one
-/// line, as does any unmodeled shape (a missing signature or `end`, an unexpected
-/// child), via the verbatim transparent lowering.
+/// end` lays out `x` at the body indent, untouched). An **empty** body collapses
+/// to the canonical inline `function f() end` via [`push_block_body`], regardless
+/// of how the source spaced it (Tenet 1). Any unmodeled shape (a missing
+/// signature or `end`, an unexpected child) bails to the verbatim transparent
+/// lowering.
 fn lower_function(node: &SyntaxNode) -> Ir {
     let kw = match node.kind() {
         SyntaxKind::FUNCTION_DEF => "function",
@@ -2219,18 +2242,11 @@ fn lower_function(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    let Some(body) = lower_block_body(&block) else {
+    let mut parts = vec![Ir::text(kw), Ir::text(" "), lower_node(&signature)];
+    if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
         return lower_transparent(node);
-    };
-
-    Ir::concat([
-        Ir::text(kw),
-        Ir::text(" "),
-        lower_node(&signature),
-        body,
-        Ir::HardLine,
-        Ir::text("end"),
-    ])
+    }
+    Ir::concat(parts)
 }
 
 /// Lay out a `do`-block (`CALL_EXPR do <params> BLOCK end`). The call head sits
@@ -2398,9 +2414,9 @@ fn lower_type_decl(node: &SyntaxNode) -> Ir {
 ///
 /// Module bodies are declarations, never `return`-inserted, so there is no
 /// semantic-rewrite risk here (a `function` *inside* the body still would be, so
-/// fixtures keep those out). An **empty** body (`module E end`) makes the body
-/// engine return `None`, and the transparent fallback preserves the source
-/// byte-for-byte. Any unmodeled shape — a missing signature or `end`, a body
+/// fixtures keep those out). An **empty** body collapses to the canonical inline
+/// `module M end` via [`push_block_body`], regardless of how the source spaced it
+/// (Tenet 1). Any unmodeled shape — a missing signature or `end`, a body
 /// comment the engine rejects, an unexpected child — also falls back to the
 /// verbatim transparent lowering.
 fn lower_module(node: &SyntaxNode) -> Ir {
@@ -2431,22 +2447,18 @@ fn lower_module(node: &SyntaxNode) -> Ir {
     let (Some(kw), Some(signature), Some(block), true) = (kw, signature, block, saw_end) else {
         return lower_transparent(node);
     };
-    let body = if module_should_indent(node) {
-        lower_block_body(&block)
-    } else {
-        build_block_body(&block)
-    };
-    let Some(body) = body else {
+    let mut parts = vec![Ir::text(kw), lower_node(&signature)];
+    let rendered = push_block_body(&mut parts, &block, || {
+        if module_should_indent(node) {
+            lower_block_body(&block)
+        } else {
+            build_block_body(&block)
+        }
+    });
+    if !rendered {
         return lower_transparent(node);
-    };
-
-    Ir::concat([
-        Ir::text(kw),
-        lower_node(&signature),
-        body,
-        Ir::HardLine,
-        Ir::text("end"),
-    ])
+    }
+    Ir::concat(parts)
 }
 
 /// Whether a module's body is indented, reproducing Runic's decision. A module
@@ -2476,9 +2488,9 @@ fn module_should_indent(node: &SyntaxNode) -> bool {
 /// A **non-empty** body is always exploded to the vertical form, even when the
 /// source wrote it on one line (`let x = 1; y = 2 end` → `let x = 1⏎    y = 2⏎
 /// end`): the binding-from-body separator `;` opens the `BLOCK`, so the body
-/// statements already live inside it. An **empty** body (`let end`, `let⏎end`,
-/// or `let x = 1⏎end`) keeps its source layout via the transparent fallback,
-/// which is byte-identical to the target's preservation there.
+/// statements already live inside it. An **empty** body collapses to the
+/// canonical inline `let end` (or `let x = 1 end` when the header binds), via
+/// [`push_block_body`], regardless of how the source spaced it (Tenet 1).
 ///
 /// The binding list is lowered recursively (so `let x = 1` keeps its spacing),
 /// but it is not otherwise reshaped: the parser leaves the second and later
@@ -2514,18 +2526,15 @@ fn lower_let(node: &SyntaxNode) -> Ir {
     let (true, true, Some(block)) = (saw_let, saw_end, block) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
-        return lower_transparent(node);
-    };
 
     let mut parts: Vec<Ir> = vec![Ir::text("let")];
     if let Some(bindings) = bindings {
         parts.push(Ir::text(" "));
         parts.push(lower_node(&bindings));
     }
-    parts.push(body);
-    parts.push(Ir::HardLine);
-    parts.push(Ir::text("end"));
+    if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
+        return lower_transparent(node);
+    }
     Ir::concat(parts)
 }
 
@@ -2541,12 +2550,12 @@ fn lower_let(node: &SyntaxNode) -> Ir {
 /// A **non-empty** body is always exploded to the vertical form, even when the
 /// source wrote it on one line (`while x; y; z; end` → `while x⏎    y; z⏎end`):
 /// the leading `;` opens the `BLOCK`, so the body statements live inside it. An
-/// **empty** body (`while x end`, `for i in y end`) makes `lower_block_body`
-/// return `None`, and the transparent fallback preserves the source layout
-/// byte-for-byte, matching the target. Loop bodies are never `return`-inserted
-/// (only function bodies are), so there is no semantic-rewrite risk. Any shape
-/// this does not fully model — a body comment, a missing `end`, an unexpected
-/// child — also falls back to the verbatim transparent lowering.
+/// **empty** body collapses to the canonical inline `while x end`/`for i in y
+/// end` via [`push_block_body`], regardless of how the source spaced it
+/// (Tenet 1). Loop bodies are never `return`-inserted (only function bodies are),
+/// so there is no semantic-rewrite risk. Any shape this does not fully model — a
+/// body comment, a missing `end`, an unexpected child — also falls back to the
+/// verbatim transparent lowering.
 fn lower_loop(node: &SyntaxNode) -> Ir {
     let kw = match node.kind() {
         SyntaxKind::WHILE_EXPR => "while",
@@ -2582,18 +2591,12 @@ fn lower_loop(node: &SyntaxNode) -> Ir {
     let (true, true, Some(header), Some(block)) = (saw_kw, saw_end, header, block) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
-        return lower_transparent(node);
-    };
 
-    Ir::concat([
-        Ir::text(kw),
-        Ir::text(" "),
-        lower_node(&header),
-        body,
-        Ir::HardLine,
-        Ir::text("end"),
-    ])
+    let mut parts = vec![Ir::text(kw), Ir::text(" "), lower_node(&header)];
+    if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
+        return lower_transparent(node);
+    }
+    Ir::concat(parts)
 }
 
 /// Lay out an `if`/`elseif`/`else` chain, indenting each branch body one step

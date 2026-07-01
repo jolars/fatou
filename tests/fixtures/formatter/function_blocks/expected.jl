@@ -19,6 +19,9 @@ macro m(x)
     return esc(x)
 end
 function empty() end
+function empty2() end
+function empty3() end
+macro noop() end
 function add(a, b)
     c = a + b
     c

@@ -21,3 +21,8 @@ p
 
 q
 end
+begin
+end
+quote
+
+end

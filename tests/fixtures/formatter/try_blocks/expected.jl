@@ -1,0 +1,21 @@
+try
+    risky()
+catch
+    handle()
+end
+try
+    a
+catch err
+    b
+finally
+    c
+end
+try
+    p
+catch e
+    q
+else
+    r
+finally
+    s
+end

@@ -82,46 +82,62 @@ Tenet 1.
   `lower_block_expr` (begin/quote), `lower_let`, `lower_loop` (while/for),
   `lower_if`/`lower_try` (+ `lower_branch_clause`), `lower_struct`,
   `lower_function`, `lower_do` (+ `lower_do_params`), `lower_module`
-  (+ `module_should_indent`), `lower_type_decl` (abstract/primitive).
+  (+ `module_should_indent`), `lower_type_decl` (abstract/primitive). Empty
+  single-body blocks (struct/function/macro/loop/let/begin/quote/module) collapse
+  to the canonical inline `… end` via the shared `push_block_body` helper
+  (`block_is_empty` gates it); `if`/`try`/`do` still bail transparent on empty.
 - Comments: own-line + trailing line comments and block comments in block bodies,
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gate `struct_blocks` + empty-body collapse)
+## Latest session (empty-body uniformity fold + gate `try_blocks`)
 
-Gated `struct`/`mutable struct`. Non-empty bodies were already canonical (4-space
-reflow, `<:` spacing, `;`-vs-newline equivalent, 1-blank cap), but the **empty
-body** was a live Tenet-1 hole: `lower_struct` bailed to transparent on an empty
-`BLOCK`, so `struct E end`, `struct E⏎end`, and `struct E⏎⏎end` formatted three
-different ways. Fixed: empty bodies now collapse to the canonical inline
-`struct Name end` (user call — inline over exploded). New `block_is_empty(block)`
-helper (only WS/NEWLINE/`;` tokens, no nodes/comments) distinguishes a genuinely
-empty body from one `lower_block_body` rejects for an unmodeled shape — the latter
-still bails transparent. Added empty variants (`Newline`, `EmptyMut`,
-`EmptySuper <: Super`) to `input.jl` to exercise it. Gate 18→19; suite (45) +
-clippy + fmt green.
+Closed the empty-body Tenet-1 hole across the **single-body** blocks, generalizing
+last session's struct fix. Before: `function f() end`, `function f()⏎end`, and
+`function f()⏎⏎end` formatted three different ways (empty bodies fell through
+`lower_block_body` → `None` → `lower_transparent`, which passes source verbatim).
+Now every spelling of an empty body collapses to the canonical **inline** form
+(user call — inline over exploded, consistent with struct): `function f() end`,
+`macro m() end`, `while c end`, `for i in x end`, `let end` / `let x = 1 end`,
+`begin end`, `quote end`, `module M end`.
 
-`block_is_empty` is reusable: the same empty-body source-mirror exists in
-`lower_function`, `lower_loop`, `lower_let`, `lower_block_expr`, `lower_if`/
-`lower_try` (all bail transparent on empty). Folding them onto the same inline
-policy is the natural follow-up to make empty-block handling uniform.
+Implementation: new shared helper `push_block_body(parts, block, render)` — runs
+`render()`, on `Some` explodes vertical (body + `HardLine` + `end`), on
+`None if block_is_empty(block)` pushes the inline `" end"`, else returns `false`
+so the caller bails transparent. Refactored `lower_struct`, `lower_function`,
+`lower_loop`, `lower_let`, `lower_block_expr`, `lower_module` onto it (struct kept
+identical output). Locked with newline-form empty variants added to the gated
+`function_blocks` (`empty2`, `empty3`, `macro noop`) and `begin_quote_blocks`
+(`begin⏎end`, `quote⏎⏎end`) fixtures. Also gated `try_blocks` as-is (pure
+fixture, no code — output was already canonical). Gate 19→20; suite (45) + clippy
++ fmt green.
 
-**Still blocked:** `loop_blocks`/`let_blocks` on the top-level blank-line policy
-(blanks *between* top-level constructs pass verbatim through `lower_transparent`,
-uncapped — inconsistent with the block-body 1-blank cap). `try_blocks` is ready to
-gate as-is. `lower_paren_block` (`paren_blocks`, `paren_multiline`) also pending.
+**Scope note:** the fold covers single-body blocks only. `if`/`try` (multi-clause)
+and `do` (call-head) still bail transparent on an empty body — folding them needs
+per-clause reasoning (e.g. `if x else end` has two empty bodies) and is deferred.
+`try_blocks`'s fixture has no empty-body case, so gating it did not touch this.
 
-**Deferred (carried forward):** the top-level blank-line policy is undecided —
-blanks *between top-level constructs* pass verbatim through `lower_transparent`
-(no cap), inconsistent with the block-body 1-blank cap. Blocks `loop_blocks` and
-`let_blocks`. The other ranked re-eval targets are `struct_blocks`/`try_blocks`
-(ready now) and `lower_paren_block` (`paren_blocks`, `paren_multiline`).
+**Still blocked:** `loop_blocks`/`let_blocks` remain ungated on the top-level
+blank-line policy (blanks *between* top-level constructs pass verbatim through
+`lower_transparent`, uncapped — inconsistent with the block-body 1-blank cap).
+`lower_paren_block` (`paren_blocks`, `paren_multiline`) also pending.
+
+**Ranked next targets:** (1) decide the **top-level blank-line policy** — unblocks
+`loop_blocks`/`let_blocks` and is a real Tenet-1 gap; (2) `lower_paren_block`
+(`paren_blocks`, `paren_multiline`); (3) extend the empty-body fold to `if`/`try`/
+`do`; (4) the headline **width-driven reflow engine** (see the pivot notes).
 
 Trap: `build_block_body` uses a Rust let-chain (`if j == last && let Some(...)`)
 — fine on this toolchain. Default indent width is **4** (commit `c552607`).
+Clippy trap: `bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` —
+use a plain `if !flag { return ... }`.
 
 ## Earlier sessions
 
+- **Gated `struct_blocks` + empty-body collapse** (committed): `lower_struct`
+  gained the inline empty-body collapse (`struct E end`) plus the reusable
+  `block_is_empty` helper; the follow-up this session generalized it to the other
+  single-body blocks. Gate 18→19.
 - **Gated `keyword_statements`** (committed `a069201`): pure `test(formatter)`, no
   code — `lower_keyword_stmt` already emits the canonical `return`/`const`/
   `global`/`local` form (one space after keyword, operand normalized, bare
