@@ -1,0 +1,30 @@
+{
+	"name": "@fatou/__NAME__",
+	"version": "__VERSION__",
+	"description": "Prebuilt fatou binary for __NAME__. Install fatou instead.",
+	"homepage": "https://github.com/jolars/fatou",
+	"bugs": "https://github.com/jolars/fatou/issues",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/jolars/fatou.git"
+	},
+	"license": "MIT",
+	"author": "Johan Larsson <johan@jolars.co>",
+	"files": [
+		"__BINARY__",
+		"README.md",
+		"LICENSE"
+	],
+	"os": [
+		"__OS__"
+	],
+	"cpu": [
+		"__CPU__"
+	],
+	"libc": [
+		"__LIBC__"
+	],
+	"engines": {
+		"node": ">=20"
+	}
+}
