@@ -9,6 +9,9 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 
+# mdBook build output
+/docs/book
+
 # Added by cargo
 
 /target

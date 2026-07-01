@@ -41,6 +41,32 @@ tasks:
     cmds:
       - cargo deny check
 
+  docs-preview:
+    desc: Serve the docs site locally with live reload
+    cmds:
+      - mdbook serve docs --open
+
+  docs-build:
+    desc: Build the docs site into docs/book with canonical links and sitemap
+    cmds:
+      - mdbook build docs
+      - task: docs-canonical
+      - task: docs-sitemap
+
+  docs-canonical:
+    desc: Inject <link rel="canonical"> into each rendered page
+    cmds:
+      - >-
+        cargo run --quiet --example canonical --
+        docs/book https://fatou.dev/
+
+  docs-sitemap:
+    desc: Generate docs/book/sitemap.xml from the rendered book
+    cmds:
+      - >-
+        cargo run --quiet --example sitemap --
+        docs/book https://fatou.dev/
+
   logo:
     desc: 'Generate the logo (pass params after --, e.g. `task logo -- mode=newton`)'
     cmds:

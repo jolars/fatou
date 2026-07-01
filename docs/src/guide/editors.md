@@ -1,22 +1,21 @@
-# Using Fatou from Neovim
+# Editor Setup
 
 Fatou ships a language server (`fatou lsp`, stdio JSON-RPC) that already
 advertises **document formatting** and pushes **parse diagnostics**. This guide
-wires it into Neovim so you can format Julia buffers and see parse errors
+wires it into your editor so you can format Julia buffers and see parse errors
 inline.
 
-> Coverage is growing construct by construct (see `TODO.md`); constructs without
-> a rule yet are left byte-identical, so formatting is always safe to run.
+> Coverage is growing construct by construct; constructs without a formatting
+> rule yet are left byte-identical, so formatting is always safe to run.
 
 ## Prerequisites
 
-Build the binary and put it on your `PATH` (or note its absolute path):
+Install Fatou (see [Getting Started](../getting-started.md)) and make sure the
+`fatou` binary is on your `PATH`, or note its absolute path.
 
-```sh
-cargo build --release        # target/release/fatou
-```
+## Neovim
 
-## Neovim 0.11+ (built-in `vim.lsp.config`)
+### Neovim 0.11+ (built-in `vim.lsp.config`)
 
 Add to your config (e.g. `init.lua` or a file under `lua/`):
 
@@ -38,7 +37,7 @@ vim.api.nvim_create_autocmd("BufWritePre", {
 })
 ```
 
-## Older Neovim (autocmd + `vim.lsp.start`)
+### Older Neovim (autocmd + `vim.lsp.start`)
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
@@ -53,7 +52,7 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 ```
 
-## Try it
+### Try it
 
 Open a `.jl` file containing `x=1`, then run `:lua vim.lsp.buf.format()` (or
 just save with the autocmd above). It becomes `x = 1`. Parse errors, if any,
@@ -62,7 +61,6 @@ appear as diagnostics (`:lua vim.diagnostic.open_float()`).
 ## Notes
 
 - The server uses **full-document sync** and full-document formatting today;
-  range formatting (`textDocument/rangeFormatting`) is on the roadmap
-  (`TODO.md`).
+  range formatting (`textDocument/rangeFormatting`) is on the roadmap.
 - Multiple formatters? `vim.lsp.buf.format({ name = "fatou" })` forces Fatou
   even if another Julia LSP is attached.

@@ -1,0 +1,16 @@
+[book]
+title = "Fatou"
+description = "Language server, formatter, and linter for Julia"
+authors = ["Johan Larsson"]
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "https://fatou.dev/"
+git-repository-url = "https://github.com/jolars/fatou"
+edit-url-template = "https://github.com/jolars/fatou/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+enable = true

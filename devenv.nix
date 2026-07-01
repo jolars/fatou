@@ -12,6 +12,7 @@
     pkgs.cargo-deny
     pkgs.cargo-insta
     pkgs.go-task
+    pkgs.mdbook
     pkgs.llvmPackages.bintools
     pkgs.prettier
     # JuliaSyntax.jl (the parser oracle, see AGENTS.md) installs via the Julia

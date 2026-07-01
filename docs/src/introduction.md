@@ -1,0 +1,38 @@
+# Fatou <img src="./images/logo.png" alt="Fatou logo" class="right" style="width: 139px; padding: 10px;" />
+
+Fatou is a language server, formatter, and linter for the
+[Julia](https://julialang.org) language, written in Rust. It follows the
+rust-analyzer design (a lossless [`rowan`](https://crates.io/crates/rowan) CST,
+[`salsa`](https://crates.io/crates/salsa) for incremental computation, and
+[`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
+transport) and is modeled on the author's R tooling project,
+[arity](https://arity.cc/).
+
+> **Status: early groundwork.** The full architecture is in place; the parser
+> covers a growing Julia subset, the formatter has started landing per-construct
+> layout rules (gated by hand-authored fixtures), and no lint rules ship yet.
+
+## Quick Start
+
+Install with Cargo:
+
+```bash
+cargo install fatou
+```
+
+Format your first file:
+
+```bash
+fatou format file.jl
+```
+
+For full installation options (npm, PyPI, prebuilt binaries, and source builds),
+see [Getting Started](getting-started.md).
+
+## Where to Go Next
+
+- [Getting Started](getting-started.md): complete installation and first-run
+  walkthrough.
+- [Editor Setup](guide/editors.md): connect the language server to your editor.
+- [Configuration](reference/configuration.md): every `fatou.toml` key.
+- [CLI Reference](reference/cli.md): every command and option.

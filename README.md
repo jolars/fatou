@@ -42,8 +42,8 @@ Configuration lives in `fatou.toml` (`[format]` line_width/indent_width,
 ## Editor integration
 
 The language server (`fatou lsp`) provides formatting and parse diagnostics over
-stdio. See [`docs/editors/neovim.md`](docs/editors/neovim.md) for a Neovim
-setup.
+stdio. See the [editor setup guide](https://fatou.dev/guide/editors.html) for
+Neovim instructions.
 
 ## Development
 
