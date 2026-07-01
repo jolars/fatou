@@ -93,35 +93,38 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (top-level `;`-join reflow: `TOPLEVEL_SEMICOLON`)
+## Latest session (width-driven paren reflow: `lower_paren`)
 
-Closed the last top-level `;`-separator Tenet-1 hole. The parser folds a top-level
-`a; b; c` into one `TOPLEVEL_SEMICOLON` node child of `ROOT`; before, that node
-reached `lower_root` (via `collect_body_lines`) as a single opaque statement and
-passed through with its `;` joins intact (`a = 1;y = 2`), so `a; b` and `a⏎b`
-diverged. Fix: **flatten the wrapper in the line collector**. Split the per-element
-loop out of `collect_body_lines` into `collect_body_elements(node, &mut lines,
-&mut expect_sep) -> Option<()>`; when it meets a `TOPLEVEL_SEMICOLON` child it
-recurses through that node's children with the *same* `lines`/`expect_sep` state,
-so the inner statements + `;` separators feed the existing logic (`;` and `NEWLINE`
-already equivalent). Each top-level `;`-joined statement thus lands on its own
-`HardLine` in `lower_root`, exactly as block bodies already do. No IR/printer
-change; `rules.rs`-only.
+Killed the source-break mirror in `lower_paren` (`PAREN_EXPR`). Before, it branched
+on `has_newline_token`: any `NEWLINE` anywhere in the subtree forced the framing
+break, so `x = (\n1 + 2\n)` stayed exploded even though `(1 + 2)` fits. Now it emits
+one width-driven `Ir::group` — flat `(inner)` when it fits `line_width`, else `(` /
++indent body / `)` — exactly like `lower_arg_list`/`lower_collection`. Source line
+breaks no longer force the split; only the inner content's width (or a hard break it
+carries) does. Padding-strip and blank-line-drop are unchanged (the loop still skips
+every `WHITESPACE`/`NEWLINE`, so only the single inner node reaches layout). IR is
+already SoftLine/group; `rules.rs`-only.
 
-Handled shapes (all verified): `a; b; c` → one per line; trailing `;` (`a;`,
-`a; b;`) drops the empty tail; `a;;b` collapses like the block `;;`; a trailing
-comment on the `;` line (`a; # c`) rides its statement; inner assignments/calls
-still normalize (`x=1;y=2` → `x = 1`⏎`y = 2`). Block bodies are untouched — the new
-branch only fires on `TOPLEVEL_SEMICOLON`, which the parser emits solely at root.
+Gated `paren_multiline/` (source paren-breaks collapse — `x = (\n1+2\n)` → `(1 + 2)`,
+nested `((1))`, call-split `(f(a,\nb))` → `(f(a, b))`, plus a width-forced break case
+that frames a too-wide call) and `paren_blocks/` (the `;`-block `(a; b)` — already
+deterministic via `lower_paren_block`: padding stripped, `;` canonicalized, trailing
+`;` dropped, nested normalized; pure fixture, no code). Gate 24→26; suite (45) +
+clippy + fmt green; idempotent.
 
-Gated `toplevel_semicolon/` (multi-join, trailing `;`, spacing-normalize). Gate
-23→24; suite (45) + clippy + fmt green; idempotent + clean reparse hold.
+**Deferred:** a binary operator split across source lines *inside* a paren
+(`y = (a +\nb)`) still won't collapse — the paren group is now width-driven, but the
+inner `lower_binary` still emits a source-mirrored `HardLine`, which forces the paren
+to break. Dropped that case from `paren_multiline`'s input (it's a binary-continuation
+test, not a paren test; the shape stays covered for stability by `binary_continuation/
+input.jl`). It collapses once binary continuation goes width-driven.
 
-**Ranked next targets:** (1) `lower_paren_block` (`paren_blocks`, `paren_multiline`
-— still source-break mirroring); (2) extend the empty-body inline fold to
-`if`/`try`/`do` (needs per-clause reasoning, e.g. `if x else end` has two empty
-bodies); (3) the headline **width-driven reflow engine** (see the pivot notes) —
-the largest remaining piece and the prerequisite for full Tenet-1 conformance.
+**Ranked next targets:** (1) width-driven `lower_binary` / binary continuation
+(retire the `has_newline_token` + `binary_group_breaks` HardLine mirror — unblocks the
+deferred paren case and gates `binary_continuation/`); (2) extend the empty-body
+inline fold to `if`/`try`/`do` (per-clause reasoning, e.g. `if x else end` has two
+empty bodies); (3) the headline **width-driven reflow engine** more broadly (see the
+pivot notes).
 
 Trap: `build_block_body`/`lower_root` use a Rust let-chain (`if j == last && let
 Some(...)`) — fine on this toolchain. Default indent width is **4** (commit
@@ -132,6 +135,14 @@ must end with one (`lower_root` pushes a final `HardLine`). Clippy trap:
 
 ## Earlier sessions
 
+- **Top-level `;`-join reflow (`TOPLEVEL_SEMICOLON`)** (committed `a23697c`): closed
+  the last top-level `;`-separator Tenet-1 hole. The parser folds `a; b; c` into one
+  `TOPLEVEL_SEMICOLON` child of `ROOT`; `collect_body_lines` now flattens it via the
+  extracted `collect_body_elements(node, &mut lines, &mut expect_sep)` recursion, so
+  each `;`-joined statement lands on its own line exactly as a block body's do
+  (`a; b` ≡ `a⏎b`). Trailing `;` drops the empty tail, `a;;b` collapses. Block bodies
+  untouched (the branch only fires on `TOPLEVEL_SEMICOLON`). Gated
+  `toplevel_semicolon/`. Gate 23→24.
 - **Top-level blank-line policy (`lower_root`)** (committed `5589f58`): closed the
   file-level blank Tenet-1 hole — `ROOT` no longer falls through transparent.
   `lower_root` reflows deterministically: interior blank runs cap at

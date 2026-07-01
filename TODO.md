@@ -187,15 +187,16 @@ leverage.
   whitespace flanking the single inner expression, which is lowered recursively
   so nested parens `( (a) )` → `((a))` and the inner spacing keep normalizing;
   the `;`-block `(a; b)` is a distinct `PAREN_BLOCK` and a tuple `(a, b)` is a
-  `TUPLE_EXPR`, so neither reaches the arm; locked by `paren_padding/`. A paren
-  whose subtree spans ≥2 source lines instead explodes vertical—`(` then the inner
-  expression at `+4` then `)` flush—the break being contagious from any descendant
-  newline (`(f(a,\nb))`) and the inner binary's continuation indent composing on
-  top of the content indent (`(a +\nb)` → `b` at `+8`); bails on a comment in a
-  direct gap, locked by `paren_multiline/`. Blank lines inside the parens are
-  **stripped** while the source-driven break is kept (a deliberate divergence from
-  Runic, which preserves them; recorded as `paren_blank_line_divergence`)),
-  `;`-block padding and
+  `TUPLE_EXPR`, so neither reaches the arm. `lower_paren` is now **width-driven**
+  (Tenet 1): one `Ir::group` — flat `(inner)` when it fits `line_width`, else `(`
+  then the inner expression at `+indent` then `)` flush. Source line breaks no longer
+  force the split (`x = (\n1+2\n)` → `(1 + 2)`); only the content's width or a hard
+  break it carries does. Blank lines inside the parens are stripped (the loop skips
+  every `NEWLINE`/`WHITESPACE`, so only the inner node reaches layout). Bails on a
+  comment in a direct gap; locked by `paren_multiline/` + `paren_padding/`. Deferred:
+  a binary operator split across source lines *inside* a paren (`y = (a +\nb)`) still
+  won't collapse until `lower_binary` goes width-driven (its source-mirrored
+  `HardLine` forces the paren to break)), `;`-block padding and
   separators (`lower_paren_block` over `PAREN_BLOCK`: `( a ; b )` → `(a; b)`,
   `(a;b;)` → `(a; b)`—each `;` packed tight-left/space-right, the padding stripped,
   a trailing arg-less `;` dropped; the leading statement and each `PARAMETERS`

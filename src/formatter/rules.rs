@@ -270,19 +270,17 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
 
 /// Lay out a parenthesized expression (`(a + b)`).
 ///
-/// **Single-line** (no `NEWLINE` token anywhere in the subtree): **no padding**
-/// inside the parentheses—`( a + b )` → `(a + b)`, `(  x  )` → `(x)`. Runic strips
-/// the incidental whitespace flanking the inner expression. The single inner node
-/// is lowered recursively, so a nested paren (`( (a) )` → `((a))`) and the inner
-/// expression's own spacing keep normalizing.
-///
-/// **Multi-line** (the subtree spans ≥2 source lines): Runic forces a framing
-/// break right after `(` and right before `)`, with the inner expression indented
-/// one step—`x = (\n1 + 2\n)` → `(` alone, `1 + 2` at `+4`, `)` flush. The break is
-/// *contagious*: even when the paren's own gaps carry no newline but a descendant
-/// breaks (`(f(a,\nb))`), the paren explodes. The inner node is lowered
-/// recursively, so a broken binary's continuation indent composes on top of the
-/// paren's content indent (`(a +\nb)` → `a` at `+4`, `b` at `+8`).
+/// Width-driven (Tenet 1): the parens frame a single inner node in one `Ir::group`.
+/// **No padding** inside the parentheses—`( a + b )` → `(a + b)`, `(  x  )` → `(x)`;
+/// the incidental whitespace flanking the inner expression is stripped. When the
+/// content fits `line_width` the group stays flat (`(a + b)`); otherwise it takes
+/// the tight framing (`(` alone, the inner expression indented one step, `)` flush).
+/// Source line breaks never force this — `x = (\n1 + 2\n)` collapses to `(1 + 2)`
+/// because it fits; only the content's own width (or a hard break it carries, e.g. a
+/// nested block) drives the split. The inner node is lowered recursively, so a
+/// nested paren (`( (a) )` → `((a))`) and the inner expression's own spacing keep
+/// normalizing, and a broken binary's continuation indent composes on top of the
+/// paren's content indent.
 ///
 /// As with [`lower_arrow`], only clean shapes are reshaped: an interleaved comment
 /// (in a direct gap), error recovery, or a missing/extra operand falls back to the
@@ -290,12 +288,9 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
 /// `PAREN_BLOCK` node, and a tuple `(a, b)` is a `TUPLE_EXPR`, so neither reaches
 /// here.
 ///
-/// **Blank lines are stripped** (a deliberate divergence from Runic, recorded as
-/// `paren_blank_line_divergence`): a single parenthesized value gains nothing from
-/// interior blank lines, so the broken form is always the tight framing
-/// (`(` / `+4` body / `)`) regardless of how many blank lines the source left in
-/// the gaps. Runic instead preserves them (capped at two); Fatou keeps the break
-/// but drops the blanks.
+/// **Blank lines are stripped**: a single parenthesized value gains nothing from
+/// interior blank lines, so the loop skips every `NEWLINE`/`WHITESPACE` token and
+/// only the inner node reaches the layout.
 fn lower_paren(node: &SyntaxNode) -> Ir {
     let mut inner: Option<SyntaxNode> = None;
     let mut extra_operand = false;
@@ -323,16 +318,18 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    if !has_newline_token(node) {
-        return Ir::concat([Ir::text("("), lower_node(&inner), Ir::text(")")]);
-    }
-
-    Ir::concat([
+    // Width-driven (Tenet 1): one `Ir::group` — flat `(inner)` when it fits
+    // `line_width`, else the tight framing (`(` / +indent body / `)`). Source line
+    // breaks never force the break; only the inner content's width (or a hard break
+    // it carries, e.g. a nested block) does. Interior blank lines are already
+    // dropped — the loop above skips every `NEWLINE`/`WHITESPACE` token, so only the
+    // single inner node reaches the layout.
+    Ir::group(Ir::concat([
         Ir::text("("),
-        Ir::indent(Ir::concat([Ir::HardLine, lower_node(&inner)])),
-        Ir::HardLine,
+        Ir::indent(Ir::concat([Ir::SoftLine, lower_node(&inner)])),
+        Ir::SoftLine,
         Ir::text(")"),
-    ])
+    ]))
 }
 
 /// Lay out a `;`-block `(a; b)` (a `PAREN_BLOCK`, distinct from the single-value
