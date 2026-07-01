@@ -93,48 +93,63 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (width-driven paren reflow: `lower_paren`)
+## Latest session (width-driven binary/assignment: `lower_binary`)
 
-Killed the source-break mirror in `lower_paren` (`PAREN_EXPR`). Before, it branched
-on `has_newline_token`: any `NEWLINE` anywhere in the subtree forced the framing
-break, so `x = (\n1 + 2\n)` stayed exploded even though `(1 + 2)` fits. Now it emits
-one width-driven `Ir::group` — flat `(inner)` when it fits `line_width`, else `(` /
-+indent body / `)` — exactly like `lower_arg_list`/`lower_collection`. Source line
-breaks no longer force the split; only the inner content's width (or a hard break it
-carries) does. Padding-strip and blank-line-drop are unchanged (the loop still skips
-every `WHITESPACE`/`NEWLINE`, so only the single inner node reaches layout). IR is
-already SoftLine/group; `rules.rs`-only.
+Retired the source-break mirror in `lower_binary` (`BINARY_EXPR` + `ASSIGNMENT_EXPR`).
+Before, a `NEWLINE` in an operator gap became an `Ir::HardLine` and a single
+continuation indent was applied at the group root (`binary_group_breaks` +
+`is_group_root`). Now it's fully width-driven, following **Air's model** (Posit's R
+formatter — the user picked it as the reference; probed at forced widths):
 
-Gated `paren_multiline/` (source paren-breaks collapse — `x = (\n1+2\n)` → `(1 + 2)`,
-nested `((1))`, call-split `(f(a,\nb))` → `(f(a, b))`, plus a width-forced break case
-that frames a too-wide call) and `paren_blocks/` (the `;`-block `(a; b)` — already
-deterministic via `lower_paren_block`: padding stripped, `;` canonicalized, trailing
-`;` dropped, nested normalized; pure fixture, no code). Gate 24→26; suite (45) +
-clippy + fmt green; idempotent.
+- **Operator-trailing**, each breakable gap an `Ir::Line` (space flat, newline broken).
+- **One `Ir::group` per binary node, each with its own `Ir::indent`.** A tighter
+  subexpression (`b * c`) is its own node/group, so it stays flat on its line while
+  the looser enclosing chain breaks; when an inner subexpr is *itself* forced to
+  break, its indent **nests** on top of its parent's (verified against Air at width 20).
+- **Assignment operators never break.** `ASSIGNMENT_EXPR` joins its op with flat
+  spaces (` = `) and emits no group/indent of its own; the break is biased into the
+  RHS, whose own group absorbs it (`x = a +⏎ b`, never `x =⏎ a + b`). Detected via
+  `node.kind() == ASSIGNMENT_EXPR` (covers `=`, `+=`, … since `+=` is `PLUS_EQ` inside
+  an `ASSIGNMENT_EXPR`).
 
-**Deferred:** a binary operator split across source lines *inside* a paren
-(`y = (a +\nb)`) still won't collapse — the paren group is now width-driven, but the
-inner `lower_binary` still emits a source-mirrored `HardLine`, which forces the paren
-to break. Dropped that case from `paren_multiline`'s input (it's a binary-continuation
-test, not a paren test; the shape stays covered for stability by `binary_continuation/
-input.jl`). It collapses once binary continuation goes width-driven.
+Tight ops (`^`/`:`/`.` via `is_tight_binop`) still pack with no space and no break.
+Source `NEWLINE` is now ignored like whitespace (no more newline-before-op bail).
+Deleted `binary_group_breaks` (was only used here); `has_newline_token` stays (matrix
+uses it). `rules.rs`-only. Also unblocked the once-deferred binary-inside-paren case:
+`y = (a +\nb)` → `(a + b)`.
 
-**Ranked next targets:** (1) width-driven `lower_binary` / binary continuation
-(retire the `has_newline_token` + `binary_group_breaks` HardLine mirror — unblocks the
-deferred paren case and gates `binary_continuation/`); (2) extend the empty-body
-inline fold to `if`/`try`/`do` (per-clause reasoning, e.g. `if x else end` has two
-empty bodies); (3) the headline **width-driven reflow engine** more broadly (see the
-pivot notes).
+Gated `binary_continuation/` (all the fit cases collapse to flat — source breaks
+erased — plus two too-wide cases that pin the break shape: a `+` chain with a `*`
+subexpr held together, and a wide assignment that breaks its RHS not at `=`) and
+`binary_spacing/` (pure fixture, no code — canonical operator spacing was already
+deterministic). Gate 26→28; suite (45) + clippy + fmt green; idempotent.
 
-Trap: `build_block_body`/`lower_root` use a Rust let-chain (`if j == last && let
-Some(...)`) — fine on this toolchain. Default indent width is **4** (commit
-`c552607`). `print()` appends **no** trailing newline of its own — the document IR
-must end with one (`lower_root` pushes a final `HardLine`). Clippy trap:
-`bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` — use a plain
-`if !flag { return ... }`.
+**Ranked next targets:** (1) width-driven `lower_comparison` (`COMPARISON_EXPR`,
+`a == b < c` chains) and `lower_arrow`/`lower_ternary` — same Air-style treatment,
+they still source-mirror; (2) extend the empty-body inline fold to `if`/`try`/`do`
+(per-clause reasoning); (3) the headline **width-driven reflow engine** across the
+block/statement families (the remaining source-break mirrors — see the pivot notes).
+
+## Standing traps
+
+- `build_block_body`/`lower_root` use a Rust let-chain (`if j == last && let
+  Some(...)`) — fine on this toolchain.
+- Default **indent width is 4** (commit `c552607`); default **`line_width` is 92**
+  (`style.rs`), not the 80 in `printer.rs`'s own unit tests.
+- `print()` appends **no** trailing newline of its own — the document IR must end
+  with one (`lower_root` pushes a final `HardLine`).
+- The transparent path emits raw `\n` as `Ir::Text`; the printer resets `col` after
+  an embedded newline and `fits` treats embedded newlines as non-fitting. Prefer
+  `Ir::Line`/`SoftLine`/`HardLine` inside groups.
+- Clippy trap: `bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` —
+  use a plain `if !flag { return ... }`.
 
 ## Earlier sessions
 
+- **Width-driven paren reflow (`lower_paren`)** (committed `3903b5f`): killed the
+  `has_newline_token` source-break mirror in `PAREN_EXPR` — one width-driven
+  `Ir::group` (flat `(inner)` when it fits, else `(`/+indent/`)`), padding stripped,
+  blanks dropped. Gated `paren_multiline/` + `paren_blocks/`. Gate 24→26.
 - **Top-level `;`-join reflow (`TOPLEVEL_SEMICOLON`)** (committed `a23697c`): closed
   the last top-level `;`-separator Tenet-1 hole. The parser folds `a; b; c` into one
   `TOPLEVEL_SEMICOLON` child of `ROOT`; `collect_body_lines` now flattens it via the

@@ -23,3 +23,6 @@ t = a =>
 b
 f(a +
 b)
+r2 = aaaaaaaaaaaa +
+bbbbbbbbbbbb * cccccccccccc * dddddddddddd + eeeeeeeeeeee + ffffffffffff + gggggggggggg
+result_variable_x = alpha_operand + beta_operand + gamma_operand + delta_operand + epsilon_op

@@ -193,10 +193,9 @@ leverage.
   force the split (`x = (\n1+2\n)` → `(1 + 2)`); only the content's width or a hard
   break it carries does. Blank lines inside the parens are stripped (the loop skips
   every `NEWLINE`/`WHITESPACE`, so only the inner node reaches layout). Bails on a
-  comment in a direct gap; locked by `paren_multiline/` + `paren_padding/`. Deferred:
-  a binary operator split across source lines *inside* a paren (`y = (a +\nb)`) still
-  won't collapse until `lower_binary` goes width-driven (its source-mirrored
-  `HardLine` forces the paren to break)), `;`-block padding and
+  comment in a direct gap; locked by `paren_multiline/` + `paren_padding/`. (The
+  once-deferred binary-inside-paren case `y = (a +\nb)` → `(a + b)` now collapses,
+  since `lower_binary` went width-driven.)), `;`-block padding and
   separators (`lower_paren_block` over `PAREN_BLOCK`: `( a ; b )` → `(a; b)`,
   `(a;b;)` → `(a; b)`—each `;` packed tight-left/space-right, the padding stripped,
   a trailing arg-less `;` dropped; the leading statement and each `PARAMETERS`
