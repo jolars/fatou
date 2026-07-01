@@ -93,42 +93,35 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (top-level blank-line policy: `lower_root`)
+## Latest session (top-level `;`-join reflow: `TOPLEVEL_SEMICOLON`)
 
-Closed the top-level (file) blank-line Tenet-1 hole. Before: `ROOT` fell through
-`lower_transparent`, passing source blanks verbatim — uncapped interior runs,
-leading blanks at file start, and trailing blanks all leaked (input-dependent).
-New `lower_root` (routed from `lower()` when the node is `ROOT`) reflows the file
-deterministically: **interior** blank runs between top-level items cap at
-`MAX_BLANK_LINES` (=1); **leading and trailing** file blanks are stripped (user
-call — strip edges, unlike a block body, whose keyword/`end` framing keeps one
-edge blank); the file ends with exactly one newline (also fixes a file with no
-trailing newline — it gains one).
+Closed the last top-level `;`-separator Tenet-1 hole. The parser folds a top-level
+`a; b; c` into one `TOPLEVEL_SEMICOLON` node child of `ROOT`; before, that node
+reached `lower_root` (via `collect_body_lines`) as a single opaque statement and
+passed through with its `;` joins intact (`a = 1;y = 2`), so `a; b` and `a⏎b`
+diverged. Fix: **flatten the wrapper in the line collector**. Split the per-element
+loop out of `collect_body_lines` into `collect_body_elements(node, &mut lines,
+&mut expect_sep) -> Option<()>`; when it meets a `TOPLEVEL_SEMICOLON` child it
+recurses through that node's children with the *same* `lines`/`expect_sep` state,
+so the inner statements + `;` separators feed the existing logic (`;` and `NEWLINE`
+already equivalent). Each top-level `;`-joined statement thus lands on its own
+`HardLine` in `lower_root`, exactly as block bodies already do. No IR/printer
+change; `rules.rs`-only.
 
-Refactored the statement/comment/`;`-vs-newline line-collection loop out of
-`build_block_body` into a shared `collect_body_lines(node) -> Option<Vec<BodyLine>>`;
-both `build_block_body` and `lower_root` call it and bail to transparent on any
-shape it rejects. `lower_root` strips the leading framing `HardLine` (no keyword
-precedes the first line) and appends one trailing `HardLine`. Empty/whitespace-only
-file → `""`.
+Handled shapes (all verified): `a; b; c` → one per line; trailing `;` (`a;`,
+`a; b;`) drops the empty tail; `a;;b` collapses like the block `;;`; a trailing
+comment on the `;` line (`a; # c`) rides its statement; inner assignments/calls
+still normalize (`x=1;y=2` → `x = 1`⏎`y = 2`). Block bodies are untouched — the new
+branch only fires on `TOPLEVEL_SEMICOLON`, which the parser emits solely at root.
 
-Gated `toplevel_blank_lines/` (leading/interior/trailing exercised) and unblocked
-`loop_blocks/` + `let_blocks/` (both now also exercise the new empty-body inline
-collapse: `while empty end`, `let end`). Gate 20→23; suite (45) + clippy + fmt
-green. Verified: doubled-blank variant of `loop_blocks` formats identically
-(Tenet 1) and is idempotent.
+Gated `toplevel_semicolon/` (multi-join, trailing `;`, spacing-normalize). Gate
+23→24; suite (45) + clippy + fmt green; idempotent + clean reparse hold.
 
-**Deferred:** top-level `;`-joined statements parse into a single
-`TOPLEVEL_SEMICOLON` child (not bare `;` at root), so they reach `lower_root` as
-one statement and pass through unreflowed — reflowing them one-per-line (as block
-bodies do for `;`) is a separate rule (lower `TOPLEVEL_SEMICOLON`). This is a
-remaining top-level Tenet-1 hole (`a; b` vs `a⏎b` differ).
-
-**Ranked next targets:** (1) lower `TOPLEVEL_SEMICOLON` (reflow top-level `;`
-one-per-line — closes the last top-level Tenet-1 hole above); (2) `lower_paren_block`
-(`paren_blocks`, `paren_multiline`); (3) extend the empty-body inline fold to
+**Ranked next targets:** (1) `lower_paren_block` (`paren_blocks`, `paren_multiline`
+— still source-break mirroring); (2) extend the empty-body inline fold to
 `if`/`try`/`do` (needs per-clause reasoning, e.g. `if x else end` has two empty
-bodies); (4) the headline **width-driven reflow engine** (see the pivot notes).
+bodies); (3) the headline **width-driven reflow engine** (see the pivot notes) —
+the largest remaining piece and the prerequisite for full Tenet-1 conformance.
 
 Trap: `build_block_body`/`lower_root` use a Rust let-chain (`if j == last && let
 Some(...)`) — fine on this toolchain. Default indent width is **4** (commit
@@ -139,6 +132,14 @@ must end with one (`lower_root` pushes a final `HardLine`). Clippy trap:
 
 ## Earlier sessions
 
+- **Top-level blank-line policy (`lower_root`)** (committed `5589f58`): closed the
+  file-level blank Tenet-1 hole — `ROOT` no longer falls through transparent.
+  `lower_root` reflows deterministically: interior blank runs cap at
+  `MAX_BLANK_LINES`=1, leading/trailing file blanks stripped (unlike a block body's
+  framed edges), exactly one final newline. Extracted the shared
+  `collect_body_lines(node) -> Option<Vec<BodyLine>>` from `build_block_body`. Gated
+  `toplevel_blank_lines/`; unblocked `loop_blocks/` + `let_blocks/` (empty-body
+  inline collapse). Gate 20→23.
 - **Empty-body uniformity fold + gate `try_blocks`** (committed `370df78`):
   generalized the struct empty-body inline collapse to the other single-body
   blocks via a shared `push_block_body` helper (`function`/`macro`/`while`/`for`/

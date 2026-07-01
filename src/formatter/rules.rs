@@ -2815,15 +2815,36 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
     // between them, and against a node following a comment on the same line.
     let mut lines: Vec<BodyLine> = vec![BodyLine::default()];
     let mut expect_sep = false;
+    collect_body_elements(node, &mut lines, &mut expect_sep)?;
+    Some(lines)
+}
 
+/// Walk one container's children into the running `lines`/`expect_sep` state,
+/// shared by [`collect_body_lines`] and its own recursion. Split out so the
+/// `TOPLEVEL_SEMICOLON` wrapper — the single node the parser folds a top-level
+/// `a; b; c` into — can be flattened in place: recursing through it feeds its
+/// inner statements and `;` separators to the very same logic, so top-level
+/// `;`-joins reflow one statement per line exactly as a block body's do (Tenet 1).
+fn collect_body_elements(
+    node: &SyntaxNode,
+    lines: &mut Vec<BodyLine>,
+    expect_sep: &mut bool,
+) -> Option<()> {
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Node(child) => {
-                if expect_sep {
+                // The `TOPLEVEL_SEMICOLON` wrapper carries no layout of its own —
+                // its children are statements joined by `;` — so flatten it rather
+                // than lowering it as one opaque statement.
+                if child.kind() == SyntaxKind::TOPLEVEL_SEMICOLON {
+                    collect_body_elements(&child, lines, expect_sep)?;
+                    continue;
+                }
+                if *expect_sep {
                     return None;
                 }
                 lines.last_mut().unwrap().stmts.push(lower_node(&child));
-                expect_sep = true;
+                *expect_sep = true;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::WHITESPACE => {}
@@ -2835,11 +2856,11 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
                     if lines.last().unwrap().comment.is_some() {
                         return None;
                     }
-                    expect_sep = false;
+                    *expect_sep = false;
                 }
                 SyntaxKind::NEWLINE => {
                     lines.push(BodyLine::default());
-                    expect_sep = false;
+                    *expect_sep = false;
                 }
                 // A line comment closes its line: own-line (the line is empty) or
                 // trailing (a statement precedes it). Either way it becomes the
@@ -2853,7 +2874,7 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
                     }
                     let text = tok.text().trim_end_matches([' ', '\t']);
                     line.comment = Some(Ir::text(text));
-                    expect_sep = true;
+                    *expect_sep = true;
                 }
                 // A block comment is preserved verbatim — its interior (including
                 // continuation-line indentation) is kept byte-for-byte (only the
@@ -2869,14 +2890,14 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
                         return None;
                     }
                     line.comment = Some(Ir::text(tok.text()));
-                    expect_sep = true;
+                    *expect_sep = true;
                 }
                 _ => return None,
             },
         }
     }
 
-    Some(lines)
+    Some(())
 }
 
 /// Lower the document root into the canonical file layout: each top-level
@@ -2888,8 +2909,8 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
 /// lowering, so unhandled syntax stays lossless.
 ///
 /// Top-level `;`-joined statements parse into a single `TOPLEVEL_SEMICOLON` child
-/// (not bare `;` tokens at the root), so they reach this as one statement and pass
-/// through unreflowed for now — reflowing them one-per-line is a separate rule.
+/// (not bare `;` tokens at the root); [`collect_body_lines`] flattens that wrapper
+/// so each such statement reflows onto its own line, exactly as a block body's do.
 fn lower_root(root: &SyntaxNode) -> Ir {
     let Some(lines) = collect_body_lines(root) else {
         return lower_transparent(root);

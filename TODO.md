@@ -325,9 +325,12 @@ leverage.
   blanks are stripped, and the file ends with exactly one newline — unlike a block
   body, whose keyword/`end` framing keeps one edge blank; reuses the extracted
   `collect_body_lines` (the statement/comment/`;`-vs-newline line model shared with
-  `build_block_body`); top-level `;`-joined statements parse into a single
-  `TOPLEVEL_SEMICOLON` child and pass through unreflowed for now; any unmodeled
-  top-level shape bails the whole file to transparent; locked by
+  `build_block_body`); top-level `;`-joined statements (the single
+  `TOPLEVEL_SEMICOLON` child the parser folds `a; b; c` into) now reflow one
+  statement per line — `collect_body_lines` flattens the wrapper via the extracted
+  `collect_body_elements` recursion, so `a; b` and `a⏎b` format identically
+  (Tenet 1); locked by `toplevel_semicolon/`; any unmodeled top-level shape bails
+  the whole file to transparent; also locked by
   `toplevel_blank_lines/`, and unblocked `loop_blocks/` + `let_blocks/`).
   **Next:** multi-line ternary in a parenthesized branch (paren's own break engine
   drives the layout); long single-line bracket/matrix width-based reflow is a
