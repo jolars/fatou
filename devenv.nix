@@ -23,6 +23,7 @@
     pkgs.hyperfine
     pkgs.yamlfmt
     pkgs.vsce
+    pkgs.air-formatter
   ];
 
   languages = {
