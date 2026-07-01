@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/jolars/fatou/compare/v0.2.0...v0.3.0) (2026-07-01)
+
+### Features
+- **formatter:** empty-body inline fold for if/try/do ([`8912b64`](https://github.com/jolars/fatou/commit/8912b64b19c3a9fe8dd879627d099f6bd145acd2))
+- **formatter:** width-driven comparison and arrow ([`662331d`](https://github.com/jolars/fatou/commit/662331d5f33f2f7522784b65ee746bb4a565cfd9))
+- **formatter:** width-driven ternary reflow ([`58e5336`](https://github.com/jolars/fatou/commit/58e53364ad13270084eca4b7d50400d4b2ed6b48))
+- **formatter:** width-driven binary continuation ([`34c3e16`](https://github.com/jolars/fatou/commit/34c3e16a3b034b7449e9ee874c315c3288c82be1))
+- **formatter:** width-driven parenthesized reflow ([`3903b5f`](https://github.com/jolars/fatou/commit/3903b5fe9ad655c4092a65bddbbd2ee39e8c95fb))
+- **formatter:** reflow top-level semicolon joins ([`463c9de`](https://github.com/jolars/fatou/commit/463c9dec18cb67a93dc933678891090a20bb5970))
+- **formatter:** reflow top-level blank lines ([`e556bfd`](https://github.com/jolars/fatou/commit/e556bfd97b974ccb57e748d44f383a520bf7ce9a))
+- **formatter:** inline empty bodies across blocks ([`d61784f`](https://github.com/jolars/fatou/commit/d61784f5a0dca9721a35971b745355836e39f0fe))
+
 ## [0.2.0](https://github.com/jolars/fatou/compare/v0.1.0...v0.2.0) (2026-06-30)
 
 ### Features

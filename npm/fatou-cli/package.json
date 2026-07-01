@@ -1,40 +1,40 @@
 {
-	"name": "fatou-cli",
-	"version": "0.2.0",
-	"description": "A language server, formatter, and linter for Julia",
-	"keywords": [
-		"julia",
-		"language-server",
-		"formatter",
-		"linter"
-	],
-	"homepage": "https://github.com/jolars/fatou",
-	"bugs": "https://github.com/jolars/fatou/issues",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/jolars/fatou.git"
-	},
-	"license": "MIT",
-	"author": "Johan Larsson <johan@jolars.co>",
-	"bin": {
-		"fatou": "bin/fatou.js"
-	},
-	"files": [
-		"bin/",
-		"README.md",
-		"LICENSE"
-	],
-	"engines": {
-		"node": ">=20"
-	},
-	"optionalDependencies": {
-		"@fatou-cli/linux-x64-gnu": "0.2.0",
-		"@fatou-cli/linux-arm64-gnu": "0.2.0",
-		"@fatou-cli/linux-x64-musl": "0.2.0",
-		"@fatou-cli/linux-arm64-musl": "0.2.0",
-		"@fatou-cli/darwin-x64": "0.2.0",
-		"@fatou-cli/darwin-arm64": "0.2.0",
-		"@fatou-cli/win32-x64": "0.2.0",
-		"@fatou-cli/win32-arm64": "0.2.0"
-	}
+  "name": "fatou-cli",
+  "version": "0.3.0",
+  "description": "A language server, formatter, and linter for Julia",
+  "keywords": [
+    "julia",
+    "language-server",
+    "formatter",
+    "linter"
+  ],
+  "homepage": "https://github.com/jolars/fatou",
+  "bugs": "https://github.com/jolars/fatou/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jolars/fatou.git"
+  },
+  "license": "MIT",
+  "author": "Johan Larsson <johan@jolars.co>",
+  "bin": {
+    "fatou": "bin/fatou.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@fatou-cli/linux-x64-gnu": "0.3.0",
+    "@fatou-cli/linux-arm64-gnu": "0.3.0",
+    "@fatou-cli/linux-x64-musl": "0.3.0",
+    "@fatou-cli/linux-arm64-musl": "0.3.0",
+    "@fatou-cli/darwin-x64": "0.3.0",
+    "@fatou-cli/darwin-arm64": "0.3.0",
+    "@fatou-cli/win32-x64": "0.3.0",
+    "@fatou-cli/win32-arm64": "0.3.0"
+  }
 }
