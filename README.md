@@ -14,6 +14,18 @@ transport) and is modeled directly on the author's R tooling project, `arity`.
 > layout rules (gated by hand-authored fixtures), and no lint rules ship yet.
 > See `TODO.md` for the roadmap and `AGENTS.md` for the design tenets.
 
+## Installation
+
+Fatou is available from several sources:
+
+- **crates.io**: `cargo install fatou`
+- **npm**: `npm install -g fatou-cli` (bundles a prebuilt binary)
+- **PyPI**: `uv tool install fatou`/`pipx install fatou`
+- **Prebuilt binaries**: from the [releases
+  page](https://github.com/jolars/fatou/releases)
+
+Runs on Linux, macOS, and Windows (x86_64 and arm64).
+
 ## Usage
 
 ```sh
