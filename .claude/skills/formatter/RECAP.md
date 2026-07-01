@@ -78,7 +78,10 @@ Tenet 1.
   `lower_import_stmt`, `lower_export_stmt`, `lower_for_binding`.
 - Literals (token text, genuinely deterministic): `lower_literal` +
   `normalize_float` + `normalize_hex`.
-- Blocks (body indentation via `lower_block_body`/`build_block_body`):
+- Document root: `lower_root` (top-level blank-line policy — interior runs capped
+  at 1, edges stripped, one final newline; reuses `collect_body_lines`).
+- Blocks (body indentation via `lower_block_body`/`build_block_body`, line model
+  via `collect_body_lines` shared with `lower_root`):
   `lower_block_expr` (begin/quote), `lower_let`, `lower_loop` (while/for),
   `lower_if`/`lower_try` (+ `lower_branch_clause`), `lower_struct`,
   `lower_function`, `lower_do` (+ `lower_do_params`), `lower_module`
@@ -90,50 +93,57 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (empty-body uniformity fold + gate `try_blocks`)
+## Latest session (top-level blank-line policy: `lower_root`)
 
-Closed the empty-body Tenet-1 hole across the **single-body** blocks, generalizing
-last session's struct fix. Before: `function f() end`, `function f()⏎end`, and
-`function f()⏎⏎end` formatted three different ways (empty bodies fell through
-`lower_block_body` → `None` → `lower_transparent`, which passes source verbatim).
-Now every spelling of an empty body collapses to the canonical **inline** form
-(user call — inline over exploded, consistent with struct): `function f() end`,
-`macro m() end`, `while c end`, `for i in x end`, `let end` / `let x = 1 end`,
-`begin end`, `quote end`, `module M end`.
+Closed the top-level (file) blank-line Tenet-1 hole. Before: `ROOT` fell through
+`lower_transparent`, passing source blanks verbatim — uncapped interior runs,
+leading blanks at file start, and trailing blanks all leaked (input-dependent).
+New `lower_root` (routed from `lower()` when the node is `ROOT`) reflows the file
+deterministically: **interior** blank runs between top-level items cap at
+`MAX_BLANK_LINES` (=1); **leading and trailing** file blanks are stripped (user
+call — strip edges, unlike a block body, whose keyword/`end` framing keeps one
+edge blank); the file ends with exactly one newline (also fixes a file with no
+trailing newline — it gains one).
 
-Implementation: new shared helper `push_block_body(parts, block, render)` — runs
-`render()`, on `Some` explodes vertical (body + `HardLine` + `end`), on
-`None if block_is_empty(block)` pushes the inline `" end"`, else returns `false`
-so the caller bails transparent. Refactored `lower_struct`, `lower_function`,
-`lower_loop`, `lower_let`, `lower_block_expr`, `lower_module` onto it (struct kept
-identical output). Locked with newline-form empty variants added to the gated
-`function_blocks` (`empty2`, `empty3`, `macro noop`) and `begin_quote_blocks`
-(`begin⏎end`, `quote⏎⏎end`) fixtures. Also gated `try_blocks` as-is (pure
-fixture, no code — output was already canonical). Gate 19→20; suite (45) + clippy
-+ fmt green.
+Refactored the statement/comment/`;`-vs-newline line-collection loop out of
+`build_block_body` into a shared `collect_body_lines(node) -> Option<Vec<BodyLine>>`;
+both `build_block_body` and `lower_root` call it and bail to transparent on any
+shape it rejects. `lower_root` strips the leading framing `HardLine` (no keyword
+precedes the first line) and appends one trailing `HardLine`. Empty/whitespace-only
+file → `""`.
 
-**Scope note:** the fold covers single-body blocks only. `if`/`try` (multi-clause)
-and `do` (call-head) still bail transparent on an empty body — folding them needs
-per-clause reasoning (e.g. `if x else end` has two empty bodies) and is deferred.
-`try_blocks`'s fixture has no empty-body case, so gating it did not touch this.
+Gated `toplevel_blank_lines/` (leading/interior/trailing exercised) and unblocked
+`loop_blocks/` + `let_blocks/` (both now also exercise the new empty-body inline
+collapse: `while empty end`, `let end`). Gate 20→23; suite (45) + clippy + fmt
+green. Verified: doubled-blank variant of `loop_blocks` formats identically
+(Tenet 1) and is idempotent.
 
-**Still blocked:** `loop_blocks`/`let_blocks` remain ungated on the top-level
-blank-line policy (blanks *between* top-level constructs pass verbatim through
-`lower_transparent`, uncapped — inconsistent with the block-body 1-blank cap).
-`lower_paren_block` (`paren_blocks`, `paren_multiline`) also pending.
+**Deferred:** top-level `;`-joined statements parse into a single
+`TOPLEVEL_SEMICOLON` child (not bare `;` at root), so they reach `lower_root` as
+one statement and pass through unreflowed — reflowing them one-per-line (as block
+bodies do for `;`) is a separate rule (lower `TOPLEVEL_SEMICOLON`). This is a
+remaining top-level Tenet-1 hole (`a; b` vs `a⏎b` differ).
 
-**Ranked next targets:** (1) decide the **top-level blank-line policy** — unblocks
-`loop_blocks`/`let_blocks` and is a real Tenet-1 gap; (2) `lower_paren_block`
-(`paren_blocks`, `paren_multiline`); (3) extend the empty-body fold to `if`/`try`/
-`do`; (4) the headline **width-driven reflow engine** (see the pivot notes).
+**Ranked next targets:** (1) lower `TOPLEVEL_SEMICOLON` (reflow top-level `;`
+one-per-line — closes the last top-level Tenet-1 hole above); (2) `lower_paren_block`
+(`paren_blocks`, `paren_multiline`); (3) extend the empty-body inline fold to
+`if`/`try`/`do` (needs per-clause reasoning, e.g. `if x else end` has two empty
+bodies); (4) the headline **width-driven reflow engine** (see the pivot notes).
 
-Trap: `build_block_body` uses a Rust let-chain (`if j == last && let Some(...)`)
-— fine on this toolchain. Default indent width is **4** (commit `c552607`).
-Clippy trap: `bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` —
-use a plain `if !flag { return ... }`.
+Trap: `build_block_body`/`lower_root` use a Rust let-chain (`if j == last && let
+Some(...)`) — fine on this toolchain. Default indent width is **4** (commit
+`c552607`). `print()` appends **no** trailing newline of its own — the document IR
+must end with one (`lower_root` pushes a final `HardLine`). Clippy trap:
+`bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` — use a plain
+`if !flag { return ... }`.
 
 ## Earlier sessions
 
+- **Empty-body uniformity fold + gate `try_blocks`** (committed `370df78`):
+  generalized the struct empty-body inline collapse to the other single-body
+  blocks via a shared `push_block_body` helper (`function`/`macro`/`while`/`for`/
+  `let`/`begin`/`quote`/`module` empty bodies → inline `… end`, Tenet 1). `if`/
+  `try`/`do` still bail transparent on empty (deferred — multi-clause). Gate 19→20.
 - **Gated `struct_blocks` + empty-body collapse** (committed): `lower_struct`
   gained the inline empty-body collapse (`struct E end`) plus the reusable
   `block_is_empty` helper; the follow-up this session generalized it to the other

@@ -318,7 +318,17 @@ leverage.
   (`y = a +⏎b` → `y = a +⏎    b`); nested binaries/assignments share the single
   level via a `binary_group_breaks` gate so `a = b =⏎c` and `a + b *⏎c + d` stay
   flat and a break buried in a non-group descendant (a broken call arg list)
-  doesn't pull the expression in; locked by `binary_continuation/`).
+  doesn't pull the expression in; locked by `binary_continuation/`),
+  top-level (file) blank-line policy (`lower_root` over `ROOT`, replacing the
+  transparent passthrough that leaked source blanks uncapped: interior blank runs
+  between top-level items cap at `MAX_BLANK_LINES`=1, leading and trailing file
+  blanks are stripped, and the file ends with exactly one newline — unlike a block
+  body, whose keyword/`end` framing keeps one edge blank; reuses the extracted
+  `collect_body_lines` (the statement/comment/`;`-vs-newline line model shared with
+  `build_block_body`); top-level `;`-joined statements parse into a single
+  `TOPLEVEL_SEMICOLON` child and pass through unreflowed for now; any unmodeled
+  top-level shape bails the whole file to transparent; locked by
+  `toplevel_blank_lines/`, and unblocked `loop_blocks/` + `let_blocks/`).
   **Next:** multi-line ternary in a parenthesized branch (paren's own break engine
   drives the layout); long single-line bracket/matrix width-based reflow is a
   **non-goal**—probing shows Runic does **not** width-reflow (it is purely

@@ -18,7 +18,11 @@ use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 /// Lower a parsed document (the `ROOT` node) into an `Ir` document.
 pub fn lower(root: &SyntaxNode) -> Ir {
-    lower_node(root)
+    if root.kind() == SyntaxKind::ROOT {
+        lower_root(root)
+    } else {
+        lower_node(root)
+    }
 }
 
 fn lower_node(node: &SyntaxNode) -> Ir {
@@ -2793,44 +2797,26 @@ impl BodyLine {
     }
 }
 
-/// Lower the statements of a `BLOCK` into an indented, vertically-broken body,
-/// returning `None` (the caller bails to the transparent lowering) for an empty
-/// block or any shape this does not model.
+/// Collect a container's children into source lines — zero or more `; `-joined
+/// statements plus an optional trailing comment per line — shared by
+/// [`build_block_body`] and [`lower_root`]. `;` and `NEWLINE` are equivalent
+/// statement separators (a `;` continues the current line, a `NEWLINE` starts a
+/// new one), so the source separator spelling never leaks (Tenet 1).
 ///
-/// Each statement gets its own line. `;` and `NEWLINE` are equivalent statement
-/// separators in a block, so `begin x; y end` and `begin x⏎y end` both reflow to
-/// `⏎    x⏎    y` — the source separator spelling never leaks (Tenet 1). Each
-/// statement is lowered recursively, so its own normalization still applies and a
-/// nested block indents further. Blank lines are preserved
-/// (capped at [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]): between statements,
-/// after the keyword (leading), and before `end` (trailing) — the framing break
-/// the layout always adds absorbs one newline on each side.
-///
-/// Comments (line `#` and block `#= … =#`) are preserved. An **own-line** comment
-/// becomes its own line, re-indented to the body; a multi-line block comment keeps
-/// its continuation lines verbatim (only the `#=` line takes the body indent). A
-/// **trailing** comment (the line already holds a statement) is attached after it
-/// with a single space — a Tenet-1 divergence: Runic preserves the user's pre-`#`
-/// whitespace (≥1 space) verbatim, but Fatou canonicalizes to exactly one space.
-/// Two statements with no separator, a node after a comment, or any unexpected
-/// token returns `None`.
-fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
-    build_block_body(block).map(Ir::indent)
-}
-
-/// The body engine shared by [`lower_block_body`] (which wraps the result in one
-/// indent step) and the module rule (which keeps the body flush at the ambient
-/// column — Runic does not indent a module body unless the module is nested under
-/// another module or shares the file's top level with a sibling). Returns the
-/// vertically-broken lines without any indent wrapper, or `None` for an empty
-/// block or any shape this does not model.
-fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
+/// Comments (line `#` and block `#= … =#`) fill the current line's `comment`
+/// slot: an **own-line** comment when the line has no statement yet, a
+/// **trailing** comment when one precedes it. Returns `None` — so the caller
+/// bails to the verbatim transparent lowering — for any shape this does not
+/// model: two adjacent statement nodes with no separator, a node or `;` after a
+/// comment (which would land it on the wrong side of the recorded comment), or a
+/// second comment on one line.
+fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
     // `expect_sep` guards against two adjacent statement nodes with no `;`/newline
     // between them, and against a node following a comment on the same line.
     let mut lines: Vec<BodyLine> = vec![BodyLine::default()];
     let mut expect_sep = false;
 
-    for el in block.children_with_tokens() {
+    for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Node(child) => {
                 if expect_sep {
@@ -2870,13 +2856,13 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
                     expect_sep = true;
                 }
                 // A block comment is preserved verbatim — its interior (including
-                // continuation-line indentation) is kept byte-for-byte (Runic only
-                // re-indents the line the `#=` opens, which the framing `HardLine`
-                // here supplies). Own-line or trailing, it fills the line's
-                // `comment` slot exactly like a line comment; `expect_sep`/the
-                // `;`-guard then bail any content that would follow it on the same
-                // line (an unmodeled inline `#= … =#` mid-expression bails its
-                // owning node, so it never reaches block level).
+                // continuation-line indentation) is kept byte-for-byte (only the
+                // line the `#=` opens is re-indented, which the framing `HardLine`
+                // supplies). Own-line or trailing, it fills the line's `comment`
+                // slot exactly like a line comment; `expect_sep`/the `;`-guard then
+                // bail any content that would follow it on the same line (an
+                // unmodeled inline `#= … =#` mid-expression bails its owning node,
+                // so it never reaches this level).
                 SyntaxKind::BLOCK_COMMENT => {
                     let line = lines.last_mut().unwrap();
                     if line.comment.is_some() {
@@ -2889,6 +2875,106 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
             },
         }
     }
+
+    Some(lines)
+}
+
+/// Lower the document root into the canonical file layout: each top-level
+/// statement on its own line, interior blank runs capped at [`MAX_BLANK_LINES`],
+/// and — unlike a block body, which keeps one framing blank on each edge — **no**
+/// leading or trailing blank lines, terminating with exactly one final newline.
+/// Reuses [`collect_body_lines`]; any shape it rejects (a top-level construct the
+/// body model does not handle) bails the whole file to the verbatim transparent
+/// lowering, so unhandled syntax stays lossless.
+///
+/// Top-level `;`-joined statements parse into a single `TOPLEVEL_SEMICOLON` child
+/// (not bare `;` tokens at the root), so they reach this as one statement and pass
+/// through unreflowed for now — reflowing them one-per-line is a separate rule.
+fn lower_root(root: &SyntaxNode) -> Ir {
+    let Some(lines) = collect_body_lines(root) else {
+        return lower_transparent(root);
+    };
+    // An empty or whitespace-only file lowers to nothing.
+    let Some(first) = lines.iter().position(|l| !l.is_blank()) else {
+        return Ir::text("");
+    };
+    let last = lines.iter().rposition(|l| !l.is_blank()).unwrap();
+    let content = &lines[first..=last];
+
+    let mut inner: Vec<Ir> = Vec::new();
+    let mut pending_blanks = 0usize;
+    for line in content {
+        if line.is_blank() {
+            pending_blanks += 1;
+            continue;
+        }
+        for _ in 0..pending_blanks.min(MAX_BLANK_LINES) {
+            inner.push(Ir::BlankLine);
+        }
+        pending_blanks = 0;
+        if line.stmts.is_empty() {
+            // Own-line comment: its own line, flush at column 0.
+            inner.push(Ir::HardLine);
+            if let Some(comment) = &line.comment {
+                inner.push(comment.clone());
+            }
+        } else {
+            let last_stmt = line.stmts.len() - 1;
+            for (j, stmt) in line.stmts.iter().enumerate() {
+                inner.push(Ir::HardLine);
+                inner.push(stmt.clone());
+                if j == last_stmt
+                    && let Some(comment) = &line.comment
+                {
+                    inner.push(Ir::text(" "));
+                    inner.push(comment.clone());
+                }
+            }
+        }
+    }
+    // The first line needs no leading break — no keyword frames the file root, so
+    // drop the framing `HardLine` the loop emits before it. Terminate the file
+    // with exactly one newline.
+    if matches!(inner.first(), Some(Ir::HardLine)) {
+        inner.remove(0);
+    }
+    inner.push(Ir::HardLine);
+    Ir::concat(inner)
+}
+
+/// Lower the statements of a `BLOCK` into an indented, vertically-broken body,
+/// returning `None` (the caller bails to the transparent lowering) for an empty
+/// block or any shape this does not model.
+///
+/// Each statement gets its own line. `;` and `NEWLINE` are equivalent statement
+/// separators in a block, so `begin x; y end` and `begin x⏎y end` both reflow to
+/// `⏎    x⏎    y` — the source separator spelling never leaks (Tenet 1). Each
+/// statement is lowered recursively, so its own normalization still applies and a
+/// nested block indents further. Blank lines are preserved
+/// (capped at [`MAX_BLANK_LINES`] via an [`Ir::BlankLine`]): between statements,
+/// after the keyword (leading), and before `end` (trailing) — the framing break
+/// the layout always adds absorbs one newline on each side.
+///
+/// Comments (line `#` and block `#= … =#`) are preserved. An **own-line** comment
+/// becomes its own line, re-indented to the body; a multi-line block comment keeps
+/// its continuation lines verbatim (only the `#=` line takes the body indent). A
+/// **trailing** comment (the line already holds a statement) is attached after it
+/// with a single space — a Tenet-1 divergence: Runic preserves the user's pre-`#`
+/// whitespace (≥1 space) verbatim, but Fatou canonicalizes to exactly one space.
+/// Two statements with no separator, a node after a comment, or any unexpected
+/// token returns `None`.
+fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
+    build_block_body(block).map(Ir::indent)
+}
+
+/// The body engine shared by [`lower_block_body`] (which wraps the result in one
+/// indent step) and the module rule (which keeps the body flush at the ambient
+/// column — Runic does not indent a module body unless the module is nested under
+/// another module or shares the file's top level with a sibling). Returns the
+/// vertically-broken lines without any indent wrapper, or `None` for an empty
+/// block or any shape this does not model.
+fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
+    let lines = collect_body_lines(block)?;
 
     // Locate the content span. Empty lines outside it are the leading (after the
     // keyword) and trailing (before `end`) framing lines plus any kept blanks:
