@@ -10,12 +10,12 @@
       "extra-files": [
         {
           "type": "json",
-          "path": "npm/fatou/package.json",
+          "path": "npm/fatou-cli/package.json",
           "jsonpath": "$.version"
         },
         {
           "type": "json",
-          "path": "npm/fatou/package.json",
+          "path": "npm/fatou-cli/package.json",
           "jsonpath": "$.optionalDependencies.*"
         }
       ]

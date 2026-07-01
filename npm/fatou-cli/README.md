@@ -1,4 +1,4 @@
-# fatou
+# fatou-cli
 
 [Fatou](https://github.com/jolars/fatou) is a language server, formatter, and
 linter for the [Julia](https://julialang.org) programming language.
@@ -6,7 +6,7 @@ linter for the [Julia](https://julialang.org) programming language.
 ## Install
 
 ```sh
-npm install -g fatou
+npm install -g fatou-cli
 ```
 
 This installs the `fatou` command globally. The package detects your platform at
@@ -16,7 +16,7 @@ Rust toolchain or postinstall download required.
 You can also use it without a global install:
 
 ```sh
-npx fatou format file.jl
+npx fatou-cli format file.jl
 ```
 
 ## Usage

@@ -17,14 +17,14 @@ function platformPackage() {
 	const libc = detectLibc();
 
 	const map = {
-		"linux-x64-gnu": "@fatou/linux-x64-gnu",
-		"linux-arm64-gnu": "@fatou/linux-arm64-gnu",
-		"linux-x64-musl": "@fatou/linux-x64-musl",
-		"linux-arm64-musl": "@fatou/linux-arm64-musl",
-		"darwin-x64": "@fatou/darwin-x64",
-		"darwin-arm64": "@fatou/darwin-arm64",
-		"win32-x64": "@fatou/win32-x64",
-		"win32-arm64": "@fatou/win32-arm64",
+		"linux-x64-gnu": "@fatou-cli/linux-x64-gnu",
+		"linux-arm64-gnu": "@fatou-cli/linux-arm64-gnu",
+		"linux-x64-musl": "@fatou-cli/linux-x64-musl",
+		"linux-arm64-musl": "@fatou-cli/linux-arm64-musl",
+		"darwin-x64": "@fatou-cli/darwin-x64",
+		"darwin-arm64": "@fatou-cli/darwin-arm64",
+		"win32-x64": "@fatou-cli/win32-x64",
+		"win32-arm64": "@fatou-cli/win32-arm64",
 	};
 
 	const key = libc ? `${platform}-${arch}-${libc}` : `${platform}-${arch}`;
@@ -35,7 +35,7 @@ function resolveBinary() {
 	const { key, name } = platformPackage();
 	if (!name) {
 		throw new Error(
-			`fatou does not ship a prebuilt binary for ${key}.\n` +
+			`fatou-cli does not ship a prebuilt binary for ${key}.\n` +
 				`Supported platforms: linux (x64/arm64, gnu+musl), darwin (x64/arm64), win32 (x64/arm64).\n` +
 				`See https://github.com/jolars/fatou for alternative install methods.`,
 		);
@@ -45,7 +45,7 @@ function resolveBinary() {
 		return require.resolve(`${name}/${binaryName}`);
 	} catch (err) {
 		throw new Error(
-			`fatou expected the optional dependency ${name} to be installed, ` +
+			`fatou-cli expected the optional dependency ${name} to be installed, ` +
 				`but it could not be resolved.\n` +
 				`This usually means npm skipped it (e.g. \`--no-optional\` or a registry/network issue ` +
 				`during install). Try reinstalling with optional dependencies enabled.\n` +

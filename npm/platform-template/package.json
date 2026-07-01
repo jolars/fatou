@@ -1,7 +1,7 @@
 {
-	"name": "@fatou/__NAME__",
+	"name": "@fatou-cli/__NAME__",
 	"version": "__VERSION__",
-	"description": "Prebuilt fatou binary for __NAME__. Install fatou instead.",
+	"description": "Prebuilt fatou binary for __NAME__. Install fatou-cli instead.",
 	"homepage": "https://github.com/jolars/fatou",
 	"bugs": "https://github.com/jolars/fatou/issues",
 	"repository": {

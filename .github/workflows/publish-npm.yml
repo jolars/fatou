@@ -1,6 +1,6 @@
 name: Publish npm
 
-# Publishes the unscoped `fatou` package and the eight `@fatou/<platform>`
+# Publishes the unscoped `fatou-cli` package and the eight `@fatou-cli/<platform>`
 # binary packages with OIDC provenance. Each package's name must already exist
 # and have a trusted publisher configured before CI can publish it -- so adding a
 # NEW target requires a one-time manual `npm publish` of a placeholder for that
@@ -133,7 +133,7 @@ jobs:
           if-no-files-found: error
 
   publish-platform-packages:
-    name: Publish @fatou/${{ matrix.npm_name }}
+    name: Publish @fatou-cli/${{ matrix.npm_name }}
     needs: build-binaries
     runs-on: ubuntu-latest
     environment: release
@@ -204,7 +204,7 @@ jobs:
       - name: Read package version
         id: version
         run: |
-          version=$(node -p "require('./npm/fatou/package.json').version")
+          version=$(node -p "require('./npm/fatou-cli/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Assemble package
@@ -263,7 +263,7 @@ jobs:
           fi
 
   publish-main:
-    name: Publish fatou
+    name: Publish fatou-cli
     needs: publish-platform-packages
     runs-on: ubuntu-latest
     environment: release
@@ -280,18 +280,18 @@ jobs:
       - name: Assemble main package
         run: |
           set -euo pipefail
-          pkg_dir=staging/fatou
+          pkg_dir=staging/fatou-cli
           mkdir -p "$pkg_dir/bin"
-          cp npm/fatou/package.json "$pkg_dir/package.json"
-          cp npm/fatou/README.md "$pkg_dir/README.md"
-          cp npm/fatou/bin/fatou.js "$pkg_dir/bin/fatou.js"
+          cp npm/fatou-cli/package.json "$pkg_dir/package.json"
+          cp npm/fatou-cli/README.md "$pkg_dir/README.md"
+          cp npm/fatou-cli/bin/fatou.js "$pkg_dir/bin/fatou.js"
           cp LICENSE "$pkg_dir/LICENSE"
 
           echo "--- package.json ---"
           cat "$pkg_dir/package.json"
 
       - name: Publish to npm
-        working-directory: staging/fatou
+        working-directory: staging/fatou-cli
         run: |
           if [ "${{ inputs.dry-run }}" = "true" ]; then
             npm publish --provenance --access public --dry-run
