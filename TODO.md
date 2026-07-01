@@ -118,13 +118,12 @@ leverage.
   trailing gap (before the close), capped at 2 per Runic; one newline is the framing
   break, the rest become blanks), anonymous-function arrow spacing (`lower_arrow`:
   `x->y` → `x -> y`, one space each side, operands recursed; bails on a multi-line
-  body), ternary spacing (`lower_ternary`: `a ?  b  :  c` → `a ? b : c`, one space
-  around `?` and `:`, operands recursed so nested `a ? b : c ? d : e` keeps
-  normalizing; a multi-line ternary keeps the operator trailing and indents the
-  continuation one level, with a right-associative chain held flat at one level;
-  a ternary nested anywhere under another ternary (through a parenthesized branch,
-  call argument, or binary operand) rides the outer ternary's single continuation
-  level rather than adding its own, locked by `ternary_paren_branch/`),
+  body), ternary conditionals (`lower_ternary`: **now width-driven** — one
+  `Ir::group` per ternary node with its own `Ir::indent`, flat `a ? b : c` when it
+  fits, else operator-trailing with the branch operands indented one step; each
+  nested `?:`-chain forced to break nests one level deeper on top of its parent's
+  indent; source line breaks ignored; `ternary_multiline/`, `ternary_spacing/`,
+  and `ternary_paren_branch/` gated),
   tight field-access `.` (`DOT` in
   `is_tight_binop`: fixed a latent mangling bug where `a.b.c` parsed as a
   `BINARY_EXPR`/`DOT` and got spaced to the invalid `a . b . c`; Julia *requires*

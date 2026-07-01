@@ -869,31 +869,31 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
 /// Lay out a ternary conditional (`a ? b : c`) with a single space on each side of
 /// both the `?` and the `:`. The node alternates operand/`?`/operand/`:`/operand;
 /// a nested ternary (`a ? b : c ? d : e`, right-associative) is the final operand
-/// and is lowered recursively, so it keeps normalizing. The target style normalizes
-/// to one space around each operator.
+/// and is lowered recursively, so it keeps normalizing.
 ///
-/// When the source breaks the ternary across lines, Runic keeps the operator
-/// trailing on the line it ends (`?` can't lead a line, so a break only ever lands
-/// in the gap *after* `?` or `:`) and indents the continuation by one level
-/// relative to the statement. We reproduce that: a `NEWLINE` in the gap after an
-/// operator becomes an [`Ir::HardLine`], and the whole body is wrapped in one
-/// [`Ir::indent`]. A right-associative chain (`a ? b :⏎c ? d :⏎e`) stays flat at a
-/// single level — the continuation ternary is the parent's else-operand, so it
-/// skips its own indent and rides the parent's, matching Runic.
+/// Width-driven (Tenet 1), following the same Air-style model as [`lower_binary`]:
+/// one `Ir::group` per ternary node, each with its own continuation indent. When
+/// the conditional fits `line_width` it stays flat (`a ? b : c`); otherwise it
+/// breaks operator-trailing (Julia forbids `?`/`:` from *leading* a line, so a
+/// break only ever lands in the gap after an operator) with the two branch operands
+/// wrapped one indent step in. Each breakable gap is an [`Ir::Line`] (a space when
+/// flat, a newline when broken). Because every ternary owns its `Ir::indent`, a
+/// nested `?:`-chain that is itself forced to break nests one level deeper on top of
+/// its parent's indent; a nested chain that still fits at its column stays flat.
+/// Source line breaks carry no layout information and are ignored like whitespace.
 ///
 /// Only the clean alternating shape with `?`/`:` operators is reshaped: an
-/// interleaved comment, a newline *before* an operator (a parse error in practice),
-/// a blank line inside a gap (>1 newline, which Runic preserves but we don't model),
-/// error recovery, or an unexpected token falls back to the verbatim transparent
-/// lowering.
+/// interleaved comment, error recovery, or an unexpected token or operand count
+/// falls back to the verbatim transparent lowering.
 fn lower_ternary(node: &SyntaxNode) -> Ir {
-    let mut parts: Vec<Ir> = Vec::new();
+    let mut first: Option<Ir> = None;
+    let mut rest: Vec<Ir> = Vec::new();
+    // Separator to emit before the upcoming operand: the breakable `Ir::Line`, set
+    // when an operator (`?`/`:`) is consumed.
+    let mut next_sep: Option<Ir> = None;
     let mut expect_operand = true;
     let mut operand_count = 0usize;
-    // Newlines seen in the current gap (between the last significant token and the
-    // next). A break only ever follows an operator; >1 newline is a blank line we
-    // don't model, so bail.
-    let mut newlines_in_gap = 0usize;
+    let mut op_count = 0usize;
 
     for el in node.children_with_tokens() {
         match el {
@@ -901,33 +901,25 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
                 if !expect_operand {
                     return lower_transparent(node);
                 }
-                if operand_count > 0 {
-                    // This operand follows an operator; the gap may break.
-                    if newlines_in_gap > 1 {
-                        return lower_transparent(node);
+                let ir = lower_node(&child);
+                if operand_count == 0 {
+                    first = Some(ir);
+                } else {
+                    if let Some(sep) = next_sep.take() {
+                        rest.push(sep);
                     }
-                    parts.push(if newlines_in_gap == 1 {
-                        Ir::HardLine
-                    } else {
-                        Ir::text(" ")
-                    });
+                    rest.push(ir);
                 }
-                parts.push(lower_node(&child));
                 operand_count += 1;
                 expect_operand = false;
-                newlines_in_gap = 0;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
-                SyntaxKind::NEWLINE => newlines_in_gap += 1,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::QUESTION | SyntaxKind::COLON if !expect_operand => {
-                    // `?`/`:` always sit on the line they end; a newline before one
-                    // is a parse error in real input, so treat it as unmodeled.
-                    if newlines_in_gap > 0 {
-                        return lower_transparent(node);
-                    }
-                    parts.push(Ir::text(" "));
-                    parts.push(Ir::text(tok.text().to_string()));
+                    // `?`/`:` sit trailing on the line they end.
+                    rest.push(Ir::text(format!(" {}", tok.text())));
+                    next_sep = Some(Ir::Line);
+                    op_count += 1;
                     expect_operand = true;
                 }
                 _ => return lower_transparent(node),
@@ -935,27 +927,16 @@ fn lower_ternary(node: &SyntaxNode) -> Ir {
         }
     }
 
-    // A well-formed ternary ends on an operand and has three of them.
-    if expect_operand || operand_count != 3 {
+    // A well-formed ternary ends on an operand and has three of them separated by
+    // exactly two operators (`?` and `:`).
+    let Some(first) = first else {
+        return lower_transparent(node);
+    };
+    if expect_operand || operand_count != 3 || op_count != 2 {
         return lower_transparent(node);
     }
 
-    let body = Ir::concat(parts);
-    // The outermost ternary owns the continuation indent; every nested ternary
-    // rides it. Runic adds the continuation level once per ternary nest and shares
-    // it across all inner ternaries, regardless of what separates them (a
-    // right-associative else-operand, but also a parenthesized branch, a call
-    // argument, or a binary operand). So a ternary skips its own indent whenever
-    // *any* ancestor is itself a ternary, not only a direct one.
-    if node
-        .ancestors()
-        .skip(1)
-        .any(|a| a.kind() == SyntaxKind::TERNARY_EXPR)
-    {
-        body
-    } else {
-        Ir::indent(body)
-    }
+    Ir::group(Ir::concat([first, Ir::indent(Ir::concat(rest))]))
 }
 
 /// Lay out a stepped range expression (`1:2:10`, `a:b:c`) with every `:` packed
