@@ -2180,6 +2180,23 @@ fn block_is_empty(block: &SyntaxNode) -> bool {
     })
 }
 
+/// Lower a block body under the empty-body policy the multi-clause `if`/`try`
+/// rules share. Unlike [`push_block_body`] (single-body blocks, whose empty body
+/// folds inline against the trailing `end`), a clause's `end` is shared by the
+/// whole construct, so an empty body here contributes **no** lines — the keyword
+/// header is followed directly by the next clause or the final `end`.
+///
+/// Returns `Some(Some(ir))` for a rendered non-empty body, `Some(None)` for a
+/// genuinely empty body (per [`block_is_empty`]), and `None` for a shape the
+/// engine rejects, so the caller bails to the verbatim transparent lowering.
+fn lower_body_allow_empty(block: &SyntaxNode) -> Option<Option<Ir>> {
+    match lower_block_body(block) {
+        Some(ir) => Some(Some(ir)),
+        None if block_is_empty(block) => Some(None),
+        None => None,
+    }
+}
+
 /// Lay out a `function`/`macro` definition. The shape mirrors the other block
 /// rules (`(FUNCTION_KW|MACRO_KW) SIGNATURE BLOCK END_KW`): the body is delegated
 /// to [`lower_block_body`], and the `SIGNATURE` (which carries the name, argument
@@ -2244,13 +2261,14 @@ fn lower_function(node: &SyntaxNode) -> Ir {
 /// the shared [`lower_block_body`] engine, exploding a non-empty body to the
 /// vertical form like the other block rules.
 ///
-/// Unlike `function`/`macro` bodies, `do`-block bodies are **not**
-/// `return`-inserted by Runic (verified: a bare tail expression stays bare), so
-/// there is no semantic-rewrite guard here — any non-empty body may be reshaped.
-/// An **empty** body (`foo() do … end`) makes `lower_block_body` return `None`
-/// and the transparent fallback preserves the source. Any unmodeled shape — a
-/// comment or newline in the params, a missing head/keyword/`end`, an unexpected
-/// child — also bails to the verbatim transparent lowering.
+/// `do`-block bodies are layout-only, never `return`-inserted (a bare tail
+/// expression stays bare), so there is no semantic-rewrite guard here — any
+/// non-empty body may be reshaped. A `do`-block is single-bodied, so an **empty**
+/// body folds inline against the trailing `end` via [`push_block_body`]
+/// (`foo() do end`, `map(xs) do x end`), exactly like the other single-body
+/// blocks. Any unmodeled shape — a comment or newline in the params, a missing
+/// head/keyword/`end`, an unexpected child — bails to the verbatim transparent
+/// lowering.
 fn lower_do(node: &SyntaxNode) -> Ir {
     let mut head: Option<SyntaxNode> = None;
     let mut params: Option<SyntaxNode> = None;
@@ -2287,9 +2305,6 @@ fn lower_do(node: &SyntaxNode) -> Ir {
     let (true, true, Some(head), Some(block)) = (saw_do, saw_end, head, block) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
-        return lower_transparent(node);
-    };
 
     let mut parts = vec![lower_node(&head), Ir::text(" do")];
     if let Some(params) = params {
@@ -2299,9 +2314,11 @@ fn lower_do(node: &SyntaxNode) -> Ir {
         parts.push(Ir::text(" "));
         parts.push(params_ir);
     }
-    parts.push(body);
-    parts.push(Ir::HardLine);
-    parts.push(Ir::text("end"));
+    // A `do` block is single-bodied, so its empty body folds inline against the
+    // trailing `end` (`f(xs) do x end`) exactly as the other single-body blocks.
+    if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
+        return lower_transparent(node);
+    }
     Ir::concat(parts)
 }
 
@@ -2600,12 +2617,13 @@ fn lower_loop(node: &SyntaxNode) -> Ir {
 ///
 /// Like the loop and `begin`/`quote`/`let` rules, a **non-empty** body is always
 /// exploded to the vertical form even when the source wrote it on one line
-/// (`if x; y; end` → `if x⏎    y⏎end`). An **empty** branch body makes
-/// `lower_block_body` return `None`; rather than partially reshape the chain, the
-/// whole `if` falls back to the verbatim transparent lowering. `if` bodies are
-/// never `return`-inserted (only function bodies are), so there is no
-/// semantic-rewrite risk. Any unmodeled shape — a body comment, a missing `end`,
-/// an unexpected child — also bails to transparent.
+/// (`if x; y; end` → `if x⏎    y⏎end`). An **empty** body contributes no lines
+/// (via [`lower_body_allow_empty`]): a clause-less empty `if` folds inline against
+/// `end` (`if x end`, the analog of `while x end`), while any empty body inside a
+/// chain leaves its header line followed directly by the next clause or the shared
+/// `end`. `if` bodies are never `return`-inserted (only function bodies are), so
+/// there is no semantic-rewrite risk. Any unmodeled shape — a body comment, a
+/// missing `end`, an unexpected child — bails to transparent.
 fn lower_if(node: &SyntaxNode) -> Ir {
     let mut condition: Option<SyntaxNode> = None;
     let mut block: Option<SyntaxNode> = None;
@@ -2637,19 +2655,30 @@ fn lower_if(node: &SyntaxNode) -> Ir {
     let (true, true, Some(condition), Some(block)) = (saw_if, saw_end, condition, block) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
+    let Some(body) = lower_body_allow_empty(&block) else {
         return lower_transparent(node);
     };
 
-    let mut parts: Vec<Ir> = vec![Ir::text("if"), Ir::text(" "), lower_node(&condition), body];
+    let body_empty = body.is_none();
+    let mut parts: Vec<Ir> = vec![Ir::text("if"), Ir::text(" "), lower_node(&condition)];
+    if let Some(body) = body {
+        parts.push(body);
+    }
     for clause in &clauses {
         let Some(clause_ir) = lower_branch_clause(clause) else {
             return lower_transparent(node);
         };
         parts.push(clause_ir);
     }
-    parts.push(Ir::HardLine);
-    parts.push(Ir::text("end"));
+    // A clause-less empty `if` folds inline against `end` (`if x end`), the exact
+    // analog of `while x end`; any clause (or a non-empty body) stays vertical,
+    // since the `end` is shared across the whole chain.
+    if body_empty && clauses.is_empty() {
+        parts.push(Ir::text(" end"));
+    } else {
+        parts.push(Ir::HardLine);
+        parts.push(Ir::text("end"));
+    }
     Ir::concat(parts)
 }
 
@@ -2663,10 +2692,13 @@ fn lower_if(node: &SyntaxNode) -> Ir {
 /// lowered recursively (a plain `NAME`, a `$`-interpolation, or a `var"…"`).
 ///
 /// As with `if` and the loops, a **non-empty** body always explodes vertical; an
-/// **empty** body (any branch) makes `lower_block_body` return `None` and the
-/// whole `try` falls back to the verbatim transparent lowering. `try` bodies are
-/// never `return`-inserted, so there is no semantic-rewrite risk. Any unmodeled
-/// shape bails to transparent.
+/// **empty** body (any branch) contributes no lines (via
+/// [`lower_body_allow_empty`]), leaving its keyword header followed directly by
+/// the next clause or the shared `end`, so `try⏎catch⏎end` stays vertical. A valid
+/// `try` always carries a clause; a clause-less one (`try end` is a syntax error)
+/// bails to transparent rather than reshape into something that won't reparse.
+/// `try` bodies are never `return`-inserted, so there is no semantic-rewrite risk.
+/// Any unmodeled shape bails to transparent.
 fn lower_try(node: &SyntaxNode) -> Ir {
     let mut block: Option<SyntaxNode> = None;
     let mut clauses: Vec<SyntaxNode> = Vec::new();
@@ -2696,11 +2728,20 @@ fn lower_try(node: &SyntaxNode) -> Ir {
     let (true, true, Some(block)) = (saw_try, saw_end, block) else {
         return lower_transparent(node);
     };
-    let Some(body) = lower_block_body(&block) else {
+    // A valid `try` always carries a `catch`/`else`/`finally`; a clause-less one
+    // is degenerate (`try end` is a syntax error), so leave it to the verbatim
+    // transparent path rather than reshaping it into something that won't reparse.
+    if clauses.is_empty() {
+        return lower_transparent(node);
+    }
+    let Some(body) = lower_body_allow_empty(&block) else {
         return lower_transparent(node);
     };
 
-    let mut parts: Vec<Ir> = vec![Ir::text("try"), body];
+    let mut parts: Vec<Ir> = vec![Ir::text("try")];
+    if let Some(body) = body {
+        parts.push(body);
+    }
     for clause in &clauses {
         let Some(clause_ir) = lower_branch_clause(clause) else {
             return lower_transparent(node);
@@ -2715,8 +2756,10 @@ fn lower_try(node: &SyntaxNode) -> Ir {
 /// Render one clause of an `if`/`try` chain (`elseif`/`else`/`catch`/`finally`)
 /// as a `HardLine` + the keyword at column 0, an optional space-separated header
 /// (the `elseif` condition or the `catch` variable), and the indented body. The
-/// header, when present, is lowered recursively. Returns `None` (the caller bails
-/// the whole construct to transparent) for an empty body or any unmodeled shape.
+/// header, when present, is lowered recursively. An **empty** clause body
+/// contributes no lines (via [`lower_body_allow_empty`]), leaving just the keyword
+/// header. Returns `None` (the caller bails the whole construct to transparent)
+/// for any unmodeled shape.
 fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
     let kw = match clause.kind() {
         SyntaxKind::ELSEIF_CLAUSE => "elseif",
@@ -2755,14 +2798,18 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
     let (true, Some(block)) = (saw_kw, block) else {
         return None;
     };
-    let body = lower_block_body(&block)?;
+    let body = lower_body_allow_empty(&block)?;
 
     let mut parts: Vec<Ir> = vec![Ir::HardLine, Ir::text(kw)];
     if let Some(header) = header {
         parts.push(Ir::text(" "));
         parts.push(lower_node(&header));
     }
-    parts.push(body);
+    // An empty clause body contributes no lines: the keyword header is followed
+    // directly by the next clause or the shared `end` (Tenet 1).
+    if let Some(body) = body {
+        parts.push(body);
+    }
     Some(Ir::concat(parts))
 }
 

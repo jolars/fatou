@@ -16,3 +16,12 @@ outer = if g
 else
     i
 end
+if p end
+if q
+elseif r
+    s
+end
+if x
+else
+    y
+end

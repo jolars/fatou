@@ -249,9 +249,12 @@ leverage.
   `lower_branch_clause`: each branch its own `BLOCK` delegated to
   `lower_block_body`, branch keywords emitted at column 0 via `HardLine`; the
   leading `if`/`elseif` `CONDITION` and the optional `catch e` variable are
-  lowered recursively; an empty branch body bails the whole construct to the
-  transparent fallback rather than partially reshape it; layout-only, never
-  `return`-inserted; locked by `if_blocks/` + `try_blocks/`), own-line line
+  lowered recursively; an empty body contributes no lines (via
+  `lower_body_allow_empty`): a clause-less empty `if` folds inline against `end`
+  (`if x end`), while an empty body inside a chain leaves its keyword header
+  followed directly by the next clause or the shared `end` (`try⏎catch⏎end`); a
+  clause-less `try` (`try end` is a syntax error) bails to transparent; layout-only,
+  never `return`-inserted; locked by `if_blocks/` + `try_blocks/`), own-line line
   comments in block bodies (`lower_block_body` extended: a `COMMENT` token on an
   otherwise-empty line becomes its own statement line, re-indented to the body;
   shared by `begin`/`quote`/`let`/loops/`if`/`try`; locked by `block_comments/`),
@@ -309,10 +312,11 @@ leverage.
   `do` blocks (`lower_do` over `DO_EXPR`: the call head sits *before* the `do`
   keyword and is lowered recursively, the optional `DO_PARAMS` arg list is
   `", "`-joined via `lower_do_params` (`do x,y` → `do x, y`, destructure `do (x, y)`
-  normalized), and the body delegates to `lower_block_body`. Unlike function bodies,
-  `do` bodies are **not** `return`-inserted by Runic, so there is no tail-return
-  guard—any non-empty body reshapes; an empty body bails to transparent; locked by
-  `do_blocks/`), n-ary binary spacing + continuation indent (`lower_binary`
+  normalized), and the body delegates to `lower_block_body`. `do` bodies are
+  layout-only, never `return`-inserted, so there is no tail-return guard—any
+  non-empty body reshapes; a `do` block is single-bodied, so an empty body folds
+  inline against `end` via `push_block_body` (`foo() do end`, `map(xs) do x end`);
+  locked by `do_blocks/`), n-ary binary spacing + continuation indent (`lower_binary`
   generalized from two operands to the full flat operand/operator alternation, so
   same-precedence chains `a+b+c+d` → `a + b + c + d` now normalize, plus a
   multi-line operator continuation: a `NEWLINE` in an operator gap becomes a

@@ -23,3 +23,6 @@ reduce(xs) do acc, x
 
 acc + x
 end
+
+filter(xs) do x
+end

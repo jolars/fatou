@@ -19,3 +19,11 @@ else
 finally
     s
 end
+try
+catch
+end
+try
+    a
+catch
+finally
+end
