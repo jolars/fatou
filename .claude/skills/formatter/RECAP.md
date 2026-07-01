@@ -93,42 +93,39 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (width-driven ternary: `lower_ternary`)
+## Latest session (width-driven comparison + arrow: `lower_comparison`, `lower_arrow`)
 
-Retired the source-break mirror in `lower_ternary` (`TERNARY_EXPR`). Before, a
-`NEWLINE` in a `?`/`:` gap became an `Ir::HardLine`, one continuation `Ir::indent`
-was applied at the outermost ternary, and every nested ternary rode that single
-level (skipping its own indent). Now it's fully width-driven, mirroring the Air
-model already used by `lower_binary`:
+Retired the last two source-break-mirroring operator rules. Both previously bailed
+transparent on a `NEWLINE` (source-mirroring a multi-line input), and
+`lower_comparison` also had no group at all, so a wide chain simply overflowed
+`line_width` unbroken.
 
-- **One `Ir::group` per ternary node, each with its own `Ir::indent`** — same
-  `Ir::group(Ir::concat([first, Ir::indent(Ir::concat(rest))]))` shape as
-  `lower_binary`. Flat `a ? b : c` when it fits `line_width`, else operator-trailing
-  (`?`/`:` can't lead a line in Julia) with the two branch operands wrapped one step.
-- Each breakable gap after an operator is an `Ir::Line` (space flat, newline broken).
-- **Nested `?:`-chains nest deeper** (user's call this session, over the old
-  single-level behavior): because each ternary owns its indent, a nested chain
-  *forced* to break indents one level further on top of its parent
-  (`x = a ?⏎    b :⏎    c ?⏎        d :⏎        e`); a nested chain that still fits
-  at its column stays flat.
-- Source `NEWLINE` is now ignored like whitespace (no more newline-into-HardLine,
-  no blank-line bail). Still bails transparent on an interleaved comment, error
-  recovery, or a bad operand/operator count (`operand_count != 3 || op_count != 2`).
+- **`lower_comparison` (`COMPARISON_EXPR`)** now mirrors `lower_binary`'s
+  non-assignment path exactly: one `Ir::group(Ir::concat([first,
+  Ir::indent(Ir::concat(rest))]))`, each gap an `Ir::Line`, operator-trailing.
+  Comparison ops are never tight, so every gap is breakable. Flat `a < b <= c`
+  when it fits, else each operator trails and the wrapped operands indent one step.
+  `NEWLINE` ignored like whitespace; still bails on an interleaved comment or a
+  degenerate operand/operator count (`op_count + 1 != operand_count`).
+- **`lower_arrow` (`ARROW_EXPR`)** stays a flat `concat([lhs, " -> ", rhs])` — the
+  `->` never introduces a break (user's call this session: assignment-style bias,
+  not break-at-arrow). The only change was ignoring `NEWLINE` alongside
+  `WHITESPACE` so a multi-line lambda reflows; the RHS's own group absorbs any
+  break (`arg -> body +⏎    more`, never `arg ->⏎    body`).
 
-Dropped the `node.ancestors()` ternary-ride check (deeper nesting makes it moot).
-`rules.rs`-only. Gated `ternary_multiline/` (fit cases collapse to flat — source
-breaks erased — plus a wide single and a wide nested case that pin the break shape),
-`ternary_spacing/` (pure spacing, no break; already deterministic), and
-`ternary_paren_branch/` (paren-branch cases all fit and collapse to flat). Gate
-28→31; suite (45) + clippy + fmt green; idempotent.
+`rules.rs`-only. Extended both fixtures' `input.jl` with a wide-break case and a
+multiline-collapse case, then gated `comparison_chains/` and `arrow_functions/`.
+Gate 31→33; suite (45) + clippy + fmt green; idempotent. **All operator rules are
+now width-driven Tenet-1** (binary, assignment, ternary, comparison, arrow; the
+tight ops `^`/`:`/`::`/`.` pack by design).
 
-**Ranked next targets:** (1) width-driven `lower_comparison` (`COMPARISON_EXPR`,
-`a == b < c` chains) and `lower_arrow` (`ARROW_EXPR`) — the last two operator rules
-that still source-mirror (both bail transparent on a `NEWLINE`); same Air-style
-group+indent as binary/ternary (`lower_arrow` biases the break into its RHS like an
-assignment); (2) extend the empty-body inline fold to `if`/`try`/`do` (per-clause
-reasoning); (3) the headline **width-driven reflow engine** across the
-block/statement families (the remaining source-break mirrors — see the pivot notes).
+**Ranked next targets:** (1) extend the empty-body inline fold to `if`/`try`/`do`
+(per-clause reasoning — currently these three still bail transparent on an empty
+body); (2) the headline **width-driven reflow engine** across the block/statement
+families (the remaining source-break mirrors — `lower_multiline_bracket`,
+`lower_matrix`, and the block-body layout still inspect source newlines; see the
+pivot notes); (3) revisit `lower_collection` (still source-mirroring per the
+inventory) if not already covered by the arg-list reflow.
 
 ## Standing traps
 
@@ -146,6 +143,13 @@ block/statement families (the remaining source-break mirrors — see the pivot n
 
 ## Earlier sessions
 
+- **Width-driven ternary (`lower_ternary`)** (committed `58e5336`): retired the
+  source-break mirror in `TERNARY_EXPR` for the Air model — one `Ir::group` per
+  ternary node with its own `Ir::indent`, operator-trailing (`?`/`:` can't lead a
+  line), each gap an `Ir::Line`; flat when it fits, else the branch operands wrap
+  one step. Nested `?:`-chains nest deeper (each owns its indent). Dropped the
+  `node.ancestors()` ride check. Gated `ternary_multiline/`, `ternary_spacing/`,
+  `ternary_paren_branch/`. Gate 28→31.
 - **Width-driven binary/assignment (`lower_binary`)** (committed `34c3e16`): retired
   the source-break mirror in `BINARY_EXPR` + `ASSIGNMENT_EXPR` for Air's model — one
   `Ir::group` per binary node with its own `Ir::indent`, operator-trailing, each gap

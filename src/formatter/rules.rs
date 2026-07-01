@@ -217,9 +217,15 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
 /// (`map(x -> x^2, a)`) keeps formatting. The target style always spaces the
 /// arrow.
 ///
-/// As with [`lower_binary`], only the clean single-line shape `<lhs> -> <rhs>` is
-/// reshaped: an interleaved comment or newline (a multi-line body), error
-/// recovery, or a missing operand falls back to the verbatim transparent lowering.
+/// **Width-driven (Tenet 1).** Like an assignment operator in [`lower_binary`], the
+/// `->` never introduces a break of its own: it stays trailing-flat (` -> `) and the
+/// break is biased into the right-hand side, whose own group absorbs it
+/// (`arg -> body +⏎ more`, never `arg ->⏎ body + more`). Source line breaks carry no
+/// layout information and are ignored like whitespace, so a multi-line body reflows.
+///
+/// As with [`lower_binary`], only the clean single-lambda shape `<lhs> -> <rhs>` is
+/// reshaped: an interleaved comment, error recovery, or a missing operand falls back
+/// to the verbatim transparent lowering.
 fn lower_arrow(node: &SyntaxNode) -> Ir {
     let mut operands: Vec<SyntaxNode> = Vec::new();
     let mut op: Option<SyntaxToken> = None;
@@ -228,7 +234,7 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
         match el {
             NodeOrToken::Node(child) => operands.push(child),
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::ARROW if op.is_none() => op = Some(tok),
                 _ => return lower_transparent(node),
             },
@@ -815,18 +821,29 @@ fn strip_trailing_zeros(s: &str) -> String {
 /// Lay out a comparison chain (`a == b == c`, `x < y <= z`) with a single space
 /// on each side of every operator. The node alternates operand/operator and may
 /// hold more than two operands; comparison operators are never tight, so every
-/// gap is one space.
+/// gap is breakable.
 ///
-/// As with [`lower_binary`], only the clean alternating shape is reshaped: any
-/// interleaved comment or newline, error recovery, or a degenerate operand count
-/// falls back to the verbatim transparent lowering.
+/// **Width-driven (Tenet 1)**, identical to [`lower_binary`]'s non-assignment
+/// path: one `Ir::group` with its own continuation indent — flat (`a < b <= c`)
+/// when it fits `line_width`, else operator-trailing (each operator stays on the
+/// line it ends) with the wrapped operands indented one step. Source line breaks
+/// carry no layout information and are ignored like whitespace.
+///
+/// As with [`lower_binary`], only the clean alternating shape is reshaped: an
+/// interleaved comment, error recovery, or a degenerate operand count falls back
+/// to the verbatim transparent lowering.
 fn lower_comparison(node: &SyntaxNode) -> Ir {
     // Children in source order, with incidental whitespace dropped: operands
     // become lowered `Ir`, operator tokens become their text. The result must
     // alternate operand, operator, operand, … starting and ending on an operand.
-    let mut parts: Vec<Ir> = Vec::new();
+    let mut first: Option<Ir> = None;
+    let mut rest: Vec<Ir> = Vec::new();
+    // Separator to emit before the upcoming operand: the breakable `Ir::Line`, set
+    // when a comparison operator is consumed.
+    let mut next_sep: Option<Ir> = None;
     let mut expect_operand = true;
     let mut operand_count = 0usize;
+    let mut op_count = 0usize;
 
     for el in node.children_with_tokens() {
         match el {
@@ -834,36 +851,51 @@ fn lower_comparison(node: &SyntaxNode) -> Ir {
                 if !expect_operand {
                     return lower_transparent(node);
                 }
-                if operand_count > 0 {
-                    parts.push(Ir::text(" "));
+                let ir = lower_node(&child);
+                if operand_count == 0 {
+                    first = Some(ir);
+                } else {
+                    if let Some(sep) = next_sep.take() {
+                        rest.push(sep);
+                    }
+                    rest.push(ir);
                 }
-                parts.push(lower_node(&child));
                 operand_count += 1;
                 expect_operand = false;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
-                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE => {
+                // Source line breaks carry no layout information under Tenet 1.
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
                     return lower_transparent(node);
                 }
                 _ => {
                     if expect_operand {
                         return lower_transparent(node);
                     }
-                    parts.push(Ir::text(" "));
-                    parts.push(Ir::text(tok.text().to_string()));
+                    // A comparison operator sits trailing on the line it ends; the
+                    // following operand wraps at the breakable gap.
+                    rest.push(Ir::text(format!(" {}", tok.text())));
+                    next_sep = Some(Ir::Line);
+                    op_count += 1;
                     expect_operand = true;
                 }
             },
         }
     }
 
-    // A well-formed chain ends on an operand and has at least two of them.
-    if expect_operand || operand_count < 2 {
+    // A well-formed chain ends on an operand, has at least two of them, and one
+    // fewer operator than operands.
+    let Some(first) = first else {
+        return lower_transparent(node);
+    };
+    if expect_operand || operand_count < 2 || op_count + 1 != operand_count {
         return lower_transparent(node);
     }
 
-    Ir::concat(parts)
+    // One width-driven group with its own continuation indent: flat when it fits,
+    // else operator-trailing with the wrapped operands indented one step.
+    Ir::group(Ir::concat([first, Ir::indent(Ir::concat(rest))]))
 }
 
 /// Lay out a ternary conditional (`a ? b : c`) with a single space on each side of

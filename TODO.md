@@ -94,7 +94,9 @@ leverage.
 - [~] Per-construct IR rules (`src/formatter/rules.rs`): replace the lossless
   passthrough in `core::format` with native IR builders per construct, printed by
   the existing best-fit engine. **Landed:** operator/assignment spacing
-  (`lower_binary`), comparison chains (`lower_comparison`), call/index arg lists
+  (`lower_binary`), comparison chains (`lower_comparison`: **now width-driven** —
+  same Air-style group+indent as `lower_binary`, flat when it fits else
+  operator-trailing; `comparison_chains/` gated), call/index arg lists
   (`lower_arg_list` + `lower_keyword_arg`/`lower_parameters`: comma spacing, no
   bracket padding, single-line trailing-comma drop, `;`-kwargs), tuple/vector/
   brace collections (`lower_collection`: comma spacing, no bracket padding,
@@ -117,8 +119,9 @@ leverage.
   everywhere—between items/rows and in the leading gap (after the open bracket) and
   trailing gap (before the close), capped at 2 per Runic; one newline is the framing
   break, the rest become blanks), anonymous-function arrow spacing (`lower_arrow`:
-  `x->y` → `x -> y`, one space each side, operands recursed; bails on a multi-line
-  body), ternary conditionals (`lower_ternary`: **now width-driven** — one
+  `x->y` → `x -> y`, one space each side, operands recursed; **now width-driven** —
+  the `->` never breaks (assignment-style), the RHS group absorbs any break,
+  source line breaks ignored; `arrow_functions/` gated), ternary conditionals (`lower_ternary`: **now width-driven** — one
   `Ir::group` per ternary node with its own `Ir::indent`, flat `a ? b : c` when it
   fits, else operator-trailing with the branch operands indented one step; each
   nested `?:`-chain forced to break nests one level deeper on top of its parent's
