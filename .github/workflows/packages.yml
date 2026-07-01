@@ -139,10 +139,12 @@ jobs:
       - name: Create archive (Unix)
         if: runner.os != 'Windows'
         run: |
-          mkdir -p dist
+          mkdir -p dist/man dist/completions
           cp target/${{ matrix.target }}/release/fatou dist/
           cp LICENSE dist/
           cp README.md dist/
+          cp target/man/*.1 dist/man/
+          cp target/completions/fatou.bash target/completions/fatou.fish target/completions/_fatou dist/completions/
           tar czf fatou-${{ matrix.target }}.tar.gz -C dist .
           rm -rf dist
 

@@ -29,6 +29,17 @@
             lockFile = ./Cargo.lock;
           };
 
+          nativeBuildInputs = [ pkgs.installShellFiles ];
+
+          postInstall = ''
+            installShellCompletion --cmd fatou \
+              --bash target/completions/fatou.bash \
+              --fish target/completions/fatou.fish \
+              --zsh target/completions/_fatou
+
+            installManPage target/man/*
+          '';
+
           meta = with pkgs.lib; {
             description = "An LSP, formatter, and linter for Julia";
             homepage = "https://github.com/jolars/fatou";
