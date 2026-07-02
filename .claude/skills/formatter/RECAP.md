@@ -93,39 +93,39 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (uniform same-operator chain break — flatten nested `&&`/`||`/`|>`)
+## Latest session (uniform mixed same-precedence chain break — flatten by tier)
 
-Second `lower_binary` re-evaluation. Width-probing exposed a real Tenet-1 asymmetry: a too-wide
-`+`/`*` chain breaks **uniformly** (each operand its own line, gated in `binary_continuation`),
-but `&&`/`||`/`|>`/`=>` broke only at the **outermost** operator, leaving the inner chain packed
-(`a &&⏎ b && c && d`). Root cause: JuliaSyntax (and Fatou's parser) fold a *same-operator*
-arithmetic chain into one **flat n-ary** `BINARY_EXPR`, but keep short-circuit / pipe / pair
-chains **nested** (`a && b && c` → `a && (b && c)`; `a |> b |> c` → `(a |> b) |> c`). `lower_binary`
-faithfully mirrored the parse shape, so the inner nested group stayed flat if it fit.
+Third `lower_binary` re-evaluation, closing ranked target #1. The prior session made a *same-operator*
+chain break uniformly but left a residual asymmetry within a precedence tier: a too-wide **mixed**
+chain (`a + b - c + d`, `a * b / c`) still broke only at its **outermost** operator, keeping the
+left-nested inner chain packed. Root cause: the parser folds a same-operator `+`/`*` chain into one
+flat n-ary node but **left-nests a mixed same-tier chain** (`a + b - c` → `(a + b) - c`), and
+`collect_binary_chain` only descended into children whose operator matched by **exact kind**.
 
-**User chose uniform break (flatten)** via AskUserQuestion. Implemented two helpers:
-`binary_op_kind(node)` (the chain's operator kind = first token after the left operand) and
-`collect_binary_chain(node, op_kind, flatten, items)` which flattens the operand/operator
-alternation, **descending into operand `BINARY_EXPR` children that share `op_kind`** so a
-same-operator nested chain collapses into one flat stream → one break group. `flatten` is gated
-`!is_assignment && !is_tight_binop(op_kind)` (assignment and tight `^`/`:`/`.` never break, so
-flattening is a no-op for them and they keep nested lowering). The layout loop is unchanged; it
-now iterates the flattened `Vec<SyntaxElement>` instead of `node.children_with_tokens()`.
-**Key invariant preserved:** only *same-operator* children flatten — a mixed or tighter subexpr
-(`a + b * c`, `a && b || c`) keeps a differing `op_kind`, is pushed whole, and stays its own flat
-group (`&&` binds tighter than `||`, so `a && b ||⏎ c && d` keeps each `&&` grouped — desirable).
-`a + b - c` (parser-nested, mixed +/-) is untouched and ungated. Gated `chain_break/`
-(fitting chain flat + overflowing `&&`/`||`/`|>` + the mixed `&&`/`||` case). Gate 77→78. Full
-suite + clippy + `fmt --check` clean.
+**User chose uniform break (flatten the whole tier)** via AskUserQuestion. Generalized the descend
+test from exact-kind equality to **precedence-tier** equality: new `binary_prec_class(kind) ->
+Option<u8>` (the multi-operator left-assoc tiers, mirroring the parser's `infix_binding_power`:
+plus `+ - |` + broadcasts = 0, times `* / \ % &` + broadcasts = 1, shift `<< >> >>>` = 2) and
+`same_break_tier(a, b)` (`a == b || same class`). `collect_binary_chain`'s descend condition is now
+`binary_op_kind(child).is_some_and(|k| same_break_tier(k, op_kind))`. Everything else in
+`lower_binary` is unchanged — the layout loop still reads each token's own text, so mixed operators
+trail correctly (`a +⏎ b -⏎ c`). **Invariants preserved:** a tighter/looser tier subexpr
+(`a + b * c`) keeps a differing class, is pushed whole, stays its own flat group; unicode ops
+collapse to one `UNICODE_OP` kind spanning several tiers, so `binary_prec_class` returns `None`
+for them and they still flatten only on **exact-kind** equality (pre-existing, unchanged).
+**Deliberate consequence disclosed to user:** bitwise `|` shares the plus tier and `&` the times
+tier in Julia, so `a + b | c` and `a * b & c` now flatten too — the honest "same precedence tier"
+rule, not just arithmetic. Gated `mixed_precedence_chain/` (fitting mixed `a + b - c` flat +
+overflowing additive/multiplicative + a mixed-additive chain with flat `*` subexprs). Gate 78→79.
+Full suite + clippy + `fmt --check` clean.
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) **mixed same-precedence chains** — `a + b - c` / `a * b / c` still
-parse nested and break outermost-only; decide whether `+`/`-` (and `*`/`/`) should flatten across
-*different* operators of one precedence tier (would need an operator-precedence-class check, not
-just kind equality). (2) more **width defects from continuation-aware `fits`** — re-probe trailing
-tails (annotations `::T`, `where`, index/call chains) for now-correct breaks to gate. (3) Sweep the
-residual Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
+**Ranked next targets:** (1) more **width defects from continuation-aware `fits`** — re-probe trailing
+tails (annotations `::T`, `where`, index/call chains) for now-correct breaks to gate. (2) The `//`
+rational and `|>` pipe tiers are single-kind so unaffected; the arrow/pair tier (`=> --> <->`) could
+flatten across kinds too but is rare — revisit only if a real case shows up. (3) Sweep the residual
+Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -156,6 +156,12 @@ targets" + `TODO.md`.
 
 ## Earlier sessions
 
+- **Uniform same-operator chain break** (committed `a6592c`-era, `feat`): flattened the
+  parser-nested same-operator short-circuit / pipe / pair chains (`&&`/`||`/`|>`/`=>`) into one
+  break group via `binary_op_kind` + `collect_binary_chain` (descend on exact-kind match), so a
+  too-wide chain breaks at every operator, not just the outermost. Only same-operator children
+  flattened; mixed/tighter subexprs stayed their own group. Gated `chain_break/`. Gate 77→78.
+  (Superseded this session: the descend test now flattens by precedence *tier*.)
 - **Continuation-aware `fits`** (committed `5baca04`, `feat`): first printer-engine change
   post-pivot. Fixed `printer::fits` to the Wadler best-fit continuation form — it now walks the
   group `inner` flat **then the rest of the print stack**, stopping at the first taken break, so a

@@ -91,6 +91,13 @@ leverage.
   chain into one group, so every operator breaks together (`a &&\n b &&\n c`).
   Mixed-operator or tighter subexprs keep a differing operator kind and stay their own
   group (`a && b ||\n c && d`). `chain_break/` gated.
+- [x] Formatter: mixed same-precedence chains break uniformly (`lower_binary`). The
+  parser left-nests `a + b - c` / `a * b / c` / `a << b >> c` (one operator per level),
+  so a too-wide mixed-additive/multiplicative/shift chain used to break only at its
+  outermost operator. New `same_break_tier`/`binary_prec_class` helpers flatten on the
+  operator's precedence *tier*, not exact kind, so `+`/`-` (and `*`/`/`/`%`/`\`/`&`,
+  `<<`/`>>`/`>>>`, and `|` with `+`) fold into one break group like a same-operator
+  chain. Tighter/looser tiers stay their own group. `mixed_precedence_chain/` gated.
 - [x] Formatter: the `;`-keyword tail of a call now folds into `lower_arg_list`'s
   width-driven group instead of always emitting flat. A too-wide call breaks
   one-arg-per-line with the `;` snug after the last positional (`b;`) and each

@@ -109,12 +109,12 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 
 /// Lay out a binary or assignment expression with normalized operator spacing:
 /// a single space on each side, except for the tight operators (`^`, `:`, `.`)
-/// the target style packs without spaces. A same-operator chain lays out as one
-/// n-ary group: the parser already folds `a + b + c` into a single flat
+/// the target style packs without spaces. A chain of one precedence tier lays out as
+/// one n-ary group: the parser already folds `a + b + c` into a single flat
 /// `BINARY_EXPR` with three operands, and [`collect_binary_chain`] flattens the
-/// operators the parser keeps *nested* (`&&`, `||`, `|>`, `=>`, …) into the same
-/// shape, so every operator in the chain breaks together regardless of how the
-/// parser associated it.
+/// chains the parser keeps *nested* — both same-operator (`&&`, `||`, `|>`, `=>`, …)
+/// and mixed same-tier (`+`/`-`, `*`/`/`, `<<`/`>>`) — into the same shape, so every
+/// operator in the tier breaks together regardless of how the parser associated it.
 ///
 /// **Width-driven (Tenet 1).** Source line breaks carry no layout information: the
 /// chain lays out flat (`a + b + c`) when it fits `line_width`, else it breaks. The
@@ -123,12 +123,13 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 /// - **Operator-trailing.** The operator stays on the line it ends; the following
 ///   operand wraps. Each breakable operator gap is an [`Ir::Line`] (a space when
 ///   flat, a newline when broken).
-/// - **Uniform same-operator break.** A too-wide chain of one operator breaks at
-///   *every* operator (`a &&⏎ b &&⏎ c`), not just the outermost. A tighter or
-///   different-operator subexpression is its own node/group, so it stays flat on
-///   its line while the looser enclosing chain breaks (`a +⏎ b * c +⏎ d`,
-///   `a &&⏎ b || c` never splits the tighter `b || c`). When an inner
-///   subexpression is *itself* forced to break, its indent nests on the parent's.
+/// - **Uniform same-tier break.** A too-wide chain of one precedence tier breaks at
+///   *every* operator (`a &&⏎ b &&⏎ c`, `a +⏎ b -⏎ c`), not just the outermost —
+///   mixed same-tier operators (`+`/`-`, `*`/`/`, `<<`/`>>`) flatten together like a
+///   same-operator chain. A subexpression in a tighter or looser tier is its own
+///   node/group, so it stays flat on its line while the enclosing chain breaks
+///   (`a +⏎ b * c +⏎ d`, `a &&⏎ b || c` never splits the tighter `b || c`). When an
+///   inner subexpression is *itself* forced to break, its indent nests on the parent's.
 /// - **Assignment operators never break.** An `ASSIGNMENT_EXPR` joins its operator
 ///   with flat spaces (` = `) and emits no group of its own; the break is biased
 ///   into the right-hand side, whose own group absorbs it
@@ -253,12 +254,14 @@ fn binary_op_kind(node: &SyntaxNode) -> Option<SyntaxKind> {
 }
 
 /// Append `node`'s operand / operator alternation to `items`, dropping trivia. When
-/// `flatten` is set, an operand child that is itself a `BINARY_EXPR` sharing
-/// `op_kind` is descended into rather than pushed whole, so a same-operator chain
-/// the parser nested (`a && b && c`, right-nested; `a |> b |> c`, left-nested)
-/// collapses into one flat operand/operator stream and thus one break group.
-/// Mixed-operator or tighter subexpressions (`a + b * c`, `a && b || c`) keep a
-/// differing `op_kind`, so they are pushed whole and lowered as their own group.
+/// `flatten` is set, an operand child that is itself a `BINARY_EXPR` whose operator
+/// breaks in the same tier as `op_kind` (see [`same_break_tier`]) is descended into
+/// rather than pushed whole, so a chain the parser nested collapses into one flat
+/// operand/operator stream and thus one break group. This folds both a same-operator
+/// nested chain (`a && b && c`, right-nested; `a |> b |> c`, left-nested) and a mixed
+/// same-precedence chain (`a + b - c`, `a * b / c`, left-nested). A tighter or
+/// looser subexpression (`a + b * c`, `a && b || c`) sits in a different tier, so it
+/// is pushed whole and lowered as its own group.
 ///
 /// Returns `false` on any shape we don't fully model — an interleaved comment, a
 /// missing operand, two operands in a row — so the caller falls back to the
@@ -278,7 +281,7 @@ fn collect_binary_chain(
                 }
                 if flatten
                     && child.kind() == SyntaxKind::BINARY_EXPR
-                    && binary_op_kind(&child) == Some(op_kind)
+                    && binary_op_kind(&child).is_some_and(|k| same_break_tier(k, op_kind))
                 {
                     if !collect_binary_chain(&child, op_kind, flatten, items) {
                         return false;
@@ -301,6 +304,36 @@ fn collect_binary_chain(
     }
     // A well-formed chain ends on an operand.
     !expect_operand
+}
+
+/// Whether two operator kinds break together in one chain group: the same kind
+/// (`a + b + c`), or two different operators sharing a left-associative precedence
+/// tier (`a + b - c`, `a * b / c`, `a << b >> c`). The parser left-nests a mixed
+/// same-tier chain (`(a + b) - c`), so flattening on tier — not just exact kind —
+/// collapses it into one break group, matching the uniform break a same-operator
+/// chain already gets. Unicode operators collapse to one `UNICODE_OP` kind that
+/// spans several tiers, so they only flatten on exact-kind equality (no tier).
+fn same_break_tier(a: SyntaxKind, b: SyntaxKind) -> bool {
+    a == b || binary_prec_class(a).is_some_and(|c| Some(c) == binary_prec_class(b))
+}
+
+/// The break-flatten tier of a left-associative binary operator whose tier holds
+/// more than one operator kind, mirroring the parser's `infix_binding_power`
+/// classes. Only these multi-operator tiers matter for flattening; a single-kind
+/// tier (`^`, `//`, `|>`, `&&`, `=>`, …) is handled by exact-kind equality, and
+/// tight or right-associative operators never break, so they are `None` here.
+fn binary_prec_class(kind: SyntaxKind) -> Option<u8> {
+    use SyntaxKind::*;
+    Some(match kind {
+        // Plus tier: `+ - |` (and broadcast `.+ .- .|`), left-associative.
+        PLUS | MINUS | PIPE | DOT_PLUS | DOT_MINUS | DOT_PIPE => 0,
+        // Times tier: `* / \ % &` (and their broadcast forms), left-associative.
+        STAR | SLASH | BACKSLASH | PERCENT | AMP | DOT_STAR | DOT_SLASH | DOT_BACKSLASH
+        | DOT_PERCENT | DOT_AMP => 1,
+        // Bitshift tier: `<< >> >>>`, left-associative.
+        SHL | SHR | USHR => 2,
+        _ => return None,
+    })
 }
 
 /// Lay out an anonymous-function arrow (`x -> y`, `(a, b) -> a + b`) with a single
