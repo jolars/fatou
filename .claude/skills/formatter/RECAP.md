@@ -93,33 +93,33 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (Tenet-1 whitespace fix for type declarations)
+## Latest session (gated the already-canonical operator/literal pile)
 
-Retired the last source-mirror in `lower_type_decl` (`ABSTRACT_DEF`/`PRIMITIVE_DEF`).
-The Runic-era rule collapsed only the *keyword-region* whitespace to one space and
-passed the **post-signature** region (around the bits `LITERAL` and the `end`)
-through verbatim, so `abstract type Foo   end` and `primitive type C <: A  32  end`
-leaked source spacing — a Tenet-1 violation.
+Pure `test(formatter)`, **no code** — landed target #2 from last session. Wrote the
+first `expected.jl` for 15 ungated fixtures whose rules already emit the canonical
+Tenet-1 form. Before authoring, re-verified each: idempotent (format∘format == format
+across the batch) and input-independent (spot-checked `control_flow` — a mangled-indent
+equivalent reflows to the canonical 4-space form). The forms are pre-existing rule
+decisions (literal normalization, operator/comma spacing, `where` bracing, `∈`/`=`→
+`in`), so gating just locks current behavior.
 
-- **Trailing-region tokens now normalize:** WHITESPACE → one space, END_KW → text,
-  anything else (comment/newline we don't model) bails transparent. The keyword
-  region already collapsed; the signature and bits `LITERAL` lower recursively.
-- Dropped the now-unused `.peekable()`/`while let` (only `lower_trivia`'s peek
-  needed it) for a plain `for` loop — clippy `while_let_on_iterator` otherwise.
-- Doc comment de-Runic'd to the width-driven description.
-
-`rules.rs`-only. Gated `abstract_types/` + `primitive_types/` (first `expected.jl`
-for both — they had `input.jl` only despite a stale TODO note claiming otherwise).
-Gate 34→36. Suite (45) + clippy + fmt green; idempotent. No parser blocker.
+Gated: `tight_operators`, `assignment_spacing`, `type_annotations`, `range_colon`,
+`where_clauses`, `dot_access`, `float_literals`, `hex_literals`, `named_tuples`,
+`curly_type_params`, `bare_tuples`, `import_using_lists`, `export_public_lists`,
+`comprehension_for_in`, `control_flow`. Gate 36→51. Formatter suite green; no parser
+blocker. (TODO prose already read "locked by X/" for these — same run-ahead as the
+abstract/primitive note last session; gating finally makes it true.)
 
 **Ranked next targets:** (1) the headline **width-driven reflow engine** across the
 block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
-still inspect source newlines); (2) gate the pile of already-canonical ungated
-operator/literal fixtures as pure `test(formatter)` — verified deterministic this
-session: `tight_operators`, `assignment_spacing`, `type_annotations`, `range_colon`,
-`where_clauses`, `dot_access`, `float_literals`, `hex_literals`, `named_tuples`,
-`curly_type_params`, `bare_tuples`, `import_using_lists`, `export_public_lists`,
-`comprehension_for_in`, `control_flow`; (3) sweep residual Runic doc comments.
+still inspect source newlines); (2) sweep residual Runic doc comments in `rules.rs`
+(~50 per-rule rationale comments); (3) revisit the remaining ungated fixtures — the
+six `*_divergence` slugs (now meaningless without Runic; rename/fold or author a
+canonical `expected.jl`) and the module/block/comment fixtures
+(`module_blocks`, `module_baremodule`, `module_siblings`, `module_leading_comment`,
+`global_local_assignment`, `global_local_names`, `block_comments*`, `trailing_comments`,
+`trailing_whitespace`, `paren_padding`, `assignment`) — verify determinism per Tenet 1
+before gating (several block-family ones still source-mirror).
 
 ## Standing traps
 
@@ -137,6 +137,12 @@ session: `tight_operators`, `assignment_spacing`, `type_annotations`, `range_col
 
 ## Earlier sessions
 
+- **Tenet-1 whitespace fix for type declarations** (committed): retired the last
+  source-mirror in `lower_type_decl` (`ABSTRACT_DEF`/`PRIMITIVE_DEF`) — the
+  post-signature region (around the bits `LITERAL` and `end`) now normalizes
+  (WHITESPACE→one space, END_KW→text, else bail transparent) instead of passing
+  source spacing through. Dropped the unused `.peekable()`/`while let` for a plain
+  `for`. Gated `abstract_types/` + `primitive_types/`. Gate 34→36.
 - **Empty-body inline fold for `if`/`try`/`do`** (committed): extended the
   empty-body inline collapse to the last three block families that still bailed
   transparent on an empty body. New helper `lower_body_allow_empty` (`Some(Some)`
