@@ -337,7 +337,11 @@ leverage.
   the whole file to transparent; also locked by
   `toplevel_blank_lines/`, and unblocked `loop_blocks/` + `let_blocks/`).
   **Next:** multi-line ternary in a parenthesized branch (paren's own break engine
-  drives the layout); long single-line bracket/matrix width-based reflow is a
+  drives the layout). The four comment fixtures (`block_comments`,
+  `block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`) are
+  now hand-authored + gated (verified input-independent per Tenet 1), so **every**
+  fixture is gated.
+  Long single-line bracket/matrix width-based reflow is a
   **non-goal**—probing shows Runic does **not** width-reflow (it is purely
   source-driven like Fatou); see the `formatter-parity` RECAP's ranked targets.
   (Unary spacing is Runic-preserved, so no rule; single-line matrices `[1 2]`/

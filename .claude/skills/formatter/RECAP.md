@@ -93,41 +93,36 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gated the spacing/padding pile; renamed the *_divergence slugs)
+## Latest session (gated the last 4 comment fixtures — every fixture now gated)
 
-Pure `test(formatter)`, **no code**. Gated the eight remaining "already-canonical"
-fixtures whose rules already emit canonical Tenet-1 form: `paren_padding`,
-`assignment`, `trailing_whitespace`, `logical_operators`, `paren_blank_lines`,
-`block_comment_spacing`, `bracket_comment_spacing`, `trailing_comment_spacing`.
-Gate 57→65 — **all 65 gated fixtures now pass; only the 4 comment fixtures remain
-ungated** (`block_comments`, `block_comments_in_blocks`, `bracket_block_comments`,
-`trailing_comments`).
+Pure `test(formatter)`, **no code**. Gated the four remaining ungated inputs:
+`block_comments`, `block_comments_in_blocks`, `bracket_block_comments`,
+`trailing_comments`. Gate 65→69 — **every fixture is now gated.** The existing
+`lower_block_body`/`lower_multiline_bracket` comment machinery already emits
+canonical Tenet-1 form; I hand-authored each `expected.jl` to the verified-canonical
+output (user approved with `commit`, no edits).
 
-Verified determinism before gating (not accidental transparent passes): mangled
-variants normalize (`x=1`→`x = 1`, `a&&b`→`a && b`, `( a + b )`→`(a + b)`, padding
-stripped, blank runs inside parens collapsed, multi-space-before-comment→one space,
-trailing whitespace trimmed on code+line-comment lines while triple-string and
-block-comment *interiors* stay verbatim), and each output is idempotent.
+Verified input-independence before gating (the RECAP flagged these as source-mirror
+risks): mangled variants all normalize —
+- **block_comments:** own-line comments re-indent to block indent; statement spacing
+  normalizes. Own-line-vs-trailing is comment *position* (semantic), not a line-break
+  choice.
+- **block_comments_in_blocks:** an over-indented / flat-one-line `#= =#` first line
+  re-indents to block indent; a multi-line `#= =#` keeps its interior lines verbatim
+  (token content, like a string body — you can't reflow inside it).
+- **bracket_block_comments:** a one-line `[1, #= one =# 2, ...]` source **explodes**
+  to one-element-per-line, identical to the pre-broken form (brackets with comments
+  always fully explode); a mid-element `#= a =#` rides the preceding element as a
+  trailing comment.
+- **trailing_comments:** spacing normalizes, `;`-joins split to separate lines,
+  comment interior text preserved verbatim (`#tight` stays `#tight`).
+All four idempotent; full suite + clippy + `fmt --check` clean; no parser blocker.
 
-**User decisions:** (1) **Renamed all five `*_divergence` slugs** (Runic is gone, so
-"divergence" is meaningless): `logical_tight_divergence`→`logical_operators`,
-`paren_blank_line_divergence`→`paren_blank_lines`,
-`block_comment_spacing_divergence`→`block_comment_spacing`,
-`bracket_comment_spacing_divergence`→`bracket_comment_spacing`,
-`trailing_comment_spacing_divergence`→`trailing_comment_spacing` (via `git mv`; TODO
-prose references updated too). (2) **Stripped the editorializing** from the comment
-fixtures — the two `# multiple spaces preserved by Runic` and the `#= many spaces =#`
-notes were false (the formatter normalizes to one space) and are now neutral
-`# comment`/`#= comment =#`. Formatter suite green; no parser blocker.
-
-**Ranked next targets:** (1) The remaining **4 comment fixtures** (`block_comments`,
-`block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`) — the only
-ungated inputs left; verify determinism per Tenet 1 before gating (their rules mirror
-source lines in places, so check input-independence carefully). (2) The headline
-**width-driven reflow engine** across the block/statement families
-(`lower_multiline_bracket`/`lower_matrix`/block-body layout still inspect source
-newlines) — the largest remaining piece, prerequisite for true Tenet-1 conformance.
-(3) Sweep residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
+**Ranked next targets:** (1) The headline **width-driven reflow engine** across the
+block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
+still inspect source newlines via `has_newline_token`) — the largest remaining piece,
+prerequisite for true Tenet-1 conformance. (2) Sweep residual Runic doc comments in
+`rules.rs` (~50 per-rule rationale comments).
 
 ## Standing traps
 
@@ -145,6 +140,13 @@ newlines) — the largest remaining piece, prerequisite for true Tenet-1 conform
 
 ## Earlier sessions
 
+- **Gated the spacing/padding pile; renamed the `*_divergence` slugs** (committed,
+  pure `test(formatter)`): gated the eight remaining already-canonical fixtures
+  (`paren_padding`, `assignment`, `trailing_whitespace`, `logical_operators`,
+  `paren_blank_lines`, `block_comment_spacing`, `bracket_comment_spacing`,
+  `trailing_comment_spacing`); verified determinism (mangled variants normalize,
+  idempotent). User renamed all five `*_divergence` slugs (Runic gone) and stripped
+  false "preserved by Runic" editorializing from comment fixtures. Gate 57→65.
 - **Gated the module/baremodule body-indentation construct** (committed, pure
   `test(formatter)`): authored `expected.jl` for the four `module_*` fixtures. Kept
   Runic's rule — every module body indents *except* the lone file-wrapper module
