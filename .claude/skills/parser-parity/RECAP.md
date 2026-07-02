@@ -6,6 +6,35 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Queued from formatter (2026-07-02b) — newline-after-comma continuation: three
+sites where a trailing comma should continue a comma list across a newline, but
+Fatou terminates the statement at the newline and fragments the tail.** One root
+cause; JuliaSyntax treats the trailing `,` (or a dangling `:` in `import`) as a
+line-continuation.
+
+1. **Bare tuple assignment.** `x = a,\nb,\nc` — Fatou splits into three ROOT
+   children: `ASSIGNMENT_EXPR(x = (a,))`, a separate `BARE_TUPLE_EXPR(b,)`, then a
+   bare `NAME(c)`. JuliaSyntax ground truth: `x = (a, b, c)` (one tuple
+   assignment). (This is the formatter RECAP's ranked target #1 — confirmed
+   parser-entangled, not a `rules.rs` fix.)
+2. **`let` binding list.** `let x = 1,\n    y = 2\n    body\nend` — Fatou's
+   `LET_BINDINGS` captures only `x = 1,`; `y = 2` leaks into the loop `BLOCK` body
+   as its first statement. JuliaSyntax ground truth: `let x = 1, y = 2 … end` (both
+   in the binding list). The single-line `let x = 1, y = 2` parses correctly; only
+   the newline-after-comma form fragments.
+3. **`import`/`using` selective list.** `import A:\n    b,\n    c` — Fatou emits
+   `IMPORT_STMT(import A:)` then a separate ROOT `BARE_TUPLE_EXPR(b,)` and `NAME(c)`.
+   Both the dangling `:` and the trailing `,` should continue the list; the
+   formatter emits flush-left fragments (also loses indentation). The single-line
+   `import A: b, c` parses correctly.
+
+Common fix locus: newline handling inside comma-separated list contexts (tuple RHS,
+`let` bindings, `import`/`using` `:`-lists) — a pending trailing comma (or the
+`import` `:`) must suppress the statement-terminating newline. The formatter keeps
+all three out of fixtures (uses single-line variants) and still source-mirrors on
+the multiline forms via the transparent bail, so no data is lost, but the layout is
+input-dependent until the parser folds them into one node.
+
 **Queued from formatter (2026-07-02) — two independent gaps surfaced while
 probing for a formatter target:**
 

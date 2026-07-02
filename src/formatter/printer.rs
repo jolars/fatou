@@ -55,7 +55,11 @@ pub fn print(doc: &Ir, style: FormatStyle) -> String {
                 col = 0;
             }
             Ir::Group(inner) => {
-                let mode = if fits(inner, width.saturating_sub(col)) {
+                // A group fits flat only if its flat rendering *plus the trailing
+                // content already on the current line* stays within the width. The
+                // trailing content is exactly the rest of the work stack up to the
+                // next line break, so `fits` walks `inner` (flat) and then `stack`.
+                let mode = if fits(width.saturating_sub(col), inner, &stack) {
                     Mode::Flat
                 } else {
                     Mode::Break
@@ -82,31 +86,66 @@ fn newline(out: &mut String, indent: usize) -> usize {
     indent
 }
 
-/// Whether `doc` fits flat within `remaining` columns. A [`HardLine`](Ir::HardLine)
-/// never fits, forcing the enclosing group to break.
-fn fits(doc: &Ir, remaining: usize) -> bool {
+/// Whether the group `inner`, rendered flat and followed by the trailing content
+/// still pending on the print stack (`rest`), fits within `remaining` columns.
+///
+/// `inner` is measured flat; `rest` items keep the mode they were queued with, so
+/// a line break in an already-broken enclosing group ends the measured line. The
+/// scan stops — the group *fits* — as soon as the current line ends (a break-mode
+/// [`Line`](Ir::Line)/[`SoftLine`](Ir::SoftLine), a [`HardLine`](Ir::HardLine)/
+/// [`BlankLine`](Ir::BlankLine), or a raw embedded newline in trailing text). A
+/// forced newline *inside* the group's own flat content instead means it cannot sit
+/// flat, so the group must break.
+fn fits(remaining: usize, inner: &Ir, rest: &[(usize, Mode, &Ir)]) -> bool {
     let mut remaining = remaining as isize;
-    let mut stack: Vec<&Ir> = vec![doc];
-    while let Some(ir) = stack.pop() {
+    // Work stack of (in_group, mode, node). Push `rest` bottom-first (it is itself
+    // a pop-from-end stack, so its last element prints next), then `inner` on top.
+    let mut stack: Vec<(bool, Mode, &Ir)> = Vec::with_capacity(rest.len() + 1);
+    for (_, mode, ir) in rest {
+        stack.push((false, *mode, ir));
+    }
+    stack.push((true, Mode::Flat, inner));
+
+    while let Some((in_group, mode, ir)) = stack.pop() {
         if remaining < 0 {
             return false;
         }
         match ir {
-            // An embedded newline (only ever from raw transparent text) means the
-            // content can't sit flat on the current line.
-            Ir::Text(s) if s.contains('\n') => return false,
-            Ir::Text(s) => remaining -= s.chars().count() as isize,
+            // A raw embedded newline (only ever from transparent text): inside the
+            // group it forbids a flat layout; in trailing content it ends the line.
+            Ir::Text(s) => match s.find('\n') {
+                Some(i) => {
+                    remaining -= s[..i].chars().count() as isize;
+                    return !in_group && remaining >= 0;
+                }
+                None => remaining -= s.chars().count() as isize,
+            },
             Ir::Concat(items) => {
                 for item in items.iter().rev() {
-                    stack.push(item);
+                    stack.push((in_group, mode, item));
                 }
             }
-            Ir::Indent(inner) | Ir::Group(inner) => stack.push(inner),
-            Ir::Line => remaining -= 1,
-            Ir::SoftLine => {}
-            // A group fits flat iff it fits flat; measure the flat string.
-            Ir::IfBreak(_, flat) => remaining -= flat.chars().count() as isize,
-            Ir::HardLine | Ir::BlankLine => return false,
+            Ir::Indent(child) => stack.push((in_group, mode, child)),
+            // A nested group inherits the carried mode: inside the tested group it
+            // renders flat with it; in trailing content it keeps the break mode it
+            // was queued with, so its first line break ends the measured line (the
+            // tested group is judged as if the trailing group breaks at that point).
+            Ir::Group(child) => stack.push((in_group, mode, child)),
+            Ir::Line => match mode {
+                Mode::Flat => remaining -= 1,
+                Mode::Break => return true,
+            },
+            Ir::SoftLine => {
+                if mode == Mode::Break {
+                    return true;
+                }
+            }
+            // A forced break ends the line: fatal inside the group, fitting after it.
+            Ir::HardLine | Ir::BlankLine => return !in_group,
+            Ir::IfBreak(broken, flat) => {
+                let s = if mode == Mode::Break { broken } else { flat };
+                remaining -= s.chars().count() as isize;
+            }
         }
     }
     remaining >= 0

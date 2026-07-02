@@ -93,46 +93,50 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (paren-block width-driven break + newline reflow)
+## Latest session (continuation-aware `fits` — trailing content drives breaking)
 
-Closed ranked target #1 for `lower_paren_block` (`PAREN_BLOCK` — the `;`-block `(a; b; c)`,
-distinct from the single-value `PAREN_EXPR` and the comma `TUPLE_EXPR`). Two Tenet-1 debts
-were open: (a) the rule bailed **transparent on any interior `NEWLINE`**, so a
-source-multiline block leaked its layout verbatim (`(\na;\nb\n)` stayed as-is); (b) the flat
-form was a plain `Ir::concat` with **no group**, so a too-wide block overflowed flat instead
-of breaking.
+First **printer-engine** change of the post-pivot era (all prior work was in `rules.rs`).
+The gate was already 76/76 full, so the next target had to be a *new* construct. Width-probing
+surfaced that the three obvious multiline-reflow targets (bare tuple, `let` bindings, `import`
+lists) are all **parser-entangled** (newline-after-comma continuation — handed off, see below),
+but it also surfaced a clean **printer** defect: a too-wide `f(x) where {…} = x` stayed flat and
+overflowed, because `printer::fits` measured only a group's **own** inner content, never the
+trailing tokens on the same line (` = x`). Standalone `where {…}` broke (its own content > 92);
+in an assignment it didn't (braces alone ≤ 92, braces + ` = x` > 92).
 
-Now one width-driven `Ir::group`: flat `(a; b; c)` when it fits `line_width`, else one
-statement per 4-indented line with the `;` **snug after each statement but the last** (`;`
-can't lead a line), brackets framing their own lines. **User chose "`;` trails each but
-last"** (via AskUserQuestion) over "trailing `;` on every statement" and "drop the `;`".
-Both token loops (`lower_paren_block` main loop + `paren_block_statement`) now skip
-`NEWLINE` alongside `WHITESPACE`, so a source-multiline or blank-bearing block reflows to
-the identical canonical form — verified with a third fixture input (the same wide block
-pre-broken differently in source reflows byte-identically).
+Fixed `fits` to the proper Wadler best-fit continuation form: it now walks the group `inner`
+(flat) **and then the rest of the print stack**, stopping at the first line break that will be
+taken. Signature changed to `fits(remaining, inner, rest: &[(usize, Mode, &Ir)])`; the `Ir::Group`
+arm passes `&stack` (the group is already popped, so `stack` is exactly the trailing content).
+Two subtleties: (a) a forced break / embedded newline **inside** the tested group forbids flat
+(`return false`), but the same **in trailing content** ends the line (`return true`) — tracked by
+an `in_group` flag; (b) trailing nested groups keep their **carried** mode (Break), so their first
+line break ends the measured line — this is what keeps the earlier small `f(x)` group **flat**
+while only the braces break (measuring trailing groups flat instead over-breaks every earlier
+group). Verified across nested calls, `::Type` tails, dicts, binary tails — only the group that
+must break does. **User chose** braces-explode + `} = x` trails (AskUserQuestion). Gated
+`where_break/`. Gate 76→77. Full suite + clippy + `fmt --check` clean; printer unit tests
+unchanged and green.
 
-Implementation (all in `rules.rs`): added `SyntaxKind::NEWLINE` to the two `WHITESPACE`
-skip arms; replaced the flat `concat` with a `SoftLine`-framed group whose per-statement
-separator is `text(";") + Ir::Line` for all but the last. The `statements.len() < 2` guard
-is unchanged — a single-statement block (`(a;)`) still bails transparent and keeps its
-trailing `;` (no fixture covers the multiline single-statement edge; transparent stays
-lossless there). Comment-bearing blocks still bail (`COMMENT` hits the `_ => Err/transparent`
-arm). Reworded the Runic-era doc comment. Gated `paren_block_break/`. Gate 75→76. Full suite
-+ clippy + `fmt --check` clean.
+**Parser/lexer blocker surfaced:** yes — three **newline-after-comma continuation** gaps (bare
+tuple `x = a,⏎b,⏎c`, `let x = 1,⏎ y = 2`, `import A:⏎ b,⏎ c`), all one root cause, handed off to
+`parser-parity/RECAP.md` "Queued next targets (2026-07-02b)" + `TODO.md` Parser. Formatter keeps
+all three out of fixtures (single-line variants parse fine); the multiline forms still
+source-mirror via the transparent bail (lossless, just input-dependent) until the parser folds
+each into one node.
 
-**No parser/lexer blocker surfaced.**
+**Ranked next targets:** (1) more **width defects now exposed by continuation-aware `fits`** —
+re-probe constructs with trailing tails (annotations, `where`, operator chains) for cases that
+now break correctly and could be gated as fixtures. (2) Surface more **unhandled source-mirroring
+multi-line forms** that are *not* parser-blocked (the comma-continuation family is now parked in
+parser-parity). (3) Sweep the residual Runic doc comments in `rules.rs`.
 
-**Ranked next targets:** (1) `lower_bare_tuple` still source-mirrors on an interior
-`NEWLINE`, but the *pre-broken* bare tuple **fragments** at the parser level into ROOT-level
-pieces, so it's parser-entangled, not a clean formatter fix — check the CST first. (2)
-surface more **unhandled constructs** that bail transparent — most *valid* ones already
-normalize via transparent recursion, so look for source-mirroring multi-line forms rather
-than spacing leaks. (3) Sweep the residual Runic doc comments in `rules.rs`.
-
-**Two parser/lexer gaps outstanding (handed off earlier, not formatter targets):** (a)
-**lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one compound-assign token; (b)
-**parser** — whitespace before a call/index/curly arg list is wrongly accepted (`f (a)`,
-`a [1]`, `A {T}`). Both in `parser-parity/RECAP.md` "Queued next targets" + `TODO.md`.
+**Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
+newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
+(2026-07-02b); (b) **lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one
+compound-assign token; (c) **parser** — whitespace before a call/index/curly arg list is
+wrongly accepted (`f (a)`, `a [1]`, `A {T}`). All in `parser-parity/RECAP.md` "Queued next
+targets" + `TODO.md`.
 
 ## Standing traps
 
@@ -143,13 +147,26 @@ than spacing leaks. (3) Sweep the residual Runic doc comments in `rules.rs`.
 - `print()` appends **no** trailing newline of its own — the document IR must end
   with one (`lower_root` pushes a final `HardLine`).
 - The transparent path emits raw `\n` as `Ir::Text`; the printer resets `col` after
-  an embedded newline and `fits` treats embedded newlines as non-fitting. Prefer
-  `Ir::Line`/`SoftLine`/`HardLine` inside groups.
+  an embedded newline. In `fits`, an embedded newline (or forced break) **inside** the
+  tested group forbids flat, but in **trailing** content it ends the measured line.
+  Prefer `Ir::Line`/`SoftLine`/`HardLine` inside groups.
+- `fits` is **continuation-aware** (2026-07-02b): it measures the group flat plus the
+  trailing stack up to the next taken break. Trailing nested groups are read in their
+  carried (Break) mode, so an earlier small group stays flat while a later one breaks.
+  A group followed by a long tail now breaks by width; don't assume a group's own
+  contents alone decide its mode.
 - Clippy trap: `bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` —
   use a plain `if !flag { return ... }`.
 
 ## Earlier sessions
 
+- **Paren-block width-driven break + newline reflow** (committed `5905ed2`, `feat`): closed
+  ranked target #1 for `lower_paren_block` (`PAREN_BLOCK`, the `;`-block `(a; b; c)`). One
+  width-driven `Ir::group`: flat when it fits, else one statement per 4-indented line with `;`
+  **snug after each but the last** (user chose via AskUserQuestion), brackets framing their own
+  lines. Both token loops skip interior `NEWLINE`, so a source-multiline block reflows to the
+  same form. `statements.len() < 2` still bails transparent (single-stmt `(a;)`); comment-bearing
+  blocks bail. Gated `paren_block_break/`. Gate 75→76.
 - **`;`-keyword tail width-driven break** (committed `7d33a5b`, `feat`): closed the deferred
   `;`-`PARAMETERS` hole in `lower_arg_list` — the `; kw = …` tail now folds into the **same**
   width-driven group as the positional args instead of emitting flat unconditionally. Broken:

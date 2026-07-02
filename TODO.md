@@ -15,6 +15,14 @@ leverage.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
   here`. Surfaced by the formatter; see parser-parity RECAP queued target.
+- [ ] Parser: newline-after-comma continuation. A trailing `,` (or `import`'s
+  dangling `:`) should continue a comma list across a newline, but Fatou terminates
+  the statement and fragments the tail. Three sites: (a) bare-tuple assignment
+  `x = a,\nb,\nc` (JuliaSyntax `x = (a, b, c)`); (b) `let x = 1,\n y = 2` (binding
+  list; `y = 2` leaks into the block body); (c) `import A:\n b,\n c` (selective
+  list fragments). All single-line variants parse fine. Surfaced by the formatter
+  (all kept out of fixtures, still source-mirror via transparent bail); see
+  parser-parity RECAP queued target.
 - [x] Parser: `global`/`local` + multiple assignment now nests properly.
   `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`, `local a, b =
   f(x), g(y)` wraps the calls, `global a, b::Int` ⇒ `(global a (::-i b Int))`.
@@ -84,6 +92,14 @@ leverage.
   with the `;` snug after each but the last, brackets on their own lines. The token
   loops skip interior `NEWLINE`/`WHITESPACE`, so a source-multiline block reflows to
   the same canonical form (`(\na;\nb\n)` -> `(a; b)`). `paren_block_break/` gated.
+- [x] Formatter: continuation-aware `fits` (printer engine). A group now breaks
+  when its flat rendering *plus the trailing content on the same line* exceeds
+  `line_width`, not just when its own contents do. `printer::fits` walks the group
+  inner (flat) and then the rest of the print stack, stopping at the first break
+  that will be taken; trailing nested groups keep their carried break mode, so an
+  earlier small group (e.g. `f(x)`) stays flat while only the group that must break
+  does. Fixes silent overflow of any construct with a trailing tail — e.g.
+  `f(x) where {…} = x` now explodes the braces (`where_break/` gated).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
