@@ -349,6 +349,10 @@ leverage.
   break; `lower_macro_name` flattens dotted names like `Base.@kwdef`; bails
   transparent on an interleaved comment/newline or unexpected token; locked by
   `macro_calls/`).
+  Unary prefix operators (`lower_unary` over `UNARY_EXPR`: `-  a` → `-a`, the
+  operator snugs to its operand, normalizing source whitespace; operand recurses
+  through `lower_node`; bails to verbatim when the operand leads with a symbolic
+  operator so `- -a` never retokenizes to `--a`; locked by `unary_operators/`).
   Long single-line bracket/matrix width-based reflow is a
   **non-goal**—probing shows Runic does **not** width-reflow (it is purely
   source-driven like Fatou); see the `formatter-parity` RECAP's ranked targets.

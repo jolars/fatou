@@ -93,38 +93,28 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (macro-call spacing — first construct past full-gate)
+## Latest session (unary prefix operators)
 
-First construct authored after every fixture was already gated: I surfaced a **new**
-construct rather than re-gate. `feat(formatter)`. `MACRO_CALL` fell through to
-`lower_transparent`, so the whitespace the parser leaves between the macro name and
-its args passed verbatim (`@test  x  ==  y` → `@test  x == y` — stable but
-Tenet-1-violating: the inner binary normalized, the macro-name→arg gap did not).
+Surfaced a **new** construct that bailed transparent. `UNARY_EXPR` (`-a`, `!b`, `~x`,
+`√x`, `¬p`) fell through to `lower_transparent`, so the parser's verbatim whitespace
+between the operator and operand leaked (`x = -  a` → `x = -  a` — stable but
+Tenet-1-violating).
 
-New `lower_macro_call` arm + `lower_macro_name` helper (inserted after
-`lower_collection`). It normalizes each space-separated gap to one space while
-preserving the parser's **semantic** call-form vs space-form distinction:
-- **Call form** — an `ARG_LIST` attached to the name with **no** intervening
-  whitespace (`@eval(expr)`, `@foo(a, b)`) → stays snug, arg list lowers like a call's.
-- **Space form** — args separated by whitespace (`@assert x > 0 "msg"`,
-  `@inbounds a[i]`, `@foo (a, b)` where the arg is a `TUPLE_EXPR`, not an attached
-  `ARG_LIST`) → each gap collapses to one space. The space is semantic (`@foo(a, b)`
-  is two args, `@foo (a, b)` is one tuple arg), so it's kept; only its width isn't.
+New `lower_unary` arm + `operand_leads_with_operator` helper (inserted before
+`lower_arrow`). A `UNARY_EXPR` is always the prefix shape `<op> <operand>` (postfix
+`'` is a separate `POSTFIX_EXPR`, out of scope). The op snugs directly to its operand
+(no space), and the operand recurses through `lower_node` so it normalizes internally
+(`-f( x )` → `-f(x)`, `-x ^ 2` → `-x^2`, `-( a + b )` → `-(a + b)`).
 
-Keyed on a `had_gap` flag (whitespace/newline seen since the last node). Args recurse
-through `lower_node`; the space form **never** introduces a break (no canonical fold
-point between space-separated macro args — a wide arg breaks within its own group,
-like an arrow's RHS). `lower_macro_name` flattens dotted names (`Base.@kwdef`) by
-joining tokens with no whitespace; returns `None` (→ transparent) on an embedded
-comment. Any interleaved comment/newline or unexpected token in the call bails
-transparent — verified idempotent on block-arg macros (`@testset "n" begin … end`),
-`Base.@kwdef mutable struct S end`, `@doc raw"…" f`, `@. y = a * x + b`. The
-`@macro a b c` parser quirk (macro-keyword collision → ERROR node) already bailed.
-Gated `macro_calls/`. Gate 69→70. Full suite + clippy + `fmt --check` clean; no
-parser blocker.
-
-Clippy trap hit: `!(a && !b)` trips `nonminimal_bool` — bind `let call_form = …;`
-then `if !call_form`.
+**Retokenization trap (user chose bail-to-transparent):** `- -a` parses as nested
+`UNARY(-, UNARY(-, a))`; snugging both to `--a` would retokenize as the `--` operator.
+So the arm bails to verbatim when the operand `kind() == UNARY_EXPR` **or** its first
+token begins with a symbolic operator char (`+-*/\^%!~<>=&|:$?`) — conservative,
+covers ASCII-op-led and unicode nested-unary alike. `-1` never reaches here (the parser
+folds the sign into a `LITERAL`). Interleaved comment, missing/extra operand, or
+unexpected token also bails. Verified: fixture exact, `- -a`/`!!x`/`-√x` stay verbatim
+(idempotent). Gated `unary_operators/`. Gate 70→71. Full suite + clippy + `fmt --check`
+clean; no parser blocker.
 
 **Ranked next targets:** (1) The headline **width-driven reflow engine** — but note
 `has_newline_token` now has only **one** call site left (`lower_matrix`'s
@@ -153,6 +143,15 @@ residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
 
 ## Earlier sessions
 
+- **Macro-call spacing** (committed `f0fdd0a`, `feat`): first construct past full-gate.
+  New `lower_macro_call` + `lower_macro_name` (after `lower_collection`) normalize the
+  verbatim macro-name→arg whitespace to one space while preserving the semantic
+  call-form vs space-form split — an attached `ARG_LIST` (`@eval(expr)`) stays snug and
+  lowers like a call's; a spaced arg (`@assert x > 0 "msg"`, `@foo (a, b)` as a
+  `TUPLE_EXPR`) collapses each gap to one space. Keyed on a `had_gap` flag; the space
+  form never breaks; dotted names (`Base.@kwdef`) flatten; comment/newline/unexpected
+  bails. Gate 69→70. Clippy trap: `!(a && !b)` trips `nonminimal_bool` — bind
+  `let call_form = …;` then `if !call_form`.
 - **Gated the last 4 comment fixtures — every fixture then gated** (committed, pure
   `test(formatter)`, no code): hand-authored `expected.jl` for `block_comments`,
   `block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`; the

@@ -1,0 +1,9 @@
+x = -  a
+y = !  b
+p = ~x
+q = √x
+n = ¬p
+u = -f( x )
+v = !g.h
+w = -x ^ 2
+c = -( a + b )

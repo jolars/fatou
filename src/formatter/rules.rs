@@ -33,6 +33,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::COMPARISON_EXPR => lower_comparison(node),
         SyntaxKind::TERNARY_EXPR => lower_ternary(node),
         SyntaxKind::RANGE_EXPR => lower_range(node),
+        SyntaxKind::UNARY_EXPR => lower_unary(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::MATRIX_EXPR => lower_matrix(node),
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
@@ -227,6 +228,61 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
 /// As with [`lower_binary`], only the clean single-lambda shape `<lhs> -> <rhs>` is
 /// reshaped: an interleaved comment, error recovery, or a missing operand falls back
 /// to the verbatim transparent lowering.
+/// Lay out a unary prefix expression (`-a`, `!b`, `~x`, `√x`, `¬p`) — the operator
+/// snugs directly to its operand with no space, normalizing whatever whitespace the
+/// parser left between them (Tenet 1). The operand recurses through [`lower_node`], so
+/// it normalizes internally (`-f( x )` → `-f(x)`).
+///
+/// A `UNARY_EXPR` is always the prefix shape `<op> <operand>` (a postfix `'` is a
+/// separate `POSTFIX_EXPR`). Snugging is unsafe when the operand itself leads with a
+/// symbolic operator: `- -a` parses as nested unary, and `--a` would retokenize as the
+/// `--` operator. In that case — and on any interleaved comment, missing operand, or
+/// unexpected shape — fall back to the verbatim transparent lowering.
+fn lower_unary(node: &SyntaxNode) -> Ir {
+    let mut op: Option<String> = None;
+    let mut operand: Option<SyntaxNode> = None;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
+                    return lower_transparent(node);
+                }
+                // The single prefix operator, which must precede the operand.
+                _ if op.is_none() && operand.is_none() => op = Some(tok.text().to_string()),
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => {
+                if op.is_none() || operand.is_some() {
+                    return lower_transparent(node);
+                }
+                operand = Some(child);
+            }
+        }
+    }
+
+    let (Some(op), Some(operand)) = (op, operand) else {
+        return lower_transparent(node);
+    };
+
+    // Snugging is unsafe when the operand leads with another operator: the two could
+    // merge into a longer operator (`- -a` → `--a`). Keep such forms verbatim.
+    if operand.kind() == SyntaxKind::UNARY_EXPR || operand_leads_with_operator(&operand) {
+        return lower_transparent(node);
+    }
+
+    Ir::concat([Ir::text(op), lower_node(&operand)])
+}
+
+/// Whether `node`'s first token begins with a symbolic operator character — a
+/// conservative guard against a prefix operator retokenizing when snugged onto it.
+fn operand_leads_with_operator(node: &SyntaxNode) -> bool {
+    node.first_token()
+        .and_then(|t| t.text().chars().next())
+        .is_some_and(|c| "+-*/\\^%!~<>=&|:$?".contains(c))
+}
+
 fn lower_arrow(node: &SyntaxNode) -> Ir {
     let mut operands: Vec<SyntaxNode> = Vec::new();
     let mut op: Option<SyntaxToken> = None;
