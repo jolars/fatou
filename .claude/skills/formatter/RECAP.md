@@ -93,22 +93,26 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gated the already-canonical operator/literal pile)
+## Latest session (gated the global/local multi-name list construct)
 
-Pure `test(formatter)`, **no code** — landed target #2 from last session. Wrote the
-first `expected.jl` for 15 ungated fixtures whose rules already emit the canonical
-Tenet-1 form. Before authoring, re-verified each: idempotent (format∘format == format
-across the batch) and input-independent (spot-checked `control_flow` — a mangled-indent
-equivalent reflows to the canonical 4-space form). The forms are pre-existing rule
-decisions (literal normalization, operator/comma spacing, `where` bracing, `∈`/`=`→
-`in`), so gating just locks current behavior.
+Pure `test(formatter)`, **no code**. Authored `expected.jl` for the two remaining
+global/local fixtures whose rules already emit the canonical Tenet-1 form. Before
+gating, confirmed the path is deterministic, not an accidental transparent pass: the
+parser wraps every multi-name form in a single `BARE_TUPLE_EXPR`/`ASSIGNMENT_EXPR`
+operand (checked `global a,b`, `global a,b = 1,2`, `global a,b::Int` CSTs), so
+`lower_keyword_stmt`'s single-operand arm recurses into `lower_bare_tuple` (whitespace
+stripped, `", "`-joined) / `lower_binary` / `lower_type_annotation` — all width-driven.
+The `lower_keyword_stmt` loose-children fallback (its lines ~491+) never fires for
+these. Idempotent; the in-fixture whitespace-mangled variants prove single-line
+input-independence.
 
-Gated: `tight_operators`, `assignment_spacing`, `type_annotations`, `range_colon`,
-`where_clauses`, `dot_access`, `float_literals`, `hex_literals`, `named_tuples`,
-`curly_type_params`, `bare_tuples`, `import_using_lists`, `export_public_lists`,
-`comprehension_for_in`, `control_flow`. Gate 36→51. Formatter suite green; no parser
-blocker. (TODO prose already read "locked by X/" for these — same run-ahead as the
-abstract/primitive note last session; gating finally makes it true.)
+Gated: `global_local_names`, `global_local_assignment`. Gate 51→53. Formatter suite
+green; no parser blocker. **Caveat found (not blocking):** a bare tuple with a
+*newline* inside (`global a,\n b`) hits `lower_bare_tuple`'s `_ => lower_transparent`
+bail and mirrors the source break — the headline width-driven-reflow debt. None of
+these fixture inputs contain such newlines, so gating locks the single-line canonical
+form (consistent with the already-gated `bare_tuples`). Corrected the stale TODO prose
+that claimed the parser drops loose `NAME`/`IDENT`/`COMMA` into the statement node.
 
 **Ranked next targets:** (1) the headline **width-driven reflow engine** across the
 block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
@@ -137,6 +141,13 @@ before gating (several block-family ones still source-mirror).
 
 ## Earlier sessions
 
+- **Gated the already-canonical operator/literal pile** (committed, pure
+  `test(formatter)`): authored the first `expected.jl` for 15 ungated fixtures whose
+  rules already emit canonical Tenet-1 form (`tight_operators`, `assignment_spacing`,
+  `type_annotations`, `range_colon`, `where_clauses`, `dot_access`, `float_literals`,
+  `hex_literals`, `named_tuples`, `curly_type_params`, `bare_tuples`,
+  `import_using_lists`, `export_public_lists`, `comprehension_for_in`, `control_flow`).
+  Re-verified idempotence + input-independence before gating. Gate 36→51.
 - **Tenet-1 whitespace fix for type declarations** (committed): retired the last
   source-mirror in `lower_type_decl` (`ABSTRACT_DEF`/`PRIMITIVE_DEF`) — the
   post-signature region (around the bits `LITERAL` and `end`) now normalizes

@@ -141,11 +141,10 @@ leverage.
   `x, y`, `a,b = 1,2` → `a, b = 1, 2`, `return x,y` → `return x, y`; bracketless,
   `", "`-joins the recursed bare elements; bails on leading/doubled/trailing comma
   or a comment/newline), `global`/`local` comma name lists (`lower_keyword_stmt`
-  extended: `global a,b` → `global a, b`, `local x,y,z` → `local x, y, z`—the
-  parser drops `NAME`/`IDENT`/`COMMA` directly into the statement node, so this is
-  a flat name list, not an operand subtree; `", "`-joins the clean
-  item/`COMMA` alternation, bails on the `=`/`::` assignment-list forms
-  `global a, b = 1, 2`, a comment, or a leading/trailing comma), `using`/`import`
+  extended: `global a,b` → `global a, b`, `local x,y,z` → `local x, y, z`—rule-free
+  PASS: the parser wraps the names in a single `BARE_TUPLE_EXPR` operand, so
+  `lower_keyword_stmt`'s single-operand arm + `lower_bare_tuple` recursion handle
+  it; locked by `global_local_names/`), `using`/`import`
   comma + selector lists (`lower_import_stmt` over `USING_STMT`/`IMPORT_STMT`:
   `using A,B` → `using A, B`, `using A: x,y` → `using A: x, y`—item(`IMPORT_PATH`/
   `IMPORT_ALIAS` node)/separator alternation, `COMMA` → `", "`, selector `COLON` →
