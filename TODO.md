@@ -340,7 +340,15 @@ leverage.
   drives the layout). The four comment fixtures (`block_comments`,
   `block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`) are
   now hand-authored + gated (verified input-independent per Tenet 1), so **every**
-  fixture is gated.
+  fixture is gated. Macro-call spacing (`lower_macro_call` over `MACRO_CALL`:
+  `@test  x  ==  y` → `@test x == y`—the parser leaves the macro-name→arg
+  whitespace verbatim, so the arm normalizes each space-separated gap to one space
+  while preserving the semantic call-form vs space-form distinction (`@eval(expr)`,
+  an attached `ARG_LIST`, stays snug; `@foo (a, b)`, a spaced `TUPLE_EXPR`, keeps
+  its space); args recurse through `lower_node`; the space form never introduces a
+  break; `lower_macro_name` flattens dotted names like `Base.@kwdef`; bails
+  transparent on an interleaved comment/newline or unexpected token; locked by
+  `macro_calls/`).
   Long single-line bracket/matrix width-based reflow is a
   **non-goal**—probing shows Runic does **not** width-reflow (it is purely
   source-driven like Fatou); see the `formatter-parity` RECAP's ranked targets.

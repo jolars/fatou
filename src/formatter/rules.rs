@@ -46,6 +46,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::IF_EXPR => lower_if(node),
         SyntaxKind::TRY_EXPR => lower_try(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
+        SyntaxKind::MACRO_CALL => lower_macro_call(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
         }
@@ -1273,6 +1274,85 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
         Ir::SoftLine,
         Ir::text(close),
     ]))
+}
+
+/// Lay out a macro call — `@name`, optionally followed by arguments. Normalizes
+/// the whitespace the parser leaves verbatim around the macro name (Tenet 1):
+///
+/// - The **call form**, where an `ARG_LIST` is attached directly to the name with
+///   no intervening space (`@eval(expr)`, `@foo(a, b)`), keeps its parenthesis
+///   snug — the arg list lowers like any call's.
+/// - The **space form**, where arguments follow the name separated by whitespace
+///   (`@assert x > 0 "msg"`, `@inbounds a[i]`), collapses each gap to a single
+///   space. The presence of that space is semantic — `@foo(a, b)` (two args) and
+///   `@foo (a, b)` (one tuple arg) parse differently — so it is preserved, but its
+///   width is not.
+///
+/// Each argument recurses through [`lower_node`], so it normalizes internally. The
+/// space form never introduces a break: there is no canonical fold point between
+/// space-separated macro arguments, so a wide argument breaks within its own
+/// group (its call parens, say), like an arrow's right-hand side. An interleaved
+/// comment or newline, a missing name, or any unexpected token falls back to the
+/// verbatim transparent lowering.
+fn lower_macro_call(node: &SyntaxNode) -> Ir {
+    let mut parts: Vec<Ir> = Vec::new();
+    let mut saw_name = false;
+    // Whether a `WHITESPACE`/`NEWLINE` token has been seen since the last node —
+    // distinguishes an attached `ARG_LIST` (call form) from a spaced argument.
+    let mut had_gap = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => had_gap = true,
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::MACRO_NAME if !saw_name => {
+                    let Some(name) = lower_macro_name(&child) else {
+                        return lower_transparent(node);
+                    };
+                    parts.push(name);
+                    saw_name = true;
+                    had_gap = false;
+                }
+                // An argument must follow the name.
+                _ if saw_name => {
+                    // Attached `ARG_LIST` → call form (`@eval(expr)`); otherwise the
+                    // argument is space-separated and gets one leading space.
+                    let call_form = child.kind() == SyntaxKind::ARG_LIST && !had_gap;
+                    if !call_form {
+                        parts.push(Ir::text(" "));
+                    }
+                    parts.push(lower_node(&child));
+                    had_gap = false;
+                }
+                _ => return lower_transparent(node),
+            },
+        }
+    }
+
+    if !saw_name {
+        return lower_transparent(node);
+    }
+    Ir::concat(parts)
+}
+
+/// Render a `MACRO_NAME` (`@name`, or a dotted `Base.@kwdef`) as flat text, joining
+/// its tokens with no whitespace. Returns `None` on any comment or unexpected token
+/// so the caller can bail to the transparent lowering.
+fn lower_macro_name(node: &SyntaxNode) -> Option<Ir> {
+    let mut text = String::new();
+    for el in node.descendants_with_tokens() {
+        if let NodeOrToken::Token(tok) = el {
+            match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => return None,
+                _ => text.push_str(tok.text()),
+            }
+        }
+    }
+    Some(Ir::text(text))
 }
 
 /// Lay out a bare (bracketless) tuple — `x, y`, `a, b, c`, the lhs/rhs of a

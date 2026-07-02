@@ -93,36 +93,49 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gated the last 4 comment fixtures — every fixture now gated)
+## Latest session (macro-call spacing — first construct past full-gate)
 
-Pure `test(formatter)`, **no code**. Gated the four remaining ungated inputs:
-`block_comments`, `block_comments_in_blocks`, `bracket_block_comments`,
-`trailing_comments`. Gate 65→69 — **every fixture is now gated.** The existing
-`lower_block_body`/`lower_multiline_bracket` comment machinery already emits
-canonical Tenet-1 form; I hand-authored each `expected.jl` to the verified-canonical
-output (user approved with `commit`, no edits).
+First construct authored after every fixture was already gated: I surfaced a **new**
+construct rather than re-gate. `feat(formatter)`. `MACRO_CALL` fell through to
+`lower_transparent`, so the whitespace the parser leaves between the macro name and
+its args passed verbatim (`@test  x  ==  y` → `@test  x == y` — stable but
+Tenet-1-violating: the inner binary normalized, the macro-name→arg gap did not).
 
-Verified input-independence before gating (the RECAP flagged these as source-mirror
-risks): mangled variants all normalize —
-- **block_comments:** own-line comments re-indent to block indent; statement spacing
-  normalizes. Own-line-vs-trailing is comment *position* (semantic), not a line-break
-  choice.
-- **block_comments_in_blocks:** an over-indented / flat-one-line `#= =#` first line
-  re-indents to block indent; a multi-line `#= =#` keeps its interior lines verbatim
-  (token content, like a string body — you can't reflow inside it).
-- **bracket_block_comments:** a one-line `[1, #= one =# 2, ...]` source **explodes**
-  to one-element-per-line, identical to the pre-broken form (brackets with comments
-  always fully explode); a mid-element `#= a =#` rides the preceding element as a
-  trailing comment.
-- **trailing_comments:** spacing normalizes, `;`-joins split to separate lines,
-  comment interior text preserved verbatim (`#tight` stays `#tight`).
-All four idempotent; full suite + clippy + `fmt --check` clean; no parser blocker.
+New `lower_macro_call` arm + `lower_macro_name` helper (inserted after
+`lower_collection`). It normalizes each space-separated gap to one space while
+preserving the parser's **semantic** call-form vs space-form distinction:
+- **Call form** — an `ARG_LIST` attached to the name with **no** intervening
+  whitespace (`@eval(expr)`, `@foo(a, b)`) → stays snug, arg list lowers like a call's.
+- **Space form** — args separated by whitespace (`@assert x > 0 "msg"`,
+  `@inbounds a[i]`, `@foo (a, b)` where the arg is a `TUPLE_EXPR`, not an attached
+  `ARG_LIST`) → each gap collapses to one space. The space is semantic (`@foo(a, b)`
+  is two args, `@foo (a, b)` is one tuple arg), so it's kept; only its width isn't.
 
-**Ranked next targets:** (1) The headline **width-driven reflow engine** across the
-block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
-still inspect source newlines via `has_newline_token`) — the largest remaining piece,
-prerequisite for true Tenet-1 conformance. (2) Sweep residual Runic doc comments in
-`rules.rs` (~50 per-rule rationale comments).
+Keyed on a `had_gap` flag (whitespace/newline seen since the last node). Args recurse
+through `lower_node`; the space form **never** introduces a break (no canonical fold
+point between space-separated macro args — a wide arg breaks within its own group,
+like an arrow's RHS). `lower_macro_name` flattens dotted names (`Base.@kwdef`) by
+joining tokens with no whitespace; returns `None` (→ transparent) on an embedded
+comment. Any interleaved comment/newline or unexpected token in the call bails
+transparent — verified idempotent on block-arg macros (`@testset "n" begin … end`),
+`Base.@kwdef mutable struct S end`, `@doc raw"…" f`, `@. y = a * x + b`. The
+`@macro a b c` parser quirk (macro-keyword collision → ERROR node) already bailed.
+Gated `macro_calls/`. Gate 69→70. Full suite + clippy + `fmt --check` clean; no
+parser blocker.
+
+Clippy trap hit: `!(a && !b)` trips `nonminimal_bool` — bind `let call_form = …;`
+then `if !call_form`.
+
+**Ranked next targets:** (1) The headline **width-driven reflow engine** — but note
+`has_newline_token` now has only **one** call site left (`lower_matrix`'s
+comment-bearing multiline-vs-transparent dispatch, a verbatim-vs-verbatim choice, not
+a reflow decision); the clean operator/collection/bracket/matrix paths are all
+width-driven. The remaining source-shape dependence is in block-body layout via
+`collect_body_lines`, but statements genuinely occupy separate lines, so this is
+mostly principled. Re-scope this target: it may be smaller than the RECAP implies.
+(2) Surface more **unhandled constructs** that bail transparent (probe with
+`cargo run -q -- format < snippet` — look for un-normalized spacing). (3) Sweep
+residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
 
 ## Standing traps
 
@@ -140,6 +153,13 @@ prerequisite for true Tenet-1 conformance. (2) Sweep residual Runic doc comments
 
 ## Earlier sessions
 
+- **Gated the last 4 comment fixtures — every fixture then gated** (committed, pure
+  `test(formatter)`, no code): hand-authored `expected.jl` for `block_comments`,
+  `block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`; the
+  existing `lower_block_body`/`lower_multiline_bracket` comment machinery already
+  emits canonical Tenet-1 form. Verified input-independence (own-line comments
+  re-indent, `#= =#` interiors kept verbatim, comment-bearing brackets explode
+  one-per-line, `;`-joins split). Gate 65→69.
 - **Gated the spacing/padding pile; renamed the `*_divergence` slugs** (committed,
   pure `test(formatter)`): gated the eight remaining already-canonical fixtures
   (`paren_padding`, `assignment`, `trailing_whitespace`, `logical_operators`,
