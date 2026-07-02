@@ -93,37 +93,47 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gated the global/local multi-name list construct)
+## Latest session (gated the module/baremodule body-indentation construct)
 
-Pure `test(formatter)`, **no code**. Authored `expected.jl` for the two remaining
-global/local fixtures whose rules already emit the canonical Tenet-1 form. Before
-gating, confirmed the path is deterministic, not an accidental transparent pass: the
-parser wraps every multi-name form in a single `BARE_TUPLE_EXPR`/`ASSIGNMENT_EXPR`
-operand (checked `global a,b`, `global a,b = 1,2`, `global a,b::Int` CSTs), so
-`lower_keyword_stmt`'s single-operand arm recurses into `lower_bare_tuple` (whitespace
-stripped, `", "`-joined) / `lower_binary` / `lower_type_annotation` — all width-driven.
-The `lower_keyword_stmt` loose-children fallback (its lines ~491+) never fires for
-these. Idempotent; the in-fixture whitespace-mangled variants prove single-line
-input-independence.
+Pure `test(formatter)`, **no code**. Authored `expected.jl` for the four module
+fixtures. **User decision:** keep Runic's rule — every module body indents *except*
+the lone "file-wrapper" module (the sole top-level expression, leading comments
+don't count as siblings), which stays flush. Confirmed the ground truth by recovering
+the deleted Runic `expected.jl` from git (`git show <deletion-rev>^:…`): Runic indents
+`module_siblings` (top-level module *with* a sibling), keeps the sole `module_blocks`
+/`module_baremodule` wrapper flush while indenting nested `module Inner`, and treats a
+leading comment (`module_leading_comment`) as *not* a sibling. Fatou's existing
+`module_should_indent` already reproduces this exactly (so what an earlier read called
+a "sibling quirk" is deliberate Runic behavior, not a bug). The only Fatou divergence
+is the intentional empty-body collapse (`module E\nend` → `module E end`).
 
-Gated: `global_local_names`, `global_local_assignment`. Gate 51→53. Formatter suite
-green; no parser blocker. **Caveat found (not blocking):** a bare tuple with a
-*newline* inside (`global a,\n b`) hits `lower_bare_tuple`'s `_ => lower_transparent`
-bail and mirrors the source break — the headline width-driven-reflow debt. None of
-these fixture inputs contain such newlines, so gating locks the single-line canonical
-form (consistent with the already-gated `bare_tuples`). Corrected the stale TODO prose
-that claimed the parser drops loose `NAME`/`IDENT`/`COMMA` into the statement node.
+Verified determinism, not an accidental transparent pass: whitespace-mangled variants
+normalize within-line spacing (`x=0`→`x = 0`, `const   X=1`→`const X = 1`) and the
+empty `module E` collapses inline — both prove `lower_module` fires. Surviving blanks
+are the documented capped blank-line policy (`module_blocks` keeps its interior
+blanks, capped at 1), not source-break mirroring; the other three inputs have no
+stray blanks. This rule is deterministic given the AST (keys on nesting/top-level
+structure, never whitespace), so it is Tenet-1 *compliant* despite the file-wrapper
+special case the user chose to keep.
 
-**Ranked next targets:** (1) the headline **width-driven reflow engine** across the
+Gated: `module_blocks`, `module_baremodule`, `module_siblings`,
+`module_leading_comment`. Gate 53→57. Formatter suite green; clippy + fmt clean; no
+parser blocker. TODO's rule-inventory prose already said "locked by module_*" (now
+accurate again), so no TODO edit.
+
+**Ranked next targets:** (1) the **already-canonical spacing/padding pile** — a pure
+`test(formatter)` gate like the operator/literal pile: `paren_padding`, `assignment`,
+`trailing_whitespace`, and the six now-meaningless `*_divergence` slugs
+(`logical_tight_divergence`, `paren_blank_line_divergence`,
+`block_comment_spacing_divergence`, `bracket_comment_spacing_divergence`,
+`trailing_comment_spacing_divergence` — all emit clean canonical output today; verify
+determinism, then rename/fold the `*_divergence` slugs since there's no Runic to
+diverge from). (2) The headline **width-driven reflow engine** across the
 block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
-still inspect source newlines); (2) sweep residual Runic doc comments in `rules.rs`
-(~50 per-rule rationale comments); (3) revisit the remaining ungated fixtures — the
-six `*_divergence` slugs (now meaningless without Runic; rename/fold or author a
-canonical `expected.jl`) and the module/block/comment fixtures
-(`module_blocks`, `module_baremodule`, `module_siblings`, `module_leading_comment`,
-`global_local_assignment`, `global_local_names`, `block_comments*`, `trailing_comments`,
-`trailing_whitespace`, `paren_padding`, `assignment`) — verify determinism per Tenet 1
-before gating (several block-family ones still source-mirror).
+still inspect source newlines). (3) The remaining comment fixtures
+(`block_comments`, `block_comments_in_blocks`, `bracket_block_comments`,
+`trailing_comments`) — verify determinism per Tenet 1 before gating. (4) Sweep
+residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
 
 ## Standing traps
 
@@ -141,6 +151,14 @@ before gating (several block-family ones still source-mirror).
 
 ## Earlier sessions
 
+- **Gated the global/local multi-name list construct** (committed, pure
+  `test(formatter)`): authored `expected.jl` for `global_local_names` +
+  `global_local_assignment`. Confirmed the parser wraps every multi-name form in a
+  single `BARE_TUPLE_EXPR`/`ASSIGNMENT_EXPR` operand, so `lower_keyword_stmt` recurses
+  into `lower_bare_tuple`/`lower_binary`/`lower_type_annotation` (all width-driven);
+  the loose-children fallback never fires. Caveat: a bare tuple with an interior
+  *newline* still bails transparent (the reflow debt); no fixture input has one.
+  Gate 51→53.
 - **Gated the already-canonical operator/literal pile** (committed, pure
   `test(formatter)`): authored the first `expected.jl` for 15 ungated fixtures whose
   rules already emit canonical Tenet-1 form (`tight_operators`, `assignment_spacing`,
