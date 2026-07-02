@@ -109,9 +109,12 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 
 /// Lay out a binary or assignment expression with normalized operator spacing:
 /// a single space on each side, except for the tight operators (`^`, `:`, `.`)
-/// the target style packs without spaces. Same-precedence chains parse as a flat
-/// n-ary `BINARY_EXPR` (`a + b + c` is one node with three operands), so the rule
-/// walks the whole operand/operator alternation rather than assuming two operands.
+/// the target style packs without spaces. A same-operator chain lays out as one
+/// n-ary group: the parser already folds `a + b + c` into a single flat
+/// `BINARY_EXPR` with three operands, and [`collect_binary_chain`] flattens the
+/// operators the parser keeps *nested* (`&&`, `||`, `|>`, `=>`, …) into the same
+/// shape, so every operator in the chain breaks together regardless of how the
+/// parser associated it.
 ///
 /// **Width-driven (Tenet 1).** Source line breaks carry no layout information: the
 /// chain lays out flat (`a + b + c`) when it fits `line_width`, else it breaks. The
@@ -120,10 +123,12 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 /// - **Operator-trailing.** The operator stays on the line it ends; the following
 ///   operand wraps. Each breakable operator gap is an [`Ir::Line`] (a space when
 ///   flat, a newline when broken).
-/// - **One `Ir::group` per node, each with its own continuation indent.** A tighter
-///   subexpression is its own node/group, so it stays flat on its line while the
-///   looser enclosing chain breaks (`a +⏎ b * c +⏎ d`). When an inner subexpression
-///   is *itself* forced to break, its indent nests on top of its parent's.
+/// - **Uniform same-operator break.** A too-wide chain of one operator breaks at
+///   *every* operator (`a &&⏎ b &&⏎ c`), not just the outermost. A tighter or
+///   different-operator subexpression is its own node/group, so it stays flat on
+///   its line while the looser enclosing chain breaks (`a +⏎ b * c +⏎ d`,
+///   `a &&⏎ b || c` never splits the tighter `b || c`). When an inner
+///   subexpression is *itself* forced to break, its indent nests on the parent's.
 /// - **Assignment operators never break.** An `ASSIGNMENT_EXPR` joins its operator
 ///   with flat spaces (` = `) and emits no group of its own; the break is biased
 ///   into the right-hand side, whose own group absorbs it
@@ -138,6 +143,19 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     // biased into the right-hand side, so the operator gap is a flat space.
     let is_assignment = node.kind() == SyntaxKind::ASSIGNMENT_EXPR;
 
+    let Some(op_kind) = binary_op_kind(node) else {
+        return lower_transparent(node);
+    };
+    // Flatten a same-operator nested chain (`a && b && c`, `a |> b |> c`) into one
+    // group so every operator breaks together, matching the parser's own n-ary
+    // folding of `+`/`*`. Tight operators and assignment never break, so they gain
+    // nothing from flattening and keep their nested lowering.
+    let flatten = !is_assignment && !is_tight_binop(op_kind);
+    let mut items: Vec<SyntaxElement> = Vec::new();
+    if !collect_binary_chain(node, op_kind, flatten, &mut items) {
+        return lower_transparent(node);
+    }
+
     let mut first: Option<Ir> = None;
     let mut rest: Vec<Ir> = Vec::new();
     // Separator to emit before the upcoming operand: `None` after a tight operator
@@ -148,7 +166,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     let mut operand_count = 0usize;
     let mut op_count = 0usize;
 
-    for el in node.children_with_tokens() {
+    for el in items {
         match el {
             NodeOrToken::Node(child) => {
                 if !expect_operand {
@@ -166,31 +184,26 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                 operand_count += 1;
                 expect_operand = false;
             }
-            NodeOrToken::Token(tok) => match tok.kind() {
-                // Source line breaks carry no layout information under Tenet 1.
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
-                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
+            NodeOrToken::Token(tok) => {
+                if expect_operand {
                     return lower_transparent(node);
                 }
-                _ if !expect_operand => {
-                    // An operator. It sits trailing on the line it ends.
-                    let tight = !is_assignment && is_tight_binop(tok.kind());
-                    if tight {
-                        rest.push(Ir::text(tok.text().to_string()));
-                        next_sep = None;
+                // An operator. It sits trailing on the line it ends.
+                let tight = !is_assignment && is_tight_binop(tok.kind());
+                if tight {
+                    rest.push(Ir::text(tok.text().to_string()));
+                    next_sep = None;
+                } else {
+                    rest.push(Ir::text(format!(" {}", tok.text())));
+                    next_sep = Some(if is_assignment {
+                        Ir::text(" ")
                     } else {
-                        rest.push(Ir::text(format!(" {}", tok.text())));
-                        next_sep = Some(if is_assignment {
-                            Ir::text(" ")
-                        } else {
-                            Ir::Line
-                        });
-                    }
-                    op_count += 1;
-                    expect_operand = true;
+                        Ir::Line
+                    });
                 }
-                _ => return lower_transparent(node),
-            },
+                op_count += 1;
+                expect_operand = true;
+            }
         }
     }
 
@@ -214,6 +227,80 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     // One width-driven group with its own continuation indent: flat when it fits,
     // else operator-trailing with the wrapped operands indented one step.
     Ir::group(Ir::concat([first, Ir::indent(Ir::concat(rest))]))
+}
+
+/// The kind of `node`'s operator token — the first token that lands where an
+/// operator is expected (after the left operand). Returns `None` for a malformed
+/// binary node with no operator, letting the caller bail transparent. Trivia and
+/// comments are skipped so the search is position-based, mirroring the operand /
+/// operator alternation the layout loop assumes.
+fn binary_op_kind(node: &SyntaxNode) -> Option<SyntaxKind> {
+    let mut expect_operand = true;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(_) => expect_operand = false,
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE
+                | SyntaxKind::NEWLINE
+                | SyntaxKind::COMMENT
+                | SyntaxKind::BLOCK_COMMENT => {}
+                _ if !expect_operand => return Some(tok.kind()),
+                _ => {}
+            },
+        }
+    }
+    None
+}
+
+/// Append `node`'s operand / operator alternation to `items`, dropping trivia. When
+/// `flatten` is set, an operand child that is itself a `BINARY_EXPR` sharing
+/// `op_kind` is descended into rather than pushed whole, so a same-operator chain
+/// the parser nested (`a && b && c`, right-nested; `a |> b |> c`, left-nested)
+/// collapses into one flat operand/operator stream and thus one break group.
+/// Mixed-operator or tighter subexpressions (`a + b * c`, `a && b || c`) keep a
+/// differing `op_kind`, so they are pushed whole and lowered as their own group.
+///
+/// Returns `false` on any shape we don't fully model — an interleaved comment, a
+/// missing operand, two operands in a row — so the caller falls back to the
+/// verbatim transparent lowering.
+fn collect_binary_chain(
+    node: &SyntaxNode,
+    op_kind: SyntaxKind,
+    flatten: bool,
+    items: &mut Vec<SyntaxElement>,
+) -> bool {
+    let mut expect_operand = true;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                if !expect_operand {
+                    return false;
+                }
+                if flatten
+                    && child.kind() == SyntaxKind::BINARY_EXPR
+                    && binary_op_kind(&child) == Some(op_kind)
+                {
+                    if !collect_binary_chain(&child, op_kind, flatten, items) {
+                        return false;
+                    }
+                } else {
+                    items.push(NodeOrToken::Node(child));
+                }
+                expect_operand = false;
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => return false,
+                _ if !expect_operand => {
+                    items.push(NodeOrToken::Token(tok));
+                    expect_operand = true;
+                }
+                _ => return false,
+            },
+        }
+    }
+    // A well-formed chain ends on an operand.
+    !expect_operand
 }
 
 /// Lay out an anonymous-function arrow (`x -> y`, `(a, b) -> a + b`) with a single

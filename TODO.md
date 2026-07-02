@@ -82,6 +82,13 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
+- [x] Formatter: same-operator chains break uniformly (`lower_binary`). The parser
+  folds `+`/`*` into flat n-ary nodes but keeps `&&`/`||`/`|>`/`=>` nested, so a
+  too-wide short-circuit or pipe chain used to break only at its outermost operator.
+  New `collect_binary_chain`/`binary_op_kind` helpers flatten a same-operator nested
+  chain into one group, so every operator breaks together (`a &&\n b &&\n c`).
+  Mixed-operator or tighter subexprs keep a differing operator kind and stay their own
+  group (`a && b ||\n c && d`). `chain_break/` gated.
 - [x] Formatter: the `;`-keyword tail of a call now folds into `lower_arg_list`'s
   width-driven group instead of always emitting flat. A too-wide call breaks
   one-arg-per-line with the `;` snug after the last positional (`b;`) and each

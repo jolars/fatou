@@ -93,43 +93,39 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (continuation-aware `fits` — trailing content drives breaking)
+## Latest session (uniform same-operator chain break — flatten nested `&&`/`||`/`|>`)
 
-First **printer-engine** change of the post-pivot era (all prior work was in `rules.rs`).
-The gate was already 76/76 full, so the next target had to be a *new* construct. Width-probing
-surfaced that the three obvious multiline-reflow targets (bare tuple, `let` bindings, `import`
-lists) are all **parser-entangled** (newline-after-comma continuation — handed off, see below),
-but it also surfaced a clean **printer** defect: a too-wide `f(x) where {…} = x` stayed flat and
-overflowed, because `printer::fits` measured only a group's **own** inner content, never the
-trailing tokens on the same line (` = x`). Standalone `where {…}` broke (its own content > 92);
-in an assignment it didn't (braces alone ≤ 92, braces + ` = x` > 92).
+Second `lower_binary` re-evaluation. Width-probing exposed a real Tenet-1 asymmetry: a too-wide
+`+`/`*` chain breaks **uniformly** (each operand its own line, gated in `binary_continuation`),
+but `&&`/`||`/`|>`/`=>` broke only at the **outermost** operator, leaving the inner chain packed
+(`a &&⏎ b && c && d`). Root cause: JuliaSyntax (and Fatou's parser) fold a *same-operator*
+arithmetic chain into one **flat n-ary** `BINARY_EXPR`, but keep short-circuit / pipe / pair
+chains **nested** (`a && b && c` → `a && (b && c)`; `a |> b |> c` → `(a |> b) |> c`). `lower_binary`
+faithfully mirrored the parse shape, so the inner nested group stayed flat if it fit.
 
-Fixed `fits` to the proper Wadler best-fit continuation form: it now walks the group `inner`
-(flat) **and then the rest of the print stack**, stopping at the first line break that will be
-taken. Signature changed to `fits(remaining, inner, rest: &[(usize, Mode, &Ir)])`; the `Ir::Group`
-arm passes `&stack` (the group is already popped, so `stack` is exactly the trailing content).
-Two subtleties: (a) a forced break / embedded newline **inside** the tested group forbids flat
-(`return false`), but the same **in trailing content** ends the line (`return true`) — tracked by
-an `in_group` flag; (b) trailing nested groups keep their **carried** mode (Break), so their first
-line break ends the measured line — this is what keeps the earlier small `f(x)` group **flat**
-while only the braces break (measuring trailing groups flat instead over-breaks every earlier
-group). Verified across nested calls, `::Type` tails, dicts, binary tails — only the group that
-must break does. **User chose** braces-explode + `} = x` trails (AskUserQuestion). Gated
-`where_break/`. Gate 76→77. Full suite + clippy + `fmt --check` clean; printer unit tests
-unchanged and green.
+**User chose uniform break (flatten)** via AskUserQuestion. Implemented two helpers:
+`binary_op_kind(node)` (the chain's operator kind = first token after the left operand) and
+`collect_binary_chain(node, op_kind, flatten, items)` which flattens the operand/operator
+alternation, **descending into operand `BINARY_EXPR` children that share `op_kind`** so a
+same-operator nested chain collapses into one flat stream → one break group. `flatten` is gated
+`!is_assignment && !is_tight_binop(op_kind)` (assignment and tight `^`/`:`/`.` never break, so
+flattening is a no-op for them and they keep nested lowering). The layout loop is unchanged; it
+now iterates the flattened `Vec<SyntaxElement>` instead of `node.children_with_tokens()`.
+**Key invariant preserved:** only *same-operator* children flatten — a mixed or tighter subexpr
+(`a + b * c`, `a && b || c`) keeps a differing `op_kind`, is pushed whole, and stays its own flat
+group (`&&` binds tighter than `||`, so `a && b ||⏎ c && d` keeps each `&&` grouped — desirable).
+`a + b - c` (parser-nested, mixed +/-) is untouched and ungated. Gated `chain_break/`
+(fitting chain flat + overflowing `&&`/`||`/`|>` + the mixed `&&`/`||` case). Gate 77→78. Full
+suite + clippy + `fmt --check` clean.
 
-**Parser/lexer blocker surfaced:** yes — three **newline-after-comma continuation** gaps (bare
-tuple `x = a,⏎b,⏎c`, `let x = 1,⏎ y = 2`, `import A:⏎ b,⏎ c`), all one root cause, handed off to
-`parser-parity/RECAP.md` "Queued next targets (2026-07-02b)" + `TODO.md` Parser. Formatter keeps
-all three out of fixtures (single-line variants parse fine); the multiline forms still
-source-mirror via the transparent bail (lossless, just input-dependent) until the parser folds
-each into one node.
+**Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) more **width defects now exposed by continuation-aware `fits`** —
-re-probe constructs with trailing tails (annotations, `where`, operator chains) for cases that
-now break correctly and could be gated as fixtures. (2) Surface more **unhandled source-mirroring
-multi-line forms** that are *not* parser-blocked (the comma-continuation family is now parked in
-parser-parity). (3) Sweep the residual Runic doc comments in `rules.rs`.
+**Ranked next targets:** (1) **mixed same-precedence chains** — `a + b - c` / `a * b / c` still
+parse nested and break outermost-only; decide whether `+`/`-` (and `*`/`/`) should flatten across
+*different* operators of one precedence tier (would need an operator-precedence-class check, not
+just kind equality). (2) more **width defects from continuation-aware `fits`** — re-probe trailing
+tails (annotations `::T`, `where`, index/call chains) for now-correct breaks to gate. (3) Sweep the
+residual Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -160,6 +156,16 @@ targets" + `TODO.md`.
 
 ## Earlier sessions
 
+- **Continuation-aware `fits`** (committed `5baca04`, `feat`): first printer-engine change
+  post-pivot. Fixed `printer::fits` to the Wadler best-fit continuation form — it now walks the
+  group `inner` flat **then the rest of the print stack**, stopping at the first taken break, so a
+  too-wide trailing tail (` = x` after `where {…}`) forces the group to break. Signature
+  `fits(remaining, inner, rest: &[(usize, Mode, &Ir)])`; a break *inside* the tested group forbids
+  flat but the same in *trailing* content ends the line (`in_group` flag); trailing nested groups
+  keep their carried Break mode so an earlier small group stays flat while only the needed one
+  breaks. User chose braces-explode + `} = x` trails. Gated `where_break/`. Gate 76→77. (Detail
+  now lives in Standing traps; the newline-after-comma continuation gaps it surfaced are in the
+  outstanding-gaps block above.)
 - **Paren-block width-driven break + newline reflow** (committed `5905ed2`, `feat`): closed
   ranked target #1 for `lower_paren_block` (`PAREN_BLOCK`, the `;`-block `(a; b; c)`). One
   width-driven `Ir::group`: flat when it fits, else one statement per 4-indented line with `;`
