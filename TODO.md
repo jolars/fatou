@@ -292,13 +292,12 @@ leverage.
   inline `module M end` via `push_block_body` (Tenet 1); module bodies are
   declarations, never `return`-inserted; locked by
   `module_blocks/` + `module_siblings/` + `module_baremodule/` +
-  `module_leading_comment/`), `abstract type`/`primitive type` keyword-region
-  whitespace (`lower_type_decl` over `ABSTRACT_DEF`/`PRIMITIVE_DEF`: bodyless
-  one-liners where Runic collapses the run after `abstract`/`primitive` and after
-  `type` to one space each but leaves the post-signature whitespace verbatim
-  (`abstract type Foo   end` keeps `Foo   end`); the `SIGNATURE` is lowered
-  recursively so `Bar<:Baz` → `Bar <: Baz`, and the trailing bits `LITERAL` + `end`
-  ride through verbatim; locked by `abstract_types/` + `primitive_types/`),
+  `module_leading_comment/`), `abstract type`/`primitive type` declarations
+  (`lower_type_decl` over `ABSTRACT_DEF`/`PRIMITIVE_DEF`: bodyless one-liners,
+  **now width-driven Tenet-1** — every whitespace run collapses to one space, both
+  the keyword region *and* the post-signature region (`abstract type Foo   end` →
+  `abstract type Foo end`); the `SIGNATURE` and bits `LITERAL` lower recursively so
+  `Bar<:Baz` → `Bar <: Baz`; locked by `abstract_types/` + `primitive_types/`),
   `function`/`macro` definition bodies (`lower_function` over
   `FUNCTION_DEF`/`MACRO_DEF`: fifth `lower_block_body` reuse; the `SIGNATURE` is
   lowered recursively so the name/args/`::`return-type/`where` normalize and the

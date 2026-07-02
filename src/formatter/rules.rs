@@ -2359,27 +2359,25 @@ fn lower_do_params(node: &SyntaxNode) -> Option<Ir> {
 
 /// Lay out an `abstract type`/`primitive type` declaration. These are bodyless
 /// one-liners (`ABSTRACT_DEF` = `abstract type SIGNATURE end`, `PRIMITIVE_DEF` =
-/// `primitive type SIGNATURE <bits> end`). The only thing this normalizes beyond
-/// the transparent fallback is the **keyword-region whitespace**: Runic collapses
-/// the run after `abstract`/`primitive` and after `type` to a single space each,
-/// but leaves the whitespace *after* the signature untouched (`abstract type Foo
-/// end` keeps `Foo   end` verbatim, matching Runic). The `SIGNATURE` is lowered
-/// recursively, so a tight supertype normalizes (`Bar<:Baz` → `Bar <: Baz`); the
-/// trailing region (an optional bits `LITERAL` and the `end`, with their
-/// surrounding whitespace) is passed through verbatim like the transparent path.
+/// `primitive type SIGNATURE <bits> end`). **Width-driven (Tenet 1):** every
+/// whitespace run collapses to a single space, so the layout is independent of the
+/// source spacing — the keyword region (after `abstract`/`primitive` and after
+/// `type`) *and* the trailing region (around the optional bits `LITERAL` and the
+/// `end`) all render with exactly one space. The `SIGNATURE` and bits `LITERAL`
+/// lower recursively, so a tight supertype normalizes too (`Bar<:Baz` →
+/// `Bar <: Baz`).
 ///
-/// Any shape this does not model — a comment or newline in the keyword region, a
-/// missing signature, fewer than two leading keyword tokens — falls back to the
-/// verbatim transparent lowering.
+/// Any shape this does not model — a comment or newline anywhere in the
+/// declaration, a missing signature, fewer than two leading keyword tokens — falls
+/// back to the verbatim transparent lowering.
 fn lower_type_decl(node: &SyntaxNode) -> Ir {
     let mut parts: Vec<Ir> = Vec::new();
     // Number of leading keyword idents (`abstract`/`primitive`, then `type`) seen;
     // their following whitespace is collapsed to a single space until the signature.
     let mut kw_count = 0u8;
     let mut seen_sig = false;
-    let mut iter = node.children_with_tokens().peekable();
 
-    while let Some(el) = iter.next() {
+    for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Node(child) if child.kind() == SyntaxKind::SIGNATURE && !seen_sig => {
                 parts.push(lower_node(&child));
@@ -2388,7 +2386,13 @@ fn lower_type_decl(node: &SyntaxNode) -> Ir {
             // After the signature, nodes (the bits `LITERAL`) lower normally.
             NodeOrToken::Node(child) if seen_sig => parts.push(lower_node(&child)),
             NodeOrToken::Node(_) => return lower_transparent(node),
-            NodeOrToken::Token(tok) if seen_sig => parts.push(lower_trivia(&tok, iter.peek())),
+            // Trailing region: collapse whitespace to one space, keep `end`, bail
+            // on anything else (a comment or newline we don't model).
+            NodeOrToken::Token(tok) if seen_sig => match tok.kind() {
+                SyntaxKind::WHITESPACE => parts.push(Ir::text(" ")),
+                SyntaxKind::END_KW => parts.push(Ir::text(tok.text().to_string())),
+                _ => return lower_transparent(node),
+            },
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::IDENT if kw_count < 2 => {
                     parts.push(Ir::text(tok.text().to_string()));

@@ -93,42 +93,33 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (empty-body inline fold for `if`/`try`/`do`)
+## Latest session (Tenet-1 whitespace fix for type declarations)
 
-Extended the empty-body inline collapse (previously only single-body blocks via
-`push_block_body`) to the last three block families that still bailed transparent
-on an empty body, retiring their source-mirroring on empty bodies (`if x⏎⏎⏎end`
-used to pass the blanks through; now `if x end`).
+Retired the last source-mirror in `lower_type_decl` (`ABSTRACT_DEF`/`PRIMITIVE_DEF`).
+The Runic-era rule collapsed only the *keyword-region* whitespace to one space and
+passed the **post-signature** region (around the bits `LITERAL` and the `end`)
+through verbatim, so `abstract type Foo   end` and `primitive type C <: A  32  end`
+leaked source spacing — a Tenet-1 violation.
 
-- **New shared helper `lower_body_allow_empty(block) -> Option<Option<Ir>>`**:
-  `Some(Some(ir))` non-empty, `Some(None)` empty (contributes no lines), `None`
-  bail. Unlike `push_block_body` (single-body, folds against a trailing `end`), a
-  clause body's `end` is shared by the whole construct, so an empty body here emits
-  nothing — the keyword header is followed directly by the next clause or `end`.
-- **`lower_do` (`DO_EXPR`)** now routes through `push_block_body` (single-bodied):
-  empty body folds inline — `map(xs) do x end`, `foo() do end`.
-- **`lower_if` (`IF_EXPR`)** uses `lower_body_allow_empty` for the main body and
-  each clause. A **clause-less** empty `if` folds inline `if x end` (user's call:
-  the exact analog of `while x end`); any clause (or non-empty body) stays vertical
-  since the `end` is shared (`if x⏎else⏎    y⏎end`, `if q⏎elseif r⏎    s⏎end`).
-- **`lower_try` (`TRY_EXPR`)** likewise; try is always multi-clause so it never
-  inline-folds (`try⏎catch⏎end` stays vertical). Added a guard: a **clause-less**
-  `try` (`try end` is a syntax error — verified via JuliaSyntax) bails transparent
-  rather than reshape into something that won't reparse.
-- **`lower_branch_clause`** now allows empty clause bodies (emits just the keyword
-  header) via the same helper.
+- **Trailing-region tokens now normalize:** WHITESPACE → one space, END_KW → text,
+  anything else (comment/newline we don't model) bails transparent. The keyword
+  region already collapsed; the signature and bits `LITERAL` lower recursively.
+- Dropped the now-unused `.peekable()`/`while let` (only `lower_trivia`'s peek
+  needed it) for a plain `for` loop — clippy `while_let_on_iterator` otherwise.
+- Doc comment de-Runic'd to the width-driven description.
 
-`rules.rs`-only. Gated `do_blocks/` (first `expected.jl`, incl. an empty-body
-case + the pre-existing leading-blank-preservation `reduce` case) and extended
-`if_blocks/`/`try_blocks/` inputs+expected with empty-body variants. Gate 33→34
-(`do_blocks` newly gated). Suite (45) + clippy + fmt green; idempotent. **All
-block families now handle empty bodies deterministically (Tenet 1).**
+`rules.rs`-only. Gated `abstract_types/` + `primitive_types/` (first `expected.jl`
+for both — they had `input.jl` only despite a stale TODO note claiming otherwise).
+Gate 34→36. Suite (45) + clippy + fmt green; idempotent. No parser blocker.
 
 **Ranked next targets:** (1) the headline **width-driven reflow engine** across the
-block/statement families — the remaining source-break mirrors (`lower_multiline_bracket`,
-`lower_matrix`, and block-body layout still inspect source newlines; see the pivot
-notes); (2) revisit `lower_collection` if the arg-list reflow hasn't already covered
-it; (3) sweep the ~50 residual Runic-rationale doc comments in `rules.rs`.
+block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
+still inspect source newlines); (2) gate the pile of already-canonical ungated
+operator/literal fixtures as pure `test(formatter)` — verified deterministic this
+session: `tight_operators`, `assignment_spacing`, `type_annotations`, `range_colon`,
+`where_clauses`, `dot_access`, `float_literals`, `hex_literals`, `named_tuples`,
+`curly_type_params`, `bare_tuples`, `import_using_lists`, `export_public_lists`,
+`comprehension_for_in`, `control_flow`; (3) sweep residual Runic doc comments.
 
 ## Standing traps
 
@@ -146,6 +137,15 @@ it; (3) sweep the ~50 residual Runic-rationale doc comments in `rules.rs`.
 
 ## Earlier sessions
 
+- **Empty-body inline fold for `if`/`try`/`do`** (committed): extended the
+  empty-body inline collapse to the last three block families that still bailed
+  transparent on an empty body. New helper `lower_body_allow_empty` (`Some(Some)`
+  non-empty / `Some(None)` empty / `None` bail); `lower_do` routes through
+  `push_block_body` (`map(xs) do x end`); a clause-less empty `if` folds inline
+  (`if x end`) but any clause keeps it vertical (shared `end`); `try` never
+  inline-folds and a clause-less `try` bails (syntax error). Gated `do_blocks/`,
+  extended `if_blocks/`/`try_blocks/`. Gate 33→34. All block families now handle
+  empty bodies deterministically.
 - **Width-driven comparison + arrow** (committed `662331d`): retired the last two
   source-break-mirroring operator rules. `lower_comparison` (`COMPARISON_EXPR`) now
   mirrors `lower_binary`'s non-assignment path (one group, `Ir::Line` gaps,
