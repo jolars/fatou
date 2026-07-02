@@ -4537,6 +4537,11 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::PercentEq
             | TokKind::PipeEq
             | TokKind::AmpEq
+            | TokKind::ShlEq
+            | TokKind::ShrEq
+            | TokKind::UShrEq
+            | TokKind::DivEq
+            | TokKind::XorEq
             | TokKind::DotPlusEq
             | TokKind::DotMinusEq
             | TokKind::DotStarEq
@@ -4545,6 +4550,11 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::DotSlashSlashEq
             | TokKind::DotCaretEq
             | TokKind::DotPercentEq
+            | TokKind::DotShlEq
+            | TokKind::DotShrEq
+            | TokKind::DotUShrEq
+            | TokKind::DotDivEq
+            | TokKind::DotXorEq
     )
 }
 
@@ -4760,6 +4770,11 @@ fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
                 | PercentEq
                 | PipeEq
                 | AmpEq
+                | ShlEq
+                | ShrEq
+                | UShrEq
+                | DivEq
+                | XorEq
                 | ColonColon
                 | Colon
         )

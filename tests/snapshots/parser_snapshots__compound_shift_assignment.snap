@@ -1,0 +1,95 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..89
+  ASSIGNMENT_EXPR@0..7
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    SHL_EQ@2..5 "<<="
+    WHITESPACE@5..6 " "
+    NAME@6..7
+      IDENT@6..7 "b"
+  NEWLINE@7..8 "\n"
+  ASSIGNMENT_EXPR@8..15
+    NAME@8..9
+      IDENT@8..9 "a"
+    WHITESPACE@9..10 " "
+    SHR_EQ@10..13 ">>="
+    WHITESPACE@13..14 " "
+    NAME@14..15
+      IDENT@14..15 "b"
+  NEWLINE@15..16 "\n"
+  ASSIGNMENT_EXPR@16..24
+    NAME@16..17
+      IDENT@16..17 "a"
+    WHITESPACE@17..18 " "
+    USHR_EQ@18..22 ">>>="
+    WHITESPACE@22..23 " "
+    NAME@23..24
+      IDENT@23..24 "b"
+  NEWLINE@24..25 "\n"
+  ASSIGNMENT_EXPR@25..32
+    NAME@25..26
+      IDENT@25..26 "a"
+    WHITESPACE@26..27 " "
+    DIV_EQ@27..30 "÷="
+    WHITESPACE@30..31 " "
+    NAME@31..32
+      IDENT@31..32 "b"
+  NEWLINE@32..33 "\n"
+  ASSIGNMENT_EXPR@33..41
+    NAME@33..34
+      IDENT@33..34 "a"
+    WHITESPACE@34..35 " "
+    XOR_EQ@35..39 "⊻="
+    WHITESPACE@39..40 " "
+    NAME@40..41
+      IDENT@40..41 "b"
+  NEWLINE@41..42 "\n"
+  ASSIGNMENT_EXPR@42..50
+    NAME@42..43
+      IDENT@42..43 "a"
+    WHITESPACE@43..44 " "
+    DOT_SHL_EQ@44..48 ".<<="
+    WHITESPACE@48..49 " "
+    NAME@49..50
+      IDENT@49..50 "b"
+  NEWLINE@50..51 "\n"
+  ASSIGNMENT_EXPR@51..59
+    NAME@51..52
+      IDENT@51..52 "a"
+    WHITESPACE@52..53 " "
+    DOT_SHR_EQ@53..57 ".>>="
+    WHITESPACE@57..58 " "
+    NAME@58..59
+      IDENT@58..59 "b"
+  NEWLINE@59..60 "\n"
+  ASSIGNMENT_EXPR@60..69
+    NAME@60..61
+      IDENT@60..61 "a"
+    WHITESPACE@61..62 " "
+    DOT_USHR_EQ@62..67 ".>>>="
+    WHITESPACE@67..68 " "
+    NAME@68..69
+      IDENT@68..69 "b"
+  NEWLINE@69..70 "\n"
+  ASSIGNMENT_EXPR@70..78
+    NAME@70..71
+      IDENT@70..71 "a"
+    WHITESPACE@71..72 " "
+    DOT_DIV_EQ@72..76 ".÷="
+    WHITESPACE@76..77 " "
+    NAME@77..78
+      IDENT@77..78 "b"
+  NEWLINE@78..79 "\n"
+  ASSIGNMENT_EXPR@79..88
+    NAME@79..80
+      IDENT@79..80 "a"
+    WHITESPACE@80..81 " "
+    DOT_XOR_EQ@81..86 ".⊻="
+    WHITESPACE@86..87 " "
+    NAME@87..88
+      IDENT@87..88 "b"
+  NEWLINE@88..89 "\n"

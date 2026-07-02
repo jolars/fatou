@@ -122,6 +122,11 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::PercentEq => SyntaxKind::PERCENT_EQ,
         TokKind::PipeEq => SyntaxKind::PIPE_EQ,
         TokKind::AmpEq => SyntaxKind::AMP_EQ,
+        TokKind::ShlEq => SyntaxKind::SHL_EQ,
+        TokKind::ShrEq => SyntaxKind::SHR_EQ,
+        TokKind::UShrEq => SyntaxKind::USHR_EQ,
+        TokKind::DivEq => SyntaxKind::DIV_EQ,
+        TokKind::XorEq => SyntaxKind::XOR_EQ,
         TokKind::Dot => SyntaxKind::DOT,
         TokKind::DotDot => SyntaxKind::DOT_DOT,
         TokKind::DotDotDot => SyntaxKind::DOT_DOT_DOT,
@@ -170,6 +175,11 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::DotSlashSlashEq => SyntaxKind::DOT_SLASH_SLASH_EQ,
         TokKind::DotCaretEq => SyntaxKind::DOT_CARET_EQ,
         TokKind::DotPercentEq => SyntaxKind::DOT_PERCENT_EQ,
+        TokKind::DotShlEq => SyntaxKind::DOT_SHL_EQ,
+        TokKind::DotShrEq => SyntaxKind::DOT_SHR_EQ,
+        TokKind::DotUShrEq => SyntaxKind::DOT_USHR_EQ,
+        TokKind::DotDivEq => SyntaxKind::DOT_DIV_EQ,
+        TokKind::DotXorEq => SyntaxKind::DOT_XOR_EQ,
         // The six `call-i` Unicode operator tiers collapse to one token kind;
         // the projector recovers the operator text from the token itself.
         TokKind::UniArrow

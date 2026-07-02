@@ -35,20 +35,10 @@ all three out of fixtures (uses single-line variants) and still source-mirrors o
 the multiline forms via the transparent bail, so no data is lost, but the layout is
 input-dependent until the parser folds them into one node.
 
-**Queued from formatter (2026-07-02) — two independent gaps surfaced while
-probing for a formatter target:**
+**Queued from formatter (2026-07-02) — one gap remaining (the compound-assign
+lexer gap landed 2026-07-02c):**
 
-1. **Lexer: several compound-assignment operators don't tokenize as one token.**
-   `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` all lex as their base op + a separate `=`,
-   producing an `ERROR`/`OPERATOR_ATOM` tail. E.g. `a <<= b` ⇒ Fatou `BINARY_EXPR`
-   with `SHL "<<"` then `ERROR(OPERATOR_ATOM(EQ "="))` then a stray `ERROR(IDENT
-   "b")`. JuliaSyntax ground truth: `a <<= b` projects `(<<= a b)` (single `<<=`
-   assignment). `\=` already lexes fine (landed 2026-06-26). Fix is in the lexer's
-   compound-assign recognition (shift ops and the Unicode `÷`/`⊻`). The formatter
-   mangles the current shape (`a <<= b` → `a << = b`); it routes around it by
-   keeping these out of fixtures.
-
-2. **Parser: whitespace before a call/index/curly argument list is accepted where
+1. **Parser: whitespace before a call/index/curly argument list is accepted where
    JuliaSyntax rejects it.** `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` all parse cleanly
    in Fatou as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR` with an interior `WHITESPACE`
    between the base and the `ARG_LIST`. JuliaSyntax raises `ParseError: whitespace is
@@ -124,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **187 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **188 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -144,44 +134,48 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-06-29b—one-line space-separated `for` body)
+## Latest session (2026-07-02c—compound shift/Unicode augmented assignments)
 
-The formatter handoff: `for i in 1:3 x += i end` swallowed the same-line
-body into the `FOR_BINDING` (flat tokens) and left an empty `BLOCK`. Root: the
-statement `for`-binding parsed only the loop var via `parse_for_binding` (bp 0,
-`no_word_op`), then `parse_header`'s greedy `while !header_ends` loop bumped
-*everything* up to the next `newline`/`;`/`end` into the binding—so with no
-separator after the iterable, the body went into the binding. The generator
-already had a correct spec parser (`parse_for_specs`) that stops after each
-iterable; the statement loop just wasn't using it.
+Cleared the formatter-queued compound-assign lexer gap: `<<=`, `>>=`, `>>>=`,
+`÷=`, `⊻=` and their broadcast forms `.<<=`, `.>>=`, `.>>>=`, `.÷=`, `.⊻=` now lex
+as one augmented-assignment token instead of base op + stray `=` + junk tail.
 
-- **Fix (2-file)**: parametrize `parse_for_specs` with `bracketed: bool`
-  (`expr.rs`)—`true` keeps the comprehension's bracket scope (insignificant
-  newlines, `parse_expr_in_brackets` for the iterable), `false` is statement
-  scope (significant newlines, `parse_expr` for the iterable, so a same-line
-  body stops the binding). `parse_header` (`structural.rs`) special-cases
-  `FOR_BINDING` to call `parse_for_specs(…, bracketed=false, …)` and `return`
-  immediately—skipping the greedy bump loop. The now-unused `parse_for_binding`
-  (`expr.rs`) was removed.
-- **Faithful** (byte-identical to JS): `for i in 1:3 x += i end` ⇒ `(for (= i
-  (call-i 1 : 3)) (block (+= x i)))`, `for i = 1:3 println(i) end`, `for i in xs
-  y end`, `for (i,j) in zip(a,b) f(i,j) end`, `for i in 1:3, j in 1:4 g(i,j)
-  end`. Multi-line and `;`-separated forms held; the iterable is now a real
-  expression node (`BINARY_EXPR`/`NAME`), not loose passthrough tokens—the
-  `loops`/`block_form_operand` snapshots re-accepted with the same projection.
-- **Fixtures**: parser snapshot + oracle dir slug `for_oneline_body` (5 cases;
-  `∈` deliberately excluded—it stays a divergence). 
-- **Counts**: JS 677 (held—forms not in the JS corpus, no regressions), dir
-  186 → **187**.
-- **Next**: no parser target queued. JS harvested backlog still exhausted of
-  fixable cases (8 permanent FAILs: float display ×6, `(2)(3)x` juxtaposition,
-  `x 'y` char-lexer). Real-world candidates: `∈` for-binding `=`-normalization
-  (small, but needs suppressing the `∈` operator in the binding LHS + a projector
-  arm; shared with generators), the deferred *suffixed*-unary prefix arm (`+₁ x`
-  crosses newlines, `expr.rs` ~line 1518), or float-display `show`.
+- **The 5-file operator recipe, ×10 tokens** (all right-assoc, assignment tier
+  `(2,1)`, `ASSIGNMENT_EXPR`, text-based projection—no per-kind `sexpr` arm):
+  - `lexer.rs`: new `TokKind`s `ShlEq`/`ShrEq`/`UShrEq`/`DivEq`/`XorEq` +
+    `Dot`-prefixed forms. ASCII: `>>>=` is a 4-char match (beats `>>>`); `<<=`/
+    `>>=` join the 3-char table (beat `<<`/`>>`). Broadcast: `.>>>=` 5-char, `.<<=`/
+    `.>>=` 4-char. **Unicode `÷=`/`⊻=` are the only two Unicode ops with an
+    augmented form** (probed: `⊕=`/`×=`/`∪=` are Julia errors)—special-cased in the
+    single-codepoint Unicode fallback (and the `.`-fused-Unicode block for `.÷=`/
+    `.⊻=`) by fusing a trailing `=`, longest-match like the ASCII `op=` forms.
+  - `syntax.rs` kinds, `tree_builder.rs` map, `expr.rs` `is_assignment_op` (+
+    `is_paren_quotable_op` for the 5 undotted forms so `:(<<=)`/`:(÷=)` quote),
+    `sexpr.rs` `is_operator`.
+- **Faithful** (byte-identical to JS): all 10 forms project `(<<= a b)` … `(.⊻= a
+  b)`; `:(<<=)`⇒`(quote-: <<=)`. Base ops unaffected (`a << b`⇒`(call-i a << b)`,
+  `a ÷ b`, whitespace-insensitive since the `=` glue is the discriminator).
+- **Fixtures**: lexer unit test `compound_shift_and_unicode_assignments`; parser
+  snapshot + oracle dir slug `compound_shift_assignment` (10 cases).
+- **Counts**: JS 677 (held—not in the JS corpus, no regressions), dir 187 → **188**.
+- **Deferred sibling**: `$=` (old bitwise-xor-assign) also works in Julia
+  (`($= a b)`) but is rare and entangled with `$` interpolation lexing; left out.
+  Broadcast *bare* shifts `.<<`/`.>>`/`.>>>` (no `=`) remain a pre-existing gap
+  (`a .<< b`⇒Fatou `(dotcall-i a < (call-pre (error <) b))` vs JS `(dotcall-i a <<
+  b)`)—unaffected by this change, a separate small target.
+- **Next**: remaining formatter-queued parser targets—whitespace-before-arglist
+  rejection (`f (a)`/`a [1]`/`A {T}`), and the newline-after-comma continuation
+  cluster (bare-tuple RHS / `let` bindings / `import` `:`-list; one root cause).
 
 ## Earlier sessions
 
+- **2026-06-29b**—one-line space-separated `for` body. `for i in 1:3 x += i end`
+  swallowed the same-line body into the `FOR_BINDING`; parametrized
+  `parse_for_specs` with `bracketed: bool` (`expr.rs`) and had `parse_header`
+  (`structural.rs`) call it with `bracketed=false` + `return` (skipping the greedy
+  bump loop); removed the now-unused `parse_for_binding`. `for i in 1:3 x += i end`
+  ⇒ `(for (= i (call-i 1 : 3)) (block (+= x i)))`. Fixtures `for_oneline_body`
+  (`∈` excluded—still a divergence). JS 677 (held); dir 186 → 187.
 - **2026-06-29**—`global`/`local` + multiple-assignment nesting. Switched
   `global`/`local` from `KwStmt::Expr` to `KwStmt::ExprTuple` (`expr.rs`; the
   `Expr` variant removed), so statement-level comma folds to a tuple and handles

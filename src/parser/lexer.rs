@@ -134,6 +134,14 @@ pub(crate) enum TokKind {
     PercentEq,
     PipeEq,
     AmpEq,
+    /// Bitshift augmented assignment `<<=`, `>>=`, `>>>=`.
+    ShlEq,
+    ShrEq,
+    UShrEq,
+    /// The Unicode augmented assignments `÷=` (integer-divide) and `⊻=` (xor).
+    /// These two are the only Unicode operators with an augmented-assign form.
+    DivEq,
+    XorEq,
     Dot,
     /// The `..` range/interval operator (infix `a..b`).
     DotDot,
@@ -203,6 +211,13 @@ pub(crate) enum TokKind {
     DotSlashSlashEq,
     DotCaretEq,
     DotPercentEq,
+    /// Broadcast bitshift augmented assignment `.<<=`, `.>>=`, `.>>>=`.
+    DotShlEq,
+    DotShrEq,
+    DotUShrEq,
+    /// Broadcast forms of the Unicode augmented assignments `.÷=`, `.⊻=`.
+    DotDivEq,
+    DotXorEq,
 
     // Single-codepoint Unicode operators, grouped by precedence tier. The exact
     // operator text is carried by the token; the parser only needs the tier (for
@@ -929,10 +944,31 @@ impl<'a> Lexer<'a> {
         // field access, the `@.` macro, and splat are all untouched. Longest
         // match: try the 3-char dotted comparisons before the 2-char ops.
         if b0 == Some(b'.') {
+            // The 5-char broadcast unsigned-shift assignment `.>>>=` must beat
+            // every shorter dotted shift form.
+            if (b1, self.peek(2), self.peek(3), self.peek(4))
+                == (Some(b'>'), Some(b'>'), Some(b'>'), Some(b'='))
+            {
+                self.pos += 5;
+                self.push_op(TokKind::DotUShrEq, start);
+                return;
+            }
             // The lone 4-char dotted op `.//=` must beat the 3-char `.//`.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
                 self.pos += 4;
                 self.push_op(TokKind::DotSlashSlashEq, start);
+                return;
+            }
+            // The 4-char broadcast bitshift assignments `.<<=`/`.>>=` beat the
+            // dotted 2-char forms.
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'<'), Some(b'=')) {
+                self.pos += 4;
+                self.push_op(TokKind::DotShlEq, start);
+                return;
+            }
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'=')) {
+                self.pos += 4;
+                self.push_op(TokKind::DotShrEq, start);
                 return;
             }
             // The 4-char broadcast arrow `.-->` must beat `.-` (`DotMinus`).
@@ -1007,6 +1043,22 @@ impl<'a> Lexer<'a> {
                 self.push_op(kind, start);
                 return;
             }
+            // The broadcast Unicode augmented assignments `.÷=`/`.⊻=` fuse `.` +
+            // the operator + a trailing `=` into one token.
+            if matches!(b1, Some(b) if !b.is_ascii()) {
+                let ch = self.char_at(self.pos + 1);
+                if matches!(ch, '\u{f7}' | '\u{22bb}') && self.peek(1 + ch.len_utf8()) == Some(b'=')
+                {
+                    let kind = if ch == '\u{f7}' {
+                        TokKind::DotDivEq
+                    } else {
+                        TokKind::DotXorEq
+                    };
+                    self.pos += 1 + ch.len_utf8() + 1;
+                    self.push_op(kind, start);
+                    return;
+                }
+            }
             // A broadcast `.` fused to a single-codepoint Unicode infix operator
             // (`.…`, `.×`, `.⊕`, …): emit the operator's precedence-tier kind on a
             // token spanning `.op`. The projector strips the leading `.` and heads
@@ -1040,6 +1092,14 @@ impl<'a> Lexer<'a> {
             return;
         }
 
+        // The 4-char unsigned-shift assignment `>>>=` must beat the 3-char `>>>`.
+        if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'>'), Some(b'='))
+        {
+            self.pos += 4;
+            self.push_op(TokKind::UShrEq, start);
+            return;
+        }
+
         // Three-char ASCII ops (longest match): the arrow `-->` must beat `->`,
         // and the unsigned shift `>>>` must beat `>>`.
         let three = match (b0, b1, self.peek(2)) {
@@ -1048,6 +1108,10 @@ impl<'a> Lexer<'a> {
             // Identity `===` beats `==`; its negation `!==` beats `!=`.
             (Some(b'='), Some(b'='), Some(b'=')) => Some(TokKind::EqEqEq),
             (Some(b'!'), Some(b'='), Some(b'=')) => Some(TokKind::NotEqEq),
+            // Bitshift augmented assignment `<<=`/`>>=` beats the 2-char `<<`/`>>`
+            // (the `>>>=` 4-char form was matched above).
+            (Some(b'<'), Some(b'<'), Some(b'=')) => Some(TokKind::ShlEq),
+            (Some(b'>'), Some(b'>'), Some(b'=')) => Some(TokKind::ShrEq),
             _ => None,
         };
         if let Some(kind) = three {
@@ -1136,7 +1200,18 @@ impl<'a> Lexer<'a> {
                 // it up by char and emit its precedence-tier kind. The operator
                 // text stays in the token; the parser keys on the tier.
                 let ch = self.char_at(self.pos);
-                if let Some(kind) = super::unicode_ops::unicode_op_kind(ch) {
+                // The two Unicode operators with an augmented-assign form: `÷=`
+                // and `⊻=` fuse the trailing `=` into a single assignment token
+                // (longest match, like the ASCII `op=` forms).
+                if matches!(ch, '\u{f7}' | '\u{22bb}') && self.peek(ch.len_utf8()) == Some(b'=') {
+                    let kind = if ch == '\u{f7}' {
+                        TokKind::DivEq
+                    } else {
+                        TokKind::XorEq
+                    };
+                    self.pos += ch.len_utf8() + 1;
+                    self.push_op(kind, start);
+                } else if let Some(kind) = super::unicode_ops::unicode_op_kind(ch) {
                     self.pos += ch.len_utf8();
                     self.push_op(kind, start);
                 } else {
@@ -1591,6 +1666,50 @@ mod tests {
         assert_eq!(
             kinds("a.\\=b"),
             vec![TokKind::Ident, TokKind::DotBackslashEq, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn compound_shift_and_unicode_assignments() {
+        // Bitshift augmented assignments lex as one token (longest match beats
+        // the bare shift `<<`/`>>`/`>>>` and, for `>>>=`, the unsigned shift).
+        assert_eq!(
+            kinds("a<<=b"),
+            vec![TokKind::Ident, TokKind::ShlEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a>>=b"),
+            vec![TokKind::Ident, TokKind::ShrEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a>>>=b"),
+            vec![TokKind::Ident, TokKind::UShrEq, TokKind::Ident]
+        );
+        // The two Unicode augmented assignments `÷=` and `⊻=` fuse the `=`.
+        assert_eq!(
+            kinds("a÷=b"),
+            vec![TokKind::Ident, TokKind::DivEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a⊻=b"),
+            vec![TokKind::Ident, TokKind::XorEq, TokKind::Ident]
+        );
+        // Broadcast forms fuse the leading `.` as well.
+        assert_eq!(
+            kinds("a.<<=b"),
+            vec![TokKind::Ident, TokKind::DotShlEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a.>>>=b"),
+            vec![TokKind::Ident, TokKind::DotUShrEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a.÷=b"),
+            vec![TokKind::Ident, TokKind::DotDivEq, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a.⊻=b"),
+            vec![TokKind::Ident, TokKind::DotXorEq, TokKind::Ident]
         );
     }
 

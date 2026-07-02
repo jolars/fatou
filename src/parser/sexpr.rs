@@ -586,6 +586,11 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | PERCENT_EQ
             | PIPE_EQ
             | AMP_EQ
+            | SHL_EQ
+            | SHR_EQ
+            | USHR_EQ
+            | DIV_EQ
+            | XOR_EQ
             | DOT_PLUS_EQ
             | DOT_MINUS_EQ
             | DOT_STAR_EQ
@@ -594,6 +599,11 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_SLASH_SLASH_EQ
             | DOT_CARET_EQ
             | DOT_PERCENT_EQ
+            | DOT_SHL_EQ
+            | DOT_SHR_EQ
+            | DOT_USHR_EQ
+            | DOT_DIV_EQ
+            | DOT_XOR_EQ
             | UNICODE_OP
             | UNICODE_ASSIGN_OP
             | UNICODE_RADICAL

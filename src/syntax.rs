@@ -203,6 +203,11 @@ pub enum SyntaxKind {
     PERCENT_EQ,
     PIPE_EQ,
     AMP_EQ,
+    SHL_EQ,
+    SHR_EQ,
+    USHR_EQ,
+    DIV_EQ,
+    XOR_EQ,
     DOT,
     DOT_DOT,
     DOT_DOT_DOT,
@@ -255,6 +260,11 @@ pub enum SyntaxKind {
     DOT_SLASH_SLASH_EQ,
     DOT_CARET_EQ,
     DOT_PERCENT_EQ,
+    DOT_SHL_EQ,
+    DOT_SHR_EQ,
+    DOT_USHR_EQ,
+    DOT_DIV_EQ,
+    DOT_XOR_EQ,
 
     // Single-codepoint Unicode operator tokens. The tier distinctions the parser
     // needs live in the `TokKind`; here only the projection shape matters, so the

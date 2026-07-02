@@ -44,6 +44,7 @@ command_literal
 command_macro
 comments
 comparison_chains
+compound_shift_assignment
 comprehension_blank_line
 comprehensions
 const_not_assignment

@@ -7,10 +7,11 @@ leverage.
 
 ## Parser
 
-- [ ] Lexer: compound-assignment operators `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` don't
-  tokenize as one token (lex as base op + `=`, giving an `ERROR`/`OPERATOR_ATOM`
-  tail). JuliaSyntax: `a <<= b` ⇒ `(<<= a b)`. `\=` already works. Surfaced by the
-  formatter (mangles `a <<= b` → `a << = b`); see parser-parity RECAP queued target.
+- [x] Lexer: compound-assignment operators `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` (and
+  their broadcast forms `.<<=`, `.>>=`, `.>>>=`, `.÷=`, `.⊻=`) now tokenize as one
+  augmented-assignment token. `a <<= b` ⇒ `(<<= a b)`, `a .÷= b` ⇒ `(.÷= a b)`;
+  quotable as `:(<<=)`. The Unicode set is exactly `÷=`/`⊻=` (the only two Unicode
+  operators with an augmented form; `⊕=`/`×=`/… are errors in Julia).
 - [ ] Parser: whitespace before a call/index/curly arg list is wrongly accepted.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
