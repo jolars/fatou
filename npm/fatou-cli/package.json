@@ -1,6 +1,6 @@
 {
   "name": "fatou-cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A language server, formatter, and linter for Julia",
   "keywords": [
     "julia",
@@ -28,13 +28,13 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@fatou-cli/linux-x64-gnu": "0.3.0",
-    "@fatou-cli/linux-arm64-gnu": "0.3.0",
-    "@fatou-cli/linux-x64-musl": "0.3.0",
-    "@fatou-cli/linux-arm64-musl": "0.3.0",
-    "@fatou-cli/darwin-x64": "0.3.0",
-    "@fatou-cli/darwin-arm64": "0.3.0",
-    "@fatou-cli/win32-x64": "0.3.0",
-    "@fatou-cli/win32-arm64": "0.3.0"
+    "@fatou-cli/linux-x64-gnu": "0.4.0",
+    "@fatou-cli/linux-arm64-gnu": "0.4.0",
+    "@fatou-cli/linux-x64-musl": "0.4.0",
+    "@fatou-cli/linux-arm64-musl": "0.4.0",
+    "@fatou-cli/darwin-x64": "0.4.0",
+    "@fatou-cli/darwin-arm64": "0.4.0",
+    "@fatou-cli/win32-x64": "0.4.0",
+    "@fatou-cli/win32-arm64": "0.4.0"
   }
 }
