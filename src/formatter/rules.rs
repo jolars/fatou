@@ -1122,8 +1122,13 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
 /// - **Comments.** A list carrying an own-line or trailing comment cannot
 ///   collapse, so it routes to the comment-aware [`lower_multiline_bracket`].
 ///   (Comments are a separate, still-source-mirroring construct.)
-/// - **A `;`-separated `PARAMETERS` tail** (`f(a; b = 1)`): the `;` break is not
-///   yet modeled, so the list is emitted flat (single line), as before.
+/// - **A `;`-separated `PARAMETERS` tail** (`f(a; b = 1)`): folded into the same
+///   width-driven group as the positional args. Flat when it fits
+///   (`f(a, b; c = 1)`); when broken, one arg per line with the `;` snug after the
+///   last positional (`b;`), each keyword on its own line, and a trailing comma
+///   after the last keyword. A keyword-only call keeps the `;` on the open line
+///   (`f(;`). An unmodeled params shape (comment, doubled comma, unexpected child)
+///   still falls back to the flat form.
 ///
 /// Any other unmodeled shape — a doubled/leading comma, two items with no comma
 /// between them, an unexpected child or token — falls back to the verbatim
@@ -1137,8 +1142,9 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
     let mut items: Vec<Ir> = Vec::new();
-    // The `; …` keyword tail, if any. Its presence forces the flat layout.
-    let mut params: Option<Ir> = None;
+    // The `; …` keyword tail node, if any. Folded into the width-driven group
+    // below (or, if its shape is unmodeled, emitted flat).
+    let mut params_node: Option<SyntaxNode> = None;
     let mut pending_comma = false;
 
     for el in node.children_with_tokens() {
@@ -1166,7 +1172,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                 SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
                     // An item after the `;` tail, or a second item with no comma
                     // between, is unmodeled.
-                    if params.is_some() || (!items.is_empty() && !pending_comma) {
+                    if params_node.is_some() || (!items.is_empty() && !pending_comma) {
                         return lower_transparent(node);
                     }
                     items.push(lower_node(&child));
@@ -1175,10 +1181,10 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                 // `;`-separated parameters attach directly (the `;` is the
                 // separator), so they must not follow a comma.
                 SyntaxKind::PARAMETERS => {
-                    if pending_comma || params.is_some() {
+                    if pending_comma || params_node.is_some() {
                         return lower_transparent(node);
                     }
-                    params = Some(lower_node(&child));
+                    params_node = Some(child);
                 }
                 _ => return lower_transparent(node),
             },
@@ -1189,8 +1195,47 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    // The `;` tail isn't modeled as a breakable group yet: emit the flat form.
-    if let Some(params) = params {
+    // A `;` keyword tail: fold it into one width-driven group with the positional
+    // args. Flat `(a, b; c = 1)`; when broken, the `;` snugs after the last
+    // positional (`b;`) and each keyword drops to its own line, or — with no
+    // positional args — the `;` rides the open bracket (`f(;`).
+    if let Some(pnode) = params_node {
+        if let Some(pitems) = collect_param_items(&pnode) {
+            let mut group_parts: Vec<Ir> = vec![Ir::text(open)];
+            let mut inner: Vec<Ir> = Vec::new();
+            if items.is_empty() {
+                // Keyword-only: `;` rides the open bracket, outside the indent.
+                group_parts.push(Ir::text(";"));
+            } else {
+                inner.push(Ir::SoftLine);
+                for (i, item) in items.into_iter().enumerate() {
+                    if i > 0 {
+                        inner.push(Ir::text(","));
+                        inner.push(Ir::Line);
+                    }
+                    inner.push(item);
+                }
+                // `;` snugs to the last positional (no comma, no break before it).
+                inner.push(Ir::text(";"));
+            }
+            for (j, p) in pitems.into_iter().enumerate() {
+                if j > 0 {
+                    inner.push(Ir::text(","));
+                }
+                // A break/space before every keyword, including the first (which
+                // sits after the `;`).
+                inner.push(Ir::Line);
+                inner.push(p);
+            }
+            inner.push(Ir::if_break(",", ""));
+            group_parts.push(Ir::indent(Ir::concat(inner)));
+            group_parts.push(Ir::SoftLine);
+            group_parts.push(Ir::text(close));
+            return Ir::group(Ir::concat(group_parts));
+        }
+
+        // An unmodeled params shape (comment, doubled comma, …): keep the flat
+        // form, lowering the tail through the transparent-safe `lower_parameters`.
         let mut parts: Vec<Ir> = vec![Ir::text(open)];
         for (i, item) in items.into_iter().enumerate() {
             if i > 0 {
@@ -1198,7 +1243,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
             }
             parts.push(item);
         }
-        parts.push(params);
+        parts.push(lower_node(&pnode));
         parts.push(Ir::text(close));
         return Ir::concat(parts);
     }
@@ -1597,6 +1642,53 @@ fn lower_keyword_arg(node: &SyntaxNode) -> Ir {
     }
 
     Ir::concat(parts)
+}
+
+/// Collect the lowered items of a `;`-separated `PARAMETERS` tail so
+/// [`lower_arg_list`] can fold them into its width-driven group. Returns the
+/// item IRs (without the `;` or any separators) on the clean alternating
+/// `; <item> [, <item>]…` shape, skipping source whitespace and newlines. Returns
+/// `None` — leaving the caller to emit the flat form — on any shape this can't
+/// reflow: a comment, a doubled/orphaned comma, an unexpected child, a missing
+/// semicolon, or an empty tail (`f(;)`).
+fn collect_param_items(node: &SyntaxNode) -> Option<Vec<Ir>> {
+    let mut items: Vec<Ir> = Vec::new();
+    let mut pending_comma = false;
+    let mut seen_semi = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::SEMICOLON if !seen_semi => seen_semi = true,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::COMMA => {
+                    if pending_comma || items.is_empty() {
+                        return None;
+                    }
+                    pending_comma = true;
+                }
+                _ => return None,
+            },
+            NodeOrToken::Node(child) => {
+                if !matches!(child.kind(), SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG) {
+                    return None;
+                }
+                if !items.is_empty() && !pending_comma {
+                    return None;
+                }
+                items.push(lower_node(&child));
+                pending_comma = false;
+            }
+        }
+    }
+
+    // A trailing `pending_comma` is just a dropped trailing comma (`f(; a, b,)`),
+    // matching the positional side; only a missing `;` or empty tail bails.
+    if !seen_semi || items.is_empty() {
+        return None;
+    }
+
+    Some(items)
 }
 
 /// Lay out a `;`-separated parameter block (`; a = 1, b = 2`): one space after

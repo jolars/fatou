@@ -6,6 +6,28 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Queued from formatter (2026-07-02) — two independent gaps surfaced while
+probing for a formatter target:**
+
+1. **Lexer: several compound-assignment operators don't tokenize as one token.**
+   `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` all lex as their base op + a separate `=`,
+   producing an `ERROR`/`OPERATOR_ATOM` tail. E.g. `a <<= b` ⇒ Fatou `BINARY_EXPR`
+   with `SHL "<<"` then `ERROR(OPERATOR_ATOM(EQ "="))` then a stray `ERROR(IDENT
+   "b")`. JuliaSyntax ground truth: `a <<= b` projects `(<<= a b)` (single `<<=`
+   assignment). `\=` already lexes fine (landed 2026-06-26). Fix is in the lexer's
+   compound-assign recognition (shift ops and the Unicode `÷`/`⊻`). The formatter
+   mangles the current shape (`a <<= b` → `a << = b`); it routes around it by
+   keeping these out of fixtures.
+
+2. **Parser: whitespace before a call/index/curly argument list is accepted where
+   JuliaSyntax rejects it.** `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` all parse cleanly
+   in Fatou as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR` with an interior `WHITESPACE`
+   between the base and the `ARG_LIST`. JuliaSyntax raises `ParseError: whitespace is
+   not allowed here` for each. Fatou is too permissive: a space before the postfix
+   `(`/`[`/`{` should not start an application. (The formatter treats this as a
+   parser matter, not a target — snugging the space away would launder invalid
+   syntax.)
+
 **Handoff to formatter (2026-06-29b):** one-line space-separated `for`
 bodies now parse into the loop `BLOCK` (`for i in 1:3 x += i end` ⇒ `(for (= i
 (call-i 1 : 3)) (block (+= x i)))`), so the one-line `for` body explodes just

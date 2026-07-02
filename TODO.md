@@ -7,6 +7,14 @@ leverage.
 
 ## Parser
 
+- [ ] Lexer: compound-assignment operators `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` don't
+  tokenize as one token (lex as base op + `=`, giving an `ERROR`/`OPERATOR_ATOM`
+  tail). JuliaSyntax: `a <<= b` ⇒ `(<<= a b)`. `\=` already works. Surfaced by the
+  formatter (mangles `a <<= b` → `a << = b`); see parser-parity RECAP queued target.
+- [ ] Parser: whitespace before a call/index/curly arg list is wrongly accepted.
+  `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
+  with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
+  here`. Surfaced by the formatter; see parser-parity RECAP queued target.
 - [x] Parser: `global`/`local` + multiple assignment now nests properly.
   `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`, `local a, b =
   f(x), g(y)` wraps the calls, `global a, b::Int` ⇒ `(global a (::-i b Int))`.
@@ -65,6 +73,12 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
+- [x] Formatter: the `;`-keyword tail of a call now folds into `lower_arg_list`'s
+  width-driven group instead of always emitting flat. A too-wide call breaks
+  one-arg-per-line with the `;` snug after the last positional (`b;`) and each
+  keyword on its own line + trailing comma; a keyword-only call keeps the `;` on the
+  open bracket (`f(;`). New `collect_param_items` helper; unmodeled param shapes
+  (comment, etc.) still fall back to the flat form. `arg_list_params_break/` gated.
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1

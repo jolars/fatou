@@ -93,54 +93,52 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (comprehension/generator reflow)
+## Latest session (`;`-keyword tail width-driven break)
 
-Surfaced a **new** construct that bailed transparent. `COMPREHENSION` (`[e for b if
-f]`), `GENERATOR` (`(e for b)`), `BRACES_COMPREHENSION` (`{e for b}`), and the sibling
-`COMPREHENSION_IF` all fell to `lower_transparent`, so the whitespace *between* the
-element, the `for`-bindings, and the `if`-filter leaked (`[x  for  x  in  v  if  x>0]`
-→ `[x  for x in v  if  x > 0]` — the existing `comprehension_for_in/` fixture only
-passed because its inputs were already single-spaced; the `FOR_BINDING` child was the
-only part `lower_transparent` recursion normalized).
+Closed the deferred `;`-`PARAMETERS` hole in `lower_arg_list`. A call whose arg list
+carried a `; kw = …` tail was emitted **flat unconditionally** — even when too wide — so
+`f(a, b; c = 1, …)` over 92 cols stayed on one line while a comma-only call broke. The `;`
+break simply wasn't modeled (the tail was lowered as an opaque flat `Ir` and appended).
 
-New `lower_comprehension` arm (COMPREHENSION | GENERATOR | BRACES_COMPREHENSION) +
-`lower_comprehension_if` helper, inserted after `lower_collection`. Shape: open bracket,
-one element node, ≥1 `FOR_BINDING` (reusing `lower_for_binding`), optional trailing
-`COMPREHENSION_IF`, close bracket. One width-driven `Ir::group`: flat `[elem for b if f]`
-(single spaces) when it fits, else the element and each `for`/`if` clause explode onto
-their own 4-indented line (**user chose "explode each clause"** over bracket-explode-only
-or never-break). The typed `T[…]` form is a `TYPED_COMPREHENSION` wrapping a `GENERATOR`
-with `[]` brackets — no arm needed; the transparent path snugs the type node onto this
-handler's bracketed body (`Int[ x for x in v ]` → `Int[x for x in v]`). Brackets read from
-whatever open/close tokens are present, so the same arm serves `[]`/`()`/`{}`.
+Now the tail folds into the **same** width-driven `Ir::group` as the positional args. Flat
+`f(a, b; c = 1)` when it fits; when broken, one arg per line with the `;` **snug after the
+last positional** (`b;`), each keyword on its own line, and a broken-only trailing comma
+after the last keyword. A **keyword-only** call (`f(; a, b)`) keeps the `;` riding the open
+bracket (`f(;`, then the kwargs indent) — the `;` is pushed to the group parts *outside*
+the indent so it stays on the open line in both modes. **User chose "`;` trails last
+positional"** (via AskUserQuestion) over "`;` leads the kwargs on its own line" or "kwargs
+stay flat after the break".
 
-**Bail discipline:** a comment can't be reflowed, so the whole node bails to transparent
-if any descendant is a `COMMENT`/`BLOCK_COMMENT`. Gated `comprehension_spacing/` (messy
-`[]`/`()`/`{}`/typed/dict-generator spacing → normalized) + `comprehension_break/` (one
-wide single-line comprehension → 5-line explode).
+Implementation (all in `rules.rs`): store `params_node: Option<SyntaxNode>` in the loop
+instead of a pre-lowered `Ir`; new `collect_param_items(&PARAMETERS) -> Option<Vec<Ir>>`
+returns the lowered kwarg items on the clean `; <item> [, <item>]…` shape (skipping
+`WHITESPACE`/`NEWLINE`), else `None`. On `Some`, build the combined group; on `None`
+(comment or other unmodeled shape) fall back to the old flat form via `lower_parameters`.
 
-**Newline-skip follow-up (same session).** The first cut also bailed on
-`has_newline_token(node)`, so a *source*-multiline comprehension stayed verbatim (kept its
-source indent) — a Tenet-1 wrinkle, **not** a parser bug (the CST is clean). Root cause: a
-multiline comprehension parks a `NEWLINE` inside its `FOR_BINDING`, and `lower_for_binding`
-bailed transparent on an interior newline, so a raw `\n` would have leaked into the group.
-Fix (three one-line edits in `rules.rs`): `lower_for_binding` and `for_iteration_operands`
-now **skip** `NEWLINE` like `WHITESPACE` (no `\n` reaches the IR), so the whole-node
-`has_newline_token` guard in `lower_comprehension` was dropped (comment guard kept). A
-pre-broken comprehension now collapses (when it fits) or re-explodes to the **same**
-canonical 4-indent form as its single-line twin (verified byte-identical + idempotent).
-Idempotence of the exploded form no longer relies on the transparent re-emit — it's the
-width-driven path being deterministic. `has_newline_token` back to **2** call sites
-(`lower_matrix`, multiline-bracket dispatch). Gated `comprehension_multiline/` (a
-short pre-broken → flat collapse + a wide pre-broken with messy source indent → canonical
-explode). Gate 71→74. Full suite + clippy + `fmt --check` clean; no parser blocker.
+**Idempotence trap (fixed mid-session):** the first cut had `collect_param_items` bail on a
+trailing `pending_comma`, so the *already-broken* fixture (whose last kwarg has a canonical
+trailing comma) returned `None` → flat fallback → `lower_parameters` bailed transparent on
+the interior `NEWLINE` → leaked the source layout (positional flat, kwargs verbatim). The
+positional side already **drops** a trailing comma (`g(a,)` → `g(a)`); so does the tail now
+— a final `pending_comma` is a dropped trailing comma, only a missing `;`/empty tail bails.
+After the fix, `format(format(x)) == format(x)` byte-identical. Gated
+`arg_list_params_break/` (fitting positional+kw and kw-only stay flat; wide positional+kw
+and wide kw-only explode). Gate 74→75. Full suite + clippy + `fmt --check` clean.
 
-**Ranked next targets:** (1) surface more **unhandled constructs** that bail transparent
-(`cargo run -q -- format < snippet`; e.g. `let x=1 ` earlier showed a stray trailing space
-on a let-binding line — worth a look). (2) Consider the same newline-skip generalization
-for the other rules that still bail on an interior `NEWLINE` (`lower_paren_block`,
-`lower_bare_tuple`, …) so their pre-broken forms reflow too. (3) Sweep the residual Runic
-doc comments in `rules.rs`.
+**Two parser/lexer gaps surfaced while probing (handed off, not formatter targets):**
+(a) **lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one compound-assign token
+(lex as base op + `=` → `ERROR`; `a <<= b` mangles to `a << = b`); (b) **parser** —
+whitespace before a call/index/curly arg list is accepted (`f (a)`, `a [1]`, `A {T}`,
+`f(a) (b)`) where JuliaSyntax rejects it (`whitespace is not allowed here`). Both recorded
+in `parser-parity/RECAP.md` "Queued next targets" + `TODO.md` Parser section.
+
+**Ranked next targets:** (1) the same newline-skip / width-driven generalization for rules
+that still source-mirror on an interior `NEWLINE` (`lower_paren_block`, `lower_bare_tuple` —
+note the *pre-broken* bare tuple **fragments** at the parser level into ROOT-level pieces,
+so it's parser-entangled, not a clean formatter fix; check the CST first). (2) surface more
+**unhandled constructs** that bail transparent — most *valid* ones already normalize via
+transparent recursion, so look for source-mirroring multi-line forms rather than spacing
+leaks. (3) Sweep the residual Runic doc comments in `rules.rs`.
 
 ## Standing traps
 
@@ -158,6 +156,16 @@ doc comments in `rules.rs`.
 
 ## Earlier sessions
 
+- **Comprehension/generator reflow** (committed `deb0df3`+`cbeaa25`, `feat`): new
+  `lower_comprehension` arm (`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`) +
+  `lower_comprehension_if`, after `lower_collection`. One width-driven group: flat
+  `[elem for b if f]` when it fits, else element + each `for`/`if` clause on its own
+  4-indented line (user chose "explode each clause"). Typed `T[…]` handled via the
+  transparent snug. Comment descendant → bail transparent. Follow-up: `lower_for_binding`
+  + `for_iteration_operands` now skip `NEWLINE` like `WHITESPACE`, so a source-multiline
+  comprehension reflows to the same canonical form (dropped the `has_newline_token` guard;
+  back to 2 call sites). Gated `comprehension_spacing/`, `comprehension_break/`,
+  `comprehension_multiline/`. Gate 71→74.
 - **Unary prefix operators** (committed `d04276d`, `feat`): new `lower_unary` arm +
   `operand_leads_with_operator` helper (before `lower_arrow`). `UNARY_EXPR` is the prefix
   `<op> <operand>`; the op snugs to its operand (no space), operand recursed
