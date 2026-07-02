@@ -1,0 +1,1 @@
+(toplevel (= x (tuple a b c)) (tuple p q r))

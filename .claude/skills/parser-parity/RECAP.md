@@ -6,35 +6,6 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Queued from formatter (2026-07-02b) — newline-after-comma continuation: three
-sites where a trailing comma should continue a comma list across a newline, but
-Fatou terminates the statement at the newline and fragments the tail.** One root
-cause; JuliaSyntax treats the trailing `,` (or a dangling `:` in `import`) as a
-line-continuation.
-
-1. **Bare tuple assignment.** `x = a,\nb,\nc` — Fatou splits into three ROOT
-   children: `ASSIGNMENT_EXPR(x = (a,))`, a separate `BARE_TUPLE_EXPR(b,)`, then a
-   bare `NAME(c)`. JuliaSyntax ground truth: `x = (a, b, c)` (one tuple
-   assignment). (This is the formatter RECAP's ranked target #1 — confirmed
-   parser-entangled, not a `rules.rs` fix.)
-2. **`let` binding list.** `let x = 1,\n    y = 2\n    body\nend` — Fatou's
-   `LET_BINDINGS` captures only `x = 1,`; `y = 2` leaks into the loop `BLOCK` body
-   as its first statement. JuliaSyntax ground truth: `let x = 1, y = 2 … end` (both
-   in the binding list). The single-line `let x = 1, y = 2` parses correctly; only
-   the newline-after-comma form fragments.
-3. **`import`/`using` selective list.** `import A:\n    b,\n    c` — Fatou emits
-   `IMPORT_STMT(import A:)` then a separate ROOT `BARE_TUPLE_EXPR(b,)` and `NAME(c)`.
-   Both the dangling `:` and the trailing `,` should continue the list; the
-   formatter emits flush-left fragments (also loses indentation). The single-line
-   `import A: b, c` parses correctly.
-
-Common fix locus: newline handling inside comma-separated list contexts (tuple RHS,
-`let` bindings, `import`/`using` `:`-lists) — a pending trailing comma (or the
-`import` `:`) must suppress the statement-terminating newline. The formatter keeps
-all three out of fixtures (uses single-line variants) and still source-mirrors on
-the multiline forms via the transparent bail, so no data is lost, but the layout is
-input-dependent until the parser folds them into one node.
-
 **Queued from formatter (2026-07-02) — one gap remaining (the compound-assign
 lexer gap landed 2026-07-02c):**
 
@@ -114,7 +85,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **188 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **191 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,41 +105,53 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-02c—compound shift/Unicode augmented assignments)
+## Latest session (2026-07-02d—newline-after-comma continuation cluster)
 
-Cleared the formatter-queued compound-assign lexer gap: `<<=`, `>>=`, `>>>=`,
-`÷=`, `⊻=` and their broadcast forms `.<<=`, `.>>=`, `.>>>=`, `.÷=`, `.⊻=` now lex
-as one augmented-assignment token instead of base op + stray `=` + junk tail.
+Cleared the whole formatter-queued cluster: a trailing comma (or the `import`
+`:`/keyword) now suppresses the statement-terminating newline so a comma list
+continues on the next line. Three sites, one theme, three small fixes:
 
-- **The 5-file operator recipe, ×10 tokens** (all right-assoc, assignment tier
-  `(2,1)`, `ASSIGNMENT_EXPR`, text-based projection—no per-kind `sexpr` arm):
-  - `lexer.rs`: new `TokKind`s `ShlEq`/`ShrEq`/`UShrEq`/`DivEq`/`XorEq` +
-    `Dot`-prefixed forms. ASCII: `>>>=` is a 4-char match (beats `>>>`); `<<=`/
-    `>>=` join the 3-char table (beat `<<`/`>>`). Broadcast: `.>>>=` 5-char, `.<<=`/
-    `.>>=` 4-char. **Unicode `÷=`/`⊻=` are the only two Unicode ops with an
-    augmented form** (probed: `⊕=`/`×=`/`∪=` are Julia errors)—special-cased in the
-    single-codepoint Unicode fallback (and the `.`-fused-Unicode block for `.÷=`/
-    `.⊻=`) by fusing a trailing `=`, longest-match like the ASCII `op=` forms.
-  - `syntax.rs` kinds, `tree_builder.rs` map, `expr.rs` `is_assignment_op` (+
-    `is_paren_quotable_op` for the 5 undotted forms so `:(<<=)`/`:(÷=)` quote),
-    `sexpr.rs` `is_operator`.
-- **Faithful** (byte-identical to JS): all 10 forms project `(<<= a b)` … `(.⊻= a
-  b)`; `:(<<=)`⇒`(quote-: <<=)`. Base ops unaffected (`a << b`⇒`(call-i a << b)`,
-  `a ÷ b`, whitespace-insensitive since the `=` glue is the discriminator).
-- **Fixtures**: lexer unit test `compound_shift_and_unicode_assignments`; parser
-  snapshot + oracle dir slug `compound_shift_assignment` (10 cases).
-- **Counts**: JS 677 (held—not in the JS corpus, no regressions), dir 187 → **188**.
-- **Deferred sibling**: `$=` (old bitwise-xor-assign) also works in Julia
-  (`($= a b)`) but is rare and entangled with `$` interpolation lexing; left out.
-  Broadcast *bare* shifts `.<<`/`.>>`/`.>>>` (no `=`) remain a pre-existing gap
-  (`a .<< b`⇒Fatou `(dotcall-i a < (call-pre (error <) b))` vs JS `(dotcall-i a <<
-  b)`)—unaffected by this change, a separate small target.
-- **Next**: remaining formatter-queued parser targets—whitespace-before-arglist
-  rejection (`f (a)`/`a [1]`/`A {T}`), and the newline-after-comma continuation
-  cluster (bare-tuple RHS / `let` bindings / `import` `:`-list; one root cause).
+- **Bare tuple** (`parse_comma_tuple`, `expr.rs`): after consuming a comma, look
+  for the next item with `skip_trivia` (crosses newlines+comments) instead of
+  `skip_ws`. `x = a,\nb,\nc` ⇒ `(= x (tuple a b c))`; `a,\nb` ⇒ `(tuple a b)`.
+- **`let` bindings** (`parse_header`, `structural.rs`): the loose-token bump loop
+  tracks whether the last significant header token was a comma; when
+  `node_kind == LET_BINDINGS` and a newline follows a trailing comma (and a real
+  binding follows past the newline), it crosses the newline instead of ending the
+  header. `let x = 1,\n y = 2 … end` ⇒ both bindings in `LET_BINDINGS`. (Scoped to
+  `LET_BINDINGS` so `for`/`struct`/`while` headers are untouched.)
+- **`import`/`using`** (`parse_import_clause`, `structural.rs`): the path lookup
+  after a separator uses `skip_trivia` instead of `skip_ws`, so a newline after the
+  `import` keyword, a `,`, or the base/names `:` is a continuation. `import A:\n
+  b,\n c` ⇒ one `(import (: A b c))`; `import\nA` continues; `import A:\nb\nc` keeps
+  `c` separate.
+- **Whitespace-sensitive:** the continuation is only *after* a separator. A newline
+  *before* the next separator still terminates (`a\n,b` ⇒ `a b`; `import A\n, B` ⇒
+  import ends at A), because the separator probes stay `skip_ws`.
+- **Faithful** (byte-identical to JS on every probed case, incl. the negatives:
+  `let x = 1\n y = 2` keeps `y=2` in the body, `import A:\nb\nc` splits `c`).
+- **Fixtures**: parser snapshots + oracle dir slugs `bare_tuple_newline`,
+  `let_bindings_newline`, `import_newline_continuation`.
+- **Counts**: JS 677 (held—not in the JS corpus, no regressions), dir 188 → **191**.
+- **Deferred sibling**: trailing-comma-at-EOF error shape — JS gives `x = a,` ⇒
+  `(= x (tuple a (error)))` (missing element), Fatou stays a clean `(tuple a)`; a
+  pre-existing error-shape divergence, not in the corpus. Likewise leading-comma
+  `a\n,b` ⇒ JS `(tuple (error) b)` vs Fatou `a b`.
+- **Next**: the remaining formatter-queued parser target — whitespace-before-
+  arglist rejection (`f (a)`/`a [1]`/`A {T}`/`f(a) (b)`; JuliaSyntax raises
+  `whitespace is not allowed here`). That one is error-shape work (a `ParseError`),
+  so weigh it against real-world-value constructs not in either corpus.
 
 ## Earlier sessions
 
+- **2026-07-02c**—compound shift/Unicode augmented assignments. `<<=`, `>>=`,
+  `>>>=`, `÷=`, `⊻=` + broadcast forms `.<<=`/`.>>=`/`.>>>=`/`.÷=`/`.⊻=` now lex as
+  one augmented-assignment token (5-file recipe ×10; all right-assoc, tier `(2,1)`,
+  `ASSIGNMENT_EXPR`, text-based projection). ASCII longest-match (`>>>=` 4-char
+  beats `>>>`); Unicode `÷=`/`⊻=` are the only two Unicode ops with an augmented
+  form (special-cased by fusing a trailing `=`). Project `(<<= a b)` … `(.⊻= a b)`;
+  `:(<<=)`⇒`(quote-: <<=)`. Fixtures `compound_shift_assignment`. JS 677 (held);
+  dir 187 → 188. Deferred: `$=`; bare broadcast shifts `.<<`/`.>>`/`.>>>`.
 - **2026-06-29b**—one-line space-separated `for` body. `for i in 1:3 x += i end`
   swallowed the same-line body into the `FOR_BINDING`; parametrized
   `parse_for_specs` with `bracketed: bool` (`expr.rs`) and had `parse_header`

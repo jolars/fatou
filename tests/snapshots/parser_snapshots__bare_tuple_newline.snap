@@ -1,0 +1,35 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..20
+  ASSIGNMENT_EXPR@0..11
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    BARE_TUPLE_EXPR@4..11
+      NAME@4..5
+        IDENT@4..5 "a"
+      COMMA@5..6 ","
+      NEWLINE@6..7 "\n"
+      NAME@7..8
+        IDENT@7..8 "b"
+      COMMA@8..9 ","
+      NEWLINE@9..10 "\n"
+      NAME@10..11
+        IDENT@10..11 "c"
+  NEWLINE@11..12 "\n"
+  BARE_TUPLE_EXPR@12..19
+    NAME@12..13
+      IDENT@12..13 "p"
+    COMMA@13..14 ","
+    WHITESPACE@14..15 " "
+    NAME@15..16
+      IDENT@15..16 "q"
+    COMMA@16..17 ","
+    NEWLINE@17..18 "\n"
+    NAME@18..19
+      IDENT@18..19 "r"
+  NEWLINE@19..20 "\n"

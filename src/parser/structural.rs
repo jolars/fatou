@@ -854,7 +854,12 @@ fn parse_import_clause(
     error_wraps: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    let path_start = ctx.skip_ws(after_sep);
+    // A separator (`import` keyword, `,`, or the base/names `:`) suppresses the
+    // statement-terminating newline, so the next clause may begin on a later line
+    // (`import A:\n b,\n c`). Skip newlines and comments — not just horizontal
+    // whitespace — to reach the path. A newline *before* the next separator still
+    // terminates (the caller's separator probe uses `skip_ws`, not this).
+    let path_start = ctx.skip_trivia(after_sep);
 
     let mut path_events = Vec::new();
     let path_end = parse_import_path(ctx, &mut path_events, path_start, diagnostics);
@@ -1473,7 +1478,28 @@ fn parse_header(
         events.extend(interp.events);
         i = interp.end;
     }
-    while !header_ends(ctx, i) {
+    // A trailing comma in a `let` binding list suppresses the statement-
+    // terminating newline, so the next binding may begin on a later line
+    // (`let x = 1,\n y = 2 … end`). Track whether the last significant header
+    // token was a comma; if so, cross the newline instead of ending the header.
+    let mut last_sig_comma = false;
+    loop {
+        if header_ends(ctx, i) {
+            let continues = node_kind == SyntaxKind::LET_BINDINGS
+                && last_sig_comma
+                && ctx.token(i).map(|t| t.kind) == Some(TokKind::Newline)
+                && !header_ends(ctx, ctx.skip_trivia(i));
+            if !continues {
+                break;
+            }
+        }
+        if let Some(k) = ctx.token(i).map(|t| t.kind) {
+            if k == TokKind::Comma {
+                last_sig_comma = true;
+            } else if !k.is_trivia() {
+                last_sig_comma = false;
+            }
+        }
         events.push(Event::Tok(i));
         i += 1;
     }

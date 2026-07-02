@@ -952,7 +952,13 @@ fn parse_comma_tuple(
         events.push(Event::Tok(comma_idx));
         end = comma_idx + 1;
 
-        let item_start = ctx.skip_ws(end);
+        // A trailing comma continues the tuple across a newline: at bare-tuple
+        // scope the comma suppresses the statement-terminating newline, so the
+        // next element may begin on a later line (`x = a,\nb,\nc` ⇒
+        // `(= x (tuple a b c))`). Skip newlines and comments — not just
+        // horizontal whitespace — to reach it. A newline *before* the comma
+        // still terminates (that gap is only `skip_ws` at the comma probe above).
+        let item_start = ctx.skip_trivia(end);
         // A trailing comma before an assignment-family operator is a 1-tuple the
         // assignment then binds (`x, = xs` ⇒ `(= (tuple x) xs)`): the operator is
         // not a tuple element, so stop here and let the operator loop take it,

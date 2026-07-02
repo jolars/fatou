@@ -17,6 +17,7 @@ augmented_assignment
 bare_function_keyword
 bare_operator
 bare_tuple
+bare_tuple_newline
 based_int_display
 begin_index
 binary_precedence
@@ -79,6 +80,7 @@ glued_colon_operator
 identity_operators
 if_missing_condition
 import_as_colon_error
+import_newline_continuation
 import_operator_names
 import_paren_quote
 import_paths
@@ -94,6 +96,7 @@ keyword_args
 keyword_name_error
 keyword_statements
 left_division
+let_bindings_newline
 let_quote
 list_empty_comma
 literals

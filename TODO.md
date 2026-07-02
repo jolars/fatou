@@ -16,14 +16,16 @@ leverage.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
   here`. Surfaced by the formatter; see parser-parity RECAP queued target.
-- [ ] Parser: newline-after-comma continuation. A trailing `,` (or `import`'s
-  dangling `:`) should continue a comma list across a newline, but Fatou terminates
-  the statement and fragments the tail. Three sites: (a) bare-tuple assignment
-  `x = a,\nb,\nc` (JuliaSyntax `x = (a, b, c)`); (b) `let x = 1,\n y = 2` (binding
-  list; `y = 2` leaks into the block body); (c) `import A:\n b,\n c` (selective
-  list fragments). All single-line variants parse fine. Surfaced by the formatter
-  (all kept out of fixtures, still source-mirror via transparent bail); see
-  parser-parity RECAP queued target.
+- [x] Parser: newline-after-comma continuation. A trailing `,` (or `import`'s
+  dangling `:`, or the `import`/`using` keyword itself) now suppresses the
+  statement-terminating newline so the comma list continues on a later line.
+  Three sites: (a) bare-tuple assignment `x = a,\nb,\nc` ⇒ `(= x (tuple a b c))`
+  (`parse_comma_tuple` skips trivia for the item after a comma); (b) `let x = 1,\n
+  y = 2` ⇒ both bindings in `LET_BINDINGS` (`parse_header` crosses a newline after
+  a trailing comma in a let-binding list); (c) `import A:\n b,\n c` ⇒ one selective
+  list (`parse_import_clause` skips trivia before the path). A newline *before* the
+  next separator still terminates (`a\n,b`, `import A\n, B`). Surfaced by the
+  formatter.
 - [x] Parser: `global`/`local` + multiple assignment now nests properly.
   `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`, `local a, b =
   f(x), g(y)` wraps the calls, `global a, b::Int` ⇒ `(global a (::-i b Int))`.

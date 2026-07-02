@@ -1,0 +1,33 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..34
+  LET_EXPR@0..33
+    LET_KW@0..3 "let"
+    WHITESPACE@3..4 " "
+    LET_BINDINGS@4..20
+      ASSIGNMENT_EXPR@4..9
+        NAME@4..5
+          IDENT@4..5 "x"
+        WHITESPACE@5..6 " "
+        EQ@6..7 "="
+        WHITESPACE@7..8 " "
+        LITERAL@8..9
+          INTEGER@8..9 "1"
+      COMMA@9..10 ","
+      NEWLINE@10..11 "\n"
+      WHITESPACE@11..15 "    "
+      IDENT@15..16 "y"
+      WHITESPACE@16..17 " "
+      EQ@17..18 "="
+      WHITESPACE@18..19 " "
+      INTEGER@19..20 "2"
+    BLOCK@20..30
+      NEWLINE@20..21 "\n"
+      WHITESPACE@21..25 "    "
+      NAME@25..29
+        IDENT@25..29 "body"
+      NEWLINE@29..30 "\n"
+    END_KW@30..33 "end"
+  NEWLINE@33..34 "\n"

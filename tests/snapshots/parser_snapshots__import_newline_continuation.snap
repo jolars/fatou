@@ -1,0 +1,32 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..38
+  IMPORT_STMT@0..22
+    IMPORT_KW@0..6 "import"
+    WHITESPACE@6..7 " "
+    IMPORT_PATH@7..8
+      IDENT@7..8 "A"
+    COLON@8..9 ":"
+    NEWLINE@9..10 "\n"
+    WHITESPACE@10..14 "    "
+    IMPORT_PATH@14..15
+      IDENT@14..15 "b"
+    COMMA@15..16 ","
+    NEWLINE@16..17 "\n"
+    WHITESPACE@17..21 "    "
+    IMPORT_PATH@21..22
+      IDENT@21..22 "c"
+  NEWLINE@22..23 "\n"
+  USING_STMT@23..37
+    USING_KW@23..28 "using"
+    WHITESPACE@28..29 " "
+    IMPORT_PATH@29..30
+      IDENT@29..30 "X"
+    COMMA@30..31 ","
+    NEWLINE@31..32 "\n"
+    WHITESPACE@32..36 "    "
+    IMPORT_PATH@36..37
+      IDENT@36..37 "Y"
+  NEWLINE@37..38 "\n"
