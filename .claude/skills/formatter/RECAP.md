@@ -93,52 +93,46 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (`;`-keyword tail width-driven break)
+## Latest session (paren-block width-driven break + newline reflow)
 
-Closed the deferred `;`-`PARAMETERS` hole in `lower_arg_list`. A call whose arg list
-carried a `; kw = …` tail was emitted **flat unconditionally** — even when too wide — so
-`f(a, b; c = 1, …)` over 92 cols stayed on one line while a comma-only call broke. The `;`
-break simply wasn't modeled (the tail was lowered as an opaque flat `Ir` and appended).
+Closed ranked target #1 for `lower_paren_block` (`PAREN_BLOCK` — the `;`-block `(a; b; c)`,
+distinct from the single-value `PAREN_EXPR` and the comma `TUPLE_EXPR`). Two Tenet-1 debts
+were open: (a) the rule bailed **transparent on any interior `NEWLINE`**, so a
+source-multiline block leaked its layout verbatim (`(\na;\nb\n)` stayed as-is); (b) the flat
+form was a plain `Ir::concat` with **no group**, so a too-wide block overflowed flat instead
+of breaking.
 
-Now the tail folds into the **same** width-driven `Ir::group` as the positional args. Flat
-`f(a, b; c = 1)` when it fits; when broken, one arg per line with the `;` **snug after the
-last positional** (`b;`), each keyword on its own line, and a broken-only trailing comma
-after the last keyword. A **keyword-only** call (`f(; a, b)`) keeps the `;` riding the open
-bracket (`f(;`, then the kwargs indent) — the `;` is pushed to the group parts *outside*
-the indent so it stays on the open line in both modes. **User chose "`;` trails last
-positional"** (via AskUserQuestion) over "`;` leads the kwargs on its own line" or "kwargs
-stay flat after the break".
+Now one width-driven `Ir::group`: flat `(a; b; c)` when it fits `line_width`, else one
+statement per 4-indented line with the `;` **snug after each statement but the last** (`;`
+can't lead a line), brackets framing their own lines. **User chose "`;` trails each but
+last"** (via AskUserQuestion) over "trailing `;` on every statement" and "drop the `;`".
+Both token loops (`lower_paren_block` main loop + `paren_block_statement`) now skip
+`NEWLINE` alongside `WHITESPACE`, so a source-multiline or blank-bearing block reflows to
+the identical canonical form — verified with a third fixture input (the same wide block
+pre-broken differently in source reflows byte-identically).
 
-Implementation (all in `rules.rs`): store `params_node: Option<SyntaxNode>` in the loop
-instead of a pre-lowered `Ir`; new `collect_param_items(&PARAMETERS) -> Option<Vec<Ir>>`
-returns the lowered kwarg items on the clean `; <item> [, <item>]…` shape (skipping
-`WHITESPACE`/`NEWLINE`), else `None`. On `Some`, build the combined group; on `None`
-(comment or other unmodeled shape) fall back to the old flat form via `lower_parameters`.
+Implementation (all in `rules.rs`): added `SyntaxKind::NEWLINE` to the two `WHITESPACE`
+skip arms; replaced the flat `concat` with a `SoftLine`-framed group whose per-statement
+separator is `text(";") + Ir::Line` for all but the last. The `statements.len() < 2` guard
+is unchanged — a single-statement block (`(a;)`) still bails transparent and keeps its
+trailing `;` (no fixture covers the multiline single-statement edge; transparent stays
+lossless there). Comment-bearing blocks still bail (`COMMENT` hits the `_ => Err/transparent`
+arm). Reworded the Runic-era doc comment. Gated `paren_block_break/`. Gate 75→76. Full suite
++ clippy + `fmt --check` clean.
 
-**Idempotence trap (fixed mid-session):** the first cut had `collect_param_items` bail on a
-trailing `pending_comma`, so the *already-broken* fixture (whose last kwarg has a canonical
-trailing comma) returned `None` → flat fallback → `lower_parameters` bailed transparent on
-the interior `NEWLINE` → leaked the source layout (positional flat, kwargs verbatim). The
-positional side already **drops** a trailing comma (`g(a,)` → `g(a)`); so does the tail now
-— a final `pending_comma` is a dropped trailing comma, only a missing `;`/empty tail bails.
-After the fix, `format(format(x)) == format(x)` byte-identical. Gated
-`arg_list_params_break/` (fitting positional+kw and kw-only stay flat; wide positional+kw
-and wide kw-only explode). Gate 74→75. Full suite + clippy + `fmt --check` clean.
+**No parser/lexer blocker surfaced.**
 
-**Two parser/lexer gaps surfaced while probing (handed off, not formatter targets):**
-(a) **lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one compound-assign token
-(lex as base op + `=` → `ERROR`; `a <<= b` mangles to `a << = b`); (b) **parser** —
-whitespace before a call/index/curly arg list is accepted (`f (a)`, `a [1]`, `A {T}`,
-`f(a) (b)`) where JuliaSyntax rejects it (`whitespace is not allowed here`). Both recorded
-in `parser-parity/RECAP.md` "Queued next targets" + `TODO.md` Parser section.
+**Ranked next targets:** (1) `lower_bare_tuple` still source-mirrors on an interior
+`NEWLINE`, but the *pre-broken* bare tuple **fragments** at the parser level into ROOT-level
+pieces, so it's parser-entangled, not a clean formatter fix — check the CST first. (2)
+surface more **unhandled constructs** that bail transparent — most *valid* ones already
+normalize via transparent recursion, so look for source-mirroring multi-line forms rather
+than spacing leaks. (3) Sweep the residual Runic doc comments in `rules.rs`.
 
-**Ranked next targets:** (1) the same newline-skip / width-driven generalization for rules
-that still source-mirror on an interior `NEWLINE` (`lower_paren_block`, `lower_bare_tuple` —
-note the *pre-broken* bare tuple **fragments** at the parser level into ROOT-level pieces,
-so it's parser-entangled, not a clean formatter fix; check the CST first). (2) surface more
-**unhandled constructs** that bail transparent — most *valid* ones already normalize via
-transparent recursion, so look for source-mirroring multi-line forms rather than spacing
-leaks. (3) Sweep the residual Runic doc comments in `rules.rs`.
+**Two parser/lexer gaps outstanding (handed off earlier, not formatter targets):** (a)
+**lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one compound-assign token; (b)
+**parser** — whitespace before a call/index/curly arg list is wrongly accepted (`f (a)`,
+`a [1]`, `A {T}`). Both in `parser-parity/RECAP.md` "Queued next targets" + `TODO.md`.
 
 ## Standing traps
 
@@ -156,6 +150,15 @@ leaks. (3) Sweep the residual Runic doc comments in `rules.rs`.
 
 ## Earlier sessions
 
+- **`;`-keyword tail width-driven break** (committed `7d33a5b`, `feat`): closed the deferred
+  `;`-`PARAMETERS` hole in `lower_arg_list` — the `; kw = …` tail now folds into the **same**
+  width-driven group as the positional args instead of emitting flat unconditionally. Broken:
+  one arg per line, `;` **snug after the last positional** (`b;`), each kwarg on its own line
+  + broken-only trailing comma; a keyword-only call keeps `;` on the open bracket (`f(;`).
+  New `collect_param_items` helper (skips `WHITESPACE`/`NEWLINE`; a trailing `pending_comma`
+  is a dropped trailing comma, only a missing `;`/empty tail bails → `lower_parameters` flat
+  fallback for comment/unmodeled shapes). User chose "`;` trails last positional". Gated
+  `arg_list_params_break/`. Gate 74→75.
 - **Comprehension/generator reflow** (committed `deb0df3`+`cbeaa25`, `feat`): new
   `lower_comprehension` arm (`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`) +
   `lower_comprehension_if`, after `lower_collection`. One width-driven group: flat

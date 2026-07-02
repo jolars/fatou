@@ -383,13 +383,16 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
 /// (`((a;b);c)` → `((a; b); c)`) and each statement's own spacing keep
 /// normalizing.
 ///
-/// Only the multi-statement single-line shape is reshaped. A single-statement
-/// block (`(a;)`, always carrying a trailing `;` since a bare `(a)` is a
-/// `PAREN_EXPR`) is left to the transparent fallback—Runic *preserves* the
-/// trailing `;` there (`(a;)` → `(a;)`), which the verbatim lowering already
-/// matches for the unpadded form. An interleaved comment or newline (a
-/// multi-line block Runic may reflow and reindent), error recovery, or any other
-/// unexpected child also falls back to the transparent lowering.
+/// The multi-statement block is width-driven (Tenet 1): flat `(a; b; c)` when it
+/// fits `line_width`, else one statement per indented line with the `;` kept snug
+/// after each statement but the last, the brackets framing their own lines. Source
+/// line breaks and interior blanks never force the break — the token loops skip
+/// every `NEWLINE`/`WHITESPACE`, so `(\na;\nb\n)` reflows to `(a; b)`.
+///
+/// A single-statement block (`(a;)`, always carrying a trailing `;` since a bare
+/// `(a)` is a `PAREN_EXPR`) is left to the transparent fallback, which preserves
+/// the trailing `;` (`(a;)` → `(a;)`). An interleaved comment, error recovery, or
+/// any other unexpected child also falls back to the transparent lowering.
 fn lower_paren_block(node: &SyntaxNode) -> Ir {
     let mut statements: Vec<Ir> = Vec::new();
     let mut saw_lparen = false;
@@ -409,7 +412,7 @@ fn lower_paren_block(node: &SyntaxNode) -> Ir {
                 }
             }
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::LPAREN if !saw_lparen => saw_lparen = true,
                 SyntaxKind::RPAREN if !saw_rparen => saw_rparen = true,
                 _ => return lower_transparent(node),
@@ -421,16 +424,27 @@ fn lower_paren_block(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    let mut parts: Vec<Ir> = Vec::with_capacity(statements.len() * 2 + 1);
-    parts.push(Ir::text("("));
+    // Width-driven (Tenet 1): one `Ir::group`. Flat `(a; b; c)` when it fits
+    // `line_width`; else one statement per indented line with the `;` separators
+    // kept snug after each statement but the last (`;` can't lead a line), the
+    // brackets framing their own lines. Source line breaks and interior blanks
+    // never force the break — the loops above skip every `NEWLINE`/`WHITESPACE`.
+    let last = statements.len() - 1;
+    let mut body: Vec<Ir> = Vec::with_capacity(statements.len() * 2);
+    body.push(Ir::SoftLine);
     for (i, stmt) in statements.into_iter().enumerate() {
-        if i > 0 {
-            parts.push(Ir::text("; "));
+        body.push(stmt);
+        if i < last {
+            body.push(Ir::text(";"));
+            body.push(Ir::Line);
         }
-        parts.push(stmt);
     }
-    parts.push(Ir::text(")"));
-    Ir::concat(parts)
+    Ir::group(Ir::concat([
+        Ir::text("("),
+        Ir::indent(Ir::concat(body)),
+        Ir::SoftLine,
+        Ir::text(")"),
+    ]))
 }
 
 /// Extract the lowered statement from a `PARAMETERS` node inside a `PAREN_BLOCK`:
@@ -450,7 +464,7 @@ fn paren_block_statement(params: &SyntaxNode) -> Result<Option<Ir>, ()> {
                 statement = Some(lower_node(&child));
             }
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::SEMICOLON if !saw_semicolon => saw_semicolon = true,
                 _ => return Err(()),
             },

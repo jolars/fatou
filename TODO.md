@@ -79,6 +79,11 @@ leverage.
   keyword on its own line + trailing comma; a keyword-only call keeps the `;` on the
   open bracket (`f(;`). New `collect_param_items` helper; unmodeled param shapes
   (comment, etc.) still fall back to the flat form. `arg_list_params_break/` gated.
+- [x] Formatter: multi-statement paren blocks (`(a; b; c)`, `lower_paren_block`)
+  are now width-driven. Flat when they fit; else one statement per indented line
+  with the `;` snug after each but the last, brackets on their own lines. The token
+  loops skip interior `NEWLINE`/`WHITESPACE`, so a source-multiline block reflows to
+  the same canonical form (`(\na;\nb\n)` -> `(a; b)`). `paren_block_break/` gated.
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
