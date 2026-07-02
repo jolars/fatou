@@ -106,6 +106,7 @@ macro_bracket_postfix
 macro_broadcast_call
 macro_definition
 macro_directive_names
+macro_keyword_name
 macro_name_brackets
 macro_operator_names
 macros

@@ -3396,6 +3396,7 @@ fn is_keyword(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         FUNCTION_KW
+            | MACRO_KW
             | END_KW
             | IF_KW
             | ELSEIF_KW

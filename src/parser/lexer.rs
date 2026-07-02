@@ -265,6 +265,7 @@ impl TokKind {
         matches!(
             self,
             TokKind::FunctionKw
+                | TokKind::MacroKw
                 | TokKind::EndKw
                 | TokKind::IfKw
                 | TokKind::ElseifKw

@@ -6,17 +6,14 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Queued from formatter (2026-07-02) — one gap remaining (the compound-assign
-lexer gap landed 2026-07-02c):**
-
-1. **Parser: whitespace before a call/index/curly argument list is accepted where
-   JuliaSyntax rejects it.** `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` all parse cleanly
-   in Fatou as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR` with an interior `WHITESPACE`
-   between the base and the `ARG_LIST`. JuliaSyntax raises `ParseError: whitespace is
-   not allowed here` for each. Fatou is too permissive: a space before the postfix
-   `(`/`[`/`{` should not start an application. (The formatter treats this as a
-   parser matter, not a target — snugging the space away would launder invalid
-   syntax.)
+**No specific parser target queued.** The formerly-queued whitespace-before-arglist
+item (`f (a)`/`a [1]`/`A {T}`/`f(a) (b)`) was **already resolved** by the 2026-06-22r
+machinery: Fatou splices a zero-width `(error-t)` between base and `ARG_LIST`, projecting
+`(call f (error-t) a)` etc.—byte-identical to JuliaSyntax on all four (verified 2026-07-03;
+the `postfix_space_error` fixture already covers `f (a)`/`a [i]`/`S {a}`/`f. (x)`). The
+RECAP's "too permissive, parses cleanly" premise was stale. Next parser work is
+real-world-value constructs not in either corpus (batch-probe common Julia against the
+JuliaSyntax oracle to surface a divergence, as 2026-07-03 did).
 
 **Handoff to formatter (2026-06-29b):** one-line space-separated `for`
 bodies now parse into the loop `BLOCK` (`for i in 1:3 x += i end` ⇒ `(for (= i
@@ -85,7 +82,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **191 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **192 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -105,45 +102,51 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-02d—newline-after-comma continuation cluster)
+## Latest session (2026-07-03—`@macro` keyword as a macro name)
 
-Cleared the whole formatter-queued cluster: a trailing comma (or the `import`
-`:`/keyword) now suppresses the statement-terminating newline so a comma list
-continues on the next line. Three sites, one theme, three small fixes:
+Fixed a one-keyword robustness gap surfaced by batch-probing common Julia against the
+oracle (the corpus-driven backlog is exhausted of fixable cases). **`macro` was missing
+from *both* `is_keyword` functions**—`TokKind::is_keyword` (`lexer.rs`) and the
+`SyntaxKind` free `is_keyword` (`sexpr.rs`)—so every path that treats a post-`@`/post-`:`
+keyword as a name skipped `macro` alone (every *other* keyword worked: `@function`, `@if`,
+`@begin`, `@struct`, `@end`, `@do`, `@quote` all projected `(macrocall @kw …)`). `@macro a
+b c` fell through the macro-name body, then `parse_macro_args` parsed `macro a b c` as a
+`MACRO_DEF` block—swallowing following tokens and emitting a fake empty `@.` name.
 
-- **Bare tuple** (`parse_comma_tuple`, `expr.rs`): after consuming a comma, look
-  for the next item with `skip_trivia` (crosses newlines+comments) instead of
-  `skip_ws`. `x = a,\nb,\nc` ⇒ `(= x (tuple a b c))`; `a,\nb` ⇒ `(tuple a b)`.
-- **`let` bindings** (`parse_header`, `structural.rs`): the loose-token bump loop
-  tracks whether the last significant header token was a comma; when
-  `node_kind == LET_BINDINGS` and a newline follows a trailing comma (and a real
-  binding follows past the newline), it crosses the newline instead of ending the
-  header. `let x = 1,\n y = 2 … end` ⇒ both bindings in `LET_BINDINGS`. (Scoped to
-  `LET_BINDINGS` so `for`/`struct`/`while` headers are untouched.)
-- **`import`/`using`** (`parse_import_clause`, `structural.rs`): the path lookup
-  after a separator uses `skip_trivia` instead of `skip_ws`, so a newline after the
-  `import` keyword, a `,`, or the base/names `:` is a continuation. `import A:\n
-  b,\n c` ⇒ one `(import (: A b c))`; `import\nA` continues; `import A:\nb\nc` keeps
-  `c` separate.
-- **Whitespace-sensitive:** the continuation is only *after* a separator. A newline
-  *before* the next separator still terminates (`a\n,b` ⇒ `a b`; `import A\n, B` ⇒
-  import ends at A), because the separator probes stay `skip_ws`.
-- **Faithful** (byte-identical to JS on every probed case, incl. the negatives:
-  `let x = 1\n y = 2` keeps `y=2` in the body, `import A:\nb\nc` splits `c`).
-- **Fixtures**: parser snapshots + oracle dir slugs `bare_tuple_newline`,
-  `let_bindings_newline`, `import_newline_continuation`.
-- **Counts**: JS 677 (held—not in the JS corpus, no regressions), dir 188 → **191**.
-- **Deferred sibling**: trailing-comma-at-EOF error shape — JS gives `x = a,` ⇒
-  `(= x (tuple a (error)))` (missing element), Fatou stays a clean `(tuple a)`; a
-  pre-existing error-shape divergence, not in the corpus. Likewise leading-comma
-  `a\n,b` ⇒ JS `(tuple (error) b)` vs Fatou `a b`.
-- **Next**: the remaining formatter-queued parser target — whitespace-before-
-  arglist rejection (`f (a)`/`a [1]`/`A {T}`/`f(a) (b)`; JuliaSyntax raises
-  `whitespace is not allowed here`). That one is error-shape work (a `ParseError`),
-  so weigh it against real-world-value constructs not in either corpus.
+- **One-line fix ×2**: add `MacroKw`/`MACRO_KW` to the two `is_keyword` matchers. The
+  statement form `macro f() end` is dispatched separately (the `MacroKw` arm at
+  `expr.rs:328`, independent of `is_keyword`), so it's untouched.
+- **One omission, a whole family fixed** (all now byte-identical to JS): `@macro a b c` ⇒
+  `(macrocall @macro a b c)`; `@macro(x)` ⇒ `(macrocall-p @macro x)`; `Base.@macro x` ⇒
+  `(macrocall (. Base (quote @macro)) x)`; `:macro` ⇒ `(quote-: macro)` (was `: (error-t)`);
+  `struct macro end` ⇒ `(struct (error macro) (block))` and `function macro() end` ⇒
+  `(function (call (error macro)) (block))` (both via `is_name_error_keyword`, previously
+  badly broken).
+- **Faithful**: no projector compensation—the parser now consumes `macro` as the `MACRO_KW`
+  name token (CST shows `MACRO_NAME > AT + MACRO_KW`), and the projector's `name_text`
+  fallback renders it because `MACRO_KW` is now a keyword.
+- **Fixtures**: parser snapshot + oracle dir slug `macro_keyword_name` (`@macro a b c`,
+  `@macro(x)`, `Base.@macro x`, `:macro`—all clean matches).
+- **Counts**: JS 677 (held—not in the JS corpus, no regressions); dir 191 → **192**.
+- **Deferred sibling**: `2macro` ⇒ JS `2 (error-t macro)`, Fatou `2 (error-t)` (the
+  toplevel-leftover error drops the keyword glyph from the trailing-junk run); a bizarre
+  error-shape edge, strictly improved (was a bogus juxtaposed `MACRO_DEF`), not in either
+  corpus.
+- **Next**: no queued target. Continue batch-probing real-world constructs (short-circuit
+  chains, comprehensions, string macros, etc. all already pass) for the next divergence, or
+  tackle the `x 'y` char-lexer / `(2)(3)x` juxtaposition FAILs (both known-hard, permanent-ish).
 
 ## Earlier sessions
 
+- **2026-07-02d**—newline-after-comma continuation cluster. A trailing comma (or the
+  `import` `:`/keyword) now suppresses the statement-terminating newline so a comma list
+  continues on the next line: bare tuple (`parse_comma_tuple`), `let` bindings
+  (`LET_BINDINGS`-scoped), and `import`/`using` paths all switched their post-separator
+  lookup from `skip_ws` to `skip_trivia`. `x = a,\nb,\nc` ⇒ `(= x (tuple a b c))`;
+  `import A:\nb,\nc` ⇒ one `(import (: A b c))`. Whitespace-sensitive (only *after* a
+  separator; `a\n,b` still terminates). Fixtures `bare_tuple_newline`,
+  `let_bindings_newline`, `import_newline_continuation`. JS 677 (held); dir 188 → 191.
+  Deferred: trailing-comma-at-EOF error shape (`x = a,` ⇒ JS `(= x (tuple a (error)))`).
 - **2026-07-02c**—compound shift/Unicode augmented assignments. `<<=`, `>>=`,
   `>>>=`, `÷=`, `⊻=` + broadcast forms `.<<=`/`.>>=`/`.>>>=`/`.÷=`/`.⊻=` now lex as
   one augmented-assignment token (5-file recipe ×10; all right-assoc, tier `(2,1)`,
