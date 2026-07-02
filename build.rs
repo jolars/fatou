@@ -49,6 +49,38 @@ fn generate_completions(outdir: &std::ffi::OsString) -> Result<()> {
     Ok(())
 }
 
+fn generate_cli_markdown() -> Result<()> {
+    // Skip during cargo package/publish - file is committed to git, and
+    // packaging runs the build in a temporary directory.
+    let is_packaging = env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.contains("/target/package/")))
+        .unwrap_or(false);
+    if is_packaging {
+        return Ok(());
+    }
+
+    let cmd = Cli::command();
+    let docs_dir = PathBuf::from("docs/src/reference");
+
+    // Only proceed if the mdBook source exists (it isn't shipped in the crate).
+    if !docs_dir.exists() {
+        return Ok(());
+    }
+
+    let markdown = clapdown::Options::new()
+        .title("Command-Line Help for `fatou`")
+        .footer(false)
+        .table_of_contents(false)
+        .render(&cmd);
+
+    let output_path = docs_dir.join("cli.md");
+    fs::write(&output_path, &markdown)?;
+    println!("Generated CLI markdown: {output_path:?}");
+
+    Ok(())
+}
+
 fn format_see_also(refs: &[String]) -> String {
     let formatted: Vec<String> = refs.iter().map(|r| format!("\\fB{}\\fR(1)", r)).collect();
     format!(".SH \"SEE ALSO\"\n{}\n", formatted.join(", "))
@@ -127,6 +159,9 @@ fn main() -> Result<()> {
 
     // Generate man pages
     generate_man_pages()?;
+
+    // Generate CLI reference markdown for the docs site
+    generate_cli_markdown()?;
 
     println!("cargo:rerun-if-changed=src/cli.rs");
     println!("cargo:rerun-if-changed=build.rs");

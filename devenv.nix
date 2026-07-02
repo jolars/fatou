@@ -86,9 +86,9 @@
         enable = true;
       };
 
-      panache-format = {
-        enable = true;
-      };
+      # panache-format = {
+      #   enable = true;
+      # };
     };
   };
 }

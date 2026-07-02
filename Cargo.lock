@@ -167,6 +167,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clapdown"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a39677e61d4fe3889470a5748e3a544e01a3206337e5eadab7d486d5f158b3a"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -328,6 +337,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
+ "clapdown",
  "crossbeam-channel",
  "env_logger",
  "ignore",
