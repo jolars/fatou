@@ -1341,19 +1341,19 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
 /// transparent path snugs the type onto this handler's bracketed body). The node
 /// is a bracket around an element expression, one or more `FOR_BINDING` clauses,
 /// and an optional trailing `COMPREHENSION_IF` filter. Under Tenet 1 the spacing
-/// is reflowed from scratch: one group that stays flat (`[elem for b if f]`, single
-/// spaces) when it fits, else explodes the element and each `for`/`if` clause onto
-/// its own indented line.
+/// is reflowed from scratch, **independent of the source line breaks**: one group
+/// that stays flat (`[elem for b if f]`, single spaces) when it fits, else explodes
+/// the element and each `for`/`if` clause onto its own indented line. A comprehension
+/// already written across lines therefore collapses (when it fits) or re-explodes to
+/// the same canonical form as its single-line twin — the element and clause recursions
+/// skip `NEWLINE` tokens rather than mirroring them.
 ///
-/// A comment or source newline anywhere in the subtree can't be reflowed away, so
-/// the whole node bails to the verbatim transparent path (`lower_for_binding`
-/// itself bails on an internal newline; catching it here keeps a stray `\n` out of
-/// the group).
+/// A comment anywhere in the subtree can't be reflowed away, so the whole node bails
+/// to the verbatim transparent path.
 fn lower_comprehension(node: &SyntaxNode) -> Ir {
-    if has_newline_token(node)
-        || node
-            .descendants_with_tokens()
-            .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
+    if node
+        .descendants_with_tokens()
+        .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
     {
         return lower_transparent(node);
     }
@@ -1673,9 +1673,11 @@ fn lower_for_binding(node: &SyntaxNode) -> Ir {
     for el in node.children_with_tokens() {
         match &el {
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                // Source newlines carry no layout information under Tenet 1; skipping
+                // them (not bailing) lets a multi-line `for`-binding reflow.
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::FOR_KW if !for_kw && els.is_empty() => for_kw = true,
-                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE => {
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
                     return lower_transparent(node);
                 }
                 _ => els.push(el),
@@ -1778,7 +1780,7 @@ fn for_iteration_operands(node: &SyntaxNode) -> Option<(Ir, Ir)> {
         match el {
             NodeOrToken::Node(child) => operands.push(child),
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::EQ => op_count += 1,
                 SyntaxKind::UNICODE_OP if tok.text() == "∈" => op_count += 1,
                 _ => return None,

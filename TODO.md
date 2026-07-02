@@ -219,8 +219,11 @@ leverage.
   flat `[elem for b if f]` with single spaces when it fits, else element and each
   `for`/`if` clause exploded onto its own indented line; padding stripped
   (`Int[ x for x in v ]` → `Int[x for x in v]`), the `if`-filter recursed via the
-  new `lower_comprehension_if`; bails to transparent on a comment or source newline
-  anywhere in the subtree; locked by `comprehension_spacing/` + `comprehension_break/`),
+  new `lower_comprehension_if`. Source line breaks are ignored: `lower_for_binding`/
+  `for_iteration_operands` skip `NEWLINE` like whitespace, so a pre-broken comprehension
+  collapses or re-explodes to the same canonical form as its single-line twin (no
+  `has_newline_token` guard). Bails to transparent only on a comment in the subtree;
+  locked by `comprehension_spacing/` + `comprehension_break/` + `comprehension_multiline/`),
   `begin`/`quote` block-body indentation
   (`lower_block_expr` + `lower_block_body` over `BEGIN_EXPR`/`QUOTE_EXPR`:
   `begin x end` → `begin⏎    x⏎end`—a non-empty block is always exploded vertical

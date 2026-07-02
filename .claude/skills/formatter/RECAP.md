@@ -114,23 +114,33 @@ with `[]` brackets — no arm needed; the transparent path snugs the type node o
 handler's bracketed body (`Int[ x for x in v ]` → `Int[x for x in v]`). Brackets read from
 whatever open/close tokens are present, so the same arm serves `[]`/`()`/`{}`.
 
-**Bail discipline:** a multiline comprehension puts a `NEWLINE` token inside its
-`FOR_BINDING` (which would make `lower_for_binding` bail transparent and embed a raw `\n`
-in the group), and a comment can't be reflowed — so the whole node bails to transparent
-if `has_newline_token(node)` **or** any descendant is a `COMMENT`/`BLOCK_COMMENT`. This
-keeps the exploded output idempotent (reparsed, it has inter-clause `NEWLINE`s → bails
-transparent → re-emits byte-identically, verified). Gated `comprehension_spacing/`
-(messy `[]`/`()`/`{}`/typed/dict-generator spacing → normalized) + `comprehension_break/`
-(one wide single-line comprehension → 5-line explode). Gate 71→73. Full suite + clippy +
-`fmt --check` clean; no parser blocker. Known limit (same class as other constructs): a
-*source*-multiline comprehension stays verbatim rather than reflowing.
+**Bail discipline:** a comment can't be reflowed, so the whole node bails to transparent
+if any descendant is a `COMMENT`/`BLOCK_COMMENT`. Gated `comprehension_spacing/` (messy
+`[]`/`()`/`{}`/typed/dict-generator spacing → normalized) + `comprehension_break/` (one
+wide single-line comprehension → 5-line explode).
+
+**Newline-skip follow-up (same session).** The first cut also bailed on
+`has_newline_token(node)`, so a *source*-multiline comprehension stayed verbatim (kept its
+source indent) — a Tenet-1 wrinkle, **not** a parser bug (the CST is clean). Root cause: a
+multiline comprehension parks a `NEWLINE` inside its `FOR_BINDING`, and `lower_for_binding`
+bailed transparent on an interior newline, so a raw `\n` would have leaked into the group.
+Fix (three one-line edits in `rules.rs`): `lower_for_binding` and `for_iteration_operands`
+now **skip** `NEWLINE` like `WHITESPACE` (no `\n` reaches the IR), so the whole-node
+`has_newline_token` guard in `lower_comprehension` was dropped (comment guard kept). A
+pre-broken comprehension now collapses (when it fits) or re-explodes to the **same**
+canonical 4-indent form as its single-line twin (verified byte-identical + idempotent).
+Idempotence of the exploded form no longer relies on the transparent re-emit — it's the
+width-driven path being deterministic. `has_newline_token` back to **2** call sites
+(`lower_matrix`, multiline-bracket dispatch). Gated `comprehension_multiline/` (a
+short pre-broken → flat collapse + a wide pre-broken with messy source indent → canonical
+explode). Gate 71→74. Full suite + clippy + `fmt --check` clean; no parser blocker.
 
 **Ranked next targets:** (1) surface more **unhandled constructs** that bail transparent
 (`cargo run -q -- format < snippet`; e.g. `let x=1 ` earlier showed a stray trailing space
-on a let-binding line — worth a look). (2) The **width-driven reflow engine** re-scope
-still stands from last session (mostly done; `has_newline_token` now has ~3 call sites:
-`lower_matrix`, `lower_comprehension`, and the multiline-bracket dispatch). (3) Sweep the
-residual Runic doc comments in `rules.rs`.
+on a let-binding line — worth a look). (2) Consider the same newline-skip generalization
+for the other rules that still bail on an interior `NEWLINE` (`lower_paren_block`,
+`lower_bare_tuple`, …) so their pre-broken forms reflow too. (3) Sweep the residual Runic
+doc comments in `rules.rs`.
 
 ## Standing traps
 
