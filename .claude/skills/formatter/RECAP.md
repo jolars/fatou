@@ -93,47 +93,41 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (gated the module/baremodule body-indentation construct)
+## Latest session (gated the spacing/padding pile; renamed the *_divergence slugs)
 
-Pure `test(formatter)`, **no code**. Authored `expected.jl` for the four module
-fixtures. **User decision:** keep Runic's rule — every module body indents *except*
-the lone "file-wrapper" module (the sole top-level expression, leading comments
-don't count as siblings), which stays flush. Confirmed the ground truth by recovering
-the deleted Runic `expected.jl` from git (`git show <deletion-rev>^:…`): Runic indents
-`module_siblings` (top-level module *with* a sibling), keeps the sole `module_blocks`
-/`module_baremodule` wrapper flush while indenting nested `module Inner`, and treats a
-leading comment (`module_leading_comment`) as *not* a sibling. Fatou's existing
-`module_should_indent` already reproduces this exactly (so what an earlier read called
-a "sibling quirk" is deliberate Runic behavior, not a bug). The only Fatou divergence
-is the intentional empty-body collapse (`module E\nend` → `module E end`).
+Pure `test(formatter)`, **no code**. Gated the eight remaining "already-canonical"
+fixtures whose rules already emit canonical Tenet-1 form: `paren_padding`,
+`assignment`, `trailing_whitespace`, `logical_operators`, `paren_blank_lines`,
+`block_comment_spacing`, `bracket_comment_spacing`, `trailing_comment_spacing`.
+Gate 57→65 — **all 65 gated fixtures now pass; only the 4 comment fixtures remain
+ungated** (`block_comments`, `block_comments_in_blocks`, `bracket_block_comments`,
+`trailing_comments`).
 
-Verified determinism, not an accidental transparent pass: whitespace-mangled variants
-normalize within-line spacing (`x=0`→`x = 0`, `const   X=1`→`const X = 1`) and the
-empty `module E` collapses inline — both prove `lower_module` fires. Surviving blanks
-are the documented capped blank-line policy (`module_blocks` keeps its interior
-blanks, capped at 1), not source-break mirroring; the other three inputs have no
-stray blanks. This rule is deterministic given the AST (keys on nesting/top-level
-structure, never whitespace), so it is Tenet-1 *compliant* despite the file-wrapper
-special case the user chose to keep.
+Verified determinism before gating (not accidental transparent passes): mangled
+variants normalize (`x=1`→`x = 1`, `a&&b`→`a && b`, `( a + b )`→`(a + b)`, padding
+stripped, blank runs inside parens collapsed, multi-space-before-comment→one space,
+trailing whitespace trimmed on code+line-comment lines while triple-string and
+block-comment *interiors* stay verbatim), and each output is idempotent.
 
-Gated: `module_blocks`, `module_baremodule`, `module_siblings`,
-`module_leading_comment`. Gate 53→57. Formatter suite green; clippy + fmt clean; no
-parser blocker. TODO's rule-inventory prose already said "locked by module_*" (now
-accurate again), so no TODO edit.
+**User decisions:** (1) **Renamed all five `*_divergence` slugs** (Runic is gone, so
+"divergence" is meaningless): `logical_tight_divergence`→`logical_operators`,
+`paren_blank_line_divergence`→`paren_blank_lines`,
+`block_comment_spacing_divergence`→`block_comment_spacing`,
+`bracket_comment_spacing_divergence`→`bracket_comment_spacing`,
+`trailing_comment_spacing_divergence`→`trailing_comment_spacing` (via `git mv`; TODO
+prose references updated too). (2) **Stripped the editorializing** from the comment
+fixtures — the two `# multiple spaces preserved by Runic` and the `#= many spaces =#`
+notes were false (the formatter normalizes to one space) and are now neutral
+`# comment`/`#= comment =#`. Formatter suite green; no parser blocker.
 
-**Ranked next targets:** (1) the **already-canonical spacing/padding pile** — a pure
-`test(formatter)` gate like the operator/literal pile: `paren_padding`, `assignment`,
-`trailing_whitespace`, and the six now-meaningless `*_divergence` slugs
-(`logical_tight_divergence`, `paren_blank_line_divergence`,
-`block_comment_spacing_divergence`, `bracket_comment_spacing_divergence`,
-`trailing_comment_spacing_divergence` — all emit clean canonical output today; verify
-determinism, then rename/fold the `*_divergence` slugs since there's no Runic to
-diverge from). (2) The headline **width-driven reflow engine** across the
-block/statement families (`lower_multiline_bracket`/`lower_matrix`/block-body layout
-still inspect source newlines). (3) The remaining comment fixtures
-(`block_comments`, `block_comments_in_blocks`, `bracket_block_comments`,
-`trailing_comments`) — verify determinism per Tenet 1 before gating. (4) Sweep
-residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
+**Ranked next targets:** (1) The remaining **4 comment fixtures** (`block_comments`,
+`block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`) — the only
+ungated inputs left; verify determinism per Tenet 1 before gating (their rules mirror
+source lines in places, so check input-independence carefully). (2) The headline
+**width-driven reflow engine** across the block/statement families
+(`lower_multiline_bracket`/`lower_matrix`/block-body layout still inspect source
+newlines) — the largest remaining piece, prerequisite for true Tenet-1 conformance.
+(3) Sweep residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
 
 ## Standing traps
 
@@ -151,6 +145,13 @@ residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
 
 ## Earlier sessions
 
+- **Gated the module/baremodule body-indentation construct** (committed, pure
+  `test(formatter)`): authored `expected.jl` for the four `module_*` fixtures. Kept
+  Runic's rule — every module body indents *except* the lone file-wrapper module
+  (sole top-level expression; a leading comment is not a sibling), which stays flush;
+  nested `module Inner` always indents. `module_should_indent` already reproduces this
+  (deterministic on AST structure, not whitespace → Tenet-1 compliant); only Fatou
+  divergence is the empty-body collapse (`module E\nend`→`module E end`). Gate 53→57.
 - **Gated the global/local multi-name list construct** (committed, pure
   `test(formatter)`): authored `expected.jl` for `global_local_names` +
   `global_local_assignment`. Confirmed the parser wraps every multi-name form in a
