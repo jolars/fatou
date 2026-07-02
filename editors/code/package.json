@@ -1,0 +1,186 @@
+{
+	"name": "fatou",
+	"displayName": "Fatou",
+	"description": "Julia language server, formatter, and linter",
+	"version": "0.3.0",
+	"publisher": "jolars",
+	"license": "MIT",
+	"icon": "icon.png",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/jolars/fatou.git"
+	},
+	"homepage": "https://github.com/jolars/fatou",
+	"bugs": {
+		"url": "https://github.com/jolars/fatou/issues"
+	},
+	"engines": {
+		"vscode": "^1.91.0"
+	},
+	"categories": [
+		"Formatters",
+		"Linters",
+		"Programming Languages"
+	],
+	"keywords": [
+		"julia",
+		"formatter",
+		"linter",
+		"language-server"
+	],
+	"activationEvents": [
+		"onLanguage:julia",
+		"workspaceContains:**/*.jl",
+		"workspaceContains:fatou.toml",
+		"workspaceContains:.fatou.toml",
+		"workspaceContains:Project.toml",
+		"workspaceContains:JuliaProject.toml"
+	],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"languages": [
+			{
+				"id": "julia",
+				"extensions": [
+					".jl"
+				],
+				"aliases": [
+					"Julia",
+					"julia"
+				]
+			}
+		],
+		"configuration": {
+			"title": "Fatou",
+			"properties": {
+				"fatou.executableStrategy": {
+					"type": "string",
+					"enum": [
+						"bundled",
+						"environment",
+						"path"
+					],
+					"enumDescriptions": [
+						"Use the binary bundled inside the extension; fall back to downloading from GitHub if none is bundled or `fatou.version`/`fatou.releaseTag` is set explicitly (default).",
+						"Look for `fatou` on the system PATH.",
+						"Use the binary at `fatou.executablePath`."
+					],
+					"default": "bundled",
+					"markdownDescription": "Strategy used to locate the `fatou` executable for the language server."
+				},
+				"fatou.executablePath": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Path to the `fatou` executable. Only used when `fatou.executableStrategy` is set to `path`."
+				},
+				"fatou.version": {
+					"type": "string",
+					"default": "latest",
+					"description": "Fatou version to install (for example: latest or 0.2.0)."
+				},
+				"fatou.releaseTag": {
+					"type": "string",
+					"default": "latest",
+					"description": "Advanced override for the exact GitHub release tag (for example: v0.2.0). If explicitly set, this takes precedence over fatou.version."
+				},
+				"fatou.githubRepo": {
+					"type": "string",
+					"default": "jolars/fatou",
+					"description": "GitHub repository used for Fatou binary downloads (<owner>/<repo>)."
+				},
+				"fatou.serverArgs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [],
+					"description": "Additional command-line arguments passed after `fatou lsp`."
+				},
+				"fatou.serverEnv": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": {},
+					"description": "Environment variables merged into the Fatou language server process."
+				},
+				"fatou.extraPath": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [],
+					"description": "Extra PATH entries prepended for the Fatou language server process."
+				},
+				"fatou.logLevel": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						null,
+						"off",
+						"error",
+						"warn",
+						"info",
+						"debug",
+						"trace"
+					],
+					"default": null,
+					"markdownDescription": "Log level for the Fatou language server. Maps to the `RUST_LOG` environment variable. Leave unset to use the server's default. If `fatou.serverEnv.RUST_LOG` is also set, it takes precedence."
+				},
+				"fatou.trace.server": {
+					"type": "string",
+					"enum": [
+						"off",
+						"messages",
+						"verbose"
+					],
+					"default": "off",
+					"description": "Trace communication between VS Code and the Fatou language server."
+				}
+			}
+		},
+		"configurationDefaults": {
+			"[julia]": {
+				"editor.defaultFormatter": "jolars.fatou"
+			}
+		},
+		"commands": [
+			{
+				"command": "fatou.restart",
+				"title": "Restart Server",
+				"category": "Fatou"
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run clean && npm run check-types && npm run bundle:prod",
+		"compile": "npm run clean && npm run check-types && npm run bundle",
+		"clean": "rm -rf dist",
+		"check-types": "tsc --noEmit -p .",
+		"bundle": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --sourcemap --external:vscode --outfile=dist/extension.js",
+		"bundle:prod": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --minify --external:vscode --outfile=dist/extension.js",
+		"watch": "npm-run-all -p watch:esbuild watch:tsc",
+		"watch:esbuild": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --sourcemap --watch --external:vscode --outfile=dist/extension.js",
+		"watch:tsc": "tsc --noEmit -w -p .",
+		"package": "vsce package"
+	},
+	"dependencies": {
+		"adm-zip": "^0.5.17",
+		"tar": "^7.5.16",
+		"vscode-languageclient": "^10.0.0"
+	},
+	"devDependencies": {
+		"@types/adm-zip": "^0.5.8",
+		"@types/node": "^25.9.2",
+		"@types/vscode": "^1.91.0",
+		"@vscode/vsce": "^3.9.2",
+		"esbuild": "^0.28.0",
+		"npm-run-all": "^4.1.5",
+		"typescript": "^6.0.3"
+	}
+}

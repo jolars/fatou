@@ -23,6 +23,7 @@ Fatou is available from several sources:
 - **PyPI**: `uv tool install fatou`/`pipx install fatou`
 - **Prebuilt binaries**: from the [releases
   page](https://github.com/jolars/fatou/releases)
+- **VS Code/Open VSX**: the **Fatou** extension (also works in Positron)
 
 Runs on Linux, macOS, and Windows (x86_64 and arm64).
 
@@ -42,8 +43,10 @@ Configuration lives in `fatou.toml` (`[format]` line_width/indent_width,
 ## Editor integration
 
 The language server (`fatou lsp`) provides formatting and parse diagnostics over
-stdio. See the [editor setup guide](https://fatou.dev/guide/editors.html) for
-Neovim instructions.
+stdio. The **Fatou** extension for VS Code/Open VSX (and Positron) bundles the
+binary and starts the server automatically; see [`editors/code`](editors/code).
+For Neovim and other editors, see the [editor setup
+guide](https://fatou.dev/guide/editors.html).
 
 ## Development
 
