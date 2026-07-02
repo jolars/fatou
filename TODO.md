@@ -212,7 +212,16 @@ leverage.
   the `for` keyword is emitted iff a child of this node, so the same arm normalizes
   a `for`-loop binding; targets and iterables lowered recursively; bails on
   comment/newline or any unmodeled binding shape; locked by
-  `comprehension_for_in/`), `begin`/`quote` block-body indentation
+  `comprehension_for_in/`), comprehension/generator reflow (`lower_comprehension`
+  over `COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`, with the typed `T[…]`
+  `TYPED_COMPREHENSION` snugged via the transparent path): one width-driven
+  `Ir::group` around the element plus each `FOR_BINDING`/`COMPREHENSION_IF` clause—
+  flat `[elem for b if f]` with single spaces when it fits, else element and each
+  `for`/`if` clause exploded onto its own indented line; padding stripped
+  (`Int[ x for x in v ]` → `Int[x for x in v]`), the `if`-filter recursed via the
+  new `lower_comprehension_if`; bails to transparent on a comment or source newline
+  anywhere in the subtree; locked by `comprehension_spacing/` + `comprehension_break/`),
+  `begin`/`quote` block-body indentation
   (`lower_block_expr` + `lower_block_body` over `BEGIN_EXPR`/`QUOTE_EXPR`:
   `begin x end` → `begin⏎    x⏎end`—a non-empty block is always exploded vertical
   and each statement indented one step; `;` and newline are equivalent statement

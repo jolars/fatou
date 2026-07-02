@@ -93,39 +93,44 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (unary prefix operators)
+## Latest session (comprehension/generator reflow)
 
-Surfaced a **new** construct that bailed transparent. `UNARY_EXPR` (`-a`, `!b`, `~x`,
-`√x`, `¬p`) fell through to `lower_transparent`, so the parser's verbatim whitespace
-between the operator and operand leaked (`x = -  a` → `x = -  a` — stable but
-Tenet-1-violating).
+Surfaced a **new** construct that bailed transparent. `COMPREHENSION` (`[e for b if
+f]`), `GENERATOR` (`(e for b)`), `BRACES_COMPREHENSION` (`{e for b}`), and the sibling
+`COMPREHENSION_IF` all fell to `lower_transparent`, so the whitespace *between* the
+element, the `for`-bindings, and the `if`-filter leaked (`[x  for  x  in  v  if  x>0]`
+→ `[x  for x in v  if  x > 0]` — the existing `comprehension_for_in/` fixture only
+passed because its inputs were already single-spaced; the `FOR_BINDING` child was the
+only part `lower_transparent` recursion normalized).
 
-New `lower_unary` arm + `operand_leads_with_operator` helper (inserted before
-`lower_arrow`). A `UNARY_EXPR` is always the prefix shape `<op> <operand>` (postfix
-`'` is a separate `POSTFIX_EXPR`, out of scope). The op snugs directly to its operand
-(no space), and the operand recurses through `lower_node` so it normalizes internally
-(`-f( x )` → `-f(x)`, `-x ^ 2` → `-x^2`, `-( a + b )` → `-(a + b)`).
+New `lower_comprehension` arm (COMPREHENSION | GENERATOR | BRACES_COMPREHENSION) +
+`lower_comprehension_if` helper, inserted after `lower_collection`. Shape: open bracket,
+one element node, ≥1 `FOR_BINDING` (reusing `lower_for_binding`), optional trailing
+`COMPREHENSION_IF`, close bracket. One width-driven `Ir::group`: flat `[elem for b if f]`
+(single spaces) when it fits, else the element and each `for`/`if` clause explode onto
+their own 4-indented line (**user chose "explode each clause"** over bracket-explode-only
+or never-break). The typed `T[…]` form is a `TYPED_COMPREHENSION` wrapping a `GENERATOR`
+with `[]` brackets — no arm needed; the transparent path snugs the type node onto this
+handler's bracketed body (`Int[ x for x in v ]` → `Int[x for x in v]`). Brackets read from
+whatever open/close tokens are present, so the same arm serves `[]`/`()`/`{}`.
 
-**Retokenization trap (user chose bail-to-transparent):** `- -a` parses as nested
-`UNARY(-, UNARY(-, a))`; snugging both to `--a` would retokenize as the `--` operator.
-So the arm bails to verbatim when the operand `kind() == UNARY_EXPR` **or** its first
-token begins with a symbolic operator char (`+-*/\^%!~<>=&|:$?`) — conservative,
-covers ASCII-op-led and unicode nested-unary alike. `-1` never reaches here (the parser
-folds the sign into a `LITERAL`). Interleaved comment, missing/extra operand, or
-unexpected token also bails. Verified: fixture exact, `- -a`/`!!x`/`-√x` stay verbatim
-(idempotent). Gated `unary_operators/`. Gate 70→71. Full suite + clippy + `fmt --check`
-clean; no parser blocker.
+**Bail discipline:** a multiline comprehension puts a `NEWLINE` token inside its
+`FOR_BINDING` (which would make `lower_for_binding` bail transparent and embed a raw `\n`
+in the group), and a comment can't be reflowed — so the whole node bails to transparent
+if `has_newline_token(node)` **or** any descendant is a `COMMENT`/`BLOCK_COMMENT`. This
+keeps the exploded output idempotent (reparsed, it has inter-clause `NEWLINE`s → bails
+transparent → re-emits byte-identically, verified). Gated `comprehension_spacing/`
+(messy `[]`/`()`/`{}`/typed/dict-generator spacing → normalized) + `comprehension_break/`
+(one wide single-line comprehension → 5-line explode). Gate 71→73. Full suite + clippy +
+`fmt --check` clean; no parser blocker. Known limit (same class as other constructs): a
+*source*-multiline comprehension stays verbatim rather than reflowing.
 
-**Ranked next targets:** (1) The headline **width-driven reflow engine** — but note
-`has_newline_token` now has only **one** call site left (`lower_matrix`'s
-comment-bearing multiline-vs-transparent dispatch, a verbatim-vs-verbatim choice, not
-a reflow decision); the clean operator/collection/bracket/matrix paths are all
-width-driven. The remaining source-shape dependence is in block-body layout via
-`collect_body_lines`, but statements genuinely occupy separate lines, so this is
-mostly principled. Re-scope this target: it may be smaller than the RECAP implies.
-(2) Surface more **unhandled constructs** that bail transparent (probe with
-`cargo run -q -- format < snippet` — look for un-normalized spacing). (3) Sweep
-residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
+**Ranked next targets:** (1) surface more **unhandled constructs** that bail transparent
+(`cargo run -q -- format < snippet`; e.g. `let x=1 ` earlier showed a stray trailing space
+on a let-binding line — worth a look). (2) The **width-driven reflow engine** re-scope
+still stands from last session (mostly done; `has_newline_token` now has ~3 call sites:
+`lower_matrix`, `lower_comprehension`, and the multiline-bracket dispatch). (3) Sweep the
+residual Runic doc comments in `rules.rs`.
 
 ## Standing traps
 
@@ -143,6 +148,13 @@ residual Runic doc comments in `rules.rs` (~50 per-rule rationale comments).
 
 ## Earlier sessions
 
+- **Unary prefix operators** (committed `d04276d`, `feat`): new `lower_unary` arm +
+  `operand_leads_with_operator` helper (before `lower_arrow`). `UNARY_EXPR` is the prefix
+  `<op> <operand>`; the op snugs to its operand (no space), operand recursed
+  (`x = -  a` → `x = -a`, `-f( x )` → `-f(x)`). **Retokenization trap:** `- -a` snugged to
+  `--a` would retokenize as `--`, so it bails to verbatim when the operand is a nested
+  `UNARY_EXPR` or its first token begins with a symbolic op char (`+-*/\^%!~<>=&|:$?`);
+  `-1` folds into a `LITERAL` upstream. Gated `unary_operators/`. Gate 70→71.
 - **Macro-call spacing** (committed `f0fdd0a`, `feat`): first construct past full-gate.
   New `lower_macro_call` + `lower_macro_name` (after `lower_collection`) normalize the
   verbatim macro-name→arg whitespace to one space while preserving the semantic

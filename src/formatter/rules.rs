@@ -51,6 +51,9 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
         }
+        SyntaxKind::COMPREHENSION | SyntaxKind::GENERATOR | SyntaxKind::BRACES_COMPREHENSION => {
+            lower_comprehension(node)
+        }
         SyntaxKind::PAREN_EXPR => lower_paren(node),
         SyntaxKind::PAREN_BLOCK => lower_paren_block(node),
         SyntaxKind::BARE_TUPLE_EXPR => lower_bare_tuple(node),
@@ -1330,6 +1333,114 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
         Ir::SoftLine,
         Ir::text(close),
     ]))
+}
+
+/// Lay out a comprehension or generator — `[elem for b… if f]`, `(elem for b…)`,
+/// or `{elem for b…}` (`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`; the
+/// typed `T[…]` form is a `TYPED_COMPREHENSION` wrapping a `GENERATOR`, so the
+/// transparent path snugs the type onto this handler's bracketed body). The node
+/// is a bracket around an element expression, one or more `FOR_BINDING` clauses,
+/// and an optional trailing `COMPREHENSION_IF` filter. Under Tenet 1 the spacing
+/// is reflowed from scratch: one group that stays flat (`[elem for b if f]`, single
+/// spaces) when it fits, else explodes the element and each `for`/`if` clause onto
+/// its own indented line.
+///
+/// A comment or source newline anywhere in the subtree can't be reflowed away, so
+/// the whole node bails to the verbatim transparent path (`lower_for_binding`
+/// itself bails on an internal newline; catching it here keeps a stray `\n` out of
+/// the group).
+fn lower_comprehension(node: &SyntaxNode) -> Ir {
+    if has_newline_token(node)
+        || node
+            .descendants_with_tokens()
+            .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
+    {
+        return lower_transparent(node);
+    }
+
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    let mut element: Option<Ir> = None;
+    let mut clauses: Vec<Ir> = Vec::new();
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LBRACKET | SyntaxKind::LPAREN | SyntaxKind::LBRACE => {
+                    open = Some(tok.text().to_string())
+                }
+                SyntaxKind::RBRACKET | SyntaxKind::RPAREN | SyntaxKind::RBRACE => {
+                    close = Some(tok.text().to_string())
+                }
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::FOR_BINDING => clauses.push(lower_for_binding(&child)),
+                SyntaxKind::COMPREHENSION_IF => match lower_comprehension_if(&child) {
+                    Some(ir) => clauses.push(ir),
+                    None => return lower_transparent(node),
+                },
+                // The element expression precedes every clause and occurs once.
+                _ => {
+                    if element.is_some() || !clauses.is_empty() {
+                        return lower_transparent(node);
+                    }
+                    element = Some(lower_node(&child));
+                }
+            },
+        }
+    }
+
+    let (Some(open), Some(close), Some(element)) = (open, close, element) else {
+        return lower_transparent(node);
+    };
+    if clauses.is_empty() {
+        return lower_transparent(node);
+    }
+
+    let mut inner: Vec<Ir> = vec![Ir::SoftLine, element];
+    for clause in clauses {
+        inner.push(Ir::Line);
+        inner.push(clause);
+    }
+
+    Ir::group(Ir::concat([
+        Ir::text(open),
+        Ir::indent(Ir::concat(inner)),
+        Ir::SoftLine,
+        Ir::text(close),
+    ]))
+}
+
+/// Lower a `COMPREHENSION_IF` filter (`if <expr>`) to `if `-prefixed, with the
+/// predicate recursed through [`lower_node`] so it normalizes. Returns `None` (the
+/// caller bails) on a missing/duplicate predicate or an unexpected token.
+fn lower_comprehension_if(node: &SyntaxNode) -> Option<Ir> {
+    let mut if_kw = false;
+    let mut filter: Option<SyntaxNode> = None;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::IF_KW if !if_kw => if_kw = true,
+                _ => return None,
+            },
+            NodeOrToken::Node(child) => {
+                if filter.is_some() {
+                    return None;
+                }
+                filter = Some(child);
+            }
+        }
+    }
+
+    let filter = filter?;
+    if !if_kw {
+        return None;
+    }
+    Some(Ir::concat([Ir::text("if "), lower_node(&filter)]))
 }
 
 /// Lay out a macro call — `@name`, optionally followed by arguments. Normalizes
