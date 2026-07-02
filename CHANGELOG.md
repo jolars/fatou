@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/jolars/fatou/compare/v0.3.0...v0.4.0) (2026-07-02)
+
+### Features
+- add VSCODE and OSVX extensions ([`c9af19b`](https://github.com/jolars/fatou/commit/c9af19bcb13f097fe149720041475c7947f9cceb))
+- **formatter:** width-driven paren-block break ([`5905ed2`](https://github.com/jolars/fatou/commit/5905ed2554eaf4a9559182b8190f74e6a5c9e8a6))
+- **formatter:** break the semicolon keyword tail ([`7d33a5b`](https://github.com/jolars/fatou/commit/7d33a5bf2750e4229b6940b7d25227083e14d9fe))
+- **formatter:** reflow source-multiline comprehensions ([`cbeaa25`](https://github.com/jolars/fatou/commit/cbeaa252de4e5b54c131d5fdfc1e31340cb8cbe9))
+- **formatter:** reflow comprehensions and generators ([`deb0df3`](https://github.com/jolars/fatou/commit/deb0df3520f7571887144dae5fe900f73d8e1259))
+- **formatter:** snug unary prefix operators ([`d04276d`](https://github.com/jolars/fatou/commit/d04276dd980dbf464c5991b52583d8a8f90a81ae))
+- **formatter:** normalize macro-call spacing ([`f0fdd0a`](https://github.com/jolars/fatou/commit/f0fdd0aa17d670810cb72e01c1d9d2f66b3dc6e0))
+- **formatter:** normalize type-decl whitespace ([`b62b197`](https://github.com/jolars/fatou/commit/b62b19791e8c3779204d005eac459ab3ee681896))
+- **cli:** add manpages and completion ([`f1b9866`](https://github.com/jolars/fatou/commit/f1b986618943dc8dc8cc4283f000fb2575a186f7))
+
 ## [0.3.0](https://github.com/jolars/fatou/compare/v0.2.0...v0.3.0) (2026-07-01)
 
 ### Features
