@@ -1280,6 +1280,9 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // below (or, if its shape is unmodeled, emitted flat).
     let mut params_node: Option<SyntaxNode> = None;
     let mut pending_comma = false;
+    // Whether the *last* positional item is a bracket-delimited construct that can
+    // hug this bracket (see [`arg_is_huggable`]). Drives the trailing-argument hug.
+    let mut last_huggable = false;
 
     for el in node.children_with_tokens() {
         match el {
@@ -1309,6 +1312,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                     if params_node.is_some() || (!items.is_empty() && !pending_comma) {
                         return lower_transparent(node);
                     }
+                    last_huggable = arg_is_huggable(&child);
                     items.push(lower_node(&child));
                     pending_comma = false;
                 }
@@ -1387,6 +1391,27 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         return Ir::concat([Ir::text(open), Ir::text(close)]);
     }
 
+    // Trailing-argument hug: when the last positional argument is itself a
+    // bracket-delimited construct (`f(g(…))`, `f([…])`, `map(f, […])`), it hugs
+    // this bracket instead of exploding onto its own indented line. The leading
+    // arguments render flat in the prefix; the hugged argument carries its own
+    // width-driven group, so it stays flat when it fits and otherwise breaks in
+    // place — its opening bracket riding this line, its closing bracket stacking
+    // with ours. There is no wrapping group and no outer trailing comma: the
+    // hugged construct's own group makes the only break decision.
+    if last_huggable {
+        let mut parts: Vec<Ir> = vec![Ir::text(open)];
+        let last = items.len() - 1;
+        for (i, item) in items.into_iter().enumerate() {
+            parts.push(item);
+            if i < last {
+                parts.push(Ir::text(", "));
+            }
+        }
+        parts.push(Ir::text(close));
+        return Ir::concat(parts);
+    }
+
     // A width-driven group: flat `(a, b, c)`, or one item per indented line with
     // a broken-only trailing comma when it doesn't fit.
     let mut inner: Vec<Ir> = vec![Ir::SoftLine];
@@ -1405,6 +1430,38 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         Ir::SoftLine,
         Ir::text(close),
     ]))
+}
+
+/// Whether an `ARG` wraps exactly one bracket-delimited construct that can hug an
+/// enclosing call/index bracket. When such an argument is the *last* item of an
+/// arg list, it hugs: its own opening bracket rides the call's opening bracket and
+/// the closers stack, rather than the argument exploding onto its own indented
+/// line. The construct must own a trailing breakable bracket group — a nested call
+/// or index (`g(…)`, `a[…]`), a curly application (`A{T}`), a bracketed collection
+/// (`[…]`, `(…,)`, `{…}`), a comprehension/generator, or a matrix. A bare token, a
+/// splat, a unary/binary expression, or anything else keeps the normal layout.
+fn arg_is_huggable(arg: &SyntaxNode) -> bool {
+    if arg.kind() != SyntaxKind::ARG {
+        return false;
+    }
+    // Exactly one child node (a clean sole wrapper), and it is a huggable kind.
+    let mut children = arg.children();
+    let (Some(child), None) = (children.next(), children.next()) else {
+        return false;
+    };
+    matches!(
+        child.kind(),
+        SyntaxKind::CALL_EXPR
+            | SyntaxKind::INDEX_EXPR
+            | SyntaxKind::CURLY_EXPR
+            | SyntaxKind::VECT_EXPR
+            | SyntaxKind::TUPLE_EXPR
+            | SyntaxKind::BRACES
+            | SyntaxKind::COMPREHENSION
+            | SyntaxKind::GENERATOR
+            | SyntaxKind::BRACES_COMPREHENSION
+            | SyntaxKind::MATRIX_EXPR
+    )
 }
 
 /// Whether a bracketed node carries a comment among its **direct** children (an

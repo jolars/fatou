@@ -133,6 +133,18 @@ leverage.
   closing-bracket line. Enabled by the continuation-aware `fits`; no code change,
   pure `test(formatter)` gating. Deferred: `<wide-collection>[index]` breaks the
   index arg-list instead of the collection subject (needs a layout decision).
+- [x] Formatter: argument hugging (`arg_hug/`). When the last positional argument
+  of a call/index arg list is a bracket-delimited construct (call, index, curly,
+  vector, tuple, braces, comprehension/generator, matrix), it hugs the enclosing
+  bracket instead of exploding onto its own doubly-indented line: `f(g(\n …\n))`,
+  `map(f, [\n …\n])`. Leading args render flat in the prefix. Implemented in
+  `lower_arg_list` (`arg_is_huggable` + drop the wrapping group/outer trailing
+  comma for a huggable last item); the continuation-aware `fits` glues the openers
+  and stacks the closers, so no printer change. **Deferred (next target):** the
+  *explode fallback* — when even the hug prefix overflows `line_width` (very wide
+  leading args), it still hugs with a too-long first line rather than exploding
+  everything one-per-line. Needs a `ConditionalGroup`/`group_hug` printer primitive
+  (cf. arity's `build_arg_hug`).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1

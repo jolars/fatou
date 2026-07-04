@@ -93,30 +93,45 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (postfix tail on a breaking bracket group — collection/tuple/matrix)
+## Latest session (argument hugging — sole + trailing bracket construct)
 
-Continued the ranked-#1 trailing-tail sweep. After the call cases (single, then chained), gated the
-**non-call breaking group** carrying a postfix tail: a wide vector/tuple that explodes one-per-line,
-or a matrix that explodes one-row-per-line, rides `.field` / `::T` / chained `.field.other` on its
-closing-bracket line. Six lines: collection `.field`, collection `::VectorType`, collection chained
-`.field.other`, tuple `.field`, matrix `.field`, matrix `::MatrixType`. The continuation-aware
-`fits` already lays all of these out canonically — **no code change**, pure `test(formatter)` gating.
-Verified idempotence + input-independence (pre-broken collection/matrix source reflows identically).
-Gated `bracket_postfix_break/`. Gate 81→82. Full suite + clippy + `fmt --check` clean.
+First engine-behavior change since the postfix sweeps, and the first that *changes* canonical form
+(not pure gating). User steered the target from "gate nested_call_break as-is" to **argument
+hugging, arity-style** (they pointed at arity's `build_arg_hug`). When the **last positional
+argument** of a call/index arg list is a bracket-delimited construct — call, index, curly, vector,
+tuple, braces, comprehension/generator, matrix — it now **hugs** the enclosing bracket instead of
+exploding onto its own doubly-indented line: `outer(inner(\n …\n))`, `f([\n …\n])`, `map(f, [\n …\n])`.
+Leading args render flat in the prefix; the hugged construct carries its own width-driven group, so
+it stays flat when it fits and otherwise breaks in place — opener riding the line, closers stacking.
 
-**Left out (deferred, needs a decision):** `<wide-collection>[index]` — the outer node is an
-INDEX_EXPR whose subject is the collection; the engine keeps the collection flat and breaks the
-*index* arg-list instead (`[a, …][\n    idx,\n]`), which is engine-consistent but reads wrong. Gating
-it means deciding the subject-should-break-first policy; kept out of this fixture.
+**No printer change.** The whole feature is one branch in `lower_arg_list`: when the last item is
+huggable (`arg_is_huggable` — checks the sole `ARG` child's kind), emit `open + [leading flat,
+comma-joined] + last_item + close` with **no wrapping group and no outer trailing comma**. Fatou's
+continuation-aware `fits` already glues the openers and stacks the closers (it accounts for the
+trailing `))` on the print stack), so flat-vs-hug falls out for free and recursion (`f(g(h(…)))`)
+hugs at every level. Non-huggable last args (atoms, binary exprs) keep the existing width-driven
+explode group untouched — verified via the `process(…, last)` boundary case.
+
+Zero regressions (no existing gated fixture had a wide last-arg-huggable case). Verified idempotence
++ input-independence (a pre-broken non-hug source reflows to the hug form). Gated `arg_hug/` (six
+cases: sole call, deep nesting, array, tuple, `map` trailing-arg, non-hug boundary). Gate 82→83.
+Full suite (46 unit + all integration) + clippy + `fmt --check` clean.
+
+**Deferred — the explode fallback (ranked #1 next):** when even the hug *prefix* overflows
+`line_width` (pathologically wide leading args, `f(long1, long2, long3, [list])`), it still hugs
+with a too-long first line rather than exploding everything one-per-line. This is arity's harder
+half — it needs a `ConditionalGroup`/`group_hug` printer primitive (measure the prefix up to the
+trailing opener; if it fits → hug, else → explode). The user accepted this limitation for the
+landing. All *common* cases are canonical. Also not covered: keyword-arg values (`f(x, y = [list])`)
+and collection-element hugging (`[f(…)]`) — both natural follow-ons if wanted.
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) the deferred `<wide-collection>[index]` subject-vs-index break above —
-now the last obvious trailing-tail gap, but it needs a layout decision (should the bracket *subject*
-break before its index?), likely a real engine change, not pure gating. (2) A call that breaks
-*inside* an argument tail (`f(g(long, args, here))`). (3) The arrow/pair tier (`=> --> <->`) could
-flatten across kinds like the additive/multiplicative tiers but is rare — revisit only on a real
-case. (4) Sweep the residual Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites
+**Ranked next targets:** (1) the **explode fallback** above (ConditionalGroup primitive) — completes
+hugging to arity fidelity. (2) The deferred `<wide-collection>[index]` subject-vs-index break — needs
+a layout decision (should the bracket *subject* break before its index?). (3) The arrow/pair tier
+(`=> --> <->`) could flatten across kinds like the additive/multiplicative tiers but is rare. (4)
+Sweep the residual Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites
 `runic-blocked.txt`).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
@@ -151,6 +166,11 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Postfix tail on a breaking bracket group** (committed, `test`): gated the non-call breaking group
+  carrying a postfix tail — a wide vector/tuple (one-per-line) or matrix (one-row-per-line) rides
+  `.field` / `::T` / chained `.field.other` on its closing-bracket line. Continuation-aware `fits`
+  already canonical; no code change, pure gating. Deferred `<wide-collection>[index]` (subject-vs-index
+  break). `bracket_postfix_break/`. Gate 81→82.
 - **Chained postfix tail on a breaking call** (committed `c4548b8`, `test`): gated multiple postfix
   ops riding a wide call's closing bracket — `).field.other`, `)[index_expr][second]`, `).method(z)`,
   `)[idx].field`. Continuation-aware `fits` already canonical; no code change. User chose
