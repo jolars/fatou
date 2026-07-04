@@ -131,8 +131,9 @@ leverage.
   (`bracket_postfix_break/`). A wide collection/tuple (one-per-line) or matrix
   (one-row-per-line) rides `.field`, `::T`, or a chained `.field.other` on its
   closing-bracket line. Enabled by the continuation-aware `fits`; no code change,
-  pure `test(formatter)` gating. Deferred: `<wide-collection>[index]` breaks the
-  index arg-list instead of the collection subject (needs a layout decision).
+  pure `test(formatter)` gating. The deferred `<wide-collection>[index]` case
+  (index arg-list broke instead of the collection subject) was resolved by
+  `collection_index_break/` — the subject yields first.
 - [x] Formatter: argument hugging (`arg_hug/`). When the last positional argument
   of a call/index arg list is a bracket-delimited construct (call, index, curly,
   vector, tuple, braces, comprehension/generator, matrix), it hugs the enclosing
@@ -158,6 +159,20 @@ leverage.
   Deferred: arity's `hug_excuse_overflow` (an overwide unbreakable leading atom
   should not force the explode, since breaking buys no width) — add inside
   `hug_fits` if a motivating fixture appears.
+- [x] Formatter: collection-subject index break (`collection_index_break/`). When
+  `collection[index]` overflows and both sides could break, the subject yields
+  first: the new `lower_index` arm (an `INDEX_EXPR` whose subject is a
+  tuple/vector/braces/matrix literal) folds the subject's reflow body and the
+  index arg list into one outer group, so the whole postfix measures flat
+  together; broken, the collection explodes one element (or matrix row) per line
+  and the index rides the closing bracket, breaking at its own column only if it
+  still overflows there. Extracted `collection_reflow_body`/`matrix_reflow_body`
+  from `lower_collection`/`lower_matrix_reflow`. Other subjects (identifier,
+  call, chained index, paren) keep the transparent path, where the index — the
+  later group — breaks first; comment-bearing subjects or index lists bail.
+  Deferred: the same subject-yields policy for call subjects (`f(args)[idx]` in
+  the boundary window where `call(…)` + `[` fits but the total overflows) and
+  for chained postfix chains (`[…][i][j]`).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1

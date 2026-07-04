@@ -47,6 +47,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::IF_EXPR => lower_if(node),
         SyntaxKind::TRY_EXPR => lower_try(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
+        SyntaxKind::INDEX_EXPR => lower_index(node),
         SyntaxKind::MACRO_CALL => lower_macro_call(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
             lower_collection(node)
@@ -1498,7 +1499,18 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
     if bracket_has_comment(node) {
         return lower_multiline_bracket(node);
     }
+    match collection_reflow_body(node) {
+        Some(body) => Ir::group(body),
+        None => lower_transparent(node),
+    }
+}
 
+/// Build the ungrouped body of a clean collection literal — the doc that
+/// [`lower_collection`] wraps in its own `Ir::group`, and that [`lower_index`]
+/// folds into a shared outer group so the subject's break opportunities and the
+/// index tail are measured together. `None` on any shape the reflow does not
+/// fully model (the caller falls back to transparent).
+fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let keep_singleton_comma = node.kind() == SyntaxKind::TUPLE_EXPR;
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
@@ -1518,34 +1530,32 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COMMA => {
                     if pending_comma || items.is_empty() {
-                        return lower_transparent(node);
+                        return None;
                     }
                     pending_comma = true;
                 }
-                _ => return lower_transparent(node),
+                _ => return None,
             },
             NodeOrToken::Node(child) => match child.kind() {
                 // `ARG` is a positional element; `KEYWORD_ARG` is a named-tuple
                 // element (`(a = 1, b = 2)`), lowered by `lower_keyword_arg`.
                 SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
                     if !items.is_empty() && !pending_comma {
-                        return lower_transparent(node);
+                        return None;
                     }
                     items.push(lower_node(&child));
                     pending_comma = false;
                 }
-                _ => return lower_transparent(node),
+                _ => return None,
             },
         }
     }
 
-    let (Some(open), Some(close)) = (open, close) else {
-        return lower_transparent(node);
-    };
+    let (open, close) = (open?, close?);
 
     // An empty collection never breaks.
     if items.is_empty() {
-        return Ir::concat([Ir::text(open), Ir::text(close)]);
+        return Some(Ir::concat([Ir::text(open), Ir::text(close)]));
     }
 
     // The one-tuple's comma is semantic: emit it in both modes. Every other list
@@ -1566,12 +1576,54 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
     }
     inner.push(trailing);
 
-    Ir::group(Ir::concat([
+    Some(Ir::concat([
         Ir::text(open),
         Ir::indent(Ir::concat(inner)),
         Ir::SoftLine,
         Ir::text(close),
     ]))
+}
+
+/// Lay out an index expression whose subject is a bracketed collection or matrix
+/// literal — `[a, b][i]`, `(a, b)[i]`, `{a, b}[i]`, `[a b; c d][i, j]`. The
+/// subject's break opportunities and the index arg list share one outer group, so
+/// the whole postfix is measured flat together and the **subject yields first**
+/// when it overflows: the collection explodes one element (or matrix row) per
+/// line and the index rides the closing bracket, breaking at its own column only
+/// if it still doesn't fit there. Without the shared group the index — the later,
+/// inner group — would take the break while a fitting subject stays flat, leaving
+/// a lone index exploded like a stray vector literal.
+///
+/// Any other subject (an identifier, a call, a chained index, a paren expression)
+/// keeps the transparent lowering, where subject and index are independent
+/// groups. A comment in the subject or the index list bails likewise — those
+/// route to the comment-aware multiline paths unchanged.
+fn lower_index(node: &SyntaxNode) -> Ir {
+    let mut parts = node.children_with_tokens();
+    let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
+        return lower_transparent(node);
+    };
+    let (NodeOrToken::Node(subject), NodeOrToken::Node(args)) = (first, second) else {
+        // A token between subject and arg list (stray whitespace) is a shape the
+        // parser should reject; keep it verbatim.
+        return lower_transparent(node);
+    };
+    if args.kind() != SyntaxKind::ARG_LIST || bracket_has_comment(&args) {
+        return lower_transparent(node);
+    }
+    let body = match subject.kind() {
+        SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES
+            if !bracket_has_comment(&subject) =>
+        {
+            collection_reflow_body(&subject)
+        }
+        SyntaxKind::MATRIX_EXPR if !matrix_has_comment(&subject) => matrix_reflow_body(&subject),
+        _ => None,
+    };
+    let Some(body) = body else {
+        return lower_transparent(node);
+    };
+    Ir::group(Ir::concat([body, lower_arg_list(&args)]))
 }
 
 /// Lay out a comprehension or generator — `[elem for b… if f]`, `(elem for b…)`,
@@ -2296,6 +2348,17 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
 /// dropped. A `;;` higher-dimensional separator, or any unexpected token or child,
 /// bails to the verbatim transparent lowering.
 fn lower_matrix_reflow(node: &SyntaxNode) -> Ir {
+    match matrix_reflow_body(node) {
+        Some(body) => Ir::group(body),
+        None => lower_transparent(node),
+    }
+}
+
+/// Build the ungrouped body of a clean matrix literal — the doc that
+/// [`lower_matrix_reflow`] wraps in its own `Ir::group`, and that [`lower_index`]
+/// folds into a shared outer group with the index tail. `None` on any shape the
+/// reflow does not fully model (the caller falls back to transparent).
+fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
     let mut rows: Vec<Vec<Ir>> = vec![Vec::new()];
@@ -2313,14 +2376,14 @@ fn lower_matrix_reflow(node: &SyntaxNode) -> Ir {
                 // semantics differ from `;` — bail rather than silently collapse it.
                 SyntaxKind::SEMICOLON => {
                     if prev_was_semicolon {
-                        return lower_transparent(node);
+                        return None;
                     }
                     rows.push(Vec::new());
                     prev_was_semicolon = true;
                     continue;
                 }
                 SyntaxKind::NEWLINE => rows.push(Vec::new()),
-                _ => return lower_transparent(node),
+                _ => return None,
             },
             NodeOrToken::Node(child) => match child.kind() {
                 SyntaxKind::ARG => rows.last_mut().unwrap().push(lower_node(&child)),
@@ -2333,22 +2396,20 @@ fn lower_matrix_reflow(node: &SyntaxNode) -> Ir {
                             NodeOrToken::Node(arg) if arg.kind() == SyntaxKind::ARG => {
                                 row.push(lower_node(&arg))
                             }
-                            _ => return lower_transparent(node),
+                            _ => return None,
                         }
                     }
                 }
-                _ => return lower_transparent(node),
+                _ => return None,
             },
         }
         prev_was_semicolon = false;
     }
 
-    let (Some(open), Some(close)) = (open, close) else {
-        return lower_transparent(node);
-    };
+    let (open, close) = (open?, close?);
     rows.retain(|row| !row.is_empty());
     if rows.is_empty() {
-        return Ir::concat([Ir::text(open), Ir::text(close)]);
+        return Some(Ir::concat([Ir::text(open), Ir::text(close)]));
     }
 
     let mut inner: Vec<Ir> = vec![Ir::SoftLine];
@@ -2366,7 +2427,7 @@ fn lower_matrix_reflow(node: &SyntaxNode) -> Ir {
         }
     }
 
-    Ir::group(Ir::concat([
+    Some(Ir::concat([
         Ir::text(open),
         Ir::indent(Ir::concat(inner)),
         Ir::SoftLine,

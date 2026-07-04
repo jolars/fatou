@@ -66,9 +66,10 @@ Tenet 1.
 - Spacing/operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`; `&&`/`||`
   canonicalized spaced), `lower_arrow`, `lower_comparison`, `lower_ternary`,
   `lower_range`, `lower_type_annotation`, `lower_where`.
-- Collections/calls: `lower_arg_list` (**now width-driven** — see latest session;
-  no longer mirrors source), `lower_keyword_arg`/`lower_parameters`,
-  `lower_collection` (still source-mirroring), `lower_bare_tuple`, curly
+- Collections/calls: `lower_arg_list` (width-driven, hug + explode fallback),
+  `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
+  `collection_reflow_body`), `lower_index` (collection/matrix subject + index
+  share one group — subject yields first), `lower_bare_tuple`, curly
   type-params, named tuples.
 - Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
   `lower_multiline_bracket`, `lower_matrix`, `lower_paren`/`lower_paren_block`,
@@ -93,58 +94,46 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (hug explode fallback — `Ir::HugGroup`)
+## Latest session (collection-subject index break — `lower_index`)
 
-Closed the previous session's ranked #1: when even the hug layout's **first line** (open bracket +
-flat leading args + the hugged construct's opening bracket) overflows `line_width`, the call now
-**explodes** one-item-per-line (the standard group, broken-only trailing comma, last item free to
-break further) instead of hugging with a too-long first line. Second printer-engine change
-post-pivot.
+Closed the deferred `<wide-collection>[index]` layout decision. **User chose (AskUserQuestion):
+the subject yields first.** When `collection[index]` overflows and both sides could break, the
+collection explodes one element per line and the index rides the closing bracket, breaking at its
+own column only if it still overflows there. Previously the continuation-aware `fits` let the
+index — the later, inner group — take the break while a fitting subject stayed flat
+(`(a, b, c)[\n    branch_index,\n]`, which reads like a stray vector literal). The declined
+alternatives: index-yields-first (zero-code gating of the old form) and wider-side-yields
+(heuristic).
 
-**Design (differs from arity's — the crux):** arity's `Group{hug}` measurement stops *successfully*
-at the first `HardLine`, which works there because an R trailing block always carries forced
-breaks. Fatou's hugged item is a width-driven group with **no** forced break — measured flat it is
-just wide text, so arity's trick would reject hugging exactly where hugging matters. Instead: new
-`Ir::HugGroup { prefix, body, close, explode }` (ir.rs) + printer `hug_fits`, which seeds the
-now-shared `fits_stack` loop (extracted from `fits`, byte-identical) with `(true, Flat, prefix)`,
-`(false, Break, body)`, `(false, Flat, close)`, then the trailing stack. In Break mode the body's
-first `Line`/`SoftLine` **ends the measured line** (existing `fits` semantics), so the measure is
-exactly the hug first line; a body with no break opportunity (`g()`) falls through to close +
-continuation. Print arm: hug fits → push close/body/prefix with the carried mode (identical
-expansion to the old bare concat); else push `explode`, re-measured by the normal Group arm — it
-always breaks there, since the hug measure never exceeds the flat measure. In `fits_stack`, a
-`HugGroup` in *trailing* content walks its hug parts — **byte-identical to the old bare concat**,
-which is why zero gated fixtures moved (the postfix/dot-access fixtures measure calls in trailing
-position).
+**Implementation (rules.rs only, no printer change):** new `lower_index` arm (`INDEX_EXPR`).
+Fires when the shape is exactly `subject ARG_LIST` (any interleaved token — e.g. the known
+parser gap `a [1]` — bails) with a `TUPLE_EXPR`/`VECT_EXPR`/`BRACES`/`MATRIX_EXPR` literal
+subject and no comment on either side; it wraps `collection_reflow_body(subject)` (or
+`matrix_reflow_body`) + `lower_arg_list(args)` in **one outer group**, so the subject's break
+opportunities belong to the group that measures the whole postfix flat. The `*_reflow_body`
+helpers are pure extractions of the group bodies from `lower_collection`/`lower_matrix_reflow`
+(Option-returning; `None` → caller bails transparent; the empty-collection concat also routes
+through the group wrapper now — no behavioral change). Any other subject (identifier, call,
+chained index, paren expr) keeps the transparent path unchanged, where the index yields.
 
-**Nested hugs (user choice via AskUserQuestion): conservative.** The hug measure walks a nested
-hug's prefix flat through to the innermost opener; overflow explodes the *outer* call, and the
-inner list re-decides at its printed column — it may hug there (`wrapped = outer_wrapper(\n
-inner_builder(…, [\n row_data,\n ]),\n)`) or explode too (`deep`). The optimistic
-outer-hug/inner-explode variant was declined (it would need the explode branch expanded in
-Break-mode fits contexts, risking silent flips in the gated postfix fixtures); revisit with a
-fixture if wanted — a two-line change in the `fits_stack` arm.
-
-`rules.rs`: the hug branch now builds `hug_group(prefix, body, close, explode)`; the fall-through
-explode group was extracted as `arg_list_explode_group` so hug fallback and non-hug layout are the
-same doc by construction. Three printer unit tests (flat / hug / explode on one doc). Gated
-`arg_hug_explode/` (7 cases: prefix-overflow explode, 92/93 boundary fence pair — the hugged first
-line is *exactly* 92 — map-style, nested outer-explode+inner-hug, nested both-explode, explode with
-the last item breaking further). Gate 83→84. Verified idempotence + input-independence (a
-pre-exploded hug source reflows to the hug). Full suite + clippy + fmt clean.
-
-**Deferred:** arity's `hug_excuse_overflow` (an overwide *unbreakable* leading atom shouldn't force
-explode — breaking buys no width, only lines); addable entirely inside `hug_fits`, no IR change.
-Still open from last session: keyword-arg-value hugging (`f(x, y = [list])`) and collection-element
-hugging (`[f(…)]`).
+Regimes locked in `collection_index_break/` (7 cases): 92/93 fence pair (flat at exactly 92;
+one char more explodes the subject), the boundary window with a pre-broken source input (locks
+the reflow — a source-exploded *index* reflows to the exploded-subject form), wide-index-rides
+(short subject still explodes, index rides flat at the `]` column), both-break (index still too
+wide riding → it breaks too), matrix subject (framed rows, `][2, 3]` rides), and a
+pre-exploded small collection collapsing back to flat. Gate 84→85, zero regressions; clippy +
+fmt clean.
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) the deferred `<wide-collection>[index]` subject-vs-index break — needs
-a layout decision (should the bracket *subject* break before its index?). (2) Keyword-arg-value /
-collection-element hugging (natural hug follow-ons). (3) The arrow/pair tier (`=> --> <->`) could
-flatten across kinds like the additive/multiplicative tiers but is rare. (4) Sweep the residual
-Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
+**Ranked next targets:** (1) Extend subject-yields-first to **call subjects** in the boundary
+window (`f(args)[idx]` where call+`[` fits but the total overflows — today the index breaks;
+`postfix_tail_break`'s gated case was one char past the window, so the call broke and the
+inconsistency is invisible in the gate). Needs the call's group/HugGroup machinery merged into
+the outer group — more invasive than collections. (2) Keyword-arg-value / collection-element
+hugging (still open). (3) Chained postfix on a collection subject (`[…][i][j]` — the outer
+`INDEX_EXPR`'s subject is an `INDEX_EXPR`, falls to transparent today). (4) Arrow/pair tier
+flatten; sweep the residual Runic doc comments in `rules.rs`.
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -178,6 +167,18 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Hug explode fallback — `Ir::HugGroup`** (committed `e7c0e41`, `feat`): when even the hug
+  first line (open bracket + flat leading args + the hugged construct's opener) overflows,
+  the call explodes one-item-per-line instead. New `Ir::HugGroup { prefix, body, close,
+  explode }` + printer `hug_fits`, seeding the shared `fits_stack` loop with the body in
+  Break mode so its first break opportunity ends the measured line (arity's stop-at-HardLine
+  trick doesn't transfer — Fatou's hugged item has no forced break). In trailing content a
+  `HugGroup` walks its parts byte-identical to the old bare concat, so zero fixtures moved.
+  Nested hugs measure conservatively (user choice): overflow explodes the outer call, the
+  inner re-decides at its column. `arg_list_explode_group` extracted so hug fallback and
+  non-hug layout are the same doc. Deferred: `hug_excuse_overflow` (overwide unbreakable
+  leading atom shouldn't force explode). Gated `arg_hug_explode/` (7 cases incl. the 92/93
+  fence pair). Gate 83→84.
 - **Argument hugging — trailing bracket construct** (committed `9ea2e38`, `feat`): when the last
   positional arg of a call/index arg list is bracket-delimited (`arg_is_huggable`), it hugs the
   enclosing bracket — `outer(inner(\n …\n))`, `map(f, [\n …\n])` — via a bare concat in
