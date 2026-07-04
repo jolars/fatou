@@ -308,21 +308,24 @@ fn collect_binary_chain(
 }
 
 /// Whether two operator kinds break together in one chain group: the same kind
-/// (`a + b + c`), or two different operators sharing a left-associative precedence
-/// tier (`a + b - c`, `a * b / c`, `a << b >> c`). The parser left-nests a mixed
-/// same-tier chain (`(a + b) - c`), so flattening on tier — not just exact kind —
-/// collapses it into one break group, matching the uniform break a same-operator
-/// chain already gets. Unicode operators collapse to one `UNICODE_OP` kind that
-/// spans several tiers, so they only flatten on exact-kind equality (no tier).
+/// (`a + b + c`), or two different operators sharing a precedence tier
+/// (`a + b - c`, `a * b / c`, `a << b >> c`, `a => b --> c`). The parser nests a
+/// mixed same-tier chain (left for the arithmetic tiers, right for the arrow/pair
+/// tier), so flattening on tier — not just exact kind — collapses it into one
+/// break group, matching the uniform break a same-operator chain already gets.
+/// The flatten is layout-only: the operand/operator text stream is identical
+/// under either association. Unicode operators collapse to one `UNICODE_OP` kind
+/// that spans several tiers, so they only flatten on exact-kind equality (no
+/// tier).
 fn same_break_tier(a: SyntaxKind, b: SyntaxKind) -> bool {
     a == b || binary_prec_class(a).is_some_and(|c| Some(c) == binary_prec_class(b))
 }
 
-/// The break-flatten tier of a left-associative binary operator whose tier holds
-/// more than one operator kind, mirroring the parser's `infix_binding_power`
-/// classes. Only these multi-operator tiers matter for flattening; a single-kind
-/// tier (`^`, `//`, `|>`, `&&`, `=>`, …) is handled by exact-kind equality, and
-/// tight or right-associative operators never break, so they are `None` here.
+/// The break-flatten tier of a binary operator whose tier holds more than one
+/// operator kind, mirroring the parser's `infix_binding_power` classes. Only
+/// these multi-operator tiers matter for flattening; a single-kind tier (`^`,
+/// `//`, `|>`, `&&`, …) is handled by exact-kind equality, and tight operators
+/// never break, so they are `None` here.
 fn binary_prec_class(kind: SyntaxKind) -> Option<u8> {
     use SyntaxKind::*;
     Some(match kind {
@@ -333,6 +336,10 @@ fn binary_prec_class(kind: SyntaxKind) -> Option<u8> {
         | DOT_PERCENT | DOT_AMP => 1,
         // Bitshift tier: `<< >> >>>`, left-associative.
         SHL | SHR | USHR => 2,
+        // Arrow/pair tier: `=> --> <-->` (and broadcast `.=> .-->`),
+        // right-associative. (`<--` is a lexer gap — it does not tokenize as one
+        // operator yet, so it cannot reach here.)
+        FAT_ARROW | LONG_ARROW | LEFT_RIGHT_ARROW | DOT_FAT_ARROW | DOT_LONG_ARROW => 3,
         _ => return None,
     })
 }
