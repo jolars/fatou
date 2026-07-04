@@ -209,6 +209,20 @@ leverage.
   still overflows there. Bails (whole chain transparent, index yields) propagate
   from the inner subjects: comments, `;` keyword tails, huggable last
   arguments/elements, name-rooted chains (no subject body to explode).
+- [x] Formatter: subject-yields-first through hugs and `;` keyword tails
+  (`hug_index_break/`, `params_index_break/`). The two remaining
+  `call_reflow_body`/`collection_reflow_body` bails are gone: a huggable last
+  argument/element/keyword-value becomes an **ungrouped** `Ir::HugGroup`
+  (prefix, the hugged construct's own reflow body, close, ungrouped explode
+  fallback) folded into `lower_index`'s shared outer group, and a `;` keyword
+  tail folds in via the extracted `arg_list_params_body`. The owning group
+  decides flat-vs-yield (flat when the whole chain fits; broken, the hugged
+  body breaks in place and every index rides the stacked closers) while the
+  printer's existing `hug_fits` keeps the hug-vs-explode tiering — no printer
+  change. New helpers: `construct_reflow_body` (shared subject/hug-body
+  dispatch, also used by `index_reflow_body`), `item_hug_parts`, `reflow_hug`,
+  `last_list_item`, `params_hug_prefix`. Nested hugs recurse (closers stack
+  `])]`); comprehension-valued hugs and name-rooted chains still bail.
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
