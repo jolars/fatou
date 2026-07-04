@@ -12,6 +12,17 @@ leverage.
   augmented-assignment token. `a <<= b` ⇒ `(<<= a b)`, `a .÷= b` ⇒ `(.÷= a b)`;
   quotable as `:(<<=)`. The Unicode set is exactly `÷=`/`⊻=` (the only two Unicode
   operators with an augmented form; `⊕=`/`×=`/… are errors in Julia).
+- [ ] Lexer: the left-arrow operator `<--` does not tokenize as one operator.
+  `a <-- b` lexes as `a` `<` `--` and parses as a broken `BINARY_EXPR` with a
+  `diagnostic: expected right-hand side for operator` (`<` missing its RHS,
+  then a stray `MINUS_MINUS`); the formatter then even reshapes the
+  error-recovery shape (`a <-- b` → `a < -- b`). JuliaSyntax:
+  `a <-- b` ⇒ `a <-- b` (`(call-i a <-- b)`), arrow tier, right-associative
+  (`a --> b <-- c` ⇒ `a --> (b <-- c)`). `-->`/`<-->`/`.-->` already lex
+  (`LongArrow`/`LeftRightArrow`/`DotLongArrow`); `<--` needs the same
+  treatment, plus the broadcast `.<--`. Surfaced by the formatter
+  (`arrow_pair_chain/` fixture routes around it); see parser-parity RECAP
+  queued target.
 - [ ] Parser: whitespace before a call/index/curly arg list is wrongly accepted.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
@@ -98,6 +109,14 @@ leverage.
   operator's precedence *tier*, not exact kind, so `+`/`-` (and `*`/`/`/`%`/`\`/`&`,
   `<<`/`>>`/`>>>`, and `|` with `+`) fold into one break group like a same-operator
   chain. Tighter/looser tiers stay their own group. `mixed_precedence_chain/` gated.
+- [x] Formatter: mixed arrow/pair-tier chains break uniformly (`lower_binary`).
+  `binary_prec_class` gained the arrow/pair tier (`=>`/`.=>`/`-->`/`.-->`/`<-->`,
+  right-associative, the parser right-nests), so a too-wide mixed chain
+  (`a => b --> c => d`) breaks at every operator instead of staircasing into
+  nested indents — same treatment the plus/times/shift tiers already had. The
+  flatten is layout-only (the text stream is identical under either
+  association). `<--` is a lexer gap (handed off; see Parser section) and stays
+  out of the fixture. `arrow_pair_chain/` gated.
 - [x] Formatter: the `;`-keyword tail of a call now folds into `lower_arg_list`'s
   width-driven group instead of always emitting flat. A too-wide call breaks
   one-arg-per-line with the `;` snug after the last positional (`b;`) and each

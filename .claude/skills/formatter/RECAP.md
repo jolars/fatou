@@ -98,54 +98,48 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (subject-yields through hugs + `;`-params tails)
+## Latest session (arrow/pair tier flatten + Runic doc-comment sweep)
 
-Closed ranked target #1 — and the presumed "needs a printer merge" turned out to be
-**rules-only**: the two remaining `call_reflow_body`/`collection_reflow_body` bails
-(huggable last item, `;` keyword tail) are gone. One AskUserQuestion decision:
-**hug-yield** (recommended option accepted) — when an index chain with a hug-tailed
-or params-tailed subject overflows, the subject yields via the hug: the hugged
-construct's body breaks in place (prefix flat), the `;` tail explodes with the `;`
-snug after the last positional, every index rides the stacked closers
-(`)][idx][jdx]`), and the printer's existing `hug_fits` keeps the hug-vs-explode
-tiering (over-wide hug first line → full explode, as before).
+Closed ranked target #1, both halves. One AskUserQuestion decision: **uniform tier
+break** (recommended option accepted) — a too-wide *mixed* arrow/pair-tier chain
+(`a => b --> c => d`) now breaks at every operator like the pure `=>` chain always
+did, instead of staircasing into nested indents. Disclosed consequence (accepted):
+`=>` (Pair) folds with the causal arrows `-->`/`<-->` since they share the parser
+tier — mirrors the earlier `a + b | c` disclosure.
 
-**The key insight:** an `Ir::HugGroup` whose body and explode fallback are
-**ungrouped** hands its flat-vs-yield decision to the owning group. The printer's
-HugGroup arm already pushes body/explode with the carried mode, so under
-`lower_index`'s outer group: group fits → Flat mode → hug renders flat; group
-breaks → Break mode → the ungrouped body's `Line`s break (subject yields), or
-`hug_fits` rejects and the ungrouped explode breaks fully. For **grouped** bodies
-(the standalone `lower_arg_list`/`lower_collection` hugs) the carried mode is a
-no-op — the body group re-measures itself — so nothing else moved. Zero printer/IR
-changes.
+**Implementation (one arm):** `binary_prec_class` gained tier 3 —
+`FAT_ARROW | LONG_ARROW | LEFT_RIGHT_ARROW | DOT_FAT_ARROW | DOT_LONG_ARROW`.
+The tier is right-associative (parser right-nests, JuliaSyntax-verified
+`a --> (b <-- c)`), unlike the left-associative plus/times/shift tiers; the
+flatten is layout-only (the operand/operator text stream is identical under
+either association), so `collect_binary_chain`/`same_break_tier` needed no
+change. Doc comments on `same_break_tier`/`binary_prec_class` de-left-assoc'd.
 
-**Implementation (rules.rs only):** extracted `arg_list_params_body` (the ungrouped
-`;`-tail width-driven body; `lower_arg_list` wraps it in the group as before) and
-`params_hug_prefix`; new `construct_reflow_body` (the shared bracket-construct
-dispatch — now also `index_reflow_body`'s subject match), `item_hug_parts` (ARG →
-sole child's reflow body; KEYWORD_ARG → `name = ` prefix + value's reflow body),
-`reflow_hug` (assembles the ungrouped HugGroup), `last_list_item`.
-`collection_reflow_body` builds the hug (one-tuple's `,)` joins the close);
-`call_reflow_body` handles params tails (non-hug + last-param hug) and positional
-hugs. Nested hugs recurse naturally (`[a, wrap(b, [ …` closers stack `])]`).
-Still bails → transparent: comprehension-valued hugs (no reflow body — deferred),
-comments, name-rooted chains.
+**Runic sweep done:** all ~25 residual per-rule Runic rationale mentions in
+`rules.rs` reworded to state the rule as Fatou's own (trivia trimming, paren
+block, where, keyword stmt, import/export, hex/float literals, module indent,
+block-body trailing comment, tight binops). Only the module-header debt marker
+("many rules still mirror source line breaks — a legacy of the removed Runic
+target") remains, intentionally. Debt #2 from the pivot is closed.
 
-Regimes locked in `hug_index_break/` (10 cases: 92/93 fence pair, overflow-at-index
-chain, call + kwarg + curly + nested-hug subjects, wide-prefix explode fallback,
-one-tuple `,)[1]`, pre-broken reflow) and `params_index_break/` (5: fence pair,
-keyword-only `(;` riding, params-hug, short-subject long-index). Gate 89→91, zero
-regressions; clippy + fmt clean.
+Gated `arrow_pair_chain/` (8 cases: short flat, mixed `=>`/`-->` uniform break,
+`.=>` broadcast mix, `<-->`/`.-->` mix, tighter-tier `+` operands staying flat
+inside the breaking chain, 92/93 fence pair, pre-broken reflow-to-flat). Gate
+91→92, zero regressions; clippy + fmt clean.
 
-**Parser/lexer blocker surfaced:** none.
+**Parser/lexer blocker surfaced:** `<--` does not tokenize (lexes as `<` + `--`,
+error recovery; the formatter even reshapes the broken text `a <-- b` →
+`a < -- b` because `lower_binary` takes the stray `MINUS_MINUS` for a real
+operator). JuliaSyntax: `(call-i a <-- b)`, arrow tier, right-assoc. Handed off:
+parser-parity RECAP queued target + `TODO.md` Parser bullet; `arrow_pair_chain/`
+routes around it (no `<--` in the fixture). When the lexer lands the token, add
+its kind to `binary_prec_class`'s tier 3.
 
-**Ranked next targets:** (1) Arrow/pair tier flatten; sweep the residual Runic doc
-comments in `rules.rs`. (2) `=>`-pair value hugging (`Dict("k" => […])` last-arg
+**Ranked next targets:** (1) `=>`-pair value hugging (`Dict("k" => […])` last-arg
 pair values don't hug — would extend `item_is_huggable` through a `BINARY_EXPR`
-pair RHS; needs a user decision). (3) Name-rooted chain layout (`table[wide
+pair RHS; needs a user decision). (2) Name-rooted chain layout (`table[wide
 args][k]` — should the inner arg list explode and `[k]` ride? needs a user
-decision). (4) Comprehension reflow body (a hugged/indexed comprehension still
+decision). (3) Comprehension reflow body (a hugged/indexed comprehension still
 bails transparent — extract an ungrouped body from `lower_comprehension` and add
 it to `construct_reflow_body`).
 
@@ -153,7 +147,8 @@ it to `construct_reflow_body`).
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
 (2026-07-02b); (b) **lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one
 compound-assign token; (c) **parser** — whitespace before a call/index/curly arg list is
-wrongly accepted (`f (a)`, `a [1]`, `A {T}`). All in `parser-parity/RECAP.md` "Queued next
+wrongly accepted (`f (a)`, `a [1]`, `A {T}`); (d) **lexer** — `<--` doesn't tokenize as one
+arrow-tier operator (2026-07-04). All in `parser-parity/RECAP.md` "Queued next
 targets" + `TODO.md`.
 
 **Note:** stray untracked `tests/oracle/runic-report.txt` (old Runic report format) is leftover
@@ -181,6 +176,13 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Subject-yields through hugs + `;`-params tails** (committed `1b0ea59`+`6956868`,
+  `feat`+`test`): closed the last two `call_reflow_body`/`collection_reflow_body` bails —
+  an **ungrouped** `Ir::HugGroup` hands flat-vs-yield to the owning group (zero printer/IR
+  changes), so a hug-tailed or params-tailed index subject yields via the hug, `;` tail
+  explodes snug, indexes ride stacked closers. New `construct_reflow_body`/`reflow_hug`/
+  `item_hug_parts`/`arg_list_params_body`. Gated `hug_index_break/` (10) +
+  `params_index_break/` (5). Gate 89→91.
 - **Chained-index break** (committed `c7966a2`+`0ac87f7`, `feat`+`test`): subject-yields-first
   through chained postfix (`[…][i][j]`, `f(x)[i][j]`) — `lower_index`'s body-building moved into
   the recursive `index_reflow_body` (the `INDEX_EXPR => index_reflow_body(&subject)` arm is the

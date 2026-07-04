@@ -6,7 +6,22 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**No specific parser target queued.** The formerly-queued whitespace-before-arglist
+**Queued (2026-07-04, from formatter): lexer gap — `<--` is not one token.**
+`a <-- b` lexes as `a` `<` `--` (a `LT` missing its RHS + a stray `MINUS_MINUS`,
+with `diagnostic: expected right-hand side for operator`). JuliaSyntax ground
+truth: `a <-- b` ⇒ `a <-- b` (`(call-i a <-- b)`); arrow tier, right-associative
+(`a --> b <-- c` ⇒ `a --> (b <-- c)`). The crux: the lexer's arrow scanning
+covers `-->` (`LongArrow`), `<-->` (`LeftRightArrow`), and `.-->`
+(`DotLongArrow`) but has no `<--` arm (nothing after `<` tries `--`); add the
+token (+ broadcast `.<--`), map it into the arrow tier `(4, 3)` alongside
+`LongArrow`, and give it a `SyntaxKind`. Formatter fallout today: `lower_binary`
+treats the stray `MINUS_MINUS` as a real operator and reshapes the
+error-recovery text (`a <-- b` → `a < -- b`); once `<--` lexes, that goes away
+and `binary_prec_class`'s arrow tier (`FAT_ARROW | LONG_ARROW | …`) should gain
+the new kind. Surfaced by the formatter's `arrow_pair_chain/` fixture, which
+routes around it (uses only `=>`/`.=>`/`-->`/`.-->`/`<-->`).
+
+**No specific parser target queued** beyond the above. The formerly-queued whitespace-before-arglist
 item (`f (a)`/`a [1]`/`A {T}`/`f(a) (b)`) was **already resolved** by the 2026-06-22r
 machinery: Fatou splices a zero-width `(error-t)` between base and `ARG_LIST`, projecting
 `(call f (error-t) a)` etc.—byte-identical to JuliaSyntax on all four (verified 2026-07-03;
