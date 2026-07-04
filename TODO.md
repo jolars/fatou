@@ -187,6 +187,19 @@ leverage.
   last argument — a hug's break opportunities live in the hugged construct's own
   group, so subject-yields-first there needs printer work (deferred, with the
   params-tail boundary window).
+- [x] Formatter: keyword-arg-value and collection-element hugging (`kwarg_hug/`,
+  `collection_hug/`). Hugging now covers a trailing `KEYWORD_ARG` whose value is
+  a bracket construct — in comma position (`f(x, kw = [` … `])`) and in the `;`
+  keyword tail (`f(x; kw = g(` … `))`, keyword-only `f(; kw = [` included) — and
+  the last element of a collection literal (`[a, b, f(` … `)]`, named tuples,
+  braces; the one-tuple's semantic comma joins the stacked closers `),)`).
+  `arg_is_huggable` generalized to `item_is_huggable` (+ `huggable_kind`);
+  `collect_param_items` reports the last param's huggability; `lower_collection`
+  gained the hug arm over the extracted `collect_collection_items`/
+  `collection_body`; the explode fallback is shared via `bracket_explode_body`.
+  The index-subject path (`collection_reflow_body`) bails on a huggable last
+  element like `call_reflow_body` does — subject-yields-first through a hug
+  still needs the printer merge (deferred, same bullet as the call bail).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1

@@ -66,9 +66,11 @@ Tenet 1.
 - Spacing/operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`; `&&`/`||`
   canonicalized spaced), `lower_arrow`, `lower_comparison`, `lower_ternary`,
   `lower_range`, `lower_type_annotation`, `lower_where`.
-- Collections/calls: `lower_arg_list` (width-driven, hug + explode fallback),
+- Collections/calls: `lower_arg_list` (width-driven, trailing hug — positional or
+  kwarg value, incl. the `;` tail — + explode fallback),
   `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
-  `collection_reflow_body`), `lower_index` (collection/matrix/call/curly subject
+  `collect_collection_items`/`collection_body`, trailing-element hug),
+  `lower_index` (collection/matrix/call/curly subject
   + index share one group — subject yields first; hug or `;`-tail subjects bail),
   `lower_bare_tuple`, curly type-params, named tuples.
 - Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
@@ -94,51 +96,54 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (call-subject index break — `call_reflow_body`)
+## Latest session (keyword-arg-value + collection-element hugging)
 
-Closed ranked target #1: extended **subject-yields-first** (user's prior AskUserQuestion
-decision for collections) to **call and curly subjects**. In the boundary window — `f(args)[`
-fits at ≤92 but the total overflows — the index used to break while the fitting call stayed
-flat (`f(a, b, c)[\n    idx,\n]`), exactly the form the user rejected for collection subjects.
-Now the call's args explode one per line and the index rides the closing paren, breaking at
-its own column only if it still overflows there. No new style decision was put to the user:
-this is the uniform extension of the recorded choice (fixture forms mirror
-`collection_index_break/`).
+Closed ranked target #1. Two AskUserQuestion decisions (both "hug", previews accepted
+verbatim): (1) a trailing `KEYWORD_ARG` whose value is a bracket construct hugs the call
+bracket — the name and `=` stay on the first line (`f(x, kw = [` … `])`) — in **both** the
+comma position and the `;` keyword tail (`optimize(obj; settings = build(` … `))`,
+keyword-only `setup(; layers = [` included); (2) the last element of a collection literal
+hugs its bracket (`[a, b, f(` … `)]`), covering named-tuple values (`(name = a, values = [`),
+braces, and the one-tuple, whose semantic comma joins the stacked closers (`),)`).
 
-**Implementation (rules.rs only, no printer change):** `lower_index`'s subject match gained
-`CALL_EXPR | CURLY_EXPR => call_reflow_body(&subject)`. The new helper requires the exact
-`callee ARG_LIST` two-node shape (an interleaved token — the `f (a)` parser gap — bails),
-lowers the callee via `lower_node` (dotted `Base.f` works; a comment anywhere in the callee
-bails), and folds the arg list's **ungrouped** explode body into the shared outer group —
-that ungrouping is the whole trick: a break point only belongs to the outer group if it is
-not wrapped in a nested group. Two extractions made it clean: the arg-list parse loop became
-`collect_arg_list(node) -> Option<ArgListParts>` (shared with `lower_arg_list`, which keeps
-its transparent/multiline routing), and `arg_list_explode_group` split into
-`Ir::group(arg_list_explode_body(…))`.
+**Implementation (rules.rs only, no printer/IR change):**
 
-**Deferred bails (index still yields there):** a `;`-`PARAMETERS` tail and a huggable last
-argument return `None` → transparent path. A hug's break opportunities live in the hugged
-construct's *own* group (verified in `printer.rs`: `fits` reads a trailing `HugGroup`'s body
-group in carried Break mode, so the subject would stay flat and the index break) — pushing
-subject-yields-first through a hug needs printer work. Both bails keep today's behavior, so
-nothing regressed; recorded in `TODO.md`.
+- `arg_is_huggable` → `item_is_huggable` + extracted `huggable_kind`. A `KEYWORD_ARG` is
+  huggable only in the clean `name = value` shape (exactly two child nodes, only `=`/spaces
+  between — a comment/newline would give a transparent body the hug can't own).
+- Comma position needed nothing else: the existing hug path pops the last item as the hug
+  body; a kwarg body is `concat(name, " = ", group(value))` and `hug_fits` walks it in Break
+  mode, so the measured first line ends at the value's own opening bracket. It just worked.
+- `;` tail: `collect_param_items` now returns `(Vec<Ir>, bool)` (last param's huggability);
+  the params branch of `lower_arg_list` builds the flat hug prefix — open + positionals
+  `, `-joined + `; ` + earlier keywords — with the standard params group as the explode
+  fallback (built once, passed as `Ir::hug_group`'s fourth arm).
+- Collections: the walk extracted to `collect_collection_items -> Option<CollectionParts>`;
+  `lower_collection` gained the hug arm; `collection_body` builds the non-hug group body;
+  `collection_reflow_body` (the `lower_index` subject path) **bails on a huggable last
+  element** — the same deferral as `call_reflow_body`, so `[a, b, f(x)][i]` takes the
+  transparent path where the subject's HugGroup decides at its own column and the index
+  rides `)]` (locked in the fixture: the composition is already pleasant).
+- Explode bodies unified: `arg_list_explode_body` and the new `collection_explode_body`
+  (singleton-comma aware) both delegate to `bracket_explode_body(open, items, close,
+  trailing)`.
 
-Regimes locked in `call_index_break/` (8 cases): 92/93 fence pair, pre-broken source input in
-the window (a source-exploded *index* reflows to the exploded-subject form), wide-index-rides
-(66-char index rides flat at the `)` column), both-break (99-char riding index breaks too),
-dotted callee, curly subject (`SomeParametricType{…}[type_index]`), and a pre-exploded small
-call collapsing back to flat. Existing `postfix_tail_break`/`chained_postfix_break` cases sit
-one char past the window (the call already broke), so they now route through the new path with
-byte-identical output. Gate 85→86, zero regressions; clippy + fmt clean.
+Regimes locked in `kwarg_hug/` (11 cases: 92/93 fence pair, call + vector values, `;` tail
+with positionals / keyword-only / multi-kwarg, pre-broken source reflowing to the hug,
+prefix-overflow explode fallback with `;` snug, non-last huggable kwarg not hugging, small
+flat) and `collection_hug/` (11 cases: 92/93 fence pair, vector/tuple/named-tuple/braces,
+singleton `),)`, pre-broken source collapsing to the hug, prefix-overflow explode, huggable
+subject under an index, small flat). Gate 86→88, zero regressions; clippy + fmt clean.
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) Keyword-arg-value / collection-element hugging (still open).
-(2) Chained postfix on a collection/call subject (`[…][i][j]`, `f(x)[i][j]` — the outer
-`INDEX_EXPR`'s subject is an `INDEX_EXPR`, falls to transparent today). (3) Subject-yields-first
-through a **hug** and through a `;`-params tail (the two `call_reflow_body` bails — needs the
-HugGroup/outer-group merge in the printer). (4) Arrow/pair tier flatten; sweep the residual
-Runic doc comments in `rules.rs`.
+**Ranked next targets:** (1) Chained postfix on a collection/call subject (`[…][i][j]`,
+`f(x)[i][j]` — the outer `INDEX_EXPR`'s subject is an `INDEX_EXPR`, falls to transparent
+today). (2) Subject-yields-first through a **hug** and through a `;`-params tail (the
+`call_reflow_body`/`collection_reflow_body` bails — needs the HugGroup/outer-group merge in
+the printer). (3) Arrow/pair tier flatten; sweep the residual Runic doc comments in
+`rules.rs`. (4) `=>`-pair value hugging (`Dict("k" => […])` last-arg pair values don't hug —
+would extend `item_is_huggable` through a `BINARY_EXPR` pair RHS; needs a user decision).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -172,6 +177,12 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Call-subject index break** (committed `38ddd40`-follow-up `486c9ca`+`9c01dbf`, `feat`+`test`):
+  extended subject-yields-first to call/curly subjects — `lower_index` accepts the clean
+  `callee ARG_LIST` shape via `call_reflow_body`, folding the arg list's **ungrouped** explode
+  body into the shared outer group (extractions: `collect_arg_list` → `ArgListParts`,
+  `arg_list_explode_body`). Bails (index yields): `;`-params tail, huggable last arg, comments,
+  interleaved token. Gated `call_index_break/` (8 cases incl. 92/93 fence). Gate 85→86.
 - **Collection-subject index break** (committed `38ddd40`, `feat`): user chose (AskUserQuestion)
   **subject yields first** for `<wide-collection>[index]` — new `lower_index` arm folds
   `collection_reflow_body`/`matrix_reflow_body` (pure extractions) + `lower_arg_list(args)` into
