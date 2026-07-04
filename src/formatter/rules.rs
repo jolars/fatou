@@ -1815,23 +1815,37 @@ fn call_reflow_body(node: &SyntaxNode) -> Option<Ir> {
 /// index — the later, inner group — would take the break while a fitting subject
 /// stays flat, leaving a lone index exploded like a stray vector literal.
 ///
-/// Any other subject (an identifier, a chained index, a paren expression) keeps
-/// the transparent lowering, where subject and index are independent groups. A
-/// comment in the subject or the index list bails likewise — those route to the
-/// comment-aware multiline paths unchanged — as does a call whose arg list the
-/// shared group cannot own (see [`call_reflow_body`]).
+/// Any other subject (an identifier, a paren expression) keeps the transparent
+/// lowering, where subject and index are independent groups. A comment in the
+/// subject or the index list bails likewise — those route to the comment-aware
+/// multiline paths unchanged — as does a call whose arg list the shared group
+/// cannot own (see [`call_reflow_body`]).
 fn lower_index(node: &SyntaxNode) -> Ir {
+    match index_reflow_body(node) {
+        Some(body) => Ir::group(body),
+        None => lower_transparent(node),
+    }
+}
+
+/// Build the ungrouped body of a clean index expression `subject[args]` — the
+/// subject's reflow body followed by the index arg list's group — for
+/// [`lower_index`]'s shared outer group. Recursing through a chained-index
+/// subject (`[…][i][j]`, `f(x)[i][j]`) folds the whole chain into one group, so
+/// the innermost subject still yields first and every index rides the closing
+/// bracket, breaking at its own column only if it overflows there. `None` on any
+/// shape the shared group cannot own — the caller falls back to transparent.
+fn index_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut parts = node.children_with_tokens();
     let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
-        return lower_transparent(node);
+        return None;
     };
     let (NodeOrToken::Node(subject), NodeOrToken::Node(args)) = (first, second) else {
         // A token between subject and arg list (stray whitespace) is a shape the
         // parser should reject; keep it verbatim.
-        return lower_transparent(node);
+        return None;
     };
     if args.kind() != SyntaxKind::ARG_LIST || bracket_has_comment(&args) {
-        return lower_transparent(node);
+        return None;
     }
     let body = match subject.kind() {
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES
@@ -1841,12 +1855,10 @@ fn lower_index(node: &SyntaxNode) -> Ir {
         }
         SyntaxKind::MATRIX_EXPR if !matrix_has_comment(&subject) => matrix_reflow_body(&subject),
         SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(&subject),
+        SyntaxKind::INDEX_EXPR => index_reflow_body(&subject),
         _ => None,
-    };
-    let Some(body) = body else {
-        return lower_transparent(node);
-    };
-    Ir::group(Ir::concat([body, lower_arg_list(&args)]))
+    }?;
+    Some(Ir::concat([body, lower_arg_list(&args)]))
 }
 
 /// Lay out a comprehension or generator — `[elem for b… if f]`, `(elem for b…)`,
