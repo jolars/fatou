@@ -93,39 +93,29 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (uniform mixed same-precedence chain break — flatten by tier)
+## Latest session (postfix tail on a breaking call — gate the continuation-aware break)
 
-Third `lower_binary` re-evaluation, closing ranked target #1. The prior session made a *same-operator*
-chain break uniformly but left a residual asymmetry within a precedence tier: a too-wide **mixed**
-chain (`a + b - c + d`, `a * b / c`) still broke only at its **outermost** operator, keeping the
-left-nested inner chain packed. Root cause: the parser folds a same-operator `+`/`*` chain into one
-flat n-ary node but **left-nests a mixed same-tier chain** (`a + b - c` → `(a + b) - c`), and
-`collect_binary_chain` only descended into children whose operator matched by **exact kind**.
-
-**User chose uniform break (flatten the whole tier)** via AskUserQuestion. Generalized the descend
-test from exact-kind equality to **precedence-tier** equality: new `binary_prec_class(kind) ->
-Option<u8>` (the multi-operator left-assoc tiers, mirroring the parser's `infix_binding_power`:
-plus `+ - |` + broadcasts = 0, times `* / \ % &` + broadcasts = 1, shift `<< >> >>>` = 2) and
-`same_break_tier(a, b)` (`a == b || same class`). `collect_binary_chain`'s descend condition is now
-`binary_op_kind(child).is_some_and(|k| same_break_tier(k, op_kind))`. Everything else in
-`lower_binary` is unchanged — the layout loop still reads each token's own text, so mixed operators
-trail correctly (`a +⏎ b -⏎ c`). **Invariants preserved:** a tighter/looser tier subexpr
-(`a + b * c`) keeps a differing class, is pushed whole, stays its own flat group; unicode ops
-collapse to one `UNICODE_OP` kind spanning several tiers, so `binary_prec_class` returns `None`
-for them and they still flatten only on **exact-kind** equality (pre-existing, unchanged).
-**Deliberate consequence disclosed to user:** bitwise `|` shares the plus tier and `&` the times
-tier in Julia, so `a + b | c` and `a * b & c` now flatten too — the honest "same precedence tier"
-rule, not just arithmetic. Gated `mixed_precedence_chain/` (fitting mixed `a + b - c` flat +
-overflowing additive/multiplicative + a mixed-additive chain with flat `*` subexprs). Gate 78→79.
-Full suite + clippy + `fmt --check` clean.
+Closed ranked target #1 (width defects from the continuation-aware `fits`). A wide call that
+explodes one-arg-per-line can carry a short **postfix tail** after its closing bracket: a
+`.field` dot access, a `::T` type annotation, or a `[index]` subscript. The continuation-aware
+`fits` (2026-07-02b) already lays these out correctly — the arg-list group breaks by width and
+the tail rides the `)` line (`).field`, `)::SomeLongTypeName`, `)[index_expr]`) — but the
+capability was ungated (the `type_annotations`/`dot_access`/`call_arg_lists` fixtures only cover
+spacing and flat cases, none a postfix tail on a *breaking* group). **No code change** — this was
+a pure `test(formatter)` gating of already-canonical output. Verified idempotence and
+input-independence (a pre-broken source reflows to the identical form). User chose (AskUserQuestion):
+tail **rides the closing bracket** (Julia postfix convention, not a fresh line), all three tails
+**bundled** in one slug. Gated `postfix_tail_break/` (three lines: dot / `::T` / index, each on a
+call wide enough to force the break). Gate 79→80. Full suite + clippy + `fmt --check` clean.
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) more **width defects from continuation-aware `fits`** — re-probe trailing
-tails (annotations `::T`, `where`, index/call chains) for now-correct breaks to gate. (2) The `//`
-rational and `|>` pipe tiers are single-kind so unaffected; the arrow/pair tier (`=> --> <->`) could
-flatten across kinds too but is rare — revisit only if a real case shows up. (3) Sweep the residual
-Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
+**Ranked next targets:** (1) keep sweeping now-correct **trailing-tail** breaks the continuation-aware
+`fits` produces but that stay ungated — e.g. a postfix tail on a breaking **collection**/**matrix**
+(`[a, b, …].field`), a **chained** postfix (`f(…).a.b`, `f(…)[i][j]`), or a call that breaks *inside*
+an argument tail. (2) The arrow/pair tier (`=> --> <->`) could flatten across kinds like the
+additive/multiplicative tiers but is rare — revisit only on a real case. (3) Sweep the residual Runic
+doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -133,6 +123,9 @@ newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) 
 compound-assign token; (c) **parser** — whitespace before a call/index/curly arg list is
 wrongly accepted (`f (a)`, `a [1]`, `A {T}`). All in `parser-parity/RECAP.md` "Queued next
 targets" + `TODO.md`.
+
+**Note:** stray untracked `tests/oracle/runic-report.txt` (old Runic report format) is leftover
+from the pivot — safe to delete, not regenerated by anything.
 
 ## Standing traps
 
@@ -156,6 +149,15 @@ targets" + `TODO.md`.
 
 ## Earlier sessions
 
+- **Uniform mixed same-precedence chain break — flatten by tier** (committed `7bff2ad`, `feat`):
+  third `lower_binary` re-evaluation. Generalized `collect_binary_chain`'s descend test from
+  exact-kind equality to **precedence-tier** equality (`binary_prec_class` + `same_break_tier`,
+  mirroring the parser's `infix_binding_power`: plus `+ - |` = 0, times `* / \ % &` = 1, shift
+  `<< >> >>>` = 2), so a too-wide *mixed* same-tier chain (`a + b - c`) breaks at every operator,
+  not just the outermost. Tighter/looser tiers stay their own flat group; unicode ops (one
+  `UNICODE_OP` kind) return `None` from `binary_prec_class` and still flatten only on exact-kind.
+  Disclosed consequence: bitwise `|`/`&` share the plus/times tiers, so `a + b | c` folds too.
+  Gated `mixed_precedence_chain/`. Gate 78→79.
 - **Uniform same-operator chain break** (committed `a6592c`-era, `feat`): flattened the
   parser-nested same-operator short-circuit / pipe / pair chains (`&&`/`||`/`|>`/`=>`) into one
   break group via `binary_op_kind` + `collect_binary_chain` (descend on exact-kind match), so a

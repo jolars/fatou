@@ -117,6 +117,11 @@ leverage.
   earlier small group (e.g. `f(x)`) stays flat while only the group that must break
   does. Fixes silent overflow of any construct with a trailing tail — e.g.
   `f(x) where {…} = x` now explodes the braces (`where_break/` gated).
+- [x] Formatter: gated postfix tails on a breaking call (`postfix_tail_break/`).
+  A wide call that explodes one-arg-per-line now carries a trailing `.field`,
+  `::T` annotation, or `[index]` snug on its closing-bracket line (`).field`),
+  the canonical postfix form. Enabled by the continuation-aware `fits`; no code
+  change, pure `test(formatter)` gating of already-correct output.
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
