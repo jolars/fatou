@@ -1274,63 +1274,14 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         return lower_multiline_bracket(node);
     }
 
-    let mut open: Option<String> = None;
-    let mut close: Option<String> = None;
-    let mut items: Vec<Ir> = Vec::new();
-    // The `; …` keyword tail node, if any. Folded into the width-driven group
-    // below (or, if its shape is unmodeled, emitted flat).
-    let mut params_node: Option<SyntaxNode> = None;
-    let mut pending_comma = false;
-    // Whether the *last* positional item is a bracket-delimited construct that can
-    // hug this bracket (see [`arg_is_huggable`]). Drives the trailing-argument hug.
-    let mut last_huggable = false;
-
-    for el in node.children_with_tokens() {
-        match el {
-            NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::LBRACE => {
-                    open = Some(tok.text().to_string())
-                }
-                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
-                    close = Some(tok.text().to_string())
-                }
-                // Source newlines carry no layout information under Tenet 1.
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
-                SyntaxKind::COMMA => {
-                    // A comma before any item (leading) or right after another
-                    // (doubled) is not a clean list.
-                    if pending_comma || items.is_empty() {
-                        return lower_transparent(node);
-                    }
-                    pending_comma = true;
-                }
-                _ => return lower_transparent(node),
-            },
-            NodeOrToken::Node(child) => match child.kind() {
-                SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
-                    // An item after the `;` tail, or a second item with no comma
-                    // between, is unmodeled.
-                    if params_node.is_some() || (!items.is_empty() && !pending_comma) {
-                        return lower_transparent(node);
-                    }
-                    last_huggable = arg_is_huggable(&child);
-                    items.push(lower_node(&child));
-                    pending_comma = false;
-                }
-                // `;`-separated parameters attach directly (the `;` is the
-                // separator), so they must not follow a comma.
-                SyntaxKind::PARAMETERS => {
-                    if pending_comma || params_node.is_some() {
-                        return lower_transparent(node);
-                    }
-                    params_node = Some(child);
-                }
-                _ => return lower_transparent(node),
-            },
-        }
-    }
-
-    let (Some(open), Some(close)) = (open, close) else {
+    let Some(ArgListParts {
+        open,
+        close,
+        mut items,
+        params: params_node,
+        last_huggable,
+    }) = collect_arg_list(node)
+    else {
         return lower_transparent(node);
     };
 
@@ -1415,9 +1366,93 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     arg_list_explode_group(&open, &items, &close)
 }
 
+/// The parsed pieces of a clean argument list: the bracket tokens, the lowered
+/// comma-separated items, the `; …` keyword tail node (if any), and whether the
+/// last positional item can hug the closing bracket (see [`arg_is_huggable`]).
+struct ArgListParts {
+    open: String,
+    close: String,
+    items: Vec<Ir>,
+    params: Option<SyntaxNode>,
+    last_huggable: bool,
+}
+
+/// Walk an `ARG_LIST`'s children into [`ArgListParts`]. `None` on any unmodeled
+/// shape — a leading/doubled comma, two items with no comma between, an item
+/// after the `;` tail, a missing bracket, or an unexpected child or token — the
+/// caller falls back to the verbatim transparent lowering. Source newlines carry
+/// no layout information under Tenet 1 and are skipped like spaces.
+fn collect_arg_list(node: &SyntaxNode) -> Option<ArgListParts> {
+    let mut open: Option<String> = None;
+    let mut close: Option<String> = None;
+    let mut items: Vec<Ir> = Vec::new();
+    let mut params: Option<SyntaxNode> = None;
+    let mut pending_comma = false;
+    let mut last_huggable = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::LPAREN | SyntaxKind::LBRACKET | SyntaxKind::LBRACE => {
+                    open = Some(tok.text().to_string())
+                }
+                SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
+                    close = Some(tok.text().to_string())
+                }
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::COMMA => {
+                    // A comma before any item (leading) or right after another
+                    // (doubled) is not a clean list.
+                    if pending_comma || items.is_empty() {
+                        return None;
+                    }
+                    pending_comma = true;
+                }
+                _ => return None,
+            },
+            NodeOrToken::Node(child) => match child.kind() {
+                SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG => {
+                    // An item after the `;` tail, or a second item with no comma
+                    // between, is unmodeled.
+                    if params.is_some() || (!items.is_empty() && !pending_comma) {
+                        return None;
+                    }
+                    last_huggable = arg_is_huggable(&child);
+                    items.push(lower_node(&child));
+                    pending_comma = false;
+                }
+                // `;`-separated parameters attach directly (the `;` is the
+                // separator), so they must not follow a comma.
+                SyntaxKind::PARAMETERS => {
+                    if pending_comma || params.is_some() {
+                        return None;
+                    }
+                    params = Some(child);
+                }
+                _ => return None,
+            },
+        }
+    }
+
+    Some(ArgListParts {
+        open: open?,
+        close: close?,
+        items,
+        params,
+        last_huggable,
+    })
+}
+
 /// The standard width-driven arg-list group: flat `(a, b, c)`, or one item per
 /// indented line with a broken-only trailing comma when it doesn't fit.
 fn arg_list_explode_group(open: &str, items: &[Ir], close: &str) -> Ir {
+    Ir::group(arg_list_explode_body(open, items, close))
+}
+
+/// The ungrouped body behind [`arg_list_explode_group`] — also folded directly
+/// into [`lower_index`]'s shared outer group (via [`call_reflow_body`]), where
+/// the enclosing group must own the arg list's break opportunities.
+fn arg_list_explode_body(open: &str, items: &[Ir], close: &str) -> Ir {
     let mut inner: Vec<Ir> = vec![Ir::SoftLine];
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -1428,12 +1463,12 @@ fn arg_list_explode_group(open: &str, items: &[Ir], close: &str) -> Ir {
     }
     inner.push(Ir::if_break(",", ""));
 
-    Ir::group(Ir::concat([
+    Ir::concat([
         Ir::text(open),
         Ir::indent(Ir::concat(inner)),
         Ir::SoftLine,
         Ir::text(close),
-    ]))
+    ])
 }
 
 /// Whether an `ARG` wraps exactly one bracket-delimited construct that can hug an
@@ -1584,20 +1619,66 @@ fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     ]))
 }
 
+/// Build the ungrouped body of a call or curly application `callee(args)` /
+/// `Callee{args}` appearing as an index subject — the callee followed by the arg
+/// list's explode body — for [`lower_index`]'s shared outer group, so the call's
+/// break opportunities and the index tail are measured together and the subject
+/// yields first. `None` on any shape whose break points would not fold into the
+/// caller's group, falling back to the transparent path (where the index yields):
+/// an interleaved token between callee and arg list, a comment on either side, a
+/// `; …` keyword tail, or a huggable last argument — a hug's break opportunities
+/// live in the hugged construct's own group, out of the outer group's reach.
+fn call_reflow_body(node: &SyntaxNode) -> Option<Ir> {
+    let mut parts = node.children_with_tokens();
+    let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    let (NodeOrToken::Node(callee), NodeOrToken::Node(args)) = (first, second) else {
+        return None;
+    };
+    let callee_has_comment = callee
+        .descendants_with_tokens()
+        .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT));
+    if args.kind() != SyntaxKind::ARG_LIST || callee_has_comment || bracket_has_comment(&args) {
+        return None;
+    }
+    let ArgListParts {
+        open,
+        close,
+        items,
+        params,
+        last_huggable,
+    } = collect_arg_list(&args)?;
+    if params.is_some() || last_huggable {
+        return None;
+    }
+    let callee_ir = lower_node(&callee);
+    // An empty list never breaks.
+    if items.is_empty() {
+        return Some(Ir::concat([callee_ir, Ir::text(open), Ir::text(close)]));
+    }
+    Some(Ir::concat([
+        callee_ir,
+        arg_list_explode_body(&open, &items, &close),
+    ]))
+}
+
 /// Lay out an index expression whose subject is a bracketed collection or matrix
-/// literal — `[a, b][i]`, `(a, b)[i]`, `{a, b}[i]`, `[a b; c d][i, j]`. The
-/// subject's break opportunities and the index arg list share one outer group, so
-/// the whole postfix is measured flat together and the **subject yields first**
-/// when it overflows: the collection explodes one element (or matrix row) per
-/// line and the index rides the closing bracket, breaking at its own column only
-/// if it still doesn't fit there. Without the shared group the index — the later,
-/// inner group — would take the break while a fitting subject stays flat, leaving
-/// a lone index exploded like a stray vector literal.
+/// literal — `[a, b][i]`, `(a, b)[i]`, `{a, b}[i]`, `[a b; c d][i, j]` — or a
+/// call or curly application — `f(a, b)[i]`, `A{T, S}[i]`. The subject's break
+/// opportunities and the index arg list share one outer group, so the whole
+/// postfix is measured flat together and the **subject yields first** when it
+/// overflows: the collection (or the call's arg list) explodes one element (or
+/// matrix row) per line and the index rides the closing bracket, breaking at its
+/// own column only if it still doesn't fit there. Without the shared group the
+/// index — the later, inner group — would take the break while a fitting subject
+/// stays flat, leaving a lone index exploded like a stray vector literal.
 ///
-/// Any other subject (an identifier, a call, a chained index, a paren expression)
-/// keeps the transparent lowering, where subject and index are independent
-/// groups. A comment in the subject or the index list bails likewise — those
-/// route to the comment-aware multiline paths unchanged.
+/// Any other subject (an identifier, a chained index, a paren expression) keeps
+/// the transparent lowering, where subject and index are independent groups. A
+/// comment in the subject or the index list bails likewise — those route to the
+/// comment-aware multiline paths unchanged — as does a call whose arg list the
+/// shared group cannot own (see [`call_reflow_body`]).
 fn lower_index(node: &SyntaxNode) -> Ir {
     let mut parts = node.children_with_tokens();
     let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
@@ -1618,6 +1699,7 @@ fn lower_index(node: &SyntaxNode) -> Ir {
             collection_reflow_body(&subject)
         }
         SyntaxKind::MATRIX_EXPR if !matrix_has_comment(&subject) => matrix_reflow_body(&subject),
+        SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(&subject),
         _ => None,
     };
     let Some(body) = body else {
