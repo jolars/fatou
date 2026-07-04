@@ -1296,59 +1296,14 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
             // before it (the positionals, the `; `, the earlier keywords, the
             // `name = `) is the flat first-line prefix, and the width-driven
             // group below is the explode fallback.
-            let hug = last_param_huggable.then(|| {
-                let mut prefix: Vec<Ir> = vec![Ir::text(open.clone())];
-                for (i, item) in items.iter().enumerate() {
-                    if i > 0 {
-                        prefix.push(Ir::text(", "));
-                    }
-                    prefix.push(item.clone());
-                }
-                // The `;` snugs to the last positional (or rides the open
-                // bracket), one space before the first keyword.
-                prefix.push(Ir::text("; "));
-                for p in &pitems[..pitems.len() - 1] {
-                    prefix.push(p.clone());
-                    prefix.push(Ir::text(", "));
-                }
-                Ir::concat(prefix)
-            });
+            let hug =
+                last_param_huggable.then(|| Ir::concat(params_hug_prefix(&open, &items, &pitems)));
             let body = hug
                 .is_some()
                 .then(|| pitems.last().expect("hug requires a last item").clone());
             let close_text = Ir::text(close.clone());
 
-            let mut group_parts: Vec<Ir> = vec![Ir::text(open)];
-            let mut inner: Vec<Ir> = Vec::new();
-            if items.is_empty() {
-                // Keyword-only: `;` rides the open bracket, outside the indent.
-                group_parts.push(Ir::text(";"));
-            } else {
-                inner.push(Ir::SoftLine);
-                for (i, item) in items.into_iter().enumerate() {
-                    if i > 0 {
-                        inner.push(Ir::text(","));
-                        inner.push(Ir::Line);
-                    }
-                    inner.push(item);
-                }
-                // `;` snugs to the last positional (no comma, no break before it).
-                inner.push(Ir::text(";"));
-            }
-            for (j, p) in pitems.into_iter().enumerate() {
-                if j > 0 {
-                    inner.push(Ir::text(","));
-                }
-                // A break/space before every keyword, including the first (which
-                // sits after the `;`).
-                inner.push(Ir::Line);
-                inner.push(p);
-            }
-            inner.push(Ir::if_break(",", ""));
-            group_parts.push(Ir::indent(Ir::concat(inner)));
-            group_parts.push(Ir::SoftLine);
-            group_parts.push(Ir::text(close));
-            let grouped = Ir::group(Ir::concat(group_parts));
+            let grouped = Ir::group(arg_list_params_body(&open, items, pitems, &close));
             if let (Some(prefix), Some(body)) = (hug, body) {
                 return Ir::hug_group(prefix, body, close_text, grouped);
             }
@@ -1485,6 +1440,68 @@ fn arg_list_explode_group(open: &str, items: &[Ir], close: &str) -> Ir {
 /// the enclosing group must own the arg list's break opportunities.
 fn arg_list_explode_body(open: &str, items: &[Ir], close: &str) -> Ir {
     bracket_explode_body(open, items, close, Ir::if_break(",", ""))
+}
+
+/// The ungrouped width-driven body of an arg list with a `;` keyword tail: flat
+/// `(a, b; kw = 1)`, or — when the owning group breaks — one item per indented
+/// line with the `;` snug after the last positional (`b;`), each keyword on its
+/// own line, and a broken-only trailing comma; a keyword-only list keeps the `;`
+/// on the open bracket (`f(;`). Grouped by [`lower_arg_list`], or folded raw
+/// into [`lower_index`]'s shared outer group (via [`call_reflow_body`]).
+fn arg_list_params_body(open: &str, items: Vec<Ir>, pitems: Vec<Ir>, close: &str) -> Ir {
+    let mut group_parts: Vec<Ir> = vec![Ir::text(open)];
+    let mut inner: Vec<Ir> = Vec::new();
+    if items.is_empty() {
+        // Keyword-only: `;` rides the open bracket, outside the indent.
+        group_parts.push(Ir::text(";"));
+    } else {
+        inner.push(Ir::SoftLine);
+        for (i, item) in items.into_iter().enumerate() {
+            if i > 0 {
+                inner.push(Ir::text(","));
+                inner.push(Ir::Line);
+            }
+            inner.push(item);
+        }
+        // `;` snugs to the last positional (no comma, no break before it).
+        inner.push(Ir::text(";"));
+    }
+    for (j, p) in pitems.into_iter().enumerate() {
+        if j > 0 {
+            inner.push(Ir::text(","));
+        }
+        // A break/space before every keyword, including the first (which
+        // sits after the `;`).
+        inner.push(Ir::Line);
+        inner.push(p);
+    }
+    inner.push(Ir::if_break(",", ""));
+    group_parts.push(Ir::indent(Ir::concat(inner)));
+    group_parts.push(Ir::SoftLine);
+    group_parts.push(Ir::text(close));
+    Ir::concat(group_parts)
+}
+
+/// The flat first-line prefix of a keyword-tail hug: the open bracket, the
+/// positional args, the `;` (snug to the last positional, or riding the open
+/// bracket when there is none), and every keyword but the last — the hugged
+/// one — each followed by `, `.
+fn params_hug_prefix(open: &str, items: &[Ir], pitems: &[Ir]) -> Vec<Ir> {
+    let mut prefix: Vec<Ir> = vec![Ir::text(open.to_string())];
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            prefix.push(Ir::text(", "));
+        }
+        prefix.push(item.clone());
+    }
+    // The `;` snugs to the last positional (or rides the open bracket), one
+    // space before the first keyword.
+    prefix.push(Ir::text("; "));
+    for p in &pitems[..pitems.len() - 1] {
+        prefix.push(p.clone());
+        prefix.push(Ir::text(", "));
+    }
+    prefix
 }
 
 /// The ungrouped width-driven body of a collection literal — the arg list's
@@ -1662,17 +1679,109 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
 
 /// Build the ungrouped body of a clean collection literal for [`lower_index`],
 /// which folds it into a shared outer group so the subject's break opportunities
-/// and the index tail are measured together. `None` on any shape the reflow does
-/// not fully model, or on a huggable last element — a hug's break opportunities
-/// live in the hugged construct's own group, out of the enclosing group's reach
-/// (the same deferral as [`call_reflow_body`]'s) — the caller falls back to
+/// and the index tail are measured together. A huggable last element becomes an
+/// ungrouped [`Ir::HugGroup`] (see [`reflow_hug`]) so the owning group decides
+/// flat-vs-yield while the hug keeps its own hug-vs-explode tiering. `None` on
+/// any shape the reflow does not fully model — the caller falls back to
 /// transparent.
 fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let parts = collect_collection_items(node)?;
     if parts.last_huggable {
-        return None;
+        let singleton_comma = collection_singleton_comma(node, &parts.items);
+        let close_text = if singleton_comma {
+            format!(",{}", parts.close)
+        } else {
+            parts.close.clone()
+        };
+        let explode =
+            collection_explode_body(&parts.open, &parts.items, &parts.close, singleton_comma);
+        let mut prefix: Vec<Ir> = vec![Ir::text(parts.open.clone())];
+        for item in &parts.items[..parts.items.len() - 1] {
+            prefix.push(item.clone());
+            prefix.push(Ir::text(", "));
+        }
+        return reflow_hug(prefix, &last_list_item(node)?, close_text, explode);
     }
     Some(collection_body(node, parts))
+}
+
+/// The last `ARG`/`KEYWORD_ARG` item of a bracketed list node — the one a
+/// `last_huggable` flag refers to.
+fn last_list_item(node: &SyntaxNode) -> Option<SyntaxNode> {
+    node.children()
+        .filter(|c| matches!(c.kind(), SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG))
+        .last()
+}
+
+/// Assemble an **ungrouped** trailing-item hug for a reflow body: the flat
+/// `prefix` (plus the hugged keyword's `name = ` when the item is a
+/// `KEYWORD_ARG`), the hugged construct's own ungrouped reflow body, the close
+/// bracket, and the ungrouped full-explode fallback. Every break lives at the
+/// owning group's level: when that group is flat the hug renders flat; when it
+/// breaks, the hugged body breaks in place (the subject yields) — or, when even
+/// the hug first line overflows, the printer's [`hug_fits`] check falls back to
+/// the full explode. `None` when the hugged construct has no reflow body (see
+/// [`construct_reflow_body`]).
+fn reflow_hug(mut prefix: Vec<Ir>, last: &SyntaxNode, close: String, explode: Ir) -> Option<Ir> {
+    let (extra_prefix, body) = item_hug_parts(last)?;
+    if let Some(extra) = extra_prefix {
+        prefix.push(extra);
+    }
+    Some(Ir::hug_group(
+        Ir::concat(prefix),
+        body,
+        Ir::text(close),
+        explode,
+    ))
+}
+
+/// Split a huggable list item into the hug's prefix addition and its ungrouped
+/// body: a positional `ARG` contributes no prefix and its sole child's reflow
+/// body; a `KEYWORD_ARG` contributes `name = ` and the value's reflow body.
+/// `None` when the wrapped construct has no reflow body — the caller bails to
+/// transparent, exactly as the pre-hug bails did.
+fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
+    match item.kind() {
+        SyntaxKind::ARG => {
+            let mut children = item.children();
+            let (Some(child), None) = (children.next(), children.next()) else {
+                return None;
+            };
+            Some((None, construct_reflow_body(&child)?))
+        }
+        SyntaxKind::KEYWORD_ARG => {
+            // `item_is_huggable` vetted the clean `name = value` shape: exactly
+            // two child nodes around a bare `=`.
+            let mut children = item.children();
+            let (Some(name), Some(value), None) =
+                (children.next(), children.next(), children.next())
+            else {
+                return None;
+            };
+            let body = construct_reflow_body(&value)?;
+            Some((Some(Ir::concat([lower_node(&name), Ir::text(" = ")])), body))
+        }
+        _ => None,
+    }
+}
+
+/// The ungrouped reflow body of a bracket-delimited construct, for folding into
+/// an enclosing group that must own its break opportunities — an index subject
+/// or a hugged trailing item. `None` for a construct without one (a
+/// comprehension, a comment-bearing literal, an unmodeled shape) — the caller
+/// bails to transparent.
+fn construct_reflow_body(node: &SyntaxNode) -> Option<Ir> {
+    match node.kind() {
+        SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES
+            if !bracket_has_comment(node) =>
+        {
+            collection_reflow_body(node)
+        }
+        SyntaxKind::MATRIX_EXPR if !matrix_has_comment(node) => matrix_reflow_body(node),
+        SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(node),
+        SyntaxKind::INDEX_EXPR => index_reflow_body(node),
+        _ => None,
+    }
 }
 
 /// The width-driven body of a clean collection literal: flat `[a, b]`, or one
@@ -1764,11 +1873,12 @@ fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
 /// `Callee{args}` appearing as an index subject — the callee followed by the arg
 /// list's explode body — for [`lower_index`]'s shared outer group, so the call's
 /// break opportunities and the index tail are measured together and the subject
-/// yields first. `None` on any shape whose break points would not fold into the
-/// caller's group, falling back to the transparent path (where the index yields):
-/// an interleaved token between callee and arg list, a comment on either side, a
-/// `; …` keyword tail, or a huggable last argument — a hug's break opportunities
-/// live in the hugged construct's own group, out of the outer group's reach.
+/// yields first. A `; …` keyword tail folds in via [`arg_list_params_body`]; a
+/// huggable last argument or keyword becomes an ungrouped [`Ir::HugGroup`] (see
+/// [`reflow_hug`]). `None` on any shape whose break points would not fold into
+/// the caller's group, falling back to the transparent path (where the index
+/// yields): an interleaved token between callee and arg list, a comment on
+/// either side, or an unmodeled tail.
 fn call_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut parts = node.children_with_tokens();
     let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
@@ -1790,14 +1900,38 @@ fn call_reflow_body(node: &SyntaxNode) -> Option<Ir> {
         params,
         last_huggable,
     } = collect_arg_list(&args)?;
-    if params.is_some() || last_huggable {
-        return None;
-    }
     let callee_ir = lower_node(&callee);
+
+    if let Some(pnode) = params {
+        let (pitems, last_param_huggable) = collect_param_items(&pnode)?;
+        if last_param_huggable {
+            let prefix = params_hug_prefix(&open, &items, &pitems);
+            let explode = arg_list_params_body(&open, items, pitems, &close);
+            let hug = reflow_hug(prefix, &last_list_item(&pnode)?, close, explode)?;
+            return Some(Ir::concat([callee_ir, hug]));
+        }
+        return Some(Ir::concat([
+            callee_ir,
+            arg_list_params_body(&open, items, pitems, &close),
+        ]));
+    }
+
     // An empty list never breaks.
     if items.is_empty() {
         return Some(Ir::concat([callee_ir, Ir::text(open), Ir::text(close)]));
     }
+
+    if last_huggable {
+        let explode = arg_list_explode_body(&open, &items, &close);
+        let mut prefix: Vec<Ir> = vec![Ir::text(open.clone())];
+        for item in &items[..items.len() - 1] {
+            prefix.push(item.clone());
+            prefix.push(Ir::text(", "));
+        }
+        let hug = reflow_hug(prefix, &last_list_item(&args)?, close, explode)?;
+        return Some(Ir::concat([callee_ir, hug]));
+    }
+
     Some(Ir::concat([
         callee_ir,
         arg_list_explode_body(&open, &items, &close),
@@ -1847,17 +1981,7 @@ fn index_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     if args.kind() != SyntaxKind::ARG_LIST || bracket_has_comment(&args) {
         return None;
     }
-    let body = match subject.kind() {
-        SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES
-            if !bracket_has_comment(&subject) =>
-        {
-            collection_reflow_body(&subject)
-        }
-        SyntaxKind::MATRIX_EXPR if !matrix_has_comment(&subject) => matrix_reflow_body(&subject),
-        SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(&subject),
-        SyntaxKind::INDEX_EXPR => index_reflow_body(&subject),
-        _ => None,
-    }?;
+    let body = construct_reflow_body(&subject)?;
     Some(Ir::concat([body, lower_arg_list(&args)]))
 }
 
