@@ -89,10 +89,10 @@ fn lower_transparent(node: &SyntaxNode) -> Ir {
 }
 
 /// Lower a token in transparent context, trimming trailing horizontal
-/// whitespace the way Runic's `trim_trailing_whitespace` does: a `WHITESPACE`
-/// run sitting immediately before a line break is dropped, and a line
-/// `COMMENT`'s trailing blanks are stripped. String content and block comments
-/// are left verbatim—Runic preserves trailing whitespace inside both.
+/// whitespace: a `WHITESPACE` run sitting immediately before a line break is
+/// dropped, and a line `COMMENT`'s trailing blanks are stripped. String content
+/// and block comments are left verbatim — their interior whitespace is the
+/// user's.
 fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
     match tok.kind() {
         SyntaxKind::WHITESPACE
@@ -504,8 +504,8 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
 /// `PAREN_EXPR` and the comma tuple `TUPLE_EXPR`). The block is `LPAREN`, a
 /// leading statement node, then one `PARAMETERS` node per `; <stmt>` (each
 /// carrying the `SEMICOLON`, optional whitespace, and the statement), then
-/// `RPAREN`. Runic packs each separator tight-left/space-right and strips the
-/// padding flanking the inner expressions: `( a ; b )` → `(a; b)`,
+/// `RPAREN`. Each separator packs tight-left/space-right and the padding
+/// flanking the inner expressions is stripped: `( a ; b )` → `(a; b)`,
 /// `(a;b;)` → `(a; b)` (a trailing `;` produces an arg-less `PARAMETERS` that is
 /// dropped). Every statement is lowered recursively, so a nested block
 /// (`((a;b);c)` → `((a; b); c)`) and each statement's own spacing keep
@@ -616,9 +616,8 @@ fn paren_block_statement(params: &SyntaxNode) -> Result<Option<Ir>, ()> {
 /// normalizing.
 ///
 /// As with [`lower_arrow`], only the clean single-line shape `<lhs> where <rhs>`
-/// is reshaped: an interleaved comment or newline (a multi-line clause Runic may
-/// reflow), error recovery, or a missing operand falls back to the verbatim
-/// transparent lowering.
+/// is reshaped: an interleaved comment or newline, error recovery, or a missing
+/// operand falls back to the verbatim transparent lowering.
 fn lower_where(node: &SyntaxNode) -> Ir {
     let mut operands: Vec<SyntaxNode> = Vec::new();
     let mut kw: Option<SyntaxToken> = None;
@@ -654,9 +653,9 @@ fn lower_where(node: &SyntaxNode) -> Ir {
 /// (`return`) emits the keyword alone.
 ///
 /// Only the clean shape `<kw> [ws] <operand>?` is reshaped. Anything else—an
-/// interleaved comment (Runic preserves the spacing around a trailing comment), a
-/// comma-separated name list (`global a, b`, a bare-tuple shape we don't model),
-/// or any unexpected token—falls back to the verbatim transparent lowering.
+/// interleaved comment, a comma-separated name list (`global a, b`, a bare-tuple
+/// shape we don't model), or any unexpected token—falls back to the verbatim
+/// transparent lowering.
 fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
     // First non-whitespace token is the keyword; everything after it (sans
     // incidental whitespace) is the operand sequence.
@@ -728,14 +727,13 @@ fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
 
 /// Lay out a `using`/`import` statement: the keyword, then a comma-separated list
 /// of `IMPORT_PATH`/`IMPORT_ALIAS` items, optionally `:`-led into a selector list
-/// (`using A: x, y`). Runic spaces every comma (`, `) and packs the selector colon
+/// (`using A: x, y`). Every comma is spaced (`, `) and the selector colon packs
 /// tight-left, space-right (`A: x`); the paths themselves (`A.B`, `.A`, `Foo as
 /// Bar`) are lowered transparently, so their internal tokens pass through verbatim.
 ///
 /// Only the clean alternating shape—item, separator, item, …—is reshaped. A
-/// comment/newline (a multi-line import Runic may reflow), a leading/trailing/
-/// doubled separator, or any unexpected token bails to the lossless transparent
-/// lowering.
+/// comment/newline, a leading/trailing/doubled separator, or any unexpected
+/// token bails to the lossless transparent lowering.
 fn lower_import_stmt(node: &SyntaxNode) -> Ir {
     let mut kw: Option<SyntaxToken> = None;
     let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
@@ -786,8 +784,8 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
 
 /// Lay out an `export`/`public` statement: the keyword, one space, then the
 /// comma-separated name list `", "`-joined (`export a,b` → `export a, b`,
-/// `public foo,bar` → `public foo, bar`). Runic spaces every comma (tight-left,
-/// space-right) and leaves the names themselves alone.
+/// `public foo,bar` → `public foo, bar`). Every comma is spaced (tight-left,
+/// space-right); the names themselves are left alone.
 ///
 /// Unlike the `using`/`import` list, an exported name is **not** always a single
 /// node: it may be an identifier, an operator (`export +, -`), a macro
@@ -795,8 +793,8 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
 /// tracks comma boundaries rather than a strict node/separator alternation: the
 /// first token of each name gets a leading space, and any further tokens of the
 /// *same* name are glued verbatim (no incidental whitespace exists between them).
-/// Bails to the lossless transparent lowering on a comment/newline (a multi-line
-/// list Runic may reflow) or a leading/trailing/doubled comma.
+/// Bails to the lossless transparent lowering on a comment/newline or a
+/// leading/trailing/doubled comma.
 fn lower_export_stmt(node: &SyntaxNode) -> Ir {
     let mut kw: Option<SyntaxToken> = None;
     let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
@@ -882,10 +880,10 @@ fn lower_literal(node: &SyntaxNode) -> Ir {
     }))
 }
 
-/// Zero-pad a hexadecimal integer literal to Runic's fixed widths, or return
-/// `None` to leave it verbatim. Runic's `format_hex_literals` pads the literal
-/// (`0x` prefix included) to the next of the canonical spans `0x` + 2/4/8/16/32
-/// hex chars (the widths of `UInt8`/`UInt16`/`UInt32`/`UInt64`/`UInt128`), by
+/// Zero-pad a hexadecimal integer literal to a fixed type width, or return
+/// `None` to leave it verbatim. The literal (`0x` prefix included) is padded to
+/// the next of the canonical spans `0x` + 2/4/8/16/32 hex chars (the widths of
+/// `UInt8`/`UInt16`/`UInt32`/`UInt64`/`UInt128`), by
 /// inserting `0`s right after the `0x`. The byte span—**not** the digit count—is
 /// what is measured, so underscores count toward the width (`0x1_2` → `0x01_2`).
 ///
@@ -910,9 +908,9 @@ fn normalize_hex(text: &str) -> Option<String> {
     Some(out)
 }
 
-/// Normalize a decimal float literal to the target style's canonical form, or
-/// return `None` to leave it verbatim. The canonical form (matching Runic's
-/// `format_float_literals`) is `[sign] <int>.<frac> [e|f [sign] <exp>]` where:
+/// Normalize a decimal float literal to the canonical form, or return `None` to
+/// leave it verbatim. The canonical form is
+/// `[sign] <int>.<frac> [e|f [sign] <exp>]` where:
 ///
 /// - the integral part has its leading zeros stripped but keeps at least one
 ///   digit (`.5` → `0`, `007.` → `7`);
@@ -924,10 +922,10 @@ fn normalize_hex(text: &str) -> Option<String> {
 ///   with leading zeros stripped from the exponent; and
 /// - a Unicode minus (`−`, U+2212) is normalized to ASCII `-`.
 ///
-/// Underscored and hex (`0x…p…`) floats are left verbatim (Runic skips them too),
-/// as is any token that doesn't parse cleanly into the shape above.
+/// Underscored and hex (`0x…p…`) floats are left verbatim, as is any token that
+/// doesn't parse cleanly into the shape above.
 fn normalize_float(text: &str) -> Option<String> {
-    // Underscored and hex floats are out of scope—Runic skips them as well.
+    // Underscored and hex floats are out of scope.
     if text.contains('_') || text.contains("0x") || text.contains("0X") {
         return None;
     }
@@ -3379,12 +3377,12 @@ fn lower_type_decl(node: &SyntaxNode) -> Ir {
 
 /// Lay out a `module`/`baremodule` definition. The shape mirrors the other block
 /// rules (`[BARE]MODULE_KW SIGNATURE BLOCK END_KW`), but the body is *conditionally*
-/// indented: Runic does **not** indent a module body when the module sits alone at
+/// indented: a module body is **not** indented when the module sits alone at
 /// the file's top level (the file-as-a-module-wrapper convention) or is nested
-/// directly inside a non-module block. It *does* indent when the module shares the
+/// directly inside a non-module block. It *is* indented when the module shares the
 /// top level with a sibling, or when it has a `module` ancestor (a nested module).
-/// See [`module_should_indent`] for the exact predicate, which reproduces Runic's
-/// `indent_toplevel`/`indent_module` decision.
+/// See [`module_should_indent`] for the exact predicate — deterministic on AST
+/// structure alone, so Tenet 1 holds.
 ///
 /// Module bodies are declarations, never `return`-inserted, so there is no
 /// semantic-rewrite risk here (a `function` *inside* the body still would be, so
@@ -3435,7 +3433,7 @@ fn lower_module(node: &SyntaxNode) -> Ir {
     Ir::concat(parts)
 }
 
-/// Whether a module's body is indented, reproducing Runic's decision. A module
+/// Whether a module's body is indented. A module
 /// with a `module` ancestor is always indented. Otherwise it is indented only
 /// when it sits at the file's top level (directly under `ROOT`) alongside at
 /// least one sibling node — a lone top-level module, or a module nested inside a
@@ -3980,8 +3978,7 @@ fn lower_root(root: &SyntaxNode) -> Ir {
 /// becomes its own line, re-indented to the body; a multi-line block comment keeps
 /// its continuation lines verbatim (only the `#=` line takes the body indent). A
 /// **trailing** comment (the line already holds a statement) is attached after it
-/// with a single space — a Tenet-1 divergence: Runic preserves the user's pre-`#`
-/// whitespace (≥1 space) verbatim, but Fatou canonicalizes to exactly one space.
+/// with exactly one space, whatever the source's pre-`#` whitespace was (Tenet 1).
 /// Two statements with no separator, a node after a comment, or any unexpected
 /// token returns `None`.
 fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
@@ -3990,8 +3987,7 @@ fn lower_block_body(block: &SyntaxNode) -> Option<Ir> {
 
 /// The body engine shared by [`lower_block_body`] (which wraps the result in one
 /// indent step) and the module rule (which keeps the body flush at the ambient
-/// column — Runic does not indent a module body unless the module is nested under
-/// another module or shares the file's top level with a sibling). Returns the
+/// column when [`module_should_indent`] says so). Returns the
 /// vertically-broken lines without any indent wrapper, or `None` for an empty
 /// block or any shape this does not model.
 fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
@@ -4060,20 +4056,16 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
 /// Binary operators the target style keeps tight (no surrounding spaces).
 /// Everything else binary gets a space on each side.
 ///
-/// Three operators qualify. The *plain* `^`: Runic always packs it (`a ^ b` →
-/// `a^b`). The range `:` in its two-operand `BINARY_EXPR` form (`a : b` →
-/// `a:b`); Runic packs every range colon tight. And the field-access `.`
+/// Three operators qualify. The *plain* `^` packs tight (`a ^ b` → `a^b`). The
+/// range `:` in its two-operand `BINARY_EXPR` form packs tight (`a : b` →
+/// `a:b`). And the field-access `.`
 /// (`a.b.c`): Julia *requires* it tight — `a . b` is a parse error — so a space
 /// here would emit invalid code. The broadcast `.^` (`DOT_CARET`) is spaced like
 /// other dotted operators, and the *stepped* range `a:b:c` parses as a
 /// `RANGE_EXPR` handled by [`lower_range`].
 ///
-/// Note `&&`/`||` are deliberately **not** here. Runic *preserves* the user's
-/// spacing around them (it normalizes neither `a&&b` nor `a && b`), which Tenet 1
-/// forbids — Fatou must be deterministic. We canonicalize them as spaced (the
-/// idiomatic form, and what Runic yields for already-spaced input); inputs
-/// written tight therefore diverge from Runic and are recorded in
-/// `tests/oracle/runic-blocked.txt`.
+/// Note `&&`/`||` are deliberately **not** here: they canonicalize as spaced
+/// (the idiomatic form), whatever the input's spacing (Tenet 1).
 fn is_tight_binop(kind: SyntaxKind) -> bool {
     matches!(
         kind,
