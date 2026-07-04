@@ -122,6 +122,11 @@ leverage.
   `::T` annotation, or `[index]` snug on its closing-bracket line (`).field`),
   the canonical postfix form. Enabled by the continuation-aware `fits`; no code
   change, pure `test(formatter)` gating of already-correct output.
+- [x] Formatter: gated chained postfix tails on a breaking call
+  (`chained_postfix_break/`). Multiple postfix ops ride the closing-bracket line
+  (`).field.other`, `)[index_expr][second]`, `).method(z)`, `)[idx].field`).
+  Enabled by the continuation-aware `fits`; no code change, pure
+  `test(formatter)` gating.
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
