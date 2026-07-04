@@ -172,7 +172,21 @@ leverage.
   later group — breaks first; comment-bearing subjects or index lists bail.
   Deferred: the same subject-yields policy for call subjects (`f(args)[idx]` in
   the boundary window where `call(…)` + `[` fits but the total overflows) and
-  for chained postfix chains (`[…][i][j]`).
+  for chained postfix chains (`[…][i][j]`). (Call subjects landed next — see the
+  following bullet; chained postfix still open.)
+- [x] Formatter: call-subject index break (`call_index_break/`). Extended the
+  subject-yields-first policy to call and curly subjects: `lower_index` now
+  accepts an `INDEX_EXPR` whose subject is a `CALL_EXPR`/`CURLY_EXPR` of the
+  clean `callee ARG_LIST` shape, folding the callee plus the arg list's ungrouped
+  explode body (new `call_reflow_body`, backed by the extracted
+  `collect_arg_list` parse helper and `arg_list_explode_body`) into the shared
+  outer group. In the boundary window (`f(args)[` fits, total overflows) the
+  call's args now explode and the index rides the closing paren, matching the
+  collection-subject policy. Bails to the transparent path (index yields, as
+  before) on a `;` keyword tail, a comment, an interleaved token, or a huggable
+  last argument — a hug's break opportunities live in the hugged construct's own
+  group, so subject-yields-first there needs printer work (deferred, with the
+  params-tail boundary window).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
