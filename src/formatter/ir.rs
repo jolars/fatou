@@ -30,6 +30,21 @@ pub enum Ir {
     /// only appears in the broken layout, e.g. `IfBreak(",", "")`. Measured as its
     /// *flat* string when deciding whether a group fits.
     IfBreak(Rc<str>, Rc<str>),
+    /// A trailing-argument hug with an explode fallback. Renders as
+    /// `prefix body close` — the hug layout: `prefix` (the open bracket plus the
+    /// leading arguments, flat) rides the current line and `body` (the hugged
+    /// last argument) breaks in place via its own group — when the hug layout's
+    /// *first line* fits: `prefix` measured strictly flat, then `body` up to its
+    /// first break opportunity. Otherwise renders `explode`, the standard
+    /// width-driven one-item-per-line group over all items, which is guaranteed
+    /// to break whenever the hug is rejected (the hug measure never exceeds the
+    /// flat measure).
+    HugGroup {
+        prefix: Rc<Ir>,
+        body: Rc<Ir>,
+        close: Rc<Ir>,
+        explode: Rc<Ir>,
+    },
 }
 
 impl Ir {
@@ -51,5 +66,14 @@ impl Ir {
 
     pub fn if_break(broken: impl Into<Rc<str>>, flat: impl Into<Rc<str>>) -> Ir {
         Ir::IfBreak(broken.into(), flat.into())
+    }
+
+    pub fn hug_group(prefix: Ir, body: Ir, close: Ir, explode: Ir) -> Ir {
+        Ir::HugGroup {
+            prefix: Rc::new(prefix),
+            body: Rc::new(body),
+            close: Rc::new(close),
+            explode: Rc::new(explode),
+        }
     }
 }

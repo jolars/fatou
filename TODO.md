@@ -140,11 +140,24 @@ leverage.
   `map(f, [\n …\n])`. Leading args render flat in the prefix. Implemented in
   `lower_arg_list` (`arg_is_huggable` + drop the wrapping group/outer trailing
   comma for a huggable last item); the continuation-aware `fits` glues the openers
-  and stacks the closers, so no printer change. **Deferred (next target):** the
-  *explode fallback* — when even the hug prefix overflows `line_width` (very wide
-  leading args), it still hugs with a too-long first line rather than exploding
-  everything one-per-line. Needs a `ConditionalGroup`/`group_hug` printer primitive
-  (cf. arity's `build_arg_hug`).
+  and stacks the closers, so no printer change. (The explode fallback landed next —
+  see the following bullet.)
+- [x] Formatter: hug explode fallback (`arg_hug_explode/`). When even the hug
+  layout's first line — the open bracket, the flat leading args, and the hugged
+  construct's opening bracket — overflows `line_width`, the call now falls back to
+  the standard explode group (one item per line, broken-only trailing comma, the
+  last item free to break further) instead of hugging with a too-long first line.
+  New `Ir::HugGroup { prefix, body, close, explode }` primitive; the printer's
+  `hug_fits` measures the hug first line by seeding the shared `fits_stack` loop
+  with the body in Break mode (its first break opportunity ends the measured
+  line), so no second measurement engine. In `fits`-trailing content a `HugGroup`
+  walks its hug parts — byte-identical to the old bare concat, so no existing
+  fixture moved. Nested hugs measure conservatively through the inner prefix to
+  the innermost opener (user choice): overflow explodes the outer call, and the
+  inner list re-decides at its printed column (it may hug there or explode too).
+  Deferred: arity's `hug_excuse_overflow` (an overwide unbreakable leading atom
+  should not force the explode, since breaking buys no width) — add inside
+  `hug_fits` if a motivating fixture appears.
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1

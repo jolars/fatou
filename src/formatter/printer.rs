@@ -71,6 +71,24 @@ pub fn print(doc: &Ir, style: FormatStyle) -> String {
                 out.push_str(s);
                 col += s.chars().count();
             }
+            Ir::HugGroup {
+                prefix,
+                body,
+                close,
+                explode,
+            } => {
+                // Hug when the hug layout's first line fits; otherwise fall back
+                // to the standard explode group (re-measured by the normal Group
+                // arm — it always breaks here, since the hug measure never
+                // exceeds its flat measure).
+                if hug_fits(width.saturating_sub(col), prefix, body, close, &stack) {
+                    stack.push((indent, mode, close));
+                    stack.push((indent, mode, body));
+                    stack.push((indent, mode, prefix));
+                } else {
+                    stack.push((indent, mode, explode));
+                }
+            }
         }
     }
 
@@ -97,7 +115,6 @@ fn newline(out: &mut String, indent: usize) -> usize {
 /// forced newline *inside* the group's own flat content instead means it cannot sit
 /// flat, so the group must break.
 fn fits(remaining: usize, inner: &Ir, rest: &[(usize, Mode, &Ir)]) -> bool {
-    let mut remaining = remaining as isize;
     // Work stack of (in_group, mode, node). Push `rest` bottom-first (it is itself
     // a pop-from-end stack, so its last element prints next), then `inner` on top.
     let mut stack: Vec<(bool, Mode, &Ir)> = Vec::with_capacity(rest.len() + 1);
@@ -105,7 +122,36 @@ fn fits(remaining: usize, inner: &Ir, rest: &[(usize, Mode, &Ir)]) -> bool {
         stack.push((false, *mode, ir));
     }
     stack.push((true, Mode::Flat, inner));
+    fits_stack(remaining as isize, stack)
+}
 
+/// Whether the hug layout of a [`HugGroup`](Ir::HugGroup) has a fitting first
+/// line: `prefix` measured strictly flat (a forced break inside a leading
+/// argument forbids hugging), then `body` up to its first break opportunity —
+/// where its own group would end the line — and, only if the body cannot break,
+/// `close` plus the trailing content still pending on the print stack.
+fn hug_fits(
+    remaining: usize,
+    prefix: &Ir,
+    body: &Ir,
+    close: &Ir,
+    rest: &[(usize, Mode, &Ir)],
+) -> bool {
+    let mut stack: Vec<(bool, Mode, &Ir)> = Vec::with_capacity(rest.len() + 3);
+    for (_, mode, ir) in rest {
+        stack.push((false, *mode, ir));
+    }
+    stack.push((false, Mode::Flat, close));
+    // Break mode: the body's first `Line`/`SoftLine` ends the measured line, so
+    // only the hugged construct's opening bracket counts toward the first line.
+    stack.push((false, Mode::Break, body));
+    stack.push((true, Mode::Flat, prefix));
+    fits_stack(remaining as isize, stack)
+}
+
+/// The shared measurement loop behind [`fits`] and [`hug_fits`], walking a
+/// prepared `(in_group, mode, node)` stack.
+fn fits_stack(mut remaining: isize, mut stack: Vec<(bool, Mode, &Ir)>) -> bool {
     while let Some((in_group, mode, ir)) = stack.pop() {
         if remaining < 0 {
             return false;
@@ -145,6 +191,19 @@ fn fits(remaining: usize, inner: &Ir, rest: &[(usize, Mode, &Ir)]) -> bool {
             Ir::IfBreak(broken, flat) => {
                 let s = if mode == Mode::Break { broken } else { flat };
                 remaining -= s.chars().count() as isize;
+            }
+            // Measured as its hug branch: flat, the hug's width equals the
+            // explode group's flat width; in trailing break-mode content this
+            // walks exactly the parts the hug layout would print.
+            Ir::HugGroup {
+                prefix,
+                body,
+                close,
+                ..
+            } => {
+                stack.push((in_group, mode, close));
+                stack.push((in_group, mode, body));
+                stack.push((in_group, mode, prefix));
             }
         }
     }
@@ -222,5 +281,79 @@ mod tests {
             indent_width: 4,
         };
         assert_eq!(print(&trailing_comma_doc(), style), "(\n    a,\n    b,\n)");
+    }
+
+    fn hug_doc() -> Ir {
+        // f(aa, [x, y]) with a huggable last argument, as `lower_arg_list`
+        // builds it: prefix `(aa, `, body the list's own group, explode the
+        // standard width-driven group over both items.
+        let body = || {
+            Ir::group(Ir::concat([
+                Ir::text("["),
+                Ir::indent(Ir::concat([
+                    Ir::SoftLine,
+                    Ir::text("x,"),
+                    Ir::Line,
+                    Ir::text("y"),
+                ])),
+                Ir::SoftLine,
+                Ir::text("]"),
+            ]))
+        };
+        let explode = Ir::group(Ir::concat([
+            Ir::text("("),
+            Ir::indent(Ir::concat([
+                Ir::SoftLine,
+                Ir::text("aa"),
+                Ir::text(","),
+                Ir::Line,
+                body(),
+                Ir::if_break(",", ""),
+            ])),
+            Ir::SoftLine,
+            Ir::text(")"),
+        ]));
+        Ir::concat([
+            Ir::text("f"),
+            Ir::hug_group(
+                Ir::concat([Ir::text("("), Ir::text("aa"), Ir::text(", ")]),
+                body(),
+                Ir::text(")"),
+                explode,
+            ),
+        ])
+    }
+
+    #[test]
+    fn hug_group_stays_flat_when_it_fits() {
+        let style = FormatStyle {
+            line_width: 80,
+            indent_width: 4,
+        };
+        assert_eq!(print(&hug_doc(), style), "f(aa, [x, y])");
+    }
+
+    #[test]
+    fn hug_group_hugs_when_first_line_fits() {
+        // Flat (13) overflows, but the hug first line `f(aa, [` (7) fits.
+        let style = FormatStyle {
+            line_width: 8,
+            indent_width: 4,
+        };
+        assert_eq!(print(&hug_doc(), style), "f(aa, [\n    x,\n    y\n])");
+    }
+
+    #[test]
+    fn hug_group_explodes_when_first_line_overflows() {
+        // Even `f(aa, [` (7) overflows: the explode fallback breaks one item
+        // per line, the list free to break further on its own.
+        let style = FormatStyle {
+            line_width: 6,
+            indent_width: 4,
+        };
+        assert_eq!(
+            print(&hug_doc(), style),
+            "f(\n    aa,\n    [\n        x,\n        y\n    ],\n)"
+        );
     }
 }

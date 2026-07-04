@@ -93,46 +93,58 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (argument hugging — sole + trailing bracket construct)
+## Latest session (hug explode fallback — `Ir::HugGroup`)
 
-First engine-behavior change since the postfix sweeps, and the first that *changes* canonical form
-(not pure gating). User steered the target from "gate nested_call_break as-is" to **argument
-hugging, arity-style** (they pointed at arity's `build_arg_hug`). When the **last positional
-argument** of a call/index arg list is a bracket-delimited construct — call, index, curly, vector,
-tuple, braces, comprehension/generator, matrix — it now **hugs** the enclosing bracket instead of
-exploding onto its own doubly-indented line: `outer(inner(\n …\n))`, `f([\n …\n])`, `map(f, [\n …\n])`.
-Leading args render flat in the prefix; the hugged construct carries its own width-driven group, so
-it stays flat when it fits and otherwise breaks in place — opener riding the line, closers stacking.
+Closed the previous session's ranked #1: when even the hug layout's **first line** (open bracket +
+flat leading args + the hugged construct's opening bracket) overflows `line_width`, the call now
+**explodes** one-item-per-line (the standard group, broken-only trailing comma, last item free to
+break further) instead of hugging with a too-long first line. Second printer-engine change
+post-pivot.
 
-**No printer change.** The whole feature is one branch in `lower_arg_list`: when the last item is
-huggable (`arg_is_huggable` — checks the sole `ARG` child's kind), emit `open + [leading flat,
-comma-joined] + last_item + close` with **no wrapping group and no outer trailing comma**. Fatou's
-continuation-aware `fits` already glues the openers and stacks the closers (it accounts for the
-trailing `))` on the print stack), so flat-vs-hug falls out for free and recursion (`f(g(h(…)))`)
-hugs at every level. Non-huggable last args (atoms, binary exprs) keep the existing width-driven
-explode group untouched — verified via the `process(…, last)` boundary case.
+**Design (differs from arity's — the crux):** arity's `Group{hug}` measurement stops *successfully*
+at the first `HardLine`, which works there because an R trailing block always carries forced
+breaks. Fatou's hugged item is a width-driven group with **no** forced break — measured flat it is
+just wide text, so arity's trick would reject hugging exactly where hugging matters. Instead: new
+`Ir::HugGroup { prefix, body, close, explode }` (ir.rs) + printer `hug_fits`, which seeds the
+now-shared `fits_stack` loop (extracted from `fits`, byte-identical) with `(true, Flat, prefix)`,
+`(false, Break, body)`, `(false, Flat, close)`, then the trailing stack. In Break mode the body's
+first `Line`/`SoftLine` **ends the measured line** (existing `fits` semantics), so the measure is
+exactly the hug first line; a body with no break opportunity (`g()`) falls through to close +
+continuation. Print arm: hug fits → push close/body/prefix with the carried mode (identical
+expansion to the old bare concat); else push `explode`, re-measured by the normal Group arm — it
+always breaks there, since the hug measure never exceeds the flat measure. In `fits_stack`, a
+`HugGroup` in *trailing* content walks its hug parts — **byte-identical to the old bare concat**,
+which is why zero gated fixtures moved (the postfix/dot-access fixtures measure calls in trailing
+position).
 
-Zero regressions (no existing gated fixture had a wide last-arg-huggable case). Verified idempotence
-+ input-independence (a pre-broken non-hug source reflows to the hug form). Gated `arg_hug/` (six
-cases: sole call, deep nesting, array, tuple, `map` trailing-arg, non-hug boundary). Gate 82→83.
-Full suite (46 unit + all integration) + clippy + `fmt --check` clean.
+**Nested hugs (user choice via AskUserQuestion): conservative.** The hug measure walks a nested
+hug's prefix flat through to the innermost opener; overflow explodes the *outer* call, and the
+inner list re-decides at its printed column — it may hug there (`wrapped = outer_wrapper(\n
+inner_builder(…, [\n row_data,\n ]),\n)`) or explode too (`deep`). The optimistic
+outer-hug/inner-explode variant was declined (it would need the explode branch expanded in
+Break-mode fits contexts, risking silent flips in the gated postfix fixtures); revisit with a
+fixture if wanted — a two-line change in the `fits_stack` arm.
 
-**Deferred — the explode fallback (ranked #1 next):** when even the hug *prefix* overflows
-`line_width` (pathologically wide leading args, `f(long1, long2, long3, [list])`), it still hugs
-with a too-long first line rather than exploding everything one-per-line. This is arity's harder
-half — it needs a `ConditionalGroup`/`group_hug` printer primitive (measure the prefix up to the
-trailing opener; if it fits → hug, else → explode). The user accepted this limitation for the
-landing. All *common* cases are canonical. Also not covered: keyword-arg values (`f(x, y = [list])`)
-and collection-element hugging (`[f(…)]`) — both natural follow-ons if wanted.
+`rules.rs`: the hug branch now builds `hug_group(prefix, body, close, explode)`; the fall-through
+explode group was extracted as `arg_list_explode_group` so hug fallback and non-hug layout are the
+same doc by construction. Three printer unit tests (flat / hug / explode on one doc). Gated
+`arg_hug_explode/` (7 cases: prefix-overflow explode, 92/93 boundary fence pair — the hugged first
+line is *exactly* 92 — map-style, nested outer-explode+inner-hug, nested both-explode, explode with
+the last item breaking further). Gate 83→84. Verified idempotence + input-independence (a
+pre-exploded hug source reflows to the hug). Full suite + clippy + fmt clean.
+
+**Deferred:** arity's `hug_excuse_overflow` (an overwide *unbreakable* leading atom shouldn't force
+explode — breaking buys no width, only lines); addable entirely inside `hug_fits`, no IR change.
+Still open from last session: keyword-arg-value hugging (`f(x, y = [list])`) and collection-element
+hugging (`[f(…)]`).
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) the **explode fallback** above (ConditionalGroup primitive) — completes
-hugging to arity fidelity. (2) The deferred `<wide-collection>[index]` subject-vs-index break — needs
-a layout decision (should the bracket *subject* break before its index?). (3) The arrow/pair tier
-(`=> --> <->`) could flatten across kinds like the additive/multiplicative tiers but is rare. (4)
-Sweep the residual Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites
-`runic-blocked.txt`).
+**Ranked next targets:** (1) the deferred `<wide-collection>[index]` subject-vs-index break — needs
+a layout decision (should the bracket *subject* break before its index?). (2) Keyword-arg-value /
+collection-element hugging (natural hug follow-ons). (3) The arrow/pair tier (`=> --> <->`) could
+flatten across kinds like the additive/multiplicative tiers but is rare. (4) Sweep the residual
+Runic doc comments in `rules.rs` (`is_tight_binop`'s doc still cites `runic-blocked.txt`).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -166,6 +178,12 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Argument hugging — trailing bracket construct** (committed `9ea2e38`, `feat`): when the last
+  positional arg of a call/index arg list is bracket-delimited (`arg_is_huggable`), it hugs the
+  enclosing bracket — `outer(inner(\n …\n))`, `map(f, [\n …\n])` — via a bare concat in
+  `lower_arg_list` (no wrapping group, no outer trailing comma); the continuation-aware `fits`
+  glued openers and stacked closers, so no printer change. Gated `arg_hug/`. Gate 82→83.
+  (Superseded this session: the bare concat became `Ir::HugGroup` with the explode fallback.)
 - **Postfix tail on a breaking bracket group** (committed, `test`): gated the non-call breaking group
   carrying a postfix tail — a wide vector/tuple (one-per-line) or matrix (one-row-per-line) rides
   `.field` / `::T` / chained `.field.other` on its closing-bracket line. Continuation-aware `fits`

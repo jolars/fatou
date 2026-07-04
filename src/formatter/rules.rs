@@ -1397,30 +1397,33 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // arguments render flat in the prefix; the hugged argument carries its own
     // width-driven group, so it stays flat when it fits and otherwise breaks in
     // place — its opening bracket riding this line, its closing bracket stacking
-    // with ours. There is no wrapping group and no outer trailing comma: the
-    // hugged construct's own group makes the only break decision.
+    // with ours. When even the hug layout's first line (the prefix plus the
+    // hugged construct's opening bracket) overflows `line_width`, the printer
+    // falls back to the standard explode group, one item per line.
     if last_huggable {
-        let mut parts: Vec<Ir> = vec![Ir::text(open)];
-        let last = items.len() - 1;
-        for (i, item) in items.into_iter().enumerate() {
-            parts.push(item);
-            if i < last {
-                parts.push(Ir::text(", "));
-            }
+        let explode = arg_list_explode_group(&open, &items, &close);
+        let body = items.pop().expect("hug requires a last item");
+        let mut prefix: Vec<Ir> = vec![Ir::text(open)];
+        for item in items {
+            prefix.push(item);
+            prefix.push(Ir::text(", "));
         }
-        parts.push(Ir::text(close));
-        return Ir::concat(parts);
+        return Ir::hug_group(Ir::concat(prefix), body, Ir::text(close), explode);
     }
 
-    // A width-driven group: flat `(a, b, c)`, or one item per indented line with
-    // a broken-only trailing comma when it doesn't fit.
+    arg_list_explode_group(&open, &items, &close)
+}
+
+/// The standard width-driven arg-list group: flat `(a, b, c)`, or one item per
+/// indented line with a broken-only trailing comma when it doesn't fit.
+fn arg_list_explode_group(open: &str, items: &[Ir], close: &str) -> Ir {
     let mut inner: Vec<Ir> = vec![Ir::SoftLine];
-    for (i, item) in items.into_iter().enumerate() {
+    for (i, item) in items.iter().enumerate() {
         if i > 0 {
             inner.push(Ir::text(","));
             inner.push(Ir::Line);
         }
-        inner.push(item);
+        inner.push(item.clone());
     }
     inner.push(Ir::if_break(",", ""));
 
