@@ -70,8 +70,9 @@ Tenet 1.
   kwarg value, incl. the `;` tail — + explode fallback),
   `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
   `collect_collection_items`/`collection_body`, trailing-element hug),
-  `lower_index` (collection/matrix/call/curly subject
-  + index share one group — subject yields first; hug or `;`-tail subjects bail),
+  `lower_index` (collection/matrix/call/curly/chained-index subject
+  + index share one group via the recursive `index_reflow_body` — innermost subject
+  yields first; hug or `;`-tail subjects and name-rooted chains bail),
   `lower_bare_tuple`, curly type-params, named tuples.
 - Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
   `lower_multiline_bracket`, `lower_matrix`, `lower_paren`/`lower_paren_block`,
@@ -96,54 +97,51 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (keyword-arg-value + collection-element hugging)
+## Latest session (chained-index break)
 
-Closed ranked target #1. Two AskUserQuestion decisions (both "hug", previews accepted
-verbatim): (1) a trailing `KEYWORD_ARG` whose value is a bracket construct hugs the call
-bracket — the name and `=` stay on the first line (`f(x, kw = [` … `])`) — in **both** the
-comma position and the `;` keyword tail (`optimize(obj; settings = build(` … `))`,
-keyword-only `setup(; layers = [` included); (2) the last element of a collection literal
-hugs its bracket (`[a, b, f(` … `)]`), covering named-tuple values (`(name = a, values = [`),
-braces, and the one-tuple, whose semantic comma joins the stacked closers (`),)`).
+Closed ranked target #1: chained postfix on a collection/call subject (`[…][i][j]`,
+`f(x)[i][j]`), where the outer `INDEX_EXPR`'s subject is an `INDEX_EXPR` and the chain
+fell to transparent (the **last** index took the break like a stray vector literal while
+the wide subject stayed flat). One AskUserQuestion decision: **innermost subject yields
+first**, the recursive extension of the single-index rule (preview accepted verbatim) —
+the whole chain shares one outer group, the innermost subject explodes, and every index
+rides the closing bracket, breaking at its own column only if it still overflows there
+(a broken mid-chain index's later siblings ride *its* closer).
 
-**Implementation (rules.rs only, no printer/IR change):**
+**Implementation (rules.rs only, pure refactor + one match arm):** `lower_index`'s
+body-building moved into the recursive `index_reflow_body(node) -> Option<Ir>` (clean
+`subject ARG_LIST` shape check + the subject-kind dispatch + `concat(body,
+lower_arg_list(args))`, ungrouped); `lower_index` is now `index_reflow_body(node)
+.map(Ir::group)` with the transparent fallback. The subject dispatch gained
+`SyntaxKind::INDEX_EXPR => index_reflow_body(&subject)` — that one arm is the feature.
+All bails propagate up from the inner subjects (`None` bubbles → whole chain
+transparent): comments anywhere, `;` keyword tail, huggable last argument/element, an
+interleaved token. **Name-rooted chains (`table[i][j]`) stay transparent** — no subject
+body to explode, so index-yields as today; extending subject-yields to the inner *arg
+list* of a name-rooted chain would be a new decision, not taken.
 
-- `arg_is_huggable` → `item_is_huggable` + extracted `huggable_kind`. A `KEYWORD_ARG` is
-  huggable only in the clean `name = value` shape (exactly two child nodes, only `=`/spaces
-  between — a comment/newline would give a transparent body the hug can't own).
-- Comma position needed nothing else: the existing hug path pops the last item as the hug
-  body; a kwarg body is `concat(name, " = ", group(value))` and `hug_fits` walks it in Break
-  mode, so the measured first line ends at the value's own opening bracket. It just worked.
-- `;` tail: `collect_param_items` now returns `(Vec<Ir>, bool)` (last param's huggability);
-  the params branch of `lower_arg_list` builds the flat hug prefix — open + positionals
-  `, `-joined + `; ` + earlier keywords — with the standard params group as the explode
-  fallback (built once, passed as `Ir::hug_group`'s fourth arm).
-- Collections: the walk extracted to `collect_collection_items -> Option<CollectionParts>`;
-  `lower_collection` gained the hug arm; `collection_body` builds the non-hug group body;
-  `collection_reflow_body` (the `lower_index` subject path) **bails on a huggable last
-  element** — the same deferral as `call_reflow_body`, so `[a, b, f(x)][i]` takes the
-  transparent path where the subject's HugGroup decides at its own column and the index
-  rides `)]` (locked in the fixture: the composition is already pleasant).
-- Explode bodies unified: `arg_list_explode_body` and the new `collection_explode_body`
-  (singleton-comma aware) both delegate to `bracket_explode_body(open, items, close,
-  trailing)`.
+Regimes locked in `chained_index_break/` (9 cases: 92/93 fence pair, collection + call +
+curly + matrix subjects with two riding indexes, an overflowing mid-chain index breaking
+at its own column with `[z]` riding its closer, a triple-index call chain, pre-broken
+sources collapsing to flat and reflowing to the canon). Gate 88→89, zero regressions;
+clippy + fmt clean.
 
-Regimes locked in `kwarg_hug/` (11 cases: 92/93 fence pair, call + vector values, `;` tail
-with positionals / keyword-only / multi-kwarg, pre-broken source reflowing to the hug,
-prefix-overflow explode fallback with `;` snug, non-last huggable kwarg not hugging, small
-flat) and `collection_hug/` (11 cases: 92/93 fence pair, vector/tuple/named-tuple/braces,
-singleton `),)`, pre-broken source collapsing to the hug, prefix-overflow explode, huggable
-subject under an index, small flat). Gate 86→88, zero regressions; clippy + fmt clean.
+**Not gated (checked, ugly, deferred):** a chain whose innermost subject has a huggable
+last element (`[aa, bb, make_thing(…)][idx][jdx]`) bails transparent and the *last* index
+explodes — unlike the single-index hug composition locked in `collection_hug/`, this one
+is not pleasant. It's the known hug/outer-group printer-merge deferral (ranked #1 below);
+kept out of the fixture.
 
 **Parser/lexer blocker surfaced:** none.
 
-**Ranked next targets:** (1) Chained postfix on a collection/call subject (`[…][i][j]`,
-`f(x)[i][j]` — the outer `INDEX_EXPR`'s subject is an `INDEX_EXPR`, falls to transparent
-today). (2) Subject-yields-first through a **hug** and through a `;`-params tail (the
-`call_reflow_body`/`collection_reflow_body` bails — needs the HugGroup/outer-group merge in
-the printer). (3) Arrow/pair tier flatten; sweep the residual Runic doc comments in
-`rules.rs`. (4) `=>`-pair value hugging (`Dict("k" => […])` last-arg pair values don't hug —
-would extend `item_is_huggable` through a `BINARY_EXPR` pair RHS; needs a user decision).
+**Ranked next targets:** (1) Subject-yields-first through a **hug** and through a
+`;`-params tail (the `call_reflow_body`/`collection_reflow_body` bails — needs the
+HugGroup/outer-group merge in the printer; now also motivated by the ugly chained-hug
+case above). (2) Arrow/pair tier flatten; sweep the residual Runic doc comments in
+`rules.rs`. (3) `=>`-pair value hugging (`Dict("k" => […])` last-arg pair values don't
+hug — would extend `item_is_huggable` through a `BINARY_EXPR` pair RHS; needs a user
+decision). (4) Name-rooted chain layout (`table[wide args][k]` — should the inner arg
+list explode and `[k]` ride? needs a user decision).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -177,6 +175,15 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Kwarg-value + collection-element hugging** (committed `ae30353`+`7aa51be`, `feat`+`test`):
+  trailing `KEYWORD_ARG` bracket values hug the call bracket in both comma position and the
+  `;` keyword tail (hug prefix + params-group explode fallback via `Ir::hug_group`'s fourth
+  arm); a collection literal's last element hugs too (named tuples, braces, one-tuple `),)`).
+  `arg_is_huggable` → `item_is_huggable`/`huggable_kind`; `collect_collection_items`/
+  `collection_body` extracted; explode bodies unified on `bracket_explode_body`;
+  `collection_reflow_body` bails on a huggable last element (single-index transparent
+  composition locked as pleasant in the fixture). Gated `kwarg_hug/` + `collection_hug/`
+  (11 cases each). Gate 86→88.
 - **Call-subject index break** (committed `38ddd40`-follow-up `486c9ca`+`9c01dbf`, `feat`+`test`):
   extended subject-yields-first to call/curly subjects — `lower_index` accepts the clean
   `callee ARG_LIST` shape via `call_reflow_body`, folding the arg list's **ungrouped** explode

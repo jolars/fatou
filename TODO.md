@@ -172,8 +172,8 @@ leverage.
   later group — breaks first; comment-bearing subjects or index lists bail.
   Deferred: the same subject-yields policy for call subjects (`f(args)[idx]` in
   the boundary window where `call(…)` + `[` fits but the total overflows) and
-  for chained postfix chains (`[…][i][j]`). (Call subjects landed next — see the
-  following bullet; chained postfix still open.)
+  for chained postfix chains (`[…][i][j]`). (Both landed next — see the
+  following bullets.)
 - [x] Formatter: call-subject index break (`call_index_break/`). Extended the
   subject-yields-first policy to call and curly subjects: `lower_index` now
   accepts an `INDEX_EXPR` whose subject is a `CALL_EXPR`/`CURLY_EXPR` of the
@@ -200,6 +200,15 @@ leverage.
   The index-subject path (`collection_reflow_body`) bails on a huggable last
   element like `call_reflow_body` does — subject-yields-first through a hug
   still needs the printer merge (deferred, same bullet as the call bail).
+- [x] Formatter: chained-index break (`chained_index_break/`). Extended the
+  subject-yields-first policy through chained index expressions (`[…][i][j]`,
+  `f(x)[i][j]`): `lower_index`'s subject dispatch moved into the recursive
+  `index_reflow_body`, which accepts an `INDEX_EXPR` subject and folds the whole
+  chain into one shared outer group. Broken, the innermost subject explodes and
+  every index rides the closing bracket, breaking at its own column only if it
+  still overflows there. Bails (whole chain transparent, index yields) propagate
+  from the inner subjects: comments, `;` keyword tails, huggable last
+  arguments/elements, name-rooted chains (no subject body to explode).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
