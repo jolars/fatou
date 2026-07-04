@@ -127,6 +127,12 @@ leverage.
   (`).field.other`, `)[index_expr][second]`, `).method(z)`, `)[idx].field`).
   Enabled by the continuation-aware `fits`; no code change, pure
   `test(formatter)` gating.
+- [x] Formatter: gated postfix tails on a breaking bracket group
+  (`bracket_postfix_break/`). A wide collection/tuple (one-per-line) or matrix
+  (one-row-per-line) rides `.field`, `::T`, or a chained `.field.other` on its
+  closing-bracket line. Enabled by the continuation-aware `fits`; no code change,
+  pure `test(formatter)` gating. Deferred: `<wide-collection>[index]` breaks the
+  index arg-list instead of the collection subject (needs a layout decision).
 - [~] Width-driven reflow engine: make `line_width` actually drive breaking
   (collapse when it fits, break + indent when it doesn't), replacing the current
   source-break mirroring in `rules.rs`. The prerequisite for true Tenet-1
