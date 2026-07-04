@@ -1290,7 +1290,34 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // positional (`b;`) and each keyword drops to its own line, or — with no
     // positional args — the `;` rides the open bracket (`f(;`).
     if let Some(pnode) = params_node {
-        if let Some(pitems) = collect_param_items(&pnode) {
+        if let Some((pitems, last_param_huggable)) = collect_param_items(&pnode) {
+            // Trailing-parameter hug (mirrors the positional hug below): the
+            // last keyword's bracket value hugs this bracket — everything
+            // before it (the positionals, the `; `, the earlier keywords, the
+            // `name = `) is the flat first-line prefix, and the width-driven
+            // group below is the explode fallback.
+            let hug = last_param_huggable.then(|| {
+                let mut prefix: Vec<Ir> = vec![Ir::text(open.clone())];
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        prefix.push(Ir::text(", "));
+                    }
+                    prefix.push(item.clone());
+                }
+                // The `;` snugs to the last positional (or rides the open
+                // bracket), one space before the first keyword.
+                prefix.push(Ir::text("; "));
+                for p in &pitems[..pitems.len() - 1] {
+                    prefix.push(p.clone());
+                    prefix.push(Ir::text(", "));
+                }
+                Ir::concat(prefix)
+            });
+            let body = hug
+                .is_some()
+                .then(|| pitems.last().expect("hug requires a last item").clone());
+            let close_text = Ir::text(close.clone());
+
             let mut group_parts: Vec<Ir> = vec![Ir::text(open)];
             let mut inner: Vec<Ir> = Vec::new();
             if items.is_empty() {
@@ -1321,7 +1348,11 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
             group_parts.push(Ir::indent(Ir::concat(inner)));
             group_parts.push(Ir::SoftLine);
             group_parts.push(Ir::text(close));
-            return Ir::group(Ir::concat(group_parts));
+            let grouped = Ir::group(Ir::concat(group_parts));
+            if let (Some(prefix), Some(body)) = (hug, body) {
+                return Ir::hug_group(prefix, body, close_text, grouped);
+            }
+            return grouped;
         }
 
         // An unmodeled params shape (comment, doubled comma, …): keep the flat
@@ -1368,7 +1399,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
 
 /// The parsed pieces of a clean argument list: the bracket tokens, the lowered
 /// comma-separated items, the `; …` keyword tail node (if any), and whether the
-/// last positional item can hug the closing bracket (see [`arg_is_huggable`]).
+/// last positional item can hug the closing bracket (see [`item_is_huggable`]).
 struct ArgListParts {
     open: String,
     close: String,
@@ -1417,7 +1448,7 @@ fn collect_arg_list(node: &SyntaxNode) -> Option<ArgListParts> {
                     if params.is_some() || (!items.is_empty() && !pending_comma) {
                         return None;
                     }
-                    last_huggable = arg_is_huggable(&child);
+                    last_huggable = item_is_huggable(&child);
                     items.push(lower_node(&child));
                     pending_comma = false;
                 }
@@ -1453,6 +1484,25 @@ fn arg_list_explode_group(open: &str, items: &[Ir], close: &str) -> Ir {
 /// into [`lower_index`]'s shared outer group (via [`call_reflow_body`]), where
 /// the enclosing group must own the arg list's break opportunities.
 fn arg_list_explode_body(open: &str, items: &[Ir], close: &str) -> Ir {
+    bracket_explode_body(open, items, close, Ir::if_break(",", ""))
+}
+
+/// The ungrouped width-driven body of a collection literal — the arg list's
+/// explode body, except that the one-tuple's semantic comma is emitted in both
+/// layout modes instead of only when broken.
+fn collection_explode_body(open: &str, items: &[Ir], close: &str, singleton_comma: bool) -> Ir {
+    let trailing = if singleton_comma {
+        Ir::text(",")
+    } else {
+        Ir::if_break(",", "")
+    };
+    bracket_explode_body(open, items, close, trailing)
+}
+
+/// The shared bracketed-list body: flat `(a, b, c)` when it fits, else one item
+/// per indented line, with `trailing` after the last item and the close bracket
+/// flush on its own line.
+fn bracket_explode_body(open: &str, items: &[Ir], close: &str, trailing: Ir) -> Ir {
     let mut inner: Vec<Ir> = vec![Ir::SoftLine];
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -1461,7 +1511,7 @@ fn arg_list_explode_body(open: &str, items: &[Ir], close: &str) -> Ir {
         }
         inner.push(item.clone());
     }
-    inner.push(Ir::if_break(",", ""));
+    inner.push(trailing);
 
     Ir::concat([
         Ir::text(open),
@@ -1471,25 +1521,60 @@ fn arg_list_explode_body(open: &str, items: &[Ir], close: &str) -> Ir {
     ])
 }
 
-/// Whether an `ARG` wraps exactly one bracket-delimited construct that can hug an
-/// enclosing call/index bracket. When such an argument is the *last* item of an
-/// arg list, it hugs: its own opening bracket rides the call's opening bracket and
-/// the closers stack, rather than the argument exploding onto its own indented
-/// line. The construct must own a trailing breakable bracket group — a nested call
-/// or index (`g(…)`, `a[…]`), a curly application (`A{T}`), a bracketed collection
-/// (`[…]`, `(…,)`, `{…}`), a comprehension/generator, or a matrix. A bare token, a
-/// splat, a unary/binary expression, or anything else keeps the normal layout.
-fn arg_is_huggable(arg: &SyntaxNode) -> bool {
-    if arg.kind() != SyntaxKind::ARG {
-        return false;
+/// Whether an arg-list or collection item ends in a bracket-delimited construct
+/// that can hug an enclosing bracket. When such an item is the *last* one of its
+/// list, it hugs: the construct's opening bracket rides the enclosing bracket's
+/// line and the closers stack, rather than the item exploding onto its own
+/// indented line. A positional `ARG` hugs when its sole child is a huggable
+/// construct; a `KEYWORD_ARG` hugs when it has the clean `name = <value>` shape
+/// (the one [`lower_keyword_arg`] reflows) and the value is one — the name and
+/// `=` join the flat prefix (`f(x, kw = [`). A bare token, a splat, a
+/// unary/binary expression, or anything else keeps the normal layout.
+fn item_is_huggable(item: &SyntaxNode) -> bool {
+    match item.kind() {
+        SyntaxKind::ARG => {
+            // Exactly one child node (a clean sole wrapper), and it is a
+            // huggable kind.
+            let mut children = item.children();
+            let (Some(child), None) = (children.next(), children.next()) else {
+                return false;
+            };
+            huggable_kind(child.kind())
+        }
+        SyntaxKind::KEYWORD_ARG => {
+            // Exactly `name = value` — two child nodes with nothing but the `=`
+            // (and spaces) between them; a comment or newline would make
+            // `lower_keyword_arg` bail to a transparent body the hug layout
+            // cannot own.
+            let mut nodes = 0usize;
+            let mut value: Option<SyntaxNode> = None;
+            let mut seen_eq = false;
+            for el in item.children_with_tokens() {
+                match el {
+                    NodeOrToken::Node(child) => {
+                        nodes += 1;
+                        value = Some(child);
+                    }
+                    NodeOrToken::Token(tok) => match tok.kind() {
+                        SyntaxKind::WHITESPACE => {}
+                        SyntaxKind::EQ if !seen_eq => seen_eq = true,
+                        _ => return false,
+                    },
+                }
+            }
+            nodes == 2 && seen_eq && value.is_some_and(|v| huggable_kind(v.kind()))
+        }
+        _ => false,
     }
-    // Exactly one child node (a clean sole wrapper), and it is a huggable kind.
-    let mut children = arg.children();
-    let (Some(child), None) = (children.next(), children.next()) else {
-        return false;
-    };
+}
+
+/// The bracket-delimited constructs that can hug an enclosing bracket: each owns
+/// a trailing breakable bracket group — a nested call or index (`g(…)`, `a[…]`),
+/// a curly application (`A{T}`), a bracketed collection (`[…]`, `(…,)`, `{…}`),
+/// a comprehension/generator, or a matrix.
+fn huggable_kind(kind: SyntaxKind) -> bool {
     matches!(
-        child.kind(),
+        kind,
         SyntaxKind::CALL_EXPR
             | SyntaxKind::INDEX_EXPR
             | SyntaxKind::CURLY_EXPR
@@ -1534,23 +1619,104 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
     if bracket_has_comment(node) {
         return lower_multiline_bracket(node);
     }
-    match collection_reflow_body(node) {
-        Some(body) => Ir::group(body),
-        None => lower_transparent(node),
+    let Some(parts) = collect_collection_items(node) else {
+        return lower_transparent(node);
+    };
+
+    // Trailing-element hug (mirrors the arg-list hug): when the last element is
+    // itself a bracket-delimited construct (`[a, b, f(…)]`, `(a, v = […])`), it
+    // hugs this bracket instead of exploding onto its own indented line; the
+    // standard explode group is the fallback when even the hug first line
+    // overflows. The one-tuple's semantic comma joins the stacked closers
+    // (`),)`).
+    if parts.last_huggable {
+        let singleton_comma = collection_singleton_comma(node, &parts.items);
+        let CollectionParts {
+            open,
+            close,
+            mut items,
+            ..
+        } = parts;
+        let close_text = if singleton_comma {
+            format!(",{close}")
+        } else {
+            close.clone()
+        };
+        let explode = Ir::group(collection_explode_body(
+            &open,
+            &items,
+            &close,
+            singleton_comma,
+        ));
+        let body = items.pop().expect("hug requires a last item");
+        let mut prefix: Vec<Ir> = vec![Ir::text(open)];
+        for item in items {
+            prefix.push(item);
+            prefix.push(Ir::text(", "));
+        }
+        return Ir::hug_group(Ir::concat(prefix), body, Ir::text(close_text), explode);
     }
+
+    Ir::group(collection_body(node, parts))
 }
 
-/// Build the ungrouped body of a clean collection literal — the doc that
-/// [`lower_collection`] wraps in its own `Ir::group`, and that [`lower_index`]
-/// folds into a shared outer group so the subject's break opportunities and the
-/// index tail are measured together. `None` on any shape the reflow does not
-/// fully model (the caller falls back to transparent).
+/// Build the ungrouped body of a clean collection literal for [`lower_index`],
+/// which folds it into a shared outer group so the subject's break opportunities
+/// and the index tail are measured together. `None` on any shape the reflow does
+/// not fully model, or on a huggable last element — a hug's break opportunities
+/// live in the hugged construct's own group, out of the enclosing group's reach
+/// (the same deferral as [`call_reflow_body`]'s) — the caller falls back to
+/// transparent.
 fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
-    let keep_singleton_comma = node.kind() == SyntaxKind::TUPLE_EXPR;
+    let parts = collect_collection_items(node)?;
+    if parts.last_huggable {
+        return None;
+    }
+    Some(collection_body(node, parts))
+}
+
+/// The width-driven body of a clean collection literal: flat `[a, b]`, or one
+/// element per indented line when it doesn't fit. An empty collection never
+/// breaks; the one-tuple's semantic comma is emitted in both modes.
+fn collection_body(node: &SyntaxNode, parts: CollectionParts) -> Ir {
+    let singleton_comma = collection_singleton_comma(node, &parts.items);
+    let CollectionParts {
+        open, close, items, ..
+    } = parts;
+    if items.is_empty() {
+        return Ir::concat([Ir::text(open), Ir::text(close)]);
+    }
+    collection_explode_body(&open, &items, &close, singleton_comma)
+}
+
+/// Whether this collection is the one-tuple `(a,)`, whose comma is semantic (it
+/// distinguishes the tuple from a parenthesized expression) and so is emitted in
+/// **both** layout modes, unlike every other list's broken-only trailing comma.
+fn collection_singleton_comma(node: &SyntaxNode, items: &[Ir]) -> bool {
+    node.kind() == SyntaxKind::TUPLE_EXPR && items.len() == 1
+}
+
+/// The parsed pieces of a clean collection literal: the bracket tokens, the
+/// lowered comma-separated items, and whether the last element can hug the
+/// closing bracket (see [`item_is_huggable`]).
+struct CollectionParts {
+    open: String,
+    close: String,
+    items: Vec<Ir>,
+    last_huggable: bool,
+}
+
+/// Walk a collection literal's children into [`CollectionParts`]. `None` on any
+/// unmodeled shape — a doubled/orphaned comma, a `;`-separated `PARAMETERS` row,
+/// an unexpected child or token, a missing bracket — the caller falls back to
+/// the verbatim transparent lowering. Source newlines carry no layout
+/// information under Tenet 1 and are skipped like spaces.
+fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
     let mut items: Vec<Ir> = Vec::new();
     let mut pending_comma = false;
+    let mut last_huggable = false;
 
     for el in node.children_with_tokens() {
         match el {
@@ -1561,7 +1727,6 @@ fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
                 SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE => {
                     close = Some(tok.text().to_string())
                 }
-                // Source newlines carry no layout information under Tenet 1.
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COMMA => {
                     if pending_comma || items.is_empty() {
@@ -1578,6 +1743,7 @@ fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
                     if !items.is_empty() && !pending_comma {
                         return None;
                     }
+                    last_huggable = item_is_huggable(&child);
                     items.push(lower_node(&child));
                     pending_comma = false;
                 }
@@ -1586,37 +1752,12 @@ fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
         }
     }
 
-    let (open, close) = (open?, close?);
-
-    // An empty collection never breaks.
-    if items.is_empty() {
-        return Some(Ir::concat([Ir::text(open), Ir::text(close)]));
-    }
-
-    // The one-tuple's comma is semantic: emit it in both modes. Every other list
-    // gets a trailing comma only when broken.
-    let trailing = if keep_singleton_comma && items.len() == 1 {
-        Ir::text(",")
-    } else {
-        Ir::if_break(",", "")
-    };
-
-    let mut inner: Vec<Ir> = vec![Ir::SoftLine];
-    for (i, item) in items.into_iter().enumerate() {
-        if i > 0 {
-            inner.push(Ir::text(","));
-            inner.push(Ir::Line);
-        }
-        inner.push(item);
-    }
-    inner.push(trailing);
-
-    Some(Ir::concat([
-        Ir::text(open),
-        Ir::indent(Ir::concat(inner)),
-        Ir::SoftLine,
-        Ir::text(close),
-    ]))
+    Some(CollectionParts {
+        open: open?,
+        close: close?,
+        items,
+        last_huggable,
+    })
 }
 
 /// Build the ungrouped body of a call or curly application `callee(args)` /
@@ -1975,14 +2116,16 @@ fn lower_keyword_arg(node: &SyntaxNode) -> Ir {
 /// Collect the lowered items of a `;`-separated `PARAMETERS` tail so
 /// [`lower_arg_list`] can fold them into its width-driven group. Returns the
 /// item IRs (without the `;` or any separators) on the clean alternating
-/// `; <item> [, <item>]…` shape, skipping source whitespace and newlines. Returns
-/// `None` — leaving the caller to emit the flat form — on any shape this can't
-/// reflow: a comment, a doubled/orphaned comma, an unexpected child, a missing
-/// semicolon, or an empty tail (`f(;)`).
-fn collect_param_items(node: &SyntaxNode) -> Option<Vec<Ir>> {
+/// `; <item> [, <item>]…` shape, skipping source whitespace and newlines, plus
+/// whether the last item can hug the closing bracket (see [`item_is_huggable`]).
+/// Returns `None` — leaving the caller to emit the flat form — on any shape this
+/// can't reflow: a comment, a doubled/orphaned comma, an unexpected child, a
+/// missing semicolon, or an empty tail (`f(;)`).
+fn collect_param_items(node: &SyntaxNode) -> Option<(Vec<Ir>, bool)> {
     let mut items: Vec<Ir> = Vec::new();
     let mut pending_comma = false;
     let mut seen_semi = false;
+    let mut last_huggable = false;
 
     for el in node.children_with_tokens() {
         match el {
@@ -2004,6 +2147,7 @@ fn collect_param_items(node: &SyntaxNode) -> Option<Vec<Ir>> {
                 if !items.is_empty() && !pending_comma {
                     return None;
                 }
+                last_huggable = item_is_huggable(&child);
                 items.push(lower_node(&child));
                 pending_comma = false;
             }
@@ -2016,7 +2160,7 @@ fn collect_param_items(node: &SyntaxNode) -> Option<Vec<Ir>> {
         return None;
     }
 
-    Some(items)
+    Some((items, last_huggable))
 }
 
 /// Lay out a `;`-separated parameter block (`; a = 1, b = 2`): one space after
