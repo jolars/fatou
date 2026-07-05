@@ -23,6 +23,14 @@ leverage.
   treatment, plus the broadcast `.<--`. Surfaced by the formatter
   (`arrow_pair_chain/` fixture routes around it); see parser-parity RECAP
   queued target.
+- [ ] Parser: newline-broken braces comprehension mis-parses as `BRACESCAT_EXPR`.
+  `{a\nfor b in c}` swallows the `for` as a statement-level `FOR_EXPR` (two
+  `expected `end`` diagnostics); the `[a\nfor b in c]` form parses fine.
+  JuliaSyntax: `{a\nfor b in c}` ⇒ `(braces (generator a (= b c)))`. Fallout:
+  the formatter's exploded form for a too-wide `BRACES_COMPREHENSION` fails to
+  reparse (latent stability violation). Surfaced by the formatter
+  (`comprehension_index_break/` keeps its braces case flat); see parser-parity
+  RECAP queued target.
 - [ ] Parser: whitespace before a call/index/curly arg list is wrongly accepted.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
@@ -124,6 +132,18 @@ leverage.
   (`Dict("k" => [\n    a,\n])`). New `pair_hug_split`/`value_is_huggable`/
   `hug_value_parts`/`pair_hug_grouped_parts`; the other arrow-tier operators
   (`-->`, `<-->`) and chained pairs (`a => b => c`) keep the normal explode.
+- [x] Formatter: comprehension subjects join the shared index group
+  (`comprehension_index_break/`). A too-wide indexed comprehension —
+  plain `[…][i]`, generator `(…)[1]`, or typed `Float64[…][idx]` — now
+  yields subject-first: the bracketed body explodes onto element/clause
+  lines and the index rides the closing bracket, breaking at its own
+  column only if it still overflows. `lower_comprehension`'s body was
+  extracted as `comprehension_reflow_body` and registered in
+  `construct_reflow_body` (plus `typed_comprehension_reflow_body`, the
+  type joining flat like a callee), which also lets a hugged trailing
+  comprehension carry an index-subject hug (`f(cfg, […])[k]`,
+  `g(k => […])[k]`). Braces comprehensions stay flat in the fixture — a
+  newline-broken `{…}` is a parser gap (see Parser section).
 - [x] Formatter: name-rooted index chains break subject-first
   (`name_index_break/`). A too-wide chain rooted at a plain or dotted name
   (`table[…][k]`, `config.table[…][k]`) now folds into `lower_index`'s shared

@@ -75,8 +75,10 @@ Tenet 1.
   + index share one group via the recursive `index_reflow_body`/`construct_reflow_body`
   — innermost subject yields first, incl. through hugs (ungrouped `Ir::HugGroup`) and
   `;`-keyword tails; a name/dotted root's first arg list is the yielding body via
-  `applied_args_body` (shared with `call_reflow_body`); comprehension/paren subjects
-  bail),
+  `applied_args_body` (shared with `call_reflow_body`); comprehension subjects —
+  plain/generator/braces via `comprehension_reflow_body`, typed via
+  `typed_comprehension_reflow_body` (type joins flat like a callee) — yield the
+  same way; paren subjects bail),
   `lower_bare_tuple`, curly type-params, named tuples.
 - Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
   `lower_multiline_bracket`, `lower_matrix`, `lower_paren`/`lower_paren_block`,
@@ -101,55 +103,62 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (name-rooted index chains)
+## Latest session (comprehension reflow body)
 
 Closed ranked target #1. Two AskUserQuestion decisions, both recommended options
-accepted: (1) a too-wide name-rooted chain (`table[…][k]`) breaks **innermost
-arg list first** — the first `[…]` explodes one-per-line and every later index
-rides the closing bracket, re-breaking at its own column only if it still
-overflows. This is exactly the gated call-subject rule with `[` for `(`
-(`f(key)[wide]` already explodes the tiny `(key)`); the disclosed tradeoff —
-`table[key][wide…]` explodes the small `[key,]` while the wide index rides — was
-accepted for consistency. (2) Eligible roots are **`NAME` + dotted access**
-(`BINARY_EXPR` with a direct `DOT` token), comment-free; paren, comprehension,
-and macro-call subjects keep the transparent bail (comprehension bodies are
-ranked target #2 and would churn if grabbed as flat atoms now).
+accepted: (1) the typed comprehension `Float64[…][idx]` joins the shared index
+group — the type name joins flat like a call's callee and the bracketed
+generator body yields; (2) the proposed `expected.jl` approved as-is
+(subject-yields-first, matching every gated index-break fixture; the broken
+comprehension keeps its gated no-trailing-comma clause style while index arg
+lists keep the broken-only trailing comma).
 
-**Implementation:** extracted `applied_args_body(prefix, args)` — the whole
-post-callee body of `call_reflow_body` (params/hug/empty/explode arms, verbatim)
-— and reused it as `index_reflow_body`'s new base case: when
-`construct_reflow_body(subject)` is `None` but `chain_root_is_name(subject)`
-holds, the body is `lower_node(subject)` + the arg list's yielding body. The
-chain recursion (`construct_reflow_body`'s `INDEX_EXPR` arm) propagates the base
-up, so outer indexes ride as before. Side effect: a *single* name-rooted index
-(`table[wide]`) now routes through `lower_index`'s group instead of transparent
-— output is byte-identical (locked by the `single` fixture case), because the
-outer group + ungrouped body breaks exactly where the arg list's own group did.
-This killed the old pathology where continuation-aware `fits` let a wide first
-link stay flat and exploded a tiny middle `[key_one]` like a stray vector.
+**Implementation:** extracted `comprehension_reflow_body(node) -> Option<Ir>` —
+the whole body of `lower_comprehension`, with every `lower_transparent` bail
+turned into `None`; `lower_comprehension` is now group-or-transparent. New
+`typed_comprehension_reflow_body` (exactly the snug `type` + generator pair,
+comment-free type; body = `lower_node(type)` + the generator's body). Both
+registered in `construct_reflow_body`
+(`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION` + `TYPED_COMPREHENSION`), so
+indexed comprehensions, comprehension chain roots, and hugged trailing
+comprehensions on an index-subject path (`f(cfg, […])[k]`, `g(k => […])[k]` via
+`hug_value_parts`) all fold into the shared outer group. The plain single-index
+cases (`[…][i]`, `(…)[1]`) were already canonical via transparent +
+continuation-aware `fits` and are locked byte-identical; the pathologies killed
+are the chained/hugged/typed forms, where the wide subject stayed flat and a
+tiny index exploded like a stray vector.
 
-Gated `name_index_break/` (11 cases: short dotted chain, 92/93 fence pair,
-wide-first + two riding tails, small-first/wide-second tradeoff, dotted root,
-hugged innermost + riding tail, both-links-overflow, single wide index
-regression, pre-broken reflow-to-flat). Gate 93→94, zero regressions; clippy +
-fmt clean.
+**Parser blocker surfaced and handed off:** a newline-broken braces
+comprehension `{a\nfor b in c}` mis-parses as `BRACESCAT_EXPR` (the `for`
+swallowed as a statement-level `FOR_EXPR`, two `expected `end`` diagnostics);
+JuliaSyntax accepts it (`(braces (generator a (= b c)))`). Consequence:
+`lower_comprehension`'s exploded output for a too-wide `BRACES_COMPREHENSION`
+**fails to reparse** under Fatou — a latent, pre-existing stability violation no
+gated fixture triggers. The fixture's braces case is kept narrow enough to stay
+flat, with a comment pointing at the gap; widen it once the parser lands.
+Queued in `parser-parity/RECAP.md` + `TODO.md` Parser section.
 
-**Ranked next targets:** (1) Comprehension reflow body (a hugged/indexed
-comprehension still bails transparent — extract an ungrouped body from
-`lower_comprehension` and add it to `construct_reflow_body`; also unlocks
-comprehension chain roots). (2) Chained-pair hug (`a => b => […]` — recurse
+Gated `comprehension_index_break/` (12 cases: flat, 92/93 fence pair, if-clause
+explode + riding index, chained `[…][i][j]`, generator subject, flat braces
+(routed around the parser gap), hugged comprehension in a call subject,
+pair-hug-through, both-links-overflow, typed, pre-broken reflow-to-flat). Gate
+94→95, zero regressions; clippy + fmt clean.
+
+**Ranked next targets:** (1) Paren-subject chains (`(f())[wide][k]` — decide
+whether a paren expression joins the shared group like a name root or keeps the
+transparent bail). (2) Chained-pair hug (`a => b => […]` — recurse
 `pair_hug_split` through the right-nested spine so the whole `a => b => ` joins
-the prefix; deferred as rare). (3) Paren-subject chains (`(f())[wide][k]` —
-decide whether a paren expression joins the shared group like a name root or
-keeps the transparent bail).
+the prefix; deferred as rare). (3) Widen the braces case of
+`comprehension_index_break/` once the bracescat parser gap lands.
 
-**Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
-newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
-(2026-07-02b); (b) **lexer** — `<<=`/`>>=`/`>>>=`/`÷=`/`⊻=` don't tokenize as one
-compound-assign token; (c) **parser** — whitespace before a call/index/curly arg list is
-wrongly accepted (`f (a)`, `a [1]`, `A {T}`); (d) **lexer** — `<--` doesn't tokenize as one
-arrow-tier operator (2026-07-04). All in `parser-parity/RECAP.md` "Queued next
-targets" + `TODO.md`.
+**Parser/lexer gaps outstanding (handed off, not formatter targets):**
+(a) **lexer** — `<--` doesn't tokenize as one arrow-tier operator (2026-07-04);
+(b) **parser** — newline-broken braces comprehension mis-parses as
+`BRACESCAT_EXPR` (2026-07-05, see above). Both in `parser-parity/RECAP.md`
+"Queued next targets" + `TODO.md`. The previously-listed newline-after-comma,
+compound-assign lexer, and whitespace-before-arglist gaps have since been
+resolved on the parser side (`TODO.md` marks them `[x]`; parser-parity RECAP
+2026-07-03 found the whitespace-before-arglist premise stale).
 
 **Note:** stray untracked `tests/oracle/runic-report.txt` (old Runic report format) is leftover
 from the pivot — safe to delete, not regenerated by anything.
@@ -176,6 +185,13 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Name-rooted index chains** (committed `32fb24f`+`98be310`+`7c3edf9`,
+  `feat`+`test`+`docs`): a too-wide `NAME`/dotted-root chain (`table[…][k]`) breaks
+  innermost-arg-list-first — extracted `applied_args_body` (the post-callee body of
+  `call_reflow_body`) as `index_reflow_body`'s name-rooted base case; outer indexes ride,
+  re-breaking only on overflow. Single name-rooted index routes through the group
+  byte-identically (locked by the `single` case). Killed the stray-vector middle
+  explosion. Gated `name_index_break/` (11). Gate 93→94.
 - **Pair-value hugging** (committed `f1363da`+`ee0e2b2`+`1cdd9e0`, `feat`+`test`+`docs`):
   `=>`/`.=>` (the pair idiom only; `-->`/`<-->` explode) are hug-transparent — a trailing
   `lhs => <bracket construct>` arg/kwarg-value/collection element hugs, the `lhs => `

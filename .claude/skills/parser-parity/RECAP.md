@@ -6,6 +6,22 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Queued (2026-07-05, from formatter): parser gap — newline-broken braces
+comprehension mis-parses as `BRACESCAT_EXPR`.** `{a\nfor b in c}` parses as a
+`BRACESCAT_EXPR` whose second row swallows the `for` as a statement-level
+`FOR_EXPR` (two `expected `end`` diagnostics); the equivalent square-bracket
+form `[a\nfor b in c]` parses fine as a comprehension. JuliaSyntax ground
+truth: `{a\nfor b in c}` ⇒ `(braces (generator a (= b c)))` — a newline before
+`for` inside `{…}` does **not** start a new bracescat row. The crux: the
+braces path commits to bracescat on the interior newline before checking
+whether the next row starts with `for`; the `[`-comprehension path already
+handles this. Formatter fallout: `lower_comprehension` explodes a too-wide
+`BRACES_COMPREHENSION` onto element/clause lines, so that output **fails to
+reparse** under Fatou (latent stability violation — no gated fixture currently
+triggers it; the formatter's `comprehension_index_break/` fixture keeps its
+braces case narrow enough to stay flat and carries a comment pointing here).
+Once fixed, widen that braces case so it explodes like the `[…]` cases.
+
 **Queued (2026-07-04, from formatter): lexer gap — `<--` is not one token.**
 `a <-- b` lexes as `a` `<` `--` (a `LT` missing its RHS + a stray `MINUS_MINUS`,
 with `diagnostic: expected right-hand side for operator`). JuliaSyntax ground
