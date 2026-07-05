@@ -67,7 +67,8 @@ Tenet 1.
   canonicalized spaced), `lower_arrow`, `lower_comparison`, `lower_ternary`,
   `lower_range`, `lower_type_annotation`, `lower_where`.
 - Collections/calls: `lower_arg_list` (width-driven, trailing hug — positional or
-  kwarg value, incl. the `;` tail — + explode fallback),
+  kwarg value, incl. the `;` tail, hug-transparent through a clean `=>`/`.=>` pair
+  — + explode fallback),
   `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
   `collect_collection_items`/`collection_body`, trailing-element hug),
   `lower_index` (collection/matrix/call/curly/chained-index subject
@@ -98,50 +99,48 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (arrow/pair tier flatten + Runic doc-comment sweep)
+## Latest session (pair-value hugging)
 
-Closed ranked target #1, both halves. One AskUserQuestion decision: **uniform tier
-break** (recommended option accepted) — a too-wide *mixed* arrow/pair-tier chain
-(`a => b --> c => d`) now breaks at every operator like the pure `=>` chain always
-did, instead of staircasing into nested indents. Disclosed consequence (accepted):
-`=>` (Pair) folds with the causal arrows `-->`/`<-->` since they share the parser
-tier — mirrors the earlier `a + b | c` disclosure.
+Closed ranked target #1. Two AskUserQuestion decisions: **pair values hug**
+(recommended option accepted), and the hug-transparent operators are **`=>` and
+`.=>` only** — the pair idiom, not the whole arrow tier (`-->`/`<-->` keep the
+normal explode; operator-identity keying is deterministic, so Tenet-1 clean).
+Mid-session friction raised and resolved: the first AskUserQuestion preview
+mistakenly showed the hugged body *packed* (`[a, b,\n c]`-style fill); the gated
+hug style is one-item-per-line. User confirmed **one item per line** (consistent
+with `kwarg_hug`/`arg_hug`; packed would need a fill primitive + re-authoring
+those fixtures).
 
-**Implementation (one arm):** `binary_prec_class` gained tier 3 —
-`FAT_ARROW | LONG_ARROW | LEFT_RIGHT_ARROW | DOT_FAT_ARROW | DOT_LONG_ARROW`.
-The tier is right-associative (parser right-nests, JuliaSyntax-verified
-`a --> (b <-- c)`), unlike the left-associative plus/times/shift tiers; the
-flatten is layout-only (the operand/operator text stream is identical under
-either association), so `collect_binary_chain`/`same_break_tier` needed no
-change. Doc comments on `same_break_tier`/`binary_prec_class` de-left-assoc'd.
+**Implementation:** `pair_hug_split` vets the clean two-operand
+`lhs =>/.=> <huggable construct>` shape (interior newlines layout-free like
+`lower_binary`; comments and `a => b => c` chains bail → normal layout);
+`value_is_huggable` folds it into `item_is_huggable` for both `ARG` and
+`KEYWORD_ARG` values. Two body flavors, matching the two hug families:
+`hug_value_parts` (via `item_hug_parts` → `reflow_hug`) yields the **ungrouped**
+reflow body for the index-subject paths, and `pair_hug_grouped_parts` rebuilds
+prefix+body at the three **grouped** hug sites (`lower_arg_list` positional +
+`;`-params tails, `lower_collection`) — the `lhs => ` (behind a keyword's
+`name = `) joins the flat hug prefix and the value's own grouped lowering is the
+body. **Trap that motivated the split:** those grouped sites use the popped
+*lowered item* as the hug body, so a pair arg's body was the whole
+`lower_binary` group and the "hug" broke at ` =>` (operator-trailing) instead of
+inside the value's bracket; the kwarg hug only ever worked because ` = ` emits
+no group. Any future hug-through-X must move the `X`-prefix into the hug prefix
+at all four sites, not just `item_hug_parts`.
 
-**Runic sweep done:** all ~25 residual per-rule Runic rationale mentions in
-`rules.rs` reworded to state the rule as Fatou's own (trivia trimming, paren
-block, where, keyword stmt, import/export, hex/float literals, module indent,
-block-body trailing comment, tight binops). Only the module-header debt marker
-("many rules still mirror source line breaks — a legacy of the removed Runic
-target") remains, intentionally. Debt #2 from the pivot is closed.
+Gated `pair_hug/` (16 cases: vector/call/nested-Dict values, `.=>`, multi-entry
+Dict prefix, `;`-params pair kwarg, vector-of-pairs collection element,
+`-->` non-hug, non-huggable RHS, non-last pair, chained pair, 92/93 fence pair,
+prefix-overflow explode fallback, pre-broken reflow-to-hug, short flat). Gate
+92→93, zero regressions; clippy + fmt clean.
 
-Gated `arrow_pair_chain/` (8 cases: short flat, mixed `=>`/`-->` uniform break,
-`.=>` broadcast mix, `<-->`/`.-->` mix, tighter-tier `+` operands staying flat
-inside the breaking chain, 92/93 fence pair, pre-broken reflow-to-flat). Gate
-91→92, zero regressions; clippy + fmt clean.
-
-**Parser/lexer blocker surfaced:** `<--` does not tokenize (lexes as `<` + `--`,
-error recovery; the formatter even reshapes the broken text `a <-- b` →
-`a < -- b` because `lower_binary` takes the stray `MINUS_MINUS` for a real
-operator). JuliaSyntax: `(call-i a <-- b)`, arrow tier, right-assoc. Handed off:
-parser-parity RECAP queued target + `TODO.md` Parser bullet; `arrow_pair_chain/`
-routes around it (no `<--` in the fixture). When the lexer lands the token, add
-its kind to `binary_prec_class`'s tier 3.
-
-**Ranked next targets:** (1) `=>`-pair value hugging (`Dict("k" => […])` last-arg
-pair values don't hug — would extend `item_is_huggable` through a `BINARY_EXPR`
-pair RHS; needs a user decision). (2) Name-rooted chain layout (`table[wide
-args][k]` — should the inner arg list explode and `[k]` ride? needs a user
-decision). (3) Comprehension reflow body (a hugged/indexed comprehension still
-bails transparent — extract an ungrouped body from `lower_comprehension` and add
-it to `construct_reflow_body`).
+**Ranked next targets:** (1) Name-rooted chain layout (`table[wide args][k]` —
+should the inner arg list explode and `[k]` ride? needs a user decision).
+(2) Comprehension reflow body (a hugged/indexed comprehension still bails
+transparent — extract an ungrouped body from `lower_comprehension` and add it to
+`construct_reflow_body`). (3) Chained-pair hug (`a => b => […]` — recurse
+`pair_hug_split` through the right-nested spine so the whole `a => b => ` joins
+the prefix; deferred this session as rare).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -176,6 +175,11 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Arrow/pair tier flatten + Runic doc-comment sweep** (committed `da4e88c`+`01caa11`+
+  `fa9baae`, `feat`+`test`+`docs`): `binary_prec_class` tier 3 (`=>`/`.=>`/`-->`/`.-->`/
+  `<-->`, right-assoc, layout-only flatten) — a mixed arrow/pair-tier chain breaks
+  uniformly; all ~25 residual Runic rationale comments reworded (debt #2 closed).
+  Surfaced the `<--` lexer gap (handed off). Gated `arrow_pair_chain/` (8). Gate 91→92.
 - **Subject-yields through hugs + `;`-params tails** (committed `1b0ea59`+`6956868`,
   `feat`+`test`): closed the last two `call_reflow_body`/`collection_reflow_body` bails —
   an **ungrouped** `Ir::HugGroup` hands flat-vs-yield to the owning group (zero printer/IR

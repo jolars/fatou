@@ -117,6 +117,13 @@ leverage.
   flatten is layout-only (the text stream is identical under either
   association). `<--` is a lexer gap (handed off; see Parser section) and stays
   out of the fixture. `arrow_pair_chain/` gated.
+- [x] Formatter: pair-value hugging (`pair_hug/`). The pair operators `=>`/`.=>`
+  are hug-transparent: a trailing `lhs => <bracket construct>` argument, keyword
+  value, or collection element hugs the enclosing bracket — the `lhs => ` joins
+  the flat prefix like a keyword's `name = `, and the value breaks in place
+  (`Dict("k" => [\n    a,\n])`). New `pair_hug_split`/`value_is_huggable`/
+  `hug_value_parts`/`pair_hug_grouped_parts`; the other arrow-tier operators
+  (`-->`, `<-->`) and chained pairs (`a => b => c`) keep the normal explode.
 - [x] Formatter: the `;`-keyword tail of a call now folds into `lower_arg_list`'s
   width-driven group instead of always emitting flat. A too-wide call breaks
   one-arg-per-line with the `;` snug after the last positional (`b;`) and each
