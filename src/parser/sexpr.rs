@@ -386,6 +386,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         PIPE_LT => CallI("<|"),
         LONG_ARROW => Special("-->"),
         LEFT_RIGHT_ARROW => CallI("<-->"),
+        LEFT_LONG_ARROW => CallI("<--"),
         SHL => CallI("<<"),
         SHR => CallI(">>"),
         USHR => CallI(">>>"),
@@ -435,6 +436,8 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         DOT_SUPERTYPE => DotCallI(">:"),
         DOT_FAT_ARROW => DotCallI("=>"),
         DOT_LONG_ARROW => DotCallI("-->"),
+        DOT_LEFT_LONG_ARROW => DotCallI("<--"),
+        DOT_LEFT_RIGHT_ARROW => DotCallI("<-->"),
         DOT_PIPE_GT => DotCallI("|>"),
         DOT_AMP => DotCallI("&"),
         DOT_PIPE => DotCallI("|"),
@@ -540,6 +543,7 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | ARROW
             | LONG_ARROW
             | LEFT_RIGHT_ARROW
+            | LEFT_LONG_ARROW
             | FAT_ARROW
             | SHL
             | SHR
@@ -573,6 +577,8 @@ fn is_operator(kind: SyntaxKind) -> bool {
             | DOT_SUPERTYPE
             | DOT_FAT_ARROW
             | DOT_LONG_ARROW
+            | DOT_LEFT_LONG_ARROW
+            | DOT_LEFT_RIGHT_ARROW
             | DOT_PIPE_GT
             | DOT_AMP
             | DOT_PIPE

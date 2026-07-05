@@ -116,6 +116,8 @@ pub(crate) enum TokKind {
     LongArrow,
     /// The arrow operator `<-->` (right-associative, ordinary `(call-i a <--> b)`).
     LeftRightArrow,
+    /// The arrow operator `<--` (right-associative, ordinary `(call-i a <-- b)`).
+    LeftLongArrow,
     /// The pair operator `=>`.
     FatArrow,
     /// Bitshift operators `<<`, `>>`, `>>>` (left-associative).
@@ -191,6 +193,10 @@ pub(crate) enum TokKind {
     DotFatArrow,
     /// The broadcast arrow operator `.-->` (projects `(dotcall-i a --> b)`).
     DotLongArrow,
+    /// The broadcast arrow operators `.<--`/`.<-->` (project
+    /// `(dotcall-i a <-- b)`/`(dotcall-i a <--> b)`).
+    DotLeftLongArrow,
+    DotLeftRightArrow,
     /// The broadcast left-pipe-to-right `.|>` (projects `(dotcall-i a |> b)`).
     DotPipeGt,
     /// The broadcast `~` operator `.~`.
@@ -978,6 +984,18 @@ impl<'a> Lexer<'a> {
                 self.push_op(TokKind::DotLongArrow, start);
                 return;
             }
+            // The 5-char broadcast arrow `.<-->` must beat the 4-char `.<--`,
+            // which in turn must beat `.<` (`DotLt`).
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-')) {
+                if self.peek(4) == Some(b'>') {
+                    self.pos += 5;
+                    self.push_op(TokKind::DotLeftRightArrow, start);
+                } else {
+                    self.pos += 4;
+                    self.push_op(TokKind::DotLeftLongArrow, start);
+                }
+                return;
+            }
             // The 4-char broadcast identity ops `.===`/`.!==` must beat the
             // 3-char `.==`/`.!=`.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'='), Some(b'='), Some(b'=')) {
@@ -1105,6 +1123,9 @@ impl<'a> Lexer<'a> {
         // and the unsigned shift `>>>` must beat `>>`.
         let three = match (b0, b1, self.peek(2)) {
             (Some(b'-'), Some(b'-'), Some(b'>')) => Some(TokKind::LongArrow),
+            // The left arrow `<--` (the 4-char `<-->` was matched above; a lone
+            // `<-` stays `Lt` + unary minus).
+            (Some(b'<'), Some(b'-'), Some(b'-')) => Some(TokKind::LeftLongArrow),
             (Some(b'>'), Some(b'>'), Some(b'>')) => Some(TokKind::UShr),
             // Identity `===` beats `==`; its negation `!==` beats `!=`.
             (Some(b'='), Some(b'='), Some(b'=')) => Some(TokKind::EqEqEq),
@@ -1323,6 +1344,7 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | FatArrow
             | LongArrow
             | LeftRightArrow
+            | LeftLongArrow
             | Transpose
             | DotPlus
             | DotMinus
@@ -1342,6 +1364,8 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | DotGe
             | DotFatArrow
             | DotLongArrow
+            | DotLeftLongArrow
+            | DotLeftRightArrow
             | DotPipeGt
             | DotAmp
             | DotPipe
@@ -1667,6 +1691,33 @@ mod tests {
         assert_eq!(
             kinds("a.\\=b"),
             vec![TokKind::Ident, TokKind::DotBackslashEq, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn left_arrow_operators() {
+        // `<--` lexes as one arrow-tier token (longest match: `<-->` beats it,
+        // and it beats `<` + `--`); likewise the broadcast `.<--`/`.<-->` beat
+        // `.<`. A lone `<-` stays `<` + unary minus.
+        assert_eq!(
+            kinds("a<--b"),
+            vec![TokKind::Ident, TokKind::LeftLongArrow, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a<-->b"),
+            vec![TokKind::Ident, TokKind::LeftRightArrow, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a.<--b"),
+            vec![TokKind::Ident, TokKind::DotLeftLongArrow, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a.<-->b"),
+            vec![TokKind::Ident, TokKind::DotLeftRightArrow, TokKind::Ident]
+        );
+        assert_eq!(
+            kinds("a<-b"),
+            vec![TokKind::Ident, TokKind::Lt, TokKind::Minus, TokKind::Ident]
         );
     }
 

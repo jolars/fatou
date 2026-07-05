@@ -14,20 +14,12 @@ is gone). Widen the braces case of the formatter's `comprehension_index_break/`
 fixture so it explodes like the `[…]` cases (it was kept narrow to stay flat,
 with a comment pointing at this gap).
 
-**Queued (2026-07-04, from formatter): lexer gap — `<--` is not one token.**
-`a <-- b` lexes as `a` `<` `--` (a `LT` missing its RHS + a stray `MINUS_MINUS`,
-with `diagnostic: expected right-hand side for operator`). JuliaSyntax ground
-truth: `a <-- b` ⇒ `a <-- b` (`(call-i a <-- b)`); arrow tier, right-associative
-(`a --> b <-- c` ⇒ `a --> (b <-- c)`). The crux: the lexer's arrow scanning
-covers `-->` (`LongArrow`), `<-->` (`LeftRightArrow`), and `.-->`
-(`DotLongArrow`) but has no `<--` arm (nothing after `<` tries `--`); add the
-token (+ broadcast `.<--`), map it into the arrow tier `(4, 3)` alongside
-`LongArrow`, and give it a `SyntaxKind`. Formatter fallout today: `lower_binary`
-treats the stray `MINUS_MINUS` as a real operator and reshapes the
-error-recovery text (`a <-- b` → `a < -- b`); once `<--` lexes, that goes away
-and `binary_prec_class`'s arrow tier (`FAT_ARROW | LONG_ARROW | …`) should gain
-the new kind. Surfaced by the formatter's `arrow_pair_chain/` fixture, which
-routes around it (uses only `=>`/`.=>`/`-->`/`.-->`/`<-->`).
+**Handoff to formatter (2026-07-05b): the `<--` lexer gap is fixed** — `a <-- b`
+now lexes as one arrow-tier token (`(call-i a <-- b)`), with broadcast
+`.<--`/`.<-->` (`dotcall-i`). `binary_prec_class`'s arrow tier already gained
+the three new kinds (done in this session, formatter tests green), so
+`arrow_pair_chain/` can stop routing around `<--` and include it in the mixed
+arrow-tier chain fixture if desired.
 
 **No specific parser target queued** beyond the above. The formerly-queued whitespace-before-arglist
 item (`f (a)`/`a [1]`/`A {T}`/`f(a) (b)`) was **already resolved** by the 2026-06-22r
@@ -105,7 +97,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **193 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **194 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -125,36 +117,45 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-05—newline-broken braces comprehension)
+## Latest session (2026-07-05b—left-arrow operator `<--` family)
 
-Closed the top queued target (formatter handoff): `{a\nfor b in c}` mis-parsed
-as a `BRACESCAT_EXPR` swallowing the `for` as a statement-level `FOR_EXPR`
-(two `expected `end`` diagnostics) — the formatter's exploded output for a
-too-wide `BRACES_COMPREHENSION` therefore failed to reparse (latent stability
-violation, no gated fixture triggered it).
+Closed the queued `<--` lexer gap via the 5-file operator recipe: `a <-- b`
+lexed as `a` `<` `--` (an `LT` missing its RHS + a stray `MINUS_MINUS`); now
+`<--`, `.<--`, and `.<-->` are single arrow-tier tokens.
 
-- **The fix is symmetry**: `parse_braces`'s first-separator match
-  (`expr.rs` ~3962) lacked the two newline-lookahead arms
-  `parse_bracket_literal` already had. Added both, reusing the existing
-  helpers verbatim: `Newline` + `newline_run_precedes_for` ⇒
-  `parse_comprehension(BRACES_COMPREHENSION)`, `Newline` +
-  `newline_run_precedes_comma` ⇒ the braces comma list. No projector change,
-  no new diagnostics — a pure parser-gap fix in one match expression.
-- **Probed ground truth** (all now byte-identical): `{a\nfor b in c}` and the
-  blank-line form ⇒ `(braces (generator a (= b c)))`; `{a\n, b}` ⇒
-  `(braces a b)`; siblings `{a\nb}`/`{a\n;b}` stay `(bracescat a b)`. The
-  formatter's actual exploded shape (element + `for` + `if` clause each on its
-  own indented line) verified byte-identical to JS and lossless.
-- **Fixtures**: parser snapshot + oracle dir slug `braces_newline_comprehension`
-  (6 cases: for, blank-line for, comma continuation, both bracescat siblings,
-  exploded multi-clause form).
-- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 192 → **193**.
-- **Handoff to formatter**: widen `comprehension_index_break/`'s braces case
-  (see Queued next targets).
-- **Next**: the `<--` lexer gap (queued 2026-07-04, 5-file operator recipe) is
-  the remaining queued target.
+- **Three new tokens** (`LeftLongArrow`/`DotLeftLongArrow`/`DotLeftRightArrow`):
+  `.<-->` was included beyond the queued scope because longest-match forces the
+  family — adding `.<--` alone would have re-broken `a .<--> b` (`.<--` + `>`).
+  Lexing: ASCII 3-char table arm (the existing 4-char `<-->` check already runs
+  first); dotted block gets one `.<-` arm branching on the trailing `>` (5-char
+  `.<-->` vs 4-char `.<--`), placed before the `.<` (`DotLt`) 2-char fallback.
+  A lone `<-` stays `<` + unary minus (probed; not an operator).
+- **Probed ground truth** (all byte-identical): `a <-- b` ⇒ `(call-i a <-- b)`
+  (ordinary `call-i`, unlike `-->`'s own `(--> …)` head), broadcast ⇒
+  `dotcall-i`, tier `(4, 3)` right-assoc (`a --> b <-- c` groups right),
+  `:(<--)`/`:(.<--)` quote, prefix `<-- a` ⇒ `(call-pre (error <--) a)` — the
+  last three came free via `is_op_name` (structural.rs) + `is_value_operator`.
+- **Files**: lexer.rs (tokens + lex arms + `op_takes_suffix` + unit test),
+  syntax.rs, tree_builder.rs, expr.rs (`infix_binding_power`,
+  `is_operator_call_name`, `is_value_operator`), structural.rs (`is_op_name`),
+  sexpr.rs (`infix_head` `CallI`/`DotCallI` + `is_operator`), plus
+  formatter/rules.rs `binary_prec_class` arrow tier (the queued fallout fix).
+- **Fixtures**: parser snapshot + oracle dir slug `left_arrow_operator`
+  (13 cases: plain/broadcast, mixed `-->` both orders, precedence vs `+`/`=`,
+  right-assoc chains, glued `a<--b`, quotes).
+- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 193 → **194**.
+- **Next**: no queued parser target — batch-probe common real-world Julia
+  against the oracle to surface a new divergence (as 2026-07-03 did).
 
 ## Earlier sessions
+
+- **2026-07-05**—newline-broken braces comprehension. `parse_braces`'s
+  first-separator match gained the two newline-lookahead arms
+  `parse_bracket_literal` already had (`{a\nfor b in c}` ⇒
+  `(braces (generator a (= b c)))`, `{a\n, b}` ⇒ `(braces a b)`;
+  `{a\nb}`/`{a\n;b}` stay `bracescat`). Killed the formatter's latent
+  stability violation for exploded braces comprehensions. Fixture
+  `braces_newline_comprehension`. JS 677 (held); dir 192 → 193.
 
 - **2026-07-03**—`@macro` keyword as a macro name. `macro` was missing from *both*
   `is_keyword` matchers (`TokKind::is_keyword` in `lexer.rs`, the `SyntaxKind` free

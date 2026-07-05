@@ -1099,6 +1099,7 @@ pub(super) fn is_op_name(kind: TokKind) -> bool {
             | Arrow
             | LongArrow
             | LeftRightArrow
+            | LeftLongArrow
             | FatArrow
             | Shl
             | Shr

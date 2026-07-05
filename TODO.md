@@ -12,17 +12,15 @@ leverage.
   augmented-assignment token. `a <<= b` ⇒ `(<<= a b)`, `a .÷= b` ⇒ `(.÷= a b)`;
   quotable as `:(<<=)`. The Unicode set is exactly `÷=`/`⊻=` (the only two Unicode
   operators with an augmented form; `⊕=`/`×=`/… are errors in Julia).
-- [ ] Lexer: the left-arrow operator `<--` does not tokenize as one operator.
-  `a <-- b` lexes as `a` `<` `--` and parses as a broken `BINARY_EXPR` with a
-  `diagnostic: expected right-hand side for operator` (`<` missing its RHS,
-  then a stray `MINUS_MINUS`); the formatter then even reshapes the
-  error-recovery shape (`a <-- b` → `a < -- b`). JuliaSyntax:
-  `a <-- b` ⇒ `a <-- b` (`(call-i a <-- b)`), arrow tier, right-associative
-  (`a --> b <-- c` ⇒ `a --> (b <-- c)`). `-->`/`<-->`/`.-->` already lex
-  (`LongArrow`/`LeftRightArrow`/`DotLongArrow`); `<--` needs the same
-  treatment, plus the broadcast `.<--`. Surfaced by the formatter
-  (`arrow_pair_chain/` fixture routes around it); see parser-parity RECAP
-  queued target.
+- [x] Lexer: the left-arrow operator `<--` (and broadcast `.<--`/`.<-->`) now
+  tokenizes as one arrow-tier, right-associative operator
+  (`LeftLongArrow`/`DotLeftLongArrow`/`DotLeftRightArrow`, tier `(4, 3)`).
+  `a <-- b` ⇒ `(call-i a <-- b)`, `a .<-- b` ⇒ `(dotcall-i a <-- b)`,
+  `a --> b <-- c` ⇒ `(--> a (call-i b <-- c))`; quotable as `:(<--)`/`:(.<--)`,
+  prefix `<-- a` recovers as `(call-pre (error <--) a)`. Longest match: `<-->`
+  beats `<--` beats `<` + `--`; `.<-->` beats `.<--` beats `.<`; a lone `<-`
+  stays `<` + unary minus. The formatter's arrow tier (`binary_prec_class`)
+  gained the three kinds.
 - [x] Parser: newline-broken braces comprehension now parses as a
   `BRACES_COMPREHENSION`. `parse_braces` gained the two newline-lookahead arms
   `parse_bracket_literal` already had: a newline run before `for` is

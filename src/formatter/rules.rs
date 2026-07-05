@@ -336,10 +336,10 @@ fn binary_prec_class(kind: SyntaxKind) -> Option<u8> {
         | DOT_PERCENT | DOT_AMP => 1,
         // Bitshift tier: `<< >> >>>`, left-associative.
         SHL | SHR | USHR => 2,
-        // Arrow/pair tier: `=> --> <-->` (and broadcast `.=> .-->`),
-        // right-associative. (`<--` is a lexer gap — it does not tokenize as one
-        // operator yet, so it cannot reach here.)
-        FAT_ARROW | LONG_ARROW | LEFT_RIGHT_ARROW | DOT_FAT_ARROW | DOT_LONG_ARROW => 3,
+        // Arrow/pair tier: `=> --> <-- <-->` (and their broadcast forms),
+        // right-associative.
+        FAT_ARROW | LONG_ARROW | LEFT_RIGHT_ARROW | LEFT_LONG_ARROW | DOT_FAT_ARROW
+        | DOT_LONG_ARROW | DOT_LEFT_LONG_ARROW | DOT_LEFT_RIGHT_ARROW => 3,
         _ => return None,
     })
 }

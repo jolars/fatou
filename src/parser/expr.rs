@@ -1849,6 +1849,8 @@ fn is_value_operator(kind: TokKind) -> bool {
                 | DotSupertype
                 | DotFatArrow
                 | DotLongArrow
+                | DotLeftLongArrow
+                | DotLeftRightArrow
                 | DotPipeGt
                 | DotAmp
                 | DotPipe
@@ -4720,6 +4722,7 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | FatArrow
             | LongArrow
             | LeftRightArrow
+            | LeftLongArrow
             | DotStar
             | DotSlash
             | DotBackslash
@@ -4738,6 +4741,8 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | DotSupertype
             | DotFatArrow
             | DotLongArrow
+            | DotLeftLongArrow
+            | DotLeftRightArrow
             | DotPipeGt
             | DotAmp
             | DotPipe
@@ -5021,7 +5026,10 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::DotFatArrow
         | TokKind::LongArrow
         | TokKind::LeftRightArrow
-        | TokKind::DotLongArrow => (4, 3),
+        | TokKind::LeftLongArrow
+        | TokKind::DotLongArrow
+        | TokKind::DotLeftLongArrow
+        | TokKind::DotLeftRightArrow => (4, 3),
         // Short-circuit `||`/`&&` (and broadcast `.||`/`.&&`) are
         // right-associative (`a && b && c` ⇒ `(&& a (&& b c))`), so `r_bp <
         // l_bp`; `&&` binds tighter than `||`, both looser than the comparisons.
