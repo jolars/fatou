@@ -2010,14 +2010,12 @@ fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
 
 /// Build the ungrouped body of a call or curly application `callee(args)` /
 /// `Callee{args}` appearing as an index subject — the callee followed by the arg
-/// list's explode body — for [`lower_index`]'s shared outer group, so the call's
-/// break opportunities and the index tail are measured together and the subject
-/// yields first. A `; …` keyword tail folds in via [`arg_list_params_body`]; a
-/// huggable last argument or keyword becomes an ungrouped [`Ir::HugGroup`] (see
-/// [`reflow_hug`]). `None` on any shape whose break points would not fold into
-/// the caller's group, falling back to the transparent path (where the index
-/// yields): an interleaved token between callee and arg list, a comment on
-/// either side, or an unmodeled tail.
+/// list's explode body (see [`applied_args_body`]) — for [`lower_index`]'s
+/// shared outer group, so the call's break opportunities and the index tail are
+/// measured together and the subject yields first. `None` on any shape whose
+/// break points would not fold into the caller's group, falling back to the
+/// transparent path (where the index yields): an interleaved token between
+/// callee and arg list, a comment on either side, or an unmodeled tail.
 fn call_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut parts = node.children_with_tokens();
     let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
@@ -2032,67 +2030,82 @@ fn call_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     if args.kind() != SyntaxKind::ARG_LIST || callee_has_comment || bracket_has_comment(&args) {
         return None;
     }
+    applied_args_body(lower_node(&callee), &args)
+}
+
+/// Fold a flat application prefix — a call's callee, or a name-rooted index
+/// chain's base (see [`chain_root_is_name`]) — and its applied arg list into one
+/// ungrouped body for the enclosing shared group. The arg list's break
+/// opportunities become the group's, so the application yields first and any
+/// postfix tail rides its closing bracket. A `; …` keyword tail folds in via
+/// [`arg_list_params_body`]; a huggable last argument or keyword becomes an
+/// ungrouped [`Ir::HugGroup`] (see [`reflow_hug`]). `None` on an unmodeled list
+/// shape — the caller falls back to transparent.
+fn applied_args_body(prefix: Ir, args: &SyntaxNode) -> Option<Ir> {
     let ArgListParts {
         open,
         close,
         items,
         params,
         last_huggable,
-    } = collect_arg_list(&args)?;
-    let callee_ir = lower_node(&callee);
+    } = collect_arg_list(args)?;
 
     if let Some(pnode) = params {
         let (pitems, last_param_huggable) = collect_param_items(&pnode)?;
         if last_param_huggable {
-            let prefix = params_hug_prefix(&open, &items, &pitems);
+            let hug_prefix = params_hug_prefix(&open, &items, &pitems);
             let explode = arg_list_params_body(&open, items, pitems, &close);
-            let hug = reflow_hug(prefix, &last_list_item(&pnode)?, close, explode)?;
-            return Some(Ir::concat([callee_ir, hug]));
+            let hug = reflow_hug(hug_prefix, &last_list_item(&pnode)?, close, explode)?;
+            return Some(Ir::concat([prefix, hug]));
         }
         return Some(Ir::concat([
-            callee_ir,
+            prefix,
             arg_list_params_body(&open, items, pitems, &close),
         ]));
     }
 
     // An empty list never breaks.
     if items.is_empty() {
-        return Some(Ir::concat([callee_ir, Ir::text(open), Ir::text(close)]));
+        return Some(Ir::concat([prefix, Ir::text(open), Ir::text(close)]));
     }
 
     if last_huggable {
         let explode = arg_list_explode_body(&open, &items, &close);
-        let mut prefix: Vec<Ir> = vec![Ir::text(open.clone())];
+        let mut hug_prefix: Vec<Ir> = vec![Ir::text(open.clone())];
         for item in &items[..items.len() - 1] {
-            prefix.push(item.clone());
-            prefix.push(Ir::text(", "));
+            hug_prefix.push(item.clone());
+            hug_prefix.push(Ir::text(", "));
         }
-        let hug = reflow_hug(prefix, &last_list_item(&args)?, close, explode)?;
-        return Some(Ir::concat([callee_ir, hug]));
+        let hug = reflow_hug(hug_prefix, &last_list_item(args)?, close, explode)?;
+        return Some(Ir::concat([prefix, hug]));
     }
 
     Some(Ir::concat([
-        callee_ir,
+        prefix,
         arg_list_explode_body(&open, &items, &close),
     ]))
 }
 
 /// Lay out an index expression whose subject is a bracketed collection or matrix
-/// literal — `[a, b][i]`, `(a, b)[i]`, `{a, b}[i]`, `[a b; c d][i, j]` — or a
-/// call or curly application — `f(a, b)[i]`, `A{T, S}[i]`. The subject's break
+/// literal — `[a, b][i]`, `(a, b)[i]`, `{a, b}[i]`, `[a b; c d][i, j]` — a
+/// call or curly application — `f(a, b)[i]`, `A{T, S}[i]` — or a plain or
+/// dotted name — `table[i][j]`, `config.table[i]`. The subject's break
 /// opportunities and the index arg list share one outer group, so the whole
 /// postfix is measured flat together and the **subject yields first** when it
 /// overflows: the collection (or the call's arg list) explodes one element (or
 /// matrix row) per line and the index rides the closing bracket, breaking at its
-/// own column only if it still doesn't fit there. Without the shared group the
-/// index — the later, inner group — would take the break while a fitting subject
-/// stays flat, leaving a lone index exploded like a stray vector literal.
+/// own column only if it still doesn't fit there. A name-rooted chain has no
+/// subject breaks of its own, so its **first arg list** plays the yielding role
+/// — `table[…][k]` explodes the first bracket and `[k]` rides — exactly as a
+/// call's arg list does in `f(…)[k]`. Without the shared group the index — the
+/// later, inner group — would take the break while a fitting subject stays
+/// flat, leaving a lone index exploded like a stray vector literal.
 ///
-/// Any other subject (an identifier, a paren expression) keeps the transparent
-/// lowering, where subject and index are independent groups. A comment in the
-/// subject or the index list bails likewise — those route to the comment-aware
-/// multiline paths unchanged — as does a call whose arg list the shared group
-/// cannot own (see [`call_reflow_body`]).
+/// Any other subject (a paren expression, a comprehension) keeps the
+/// transparent lowering, where subject and index are independent groups. A
+/// comment in the subject or the index list bails likewise — those route to the
+/// comment-aware multiline paths unchanged — as does a call whose arg list the
+/// shared group cannot own (see [`call_reflow_body`]).
 fn lower_index(node: &SyntaxNode) -> Ir {
     match index_reflow_body(node) {
         Some(body) => Ir::group(body),
@@ -2105,8 +2118,11 @@ fn lower_index(node: &SyntaxNode) -> Ir {
 /// [`lower_index`]'s shared outer group. Recursing through a chained-index
 /// subject (`[…][i][j]`, `f(x)[i][j]`) folds the whole chain into one group, so
 /// the innermost subject still yields first and every index rides the closing
-/// bracket, breaking at its own column only if it overflows there. `None` on any
-/// shape the shared group cannot own — the caller falls back to transparent.
+/// bracket, breaking at its own column only if it overflows there. A chain
+/// rooted at a plain or dotted name (`table[…][k]`) bottoms out the same way a
+/// call does: the base joins flat and the first arg list is the yielding body
+/// (via [`applied_args_body`]). `None` on any shape the shared group cannot own
+/// — the caller falls back to transparent.
 fn index_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut parts = node.children_with_tokens();
     let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
@@ -2120,8 +2136,31 @@ fn index_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     if args.kind() != SyntaxKind::ARG_LIST || bracket_has_comment(&args) {
         return None;
     }
-    let body = construct_reflow_body(&subject)?;
-    Some(Ir::concat([body, lower_arg_list(&args)]))
+    if let Some(body) = construct_reflow_body(&subject) {
+        return Some(Ir::concat([body, lower_arg_list(&args)]));
+    }
+    if !chain_root_is_name(&subject) {
+        return None;
+    }
+    applied_args_body(lower_node(&subject), &args)
+}
+
+/// Whether an index subject is an eligible name-rooted chain base — a plain
+/// name (`table`) or a dotted access (`config.lookup_table`), comment-free —
+/// that joins the shared group flat while its first arg list yields. Any other
+/// subject without a reflow body (a paren expression, a comprehension) keeps
+/// the transparent path, where the index breaks on its own.
+fn chain_root_is_name(subject: &SyntaxNode) -> bool {
+    let dotted = subject.kind() == SyntaxKind::BINARY_EXPR
+        && subject
+            .children_with_tokens()
+            .any(|el| el.kind() == SyntaxKind::DOT);
+    if subject.kind() != SyntaxKind::NAME && !dotted {
+        return false;
+    }
+    !subject
+        .descendants_with_tokens()
+        .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
 }
 
 /// Lay out a comprehension or generator — `[elem for b… if f]`, `(elem for b…)`,
