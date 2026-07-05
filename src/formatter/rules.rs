@@ -1301,15 +1301,25 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
             // before it (the positionals, the `; `, the earlier keywords, the
             // `name = `) is the flat first-line prefix, and the width-driven
             // group below is the explode fallback.
-            let hug =
-                last_param_huggable.then(|| Ir::concat(params_hug_prefix(&open, &items, &pitems)));
-            let body = hug
-                .is_some()
-                .then(|| pitems.last().expect("hug requires a last item").clone());
+            let hug = last_param_huggable.then(|| {
+                let mut prefix = params_hug_prefix(&open, &items, &pitems);
+                let mut body = pitems.last().expect("hug requires a last item").clone();
+                // A trailing pair value hugs through its `=>`: the keyword's
+                // `name = lhs => ` joins the flat prefix and the value alone
+                // is the body (see [`pair_hug_grouped_parts`]).
+                if let Some((extra, value_body)) = last_list_item(&pnode)
+                    .as_ref()
+                    .and_then(pair_hug_grouped_parts)
+                {
+                    prefix.push(extra);
+                    body = value_body;
+                }
+                (Ir::concat(prefix), body)
+            });
             let close_text = Ir::text(close.clone());
 
             let grouped = Ir::group(arg_list_params_body(&open, items, pitems, &close));
-            if let (Some(prefix), Some(body)) = (hug, body) {
+            if let Some((prefix, body)) = hug {
                 return Ir::hug_group(prefix, body, close_text, grouped);
             }
             return grouped;
@@ -1345,11 +1355,20 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // falls back to the standard explode group, one item per line.
     if last_huggable {
         let explode = arg_list_explode_group(&open, &items, &close);
-        let body = items.pop().expect("hug requires a last item");
+        let mut body = items.pop().expect("hug requires a last item");
         let mut prefix: Vec<Ir> = vec![Ir::text(open)];
         for item in items {
             prefix.push(item);
             prefix.push(Ir::text(", "));
+        }
+        // A trailing pair hugs through its `=>`: the `lhs => ` joins the flat
+        // prefix and the value alone is the body (see [`pair_hug_grouped_parts`]).
+        if let Some((extra, value_body)) = last_list_item(node)
+            .as_ref()
+            .and_then(pair_hug_grouped_parts)
+        {
+            prefix.push(extra);
+            body = value_body;
         }
         return Ir::hug_group(Ir::concat(prefix), body, Ir::text(close), explode);
     }
@@ -1551,17 +1570,20 @@ fn bracket_explode_body(open: &str, items: &[Ir], close: &str, trailing: Ir) -> 
 /// construct; a `KEYWORD_ARG` hugs when it has the clean `name = <value>` shape
 /// (the one [`lower_keyword_arg`] reflows) and the value is one — the name and
 /// `=` join the flat prefix (`f(x, kw = [`). A bare token, a splat, a
-/// unary/binary expression, or anything else keeps the normal layout.
+/// unary/binary expression, or anything else keeps the normal layout. The pair
+/// operators are hug-transparent (see [`pair_hug_split`]): a value of the form
+/// `lhs => <huggable construct>` hugs too, the `lhs => ` joining the flat
+/// prefix like a keyword's `name = `.
 fn item_is_huggable(item: &SyntaxNode) -> bool {
     match item.kind() {
         SyntaxKind::ARG => {
             // Exactly one child node (a clean sole wrapper), and it is a
-            // huggable kind.
+            // huggable value.
             let mut children = item.children();
             let (Some(child), None) = (children.next(), children.next()) else {
                 return false;
             };
-            huggable_kind(child.kind())
+            value_is_huggable(&child)
         }
         SyntaxKind::KEYWORD_ARG => {
             // Exactly `name = value` — two child nodes with nothing but the `=`
@@ -1584,10 +1606,54 @@ fn item_is_huggable(item: &SyntaxNode) -> bool {
                     },
                 }
             }
-            nodes == 2 && seen_eq && value.is_some_and(|v| huggable_kind(v.kind()))
+            nodes == 2 && seen_eq && value.as_ref().is_some_and(value_is_huggable)
         }
         _ => false,
     }
+}
+
+/// Whether an item's value can hug: a bracket-delimited construct itself, or a
+/// clean pair wrapping one (see [`pair_hug_split`]).
+fn value_is_huggable(value: &SyntaxNode) -> bool {
+    huggable_kind(value.kind()) || pair_hug_split(value).is_some()
+}
+
+/// Split a clean pair whose value can hug — `lhs => <construct>` or
+/// `lhs .=> <construct>` with a huggable right-hand side — into the left
+/// operand, the operator text, and the value node. The two pair spellings are
+/// hug-transparent: a trailing pair item hugs through them, the `lhs => `
+/// joining the flat hug prefix exactly as a keyword's `name = ` does. The
+/// other arrow-tier operators (`-->`, `<-->`, …) share the parser tier but not
+/// the pair idiom and keep the normal layout, as does anything but the clean
+/// two-operand shape (a comment or a longer `a => b => c` chain bails; interior
+/// newlines are layout-free, as in [`lower_binary`]).
+fn pair_hug_split(node: &SyntaxNode) -> Option<(SyntaxNode, String, SyntaxNode)> {
+    if node.kind() != SyntaxKind::BINARY_EXPR {
+        return None;
+    }
+    let mut lhs: Option<SyntaxNode> = None;
+    let mut op: Option<String> = None;
+    let mut rhs: Option<SyntaxNode> = None;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => match (&lhs, &op, &rhs) {
+                (None, None, None) => lhs = Some(child),
+                (Some(_), Some(_), None) => rhs = Some(child),
+                _ => return None,
+            },
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::FAT_ARROW | SyntaxKind::DOT_FAT_ARROW
+                    if lhs.is_some() && op.is_none() =>
+                {
+                    op = Some(tok.text().to_string());
+                }
+                _ => return None,
+            },
+        }
+    }
+    let (lhs, op, rhs) = (lhs?, op?, rhs?);
+    huggable_kind(rhs.kind()).then_some((lhs, op, rhs))
 }
 
 /// The bracket-delimited constructs that can hug an enclosing bracket: each owns
@@ -1670,11 +1736,20 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
             &close,
             singleton_comma,
         ));
-        let body = items.pop().expect("hug requires a last item");
+        let mut body = items.pop().expect("hug requires a last item");
         let mut prefix: Vec<Ir> = vec![Ir::text(open)];
         for item in items {
             prefix.push(item);
             prefix.push(Ir::text(", "));
+        }
+        // A trailing pair element hugs through its `=>` (see
+        // [`pair_hug_grouped_parts`]).
+        if let Some((extra, value_body)) = last_list_item(node)
+            .as_ref()
+            .and_then(pair_hug_grouped_parts)
+        {
+            prefix.push(extra);
+            body = value_body;
         }
         return Ir::hug_group(Ir::concat(prefix), body, Ir::text(close_text), explode);
     }
@@ -1741,8 +1816,8 @@ fn reflow_hug(mut prefix: Vec<Ir>, last: &SyntaxNode, close: String, explode: Ir
 }
 
 /// Split a huggable list item into the hug's prefix addition and its ungrouped
-/// body: a positional `ARG` contributes no prefix and its sole child's reflow
-/// body; a `KEYWORD_ARG` contributes `name = ` and the value's reflow body.
+/// body: a positional `ARG` contributes its value's prefix (nothing, or a
+/// pair's `lhs => `) and reflow body; a `KEYWORD_ARG` prepends `name = `.
 /// `None` when the wrapped construct has no reflow body — the caller bails to
 /// transparent, exactly as the pre-hug bails did.
 fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
@@ -1752,7 +1827,7 @@ fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
             let (Some(child), None) = (children.next(), children.next()) else {
                 return None;
             };
-            Some((None, construct_reflow_body(&child)?))
+            hug_value_parts(&child)
         }
         SyntaxKind::KEYWORD_ARG => {
             // `item_is_huggable` vetted the clean `name = value` shape: exactly
@@ -1763,11 +1838,70 @@ fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
             else {
                 return None;
             };
-            let body = construct_reflow_body(&value)?;
-            Some((Some(Ir::concat([lower_node(&name), Ir::text(" = ")])), body))
+            let (extra, body) = hug_value_parts(&value)?;
+            let mut prefix = vec![lower_node(&name), Ir::text(" = ")];
+            prefix.extend(extra);
+            Some((Some(Ir::concat(prefix)), body))
         }
         _ => None,
     }
+}
+
+/// The prefix segment and grouped value body of a trailing *pair* item in a
+/// hug: `lhs => ` (behind a keyword's `name = `) joins the flat prefix, and
+/// the hug body is the pair value's own grouped lowering, so the break lands
+/// inside the value's bracket rather than at the `=>`. `None` for a non-pair
+/// item, whose normal lowering is already the right hug body.
+fn pair_hug_grouped_parts(item: &SyntaxNode) -> Option<(Ir, Ir)> {
+    match item.kind() {
+        SyntaxKind::ARG => {
+            let mut children = item.children();
+            let (Some(child), None) = (children.next(), children.next()) else {
+                return None;
+            };
+            let (lhs, op, rhs) = pair_hug_split(&child)?;
+            Some((
+                Ir::concat([lower_node(&lhs), Ir::text(format!(" {op} "))]),
+                lower_node(&rhs),
+            ))
+        }
+        SyntaxKind::KEYWORD_ARG => {
+            // `item_is_huggable` vetted the clean `name = value` shape.
+            let mut children = item.children();
+            let (Some(name), Some(value), None) =
+                (children.next(), children.next(), children.next())
+            else {
+                return None;
+            };
+            let (lhs, op, rhs) = pair_hug_split(&value)?;
+            Some((
+                Ir::concat([
+                    lower_node(&name),
+                    Ir::text(" = "),
+                    lower_node(&lhs),
+                    Ir::text(format!(" {op} ")),
+                ]),
+                lower_node(&rhs),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// The hug prefix contribution and ungrouped reflow body of a huggable item
+/// value: a bracket-delimited construct contributes no prefix; a clean pair
+/// (see [`pair_hug_split`]) contributes `lhs => ` and its right-hand side's
+/// body.
+fn hug_value_parts(value: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
+    if huggable_kind(value.kind()) {
+        return Some((None, construct_reflow_body(value)?));
+    }
+    let (lhs, op, rhs) = pair_hug_split(value)?;
+    let body = construct_reflow_body(&rhs)?;
+    Some((
+        Some(Ir::concat([lower_node(&lhs), Ir::text(format!(" {op} "))])),
+        body,
+    ))
 }
 
 /// The ungrouped reflow body of a bracket-delimited construct, for folding into
