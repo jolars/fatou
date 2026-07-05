@@ -1906,8 +1906,8 @@ fn hug_value_parts(value: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
 
 /// The ungrouped reflow body of a bracket-delimited construct, for folding into
 /// an enclosing group that must own its break opportunities — an index subject
-/// or a hugged trailing item. `None` for a construct without one (a
-/// comprehension, a comment-bearing literal, an unmodeled shape) — the caller
+/// or a hugged trailing item. `None` for a construct without one (a paren
+/// expression, a comment-bearing literal, an unmodeled shape) — the caller
 /// bails to transparent.
 fn construct_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     match node.kind() {
@@ -1919,6 +1919,10 @@ fn construct_reflow_body(node: &SyntaxNode) -> Option<Ir> {
         SyntaxKind::MATRIX_EXPR if !matrix_has_comment(node) => matrix_reflow_body(node),
         SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(node),
         SyntaxKind::INDEX_EXPR => index_reflow_body(node),
+        SyntaxKind::COMPREHENSION | SyntaxKind::GENERATOR | SyntaxKind::BRACES_COMPREHENSION => {
+            comprehension_reflow_body(node)
+        }
+        SyntaxKind::TYPED_COMPREHENSION => typed_comprehension_reflow_body(node),
         _ => None,
     }
 }
@@ -2101,11 +2105,14 @@ fn applied_args_body(prefix: Ir, args: &SyntaxNode) -> Option<Ir> {
 /// later, inner group — would take the break while a fitting subject stays
 /// flat, leaving a lone index exploded like a stray vector literal.
 ///
-/// Any other subject (a paren expression, a comprehension) keeps the
-/// transparent lowering, where subject and index are independent groups. A
-/// comment in the subject or the index list bails likewise — those route to the
-/// comment-aware multiline paths unchanged — as does a call whose arg list the
-/// shared group cannot own (see [`call_reflow_body`]).
+/// A comprehension subject — plain, generator, braces, or typed
+/// `Float64[…]` — yields the same way: the bracketed body explodes onto
+/// element-and-clause lines and the index rides. Any other subject (a paren
+/// expression) keeps the transparent lowering, where subject and index are
+/// independent groups. A comment in the subject or the index list bails
+/// likewise — those route to the comment-aware multiline paths unchanged — as
+/// does a call whose arg list the shared group cannot own (see
+/// [`call_reflow_body`]).
 fn lower_index(node: &SyntaxNode) -> Ir {
     match index_reflow_body(node) {
         Some(body) => Ir::group(body),
@@ -2148,8 +2155,8 @@ fn index_reflow_body(node: &SyntaxNode) -> Option<Ir> {
 /// Whether an index subject is an eligible name-rooted chain base — a plain
 /// name (`table`) or a dotted access (`config.lookup_table`), comment-free —
 /// that joins the shared group flat while its first arg list yields. Any other
-/// subject without a reflow body (a paren expression, a comprehension) keeps
-/// the transparent path, where the index breaks on its own.
+/// subject without a reflow body (a paren expression) keeps the transparent
+/// path, where the index breaks on its own.
 fn chain_root_is_name(subject: &SyntaxNode) -> bool {
     let dotted = subject.kind() == SyntaxKind::BINARY_EXPR
         && subject
@@ -2179,11 +2186,25 @@ fn chain_root_is_name(subject: &SyntaxNode) -> bool {
 /// A comment anywhere in the subtree can't be reflowed away, so the whole node bails
 /// to the verbatim transparent path.
 fn lower_comprehension(node: &SyntaxNode) -> Ir {
+    match comprehension_reflow_body(node) {
+        Some(body) => Ir::group(body),
+        None => lower_transparent(node),
+    }
+}
+
+/// Build the ungrouped body behind [`lower_comprehension`] — also folded into
+/// [`lower_index`]'s shared outer group (via [`construct_reflow_body`]) or an
+/// enclosing hug, where the owning group must own the break opportunities so a
+/// too-wide indexed comprehension explodes while its index rides the closing
+/// bracket. `None` on any unmodeled shape — a comment anywhere in the subtree,
+/// an unexpected token or child, a missing bracket or clause — the caller falls
+/// back to transparent.
+fn comprehension_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     if node
         .descendants_with_tokens()
         .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
     {
-        return lower_transparent(node);
+        return None;
     }
 
     let mut open: Option<String> = None;
@@ -2201,18 +2222,15 @@ fn lower_comprehension(node: &SyntaxNode) -> Ir {
                     close = Some(tok.text().to_string())
                 }
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
-                _ => return lower_transparent(node),
+                _ => return None,
             },
             NodeOrToken::Node(child) => match child.kind() {
                 SyntaxKind::FOR_BINDING => clauses.push(lower_for_binding(&child)),
-                SyntaxKind::COMPREHENSION_IF => match lower_comprehension_if(&child) {
-                    Some(ir) => clauses.push(ir),
-                    None => return lower_transparent(node),
-                },
+                SyntaxKind::COMPREHENSION_IF => clauses.push(lower_comprehension_if(&child)?),
                 // The element expression precedes every clause and occurs once.
                 _ => {
                     if element.is_some() || !clauses.is_empty() {
-                        return lower_transparent(node);
+                        return None;
                     }
                     element = Some(lower_node(&child));
                 }
@@ -2220,11 +2238,9 @@ fn lower_comprehension(node: &SyntaxNode) -> Ir {
         }
     }
 
-    let (Some(open), Some(close), Some(element)) = (open, close, element) else {
-        return lower_transparent(node);
-    };
+    let (open, close, element) = (open?, close?, element?);
     if clauses.is_empty() {
-        return lower_transparent(node);
+        return None;
     }
 
     let mut inner: Vec<Ir> = vec![Ir::SoftLine, element];
@@ -2233,11 +2249,37 @@ fn lower_comprehension(node: &SyntaxNode) -> Ir {
         inner.push(clause);
     }
 
-    Ir::group(Ir::concat([
+    Some(Ir::concat([
         Ir::text(open),
         Ir::indent(Ir::concat(inner)),
         Ir::SoftLine,
         Ir::text(close),
+    ]))
+}
+
+/// The ungrouped reflow body of a typed comprehension `T[…]` — the type joins
+/// the shared group flat, like a call's callee, and the bracketed generator
+/// body carries the break opportunities, so a too-wide indexed
+/// `Float64[…][idx]` explodes the comprehension while the index rides. `None`
+/// unless the node is exactly the snug type + generator pair with a
+/// comment-free type — anything else keeps the transparent path.
+fn typed_comprehension_reflow_body(node: &SyntaxNode) -> Option<Ir> {
+    let mut parts = node.children_with_tokens();
+    let (Some(first), Some(second), None) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    let (NodeOrToken::Node(ty), NodeOrToken::Node(generator)) = (first, second) else {
+        return None;
+    };
+    let ty_has_comment = ty
+        .descendants_with_tokens()
+        .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT));
+    if ty_has_comment {
+        return None;
+    }
+    Some(Ir::concat([
+        lower_node(&ty),
+        comprehension_reflow_body(&generator)?,
     ]))
 }
 
