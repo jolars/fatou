@@ -124,6 +124,15 @@ leverage.
   (`Dict("k" => [\n    a,\n])`). New `pair_hug_split`/`value_is_huggable`/
   `hug_value_parts`/`pair_hug_grouped_parts`; the other arrow-tier operators
   (`-->`, `<-->`) and chained pairs (`a => b => c`) keep the normal explode.
+- [x] Formatter: name-rooted index chains break subject-first
+  (`name_index_break/`). A too-wide chain rooted at a plain or dotted name
+  (`table[…][k]`, `config.table[…][k]`) now folds into `lower_index`'s shared
+  group: the first arg list is the yielding body (hugs and `;`-tails included
+  via the extracted `applied_args_body`, shared with `call_reflow_body`) and
+  every later index rides the closing bracket, breaking at its own column only
+  if it still overflows — exactly the gated call-subject rule with `[` for `(`.
+  Kills the stray-vector middle explosion the transparent path produced. Paren
+  and comprehension subjects still bail transparent.
 - [x] Formatter: the `;`-keyword tail of a call now folds into `lower_arg_list`'s
   width-driven group instead of always emitting flat. A too-wide call breaks
   one-arg-per-line with the `;` snug after the last positional (`b;`) and each

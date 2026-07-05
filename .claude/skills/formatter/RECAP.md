@@ -71,10 +71,12 @@ Tenet 1.
   — + explode fallback),
   `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
   `collect_collection_items`/`collection_body`, trailing-element hug),
-  `lower_index` (collection/matrix/call/curly/chained-index subject
+  `lower_index` (collection/matrix/call/curly/chained-index/name-rooted subject
   + index share one group via the recursive `index_reflow_body`/`construct_reflow_body`
   — innermost subject yields first, incl. through hugs (ungrouped `Ir::HugGroup`) and
-  `;`-keyword tails; comprehension subjects and name-rooted chains bail),
+  `;`-keyword tails; a name/dotted root's first arg list is the yielding body via
+  `applied_args_body` (shared with `call_reflow_body`); comprehension/paren subjects
+  bail),
   `lower_bare_tuple`, curly type-params, named tuples.
 - Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
   `lower_multiline_bracket`, `lower_matrix`, `lower_paren`/`lower_paren_block`,
@@ -99,48 +101,47 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (pair-value hugging)
+## Latest session (name-rooted index chains)
 
-Closed ranked target #1. Two AskUserQuestion decisions: **pair values hug**
-(recommended option accepted), and the hug-transparent operators are **`=>` and
-`.=>` only** — the pair idiom, not the whole arrow tier (`-->`/`<-->` keep the
-normal explode; operator-identity keying is deterministic, so Tenet-1 clean).
-Mid-session friction raised and resolved: the first AskUserQuestion preview
-mistakenly showed the hugged body *packed* (`[a, b,\n c]`-style fill); the gated
-hug style is one-item-per-line. User confirmed **one item per line** (consistent
-with `kwarg_hug`/`arg_hug`; packed would need a fill primitive + re-authoring
-those fixtures).
+Closed ranked target #1. Two AskUserQuestion decisions, both recommended options
+accepted: (1) a too-wide name-rooted chain (`table[…][k]`) breaks **innermost
+arg list first** — the first `[…]` explodes one-per-line and every later index
+rides the closing bracket, re-breaking at its own column only if it still
+overflows. This is exactly the gated call-subject rule with `[` for `(`
+(`f(key)[wide]` already explodes the tiny `(key)`); the disclosed tradeoff —
+`table[key][wide…]` explodes the small `[key,]` while the wide index rides — was
+accepted for consistency. (2) Eligible roots are **`NAME` + dotted access**
+(`BINARY_EXPR` with a direct `DOT` token), comment-free; paren, comprehension,
+and macro-call subjects keep the transparent bail (comprehension bodies are
+ranked target #2 and would churn if grabbed as flat atoms now).
 
-**Implementation:** `pair_hug_split` vets the clean two-operand
-`lhs =>/.=> <huggable construct>` shape (interior newlines layout-free like
-`lower_binary`; comments and `a => b => c` chains bail → normal layout);
-`value_is_huggable` folds it into `item_is_huggable` for both `ARG` and
-`KEYWORD_ARG` values. Two body flavors, matching the two hug families:
-`hug_value_parts` (via `item_hug_parts` → `reflow_hug`) yields the **ungrouped**
-reflow body for the index-subject paths, and `pair_hug_grouped_parts` rebuilds
-prefix+body at the three **grouped** hug sites (`lower_arg_list` positional +
-`;`-params tails, `lower_collection`) — the `lhs => ` (behind a keyword's
-`name = `) joins the flat hug prefix and the value's own grouped lowering is the
-body. **Trap that motivated the split:** those grouped sites use the popped
-*lowered item* as the hug body, so a pair arg's body was the whole
-`lower_binary` group and the "hug" broke at ` =>` (operator-trailing) instead of
-inside the value's bracket; the kwarg hug only ever worked because ` = ` emits
-no group. Any future hug-through-X must move the `X`-prefix into the hug prefix
-at all four sites, not just `item_hug_parts`.
+**Implementation:** extracted `applied_args_body(prefix, args)` — the whole
+post-callee body of `call_reflow_body` (params/hug/empty/explode arms, verbatim)
+— and reused it as `index_reflow_body`'s new base case: when
+`construct_reflow_body(subject)` is `None` but `chain_root_is_name(subject)`
+holds, the body is `lower_node(subject)` + the arg list's yielding body. The
+chain recursion (`construct_reflow_body`'s `INDEX_EXPR` arm) propagates the base
+up, so outer indexes ride as before. Side effect: a *single* name-rooted index
+(`table[wide]`) now routes through `lower_index`'s group instead of transparent
+— output is byte-identical (locked by the `single` fixture case), because the
+outer group + ungrouped body breaks exactly where the arg list's own group did.
+This killed the old pathology where continuation-aware `fits` let a wide first
+link stay flat and exploded a tiny middle `[key_one]` like a stray vector.
 
-Gated `pair_hug/` (16 cases: vector/call/nested-Dict values, `.=>`, multi-entry
-Dict prefix, `;`-params pair kwarg, vector-of-pairs collection element,
-`-->` non-hug, non-huggable RHS, non-last pair, chained pair, 92/93 fence pair,
-prefix-overflow explode fallback, pre-broken reflow-to-hug, short flat). Gate
-92→93, zero regressions; clippy + fmt clean.
+Gated `name_index_break/` (11 cases: short dotted chain, 92/93 fence pair,
+wide-first + two riding tails, small-first/wide-second tradeoff, dotted root,
+hugged innermost + riding tail, both-links-overflow, single wide index
+regression, pre-broken reflow-to-flat). Gate 93→94, zero regressions; clippy +
+fmt clean.
 
-**Ranked next targets:** (1) Name-rooted chain layout (`table[wide args][k]` —
-should the inner arg list explode and `[k]` ride? needs a user decision).
-(2) Comprehension reflow body (a hugged/indexed comprehension still bails
-transparent — extract an ungrouped body from `lower_comprehension` and add it to
-`construct_reflow_body`). (3) Chained-pair hug (`a => b => […]` — recurse
+**Ranked next targets:** (1) Comprehension reflow body (a hugged/indexed
+comprehension still bails transparent — extract an ungrouped body from
+`lower_comprehension` and add it to `construct_reflow_body`; also unlocks
+comprehension chain roots). (2) Chained-pair hug (`a => b => […]` — recurse
 `pair_hug_split` through the right-nested spine so the whole `a => b => ` joins
-the prefix; deferred this session as rare).
+the prefix; deferred as rare). (3) Paren-subject chains (`(f())[wide][k]` —
+decide whether a paren expression joins the shared group like a name root or
+keeps the transparent bail).
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):** (a) **parser** —
 newline-after-comma continuation (bare tuple / `let` bindings / `import` lists) fragment
@@ -175,6 +176,15 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Pair-value hugging** (committed `f1363da`+`ee0e2b2`+`1cdd9e0`, `feat`+`test`+`docs`):
+  `=>`/`.=>` (the pair idiom only; `-->`/`<-->` explode) are hug-transparent — a trailing
+  `lhs => <bracket construct>` arg/kwarg-value/collection element hugs, the `lhs => `
+  joining the flat prefix. `pair_hug_split`/`value_is_huggable`; two body flavors
+  (`hug_value_parts` ungrouped for index-subject paths, `pair_hug_grouped_parts` at the
+  three grouped hug sites). **Trap:** grouped sites use the popped lowered item as hug
+  body, so any future hug-through-X must move the `X`-prefix into the hug prefix at all
+  four sites, not just `item_hug_parts`. Chained pairs (`a => b => c`) bail → normal
+  layout. Gated `pair_hug/` (16). Gate 92→93.
 - **Arrow/pair tier flatten + Runic doc-comment sweep** (committed `da4e88c`+`01caa11`+
   `fa9baae`, `feat`+`test`+`docs`): `binary_prec_class` tier 3 (`=>`/`.=>`/`-->`/`.-->`/
   `<-->`, right-assoc, layout-only flatten) — a mixed arrow/pair-tier chain breaks
