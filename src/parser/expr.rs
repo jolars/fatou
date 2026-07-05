@@ -3969,6 +3969,21 @@ fn parse_braces(
             diagnostics,
         )),
         None | Some(TokKind::RBrace | TokKind::Comma) => Some(braces(diagnostics)),
+        // A newline run before the comprehension `for` is insignificant, so
+        // `{x \n for a in as}` stays a `(braces (generator …))`.
+        Some(TokKind::Newline) if newline_run_precedes_for(ctx, look) => Some(parse_comprehension(
+            ctx,
+            start,
+            first,
+            SyntaxKind::BRACES_COMPREHENSION,
+            TokKind::RBrace,
+            diagnostics,
+        )),
+        // A newline followed by a `,` keeps the comma as the real separator, so
+        // `{x\n, y}` is `(braces x y)`, matching `[x\n, y]` → `(vect x y)`.
+        Some(TokKind::Newline) if newline_run_precedes_comma(ctx, look) => {
+            Some(braces(diagnostics))
+        }
         _ => Some(parse_matrix(
             ctx,
             start,

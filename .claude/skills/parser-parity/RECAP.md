@@ -6,21 +6,13 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Queued (2026-07-05, from formatter): parser gap — newline-broken braces
-comprehension mis-parses as `BRACESCAT_EXPR`.** `{a\nfor b in c}` parses as a
-`BRACESCAT_EXPR` whose second row swallows the `for` as a statement-level
-`FOR_EXPR` (two `expected `end`` diagnostics); the equivalent square-bracket
-form `[a\nfor b in c]` parses fine as a comprehension. JuliaSyntax ground
-truth: `{a\nfor b in c}` ⇒ `(braces (generator a (= b c)))` — a newline before
-`for` inside `{…}` does **not** start a new bracescat row. The crux: the
-braces path commits to bracescat on the interior newline before checking
-whether the next row starts with `for`; the `[`-comprehension path already
-handles this. Formatter fallout: `lower_comprehension` explodes a too-wide
-`BRACES_COMPREHENSION` onto element/clause lines, so that output **fails to
-reparse** under Fatou (latent stability violation — no gated fixture currently
-triggers it; the formatter's `comprehension_index_break/` fixture keeps its
-braces case narrow enough to stay flat and carries a comment pointing here).
-Once fixed, widen that braces case so it explodes like the `[…]` cases.
+**Handoff to formatter (2026-07-05): the braces-comprehension parser gap is
+fixed** — `{a\nfor b in c}` now parses as `BRACES_COMPREHENSION` ⇒
+`(braces (generator a (= b c)))`, so the formatter's exploded output for a
+too-wide braces comprehension reparses cleanly (the latent stability violation
+is gone). Widen the braces case of the formatter's `comprehension_index_break/`
+fixture so it explodes like the `[…]` cases (it was kept narrow to stay flat,
+with a comment pointing at this gap).
 
 **Queued (2026-07-04, from formatter): lexer gap — `<--` is not one token.**
 `a <-- b` lexes as `a` `<` `--` (a `LT` missing its RHS + a stray `MINUS_MINUS`,
@@ -113,7 +105,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **192 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **193 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -133,41 +125,44 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-03—`@macro` keyword as a macro name)
+## Latest session (2026-07-05—newline-broken braces comprehension)
 
-Fixed a one-keyword robustness gap surfaced by batch-probing common Julia against the
-oracle (the corpus-driven backlog is exhausted of fixable cases). **`macro` was missing
-from *both* `is_keyword` functions**—`TokKind::is_keyword` (`lexer.rs`) and the
-`SyntaxKind` free `is_keyword` (`sexpr.rs`)—so every path that treats a post-`@`/post-`:`
-keyword as a name skipped `macro` alone (every *other* keyword worked: `@function`, `@if`,
-`@begin`, `@struct`, `@end`, `@do`, `@quote` all projected `(macrocall @kw …)`). `@macro a
-b c` fell through the macro-name body, then `parse_macro_args` parsed `macro a b c` as a
-`MACRO_DEF` block—swallowing following tokens and emitting a fake empty `@.` name.
+Closed the top queued target (formatter handoff): `{a\nfor b in c}` mis-parsed
+as a `BRACESCAT_EXPR` swallowing the `for` as a statement-level `FOR_EXPR`
+(two `expected `end`` diagnostics) — the formatter's exploded output for a
+too-wide `BRACES_COMPREHENSION` therefore failed to reparse (latent stability
+violation, no gated fixture triggered it).
 
-- **One-line fix ×2**: add `MacroKw`/`MACRO_KW` to the two `is_keyword` matchers. The
-  statement form `macro f() end` is dispatched separately (the `MacroKw` arm at
-  `expr.rs:328`, independent of `is_keyword`), so it's untouched.
-- **One omission, a whole family fixed** (all now byte-identical to JS): `@macro a b c` ⇒
-  `(macrocall @macro a b c)`; `@macro(x)` ⇒ `(macrocall-p @macro x)`; `Base.@macro x` ⇒
-  `(macrocall (. Base (quote @macro)) x)`; `:macro` ⇒ `(quote-: macro)` (was `: (error-t)`);
-  `struct macro end` ⇒ `(struct (error macro) (block))` and `function macro() end` ⇒
-  `(function (call (error macro)) (block))` (both via `is_name_error_keyword`, previously
-  badly broken).
-- **Faithful**: no projector compensation—the parser now consumes `macro` as the `MACRO_KW`
-  name token (CST shows `MACRO_NAME > AT + MACRO_KW`), and the projector's `name_text`
-  fallback renders it because `MACRO_KW` is now a keyword.
-- **Fixtures**: parser snapshot + oracle dir slug `macro_keyword_name` (`@macro a b c`,
-  `@macro(x)`, `Base.@macro x`, `:macro`—all clean matches).
-- **Counts**: JS 677 (held—not in the JS corpus, no regressions); dir 191 → **192**.
-- **Deferred sibling**: `2macro` ⇒ JS `2 (error-t macro)`, Fatou `2 (error-t)` (the
-  toplevel-leftover error drops the keyword glyph from the trailing-junk run); a bizarre
-  error-shape edge, strictly improved (was a bogus juxtaposed `MACRO_DEF`), not in either
-  corpus.
-- **Next**: no queued target. Continue batch-probing real-world constructs (short-circuit
-  chains, comprehensions, string macros, etc. all already pass) for the next divergence, or
-  tackle the `x 'y` char-lexer / `(2)(3)x` juxtaposition FAILs (both known-hard, permanent-ish).
+- **The fix is symmetry**: `parse_braces`'s first-separator match
+  (`expr.rs` ~3962) lacked the two newline-lookahead arms
+  `parse_bracket_literal` already had. Added both, reusing the existing
+  helpers verbatim: `Newline` + `newline_run_precedes_for` ⇒
+  `parse_comprehension(BRACES_COMPREHENSION)`, `Newline` +
+  `newline_run_precedes_comma` ⇒ the braces comma list. No projector change,
+  no new diagnostics — a pure parser-gap fix in one match expression.
+- **Probed ground truth** (all now byte-identical): `{a\nfor b in c}` and the
+  blank-line form ⇒ `(braces (generator a (= b c)))`; `{a\n, b}` ⇒
+  `(braces a b)`; siblings `{a\nb}`/`{a\n;b}` stay `(bracescat a b)`. The
+  formatter's actual exploded shape (element + `for` + `if` clause each on its
+  own indented line) verified byte-identical to JS and lossless.
+- **Fixtures**: parser snapshot + oracle dir slug `braces_newline_comprehension`
+  (6 cases: for, blank-line for, comma continuation, both bracescat siblings,
+  exploded multi-clause form).
+- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 192 → **193**.
+- **Handoff to formatter**: widen `comprehension_index_break/`'s braces case
+  (see Queued next targets).
+- **Next**: the `<--` lexer gap (queued 2026-07-04, 5-file operator recipe) is
+  the remaining queued target.
 
 ## Earlier sessions
+
+- **2026-07-03**—`@macro` keyword as a macro name. `macro` was missing from *both*
+  `is_keyword` matchers (`TokKind::is_keyword` in `lexer.rs`, the `SyntaxKind` free
+  fn in `sexpr.rs`), so `@macro a b c` fell through to a bogus juxtaposed
+  `MACRO_DEF` with a fake empty `@.` name. Two one-line fixes; whole family now
+  byte-identical (`@macro a b c`, `@macro(x)`, `Base.@macro x`, `:macro`,
+  `struct macro end`, `function macro() end`). Fixture `macro_keyword_name`.
+  JS 677 (held); dir 191 → 192. Deferred: `2macro` trailing-junk glyph drop.
 
 - **2026-07-02d**—newline-after-comma continuation cluster. A trailing comma (or the
   `import` `:`/keyword) now suppresses the statement-terminating newline so a comma list

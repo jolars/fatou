@@ -25,6 +25,7 @@ block_form_operand
 block_trailing_junk
 bracescat
 braces_generator
+braces_newline_comprehension
 broadcast_bitwise_operators
 broadcast_identity_operators
 broadcasting

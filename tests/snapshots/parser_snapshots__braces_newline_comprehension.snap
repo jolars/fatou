@@ -1,0 +1,128 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..109
+  BRACES_COMPREHENSION@0..14
+    LBRACE@0..1 "{"
+    NAME@1..2
+      IDENT@1..2 "a"
+    NEWLINE@2..3 "\n"
+    FOR_BINDING@3..13
+      FOR_KW@3..6 "for"
+      WHITESPACE@6..7 " "
+      NAME@7..8
+        IDENT@7..8 "b"
+      WHITESPACE@8..9 " "
+      IDENT@9..11 "in"
+      WHITESPACE@11..12 " "
+      NAME@12..13
+        IDENT@12..13 "c"
+    RBRACE@13..14 "}"
+  NEWLINE@14..15 "\n"
+  BRACES_COMPREHENSION@15..30
+    LBRACE@15..16 "{"
+    NAME@16..17
+      IDENT@16..17 "a"
+    NEWLINE@17..18 "\n"
+    NEWLINE@18..19 "\n"
+    FOR_BINDING@19..29
+      FOR_KW@19..22 "for"
+      WHITESPACE@22..23 " "
+      NAME@23..24
+        IDENT@23..24 "b"
+      WHITESPACE@24..25 " "
+      IDENT@25..27 "in"
+      WHITESPACE@27..28 " "
+      NAME@28..29
+        IDENT@28..29 "c"
+    RBRACE@29..30 "}"
+  NEWLINE@30..31 "\n"
+  BRACES@31..38
+    LBRACE@31..32 "{"
+    ARG@32..33
+      NAME@32..33
+        IDENT@32..33 "a"
+    NEWLINE@33..34 "\n"
+    COMMA@34..35 ","
+    WHITESPACE@35..36 " "
+    ARG@36..37
+      NAME@36..37
+        IDENT@36..37 "b"
+    RBRACE@37..38 "}"
+  NEWLINE@38..39 "\n"
+  BRACESCAT_EXPR@39..44
+    LBRACE@39..40 "{"
+    ARG@40..41
+      NAME@40..41
+        IDENT@40..41 "a"
+    NEWLINE@41..42 "\n"
+    ARG@42..43
+      NAME@42..43
+        IDENT@42..43 "b"
+    RBRACE@43..44 "}"
+  NEWLINE@44..45 "\n"
+  BRACESCAT_EXPR@45..51
+    LBRACE@45..46 "{"
+    ARG@46..47
+      NAME@46..47
+        IDENT@46..47 "a"
+    NEWLINE@47..48 "\n"
+    SEMICOLON@48..49 ";"
+    ARG@49..50
+      NAME@49..50
+        IDENT@49..50 "b"
+    RBRACE@50..51 "}"
+  NEWLINE@51..52 "\n"
+  ASSIGNMENT_EXPR@52..108
+    NAME@52..53
+      IDENT@52..53 "x"
+    WHITESPACE@53..54 " "
+    EQ@54..55 "="
+    WHITESPACE@55..56 " "
+    BRACES_COMPREHENSION@56..108
+      LBRACE@56..57 "{"
+      NEWLINE@57..58 "\n"
+      WHITESPACE@58..62 "    "
+      CALL_EXPR@62..69
+        NAME@62..63
+          IDENT@62..63 "f"
+        ARG_LIST@63..69
+          LPAREN@63..64 "("
+          ARG@64..65
+            NAME@64..65
+              IDENT@64..65 "a"
+          COMMA@65..66 ","
+          WHITESPACE@66..67 " "
+          ARG@67..68
+            NAME@67..68
+              IDENT@67..68 "b"
+          RPAREN@68..69 ")"
+      NEWLINE@69..70 "\n"
+      WHITESPACE@70..74 "    "
+      FOR_BINDING@74..85
+        FOR_KW@74..77 "for"
+        WHITESPACE@77..78 " "
+        NAME@78..79
+          IDENT@78..79 "a"
+        WHITESPACE@79..80 " "
+        IDENT@80..82 "in"
+        WHITESPACE@82..83 " "
+        NAME@83..85
+          IDENT@83..85 "as"
+      NEWLINE@85..86 "\n"
+      WHITESPACE@86..90 "    "
+      COMPREHENSION_IF@90..106
+        IF_KW@90..92 "if"
+        WHITESPACE@92..93 " "
+        BINARY_EXPR@93..106
+          NAME@93..94
+            IDENT@93..94 "a"
+          WHITESPACE@94..95 " "
+          GT@95..96 ">"
+          WHITESPACE@96..97 " "
+          NAME@97..106
+            IDENT@97..106 "threshold"
+      NEWLINE@106..107 "\n"
+      RBRACE@107..108 "}"
+  NEWLINE@108..109 "\n"

@@ -152,10 +152,12 @@ the prefix; deferred as rare). (3) Widen the braces case of
 `comprehension_index_break/` once the bracescat parser gap lands.
 
 **Parser/lexer gaps outstanding (handed off, not formatter targets):**
-(a) **lexer** — `<--` doesn't tokenize as one arrow-tier operator (2026-07-04);
-(b) **parser** — newline-broken braces comprehension mis-parses as
-`BRACESCAT_EXPR` (2026-07-05, see above). Both in `parser-parity/RECAP.md`
-"Queued next targets" + `TODO.md`. The previously-listed newline-after-comma,
+(a) **lexer** — `<--` doesn't tokenize as one arrow-tier operator (2026-07-04),
+still queued in `parser-parity/RECAP.md` + `TODO.md`. (b) **RESOLVED
+(2026-07-05, parser-parity):** the newline-broken braces comprehension now
+parses as `BRACES_COMPREHENSION`, so the exploded braces form reparses cleanly
+— ranked target #3 (widen `comprehension_index_break/`'s braces case) is
+unblocked. The previously-listed newline-after-comma,
 compound-assign lexer, and whitespace-before-arglist gaps have since been
 resolved on the parser side (`TODO.md` marks them `[x]`; parser-parity RECAP
 2026-07-03 found the whitespace-before-arglist premise stale).

@@ -23,14 +23,15 @@ leverage.
   treatment, plus the broadcast `.<--`. Surfaced by the formatter
   (`arrow_pair_chain/` fixture routes around it); see parser-parity RECAP
   queued target.
-- [ ] Parser: newline-broken braces comprehension mis-parses as `BRACESCAT_EXPR`.
-  `{a\nfor b in c}` swallows the `for` as a statement-level `FOR_EXPR` (two
-  `expected `end`` diagnostics); the `[a\nfor b in c]` form parses fine.
-  JuliaSyntax: `{a\nfor b in c}` ⇒ `(braces (generator a (= b c)))`. Fallout:
-  the formatter's exploded form for a too-wide `BRACES_COMPREHENSION` fails to
-  reparse (latent stability violation). Surfaced by the formatter
-  (`comprehension_index_break/` keeps its braces case flat); see parser-parity
-  RECAP queued target.
+- [x] Parser: newline-broken braces comprehension now parses as a
+  `BRACES_COMPREHENSION`. `parse_braces` gained the two newline-lookahead arms
+  `parse_bracket_literal` already had: a newline run before `for` is
+  insignificant (`{a\nfor b in c}` ⇒ `(braces (generator a (= b c)))`, blank
+  lines included), and a newline before `,` keeps the comma list (`{a\n, b}` ⇒
+  `(braces a b)`); newline-before-element/`;` stays `BRACESCAT_EXPR`. Kills the
+  latent stability violation where the formatter's exploded
+  `BRACES_COMPREHENSION` failed to reparse; the formatter can now widen the
+  braces case of `comprehension_index_break/`.
 - [ ] Parser: whitespace before a call/index/curly arg list is wrongly accepted.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
