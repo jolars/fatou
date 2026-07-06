@@ -117,6 +117,14 @@ leverage.
   not a break point); a source-broken list reflows to flat instead of mirroring
   the input breaks (Tenet 1). `lower_import_stmt`/`lower_export_stmt` now build a
   width-driven group instead of a flat concat.
+- [x] Formatter: `let` binding lists reflow width-first (`let_binding_break/`). A
+  too-wide multi-binding header (`let a = 1, b = 2, ...`) now breaks one binding
+  per line, comma trailing each, wrapped bindings at one continuation indent
+  (first on the `let ` line), instead of leaking a width break into a random inner
+  arg list; a source-broken header reflows to flat when it fits (Tenet 1).
+  `lower_bare_tuple` was generalized to `lower_comma_list`, shared by
+  `BARE_TUPLE_EXPR` and `LET_BINDINGS` (both node-kind-agnostic); enabled by the
+  parser fix that wraps every binding as its own node.
 - [x] Formatter: bare tuples reflow width-first (`bare_tuple_break/`). A too-wide
   bracketless tuple (`x = a, b, c`, `return a, b, c`, a standalone `a, b, c`) now
   breaks one element per line with the comma trailing each and the wrapped

@@ -57,7 +57,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         }
         SyntaxKind::PAREN_EXPR => lower_paren(node),
         SyntaxKind::PAREN_BLOCK => lower_paren_block(node),
-        SyntaxKind::BARE_TUPLE_EXPR => lower_bare_tuple(node),
+        SyntaxKind::BARE_TUPLE_EXPR | SyntaxKind::LET_BINDINGS => lower_comma_list(node),
         SyntaxKind::KEYWORD_ARG => lower_keyword_arg(node),
         SyntaxKind::PARAMETERS => lower_parameters(node),
         SyntaxKind::FOR_BINDING => lower_for_binding(node),
@@ -2474,27 +2474,28 @@ fn lower_macro_name(node: &SyntaxNode) -> Option<Ir> {
     Some(Ir::text(text))
 }
 
-/// Lay out a bare (bracketless) tuple — `x, y`, `a, b, c`, the lhs/rhs of a
-/// multiple assignment (`a, b = 1, 2`), a multi-value `return x, y` — with
-/// normalized comma punctuation: no space before a comma, one space after it.
-/// Elements are bare nodes (not `ARG`-wrapped) separated by commas; each is
-/// lowered recursively so its own normalization still applies (`f(x),g(y)` →
+/// Lay out a comma-separated list with normalized comma punctuation (no space
+/// before a comma, one space after it): a bare (bracketless) tuple — `x, y`,
+/// `a, b, c`, the lhs/rhs of a multiple assignment (`a, b = 1, 2`), a multi-value
+/// `return x, y` — or a `let` binding list (`let x = 1, y = 2`). Elements are
+/// bare nodes (not `ARG`-wrapped) separated by commas; each is lowered
+/// recursively so its own normalization still applies (`f(x),g(y)` →
 /// `f(x), g(y)`).
 ///
 /// The layout is width-driven: flat `a, b, c` when it fits, else one element per
 /// line with the comma trailing each element and the wrapped elements indented
 /// one continuation step (the first element stays on the opening line — after
-/// the `= `, `return `, or at column zero — and the rest wrap beneath it). A bare
-/// tuple has no brackets to frame the break, so the comma serves as the
-/// breakable separator; there is no broken-only trailing comma. Source line
-/// breaks carry no layout information (Tenet 1): `x = a,\n b` reflows to the same
-/// form as `x = a, b`.
+/// the `= `, `return `, `let `, or at column zero — and the rest wrap beneath
+/// it). A bracketless list has no brackets to frame the break, so the comma
+/// serves as the breakable separator; there is no broken-only trailing comma.
+/// Source line breaks carry no layout information (Tenet 1): `x = a,\n b` reflows
+/// to the same form as `x = a, b`.
 ///
 /// Only the clean alternating shape `<el> , <el> [ , <el> ]…` is reshaped. A
 /// leading/doubled/trailing comma (the trailing form is a parse error at this
 /// level anyway), an interleaved comment, or any unexpected token falls back to
 /// the verbatim transparent lowering.
-fn lower_bare_tuple(node: &SyntaxNode) -> Ir {
+fn lower_comma_list(node: &SyntaxNode) -> Ir {
     let mut first: Option<Ir> = None;
     let mut rest: Vec<Ir> = Vec::new();
     let mut item_count = 0usize;
@@ -3787,13 +3788,13 @@ fn module_should_indent(node: &SyntaxNode) -> bool {
 /// canonical inline `let end` (or `let x = 1 end` when the header binds), via
 /// [`push_block_body`], regardless of how the source spaced it (Tenet 1).
 ///
-/// The binding list is lowered recursively (so `let x = 1` keeps its spacing),
-/// but it is not otherwise reshaped: the parser leaves the second and later
-/// bindings as flat tokens rather than wrapped nodes, so a tight multi-binding
-/// header (`let x=1,y=2`) is not normalized here and is kept out of the fixture.
-/// Any shape this does not fully model — a comment in the body, two statements
-/// with no separator, a missing `end`, or an unexpected child — also falls back
-/// to the verbatim transparent lowering.
+/// The `LET_BINDINGS` list is lowered recursively through [`lower_comma_list`],
+/// so it reflows width-driven like a bare tuple: a header that fits stays flat
+/// (`let x = 1, y = 2`), and an overwide one breaks one binding per line with the
+/// comma trailing each and the wrapped bindings indented one continuation step
+/// beneath the first. Any shape this does not fully model — a comment in the
+/// body, two statements with no separator, a missing `end`, or an unexpected
+/// child — also falls back to the verbatim transparent lowering.
 fn lower_let(node: &SyntaxNode) -> Ir {
     let mut bindings: Option<SyntaxNode> = None;
     let mut block: Option<SyntaxNode> = None;
