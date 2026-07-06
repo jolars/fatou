@@ -103,64 +103,55 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (comprehension reflow body)
+## Latest session (paren-subject index break)
 
-Closed ranked target #1. Two AskUserQuestion decisions, both recommended options
-accepted: (1) the typed comprehension `Float64[…][idx]` joins the shared index
-group — the type name joins flat like a call's callee and the bracketed
-generator body yields; (2) the proposed `expected.jl` approved as-is
-(subject-yields-first, matching every gated index-break fixture; the broken
-comprehension keeps its gated no-trailing-comma clause style while index arg
-lists keep the broken-only trailing comma).
+Closed ranked target #1 (paren-subject chains). One AskUserQuestion decision:
+the user chose **Option B — the paren breaks at its own parentheses** (inner on
+one indented line, `)[index]` riding the closer) over Option A (dive into the
+inner call/binary so it yields) or the status-quo transparent bail. Rationale:
+`construct_reflow_body`'s policy is "the subject's outermost breakable bracket
+explodes, the index rides its closer" — for a single-value paren the outermost
+bracket **is** the parens, so it's the exact single-value analog of the already
+subject-yielding tuple (`(a, b, c)[i]`). Option A would inconsistently skip the
+paren's own brackets.
 
-**Implementation:** extracted `comprehension_reflow_body(node) -> Option<Ir>` —
-the whole body of `lower_comprehension`, with every `lower_transparent` bail
-turned into `None`; `lower_comprehension` is now group-or-transparent. New
-`typed_comprehension_reflow_body` (exactly the snug `type` + generator pair,
-comment-free type; body = `lower_node(type)` + the generator's body). Both
-registered in `construct_reflow_body`
-(`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION` + `TYPED_COMPREHENSION`), so
-indexed comprehensions, comprehension chain roots, and hugged trailing
-comprehensions on an index-subject path (`f(cfg, […])[k]`, `g(k => […])[k]` via
-`hug_value_parts`) all fold into the shared outer group. The plain single-index
-cases (`[…][i]`, `(…)[1]`) were already canonical via transparent +
-continuation-aware `fits` and are locked byte-identical; the pathologies killed
-are the chained/hugged/typed forms, where the wide subject stayed flat and a
-tiny index exploded like a stray vector.
+**Implementation (Option B):** extracted `paren_reflow_body(node) -> Option<Ir>`
+— the whole body of `lower_paren` (`(` / SoftLine+indent inner / SoftLine `)`),
+with every `lower_transparent` bail turned into `None`; `lower_paren` is now
+group-or-transparent. Registered `PAREN_EXPR => paren_reflow_body(node)` in
+`construct_reflow_body`, so a `(inner)` index subject folds into `lower_index`'s
+shared outer group and the index rides the closing paren. No new IR/printer
+primitive; the SoftLine framing already existed. Nested paren, deep-inner (double
+break), wide-index-tail, and both-overflow all compose from the shared group +
+continuation-aware `fits`. The `;`-block `PAREN_BLOCK` and comma `TUPLE_EXPR` are
+distinct nodes and never reach the arm. Plain-paren fixtures are byte-identical
+(the refactor preserved the flat/broken structure).
 
-**Parser blocker surfaced and handed off:** a newline-broken braces
-comprehension `{a\nfor b in c}` mis-parses as `BRACESCAT_EXPR` (the `for`
-swallowed as a statement-level `FOR_EXPR`, two `expected `end`` diagnostics);
-JuliaSyntax accepts it (`(braces (generator a (= b c)))`). Consequence:
-`lower_comprehension`'s exploded output for a too-wide `BRACES_COMPREHENSION`
-**fails to reparse** under Fatou — a latent, pre-existing stability violation no
-gated fixture triggers. The fixture's braces case is kept narrow enough to stay
-flat, with a comment pointing at the gap; widen it once the parser lands.
-Queued in `parser-parity/RECAP.md` + `TODO.md` Parser section.
+Gated `paren_index_break/` (11 cases: small flat, 92/93 fence pair, call subject,
+chained binary subject `(…)[i][j]`, deep-inner double break, nested paren, wide
+index tail, both-overflow, pre-broken reflow-to-flat). Gate 95→96, zero
+regressions; clippy + fmt clean. No parser/lexer blocker surfaced.
 
-Gated `comprehension_index_break/` (12 cases: flat, 92/93 fence pair, if-clause
-explode + riding index, chained `[…][i][j]`, generator subject, flat braces
-(routed around the parser gap), hugged comprehension in a call subject,
-pair-hug-through, both-links-overflow, typed, pre-broken reflow-to-flat). Gate
-94→95, zero regressions; clippy + fmt clean.
-
-**Ranked next targets:** (1) Paren-subject chains (`(f())[wide][k]` — decide
-whether a paren expression joins the shared group like a name root or keeps the
-transparent bail). (2) Chained-pair hug (`a => b => […]` — recurse
+**Ranked next targets:** (1) Chained-pair hug (`a => b => […]` — recurse
 `pair_hug_split` through the right-nested spine so the whole `a => b => ` joins
-the prefix; deferred as rare). (3) Widen the braces case of
-`comprehension_index_break/` once the bracescat parser gap lands.
+the prefix; deferred as rare). (2) Widen the braces case of
+`comprehension_index_break/` now that the bracescat parser gap has landed
+(2026-07-05) — a newline-broken `{…for…}` parses as `BRACES_COMPREHENSION`, so
+the exploded braces form reparses; the fixture's braces case is currently kept
+narrow with a comment pointing at the now-resolved gap.
 
-**Parser/lexer gaps outstanding (handed off, not formatter targets):**
-(a) **lexer** — `<--` doesn't tokenize as one arrow-tier operator (2026-07-04),
-still queued in `parser-parity/RECAP.md` + `TODO.md`. (b) **RESOLVED
+**Parser/lexer gaps — all previously-handed-off gaps now RESOLVED:**
+(a) **RESOLVED (commit `2643498`, `feat(parser): lex left-arrow operator <-- family`):**
+`<--`/`<-->` now tokenize as one arrow-tier operator; the `arrow_pair_chain/`
+fixture can be widened to include them when revisited. (b) **RESOLVED
 (2026-07-05, parser-parity):** the newline-broken braces comprehension now
 parses as `BRACES_COMPREHENSION`, so the exploded braces form reparses cleanly
-— ranked target #3 (widen `comprehension_index_break/`'s braces case) is
-unblocked. The previously-listed newline-after-comma,
-compound-assign lexer, and whitespace-before-arglist gaps have since been
-resolved on the parser side (`TODO.md` marks them `[x]`; parser-parity RECAP
-2026-07-03 found the whitespace-before-arglist premise stale).
+— next-target #2 (widen `comprehension_index_break/`'s braces case) is
+unblocked. The previously-listed newline-after-comma, compound-assign lexer, and
+whitespace-before-arglist gaps were likewise resolved on the parser side
+(`TODO.md` marks them `[x]`; parser-parity RECAP 2026-07-03 found the
+whitespace-before-arglist premise stale). No formatter-surfaced parser gap is
+currently outstanding.
 
 **Note:** stray untracked `tests/oracle/runic-report.txt` (old Runic report format) is leftover
 from the pivot — safe to delete, not regenerated by anything.
@@ -187,6 +178,15 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Comprehension reflow body** (committed `075e0a8`+`05f54be`+`8f693c8`+`f4f9113`,
+  `feat`+`test`+`docs`): a too-wide indexed comprehension yields subject-first —
+  extracted `comprehension_reflow_body` + `typed_comprehension_reflow_body` (type
+  joins flat like a callee), registered in `construct_reflow_body`
+  (`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`/`TYPED_COMPREHENSION`), so
+  chained/hugged/typed indexed comprehensions fold into the shared group and the
+  index rides the closer. Killed the stray-vector tiny-index explosion. Surfaced +
+  handed off (then RESOLVED 2026-07-05) the newline-broken bracescat parser gap.
+  Gated `comprehension_index_break/` (12). Gate 94→95.
 - **Name-rooted index chains** (committed `32fb24f`+`98be310`+`7c3edf9`,
   `feat`+`test`+`docs`): a too-wide `NAME`/dotted-root chain (`table[…][k]`) breaks
   innermost-arg-list-first — extracted `applied_args_body` (the post-callee body of

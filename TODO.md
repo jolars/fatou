@@ -102,6 +102,16 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
+- [x] Formatter: paren-expression subjects join the shared index group
+  (`paren_index_break/`). A too-wide `(inner)[index]` chain now yields
+  subject-first at its own parentheses — the inner value on one indented line,
+  the `)[index]` riding the closing paren (breaking further only if it still
+  overflows) — exactly as a tuple subject already does. `lower_paren`'s body was
+  extracted as `paren_reflow_body` and registered in `construct_reflow_body`, so
+  a single-value `PAREN_EXPR` is the breakable unit (its own brackets), never the
+  inner call/binary; the `;`-block `PAREN_BLOCK` and comma `TUPLE_EXPR` are
+  distinct nodes and unaffected. Kills the stray-vector index explosion the
+  transparent bail produced.
 - [x] Formatter: same-operator chains break uniformly (`lower_binary`). The parser
   folds `+`/`*` into flat n-ary nodes but keeps `&&`/`||`/`|>`/`=>` nested, so a
   too-wide short-circuit or pipe chain used to break only at its outermost operator.
