@@ -69,6 +69,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => lower_import_stmt(node),
         SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => lower_export_stmt(node),
         SyntaxKind::LITERAL => lower_literal(node),
+        SyntaxKind::STRING_LITERAL | SyntaxKind::CMD_LITERAL => lower_string_literal(node),
         _ => lower_transparent(node),
     }
 }
@@ -1025,6 +1026,91 @@ fn lower_literal(node: &SyntaxNode) -> Ir {
             _ => Ir::text(tok.text().to_string()),
         },
     }))
+}
+
+/// Lay out a string or command literal (`"…"`, `"""…"""`, `` `…` ``). The literal
+/// content and delimiters are **verbatim** — a string's characters are the user's,
+/// never reflowed. Each `$(…)` interpolation, however, is embedded Julia code whose
+/// surrounding whitespace and newlines do not affect the string's value (a single
+/// expression; `$(\n x\n)` ≡ `$(x)`), so its expression is normalized like any other
+/// and **forced flat** ([`render_flat`]): `$( y + z )` → `$(y + z)`, and a source
+/// break inside the parens collapses. This is Tenet 1 for the interpolated code
+/// while leaving the string content untouched, and it removes the pre-rule bug where
+/// an overflowing string let [`lower_paren`] break *inside* the literal.
+///
+/// A bare `$name` interpolation has no parens to normalize and passes through. Any
+/// interpolation that cannot be flattened (a comment or block forcing a hard break)
+/// bails the whole literal to its verbatim source text — always lossless and
+/// idempotent.
+fn lower_string_literal(node: &SyntaxNode) -> Ir {
+    string_literal_body(node).unwrap_or_else(|| Ir::text(node.text().to_string()))
+}
+
+/// Build the concatenated body of a string/command literal: every token verbatim,
+/// every `INTERPOLATION` child normalized and forced flat. `None` if any
+/// interpolation cannot be laid out flat (the caller emits the literal verbatim).
+fn string_literal_body(node: &SyntaxNode) -> Option<Ir> {
+    let mut parts = Vec::new();
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => parts.push(Ir::text(tok.text().to_string())),
+            NodeOrToken::Node(child) => {
+                if child.kind() != SyntaxKind::INTERPOLATION {
+                    return None;
+                }
+                // The interpolation lowers normally (`$` verbatim, the `$(…)` paren
+                // through `lower_paren`), then renders strictly flat so it can never
+                // break inside the literal.
+                parts.push(Ir::text(render_flat(&lower_node(&child))?));
+            }
+        }
+    }
+    Some(Ir::concat(parts))
+}
+
+/// Render an [`Ir`] in strictly flat layout to a string, or `None` if it carries a
+/// forced break that cannot be flattened (a [`HardLine`](Ir::HardLine)/
+/// [`BlankLine`](Ir::BlankLine), or an embedded newline in transparent text).
+/// Every [`Group`](Ir::Group) is taken flat regardless of width; a [`Line`](Ir::Line)
+/// is a space, a [`SoftLine`](Ir::SoftLine) is empty, an [`IfBreak`](Ir::IfBreak) is
+/// its flat string.
+fn render_flat(ir: &Ir) -> Option<String> {
+    let mut out = String::new();
+    render_flat_into(ir, &mut out).then_some(out)
+}
+
+fn render_flat_into(ir: &Ir, out: &mut String) -> bool {
+    match ir {
+        Ir::Text(s) => {
+            if s.contains('\n') {
+                return false;
+            }
+            out.push_str(s);
+            true
+        }
+        Ir::Concat(items) => items.iter().all(|item| render_flat_into(item, out)),
+        Ir::Indent(inner) | Ir::Group(inner) => render_flat_into(inner, out),
+        Ir::Line => {
+            out.push(' ');
+            true
+        }
+        Ir::SoftLine => true,
+        Ir::HardLine | Ir::BlankLine => false,
+        Ir::IfBreak(_, flat) => {
+            out.push_str(flat);
+            true
+        }
+        Ir::HugGroup {
+            prefix,
+            body,
+            close,
+            ..
+        } => {
+            render_flat_into(prefix, out)
+                && render_flat_into(body, out)
+                && render_flat_into(close, out)
+        }
+    }
 }
 
 /// Zero-pad a hexadecimal integer literal to a fixed type width, or return

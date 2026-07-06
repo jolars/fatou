@@ -94,6 +94,11 @@ Tenet 1.
   **bracket-closing operand bails to spaced** pending the parser gap for `)...`).
 - Literals (token text, genuinely deterministic): `lower_literal` +
   `normalize_float` + `normalize_hex`.
+- Strings/commands: `lower_string_literal` (`STRING_LITERAL`/`CMD_LITERAL`) —
+  content + delimiters verbatim; each `$(…)` interpolation's expression normalized
+  and **forced flat** via `render_flat`/`render_flat_into` (a group is always taken
+  flat; a `HardLine`/`BlankLine`/embedded-newline can't flatten → bail); any
+  unflattenable interpolation bails the whole literal to `node.text()` (verbatim).
 - Document root: `lower_root` (top-level blank-line policy — interior runs capped
   at 1, edges stripped, one final newline; reuses `collect_body_lines`).
 - Blocks (body indentation via `lower_block_body`/`build_block_body`, line model
@@ -109,7 +114,47 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (bracescat-subject index break `{a; b}[k]`)
+## Latest session (string/command interpolation — normalize + force flat)
+
+`feat(formatter)`. Fixed a genuine bug (not a carried-debt re-eval): `STRING_LITERAL`
+and `CMD_LITERAL` had **no rule**, so the transparent path recursed into each
+`INTERPOLATION`'s `PAREN_EXPR` and let `lower_paren` break it when the string
+overflowed `line_width` — injecting newlines + indent **inside** the literal
+(`"… plus $(⏎    one_more_variable_here⏎)"`). Idempotent + value-preserving (the
+newlines land inside the interpolation parens, not the string content — verified via
+Julia: `$(x)` ≡ `$( x )` ≡ multiline), but an ugly width-driven break inside a string.
+
+**Decision (user, after clarifying interpolation semantics).** Interpolation content
+is embedded Julia code whose surrounding whitespace/newlines don't affect the string
+value (a single expression; multiple bare-newline statements are a *parse error*), so
+it's treated as code: **normalize + force flat**, not opaque-verbatim. Only genuine
+content — the string characters and any *nested* string literal (`$("a  b")`, whose
+whitespace is significant) — stays verbatim (nested strings hit the same rule and
+emit verbatim, so they're safe).
+
+**Change (one dispatch arm + `lower_string_literal` + `string_literal_body` +
+`render_flat`/`render_flat_into`).** The body walks children: tokens (content,
+delimiters, triple-quote newlines) verbatim; each `INTERPOLATION` lowers normally
+(`$` verbatim, `$(…)` through `lower_paren`) then renders **strictly flat** to a
+`String` (`render_flat`: every `Group` taken flat regardless of width, `Line`→space,
+`SoftLine`→"", `IfBreak`→flat arm; `HardLine`/`BlankLine`/embedded-newline → `None`).
+Any interpolation that can't flatten (a comment/block inside, e.g. `$(f(y) #= c =#)`)
+bails the **whole literal** to `node.text()` — verbatim, lossless, idempotent. Bare
+`$name` (no parens) passes through. No IR/printer change.
+
+Gated `string_interpolation/` (9 cases: fits-flat, wide-stays-flat, `$( y + z )`
+normalize, source-broken collapse, bare `$b`, call-in-interp stays flat, nested-string
+content preserved, wide command literal, comment-bail-to-verbatim). Gate 103→104;
+stability + clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
+innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
+bracket/matrix rules against the width-driven reflow engine (the largest carried debt
+— `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`). (3) Method/field
+chains (`a.b().c().d()`) currently stay flat past `line_width` — no break rule yet.
+(4) Sweep any remaining Runic-rationale doc comments in `rules.rs`.
+
+## Earlier: bracescat-subject index break `{a; b}[k]`
 
 `feat(formatter)`. Closed the former ranked #3 — the direct follow-on to last
 session's bracescat==matrix routing. A too-wide `{a; b}[k]` now yields

@@ -112,6 +112,13 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: string/command interpolation normalized + forced flat
+  (`string_interpolation/`). A `STRING_LITERAL`/`CMD_LITERAL` now has a rule
+  (`lower_string_literal`): content and delimiters stay verbatim, but each `$(…)`
+  interpolation's expression is normalized and forced flat via `render_flat`
+  (`$( y + z )` → `$(y + z)`, a source-broken interpolation collapses). Fixes the
+  bug where an overflowing string let `lower_paren` break *inside* the literal.
+  Unflattenable interiors (a comment/block) bail the whole literal to verbatim.
 - [x] Formatter: bracescat `{a; b}` reflow (`bracescat_spacing/`). A
   `BRACESCAT_EXPR` (the brace-delimited vcat/matrix) is structurally identical to
   a `MATRIX_EXPR` — same `ARG`/`MATRIX_ROW` children, same `;`/newline/space
