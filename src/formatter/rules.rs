@@ -2067,7 +2067,13 @@ fn construct_reflow_body(node: &SyntaxNode) -> Option<Ir> {
         {
             collection_reflow_body(node)
         }
-        SyntaxKind::MATRIX_EXPR if !matrix_has_comment(node) => matrix_reflow_body(node),
+        // A `BRACESCAT_EXPR` (`{a; b}`) is structurally the brace-delimited matrix
+        // (same `ARG`/`MATRIX_ROW` children, `{`/`}` flowing through the tokens), so
+        // its index subject yields through the shared matrix body — `;;` bails here
+        // just as it does for a `MATRIX_EXPR` (`matrix_reflow_body` returns `None`).
+        SyntaxKind::MATRIX_EXPR | SyntaxKind::BRACESCAT_EXPR if !matrix_has_comment(node) => {
+            matrix_reflow_body(node)
+        }
         SyntaxKind::PAREN_EXPR => paren_reflow_body(node),
         SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(node),
         SyntaxKind::INDEX_EXPR => index_reflow_body(node),

@@ -1,0 +1,22 @@
+narrow = {a; b}[k]
+fits = {alpha_component; beta_component; gamma_component; delta_aaaaaaaaaaa}[selected_index]
+brks = {
+    alpha_component
+    beta_component
+    gamma_component
+    delta_aaaaaaaaaaaa
+}[selected_index]
+chained = {
+    alpha_component
+    beta_component
+    gamma_component
+    delta_component
+}[first_i][second_j]
+rows = {
+    elem_one elem_two elem_three
+    elem_four elem_five elem_six
+    elem_seven elem_eight nine
+}[2, 3]
+higherdim = {alpha_component;; beta_component; gamma_component; delta_component_padded}[
+    key_expr,
+]

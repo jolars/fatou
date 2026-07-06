@@ -109,7 +109,38 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (bracescat `{a; b}` reflow)
+## Latest session (bracescat-subject index break `{a; b}[k]`)
+
+`feat(formatter)`. Closed the former ranked #3 — the direct follow-on to last
+session's bracescat==matrix routing. A too-wide `{a; b}[k]` now yields
+**subject-first** (the matrix-subject analog: the bracescat frames one element per
+line and `}[k]` rides the closing brace), instead of the transparent bail leaking a
+width break into the tiny `[key,]` index. The design was pre-settled — bracescat
+routes through the matrix machinery (last session's user decision) and
+subject-yields-first was the matrix-subject AskUserQuestion choice — so the layout
+is the matrix analog by construction. User ratified keeping the `;;` (higher-dim)
+bail case in the fixture.
+
+**Change (one match arm + doc).** `construct_reflow_body` (the shared ungrouped
+reflow body used by index subjects + hugs) gained `BRACESCAT_EXPR` next to
+`MATRIX_EXPR`; both route through `matrix_reflow_body`, which already reads
+`{`/`}` from the tokens (last session), so no helper changed. Everything else
+falls out: chained `[i][j]` ride stacked closers, and the `;;` higher-dim form
+bails byte-identically to the matrix `[...;;...][k]` (matrix_reflow_body → None →
+subject can't yield → index arg list explodes). Verified idempotent and that the
+`;;` bail matches the matrix analog exactly.
+
+Gated `bracescat_index_break/` (6 cases: narrow flat, 92/93 fence pair, wide vcat
+subject break, chained `[i][j]`, matrix-row subject, `;;` bail). Gate 102→103;
+stability + clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
+innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
+bracket/matrix rules against the width-driven reflow engine (the largest carried
+debt — `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block` still mirror
+source breaks). (3) Sweep any remaining Runic-rationale doc comments in `rules.rs`.
+
+## Earlier: bracescat `{a; b}` reflow
 
 `feat(formatter)`. Closed the former ranked #1. A `BRACESCAT_EXPR` (`{a; b}` — the
 brace-delimited vcat, `{a b; c d}` the matrix-row form) is **structurally identical
@@ -143,46 +174,6 @@ innermost (low value). (2) Re-evaluate the source-break-mirroring bracket/matrix
 against the width-driven reflow engine (largest carried debt). (3) A
 bracescat/matrix-subject index break (`{a; b}[k]`) — register `BRACESCAT_EXPR` in
 `construct_reflow_body` (matrix already there via `MATRIX_EXPR`).
-
-## Earlier: let binding-list width-driven reflow
-
-`feat(formatter)`. Closed the former ranked #1 (unblocked by parser commit
-`858441c`, which now wraps every let binding as its own `ASSIGNMENT_EXPR`). A
-too-wide `let a = 1, b = 2, …` header now breaks one binding per line — comma
-trailing each, wrapped bindings at one continuation indent, first on the `let `
-line — instead of the transparent fallback leaking a width break into a random
-inner arg list (`delta = compute(⏎4,⏎)`). A source-broken header (`let a = 1,\n
-b = 2`) reflows to flat when it fits (Tenet 1). User chose break-at-commas
-(bare-tuple analog) over keep-flat; **explicitly vetted and rejected** moving
-bindings into the body (`let⏎ a = 1, b = 2`) — JuliaSyntax proves that's a
-semantic change, not layout (`a = 1, b = 2` in body position parses as
-`a = ((1, b) = 2)`), so it's out of scope (no semantic rewrites).
-
-**Change:** the binding list flows through `lower_let`'s existing
-`lower_node(&bindings)`, so the whole change is: (1) generalized `lower_bare_tuple`
-→ **`lower_comma_list`** (the loop was already node-kind-agnostic — it lowers each
-child node and joins with trailing-comma + `Ir::Line`, one width-driven
-`group(concat[first, indent(rest)])`); (2) dispatched **both** `BARE_TUPLE_EXPR`
-and `LET_BINDINGS` to it. A single-binding header (`let x = 1`) has no comma so
-`rest` is empty and the group is skipped — byte-identical to before. A bare-name
-binding (`let counter, x = 2`) lowers fine (generic child recursion). No IR/printer
-change; no broken-only trailing comma (bracketless). `lower_let`'s stale
-"parser leaves 2nd+ bindings as flat tokens" doc paragraph rewritten.
-
-Gated `let_binding_break/` (6 cases: flat fit, source-broken reflows flat, wide
-break, 92/93 plain fence pair, wide bare-name+assignment mix). `let_blocks/`
-byte-identical. Gate 99→100, stability + clippy + fmt + full suite green. No
-parser/lexer blocker (the parser fix was the prerequisite and it landed).
-
-**Ranked next targets:** (1) Chained-pair hug through a
-*non-huggable-but-grouped* innermost (currently only `huggable_kind` leaves hug);
-low value. (2) Sweep the remaining Runic-rationale doc comments in `rules.rs`
-(debt #2 mostly closed). (3) Re-evaluate the source-break-mirroring bracket/matrix
-rules against the headline width-driven reflow engine (the largest carried debt).
-**Verified NOT debt (prior session):** the comment-bearing paths
-(`lower_multiline_bracket`, `lower_matrix_multiline`) are already input-independent
-(a commented bracket/matrix explodes to the identical one-per-line form regardless
-of source breaks).
 
 ## Parser/lexer gaps
 
@@ -233,6 +224,14 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Let binding-list width-driven reflow** (committed `3bbc07d`, `feat`): a too-wide
+  `let a = 1, b = 2, …` header breaks one binding per line (comma trailing, wrapped
+  bindings at one continuation indent, first on the `let ` line); source-broken
+  reflows flat. Generalized `lower_bare_tuple`→`lower_comma_list`, dispatched both
+  `BARE_TUPLE_EXPR` and `LET_BINDINGS` to it (`group(concat[first, indent(rest)])`).
+  **Explicitly rejected** moving bindings into the body (`a = 1, b = 2` in body
+  position parses as `a = ((1, b) = 2)` — a semantic change, out of scope). Gated
+  `let_binding_break/` (6). Gate 99→100. Unblocked by parser `858441c`.
 - **Splat operator snug** (committed `7a286e2`, `feat`): the postfix `...` snugs to
   its operand (`f(x ...)` → `f(x...)`), the direct postfix analog of `lower_unary`.
   A `LITERAL` operand always snugs (floats normalize safely); a non-literal verbatim

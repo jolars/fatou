@@ -121,6 +121,13 @@ leverage.
   matrix helpers that read the open/close tokens (`matrix_reflow_body`,
   `lower_matrix_multiline`) gained `LBRACE`/`RBRACE` arms; the bracket text flows
   through verbatim.
+- [x] Formatter: bracescat subjects break subject-first under an index
+  (`bracescat_index_break/`). A too-wide `{a; b}[k]` now yields subject-first —
+  the bracescat frames one element per line and `}[k]` rides the closing brace —
+  by registering `BRACESCAT_EXPR` in `construct_reflow_body` next to
+  `MATRIX_EXPR` (both fold through the shared `matrix_reflow_body`). Chained
+  indexes ride stacked closers; the `;;` higher-dim form bails (index arg list
+  explodes) exactly as the matrix analog does.
 - [x] Formatter: splat operator snugs to its operand (`splat_spacing/`). A
   `SPLAT_EXPR` written `x ...` now normalizes to `x...` (the postfix analog of the
   unary-prefix snug), reflowing whatever whitespace the parser left between operand
