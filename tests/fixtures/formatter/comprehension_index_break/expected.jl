@@ -18,9 +18,11 @@ gen = (
     for item in extremely_long_iterable_name_for_testing
     if wanted(item)
 )[1]
-# braces case kept flat: Fatou mis-parses a newline-broken `{elem for ...}`
-# as BRACESCAT_EXPR (JuliaSyntax accepts it) -- see parser-parity RECAP.
-braces = {pair_of(item) for item in source_items if accept(item)}[k]
+braces = {
+    pair_of(item)
+    for item in source_items_collection
+    if accept(item) && wanted(item)
+}[k]
 hugged = process(configuration, [
     normalize(record)
     for record in all_incoming_records

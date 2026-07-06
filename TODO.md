@@ -151,8 +151,9 @@ leverage.
   `construct_reflow_body` (plus `typed_comprehension_reflow_body`, the
   type joining flat like a callee), which also lets a hugged trailing
   comprehension carry an index-subject hug (`f(cfg, […])[k]`,
-  `g(k => […])[k]`). Braces comprehensions stay flat in the fixture — a
-  newline-broken `{…}` is a parser gap (see Parser section).
+  `g(k => […])[k]`). Braces comprehensions (`{…for…}[k]`) now widen too:
+  the parser gap is resolved, so the exploded braces form reparses and the
+  fixture's braces case breaks like the rest.
 - [x] Formatter: name-rooted index chains break subject-first
   (`name_index_break/`). A too-wide chain rooted at a plain or dotted name
   (`table[…][k]`, `config.table[…][k]`) now folds into `lower_index`'s shared
