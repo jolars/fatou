@@ -112,6 +112,15 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: `for`-binding continuation double-indent (`for_binding_break/`).
+  A too-wide `for` binding used to break its iterable's continuation at +4 — the
+  same indent as the loop body — the same header/body ambiguity the condition rule
+  fixed. `lower_control_header` now also wraps a `FOR_BINDING` in the extra
+  `Ir::indent`, so a broken iterable (inside a call's parens or after an operator)
+  sits one level deeper than the body (continuation at +8, close bracket and body
+  at +4). Uniform with the condition rule (user-ratified); inert while flat; the
+  `=`→`in` normalization composes; a comprehension `for`-clause routes through
+  `lower_for_binding` directly and keeps the comprehension indent.
 - [x] Formatter: control-flow condition continuation double-indent
   (`condition_break/`). An `if`/`elseif`/`while` `CONDITION` that overflows used to
   break its continuation at +4 — the same indent as the body it guards — so you

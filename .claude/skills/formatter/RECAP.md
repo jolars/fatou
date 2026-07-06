@@ -118,44 +118,57 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (control-flow condition continuation double-indent)
+## Latest session (`for`-binding continuation double-indent)
 
-`feat(formatter)`. A too-wide `if`/`elseif`/`while` `CONDITION` used to break its
-continuation at +4 — **the same indent as the body it guards** — so you couldn't
-tell where the condition ended and the body began (`while a &&⏎    b &&⏎    c⏎    body`).
-The clash hit every breaking-condition shape: `&&`/`||` chains, comparisons, and
-bracketed predicate calls (args at +4 = body). Stable/idempotent but ambiguous.
+`feat(formatter)`. The direct follow-on to last session's condition rule, which
+deliberately skipped `FOR_BINDING`. A too-wide `for` binding used to break its
+iterable's continuation at +4 — **the same indent as the loop body** — so you
+couldn't tell where the header ended and the body began (`for x in call(⏎    a,⏎    b,⏎)⏎    body`,
+args at +4 = body). The clash hit both breaking shapes: a call iterable that
+breaks inside its parens (args at +4) and an operator-chain iterable (`∪`, `+`,
+continuation at +4). Stable/idempotent but ambiguous.
 
-**Decision (AskUserQuestion).** User chose **uniform +8 across all condition
-shapes** (over "operator-chains only, brackets keep +4" and "leave the clash"): a
-broken condition always sits one level *deeper* than the body — continuation at +8,
-body at +4 — regardless of whether it breaks at an operator or inside a call's
-parens. The simplest, most Tenet-1 rule ("a broken condition is one level deeper
-than the body, period"); a bracketed call's args go to +8, its `)` to +4.
+**Decision (AskUserQuestion).** User chose **uniform +8** (over "keep +4"): a
+broken `for` binding sits one level *deeper* than the body, exactly like the
+ratified condition rule — continuation at +8, close bracket and body at +4,
+regardless of whether it breaks inside a call's parens or after an operator.
 
-**Change (one helper + 3 one-line call-site swaps).** New `lower_control_header`
-wraps a `CONDITION` node's lowering in a single extra `Ir::indent` (inert while the
-condition fits flat — indent only surfaces after a break; the first operand stays on
-the header line). Gated on `header.kind() == CONDITION`, so `if`/`elseif`/`while`
-conditions get the extra level while a `for` `FOR_BINDING` and a `catch` `NAME`
-variable lower unchanged. Wired into `lower_if` (the leading condition), `lower_loop`
-(header, only when it's a CONDITION not a FOR_BINDING), and `lower_branch_clause`
-(the `elseif` header). No IR/printer change; base indent propagates (nested in a
-function body → continuation +12, branch body +8).
+**Change (one guard line + doc).** `lower_control_header` — the helper that already
+wraps a `CONDITION` in one extra `Ir::indent` — now also wraps a `FOR_BINDING`
+(`matches!(header.kind(), CONDITION | FOR_BINDING)`). `lower_loop` already routes
+the `for` header through it, so no call-site change. The extra indent is inert while
+the binding fits flat (first operand stays on the header line) and only surfaces
+after a break; base indent propagates (nested in a function → args +12, close +8,
+body +8). The `=`→`in` normalization composes. A **comprehension `for`-clause** is
+lowered by `lower_for_binding` *directly* (not through `lower_control_header`), so it
+keeps the comprehension indent and never double-indents — locked by a fixture case.
 
-Gated `condition_break/` (flat stays flat, wide `&&`/`||` chains, elseif condition,
-comparison condition, bracketed-call condition, nested-in-function base indent,
-source-broken-but-fits reflows flat, catch-var/for-binding control). Gate 105→106;
-stability + clippy + fmt + full suite green. No parser/lexer blocker.
+Gated `for_binding_break/` (short-flat, wide-call iterable, destructuring+wide-zip,
+operator-chain iterable, `=`→`in` normalize+break, nested-in-function base indent,
+comprehension-for-clause-stays-flat control, source-broken-but-fits reflows flat).
+Gate 106→107; stability + clippy + fmt + full suite green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) `for`-binding continuation shares the same +4/+body
-clash when a for iteration breaks — the natural follow-on (not ratified this
-session; `lower_control_header` deliberately skips FOR_BINDING). (2) Chained-pair hug
-through a *non-huggable-but-grouped* innermost (low value, long-standing). (3) Sweep
+**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
+innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
+bracket/matrix rules against the width-driven reflow engine (the largest carried
+debt — `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`). (3) Sweep
 any remaining Runic-rationale doc comments in `rules.rs`. (Note: the stale inventory
 header still names `lower_multiline_bracket`/`lower_matrix`/`lower_paren` as
 "source-break mirroring" — they were rewritten width-driven in earlier sessions;
 `has_newline_token` now only picks the comment-bearing matrix path.)
+
+## Earlier: control-flow condition continuation double-indent
+
+`feat(formatter)`. A too-wide `if`/`elseif`/`while` `CONDITION` used to break its
+continuation at +4 — the same indent as the body it guards — so you couldn't tell
+where the condition ended and the body began. New `lower_control_header` wraps a
+`CONDITION` node in one extra `Ir::indent`, so a broken condition (`&&`/`||`/
+comparison chain, or bracketed predicate call) sits one level deeper than the body
+(continuation +8, `)` and body +4). Uniform across every condition shape
+(AskUserQuestion, over "operator-chains only" and "leave the clash"); inert while
+flat. Wired into `lower_if`/`lower_loop`/`lower_branch_clause`; `for` bindings and
+`catch` variables were left unchanged (the `for` binding was picked up next session).
+Gated `condition_break/` (8 cases). Gate 105→106. No parser/lexer blocker.
 
 ## Earlier: fluent method chains — break at the dots
 

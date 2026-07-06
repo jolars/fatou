@@ -4168,17 +4168,23 @@ fn lower_let(node: &SyntaxNode) -> Ir {
 }
 
 /// Lower a control-flow header, wrapping a boolean `CONDITION` (the `if`/`elseif`/
-/// `while` predicate) in one extra indent step. A condition that overflows and
-/// breaks — an `&&`/`||`/comparison chain, or a bracketed predicate call — then
-/// sits one level *deeper* than the block body it guards (its continuation at +8,
-/// the body at +4), so the header never shares an indent with the body it
-/// introduces. The rule is uniform across every condition shape (Tenet 1): the
-/// extra indent is inert while the condition fits flat, and only surfaces once it
-/// breaks. Non-condition headers — a `for` binding, a `catch` variable — carry no
-/// body-boundary ambiguity and lower unchanged.
+/// `while` predicate) or a `for` loop's `FOR_BINDING` in one extra indent step. A
+/// header that overflows and breaks — an `&&`/`||`/comparison chain, a bracketed
+/// predicate call, or a `for` iterable that breaks inside its parens or after an
+/// operator — then sits one level *deeper* than the block body it guards (its
+/// continuation at +8, the body at +4), so the header never shares an indent with
+/// the body it introduces. The rule is uniform across every header shape
+/// (Tenet 1): the extra indent is inert while the header fits flat, and only
+/// surfaces once it breaks. A `catch` variable carries no body-boundary ambiguity
+/// and lowers unchanged. (A comprehension's `for`-clause is lowered by
+/// [`lower_for_binding`] directly, never through here, so it keeps the
+/// comprehension indent rather than double-indenting.)
 fn lower_control_header(header: &SyntaxNode) -> Ir {
     let ir = lower_node(header);
-    if header.kind() == SyntaxKind::CONDITION {
+    if matches!(
+        header.kind(),
+        SyntaxKind::CONDITION | SyntaxKind::FOR_BINDING
+    ) {
         Ir::indent(ir)
     } else {
         ir
