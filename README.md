@@ -1,7 +1,10 @@
 # Fatou <img src='https://raw.githubusercontent.com/jolars/fatou/main/assets/logo.png' align="right" width="139" />
 
-A language server, formatter, and linter for [Julia](https://julialang.org),
-written in Rust.
+A language server, formatter, and linter for [Julia](https://julialang.org) that
+doesn't require running Julia itself. Fatou is written in Rust and is designed
+to be fast, safe, and easy to integrate into editors and tooling. It is named
+after the French mathematician Pierre Fatou, whose Fatou set is the complement
+of the Julia set.
 
 Fatou follows the rust-analyzer design (a lossless
 [`rowan`](https://crates.io/crates/rowan) CST,
