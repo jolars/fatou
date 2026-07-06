@@ -173,6 +173,18 @@ leverage.
   form instead of bailing to verbatim (Tenet 1). `lower_bare_tuple` now builds a
   width-driven `Ir::group` (mirroring `lower_comparison`) and skips interior
   newlines. No broken-only trailing comma (no brackets to frame it).
+- [x] Formatter: fluent method chains break at the dots (`method_chain_break/`).
+  A too-wide `.`-spine with at least two *called* links (`recv.a(x).b(y)`) now
+  reflows to the trailing-dot form — receiver on the opening line, each called
+  link on its own continuation-indented line with the `.` trailing the line
+  before it (the only broken spelling Julia reparses as the same chain) — instead
+  of the tight flat access. Bare field accesses / module qualifiers never split
+  (`obj.config.` glues; `Base.Foo.bar` stays flat even when it overflows); a
+  single-call `recv.method(args)` breaks its argument list, not the dot. New
+  `try_lower_chain`/`collect_chain`/`call_parts`/`dot_access_parts`/`lower_call`;
+  a `CALL_EXPR` arm plus a guard at the top of `lower_binary` (field-terminated
+  chains root at a `BINARY_EXPR`). Any comment/broadcast-dot/unmodeled shape bails
+  transparent.
 - [x] Formatter: chained pairs hug through the whole spine (`chained_pair_hug/`).
   A trailing chained pair `a => b => Dict(...)` now hugs its enclosing bracket
   like a single pair — the whole `a => b => ` joins the flat prefix and only the

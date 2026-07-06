@@ -114,7 +114,53 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (string/command interpolation — normalize + force flat)
+## Latest session (fluent method chains — break at the dots)
+
+`feat(formatter)`. Closed ranked #3. A `.`-spine with **≥2 called links**
+(`recv.a(x).b(y)`) is a fluent method chain and now reflows width-first instead of
+flattening tight forever. Two design decisions were ratified via AskUserQuestion:
+(1) **only call links break** — bare field accesses / module qualifiers stay glued
+(`obj.config.` rides the receiver line; `Base.Foo.bar` never splits, even
+overflowing); (2) **receiver on the opening line** (chosen over "receiver on its
+own line" after I raised the friction: own-line needs the assignment/arg gap to
+break, conflicting with the locked `x =⏎ …` avoidance, and degenerates for
+prefix-less standalone chains — opening-line is one self-contained group).
+
+**Reparse constraint (drove the whole design).** Only the **trailing-dot** spelling
+reparses as the same chain — `recv.⏎    a(x)` — in both Fatou and JuliaSyntax
+(`(recv.a(x)).b(y)`); a leading-dot `recv⏎.a(x)` is a **Julia parse error**
+(`unexpected text after parsing statement`). So the broken form is receiver on the
+opening line, each called link on its own +4 line, the `.` trailing the line before
+it, via `Ir::SoftLine` (empty flat, newline broken — *not* `Ir::Line`, which would
+leave a flat `. a` space).
+
+**Change (one dispatch arm + a `lower_binary` guard + 5 helpers).** New `lower_call`
+(`CALL_EXPR` arm) and a `try_lower_chain(node)` guard at the top of `lower_binary`
+(field-*terminated* chains root at a `BINARY_EXPR(DOT)`, not a call).
+`collect_chain` peels the left-nested spine (`call_parts` = clean `callee(args)`;
+`dot_access_parts` = plain `recv.name`, skipping WHITESPACE/**NEWLINE** so a
+source-broken chain reflows) to `(base, links)`; `<2` call links → `None` (a
+qualified name or single call keeps its normal lowering — the arg list, not the
+dot, breaks). Builds `group(concat[base, indent(concat[links…])])`; a called link
+is `concat[".", SoftLine, name, lower_arg_list(args)]`, a field link
+`concat[".", name]` (glued). Any comment / broadcast `f.(x)` dot / unexpected token
+bails to transparent. No IR/printer change; inner arg lists still explode nested
+under a broken chain (`).` rides the closer).
+
+Gated `method_chain_break/` (10 cases in one file: short-flat, wide assignment
+break, field-prefix glue, standalone break, mid-chain field glue, field-terminated
+break, single-call arg-list explode (95c, not a chain), qualified-name stays flat
+(95c overflow), source-broken reflows flat). Gate 104→105; stability + clippy + fmt
++ full suite green. No parser/lexer blocker. (Note: `expected.jl` conforms to both
+ratified decisions — authored to the design, not merely captured.)
+
+**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
+innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
+bracket/matrix rules against the width-driven reflow engine (the largest carried
+debt — `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`). (3) Sweep
+any remaining Runic-rationale doc comments in `rules.rs`.
+
+## Earlier: string/command interpolation — normalize + force flat
 
 `feat(formatter)`. Fixed a genuine bug (not a carried-debt re-eval): `STRING_LITERAL`
 and `CMD_LITERAL` had **no rule**, so the transparent path recursed into each

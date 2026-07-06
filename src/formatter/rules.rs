@@ -48,6 +48,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::IF_EXPR => lower_if(node),
         SyntaxKind::TRY_EXPR => lower_try(node),
         SyntaxKind::ARG_LIST => lower_arg_list(node),
+        SyntaxKind::CALL_EXPR => lower_call(node),
         SyntaxKind::INDEX_EXPR => lower_index(node),
         SyntaxKind::MACRO_CALL => lower_macro_call(node),
         SyntaxKind::TUPLE_EXPR | SyntaxKind::VECT_EXPR | SyntaxKind::BRACES => {
@@ -143,6 +144,12 @@ fn lower_trivia(tok: &SyntaxToken, next: Option<&SyntaxElement>) -> Ir {
 /// verbatim-preserving transparent lowering so we never mangle a construct we
 /// don't fully understand.
 fn lower_binary(node: &SyntaxNode) -> Ir {
+    // A `.`-rooted spine of enough calls is a fluent method chain, laid out as a
+    // trailing-dot break group rather than a flat tight `.` access.
+    if let Some(ir) = try_lower_chain(node) {
+        return ir;
+    }
+
     // Assignment operators (`=`, `+=`, …) never introduce a break; the break is
     // biased into the right-hand side, so the operator gap is a flat space.
     let is_assignment = node.kind() == SyntaxKind::ASSIGNMENT_EXPR;
@@ -344,6 +351,164 @@ fn binary_prec_class(kind: SyntaxKind) -> Option<u8> {
         | DOT_LONG_ARROW | DOT_LEFT_LONG_ARROW | DOT_LEFT_RIGHT_ARROW => 3,
         _ => return None,
     })
+}
+
+/// A DOT-spine needs at least this many *called* links before it lays out as a
+/// broken method chain. One call (`recv.method(args)`) is not a chain — it stays
+/// transparent so its argument list, not the dot, absorbs any break.
+const MIN_CHAIN_CALLS: usize = 2;
+
+/// One link in a fluent-chain spine, in print order (receiver-first). `args` is
+/// `Some` for a called link (`.name(args)`) and `None` for a bare field access
+/// (`.name`).
+struct ChainLink {
+    name: SyntaxNode,
+    args: Option<SyntaxNode>,
+}
+
+/// Try to lay out `node` as a fluent method chain — a left-nested run of `.name`
+/// field accesses and `.name(args)` calls over a base receiver. Returns `None`
+/// (so the caller keeps its normal lowering) unless the spine has at least
+/// [`MIN_CHAIN_CALLS`] called links; a shorter spine is a qualified name or a
+/// single call, which never break at the dot.
+///
+/// **Layout (Tenet 1).** One width-driven group: flat
+/// `recv.a(x).b(y)` when it fits `line_width`, else the receiver stays on the
+/// opening line and each *called* link wraps to its own continuation-indented
+/// line with the `.` trailing the line before it (`recv.` / `····a(x).` / …).
+/// The trailing-dot spelling is the only broken form Julia reparses as the same
+/// chain (a leading-dot `recv⏎.a(x)` is a parse error). Bare field accesses
+/// (module qualifiers, receiver-prefix accesses like `obj.config`) never break;
+/// they glue to the segment before them, matching the "only call links break"
+/// rule.
+fn try_lower_chain(node: &SyntaxNode) -> Option<Ir> {
+    let (base, links) = collect_chain(node)?;
+    let call_count = links.iter().filter(|l| l.args.is_some()).count();
+    if call_count < MIN_CHAIN_CALLS {
+        return None;
+    }
+
+    let mut inner: Vec<Ir> = Vec::new();
+    for link in &links {
+        let name_ir = lower_node(&link.name);
+        match &link.args {
+            // A called link breaks before its `.`: the dot ends the previous
+            // line (trailing-dot), then the name and args wrap one step.
+            Some(args) => inner.push(Ir::concat([
+                Ir::text("."),
+                Ir::SoftLine,
+                name_ir,
+                lower_arg_list(args),
+            ])),
+            // A bare field access glues to the current line.
+            None => inner.push(Ir::concat([Ir::text("."), name_ir])),
+        }
+    }
+
+    Some(Ir::group(Ir::concat([
+        lower_node(&base),
+        Ir::indent(Ir::concat(inner)),
+    ])))
+}
+
+/// Collect the fluent-chain spine rooted at `node`: peel the left-nested
+/// `.name(args)` calls and `.name` field accesses down to the base receiver,
+/// returning `(base, links)` with the links in print order. `None` on any shape
+/// we don't fully model — a comment interleaved in a call or dot access, a
+/// broadcast `f.(x)` dot, or a non-`.` operator — so the caller bails to the
+/// verbatim transparent lowering.
+fn collect_chain(node: &SyntaxNode) -> Option<(SyntaxNode, Vec<ChainLink>)> {
+    let mut links: Vec<ChainLink> = Vec::new(); // outer-first; reversed below
+    let mut cur = node.clone();
+    loop {
+        match cur.kind() {
+            SyntaxKind::CALL_EXPR => {
+                let (callee, arg_list) = call_parts(&cur)?;
+                let Some((inner, name)) = dot_access_parts(&callee) else {
+                    // A base call (`f(x)`): the whole `CALL_EXPR` is the receiver.
+                    break;
+                };
+                links.push(ChainLink {
+                    name,
+                    args: Some(arg_list),
+                });
+                cur = inner;
+            }
+            SyntaxKind::BINARY_EXPR => {
+                let Some((inner, name)) = dot_access_parts(&cur) else {
+                    break;
+                };
+                links.push(ChainLink { name, args: None });
+                cur = inner;
+            }
+            _ => break,
+        }
+    }
+    links.reverse();
+    Some((cur, links))
+}
+
+/// The callee and `ARG_LIST` of a clean `callee(args)` call, skipping trivia.
+/// `None` if the call carries a comment or any token/node beyond that pair (a
+/// broadcast `f.(x)` leaves a stray `.` token, for instance).
+fn call_parts(node: &SyntaxNode) -> Option<(SyntaxNode, SyntaxNode)> {
+    let mut nodes: Vec<SyntaxNode> = Vec::new();
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => nodes.push(child),
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                _ => return None,
+            },
+        }
+    }
+    let [callee, arg_list] = nodes.as_slice() else {
+        return None;
+    };
+    if arg_list.kind() != SyntaxKind::ARG_LIST {
+        return None;
+    }
+    Some((callee.clone(), arg_list.clone()))
+}
+
+/// The receiver and field-name nodes of a plain `.`-access `recv.name`, skipping
+/// trivia (including a source newline, so a source-broken chain reflows). `None`
+/// unless the shape is exactly `<node> . <node>` with a plain `DOT` operator — a
+/// broadcast `.+`/`.^`, a comment, or an extra child bails.
+fn dot_access_parts(node: &SyntaxNode) -> Option<(SyntaxNode, SyntaxNode)> {
+    if node.kind() != SyntaxKind::BINARY_EXPR {
+        return None;
+    }
+    let mut lhs: Option<SyntaxNode> = None;
+    let mut rhs: Option<SyntaxNode> = None;
+    let mut saw_dot = false;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Node(child) => {
+                let slot = if saw_dot { &mut rhs } else { &mut lhs };
+                if slot.is_some() {
+                    return None;
+                }
+                *slot = Some(child);
+            }
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::DOT if !saw_dot => saw_dot = true,
+                _ => return None,
+            },
+        }
+    }
+    match (lhs, saw_dot, rhs) {
+        (Some(l), true, Some(r)) => Some((l, r)),
+        _ => None,
+    }
+}
+
+/// Lower a `CALL_EXPR`. A fluent method chain (see [`try_lower_chain`]) folds
+/// into one width-driven group; every other call stays transparent (its
+/// `ARG_LIST` still normalizes and breaks on its own).
+fn lower_call(node: &SyntaxNode) -> Ir {
+    try_lower_chain(node).unwrap_or_else(|| lower_transparent(node))
 }
 
 /// Lay out an anonymous-function arrow (`x -> y`, `(a, b) -> a + b`) with a single
