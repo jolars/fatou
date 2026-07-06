@@ -112,6 +112,15 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: bracescat `{a; b}` reflow (`bracescat_spacing/`). A
+  `BRACESCAT_EXPR` (the brace-delimited vcat/matrix) is structurally identical to
+  a `MATRIX_EXPR` — same `ARG`/`MATRIX_ROW` children, same `;`/newline/space
+  separators, same `;;` higher-dim bail — so it now routes through the shared
+  `lower_matrix` machinery: source spacing normalizes to `{a; b}`, a too-wide
+  bracescat frames one element per line (`;` dropped, matrix style). The two
+  matrix helpers that read the open/close tokens (`matrix_reflow_body`,
+  `lower_matrix_multiline`) gained `LBRACE`/`RBRACE` arms; the bracket text flows
+  through verbatim.
 - [x] Formatter: splat operator snugs to its operand (`splat_spacing/`). A
   `SPLAT_EXPR` written `x ...` now normalizes to `x...` (the postfix analog of the
   unary-prefix snug), reflowing whatever whitespace the parser left between operand

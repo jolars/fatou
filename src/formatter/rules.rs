@@ -36,7 +36,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::UNARY_EXPR => lower_unary(node),
         SyntaxKind::SPLAT_EXPR => lower_splat(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
-        SyntaxKind::MATRIX_EXPR => lower_matrix(node),
+        SyntaxKind::MATRIX_EXPR | SyntaxKind::BRACESCAT_EXPR => lower_matrix(node),
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
@@ -3127,8 +3127,12 @@ fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::LBRACKET => open = Some(tok.text().to_string()),
-                SyntaxKind::RBRACKET => close = Some(tok.text().to_string()),
+                // A `MATRIX_EXPR` opens `[`/`]`; a `BRACESCAT_EXPR` (`{a; b}`, the
+                // brace-delimited vcat/matrix) opens `{`/`}`. Both share the same
+                // row/`;`/newline shape, so they lower identically — the actual
+                // bracket text flows through from the token.
+                SyntaxKind::LBRACKET | SyntaxKind::LBRACE => open = Some(tok.text().to_string()),
+                SyntaxKind::RBRACKET | SyntaxKind::RBRACE => close = Some(tok.text().to_string()),
                 // Whitespace carries no layout and is transparent to the `;;` check.
                 SyntaxKind::WHITESPACE => continue,
                 // `;` and a source newline both separate rows; a blank line or a
@@ -3245,8 +3249,10 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::LBRACKET => open = Some(tok.text().to_string()),
-                SyntaxKind::RBRACKET => close = Some(tok.text().to_string()),
+                // `[`/`]` for a matrix, `{`/`}` for a bracescat — see
+                // [`matrix_reflow_body`]; the bracket text flows through verbatim.
+                SyntaxKind::LBRACKET | SyntaxKind::LBRACE => open = Some(tok.text().to_string()),
+                SyntaxKind::RBRACKET | SyntaxKind::RBRACE => close = Some(tok.text().to_string()),
                 SyntaxKind::WHITESPACE => {}
                 // `;` and a source newline are equivalent row separators; both are
                 // layout-only here (rows are already framed one per line). Only the

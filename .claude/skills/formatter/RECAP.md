@@ -109,43 +109,40 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (splat operator snug)
+## Latest session (bracescat `{a; b}` reflow)
 
-`feat(formatter)`. New construct `SPLAT_EXPR` — the postfix `...` now snugs to its
-operand (`f(x ...)` → `f(x...)`, `[a ... , b]` → `[a..., b]`, `apply(args ...; opts
-...)` → `apply(args...; opts...)`), normalizing whatever whitespace the parser left
-(Tenet 1). Chosen as the next construct after probing transparent-handled kinds:
-splat leaked source spacing where juxtaposition (`2  x` is a **parse error**, never
-carries interior whitespace) and bracescat/curly did not (curly already normalizes;
-bracescat `{a ; b}` is a smaller separate gap left for later). New `lower_splat` is
-the direct postfix analog of `lower_unary`: `concat[lower_node(operand), "..."]`,
-recursing so the operand normalizes internally.
+`feat(formatter)`. Closed the former ranked #1. A `BRACESCAT_EXPR` (`{a; b}` — the
+brace-delimited vcat, `{a b; c d}` the matrix-row form) is **structurally identical
+to a `MATRIX_EXPR`**: same `ARG`/`MATRIX_ROW` children, same `;`/newline/space
+separators, same `;;` higher-dim operator, differing only in `{`/`}` vs `[`/`]`. So
+instead of a bespoke `lower_bracescat`, it routes through the existing `lower_matrix`
+machinery (user chose the matrix analog via AskUserQuestion over a `;`-visible-on-break
+variant). Result: source spacing normalizes (`{a ;b}` → `{a; b}`), a source-multiline
+bracescat reflows flat when it fits, and a too-wide one frames one element per
+4-indented line with the `;` **dropped** between broken rows — byte-identical to how
+`[…]` matrices break.
 
-**Two guards.** (1) A `LITERAL` operand always snugs — a bare float `1.` is the only
-trailing-`.` spelling and `normalize_float` rewrites it to `1.0` (safe), so the guard
-only bails a *non-literal* verbatim shape whose last raw token ends in `.` (would make
-`....`). The naive "bail on raw trailing `.`" guard I first wrote broke idempotence:
-`f(1. ...)` → `f(1.0 ...)` (bail, but float still normalized) → `f(1.0...)` (snug) ≠
-fixpoint; the kind-aware guard fixes it. (2) **Bracket-closing operands bail to
-verbatim spaced** — see the parser gap below.
+**Change (~6 lines).** (1) Dispatch `BRACESCAT_EXPR` alongside `MATRIX_EXPR` to
+`lower_matrix` in `lower_node`. (2) The two matrix helpers that read the open/close
+tokens — `matrix_reflow_body` and `lower_matrix_multiline` — gained
+`LBRACE`/`RBRACE` arms next to `LBRACKET`/`RBRACKET`; the bracket text flows through
+from the token, so `open`/`close` carry `{`/`}` automatically. `matrix_has_comment`
+already keys on `MATRIX_ROW`/`COMMENT` (bracket-agnostic), so the comment-bearing
+bracescat path works unchanged. The `;;` bail (two adjacent `SEMICOLON`) and empty
+`{}` both fall out for free. Verified the framed brace form reparses as
+`BRACESCAT_EXPR` (stability). No IR/printer change; `construct_reflow_body` (matrix
+index-subject folding) left keyed on `MATRIX_EXPR` only — a bracescat-subject index
+break is a separate future target.
 
-**Parser blocker surfaced + handed off.** Snugging a splat onto a closing bracket
-(`f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`) makes
-Fatou's parser reject the `...` as a `LoneOperator` even though JuliaSyntax accepts
-it — so the snug output fails the stability reparse. `lower_splat` therefore withholds
-the snug when the operand's last token is `)`/`]`/`}` and keeps the verbatim spaced
-form (which reparses). Handed off to parser-parity (RECAP "Queued next targets" +
-`TODO.md` Parser); once the parser accepts `)...`, drop the `ends_in_bracket` guard and
-widen the fixture. Gated `splat_spacing/` (9 cases: name/dotted/literal operands,
-vect/tuple/vararg/`;`-params positions). Gate 100→101; stability + clippy + fmt + full
-suite green.
+Gated `bracescat_spacing/` (6 cases: spacing normalize, matrix rows, newline reflow,
+wide vcat break, wide row break, `;;` bail). Gate 101→102; stability + clippy + fmt +
+full suite green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) **Bracescat `{a; b}` reflow** — `{a ; b}` (BRACESCAT_EXPR,
-unhandled → transparent) leaks source spacing around `;`; a small `lower_bracescat`
-analogous to the paren-block/matrix `;` handling. (2) Chained-pair hug through a
-*non-huggable-but-grouped* innermost (low value). (3) Re-evaluate the
-source-break-mirroring bracket/matrix rules against the width-driven reflow engine
-(largest carried debt).
+**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
+innermost (low value). (2) Re-evaluate the source-break-mirroring bracket/matrix rules
+against the width-driven reflow engine (largest carried debt). (3) A
+bracescat/matrix-subject index break (`{a; b}[k]`) — register `BRACESCAT_EXPR` in
+`construct_reflow_body` (matrix already there via `MATRIX_EXPR`).
 
 ## Earlier: let binding-list width-driven reflow
 
@@ -236,6 +233,13 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Splat operator snug** (committed `7a286e2`, `feat`): the postfix `...` snugs to
+  its operand (`f(x ...)` → `f(x...)`), the direct postfix analog of `lower_unary`.
+  A `LITERAL` operand always snugs (floats normalize safely); a non-literal verbatim
+  shape ending in a raw `.` bails (avoids `....`); a **bracket-closing operand**
+  (`g(x)...`) bails to verbatim spaced pending the parser gap (handed off to
+  parser-parity — the still-OUTSTANDING gap below). Gated `splat_spacing/` (9).
+  Gate 100→101.
 - **Import/using/export list width-driven reflow** (committed `5b48009`, `feat`): a
   too-wide `using`/`import`/`export` list breaks one comma-group per line (comma
   trailing, wrapped groups at one continuation indent, first group on the keyword
