@@ -1588,9 +1588,10 @@ fn bracket_explode_body(open: &str, items: &[Ir], close: &str, trailing: Ir) -> 
 /// (the one [`lower_keyword_arg`] reflows) and the value is one — the name and
 /// `=` join the flat prefix (`f(x, kw = [`). A bare token, a splat, a
 /// unary/binary expression, or anything else keeps the normal layout. The pair
-/// operators are hug-transparent (see [`pair_hug_split`]): a value of the form
-/// `lhs => <huggable construct>` hugs too, the `lhs => ` joining the flat
-/// prefix like a keyword's `name = `.
+/// operators are hug-transparent (see [`pair_hug_chain`]): a value of the form
+/// `lhs => <huggable construct>` — or the longer chain `a => b => <construct>` —
+/// hugs too, the whole `a => b => ` joining the flat prefix like a keyword's
+/// `name = `.
 fn item_is_huggable(item: &SyntaxNode) -> bool {
     match item.kind() {
         SyntaxKind::ARG => {
@@ -1630,21 +1631,17 @@ fn item_is_huggable(item: &SyntaxNode) -> bool {
 }
 
 /// Whether an item's value can hug: a bracket-delimited construct itself, or a
-/// clean pair wrapping one (see [`pair_hug_split`]).
+/// clean pair chain wrapping one (see [`pair_hug_chain`]).
 fn value_is_huggable(value: &SyntaxNode) -> bool {
-    huggable_kind(value.kind()) || pair_hug_split(value).is_some()
+    huggable_kind(value.kind()) || pair_hug_chain(value).is_some()
 }
 
-/// Split a clean pair whose value can hug — `lhs => <construct>` or
-/// `lhs .=> <construct>` with a huggable right-hand side — into the left
-/// operand, the operator text, and the value node. The two pair spellings are
-/// hug-transparent: a trailing pair item hugs through them, the `lhs => `
-/// joining the flat hug prefix exactly as a keyword's `name = ` does. The
-/// other arrow-tier operators (`-->`, `<-->`, …) share the parser tier but not
-/// the pair idiom and keep the normal layout, as does anything but the clean
-/// two-operand shape (a comment or a longer `a => b => c` chain bails; interior
-/// newlines are layout-free, as in [`lower_binary`]).
-fn pair_hug_split(node: &SyntaxNode) -> Option<(SyntaxNode, String, SyntaxNode)> {
+/// Parse a clean two-operand `=>`/`.=>` pair into its left operand, operator
+/// text, and right operand. `None` for a non-`BINARY_EXPR`, a non-pair operator
+/// (`-->`, `<-->`, … share the parser tier but not the pair idiom), a comment,
+/// or any shape but the clean two-operand form; interior newlines are
+/// layout-free, as in [`lower_binary`].
+fn pair_operands(node: &SyntaxNode) -> Option<(SyntaxNode, String, SyntaxNode)> {
     if node.kind() != SyntaxKind::BINARY_EXPR {
         return None;
     }
@@ -1669,8 +1666,25 @@ fn pair_hug_split(node: &SyntaxNode) -> Option<(SyntaxNode, String, SyntaxNode)>
             },
         }
     }
-    let (lhs, op, rhs) = (lhs?, op?, rhs?);
-    huggable_kind(rhs.kind()).then_some((lhs, op, rhs))
+    Some((lhs?, op?, rhs?))
+}
+
+/// Peel a right-nested chain of clean huggable pairs — `a => <construct>` or
+/// the longer `a => b => <construct>` — into the accumulated flat prefix
+/// (`a => `, `a => b => `, …) and the innermost huggable construct. The pair
+/// spellings are hug-transparent: a trailing pair (chain) item hugs through
+/// them, the whole `a => b => ` joining the flat hug prefix exactly as a
+/// keyword's `name = ` does. `None` unless every link is a clean two-operand
+/// `=>`/`.=>` pair (see [`pair_operands`]) and the innermost value is a huggable
+/// bracket construct (see [`huggable_kind`]).
+fn pair_hug_chain(node: &SyntaxNode) -> Option<(Ir, SyntaxNode)> {
+    let (lhs, op, rhs) = pair_operands(node)?;
+    let head = Ir::concat([lower_node(&lhs), Ir::text(format!(" {op} "))]);
+    if huggable_kind(rhs.kind()) {
+        return Some((head, rhs));
+    }
+    let (tail, construct) = pair_hug_chain(&rhs)?;
+    Some((Ir::concat([head, tail]), construct))
 }
 
 /// The bracket-delimited constructs that can hug an enclosing bracket: each owns
@@ -1864,11 +1878,12 @@ fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
     }
 }
 
-/// The prefix segment and grouped value body of a trailing *pair* item in a
-/// hug: `lhs => ` (behind a keyword's `name = `) joins the flat prefix, and
-/// the hug body is the pair value's own grouped lowering, so the break lands
-/// inside the value's bracket rather than at the `=>`. `None` for a non-pair
-/// item, whose normal lowering is already the right hug body.
+/// The prefix segment and grouped value body of a trailing *pair* (chain) item
+/// in a hug: the whole `a => b => ` (behind a keyword's `name = `) joins the
+/// flat prefix, and the hug body is the innermost value's own grouped lowering,
+/// so the break lands inside that value's bracket rather than at any `=>`.
+/// `None` for a non-pair item, whose normal lowering is already the right hug
+/// body.
 fn pair_hug_grouped_parts(item: &SyntaxNode) -> Option<(Ir, Ir)> {
     match item.kind() {
         SyntaxKind::ARG => {
@@ -1876,11 +1891,8 @@ fn pair_hug_grouped_parts(item: &SyntaxNode) -> Option<(Ir, Ir)> {
             let (Some(child), None) = (children.next(), children.next()) else {
                 return None;
             };
-            let (lhs, op, rhs) = pair_hug_split(&child)?;
-            Some((
-                Ir::concat([lower_node(&lhs), Ir::text(format!(" {op} "))]),
-                lower_node(&rhs),
-            ))
+            let (prefix, construct) = pair_hug_chain(&child)?;
+            Some((prefix, lower_node(&construct)))
         }
         SyntaxKind::KEYWORD_ARG => {
             // `item_is_huggable` vetted the clean `name = value` shape.
@@ -1890,15 +1902,10 @@ fn pair_hug_grouped_parts(item: &SyntaxNode) -> Option<(Ir, Ir)> {
             else {
                 return None;
             };
-            let (lhs, op, rhs) = pair_hug_split(&value)?;
+            let (prefix, construct) = pair_hug_chain(&value)?;
             Some((
-                Ir::concat([
-                    lower_node(&name),
-                    Ir::text(" = "),
-                    lower_node(&lhs),
-                    Ir::text(format!(" {op} ")),
-                ]),
-                lower_node(&rhs),
+                Ir::concat([lower_node(&name), Ir::text(" = "), prefix]),
+                lower_node(&construct),
             ))
         }
         _ => None,
@@ -1907,18 +1914,15 @@ fn pair_hug_grouped_parts(item: &SyntaxNode) -> Option<(Ir, Ir)> {
 
 /// The hug prefix contribution and ungrouped reflow body of a huggable item
 /// value: a bracket-delimited construct contributes no prefix; a clean pair
-/// (see [`pair_hug_split`]) contributes `lhs => ` and its right-hand side's
-/// body.
+/// chain (see [`pair_hug_chain`]) contributes the whole `a => b => ` and its
+/// innermost value's body.
 fn hug_value_parts(value: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
     if huggable_kind(value.kind()) {
         return Some((None, construct_reflow_body(value)?));
     }
-    let (lhs, op, rhs) = pair_hug_split(value)?;
-    let body = construct_reflow_body(&rhs)?;
-    Some((
-        Some(Ir::concat([lower_node(&lhs), Ir::text(format!(" {op} "))])),
-        body,
-    ))
+    let (prefix, construct) = pair_hug_chain(value)?;
+    let body = construct_reflow_body(&construct)?;
+    Some((Some(prefix), body))
 }
 
 /// The ungrouped reflow body of a bracket-delimited construct, for folding into

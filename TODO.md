@@ -102,6 +102,14 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
+- [x] Formatter: chained pairs hug through the whole spine (`chained_pair_hug/`).
+  A trailing chained pair `a => b => Dict(...)` now hugs its enclosing bracket
+  like a single pair — the whole `a => b => ` joins the flat prefix and only the
+  innermost construct explodes — instead of bailing to normal arrow-tier layout.
+  `pair_hug_split` split into `pair_operands` (clean-pair parse) + the recursive
+  `pair_hug_chain` (peels the right-nested spine to the innermost huggable
+  construct); the four hug consumers route through it. `-->`/`<-->` links and a
+  non-huggable innermost value still bail.
 - [x] Formatter: paren-expression subjects join the shared index group
   (`paren_index_break/`). A too-wide `(inner)[index]` chain now yields
   subject-first at its own parentheses — the inner value on one indented line,

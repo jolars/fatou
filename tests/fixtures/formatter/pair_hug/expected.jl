@@ -39,9 +39,11 @@ fit = optimize(objective; schedule = "warmup_phase" => build_schedule(
     ramp_step_count,
     decay_rate,
 ))
-chained = Dict(
-    "outer_key" => "inner_key" => [first_element_value, second_element_value, third],
-)
+chained = Dict("outer_key" => "inner_key" => [
+    first_element_value,
+    second_element_value,
+    third,
+])
 fence_lowx = Dict("configuration_key" => (alpha_setting_value, beta_setting_value, gamma_a))
 fence_high = Dict("configuration_key" => (
     alpha_setting_value,
