@@ -105,6 +105,10 @@ Tenet 1.
   via `collect_body_lines` shared with `lower_root`):
   `lower_block_expr` (begin/quote), `lower_let`, `lower_loop` (while/for),
   `lower_if`/`lower_try` (+ `lower_branch_clause`), `lower_struct`,
+  a `CONDITION` header (`if`/`elseif`/`while` predicate) is wrapped by
+  `lower_control_header` in one extra `Ir::indent` so a broken condition sits one
+  level deeper than the body it guards (continuation +8, body +4; `for` bindings and
+  `catch` variables lower unchanged),
   `lower_function`, `lower_do` (+ `lower_do_params`), `lower_module`
   (+ `module_should_indent`), `lower_type_decl` (abstract/primitive). Empty
   single-body blocks (struct/function/macro/loop/let/begin/quote/module) collapse
@@ -114,7 +118,46 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (fluent method chains — break at the dots)
+## Latest session (control-flow condition continuation double-indent)
+
+`feat(formatter)`. A too-wide `if`/`elseif`/`while` `CONDITION` used to break its
+continuation at +4 — **the same indent as the body it guards** — so you couldn't
+tell where the condition ended and the body began (`while a &&⏎    b &&⏎    c⏎    body`).
+The clash hit every breaking-condition shape: `&&`/`||` chains, comparisons, and
+bracketed predicate calls (args at +4 = body). Stable/idempotent but ambiguous.
+
+**Decision (AskUserQuestion).** User chose **uniform +8 across all condition
+shapes** (over "operator-chains only, brackets keep +4" and "leave the clash"): a
+broken condition always sits one level *deeper* than the body — continuation at +8,
+body at +4 — regardless of whether it breaks at an operator or inside a call's
+parens. The simplest, most Tenet-1 rule ("a broken condition is one level deeper
+than the body, period"); a bracketed call's args go to +8, its `)` to +4.
+
+**Change (one helper + 3 one-line call-site swaps).** New `lower_control_header`
+wraps a `CONDITION` node's lowering in a single extra `Ir::indent` (inert while the
+condition fits flat — indent only surfaces after a break; the first operand stays on
+the header line). Gated on `header.kind() == CONDITION`, so `if`/`elseif`/`while`
+conditions get the extra level while a `for` `FOR_BINDING` and a `catch` `NAME`
+variable lower unchanged. Wired into `lower_if` (the leading condition), `lower_loop`
+(header, only when it's a CONDITION not a FOR_BINDING), and `lower_branch_clause`
+(the `elseif` header). No IR/printer change; base indent propagates (nested in a
+function body → continuation +12, branch body +8).
+
+Gated `condition_break/` (flat stays flat, wide `&&`/`||` chains, elseif condition,
+comparison condition, bracketed-call condition, nested-in-function base indent,
+source-broken-but-fits reflows flat, catch-var/for-binding control). Gate 105→106;
+stability + clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) `for`-binding continuation shares the same +4/+body
+clash when a for iteration breaks — the natural follow-on (not ratified this
+session; `lower_control_header` deliberately skips FOR_BINDING). (2) Chained-pair hug
+through a *non-huggable-but-grouped* innermost (low value, long-standing). (3) Sweep
+any remaining Runic-rationale doc comments in `rules.rs`. (Note: the stale inventory
+header still names `lower_multiline_bracket`/`lower_matrix`/`lower_paren` as
+"source-break mirroring" — they were rewritten width-driven in earlier sessions;
+`has_newline_token` now only picks the comment-bearing matrix path.)
+
+## Earlier: fluent method chains — break at the dots
 
 `feat(formatter)`. Closed ranked #3. A `.`-spine with **≥2 called links**
 (`recv.a(x).b(y)`) is a fluent method chain and now reflows width-first instead of

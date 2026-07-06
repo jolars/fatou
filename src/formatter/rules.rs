@@ -4167,6 +4167,24 @@ fn lower_let(node: &SyntaxNode) -> Ir {
     Ir::concat(parts)
 }
 
+/// Lower a control-flow header, wrapping a boolean `CONDITION` (the `if`/`elseif`/
+/// `while` predicate) in one extra indent step. A condition that overflows and
+/// breaks — an `&&`/`||`/comparison chain, or a bracketed predicate call — then
+/// sits one level *deeper* than the block body it guards (its continuation at +8,
+/// the body at +4), so the header never shares an indent with the body it
+/// introduces. The rule is uniform across every condition shape (Tenet 1): the
+/// extra indent is inert while the condition fits flat, and only surfaces once it
+/// breaks. Non-condition headers — a `for` binding, a `catch` variable — carry no
+/// body-boundary ambiguity and lower unchanged.
+fn lower_control_header(header: &SyntaxNode) -> Ir {
+    let ir = lower_node(header);
+    if header.kind() == SyntaxKind::CONDITION {
+        Ir::indent(ir)
+    } else {
+        ir
+    }
+}
+
 /// Lay out a `while` or `for` loop by indenting its body one step, reusing the
 /// [`lower_block_body`] engine that `begin`/`quote`/`let` already share. The
 /// shape is `<kw> <header> BLOCK end`, where the header is a `CONDITION`
@@ -4221,7 +4239,7 @@ fn lower_loop(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    let mut parts = vec![Ir::text(kw), Ir::text(" "), lower_node(&header)];
+    let mut parts = vec![Ir::text(kw), Ir::text(" "), lower_control_header(&header)];
     if !push_block_body(&mut parts, &block, || lower_block_body(&block)) {
         return lower_transparent(node);
     }
@@ -4284,7 +4302,11 @@ fn lower_if(node: &SyntaxNode) -> Ir {
     };
 
     let body_empty = body.is_none();
-    let mut parts: Vec<Ir> = vec![Ir::text("if"), Ir::text(" "), lower_node(&condition)];
+    let mut parts: Vec<Ir> = vec![
+        Ir::text("if"),
+        Ir::text(" "),
+        lower_control_header(&condition),
+    ];
     if let Some(body) = body {
         parts.push(body);
     }
@@ -4427,7 +4449,7 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
     let mut parts: Vec<Ir> = vec![Ir::HardLine, Ir::text(kw)];
     if let Some(header) = header {
         parts.push(Ir::text(" "));
-        parts.push(lower_node(&header));
+        parts.push(lower_control_header(&header));
     }
     // An empty clause body contributes no lines: the keyword header is followed
     // directly by the next clause or the shared `end` (Tenet 1).

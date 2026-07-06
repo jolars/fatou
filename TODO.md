@@ -112,6 +112,16 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: control-flow condition continuation double-indent
+  (`condition_break/`). An `if`/`elseif`/`while` `CONDITION` that overflows used to
+  break its continuation at +4 — the same indent as the body it guards — so you
+  could not tell where the condition ended and the body began. New
+  `lower_control_header` wraps a `CONDITION` node in one extra `Ir::indent`, so a
+  broken condition (an `&&`/`||`/comparison chain, or a bracketed predicate call)
+  sits one level deeper than the body (continuation at +8, body at +4). Uniform
+  across every condition shape (user-ratified); inert while the condition fits
+  flat. `for` bindings and `catch` variables are not conditions and lower
+  unchanged.
 - [x] Formatter: string/command interpolation normalized + forced flat
   (`string_interpolation/`). A `STRING_LITERAL`/`CMD_LITERAL` now has a rule
   (`lower_string_literal`): content and delimiters stay verbatim, but each `$(…)`
