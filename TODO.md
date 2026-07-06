@@ -132,8 +132,10 @@ leverage.
   (`a => b --> c => d`) breaks at every operator instead of staircasing into
   nested indents — same treatment the plus/times/shift tiers already had. The
   flatten is layout-only (the text stream is identical under either
-  association). `<--` is a lexer gap (handed off; see Parser section) and stays
-  out of the fixture. `arrow_pair_chain/` gated.
+  association). `<--`/`.<--` (`LEFT_LONG_ARROW`/`DOT_LEFT_LONG_ARROW`) join the
+  same tier now that the lexer gap is resolved; `arrow_pair_chain/` gated and
+  widened to exercise them (same-op break, mixed `<--`/`.<--`/`=>` break, flat
+  fit, source-broken reflow).
 - [x] Formatter: pair-value hugging (`pair_hug/`). The pair operators `=>`/`.=>`
   are hug-transparent: a trailing `lhs => <bracket construct>` argument, keyword
   value, or collection element hugs the enclosing bracket — the `lhs => ` joins

@@ -13,6 +13,16 @@ z = node_alpha <-->
     node_gamma .-->
     node_delta <-->
     node_epsilon_extension_pads
+s = alpha_operand_name_wide <--
+    beta_operand_name_wide <--
+    gamma_operand_name_wide <--
+    tail_x
+t = alpha_operand_name_wide <--
+    beta_operand_name_wide .<--
+    gamma_operand_wide =>
+    tail_operand
+u = short_left_name <-- short_right_name
+p = pointer_left_name <-- pointer_right_name
 q = alpha_operand =>
     beta_operand + gamma_operand -->
     delta_operand + epsilon_operand_widerxx
