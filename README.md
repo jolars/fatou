@@ -10,12 +10,10 @@ Fatou follows the rust-analyzer design (a lossless
 [`rowan`](https://crates.io/crates/rowan) CST,
 [`salsa`](https://crates.io/crates/salsa) for incremental computation, and
 [`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
-transport) and is modeled directly on the author's R tooling project, `arity`.
+transport).
 
-> **Status: early groundwork.** The full architecture is in place; the parser
-> covers a growing Julia subset, the formatter has started landing per-construct
-> layout rules (gated by hand-authored fixtures), and no lint rules ship yet.
-> See `TODO.md` for the roadmap and `AGENTS.md` for the design tenets.
+> **Status: early groundwork.** The parser is fully developed. Formatter is
+> increasingly stable, but no language server features yet.
 
 ## Installation
 

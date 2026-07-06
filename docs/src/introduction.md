@@ -5,12 +5,10 @@ Fatou is a language server, formatter, and linter for the
 rust-analyzer design (a lossless [`rowan`](https://crates.io/crates/rowan) CST,
 [`salsa`](https://crates.io/crates/salsa) for incremental computation, and
 [`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
-transport) and is modeled on the author's R tooling project,
-[arity](https://arity.cc/).
+transport).
 
-> **Status: early groundwork.** The full architecture is in place; the parser
-> covers a growing Julia subset, the formatter has started landing per-construct
-> layout rules (gated by hand-authored fixtures), and no lint rules ship yet.
+> **Status: early groundwork.** The parser is fully developed. Formatter is
+> increasingly stable, but no language server features yet.
 
 ## Quick Start
 
