@@ -102,6 +102,14 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
+- [x] Formatter: bare tuples reflow width-first (`bare_tuple_break/`). A too-wide
+  bracketless tuple (`x = a, b, c`, `return a, b, c`, a standalone `a, b, c`) now
+  breaks one element per line with the comma trailing each and the wrapped
+  elements indented one continuation step (first element on the opening line),
+  instead of always rendering flat; a source-broken bare tuple reflows to the same
+  form instead of bailing to verbatim (Tenet 1). `lower_bare_tuple` now builds a
+  width-driven `Ir::group` (mirroring `lower_comparison`) and skips interior
+  newlines. No broken-only trailing comma (no brackets to frame it).
 - [x] Formatter: chained pairs hug through the whole spine (`chained_pair_hug/`).
   A trailing chained pair `a => b => Dict(...)` now hugs its enclosing bracket
   like a single pair — the whole `a => b => ` joins the flat prefix and only the

@@ -2421,19 +2421,30 @@ fn lower_macro_name(node: &SyntaxNode) -> Option<Ir> {
 /// lowered recursively so its own normalization still applies (`f(x),g(y)` →
 /// `f(x), g(y)`).
 ///
+/// The layout is width-driven: flat `a, b, c` when it fits, else one element per
+/// line with the comma trailing each element and the wrapped elements indented
+/// one continuation step (the first element stays on the opening line — after
+/// the `= `, `return `, or at column zero — and the rest wrap beneath it). A bare
+/// tuple has no brackets to frame the break, so the comma serves as the
+/// breakable separator; there is no broken-only trailing comma. Source line
+/// breaks carry no layout information (Tenet 1): `x = a,\n b` reflows to the same
+/// form as `x = a, b`.
+///
 /// Only the clean alternating shape `<el> , <el> [ , <el> ]…` is reshaped. A
 /// leading/doubled/trailing comma (the trailing form is a parse error at this
-/// level anyway), an interleaved comment or newline, or any unexpected token
-/// falls back to the verbatim transparent lowering.
+/// level anyway), an interleaved comment, or any unexpected token falls back to
+/// the verbatim transparent lowering.
 fn lower_bare_tuple(node: &SyntaxNode) -> Ir {
-    let mut parts: Vec<Ir> = Vec::new();
+    let mut first: Option<Ir> = None;
+    let mut rest: Vec<Ir> = Vec::new();
     let mut item_count = 0usize;
     let mut pending_comma = false;
 
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE => {}
+                // Source line breaks carry no layout information under Tenet 1.
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::COMMA => {
                     if pending_comma || item_count == 0 {
                         return lower_transparent(node);
@@ -2443,13 +2454,19 @@ fn lower_bare_tuple(node: &SyntaxNode) -> Ir {
                 _ => return lower_transparent(node),
             },
             NodeOrToken::Node(child) => {
-                if item_count > 0 {
-                    if !pending_comma {
-                        return lower_transparent(node);
-                    }
-                    parts.push(Ir::text(", "));
+                if item_count > 0 && !pending_comma {
+                    return lower_transparent(node);
                 }
-                parts.push(lower_node(&child));
+                let ir = lower_node(&child);
+                if item_count == 0 {
+                    first = Some(ir);
+                } else {
+                    // The comma trails the previous element on its line; the
+                    // following element wraps at the breakable gap.
+                    rest.push(Ir::text(","));
+                    rest.push(Ir::Line);
+                    rest.push(ir);
+                }
                 item_count += 1;
                 pending_comma = false;
             }
@@ -2459,8 +2476,17 @@ fn lower_bare_tuple(node: &SyntaxNode) -> Ir {
     if pending_comma {
         return lower_transparent(node);
     }
+    let Some(first) = first else {
+        return lower_transparent(node);
+    };
+    if rest.is_empty() {
+        return first;
+    }
 
-    Ir::concat(parts)
+    // One width-driven group with its own continuation indent: flat `a, b, c`
+    // when it fits, else comma-trailing with the wrapped elements indented one
+    // step.
+    Ir::group(Ir::concat([first, Ir::indent(Ir::concat(rest))]))
 }
 
 /// Lay out a keyword argument (`x = 1`) with a single space on each side of the
