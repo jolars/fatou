@@ -1731,26 +1731,10 @@ fn project_let(node: &SyntaxNode) -> String {
 }
 
 fn project_let_bindings(node: &SyntaxNode) -> Vec<String> {
-    // Comma-separated bindings; Fatou keeps the first as an `ASSIGNMENT_EXPR`
-    // and any later one as loose `IDENT = expr` tokens (header passthrough).
-    let mut out = Vec::new();
-    let mut pending: Vec<SyntaxElement> = Vec::new();
-    let flush = |pending: &mut Vec<SyntaxElement>, out: &mut Vec<String>| {
-        if !pending.is_empty() {
-            out.push(project_flat(std::mem::take(pending)));
-        }
-    };
-    // The `,` separators are load-bearing, so iterate raw children (dropping
-    // only trivia) rather than via `significant`, which would strip them.
-    for el in node.children_with_tokens() {
-        match &el {
-            NodeOrToken::Token(t) if is_trivia(t.kind()) => {}
-            NodeOrToken::Token(t) if t.kind() == COMMA => flush(&mut pending, &mut out),
-            _ => pending.push(el),
-        }
-    }
-    flush(&mut pending, &mut out);
-    out
+    // Each comma-separated binding is its own expression node (an
+    // `ASSIGNMENT_EXPR`, a bare name, a destructuring tuple, …); the `,`
+    // separators are loose tokens. Project each binding node in order.
+    node.children().map(|c| project(&c)).collect()
 }
 
 fn project_do(node: &SyntaxNode) -> String {

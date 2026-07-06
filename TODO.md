@@ -7,13 +7,14 @@ leverage.
 
 ## Parser
 
-- [ ] Parser: multi-binding `let` wraps only the first binding. `let a = 1, b = 2,
-  c = 3` makes `a = 1` an `ASSIGNMENT_EXPR` but leaves `b = 2`/`c = 3` as flat
-  `IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS`; JuliaSyntax wraps every
-  binding as a `=` node (`(let (block (= a 1) (= b 2) (= c 3)) (block x))`). Each
-  comma-separated binding should be its own `ASSIGNMENT_EXPR`. Blocks the
-  formatter's width-driven let-binding-list reflow (surfaced 2026-07-06; see
-  parser-parity RECAP queued target).
+- [x] Parser: multi-binding `let` wraps every binding as its own node. `let a =
+  1, b = 2, c = 3` now makes each comma-separated binding its own
+  `ASSIGNMENT_EXPR` (bare names stay `NAME`, destructuring stays a tuple) rather
+  than leaving all but the first as flat `IDENT`/`EQ`/`INTEGER` tokens under
+  `LET_BINDINGS` (`(let (block (= a 1) (= b 2) (= c 3)) (block x))`). `parse_header`'s
+  general path now loops parsing each binding as an expr with the `,` separators
+  kept loose; the projector iterates the binding nodes (no more flat-token
+  compensation). Unblocks the formatter's width-driven let-binding-list reflow.
 - [x] Lexer: compound-assignment operators `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` (and
   their broadcast forms `.<<=`, `.>>=`, `.>>>=`, `.÷=`, `.⊻=`) now tokenize as one
   augmented-assignment token. `a <<= b` ⇒ `(<<= a b)`, `a .÷= b` ⇒ `(.÷= a b)`;

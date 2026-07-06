@@ -56,7 +56,7 @@ ROOT@0..210
     LET_EXPR@47..60
       LET_KW@47..50 "let"
       WHITESPACE@50..51 " "
-      LET_BINDINGS@51..57
+      LET_BINDINGS@51..56
         ASSIGNMENT_EXPR@51..56
           NAME@51..52
             IDENT@51..52 "x"
@@ -65,8 +65,8 @@ ROOT@0..210
           WHITESPACE@54..55 " "
           LITERAL@55..56
             INTEGER@55..56 "1"
+      BLOCK@56..57
         WHITESPACE@56..57 " "
-      BLOCK@57..57
       END_KW@57..60 "end"
     WHITESPACE@60..61 " "
     PLUS@61..62 "+"

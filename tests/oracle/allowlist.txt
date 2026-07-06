@@ -99,6 +99,7 @@ keyword_statements
 left_arrow_operator
 left_division
 let_bindings_newline
+let_multi_binding
 let_quote
 list_empty_comma
 literals

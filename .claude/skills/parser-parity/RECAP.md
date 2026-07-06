@@ -6,20 +6,15 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Queued from formatter (2026-07-06): multi-binding `let` wraps only the first
-binding.** `let a = 1, b = 2, c = 3` parses with only the **first** binding as an
-`ASSIGNMENT_EXPR` node; `b = 2` and `c = 3` are left as flat unwrapped tokens
-(`IDENT`, `EQ`, `INTEGER`) directly under `LET_BINDINGS`. JuliaSyntax makes every
-binding a proper `=` node:
-`julia --startup-file=no -e 'using JuliaSyntax; print(JuliaSyntax.parse(Expr, "let a = 1, b = 2, c = 3\n    x\nend"))'`
-⇒ the `let` header is a `block` of three `=` nodes (`(let (block (= a 1) (= b 2)
-(= c 3)) (block x))`). Fatou's `LET_BINDINGS` should likewise wrap **each**
-comma-separated binding as its own `ASSIGNMENT_EXPR`. This blocks the formatter's
-width-driven let-binding-list reflow (it can't cleanly iterate binding nodes, and
-a rule over the flat-token soup would paper over the parser bug). The
-single-binding `let x = 1` is correct today; only 2+ bindings are affected.
-Cross-ref: formatter RECAP "Latest session" (import/export list session) +
-`TODO.md` Parser bullet.
+**Handoff to formatter (2026-07-06b): multi-binding `let` now wraps every
+binding.** `let a = 1, b = 2, c = 3` used to leave `b = 2`/`c = 3` as flat
+unwrapped `IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS` (only the first was
+an `ASSIGNMENT_EXPR`); now **each** comma-separated binding is its own node
+(`ASSIGNMENT_EXPR`, or a bare `NAME`, or a destructuring tuple), with the `,`
+separators kept loose. The formatter's width-driven let-binding-list reflow can
+now iterate `LET_BINDINGS.children()` cleanly instead of routing around flat-token
+soup. `let x = 1 end` trailing whitespace now attaches to the block, not the
+binding list (benign trivia move).
 
 **Handoff to formatter (2026-07-05): the braces-comprehension parser gap is
 fixed** — `{a\nfor b in c}` now parses as `BRACES_COMPREHENSION` ⇒
@@ -112,7 +107,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **194 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **195 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -132,37 +127,44 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-05b—left-arrow operator `<--` family)
+## Latest session (2026-07-06b—multi-binding `let` per-binding nodes)
 
-Closed the queued `<--` lexer gap via the 5-file operator recipe: `a <-- b`
-lexed as `a` `<` `--` (an `LT` missing its RHS + a stray `MINUS_MINUS`); now
-`<--`, `.<--`, and `.<-->` are single arrow-tier tokens.
+Closed the queued formatter-blocking parser bug: a `let` with 2+ comma-separated
+bindings kept only the **first** as an `ASSIGNMENT_EXPR`, dumping the rest as flat
+`IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS` — the projector *compensated*
+with `project_flat` (the classic "passing sexpr hiding a wrong CST" smell). Now
+each binding is a proper node.
 
-- **Three new tokens** (`LeftLongArrow`/`DotLeftLongArrow`/`DotLeftRightArrow`):
-  `.<-->` was included beyond the queued scope because longest-match forces the
-  family — adding `.<--` alone would have re-broken `a .<--> b` (`.<--` + `>`).
-  Lexing: ASCII 3-char table arm (the existing 4-char `<-->` check already runs
-  first); dotted block gets one `.<-` arm branching on the trailing `>` (5-char
-  `.<-->` vs 4-char `.<--`), placed before the `.<` (`DotLt`) 2-char fallback.
-  A lone `<-` stays `<` + unary minus (probed; not an operator).
-- **Probed ground truth** (all byte-identical): `a <-- b` ⇒ `(call-i a <-- b)`
-  (ordinary `call-i`, unlike `-->`'s own `(--> …)` head), broadcast ⇒
-  `dotcall-i`, tier `(4, 3)` right-assoc (`a --> b <-- c` groups right),
-  `:(<--)`/`:(.<--)` quote, prefix `<-- a` ⇒ `(call-pre (error <--) a)` — the
-  last three came free via `is_op_name` (structural.rs) + `is_value_operator`.
-- **Files**: lexer.rs (tokens + lex arms + `op_takes_suffix` + unit test),
-  syntax.rs, tree_builder.rs, expr.rs (`infix_binding_power`,
-  `is_operator_call_name`, `is_value_operator`), structural.rs (`is_op_name`),
-  sexpr.rs (`infix_head` `CallI`/`DotCallI` + `is_operator`), plus
-  formatter/rules.rs `binary_prec_class` arrow tier (the queued fallout fix).
-- **Fixtures**: parser snapshot + oracle dir slug `left_arrow_operator`
-  (13 cases: plain/broadcast, mixed `-->` both orders, precedence vs `+`/`=`,
-  right-assoc chains, glued `a<--b`, quotes).
-- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 193 → **194**.
+- **Root**: `parse_header`'s general path (LET-only; FOR returns early) parsed
+  **one** expr then bumped every remaining token as loose. Rewrote it as a loop:
+  parse each binding via `parse_expr(bp 0)` (which already stops at the comma),
+  bump the `,` (and horizontal ws) as loose separators, then cross trivia after a
+  trailing comma to reach a next-line binding. `parse_expr` at bp 0 never folds a
+  bare tuple, so each binding lands as its own node.
+- **Projector**: `project_let_bindings` collapsed from the flat-token
+  reconstruction to `node.children().map(project)` — the compensation is gone.
+- **Probed** all byte-identical: `let a=1,b=2,c=3` ⇒ `(= a 1)(= b 2)(= c 3)`;
+  bare-name `let x, y=2` ⇒ `x (= y 2)`; destructuring `let (a,b)=f()` ⇒
+  `(= (tuple-p a b) (call f))`; mixed `let a=1, b, c=3`; newline-continued
+  `let x=1,\n y=2`.
+- **Files**: structural.rs (`parse_header` general path), sexpr.rs
+  (`project_let_bindings`). Benign trivia move: `let x = 1 end` trailing ws now
+  attaches to the block, not `LET_BINDINGS` (updated `block_form_operand` +
+  `paren_block_juxtapose_error` snapshots).
+- **Fixtures**: parser snapshot + oracle dir slug `let_multi_binding` (multi
+  assign, bare-name, mixed). Existing `let_quote`/`let_bindings_newline` snapshots
+  updated to show the second binding as a real node.
+- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 194 → **195**.
 - **Next**: no queued parser target — batch-probe common real-world Julia
   against the oracle to surface a new divergence (as 2026-07-03 did).
 
 ## Earlier sessions
+
+- **2026-07-05b**—left-arrow operator `<--` family. Closed the queued `<--` lexer
+  gap via the 5-file operator recipe (`a <-- b` was `a` `<` `--`); now `<--`,
+  `.<--`, `.<-->` are single arrow-tier tokens (tier `(4,3)` right-assoc,
+  `(call-i a <-- b)`, broadcast `dotcall-i`). Fixture `left_arrow_operator`.
+  JS 677 (held); dir 193 → 194.
 
 - **2026-07-05**—newline-broken braces comprehension. `parse_braces`'s
   first-separator match gained the two newline-lookahead arms

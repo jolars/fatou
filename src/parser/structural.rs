@@ -1467,42 +1467,42 @@ fn parse_header(
         events.push(Event::Finish);
         return i;
     }
+    // A `let` binding list is a comma-separated series of bindings, each of
+    // which is its own expression (`x`, `x = 1`, `(a, b) = f()`, …). Parse each
+    // as a full expression so the CST carries a proper node per binding (an
+    // `ASSIGNMENT_EXPR`, a bare name, a destructuring tuple) rather than flat
+    // `IDENT = expr` tokens for every binding after the first. The `,`
+    // separators stay loose tokens (the projector iterates the binding nodes).
     let mut i = header_start;
-    let header_expr = run_expr.then(|| parse_expr(ctx.tokens(), header_start, 0, diagnostics));
-    if let Some(Some(expr)) = header_expr {
-        events.extend(expr.events);
-        i = expr.end;
-    } else if ctx.token(i).map(|t| t.kind) == Some(TokKind::Dollar) {
-        // An interpolated name (`module $A end`): build a real `INTERPOLATION`
-        // node so the projector reads it as `($ A)` rather than a loose name.
-        let interp = parse_prefix_interpolation(ctx, i, diagnostics);
-        events.extend(interp.events);
-        i = interp.end;
-    }
-    // A trailing comma in a `let` binding list suppresses the statement-
-    // terminating newline, so the next binding may begin on a later line
-    // (`let x = 1,\n y = 2 … end`). Track whether the last significant header
-    // token was a comma; if so, cross the newline instead of ending the header.
-    let mut last_sig_comma = false;
     loop {
-        if header_ends(ctx, i) {
-            let continues = node_kind == SyntaxKind::LET_BINDINGS
-                && last_sig_comma
-                && ctx.token(i).map(|t| t.kind) == Some(TokKind::Newline)
-                && !header_ends(ctx, ctx.skip_trivia(i));
-            if !continues {
-                break;
-            }
+        let binding = run_expr.then(|| parse_expr(ctx.tokens(), i, 0, diagnostics));
+        if let Some(Some(expr)) = binding {
+            events.extend(expr.events);
+            i = expr.end;
+        } else if ctx.token(i).map(|t| t.kind) == Some(TokKind::Dollar) {
+            // An interpolated name: build a real `INTERPOLATION` node so the
+            // projector reads it as `($ A)` rather than a loose name.
+            let interp = parse_prefix_interpolation(ctx, i, diagnostics);
+            events.extend(interp.events);
+            i = interp.end;
         }
-        if let Some(k) = ctx.token(i).map(|t| t.kind) {
-            if k == TokKind::Comma {
-                last_sig_comma = true;
-            } else if !k.is_trivia() {
-                last_sig_comma = false;
-            }
+        // A `,` (possibly preceded by horizontal whitespace) separates the next
+        // binding. Absent a comma, the binding list ends.
+        let sep = ctx.skip_ws(i);
+        if ctx.token(sep).map(|t| t.kind) != Some(TokKind::Comma) {
+            break;
         }
-        events.push(Event::Tok(i));
-        i += 1;
+        push_range(events, i, sep + 1);
+        i = sep + 1;
+        // A trailing comma suppresses the statement-terminating newline, so the
+        // next binding may begin on a later line (`let x = 1,\n y = 2 … end`).
+        // Cross intervening trivia to reach it; if only a header terminator
+        // follows, stop (the loop's next `parse_expr` would find nothing).
+        let next = ctx.skip_trivia(i);
+        if next > i && !header_ends(ctx, next) {
+            push_range(events, i, next);
+            i = next;
+        }
     }
     events.push(Event::Finish);
     i

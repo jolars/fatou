@@ -48,15 +48,15 @@ ROOT@0..55
     LET_EXPR@41..52
       LET_KW@41..44 "let"
       WHITESPACE@44..45 " "
-      LET_BINDINGS@45..49
+      LET_BINDINGS@45..48
         ASSIGNMENT_EXPR@45..48
           NAME@45..46
             IDENT@45..46 "x"
           EQ@46..47 "="
           LITERAL@47..48
             INTEGER@47..48 "1"
+      BLOCK@48..49
         WHITESPACE@48..49 " "
-      BLOCK@49..49
       END_KW@49..52 "end"
     RPAREN@52..53 ")"
   ERROR@53..54

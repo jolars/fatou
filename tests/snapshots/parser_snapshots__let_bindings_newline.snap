@@ -18,11 +18,14 @@ ROOT@0..34
       COMMA@9..10 ","
       NEWLINE@10..11 "\n"
       WHITESPACE@11..15 "    "
-      IDENT@15..16 "y"
-      WHITESPACE@16..17 " "
-      EQ@17..18 "="
-      WHITESPACE@18..19 " "
-      INTEGER@19..20 "2"
+      ASSIGNMENT_EXPR@15..20
+        NAME@15..16
+          IDENT@15..16 "y"
+        WHITESPACE@16..17 " "
+        EQ@17..18 "="
+        WHITESPACE@18..19 " "
+        LITERAL@19..20
+          INTEGER@19..20 "2"
     BLOCK@20..30
       NEWLINE@20..21 "\n"
       WHITESPACE@21..25 "    "
