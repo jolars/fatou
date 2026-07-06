@@ -88,6 +88,10 @@ Tenet 1.
   `lower_import_stmt`/`lower_export_stmt` (width-driven comma-group break, one per
   line, selector `Mod:` colon non-breaking, source-broken reflows flat),
   `lower_for_binding`.
+- Prefix/postfix operators: `lower_unary` (prefix op snug to operand,
+  retokenization guard), `lower_splat` (postfix `...` snug to operand — `x ...` →
+  `x...`; `LITERAL` operand always snugs, verbatim trailing-`.` bails, and a
+  **bracket-closing operand bails to spaced** pending the parser gap for `)...`).
 - Literals (token text, genuinely deterministic): `lower_literal` +
   `normalize_float` + `normalize_hex`.
 - Document root: `lower_root` (top-level blank-line policy — interior runs capped
@@ -105,7 +109,45 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (let binding-list width-driven reflow)
+## Latest session (splat operator snug)
+
+`feat(formatter)`. New construct `SPLAT_EXPR` — the postfix `...` now snugs to its
+operand (`f(x ...)` → `f(x...)`, `[a ... , b]` → `[a..., b]`, `apply(args ...; opts
+...)` → `apply(args...; opts...)`), normalizing whatever whitespace the parser left
+(Tenet 1). Chosen as the next construct after probing transparent-handled kinds:
+splat leaked source spacing where juxtaposition (`2  x` is a **parse error**, never
+carries interior whitespace) and bracescat/curly did not (curly already normalizes;
+bracescat `{a ; b}` is a smaller separate gap left for later). New `lower_splat` is
+the direct postfix analog of `lower_unary`: `concat[lower_node(operand), "..."]`,
+recursing so the operand normalizes internally.
+
+**Two guards.** (1) A `LITERAL` operand always snugs — a bare float `1.` is the only
+trailing-`.` spelling and `normalize_float` rewrites it to `1.0` (safe), so the guard
+only bails a *non-literal* verbatim shape whose last raw token ends in `.` (would make
+`....`). The naive "bail on raw trailing `.`" guard I first wrote broke idempotence:
+`f(1. ...)` → `f(1.0 ...)` (bail, but float still normalized) → `f(1.0...)` (snug) ≠
+fixpoint; the kind-aware guard fixes it. (2) **Bracket-closing operands bail to
+verbatim spaced** — see the parser gap below.
+
+**Parser blocker surfaced + handed off.** Snugging a splat onto a closing bracket
+(`f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`) makes
+Fatou's parser reject the `...` as a `LoneOperator` even though JuliaSyntax accepts
+it — so the snug output fails the stability reparse. `lower_splat` therefore withholds
+the snug when the operand's last token is `)`/`]`/`}` and keeps the verbatim spaced
+form (which reparses). Handed off to parser-parity (RECAP "Queued next targets" +
+`TODO.md` Parser); once the parser accepts `)...`, drop the `ends_in_bracket` guard and
+widen the fixture. Gated `splat_spacing/` (9 cases: name/dotted/literal operands,
+vect/tuple/vararg/`;`-params positions). Gate 100→101; stability + clippy + fmt + full
+suite green.
+
+**Ranked next targets:** (1) **Bracescat `{a; b}` reflow** — `{a ; b}` (BRACESCAT_EXPR,
+unhandled → transparent) leaks source spacing around `;`; a small `lower_bracescat`
+analogous to the paren-block/matrix `;` handling. (2) Chained-pair hug through a
+*non-huggable-but-grouped* innermost (low value). (3) Re-evaluate the
+source-break-mirroring bracket/matrix rules against the width-driven reflow engine
+(largest carried debt).
+
+## Earlier: let binding-list width-driven reflow
 
 `feat(formatter)`. Closed the former ranked #1 (unblocked by parser commit
 `858441c`, which now wraps every let binding as its own `ASSIGNMENT_EXPR`). A
@@ -145,7 +187,16 @@ rules against the headline width-driven reflow engine (the largest carried debt)
 (a commented bracket/matrix explodes to the identical one-per-line form regardless
 of source breaks).
 
-## Parser/lexer gaps — all previously-handed-off gaps now RESOLVED
+## Parser/lexer gaps
+
+**OUTSTANDING (handed off 2026-07-06c): splat after a closing bracket.** `f(g(x)...)`,
+`f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)` fail to parse (`...` seen as
+a `LoneOperator`) though JuliaSyntax accepts them; only the spaced spelling parses.
+`lower_splat` withholds the snug for bracket-closing operands until this lands (see
+parser-parity RECAP "Queued next targets" + `TODO.md` Parser). Drop the
+`ends_in_bracket` guard and widen `splat_spacing/` when fixed.
+
+### Previously-handed-off gaps now RESOLVED
 
 (a) **RESOLVED (commit `2643498`, `feat(parser): lex left-arrow operator <-- family`):**
 `<--`/`<-->` now tokenize as one arrow-tier operator; the `arrow_pair_chain/`

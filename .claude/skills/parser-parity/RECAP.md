@@ -6,6 +6,21 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Handoff from formatter (2026-07-06c): splat after a closing bracket is rejected.**
+A splat whose operand ends in `)`/`]`/`}` fails to parse — `f(g(x)...)`, `f(a[i]...)`,
+`f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)` all yield a `LoneOperator` "operator is
+not a valid value" ERROR on the `...`. Only the space-separated spelling parses
+(`f(g(x) ...)`), and a name/dotted/literal operand snugged directly (`f(x...)`,
+`f(a.b...)`) is fine — so the postfix `...` isn't being recognized right after a
+closing-bracket token. JuliaSyntax accepts all of them:
+`julia --startup-file=no -e 'using JuliaSyntax; println(JuliaSyntax.parse(Expr, "f(g(x)...)"))'`
+prints `f(g(x)...)` (a `...` splat inside the call). The formatter's new `lower_splat`
+(commit landing the `splat_spacing/` fixture) snugs `x ...` → `x...` but **withholds
+the snug for bracket-closing operands** (bails to verbatim spaced) precisely because
+the snug output would fail its own stability reparse. Once the parser accepts
+`)...`/`]...`/`}...`, drop that `ends_in_bracket` guard in `lower_splat` and widen
+`splat_spacing/` to cover call/index/paren/curly/collection operands.
+
 **Handoff to formatter (2026-07-06b): multi-binding `let` now wraps every
 binding.** `let a = 1, b = 2, c = 3` used to leave `b = 2`/`c = 3` as flat
 unwrapped `IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS` (only the first was

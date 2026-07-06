@@ -34,6 +34,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::TERNARY_EXPR => lower_ternary(node),
         SyntaxKind::RANGE_EXPR => lower_range(node),
         SyntaxKind::UNARY_EXPR => lower_unary(node),
+        SyntaxKind::SPLAT_EXPR => lower_splat(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::MATRIX_EXPR => lower_matrix(node),
         SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
@@ -412,6 +413,75 @@ fn operand_leads_with_operator(node: &SyntaxNode) -> bool {
     node.first_token()
         .and_then(|t| t.text().chars().next())
         .is_some_and(|c| "+-*/\\^%!~<>=&|:$?".contains(c))
+}
+
+/// Lay out a splat (`x...`) — the postfix `...` snugs directly to its operand with
+/// no space, normalizing whatever whitespace the parser left between them (Tenet 1).
+/// The operand recurses through [`lower_node`], so it normalizes internally
+/// (`f(a , b) ...` → `f(a, b)...`). This is the postfix analog of [`lower_unary`].
+///
+/// A `SPLAT_EXPR` is always the shape `<operand> ...`. Snugging is unsafe when the
+/// operand prints a trailing `.` — it would merge with the leading `.` of `...` into
+/// `....`. A bare float `1.` is the only literal that spells a trailing dot, and
+/// [`normalize_float`] always rewrites it to a safe trailing digit (`1.` → `1.0`), so
+/// a `LITERAL` operand is always snug-safe; any *other* operand whose last token ends
+/// in `.` (an unmodeled shape lowered verbatim) bails to the transparent lowering, as
+/// do an interleaved comment, a missing operand, or an unexpected shape.
+///
+/// Snugging is also withheld when the operand ends in a closing bracket (`)`/`]`/`}` —
+/// a call, index, paren, curly, or bracket collection): Fatou's parser currently
+/// rejects `g(x)...` (splat directly after a closing bracket) as a lone operator even
+/// though it is valid Julia, so the snug form would fail the stability reparse. Such
+/// operands bail to the verbatim (spaced) lowering until the parser gap is closed
+/// (handed off to `parser-parity`); remove this guard and widen the fixture then.
+fn lower_splat(node: &SyntaxNode) -> Ir {
+    let mut operand: Option<SyntaxNode> = None;
+    let mut dots: Option<String> = None;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::DOT_DOT_DOT if operand.is_some() && dots.is_none() => {
+                    dots = Some(tok.text().to_string());
+                }
+                _ => return lower_transparent(node),
+            },
+            NodeOrToken::Node(child) => {
+                if operand.is_some() {
+                    return lower_transparent(node);
+                }
+                operand = Some(child);
+            }
+        }
+    }
+
+    let (Some(operand), Some(dots)) = (operand, dots) else {
+        return lower_transparent(node);
+    };
+
+    // Snugging is unsafe when the operand *prints* a trailing `.`: it would merge with
+    // the leading `.` of `...` into `....`. A float literal is the only trailing-dot
+    // spelling and normalizes to a safe trailing digit, so a `LITERAL` operand always
+    // snugs; guard only the (essentially unproducible) verbatim shape whose last raw
+    // token ends in `.`.
+    let trails_with_dot = operand.kind() != SyntaxKind::LITERAL
+        && operand
+            .last_token()
+            .is_some_and(|t| t.text().ends_with('.'));
+    // The parser can't yet reparse a splat snugged onto a closing bracket (`g(x)...`),
+    // so a bracket-closing operand keeps its verbatim spacing. See the doc comment.
+    let ends_in_bracket = operand.last_token().is_some_and(|t| {
+        matches!(
+            t.kind(),
+            SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
+        )
+    });
+    if trails_with_dot || ends_in_bracket {
+        return lower_transparent(node);
+    }
+
+    Ir::concat([lower_node(&operand), Ir::text(dots)])
 }
 
 fn lower_arrow(node: &SyntaxNode) -> Ir {
