@@ -460,6 +460,29 @@ fn lower_arrow(node: &SyntaxNode) -> Ir {
 /// interior blank lines, so the loop skips every `NEWLINE`/`WHITESPACE` token and
 /// only the inner node reaches the layout.
 fn lower_paren(node: &SyntaxNode) -> Ir {
+    match paren_reflow_body(node) {
+        Some(body) => Ir::group(body),
+        None => lower_transparent(node),
+    }
+}
+
+/// Build the ungrouped body of a single-value parenthesized expression `(inner)`
+/// — the tight framing (`(` / +indent body / `)`) — for [`lower_paren`]'s width
+/// group, and also folded into [`lower_index`]'s shared outer group (via
+/// [`construct_reflow_body`]) so a too-wide paren-subject chain yields at its own
+/// brackets and the index rides the closing `)`, exactly as a tuple subject does.
+///
+/// Width-driven (Tenet 1): flat `(inner)` when it fits `line_width`, else the
+/// inner on its own indented line. Source line breaks never force the break; only
+/// the inner content's width (or a hard break it carries, e.g. a nested block)
+/// does. Interior blank lines are already dropped — the loop skips every
+/// `NEWLINE`/`WHITESPACE` token, so only the single inner node reaches the layout.
+///
+/// `None` on any unmodeled shape (a stray token, a doubled operand, a missing
+/// bracket) — the caller falls back to the verbatim transparent lowering. The
+/// `;`-block form `(a; b)` is a distinct `PAREN_BLOCK` node, and a tuple `(a, b)`
+/// is a `TUPLE_EXPR`, so neither reaches here.
+fn paren_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut inner: Option<SyntaxNode> = None;
     let mut extra_operand = false;
     let mut saw_lparen = false;
@@ -477,22 +500,16 @@ fn lower_paren(node: &SyntaxNode) -> Ir {
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::LPAREN if !saw_lparen => saw_lparen = true,
                 SyntaxKind::RPAREN if !saw_rparen => saw_rparen = true,
-                _ => return lower_transparent(node),
+                _ => return None,
             },
         }
     }
 
     let (true, true, false, Some(inner)) = (saw_lparen, saw_rparen, extra_operand, inner) else {
-        return lower_transparent(node);
+        return None;
     };
 
-    // Width-driven (Tenet 1): one `Ir::group` — flat `(inner)` when it fits
-    // `line_width`, else the tight framing (`(` / +indent body / `)`). Source line
-    // breaks never force the break; only the inner content's width (or a hard break
-    // it carries, e.g. a nested block) does. Interior blank lines are already
-    // dropped — the loop above skips every `NEWLINE`/`WHITESPACE` token, so only the
-    // single inner node reaches the layout.
-    Ir::group(Ir::concat([
+    Some(Ir::concat([
         Ir::text("("),
         Ir::indent(Ir::concat([Ir::SoftLine, lower_node(&inner)])),
         Ir::SoftLine,
@@ -1917,6 +1934,7 @@ fn construct_reflow_body(node: &SyntaxNode) -> Option<Ir> {
             collection_reflow_body(node)
         }
         SyntaxKind::MATRIX_EXPR if !matrix_has_comment(node) => matrix_reflow_body(node),
+        SyntaxKind::PAREN_EXPR => paren_reflow_body(node),
         SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => call_reflow_body(node),
         SyntaxKind::INDEX_EXPR => index_reflow_body(node),
         SyntaxKind::COMPREHENSION | SyntaxKind::GENERATOR | SyntaxKind::BRACES_COMPREHENSION => {
