@@ -748,18 +748,27 @@ fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
 /// tight-left, space-right (`A: x`); the paths themselves (`A.B`, `.A`, `Foo as
 /// Bar`) are lowered transparently, so their internal tokens pass through verbatim.
 ///
+/// The layout is width-driven: flat `using A, B, C` when it fits, else each
+/// comma-group on its own line with the comma trailing and the wrapped groups
+/// indented one continuation step (the first group stays on the opening line after
+/// the keyword). The selector colon is **not** a break point—`using Mod: a, b, c`
+/// breaks only at the commas, so `Mod: a` heads the opening line. A bare list has
+/// no brackets to frame the break, so the comma serves as the breakable separator;
+/// there is no broken-only trailing comma. Source line breaks carry no layout
+/// information (Tenet 1): `using A,\n B` reflows to the same form as `using A, B`.
+///
 /// Only the clean alternating shape—item, separator, item, …—is reshaped. A
-/// comment/newline, a leading/trailing/doubled separator, or any unexpected
-/// token bails to the lossless transparent lowering.
+/// comment, a leading/trailing/doubled separator, or any unexpected token bails to
+/// the lossless transparent lowering.
 fn lower_import_stmt(node: &SyntaxNode) -> Ir {
     let mut kw: Option<SyntaxToken> = None;
-    let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
+    let mut rest_els: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
 
     for el in node.children_with_tokens() {
         match &el {
             NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
             NodeOrToken::Token(tok) if kw.is_none() => kw = Some(tok.clone()),
-            _ => rest.push(el),
+            _ => rest_els.push(el),
         }
     }
 
@@ -767,25 +776,44 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    // Alternate item (a path/alias node) and separator (`,` → `, `, the selector
-    // `:` → `: `), starting and ending on an item.
-    let mut parts: Vec<Ir> = vec![Ir::text(kw.text().to_string()), Ir::text(" ")];
+    // The opening line carries the keyword and the first comma-group (a bare path,
+    // or the `Mod: name` selector head whose colon never breaks); each later
+    // comma-group wraps beneath it. Commas are the only break points.
+    let mut first: Vec<Ir> = vec![Ir::text(kw.text().to_string()), Ir::text(" ")];
+    let mut rest: Vec<Ir> = Vec::new();
+    let mut seen_comma = false;
     let mut expect_item = true;
 
-    for el in &rest {
+    for el in &rest_els {
         match el {
             NodeOrToken::Node(child) if expect_item => {
-                parts.push(lower_node(child));
+                let ir = lower_node(child);
+                if seen_comma {
+                    rest.push(ir);
+                } else {
+                    first.push(ir);
+                }
                 expect_item = false;
             }
             NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COMMA => {
-                parts.push(Ir::text(", "));
+                // The comma trails its group; the next group wraps at the break.
+                rest.push(Ir::text(","));
+                rest.push(Ir::Line);
+                seen_comma = true;
                 expect_item = true;
             }
             NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COLON => {
-                parts.push(Ir::text(": "));
+                // The selector colon stays on the opening line with its module.
+                if seen_comma {
+                    rest.push(Ir::text(": "));
+                } else {
+                    first.push(Ir::text(": "));
+                }
                 expect_item = true;
             }
+            // Source line breaks carry no layout information under Tenet 1.
+            NodeOrToken::Token(tok)
+                if matches!(tok.kind(), SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) => {}
             _ => return lower_transparent(node),
         }
     }
@@ -796,13 +824,21 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    Ir::concat(parts)
+    if rest.is_empty() {
+        return Ir::concat(first);
+    }
+
+    // One width-driven group with its own continuation indent.
+    Ir::group(Ir::concat([
+        Ir::concat(first),
+        Ir::indent(Ir::concat(rest)),
+    ]))
 }
 
 /// Lay out an `export`/`public` statement: the keyword, one space, then the
-/// comma-separated name list `", "`-joined (`export a,b` → `export a, b`,
-/// `public foo,bar` → `public foo, bar`). Every comma is spaced (tight-left,
-/// space-right); the names themselves are left alone.
+/// comma-separated name list (`export a,b` → `export a, b`, `public foo,bar` →
+/// `public foo, bar`). Every comma is spaced (tight-left, space-right); the names
+/// themselves are left alone.
 ///
 /// Unlike the `using`/`import` list, an exported name is **not** always a single
 /// node: it may be an identifier, an operator (`export +, -`), a macro
@@ -810,25 +846,28 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
 /// tracks comma boundaries rather than a strict node/separator alternation: the
 /// first token of each name gets a leading space, and any further tokens of the
 /// *same* name are glued verbatim (no incidental whitespace exists between them).
-/// Bails to the lossless transparent lowering on a comment/newline or a
-/// leading/trailing/doubled comma.
+///
+/// The layout is width-driven, matching the `using`/`import` list: flat
+/// `export a, b, c` when it fits, else each name on its own line with the comma
+/// trailing and the wrapped names indented one continuation step (the first name
+/// stays on the opening line after the keyword). Source line breaks carry no
+/// layout information (Tenet 1). Bails to the lossless transparent lowering on a
+/// comment or a leading/trailing/doubled comma.
 fn lower_export_stmt(node: &SyntaxNode) -> Ir {
     let mut kw: Option<SyntaxToken> = None;
-    let mut rest: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
+    let mut rest_els: Vec<NodeOrToken<SyntaxNode, SyntaxToken>> = Vec::new();
 
     for el in node.children_with_tokens() {
         match &el {
-            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
             NodeOrToken::Token(tok)
-                if matches!(
-                    tok.kind(),
-                    SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT | SyntaxKind::NEWLINE
-                ) =>
+                if matches!(tok.kind(), SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) => {}
+            NodeOrToken::Token(tok)
+                if matches!(tok.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT) =>
             {
                 return lower_transparent(node);
             }
             NodeOrToken::Token(tok) if kw.is_none() => kw = Some(tok.clone()),
-            _ => rest.push(el),
+            _ => rest_els.push(el),
         }
     }
 
@@ -836,16 +875,23 @@ fn lower_export_stmt(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    let mut parts: Vec<Ir> = vec![Ir::text(kw.text().to_string())];
-    // `expect_item` is true after the keyword and after each comma: the next item
-    // token opens a new name and takes a leading space. While false, we are inside
-    // a name—a comma closes it, any other token is glued on verbatim.
+    // The opening line carries the keyword and the first name; each later name
+    // wraps beneath it. Commas are the only break points. `expect_item` is true
+    // after the keyword and after each comma: the next token opens a new name and
+    // takes a leading space (flat) or the continuation indent (broken). While
+    // false, we are inside a name—a comma closes it, any other token is glued on.
+    let mut first: Vec<Ir> = vec![Ir::text(kw.text().to_string())];
+    let mut rest: Vec<Ir> = Vec::new();
+    let mut seen_comma = false;
     let mut expect_item = true;
 
-    for el in &rest {
+    for el in &rest_els {
         match el {
             NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COMMA => {
-                parts.push(Ir::text(","));
+                // The comma trails its name; the next name wraps at the break.
+                rest.push(Ir::text(","));
+                rest.push(Ir::Line);
+                seen_comma = true;
                 expect_item = true;
             }
             // A comma where an item is expected is a leading/doubled comma.
@@ -853,14 +899,20 @@ fn lower_export_stmt(node: &SyntaxNode) -> Ir {
                 return lower_transparent(node);
             }
             _ => {
-                if expect_item {
-                    parts.push(Ir::text(" "));
-                    expect_item = false;
-                }
-                parts.push(match el {
+                let piece = match el {
                     NodeOrToken::Node(child) => lower_node(child),
                     NodeOrToken::Token(tok) => Ir::text(tok.text().to_string()),
-                });
+                };
+                let bucket = if seen_comma { &mut rest } else { &mut first };
+                if expect_item {
+                    // Opening a new name: a leading space only heads the first
+                    // group; every later group gets its space from the `Ir::Line`.
+                    if !seen_comma {
+                        bucket.push(Ir::text(" "));
+                    }
+                    expect_item = false;
+                }
+                bucket.push(piece);
             }
         }
     }
@@ -871,7 +923,15 @@ fn lower_export_stmt(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    Ir::concat(parts)
+    if rest.is_empty() {
+        return Ir::concat(first);
+    }
+
+    // One width-driven group with its own continuation indent.
+    Ir::group(Ir::concat([
+        Ir::concat(first),
+        Ir::indent(Ir::concat(rest)),
+    ]))
 }
 
 /// Lay out a literal (`42`, `1.`, `0xFF`, `true`, `:sym`): every token but a

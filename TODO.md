@@ -7,6 +7,13 @@ leverage.
 
 ## Parser
 
+- [ ] Parser: multi-binding `let` wraps only the first binding. `let a = 1, b = 2,
+  c = 3` makes `a = 1` an `ASSIGNMENT_EXPR` but leaves `b = 2`/`c = 3` as flat
+  `IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS`; JuliaSyntax wraps every
+  binding as a `=` node (`(let (block (= a 1) (= b 2) (= c 3)) (block x))`). Each
+  comma-separated binding should be its own `ASSIGNMENT_EXPR`. Blocks the
+  formatter's width-driven let-binding-list reflow (surfaced 2026-07-06; see
+  parser-parity RECAP queued target).
 - [x] Lexer: compound-assignment operators `<<=`, `>>=`, `>>>=`, `÷=`, `⊻=` (and
   their broadcast forms `.<<=`, `.>>=`, `.>>>=`, `.÷=`, `.⊻=`) now tokenize as one
   augmented-assignment token. `a <<= b` ⇒ `(<<= a b)`, `a .÷= b` ⇒ `(.÷= a b)`;
@@ -102,6 +109,13 @@ leverage.
   no allowlist) and, over every `input.jl`, checks idempotence + clean reparse.
   The Runic.jl differential oracle was removed (it preserved source line breaks,
   contradicting Tenet 1; `expected.jl` is now authored under full reflow).
+- [x] Formatter: `using`/`import`/`export` lists reflow width-first
+  (`import_list_break/`). A too-wide list now breaks one comma-group per line with
+  the comma trailing and the wrapped groups indented one continuation step (the
+  first group on the opening line after the keyword; the selector colon `Mod:` is
+  not a break point); a source-broken list reflows to flat instead of mirroring
+  the input breaks (Tenet 1). `lower_import_stmt`/`lower_export_stmt` now build a
+  width-driven group instead of a flat concat.
 - [x] Formatter: bare tuples reflow width-first (`bare_tuple_break/`). A too-wide
   bracketless tuple (`x = a, b, c`, `return a, b, c`, a standalone `a, b, c`) now
   breaks one element per line with the comma trailing each and the wrapped

@@ -85,7 +85,9 @@ Tenet 1.
   blank-line preservation via `Ir::BlankLine`, `binary_group_breaks` continuation
   indent.
 - Statements: `lower_keyword_stmt` (`return`/`const`/`global`/`local`),
-  `lower_import_stmt`, `lower_export_stmt`, `lower_for_binding`.
+  `lower_import_stmt`/`lower_export_stmt` (width-driven comma-group break, one per
+  line, selector `Mod:` colon non-breaking, source-broken reflows flat),
+  `lower_for_binding`.
 - Literals (token text, genuinely deterministic): `lower_literal` +
   `normalize_float` + `normalize_hex`.
 - Document root: `lower_root` (top-level blank-line policy — interior runs capped
@@ -103,40 +105,56 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (bare tuple width-driven reflow)
+## Latest session (import/using/export list width-driven reflow)
 
-Closed ranked next-target #2 (`feat(formatter)`). A too-wide bracketless tuple
-(`x = a, b, c`, `return a, b, c`, a standalone `a, b, c`) now breaks one element
-per line — comma trailing each, wrapped elements indented one continuation step,
-the first element staying on the opening line (after `= `/`return `/at col 0) —
-instead of always rendering flat. A source-broken bare tuple reflows to the same
-form instead of bailing to verbatim (the Tenet-1 reflow debt). User chose this
-(AskUserQuestion **Option B**, width-driven break) over always-flat.
+`feat(formatter)`. A too-wide `using`/`import`/`export` list now breaks one
+comma-group per line — comma trailing each, wrapped groups indented one
+continuation step, the first group on the opening line after the keyword — instead
+of overflowing flat. A source-broken list (`using A,\n B,\n C`) reflows to flat
+`using A, B, C` instead of mirroring the input breaks (the Tenet-1 reflow debt).
+User chose the bare-tuple analog (AskUserQuestion **Option A**, one-per-line) over
+always-flat or a names-under-indented-block selector form.
 
-**Change:** `lower_bare_tuple` now builds one width-driven `Ir::group` in the
-shape `group(concat[first, indent(rest)])`, mirroring `lower_comparison`'s
-continuation-indent pattern, but with the comma as a **trailing** separator
-(`text(",")` then `Ir::Line` before each subsequent element) rather than a
-leading operator. Interior `NEWLINE` is now skipped like `WHITESPACE`, so
-`x = a,\n b` reflows to the same output as `x = a, b`. **No broken-only trailing
-comma** — a bare tuple has no brackets to frame one. All existing flat cases stay
-byte-identical (the group renders flat when it fits). The clean alternating-shape
-guard and the leading/doubled/trailing-comma bails are unchanged.
+**Change:** `lower_import_stmt` and `lower_export_stmt` now build one width-driven
+`Ir::group` in the shape `group(concat[first, indent(rest)])` (same shape as
+`lower_bare_tuple`), where the comma is a **trailing** separator (`text(",")` then
+`Ir::Line` before each later group) rather than a leading operator. The keyword +
+first comma-group open the group; each later group joins `rest`. The selector
+colon (`using Mod: a, b`) is **not** a break point — it packs `: ` tight-left,
+space-right and stays on the opening line with its module, so only the commas
+break (`using Mod: a,\n    b,\n    c`). Interior `NEWLINE` is now skipped like
+`WHITESPACE` in both rules, so source breaks carry no layout info. **No
+broken-only trailing comma** — a bare list has no brackets to frame one. Export
+keeps its multi-token name-gluing (operators, macros, `var"…"`) but routes each
+name into `first`/`rest` by comma boundary. All existing flat fixtures
+(`import_using_lists/`, `export_public_lists/`) stay byte-identical (the group
+renders flat when it fits); comment bail unchanged.
 
-Gated `bare_tuple_break/` (7 cases: flat-fit, wide RHS/return/standalone breaks,
-prebroken-fits reflows flat, prebroken-wide reflows to canonical break). Gate
-97→98, stability (idempotence + clean reparse) + clippy + fmt green. No
-parser/lexer blocker surfaced (JuliaSyntax reads a broken bare tuple as the same
-tuple; Fatou reparses it without ERROR).
+Gated `import_list_break/` (8 lines: flat fit, source-broken reflows flat, 92/93
+plain fence, wide selector `using`/`import` break, wide `export` break). Gate
+98→99, stability + clippy + fmt + full suite green. No parser/lexer blocker on the
+imports path itself (the `USING_STMT`/`IMPORT_STMT` CST is clean: proper
+`IMPORT_PATH`/`IMPORT_ALIAS`/`COLON`/`COMMA` children).
 
-**Ranked next targets:** (1) Re-evaluate a source-break-mirroring rule against a
-hand-authored `expected.jl`. Remaining genuine source-mirroring lives in the
-**comment-bearing** paths (`lower_multiline_bracket`, `lower_matrix_multiline`) —
-comments can't be reflowed away, so their layout is arguably necessary; decide
-with the user whether these are debt at all. The clean bracket/matrix/paren paths
-are already width-driven. (2) Chained-pair hug through a *non-huggable-but-grouped*
-innermost (currently only `huggable_kind` leaves hug); low value. (3) Sweep the
-remaining Runic-rationale doc comments in `rules.rs` (debt #2 mostly closed).
+**Parser gap surfaced + handed off (NOT on the imports path):** while probing, a
+multi-binding `let a = 1, b = 2, c = 3` was found to parse wrong — Fatou wraps
+only the **first** binding as `ASSIGNMENT_EXPR` and leaves `b = 2`, `c = 3` as
+flat unwrapped tokens under `LET_BINDINGS`, whereas JuliaSyntax makes all three
+proper `=` nodes. This blocks a clean width-driven let-binding-list reflow (the
+formatter would have to paper over the parser bug). Handed off to parser-parity
+(RECAP queued target + `TODO.md` Parser bullet). Until fixed, a source-broken
+multi-binding let still mirrors its input (Tenet-1 debt) via the transparent bail.
+
+**Ranked next targets:** (1) **After the parser fix lands:** width-driven
+let-binding-list reflow (`LET_BINDINGS`) — same bare-tuple group shape, breaking
+at commas. Parser-blocked today. (2) Chained-pair hug through a
+*non-huggable-but-grouped* innermost (currently only `huggable_kind` leaves hug);
+low value. (3) Sweep the remaining Runic-rationale doc comments in `rules.rs`
+(debt #2 mostly closed). **Verified NOT debt this session:** the comment-bearing
+paths (`lower_multiline_bracket`, `lower_matrix_multiline`) are already
+input-independent — a commented bracket/matrix explodes to the identical
+one-per-line form regardless of source breaks, so their layout is principled, not
+source-mirroring. Former ranked #1 closed as a non-issue.
 
 ## Parser/lexer gaps — all previously-handed-off gaps now RESOLVED
 
@@ -178,6 +196,14 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Bare tuple width-driven reflow** (committed `44ee81b`, `feat`): a too-wide
+  bracketless tuple (`x = a, b, c`, `return a, b, c`, standalone) breaks one element
+  per line (comma trailing, wrapped elements at one continuation indent, first on the
+  opening line) instead of always-flat; source-broken reflows to the same form.
+  `lower_bare_tuple` builds `group(concat[first, indent(rest)])` with the comma as a
+  trailing separator; interior `NEWLINE` skipped. No broken-only trailing comma
+  (no brackets to frame one). Gated `bare_tuple_break/` (7). Gate 97→98. (The
+  import/export session reused this exact group shape.)
 - **Chained-pair hug through the whole spine** (committed `7409c00`, `feat`): closed
   ranked #1 — a trailing chained pair `a => b => Dict(...)` now hugs its enclosing
   bracket like a single pair (whole `a => b => ` joins the flat prefix, only the

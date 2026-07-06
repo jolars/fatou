@@ -6,6 +6,21 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
+**Queued from formatter (2026-07-06): multi-binding `let` wraps only the first
+binding.** `let a = 1, b = 2, c = 3` parses with only the **first** binding as an
+`ASSIGNMENT_EXPR` node; `b = 2` and `c = 3` are left as flat unwrapped tokens
+(`IDENT`, `EQ`, `INTEGER`) directly under `LET_BINDINGS`. JuliaSyntax makes every
+binding a proper `=` node:
+`julia --startup-file=no -e 'using JuliaSyntax; print(JuliaSyntax.parse(Expr, "let a = 1, b = 2, c = 3\n    x\nend"))'`
+⇒ the `let` header is a `block` of three `=` nodes (`(let (block (= a 1) (= b 2)
+(= c 3)) (block x))`). Fatou's `LET_BINDINGS` should likewise wrap **each**
+comma-separated binding as its own `ASSIGNMENT_EXPR`. This blocks the formatter's
+width-driven let-binding-list reflow (it can't cleanly iterate binding nodes, and
+a rule over the flat-token soup would paper over the parser bug). The
+single-binding `let x = 1` is correct today; only 2+ bindings are affected.
+Cross-ref: formatter RECAP "Latest session" (import/export list session) +
+`TODO.md` Parser bullet.
+
 **Handoff to formatter (2026-07-05): the braces-comprehension parser gap is
 fixed** — `{a\nfor b in c}` now parses as `BRACES_COMPREHENSION` ⇒
 `(braces (generator a (= b c)))`, so the formatter's exploded output for a
