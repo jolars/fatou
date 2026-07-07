@@ -44,14 +44,22 @@ them when revisited.
 
 **Two debts carried forward:**
 
-1. **The existing rules are Runic-derived and mirror source line breaks**, which
-   contradicts Tenet 1. They still pass the stability test but produce
-   input-dependent layout. Each must be re-evaluated against a hand-authored
-   `expected.jl` as its construct is revisited. **Headline future target: build
-   the width-driven reflow engine** (`line_width` is currently vestigial — it does
-   not drive breaking; the lowering rules decide breaks by inspecting source
-   newline tokens via `has_newline_token`). This is the largest piece of work in
-   the formatter's life and the prerequisite for true Tenet-1 conformance.
+1. **~~The existing rules are Runic-derived and mirror source line breaks~~ —
+   ESSENTIALLY PAID (2026-07-07 audit).** This was framed for many sessions as the
+   "headline future target: build the width-driven reflow engine," said to be "the
+   largest piece of work in the formatter's life." That framing is **stale**. The
+   reflow engine already exists and works: `printer.rs:62` decides every
+   `Ir::Group`'s flat-vs-break purely from `line_width` via the continuation-aware
+   Wadler `fits`. The debt was never one monolithic rewrite — it was retired
+   incrementally, rule by rule, as each bracket/collection/matrix/comprehension
+   construct was revisited and re-authored width-driven. `has_newline_token` (the
+   named source-break-mirroring mechanism) now has **exactly one live call site**
+   (`rules.rs:3364`), inside the **comment-bearing matrix** path — and a comment
+   genuinely can't be reflowed away (moving a trailing `# note` changes which
+   element it annotates), so mirroring source position there is arguably *correct*,
+   not debt. The clean comment-free matrix path (`lower_matrix_reflow`) is fully
+   width-driven. Net: no large reflow rewrite remains; do not let this bullet's old
+   framing send the next session chasing a rewrite that's already done.
 2. **~50 per-rule Runic-rationale doc comments remain in `src/formatter/rules.rs`.**
    The file/module-level headers (`src/formatter.rs`, `core.rs`, `rules.rs` top)
    were de-Runic'd during the pivot; the per-rule comments are accurate history
@@ -80,10 +88,12 @@ Tenet 1.
   `typed_comprehension_reflow_body` (type joins flat like a callee) — yield the
   same way; paren subjects bail),
   `lower_bare_tuple`, curly type-params, named tuples.
-- Brackets/matrices (source-break mirroring — the prime reflow-engine targets):
-  `lower_multiline_bracket`, `lower_matrix`, `lower_paren`/`lower_paren_block`,
-  blank-line preservation via `Ir::BlankLine`, `binary_group_breaks` continuation
-  indent.
+- Brackets/matrices (width-driven — NOT source-break mirroring; the old "prime
+  reflow-engine targets" label is stale, see debt #1): `lower_multiline_bracket`,
+  `lower_matrix`, `lower_paren`/`lower_paren_block`, blank-line preservation via
+  `Ir::BlankLine`, `binary_group_breaks` continuation indent. Only the
+  comment-bearing matrix path still consults source newlines (necessarily — a
+  comment can't be reflowed).
 - Statements: `lower_keyword_stmt` (`return`/`const`/`global`/`local`),
   `lower_import_stmt`/`lower_export_stmt` (width-driven comma-group break, one per
   line, selector `Mod:` colon non-breaking, source-broken reflows flat),
@@ -118,7 +128,36 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (block-quote reflow locked)
+## Latest session (progress audit — reflow debt found already paid; LSP pivot)
+
+No code, no fixture. A **strategic review**, not a construct. Prompted by "is it
+time to switch to language-server work?" Findings:
+
+- **The per-construct cadence has saturated.** Four of the last five sessions
+  (block-quote, quoted symbols, transpose/adjoint, chained-pair grouped tail)
+  landed **no code** — "already canonical via the transparent path, just lock a
+  fixture." That's diminishing returns: the loop is now confirming existing
+  machinery is canonical, not extending capability. 112 gated constructs.
+- **The "headline reflow engine" debt is essentially already paid** (see debt #1,
+  rewritten). The RECAP had framed a large width-driven-reflow rewrite as the prime
+  remaining formatter work; the code shows it was retired incrementally and
+  `has_newline_token` is down to one (arguably-correct) comment-path call site. So
+  there is **no large formatter piece left** to justify staying in the loop.
+- **Recommendation: pivot to the LSP semantic model.** `src/lsp.rs` is 203 lines,
+  single-threaded, diagnostics-only; hover/go-to-def/references/symbols/rename all
+  need a per-file semantic model (scopes, bindings, read sites) that **does not
+  exist yet** (`TODO.md` "Language server"). Highest-leverage greenfield: one
+  foundation unblocks a whole feature category. Caveat: it's greenfield with no
+  oracle equivalent to the parser's JuliaSyntax harness — it needs its own
+  scope/binding test scaffolding built from scratch.
+
+**Ranked next targets (revised):** (1) **Switch to the LSP semantic model** — the
+strategic move; formatter is broad and usable, LSP nav is missing entirely.
+(2) If staying in the formatter: minor only — the doc-comment sweep (debt #2) and
+char/string-macro literal variants. The old "re-evaluate source-break-mirroring
+brackets against the reflow engine" #1 target is **retired** (already done).
+
+## Earlier: block-quote reflow locked
 
 `test(formatter)` (fixtures-only, **no code change**). Closed ranked target #1. A
 `QUOTE_SYM` over a `PAREN_EXPR` wrapping an `end`-block (`:(if a; b end)`,
