@@ -9,9 +9,6 @@ rust-analyzer design (a lossless [`rowan`](https://crates.io/crates/rowan) CST,
 [`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
 transport).
 
-> **Status: early groundwork.** The parser is fully developed. Formatter is
-> increasingly stable, but no language server features yet.
-
 ## Quick Start
 
 Install with Cargo:

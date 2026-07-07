@@ -12,9 +12,6 @@ Fatou follows the rust-analyzer design (a lossless
 [`lsp-server`](https://crates.io/crates/lsp-server) for the language-server
 transport).
 
-> **Status: early groundwork.** The parser is fully developed. Formatter is
-> increasingly stable, but no language server features yet.
-
 ## Installation
 
 Fatou is available from several sources:
