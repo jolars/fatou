@@ -58,8 +58,9 @@ impl<'a> LineIndex<'a> {
     }
 
     /// Inverse of [`byte_to_position`](Self::byte_to_position): a 0-indexed LSP
-    /// `Position` (UTF-16 character offset) back to a byte offset. A line or
-    /// character past the end clamps to the end of the line / buffer.
+    /// `Position` (UTF-16 character offset) back to a byte offset. A line past
+    /// the end clamps to the end of the buffer; a character past the end of
+    /// the line clamps to the line's content, before its terminator.
     pub fn position_to_byte(&self, position: Position) -> usize {
         let line = position.line as usize;
         let Some(&line_start) = self.line_starts.get(line) else {
@@ -70,7 +71,9 @@ impl<'a> LineIndex<'a> {
             .get(line + 1)
             .copied()
             .unwrap_or(self.text.len());
-        let line_text = &self.text[line_start..line_end];
+        let line_text = self.text[line_start..line_end]
+            .trim_end_matches('\n')
+            .trim_end_matches('\r');
         let mut utf16 = 0u32;
         for (byte_off, ch) in line_text.char_indices() {
             if utf16 >= position.character {
@@ -78,7 +81,7 @@ impl<'a> LineIndex<'a> {
             }
             utf16 += ch.len_utf16() as u32;
         }
-        line_end
+        line_start + line_text.len()
     }
 
     /// Total line count (1 even for empty text).
@@ -119,6 +122,15 @@ mod tests {
         let idx = LineIndex::new("\u{1F600}x");
         assert_eq!(idx.byte_to_lc(4), LineCol { line: 1, column: 2 });
         assert_eq!(idx.byte_to_position(4), Position::new(0, 2));
+    }
+
+    #[test]
+    fn position_to_byte_clamps_before_line_terminator() {
+        let idx = LineIndex::new("ab\ncd");
+        assert_eq!(idx.position_to_byte(Position::new(0, 9)), 2);
+        assert_eq!(idx.position_to_byte(Position::new(9, 0)), 5);
+        let idx = LineIndex::new("ab\r\ncd");
+        assert_eq!(idx.position_to_byte(Position::new(0, 9)), 2);
     }
 
     #[test]

@@ -31,7 +31,9 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
 
 fn server_capabilities() -> ServerCapabilities {
     ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(
+            TextDocumentSyncKind::INCREMENTAL,
+        )),
         document_formatting_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }

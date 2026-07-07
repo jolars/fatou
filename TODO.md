@@ -60,9 +60,12 @@ completion would feel broken on day one.
   error → versioned diagnostics → fixing edit → clear on close).
   **Deferred:** the single-thread index pool lands with the package index
   (Phase 3) — there is no unbounded background job to isolate yet.
-- [ ] Incremental (range) document sync (`TextDocumentSyncKind::INCREMENTAL`):
-  apply range edits to the live buffer. Whole-file reparse stays fine until
-  token/block reparse splicing lands (see Parser → Incremental).
+- [x] Incremental (range) document sync (`TextDocumentSyncKind::INCREMENTAL`):
+  range edits are spliced into the live buffer by the pure
+  `apply_content_changes` (`src/text/edit.rs`) — sequential application per
+  the spec, full-replacement (`range: None`) changes still honored, positions
+  clamped via `LineIndex::position_to_byte`. Whole-file reparse stays fine
+  until token/block reparse splicing lands (see Parser → Incremental).
 - [ ] Position-encoding negotiation (UTF-16 default, honor `utf-8` when the
   client offers it) on top of `text/line_index.rs`.
 - [ ] LSP test strategy: a pure `compute_*` function per feature that takes

@@ -6,9 +6,9 @@
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, FormattingOptions, InitializeParams, PublishDiagnosticsParams,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri,
-    VersionedTextDocumentIdentifier,
+    DocumentFormattingParams, FormattingOptions, InitializeParams, Position,
+    PublishDiagnosticsParams, Range, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -146,6 +146,177 @@ fn initialize_format_and_shutdown() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// The server advertises incremental sync and splices range edits into the
+/// live buffer: a batch of two range edits (the second positioned against the
+/// text after the first) fixes a parse error, a later range edit reintroduces
+/// one, and a `didChange` for a never-opened document is ignored.
+#[test]
+fn applies_incremental_range_edits() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capabilities announce incremental sync ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let init_response = client.receiver.recv().unwrap();
+    match init_response {
+        Message::Response(resp) => {
+            let result = resp.result.unwrap();
+            assert_eq!(
+                result["capabilities"]["textDocumentSync"],
+                serde_json::json!(2),
+                "expected TextDocumentSyncKind::INCREMENTAL"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let recv_diagnostics = |client: &Connection| -> PublishDiagnosticsParams {
+        loop {
+            match client.receiver.recv().unwrap() {
+                Message::Notification(note) if note.method == "textDocument/publishDiagnostics" => {
+                    return serde_json::from_value(note.params).unwrap();
+                }
+                _ => {}
+            }
+        }
+    };
+    let range_edit =
+        |start: (u32, u32), end: (u32, u32), text: &str| TextDocumentContentChangeEvent {
+            range: Some(Range::new(
+                Position::new(start.0, start.1),
+                Position::new(end.0, end.1),
+            )),
+            range_length: None,
+            text: text.to_string(),
+        };
+    let did_change = |uri: &Uri, version: i32, changes: Vec<TextDocumentContentChangeEvent>| {
+        Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: changes,
+            })
+            .unwrap(),
+        })
+    };
+
+    // --- open a document with a parse error; expect an error diagnostic @v1 ---
+    let uri = Uri::from_str("file:///work/ranged.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(x)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(1));
+    assert!(!diag.diagnostics.is_empty());
+
+    // --- fix it with a batch of two range edits; the second edit's position
+    // is only valid against the text after the first, pinning sequential
+    // application. Buffer becomes "function f(x)\n    x\nend\n". ---
+    client
+        .sender
+        .send(did_change(
+            &uri,
+            2,
+            vec![
+                range_edit((1, 0), (1, 0), "    x\n"),
+                range_edit((2, 0), (2, 0), "end\n"),
+            ],
+        ))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(2));
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- delete the `end` line with a range edit; the error returns @v3 ---
+    client
+        .sender
+        .send(did_change(&uri, 3, vec![range_edit((2, 0), (3, 0), "")]))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(3));
+    assert!(
+        !diag.diagnostics.is_empty(),
+        "expected the parse error back after deleting `end`"
+    );
+
+    // --- a change for a never-opened document is dropped: the next publish
+    // observed is the clearing one for the real document's close ---
+    let unknown = Uri::from_str("file:///work/never-opened.jl").unwrap();
+    client
+        .sender
+        .send(did_change(
+            &unknown,
+            1,
+            vec![range_edit((0, 0), (0, 0), "x")],
+        ))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didClose".to_string(),
+            params: serde_json::to_value(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.uri, uri);
+    assert_eq!(diag.version, None);
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

@@ -17,6 +17,7 @@ use lsp_types::{
 };
 
 use crate::formatter::FormatStyle;
+use crate::text::apply_content_changes;
 
 use super::analysis_thread::AnalysisRequest;
 use super::read_jobs::ReadJob;
@@ -130,19 +131,17 @@ impl GlobalState {
                 }
             }
             DidChangeTextDocument::METHOD => {
-                // Full sync: the last change carries the entire document.
-                if let Ok(mut params) =
+                if let Ok(params) =
                     note.extract::<DidChangeTextDocumentParams>(DidChangeTextDocument::METHOD)
-                    && let Some(change) = params.content_changes.pop()
                 {
                     let uri = params.text_document.uri;
-                    self.documents.insert(
-                        uri.clone(),
-                        Document {
-                            text: change.text,
-                            version: params.text_document.version,
-                        },
-                    );
+                    // A change for a never-opened document has no buffer to
+                    // splice into; drop it.
+                    let Some(doc) = self.documents.get_mut(&uri) else {
+                        return;
+                    };
+                    apply_content_changes(&mut doc.text, params.content_changes);
+                    doc.version = params.text_document.version;
                     self.send_analysis(uri);
                 }
             }
