@@ -12,12 +12,12 @@ use lsp_types::notification::{
 };
 use lsp_types::request::{
     DocumentSymbolRequest, FoldingRangeRequest, Formatting, RangeFormatting,
-    Request as RequestTrait, SelectionRangeRequest,
+    Request as RequestTrait, SelectionRangeRequest, SemanticTokensFullRequest,
 };
 use lsp_types::{
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
-    FoldingRangeParams, PublishDiagnosticsParams, SelectionRangeParams, Uri,
+    FoldingRangeParams, PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -80,6 +80,7 @@ impl GlobalState {
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
+            SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -192,6 +193,27 @@ impl GlobalState {
             path: path_for(&uri),
             text,
             positions: params.positions,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_semantic_tokens_full(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<SemanticTokensParams>(SemanticTokensFullRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid semanticTokens params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::SemanticTokensFull {
+            id,
+            path: path_for(&uri),
+            text,
             sender: self.sender.clone(),
         });
     }

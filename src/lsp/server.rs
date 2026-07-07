@@ -7,14 +7,15 @@ use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
     ClientCapabilities, FoldingRangeProviderCapability, InitializeParams, OneOf,
-    PositionEncodingKind, SelectionRangeProviderCapability, ServerCapabilities,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    PositionEncodingKind, SelectionRangeProviderCapability, SemanticTokensFullOptions,
+    SemanticTokensOptions, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, spawn_analysis_thread};
 use super::read_jobs::ReadJob;
+use super::semantic_tokens::legend;
 use super::state::{GlobalState, Outbound};
 use super::task_pool::{TaskPool, read_pool_size};
 
@@ -74,6 +75,15 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         document_symbol_provider: Some(OneOf::Left(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+        semantic_tokens_provider: Some(
+            SemanticTokensOptions {
+                work_done_progress_options: Default::default(),
+                legend: legend(),
+                range: None,
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+            }
+            .into(),
+        ),
         ..Default::default()
     }
 }

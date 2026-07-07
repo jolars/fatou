@@ -14,6 +14,7 @@ use crate::text::PositionEncoding;
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::selection::selection_ranges_via_db;
+use super::semantic_tokens::semantic_tokens_via_db;
 use super::symbols::document_symbols_via_db;
 
 /// A read-only request the analysis thread services by cloning its salsa db
@@ -55,6 +56,12 @@ pub(crate) enum ReadJob {
         positions: Vec<Position>,
         sender: Sender<Message>,
     },
+    SemanticTokensFull {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -67,6 +74,7 @@ impl ReadJob {
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
             ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
             ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
+            ReadJob::SemanticTokensFull { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -126,6 +134,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let ranges = selection_ranges_via_db(&snapshot, &path, &text, &positions, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, ranges)));
+        }
+        ReadJob::SemanticTokensFull {
+            id,
+            path,
+            text,
+            sender,
+        } => {
+            let tokens = semantic_tokens_via_db(&snapshot, &path, &text, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, tokens)));
         }
     }
 }

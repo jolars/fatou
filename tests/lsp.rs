@@ -3,7 +3,10 @@
 //! cleanly. Exercises the threaded pipeline end-to-end: main loop → analysis
 //! thread (write-phase) → read pool (read-phase) → version-gated publish.
 
-use fatou::lsp::{compute_document_symbols, compute_folding_ranges, compute_selection_ranges};
+use fatou::lsp::{
+    compute_document_symbols, compute_folding_ranges, compute_selection_ranges,
+    compute_semantic_tokens,
+};
 use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
@@ -11,9 +14,9 @@ use lsp_types::{
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
     DocumentSymbol, DocumentSymbolParams, FoldingRange, FoldingRangeKind, FoldingRangeParams,
     FormattingOptions, GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
-    PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SymbolKind,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri,
-    VersionedTextDocumentIdentifier,
+    PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SemanticTokens,
+    SemanticTokensParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -1576,6 +1579,284 @@ fn serves_selection_ranges() {
             id: RequestId::from(3),
             method: "textDocument/selectionRange".to_string(),
             params: selection_params(&unknown, vec![Position::new(0, 0)]),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            assert_eq!(resp.result, Some(serde_json::Value::Null));
+        }
+        other => panic!("expected a null response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Semantic tokens
+// ---------------------------------------------------------------------------
+
+/// Legend indices as advertised by the server (see `semantic_tokens::legend`).
+const KEYWORD: u32 = 0;
+const MACRO: u32 = 1;
+const STRING: u32 = 2;
+const NUMBER: u32 = 3;
+
+/// Fold the relative encoding back into absolute
+/// `(line, character, length, legend index)` tuples.
+fn decode(tokens: &SemanticTokens) -> Vec<(u32, u32, u32, u32)> {
+    let mut out = Vec::new();
+    let (mut line, mut character) = (0, 0);
+    for token in &tokens.data {
+        if token.delta_line > 0 {
+            line += token.delta_line;
+            character = 0;
+        }
+        character += token.delta_start;
+        out.push((line, character, token.length, token.token_type));
+        assert_eq!(token.token_modifiers_bitset, 0, "no modifiers are emitted");
+    }
+    out
+}
+
+/// The decoded semantic tokens for `text` under UTF-8.
+fn toks(text: &str) -> Vec<(u32, u32, u32, u32)> {
+    decode(&compute_semantic_tokens(text, PositionEncoding::Utf8))
+}
+
+#[test]
+fn semantic_tokens_paint_keywords_and_bool_literals() {
+    // `true`/`false` count as keywords: the standard legend has no boolean
+    // type, and it matches the lexer's classification.
+    assert_eq!(
+        toks("if true\nelse\nend\n"),
+        vec![
+            (0, 0, 2, KEYWORD),
+            (0, 3, 4, KEYWORD),
+            (1, 0, 4, KEYWORD),
+            (2, 0, 3, KEYWORD),
+        ],
+    );
+}
+
+#[test]
+fn semantic_tokens_paint_a_macro_call_as_one_token() {
+    // Sigil and name coalesce; the argument stays plain.
+    assert_eq!(toks("@show x\n"), vec![(0, 0, 5, MACRO)]);
+}
+
+#[test]
+fn semantic_tokens_leave_macro_qualifiers_plain() {
+    // Trailing sigil: only `@time` paints, the module path stays plain
+    // until name resolution can classify it (Phase 6).
+    assert_eq!(toks("Base.@time f()\n"), vec![(0, 5, 5, MACRO)]);
+    // Leading sigil: the sigil and the final component paint.
+    assert_eq!(
+        toks("@Base.time x\n"),
+        vec![(0, 0, 1, MACRO), (0, 6, 4, MACRO)],
+    );
+}
+
+#[test]
+fn semantic_tokens_paint_a_keyword_named_macro_as_a_macro() {
+    assert_eq!(toks("@macro a\n"), vec![(0, 0, 6, MACRO)]);
+}
+
+#[test]
+fn semantic_tokens_leave_nonstandard_identifiers_plain() {
+    // The `var"..."` body is an identifier spelled with quotes, not a
+    // string; only the sigil paints.
+    assert_eq!(toks("@var\"#\" a\n"), vec![(0, 0, 1, MACRO)]);
+}
+
+#[test]
+fn semantic_tokens_paint_string_macro_prefix_and_suffix_as_macros() {
+    // `r"ab"i` calls `@r_str` with flag `i`: the prefix and suffix are the
+    // macro parts, the body is a string.
+    assert_eq!(
+        toks("r\"ab\"i\n"),
+        vec![(0, 0, 1, MACRO), (0, 1, 4, STRING), (0, 5, 1, MACRO)],
+    );
+}
+
+#[test]
+fn semantic_tokens_paint_command_literals_as_strings() {
+    assert_eq!(toks("`ls -l`\n"), vec![(0, 0, 7, STRING)]);
+}
+
+#[test]
+fn semantic_tokens_never_span_line_breaks() {
+    // Triple-quoted content splits into one token per line: most clients
+    // reject multiline semantic tokens.
+    assert_eq!(
+        toks("s = \"\"\"\na b\nc\"\"\"\n"),
+        vec![(0, 4, 3, STRING), (1, 0, 3, STRING), (2, 0, 4, STRING)],
+    );
+}
+
+#[test]
+fn semantic_tokens_leave_string_interpolation_unpainted() {
+    // The interpolation renders as code, so the string paints around it.
+    assert_eq!(
+        toks("\"a $x b\"\n"),
+        vec![(0, 0, 3, STRING), (0, 5, 3, STRING)],
+    );
+}
+
+#[test]
+fn semantic_tokens_paint_number_and_char_literals() {
+    assert_eq!(
+        toks("0x1f + 0b10 + 0o7 + 1.5 + 2f0 + 42\n"),
+        vec![
+            (0, 0, 4, NUMBER),
+            (0, 7, 4, NUMBER),
+            (0, 14, 3, NUMBER),
+            (0, 20, 3, NUMBER),
+            (0, 26, 3, NUMBER),
+            (0, 32, 2, NUMBER),
+        ],
+    );
+    assert_eq!(toks("'a'\n"), vec![(0, 0, 3, STRING)]);
+}
+
+#[test]
+fn semantic_tokens_respect_the_negotiated_encoding() {
+    // `α`/`β` are two UTF-8 bytes but one UTF-16 unit each, changing both
+    // the string token's length and every later start on the line.
+    let text = "\"αβ\"; if true end\n";
+    assert_eq!(
+        decode(&compute_semantic_tokens(text, PositionEncoding::Utf8)),
+        vec![
+            (0, 0, 6, STRING),
+            (0, 8, 2, KEYWORD),
+            (0, 11, 4, KEYWORD),
+            (0, 16, 3, KEYWORD),
+        ],
+    );
+    assert_eq!(
+        decode(&compute_semantic_tokens(text, PositionEncoding::Utf16)),
+        vec![
+            (0, 0, 4, STRING),
+            (0, 6, 2, KEYWORD),
+            (0, 9, 4, KEYWORD),
+            (0, 14, 3, KEYWORD),
+        ],
+    );
+}
+
+#[test]
+fn semantic_tokens_is_best_effort_on_broken_input() {
+    // A missing `end` and an unterminated string must not panic.
+    let _ = toks("function f(x)\n    if x\n        \"a\n");
+}
+
+#[test]
+fn serves_semantic_tokens() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability and legend advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let provider = &resp.result.unwrap()["capabilities"]["semanticTokensProvider"];
+            assert_eq!(
+                provider["legend"]["tokenTypes"],
+                serde_json::json!(["keyword", "macro", "string", "number"]),
+            );
+            assert_eq!(provider["full"], serde_json::json!(true));
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document; drain its diagnostics publish ---
+    let uri = Uri::from_str("file:///work/semantic.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "@show 1 + true\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+
+    // --- request the full document's tokens ---
+    let semantic_params = |uri: &Uri| {
+        serde_json::to_value(SemanticTokensParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/semanticTokens/full".to_string(),
+            params: semantic_params(&uri),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let tokens: SemanticTokens = serde_json::from_value(resp.result.unwrap()).unwrap();
+            assert_eq!(
+                decode(&tokens),
+                vec![(0, 0, 5, MACRO), (0, 6, 1, NUMBER), (0, 10, 4, KEYWORD)],
+            );
+        }
+        other => panic!("expected a semanticTokens response, got {other:?}"),
+    }
+
+    // --- an unknown document answers null ---
+    let unknown = Uri::from_str("file:///work/never-opened.jl").unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/semanticTokens/full".to_string(),
+            params: semantic_params(&unknown),
         }))
         .unwrap();
     match client.receiver.recv().unwrap() {

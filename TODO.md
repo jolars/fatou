@@ -112,8 +112,17 @@ semantic model grows.
   (widening, structural vs preserved indent, non-indenting module bodies,
   blank-line capping, trailing comments, no-op selections, convergence with
   the full formatter, encoding-aware positions).
-- [ ] Syntax-driven semantic tokens (keywords, macro calls, string macros,
-  literals); refined with resolved names in Phase 6.
+- [x] Syntax-driven semantic tokens (`textDocument/semanticTokens/full`):
+  pure `compute_semantic_tokens` walk in `src/lsp/semantic_tokens.rs` over a
+  four-type legend (keyword, macro, string, number) — keywords including
+  `true`/`false`, macro names as sigil plus final component (qualifiers stay
+  plain until Phase 6 resolves namespaces), string-macro prefixes and
+  suffixes as macros around a string body, and number/char literals.
+  Interpolations stay unpainted, byte-adjacent same-kind tokens coalesce,
+  and multi-line spans split per line (most clients reject multiline
+  tokens); the delta encoding counts code units of the negotiated encoding
+  via `LineIndex`. Plus a `semantic_tokens_via_db` warm path off the cached
+  parse. Refined with resolved names in Phase 6.
 
 ### Phase 2: per-file semantic model
 
