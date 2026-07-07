@@ -128,7 +128,38 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (progress audit — reflow debt found already paid; LSP pivot)
+## Latest session (char + string-macro literals locked)
+
+`test(formatter)` (fixtures-only, **no code change**). Closed the last
+construct-shaped ranked target. Char literals (`'a'`, `'\n'`, `'\''`, `'\\'`,
+`' '`, `'\x61'`, `'é'`) and string/command macros (`r"…"`, suffixed `r"…"i`,
+`raw"…"`, `b"…"`, `html"…"`, `var"…"` incl. lhs position, ``foo`…` ``, triple-quoted
+``sql```…``` `` and `r"""…"""` with suffix, `$` staying plain content inside
+prefixed strings) are **already canonical via existing machinery**:
+`lower_literal`'s verbatim arm covers `CHAR`, `lower_string_literal`'s verbatim
+token walk covers `STRING_PREFIX`/`STRING_SUFFIX`, and `NONSTANDARD_IDENTIFIER`
+(`var"…"`) is transparent. Spacing normalizes around the literals
+(`s=r"a"` → `s = r"a"`), wide calls break around — never inside — them, and the
+lexer emits no `INTERPOLATION` node inside prefixed strings (verified; no parser
+blocker anywhere).
+
+**Decision (AskUserQuestion).** Char escape spelling stays **verbatim**
+(`'\x61'` does *not* normalize to `'a'`) — user ratified over a
+normalize-escapes variant. Rationale: a char is string-content, not a numeric
+spelling like `FLOAT`/`HEX_INT`; escape choice carries intent (`'\0'`,
+`'é'`) and rewriting it is content rewriting, which the ratified string
+rule already forbids. Both fixtures accepted as proposed (authored to the
+design, confirmed to coincide with current output — not blind-captured).
+
+Gated `char_literals/` (10 lines) + `string_macros/` (16 lines). Gate 112→114;
+stability + clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) **Switch to the LSP semantic model** — the standing
+strategic recommendation; the formatter construct queue is now empty. (2)
+In-formatter, minor only: the ~50 per-rule Runic-rationale doc comments
+(debt #2), reworded lazily as constructs are revisited.
+
+## Earlier: progress audit — reflow debt found already paid; LSP pivot
 
 No code, no fixture. A **strategic review**, not a construct. Prompted by "is it
 time to switch to language-server work?" Findings:
