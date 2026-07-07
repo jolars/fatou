@@ -125,6 +125,24 @@ impl Default for IncrementalDatabase {
     }
 }
 
+/// Cloning yields a second handle onto the *same* salsa storage (a cheap
+/// `Arc`-bump of the shared state, plus the shared path→input map). This is how
+/// the language server runs read-only queries off the analysis thread: the
+/// owner mints a short-lived clone (see [`snapshot`](IncrementalDatabase::snapshot)),
+/// hands it to a worker, and the clone is dropped promptly. Salsa is
+/// single-writer — a clone outstanding when the owner performs a write blocks
+/// that write until the clone drops (and trips `salsa::Cancelled` in any read
+/// still in flight), so clones must never be held across a write or parked
+/// long-term.
+impl Clone for IncrementalDatabase {
+    fn clone(&self) -> Self {
+        Self {
+            storage: self.storage.clone(),
+            source_map: Arc::clone(&self.source_map),
+        }
+    }
+}
+
 impl std::fmt::Debug for IncrementalDatabase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IncrementalDatabase")
@@ -204,8 +222,49 @@ impl IncrementalDatabase {
         file.set_text(self).to(text.into());
     }
 
+    /// The text currently tracked for `file`.
+    pub fn file_text(&self, file: SourceFile) -> &str {
+        file.text(self).as_str()
+    }
+
     pub fn parsed_tree(&self, file: SourceFile) -> SyntaxNode {
         parsed_tree_root(self, file)
+    }
+
+    /// Mint a read-only [`Analysis`] snapshot: a short-lived db clone wrapped so
+    /// callers can only *read*. Drop it promptly — an outstanding clone blocks
+    /// the next write (salsa is single-writer; see the [`Clone`] impl).
+    pub fn snapshot(&self) -> Analysis {
+        Analysis(self.clone())
+    }
+}
+
+/// A read-only handle onto the incremental database, à la rust-analyzer's
+/// `Analysis` (vs. its writer `AnalysisHost`). Wraps a short-lived clone of the
+/// analysis thread's [`IncrementalDatabase`] and exposes *only* read queries,
+/// so a read job cannot call `upsert_file` or salsa setters — the single-writer
+/// invariant is encoded in the type system rather than left to convention.
+pub struct Analysis(IncrementalDatabase);
+
+impl Analysis {
+    /// The `SourceFile` input currently tracked for `path`, if any.
+    pub fn lookup_file(&self, path: &Path) -> Option<SourceFile> {
+        self.0.lookup_file(path)
+    }
+
+    /// The text currently tracked for `file`.
+    pub fn file_text(&self, file: SourceFile) -> &str {
+        self.0.file_text(file)
+    }
+
+    /// Parse diagnostics for `file` (empty when it parses cleanly).
+    pub fn parse_diagnostics(&self, file: SourceFile) -> &[ParseDiagnostic] {
+        parse_diagnostics(&self.0, file)
+    }
+
+    /// A fresh `SyntaxNode` over the cached parse tree.
+    pub fn parsed_tree(&self, file: SourceFile) -> SyntaxNode {
+        self.0.parsed_tree(file)
     }
 }
 

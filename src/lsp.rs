@@ -1,203 +1,56 @@
-//! A minimal Julia language server over `lsp-server`'s stdio JSON-RPC transport.
+//! A Julia language server over `lsp-server`'s stdio JSON-RPC transport.
 //!
-//! Groundwork phase: a **single-threaded** loop that advertises full-document
-//! sync and document formatting, pushes parse diagnostics on open/change, and
-//! formats on request. The dedicated-lint-thread + rayon read-pool model (which
-//! Arity uses to keep the salsa single-writer database off the request path) is
-//! a deliberate later step — see `TODO.md`. The server here parses on demand
-//! rather than owning a persistent `IncrementalDatabase`.
+//! Architecture (after arity's dedicated-analysis-thread design, itself modeled
+//! on rust-analyzer): the **main loop owns no salsa database**. A dedicated
+//! analysis thread ([`analysis_thread`]) owns the persistent
+//! [`IncrementalDatabase`](crate::incremental::IncrementalDatabase) and is the
+//! sole *writer* — salsa is strictly single-writer. Each analysis is split into
+//! a cheap **write-phase** (`&mut db`, on the analysis thread: upsert the live
+//! buffer) and a **read-phase** (`&db` only) that runs on the read pool holding
+//! a short-lived db clone under `salsa::Cancelled::catch`, so the analysis
+//! thread returns to its `select!` immediately and a slow read never blocks
+//! queued work.
+//!
+//! Threading uses a purpose-built [`TaskPool`](task_pool::TaskPool) rather than
+//! rayon's global pool (which has no priority concept): the **read pool**,
+//! sized to the machine's parallelism, serves latency-sensitive work
+//! (formatting, the analysis read-phase). A single-thread **index pool** will
+//! join it when background package indexing lands (see `TODO.md`, language
+//! server Phase 3) — the one unbounded-duration job must never slot-block a
+//! read.
+//!
+//! Edits are *coalesced* (latest version per URI; stale edits dropped) into a
+//! pending queue. A [`decide`](analysis_thread::decide) scheduler keeps at most
+//! one analysis in flight: a strictly-newer edit of the *same* URI cancels the
+//! running analysis via `salsa::Database::trigger_cancellation` (the worker's
+//! `salsa::Cancelled` catch then publishes nothing), while a *different*
+//! pending URI waits its turn. Diagnostics route back through the main loop,
+//! which drops publishes for closed or superseded documents (a version gate
+//! that backstops the rare finish-during-cancel race).
+//!
+//! Read-only requests reuse the analysis thread's cached work rather than
+//! re-parsing: formatting is sent to the analysis thread as a
+//! [`ReadJob`](read_jobs::ReadJob); it mints a short-lived db clone and runs
+//! the job on the read pool, formatting off the cached parse tree when the
+//! tracked buffer still matches the live text. A clone outstanding when the
+//! analysis thread writes trips `salsa::Cancelled`; both that and a cache miss
+//! fall back to a fresh parse, so reads are always correct, only sometimes
+//! warm.
 
-use std::collections::HashMap;
-use std::error::Error;
+// `lsp_types::Uri` (a `fluent_uri` newtype) carries an internal `Cell` tag for
+// its mutable-view mechanism, which trips `clippy::mutable_key_type` when a
+// `Uri` is used as a map key. Our URIs are owned + parsed (never "taken"), and
+// `Uri`'s `Hash`/`Eq` go through `as_str()`, so this is sound. Allow it
+// module-wide.
+#![allow(clippy::mutable_key_type)]
 
-use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
-use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Notification as _,
-    PublishDiagnostics,
-};
-use lsp_types::request::Formatting;
-use lsp_types::{
-    Diagnostic, DiagnosticSeverity, DocumentFormattingParams, OneOf, Position,
-    PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextEdit, Uri,
-};
+mod analysis_thread;
+mod format;
+mod read_jobs;
+mod server;
+mod state;
+mod task_pool;
+mod uri;
 
-use crate::formatter::{FormatStyle, format_with_style};
-use crate::parser::parse;
-use crate::text::LineIndex;
-
-type LspResult<T> = Result<T, Box<dyn Error + Sync + Send>>;
-
-/// Run the language server on stdio until the client shuts it down.
-pub fn run() -> LspResult<()> {
-    let (connection, io_threads) = Connection::stdio();
-    serve(&connection)?;
-    io_threads.join()?;
-    Ok(())
-}
-
-/// Perform the initialize handshake on `connection`, then run the message loop.
-/// Split out from [`run`] so tests can drive it over an in-memory connection.
-pub fn serve(connection: &Connection) -> LspResult<()> {
-    let capabilities = ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
-        document_formatting_provider: Some(OneOf::Left(true)),
-        ..Default::default()
-    };
-    connection.initialize(serde_json::to_value(capabilities)?)?;
-    main_loop(connection)
-}
-
-fn main_loop(connection: &Connection) -> LspResult<()> {
-    // Open documents, keyed by URI string.
-    let mut documents: HashMap<String, String> = HashMap::new();
-
-    for message in &connection.receiver {
-        match message {
-            Message::Request(req) => {
-                if connection.handle_shutdown(&req)? {
-                    return Ok(());
-                }
-                handle_request(connection, &documents, req)?;
-            }
-            Message::Notification(note) => {
-                handle_notification(connection, &mut documents, note)?;
-            }
-            Message::Response(_) => {}
-        }
-    }
-
-    Ok(())
-}
-
-fn handle_request(
-    connection: &Connection,
-    documents: &HashMap<String, String>,
-    req: Request,
-) -> LspResult<()> {
-    match cast::<Formatting>(req) {
-        Ok((id, params)) => {
-            let edits = format_edits(documents, &params);
-            respond(connection, id, &edits)?;
-            Ok(())
-        }
-        Err(ExtractError::MethodMismatch(req)) => {
-            // Unhandled method: reply with an empty result so the client is not
-            // left waiting.
-            respond::<Option<serde_json::Value>>(connection, req.id, &None)?;
-            Ok(())
-        }
-        Err(ExtractError::JsonError { method, error }) => {
-            Err(format!("malformed `{method}` request: {error}").into())
-        }
-    }
-}
-
-fn handle_notification(
-    connection: &Connection,
-    documents: &mut HashMap<String, String>,
-    note: Notification,
-) -> LspResult<()> {
-    match note.method.as_str() {
-        DidOpenTextDocument::METHOD => {
-            let params: lsp_types::DidOpenTextDocumentParams = serde_json::from_value(note.params)?;
-            let uri = params.text_document.uri.clone();
-            let text = params.text_document.text;
-            publish_diagnostics(connection, &uri, &text)?;
-            documents.insert(uri_key(&uri), text);
-        }
-        DidChangeTextDocument::METHOD => {
-            let params: lsp_types::DidChangeTextDocumentParams =
-                serde_json::from_value(note.params)?;
-            // Full sync: the last change carries the entire document.
-            if let Some(change) = params.content_changes.into_iter().next_back() {
-                let uri = params.text_document.uri.clone();
-                publish_diagnostics(connection, &uri, &change.text)?;
-                documents.insert(uri_key(&uri), change.text);
-            }
-        }
-        DidCloseTextDocument::METHOD => {
-            let params: lsp_types::DidCloseTextDocumentParams =
-                serde_json::from_value(note.params)?;
-            documents.remove(&uri_key(&params.text_document.uri));
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-/// Build the full-document formatting edits for a `textDocument/formatting`
-/// request, or `None` if the document is unknown or formatting fails.
-fn format_edits(
-    documents: &HashMap<String, String>,
-    params: &DocumentFormattingParams,
-) -> Option<Vec<TextEdit>> {
-    let text = documents.get(&uri_key(&params.text_document.uri))?;
-    let style = FormatStyle::default();
-    let formatted = format_with_style(text, style).ok()?;
-    if formatted == *text {
-        return Some(Vec::new());
-    }
-    let line_index = LineIndex::new(text);
-    let end = line_index.byte_to_position(text.len());
-    Some(vec![TextEdit {
-        range: Range::new(Position::new(0, 0), end),
-        new_text: formatted,
-    }])
-}
-
-fn publish_diagnostics(connection: &Connection, uri: &Uri, text: &str) -> LspResult<()> {
-    let parsed = parse(text);
-    let line_index = LineIndex::new(text);
-    let diagnostics: Vec<Diagnostic> = parsed
-        .diagnostics
-        .iter()
-        .map(|diag| Diagnostic {
-            range: Range::new(
-                line_index.byte_to_position(diag.start),
-                line_index.byte_to_position(diag.end),
-            ),
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("fatou".to_string()),
-            message: diag.message.clone(),
-            ..Default::default()
-        })
-        .collect();
-
-    let params = PublishDiagnosticsParams {
-        uri: uri.clone(),
-        diagnostics,
-        version: None,
-    };
-    connection.sender.send(Message::Notification(Notification {
-        method: PublishDiagnostics::METHOD.to_string(),
-        params: serde_json::to_value(params)?,
-    }))?;
-    Ok(())
-}
-
-fn respond<T: serde::Serialize>(
-    connection: &Connection,
-    id: RequestId,
-    result: &T,
-) -> LspResult<()> {
-    let response = Response {
-        id,
-        result: Some(serde_json::to_value(result)?),
-        error: None,
-    };
-    connection.sender.send(Message::Response(response))?;
-    Ok(())
-}
-
-fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
-where
-    R: lsp_types::request::Request,
-    R::Params: serde::de::DeserializeOwned,
-{
-    req.extract(R::METHOD)
-}
-
-fn uri_key(uri: &Uri) -> String {
-    uri.as_str().to_string()
-}
+pub use format::compute_format_edits;
+pub use server::{run, serve};

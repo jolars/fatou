@@ -1,10 +1,14 @@
 //! Drive the language server over an in-memory connection: initialize, open a
-//! document, request formatting, and shut down cleanly.
+//! document, request formatting, edit through parse errors, and shut down
+//! cleanly. Exercises the threaded pipeline end-to-end: main loop → analysis
+//! thread (write-phase) → read pool (read-phase) → version-gated publish.
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
-    DidOpenTextDocumentParams, DocumentFormattingParams, FormattingOptions, InitializeParams,
-    TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentFormattingParams, FormattingOptions, InitializeParams, PublishDiagnosticsParams,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri,
+    VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -142,6 +146,131 @@ fn initialize_format_and_shutdown() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// Diagnostics carry the buffer version they were computed against, a fixing
+/// edit yields a fresh (empty) report for the new version, and closing the
+/// document clears diagnostics. Publishes for superseded versions are dropped
+/// by the main loop's version gate, so the reports observed here are
+/// unambiguous.
+#[test]
+fn publishes_versioned_diagnostics_across_edits() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let _init_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let recv_diagnostics = |client: &Connection| -> PublishDiagnosticsParams {
+        loop {
+            match client.receiver.recv().unwrap() {
+                Message::Notification(note) if note.method == "textDocument/publishDiagnostics" => {
+                    return serde_json::from_value(note.params).unwrap();
+                }
+                _ => {}
+            }
+        }
+    };
+
+    // --- open a document with a parse error; expect an error diagnostic @v1 ---
+    let uri = Uri::from_str("file:///work/broken.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(x)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(1));
+    assert!(
+        !diag.diagnostics.is_empty(),
+        "expected a parse diagnostic for the unterminated function"
+    );
+    assert!(diag.diagnostics[0].message.contains("expected `end`"));
+
+    // --- fix the document; expect an empty report @v2 ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "function f(x)\n    x\nend\n".to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(2));
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- close the document; expect a clearing (empty, versionless) publish ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didClose".to_string(),
+            params: serde_json::to_value(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, None);
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

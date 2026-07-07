@@ -38,7 +38,17 @@ pub fn format(input: &str) -> Result<String, FormatError> {
 /// Format `input` with the given style: parse to the lossless CST, lower it to
 /// the layout IR, and print (see the module docs).
 pub fn format_with_style(input: &str, style: FormatStyle) -> Result<String, FormatError> {
-    let doc = lower(&parse(input).cst);
+    format_node(&parse(input).cst, style)
+}
+
+/// Format an already-parsed CST `root` with the given style. The language
+/// server's warm path: it reuses the salsa-cached parse instead of re-parsing
+/// the buffer (see `lsp::format::format_edits_via_db`).
+pub fn format_node(
+    root: &crate::syntax::SyntaxNode,
+    style: FormatStyle,
+) -> Result<String, FormatError> {
+    let doc = lower(root);
     Ok(print(&doc, style))
 }
 
