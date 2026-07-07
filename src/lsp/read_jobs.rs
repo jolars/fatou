@@ -5,14 +5,14 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, RequestId, Response};
 
-use lsp_types::{DocumentSymbolResponse, Position};
+use lsp_types::{DocumentSymbolResponse, Position, Range};
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
 use super::folding::folding_ranges_via_db;
-use super::format::format_edits_via_db;
+use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::selection::selection_ranges_via_db;
 use super::symbols::document_symbols_via_db;
 
@@ -25,6 +25,14 @@ pub(crate) enum ReadJob {
         id: RequestId,
         path: PathBuf,
         text: String,
+        style: FormatStyle,
+        sender: Sender<Message>,
+    },
+    FormatRange {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        range: Range,
         style: FormatStyle,
         sender: Sender<Message>,
     },
@@ -55,6 +63,7 @@ impl ReadJob {
     pub(crate) fn into_reply_parts(self) -> (RequestId, Sender<Message>) {
         match self {
             ReadJob::Format { id, sender, .. } => (id, sender),
+            ReadJob::FormatRange { id, sender, .. } => (id, sender),
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
             ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
             ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
@@ -75,6 +84,17 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             sender,
         } => {
             let result = format_edits_via_db(&snapshot, &path, &text, style, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::FormatRange {
+            id,
+            path,
+            text,
+            range,
+            style,
+            sender,
+        } => {
+            let result = format_range_edits_via_db(&snapshot, &path, &text, range, style, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
         ReadJob::DocumentSymbols {

@@ -17,8 +17,6 @@ leverage.
 
 ## Formatter
 
-- [ ] Range formatting (`textDocument/rangeFormatting`).
-
 ## Linter
 
 - [ ] First rules (correctness + suspicious), each a `Rule` impl registered in
@@ -102,7 +100,18 @@ semantic model grows.
   more selectable side, identifiers first), plus a `selection_ranges_via_db`
   warm path off the cached parse. Positions are character-precise, so the
   negotiated encoding threads through both directions of the conversion.
-- [ ] Range formatting (`textDocument/rangeFormatting`).
+- [x] Range formatting (`textDocument/rangeFormatting`): `format_range`
+  (`src/formatter/core.rs`) widens the selection to whole statements in the
+  deepest enclosing `ROOT`/`BLOCK` (via source spans recorded on
+  `collect_body_lines`), lowers just those lines, and prints them with
+  `print_at` at the block's structural indent — the first line keeps its
+  existing leading whitespace, so the single `TextEdit` replaces exactly the
+  widened span. Pure `compute_format_range_edits` plus a
+  `format_range_edits_via_db` warm path off the cached parse
+  (`src/lsp/format.rs`); behavior locked in `tests/range_format.rs`
+  (widening, structural vs preserved indent, non-indenting module bodies,
+  blank-line capping, trailing comments, no-op selections, convergence with
+  the full formatter, encoding-aware positions).
 - [ ] Syntax-driven semantic tokens (keywords, macro calls, string macros,
   literals); refined with resolved names in Phase 6.
 

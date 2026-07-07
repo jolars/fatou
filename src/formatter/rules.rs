@@ -11,7 +11,7 @@
 //! line breaks (a legacy of the removed Runic target), which Tenet 1 forbids; they
 //! are re-evaluated construct-by-construct as the width-driven reflow engine lands.
 
-use rowan::NodeOrToken;
+use rowan::{NodeOrToken, TextRange};
 
 use crate::formatter::ir::Ir;
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
@@ -4482,12 +4482,25 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
 struct BodyLine {
     stmts: Vec<Ir>,
     comment: Option<Ir>,
+    /// The source span of the line's significant content — from the first
+    /// statement's or comment's start to the last one's end, exclusive of the
+    /// surrounding indentation and terminator. `None` for a blank line. Range
+    /// formatting keys its statement widening and replacement span on this.
+    range: Option<TextRange>,
 }
 
 impl BodyLine {
     /// A line carrying neither a statement nor a comment — a blank line.
     fn is_blank(&self) -> bool {
         self.stmts.is_empty() && self.comment.is_none()
+    }
+
+    /// Grow the line's significant span to cover `range`.
+    fn cover(&mut self, range: TextRange) {
+        self.range = Some(match self.range {
+            Some(current) => current.cover(range),
+            None => range,
+        });
     }
 }
 
@@ -4537,7 +4550,9 @@ fn collect_body_elements(
                 if *expect_sep {
                     return None;
                 }
-                lines.last_mut().unwrap().stmts.push(lower_node(&child));
+                let line = lines.last_mut().unwrap();
+                line.stmts.push(lower_node(&child));
+                line.cover(child.text_range());
                 *expect_sep = true;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
@@ -4568,6 +4583,7 @@ fn collect_body_elements(
                     }
                     let text = tok.text().trim_end_matches([' ', '\t']);
                     line.comment = Some(Ir::text(text));
+                    line.cover(tok.text_range());
                     *expect_sep = true;
                 }
                 // A block comment is preserved verbatim — its interior (including
@@ -4584,6 +4600,7 @@ fn collect_body_elements(
                         return None;
                     }
                     line.comment = Some(Ir::text(tok.text()));
+                    line.cover(tok.text_range());
                     *expect_sep = true;
                 }
                 _ => return None,
@@ -4747,6 +4764,100 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
     }
 
     Some(Ir::concat(inner))
+}
+
+/// Lower the statements of `container` (a `ROOT` or `BLOCK`) that overlap
+/// `range`, widened to whole source lines, for range formatting. Returns the
+/// windowed IR — statements one per line as [`build_block_body`] lays them
+/// out, interior blank runs kept (capped at [`MAX_BLANK_LINES`]), no leading
+/// or trailing break — plus the source span it replaces: from the first
+/// windowed line's significant start to the last one's end, so the first
+/// line's existing leading whitespace stays untouched.
+///
+/// `None` — the caller emits no edits — when the container has a shape the
+/// body model does not handle (never mangle), or when `range` overlaps no
+/// significant line (a selection in whitespace).
+pub(crate) fn lower_body_range(
+    container: &SyntaxNode,
+    range: TextRange,
+) -> Option<(Ir, TextRange)> {
+    let lines = collect_body_lines(container)?;
+
+    // Widen the selection to the run of source lines whose significant span
+    // overlaps `range`. The closed comparison keeps an empty (cursor) range
+    // touching a line's edge inside it.
+    let mut window: Option<(usize, usize)> = None;
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(span) = line.range
+            && span.start() <= range.end()
+            && range.start() <= span.end()
+        {
+            let start = window.map_or(idx, |(start, _)| start);
+            window = Some((start, idx));
+        }
+    }
+    let (first, last) = window?;
+
+    let mut inner: Vec<Ir> = Vec::new();
+    let mut pending_blanks = 0usize;
+    let mut emitted = false;
+    for line in &lines[first..=last] {
+        if line.is_blank() {
+            pending_blanks += 1;
+            continue;
+        }
+        for _ in 0..pending_blanks.min(MAX_BLANK_LINES) {
+            inner.push(Ir::BlankLine);
+        }
+        pending_blanks = 0;
+        if line.stmts.is_empty() {
+            // Own-line comment.
+            if emitted {
+                inner.push(Ir::HardLine);
+            }
+            if let Some(comment) = &line.comment {
+                inner.push(comment.clone());
+            }
+            emitted = true;
+        } else {
+            let last_stmt = line.stmts.len() - 1;
+            for (j, stmt) in line.stmts.iter().enumerate() {
+                if emitted {
+                    inner.push(Ir::HardLine);
+                }
+                inner.push(stmt.clone());
+                if j == last_stmt
+                    && let Some(comment) = &line.comment
+                {
+                    inner.push(Ir::text(" "));
+                    inner.push(comment.clone());
+                }
+                emitted = true;
+            }
+        }
+    }
+
+    // The window's endpoints are significant lines, so both spans exist.
+    let span = lines[first].range?.cover(lines[last].range?);
+    Some((Ir::concat(inner), span))
+}
+
+/// The structural indent depth of statements directly inside `container`, in
+/// indent steps: the number of `BLOCK` ancestors (`container` included) whose
+/// body the formatter indents. Matches the one `Ir::indent` step each
+/// [`lower_block_body`] wraps — a module body is skipped when
+/// [`module_should_indent`] keeps it flush. Range formatting prints its
+/// windowed statements at this depth.
+pub(crate) fn base_indent_level(container: &SyntaxNode) -> usize {
+    container
+        .ancestors()
+        .filter(|node| node.kind() == SyntaxKind::BLOCK)
+        .filter(|block| {
+            block.parent().is_none_or(|parent| {
+                parent.kind() != SyntaxKind::MODULE_DEF || module_should_indent(&parent)
+            })
+        })
+        .count()
 }
 
 /// Binary operators the target style keeps tight (no surrounding spaces).

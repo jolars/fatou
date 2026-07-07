@@ -12,12 +12,21 @@ enum Mode {
 
 /// Render `doc` at the given style.
 pub fn print(doc: &Ir, style: FormatStyle) -> String {
+    print_at(doc, style, 0)
+}
+
+/// Render `doc` as if it sat at column `indent` (in spaces): line breaks
+/// re-indent to `indent`, nested indents stack on top of it, and group fit
+/// checks start from that column. **No leading indent is emitted for the first
+/// line** — the caller places the output after existing text (range formatting
+/// keeps the first line's original leading whitespace).
+pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
     let indent_step = style.indent_width as usize;
     let width = style.line_width as usize;
     let mut out = String::new();
-    let mut col = 0usize;
+    let mut col = indent;
     // Work stack of (indent, mode, node), processed depth-first.
-    let mut stack: Vec<(usize, Mode, &Ir)> = vec![(0, Mode::Break, doc)];
+    let mut stack: Vec<(usize, Mode, &Ir)> = vec![(indent, Mode::Break, doc)];
 
     while let Some((indent, mode, ir)) = stack.pop() {
         match ir {
@@ -247,6 +256,22 @@ mod tests {
             indent_width: 4,
         };
         assert_eq!(print(&list_doc(), style), "[\n    a,\n    b,\n    c\n]");
+    }
+
+    #[test]
+    fn print_at_starts_from_the_given_column() {
+        // The flat rendering is 9 columns: it fits exactly at column 0, but
+        // shifted to column 4 it must break — and every line break re-indents
+        // relative to that base, with no leading indent on the first line.
+        let style = FormatStyle {
+            line_width: 9,
+            indent_width: 4,
+        };
+        assert_eq!(print_at(&list_doc(), style, 0), "[a, b, c]");
+        assert_eq!(
+            print_at(&list_doc(), style, 4),
+            "[\n        a,\n        b,\n        c\n    ]"
+        );
     }
 
     fn trailing_comma_doc() -> Ir {

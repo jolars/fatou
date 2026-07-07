@@ -16,5 +16,8 @@ pub mod rules;
 pub mod style;
 
 pub use check::{ChangedFile, CheckError, CheckResult, check_paths};
-pub use core::{FormatError, format, format_node, format_with_style, print_document};
+pub use core::{
+    FormatError, RangeFormatted, format, format_node, format_range, format_with_style,
+    print_document,
+};
 pub use style::FormatStyle;

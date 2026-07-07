@@ -70,6 +70,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             TextDocumentSyncKind::INCREMENTAL,
         )),
         document_formatting_provider: Some(OneOf::Left(true)),
+        document_range_formatting_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),

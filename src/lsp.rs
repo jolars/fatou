@@ -56,7 +56,7 @@ mod task_pool;
 mod uri;
 
 pub use folding::compute_folding_ranges;
-pub use format::compute_format_edits;
+pub use format::{compute_format_edits, compute_format_range_edits};
 pub use selection::compute_selection_ranges;
 pub use server::{run, serve};
 pub use symbols::compute_document_symbols;

@@ -8,9 +8,9 @@ use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbol, DocumentSymbolParams,
-    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
-    GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
+    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
+    DocumentSymbol, DocumentSymbolParams, FoldingRange, FoldingRangeKind, FoldingRangeParams,
+    FormattingOptions, GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
     PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SymbolKind,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri,
     VersionedTextDocumentIdentifier,
@@ -146,11 +146,66 @@ fn initialize_format_and_shutdown() {
         other => panic!("expected a formatting response, got {other:?}"),
     }
 
-    // --- shutdown / exit ---
+    // --- range formatting: the edit is scoped to the selected statement ---
+    let scoped = Uri::from_str("file:///work/c.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: scoped.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "a=1\nb =2\nc= 3\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _scoped_diag = client.receiver.recv().unwrap();
     client
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(4),
+            method: "textDocument/rangeFormatting".to_string(),
+            params: serde_json::to_value(DocumentRangeFormattingParams {
+                text_document: TextDocumentIdentifier {
+                    uri: scoped.clone(),
+                },
+                range: Range::new(Position::new(1, 1), Position::new(1, 1)),
+                options: FormattingOptions {
+                    tab_size: 4,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let scoped_response = client.receiver.recv().unwrap();
+    match scoped_response {
+        Message::Response(resp) => {
+            let edits: Option<Vec<TextEdit>> =
+                serde_json::from_value(resp.result.unwrap()).unwrap();
+            let edits = edits.expect("range formatting edits");
+            assert_eq!(edits.len(), 1, "expected a single scoped edit");
+            assert_eq!(edits[0].new_text, "b = 2");
+            assert_eq!(
+                edits[0].range,
+                Range::new(Position::new(1, 0), Position::new(1, 4)),
+                "the edit must cover exactly the widened statement"
+            );
+        }
+        other => panic!("expected a rangeFormatting response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(5),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

@@ -11,13 +11,13 @@ use lsp_types::notification::{
     Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
-    DocumentSymbolRequest, FoldingRangeRequest, Formatting, Request as RequestTrait,
-    SelectionRangeRequest,
+    DocumentSymbolRequest, FoldingRangeRequest, Formatting, RangeFormatting,
+    Request as RequestTrait, SelectionRangeRequest,
 };
 use lsp_types::{
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, DocumentSymbolParams, FoldingRangeParams, PublishDiagnosticsParams,
-    SelectionRangeParams, Uri,
+    DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
+    FoldingRangeParams, PublishDiagnosticsParams, SelectionRangeParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -76,6 +76,7 @@ impl GlobalState {
     pub(crate) fn on_request(&mut self, req: Request) {
         match req.method.as_str() {
             Formatting::METHOD => self.on_formatting(req),
+            RangeFormatting::METHOD => self.on_range_formatting(req),
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
@@ -107,6 +108,29 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
+            style: FormatStyle::default(),
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_range_formatting(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<DocumentRangeFormattingParams>(RangeFormatting::METHOD)
+        else {
+            self.respond_err(id, "invalid rangeFormatting params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        // Style resolution mirrors full formatting: defaults for now.
+        self.dispatch_read(ReadJob::FormatRange {
+            id,
+            path: path_for(&uri),
+            text,
+            range: params.range,
             style: FormatStyle::default(),
             sender: self.sender.clone(),
         });
