@@ -1,0 +1,17 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..8
+  ASSIGNMENT_EXPR@0..8
+    NAME@0..1
+      IDENT@0..1 "x"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    ERROR@4..8
+      LPAREN@4..5 "("
+      COMMENT@5..7 "#c"
+      NEWLINE@7..8 "\n"
+
+diagnostic [4..5]: unclosed `(`

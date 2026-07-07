@@ -2375,6 +2375,19 @@ pub(crate) fn parse_paren(
 
     let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, end_marker, diagnostics)
     else {
+        // Only trivia remains to EOF: the paren can never be closed, so report
+        // it like the non-empty case below. A non-EOF failure (`(,1)`, `[(]`)
+        // may still have its `)` ahead, so it stays with outer recovery.
+        if ctx.token(inner_start).is_none() {
+            let open = &ctx.tokens()[start];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::UnclosedParen,
+                "unclosed `(`",
+                open.start,
+                open.end,
+            );
+        }
         return Some(error_expr_with_range(start, inner_start));
     };
 

@@ -19,15 +19,6 @@ leverage.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
   here`. Surfaced by the formatter; see parser-parity RECAP queued target.
-- [ ] Parser: an unclosed `(` with an empty interior emits no diagnostic. `(`,
-  `x = (`, `x = ( \n`, and `x = (#c\n` (only trivia — whitespace, newline,
-  comment, or EOF — after the paren) produce an `ERROR` node wrapping the
-  `LPAREN` but an empty `diagnostics` list, so the LSP publishes nothing for a
-  buffer the editor should flag. Any interior content already reports:
-  `x = (a` ⇒ ``unclosed `(` ``, `y = (;` ⇒ `unterminated argument list`. The
-  empty-interior recovery path builds the ERROR node without emitting; it
-  should report ``unclosed `(` `` like the non-empty case. (Surfaced by the
-  LSP end-to-end diagnostics test, 2026-07-07.)
 
 ### Incremental
 
