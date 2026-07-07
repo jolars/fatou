@@ -4501,7 +4501,15 @@ fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u
     let k = next.kind;
     // The term must be adjacent and must start a value: not an operator (radicals
     // are not `is_operator`, so they pass), not a macro `@`, not a closing token.
-    if k.is_trivia() || is_operator(k) || k == TokKind::At || is_closing_token(k) {
+    // Splat `...` is kept out of `is_operator` (the operator loop's splat arm
+    // owns it) but cannot start a value either (`"a"...` is a splat of the
+    // string, not a juxtaposition).
+    if k.is_trivia()
+        || is_operator(k)
+        || k == TokKind::DotDotDot
+        || k == TokKind::At
+        || is_closing_token(k)
+    {
         return false;
     }
     if lhs_is_plain_string(ctx, lhs) {
@@ -4533,8 +4541,15 @@ fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
         return false;
     }
     // It must start a value: not an operator (radicals are not `is_operator`, so
-    // they pass), not a closing delimiter, keyword, or macro `@`.
-    if is_operator(k) || is_juxtapose_closing(k) || k.is_keyword() || k == TokKind::At {
+    // they pass), not a closing delimiter, keyword, or macro `@`. Splat `...` is
+    // kept out of `is_operator` (the operator loop's splat arm owns it) but
+    // cannot start a value either (`g(x)...` splats the call result).
+    if is_operator(k)
+        || k == TokKind::DotDotDot
+        || is_juxtapose_closing(k)
+        || k.is_keyword()
+        || k == TokKind::At
+    {
         return false;
     }
     // A numeric coefficient juxtaposes with any such value.

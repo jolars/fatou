@@ -7,15 +7,6 @@ leverage.
 
 ## Parser
 
-- [ ] Parser: splat after a closing bracket is rejected. `f(g(x)...)`,
-  `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)` yield a
-  `LoneOperator` ERROR on the `...`; only the spaced spelling `f(g(x) ...)`
-  parses, and a name/dotted/literal operand snugged (`f(x...)`) is fine.
-  JuliaSyntax accepts all: `JuliaSyntax.parse(Expr, "f(g(x)...)")` ⇒ `f(g(x)...)`.
-  Blocks the formatter's `lower_splat` from snugging bracket-closing operands (it
-  bails to verbatim spaced); once fixed, drop the `ends_in_bracket` guard and
-  widen `splat_spacing/`. (Handed off from formatter 2026-07-06c.)
-
 ### Incremental
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

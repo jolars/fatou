@@ -6,20 +6,12 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 
 ## Queued next targets
 
-**Handoff from formatter (2026-07-06c): splat after a closing bracket is rejected.**
-A splat whose operand ends in `)`/`]`/`}` fails to parse — `f(g(x)...)`, `f(a[i]...)`,
-`f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)` all yield a `LoneOperator` "operator is
-not a valid value" ERROR on the `...`. Only the space-separated spelling parses
-(`f(g(x) ...)`), and a name/dotted/literal operand snugged directly (`f(x...)`,
-`f(a.b...)`) is fine — so the postfix `...` isn't being recognized right after a
-closing-bracket token. JuliaSyntax accepts all of them:
-`julia --startup-file=no -e 'using JuliaSyntax; println(JuliaSyntax.parse(Expr, "f(g(x)...)"))'`
-prints `f(g(x)...)` (a `...` splat inside the call). The formatter's new `lower_splat`
-(commit landing the `splat_spacing/` fixture) snugs `x ...` → `x...` but **withholds
-the snug for bracket-closing operands** (bails to verbatim spaced) precisely because
-the snug output would fail its own stability reparse. Once the parser accepts
-`)...`/`]...`/`}...`, drop that `ends_in_bracket` guard in `lower_splat` and widen
-`splat_spacing/` to cover call/index/paren/curly/collection operands.
+**Handoff to formatter (2026-07-07): splat after a closing bracket is fixed.**
+`f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`, plus the
+sibling operands `f(2...)` and `f("a"...)`, all parse as `SPLAT_EXPR` ⇒
+`(... operand)`, byte-identical to JuliaSyntax. The formatter can now drop the
+`ends_in_bracket` guard in `lower_splat` (`src/formatter/rules.rs` ~line 651) and
+widen `splat_spacing/` to cover call/index/paren/curly/collection operands.
 
 **Handoff to formatter (2026-07-06b): multi-binding `let` now wraps every
 binding.** `let a = 1, b = 2, c = 3` used to leave `b = 2`/`c = 3` as flat
@@ -122,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **195 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **196 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -142,38 +134,37 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-06b—multi-binding `let` per-binding nodes)
+## Latest session (2026-07-07—splat after a closing bracket)
 
-Closed the queued formatter-blocking parser bug: a `let` with 2+ comma-separated
-bindings kept only the **first** as an `ASSIGNMENT_EXPR`, dumping the rest as flat
-`IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS` — the projector *compensated*
-with `project_flat` (the classic "passing sexpr hiding a wrong CST" smell). Now
-each binding is a proper node.
+Closed the queued formatter handoff: a splat whose operand ends in `)`/`]`/`}`
+(or is a number or string literal) juxtaposed instead of splatting —
+`f(g(x)...)` ⇒ `(juxtapose (call g x) (error ...))` with a `LoneOperator`
+diagnostic. Root: the juxtaposition predicates run **before** the operator
+loop's splat arm, and `DotDotDot` is deliberately not in `is_operator` (the
+splat arm owns it), so `...` passed the "starts a value" filter whenever the
+lhs qualified — `lhs_value_close` (bracket-closing), `lhs_is_number` (`f(2...)`),
+or the string-error path (`f("a"...)`). Snugged idents (`f(x...)`) only worked
+because a bare name is not a "closed value".
 
-- **Root**: `parse_header`'s general path (LET-only; FOR returns early) parsed
-  **one** expr then bumped every remaining token as loose. Rewrote it as a loop:
-  parse each binding via `parse_expr(bp 0)` (which already stops at the comma),
-  bump the `,` (and horizontal ws) as loose separators, then cross trivia after a
-  trailing comma to reach a next-line binding. `parse_expr` at bp 0 never folds a
-  bare tuple, so each binding lands as its own node.
-- **Projector**: `project_let_bindings` collapsed from the flat-token
-  reconstruction to `node.children().map(project)` — the compensation is gone.
-- **Probed** all byte-identical: `let a=1,b=2,c=3` ⇒ `(= a 1)(= b 2)(= c 3)`;
-  bare-name `let x, y=2` ⇒ `x (= y 2)`; destructuring `let (a,b)=f()` ⇒
-  `(= (tuple-p a b) (call f))`; mixed `let a=1, b, c=3`; newline-continued
-  `let x=1,\n y=2`.
-- **Files**: structural.rs (`parse_header` general path), sexpr.rs
-  (`project_let_bindings`). Benign trivia move: `let x = 1 end` trailing ws now
-  attaches to the block, not `LET_BINDINGS` (updated `block_form_operand` +
-  `paren_block_juxtapose_error` snapshots).
-- **Fixtures**: parser snapshot + oracle dir slug `let_multi_binding` (multi
-  assign, bare-name, mixed). Existing `let_quote`/`let_bindings_newline` snapshots
-  updated to show the second binding as a real node.
-- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 194 → **195**.
+- **Fix**: exclude `TokKind::DotDotDot` explicitly in `should_juxtapose` and
+  `should_juxtapose_string_error` (`expr.rs`); the splat arm then takes it.
+  Two-line parser-bucket fix, projector untouched.
+- **Probed** byte-identical: all five bracket-closing forms plus `f(2...)`,
+  `f("a"...)`, `f(a.b...)`, spaced `f(g(x) ...)`. Out of scope: `f(c'x'...)`
+  (the known `x 'y` char-lexer divergence, unrelated).
+- **Fixtures**: parser snapshot + oracle dir slug `splat_bracket_operand`.
+- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 195 → **196**.
 - **Next**: no queued parser target — batch-probe common real-world Julia
   against the oracle to surface a new divergence (as 2026-07-03 did).
 
 ## Earlier sessions
+
+- **2026-07-06b**—multi-binding `let` per-binding nodes. `let a = 1, b = 2` kept
+  only the first binding as a node, dumping the rest as flat tokens the projector
+  compensated for (`project_flat`). `parse_header`'s general path became a loop
+  (`parse_expr` bp 0 per binding, `,` loose); `project_let_bindings` collapsed to
+  `children().map(project)`. Fixture `let_multi_binding`. JS 677 (held);
+  dir 194 → 195.
 
 - **2026-07-05b**—left-arrow operator `<--` family. Closed the queued `<--` lexer
   gap via the 5-file operator recipe (`a <-- b` was `a` `<` `--`); now `<--`,

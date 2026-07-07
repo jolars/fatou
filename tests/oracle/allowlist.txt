@@ -152,6 +152,7 @@ short_circuit_assoc
 short_function_def
 signed_literals
 splat
+splat_bracket_operand
 splat_precedence
 stray_block_keyword
 stray_close_delimiter_error

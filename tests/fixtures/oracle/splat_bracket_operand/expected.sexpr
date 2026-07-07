@@ -1,0 +1,1 @@
+(toplevel (call f (... (call g x))) (call f (... (ref a i))) (call f (... (call-i a + b))) (call f (... (curly A T))) (call f (... (vect 1 2))) (call f (... 2)) (call f (... (string "a"))) (call f (... (. a (quote b)))) (call f (... (call g x))))
