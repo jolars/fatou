@@ -1,4 +1,6 @@
-# Fatou <img src="./images/logo.png" alt="Fatou logo" class="right" style="width: 139px; padding: 10px;" />
+# Fatou
+
+<img src="./images/logo.png" alt="Fatou logo" class="right" style="width: 139px; padding: 10px;" />
 
 Fatou is a language server, formatter, and linter for the
 [Julia](https://julialang.org) language, written in Rust. It follows the
