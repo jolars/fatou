@@ -15,10 +15,6 @@ leverage.
   Blocks the formatter's `lower_splat` from snugging bracket-closing operands (it
   bails to verbatim spaced); once fixed, drop the `ends_in_bracket` guard and
   widen `splat_spacing/`. (Handed off from formatter 2026-07-06c.)
-- [ ] Parser: whitespace before a call/index/curly arg list is wrongly accepted.
-  `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
-  with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
-  here`. Surfaced by the formatter; see parser-parity RECAP queued target.
 
 ### Incremental
 
