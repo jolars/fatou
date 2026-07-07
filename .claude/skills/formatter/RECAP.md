@@ -118,7 +118,46 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (`for`-binding continuation double-indent)
+## Latest session (chained-pair grouped tail stays arrow-tier — ranked #1 retired)
+
+`test(formatter)` (fixtures-only, **no code change**). Resolved the long-standing
+ranked #1 target — "chained-pair hug through a *non-huggable-but-grouped*
+innermost" — as **already correct**. Investigation: a trailing chained pair
+`a => b => <value>` whose innermost value is a **grouped but non-huggable**
+construct (a wide binary chain, a paren expr, a comparison, ...) currently falls
+to normal `lower_binary` layout, which is the **ratified uniform arrow-tier
+flatten**: it breaks at every `=>`, each operand one indent deeper, byte-identical
+to a standalone `arrow_pair_chain` chain (case `w`/`q`/`s`) scaled into the
+exploded bracket (first operand on the item/prefix line, subsequent `=>` operands
+at +8, value flat at +8 — nesting to +12 only when the value itself overflows).
+So the current output is not buggy; it *is* the tier rule applied consistently.
+
+**Decision (AskUserQuestion).** The alternative — "hug the `=>` spine flat and
+break the value" (`a => b => alpha +⏎ beta +⏎ …`) — would parallel the
+huggable-bracket case but is a **conscious divergence from the uniform arrow-tier
+rule** and content-dependent (a leaf-tailed chain would still break its spine, a
+wide-binary-tailed one would not). I surfaced that a narrowly-scoped version
+wouldn't break `arrow_pair_chain` (all its cases have leaf or flat-fitting tails),
+but flagged the inconsistency. **User chose "keep arrow-tier break"** over the
+hug; ranked #1 is retired. No `rules.rs` change — the pair-hug machinery
+(`pair_hug_chain`/`huggable_kind`) correctly requires a *bracket* innermost, and a
+grouped non-bracket value has nothing to hug.
+
+Gated `chained_pair_grouped_tail/` (6 cases: dict binary tail, vector paren tail,
+kwarg binary tail that breaks, value-also-breaks deep nesting, leaf tail fits flat
+boundary, source-broken reflows to canonical). Gate 107→108; stability + clippy +
+fmt + full suite green. No parser/lexer blocker. `expected.jl` hand-authored to
+the ratified arrow-tier form (derived from the tier rule, then confirmed to
+coincide with current output — not blind-captured).
+
+**Ranked next targets:** (1) Re-evaluate the source-break-mirroring bracket/matrix
+rules against the width-driven reflow engine (the largest carried debt —
+`lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`; note the inventory
+header is stale, these were rewritten width-driven, only the comment-bearing matrix
+path still mirrors). (2) Sweep any remaining Runic-rationale doc comments in
+`rules.rs`.
+
+## Earlier: `for`-binding continuation double-indent
 
 `feat(formatter)`. The direct follow-on to last session's condition rule, which
 deliberately skipped `FOR_BINDING`. A too-wide `for` binding used to break its

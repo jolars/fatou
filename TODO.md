@@ -112,6 +112,16 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: chained-pair grouped tail stays arrow-tier
+  (`chained_pair_grouped_tail/`). Resolved the long-standing ranked #1 target
+  ("hug through a non-huggable-but-grouped innermost") as *already correct, no
+  code change*. A trailing chained pair whose innermost value is a grouped but
+  non-huggable construct (a wide binary chain, a paren expr, ...) breaks at every
+  `=>`, each operand one indent deeper, exactly like a standalone chain
+  (`arrow_pair_chain`) scaled into the exploded bracket; the value nests a further
+  level only when it too overflows. User ratified keeping this uniform arrow-tier
+  form over "hug the `=>` spine flat" (which would have been a content-dependent
+  divergence from the ratified tier-break rule). Fixture pins the consistency.
 - [x] Formatter: `for`-binding continuation double-indent (`for_binding_break/`).
   A too-wide `for` binding used to break its iterable's continuation at +4 — the
   same indent as the loop body — the same header/body ambiguity the condition rule
