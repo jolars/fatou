@@ -29,9 +29,12 @@ struct ExprFlags {
     /// A bare `:` terminates the expression (a ternary true-branch separator)
     /// rather than being parsed as a range operator.
     no_range: bool,
-    /// Parsing one element of an array literal: an operator with whitespace before
-    /// it but none after begins a new element, so `[1 +2]` is two elements while
-    /// `[1 + 2]` is one (see [`array_element_boundary`]).
+    /// Space-sensitive element position: one element of an array literal or one
+    /// space-form macro argument. An operator with whitespace before it but none
+    /// after begins a new element (`[1 +2]` is two elements, `@foo a +b` two
+    /// arguments; see [`array_element_boundary`]), and a `(`/`[`/`{` preceded by
+    /// whitespace starts a new element rather than chaining as a call/index/curly
+    /// (`@foo f (x)` is two arguments). Mirrors JuliaSyntax's `space_sensitive`.
     array_mode: bool,
     /// A bare `end` is the index-end marker (an `END_MARKER` atom) rather than a
     /// block terminator. Enabled only inside square brackets (`a[end]`, `[end]`);
@@ -3201,10 +3204,11 @@ fn parse_postfix_chain(
     loop {
         // No newline between the callee and `(`/`[` — only horizontal space.
         let next = ctx.skip_ws(lhs.end);
-        // Inside an array literal, a `(`/`[`/`{` with whitespace before it begins a
-        // new concatenation element rather than chaining as a call/index/curly:
-        // `[f (x)]` is `(hcat f x)` (two elements), while `[f(x)]` is `(vect (call
-        // f x))`. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
+        // In a space-sensitive position (an array-literal element or a space-form
+        // macro argument), a `(`/`[`/`{` with whitespace before it begins a new
+        // element rather than chaining as a call/index/curly: `[f (x)]` is
+        // `(hcat f x)` and `@foo f (x)` two arguments, while `[f(x)]` is
+        // `(vect (call f x))`. Mirrors JuliaSyntax's `space_sensitive` splitting.
         if array_mode
             && next > lhs.end
             && matches!(
@@ -3834,8 +3838,11 @@ fn parse_macro_args(
         }
     }
 
-    // Space form `@m a b`: each argument is a full expression. Stop at a newline,
-    // end of input, or a delimiter that closes/separates an enclosing list.
+    // Space form `@m a b`: each argument is a full expression parsed
+    // space-sensitively (`array_mode`), so a whitespace-preceded `(`/`[`/`{` or a
+    // space-glued prefix operator begins the next argument (`@m f (x)` is two
+    // arguments, `@m a +b` likewise). Stop at a newline, end of input, or a
+    // delimiter that closes/separates an enclosing list.
     let mut pos = name_end;
     let mut n_args = 0;
     loop {
@@ -3854,6 +3861,7 @@ fn parse_macro_args(
                 push_range(events, pos, next);
                 let arg_flags = ExprFlags {
                     inside_brackets,
+                    array_mode: true,
                     ..ExprFlags::default()
                 };
                 match parse_expr_in(ctx.tokens(), next, 0, diagnostics, arg_flags) {
@@ -3898,6 +3906,7 @@ fn parse_macro_args(
                 push_range(events, pos, after);
                 let arg_flags = ExprFlags {
                     inside_brackets,
+                    array_mode: true,
                     stmt_comma: true,
                     ..ExprFlags::default()
                 };

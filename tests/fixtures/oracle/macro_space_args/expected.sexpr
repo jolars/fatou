@@ -1,0 +1,1 @@
+(toplevel (macrocall @recipe EunoiaDiagram (tuple-p fit) (block (= colors (. Makie (quote automatic))))) (macrocall @foo f x) (macrocall @foo a (vect 1)) (macrocall @foo A (braces T)) (macrocall @foo a (call-pre + b)) (macrocall @foo x (quote-: y)) (macrocall @foo a (quote-: b) c) (macrocall @foo (call f x)) (macrocall @foo (call g x) (vect 1)) (call f (macrocall @m a b)))

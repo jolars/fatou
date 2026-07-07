@@ -1,0 +1,188 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..171
+  MACRO_CALL@0..67
+    MACRO_NAME@0..7
+      AT@0..1 "@"
+      IDENT@1..7 "recipe"
+    WHITESPACE@7..8 " "
+    NAME@8..21
+      IDENT@8..21 "EunoiaDiagram"
+    WHITESPACE@21..22 " "
+    TUPLE_EXPR@22..28
+      LPAREN@22..23 "("
+      ARG@23..26
+        NAME@23..26
+          IDENT@23..26 "fit"
+      COMMA@26..27 ","
+      RPAREN@27..28 ")"
+    WHITESPACE@28..29 " "
+    BEGIN_EXPR@29..67
+      BEGIN_KW@29..34 "begin"
+      BLOCK@34..64
+        NEWLINE@34..35 "\n"
+        WHITESPACE@35..39 "    "
+        ASSIGNMENT_EXPR@39..63
+          NAME@39..45
+            IDENT@39..45 "colors"
+          WHITESPACE@45..46 " "
+          EQ@46..47 "="
+          WHITESPACE@47..48 " "
+          BINARY_EXPR@48..63
+            NAME@48..53
+              IDENT@48..53 "Makie"
+            DOT@53..54 "."
+            NAME@54..63
+              IDENT@54..63 "automatic"
+        NEWLINE@63..64 "\n"
+      END_KW@64..67 "end"
+  NEWLINE@67..68 "\n"
+  MACRO_CALL@68..78
+    MACRO_NAME@68..72
+      AT@68..69 "@"
+      IDENT@69..72 "foo"
+    WHITESPACE@72..73 " "
+    NAME@73..74
+      IDENT@73..74 "f"
+    WHITESPACE@74..75 " "
+    PAREN_EXPR@75..78
+      LPAREN@75..76 "("
+      NAME@76..77
+        IDENT@76..77 "x"
+      RPAREN@77..78 ")"
+  NEWLINE@78..79 "\n"
+  MACRO_CALL@79..89
+    MACRO_NAME@79..83
+      AT@79..80 "@"
+      IDENT@80..83 "foo"
+    WHITESPACE@83..84 " "
+    NAME@84..85
+      IDENT@84..85 "a"
+    WHITESPACE@85..86 " "
+    VECT_EXPR@86..89
+      LBRACKET@86..87 "["
+      ARG@87..88
+        LITERAL@87..88
+          INTEGER@87..88 "1"
+      RBRACKET@88..89 "]"
+  NEWLINE@89..90 "\n"
+  MACRO_CALL@90..100
+    MACRO_NAME@90..94
+      AT@90..91 "@"
+      IDENT@91..94 "foo"
+    WHITESPACE@94..95 " "
+    NAME@95..96
+      IDENT@95..96 "A"
+    WHITESPACE@96..97 " "
+    BRACES@97..100
+      LBRACE@97..98 "{"
+      ARG@98..99
+        NAME@98..99
+          IDENT@98..99 "T"
+      RBRACE@99..100 "}"
+  NEWLINE@100..101 "\n"
+  MACRO_CALL@101..110
+    MACRO_NAME@101..105
+      AT@101..102 "@"
+      IDENT@102..105 "foo"
+    WHITESPACE@105..106 " "
+    NAME@106..107
+      IDENT@106..107 "a"
+    WHITESPACE@107..108 " "
+    UNARY_EXPR@108..110
+      PLUS@108..109 "+"
+      NAME@109..110
+        IDENT@109..110 "b"
+  NEWLINE@110..111 "\n"
+  MACRO_CALL@111..120
+    MACRO_NAME@111..115
+      AT@111..112 "@"
+      IDENT@112..115 "foo"
+    WHITESPACE@115..116 " "
+    NAME@116..117
+      IDENT@116..117 "x"
+    WHITESPACE@117..118 " "
+    QUOTE_SYM@118..120
+      COLON@118..119 ":"
+      NAME@119..120
+        IDENT@119..120 "y"
+  NEWLINE@120..121 "\n"
+  MACRO_CALL@121..132
+    MACRO_NAME@121..125
+      AT@121..122 "@"
+      IDENT@122..125 "foo"
+    WHITESPACE@125..126 " "
+    NAME@126..127
+      IDENT@126..127 "a"
+    WHITESPACE@127..128 " "
+    QUOTE_SYM@128..130
+      COLON@128..129 ":"
+      NAME@129..130
+        IDENT@129..130 "b"
+    WHITESPACE@130..131 " "
+    NAME@131..132
+      IDENT@131..132 "c"
+  NEWLINE@132..133 "\n"
+  MACRO_CALL@133..144
+    MACRO_NAME@133..137
+      AT@133..134 "@"
+      IDENT@134..137 "foo"
+    WHITESPACE@137..138 " "
+    CALL_EXPR@138..144
+      PAREN_EXPR@138..141
+        LPAREN@138..139 "("
+        NAME@139..140
+          IDENT@139..140 "f"
+        RPAREN@140..141 ")"
+      ARG_LIST@141..144
+        LPAREN@141..142 "("
+        ARG@142..143
+          NAME@142..143
+            IDENT@142..143 "x"
+        RPAREN@143..144 ")"
+  NEWLINE@144..145 "\n"
+  MACRO_CALL@145..158
+    MACRO_NAME@145..149
+      AT@145..146 "@"
+      IDENT@146..149 "foo"
+    WHITESPACE@149..150 " "
+    CALL_EXPR@150..154
+      NAME@150..151
+        IDENT@150..151 "g"
+      ARG_LIST@151..154
+        LPAREN@151..152 "("
+        ARG@152..153
+          NAME@152..153
+            IDENT@152..153 "x"
+        RPAREN@153..154 ")"
+    WHITESPACE@154..155 " "
+    VECT_EXPR@155..158
+      LBRACKET@155..156 "["
+      ARG@156..157
+        LITERAL@156..157
+          INTEGER@156..157 "1"
+      RBRACKET@157..158 "]"
+  NEWLINE@158..159 "\n"
+  CALL_EXPR@159..170
+    NAME@159..160
+      IDENT@159..160 "f"
+    ARG_LIST@160..170
+      LPAREN@160..161 "("
+      ARG@161..169
+        MACRO_CALL@161..169
+          MACRO_NAME@161..163
+            AT@161..162 "@"
+            IDENT@162..163 "m"
+          WHITESPACE@163..164 " "
+          NAME@164..165
+            IDENT@164..165 "a"
+          WHITESPACE@165..166 " "
+          PAREN_EXPR@166..169
+            LPAREN@166..167 "("
+            NAME@167..168
+              IDENT@167..168 "b"
+            RPAREN@168..169 ")"
+      RPAREN@169..170 ")"
+  NEWLINE@170..171 "\n"

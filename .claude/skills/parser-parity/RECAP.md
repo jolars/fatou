@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **196 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **197 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,30 +134,39 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-07—splat after a closing bracket)
+## Latest session (2026-07-07b—space-sensitive macro space-form arguments)
 
-Closed the queued formatter handoff: a splat whose operand ends in `)`/`]`/`}`
-(or is a number or string literal) juxtaposed instead of splatting —
-`f(g(x)...)` ⇒ `(juxtapose (call g x) (error ...))` with a `LoneOperator`
-diagnostic. Root: the juxtaposition predicates run **before** the operator
-loop's splat arm, and `DotDotDot` is deliberately not in `is_operator` (the
-splat arm owns it), so `...` passed the "starts a value" filter whenever the
-lhs qualified — `lhs_value_close` (bracket-closing), `lhs_is_number` (`f(2...)`),
-or the string-error path (`f("a"...)`). Snugged idents (`f(x...)`) only worked
-because a bare name is not a "closed value".
+Real-world find (Makie's `@recipe EunoiaDiagram (fit,) begin … end` from a user
+file): a space-form macro argument was parsed with default flags, so the postfix
+chain fused a whitespace-preceded `(`/`[`/`{` into a call/index/curly with a
+spurious "whitespace before opener" `(error-t)` — `@foo f (x)` ⇒
+`(macrocall @foo (call f (error-t) x))`. In JuliaSyntax's space-sensitive mode a
+spaced opener starts a **new argument** (`(macrocall @foo f x)`); the earlier
+"whitespace-before-arglist already resolved" note (2026-07-03) covered only
+non-macro contexts, where the error shape is genuinely correct.
 
-- **Fix**: exclude `TokKind::DotDotDot` explicitly in `should_juxtapose` and
-  `should_juxtapose_string_error` (`expr.rs`); the splat arm then takes it.
-  Two-line parser-bucket fix, projector untouched.
-- **Probed** byte-identical: all five bracket-closing forms plus `f(2...)`,
-  `f("a"...)`, `f(a.b...)`, spaced `f(g(x) ...)`. Out of scope: `f(c'x'...)`
-  (the known `x 'y` char-lexer divergence, unrelated).
-- **Fixtures**: parser snapshot + oracle dir slug `splat_bracket_operand`.
-- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 195 → **196**.
+- **Fix**: set `array_mode: true` (Fatou's `space_sensitive`) in both
+  `parse_macro_args` arg-parse sites (space-form loop + `@doc` continuation).
+  The existing array-element machinery does the rest: the postfix chain breaks
+  at a spaced opener, and `array_element_boundary` splits `@foo a +b` into two
+  args for free. Two-flag parser-bucket fix; projector untouched. `ExprFlags`
+  doc updated to name both space-sensitive positions.
+- **Probed** byte-identical: the recipe form, `@foo f (x)`/`a [1]`/`A {T}`,
+  `@foo a +b`, `@foo x :y`, `@foo a :b c`, glued `@foo (f)(x)`/`g(x) [1]`,
+  bracketed `f(@m a (b))`, and the doc leftover `@doc x\nf (y)` ⇒
+  `(call (macrocall @doc x f) (error-t) y)` (falls out of the outer chain).
+- **Fixtures**: parser snapshot + oracle dir slug `macro_space_args`.
+- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 196 → **197**.
 - **Next**: no queued parser target — batch-probe common real-world Julia
   against the oracle to surface a new divergence (as 2026-07-03 did).
 
 ## Earlier sessions
+
+- **2026-07-07**—splat after a closing bracket. `f(g(x)...)`/`f(a[i]...)`/
+  `f(2...)`/`f("a"...)` juxtaposed instead of splatting; excluded
+  `TokKind::DotDotDot` in `should_juxtapose`/`should_juxtapose_string_error` so
+  the splat arm takes it. Fixture `splat_bracket_operand`. JS 677 (held);
+  dir 195 → 196.
 
 - **2026-07-06b**—multi-binding `let` per-binding nodes. `let a = 1, b = 2` kept
   only the first binding as a node, dumping the rest as flat tokens the projector
