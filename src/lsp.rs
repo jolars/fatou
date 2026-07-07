@@ -49,8 +49,10 @@ mod format;
 mod read_jobs;
 mod server;
 mod state;
+mod symbols;
 mod task_pool;
 mod uri;
 
 pub use format::compute_format_edits;
 pub use server::{run, serve};
+pub use symbols::compute_document_symbols;

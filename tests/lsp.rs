@@ -3,13 +3,15 @@
 //! cleanly. Exercises the threaded pipeline end-to-end: main loop → analysis
 //! thread (write-phase) → read pool (read-phase) → version-gated publish.
 
+use fatou::lsp::compute_document_symbols;
+use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, FormattingOptions,
-    GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
-    PublishDiagnosticsParams, Range, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
+    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbol, DocumentSymbolParams,
+    FormattingOptions, GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
+    PublishDiagnosticsParams, Range, SymbolKind, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -611,6 +613,327 @@ fn negotiates_utf8_position_encoding() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(3),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+// --- document symbols: unit tests on the pure compute function ---
+
+fn symbols(text: &str) -> Vec<DocumentSymbol> {
+    compute_document_symbols(text, PositionEncoding::Utf16)
+}
+
+fn names_and_kinds(symbols: &[DocumentSymbol]) -> Vec<(&str, SymbolKind)> {
+    symbols.iter().map(|s| (s.name.as_str(), s.kind)).collect()
+}
+
+fn assert_selection_within_range(symbols: &[DocumentSymbol]) {
+    fn contains(outer: &Range, inner: &Range) -> bool {
+        outer.start <= inner.start && inner.end <= outer.end
+    }
+    for symbol in symbols {
+        assert!(
+            contains(&symbol.range, &symbol.selection_range),
+            "selection range of `{}` escapes its full range",
+            symbol.name
+        );
+        assert_selection_within_range(symbol.children.as_deref().unwrap_or_default());
+    }
+}
+
+#[test]
+fn document_symbols_cover_every_top_level_definition_kind() {
+    let text = "\
+module M
+end
+
+function f(x)
+    return x
+end
+
+macro m(ex)
+end
+
+struct S
+    a
+    b::Int
+end
+
+abstract type A end
+
+primitive type P 8 end
+
+const C = 1
+";
+    let symbols = symbols(text);
+    assert_eq!(
+        names_and_kinds(&symbols),
+        vec![
+            ("M", SymbolKind::MODULE),
+            ("f", SymbolKind::FUNCTION),
+            ("@m", SymbolKind::FUNCTION),
+            ("S", SymbolKind::STRUCT),
+            ("A", SymbolKind::INTERFACE),
+            ("P", SymbolKind::STRUCT),
+            ("C", SymbolKind::CONSTANT),
+        ]
+    );
+    let s = &symbols[3];
+    assert_eq!(
+        names_and_kinds(s.children.as_deref().unwrap_or_default()),
+        vec![("a", SymbolKind::FIELD), ("b", SymbolKind::FIELD)]
+    );
+    assert_selection_within_range(&symbols);
+}
+
+#[test]
+fn document_symbols_nest_definitions_inside_modules_and_functions() {
+    let text = "\
+module Outer
+module Inner
+g() = 1
+end
+function f()
+    helper(x) = x
+    return helper
+end
+end
+";
+    let symbols = symbols(text);
+    assert_eq!(
+        names_and_kinds(&symbols),
+        vec![("Outer", SymbolKind::MODULE)]
+    );
+    let outer = symbols[0].children.as_deref().unwrap_or_default();
+    assert_eq!(
+        names_and_kinds(outer),
+        vec![("Inner", SymbolKind::MODULE), ("f", SymbolKind::FUNCTION)]
+    );
+    let inner = outer[0].children.as_deref().unwrap_or_default();
+    assert_eq!(names_and_kinds(inner), vec![("g", SymbolKind::FUNCTION)]);
+    let f = outer[1].children.as_deref().unwrap_or_default();
+    assert_eq!(names_and_kinds(f), vec![("helper", SymbolKind::FUNCTION)]);
+}
+
+#[test]
+fn document_symbols_carry_the_signature_as_detail() {
+    let text = "\
+f(x::Int, y) = x
+g(x::T) where T = x
+h(x)::Int = x
+function Base.show(io, x)
+end
+function +(a, b)
+    a
+end
+function forward end
+";
+    let symbols = symbols(text);
+    let details: Vec<(&str, Option<&str>)> = symbols
+        .iter()
+        .map(|s| (s.name.as_str(), s.detail.as_deref()))
+        .collect();
+    assert_eq!(
+        details,
+        vec![
+            ("f", Some("(x::Int, y)")),
+            ("g", Some("(x::T) where T")),
+            ("h", Some("(x)::Int")),
+            ("Base.show", Some("(io, x)")),
+            ("+", Some("(a, b)")),
+            ("forward", None),
+        ]
+    );
+    assert!(symbols.iter().all(|s| s.kind == SymbolKind::FUNCTION));
+}
+
+#[test]
+fn document_symbols_split_a_multi_name_const() {
+    let symbols = symbols("const a, b = 1, 2\n");
+    assert_eq!(
+        names_and_kinds(&symbols),
+        vec![("a", SymbolKind::CONSTANT), ("b", SymbolKind::CONSTANT)]
+    );
+}
+
+#[test]
+fn document_symbols_surface_a_definition_inside_control_flow() {
+    let text = "\
+if flag
+    helper(x) = x
+end
+let
+    inner() = 2
+end
+";
+    assert_eq!(
+        names_and_kinds(&symbols(text)),
+        vec![
+            ("helper", SymbolKind::FUNCTION),
+            ("inner", SymbolKind::FUNCTION),
+        ]
+    );
+}
+
+#[test]
+fn document_symbols_include_inner_constructors() {
+    let text = "\
+struct S
+    x::Int
+    S(x) = new(x)
+end
+";
+    let symbols = symbols(text);
+    let members = symbols[0].children.as_deref().unwrap_or_default();
+    assert_eq!(
+        names_and_kinds(members),
+        vec![("x", SymbolKind::FIELD), ("S", SymbolKind::FUNCTION)]
+    );
+}
+
+#[test]
+fn document_symbols_skip_non_definitions() {
+    assert!(symbols("x = 1\nprint(1)\nx, y = 1, 2\n").is_empty());
+    assert!(symbols("").is_empty());
+    // An interpolated definition name is not statically known.
+    assert!(symbols("function $f end\n").is_empty());
+}
+
+#[test]
+fn document_symbols_are_best_effort_on_broken_input() {
+    // Unterminated function: the parse error must not hide the symbol.
+    let symbols = symbols("function f(x)\n");
+    assert_eq!(names_and_kinds(&symbols), vec![("f", SymbolKind::FUNCTION)]);
+}
+
+#[test]
+fn document_symbol_positions_follow_the_encoding() {
+    // U+1F600 is 4 bytes in UTF-8, 2 UTF-16 units; the symbol's end position
+    // on the same line differs accordingly.
+    let text = "f(x) = \"\u{1F600}\"\n";
+    let utf16 = compute_document_symbols(text, PositionEncoding::Utf16);
+    let utf8 = compute_document_symbols(text, PositionEncoding::Utf8);
+    assert_eq!(utf16[0].range.end, Position::new(0, 11));
+    assert_eq!(utf8[0].range.end, Position::new(0, 13));
+}
+
+/// End-to-end: the capability is advertised, an open document returns its
+/// nested outline, and an unknown document returns null.
+#[test]
+fn serves_document_symbols() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result = resp.result.unwrap();
+            assert_eq!(
+                result["capabilities"]["documentSymbolProvider"],
+                serde_json::json!(true),
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document; drain its diagnostics publish ---
+    let uri = Uri::from_str("file:///work/symbols.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "module M\nf(x) = x\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+
+    // --- request document symbols; expect the nested outline ---
+    let symbol_params = |uri: &Uri| {
+        serde_json::to_value(DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/documentSymbol".to_string(),
+            params: symbol_params(&uri),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let symbols: Vec<DocumentSymbol> =
+                serde_json::from_value(resp.result.unwrap()).unwrap();
+            assert_eq!(names_and_kinds(&symbols), vec![("M", SymbolKind::MODULE)]);
+            let children = symbols[0].children.as_deref().unwrap_or_default();
+            assert_eq!(names_and_kinds(children), vec![("f", SymbolKind::FUNCTION)]);
+        }
+        other => panic!("expected a documentSymbol response, got {other:?}"),
+    }
+
+    // --- an unknown document answers null ---
+    let unknown = Uri::from_str("file:///work/never-opened.jl").unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/documentSymbol".to_string(),
+            params: symbol_params(&unknown),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            assert_eq!(resp.result, Some(serde_json::Value::Null));
+        }
+        other => panic!("expected a null response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

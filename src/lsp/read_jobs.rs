@@ -5,11 +5,14 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, RequestId, Response};
 
+use lsp_types::DocumentSymbolResponse;
+
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
 use super::format::format_edits_via_db;
+use super::symbols::document_symbols_via_db;
 
 /// A read-only request the analysis thread services by cloning its salsa db
 /// and running the work off-thread on the read pool. Each variant carries the
@@ -23,6 +26,12 @@ pub(crate) enum ReadJob {
         style: FormatStyle,
         sender: Sender<Message>,
     },
+    DocumentSymbols {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -31,6 +40,7 @@ impl ReadJob {
     pub(crate) fn into_reply_parts(self) -> (RequestId, Sender<Message>) {
         match self {
             ReadJob::Format { id, sender, .. } => (id, sender),
+            ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -48,6 +58,16 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             sender,
         } => {
             let result = format_edits_via_db(&snapshot, &path, &text, style, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::DocumentSymbols {
+            id,
+            path,
+            text,
+            sender,
+        } => {
+            let symbols = document_symbols_via_db(&snapshot, &path, &text, encoding);
+            let result = DocumentSymbolResponse::Nested(symbols);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
     }

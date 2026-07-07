@@ -69,6 +69,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             TextDocumentSyncKind::INCREMENTAL,
         )),
         document_formatting_provider: Some(OneOf::Left(true)),
+        document_symbol_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }

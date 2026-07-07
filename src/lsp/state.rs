@@ -10,10 +10,10 @@ use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
     Notification as NotificationTrait, PublishDiagnostics,
 };
-use lsp_types::request::{Formatting, Request as RequestTrait};
+use lsp_types::request::{DocumentSymbolRequest, Formatting, Request as RequestTrait};
 use lsp_types::{
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, PublishDiagnosticsParams, Uri,
+    DocumentFormattingParams, DocumentSymbolParams, PublishDiagnosticsParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -72,6 +72,7 @@ impl GlobalState {
     pub(crate) fn on_request(&mut self, req: Request) {
         match req.method.as_str() {
             Formatting::METHOD => self.on_formatting(req),
+            DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -101,6 +102,26 @@ impl GlobalState {
             path: path_for(&uri),
             text,
             style: FormatStyle::default(),
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_document_symbols(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<DocumentSymbolParams>(DocumentSymbolRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid documentSymbol params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::DocumentSymbols {
+            id,
+            path: path_for(&uri),
+            text,
             sender: self.sender.clone(),
         });
     }

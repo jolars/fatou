@@ -72,15 +72,21 @@ completion would feel broken on day one.
   `src/lsp/server.rs`) through document sync, diagnostics, and formatting.
 - [ ] LSP test strategy: a pure `compute_*` function per feature that takes
   text plus position and returns the response type (arity's pattern), plus
-  the existing in-memory connection test in `tests/lsp.rs`.
+  the existing in-memory connection test in `tests/lsp.rs`. Established by
+  document symbols (`compute_document_symbols`); apply to each new feature.
 
 ### Phase 1: syntax-only features
 
 Pure CST walks with no semantic blockers; cheap wins that can ship while the
 semantic model grows.
 
-- [ ] Document symbols (modules, functions, macros, structs/abstract types,
-  consts); the same walk later feeds workspace symbols (Phase 5).
+- [x] Document symbols (modules, functions, macros, structs/abstract types,
+  consts); the same walk later feeds workspace symbols (Phase 5). Pure
+  `compute_document_symbols` walk in `src/lsp/symbols.rs` (macros as `@name`,
+  signature in `detail` for multiple dispatch, struct fields as `FIELD`
+  children, qualified extension names kept whole), plus a
+  `document_symbols_via_db` warm path off the cached parse mirroring
+  formatting's.
 - [ ] Folding ranges (block constructs, comment runs, import groups).
 - [ ] Selection range (expand selection along CST ancestors).
 - [ ] Range formatting (`textDocument/rangeFormatting`).
