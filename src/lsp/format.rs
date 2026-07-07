@@ -8,7 +8,7 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, TextEdit};
 use crate::formatter::{FormatStyle, format_node, format_with_style};
 use crate::incremental::Analysis;
 use crate::parser::ParseDiagnostic;
-use crate::text::LineIndex;
+use crate::text::{LineIndex, PositionEncoding};
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
 /// for `path` still matches it; otherwise re-parse. A write racing the read
@@ -21,6 +21,7 @@ pub(crate) fn format_edits_via_db(
     path: &Path,
     text: &str,
     style: FormatStyle,
+    encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -30,12 +31,12 @@ pub(crate) fn format_edits_via_db(
         }
         let root = snapshot.parsed_tree(file);
         let formatted = format_node(&root, style).ok();
-        Some(formatted.map(|formatted| edits_for_formatted(text, formatted)))
+        Some(formatted.map(|formatted| edits_for_formatted(text, formatted, encoding)))
     }));
     match cached {
         Ok(Some(edits)) => edits,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_format_edits(text, style),
+        Ok(None) | Err(_) => compute_format_edits(text, style, encoding),
     }
 }
 
@@ -43,20 +44,28 @@ pub(crate) fn format_edits_via_db(
 ///
 /// Returns `None` when the formatter rejects the input. An empty `Vec` means
 /// the document is already formatted.
-pub fn compute_format_edits(text: &str, style: FormatStyle) -> Option<Vec<TextEdit>> {
+pub fn compute_format_edits(
+    text: &str,
+    style: FormatStyle,
+    encoding: PositionEncoding,
+) -> Option<Vec<TextEdit>> {
     let formatted = format_with_style(text, style).ok()?;
-    Some(edits_for_formatted(text, formatted))
+    Some(edits_for_formatted(text, formatted, encoding))
 }
 
 /// The whole-document edit replacing `text` with its formatted form (empty when
 /// already formatted). The single source of the edit geometry shared by the
 /// re-parse path ([`compute_format_edits`]) and the cached-tree path.
-pub(crate) fn edits_for_formatted(text: &str, formatted: String) -> Vec<TextEdit> {
+pub(crate) fn edits_for_formatted(
+    text: &str,
+    formatted: String,
+    encoding: PositionEncoding,
+) -> Vec<TextEdit> {
     if formatted == text {
         return Vec::new();
     }
     let line_index = LineIndex::new(text);
-    let end = line_index.byte_to_position(text.len());
+    let end = line_index.byte_to_position(text.len(), encoding);
     vec![TextEdit {
         range: Range {
             start: Position::new(0, 0),
@@ -71,14 +80,15 @@ pub(crate) fn edits_for_formatted(text: &str, formatted: String) -> Vec<TextEdit
 pub(crate) fn parse_diagnostics_to_lsp(
     diagnostics: &[ParseDiagnostic],
     text: &str,
+    encoding: PositionEncoding,
 ) -> Vec<Diagnostic> {
     let line_index = LineIndex::new(text);
     diagnostics
         .iter()
         .map(|diag| Diagnostic {
             range: Range::new(
-                line_index.byte_to_position(diag.start),
-                line_index.byte_to_position(diag.end),
+                line_index.byte_to_position(diag.start, encoding),
+                line_index.byte_to_position(diag.end, encoding),
             ),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fatou".to_string()),
@@ -100,9 +110,10 @@ mod tests {
     #[test]
     fn format_via_db_matches_compute_and_falls_back() {
         let style = FormatStyle::default();
+        let encoding = PositionEncoding::Utf16;
         let path = Path::new("/work/a.jl");
         let buffer = "x=f( 1 )\n";
-        let expected = compute_format_edits(buffer, style);
+        let expected = compute_format_edits(buffer, style, encoding);
         assert!(
             matches!(&expected, Some(edits) if !edits.is_empty()),
             "fixture must require reformatting"
@@ -113,7 +124,7 @@ mod tests {
         db.upsert_file(path, buffer.to_string());
         let snapshot = db.snapshot();
         assert_eq!(
-            format_edits_via_db(&snapshot, path, buffer, style),
+            format_edits_via_db(&snapshot, path, buffer, style, encoding),
             expected,
             "cached-tree format must match the re-parse path"
         );
@@ -122,7 +133,7 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            format_edits_via_db(&stale.snapshot(), path, buffer, style),
+            format_edits_via_db(&stale.snapshot(), path, buffer, style, encoding),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -130,9 +141,26 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            format_edits_via_db(&empty.snapshot(), path, buffer, style),
+            format_edits_via_db(&empty.snapshot(), path, buffer, style, encoding),
             expected,
             "untracked path must fall back to the buffer text"
         );
+    }
+
+    /// The whole-document replacement range's end position follows the
+    /// negotiated encoding when the last line contains multi-byte characters.
+    #[test]
+    fn edit_end_position_follows_encoding() {
+        // U+1F600 is 4 bytes in UTF-8, 2 UTF-16 units.
+        let text = "x = \"\u{1F600}\"";
+        let formatted = "y".to_string();
+        let end_utf16 = edits_for_formatted(text, formatted.clone(), PositionEncoding::Utf16)[0]
+            .range
+            .end;
+        let end_utf8 = edits_for_formatted(text, formatted, PositionEncoding::Utf8)[0]
+            .range
+            .end;
+        assert_eq!(end_utf16, Position::new(0, 8));
+        assert_eq!(end_utf8, Position::new(0, 10));
     }
 }

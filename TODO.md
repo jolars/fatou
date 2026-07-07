@@ -66,8 +66,10 @@ completion would feel broken on day one.
   the spec, full-replacement (`range: None`) changes still honored, positions
   clamped via `LineIndex::position_to_byte`. Whole-file reparse stays fine
   until token/block reparse splicing lands (see Parser → Incremental).
-- [ ] Position-encoding negotiation (UTF-16 default, honor `utf-8` when the
-  client offers it) on top of `text/line_index.rs`.
+- [x] Position-encoding negotiation (UTF-16 default, honor `utf-8` when the
+  client offers it) on top of `text/line_index.rs`: `PositionEncoding` threads
+  from the two-step initialize handshake (`negotiate_position_encoding` in
+  `src/lsp/server.rs`) through document sync, diagnostics, and formatting.
 - [ ] LSP test strategy: a pure `compute_*` function per feature that takes
   text plus position and returns the response type (arity's pattern), plus
   the existing in-memory connection test in `tests/lsp.rs`.

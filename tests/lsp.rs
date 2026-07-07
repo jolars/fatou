@@ -5,8 +5,9 @@
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, FormattingOptions, InitializeParams, Position,
+    ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentFormattingParams, FormattingOptions,
+    GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
     PublishDiagnosticsParams, Range, TextDocumentContentChangeEvent, TextDocumentIdentifier,
     TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
@@ -190,6 +191,11 @@ fn applies_incremental_range_edits() {
                 result["capabilities"]["textDocumentSync"],
                 serde_json::json!(2),
                 "expected TextDocumentSyncKind::INCREMENTAL"
+            );
+            assert_eq!(
+                result["capabilities"]["positionEncoding"],
+                serde_json::json!("utf-16"),
+                "a client offering no encodings gets the LSP default"
             );
         }
         other => panic!("expected an InitializeResult, got {other:?}"),
@@ -442,6 +448,169 @@ fn publishes_versioned_diagnostics_across_edits() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(2),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// A client offering `utf-8` in `general.positionEncodings` gets it advertised
+/// back, and the server then reads incoming range positions as byte offsets:
+/// an edit deleting the 2-byte `é` (1 UTF-16 unit) is specified as 2 character
+/// units, and the resulting buffer is pinned exactly through a formatting
+/// round trip.
+#[test]
+fn negotiates_utf8_position_encoding() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake offering utf-8 ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams {
+                capabilities: ClientCapabilities {
+                    general: Some(GeneralClientCapabilities {
+                        position_encodings: Some(vec![
+                            PositionEncodingKind::UTF8,
+                            PositionEncodingKind::UTF16,
+                        ]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result = resp.result.unwrap();
+            assert_eq!(
+                result["capabilities"]["positionEncoding"],
+                serde_json::json!("utf-8"),
+                "expected the offered utf-8 encoding to be picked"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let recv_diagnostics = |client: &Connection| -> PublishDiagnosticsParams {
+        loop {
+            match client.receiver.recv().unwrap() {
+                Message::Notification(note) if note.method == "textDocument/publishDiagnostics" => {
+                    return serde_json::from_value(note.params).unwrap();
+                }
+                _ => {}
+            }
+        }
+    };
+
+    // --- open "éy=1\n" (unformatted, but valid: no diagnostics) ---
+    let uri = Uri::from_str("file:///work/utf8.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "\u{00E9}y=1\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(1));
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- delete the leading `é` with a byte-offset range: (0,0)..(0,2).
+    // Misread as UTF-16 units this would delete `éy`, leaving the parse
+    // error `=1`; read as bytes it leaves the valid `y=1`. ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: Some(Range::new(Position::new(0, 0), Position::new(0, 2))),
+                    range_length: None,
+                    text: String::new(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(2));
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- formatting the still-unformatted buffer reveals its exact content ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/formatting".to_string(),
+            params: serde_json::to_value(DocumentFormattingParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                options: FormattingOptions {
+                    tab_size: 4,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let edits: Option<Vec<TextEdit>> =
+                serde_json::from_value(resp.result.unwrap()).unwrap();
+            let edits = edits.expect("formatting edits");
+            assert_eq!(edits.len(), 1, "expected a single whole-document edit");
+            assert_eq!(
+                edits[0].new_text, "y = 1\n",
+                "the edit must have deleted exactly the 2-byte `é`"
+            );
+        }
+        other => panic!("expected a formatting response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

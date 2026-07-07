@@ -17,7 +17,7 @@ use lsp_types::{
 };
 
 use crate::formatter::FormatStyle;
-use crate::text::apply_content_changes;
+use crate::text::{PositionEncoding, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
 use super::read_jobs::ReadJob;
@@ -49,6 +49,8 @@ pub(crate) struct GlobalState {
     /// job and runs the read off-thread against the cached parse. See
     /// [`run_read`](super::read_jobs::run_read).
     read_tx: Sender<ReadJob>,
+    /// The position encoding negotiated at initialize, fixed for the session.
+    encoding: PositionEncoding,
 }
 
 impl GlobalState {
@@ -56,12 +58,14 @@ impl GlobalState {
         sender: Sender<Message>,
         analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
+        encoding: PositionEncoding,
     ) -> Self {
         Self {
             documents: HashMap::new(),
             sender,
             analysis_tx,
             read_tx,
+            encoding,
         }
     }
 
@@ -140,7 +144,7 @@ impl GlobalState {
                     let Some(doc) = self.documents.get_mut(&uri) else {
                         return;
                     };
-                    apply_content_changes(&mut doc.text, params.content_changes);
+                    apply_content_changes(&mut doc.text, params.content_changes, self.encoding);
                     doc.version = params.text_document.version;
                     self.send_analysis(uri);
                 }

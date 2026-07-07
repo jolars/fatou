@@ -2,9 +2,10 @@
 
 use lsp_types::TextDocumentContentChangeEvent;
 
-use super::LineIndex;
+use super::{LineIndex, PositionEncoding};
 
-/// Apply a `didChange` batch to `text` in place.
+/// Apply a `didChange` batch to `text` in place, interpreting range positions
+/// in the negotiated `encoding`.
 ///
 /// Changes apply sequentially: each range is interpreted against the text as
 /// it stands after the previous change, so the line table is rebuilt per
@@ -12,7 +13,11 @@ use super::LineIndex;
 /// from clients even under incremental sync), so application starts at the
 /// last such change and everything before it is skipped. Out-of-range
 /// positions clamp to the end of the line or buffer.
-pub fn apply_content_changes(text: &mut String, changes: Vec<TextDocumentContentChangeEvent>) {
+pub fn apply_content_changes(
+    text: &mut String,
+    changes: Vec<TextDocumentContentChangeEvent>,
+    encoding: PositionEncoding,
+) {
     let start = changes
         .iter()
         .rposition(|change| change.range.is_none())
@@ -21,8 +26,8 @@ pub fn apply_content_changes(text: &mut String, changes: Vec<TextDocumentContent
         match change.range {
             Some(range) => {
                 let index = LineIndex::new(text);
-                let start = index.position_to_byte(range.start);
-                let end = index.position_to_byte(range.end);
+                let start = index.position_to_byte(range.start, encoding);
+                let end = index.position_to_byte(range.end, encoding);
                 text.replace_range(start..end, &change.text);
             }
             None => {
@@ -60,7 +65,7 @@ mod tests {
 
     fn apply(initial: &str, changes: Vec<TextDocumentContentChangeEvent>) -> String {
         let mut text = initial.to_string();
-        apply_content_changes(&mut text, changes);
+        apply_content_changes(&mut text, changes, PositionEncoding::Utf16);
         text
     }
 
@@ -99,6 +104,19 @@ mod tests {
             apply("\u{1F600}x", vec![ranged((0, 2), (0, 3), "y")]),
             "\u{1F600}y"
         );
+    }
+
+    #[test]
+    fn utf8_offsets_after_surrogate_pair() {
+        // Under the negotiated utf-8 encoding, U+1F600 is 4 units (bytes), so
+        // character 4 is just past the emoji.
+        let mut text = "\u{1F600}x".to_string();
+        apply_content_changes(
+            &mut text,
+            vec![ranged((0, 4), (0, 5), "y")],
+            PositionEncoding::Utf8,
+        );
+        assert_eq!(text, "\u{1F600}y");
     }
 
     #[test]

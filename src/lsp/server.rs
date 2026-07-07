@@ -5,7 +5,12 @@ use std::error::Error;
 
 use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
-use lsp_types::{OneOf, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind};
+use lsp_types::{
+    ClientCapabilities, InitializeParams, OneOf, PositionEncodingKind, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
+};
+
+use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, spawn_analysis_thread};
 use super::read_jobs::ReadJob;
@@ -24,13 +29,42 @@ pub fn run() -> Result<(), DynError> {
 
 /// Perform the initialize handshake on `connection`, then run the message loop.
 /// Split out from [`run`] so tests can drive it over an in-memory connection.
+///
+/// The handshake is two-step ([`Connection::initialize_start`] /
+/// [`Connection::initialize_finish`]) rather than [`Connection::initialize`]
+/// because the advertised capabilities depend on the client's: the position
+/// encoding is negotiated from `general.positionEncodings`.
 pub fn serve(connection: &Connection) -> Result<(), DynError> {
-    connection.initialize(serde_json::to_value(server_capabilities())?)?;
-    main_loop(connection)
+    let (id, params) = connection.initialize_start()?;
+    let params: InitializeParams = serde_json::from_value(params)?;
+    let encoding = negotiate_position_encoding(&params.capabilities);
+    let result = serde_json::json!({ "capabilities": server_capabilities(encoding) });
+    connection.initialize_finish(id, result)?;
+    main_loop(connection, encoding)
 }
 
-fn server_capabilities() -> ServerCapabilities {
+/// Pick the position encoding for the session: UTF-8 (plain byte offsets, no
+/// re-encoding on our side) when the client offers it, otherwise the mandatory
+/// LSP default of UTF-16.
+fn negotiate_position_encoding(capabilities: &ClientCapabilities) -> PositionEncoding {
+    let offered = capabilities
+        .general
+        .as_ref()
+        .and_then(|general| general.position_encodings.as_deref())
+        .unwrap_or_default();
+    if offered.contains(&PositionEncodingKind::UTF8) {
+        PositionEncoding::Utf8
+    } else {
+        PositionEncoding::Utf16
+    }
+}
+
+fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
     ServerCapabilities {
+        position_encoding: Some(match encoding {
+            PositionEncoding::Utf8 => PositionEncodingKind::UTF8,
+            PositionEncoding::Utf16 => PositionEncodingKind::UTF16,
+        }),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(
             TextDocumentSyncKind::INCREMENTAL,
         )),
@@ -42,7 +76,7 @@ fn server_capabilities() -> ServerCapabilities {
 /// The main event loop: dispatch incoming JSON-RPC messages and analysis
 /// results. Owns no salsa database (see the module docs); joins the analysis
 /// thread before returning.
-fn main_loop(connection: &Connection) -> Result<(), DynError> {
+fn main_loop(connection: &Connection, encoding: PositionEncoding) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
     let (read_tx, read_rx) = crossbeam_channel::unbounded::<ReadJob>();
@@ -51,9 +85,10 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
     // read-phase). Its workers must outlive both `state` and the analysis
     // thread; the drop order at the end of this function guarantees that.
     let read_pool = TaskPool::new("fatou-lsp-read", read_pool_size());
-    let analysis_handle = spawn_analysis_thread(analysis_rx, read_rx, out_tx, read_pool.spawner());
+    let analysis_handle =
+        spawn_analysis_thread(analysis_rx, read_rx, out_tx, read_pool.spawner(), encoding);
 
-    let mut state = GlobalState::new(connection.sender.clone(), analysis_tx, read_tx);
+    let mut state = GlobalState::new(connection.sender.clone(), analysis_tx, read_tx, encoding);
 
     loop {
         select! {
@@ -82,4 +117,51 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
     drop(state);
     let _ = analysis_handle.join();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use lsp_types::GeneralClientCapabilities;
+
+    use super::*;
+
+    fn caps_offering(encodings: Option<Vec<PositionEncodingKind>>) -> ClientCapabilities {
+        ClientCapabilities {
+            general: Some(GeneralClientCapabilities {
+                position_encodings: encodings,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn negotiation_defaults_to_utf16() {
+        // No `general` capabilities at all, and `general` without an
+        // `positionEncodings` offer, both fall back to the mandatory default.
+        let none = ClientCapabilities::default();
+        assert_eq!(negotiate_position_encoding(&none), PositionEncoding::Utf16);
+        assert_eq!(
+            negotiate_position_encoding(&caps_offering(None)),
+            PositionEncoding::Utf16
+        );
+        assert_eq!(
+            negotiate_position_encoding(&caps_offering(Some(vec![
+                PositionEncodingKind::UTF16,
+                PositionEncodingKind::UTF32,
+            ]))),
+            PositionEncoding::Utf16
+        );
+    }
+
+    #[test]
+    fn negotiation_prefers_offered_utf8() {
+        assert_eq!(
+            negotiate_position_encoding(&caps_offering(Some(vec![
+                PositionEncodingKind::UTF16,
+                PositionEncodingKind::UTF8,
+            ]))),
+            PositionEncoding::Utf8
+        );
+    }
 }

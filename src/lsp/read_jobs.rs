@@ -7,6 +7,7 @@ use lsp_server::{Message, RequestId, Response};
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
+use crate::text::PositionEncoding;
 
 use super::format::format_edits_via_db;
 
@@ -37,7 +38,7 @@ impl ReadJob {
 /// Service a read-only job against a db `snapshot`, replying to the client.
 /// Runs on a read-pool worker; the `snapshot` is dropped on return so it never
 /// blocks the analysis thread's next write longer than the job itself.
-pub(crate) fn run_read(snapshot: Analysis, job: ReadJob) {
+pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncoding) {
     match job {
         ReadJob::Format {
             id,
@@ -46,7 +47,7 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob) {
             style,
             sender,
         } => {
-            let result = format_edits_via_db(&snapshot, &path, &text, style);
+            let result = format_edits_via_db(&snapshot, &path, &text, style, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
     }

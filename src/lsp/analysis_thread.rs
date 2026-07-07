@@ -19,6 +19,7 @@ use lsp_types::Uri;
 use salsa::Database as _;
 
 use crate::incremental::IncrementalDatabase;
+use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
 use super::read_jobs::{ReadJob, run_read};
@@ -40,6 +41,7 @@ pub(crate) fn spawn_analysis_thread(
     read_rx: Receiver<ReadJob>,
     out_tx: Sender<Outbound>,
     read_spawner: Spawner,
+    encoding: PositionEncoding,
 ) -> JoinHandle<()> {
     let (done_tx, done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
     std::thread::Builder::new()
@@ -52,6 +54,7 @@ pub(crate) fn spawn_analysis_thread(
                 inflight: None,
                 pending: HashMap::new(),
                 read_spawner,
+                encoding,
             };
             worker.run(&analysis_rx, &read_rx, &done_rx);
         })
@@ -124,6 +127,8 @@ struct AnalysisWorker {
     /// Submit-side handle onto the read pool, shared with the main loop. Used
     /// for read jobs (formatting) and the analysis read-phase.
     read_spawner: Spawner,
+    /// The position encoding negotiated at initialize, fixed for the session.
+    encoding: PositionEncoding,
 }
 
 impl AnalysisWorker {
@@ -163,7 +168,8 @@ impl AnalysisWorker {
                     // racing write trips `salsa::Cancelled`, handled by the
                     // job's fallback).
                     let snapshot = self.db.snapshot();
-                    self.read_spawner.spawn(move || run_read(snapshot, job));
+                    let encoding = self.encoding;
+                    self.read_spawner.spawn(move || run_read(snapshot, job, encoding));
                 }
             }
         }
@@ -224,6 +230,7 @@ impl AnalysisWorker {
         let snapshot = self.db.snapshot();
         let out_tx = self.out_tx.clone();
         let done_tx = self.done_tx.clone();
+        let encoding = self.encoding;
         let AnalysisRequest {
             uri, text, version, ..
         } = req;
@@ -233,7 +240,7 @@ impl AnalysisWorker {
         });
         self.read_spawner.spawn(move || {
             let result = salsa::Cancelled::catch(AssertUnwindSafe(|| {
-                parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text)
+                parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding)
             }));
             if let Ok(diags) = result {
                 let _ = out_tx.send(Outbound::Diagnostics {

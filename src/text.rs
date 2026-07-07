@@ -4,4 +4,4 @@ pub mod edit;
 pub mod line_index;
 
 pub use edit::apply_content_changes;
-pub use line_index::{LineCol, LineIndex};
+pub use line_index::{LineCol, LineIndex, PositionEncoding};
