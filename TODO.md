@@ -112,6 +112,16 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: block-quote reflow (`block_quote/`, fixtures-only, no code). A
+  `QUOTE_SYM` over a `PAREN_EXPR` wrapping an `end`-block (`:(if a; b end)`,
+  `:(function f(x) x end)`, `:(let x = 1; x end)`, `:(begin x end)`,
+  `:(for i in x; g(i) end)`, `:(quote y end)`) reflows across lines: the paren
+  frames its own lines and the block indents inside. Already canonical via
+  `lower_paren`'s width-driven reflow (the inner block forces HardLines, so the
+  paren group breaks) -- no `QUOTE_SYM`-specific code, deterministic and
+  input-independent. Inline `;`-block quotes (`:(a; b; c)`) stay flat via
+  `lower_paren_block`. User ratified across-lines as canonical (over a hug form).
+  Gate 111->112.
 - [x] Formatter: quoted symbols and inline quote exprs (`symbols/`, fixtures-only,
   no code). A `QUOTE_SYM` (`:foo`, `:+`, `:end`, `:(x + 1)`, `:(:nested)`,
   `:(a = 1)`, `:(x[1])`, `:(foo(a, b))`) is already canonical via the transparent

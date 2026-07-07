@@ -118,44 +118,50 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (quoted symbols + inline quote exprs locked)
+## Latest session (block-quote reflow locked)
 
 `test(formatter)` (fixtures-only, **no code change**). Closed ranked target #1. A
-`QUOTE_SYM` (`:foo`, `:bar123`, `:+`, `:end`, `:(x + 1)`, `:(a + b * c)`,
-`:(:nested)`, `:(a = 1)`, `:(x[1])`, `:(foo(a, b))`) is **already canonical via the
-transparent path**: the `COLON` is emitted verbatim and **snugs to its operand**
-because the parser leaves no whitespace token between them, and the operand —
-`NAME` / operator token (`PLUS`) / `END_KW` / `PAREN_EXPR` — recurses through
-`lower_node`. So a quoted paren's interior normalizes exactly like a bare paren
-(`:( x+1 )`→`:(x + 1)`, `:(a+b*c)`→`:(a + b * c)`, `:(x[ 1 ])`→`:(x[1])`,
-`:(foo( a ,b ))`→`:(foo(a, b))`), a nested quote `:(:nested)` stays snug, and a
-quoted assignment `:(a = 1)` gets binary spacing. Verified idempotent + stable.
+`QUOTE_SYM` over a `PAREN_EXPR` wrapping an `end`-block (`:(if a; b end)`,
+`:(function f(x) x end)`, `:(let x = 1; x end)`, `:(begin x end)`,
+`:(for i in x; g(i) end)`, `:(quote y end)`) is **already canonical via the
+transparent path**: the `COLON` snugs to the `PAREN_EXPR`, which recurses through
+`lower_paren`'s width-driven group. The inner block lowers to forced HardLines
+(every block body breaks), so the paren group **can't be flat** and frames its own
+lines — the block indents one step inside, `)` returns to column 0. Uniform across
+every `end`-block family; source spelling normalizes on the way (`function  f(x)  x
+ end`→clean, `let x=1`→`let x = 1`). Inline `;`-block quotes (`:(a; b; c)`) stay
+flat via `lower_paren_block`, and simple-expr quotes (`:(x = 1)`) stay inline
+(covered by `symbols/`). Verified input-independent (3 spellings → identical),
+idempotent, and the broken form reparses as the same `QUOTE_SYM`/`PAREN_EXPR`.
 
-**No decision needed / no friction.** The canonical forms follow directly from
-existing ratified rules (colon snug like the transpose `'` and `lower_splat`,
-binary spacing, call/index normalization via the paren's inner recursion).
-`expected.jl` derived from those principles, confirmed to coincide with current
-output — not blind-captured.
+**Decision (AskUserQuestion).** User chose **accept across-lines as canonical**
+over a **hug form** (`:(if a⏎    b⏎end)`, which would need `QUOTE_SYM`-specific code
+to hug `:(`/`)` to the block and hard-code a special case) and over a bail (the
+current path already *is* transparent, so bailing = the same across-lines output).
+The across-lines form falls straight out of the generic `lower_paren` reflow with
+**no special-casing**, which is why it's the principled choice. `expected.jl`
+authored to that design, confirmed to coincide with current output — not
+blind-captured.
 
-**Scope decision (AskUserQuestion).** **Block-quote** forms — a `QUOTE_SYM` over a
-`PAREN_EXPR` wrapping a block (`:(if a; b end)`, `:(function f(x) x end)`) —
-currently reflow **across lines** (`:(⏎    if a⏎        b⏎    end⏎)`), which is
-deterministic and stable but a distinct layout question. User chose **inline cases
-only**, leaving block-quote to its own future construct. Deliberately **excluded**
-from the fixture.
+Gated `block_quote/` (8 lines in one file: quoted `if`, quoted `function`, quoted
+`let`, quoted `begin`, quoted `for`, nested quoted `quote`, inline `;`-block
+control, multi-statement `if` body). Gate 111→112; stability + clippy + fmt + full
+suite green. No parser/lexer blocker.
 
-Gated `symbols/` (10 lines in one file: plain symbol, digit symbol, operator
-symbol, keyword `:end`, quoted binary (spacing normalize), quoted precedence
-chain, nested quote, quoted assignment, quoted index, quoted call). Gate 110→111;
-stability + clippy + fmt + full suite green. No parser/lexer blocker.
+**Ranked next targets:** (1) Re-evaluate the source-break-mirroring bracket/matrix
+rules against the width-driven reflow engine (the largest carried debt — the
+comment-bearing matrix path still mirrors). (2) Sweep remaining Runic-rationale doc
+comments in `rules.rs`. (3) char/string-macro literal variants.
 
-**Ranked next targets:** (1) **Block-quote reflow** (`:(if a; b end)` and friends)
-— decide whether the across-lines form is canonical or should stay inline / bail;
-the natural follow-on now that inline quotes are locked. (2) Re-evaluate the
-source-break-mirroring bracket/matrix rules against the width-driven reflow engine
-(the largest carried debt — the comment-bearing matrix path still mirrors). (3)
-Sweep remaining Runic-rationale doc comments in `rules.rs`. (4) char/string-macro
-literal variants.
+## Earlier: quoted symbols + inline quote exprs locked
+
+`test(formatter)` (fixtures-only, **no code**). A `QUOTE_SYM` (`:foo`, `:+`,
+`:end`, `:(x + 1)`, `:(a + b * c)`, `:(:nested)`, `:(a = 1)`, `:(x[1])`,
+`:(foo(a, b))`) is **already canonical via the transparent path**: the `COLON`
+snugs to its operand (no whitespace token between them) and the operand recurses
+through `lower_node`, so a quoted paren's interior normalizes like a bare paren.
+No decision / no friction. Block-quote forms were deliberately excluded and became
+this session's target. Gated `symbols/` (10 lines). Gate 110→111.
 
 ## Earlier: transpose/adjoint postfix `'` locked
 
