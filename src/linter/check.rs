@@ -1,15 +1,19 @@
 //! The linting pipeline: parse each file, run the enabled rules, and report a
-//! status. Parse diagnostics block linting a file (the rules need a clean tree).
+//! status. Parse diagnostics block the rules for a file (they need a clean
+//! tree) but are still reported, under the [`PARSE_ERROR_RULE`] pseudo-rule.
 
 use std::path::{Path, PathBuf};
 
 use crate::config::LintConfig;
 use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
-use crate::linter::diagnostic::Diagnostic;
+use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::rules::{ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
 use crate::text::LineIndex;
+
+/// The pseudo-rule id under which parse diagnostics are reported.
+pub const PARSE_ERROR_RULE: &str = "parse-error";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintStatus {
@@ -97,12 +101,26 @@ pub fn check_document(text: &str) -> LintFileReport {
 fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFileReport {
     let parsed = parse(text);
     if !parsed.diagnostics.is_empty() {
+        let diagnostics = parsed
+            .diagnostics
+            .iter()
+            .map(|diag| Diagnostic {
+                path: path.map(Path::to_path_buf),
+                start: diag.start,
+                end: diag.end,
+                rule: PARSE_ERROR_RULE.to_string(),
+                severity: Severity::Error,
+                message: diag.message.clone(),
+                fixes: Vec::new(),
+                suppressed: false,
+            })
+            .collect();
         return LintFileReport {
             path: path.map(Path::to_path_buf),
             status: LintStatus::ParseDiagnostics {
                 count: parsed.diagnostics.len(),
             },
-            diagnostics: Vec::new(),
+            diagnostics,
         };
     }
 
@@ -145,5 +163,19 @@ mod tests {
     fn clean_file_reports_clean() {
         let report = check_document("x = 1\n");
         assert_eq!(report.status, LintStatus::Clean);
+    }
+
+    #[test]
+    fn parse_diagnostics_are_surfaced() {
+        let report = check_document("f (x)\n");
+        assert!(matches!(
+            report.status,
+            LintStatus::ParseDiagnostics { count } if count > 0
+        ));
+        assert_eq!(report.diagnostics.len(), 1);
+        let diag = &report.diagnostics[0];
+        assert_eq!(diag.rule, PARSE_ERROR_RULE);
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(!diag.message.is_empty());
     }
 }
