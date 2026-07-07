@@ -11,6 +11,7 @@ use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
+use super::folding::folding_ranges_via_db;
 use super::format::format_edits_via_db;
 use super::symbols::document_symbols_via_db;
 
@@ -32,6 +33,12 @@ pub(crate) enum ReadJob {
         text: String,
         sender: Sender<Message>,
     },
+    FoldingRanges {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -41,6 +48,7 @@ impl ReadJob {
         match self {
             ReadJob::Format { id, sender, .. } => (id, sender),
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
+            ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -69,6 +77,16 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             let symbols = document_symbols_via_db(&snapshot, &path, &text, encoding);
             let result = DocumentSymbolResponse::Nested(symbols);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::FoldingRanges {
+            id,
+            path,
+            text,
+            sender,
+        } => {
+            // Folds are line-only, so the position encoding is irrelevant.
+            let folds = folding_ranges_via_db(&snapshot, &path, &text);
+            let _ = sender.send(Message::Response(Response::new_ok(id, folds)));
         }
     }
 }

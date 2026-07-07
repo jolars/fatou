@@ -3,13 +3,14 @@
 //! cleanly. Exercises the threaded pipeline end-to-end: main loop → analysis
 //! thread (write-phase) → read pool (read-phase) → version-gated publish.
 
-use fatou::lsp::compute_document_symbols;
+use fatou::lsp::{compute_document_symbols, compute_folding_ranges};
 use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbol, DocumentSymbolParams,
-    FormattingOptions, GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
+    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
+    GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
     PublishDiagnosticsParams, Range, SymbolKind, TextDocumentContentChangeEvent,
     TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
@@ -920,6 +921,339 @@ fn serves_document_symbols() {
             id: RequestId::from(3),
             method: "textDocument/documentSymbol".to_string(),
             params: symbol_params(&unknown),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            assert_eq!(resp.result, Some(serde_json::Value::Null));
+        }
+        other => panic!("expected a null response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+// --- folding ranges: unit tests on the pure compute function ---
+
+/// Folds as `(start_line, end_line, kind)` triples, asserting the line-only
+/// convention (no character offsets) along the way.
+fn folds(text: &str) -> Vec<(u32, u32, Option<FoldingRangeKind>)> {
+    compute_folding_ranges(text)
+        .into_iter()
+        .map(|fold| {
+            assert_eq!(fold.start_character, None, "folds must be line-only");
+            assert_eq!(fold.end_character, None, "folds must be line-only");
+            (fold.start_line, fold.end_line, fold.kind)
+        })
+        .collect()
+}
+
+#[test]
+fn folding_covers_nested_definition_and_loop_blocks() {
+    let text = "\
+module M
+function f(x)
+    for i in xs
+        x
+    end
+end
+end
+";
+    assert_eq!(
+        folds(text),
+        vec![(0, 6, None), (1, 5, None), (2, 4, None)],
+        "module, function, and loop each fold through their `end`"
+    );
+}
+
+#[test]
+fn folding_covers_every_expression_block_kind() {
+    let text = "\
+struct S
+    a
+end
+while c
+    x
+end
+begin
+    x
+end
+quote
+    x
+end
+let y = 1
+    y
+end
+map(xs) do x
+    x
+end
+";
+    assert_eq!(
+        folds(text),
+        vec![
+            (0, 2, None),
+            (3, 5, None),
+            (6, 8, None),
+            (9, 11, None),
+            (12, 14, None),
+            (15, 17, None),
+        ],
+    );
+}
+
+#[test]
+fn folding_makes_if_and_try_arms_collapse_individually() {
+    let text = "\
+if a
+    x
+elseif b
+    y
+else
+    z
+end
+";
+    assert_eq!(
+        folds(text),
+        vec![(0, 6, None), (2, 3, None), (4, 5, None)],
+        "the whole `if` folds, and so does each later arm"
+    );
+
+    let text = "\
+try
+    x
+catch err
+    y
+finally
+    z
+end
+";
+    assert_eq!(
+        folds(text),
+        vec![(0, 6, None), (2, 3, None), (4, 5, None)],
+        "the whole `try` folds, and so do `catch` and `finally`"
+    );
+}
+
+#[test]
+fn folding_skips_single_line_constructs() {
+    let text = "\
+begin; x; end
+f(x) = x
+using A
+# lone comment
+";
+    assert_eq!(folds(text), vec![]);
+}
+
+#[test]
+fn folding_groups_comment_runs() {
+    let text = "\
+# a
+# b
+x = 1
+";
+    assert_eq!(folds(text), vec![(0, 1, Some(FoldingRangeKind::Comment))]);
+}
+
+#[test]
+fn folding_ignores_trailing_comments_in_runs() {
+    let text = "\
+# lead
+x = 1  # tail
+# c
+# d
+";
+    assert_eq!(
+        folds(text),
+        vec![(2, 3, Some(FoldingRangeKind::Comment))],
+        "a trailing comment neither starts nor joins a run"
+    );
+}
+
+#[test]
+fn folding_covers_comment_runs_inside_blocks() {
+    let text = "\
+function f(x)
+    # a
+    # b
+    x
+end
+";
+    assert_eq!(
+        folds(text),
+        vec![(0, 4, None), (1, 2, Some(FoldingRangeKind::Comment))],
+    );
+}
+
+#[test]
+fn folding_covers_multi_line_block_comments() {
+    let text = "\
+#=
+body
+=#
+x = 1
+";
+    assert_eq!(folds(text), vec![(0, 2, Some(FoldingRangeKind::Comment))]);
+}
+
+#[test]
+fn folding_groups_consecutive_imports() {
+    let text = "\
+using A
+import B
+using C
+
+x = 1
+";
+    assert_eq!(folds(text), vec![(0, 2, Some(FoldingRangeKind::Imports))]);
+}
+
+#[test]
+fn folding_splits_import_groups_on_blank_lines() {
+    let text = "\
+using A
+
+using B
+using C
+";
+    assert_eq!(folds(text), vec![(2, 3, Some(FoldingRangeKind::Imports))]);
+}
+
+#[test]
+fn folding_covers_a_multi_line_import_on_its_own() {
+    let text = "\
+using Foo:
+    a,
+    b
+using Bar
+";
+    assert_eq!(
+        folds(text),
+        vec![
+            (0, 3, Some(FoldingRangeKind::Imports)),
+            (0, 2, Some(FoldingRangeKind::Imports)),
+        ],
+        "the group folds as a whole and the multi-line statement by itself"
+    );
+}
+
+#[test]
+fn folding_is_best_effort_on_broken_input() {
+    // A missing `end`: whatever partial folds come out must not panic.
+    let _ = folds("function f(x)\n    if x\n        x\n    end\n");
+}
+
+#[test]
+fn serves_folding_ranges() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result = resp.result.unwrap();
+            assert_eq!(
+                result["capabilities"]["foldingRangeProvider"],
+                serde_json::json!(true),
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document; drain its diagnostics publish ---
+    let uri = Uri::from_str("file:///work/folding.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(x)\n    x\nend\n# a\n# b\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+
+    // --- request folding ranges ---
+    let folding_params = |uri: &Uri| {
+        serde_json::to_value(FoldingRangeParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/foldingRange".to_string(),
+            params: folding_params(&uri),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let folds: Vec<FoldingRange> = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let triples: Vec<_> = folds
+                .into_iter()
+                .map(|f| (f.start_line, f.end_line, f.kind))
+                .collect();
+            assert_eq!(
+                triples,
+                vec![(0, 2, None), (3, 4, Some(FoldingRangeKind::Comment))],
+            );
+        }
+        other => panic!("expected a foldingRange response, got {other:?}"),
+    }
+
+    // --- an unknown document answers null ---
+    let unknown = Uri::from_str("file:///work/never-opened.jl").unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/foldingRange".to_string(),
+            params: folding_params(&unknown),
         }))
         .unwrap();
     match client.receiver.recv().unwrap() {

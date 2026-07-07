@@ -45,6 +45,7 @@
 #![allow(clippy::mutable_key_type)]
 
 mod analysis_thread;
+mod folding;
 mod format;
 mod read_jobs;
 mod server;
@@ -53,6 +54,7 @@ mod symbols;
 mod task_pool;
 mod uri;
 
+pub use folding::compute_folding_ranges;
 pub use format::compute_format_edits;
 pub use server::{run, serve};
 pub use symbols::compute_document_symbols;

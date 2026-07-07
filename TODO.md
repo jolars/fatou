@@ -87,7 +87,14 @@ semantic model grows.
   children, qualified extension names kept whole), plus a
   `document_symbols_via_db` warm path off the cached parse mirroring
   formatting's.
-- [ ] Folding ranges (block constructs, comment runs, import groups).
+- [x] Folding ranges (block constructs, comment runs, import groups): pure
+  `compute_folding_ranges` walk in `src/lsp/folding.rs` (definition and
+  expression blocks fold through their `end`, `elseif`/`else`/`catch`/
+  `finally` arms fold individually, runs of ≥2 whole-line comments and of
+  consecutive `using`/`import` statements group, multi-line block comments
+  and import statements fold alone), plus a `folding_ranges_via_db` warm path
+  off the cached parse. Folds are line-only (no character offsets), so the
+  result is independent of the negotiated position encoding.
 - [ ] Selection range (expand selection along CST ancestors).
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 - [ ] Syntax-driven semantic tokens (keywords, macro calls, string macros,
