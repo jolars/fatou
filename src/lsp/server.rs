@@ -7,7 +7,8 @@ use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
     ClientCapabilities, FoldingRangeProviderCapability, InitializeParams, OneOf,
-    PositionEncodingKind, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    PositionEncodingKind, SelectionRangeProviderCapability, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
 use crate::text::PositionEncoding;
@@ -71,6 +72,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         document_formatting_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         ..Default::default()
     }
 }

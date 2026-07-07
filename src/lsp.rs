@@ -48,6 +48,7 @@ mod analysis_thread;
 mod folding;
 mod format;
 mod read_jobs;
+mod selection;
 mod server;
 mod state;
 mod symbols;
@@ -56,5 +57,6 @@ mod uri;
 
 pub use folding::compute_folding_ranges;
 pub use format::compute_format_edits;
+pub use selection::compute_selection_ranges;
 pub use server::{run, serve};
 pub use symbols::compute_document_symbols;

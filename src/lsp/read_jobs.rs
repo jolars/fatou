@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, RequestId, Response};
 
-use lsp_types::DocumentSymbolResponse;
+use lsp_types::{DocumentSymbolResponse, Position};
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
@@ -13,6 +13,7 @@ use crate::text::PositionEncoding;
 
 use super::folding::folding_ranges_via_db;
 use super::format::format_edits_via_db;
+use super::selection::selection_ranges_via_db;
 use super::symbols::document_symbols_via_db;
 
 /// A read-only request the analysis thread services by cloning its salsa db
@@ -39,6 +40,13 @@ pub(crate) enum ReadJob {
         text: String,
         sender: Sender<Message>,
     },
+    SelectionRanges {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        positions: Vec<Position>,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -49,6 +57,7 @@ impl ReadJob {
             ReadJob::Format { id, sender, .. } => (id, sender),
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
             ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
+            ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -87,6 +96,16 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             // Folds are line-only, so the position encoding is irrelevant.
             let folds = folding_ranges_via_db(&snapshot, &path, &text);
             let _ = sender.send(Message::Response(Response::new_ok(id, folds)));
+        }
+        ReadJob::SelectionRanges {
+            id,
+            path,
+            text,
+            positions,
+            sender,
+        } => {
+            let ranges = selection_ranges_via_db(&snapshot, &path, &text, &positions, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, ranges)));
         }
     }
 }

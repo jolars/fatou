@@ -95,7 +95,13 @@ semantic model grows.
   and import statements fold alone), plus a `folding_ranges_via_db` warm path
   off the cached parse. Folds are line-only (no character offsets), so the
   result is independent of the negotiated position encoding.
-- [ ] Selection range (expand selection along CST ancestors).
+- [x] Selection range (expand selection along CST ancestors): pure
+  `compute_selection_ranges` in `src/lsp/selection.rs` (token under the cursor
+  first — skipped for whitespace, kept for comments — then ancestor nodes with
+  same-extent wrappers deduped; a cursor on a token boundary starts from the
+  more selectable side, identifiers first), plus a `selection_ranges_via_db`
+  warm path off the cached parse. Positions are character-precise, so the
+  negotiated encoding threads through both directions of the conversion.
 - [ ] Range formatting (`textDocument/rangeFormatting`).
 - [ ] Syntax-driven semantic tokens (keywords, macro calls, string macros,
   literals); refined with resolved names in Phase 6.

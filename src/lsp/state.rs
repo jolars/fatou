@@ -12,11 +12,12 @@ use lsp_types::notification::{
 };
 use lsp_types::request::{
     DocumentSymbolRequest, FoldingRangeRequest, Formatting, Request as RequestTrait,
+    SelectionRangeRequest,
 };
 use lsp_types::{
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentFormattingParams, DocumentSymbolParams, FoldingRangeParams, PublishDiagnosticsParams,
-    Uri,
+    SelectionRangeParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -77,6 +78,7 @@ impl GlobalState {
             Formatting::METHOD => self.on_formatting(req),
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
+            SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -145,6 +147,27 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_selection_ranges(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<SelectionRangeParams>(SelectionRangeRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid selectionRange params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::SelectionRanges {
+            id,
+            path: path_for(&uri),
+            text,
+            positions: params.positions,
             sender: self.sender.clone(),
         });
     }

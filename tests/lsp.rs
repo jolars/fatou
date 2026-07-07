@@ -3,7 +3,7 @@
 //! cleanly. Exercises the threaded pipeline end-to-end: main loop → analysis
 //! thread (write-phase) → read pool (read-phase) → version-gated publish.
 
-use fatou::lsp::{compute_document_symbols, compute_folding_ranges};
+use fatou::lsp::{compute_document_symbols, compute_folding_ranges, compute_selection_ranges};
 use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
@@ -11,8 +11,9 @@ use lsp_types::{
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentSymbol, DocumentSymbolParams,
     FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
     GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
-    PublishDiagnosticsParams, Range, SymbolKind, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
+    PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SymbolKind,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, TextEdit, Uri,
+    VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -1254,6 +1255,272 @@ fn serves_folding_ranges() {
             id: RequestId::from(3),
             method: "textDocument/foldingRange".to_string(),
             params: folding_params(&unknown),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            assert_eq!(resp.result, Some(serde_json::Value::Null));
+        }
+        other => panic!("expected a null response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+// --- selection ranges: unit tests on the pure compute function ---
+
+/// Flatten a linked chain into its ranges, innermost first, asserting each
+/// step strictly contains the one below it (containment is what makes the
+/// client's repeated "expand" well-defined).
+fn flatten_chain(selection: SelectionRange) -> Vec<Range> {
+    let mut out = vec![selection.range];
+    let mut current = selection;
+    while let Some(parent) = current.parent {
+        current = *parent;
+        let (inner, outer) = (*out.last().unwrap(), current.range);
+        assert!(
+            outer.start <= inner.start && inner.end <= outer.end && inner != outer,
+            "each step must strictly widen: {inner:?} -> {outer:?}"
+        );
+        out.push(current.range);
+    }
+    out
+}
+
+/// The chain for a single position under UTF-8, flattened innermost-first.
+fn chain(text: &str, line: u32, character: u32) -> Vec<Range> {
+    let mut chains = compute_selection_ranges(
+        text,
+        &[Position::new(line, character)],
+        PositionEncoding::Utf8,
+    );
+    assert_eq!(chains.len(), 1, "one chain per requested position");
+    flatten_chain(chains.remove(0))
+}
+
+fn sel(start_line: u32, start_char: u32, end_line: u32, end_char: u32) -> Range {
+    Range::new(
+        Position::new(start_line, start_char),
+        Position::new(end_line, end_char),
+    )
+}
+
+#[test]
+fn selection_expands_from_identifier_through_enclosing_nodes() {
+    // Cursor on the `x` of `x + 1`: identifier, binary expression, body
+    // block, whole definition, whole file.
+    assert_eq!(
+        chain("function f(x)\n    x + 1\nend\n", 1, 4),
+        vec![
+            sel(1, 4, 1, 5),
+            sel(1, 4, 1, 9),
+            sel(0, 13, 2, 0),
+            sel(0, 0, 2, 3),
+            sel(0, 0, 3, 0),
+        ],
+    );
+}
+
+#[test]
+fn selection_widens_stepwise_through_nested_calls() {
+    // Cursor on the inner `x`: every nesting level is its own step, and
+    // same-extent wrapper nodes contribute no zero-growth steps (the
+    // strict-widening assertion in `flatten_chain` backstops that).
+    assert_eq!(
+        chain("f(g(x), y)\n", 0, 4),
+        vec![
+            sel(0, 4, 0, 5),
+            sel(0, 3, 0, 6),
+            sel(0, 2, 0, 6),
+            sel(0, 1, 0, 10),
+            sel(0, 0, 0, 10),
+            sel(0, 0, 1, 0),
+        ],
+    );
+}
+
+#[test]
+fn selection_returns_one_chain_per_position_in_order() {
+    let text = "function f(x)\n    x + 1\nend\n";
+    let chains = compute_selection_ranges(
+        text,
+        &[Position::new(1, 4), Position::new(0, 9)],
+        PositionEncoding::Utf8,
+    );
+    let innermost: Vec<Range> = chains
+        .into_iter()
+        .map(|chain| flatten_chain(chain)[0])
+        .collect();
+    assert_eq!(
+        innermost,
+        vec![sel(1, 4, 1, 5), sel(0, 9, 0, 10)],
+        "chains answer the requested positions in request order"
+    );
+}
+
+#[test]
+fn selection_prefers_identifier_at_token_boundary() {
+    // Cursor between `f` and `(`: expansion starts from the identifier, not
+    // the parenthesis.
+    assert_eq!(chain("f(x)\n", 0, 1)[0], sel(0, 0, 0, 1));
+}
+
+#[test]
+fn selection_in_whitespace_starts_at_the_enclosing_node() {
+    // Cursor in the body's leading indentation: whitespace itself is not a
+    // selection step, so the chain starts at the enclosing block.
+    assert_eq!(
+        chain("function f(x)\n    x + 1\nend\n", 1, 0),
+        vec![sel(0, 13, 2, 0), sel(0, 0, 2, 3), sel(0, 0, 3, 0)],
+    );
+}
+
+#[test]
+fn selection_in_a_comment_starts_at_the_comment() {
+    assert_eq!(chain("# hi\nx = 1\n", 0, 2)[0], sel(0, 0, 0, 4));
+}
+
+#[test]
+fn selection_respects_the_negotiated_encoding() {
+    // `α` is two UTF-8 bytes but one UTF-16 unit, shifting every column on
+    // the line: the same cursor-on-`1` request differs in both the position
+    // decoded and the ranges encoded.
+    let text = "α + 1\n";
+    let utf8 = compute_selection_ranges(text, &[Position::new(0, 5)], PositionEncoding::Utf8);
+    assert_eq!(
+        flatten_chain(utf8.into_iter().next().unwrap())[0],
+        sel(0, 5, 0, 6)
+    );
+    let utf16 = compute_selection_ranges(text, &[Position::new(0, 4)], PositionEncoding::Utf16);
+    assert_eq!(
+        flatten_chain(utf16.into_iter().next().unwrap())[0],
+        sel(0, 4, 0, 5)
+    );
+}
+
+#[test]
+fn selection_clamps_out_of_bounds_and_handles_empty_input() {
+    // An empty file yields a single parentless (empty) range.
+    assert_eq!(chain("", 0, 0), vec![sel(0, 0, 0, 0)]);
+    // A position past the end of the buffer clamps instead of panicking.
+    assert_eq!(chain("x\n", 5, 0), vec![sel(0, 0, 1, 0)]);
+}
+
+#[test]
+fn selection_is_best_effort_on_broken_input() {
+    // A missing `end`: whatever partial chain comes out must not panic.
+    let _ = chain("function f(x)\n    if x\n        x\n", 1, 7);
+}
+
+#[test]
+fn serves_selection_ranges() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result = resp.result.unwrap();
+            assert_eq!(
+                result["capabilities"]["selectionRangeProvider"],
+                serde_json::json!(true),
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document; drain its diagnostics publish ---
+    let uri = Uri::from_str("file:///work/selection.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(x)\n    x + 1\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+
+    // --- request selection ranges for two positions ---
+    let selection_params = |uri: &Uri, positions: Vec<Position>| {
+        serde_json::to_value(SelectionRangeParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            positions,
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/selectionRange".to_string(),
+            params: selection_params(&uri, vec![Position::new(1, 4), Position::new(0, 9)]),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let chains: Vec<SelectionRange> = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let innermost: Vec<Range> = chains
+                .into_iter()
+                .map(|chain| flatten_chain(chain)[0])
+                .collect();
+            assert_eq!(innermost, vec![sel(1, 4, 1, 5), sel(0, 9, 0, 10)]);
+        }
+        other => panic!("expected a selectionRange response, got {other:?}"),
+    }
+
+    // --- an unknown document answers null ---
+    let unknown = Uri::from_str("file:///work/never-opened.jl").unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/selectionRange".to_string(),
+            params: selection_params(&unknown, vec![Position::new(0, 0)]),
         }))
         .unwrap();
     match client.receiver.recv().unwrap() {
