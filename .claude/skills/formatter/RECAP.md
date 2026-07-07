@@ -118,49 +118,46 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (broadcast operators locked + tight `.^`)
+## Latest session (transpose/adjoint postfix `'` locked)
 
-`feat(formatter)`. Sourced the fixture inputs from the parser broadcast fixtures
-(`broadcasting`, `broadcast_bitwise_operators`, `broadcast_type_comparison`, ...)
-per the user's steer. The whole dotted-operator family was **already canonical**
-(spaced `.+`/`.*`/`.==`, unary `.-x`, broadcast assignment `.=`, broadcast call
-`f.(x, y)`, operator-as-function `.&(x, y)`, width-driven chain break + call
-explode), so the intended landing was a fixtures-only lock — **until the user
-asked whether `.^` should be spaced.** It was: `.^` spaced while its base `^` is
-tight (`x .^ 2 .+ y .^ 2`).
+`test(formatter)` (fixtures-only, **no code change**). Closed ranked target #3's
+first item. A `POSTFIX_EXPR` (`A'`, `A''`, `A'''`, `[1 2]'`, `M' * v`, `(a + b)'`,
+`f(x)'`, `B'[1]`, `B'[1]'`) is **already canonical via the transparent path**: the
+`TRANSPOSE` token is emitted verbatim and **snugs to its operand** because the
+parser leaves no whitespace token between them, the operand recurses through
+`lower_node` and normalizes (`[ 1  2 ]'`→`[1 2]'`, `M'*v`→`M' * v`,
+`( a + b )'`→`(a + b)'`, `f( x )'`→`f(x)'`), and a `)'` **rides a broken bracket
+closer** via the ratified continuation-`fits` postfix-tail rule (wide call explodes
+one-arg-per-line with `)'` on the closer; wide paren breaks at its parens with the
+inner chain at continuation indent and `)'` riding).
 
-**Decision (AskUserQuestion).** The real rule is *a dotted operator inherits its
-base operator's spacing* — `.+`/`.*`/`.==` are spaced because `+`/`*`/`==` are, so
-`.^` should be **tight** because `^` is (same very-high precedence, tighter than
-unary minus on the base). User chose **tight** over "keep spaced," consciously
-reversing the prior recorded decision in the `is_tight_binop` doc comment.
+**No decision needed / no friction.** The canonical forms follow directly from
+existing ratified rules (postfix snug like `lower_splat`/`lower_unary`, binary
+spacing, postfix-tail-rides-closer). `expected.jl` derived from those principles,
+confirmed to coincide with current output — not blind-captured.
 
-**Change.** Added `DOT_CARET` to `is_tight_binop`, reworded the doc comment to the
-inheritance principle. **Retokenization guard** (the trap this surfaced): `2 .^ n`
-snugged to `2.^n` re-lexes `2.` as the float `2.0` (and `0x1f .^ n` → `0x1f.`, a
-hex float) — a silent tree change. New `dot_caret_snug_retokenizes` keeps `.^`
-spaced when the previous operand's final token is an `INTEGER` or `HEX_INT`;
-binary/octal (`0b101`, `0o17`), floats (`2.0`), imaginary (`2im`), identifiers, and
-bracket-closing operands are safe and go tight. `lower_binary`'s loop now tracks
-`prev_operand` to consult it. `.^=` is a `DOT_CARET_EQ` assignment, never routed
-through the tight path. Mirrors the `LITERAL`/`ends_in_bracket` guards in
-`lower_splat`/`lower_unary`.
+**Non-issue clarified (recorded so it isn't re-litigated):** `A '` (a space before
+the prime) is **not** a Tenet-1-equivalent spelling — in Julia the space makes `'`
+open a **char literal**, so `A '` is a genuine parse error (Fatou yields an `ERROR`
+node with an unterminated `CHAR '\n` that poisons the rest of the lex). Bailing
+transparent there is correct; it is deliberately **excluded** from the fixture. The
+sibling `x = 'a'` (a real char literal) stays distinct from transpose and is in the
+fixture as the disambiguation case.
 
-Gated `broadcasting/` (14 lines in one file: dotted binops, mixed-tier `.* b.^c`,
-comparison, unary `.-x`, `.=`, `f.(x,y)`, composed `g.(a) .+ h.(b)`, `.&(x,y)`,
-`x.^2 .+ y.^2`, the two integer-operand `.^`-stays-spaced guards, source-spacing
-normalization, wide-chain break, wide-call explode). Gate 108→109; stability +
-clippy + fmt + full suite green. No parser/lexer blocker. `expected.jl`
-hand-authored to the tight-`.^` decision (not blind-captured — the pre-decision
-output spaced `.^`).
+Gated `transpose/` (12 lines in one file: name/double/triple prime, matrix
+transpose, transpose operand in a spaced binary, paren transpose, call transpose,
+char-literal disambiguation, transpose-then-index `B'[1]`,
+transpose-index-transpose `B'[1]'`, wide-call `)'`-rides-closer, wide-paren
+`)'`-rides-closer). Gate 109→110; stability + clippy + fmt + full suite green. No
+parser/lexer blocker.
 
-**Ranked next targets:** (1) Re-evaluate the source-break-mirroring bracket/matrix
-rules against the width-driven reflow engine (the largest carried debt — the
-comment-bearing matrix path still mirrors). (2) Sweep remaining Runic-rationale doc
-comments in `rules.rs`. (3) More parser-fixture-sourced constructs still unlocked
-in the formatter gate: `transpose` (postfix `'` — already canonical via transparent,
-a thin fixtures-only lock), `symbols` (`:(x + 1)` normalizes), char/string-macro
-literal variants.
+**Ranked next targets:** (1) `symbols` (`:foo`, `:(x + 1)`, `:end`) — verified this
+session to be **already canonical** (`:( x+1 )`→`:(x + 1)`, `:(a+b*c)`→`:(a + b * c)`
+via the quote paren's inner recursion); a thin fixtures-only lock, the obvious next
+pick. (2) Re-evaluate the source-break-mirroring bracket/matrix rules against the
+width-driven reflow engine (the largest carried debt — the comment-bearing matrix
+path still mirrors). (3) Sweep remaining Runic-rationale doc comments in `rules.rs`.
+(4) char/string-macro literal variants.
 
 ## Earlier: chained-pair grouped tail stays arrow-tier — ranked #1 retired
 
@@ -454,6 +451,15 @@ from the pivot — safe to delete, not regenerated by anything.
 
 ## Earlier sessions
 
+- **Broadcast operators + tight `.^`** (committed `015c4a0`+earlier, `feat`): the
+  dotted-operator family was already canonical (spaced `.+`/`.*`/`.==`, unary `.-x`,
+  `.=`, `f.(x, y)`, `.&(x, y)`, width-driven chain break + call explode); the one
+  change was making `.^` **tight** (a dotted op inherits its base op's spacing, so
+  `.^` follows tight `^` — `x .^ 2 .+ y .^ 2`; user-ratified over "keep spaced").
+  Added `DOT_CARET` to `is_tight_binop` with a retokenization guard
+  (`dot_caret_snug_retokenizes`): `.^` after a decimal/hex integer stays spaced
+  (`2 .^ n` — snugging would re-lex `2.` as a float). Gated `broadcasting/` (14).
+  Gate 108→109.
 - **Let binding-list width-driven reflow** (committed `3bbc07d`, `feat`): a too-wide
   `let a = 1, b = 2, …` header breaks one binding per line (comma trailing, wrapped
   bindings at one continuation indent, first on the `let ` line); source-broken

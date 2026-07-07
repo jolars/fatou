@@ -112,6 +112,14 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: transpose/adjoint postfix `'` (`transpose/`, fixtures-only, no
+  code). A `POSTFIX_EXPR` (`A'`, `A''`, `[1 2]'`, `(a + b)'`, `f(x)'`, `B'[1]`) is
+  already canonical via the transparent path: the `TRANSPOSE` token snugs to its
+  operand (no whitespace token between them), the operand recurses and normalizes,
+  and `)'` rides a broken bracket closer via the ratified continuation-`fits`
+  postfix-tail rule. Space-before-`'` (`A '`) is a genuine Julia parse error (the
+  `'` opens a char literal), not a Tenet-1-equivalent spelling, so bailing there is
+  correct. `x = 'a'` (char literal) stays distinct. Gate 109->110.
 - [x] Formatter: broadcast operators + tight `.^` (`broadcasting/`). Sourced the
   fixture inputs from the parser broadcast fixtures. The dotted operators were
   already canonical (spaced `.+`/`.*`/`.==`, unary `.-x`, broadcast assignment
