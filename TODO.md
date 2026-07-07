@@ -112,6 +112,14 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: quoted symbols and inline quote exprs (`symbols/`, fixtures-only,
+  no code). A `QUOTE_SYM` (`:foo`, `:+`, `:end`, `:(x + 1)`, `:(:nested)`,
+  `:(a = 1)`, `:(x[1])`, `:(foo(a, b))`) is already canonical via the transparent
+  path: the `COLON` snugs to its operand (no whitespace token between them) and the
+  operand recurses through `lower_node`, so a quoted paren's interior normalizes
+  (`:( x+1 )` -> `:(x + 1)`, `:(a+b*c)` -> `:(a + b * c)`). Block-quote forms
+  (`:(if a; b end)` reflowing across lines) are a separate future construct, left
+  out of this fixture. Gate 110->111.
 - [x] Formatter: transpose/adjoint postfix `'` (`transpose/`, fixtures-only, no
   code). A `POSTFIX_EXPR` (`A'`, `A''`, `[1 2]'`, `(a + b)'`, `f(x)'`, `B'[1]`) is
   already canonical via the transparent path: the `TRANSPOSE` token snugs to its

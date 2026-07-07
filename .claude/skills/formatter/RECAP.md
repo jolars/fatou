@@ -118,46 +118,57 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (transpose/adjoint postfix `'` locked)
+## Latest session (quoted symbols + inline quote exprs locked)
 
-`test(formatter)` (fixtures-only, **no code change**). Closed ranked target #3's
-first item. A `POSTFIX_EXPR` (`A'`, `A''`, `A'''`, `[1 2]'`, `M' * v`, `(a + b)'`,
-`f(x)'`, `B'[1]`, `B'[1]'`) is **already canonical via the transparent path**: the
-`TRANSPOSE` token is emitted verbatim and **snugs to its operand** because the
-parser leaves no whitespace token between them, the operand recurses through
-`lower_node` and normalizes (`[ 1  2 ]'`→`[1 2]'`, `M'*v`→`M' * v`,
-`( a + b )'`→`(a + b)'`, `f( x )'`→`f(x)'`), and a `)'` **rides a broken bracket
-closer** via the ratified continuation-`fits` postfix-tail rule (wide call explodes
-one-arg-per-line with `)'` on the closer; wide paren breaks at its parens with the
-inner chain at continuation indent and `)'` riding).
+`test(formatter)` (fixtures-only, **no code change**). Closed ranked target #1. A
+`QUOTE_SYM` (`:foo`, `:bar123`, `:+`, `:end`, `:(x + 1)`, `:(a + b * c)`,
+`:(:nested)`, `:(a = 1)`, `:(x[1])`, `:(foo(a, b))`) is **already canonical via the
+transparent path**: the `COLON` is emitted verbatim and **snugs to its operand**
+because the parser leaves no whitespace token between them, and the operand —
+`NAME` / operator token (`PLUS`) / `END_KW` / `PAREN_EXPR` — recurses through
+`lower_node`. So a quoted paren's interior normalizes exactly like a bare paren
+(`:( x+1 )`→`:(x + 1)`, `:(a+b*c)`→`:(a + b * c)`, `:(x[ 1 ])`→`:(x[1])`,
+`:(foo( a ,b ))`→`:(foo(a, b))`), a nested quote `:(:nested)` stays snug, and a
+quoted assignment `:(a = 1)` gets binary spacing. Verified idempotent + stable.
 
 **No decision needed / no friction.** The canonical forms follow directly from
-existing ratified rules (postfix snug like `lower_splat`/`lower_unary`, binary
-spacing, postfix-tail-rides-closer). `expected.jl` derived from those principles,
-confirmed to coincide with current output — not blind-captured.
+existing ratified rules (colon snug like the transpose `'` and `lower_splat`,
+binary spacing, call/index normalization via the paren's inner recursion).
+`expected.jl` derived from those principles, confirmed to coincide with current
+output — not blind-captured.
 
-**Non-issue clarified (recorded so it isn't re-litigated):** `A '` (a space before
-the prime) is **not** a Tenet-1-equivalent spelling — in Julia the space makes `'`
-open a **char literal**, so `A '` is a genuine parse error (Fatou yields an `ERROR`
-node with an unterminated `CHAR '\n` that poisons the rest of the lex). Bailing
-transparent there is correct; it is deliberately **excluded** from the fixture. The
-sibling `x = 'a'` (a real char literal) stays distinct from transpose and is in the
-fixture as the disambiguation case.
+**Scope decision (AskUserQuestion).** **Block-quote** forms — a `QUOTE_SYM` over a
+`PAREN_EXPR` wrapping a block (`:(if a; b end)`, `:(function f(x) x end)`) —
+currently reflow **across lines** (`:(⏎    if a⏎        b⏎    end⏎)`), which is
+deterministic and stable but a distinct layout question. User chose **inline cases
+only**, leaving block-quote to its own future construct. Deliberately **excluded**
+from the fixture.
 
-Gated `transpose/` (12 lines in one file: name/double/triple prime, matrix
-transpose, transpose operand in a spaced binary, paren transpose, call transpose,
-char-literal disambiguation, transpose-then-index `B'[1]`,
-transpose-index-transpose `B'[1]'`, wide-call `)'`-rides-closer, wide-paren
-`)'`-rides-closer). Gate 109→110; stability + clippy + fmt + full suite green. No
-parser/lexer blocker.
+Gated `symbols/` (10 lines in one file: plain symbol, digit symbol, operator
+symbol, keyword `:end`, quoted binary (spacing normalize), quoted precedence
+chain, nested quote, quoted assignment, quoted index, quoted call). Gate 110→111;
+stability + clippy + fmt + full suite green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) `symbols` (`:foo`, `:(x + 1)`, `:end`) — verified this
-session to be **already canonical** (`:( x+1 )`→`:(x + 1)`, `:(a+b*c)`→`:(a + b * c)`
-via the quote paren's inner recursion); a thin fixtures-only lock, the obvious next
-pick. (2) Re-evaluate the source-break-mirroring bracket/matrix rules against the
-width-driven reflow engine (the largest carried debt — the comment-bearing matrix
-path still mirrors). (3) Sweep remaining Runic-rationale doc comments in `rules.rs`.
-(4) char/string-macro literal variants.
+**Ranked next targets:** (1) **Block-quote reflow** (`:(if a; b end)` and friends)
+— decide whether the across-lines form is canonical or should stay inline / bail;
+the natural follow-on now that inline quotes are locked. (2) Re-evaluate the
+source-break-mirroring bracket/matrix rules against the width-driven reflow engine
+(the largest carried debt — the comment-bearing matrix path still mirrors). (3)
+Sweep remaining Runic-rationale doc comments in `rules.rs`. (4) char/string-macro
+literal variants.
+
+## Earlier: transpose/adjoint postfix `'` locked
+
+`test(formatter)` (fixtures-only, **no code change**). A `POSTFIX_EXPR` (`A'`,
+`A''`, `[1 2]'`, `M' * v`, `(a + b)'`, `f(x)'`, `B'[1]`, `B'[1]'`) is **already
+canonical via the transparent path**: the `TRANSPOSE` token snugs to its operand
+(no whitespace token between them), the operand recurses and normalizes
+(`( a + b )'`→`(a + b)'`, `f( x )'`→`f(x)'`), and `)'` **rides a broken bracket
+closer** via the ratified continuation-`fits` postfix-tail rule. `A '` (space
+before the prime) is a genuine Julia parse error (`'` opens a char literal), not a
+Tenet-1-equivalent spelling, so bailing there is correct and it is **excluded**;
+`x = 'a'` (a real char literal) stays distinct and is the disambiguation case.
+Gated `transpose/` (12 lines). Gate 109→110.
 
 ## Earlier: chained-pair grouped tail stays arrow-tier — ranked #1 retired
 
