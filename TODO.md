@@ -19,6 +19,15 @@ leverage.
   `f (a)`, `a [1]`, `A {T}`, `f(a) (b)` parse as `CALL_EXPR`/`INDEX_EXPR`/`CURLY_EXPR`
   with an interior `WHITESPACE`; JuliaSyntax rejects with `whitespace is not allowed
   here`. Surfaced by the formatter; see parser-parity RECAP queued target.
+- [ ] Parser: an unclosed `(` with an empty interior emits no diagnostic. `(`,
+  `x = (`, `x = ( \n`, and `x = (#c\n` (only trivia — whitespace, newline,
+  comment, or EOF — after the paren) produce an `ERROR` node wrapping the
+  `LPAREN` but an empty `diagnostics` list, so the LSP publishes nothing for a
+  buffer the editor should flag. Any interior content already reports:
+  `x = (a` ⇒ ``unclosed `(` ``, `y = (;` ⇒ `unterminated argument list`. The
+  empty-interior recovery path builds the ERROR node without emitting; it
+  should report ``unclosed `(` `` like the non-empty case. (Surfaced by the
+  LSP end-to-end diagnostics test, 2026-07-07.)
 
 ### Incremental
 
@@ -44,24 +53,35 @@ leverage.
 
 ## Language server
 
-The LSP roadmap, phased so each phase unblocks the next. The current server
-(`src/lsp.rs`) is a single-threaded skeleton: full-document sync, whole-file
-formatting, and parse-error diagnostics. Architecture and feature order follow
-arity (which follows rust-analyzer). The package/stdlib index (Phase 3)
-deliberately lands *before* completion and hover (Phase 4): in Julia most
-identifiers resolve to Base or package symbols, so local-only completion would
-feel broken on day one.
+The LSP roadmap, phased so each phase unblocks the next. Architecture and
+feature order follow arity (which follows rust-analyzer). The package/stdlib
+index (Phase 3) deliberately lands *before* completion and hover (Phase 4): in
+Julia most identifiers resolve to Base or package symbols, so local-only
+completion would feel broken on day one.
 
 ### Phase 0: server infrastructure
 
-- [ ] Threading rework of `src/lsp.rs` after arity's model: the main loop owns
-  no salsa database; a dedicated analysis thread is the sole salsa writer
-  (write-phase upserts with `&mut db`, read-phase analysis on a pool under
-  `salsa::Cancelled::catch`); a rayon read pool serves latency-sensitive
-  requests (hover, completion, formatting); a separate single-threaded index
-  pool isolates background package indexing so long harvests never starve
-  reads. Pending-edit coalescing (latest version per URI wins), cancellation
-  via `db.trigger_cancellation()`, version-gated diagnostic publish.
+- [x] Threading rework of `src/lsp.rs` after arity's model: the main loop owns
+  no salsa database; a dedicated analysis thread
+  (`src/lsp/analysis_thread.rs`) is the sole salsa writer (write-phase
+  `upsert_file` with `&mut db`; read-phase parse + diagnostic conversion on
+  the read pool under `salsa::Cancelled::catch`, holding a read-only
+  `Analysis` snapshot — `incremental.rs` — so read jobs *can't* write). The
+  read pool (`src/lsp/task_pool.rs`, rust-analyzer's `TaskPool` rather than
+  rayon's global pool, which has no priority concept) is sized to the
+  machine's parallelism and serves latency-sensitive requests: formatting
+  runs warm off the salsa-cached parse via `format_node` when the tracked
+  buffer matches the live text, falling back to a fresh parse on a cache miss
+  or a racing write. Pending edits are coalesced (latest version per URI
+  wins) and scheduled by the pure, unit-tested `decide` function: at most one
+  analysis in flight; a strictly-newer edit of the *same* URI cancels it via
+  `db.trigger_cancellation()`, a different URI waits its turn. The main
+  loop's version gate drops publishes for closed or superseded documents
+  (backstopping the finish-during-cancel race); diagnostics now carry the
+  buffer version. End-to-end coverage in `tests/lsp.rs` (open with a parse
+  error → versioned diagnostics → fixing edit → clear on close).
+  **Deferred:** the single-thread index pool lands with the package index
+  (Phase 3) — there is no unbounded background job to isolate yet.
 - [ ] Incremental (range) document sync (`TextDocumentSyncKind::INCREMENTAL`):
   apply range edits to the live buffer. Whole-file reparse stays fine until
   token/block reparse splicing lands (see Parser → Incremental).
