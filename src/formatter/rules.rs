@@ -176,6 +176,9 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
     let mut expect_operand = true;
     let mut operand_count = 0usize;
     let mut op_count = 0usize;
+    // The operand node most recently seen, so a tight `.^` can check it for the
+    // integer-literal retokenization hazard before snugging.
+    let mut prev_operand: Option<SyntaxNode> = None;
 
     for el in items {
         match el {
@@ -192,6 +195,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                     }
                     rest.push(ir);
                 }
+                prev_operand = Some(child);
                 operand_count += 1;
                 expect_operand = false;
             }
@@ -200,7 +204,14 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                     return lower_transparent(node);
                 }
                 // An operator. It sits trailing on the line it ends.
-                let tight = !is_assignment && is_tight_binop(tok.kind());
+                let tight = !is_assignment
+                    && is_tight_binop(tok.kind())
+                    // A `.^` after an integer literal would re-lex the operand's
+                    // trailing digit(s) plus the operator's leading `.` as a float.
+                    && !(tok.kind() == SyntaxKind::DOT_CARET
+                        && prev_operand
+                            .as_ref()
+                            .is_some_and(dot_caret_snug_retokenizes));
                 if tight {
                     rest.push(Ir::text(tok.text().to_string()));
                     next_sep = None;
@@ -4741,19 +4752,37 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
 /// Binary operators the target style keeps tight (no surrounding spaces).
 /// Everything else binary gets a space on each side.
 ///
-/// Three operators qualify. The *plain* `^` packs tight (`a ^ b` → `a^b`). The
-/// range `:` in its two-operand `BINARY_EXPR` form packs tight (`a : b` →
-/// `a:b`). And the field-access `.`
-/// (`a.b.c`): Julia *requires* it tight — `a . b` is a parse error — so a space
-/// here would emit invalid code. The broadcast `.^` (`DOT_CARET`) is spaced like
-/// other dotted operators, and the *stepped* range `a:b:c` parses as a
-/// `RANGE_EXPR` handled by [`lower_range`].
+/// A dotted (broadcast) operator inherits its base operator's spacing: `.+`/`.*`/
+/// `.==` are spaced because `+`/`*`/`==` are, and `.^` packs tight because `^`
+/// does. So four operators qualify. The *plain* `^` and the broadcast `.^`
+/// (`DOT_CARET`) both pack tight (`a ^ b` → `a^b`, `a .^ b` → `a.^b`) — they share
+/// the same very high precedence, tighter than unary minus on the base, which is
+/// why tight framing reads correctly (`a^b + c` groups as `(a^b) + c`). The range
+/// `:` in its two-operand `BINARY_EXPR` form packs tight (`a : b` → `a:b`). And the
+/// field-access `.` (`a.b.c`): Julia *requires* it tight — `a . b` is a parse error
+/// — so a space here would emit invalid code. The *stepped* range `a:b:c` parses as
+/// a `RANGE_EXPR` handled by [`lower_range`], and the broadcast compound assignment
+/// `.^=` (`DOT_CARET_EQ`) is an assignment, never routed here (assignment ops stay
+/// spaced).
 ///
 /// Note `&&`/`||` are deliberately **not** here: they canonicalize as spaced
 /// (the idiomatic form), whatever the input's spacing (Tenet 1).
 fn is_tight_binop(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        SyntaxKind::CARET | SyntaxKind::COLON | SyntaxKind::DOT
+        SyntaxKind::CARET | SyntaxKind::DOT_CARET | SyntaxKind::COLON | SyntaxKind::DOT
     )
+}
+
+/// True when snugging a following `.^` onto `operand` would retokenize. `2 .^ n`
+/// packed to `2.^n` re-lexes the `2.` as the float `2.0`, and `0x1f .^ n` → `0x1f.`,
+/// a hex float — silent tree changes — so a `.^` after a decimal or hexadecimal
+/// integer literal stays spaced. Binary/octal integers (`0b101`, `0o17`) don't form a
+/// float with a trailing `.`, and a `FLOAT`, imaginary literal, identifier, or
+/// bracket-closing operand is likewise safe; the guard keys on the final token being
+/// an `INTEGER` or `HEX_INT`.
+fn dot_caret_snug_retokenizes(operand: &SyntaxNode) -> bool {
+    operand
+        .last_token()
+        .is_some_and(|tok| matches!(tok.kind(), SyntaxKind::INTEGER | SyntaxKind::HEX_INT))
 }

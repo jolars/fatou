@@ -112,6 +112,16 @@ leverage.
 
 ## Formatter
 
+- [x] Formatter: broadcast operators + tight `.^` (`broadcasting/`). Sourced the
+  fixture inputs from the parser broadcast fixtures. The dotted operators were
+  already canonical (spaced `.+`/`.*`/`.==`, unary `.-x`, broadcast assignment
+  `.=`, broadcast call `f.(x, y)`, operator-as-function `.&(x, y)`, width-driven
+  chain break + call explode), but `.^` was spaced while its base `^` is tight.
+  Added `DOT_CARET` to `is_tight_binop` so a dotted operator inherits its base
+  operator's spacing (`x.^2 .+ y.^2`, user-ratified over "keep spaced"). Guarded
+  the retokenization hazard: `.^` after a decimal or hex integer literal stays
+  spaced (`2 .^ n`, `0x1f .^ n` — snugging would re-lex `2.`/`0x1f.` as a float),
+  via `dot_caret_snug_retokenizes` on the previous operand's final token.
 - [x] Formatter: chained-pair grouped tail stays arrow-tier
   (`chained_pair_grouped_tail/`). Resolved the long-standing ranked #1 target
   ("hug through a non-huggable-but-grouped innermost") as *already correct, no

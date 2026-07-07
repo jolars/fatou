@@ -118,7 +118,51 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (chained-pair grouped tail stays arrow-tier — ranked #1 retired)
+## Latest session (broadcast operators locked + tight `.^`)
+
+`feat(formatter)`. Sourced the fixture inputs from the parser broadcast fixtures
+(`broadcasting`, `broadcast_bitwise_operators`, `broadcast_type_comparison`, ...)
+per the user's steer. The whole dotted-operator family was **already canonical**
+(spaced `.+`/`.*`/`.==`, unary `.-x`, broadcast assignment `.=`, broadcast call
+`f.(x, y)`, operator-as-function `.&(x, y)`, width-driven chain break + call
+explode), so the intended landing was a fixtures-only lock — **until the user
+asked whether `.^` should be spaced.** It was: `.^` spaced while its base `^` is
+tight (`x .^ 2 .+ y .^ 2`).
+
+**Decision (AskUserQuestion).** The real rule is *a dotted operator inherits its
+base operator's spacing* — `.+`/`.*`/`.==` are spaced because `+`/`*`/`==` are, so
+`.^` should be **tight** because `^` is (same very-high precedence, tighter than
+unary minus on the base). User chose **tight** over "keep spaced," consciously
+reversing the prior recorded decision in the `is_tight_binop` doc comment.
+
+**Change.** Added `DOT_CARET` to `is_tight_binop`, reworded the doc comment to the
+inheritance principle. **Retokenization guard** (the trap this surfaced): `2 .^ n`
+snugged to `2.^n` re-lexes `2.` as the float `2.0` (and `0x1f .^ n` → `0x1f.`, a
+hex float) — a silent tree change. New `dot_caret_snug_retokenizes` keeps `.^`
+spaced when the previous operand's final token is an `INTEGER` or `HEX_INT`;
+binary/octal (`0b101`, `0o17`), floats (`2.0`), imaginary (`2im`), identifiers, and
+bracket-closing operands are safe and go tight. `lower_binary`'s loop now tracks
+`prev_operand` to consult it. `.^=` is a `DOT_CARET_EQ` assignment, never routed
+through the tight path. Mirrors the `LITERAL`/`ends_in_bracket` guards in
+`lower_splat`/`lower_unary`.
+
+Gated `broadcasting/` (14 lines in one file: dotted binops, mixed-tier `.* b.^c`,
+comparison, unary `.-x`, `.=`, `f.(x,y)`, composed `g.(a) .+ h.(b)`, `.&(x,y)`,
+`x.^2 .+ y.^2`, the two integer-operand `.^`-stays-spaced guards, source-spacing
+normalization, wide-chain break, wide-call explode). Gate 108→109; stability +
+clippy + fmt + full suite green. No parser/lexer blocker. `expected.jl`
+hand-authored to the tight-`.^` decision (not blind-captured — the pre-decision
+output spaced `.^`).
+
+**Ranked next targets:** (1) Re-evaluate the source-break-mirroring bracket/matrix
+rules against the width-driven reflow engine (the largest carried debt — the
+comment-bearing matrix path still mirrors). (2) Sweep remaining Runic-rationale doc
+comments in `rules.rs`. (3) More parser-fixture-sourced constructs still unlocked
+in the formatter gate: `transpose` (postfix `'` — already canonical via transparent,
+a thin fixtures-only lock), `symbols` (`:(x + 1)` normalizes), char/string-macro
+literal variants.
+
+## Earlier: chained-pair grouped tail stays arrow-tier — ranked #1 retired
 
 `test(formatter)` (fixtures-only, **no code change**). Resolved the long-standing
 ranked #1 target — "chained-pair hug through a *non-huggable-but-grouped*
