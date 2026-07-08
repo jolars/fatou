@@ -15,5 +15,9 @@ println(sum([1, 2, 3]))
 ```
 
 ```text
-example.jl:1:13: warning[unused-import] `sortperm` is imported but never used
+warning: unused-import
+ --> example.jl:1:13
+  |
+1 | using Base: sortperm, sum
+  |             ^^^^^^^^ `sortperm` is imported but never used
 ```

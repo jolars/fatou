@@ -25,8 +25,23 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_config: bool,
 
+    /// When to colorize human-readable output.
+    #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true)]
+    pub color: ColorChoice,
+
     #[command(subcommand)]
     pub command: Commands,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ColorChoice {
+    /// Colorize when writing to a terminal and `NO_COLOR` is unset.
+    #[default]
+    Auto,
+    /// Always colorize.
+    Always,
+    /// Never colorize.
+    Never,
 }
 
 #[derive(Subcommand)]

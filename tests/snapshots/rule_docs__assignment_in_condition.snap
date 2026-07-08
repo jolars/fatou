@@ -15,7 +15,12 @@ end
 ```
 
 ```text
-example.jl:1:4: warning[assignment-in-condition] assignment used as a condition; did you mean `==`?
+warning: assignment-in-condition
+ --> example.jl:1:4
+  |
+1 | if x = 5
+  |    ^^^^^ assignment used as a condition; did you mean `==`?
+  = help: Replace `=` with `==`
 ```
 
 After applying the fix:

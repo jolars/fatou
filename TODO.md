@@ -43,8 +43,10 @@ leverage.
   to a fixpoint. `render_rule_doc` gained an "After applying the fix" block so
   fixable rules document their result. Engine tests in `src/linter/fix.rs` and
   `tests/autofix.rs`.
-- [ ] `annotate-snippets`-based pretty diagnostics rendering (dependency noted
-  in `Cargo.toml`; `render.rs` is currently a compact one-liner renderer).
+- [x] `annotate-snippets`-based pretty diagnostics rendering. `Pretty` draws
+  source-context snippets (caret, rule title, severity color, fix hints);
+  `Concise` keeps the one-liner. A global `--color auto|always|never` flag gates
+  ANSI; human output goes to stderr, JSON to stdout.
 - [ ] Report unknown rule IDs in `select`/`ignore`. `all_rule_ids()` exists but
   is unwired; have `ResolvedRules::resolve` return the unrecognized IDs (arity's
   `(Self, Vec<String>)`) so the CLI can warn on a typo'd `--select`.

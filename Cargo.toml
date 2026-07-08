@@ -24,6 +24,7 @@ name = "fatou"
 path = "src/main.rs"
 
 [dependencies]
+annotate-snippets = "0.12.16"
 clap = { version = "4.6.1", features = ["derive"] }
 crossbeam-channel = "0.5"
 env_logger = "0.11.10"
@@ -38,8 +39,6 @@ serde_json = "1.0.145"
 similar = { version = "3.1.1", features = ["text"] }
 smol_str = "0.3"
 toml = "1.1.2"
-# Slated for later phases (noted in TODO.md): `annotate-snippets` for rich
-# pretty-printed lint diagnostics.
 
 [dev-dependencies]
 insta = "1.47.2"

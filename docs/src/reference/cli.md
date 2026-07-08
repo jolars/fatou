@@ -12,6 +12,17 @@ Fatou: a language server, formatter, and linter for Julia
 `--no-config`
 :   Ignore any discovered `fatou.toml` and use built-in defaults
 
+`--color <COLOR>`
+:   When to colorize human-readable output
+
+    Default value: `auto`
+
+    Possible values:
+
+    - `auto`: Colorize when writing to a terminal and `NO_COLOR` is unset
+    - `always`: Always colorize
+    - `never`: Never colorize
+
 ## `fatou parse`
 
 Parse and display the CST for debugging

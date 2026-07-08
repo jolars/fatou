@@ -15,5 +15,9 @@ end
 ```
 
 ```text
-example.jl:1:21: error[duplicate-argument] argument name `x` is used more than once
+error: duplicate-argument
+ --> example.jl:1:21
+  |
+1 | function dist(x, y, x)
+  |                     ^ argument name `x` is used more than once
 ```

@@ -1,10 +1,10 @@
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
 
-use fatou::cli::{Cli, Commands, LintOutput, ParseFormat};
+use fatou::cli::{Cli, ColorChoice, Commands, LintOutput, ParseFormat};
 use fatou::config::Config;
 use fatou::formatter::{self, FormatStyle};
 use fatou::linter::{self, LintStatus, OutputMode};
@@ -47,7 +47,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             output,
         } => {
             let config = load_config(&cli.config, cli.no_config)?;
-            run_lint(paths, output, fix, unsafe_fixes, &config)
+            run_lint(paths, output, fix, unsafe_fixes, cli.color, &config)
         }
         Commands::Lsp => fatou::lsp::run()
             .map(|()| ExitCode::SUCCESS)
@@ -131,6 +131,7 @@ fn run_lint(
     output: LintOutput,
     fix: bool,
     unsafe_fixes: bool,
+    color: ColorChoice,
     config: &Config,
 ) -> Result<ExitCode, String> {
     if paths.is_empty() {
@@ -144,9 +145,10 @@ fn run_lint(
     };
 
     if fix || unsafe_fixes {
-        return run_lint_fix(paths, mode, unsafe_fixes, config);
+        return run_lint_fix(paths, mode, unsafe_fixes, color, config);
     }
 
+    let use_color = color_enabled(color, std::io::stderr().is_terminal());
     let result =
         linter::check_paths_with_config(&paths, &config.lint).map_err(|e| e.to_string())?;
 
@@ -155,10 +157,10 @@ fn run_lint(
         .iter()
         .flat_map(|report| report.diagnostics.clone())
         .collect();
-    let rendered = linter::render_findings(&diagnostics, mode, &|path| {
+    let rendered = linter::render_findings(&diagnostics, mode, use_color, &|path| {
         path.and_then(|p| std::fs::read_to_string(p).ok())
     });
-    print!("{rendered}");
+    emit(mode, &rendered);
 
     let has_parse_errors = result
         .reports
@@ -167,7 +169,7 @@ fn run_lint(
     if result.total_findings > 0 || has_parse_errors {
         Ok(ExitCode::FAILURE)
     } else {
-        println!("checked {} file(s): clean", result.checked_files);
+        eprintln!("checked {} file(s): clean", result.checked_files);
         Ok(ExitCode::SUCCESS)
     }
 }
@@ -178,8 +180,10 @@ fn run_lint_fix(
     paths: Vec<PathBuf>,
     mode: OutputMode,
     unsafe_fixes: bool,
+    color: ColorChoice,
     config: &Config,
 ) -> Result<ExitCode, String> {
+    let use_color = color_enabled(color, std::io::stderr().is_terminal());
     let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
 
     let mut applied = 0usize;
@@ -197,19 +201,37 @@ fn run_lint_fix(
         remaining.extend(outcome.remaining);
     }
 
-    let rendered = linter::render_findings(&remaining, mode, &|path| {
+    let rendered = linter::render_findings(&remaining, mode, use_color, &|path| {
         path.and_then(|p| std::fs::read_to_string(p).ok())
     });
-    print!("{rendered}");
+    emit(mode, &rendered);
 
     if applied > 0 {
-        println!("fixed {applied} issue(s) in {changed_files} file(s)");
+        eprintln!("fixed {applied} issue(s) in {changed_files} file(s)");
     }
 
     if remaining.is_empty() {
         Ok(ExitCode::SUCCESS)
     } else {
         Ok(ExitCode::FAILURE)
+    }
+}
+
+/// Route rendered lint output: JSON to stdout (machine-readable), human-facing
+/// pretty/concise to stderr.
+fn emit(mode: OutputMode, rendered: &str) {
+    if matches!(mode, OutputMode::Json) {
+        print!("{rendered}");
+    } else {
+        eprint!("{rendered}");
+    }
+}
+
+fn color_enabled(choice: ColorChoice, is_terminal: bool) -> bool {
+    match choice {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => std::env::var_os("NO_COLOR").is_none() && is_terminal,
     }
 }
 

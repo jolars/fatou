@@ -50,7 +50,7 @@ pub fn render_rule_doc(rule: &dyn Rule) -> String {
 
         let report = check_source(Some(&path), example.source, &config);
         let source = example.source.to_string();
-        let rendered = render_findings(&report.diagnostics, OutputMode::Pretty, &|p| {
+        let rendered = render_findings(&report.diagnostics, OutputMode::Pretty, false, &|p| {
             (p == Some(path.as_path())).then(|| source.clone())
         });
         let _ = writeln!(out);

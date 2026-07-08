@@ -16,5 +16,9 @@ end
 ```
 
 ```text
-example.jl:2:5: warning[unused-binding] local variable `tmp` is assigned but never used
+warning: unused-binding
+ --> example.jl:2:5
+  |
+2 |     tmp = x + 1
+  |     ^^^ local variable `tmp` is assigned but never used
 ```
