@@ -9,5 +9,5 @@ pub mod nodes;
 pub use nodes::{
     ArgList, AssignmentExpr, BeginExpr, BinaryExpr, Block, CallExpr, Condition, ElseClause,
     ElseifClause, FunctionDef, IfExpr, IndexExpr, Literal, Name, ParenExpr, Root, Signature,
-    UnaryExpr,
+    StringLiteral, UnaryExpr,
 };

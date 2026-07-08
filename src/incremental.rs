@@ -11,13 +11,14 @@
 //! parse is deferred (see `TODO.md`); today every edit triggers a full parse,
 //! which is still correct.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use salsa::Setter;
 
 use crate::parser::{ParseDiagnostic, parse};
+use crate::project::{self, IncludeEdge};
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
 
@@ -83,6 +84,47 @@ pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode 
 #[salsa::tracked(returns(ref), unsafe(non_update_types))]
 pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel {
     SemanticModel::build(&parsed_tree_root(db, file))
+}
+
+// The firewall queries: range-free projections of [`semantic_model`] (or, for
+// [`include_edges`], of the parse tree). Each re-executes on any edit but
+// returns an `Eq` value unchanged by a body edit or a mere position shift, so
+// salsa backdates it and the project-level memos built on top are not rebuilt.
+// See [`crate::project`]. Together they are the barrier the `semantic_model`
+// doc above forward-refers to.
+
+/// The file's top-level definitions ([`crate::project::file_exports`]): what
+/// another file that `include`s this one sees. Editing a function body changes
+/// [`semantic_model`] but leaves this `BTreeSet` equal, so salsa backdates.
+#[salsa::tracked(returns(ref))]
+pub fn file_exports(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSet<String> {
+    project::file_exports(semantic_model(db, file))
+}
+
+/// The names the file reads but binds nowhere in it
+/// ([`crate::project::file_free_reads`]). The mirror firewall to
+/// [`file_exports`].
+#[salsa::tracked(returns(ref))]
+pub fn file_free_reads(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSet<String> {
+    project::file_free_reads(semantic_model(db, file))
+}
+
+/// The module-qualified names the file references, each a full dotted path
+/// ([`crate::project::file_qualified_reads`]).
+#[salsa::tracked(returns(ref))]
+pub fn file_qualified_reads(db: &dyn IncrementalDb, file: SourceFile) -> BTreeSet<String> {
+    project::file_qualified_reads(semantic_model(db, file))
+}
+
+/// The file's static `include("literal")` edges, in source order, resolved
+/// against the file's own directory ([`crate::project::include_edges`]). The
+/// path is an input field set once, so this re-runs only on a text edit and
+/// backdates when the edges are unchanged.
+#[salsa::tracked(returns(ref))]
+pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> Vec<IncludeEdge> {
+    let root = parsed_tree_root(db, file);
+    let base_dir = file.path(db).as_deref().and_then(Path::parent);
+    project::include_edges(&root, base_dir)
 }
 
 /// Lexically normalize `path` for use as a deduplication key: absolutize it
@@ -283,6 +325,28 @@ impl Analysis {
     /// The cached semantic model for `file`.
     pub fn semantic_model(&self, file: SourceFile) -> &SemanticModel {
         semantic_model(&self.0, file)
+    }
+
+    /// The file's top-level definitions (the [`file_exports`] firewall query).
+    pub fn file_exports(&self, file: SourceFile) -> &BTreeSet<String> {
+        file_exports(&self.0, file)
+    }
+
+    /// The names the file reads but binds nowhere (the [`file_free_reads`]
+    /// firewall query).
+    pub fn file_free_reads(&self, file: SourceFile) -> &BTreeSet<String> {
+        file_free_reads(&self.0, file)
+    }
+
+    /// The module-qualified names the file references (the
+    /// [`file_qualified_reads`] firewall query).
+    pub fn file_qualified_reads(&self, file: SourceFile) -> &BTreeSet<String> {
+        file_qualified_reads(&self.0, file)
+    }
+
+    /// The file's static `include` edges (the [`include_edges`] firewall query).
+    pub fn include_edges(&self, file: SourceFile) -> &[IncludeEdge] {
+        include_edges(&self.0, file)
     }
 }
 

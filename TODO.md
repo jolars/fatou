@@ -197,10 +197,12 @@ The core enabler for everything semantic; the biggest single item.
   resolve against their global scope and mark the binding used without
   entering the free reads; `using X`'s unknowable exports stay free reads
   for Phase 3 resolution.
-- [ ] Firewall queries after arity's pattern: `file_exports`,
+- [x] Firewall queries after arity's pattern: `file_exports`,
   `file_free_reads`, `file_qualified_reads`, `include_edges`—stable `Eq`
   projections that survive body edits so project-level memos don't
-  invalidate on every keystroke.
+  invalidate on every keystroke. Pure projections in `src/project.rs`, tracked
+  wrappers in `incremental.rs`; backdating across position-shifting edits is
+  locked in `tests/salsa_incremental.rs`.
 - [x] `smol_str` interning for symbol names (the Tooling item lands here):
   binding and identifier names are `SmolStr`.
 
