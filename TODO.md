@@ -19,11 +19,27 @@ leverage.
 
 ## Linter
 
-- [ ] First rules (correctness + suspicious), each a `Rule` impl registered in
-  `src/linter/rules.rs`.
+- [x] One-pass rule engine after arity's model: each `Rule` declares its
+  `interests` (subscribed `SyntaxKind`s) and `check`s per element in a single
+  shared `descendants_with_tokens` traversal (dispatch table indexed by
+  `SyntaxKind::COUNT`), or does a whole-file `check_file` pass off the
+  `SemanticModel`. `RuleContext` carries the CST root and the model;
+  `run_rules` stamps the path and stably sorts by `(start, end, rule)`.
+- [x] First rules (correctness + suspicious), each a `Rule` impl registered in
+  `src/linter/rules.rs`: `unused-binding` (dead `Local`/`LetVar`),
+  `unused-import` (explicit imports only; whole-module `using X` exempt),
+  `duplicate-argument` (per-scope duplicate params, all signature forms), and
+  `assignment-in-condition` (bare `=` in an `if`/`elseif`/`while` test, with a
+  safe `=`->`==` fix). Behavior locked in `tests/linter_rules.rs`.
+- [x] Auto-generated rule reference from rule metadata (`description` +
+  `examples`): `render_rule_doc` (`src/linter/docs.rs`) runs the real linter on
+  each example, `examples/docgen.rs` writes the mdBook pages, and
+  `tests/rule_docs.rs` snapshot-pins them plus guards that every rule is
+  documented and every example still triggers.
 - [ ] Autofix application engine (`apply_fixes`) honoring `Applicability`
   (safe/unsafe), with the `format → lint --fix → format --check` property
-  test (Tenet 5).
+  test (Tenet 5). Rules already carry `Fix`es (e.g. `assignment-in-condition`);
+  only the application path is missing.
 - [ ] `annotate-snippets`-based pretty diagnostics rendering (dependency noted
   in `Cargo.toml`; `render.rs` is currently a compact one-liner renderer).
 

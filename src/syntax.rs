@@ -300,6 +300,11 @@ pub enum SyntaxKind {
 }
 
 impl SyntaxKind {
+    /// The number of distinct kinds. The discriminants are contiguous from
+    /// `ROOT` (0) through `ERROR`, so this is the size of a flat table indexed
+    /// by `kind as usize` (used by the linter's node-dispatch table).
+    pub const COUNT: usize = SyntaxKind::ERROR as usize + 1;
+
     /// Whether this token kind is an operator symbol (including dotted,
     /// assignment, and unicode forms). One list shared by the sexpr
     /// projector and the semantic builder (operator names are importable

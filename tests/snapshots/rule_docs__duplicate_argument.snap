@@ -1,0 +1,19 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+# `duplicate-argument`
+
+Flag the same parameter name declared more than once in a single signature. Julia rejects such a definition outright, so it is always a mistake. Positional and keyword parameters share one namespace.
+
+`x` appears twice in the parameter list:
+
+```julia
+function dist(x, y, x)
+    hypot(x, y)
+end
+```
+
+```text
+example.jl:1:21: error[duplicate-argument] argument name `x` is used more than once
+```

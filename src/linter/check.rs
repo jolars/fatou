@@ -10,6 +10,7 @@ use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::rules::{ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
+use crate::semantic::SemanticModel;
 use crate::text::LineIndex;
 
 /// The pseudo-rule id under which parse diagnostics are reported.
@@ -96,6 +97,13 @@ pub fn check_document(text: &str) -> LintFileReport {
     check_text(None, text, &rules)
 }
 
+/// Lint `text` under `config`, attributing findings to `path`. Used by the docs
+/// generator (`crate::linter::docs`) to render each example's real diagnostics.
+pub fn check_source(path: Option<&Path>, text: &str, config: &LintConfig) -> LintFileReport {
+    let rules = ResolvedRules::resolve(config.select.as_deref(), &config.ignore);
+    check_text(path, text, &rules)
+}
+
 /// Core single-file pass: parse, run rules on a clean tree, filter suppressed
 /// findings.
 fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFileReport {
@@ -124,9 +132,11 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
         };
     }
 
+    let model = SemanticModel::build(&parsed.cst);
     let ctx = RuleContext {
         path,
         root: &parsed.cst,
+        model: &model,
     };
     let raw = rules.run(&ctx);
 
