@@ -11,6 +11,7 @@
 use rowan::TextRange;
 use smol_str::SmolStr;
 
+use crate::ast::{AstNode, AstToken, Name};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use super::binding::{Binding, BindingId, BindingKind};
@@ -141,10 +142,12 @@ fn is_field_access(node: &SyntaxNode) -> bool {
             .any(|t| t.kind() == SyntaxKind::DOT)
 }
 
+/// The identifier token of a `NAME` node, via the shared [`Name::ident`] typed
+/// accessor.
 fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
-    node.children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::IDENT)
+    Name::cast(node.clone())?
+        .ident()
+        .map(|ident| ident.syntax().clone())
 }
 
 /// One `using`/`import` clause (an `IMPORT_PATH`, or the path inside an

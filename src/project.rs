@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 
 use rowan::ast::AstNode;
 
-use crate::ast::{CallExpr, Name, StringLiteral};
+use crate::ast::{AstToken, CallExpr, Expr, HasArgList};
 use crate::semantic::{ScopeKind, SemanticModel};
-use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::syntax::SyntaxNode;
 
 /// The names bound at file (top) level — what another file that `include`s this
 /// one sees. Every binding whose scope is the file top level, `import`/`using`
@@ -104,35 +104,32 @@ pub fn include_edges(root: &SyntaxNode, base_dir: Option<&Path>) -> Vec<IncludeE
 /// The literal path of `call` if it is a static `include("literal")`, else
 /// `None`.
 fn include_target(call: &CallExpr) -> Option<String> {
-    // The callee is the first child node; it must be the bare name `include`
-    // (a qualified `M.include` is a `BinaryExpr`, an operator call a token).
-    let callee = Name::cast(call.syntax().children().next()?)?;
+    // The callee must be the bare name `include` (a qualified `M.include` is a
+    // `BinaryExpr`, an operator call a token — neither is an `Expr::Name`).
+    let Expr::Name(callee) = call.callee()? else {
+        return None;
+    };
     if callee.ident()?.text() != "include" {
         return None;
     }
 
     // Exactly one argument, or it is `include(mapexpr, path)` — not static.
-    let arg_list = call.arg_list()?;
-    let mut args = arg_list
-        .syntax()
-        .children()
-        .filter(|child| child.kind() == SyntaxKind::ARG);
+    let mut args = call.arg_list()?.args();
     let arg = args.next()?;
     if args.next().is_some() {
         return None;
     }
 
     // A plain string literal: no prefix (`raw"…"`) and no interpolation.
-    let string = StringLiteral::cast(arg.children().next()?)?;
+    let Expr::StringLiteral(string) = arg.expr()? else {
+        return None;
+    };
     if string.prefix().is_some() || string.interpolations().next().is_some() {
         return None;
     }
     Some(
         string
-            .syntax()
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .filter(|token| token.kind() == SyntaxKind::STRING_CONTENT)
+            .content_tokens()
             .map(|token| token.text().to_string())
             .collect(),
     )

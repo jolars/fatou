@@ -134,11 +134,44 @@ build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
   Julia precedence, calls, indexing, and the `function`/`if`/`begin` block
   forms) and grows incrementally (`TODO.md`). Unlike R, Julia has no `[[`/`]]`
   bracket ambiguity, so there is no bracket-rebalancer pass.
-- `src/ast/nodes.rs` (`src/ast.rs`) provides zero-cost typed AST wrappers over
-  the CST via rowan's `AstNode` support.
+- `src/ast/` is the typed AST interface over the CST (see **AST wrappers**
+  below).
 - `src/incremental.rs` models file text → CST as a `salsa` query
   (`parsed_document`). The token/block reparse *splicing* is deferred; today a
   text edit triggers a full parse (still correct).
+
+**AST wrappers** (`src/ast/`, re-exported from `src/ast.rs`): the typed interface
+over the rowan CST, modeled on rust-analyzer's `ast` module. Three layers, all
+zero-cost newtypes that only cast when a kind matches:
+
+- `nodes.rs` — an `AstNode` newtype per node kind (`FunctionDef`, `CallExpr`, ...)
+  with typed accessors (`BinaryExpr::lhs/rhs/op`, `CallExpr::callee`,
+  `ArgList::args`, `IfExpr::then_body/elseif_clauses/else_clause`,
+  `Condition::expr` which peels one paren layer), plus the `Expr` expression sum.
+  `Expr` has a variant per wrapped expression kind and an `Other(SyntaxNode)`
+  catch-all, so it stays *total* over expression kinds as the grammar grows — an
+  operand of a not-yet-wrapped kind round-trips through `Other` rather than
+  vanishing.
+- `tokens.rs` — the `AstToken` trait (rowan ships only `AstNode`) and typed token
+  newtypes (`Ident`, `Operator`; `Operator::can_cast` is `SyntaxKind::is_operator`,
+  the one shared operator predicate). `child_token::<T>` is the typed-token analogue
+  of `support::child`.
+- `traits.rs` — the `Has*` shape traits (`HasArgList`, `HasBody`, `HasCondition`)
+  shared across wrappers, so `arg_list()`/`body()`/`condition()` are one contract.
+
+**Who uses it:** the linter and code actions/fixes, the semantic builder, the LSP
+handlers, and `project.rs` — navigate the tree through these wrappers rather than
+raw `children()`/`kind()` matching. **Who doesn't:** the **formatter** is
+deliberately exempt (it lowers known kinds and recurses over everything else
+verbatim — the transparent fallback that guards losslessness/idempotence — so it
+works the raw CST directly), and the polymorphic kind-classification walkers
+(`lsp/symbols.rs`, `lsp/folding.rs`, `lsp/semantic_tokens.rs`) that dispatch a
+single node over many kinds, where single-kind wrappers would add code, not
+remove it.
+
+**To grow it:** add the `ast_node!`/`ast_token!` entry, add accessors via
+`support::child`/`support::children`/`support::token`/`child_token`, impl any
+relevant `Has*` trait, re-export from `src/ast.rs`, and add an accessor unit test.
 
 **Formatter** (`src/formatter/`, public API in `src/formatter.rs`): consumes the
 CST and uses a Wadler/Prettier-style document IR (`ir.rs`) printed by a single

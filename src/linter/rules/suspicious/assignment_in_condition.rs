@@ -7,9 +7,10 @@
 //! a false positive on a genuine comparison. A parenthesized condition
 //! (`if (x = 1)`) is unwrapped first.
 
+use crate::ast::{AstNode, AstToken, Condition, Expr};
 use crate::linter::diagnostic::{Applicability, Diagnostic, Fix, Severity};
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
+use crate::syntax::{SyntaxElement, SyntaxKind};
 
 pub struct AssignmentInCondition;
 
@@ -36,25 +37,28 @@ impl Rule for AssignmentInCondition {
     }
 
     fn check(&self, el: &SyntaxElement, _ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
-        let Some(condition) = el.as_node() else {
+        // The test is a bare-`=` assignment: `Condition::expr` unwraps a single
+        // parenthesized layer (`if (x = 1)`); `==`/`===`/comparisons parse as
+        // their own nodes, and augmented forms (`+=`) carry a non-`EQ` operator.
+        let Some(condition) = el.as_node().cloned().and_then(Condition::cast) else {
             return;
         };
-        let Some(assign) = condition_assignment(condition) else {
+        let Some(Expr::AssignmentExpr(assign)) = condition.expr() else {
             return;
         };
-        let Some(eq) = assign
-            .children_with_tokens()
-            .filter_map(|e| e.into_token())
-            .find(|t| t.kind() == SyntaxKind::EQ)
+        let Some(op) = assign
+            .op()
+            .filter(|op| op.syntax().kind() == SyntaxKind::EQ)
         else {
             return;
         };
 
-        let range = eq.text_range();
+        let range = op.syntax().text_range();
+        let assign_range = assign.syntax().text_range();
         sink.push(Diagnostic {
             path: None,
-            start: assign.text_range().start().into(),
-            end: assign.text_range().end().into(),
+            start: assign_range.start().into(),
+            end: assign_range.end().into(),
             rule: self.id().to_string(),
             severity: Severity::Warning,
             message: "assignment used as a condition; did you mean `==`?".to_string(),
@@ -68,14 +72,4 @@ impl Rule for AssignmentInCondition {
             suppressed: false,
         });
     }
-}
-
-/// The bare-`=` `ASSIGNMENT_EXPR` directly forming `condition`, unwrapping a
-/// single parenthesized layer (`if (x = 1)`). `None` for any other condition.
-fn condition_assignment(condition: &SyntaxNode) -> Option<SyntaxNode> {
-    let mut node = condition.children().next()?;
-    if node.kind() == SyntaxKind::PAREN_EXPR {
-        node = node.children().next()?;
-    }
-    (node.kind() == SyntaxKind::ASSIGNMENT_EXPR).then_some(node)
 }
