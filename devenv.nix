@@ -43,6 +43,8 @@
           "Makie"
           "CairoMakie"
           "Plots"
+          "Runic"
+          "StaticLint"
           "Revise"
           "Test"
           "JuliaSyntax"
