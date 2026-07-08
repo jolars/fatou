@@ -47,9 +47,9 @@ leverage.
   source-context snippets (caret, rule title, severity color, fix hints);
   `Concise` keeps the one-liner. A global `--color auto|always|never` flag gates
   ANSI; human output goes to stderr, JSON to stdout.
-- [ ] Report unknown rule IDs in `select`/`ignore`. `all_rule_ids()` exists but
-  is unwired; have `ResolvedRules::resolve` return the unrecognized IDs (arity's
-  `(Self, Vec<String>)`) so the CLI can warn on a typo'd `--select`.
+- [x] Report unknown rule IDs in `select`/`ignore`. `ResolvedRules::resolve` now
+  returns `(Self, Vec<String>)` with the unrecognized IDs, surfaced on
+  `LintResult` so the CLI warns on a typo'd `select`/`ignore`.
 - [ ] Stamp severity in the engine, not the rule. `Rule::default_severity()` is
   currently declared but never consulted — rules emit a hardcoded `Severity`, so
   overriding it is a no-op. Have `run_rules` assign

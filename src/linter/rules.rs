@@ -118,12 +118,26 @@ pub struct ResolvedRules {
 }
 
 impl ResolvedRules {
-    /// Build the rule set honoring `select` / `ignore`.
+    /// Build the rule set honoring `select` / `ignore`, alongside any
+    /// `select`/`ignore` entries that name no shipped rule.
     ///
     /// Resolution order: start with every default-enabled rule (or, when
     /// `select` is set, the listed rules), then subtract anything in `ignore`.
-    pub fn resolve(select: Option<&[String]>, ignore: &[String]) -> Self {
-        let rules = all_rules()
+    ///
+    /// The returned `Vec<String>` holds the unrecognized IDs (first-seen order,
+    /// deduplicated) so callers can warn on a typo'd `--select`/`--ignore`.
+    pub fn resolve(select: Option<&[String]>, ignore: &[String]) -> (Self, Vec<String>) {
+        let all = all_rules();
+
+        let mut unknown = Vec::new();
+        for id in select.into_iter().flatten().chain(ignore) {
+            let recognized = all.iter().any(|rule| rule.id() == id);
+            if !recognized && !unknown.contains(id) {
+                unknown.push(id.clone());
+            }
+        }
+
+        let rules = all
             .into_iter()
             .filter(|rule| {
                 let enabled = match select {
@@ -133,7 +147,7 @@ impl ResolvedRules {
                 enabled && !ignore.iter().any(|id| id == rule.id())
             })
             .collect();
-        Self { rules }
+        (Self { rules }, unknown)
     }
 
     /// Run every configured rule against `ctx` in one shared CST traversal.
@@ -189,4 +203,35 @@ fn run_rules(rules: &[Box<dyn Rule>], ctx: &RuleContext<'_>) -> Vec<Diagnostic> 
 
     all.sort_by(|a, b| (a.start, a.end, &a.rule).cmp(&(b.start, b.end, &b.rule)));
     all
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_flags_unknown_select_and_ignore_ids() {
+        let select = ids(&["unused-binding", "made-up-rule"]);
+        let ignore = ids(&["also-bogus"]);
+        let (_rules, unknown) = ResolvedRules::resolve(Some(&select), &ignore);
+        assert_eq!(unknown, ids(&["made-up-rule", "also-bogus"]));
+    }
+
+    #[test]
+    fn resolve_reports_no_unknowns_for_valid_ids() {
+        let ignore = ids(&["unused-import"]);
+        let (_rules, unknown) = ResolvedRules::resolve(None, &ignore);
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn resolve_dedupes_repeated_unknown_ids() {
+        let select = ids(&["typo", "typo"]);
+        let (_rules, unknown) = ResolvedRules::resolve(Some(&select), &["typo".to_string()]);
+        assert_eq!(unknown, ids(&["typo"]));
+    }
 }

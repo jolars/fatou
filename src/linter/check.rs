@@ -35,6 +35,8 @@ pub struct LintResult {
     pub checked_files: usize,
     pub total_findings: usize,
     pub reports: Vec<LintFileReport>,
+    /// `select`/`ignore` entries that name no shipped rule (likely typos).
+    pub unknown_rules: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -67,7 +69,7 @@ pub fn check_paths_with_config(
     config: &LintConfig,
 ) -> Result<LintResult, LintError> {
     let files = collect_julia_files(paths).map_err(LintError::Discovery)?;
-    let rules = ResolvedRules::resolve(config.select.as_deref(), &config.ignore);
+    let (rules, unknown_rules) = ResolvedRules::resolve(config.select.as_deref(), &config.ignore);
 
     let mut reports = Vec::with_capacity(files.len());
     let mut total_findings = 0;
@@ -88,19 +90,20 @@ pub fn check_paths_with_config(
         checked_files: files.len(),
         total_findings,
         reports,
+        unknown_rules,
     })
 }
 
 /// Lint an in-memory document with no path (e.g. stdin).
 pub fn check_document(text: &str) -> LintFileReport {
-    let rules = ResolvedRules::resolve(None, &[]);
+    let (rules, _) = ResolvedRules::resolve(None, &[]);
     check_text(None, text, &rules)
 }
 
 /// Lint `text` under `config`, attributing findings to `path`. Used by the docs
 /// generator (`crate::linter::docs`) to render each example's real diagnostics.
 pub fn check_source(path: Option<&Path>, text: &str, config: &LintConfig) -> LintFileReport {
-    let rules = ResolvedRules::resolve(config.select.as_deref(), &config.ignore);
+    let (rules, _) = ResolvedRules::resolve(config.select.as_deref(), &config.ignore);
     check_text(path, text, &rules)
 }
 

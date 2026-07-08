@@ -151,6 +151,7 @@ fn run_lint(
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
     let result =
         linter::check_paths_with_config(&paths, &config.lint).map_err(|e| e.to_string())?;
+    warn_unknown_rules(&result.unknown_rules);
 
     let diagnostics: Vec<_> = result
         .reports
@@ -184,6 +185,9 @@ fn run_lint_fix(
     config: &Config,
 ) -> Result<ExitCode, String> {
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
+    let (_, unknown_rules) =
+        linter::ResolvedRules::resolve(config.lint.select.as_deref(), &config.lint.ignore);
+    warn_unknown_rules(&unknown_rules);
     let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
 
     let mut applied = 0usize;
@@ -214,6 +218,14 @@ fn run_lint_fix(
         Ok(ExitCode::SUCCESS)
     } else {
         Ok(ExitCode::FAILURE)
+    }
+}
+
+/// Warn (once, to stderr) about any `select`/`ignore` entry that names no
+/// shipped rule, so a typo'd `--select` doesn't silently select nothing.
+fn warn_unknown_rules(unknown: &[String]) {
+    for id in unknown {
+        eprintln!("warning: unknown rule `{id}` in select/ignore");
     }
 }
 
