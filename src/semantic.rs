@@ -688,6 +688,141 @@ end",
         assert_eq!(free_read_names(&m), ["x"]);
     }
 
+    // --- declarations, structs, and modules ---------------------------------
+
+    #[test]
+    fn local_declaration_shadows_enclosing_local() {
+        let src = "function f()\n    x = 1\n    for i in 1:3\n        local x\n        x = 2\n    end\n    x\nend";
+        let m = model_of(src);
+        let xs: Vec<_> = m.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(xs.len(), 2);
+        assert_eq!(m.scope(xs[1].scope).kind, ScopeKind::For);
+        let loop_x = BindingId(m.bindings().iter().rposition(|b| b.name == "x").unwrap() as u32);
+        let write = m
+            .idents()
+            .iter()
+            .find(|i| i.name == "x" && i.access == Access::Write)
+            .unwrap();
+        assert_eq!(
+            write.binding,
+            Some(loop_x),
+            "loop assigns the declared local"
+        );
+    }
+
+    #[test]
+    fn global_declaration_routes_assignment_to_the_global() {
+        let m = model_of("x = 0\nfunction f()\n    global x\n    x = 1\nend");
+        let xs: Vec<_> = m.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(xs.len(), 1);
+        assert_eq!(m.scope(xs[0].scope).kind, ScopeKind::File);
+        let write = m
+            .idents()
+            .iter()
+            .find(|i| i.name == "x" && i.access == Access::Write)
+            .unwrap();
+        assert_eq!(write.binding, Some(find(&m, "x")));
+    }
+
+    #[test]
+    fn global_assignment_creates_the_global_from_inside() {
+        let m = model_of("function f()\n    global y = 2\nend");
+        assert_eq!(kind_of(&m, "y"), BindingKind::Global);
+        assert_eq!(scope_kind_of(&m, "y"), ScopeKind::File);
+    }
+
+    #[test]
+    fn global_with_annotation_binds_and_reads_type() {
+        let m = model_of("global a, b::Int");
+        assert_eq!(kind_of(&m, "a"), BindingKind::Global);
+        assert_eq!(kind_of(&m, "b"), BindingKind::Global);
+        assert_eq!(free_read_names(&m), ["Int"]);
+    }
+
+    #[test]
+    fn local_with_tuple_assignment() {
+        let m = model_of("local m, n = g()");
+        assert_eq!(kind_of(&m, "m"), BindingKind::Local);
+        assert_eq!(kind_of(&m, "n"), BindingKind::Local);
+        assert_eq!(free_read_names(&m), ["g"]);
+    }
+
+    #[test]
+    fn const_binds_with_const_kind() {
+        let m = model_of("const c = 1\nc");
+        assert_eq!(kind_of(&m, "c"), BindingKind::Const);
+        assert!(m.binding(find(&m, "c")).read);
+    }
+
+    #[test]
+    fn struct_binds_name_fields_and_type_params() {
+        let m = model_of("struct Foo{T<:Real} <: Bar{T}\n    x::T\n    y\nend");
+        assert_eq!(kind_of(&m, "Foo"), BindingKind::Type);
+        assert_eq!(scope_kind_of(&m, "Foo"), ScopeKind::File);
+        assert_eq!(kind_of(&m, "T"), BindingKind::TypeParam);
+        assert_eq!(kind_of(&m, "x"), BindingKind::Field);
+        assert_eq!(kind_of(&m, "y"), BindingKind::Field);
+        assert_eq!(scope_kind_of(&m, "x"), ScopeKind::Struct);
+        assert!(m.binding(find(&m, "T")).read, "supertype and field read T");
+        assert_eq!(free_read_names(&m), ["Real", "Bar"]);
+    }
+
+    #[test]
+    fn struct_fields_do_not_leak() {
+        let m = model_of("struct S\n    f\nend\nf");
+        assert_eq!(free_read_names(&m), ["f"]);
+    }
+
+    #[test]
+    fn mutable_struct_and_const_field() {
+        let m = model_of("mutable struct Counter\n    n::Int\nend");
+        assert_eq!(kind_of(&m, "Counter"), BindingKind::Type);
+        assert_eq!(kind_of(&m, "n"), BindingKind::Field);
+    }
+
+    #[test]
+    fn inner_constructor_is_a_function_in_the_struct_scope() {
+        let m = model_of("struct P\n    x\n    P(a) = new(a)\nend");
+        assert_eq!(kind_of(&m, "a"), BindingKind::Param);
+        assert!(m.binding(find(&m, "a")).read);
+        let ctor = m
+            .bindings()
+            .iter()
+            .find(|b| b.name == "P" && b.kind == BindingKind::Function)
+            .expect("constructor binding");
+        assert_eq!(m.scope(ctor.scope).kind, ScopeKind::Struct);
+        assert!(free_read_names(&m).contains(&"new"));
+    }
+
+    #[test]
+    fn abstract_type_binds_name_and_reads_supertype() {
+        let m = model_of("abstract type A <: B end");
+        assert_eq!(kind_of(&m, "A"), BindingKind::Type);
+        assert_eq!(free_read_names(&m), ["B"]);
+    }
+
+    #[test]
+    fn module_binds_name_and_scopes_its_body() {
+        let m = model_of("module M\ny = 1\nend");
+        assert_eq!(kind_of(&m, "M"), BindingKind::Module);
+        assert_eq!(scope_kind_of(&m, "M"), ScopeKind::File);
+        assert_eq!(kind_of(&m, "y"), BindingKind::Global);
+        assert_eq!(scope_kind_of(&m, "y"), ScopeKind::Module);
+    }
+
+    #[test]
+    fn module_body_does_not_see_enclosing_globals() {
+        let m = model_of("x = 1\nmodule M\ny = x\nend");
+        assert!(!m.binding(find(&m, "x")).read);
+        assert_eq!(free_read_names(&m), ["x"]);
+    }
+
+    #[test]
+    fn module_locals_do_not_leak_out() {
+        let m = model_of("module M\ny = 1\nend\ny");
+        assert_eq!(free_read_names(&m), ["y"]);
+    }
+
     #[test]
     fn names_in_scope_sees_locals_params_and_globals() {
         let src = "g = 1\nfunction f(a)\n    b = 2\n    b\nend";

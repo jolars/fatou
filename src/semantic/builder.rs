@@ -222,6 +222,26 @@ enum AssignSlot {
     NewIn(ScopeId, BindingKind),
 }
 
+/// Which declaration statement a name comes from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DeclKind {
+    Local,
+    Global,
+    Const,
+}
+
+/// The `NAME` a type-definition signature introduces: peels `Foo{T} <: Super`
+/// layers down to `Foo`.
+fn type_name_of(start: &SyntaxNode) -> Option<SyntaxNode> {
+    match start.kind() {
+        SyntaxKind::NAME => Some(start.clone()),
+        SyntaxKind::CURLY_EXPR | SyntaxKind::BINARY_EXPR | SyntaxKind::COMPARISON_EXPR => {
+            start.children().next().and_then(|c| type_name_of(&c))
+        }
+        _ => None,
+    }
+}
+
 struct Builder {
     model: SemanticModel,
     /// Names declared `global` per scope (builder-transient, parallel to
@@ -400,6 +420,13 @@ impl Builder {
             SyntaxKind::MACRO_DEF => {
                 self.declare_function_name(node, scope, BindingKind::Macro);
             }
+            SyntaxKind::STRUCT_DEF | SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => {
+                self.declare_type_name(node, scope);
+            }
+            SyntaxKind::MODULE_DEF => self.declare_module_name(node, scope),
+            SyntaxKind::LOCAL_STMT => self.declare_declaration(node, scope, DeclKind::Local),
+            SyntaxKind::GLOBAL_STMT => self.declare_declaration(node, scope, DeclKind::Global),
+            SyntaxKind::CONST_STMT => self.declare_declaration(node, scope, DeclKind::Const),
             kind if creates_scope(kind) => {}
             SyntaxKind::ASSIGNMENT_EXPR => {
                 let mut children = node.children();
@@ -459,6 +486,106 @@ impl Builder {
             && let Some(token) = name_ident(&name)
         {
             self.declare_name(&token, scope, Some(kind));
+        }
+    }
+
+    /// Bind the name of a `struct`/`abstract type`/`primitive type` in its
+    /// enclosing scope.
+    fn declare_type_name(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if let Some(name) = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::SIGNATURE)
+            .and_then(|sig| sig.children().next())
+            .and_then(|start| type_name_of(&start))
+            && let Some(token) = name_ident(&name)
+        {
+            self.declare_name(&token, scope, Some(BindingKind::Type));
+        }
+    }
+
+    fn declare_module_name(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if let Some(name) = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::SIGNATURE)
+            .and_then(|sig| sig.children().find(|c| c.kind() == SyntaxKind::NAME))
+            && let Some(token) = name_ident(&name)
+        {
+            self.declare_name(&token, scope, Some(BindingKind::Module));
+        }
+    }
+
+    /// `local`/`global`/`const` statements, with bare-name and assignment
+    /// payloads. `local` forces a binding in the current scope (shadowing
+    /// any enclosing local); `global` routes the names to the innermost
+    /// global scope and records the declaration so later assignments in
+    /// this scope follow it.
+    fn declare_declaration(&mut self, node: &SyntaxNode, scope: ScopeId, decl: DeclKind) {
+        for child in node.children() {
+            self.declare_decl_pattern(&child, scope, decl);
+        }
+    }
+
+    fn declare_decl_pattern(&mut self, node: &SyntaxNode, scope: ScopeId, decl: DeclKind) {
+        match node.kind() {
+            SyntaxKind::NAME => {
+                if let Some(token) = name_ident(node) {
+                    self.declare_declared_name(&token, scope, decl);
+                }
+            }
+            SyntaxKind::TUPLE_EXPR
+            | SyntaxKind::BARE_TUPLE_EXPR
+            | SyntaxKind::ARG
+            | SyntaxKind::SPLAT_EXPR
+            | SyntaxKind::PAREN_EXPR => {
+                for child in node.children() {
+                    self.declare_decl_pattern(&child, scope, decl);
+                }
+            }
+            SyntaxKind::TYPE_ANNOTATION => {
+                if let Some(pattern) = annotation_parts(node).0 {
+                    self.declare_decl_pattern(&pattern, scope, decl);
+                }
+            }
+            SyntaxKind::ASSIGNMENT_EXPR => {
+                let mut children = node.children();
+                if let Some(target) = children.next() {
+                    self.declare_decl_pattern(&target, scope, decl);
+                }
+                for rest in children {
+                    self.declare_node(&rest, scope);
+                }
+            }
+            _ => self.declare_node(node, scope),
+        }
+    }
+
+    fn declare_declared_name(&mut self, token: &SyntaxToken, scope: ScopeId, decl: DeclKind) {
+        if token.text() == "_" {
+            return;
+        }
+        match decl {
+            DeclKind::Local | DeclKind::Const => {
+                let kind = if decl == DeclKind::Const {
+                    BindingKind::Const
+                } else {
+                    BindingKind::Local
+                };
+                if self.find_in_scope(scope, token.text()).is_none() {
+                    self.push_binding(token.text(), kind, scope, token.text_range());
+                }
+            }
+            DeclKind::Global => {
+                self.global_decls[scope.0 as usize].push(SmolStr::new(token.text()));
+                let global = self.innermost_global(scope);
+                if self.find_in_scope(global, token.text()).is_none() {
+                    self.push_binding(
+                        token.text(),
+                        BindingKind::Global,
+                        global,
+                        token.text_range(),
+                    );
+                }
+            }
         }
     }
 
@@ -530,6 +657,13 @@ impl Builder {
             | SyntaxKind::BRACES_COMPREHENSION
             | SyntaxKind::TYPED_COMPREHENSION
             | SyntaxKind::GENERATOR => self.handle_comprehension(node, scope),
+            SyntaxKind::STRUCT_DEF | SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => {
+                self.handle_type_def(node, scope);
+            }
+            SyntaxKind::MODULE_DEF => self.handle_module(node, scope),
+            SyntaxKind::LOCAL_STMT | SyntaxKind::GLOBAL_STMT | SyntaxKind::CONST_STMT => {
+                self.handle_declaration(node, scope);
+            }
             SyntaxKind::BINARY_EXPR if is_field_access(node) => {
                 if let Some(base) = node.children().next() {
                     self.walk_node(&base, scope);
@@ -652,6 +786,136 @@ impl Builder {
             false,
             binding,
         );
+    }
+
+    // --- declarations, type definitions, and modules ------------------------
+
+    /// Walk a `local`/`global`/`const` statement: bare names are their own
+    /// definition sites (nothing to record), assignment payloads run
+    /// normally — the declare phase already routed the bindings.
+    fn handle_declaration(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::ASSIGNMENT_EXPR => self.handle_assignment(&child, scope),
+                _ => self.walk_target(&child, scope, Access::Write),
+            }
+        }
+    }
+
+    /// `struct`/`abstract type`/`primitive type`: the name binds in the
+    /// enclosing scope; curly type parameters, the supertype expression,
+    /// fields, and inner constructors live in a `Struct` scope.
+    fn handle_type_def(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let struct_scope = self.push_scope(ScopeKind::Struct, Some(scope), node.text_range());
+        if let Some(start) = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::SIGNATURE)
+            .and_then(|sig| sig.children().next())
+        {
+            self.walk_type_signature(&start, scope, struct_scope);
+        }
+        if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+            // Fields bind; anything else (inner constructors, docstrings)
+            // declares and walks as usual inside the struct scope.
+            for stmt in body.children() {
+                match stmt.kind() {
+                    SyntaxKind::NAME | SyntaxKind::TYPE_ANNOTATION => {}
+                    _ => self.declare_node(&stmt, struct_scope),
+                }
+            }
+            for stmt in body.children() {
+                match stmt.kind() {
+                    SyntaxKind::NAME => self.bind_field(&stmt, struct_scope),
+                    SyntaxKind::TYPE_ANNOTATION => {
+                        let (pattern, types) = annotation_parts(&stmt);
+                        if let Some(pattern) = pattern {
+                            self.bind_field(&pattern, struct_scope);
+                        }
+                        for ty in types {
+                            self.walk_node(&ty, struct_scope);
+                        }
+                    }
+                    _ => self.walk_node(&stmt, struct_scope),
+                }
+            }
+        }
+    }
+
+    fn bind_field(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if node.kind() == SyntaxKind::NAME
+            && let Some(token) = name_ident(node)
+            && token.text() != "_"
+        {
+            self.push_binding(token.text(), BindingKind::Field, scope, token.text_range());
+        }
+    }
+
+    /// The signature of a type definition: `Foo`, `Foo{T<:Real}`, possibly
+    /// `<: Super`. The name is a write in the enclosing scope; type
+    /// parameters bind in the struct scope, where the supertype expression
+    /// is then walked (it may reference them).
+    fn walk_type_signature(
+        &mut self,
+        start: &SyntaxNode,
+        enclosing: ScopeId,
+        struct_scope: ScopeId,
+    ) {
+        match start.kind() {
+            SyntaxKind::NAME => {
+                if let Some(token) = name_ident(start) {
+                    self.write_name(&token, enclosing, Access::Write);
+                }
+            }
+            SyntaxKind::CURLY_EXPR => {
+                let mut children = start.children();
+                if let Some(name) = children.next()
+                    && name.kind() == SyntaxKind::NAME
+                    && let Some(token) = name_ident(&name)
+                {
+                    self.write_name(&token, enclosing, Access::Write);
+                }
+                for args in start
+                    .children()
+                    .filter(|c| c.kind() == SyntaxKind::ARG_LIST)
+                {
+                    for arg in args.children() {
+                        self.bind_type_param_spec(&arg, struct_scope);
+                    }
+                }
+            }
+            SyntaxKind::BINARY_EXPR | SyntaxKind::COMPARISON_EXPR => {
+                let mut children = start.children();
+                if let Some(name_part) = children.next() {
+                    self.walk_type_signature(&name_part, enclosing, struct_scope);
+                }
+                for supertype in children {
+                    self.walk_node(&supertype, struct_scope);
+                }
+            }
+            _ => self.walk_node(start, struct_scope),
+        }
+    }
+
+    /// `module M ... end`: the name binds in the enclosing scope; the body
+    /// is a fresh global scope that does *not* see enclosing names.
+    fn handle_module(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if let Some(name) = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::SIGNATURE)
+            .and_then(|sig| sig.children().find(|c| c.kind() == SyntaxKind::NAME))
+            && let Some(token) = name_ident(&name)
+        {
+            self.write_name(&token, scope, Access::Write);
+        }
+        let body = node.children().find(|c| c.kind() == SyntaxKind::BLOCK);
+        let range = body
+            .as_ref()
+            .map_or_else(|| node.text_range(), |b| b.text_range());
+        let module_scope = self.push_scope(ScopeKind::Module, Some(scope), range);
+        if let Some(body) = body {
+            self.declare_in(&body, module_scope);
+            self.walk_children(&body, module_scope);
+        }
     }
 
     // --- block scopes -------------------------------------------------------
