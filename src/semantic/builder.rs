@@ -522,6 +522,14 @@ impl Builder {
             SyntaxKind::MACRO_DEF => self.handle_function_def(node, scope),
             SyntaxKind::ARROW_EXPR => self.handle_arrow(node, scope),
             SyntaxKind::DO_EXPR => self.handle_do(node, scope),
+            SyntaxKind::LET_EXPR => self.handle_let(node, scope),
+            SyntaxKind::FOR_EXPR => self.handle_for(node, scope),
+            SyntaxKind::WHILE_EXPR => self.handle_while(node, scope),
+            SyntaxKind::TRY_EXPR => self.handle_try(node, scope),
+            SyntaxKind::COMPREHENSION
+            | SyntaxKind::BRACES_COMPREHENSION
+            | SyntaxKind::TYPED_COMPREHENSION
+            | SyntaxKind::GENERATOR => self.handle_comprehension(node, scope),
             SyntaxKind::BINARY_EXPR if is_field_access(node) => {
                 if let Some(base) = node.children().next() {
                     self.walk_node(&base, scope);
@@ -644,6 +652,165 @@ impl Builder {
             false,
             binding,
         );
+    }
+
+    // --- block scopes -------------------------------------------------------
+
+    /// `let a = 1, b, c = a ... end`: one chained scope per binding, so each
+    /// right-hand side sees the previous bindings and `let x = x` reads the
+    /// outer `x`. The body gets a scope of its own even without bindings.
+    fn handle_let(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let end = node.text_range().end();
+        let mut current = scope;
+        if let Some(bindings) = node
+            .children()
+            .find(|c| c.kind() == SyntaxKind::LET_BINDINGS)
+        {
+            for item in bindings.children() {
+                let range = TextRange::new(item.text_range().start(), end);
+                if item.kind() == SyntaxKind::ASSIGNMENT_EXPR {
+                    let mut parts = item.children();
+                    let target = parts.next();
+                    for rhs in parts {
+                        self.walk_node(&rhs, current);
+                    }
+                    current = self.push_scope(ScopeKind::Let, Some(current), range);
+                    if let Some(target) = target {
+                        self.bind_param_pattern(&target, current, BindingKind::LetVar);
+                    }
+                } else {
+                    current = self.push_scope(ScopeKind::Let, Some(current), range);
+                    self.bind_param_pattern(&item, current, BindingKind::LetVar);
+                }
+            }
+        }
+        if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+            let body_scope = self.push_scope(ScopeKind::Let, Some(current), body.text_range());
+            self.declare_in(&body, body_scope);
+            self.walk_children(&body, body_scope);
+        }
+    }
+
+    /// One `FOR_BINDING` clause list: each clause's iterable is walked in
+    /// the scope outside its variable (so `for x in x` reads the outer `x`,
+    /// and later iterables see earlier variables), then the variable binds
+    /// in a fresh chained scope. Returns the innermost scope.
+    fn handle_for_binding(
+        &mut self,
+        node: &SyntaxNode,
+        outer: ScopeId,
+        end: rowan::TextSize,
+        kind: ScopeKind,
+    ) -> ScopeId {
+        let mut current = outer;
+        let clauses: Vec<SyntaxNode> = node.children().collect();
+        let mut i = 0;
+        while i < clauses.len() {
+            let target = &clauses[i];
+            if let Some(iterable) = clauses.get(i + 1) {
+                self.walk_node(iterable, current);
+            }
+            let range = TextRange::new(target.text_range().start(), end);
+            current = self.push_scope(kind, Some(current), range);
+            self.bind_param_pattern(target, current, BindingKind::ForVar);
+            i += 2;
+        }
+        current
+    }
+
+    fn handle_for(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let end = node.text_range().end();
+        let mut current = scope;
+        for child in node.children() {
+            if child.kind() == SyntaxKind::FOR_BINDING {
+                current = self.handle_for_binding(&child, current, end, ScopeKind::For);
+            }
+        }
+        if current == scope {
+            // Recovery: a `for` with no binding still scopes its body.
+            current = self.push_scope(ScopeKind::For, Some(scope), node.text_range());
+        }
+        if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+            self.declare_in(&body, current);
+            self.walk_children(&body, current);
+        }
+    }
+
+    fn handle_while(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let while_scope = self.push_scope(ScopeKind::While, Some(scope), node.text_range());
+        self.declare_in(node, while_scope);
+        self.walk_children(node, while_scope);
+    }
+
+    /// `try`/`catch`/`else`/`finally`: each clause is its own soft scope —
+    /// variables from the `try` block are *not* visible in `catch`. The
+    /// catch variable binds in the catch scope.
+    fn handle_try(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::BLOCK => {
+                    let s = self.push_scope(ScopeKind::Try, Some(scope), child.text_range());
+                    self.declare_in(&child, s);
+                    self.walk_children(&child, s);
+                }
+                SyntaxKind::CATCH_CLAUSE => {
+                    let s = self.push_scope(ScopeKind::Catch, Some(scope), child.text_range());
+                    for part in child.children() {
+                        match part.kind() {
+                            SyntaxKind::NAME => {
+                                self.bind_param_pattern(&part, s, BindingKind::CatchParam);
+                            }
+                            SyntaxKind::BLOCK => {
+                                self.declare_in(&part, s);
+                                self.walk_children(&part, s);
+                            }
+                            _ => self.walk_node(&part, s),
+                        }
+                    }
+                }
+                SyntaxKind::ELSE_CLAUSE | SyntaxKind::FINALLY_CLAUSE => {
+                    let kind = if child.kind() == SyntaxKind::FINALLY_CLAUSE {
+                        ScopeKind::Finally
+                    } else {
+                        ScopeKind::Try
+                    };
+                    let s = self.push_scope(kind, Some(scope), child.text_range());
+                    self.declare_in(&child, s);
+                    self.walk_children(&child, s);
+                }
+                _ => self.walk_node(&child, scope),
+            }
+        }
+    }
+
+    /// Comprehensions and generators: hard scopes for their iteration
+    /// variables. A typed comprehension's element type is read in the
+    /// enclosing scope; the element expression and `if` filters run in the
+    /// innermost clause scope.
+    fn handle_comprehension(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let end = node.text_range().end();
+        let mut children = node.children().peekable();
+        if node.kind() == SyntaxKind::TYPED_COMPREHENSION
+            && let Some(ty) = children.next()
+        {
+            self.walk_node(&ty, scope);
+        }
+        let rest: Vec<SyntaxNode> = children.collect();
+        let mut current = scope;
+        for child in &rest {
+            if child.kind() == SyntaxKind::FOR_BINDING {
+                current = self.handle_for_binding(child, current, end, ScopeKind::Comprehension);
+            }
+        }
+        if current == scope {
+            current = self.push_scope(ScopeKind::Comprehension, Some(scope), node.text_range());
+        }
+        for child in &rest {
+            if child.kind() != SyntaxKind::FOR_BINDING {
+                self.declare_node(child, current);
+                self.walk_node(child, current);
+            }
+        }
     }
 
     // --- function-like scopes ----------------------------------------------

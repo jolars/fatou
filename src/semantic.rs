@@ -529,6 +529,165 @@ mod tests {
         assert!(!m.binding(find(&m, "time")).read);
     }
 
+    // --- block scopes -------------------------------------------------------
+
+    #[test]
+    fn let_binds_and_body_reads() {
+        let m = model_of("let a = 1\n    a + 1\nend");
+        assert_eq!(kind_of(&m, "a"), BindingKind::LetVar);
+        assert!(m.binding(find(&m, "a")).read);
+    }
+
+    #[test]
+    fn let_shadow_reads_outer_on_rhs() {
+        let m = model_of("x = 1\nlet x = x\n    x\nend");
+        let bindings: Vec<_> = m.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(bindings.len(), 2);
+        let outer = find(&m, "x");
+        assert_eq!(m.binding(outer).kind, BindingKind::Global);
+        let rhs = m.idents().iter().find(|i| i.name == "x").unwrap();
+        assert_eq!(rhs.binding, Some(outer), "let rhs reads the outer x");
+        assert!(m.bindings().iter().all(|b| b.name != "x" || b.read));
+    }
+
+    #[test]
+    fn let_bindings_chain_left_to_right() {
+        let m = model_of("let a = 1, b, c = a\n    c\nend");
+        assert_eq!(binding_names(&m), ["a", "b", "c"]);
+        let a = find(&m, "a");
+        let read = m.idents().iter().find(|i| i.name == "a").unwrap();
+        assert_eq!(read.binding, Some(a));
+    }
+
+    #[test]
+    fn let_body_locals_do_not_leak() {
+        let m = model_of("let\n    y = 2\nend\ny");
+        assert_eq!(kind_of(&m, "y"), BindingKind::Local);
+        assert_eq!(scope_kind_of(&m, "y"), ScopeKind::Let);
+        assert_eq!(free_read_names(&m), ["y"]);
+    }
+
+    #[test]
+    fn for_binds_loop_var_and_reads_iterable_outside() {
+        let m = model_of("xs = []\nfor x in xs\n    x\nend");
+        assert_eq!(kind_of(&m, "x"), BindingKind::ForVar);
+        assert!(m.binding(find(&m, "xs")).read);
+        assert!(m.binding(find(&m, "x")).read);
+    }
+
+    #[test]
+    fn for_iterable_does_not_see_the_loop_var() {
+        let m = model_of("for x in x\nend");
+        let read = m.idents().iter().find(|i| i.name == "x").unwrap();
+        assert_eq!(read.binding, None, "iterable x is the (free) outer x");
+    }
+
+    #[test]
+    fn multi_clause_for_chains_scopes() {
+        let m = model_of("xs = []\nfor i in xs, j in f(i)\n    j\nend");
+        let i = find(&m, "i");
+        let read = m
+            .idents()
+            .iter()
+            .find(|r| r.name == "i" && r.access == Access::Read)
+            .unwrap();
+        assert_eq!(read.binding, Some(i), "second iterable sees the first var");
+    }
+
+    #[test]
+    fn for_destructures_tuple_vars() {
+        let m = model_of(
+            "for (k, v) in pairs\n    k
+end",
+        );
+        assert_eq!(kind_of(&m, "k"), BindingKind::ForVar);
+        assert_eq!(kind_of(&m, "v"), BindingKind::ForVar);
+    }
+
+    #[test]
+    fn soft_scope_assigns_enclosing_local() {
+        let src =
+            "function f()\n    s = 0\n    for i in 1:3\n        s = s + i\n    end\n    s\nend";
+        let m = model_of(src);
+        let s_bindings: Vec<_> = m.bindings().iter().filter(|b| b.name == "s").collect();
+        assert_eq!(s_bindings.len(), 1, "loop body assigns the function local");
+        assert_eq!(m.scope(s_bindings[0].scope).kind, ScopeKind::Function);
+    }
+
+    #[test]
+    fn top_level_soft_scope_makes_a_new_local() {
+        // Non-interactive file semantics: the loop-body assignment does NOT
+        // reuse the global (Julia warns and creates a local).
+        let m = model_of("x = 0\nfor i in 1:3\n    x = i\nend");
+        let xs: Vec<_> = m.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(xs.len(), 2);
+        assert_eq!(m.scope(xs[1].scope).kind, ScopeKind::For);
+    }
+
+    #[test]
+    fn for_body_locals_do_not_leak() {
+        let m = model_of("for i in 1:3\n    t = i\nend\nt");
+        assert_eq!(free_read_names(&m), ["t"]);
+    }
+
+    #[test]
+    fn while_scopes_condition_and_body() {
+        let m = model_of("n = 3\nwhile n > 0\n    t = n\nend");
+        assert!(m.binding(find(&m, "n")).read);
+        assert_eq!(scope_kind_of(&m, "t"), ScopeKind::While);
+    }
+
+    #[test]
+    fn catch_binds_its_variable_in_the_catch_scope() {
+        let m = model_of("try\n    risky()\ncatch e\n    handle(e)\nend");
+        assert_eq!(kind_of(&m, "e"), BindingKind::CatchParam);
+        assert_eq!(scope_kind_of(&m, "e"), ScopeKind::Catch);
+        assert!(m.binding(find(&m, "e")).read);
+    }
+
+    #[test]
+    fn try_locals_are_not_visible_in_catch() {
+        let m = model_of("try\n    t = 1\ncatch\n    t\nend");
+        assert_eq!(scope_kind_of(&m, "t"), ScopeKind::Try);
+        assert_eq!(free_read_names(&m), ["t"]);
+    }
+
+    #[test]
+    fn finally_gets_its_own_scope() {
+        let m = model_of("try\n    risky()\nfinally\n    t = 1\nend");
+        assert_eq!(scope_kind_of(&m, "t"), ScopeKind::Finally);
+    }
+
+    #[test]
+    fn comprehension_binds_var_and_reads_iterable_outside() {
+        let m = model_of("xs = []\n[x^2 for x in xs if x > 1]");
+        assert_eq!(kind_of(&m, "x"), BindingKind::ForVar);
+        assert_eq!(scope_kind_of(&m, "x"), ScopeKind::Comprehension);
+        assert!(m.binding(find(&m, "xs")).read);
+        let x = find(&m, "x");
+        let reads = m.idents().iter().filter(|i| i.binding == Some(x)).count();
+        assert_eq!(reads, 2, "element and filter both read x");
+    }
+
+    #[test]
+    fn generator_scopes_like_a_comprehension() {
+        let m = model_of("sum(x for x in 1:10)");
+        assert_eq!(kind_of(&m, "x"), BindingKind::ForVar);
+        assert!(m.binding(find(&m, "x")).read);
+    }
+
+    #[test]
+    fn typed_comprehension_type_is_read_outside() {
+        let m = model_of("Int[x for x in xs]");
+        assert_eq!(free_read_names(&m), ["Int", "xs"]);
+    }
+
+    #[test]
+    fn comprehension_vars_do_not_leak() {
+        let m = model_of("[x for x in 1:3]\nx");
+        assert_eq!(free_read_names(&m), ["x"]);
+    }
+
     #[test]
     fn names_in_scope_sees_locals_params_and_globals() {
         let src = "g = 1\nfunction f(a)\n    b = 2\n    b\nend";
