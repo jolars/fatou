@@ -42,6 +42,11 @@ pub enum BindingKind {
     Type,
     /// A `module` definition's name.
     Module,
+    /// A name introduced by `using`/`import`: the last path component, its
+    /// `as` alias, or an explicit item (`using X: a`). Imported macros keep
+    /// the `@` sigil in the name, which keeps them invisible to value
+    /// lookups (resolution matches by name).
+    Import,
 }
 
 /// One variable: a single binding covers every assignment to the same

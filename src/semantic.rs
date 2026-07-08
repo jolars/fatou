@@ -21,6 +21,7 @@
 
 pub mod binding;
 pub mod builder;
+pub mod import;
 pub mod scope;
 
 use rowan::{TextRange, TextSize};
@@ -29,6 +30,9 @@ use smol_str::SmolStr;
 use crate::syntax::SyntaxNode;
 
 pub use binding::{Binding, BindingId, BindingKind};
+pub use import::{
+    ExportEntry, ImportItem, LoadKind, ModuleLoad, ModulePath, QualifiedRead, Visibility,
+};
 pub use scope::{Scope, ScopeId, ScopeKind};
 
 /// How an identifier occurrence uses its variable.
@@ -72,6 +76,9 @@ pub struct SemanticModel {
     scopes: Vec<Scope>,
     bindings: Vec<Binding>,
     idents: Vec<IdentRef>,
+    module_loads: Vec<ModuleLoad>,
+    exports: Vec<ExportEntry>,
+    qualified_reads: Vec<QualifiedRead>,
 }
 
 impl SemanticModel {
@@ -181,6 +188,25 @@ impl SemanticModel {
         self.idents
             .iter()
             .filter(|i| i.binding.is_none() && !i.is_macro)
+    }
+
+    /// The `using`/`import` clauses, in source order. (Feeds the package
+    /// index's resolution order and the future firewall queries.)
+    pub fn module_loads(&self) -> &[ModuleLoad] {
+        &self.module_loads
+    }
+
+    /// The `export`/`public` names, in source order. (Feeds the future
+    /// `file_exports` firewall query.)
+    pub fn exports(&self) -> &[ExportEntry] {
+        &self.exports
+    }
+
+    /// The qualified reads (`Foo.bar`, `Base.@time`), in source order,
+    /// separate from the bare free reads. (Feeds the future
+    /// `file_qualified_reads` firewall query.)
+    pub fn qualified_reads(&self) -> &[QualifiedRead] {
+        &self.qualified_reads
     }
 }
 
@@ -821,6 +847,234 @@ end",
     fn module_locals_do_not_leak_out() {
         let m = model_of("module M\ny = 1\nend\ny");
         assert_eq!(free_read_names(&m), ["y"]);
+    }
+
+    // --- imports and exports -------------------------------------------------
+
+    #[test]
+    fn using_whole_module_binds_last_component() {
+        let m = model_of("using A");
+        assert_eq!(binding_names(&m), ["A"]);
+        assert_eq!(kind_of(&m, "A"), BindingKind::Import);
+
+        let m = model_of("using A.B");
+        assert_eq!(binding_names(&m), ["B"]);
+    }
+
+    #[test]
+    fn import_binds_last_component() {
+        let m = model_of("import A.B.C");
+        assert_eq!(binding_names(&m), ["C"]);
+        let load = &m.module_loads()[0];
+        assert_eq!(load.kind, LoadKind::Import);
+        assert_eq!(load.path.leading_dots, 0);
+        assert_eq!(load.path.components, ["A", "B", "C"]);
+        assert_eq!(load.items, None);
+    }
+
+    #[test]
+    fn import_alias_binds_alias() {
+        let m = model_of("import A as Z");
+        assert_eq!(binding_names(&m), ["Z"]);
+        let load = &m.module_loads()[0];
+        assert_eq!(load.path.components, ["A"]);
+        assert_eq!(load.alias.as_deref(), Some("Z"));
+    }
+
+    #[test]
+    fn using_items_bind_only_items() {
+        let m = model_of("using A: x, y");
+        assert_eq!(binding_names(&m), ["x", "y"]);
+        let load = &m.module_loads()[0];
+        assert_eq!(load.kind, LoadKind::Using);
+        assert_eq!(load.path.components, ["A"]);
+        let items = load.items.as_ref().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].name, "x");
+        assert_eq!(items[1].name, "y");
+    }
+
+    #[test]
+    fn item_alias_binds_alias() {
+        let m = model_of("import A: x as y");
+        assert_eq!(binding_names(&m), ["y"]);
+        let items = m.module_loads()[0].items.as_ref().unwrap();
+        assert_eq!(items[0].name, "x");
+        assert_eq!(items[0].alias.as_deref(), Some("y"));
+    }
+
+    #[test]
+    fn import_comma_form_records_two_loads() {
+        let m = model_of("import A, B");
+        assert_eq!(binding_names(&m), ["A", "B"]);
+        let loads = m.module_loads();
+        assert_eq!(loads.len(), 2);
+        assert_eq!(loads[0].path.components, ["A"]);
+        assert_eq!(loads[1].path.components, ["B"]);
+    }
+
+    #[test]
+    fn relative_import_counts_leading_dots() {
+        let m = model_of("import ..A");
+        assert_eq!(binding_names(&m), ["A"]);
+        let load = &m.module_loads()[0];
+        assert_eq!(load.path.leading_dots, 2);
+        assert_eq!(load.path.components, ["A"]);
+    }
+
+    #[test]
+    fn operator_import_binds_operator() {
+        let m = model_of("import A: +");
+        assert_eq!(binding_names(&m), ["+"]);
+        assert_eq!(kind_of(&m, "+"), BindingKind::Import);
+    }
+
+    #[test]
+    fn imported_name_resolves_reads() {
+        let m = model_of("import A: f\nf()");
+        assert!(m.binding(find(&m, "f")).read);
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn whole_module_using_leaves_exports_free() {
+        let m = model_of("using A\nf()");
+        assert_eq!(free_read_names(&m), ["f"]);
+    }
+
+    #[test]
+    fn imported_macro_resolves_macro_calls() {
+        let m = model_of("using X: @foo\n@foo 1");
+        assert_eq!(binding_names(&m), ["@foo"]);
+        assert_eq!(kind_of(&m, "@foo"), BindingKind::Import);
+        assert!(m.binding(find(&m, "@foo")).read);
+        let call = m.idents().iter().find(|i| i.is_macro).unwrap();
+        assert_eq!(call.binding, Some(find(&m, "@foo")));
+    }
+
+    #[test]
+    fn macro_import_does_not_satisfy_value_reads() {
+        let m = model_of("using X: @foo\nfoo");
+        assert_eq!(free_read_names(&m), ["foo"]);
+    }
+
+    #[test]
+    fn interpolated_import_reads_not_binds() {
+        let m = model_of("import $A");
+        assert!(binding_names(&m).is_empty());
+        assert!(m.module_loads().is_empty());
+        assert_eq!(free_read_names(&m), ["A"]);
+    }
+
+    #[test]
+    fn module_body_import_scopes_to_module() {
+        let m = model_of("module M\nusing Inner: q\nend");
+        assert_eq!(kind_of(&m, "q"), BindingKind::Import);
+        assert_eq!(scope_kind_of(&m, "q"), ScopeKind::Module);
+        let load = &m.module_loads()[0];
+        assert_eq!(m.scope(load.scope).kind, ScopeKind::Module);
+    }
+
+    #[test]
+    fn invalid_using_as_is_skipped() {
+        let m = model_of("using A as B");
+        assert!(binding_names(&m).is_empty());
+        assert!(m.module_loads().is_empty());
+
+        let m = model_of("using A as B: x");
+        assert!(binding_names(&m).is_empty());
+        assert!(m.module_loads().is_empty());
+    }
+
+    #[test]
+    fn export_records_and_marks_read() {
+        let m = model_of("f() = 1\nexport f");
+        let entry = &m.exports()[0];
+        assert_eq!(entry.name, "f");
+        assert_eq!(entry.visibility, Visibility::Exported);
+        assert_eq!(entry.binding, Some(find(&m, "f")));
+        assert!(m.binding(find(&m, "f")).read);
+    }
+
+    #[test]
+    fn export_before_definition_resolves() {
+        let m = model_of("export f\nf() = 1");
+        assert_eq!(m.exports()[0].binding, Some(find(&m, "f")));
+    }
+
+    #[test]
+    fn export_undefined_is_not_a_free_read() {
+        let m = model_of("export g");
+        assert_eq!(m.exports()[0].binding, None);
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn export_operator_and_macro_names() {
+        let m = model_of("macro m()\nend\nexport +, @m");
+        let names: Vec<_> = m.exports().iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["+", "@m"]);
+        assert_eq!(m.exports()[1].binding, Some(find(&m, "m")));
+        assert!(m.binding(find(&m, "m")).read);
+    }
+
+    #[test]
+    fn export_paren_name_is_not_a_read() {
+        let m = model_of("export (x)");
+        assert_eq!(m.exports()[0].name, "x");
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn public_records_with_public_visibility() {
+        let m = model_of("g() = 1\npublic g");
+        let entry = &m.exports()[0];
+        assert_eq!(entry.name, "g");
+        assert_eq!(entry.visibility, Visibility::Public);
+        assert_eq!(entry.binding, Some(find(&m, "g")));
+    }
+
+    #[test]
+    fn public_assignment_is_not_a_name_list() {
+        let m = model_of("public = 4");
+        assert!(m.exports().is_empty());
+        assert_eq!(binding_names(&m), ["public"]);
+    }
+
+    #[test]
+    fn qualified_read_records_full_path() {
+        let m = model_of("a.b.c");
+        let q = &m.qualified_reads()[0];
+        assert_eq!(q.path, ["a", "b", "c"]);
+        assert!(!q.is_macro);
+        assert_eq!(free_read_names(&m), ["a"], "only the root is an ident");
+    }
+
+    #[test]
+    fn qualified_read_root_resolves_to_import() {
+        let m = model_of("import A\nA.f()");
+        assert!(m.binding(find(&m, "A")).read);
+        assert_eq!(m.qualified_reads()[0].path, ["A", "f"]);
+    }
+
+    #[test]
+    fn qualified_macro_records_and_reads_root() {
+        let m = model_of("Base.@time f()");
+        let q = &m.qualified_reads()[0];
+        assert_eq!(q.path, ["Base", "@time"]);
+        assert!(q.is_macro);
+        assert_eq!(free_read_names(&m), ["Base", "f"]);
+        assert!(
+            !m.idents().iter().any(|i| i.is_macro),
+            "a qualified macro is not a local macro-namespace read"
+        );
+    }
+
+    #[test]
+    fn call_chains_are_not_qualified_reads() {
+        let m = model_of("f(x).y");
+        assert!(m.qualified_reads().is_empty());
+        assert_eq!(free_read_names(&m), ["f", "x"]);
     }
 
     #[test]

@@ -85,3 +85,33 @@ fn same_shape_edit_backdates_the_semantic_model() {
         "the Eq model must backdate: dependents do not re-run"
     );
 }
+
+/// A downstream query over the import model, to observe backdating.
+#[salsa::tracked]
+fn probe_load_count(db: &dyn IncrementalDb, file: SourceFile) -> usize {
+    use std::sync::atomic::Ordering;
+    LOAD_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
+    semantic_model(db, file).module_loads().len()
+}
+
+static LOAD_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[test]
+fn same_shape_edit_backdates_the_import_model() {
+    use std::sync::atomic::Ordering;
+
+    let mut db = IncrementalDatabase::new();
+    let file = db.add_file("using A: f\nx = 1\nf(x)\n");
+    assert_eq!(probe_load_count(&db, file), 1);
+    assert_eq!(LOAD_PROBE_RUNS.load(Ordering::SeqCst), 1);
+
+    // A same-width literal edit after the import leaves every range (and so
+    // the whole model, loaded-modules list included) structurally equal.
+    db.set_file_text(file, "using A: f\nx = 2\nf(x)\n");
+    assert_eq!(probe_load_count(&db, file), 1);
+    assert_eq!(
+        LOAD_PROBE_RUNS.load(Ordering::SeqCst),
+        1,
+        "the Eq model must backdate: dependents do not re-run"
+    );
+}

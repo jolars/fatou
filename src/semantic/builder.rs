@@ -14,6 +14,9 @@ use smol_str::SmolStr;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use super::binding::{Binding, BindingId, BindingKind};
+use super::import::{
+    ExportEntry, ImportItem, LoadKind, ModuleLoad, ModulePath, QualifiedRead, Visibility,
+};
 use super::scope::{Scope, ScopeId, ScopeKind};
 use super::{Access, IdentRef, SemanticModel};
 
@@ -142,6 +145,218 @@ fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
     node.children_with_tokens()
         .filter_map(|e| e.into_token())
         .find(|t| t.kind() == SyntaxKind::IDENT)
+}
+
+/// One `using`/`import` clause (an `IMPORT_PATH`, or the path inside an
+/// `IMPORT_ALIAS`), extracted from the raw token stream the parser leaves in
+/// the tree. Mirrors the sexpr projector's reading of the same shape.
+struct ImportClause {
+    leading_dots: u32,
+    components: Vec<(SmolStr, TextRange)>,
+    alias: Option<(SmolStr, TextRange)>,
+    range: TextRange,
+    /// The clause ends in an interpolation (`import $A`, `import A.$B`), so
+    /// the name it binds is unknowable.
+    unbindable: bool,
+}
+
+impl ImportClause {
+    /// The name this clause binds (the alias, else the last component), or
+    /// `None` when interpolation makes it unknowable.
+    fn binding_name(&self) -> Option<(&SmolStr, TextRange)> {
+        if let Some((name, range)) = &self.alias {
+            return Some((name, *range));
+        }
+        if self.unbindable {
+            return None;
+        }
+        self.components.last().map(|(name, range)| (name, *range))
+    }
+
+    fn path(&self) -> ModulePath {
+        ModulePath {
+            leading_dots: self.leading_dots,
+            components: self
+                .components
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect(),
+        }
+    }
+
+    /// The clause as an explicit import item (`using X: a as b`).
+    fn as_item(&self) -> Option<ImportItem> {
+        if self.unbindable || self.components.is_empty() {
+            return None;
+        }
+        Some(ImportItem {
+            name: self.components.last().unwrap().0.clone(),
+            alias: self.alias.as_ref().map(|(name, _)| name.clone()),
+            range: self.range,
+        })
+    }
+}
+
+/// Read the dot-separated components out of an `IMPORT_PATH` node's tokens:
+/// leading `.`/`..`/`...` count as relative dots, `IDENT` and operator
+/// tokens are components (fused dotted operators like `.==` contribute a
+/// relative dot when leading), quoted operators (`A.:+`, `A.(:+)`) unwrap to
+/// the quoted symbol, macro names keep their `@`, and interpolations mark
+/// the clause unbindable.
+fn import_path_parts(path: &SyntaxNode, clause: &mut ImportClause) {
+    let mut seen_name = false;
+    let component = |clause: &mut ImportClause, text: &str, range: TextRange| {
+        clause.components.push((SmolStr::new(text), range));
+        clause.unbindable = false;
+    };
+    for element in path.children_with_tokens() {
+        match element {
+            rowan::NodeOrToken::Token(t) => match t.kind() {
+                SyntaxKind::DOT if !seen_name => clause.leading_dots += 1,
+                SyntaxKind::DOT_DOT if !seen_name => clause.leading_dots += 2,
+                SyntaxKind::DOT_DOT_DOT if !seen_name => clause.leading_dots += 3,
+                SyntaxKind::IDENT => {
+                    component(clause, t.text(), t.text_range());
+                    seen_name = true;
+                }
+                // After a name, `...` is a separator dot fused with the `..`
+                // range operator as a component (`import A...`).
+                SyntaxKind::DOT_DOT_DOT => component(clause, "..", t.text_range()),
+                SyntaxKind::DOT | SyntaxKind::DOT_DOT | SyntaxKind::COLON => {}
+                k if k.is_operator() => {
+                    // A fused dotted operator's leading dot is a relative
+                    // dot before any name (`import .==`), a separator after.
+                    if !seen_name && t.text().starts_with('.') {
+                        clause.leading_dots += 1;
+                    }
+                    component(clause, t.text().trim_start_matches('.'), t.text_range());
+                    seen_name = true;
+                }
+                _ => {}
+            },
+            rowan::NodeOrToken::Node(n) => match n.kind() {
+                SyntaxKind::NAME => {
+                    if let Some(t) = name_ident(&n) {
+                        component(clause, t.text(), t.text_range());
+                    }
+                    seen_name = true;
+                }
+                // `A.:+` and `A.(:+)`: the component is the quoted symbol.
+                SyntaxKind::QUOTE_SYM | SyntaxKind::PAREN_EXPR => {
+                    if let Some(t) = quoted_symbol_token(&n) {
+                        component(clause, t.text(), t.text_range());
+                    }
+                    seen_name = true;
+                }
+                SyntaxKind::MACRO_NAME => {
+                    if let Some(t) = macro_name_ident(&n) {
+                        component(clause, &format!("@{}", t.text()), n.text_range());
+                    }
+                    seen_name = true;
+                }
+                SyntaxKind::INTERPOLATION => {
+                    clause.unbindable = true;
+                    seen_name = true;
+                }
+                _ => {}
+            },
+        }
+    }
+}
+
+/// The symbol token inside a quoted-operator path component (`:+`, `:(+)`,
+/// `:(foo)`): the first identifier or operator token after the quote colon.
+fn quoted_symbol_token(node: &SyntaxNode) -> Option<SyntaxToken> {
+    node.descendants_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| {
+            t.kind() == SyntaxKind::IDENT
+                || (t.kind().is_operator() && t.kind() != SyntaxKind::COLON)
+        })
+}
+
+/// The final identifier token of a `MACRO_NAME` (the name after the `@`).
+fn macro_name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .filter(|t| t.kind() == SyntaxKind::IDENT)
+        .last()
+}
+
+/// Split a `USING_STMT`/`IMPORT_STMT` into the clauses before an optional
+/// colon (the comma-form paths, or the item list's single base path) and the
+/// item clauses after it. ERROR-wrapped clauses (invalid `as` positions) are
+/// skipped. A statement-level `$` (the parser leaves `import A.$B` partly
+/// outside the path node) poisons the preceding clause.
+fn collect_import_clauses(stmt: &SyntaxNode) -> (Vec<ImportClause>, Option<Vec<ImportClause>>) {
+    let mut before: Vec<ImportClause> = Vec::new();
+    let mut after: Option<Vec<ImportClause>> = None;
+    for element in stmt.children_with_tokens() {
+        match element {
+            rowan::NodeOrToken::Token(t) => match t.kind() {
+                SyntaxKind::COLON => after = Some(Vec::new()),
+                SyntaxKind::DOLLAR => {
+                    if let Some(clause) = after.as_mut().unwrap_or(&mut before).last_mut() {
+                        clause.unbindable = true;
+                    }
+                }
+                _ => {}
+            },
+            rowan::NodeOrToken::Node(n)
+                if matches!(n.kind(), SyntaxKind::IMPORT_PATH | SyntaxKind::IMPORT_ALIAS) =>
+            {
+                let mut clause = ImportClause {
+                    leading_dots: 0,
+                    components: Vec::new(),
+                    alias: None,
+                    range: n.text_range(),
+                    unbindable: false,
+                };
+                let path = if n.kind() == SyntaxKind::IMPORT_ALIAS {
+                    // `IMPORT_PATH … as alias`: the alias is the last bare
+                    // identifier token (the path's own names are nested).
+                    clause.alias = n
+                        .children_with_tokens()
+                        .filter_map(|e| e.into_token())
+                        .filter(|t| t.kind() == SyntaxKind::IDENT && t.text() != "as")
+                        .last()
+                        .map(|t| (SmolStr::new(t.text()), t.text_range()));
+                    n.children().find(|c| c.kind() == SyntaxKind::IMPORT_PATH)
+                } else {
+                    Some(n.clone())
+                };
+                if let Some(path) = path {
+                    import_path_parts(&path, &mut clause);
+                }
+                after.as_mut().unwrap_or(&mut before).push(clause);
+            }
+            _ => {}
+        }
+    }
+    (before, after)
+}
+
+/// Flatten a pure dotted-name chain (`a.b.c`) into its components plus the
+/// root `NAME` node; `None` when any part is not a plain name (`f(x).y`).
+fn qualified_name_chain(node: &SyntaxNode) -> Option<(Vec<SmolStr>, SyntaxNode)> {
+    let mut reversed: Vec<SmolStr> = Vec::new();
+    let mut cursor = node.clone();
+    loop {
+        let mut children = cursor.children();
+        let lhs = children.next()?;
+        let rhs = children.next()?;
+        let field = name_ident(&rhs).filter(|_| rhs.kind() == SyntaxKind::NAME)?;
+        reversed.push(SmolStr::new(field.text()));
+        match lhs.kind() {
+            SyntaxKind::NAME => {
+                reversed.push(SmolStr::new(name_ident(&lhs)?.text()));
+                reversed.reverse();
+                return Some((reversed, lhs));
+            }
+            SyntaxKind::BINARY_EXPR if is_field_access(&lhs) => cursor = lhs,
+            _ => return None,
+        }
+    }
 }
 
 /// Split a `TYPE_ANNOTATION` into the annotated pattern (absent for the
@@ -384,14 +599,18 @@ impl Builder {
         None
     }
 
-    /// Resolve a `@name` read: the macro namespace only sees `macro`
-    /// definitions.
+    /// Resolve a `@name` read: the macro namespace sees `macro` definitions
+    /// and imported macros (whose bindings keep the `@` sigil in the name).
     fn resolve_macro_read(&self, name: &str, scope: ScopeId) -> Option<BindingId> {
         let mut cursor = Some(scope);
         while let Some(id) = cursor {
             let hit = self.scope(id).bindings.iter().rev().copied().find(|&b| {
                 let binding = &self.model.bindings[b.0 as usize];
-                binding.kind == BindingKind::Macro && binding.name == name
+                match binding.kind {
+                    BindingKind::Macro => binding.name == name,
+                    BindingKind::Import => binding.name.strip_prefix('@') == Some(name),
+                    _ => false,
+                }
             });
             if hit.is_some() {
                 return hit;
@@ -427,6 +646,9 @@ impl Builder {
             SyntaxKind::LOCAL_STMT => self.declare_declaration(node, scope, DeclKind::Local),
             SyntaxKind::GLOBAL_STMT => self.declare_declaration(node, scope, DeclKind::Global),
             SyntaxKind::CONST_STMT => self.declare_declaration(node, scope, DeclKind::Const),
+            SyntaxKind::IMPORT_STMT | SyntaxKind::USING_STMT => {
+                self.declare_import(node, scope);
+            }
             kind if creates_scope(kind) => {}
             SyntaxKind::ASSIGNMENT_EXPR => {
                 let mut children = node.children();
@@ -457,6 +679,27 @@ impl Builder {
                 }
             }
             _ => self.declare_in(node, scope),
+        }
+    }
+
+    /// Bind the names a `using`/`import` statement introduces: each comma
+    /// clause's last path component (or its `as` alias), or the explicit
+    /// items after a colon. Imported macros keep their `@` sigil, which
+    /// keeps them out of value resolution (names never contain `@`).
+    fn declare_import(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let (before, after) = collect_import_clauses(node);
+        let clauses = match &after {
+            // An ERROR-wrapped base (`using A as B: x`) poisons the statement.
+            Some(items) if !before.is_empty() => items,
+            Some(_) => return,
+            None => &before,
+        };
+        for clause in clauses {
+            if let Some((name, range)) = clause.binding_name()
+                && self.find_in_scope(scope, name).is_none()
+            {
+                self.push_binding(name, BindingKind::Import, scope, range);
+            }
         }
     }
 
@@ -661,11 +904,26 @@ impl Builder {
                 self.handle_type_def(node, scope);
             }
             SyntaxKind::MODULE_DEF => self.handle_module(node, scope),
+            SyntaxKind::IMPORT_STMT | SyntaxKind::USING_STMT => self.handle_import(node, scope),
+            SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => {
+                self.handle_name_list(node, scope);
+            }
             SyntaxKind::LOCAL_STMT | SyntaxKind::GLOBAL_STMT | SyntaxKind::CONST_STMT => {
                 self.handle_declaration(node, scope);
             }
             SyntaxKind::BINARY_EXPR if is_field_access(node) => {
-                if let Some(base) = node.children().next() {
+                // A pure dotted-name chain is a qualified read (`Foo.bar`),
+                // recorded whole alongside the root's ordinary read; mixed
+                // chains (`f(x).y`) just walk the base as before.
+                if let Some((path, root)) = qualified_name_chain(node) {
+                    self.model.qualified_reads.push(QualifiedRead {
+                        path,
+                        range: node.text_range(),
+                        scope,
+                        is_macro: false,
+                    });
+                    self.record_name_read(&root, scope);
+                } else if let Some(base) = node.children().next() {
                     self.walk_node(&base, scope);
                 }
             }
@@ -786,6 +1044,144 @@ impl Builder {
             false,
             binding,
         );
+    }
+
+    // --- imports and exports -------------------------------------------------
+
+    /// Record a `using`/`import` statement into the loaded-modules list: one
+    /// entry per comma clause, or one entry carrying the item list of the
+    /// colon form. The declare phase already introduced the bindings; here
+    /// only interpolations are walked (they splice in enclosing values).
+    fn handle_import(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let kind = if node.kind() == SyntaxKind::USING_STMT {
+            LoadKind::Using
+        } else {
+            LoadKind::Import
+        };
+        let (before, after) = collect_import_clauses(node);
+        if let Some(items) = after {
+            if let Some(base) = before.into_iter().next() {
+                self.model.module_loads.push(ModuleLoad {
+                    kind,
+                    path: base.path(),
+                    alias: base.alias.map(|(name, _)| name),
+                    items: Some(items.iter().filter_map(ImportClause::as_item).collect()),
+                    range: node.text_range(),
+                    scope,
+                });
+            }
+        } else {
+            for clause in before {
+                if clause.components.is_empty() {
+                    continue;
+                }
+                self.model.module_loads.push(ModuleLoad {
+                    kind,
+                    path: clause.path(),
+                    alias: clause.alias.map(|(name, _)| name),
+                    items: None,
+                    range: clause.range,
+                    scope,
+                });
+            }
+        }
+        for child in node.descendants().skip(1) {
+            if child.kind() == SyntaxKind::INTERPOLATION {
+                self.walk_node(&child, scope);
+            }
+        }
+        // `import A.$B` leaves the interpolation as statement-level tokens.
+        let mut after_dollar = false;
+        for element in node.children_with_tokens() {
+            if let Some(token) = element.into_token() {
+                match token.kind() {
+                    SyntaxKind::DOLLAR => after_dollar = true,
+                    SyntaxKind::IDENT if after_dollar => {
+                        self.record_token_read(&token, scope);
+                        after_dollar = false;
+                    }
+                    SyntaxKind::WHITESPACE => {}
+                    _ => after_dollar = false,
+                }
+            }
+        }
+    }
+
+    /// Record an `export`/`public` name list: identifiers, operators, macro
+    /// names (`@` retained), and parenthesized names become entries resolved
+    /// against the statement's global scope (resolution marks the binding
+    /// used — exported is used); interpolations are ordinary reads and
+    /// unresolved names deliberately stay out of the free reads.
+    fn handle_name_list(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let visibility = if node.kind() == SyntaxKind::EXPORT_STMT {
+            Visibility::Exported
+        } else {
+            Visibility::Public
+        };
+        // `public` is a contextual keyword: the statement's leading token is
+        // a plain IDENT to skip.
+        let mut skip_keyword = node.kind() == SyntaxKind::PUBLIC_STMT;
+        for element in node.children_with_tokens() {
+            match element {
+                rowan::NodeOrToken::Token(t) => match t.kind() {
+                    SyntaxKind::IDENT if skip_keyword => skip_keyword = false,
+                    SyntaxKind::IDENT => {
+                        self.push_export(t.text(), t.text_range(), scope, visibility);
+                    }
+                    k if k.is_operator() => {
+                        self.push_export(t.text(), t.text_range(), scope, visibility);
+                    }
+                    _ => {}
+                },
+                rowan::NodeOrToken::Node(n) => match n.kind() {
+                    SyntaxKind::MACRO_NAME => {
+                        if let Some(t) = macro_name_ident(&n) {
+                            let name = format!("@{}", t.text());
+                            self.push_export(&name, n.text_range(), scope, visibility);
+                        }
+                    }
+                    // `export (x)` unwraps to the name; `export ($a)` and
+                    // bare `$a` interpolations read the enclosing value.
+                    SyntaxKind::PAREN_EXPR => {
+                        let mut inner = n.children();
+                        match (inner.next(), inner.next()) {
+                            (Some(name), None) if name.kind() == SyntaxKind::NAME => {
+                                if let Some(t) = name_ident(&name) {
+                                    self.push_export(t.text(), t.text_range(), scope, visibility);
+                                }
+                            }
+                            _ => self.walk_children(&n, scope),
+                        }
+                    }
+                    SyntaxKind::INTERPOLATION => self.walk_node(&n, scope),
+                    _ => {}
+                },
+            }
+        }
+    }
+
+    fn push_export(
+        &mut self,
+        name: &str,
+        range: TextRange,
+        scope: ScopeId,
+        visibility: Visibility,
+    ) {
+        let binding = if let Some(bare) = name.strip_prefix('@') {
+            self.resolve_macro_read(bare, scope)
+        } else {
+            self.find_in_scope(self.innermost_global(scope), name)
+        };
+        if let Some(b) = binding {
+            self.model.bindings[b.0 as usize].read = true;
+        }
+        self.model.exports.push(ExportEntry {
+            name: SmolStr::new(name),
+            visibility,
+            range,
+            scope,
+            binding,
+        });
     }
 
     // --- declarations, type definitions, and modules ------------------------
@@ -1317,34 +1713,72 @@ impl Builder {
     }
 
     /// `@name args...`: the final name component is a read in the macro
-    /// namespace; arguments are ordinary expressions. Qualifiers
-    /// (`Base.@time`) stay untracked until the import model lands.
+    /// namespace; arguments are ordinary expressions. A qualified name
+    /// (`Base.@time`, `@Base.time`) instead reads its root qualifier as a
+    /// value and records the whole chain as a qualified read — it must not
+    /// resolve to a local macro of the same name.
     fn walk_macro_call(&mut self, node: &SyntaxNode, scope: ScopeId) {
         for child in node.children() {
             if child.kind() == SyntaxKind::MACRO_NAME {
-                let name_token = child
-                    .children_with_tokens()
-                    .filter_map(|e| e.into_token())
-                    .filter(|t| t.kind() == SyntaxKind::IDENT)
-                    .last();
-                if let Some(token) = name_token {
-                    let binding = self.resolve_macro_read(token.text(), scope);
-                    if let Some(b) = binding {
-                        self.model.bindings[b.0 as usize].read = true;
-                    }
-                    self.push_ident(
-                        token.text(),
-                        token.text_range(),
-                        scope,
-                        Access::Read,
-                        true,
-                        binding,
-                    );
-                }
+                self.walk_macro_name(&child, scope);
             } else {
                 self.walk_node(&child, scope);
             }
         }
+    }
+
+    fn walk_macro_name(&mut self, name: &SyntaxNode, scope: ScopeId) {
+        // Qualifier components are NAME nodes (`Base.@time`) or the leading
+        // IDENT tokens of the `@Base.time` form; the final IDENT is the
+        // macro's own name in either.
+        let mut parts: Vec<(SmolStr, Option<SyntaxToken>)> = Vec::new();
+        for element in name.children_with_tokens() {
+            match element {
+                rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::IDENT => {
+                    parts.push((SmolStr::new(t.text()), Some(t)));
+                }
+                rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::NAME => {
+                    if let Some(t) = name_ident(&n) {
+                        parts.push((SmolStr::new(t.text()), Some(t)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some((macro_name, macro_token)) = parts.pop() else {
+            return;
+        };
+        if parts.is_empty() {
+            // Unqualified: a read in the macro namespace.
+            let binding = self.resolve_macro_read(&macro_name, scope);
+            if let Some(b) = binding {
+                self.model.bindings[b.0 as usize].read = true;
+            }
+            if let Some(token) = macro_token {
+                self.push_ident(
+                    token.text(),
+                    token.text_range(),
+                    scope,
+                    Access::Read,
+                    true,
+                    binding,
+                );
+            }
+            return;
+        }
+        // Qualified: the root is an ordinary value read; the chain is a
+        // qualified read in the macro namespace.
+        if let Some(token) = &parts[0].1 {
+            self.record_token_read(token, scope);
+        }
+        let mut path: Vec<SmolStr> = parts.into_iter().map(|(text, _)| text).collect();
+        path.push(SmolStr::new(format!("@{macro_name}")));
+        self.model.qualified_reads.push(QualifiedRead {
+            path,
+            range: name.text_range(),
+            scope,
+            is_macro: true,
+        });
     }
 
     /// Quoted code is data, not evaluated here — except interpolations,

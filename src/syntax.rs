@@ -299,6 +299,122 @@ pub enum SyntaxKind {
     ERROR,
 }
 
+impl SyntaxKind {
+    /// Whether this token kind is an operator symbol (including dotted,
+    /// assignment, and unicode forms). One list shared by the sexpr
+    /// projector and the semantic builder (operator names are importable
+    /// and exportable: `import A: +`, `export ==`).
+    pub fn is_operator(self) -> bool {
+        use SyntaxKind::*;
+        let kind = self;
+        matches!(
+            kind,
+            EQ | PLUS
+                | MINUS
+                | STAR
+                | STAR_STAR
+                | MINUS_MINUS
+                | SLASH
+                | BACKSLASH
+                | SLASH_SLASH
+                | CARET
+                | PERCENT
+                | EQ_EQ
+                | NOT_EQ
+                | EQ_EQ_EQ
+                | NOT_EQ_EQ
+                | LT
+                | LE
+                | GT
+                | GE
+                | AND_AND
+                | OR_OR
+                | DOT_AND_AND
+                | DOT_OR_OR
+                | COLON
+                | DOT_DOT
+                | COLON_COLON
+                | TILDE
+                | DOT_TILDE
+                | SUBTYPE
+                | SUPERTYPE
+                | ARROW
+                | LONG_ARROW
+                | LEFT_RIGHT_ARROW
+                | LEFT_LONG_ARROW
+                | FAT_ARROW
+                | SHL
+                | SHR
+                | USHR
+                | DOT
+                | PIPE_GT
+                | PIPE_LT
+                | BANG
+                | AMP
+                | PIPE
+                | DOT_PLUS
+                | DOT_MINUS
+                | DOT_STAR
+                | DOT_STAR_STAR
+                | DOT_MINUS_MINUS
+                | DOT_SLASH
+                | DOT_BACKSLASH
+                | DOT_SLASH_SLASH
+                | DOT_CARET
+                | DOT_PERCENT
+                | DOT_EQ
+                | DOT_EQ_EQ
+                | DOT_NOT_EQ
+                | DOT_EQ_EQ_EQ
+                | DOT_NOT_EQ_EQ
+                | DOT_LT
+                | DOT_LE
+                | DOT_GT
+                | DOT_GE
+                | DOT_SUBTYPE
+                | DOT_SUPERTYPE
+                | DOT_FAT_ARROW
+                | DOT_LONG_ARROW
+                | DOT_LEFT_LONG_ARROW
+                | DOT_LEFT_RIGHT_ARROW
+                | DOT_PIPE_GT
+                | DOT_AMP
+                | DOT_PIPE
+                | PLUS_EQ
+                | MINUS_EQ
+                | STAR_EQ
+                | SLASH_EQ
+                | BACKSLASH_EQ
+                | SLASH_SLASH_EQ
+                | CARET_EQ
+                | PERCENT_EQ
+                | PIPE_EQ
+                | AMP_EQ
+                | SHL_EQ
+                | SHR_EQ
+                | USHR_EQ
+                | DIV_EQ
+                | XOR_EQ
+                | DOT_PLUS_EQ
+                | DOT_MINUS_EQ
+                | DOT_STAR_EQ
+                | DOT_SLASH_EQ
+                | DOT_BACKSLASH_EQ
+                | DOT_SLASH_SLASH_EQ
+                | DOT_CARET_EQ
+                | DOT_PERCENT_EQ
+                | DOT_SHL_EQ
+                | DOT_SHR_EQ
+                | DOT_USHR_EQ
+                | DOT_DIV_EQ
+                | DOT_XOR_EQ
+                | UNICODE_OP
+                | UNICODE_ASSIGN_OP
+                | UNICODE_RADICAL
+        )
+    }
+}
+
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {
         Self(kind as u16)

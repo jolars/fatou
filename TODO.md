@@ -146,10 +146,18 @@ The core enabler for everything semantic; the biggest single item.
   destructuring `(; a, b) = t` deferred. The query keeps structural `Eq`,
   so same-shape edits backdate (locked in `tests/salsa_incremental.rs`);
   position-shifting edits wait on the firewall projections below.
-- [ ] Import model: `using X`, `using X: a, b`, `import X`, `import X: a`,
+- [x] Import model: `using X`, `using X: a, b`, `import X`, `import X: a`,
   `import X as Y`, `export`, and `public` (1.11+), recorded in source order
-  into a per-file loaded-modules list; qualified reads (`Foo.bar`) tracked
-  separately from bare free reads.
+  into a per-file loaded-modules list (`module_loads` on the model: kind,
+  relative-dot count, path components, aliases, item lists); qualified reads
+  (`Foo.bar`, `Base.@time`) tracked separately from bare free reads in
+  `qualified_reads`. Imported names bind (`BindingKind::Import`: the last
+  path component, the `as` alias, or the colon items — semantics verified
+  against Julia 1.12), so reads resolve intra-file; imported macros keep
+  their `@` sigil, invisible to value lookups. `export`/`public` names
+  resolve against their global scope and mark the binding used without
+  entering the free reads; `using X`'s unknowable exports stay free reads
+  for Phase 3 resolution.
 - [ ] Firewall queries after arity's pattern: `file_exports`,
   `file_free_reads`, `file_qualified_reads`, `include_edges`—stable `Eq`
   projections that survive body edits so project-level memos don't
