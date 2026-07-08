@@ -76,8 +76,11 @@ Lint `.jl` files
 
 ### Options
 
-`--check`
-:   Required in the groundwork phase: lint reports findings without writing fixes
+`--fix`
+:   Apply safe fixes to the source and write the files back
+
+`--unsafe-fixes`
+:   Also apply fixes marked unsafe (implies `--fix`)
 
 `--output <OUTPUT>`
 :   Output format

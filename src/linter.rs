@@ -12,6 +12,7 @@
 pub mod check;
 pub mod diagnostic;
 pub mod docs;
+pub mod fix;
 pub mod render;
 pub mod rules;
 pub mod suppression;
@@ -22,5 +23,6 @@ pub use check::{
 };
 pub use diagnostic::{Applicability, Diagnostic, Fix, Severity};
 pub use docs::render_rule_doc;
+pub use fix::{Applied, FixOutcome, apply_fixes, fix_source};
 pub use render::{OutputMode, render_findings};
 pub use rules::{Example, ResolvedRules, Rule, RuleContext, all_rule_ids, all_rules};

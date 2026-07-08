@@ -36,12 +36,13 @@ leverage.
   each example, `examples/docgen.rs` writes the mdBook pages, and
   `tests/rule_docs.rs` snapshot-pins them plus guards that every rule is
   documented and every example still triggers.
-- [ ] Autofix application engine (`apply_fixes`) honoring `Applicability`
-  (safe/unsafe), with the `format → lint --fix → format --check` property
-  test (Tenet 5). Rules already carry `Fix`es (e.g. `assignment-in-condition`);
-  only the application path is missing. Once it lands, extend
-  `render_rule_doc` with an "After applying the fix" block (as arity's docs do)
-  so fixable rules document their result.
+- [x] Autofix application engine (`apply_fixes`, `fix_source`) honoring
+  `Applicability` (safe/unsafe), wired to a Ruff-style `lint --fix` /
+  `--unsafe-fixes` CLI. `apply_fixes` (`src/linter/fix.rs`) applies
+  non-overlapping byte-range replacements right-to-left; `fix_source` re-lints
+  to a fixpoint. `render_rule_doc` gained an "After applying the fix" block so
+  fixable rules document their result. Engine tests in `src/linter/fix.rs` and
+  `tests/autofix.rs`.
 - [ ] `annotate-snippets`-based pretty diagnostics rendering (dependency noted
   in `Cargo.toml`; `render.rs` is currently a compact one-liner renderer).
 - [ ] Report unknown rule IDs in `select`/`ignore`. `all_rule_ids()` exists but

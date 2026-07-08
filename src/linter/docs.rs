@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use crate::config::LintConfig;
 use crate::linter::check::check_source;
+use crate::linter::fix::apply_fixes;
 use crate::linter::render::{OutputMode, render_findings};
 use crate::linter::rules::Rule;
 
@@ -54,6 +55,15 @@ pub fn render_rule_doc(rule: &dyn Rule) -> String {
         });
         let _ = writeln!(out);
         fenced(&mut out, "text", &rendered);
+
+        // Show the result of the safe fixes, when the example carries any.
+        let fixed = apply_fixes(example.source, &report.diagnostics, false);
+        if fixed.output != example.source {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "After applying the fix:");
+            let _ = writeln!(out);
+            fenced(&mut out, "julia", &fixed.output);
+        }
     }
 
     out

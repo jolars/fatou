@@ -74,10 +74,13 @@ pub enum Commands {
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
 
-        /// Required in the groundwork phase: lint reports findings without
-        /// writing fixes.
+        /// Apply safe fixes to the source and write the files back.
         #[arg(long)]
-        check: bool,
+        fix: bool,
+
+        /// Also apply fixes marked unsafe (implies `--fix`).
+        #[arg(long)]
+        unsafe_fixes: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = LintOutput::Pretty)]

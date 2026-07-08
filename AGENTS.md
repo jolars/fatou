@@ -47,11 +47,12 @@ and includes a Julia toolchain.
 4. **Losslessness is the parser's job.** The parser preserves all text
    (whitespace, comments, etc.) so that `reconstruct(text) == text` always. The
    formatter can assume the CST is lossless and focus on layout.
-5. **Autofixes never introduce formatting errors.** A lint fix is not a
-   formatter, but it must never make formatted code unformatted:
-   `format` → `lint --fix` → `format --check` must pass. Make each fix
-   format-clean by construction (or withhold it for that shape); don't run the
-   formatter inside `--fix`.
+
+A lint fix is not a formatter. `lint --fix` applies each fix as a byte-range
+replacement (`apply_fixes`, `src/linter/fix.rs`) and never runs the formatter.
+A fix must stay locally legible on its own (don't jam tokens together), but it
+need **not** satisfy line width or produce canonical layout; the formatter owns
+that. Run `format` afterward if canonical output is wanted.
 
 ## Formatter testing
 

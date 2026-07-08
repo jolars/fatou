@@ -42,11 +42,12 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         }
         Commands::Lint {
             paths,
-            check: _,
+            fix,
+            unsafe_fixes,
             output,
         } => {
             let config = load_config(&cli.config, cli.no_config)?;
-            run_lint(paths, output, &config)
+            run_lint(paths, output, fix, unsafe_fixes, &config)
         }
         Commands::Lsp => fatou::lsp::run()
             .map(|()| ExitCode::SUCCESS)
@@ -125,19 +126,29 @@ fn run_format(paths: Vec<PathBuf>, check: bool, style: FormatStyle) -> Result<Ex
     Ok(ExitCode::SUCCESS)
 }
 
-fn run_lint(paths: Vec<PathBuf>, output: LintOutput, config: &Config) -> Result<ExitCode, String> {
+fn run_lint(
+    paths: Vec<PathBuf>,
+    output: LintOutput,
+    fix: bool,
+    unsafe_fixes: bool,
+    config: &Config,
+) -> Result<ExitCode, String> {
     if paths.is_empty() {
         return Err("lint requires at least one path".to_string());
     }
-
-    let result =
-        linter::check_paths_with_config(&paths, &config.lint).map_err(|e| e.to_string())?;
 
     let mode = match output {
         LintOutput::Pretty => OutputMode::Pretty,
         LintOutput::Concise => OutputMode::Concise,
         LintOutput::Json => OutputMode::Json,
     };
+
+    if fix || unsafe_fixes {
+        return run_lint_fix(paths, mode, unsafe_fixes, config);
+    }
+
+    let result =
+        linter::check_paths_with_config(&paths, &config.lint).map_err(|e| e.to_string())?;
 
     let diagnostics: Vec<_> = result
         .reports
@@ -158,6 +169,47 @@ fn run_lint(paths: Vec<PathBuf>, output: LintOutput, config: &Config) -> Result<
     } else {
         println!("checked {} file(s): clean", result.checked_files);
         Ok(ExitCode::SUCCESS)
+    }
+}
+
+/// Apply fixes across every discovered file, writing changed files back, then
+/// report whatever findings remain. Exits non-zero if any remain (Ruff-style).
+fn run_lint_fix(
+    paths: Vec<PathBuf>,
+    mode: OutputMode,
+    unsafe_fixes: bool,
+    config: &Config,
+) -> Result<ExitCode, String> {
+    let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
+
+    let mut applied = 0usize;
+    let mut changed_files = 0usize;
+    let mut remaining = Vec::new();
+
+    for path in &files {
+        let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let outcome = linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes);
+        if outcome.output != original {
+            std::fs::write(path, &outcome.output).map_err(|e| e.to_string())?;
+            changed_files += 1;
+        }
+        applied += outcome.applied;
+        remaining.extend(outcome.remaining);
+    }
+
+    let rendered = linter::render_findings(&remaining, mode, &|path| {
+        path.and_then(|p| std::fs::read_to_string(p).ok())
+    });
+    print!("{rendered}");
+
+    if applied > 0 {
+        println!("fixed {applied} issue(s) in {changed_files} file(s)");
+    }
+
+    if remaining.is_empty() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
     }
 }
 

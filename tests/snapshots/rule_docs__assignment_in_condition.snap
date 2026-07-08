@@ -17,3 +17,11 @@ end
 ```text
 example.jl:1:4: warning[assignment-in-condition] assignment used as a condition; did you mean `==`?
 ```
+
+After applying the fix:
+
+```julia
+if x == 5
+    println(x)
+end
+```
