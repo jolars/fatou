@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use salsa::Setter;
 
 use crate::parser::{ParseDiagnostic, parse};
+use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
 
 /// An opaque, process-local file identity, allocated once when a file is first
@@ -70,6 +71,18 @@ pub fn parse_diagnostics(db: &dyn IncrementalDb, file: SourceFile) -> &[ParseDia
 /// Materialize the cached parse for `file` as a fresh `SyntaxNode` cursor.
 pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode {
     SyntaxNode::new_root(parsed_document(db, file).green.clone())
+}
+
+/// The per-file semantic model (scope tree, bindings, reads), built from the
+/// cached parse. Unlike [`parsed_document`] this query keeps structural `Eq`:
+/// when an edit leaves the model unchanged (the model carries text ranges, so
+/// this means same-shape edits), salsa backdates it and dependents are not
+/// re-run. The robust invalidation barrier for position-shifting edits is the
+/// range-free firewall projections (`file_exports`, `file_free_reads`; see
+/// `TODO.md` Phase 2), which layer on top of this query.
+#[salsa::tracked(returns(ref), unsafe(non_update_types))]
+pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel {
+    SemanticModel::build(&parsed_tree_root(db, file))
 }
 
 /// Lexically normalize `path` for use as a deduplication key: absolutize it
@@ -265,6 +278,11 @@ impl Analysis {
     /// A fresh `SyntaxNode` over the cached parse tree.
     pub fn parsed_tree(&self, file: SourceFile) -> SyntaxNode {
         self.0.parsed_tree(file)
+    }
+
+    /// The cached semantic model for `file`.
+    pub fn semantic_model(&self, file: SourceFile) -> &SemanticModel {
+        semantic_model(&self.0, file)
     }
 }
 

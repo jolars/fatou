@@ -128,13 +128,24 @@ semantic model grows.
 
 The core enabler for everything semantic; the biggest single item.
 
-- [ ] `SemanticModel` per file as a salsa query: one bottom-up CST walk builds
-  the scope tree, bindings (definition site plus read sites), and free
-  reads, honoring Julia's scoping rules—global scope per module; hard local
-  scopes (function/macro bodies, `do`, `let`, comprehensions/generators);
-  soft local scopes (`for`/`while`/`try`); `local`/`global` declarations;
-  struct fields; type parameters (curly and `where`); keyword vs positional
-  parameters; closure captures.
+- [x] `SemanticModel` per file as a salsa query (`semantic_model` in
+  `src/incremental.rs`, model in `src/semantic/`): flat scope/binding arenas
+  with `SmolStr` names and resolved `IdentRef`s (arity's shape). One
+  declare-then-walk pass per scope mirrors Julia's hoisting rule (any
+  assignment makes the name local to the whole scope), so forward closure
+  captures resolve; assignment targets follow the innermost-local rule with
+  `local`/`global` routing. Covers global scope per module (module bodies
+  neither see nor leak enclosing names), hard scopes (function/macro/short/
+  anonymous/arrow/`do` bodies, `let` with per-binding chaining,
+  comprehensions/generators, struct bodies with type params and fields),
+  soft scopes (`for`/`while`/`try`/`catch`/`finally`, iterables walked
+  outside their variables), keyword vs positional parameters, `where`/curly
+  type params, and a separate macro namespace. Documented deviations:
+  top-level soft-scope assignment takes the non-interactive reading (new
+  local); macros are opaque; `for outer`, `var"..."`, and property
+  destructuring `(; a, b) = t` deferred. The query keeps structural `Eq`,
+  so same-shape edits backdate (locked in `tests/salsa_incremental.rs`);
+  position-shifting edits wait on the firewall projections below.
 - [ ] Import model: `using X`, `using X: a, b`, `import X`, `import X: a`,
   `import X as Y`, `export`, and `public` (1.11+), recorded in source order
   into a per-file loaded-modules list; qualified reads (`Foo.bar`) tracked
@@ -143,7 +154,8 @@ The core enabler for everything semantic; the biggest single item.
   `file_free_reads`, `file_qualified_reads`, `include_edges`—stable `Eq`
   projections that survive body edits so project-level memos don't
   invalidate on every keystroke.
-- [ ] `smol_str` interning for symbol names (the Tooling item lands here).
+- [x] `smol_str` interning for symbol names (the Tooling item lands here):
+  binding and identifier names are `SmolStr`.
 
 ### Phase 3: package, stdlib, and environment index
 
@@ -229,4 +241,5 @@ The payoff phase, in roughly arity's shipping order.
 - [ ] `build.rs` generating shell completions + man pages
   (clap_complete/clap_mangen), as arity does.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.
-- [ ] `smol_str` interning for symbol names once the semantic model lands.
+- [x] `smol_str` interning for symbol names once the semantic model lands
+  (landed with the semantic model, Phase 2).
