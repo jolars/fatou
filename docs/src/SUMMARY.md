@@ -5,6 +5,7 @@
 # Guide
 
 - [Editor Setup](guide/editors.md)
+- [Performance](performance.md)
 
 # Reference
 

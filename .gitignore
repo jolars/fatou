@@ -48,3 +48,8 @@ target
 /assets/fatou-logo.svg
 /assets/fatou-newton.png
 /test.jl
+
+# Benchmark corpus (fetched by bench/corpus/download.sh, pinned but not vendored)
+# and per-tool intermediate outputs. bench/results.json is committed.
+/bench/corpus/JuliaSyntax
+/bench/*.tmp.json

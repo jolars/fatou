@@ -43,6 +43,10 @@ toml = "1.1.2"
 [dev-dependencies]
 insta = "1.47.2"
 
+[[bench]]
+name = "format_compare"
+harness = false
+
 [build-dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
 clapdown = "0.1.0"

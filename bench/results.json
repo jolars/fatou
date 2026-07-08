@@ -1,0 +1,84 @@
+{
+	"schema_version": 1,
+	"meta": {
+		"host": "ucph",
+		"os": "Linux x86_64",
+		"cpu": "Intel(R) Core(TM) Ultra 7 155U",
+		"iterations_single": 50,
+		"iterations_project": 20,
+		"warmup": 3,
+		"single_target": "parse_stream.jl",
+		"project_target": "JuliaSyntax/src",
+		"corpus": {
+			"repo": "https://github.com/JuliaLang/JuliaSyntax.jl",
+			"tag": "v0.4.10",
+			"commit": "09576ca"
+		},
+		"versions": {
+			"fatou": "0.4.0",
+			"julia": "1.12.6",
+			"runic": "1.7.0",
+			"juliaformatter": "2.10.1"
+		}
+	},
+	"scenarios": {
+		"single_file": {
+			"target": "parse_stream.jl",
+			"tools": {
+				"fatou": {
+					"files_ok": 1,
+					"total_bytes": 41937,
+					"median_total_ns": 7008855,
+					"min_total_ns": 5927794,
+					"throughput_mbps": 5.983,
+					"skipped": []
+				},
+				"runic": {
+					"files_ok": 1,
+					"total_bytes": 41937,
+					"median_total_ns": 21212802,
+					"min_total_ns": 19507440,
+					"throughput_mbps": 1.977,
+					"skipped": []
+				},
+				"juliaformatter": {
+					"files_ok": 1,
+					"total_bytes": 41937,
+					"median_total_ns": 9887118,
+					"min_total_ns": 9286923,
+					"throughput_mbps": 4.242,
+					"skipped": []
+				}
+			}
+		},
+		"project": {
+			"target": "JuliaSyntax/src",
+			"tools": {
+				"fatou": {
+					"files_ok": 15,
+					"total_bytes": 332783,
+					"median_total_ns": 53971893,
+					"min_total_ns": 46110277,
+					"throughput_mbps": 6.166,
+					"skipped": []
+				},
+				"runic": {
+					"files_ok": 15,
+					"total_bytes": 332783,
+					"median_total_ns": 216793170,
+					"min_total_ns": 199356285,
+					"throughput_mbps": 1.535,
+					"skipped": []
+				},
+				"juliaformatter": {
+					"files_ok": 15,
+					"total_bytes": 332783,
+					"median_total_ns": 84545826,
+					"min_total_ns": 75625604,
+					"throughput_mbps": 3.936,
+					"skipped": []
+				}
+			}
+		}
+	}
+}

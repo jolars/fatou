@@ -41,6 +41,16 @@ tasks:
     cmds:
       - cargo deny check
 
+  bench:
+    desc: Benchmark formatter throughput vs Runic and JuliaFormatter (writes bench/results.json and the docs table)
+    cmds:
+      - ./bench/compare_format.sh
+
+  bench-corpus:
+    desc: Fetch the pinned JuliaSyntax.jl corpus for the formatter benchmark
+    cmds:
+      - ./bench/corpus/download.sh
+
   docs-preview:
     desc: Serve the docs site locally with live reload
     cmds:
