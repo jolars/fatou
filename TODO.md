@@ -39,9 +39,29 @@ leverage.
 - [ ] Autofix application engine (`apply_fixes`) honoring `Applicability`
   (safe/unsafe), with the `format → lint --fix → format --check` property
   test (Tenet 5). Rules already carry `Fix`es (e.g. `assignment-in-condition`);
-  only the application path is missing.
+  only the application path is missing. Once it lands, extend
+  `render_rule_doc` with an "After applying the fix" block (as arity's docs do)
+  so fixable rules document their result.
 - [ ] `annotate-snippets`-based pretty diagnostics rendering (dependency noted
   in `Cargo.toml`; `render.rs` is currently a compact one-liner renderer).
+- [ ] Report unknown rule IDs in `select`/`ignore`. `all_rule_ids()` exists but
+  is unwired; have `ResolvedRules::resolve` return the unrecognized IDs (arity's
+  `(Self, Vec<String>)`) so the CLI can warn on a typo'd `--select`.
+- [ ] Stamp severity in the engine, not the rule. `Rule::default_severity()` is
+  currently declared but never consulted — rules emit a hardcoded `Severity`, so
+  overriding it is a no-op. Have `run_rules` assign
+  `config_override.unwrap_or(rule.default_severity())`, which also unlocks
+  per-rule severity configuration (`fatou.toml`). Same latent redundancy exists
+  in arity.
+- [ ] Precompute the node-dispatch table. `run_rules` rebuilds the
+  `Vec<Vec<usize>>` (sized `SyntaxKind::COUNT`) from `interests()` on every file;
+  the interests are fixed once `ResolvedRules` is built. Move the table into
+  `ResolvedRules` so the LSP's per-keystroke path drops a per-file allocation and
+  rebuild. Also applies to arity.
+- [ ] Reconcile the `Diagnostic` shape with arity's when the autofix engine or
+  `annotate-snippets` lands: `rule: &'static str` (no per-finding `String`),
+  `TextRange` instead of raw `usize` offsets, and a structured message
+  (`name`/`body`/`suggestion`) for richer LSP code actions.
 
 ## Language server
 
