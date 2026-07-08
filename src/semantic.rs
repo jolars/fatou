@@ -344,4 +344,204 @@ mod tests {
         assert_eq!(occ.len(), 3);
         assert_eq!(occ.iter().filter(|o| o.is_def).count(), 1);
     }
+
+    // --- function scopes and parameters ------------------------------------
+
+    fn kind_of(m: &SemanticModel, name: &str) -> BindingKind {
+        m.binding(find(m, name)).kind
+    }
+
+    fn scope_kind_of(m: &SemanticModel, name: &str) -> ScopeKind {
+        m.scope(m.binding(find(m, name)).scope).kind
+    }
+
+    #[test]
+    fn long_form_function_binds_name_and_params() {
+        let m = model_of("function f(x, y)\n    x + y\nend");
+        assert_eq!(kind_of(&m, "f"), BindingKind::Function);
+        assert_eq!(scope_kind_of(&m, "f"), ScopeKind::File);
+        for p in ["x", "y"] {
+            assert_eq!(kind_of(&m, p), BindingKind::Param);
+            assert_eq!(scope_kind_of(&m, p), ScopeKind::Function);
+            assert!(m.binding(find(&m, p)).read);
+        }
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn short_form_function_binds_name_and_params() {
+        let m = model_of("f(x) = x + 1");
+        assert_eq!(kind_of(&m, "f"), BindingKind::Function);
+        assert_eq!(kind_of(&m, "x"), BindingKind::Param);
+        assert!(m.binding(find(&m, "x")).read);
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn function_body_locals_do_not_leak() {
+        let m = model_of("function f()\n    tmp = 1\n    tmp\nend\ntmp");
+        assert_eq!(kind_of(&m, "tmp"), BindingKind::Local);
+        assert_eq!(scope_kind_of(&m, "tmp"), ScopeKind::Function);
+        assert_eq!(free_read_names(&m), ["tmp"]);
+    }
+
+    #[test]
+    fn keyword_params_after_semicolon() {
+        let m = model_of("f(x, y = 2; k = 3, kw...) = x");
+        assert_eq!(kind_of(&m, "x"), BindingKind::Param);
+        assert_eq!(kind_of(&m, "y"), BindingKind::Param);
+        assert_eq!(kind_of(&m, "k"), BindingKind::KeywordParam);
+        assert_eq!(kind_of(&m, "kw"), BindingKind::KeywordParam);
+    }
+
+    #[test]
+    fn default_reads_earlier_param() {
+        let m = model_of("f(x, y = x + 1) = y");
+        let x = find(&m, "x");
+        assert!(m.binding(x).read);
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn destructured_and_annotated_params() {
+        let m = model_of("f((a, b), x::Int) = a + b + x");
+        for p in ["a", "b", "x"] {
+            assert_eq!(kind_of(&m, p), BindingKind::Param);
+        }
+        assert_eq!(free_read_names(&m), ["Int"]);
+    }
+
+    #[test]
+    fn unnamed_param_type_is_a_read() {
+        let m = model_of("f(::Int) = 1");
+        assert_eq!(binding_names(&m), ["f"]);
+        assert_eq!(free_read_names(&m), ["Int"]);
+    }
+
+    #[test]
+    fn where_clause_binds_type_params() {
+        let m = model_of("f(x::T) where {T<:Number} = x");
+        assert_eq!(kind_of(&m, "T"), BindingKind::TypeParam);
+        assert!(m.binding(find(&m, "T")).read, "annotation reads T");
+        assert_eq!(free_read_names(&m), ["Number"]);
+    }
+
+    #[test]
+    fn chained_where_clauses_bind_all_params() {
+        let m = model_of("f(x::S) where T where S = x");
+        assert_eq!(kind_of(&m, "T"), BindingKind::TypeParam);
+        assert_eq!(kind_of(&m, "S"), BindingKind::TypeParam);
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn return_type_is_read_in_function_scope() {
+        let m = model_of("function f(x)::Int\n    x\nend");
+        assert_eq!(kind_of(&m, "f"), BindingKind::Function);
+        assert_eq!(free_read_names(&m), ["Int"]);
+    }
+
+    #[test]
+    fn bare_function_form_binds_name() {
+        let m = model_of("function f end");
+        assert_eq!(binding_names(&m), ["f"]);
+        assert_eq!(kind_of(&m, "f"), BindingKind::Function);
+    }
+
+    #[test]
+    fn method_extension_binds_nothing() {
+        let m = model_of("Base.foo(x) = x + 1");
+        assert_eq!(binding_names(&m), ["x"]);
+        assert_eq!(free_read_names(&m), ["Base"]);
+    }
+
+    #[test]
+    fn callable_object_signature_binds_object_and_params() {
+        let m = model_of("function (o::T)(x)\n    o.f + x\nend");
+        assert_eq!(kind_of(&m, "o"), BindingKind::Param);
+        assert_eq!(kind_of(&m, "x"), BindingKind::Param);
+        assert_eq!(free_read_names(&m), ["T"]);
+    }
+
+    #[test]
+    fn arrow_function_binds_params_and_captures() {
+        let m = model_of("function outer(n)\n    xs -> xs .+ n\nend");
+        assert_eq!(kind_of(&m, "xs"), BindingKind::Param);
+        assert!(m.binding(find(&m, "n")).read, "closure captures n");
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn do_block_params_scope_to_the_body() {
+        let m = model_of("xs = []\nmap(xs) do x\n    x + y\nend");
+        assert_eq!(kind_of(&m, "x"), BindingKind::Param);
+        assert!(m.binding(find(&m, "xs")).read, "call args read outer scope");
+        assert_eq!(free_read_names(&m), ["map", "y"]);
+    }
+
+    #[test]
+    fn closure_writes_captured_local() {
+        let src = "function outer()\n    n = 0\n    bump() = (n += 1)\n    bump\nend";
+        let m = model_of(src);
+        assert_eq!(binding_names(&m), ["outer", "n", "bump"]);
+        let n = find(&m, "n");
+        assert_eq!(scope_kind_of(&m, "n"), ScopeKind::Function);
+        assert!(m.binding(n).read);
+        let writes: Vec<_> = m
+            .idents()
+            .iter()
+            .filter(|i| i.binding == Some(n) && i.access == Access::ReadWrite)
+            .collect();
+        assert_eq!(writes.len(), 1);
+    }
+
+    #[test]
+    fn forward_capture_assigns_the_hoisted_local() {
+        let src = "function outer()\n    g() = (x = 2)\n    x = 1\nend";
+        let m = model_of(src);
+        let xs: Vec<_> = m.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(xs.len(), 1, "one hoisted local, not one per scope");
+        assert_eq!(m.scope(xs[0].scope).kind, ScopeKind::Function);
+    }
+
+    #[test]
+    fn mutual_recursion_resolves_both_ways() {
+        let m = model_of("f() = g()\ng() = f()");
+        assert!(m.binding(find(&m, "f")).read);
+        assert!(m.binding(find(&m, "g")).read);
+        assert!(free_read_names(&m).is_empty());
+    }
+
+    #[test]
+    fn macro_def_binds_and_macro_call_resolves() {
+        let m = model_of("macro m(ex)\n    ex\nend\n@m 1");
+        assert_eq!(kind_of(&m, "m"), BindingKind::Macro);
+        assert!(m.binding(find(&m, "m")).read);
+        let call = m.idents().iter().find(|i| i.is_macro).unwrap();
+        assert_eq!(call.binding, Some(find(&m, "m")));
+    }
+
+    #[test]
+    fn macro_namespace_is_separate_from_values() {
+        let m = model_of("time = 1\n@time f()");
+        let call = m.idents().iter().find(|i| i.is_macro).unwrap();
+        assert_eq!(call.binding, None, "@time must not resolve to the value");
+        assert!(!m.binding(find(&m, "time")).read);
+    }
+
+    #[test]
+    fn names_in_scope_sees_locals_params_and_globals() {
+        let src = "g = 1\nfunction f(a)\n    b = 2\n    b\nend";
+        let m = model_of(src);
+        let offset = TextSize::from(src.rfind('b').unwrap() as u32);
+        let visible: Vec<_> = m
+            .names_in_scope_at(offset)
+            .into_iter()
+            .map(|b| m.binding(b).name.as_str())
+            .collect();
+        assert!(visible.contains(&"a"));
+        assert!(visible.contains(&"b"));
+        assert!(visible.contains(&"g"));
+        assert!(visible.contains(&"f"));
+    }
 }
