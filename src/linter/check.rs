@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
+
 use crate::config::LintConfig;
 use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
 use crate::linter::diagnostic::{Diagnostic, Severity};
@@ -71,20 +73,26 @@ pub fn check_paths_with_config(
     let files = collect_julia_files(paths).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config.select.as_deref(), &config.ignore);
 
-    let mut reports = Vec::with_capacity(files.len());
-    let mut total_findings = 0;
+    // Files are independent; lint them in parallel. `collect` into an ordered
+    // Vec keeps the sorted discovery order for deterministic reporting.
+    let reports = files
+        .par_iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(path).map_err(|err| LintError::Io {
+                path: path.clone(),
+                message: err.to_string(),
+            })?;
+            Ok(check_text(Some(path), &text, &rules))
+        })
+        .collect::<Result<Vec<_>, LintError>>()?;
 
-    for path in &files {
-        let text = std::fs::read_to_string(path).map_err(|err| LintError::Io {
-            path: path.clone(),
-            message: err.to_string(),
-        })?;
-        let report = check_text(Some(path), &text, &rules);
-        if let LintStatus::Findings { count } = report.status {
-            total_findings += count;
-        }
-        reports.push(report);
-    }
+    let total_findings = reports
+        .iter()
+        .filter_map(|report| match report.status {
+            LintStatus::Findings { count } => Some(count),
+            _ => None,
+        })
+        .sum();
 
     Ok(LintResult {
         checked_files: files.len(),

@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
 use similar::{ChangeTag, TextDiff};
 
 use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
@@ -45,25 +46,34 @@ impl std::error::Error for CheckError {}
 /// from disk are collected with a unified-style diff.
 pub fn check_paths(paths: &[PathBuf], style: FormatStyle) -> Result<CheckResult, CheckError> {
     let files = collect_julia_files(paths).map_err(CheckError::Discovery)?;
-    let mut changed = Vec::new();
 
-    for path in &files {
-        let original = std::fs::read_to_string(path).map_err(|err| CheckError::Io {
-            path: path.clone(),
-            message: err.to_string(),
-        })?;
-        let formatted =
-            format_with_style(&original, style).map_err(|error| CheckError::Format {
+    // Each file is independent, so check them in parallel; `collect` preserves
+    // the sorted discovery order for deterministic output.
+    let changed = files
+        .par_iter()
+        .map(|path| {
+            let original = std::fs::read_to_string(path).map_err(|err| CheckError::Io {
                 path: path.clone(),
-                error,
+                message: err.to_string(),
             })?;
-        if formatted != original {
-            changed.push(ChangedFile {
-                path: path.clone(),
-                diff: line_diff(&original, &formatted),
-            });
-        }
-    }
+            let formatted =
+                format_with_style(&original, style).map_err(|error| CheckError::Format {
+                    path: path.clone(),
+                    error,
+                })?;
+            Ok(if formatted != original {
+                Some(ChangedFile {
+                    path: path.clone(),
+                    diff: line_diff(&original, &formatted),
+                })
+            } else {
+                None
+            })
+        })
+        .collect::<Result<Vec<_>, CheckError>>()?
+        .into_iter()
+        .flatten()
+        .collect();
 
     Ok(CheckResult {
         checked: files.len(),

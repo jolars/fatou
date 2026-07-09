@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::Parser;
+use rayon::prelude::*;
 
 use fatou::cli::{Cli, ColorChoice, Commands, LintOutput, ParseFormat};
 use fatou::config::Config;
@@ -115,14 +116,15 @@ fn run_format(paths: Vec<PathBuf>, check: bool, style: FormatStyle) -> Result<Ex
     }
 
     let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
-    for path in &files {
+    files.par_iter().try_for_each(|path| {
         let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let formatted =
             formatter::format_with_style(&original, style).map_err(|e| e.to_string())?;
         if formatted != original {
             std::fs::write(path, formatted).map_err(|e| e.to_string())?;
         }
-    }
+        Ok::<(), String>(())
+    })?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -190,19 +192,30 @@ fn run_lint_fix(
     warn_unknown_rules(&unknown_rules);
     let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
 
+    // Fix files in parallel; each writes back to its own path. Per-file results
+    // are reduced afterward so counts and the `remaining` list stay stable.
+    let outcomes = files
+        .par_iter()
+        .map(|path| {
+            let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+            let outcome = linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes);
+            let changed = outcome.output != original;
+            if changed {
+                std::fs::write(path, &outcome.output).map_err(|e| e.to_string())?;
+            }
+            Ok::<_, String>((outcome.applied, changed, outcome.remaining))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
     let mut applied = 0usize;
     let mut changed_files = 0usize;
     let mut remaining = Vec::new();
-
-    for path in &files {
-        let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        let outcome = linter::fix_source(Some(path), &original, &config.lint, unsafe_fixes);
-        if outcome.output != original {
-            std::fs::write(path, &outcome.output).map_err(|e| e.to_string())?;
+    for (file_applied, changed, file_remaining) in outcomes {
+        applied += file_applied;
+        if changed {
             changed_files += 1;
         }
-        applied += outcome.applied;
-        remaining.extend(outcome.remaining);
+        remaining.extend(file_remaining);
     }
 
     let rendered = linter::render_findings(&remaining, mode, use_color, &|path| {
