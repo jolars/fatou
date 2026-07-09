@@ -120,6 +120,7 @@ matrices
 matrix_end_keyword
 multi_clause_generators
 multi_param_groups
+name_list_comment_continuation
 ncat
 nested_macro_path
 nested_string_interp

@@ -675,8 +675,9 @@ pub(crate) fn parse_name_list_stmt(
     // the toplevel trailing-junk driver.
     let is_public = node_kind == SyntaxKind::PUBLIC_STMT;
 
-    // A newline directly after the keyword continues onto the next line.
-    let mut i = ctx.skip_ws_and_newlines(start + 1);
+    // A newline (or comment) directly after the keyword continues onto the next
+    // line (`export\n # re-exports\n Any`), so skip all trivia, not just newlines.
+    let mut i = ctx.skip_trivia(start + 1);
     push_range(&mut events, start + 1, i);
 
     while !header_ends(&ctx, i) {
@@ -710,10 +711,12 @@ pub(crate) fn parse_name_list_stmt(
                 }
             }
             // A comma separates names and allows the list to continue onto the
-            // next line (a newline right after the comma is skipped).
+            // next line: a newline or comment right after the comma is skipped
+            // (`export Core,\n # key types\n Any`), matching the sibling
+            // comma-continuation lists (bare tuple, `let`, `import`).
             Some(TokKind::Comma) => {
                 events.push(Event::Tok(i));
-                let next = ctx.skip_ws_and_newlines(i + 1);
+                let next = ctx.skip_trivia(i + 1);
                 push_range(&mut events, i + 1, next);
                 i = next;
             }

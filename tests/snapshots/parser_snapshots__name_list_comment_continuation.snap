@@ -1,0 +1,46 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..116
+  EXPORT_STMT@0..41
+    EXPORT_KW@0..6 "export"
+    WHITESPACE@6..7 " "
+    IDENT@7..11 "Core"
+    COMMA@11..12 ","
+    NEWLINE@12..13 "\n"
+    WHITESPACE@13..17 "    "
+    COMMENT@17..28 "# key types"
+    NEWLINE@28..29 "\n"
+    WHITESPACE@29..33 "    "
+    IDENT@33..36 "Any"
+    COMMA@36..37 ","
+    WHITESPACE@37..38 " "
+    IDENT@38..41 "Int"
+  NEWLINE@41..42 "\n"
+  NEWLINE@42..43 "\n"
+  EXPORT_STMT@43..83
+    EXPORT_KW@43..49 "export"
+    NEWLINE@49..50 "\n"
+    WHITESPACE@50..54 "    "
+    COMMENT@54..66 "# re-exports"
+    NEWLINE@66..67 "\n"
+    WHITESPACE@67..71 "    "
+    IDENT@71..74 "map"
+    COMMA@74..75 ","
+    WHITESPACE@75..76 " "
+    IDENT@76..83 "println"
+  NEWLINE@83..84 "\n"
+  NEWLINE@84..85 "\n"
+  PUBLIC_STMT@85..115
+    IDENT@85..91 "public"
+    WHITESPACE@91..92 " "
+    IDENT@92..95 "foo"
+    COMMA@95..96 ","
+    NEWLINE@96..97 "\n"
+    WHITESPACE@97..101 "    "
+    COMMENT@101..107 "# note"
+    NEWLINE@107..108 "\n"
+    WHITESPACE@108..112 "    "
+    IDENT@112..115 "bar"
+  NEWLINE@115..116 "\n"

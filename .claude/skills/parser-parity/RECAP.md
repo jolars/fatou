@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **197 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **198 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,33 +134,40 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-07b—space-sensitive macro space-form arguments)
+## Latest session (2026-07-09—name-list comment continuation)
 
-Real-world find (Makie's `@recipe EunoiaDiagram (fit,) begin … end` from a user
-file): a space-form macro argument was parsed with default flags, so the postfix
-chain fused a whitespace-preceded `(`/`[`/`{` into a call/index/curly with a
-spurious "whitespace before opener" `(error-t)` — `@foo f (x)` ⇒
-`(macrocall @foo (call f (error-t) x))`. In JuliaSyntax's space-sensitive mode a
-spaced opener starts a **new argument** (`(macrocall @foo f x)`); the earlier
-"whitespace-before-arglist already resolved" note (2026-07-03) covered only
-non-macro contexts, where the error shape is genuinely correct.
+Real-world find (harvesting Julia 1.12's own `base/exports.jl`/`boot.jl` for the
+Base/stdlib index): an `export`/`public` list continued across a **comment** was
+truncated at the first comment. `export Core,\n # key types\n Any, Int` parsed as
+just `(export Core)`, and `export\n # c\n Any` (boot.jl's Core block) as an empty
+`(export)` — so the harvested Base export set collapsed to `["Core"]` and Core's
+to `[]`. Root cause: `parse_name_list_stmt` (`structural.rs`) skipped the
+post-keyword and post-comma gap with `skip_ws_and_newlines`, which crosses
+newlines but **not** comments — the 2026-07-02d comma-continuation cluster
+(bare tuple, `let`, `import`) switched to `skip_trivia`, but the name-list
+statement was left behind.
 
-- **Fix**: set `array_mode: true` (Fatou's `space_sensitive`) in both
-  `parse_macro_args` arg-parse sites (space-form loop + `@doc` continuation).
-  The existing array-element machinery does the rest: the postfix chain breaks
-  at a spaced opener, and `array_element_boundary` splits `@foo a +b` into two
-  args for free. Two-flag parser-bucket fix; projector untouched. `ExprFlags`
-  doc updated to name both space-sensitive positions.
-- **Probed** byte-identical: the recipe form, `@foo f (x)`/`a [1]`/`A {T}`,
-  `@foo a +b`, `@foo x :y`, `@foo a :b c`, glued `@foo (f)(x)`/`g(x) [1]`,
-  bracketed `f(@m a (b))`, and the doc leftover `@doc x\nf (y)` ⇒
-  `(call (macrocall @doc x f) (error-t) y)` (falls out of the outer chain).
-- **Fixtures**: parser snapshot + oracle dir slug `macro_space_args`.
-- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 196 → **197**.
-- **Next**: no queued parser target — batch-probe common real-world Julia
-  against the oracle to surface a new divergence (as 2026-07-03 did).
+- **Fix**: two call sites in `parse_name_list_stmt` switched
+  `skip_ws_and_newlines` → `skip_trivia` (ws + newlines + comments). A bare
+  newline without a comma still terminates (`header_ends` stops on `Newline`;
+  `export a \n b` ⇒ `(export a) b`), so only the after-keyword and after-comma
+  gaps gained comment-crossing. Parser-bucket fix; projector untouched.
+- **Probed** byte-identical: `export Core,\n #c\n Any, Int` ⇒ `(export Core Any
+  Int)`, `export\n #c\n Any, Int` ⇒ `(export Any Int)`, `public foo,\n #c\n bar`
+  ⇒ `(public foo bar)`, and the terminator `export a \n b` ⇒ `(export a) b`.
+- **Fixtures**: parser snapshot + oracle dir slug `name_list_comment_continuation`.
+- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 197 → **198**.
+- **Next**: no queued parser target — surfaced while building the Base/stdlib
+  index (TODO Phase 3); batch-probe real-world Julia against the oracle for the
+  next divergence.
 
 ## Earlier sessions
+
+- **2026-07-07b**—space-sensitive macro space-form arguments. `@foo f (x)` fused
+  a whitespace-preceded opener into a call with a spurious `(error-t)`; set
+  `array_mode: true` at both `parse_macro_args` sites so a spaced opener starts a
+  new argument (`(macrocall @foo f x)`). Fixture `macro_space_args`. JS 677
+  (held); dir 196 → 197.
 
 - **2026-07-07**—splat after a closing bracket. `f(g(x)...)`/`f(a[i]...)`/
   `f(2...)`/`f("a"...)` juxtaposed instead of splatting; excluded
