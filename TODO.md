@@ -212,7 +212,7 @@ The arity `rindex/` analog, but simpler: every Julia package, plus Base and
 the stdlib, ships as plain source, so fatou's own parser does all the
 harvesting—no Julia runtime needed.
 
-- [ ] Environment resolution: locate the active `Project.toml`/`Manifest.toml`
+- [x] Environment resolution: locate the active `Project.toml`/`Manifest.toml`
   (walk up from the workspace root, then `JULIA_PROJECT`, then the newest
   `~/.julia/environments/v1.X`); parse the Manifest for the pinned package
   set (name, uuid, version, `git-tree-sha1`, deps); locate depots via
