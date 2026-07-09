@@ -1,5 +1,14 @@
 # Fatou <img src='https://raw.githubusercontent.com/jolars/fatou/main/assets/logo.png' align="right" width="139" />
 
+[![Build and
+Test](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml/badge.svg?branch=main)](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml)
+[![Lint](https://github.com/jolars/fatou/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/jolars/fatou/actions/workflows/lint.yml)
+[![Documentation](https://github.com/jolars/fatou/actions/workflows/docs.yml/badge.svg?branch=main)](https://fatou.dev/)
+[![Open
+VSX](https://img.shields.io/open-vsx/v/jolars/fatou?logo=vsix)](https://open-vsx.org/extension/jolars/fatou)
+[![VS
+Code](https://vsmarketplacebadges.dev/version-short/jolars.fatou.svg?logo=vsix)](https://marketplace.visualstudio.com/items?itemName=jolars.fatou)
+
 A language server, formatter, and linter for [Julia](https://julialang.org) that
 doesn't require running Julia itself. Fatou is written in Rust and is designed
 to be fast, safe, and easy to integrate into editors and tooling. It is named
