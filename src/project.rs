@@ -103,7 +103,7 @@ pub fn include_edges(root: &SyntaxNode, base_dir: Option<&Path>) -> Vec<IncludeE
 
 /// The literal path of `call` if it is a static `include("literal")`, else
 /// `None`.
-fn include_target(call: &CallExpr) -> Option<String> {
+pub(crate) fn include_target(call: &CallExpr) -> Option<String> {
     // The callee must be the bare name `include` (a qualified `M.include` is a
     // `BinaryExpr`, an operator call a token — neither is an `Expr::Name`).
     let Expr::Name(callee) = call.callee()? else {
@@ -137,7 +137,7 @@ fn include_target(call: &CallExpr) -> Option<String> {
 
 /// Resolve an include's literal path against the including file's directory.
 /// Absolute paths are taken as-is; a relative path needs a known `base_dir`.
-fn resolve_target(raw: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn resolve_target(raw: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
     let path = Path::new(raw);
     if path.is_absolute() {
         Some(path.to_path_buf())

@@ -11,12 +11,13 @@
 //! parse is deferred (see `TODO.md`); today every edit triggers a full parse,
 //! which is still correct.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use salsa::Setter;
+use salsa::{Durability, Setter};
 
+use crate::index::PackageIndex;
 use crate::parser::{ParseDiagnostic, parse};
 use crate::project::{self, IncludeEdge};
 use crate::semantic::SemanticModel;
@@ -38,6 +39,39 @@ pub struct SourceFile {
     pub path: Option<PathBuf>,
     #[returns(ref)]
     pub text: String,
+}
+
+/// The harvested library index: every resolved package's [`PackageIndex`]
+/// keyed by name. Wrapped so it carries an opaque whole-value [`salsa::Update`]
+/// (the model types stay salsa-free), and so the map is cheap to swap — each
+/// value is an [`Arc`], so replacing one package clones only pointers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LibraryPackages(pub BTreeMap<String, Arc<PackageIndex>>);
+
+// SAFETY: `maybe_update` overwrites the whole value when it differs (by `Eq`)
+// and reports the change, leaving no dangling references — the standard opaque
+// leaf pattern. This is why the [`PackageIndex`] model needs no `Update` impl.
+unsafe impl salsa::Update for LibraryPackages {
+    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
+        let old = unsafe { &mut *old_pointer };
+        if *old == new {
+            false
+        } else {
+            *old = new;
+            true
+        }
+    }
+}
+
+/// The whole harvested library, as a single HIGH-durability salsa input. One
+/// input holds every package (rather than one input per package): the library
+/// set changes only on a manifest change or a re-harvest, which HIGH durability
+/// encodes, and there are no per-package incremental consumers yet. Per-package
+/// replacement stays cheap because [`LibraryPackages`] holds `Arc`s.
+#[salsa::input(singleton)]
+pub struct LibraryIndex {
+    #[returns(ref)]
+    pub packages: LibraryPackages,
 }
 
 /// The cached parse of a file. The `GreenNode` is not `Eq`/`salsa::Update`, so
@@ -286,6 +320,48 @@ impl IncrementalDatabase {
         parsed_tree_root(self, file)
     }
 
+    /// Replace the whole harvested library index, at HIGH durability. Creates
+    /// the singleton input on first call. Re-analyze open files after a swap:
+    /// dependents of the index (once they exist) will have been invalidated.
+    pub fn set_library_packages(&mut self, packages: BTreeMap<String, Arc<PackageIndex>>) {
+        let value = LibraryPackages(packages);
+        match LibraryIndex::try_get(self) {
+            Some(index) => {
+                index
+                    .set_packages(self)
+                    .with_durability(Durability::HIGH)
+                    .to(value);
+            }
+            None => {
+                // Creating the singleton input registers it in storage; the
+                // handle is refetched via `try_get` on later calls.
+                let _ = LibraryIndex::builder(value)
+                    .durability(Durability::HIGH)
+                    .new(self);
+            }
+        }
+    }
+
+    /// Insert or replace a single package's index, keeping the rest. Cheap: the
+    /// map's other entries are `Arc` pointer clones.
+    pub fn set_package_index(&mut self, name: impl Into<String>, index: Arc<PackageIndex>) {
+        let mut packages = LibraryIndex::try_get(self)
+            .map(|lib| lib.packages(self).0.clone())
+            .unwrap_or_default();
+        packages.insert(name.into(), index);
+        self.set_library_packages(packages);
+    }
+
+    /// The harvested index for `name`, if the library has been populated and
+    /// contains it.
+    pub fn library_package(&self, name: &str) -> Option<Arc<PackageIndex>> {
+        LibraryIndex::try_get(self)?
+            .packages(self)
+            .0
+            .get(name)
+            .cloned()
+    }
+
     /// Mint a read-only [`Analysis`] snapshot: a short-lived db clone wrapped so
     /// callers can only *read*. Drop it promptly — an outstanding clone blocks
     /// the next write (salsa is single-writer; see the [`Clone`] impl).
@@ -347,6 +423,11 @@ impl Analysis {
     /// The file's static `include` edges (the [`include_edges`] firewall query).
     pub fn include_edges(&self, file: SourceFile) -> &[IncludeEdge] {
         include_edges(&self.0, file)
+    }
+
+    /// The harvested index for package `name`, if present.
+    pub fn library_package(&self, name: &str) -> Option<Arc<PackageIndex>> {
+        self.0.library_package(name)
     }
 }
 

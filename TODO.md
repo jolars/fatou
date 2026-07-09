@@ -218,20 +218,36 @@ harvesting—no Julia runtime needed.
   set (name, uuid, version, `git-tree-sha1`, deps); locate depots via
   `JULIA_DEPOT_PATH` falling back to `~/.julia` (sources live at
   `~/.julia/packages/<Name>/<slug>/src/`).
-- [ ] Harvester: parse each package's `src/` with fatou's parser, following
-  `include()` chains to build the module tree; extract exported/`public`
-  names, function signatures (positional/keyword arguments, defaults, `::`
-  annotations, `where` clauses; grouped by name since multiple dispatch
-  means many methods per function), structs/abstract types with supertypes,
-  consts, macros, and docstrings (the string literal or `@doc` preceding a
-  definition).
+- [x] Harvester (`src/index/`): parse each package's `src/` with fatou's
+  parser, following static `include("literal")` chains (reusing
+  `project::include_target`/`resolve_target`) interleaved with the module walk
+  so an `include` splices into the module that lexically contains it. Extracts
+  exported/`public` names, function signatures grouped by `(owner, name)` for
+  multiple dispatch (positional/keyword params with defaults, `where` specs,
+  return types; `Base.show` records its owner), struct/abstract/primitive types
+  with supertypes and fields (incl. `@kwdef` defaults and inner constructors),
+  consts, macros, and docstrings (the `DOC`-folded string literal or an
+  explicit `@doc`). Type positions lower to a structured `TypeExpr`
+  (name/qualified, `Applied`, `Union`, `Tuple`, `TypeVar` with bounds, `Raw`
+  fallback); value positions stay normalized source strings. Every symbol
+  carries a `DefLocation` (package-relative path + name span) for later
+  go-to-definition. `@doc`/`@kwdef` are understood; other macros are
+  transparent wrappers recursed into only when their argument is itself a
+  definition (`@inline f() = ...`). Best-effort: missing/unreadable/dynamic
+  includes, parse errors, and include cycles are recorded as
+  `HarvestDiagnostic`s and the walk continues. Locked by inline units plus
+  `tests/harvest.rs`; the signature/type helpers factored into
+  `src/semantic/signature.rs`. Smoke-harvested against a real depot package.
 - [ ] Base/stdlib index from the Julia installation's plain sources
   (`share/julia/base/`, `share/julia/stdlib/v1.X/`), plus a baked-in minimal
   Base/Core export list as fallback when no installation is found (arity's
   `StaticBaseR` analog).
 - [ ] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in
-  parallel (rayon) on the index pool, hot-swapped into a HIGH-durability
-  `LibraryIndex` salsa input; re-analyze open files on swap.
+  parallel (rayon) on the index pool, hot-swapped into the HIGH-durability
+  `LibraryIndex` salsa input (the input itself has landed: a singleton in
+  `src/incremental.rs` holding `BTreeMap<String, Arc<PackageIndex>>`, with
+  `set_library_packages`/`set_package_index`/`library_package` on the db and
+  `tests/library_index.rs`); re-analyze open files on swap.
 - [ ] One shared name-resolution/masking order for all consumers (completion,
   hover, the future undefined-name lint): local scopes → explicit imports →
   `using`'d exports in source order → Base/Core implicit.

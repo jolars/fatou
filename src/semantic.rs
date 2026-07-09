@@ -23,6 +23,7 @@ pub mod binding;
 pub mod builder;
 pub mod import;
 pub mod scope;
+pub mod signature;
 
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
