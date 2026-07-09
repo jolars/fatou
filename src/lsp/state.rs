@@ -11,14 +11,14 @@ use lsp_types::notification::{
     Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
-    Completion, DocumentSymbolRequest, FoldingRangeRequest, Formatting, RangeFormatting,
-    Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
+    Completion, DocumentSymbolRequest, FoldingRangeRequest, Formatting, HoverRequest,
+    RangeFormatting, Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
     SemanticTokensFullRequest,
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    DocumentRangeFormattingParams, DocumentSymbolParams, FoldingRangeParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, FoldingRangeParams, HoverParams,
     PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams, Uri,
 };
 
@@ -85,6 +85,7 @@ impl GlobalState {
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
             Completion::METHOD => self.on_completion(req),
             ResolveCompletionItem::METHOD => self.on_completion_resolve(req),
+            HoverRequest::METHOD => self.on_hover(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -238,6 +239,26 @@ impl GlobalState {
             path: path_for(&uri),
             text,
             position: params.text_document_position.position,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_hover(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<HoverParams>(HoverRequest::METHOD) else {
+            self.respond_err(id, "invalid hover params");
+            return;
+        };
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::Hover {
+            id,
+            path: path_for(&uri),
+            text,
+            position: params.text_document_position_params.position,
             sender: self.sender.clone(),
         });
     }

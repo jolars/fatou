@@ -14,10 +14,11 @@ use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
     FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
-    GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
-    PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SemanticTokens,
-    SemanticTokensParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
+    GeneralClientCapabilities, Hover, HoverContents, HoverParams, InitializeParams, Position,
+    PositionEncodingKind, PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams,
+    SemanticTokens, SemanticTokensParams, SymbolKind, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri,
+    VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -210,6 +211,121 @@ fn initialize_format_and_shutdown() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(5),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// The server advertises hover and answers `textDocument/hover` for a local
+/// definition with its signature line and binding kind, rendered as markdown.
+#[test]
+fn hovers_a_local_definition() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capabilities announce hover support ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let init_response = client.receiver.recv().unwrap();
+    match init_response {
+        Message::Response(resp) => {
+            assert_eq!(
+                resp.result.unwrap()["capabilities"]["hoverProvider"],
+                serde_json::json!(true),
+                "expected hover to be advertised"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document defining a local function ---
+    let uri = Uri::from_str("file:///work/h.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(name) = name\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag_note = client.receiver.recv().unwrap();
+    assert!(matches!(diag_note, Message::Notification(_)));
+
+    // --- hover the function name at (0, 0) ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/hover".to_string(),
+            params: serde_json::to_value(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(0, 0),
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let hover_response = client.receiver.recv().unwrap();
+    match hover_response {
+        Message::Response(resp) => {
+            let hover: Hover = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected markup hover contents");
+            };
+            assert!(
+                markup.value.contains("greet(name) = name"),
+                "hover should show the definition line, got {:?}",
+                markup.value
+            );
+            assert!(
+                markup.value.contains("*function*"),
+                "hover should tag the binding kind, got {:?}",
+                markup.value
+            );
+        }
+        other => panic!("expected a hover response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

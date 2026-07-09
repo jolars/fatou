@@ -14,6 +14,7 @@ use crate::text::PositionEncoding;
 use super::completion::{completion_via_db, resolve_completion};
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
+use super::hover::hover_via_db;
 use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
 use super::symbols::document_symbols_via_db;
@@ -75,6 +76,13 @@ pub(crate) enum ReadJob {
         item: Box<CompletionItem>,
         sender: Sender<Message>,
     },
+    Hover {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -90,6 +98,7 @@ impl ReadJob {
             ReadJob::SemanticTokensFull { id, sender, .. } => (id, sender),
             ReadJob::Completion { id, sender, .. } => (id, sender),
             ReadJob::CompletionResolve { id, sender, .. } => (id, sender),
+            ReadJob::Hover { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -173,6 +182,16 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         ReadJob::CompletionResolve { id, item, sender } => {
             let resolved = resolve_completion(&snapshot, *item);
             let _ = sender.send(Message::Response(Response::new_ok(id, resolved)));
+        }
+        ReadJob::Hover {
+            id,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let hover = hover_via_db(&snapshot, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, hover)));
         }
     }
 }

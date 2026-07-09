@@ -31,11 +31,13 @@ use rowan::TextSize;
 use serde::{Deserialize, Serialize};
 
 use crate::incremental::Analysis;
-use crate::index::{FunctionGroup, Method, ModuleIndex, Param, TypeDef, TypeExpr, TypeKind};
+use crate::index::ModuleIndex;
 use crate::parser::{KEYWORDS, parse};
 use crate::resolve::{Candidate, Namespace, PackageSource, Resolver, Source, resolve_submodule};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
+
+use super::render::{binding_detail, function_detail, type_detail};
 
 /// The lazy-resolve payload stashed on each library-sourced item: the module it
 /// came from (package name first, then any submodule chain) and the name to look
@@ -279,28 +281,6 @@ fn binding_kind(kind: BindingKind) -> CompletionItemKind {
     }
 }
 
-/// A short human label for a binding's kind, shown as the item's `detail`.
-fn binding_detail(kind: BindingKind) -> &'static str {
-    use BindingKind::*;
-    match kind {
-        Global => "global",
-        Local => "local",
-        Const => "const",
-        Param => "parameter",
-        KeywordParam => "keyword",
-        ForVar => "loop variable",
-        LetVar => "let binding",
-        CatchParam => "catch variable",
-        TypeParam => "type parameter",
-        Field => "field",
-        Function => "function",
-        Macro => "macro",
-        Type => "type",
-        Module => "module",
-        Import => "import",
-    }
-}
-
 /// Classify a library name without a module lookup: a macro is a function, a
 /// `CamelCase` name is (by Julia convention) a type or module, anything else a
 /// function. Precise kinds come from member completion, which has the module.
@@ -403,6 +383,8 @@ fn resolve_completion_with(
     item
 }
 
+// Signature and type rendering moved to `super::render`, shared with hover.
+
 /// Fill `item`'s signature detail and documentation from the definition of
 /// `name` in `module`, searching functions, types, consts, then macros.
 fn enrich(item: &mut CompletionItem, module: &ModuleIndex, name: &str) {
@@ -439,85 +421,6 @@ fn set_doc(item: &mut CompletionItem, doc: Option<&str>) {
     }
 }
 
-/// A one-line signature for a function group, from its first method.
-fn function_detail(group: &FunctionGroup) -> String {
-    match group.methods.first() {
-        Some(method) => format!("{}{}", group.name, render_method(method)),
-        None => group.name.clone(),
-    }
-}
-
-/// The `(params; keywords)` of a method, rendered compactly.
-fn render_method(method: &Method) -> String {
-    let mut out = String::from("(");
-    let positional: Vec<String> = method.params.iter().map(render_param).collect();
-    out.push_str(&positional.join(", "));
-    if !method.keyword_params.is_empty() {
-        out.push_str("; ");
-        let kw: Vec<String> = method.keyword_params.iter().map(render_param).collect();
-        out.push_str(&kw.join(", "));
-    }
-    out.push(')');
-    if let Some(ret) = &method.return_type {
-        out.push_str("::");
-        out.push_str(&render_type(ret));
-    }
-    out
-}
-
-fn render_param(param: &Param) -> String {
-    let mut out = param.name.clone().unwrap_or_default();
-    if let Some(ty) = &param.type_annotation {
-        out.push_str("::");
-        out.push_str(&render_type(ty));
-    }
-    if param.is_vararg {
-        out.push_str("...");
-    }
-    if let Some(default) = &param.default {
-        out.push_str(" = ");
-        out.push_str(default);
-    }
-    out
-}
-
-/// A short type-kind and supertype detail for a type definition.
-fn type_detail(def: &TypeDef) -> String {
-    let head = match def.kind {
-        TypeKind::Struct { mutable: true } => "mutable struct",
-        TypeKind::Struct { mutable: false } => "struct",
-        TypeKind::Abstract => "abstract type",
-        TypeKind::Primitive { .. } => "primitive type",
-    };
-    match &def.supertype {
-        Some(sup) => format!("{head} {} <: {}", def.name, render_type(sup)),
-        None => format!("{head} {}", def.name),
-    }
-}
-
-/// Render a [`TypeExpr`] back to Julia-ish source for a signature preview.
-fn render_type(ty: &TypeExpr) -> String {
-    match ty {
-        TypeExpr::Name { path } => path.join("."),
-        TypeExpr::Applied { base, args } => {
-            format!("{}{{{}}}", render_type(base), render_types(args))
-        }
-        TypeExpr::Union { members } => format!("Union{{{}}}", render_types(members)),
-        TypeExpr::Tuple { elems } => format!("Tuple{{{}}}", render_types(elems)),
-        TypeExpr::TypeVar { name, lower, upper } => match (lower, upper) {
-            (Some(l), Some(u)) => format!("{} <: {name} <: {}", render_type(l), render_type(u)),
-            (None, Some(u)) => format!("{name} <: {}", render_type(u)),
-            (Some(l), None) => format!("{name} >: {}", render_type(l)),
-            (None, None) => name.clone(),
-        },
-        TypeExpr::Raw { text } => text.clone(),
-    }
-}
-
-fn render_types(types: &[TypeExpr]) -> String {
-    types.iter().map(render_type).collect::<Vec<_>>().join(", ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,7 +428,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::index::model::{DefLocation, ExportedName, PackageIndex, Span, Visibility};
-    use crate::index::{ConstDef, MacroDef, TypeDef};
+    use crate::index::{
+        ConstDef, FunctionGroup, MacroDef, Method, Param, TypeDef, TypeExpr, TypeKind,
+    };
 
     fn loc() -> DefLocation {
         DefLocation {

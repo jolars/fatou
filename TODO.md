@@ -278,7 +278,7 @@ The payoff phase, in roughly arity's shipping order.
 - [x] Completion: scope-aware locals/params, keywords, and symbols from loaded
   packages and Base; `Foo.` member completion (trigger character `.`);
   `completionItem/resolve` for lazy docs.
-- [ ] Hover: local binding info; for library symbols, signature(s) and
+- [x] Hover: local binding info; for library symbols, signature(s) and
   docstring rendered as markdown (multiple dispatch: show the method group).
 - [ ] Signature help (triggers `(` and `,`), including keyword arguments.
 - [ ] Go-to-definition: intra-file bindings; library symbols jump straight

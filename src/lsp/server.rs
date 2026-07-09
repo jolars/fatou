@@ -6,9 +6,10 @@ use std::error::Error;
 use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
-    ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, InitializeParams, OneOf,
-    PositionEncodingKind, SelectionRangeProviderCapability, SemanticTokensFullOptions,
-    SemanticTokensOptions, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability,
+    InitializeParams, OneOf, PositionEncodingKind, SelectionRangeProviderCapability,
+    SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
 use crate::text::PositionEncoding;
@@ -79,6 +80,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             resolve_provider: Some(true),
             ..Default::default()
         }),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(
