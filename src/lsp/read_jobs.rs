@@ -5,12 +5,13 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, RequestId, Response};
 
-use lsp_types::{DocumentSymbolResponse, Position, Range};
+use lsp_types::{CompletionItem, CompletionResponse, DocumentSymbolResponse, Position, Range};
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
+use super::completion::{completion_via_db, resolve_completion};
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::selection::selection_ranges_via_db;
@@ -62,6 +63,18 @@ pub(crate) enum ReadJob {
         text: String,
         sender: Sender<Message>,
     },
+    Completion {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
+    CompletionResolve {
+        id: RequestId,
+        item: Box<CompletionItem>,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -75,6 +88,8 @@ impl ReadJob {
             ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
             ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
             ReadJob::SemanticTokensFull { id, sender, .. } => (id, sender),
+            ReadJob::Completion { id, sender, .. } => (id, sender),
+            ReadJob::CompletionResolve { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -143,6 +158,21 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let tokens = semantic_tokens_via_db(&snapshot, &path, &text, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, tokens)));
+        }
+        ReadJob::Completion {
+            id,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let items = completion_via_db(&snapshot, &path, &text, position, encoding);
+            let result = CompletionResponse::Array(items);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::CompletionResolve { id, item, sender } => {
+            let resolved = resolve_completion(&snapshot, *item);
+            let _ = sender.send(Message::Response(Response::new_ok(id, resolved)));
         }
     }
 }

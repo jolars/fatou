@@ -10,13 +10,14 @@ use fatou::lsp::{
 use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
-    ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbol, DocumentSymbolParams, FoldingRange, FoldingRangeKind, FoldingRangeParams,
-    FormattingOptions, GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
+    ClientCapabilities, CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
+    GeneralClientCapabilities, InitializeParams, Position, PositionEncodingKind,
     PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SemanticTokens,
     SemanticTokensParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextEdit, Uri, VersionedTextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -987,6 +988,140 @@ fn serves_document_symbols() {
             assert_eq!(resp.result, Some(serde_json::Value::Null));
         }
         other => panic!("expected a null response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn serves_completion_and_resolve() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result = resp.result.unwrap();
+            assert_eq!(
+                result["capabilities"]["completionProvider"]["resolveProvider"],
+                serde_json::json!(true),
+            );
+            assert_eq!(
+                result["capabilities"]["completionProvider"]["triggerCharacters"],
+                serde_json::json!([".", "@"]),
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document with a local, then request completion in its body ---
+    let uri = Uri::from_str("file:///work/complete.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(alpha)\n    \nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+
+    // Cursor on the blank body line (line 1, after its indentation).
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/completion".to_string(),
+            params: serde_json::to_value(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(1, 4),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+                context: None,
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let items = match serde_json::from_value(resp.result.unwrap()).unwrap() {
+                CompletionResponse::Array(items) => items,
+                CompletionResponse::List(list) => list.items,
+            };
+            let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+            // The parameter is in scope, the function name is in scope, and
+            // keywords are always offered.
+            assert!(labels.contains(&"alpha"), "missing local in {labels:?}");
+            assert!(labels.contains(&"f"), "missing function name in {labels:?}");
+            let function_kw = items.iter().find(|i| i.label == "function").unwrap();
+            assert_eq!(function_kw.kind, Some(CompletionItemKind::KEYWORD));
+        }
+        other => panic!("expected a completion response, got {other:?}"),
+    }
+
+    // --- resolve round-trips an item (no library loaded, so unchanged) ---
+    let item = CompletionItem {
+        label: "alpha".to_string(),
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "completionItem/resolve".to_string(),
+            params: serde_json::to_value(&item).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let resolved: CompletionItem = serde_json::from_value(resp.result.unwrap()).unwrap();
+            assert_eq!(resolved.label, "alpha");
+        }
+        other => panic!("expected a resolve response, got {other:?}"),
     }
 
     // --- shutdown / exit ---

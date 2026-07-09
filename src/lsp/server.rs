@@ -6,7 +6,7 @@ use std::error::Error;
 use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
-    ClientCapabilities, FoldingRangeProviderCapability, InitializeParams, OneOf,
+    ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, InitializeParams, OneOf,
     PositionEncodingKind, SelectionRangeProviderCapability, SemanticTokensFullOptions,
     SemanticTokensOptions, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
@@ -73,6 +73,12 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
+        completion_provider: Some(CompletionOptions {
+            // `.` opens member completion, `@` opens macro completion.
+            trigger_characters: Some(vec![".".to_string(), "@".to_string()]),
+            resolve_provider: Some(true),
+            ..Default::default()
+        }),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(

@@ -307,6 +307,18 @@ impl std::ops::Deref for ModuleIndexHandle {
     }
 }
 
+/// Walk `root`'s submodules along `path` by name (`["B", "C"]` from `A`'s root
+/// reaches `A.B.C`); an empty `path` is `root` itself. The by-name counterpart
+/// of [`resolve_module_path`], for member completion resolving a dotted
+/// receiver (`A.B.`) against the library.
+pub fn resolve_submodule<'m>(root: &'m ModuleIndex, path: &[&str]) -> Option<&'m ModuleIndex> {
+    let mut current = root;
+    for name in path {
+        current = current.submodules.iter().find(|m| m.name == *name)?;
+    }
+    Some(current)
+}
+
 /// Walk `root`'s submodules along `rest` (`using A.B.C` → from `A`'s root, walk
 /// `B` then `C`); an empty `rest` is `root` itself.
 fn resolve_module_path<'m>(root: &'m ModuleIndex, rest: &[SmolStr]) -> Option<&'m ModuleIndex> {

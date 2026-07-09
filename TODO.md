@@ -275,7 +275,7 @@ harvesting—no Julia runtime needed.
 
 The payoff phase, in roughly arity's shipping order.
 
-- [ ] Completion: scope-aware locals/params, keywords, and symbols from loaded
+- [x] Completion: scope-aware locals/params, keywords, and symbols from loaded
   packages and Base; `Foo.` member completion (trigger character `.`);
   `completionItem/resolve` for lazy docs.
 - [ ] Hover: local binding info; for library symbols, signature(s) and

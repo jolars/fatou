@@ -11,13 +11,15 @@ use lsp_types::notification::{
     Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
-    DocumentSymbolRequest, FoldingRangeRequest, Formatting, RangeFormatting,
-    Request as RequestTrait, SelectionRangeRequest, SemanticTokensFullRequest,
+    Completion, DocumentSymbolRequest, FoldingRangeRequest, Formatting, RangeFormatting,
+    Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
+    SemanticTokensFullRequest,
 };
 use lsp_types::{
-    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbolParams,
-    FoldingRangeParams, PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams, Uri,
+    CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, FoldingRangeParams,
+    PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -81,6 +83,8 @@ impl GlobalState {
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
+            Completion::METHOD => self.on_completion(req),
+            ResolveCompletionItem::METHOD => self.on_completion_resolve(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -214,6 +218,39 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_completion(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<CompletionParams>(Completion::METHOD) else {
+            self.respond_err(id, "invalid completion params");
+            return;
+        };
+        let uri = params.text_document_position.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::Completion {
+            id,
+            path: path_for(&uri),
+            text,
+            position: params.text_document_position.position,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_completion_resolve(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, item)) = req.extract::<CompletionItem>(ResolveCompletionItem::METHOD) else {
+            self.respond_err(id, "invalid completionItem/resolve params");
+            return;
+        };
+        self.dispatch_read(ReadJob::CompletionResolve {
+            id,
+            item: Box::new(item),
             sender: self.sender.clone(),
         });
     }

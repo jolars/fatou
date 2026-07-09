@@ -1246,6 +1246,44 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// Every Julia keyword, as written. The single source of truth for the set of
+/// keywords, shared by the lexer's [`keyword_kind`] classification and the
+/// language server's keyword completion. A test keeps it in step with
+/// [`keyword_kind`].
+pub(crate) const KEYWORDS: &[&str] = &[
+    "function",
+    "macro",
+    "end",
+    "if",
+    "elseif",
+    "else",
+    "begin",
+    "true",
+    "false",
+    "while",
+    "for",
+    "do",
+    "let",
+    "quote",
+    "try",
+    "catch",
+    "finally",
+    "struct",
+    "mutable",
+    "module",
+    "baremodule",
+    "return",
+    "break",
+    "continue",
+    "const",
+    "global",
+    "local",
+    "import",
+    "using",
+    "export",
+    "where",
+];
+
 fn keyword_kind(text: &str) -> Option<TokKind> {
     Some(match text {
         "function" => TokKind::FunctionKw,
@@ -1400,6 +1438,19 @@ mod tests {
     fn roundtrips(input: &str) -> bool {
         let joined: String = lex(input).into_iter().map(|t| t.text).collect();
         joined == input
+    }
+
+    #[test]
+    fn keywords_slice_agrees_with_keyword_kind() {
+        // Every entry in the shared `KEYWORDS` slice must lex as a keyword, so
+        // completion never offers a word the lexer treats as an identifier.
+        for kw in KEYWORDS {
+            assert_eq!(kinds(kw).len(), 1, "{kw} did not lex to a single token");
+            assert!(
+                keyword_kind(kw).is_some(),
+                "{kw} is in KEYWORDS but not keyword_kind"
+            );
+        }
     }
 
     #[test]

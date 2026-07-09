@@ -45,6 +45,7 @@
 #![allow(clippy::mutable_key_type)]
 
 mod analysis_thread;
+mod completion;
 mod folding;
 mod format;
 mod read_jobs;
@@ -56,6 +57,7 @@ mod symbols;
 mod task_pool;
 mod uri;
 
+pub use completion::compute_completions;
 pub use folding::compute_folding_ranges;
 pub use format::{compute_format_edits, compute_format_range_edits};
 pub use selection::compute_selection_ranges;
