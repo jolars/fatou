@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use fatou::index::{HarvestDiagnostic, ModuleIndex, harvest_package_named};
+use fatou::index::{HarvestDiagnostic, ModuleIndex, harvest_entry, harvest_package_named};
 
 /// A unique temp directory removed on drop. Avoids a `tempfile`
 /// dev-dependency (mirrors `tests/environment.rs`).
@@ -57,6 +57,28 @@ fn single_file_package() {
     assert_eq!(index.name, "Pkg");
     assert_eq!(fn_names(&index.root), ["f"]);
     assert_eq!(index.root.exports.len(), 1);
+    assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+}
+
+#[test]
+fn harvest_entry_enters_non_src_layout() {
+    // Julia's Base enters at `base/Base.jl`, not `src/<name>.jl`. `harvest_entry`
+    // takes the entry file explicitly and keeps locations relative to the root.
+    let tmp = TempDir::new();
+    let base = tmp.path().join("base");
+    write(
+        &base.join("Base.jl"),
+        "baremodule Base\ninclude(\"exports.jl\")\nf(x) = x\nend\n",
+    );
+    write(&base.join("exports.jl"), "export f\n");
+
+    let index = harvest_entry(&base, &base.join("Base.jl"), "Base");
+    assert_eq!(index.name, "Base");
+    assert_eq!(fn_names(&index.root), ["f"]);
+    assert_eq!(index.root.exports.len(), 1);
+    assert_eq!(index.root.exports[0].name, "f");
+    // The exported name's location is relative to the root (`exports.jl`).
+    assert_eq!(index.root.exports[0].loc.file, PathBuf::from("exports.jl"));
     assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
 }
 

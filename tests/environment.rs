@@ -7,6 +7,30 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use fatou::environment::{self, EnvContext, EnvSource, PackageKind};
 
+/// Lay out a minimal `<prefix>/share/julia` tree with a `bin/julia` stub, a
+/// Base entry, and one stdlib package, enough for the install locator.
+fn make_fake_install(prefix: &Path, stdlib_version: &str) {
+    let julia = prefix.join("share/julia");
+    write(&julia.join("base/Base.jl"), "baremodule Base\nend\n");
+    write(&julia.join("base/boot.jl"), "export Any\n");
+    write(
+        &julia.join(format!("stdlib/v{stdlib_version}/Foo/src/Foo.jl")),
+        "module Foo\nend\n",
+    );
+    write(&prefix.join("bin/julia"), "#!/bin/sh\n");
+}
+
+fn bare_ctx(workspace_root: PathBuf) -> EnvContext {
+    EnvContext {
+        workspace_root,
+        julia_project: None,
+        julia_depot_path: None,
+        home: None,
+        julia_bindir: None,
+        path: None,
+    }
+}
+
 /// A unique temp directory removed on drop. Avoids a `tempfile` dev-dependency.
 struct TempDir {
     path: PathBuf,
@@ -72,6 +96,8 @@ fn resolves_project_manifest_and_source() {
         julia_project: None,
         julia_depot_path: Some(depot.to_string_lossy().into_owned()),
         home: None,
+        julia_bindir: None,
+        path: None,
     };
     let env = environment::resolve(&ctx).unwrap().expect("environment");
 
@@ -103,6 +129,8 @@ fn source_is_none_when_slug_missing_from_depot() {
         julia_project: None,
         julia_depot_path: Some(depot.to_string_lossy().into_owned()),
         home: None,
+        julia_bindir: None,
+        path: None,
     };
     let env = environment::resolve(&ctx).unwrap().unwrap();
     assert_eq!(env.packages[0].source, None);
@@ -121,6 +149,8 @@ fn julia_project_beats_workspace_walk_up() {
         julia_project: Some(other.to_string_lossy().into_owned()),
         julia_depot_path: None,
         home: None,
+        julia_bindir: None,
+        path: None,
     };
     let env = environment::resolve(&ctx).unwrap().unwrap();
     assert_eq!(env.source, EnvSource::JuliaProject);
@@ -140,6 +170,8 @@ fn julia_project_dot_walks_up() {
         julia_project: Some("@.".to_string()),
         julia_depot_path: None,
         home: None,
+        julia_bindir: None,
+        path: None,
     };
     let env = environment::resolve(&ctx).unwrap().unwrap();
     assert_eq!(env.source, EnvSource::JuliaProject);
@@ -158,6 +190,8 @@ fn julia_project_prefers_julia_prefixed_names() {
         julia_project: None,
         julia_depot_path: None,
         home: None,
+        julia_bindir: None,
+        path: None,
     };
     let env = environment::resolve(&ctx).unwrap().unwrap();
     assert_eq!(env.name.as_deref(), Some("Preferred"));
@@ -177,6 +211,8 @@ fn falls_back_to_newest_default_env() {
         julia_project: None,
         julia_depot_path: None,
         home: Some(home.clone()),
+        julia_bindir: None,
+        path: None,
     };
     fs::create_dir_all(tmp.path().join("empty/ws")).unwrap();
     let env = environment::resolve(&ctx).unwrap().unwrap();
@@ -198,6 +234,8 @@ fn resolves_against_real_depot() {
         julia_project: None,
         julia_depot_path: std::env::var("JULIA_DEPOT_PATH").ok(),
         home: std::env::var_os("HOME").map(PathBuf::from),
+        julia_bindir: None,
+        path: None,
     };
     let env = environment::resolve(&ctx)
         .unwrap()
@@ -219,6 +257,116 @@ fn resolves_against_real_depot() {
 }
 
 #[test]
+fn locate_install_via_bindir_override() {
+    let tmp = TempDir::new();
+    let prefix = tmp.path().join("julia");
+    make_fake_install(&prefix, "1.11");
+
+    let mut ctx = bare_ctx(tmp.path().to_path_buf());
+    ctx.julia_bindir = Some(prefix.join("bin").to_string_lossy().into_owned());
+
+    let install = environment::locate_install(&ctx, &[]).expect("install");
+    assert_eq!(install.share, prefix.join("share/julia"));
+    assert_eq!(install.base_dir, prefix.join("share/julia/base"));
+    assert_eq!(install.stdlib_dir, prefix.join("share/julia/stdlib/v1.11"));
+    assert_eq!(install.version, "1.11");
+    assert_eq!(install.prefix, prefix);
+}
+
+#[test]
+fn locate_install_via_path() {
+    let tmp = TempDir::new();
+    let prefix = tmp.path().join("julia");
+    make_fake_install(&prefix, "1.10");
+
+    let mut ctx = bare_ctx(tmp.path().to_path_buf());
+    ctx.path = Some(prefix.join("bin").to_string_lossy().into_owned());
+
+    let install = environment::locate_install(&ctx, &[]).expect("install");
+    assert_eq!(install.version, "1.10");
+    assert_eq!(install.base_dir, prefix.join("share/julia/base"));
+}
+
+#[test]
+fn locate_install_via_juliaup() {
+    let tmp = TempDir::new();
+    let depot = tmp.path().join("depot");
+    let juliaup = depot.join("juliaup");
+    make_fake_install(&juliaup.join("julia-1.11.2"), "1.11");
+    write(
+        &juliaup.join("juliaup.json"),
+        r#"{
+            "Default": "release",
+            "InstalledChannels": { "release": { "Version": "1.11.2+0.x64.linux.gnu" } },
+            "InstalledVersions": { "1.11.2+0.x64.linux.gnu": { "Path": "julia-1.11.2" } }
+        }"#,
+    );
+
+    let ctx = bare_ctx(tmp.path().to_path_buf());
+    let install = environment::locate_install(&ctx, std::slice::from_ref(&depot)).expect("install");
+    assert_eq!(install.share, juliaup.join("julia-1.11.2/share/julia"));
+    assert_eq!(install.version, "1.11");
+}
+
+#[test]
+fn locate_install_picks_newest_stdlib_version() {
+    let tmp = TempDir::new();
+    let prefix = tmp.path().join("julia");
+    make_fake_install(&prefix, "1.9");
+    // A second, higher stdlib version directory should win.
+    write(
+        &prefix.join("share/julia/stdlib/v1.11/Bar/src/Bar.jl"),
+        "module Bar\nend\n",
+    );
+
+    let mut ctx = bare_ctx(tmp.path().to_path_buf());
+    ctx.julia_bindir = Some(prefix.join("bin").to_string_lossy().into_owned());
+    let install = environment::locate_install(&ctx, &[]).expect("install");
+    assert_eq!(install.version, "1.11");
+}
+
+#[test]
+fn locate_install_none_without_base() {
+    let tmp = TempDir::new();
+    // A share dir with no base/Base.jl is not a usable installation.
+    let prefix = tmp.path().join("julia");
+    write(&prefix.join("share/julia/stdlib/v1.11/Foo/src/Foo.jl"), "");
+    let mut ctx = bare_ctx(tmp.path().to_path_buf());
+    ctx.julia_bindir = Some(prefix.join("bin").to_string_lossy().into_owned());
+    assert!(environment::locate_install(&ctx, &[]).is_none());
+}
+
+#[test]
+fn resolve_fills_stdlib_sources_from_install() {
+    let tmp = TempDir::new();
+    let ws = tmp.path().join("ws");
+    let prefix = tmp.path().join("julia");
+    make_fake_install(&prefix, "1.11");
+    write(&ws.join("Project.toml"), "");
+    write(
+        &ws.join("Manifest.toml"),
+        r#"
+manifest_format = "2.0"
+
+[[deps.Foo]]
+uuid = "00000000-0000-0000-0000-000000000010"
+"#,
+    );
+
+    let mut ctx = bare_ctx(ws.clone());
+    ctx.julia_bindir = Some(prefix.join("bin").to_string_lossy().into_owned());
+    let env = environment::resolve(&ctx).unwrap().expect("environment");
+
+    let foo = env.packages.iter().find(|p| p.name == "Foo").unwrap();
+    assert_eq!(foo.kind, PackageKind::Stdlib);
+    assert_eq!(
+        foo.source,
+        Some(prefix.join("share/julia/stdlib/v1.11/Foo"))
+    );
+    assert!(env.install.is_some());
+}
+
+#[test]
 fn returns_none_when_no_project_found() {
     let tmp = TempDir::new();
     let ws = tmp.path().join("empty");
@@ -228,6 +376,8 @@ fn returns_none_when_no_project_found() {
         julia_project: None,
         julia_depot_path: None,
         home: Some(tmp.path().join("nonexistent-home")),
+        julia_bindir: None,
+        path: None,
     };
     assert!(environment::resolve(&ctx).unwrap().is_none());
 }

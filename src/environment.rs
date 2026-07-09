@@ -14,6 +14,7 @@
 //! layer, the LSP, or the CLI. Later Phase 3/5 work consumes [`Environment`].
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// A parsed 16-byte package UUID, stored in textual (big-endian) byte order.
@@ -90,6 +91,22 @@ pub enum EnvSource {
     DefaultEnv,
 }
 
+/// A located Julia installation whose plain Base/stdlib sources fatou can
+/// harvest. Found from the filesystem alone, without running Julia.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JuliaInstall {
+    /// The installation prefix (`<prefix>/bin/julia`, `<prefix>/share/julia`).
+    pub prefix: PathBuf,
+    /// `<prefix>/share/julia`.
+    pub share: PathBuf,
+    /// `<share>/base`, holding `Base.jl`, `boot.jl`, `exports.jl`, etc.
+    pub base_dir: PathBuf,
+    /// `<share>/stdlib/vX.Y`, holding one directory per standard-library package.
+    pub stdlib_dir: PathBuf,
+    /// The stdlib version, e.g. `1.11`, taken from the `stdlib/vX.Y` directory.
+    pub version: String,
+}
+
 /// A resolved Julia environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Environment {
@@ -102,6 +119,9 @@ pub struct Environment {
     pub packages: Vec<Package>,
     pub depots: Vec<PathBuf>,
     pub source: EnvSource,
+    /// The Julia installation whose Base/stdlib sources back this environment,
+    /// if one could be located. `None` falls back to the baked-in export list.
+    pub install: Option<JuliaInstall>,
 }
 
 /// Everything environment-dependent, injected so resolution stays testable
@@ -112,6 +132,11 @@ pub struct EnvContext {
     pub julia_project: Option<String>,
     pub julia_depot_path: Option<String>,
     pub home: Option<PathBuf>,
+    /// `JULIA_BINDIR`: an explicit `<prefix>/bin` override for locating the
+    /// installation, taking precedence over juliaup and `PATH`.
+    pub julia_bindir: Option<String>,
+    /// The process `PATH`, searched for the `julia` executable as a last resort.
+    pub path: Option<String>,
 }
 
 impl EnvContext {
@@ -122,6 +147,8 @@ impl EnvContext {
             julia_project: std::env::var("JULIA_PROJECT").ok(),
             julia_depot_path: std::env::var("JULIA_DEPOT_PATH").ok(),
             home: std::env::var_os("HOME").map(PathBuf::from),
+            julia_bindir: std::env::var("JULIA_BINDIR").ok(),
+            path: std::env::var("PATH").ok(),
         }
     }
 }
@@ -164,10 +191,15 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
 
     let (name, uuid, direct_deps) = parse_project(&project_file)?;
     let manifest_file = find_manifest(&project_dir);
-    let packages = match &manifest_file {
+    let mut packages = match &manifest_file {
         Some(path) => parse_manifest(path, &project_dir, &depots)?,
         None => Vec::new(),
     };
+
+    let install = locate_install(ctx, &depots);
+    if let Some(install) = &install {
+        resolve_stdlib_sources(&mut packages, install);
+    }
 
     Ok(Some(Environment {
         project_file,
@@ -179,6 +211,7 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
         packages,
         depots,
         source,
+        install,
     }))
 }
 
@@ -307,6 +340,170 @@ fn depot_roots(ctx: &EnvContext) -> Vec<PathBuf> {
 
 const fn depot_separator() -> char {
     if cfg!(windows) { ';' } else { ':' }
+}
+
+// --- Julia installation ----------------------------------------------------
+
+/// Locate the active Julia installation without running Julia, trying (in
+/// order): the `JULIA_BINDIR` override, the juliaup default channel, then the
+/// `julia` executable on `PATH`. Returns `None` when none resolves to a tree
+/// with a readable `base/Base.jl`.
+pub fn locate_install(ctx: &EnvContext, depots: &[PathBuf]) -> Option<JuliaInstall> {
+    install_from_bindir(ctx)
+        .or_else(|| install_from_juliaup(depots))
+        .or_else(|| install_from_path(ctx))
+}
+
+/// `<JULIA_BINDIR>/../share/julia`.
+fn install_from_bindir(ctx: &EnvContext) -> Option<JuliaInstall> {
+    let bindir = ctx.julia_bindir.as_deref().map(str::trim)?;
+    if bindir.is_empty() {
+        return None;
+    }
+    let prefix = Path::new(bindir).parent()?;
+    install_from_share(prefix.join("share").join("julia"))
+}
+
+/// Read `<depot>/juliaup/juliaup.json`, follow the default channel's version to
+/// its install directory, and take its bundled `share/julia`.
+fn install_from_juliaup(depots: &[PathBuf]) -> Option<JuliaInstall> {
+    for depot in depots {
+        let juliaup = depot.join("juliaup");
+        let Ok(text) = std::fs::read_to_string(juliaup.join("juliaup.json")) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let Some(install) = juliaup_install_dir(&json, &juliaup) else {
+            continue;
+        };
+        if let Some(found) = install_from_share(install.join("share").join("julia")) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The default channel's install directory from a parsed `juliaup.json`, joined
+/// under `juliaup/` (where the `Path` values are relative).
+fn juliaup_install_dir(json: &serde_json::Value, juliaup: &Path) -> Option<PathBuf> {
+    let default = json.get("Default")?.as_str()?;
+    let version = json
+        .get("InstalledChannels")?
+        .get(default)?
+        .get("Version")?
+        .as_str()?;
+    let rel = json
+        .get("InstalledVersions")?
+        .get(version)?
+        .get("Path")?
+        .as_str()?;
+    Some(juliaup.join(rel))
+}
+
+/// Find `julia` on `PATH`, resolve symlinks and shell wrappers, and take
+/// `<prefix>/share/julia` from the `<prefix>/bin/julia` layout.
+fn install_from_path(ctx: &EnvContext) -> Option<JuliaInstall> {
+    let path = ctx.path.as_deref()?;
+    let exe = if cfg!(windows) { "julia.exe" } else { "julia" };
+    let julia = path
+        .split(depot_separator())
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| Path::new(dir).join(exe))
+        .find(|candidate| candidate.is_file())?;
+    let real = std::fs::canonicalize(&julia).ok()?;
+    // On NixOS (and some distros) `julia` is a shell wrapper that `exec`s the
+    // real binary in a different prefix; follow the chain to the ELF.
+    let real = std::fs::canonicalize(follow_wrapper(&real, 8)).unwrap_or(real);
+    let prefix = real.parent()?.parent()?; // <prefix>/bin/julia -> <prefix>
+    install_from_share(prefix.join("share").join("julia"))
+}
+
+/// Follow a chain of shell wrappers (each ending in `exec "<path>"`) to the real
+/// executable, bounded by `depth`. Non-scripts and unparseable wrappers stop.
+fn follow_wrapper(path: &Path, depth: u8) -> PathBuf {
+    if depth == 0 || !is_shebang(path) {
+        return path.to_path_buf();
+    }
+    match std::fs::read_to_string(path)
+        .ok()
+        .as_deref()
+        .and_then(exec_target)
+    {
+        Some(target) if target != path => follow_wrapper(&target, depth - 1),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Whether `path`'s first two bytes are `#!` (a shell wrapper, not an ELF).
+fn is_shebang(path: &Path) -> bool {
+    let mut buf = [0u8; 2];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut buf))
+        .is_ok()
+        && &buf == b"#!"
+}
+
+/// The target of the last `exec <path>` line in a wrapper script (quoted or a
+/// bare first token).
+fn exec_target(script: &str) -> Option<PathBuf> {
+    let line = script
+        .lines()
+        .rev()
+        .find(|line| line.trim_start().starts_with("exec "))?;
+    let after = line.trim_start().strip_prefix("exec ")?.trim_start();
+    let target = match after.strip_prefix('"') {
+        Some(rest) => rest.split('"').next()?,
+        None => after.split_whitespace().next()?,
+    };
+    (!target.is_empty()).then(|| PathBuf::from(target))
+}
+
+/// Build and validate a [`JuliaInstall`] from a candidate `share/julia`
+/// directory: it must hold `base/Base.jl` and a `stdlib/vX.Y` directory.
+fn install_from_share(share: PathBuf) -> Option<JuliaInstall> {
+    let base_dir = share.join("base");
+    if !base_dir.join("Base.jl").is_file() {
+        return None;
+    }
+    let (version, stdlib_dir) = newest_stdlib(&share.join("stdlib"))?;
+    let prefix = share.parent()?.parent()?.to_path_buf(); // <prefix>/share/julia
+    Some(JuliaInstall {
+        prefix,
+        base_dir,
+        stdlib_dir,
+        version,
+        share,
+    })
+}
+
+/// The highest `vMAJOR.MINOR` directory under `stdlib/`, with its `X.Y` string.
+fn newest_stdlib(stdlib: &Path) -> Option<(String, PathBuf)> {
+    std::fs::read_dir(stdlib)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let raw = name.to_str()?.strip_prefix('v')?;
+            let version = parse_version(raw)?;
+            Some((version, raw.to_string(), entry.path()))
+        })
+        .max_by_key(|(version, _, _)| *version)
+        .map(|(_, raw, path)| (raw, path))
+}
+
+/// Point each stdlib package at its source under the installation's `stdlib`.
+fn resolve_stdlib_sources(packages: &mut [Package], install: &JuliaInstall) {
+    for pkg in packages
+        .iter_mut()
+        .filter(|p| p.kind == PackageKind::Stdlib)
+    {
+        let dir = install.stdlib_dir.join(&pkg.name);
+        if dir.is_dir() {
+            pkg.source = Some(dir);
+        }
+    }
 }
 
 // --- Project.toml ----------------------------------------------------------
@@ -628,6 +825,8 @@ mod tests {
             julia_project: None,
             julia_depot_path: None,
             home: Some(PathBuf::from("/home/u")),
+            julia_bindir: None,
+            path: None,
         };
         assert_eq!(depot_roots(&ctx), vec![PathBuf::from("/home/u/.julia")]);
     }
@@ -640,6 +839,8 @@ mod tests {
             julia_project: None,
             julia_depot_path: Some(format!("/custom{sep}")),
             home: Some(PathBuf::from("/home/u")),
+            julia_bindir: None,
+            path: None,
         };
         assert_eq!(
             depot_roots(&ctx),

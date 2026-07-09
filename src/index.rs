@@ -9,11 +9,13 @@
 //! result feeds the [`LibraryIndex`](crate::incremental::LibraryIndex) salsa
 //! input, which later completion, hover, and go-to-definition read.
 
+pub mod base;
 pub mod harvest;
 pub mod model;
 pub mod typeexpr;
 
-pub use harvest::{harvest_package, harvest_package_named};
+pub use base::build_system_index;
+pub use harvest::{harvest_entry, harvest_package, harvest_package_named};
 pub use model::{
     ConstDef, DefLocation, Docstring, ExportedName, Field, FunctionGroup, HarvestDiagnostic,
     MacroDef, Method, ModuleIndex, PackageIndex, Param, Span, TypeDef, TypeKind, Visibility,

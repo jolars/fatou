@@ -36,6 +36,15 @@ pub fn harvest_package(source_root: &Path) -> PackageIndex {
 /// `src/<name>.jl`.
 pub fn harvest_package_named(source_root: &Path, name: &str) -> PackageIndex {
     let entry = source_root.join("src").join(format!("{name}.jl"));
+    harvest_entry(source_root, &entry, name)
+}
+
+/// Harvest the module named `name` rooted at `source_root`, entering at the
+/// explicit file `entry`. Locations stay relative to `source_root`, so callers
+/// with a non-`src/` layout (Julia's Base at `base/Base.jl`, Core at
+/// `base/boot.jl`) get the same depot-relative `DefLocation`s as ordinary
+/// packages entered through [`harvest_package_named`].
+pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageIndex {
     let mut harvester = Harvester {
         root: source_root.to_path_buf(),
         visited: HashSet::new(),
@@ -46,7 +55,7 @@ pub fn harvest_package_named(source_root: &Path, name: &str) -> PackageIndex {
         name: name.to_string(),
         bare: false,
         loc: DefLocation {
-            file: harvester.relative(&entry),
+            file: harvester.relative(entry),
             range: Span { start: 0, end: 0 },
         },
         exports: Vec::new(),
@@ -57,18 +66,20 @@ pub fn harvest_package_named(source_root: &Path, name: &str) -> PackageIndex {
         submodules: Vec::new(),
     };
 
-    match std::fs::read_to_string(&entry) {
+    match std::fs::read_to_string(entry) {
         Ok(text) => {
-            harvester.visited.insert(canonical(&entry));
-            harvester.walk_text(&text, &entry, &mut root, true);
+            harvester.visited.insert(canonical(entry));
+            harvester.walk_text(&text, entry, &mut root, true);
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             harvester
                 .diagnostics
-                .push(HarvestDiagnostic::EntryFileMissing { path: entry });
+                .push(HarvestDiagnostic::EntryFileMissing {
+                    path: entry.to_path_buf(),
+                });
         }
         Err(err) => harvester.diagnostics.push(HarvestDiagnostic::ReadError {
-            path: entry,
+            path: entry.to_path_buf(),
             message: err.to_string(),
         }),
     }

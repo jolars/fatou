@@ -238,10 +238,17 @@ harvesting—no Julia runtime needed.
   `HarvestDiagnostic`s and the walk continues. Locked by inline units plus
   `tests/harvest.rs`; the signature/type helpers factored into
   `src/semantic/signature.rs`. Smoke-harvested against a real depot package.
-- [ ] Base/stdlib index from the Julia installation's plain sources
+- [x] Base/stdlib index from the Julia installation's plain sources
   (`share/julia/base/`, `share/julia/stdlib/v1.X/`), plus a baked-in minimal
   Base/Core export list as fallback when no installation is found (arity's
-  `StaticBaseR` analog).
+  `StaticBaseR` analog). `environment::locate_install` finds the install without
+  running Julia (`JULIA_BINDIR` override, juliaup's `juliaup.json`, then `julia`
+  on `PATH`, following NixOS shell wrappers to the real binary) and fills stdlib
+  `Package.source`s; `index::build_system_index` harvests Base (merging
+  `Base_compiler.jl`+`Base.jl` for the 1.12 split), Core (`boot.jl`), and every
+  stdlib via the generalized `harvest_entry`, falling back to the embedded
+  `src/index/fallback/{base,core}_exports.txt` snapshots. Locked by
+  `tests/base_index.rs` and the `locate_install` cases in `tests/environment.rs`.
 - [ ] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in
   parallel (rayon) on the index pool, hot-swapped into the HIGH-durability
   `LibraryIndex` salsa input (the input itself has landed: a singleton in
