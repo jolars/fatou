@@ -20,8 +20,11 @@ use salsa::{Durability, Setter};
 use crate::index::PackageIndex;
 use crate::parser::{ParseDiagnostic, parse};
 use crate::project::{self, IncludeEdge};
+use crate::resolve::{Candidate, Namespace, PackageSource, Resolution, Resolver};
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
+
+use rowan::TextSize;
 
 /// An opaque, process-local file identity, allocated once when a file is first
 /// seen and never reused. The stable handle the rest of the system keys on
@@ -428,6 +431,38 @@ impl Analysis {
     /// The harvested index for package `name`, if present.
     pub fn library_package(&self, name: &str) -> Option<Arc<PackageIndex>> {
         self.0.library_package(name)
+    }
+
+    /// Resolve `name` read at `offset` in `file` through the shared masking
+    /// order (locals/imports, then `using`'d exports, then Base/Core). `name` is
+    /// bare even for a macro; pick the namespace with `namespace`.
+    pub fn resolve_name(
+        &self,
+        file: SourceFile,
+        name: &str,
+        offset: TextSize,
+        namespace: Namespace,
+    ) -> Resolution {
+        Resolver::new(self.semantic_model(file), self).resolve(name, offset, namespace)
+    }
+
+    /// Every name visible at `offset` in `file`, in the shared masking order
+    /// with shadowed names dropped. For completion.
+    pub fn visible_names(
+        &self,
+        file: SourceFile,
+        offset: TextSize,
+        namespace: Namespace,
+    ) -> Vec<Candidate> {
+        Resolver::new(self.semantic_model(file), self).visible(offset, namespace)
+    }
+}
+
+/// The library seen through a read-only snapshot, so a [`Resolver`] can run off
+/// the analysis thread.
+impl PackageSource for Analysis {
+    fn package(&self, name: &str) -> Option<Arc<PackageIndex>> {
+        self.library_package(name)
     }
 }
 

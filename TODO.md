@@ -255,9 +255,20 @@ harvesting—no Julia runtime needed.
   `src/incremental.rs` holding `BTreeMap<String, Arc<PackageIndex>>`, with
   `set_library_packages`/`set_package_index`/`library_package` on the db and
   `tests/library_index.rs`); re-analyze open files on swap.
-- [ ] One shared name-resolution/masking order for all consumers (completion,
+- [x] One shared name-resolution/masking order for all consumers (completion,
   hover, the future undefined-name lint): local scopes → explicit imports →
-  `using`'d exports in source order → Base/Core implicit.
+  `using`'d exports in source order → Base/Core implicit. `src/resolve.rs`'s
+  `Resolver` borrows one `SemanticModel` plus a `PackageSource` (the harvested
+  library, implemented for the raw harvest map and for the read-only `Analysis`
+  snapshot). `resolve` walks the four tiers and returns the first hit as a
+  `Resolution` (tiers 1-2 collapse to `Binding`, since explicit imports are file
+  bindings; the library tiers name the source module); `visible` enumerates
+  every name in the same order with shadowing dropped, for completion. Macros
+  resolve in a parallel `Namespace`, reconciling the model's bare macro-def vs.
+  `@`-sigil imported-macro bindings. `using` visibility respects module-body
+  scope boundaries; relative/interpolated `using`s and `baremodule`'s Base/Core
+  suppression are deferred. Wired onto `Analysis` as `resolve_name`/`visible_names`
+  and locked by inline units plus `tests/resolve.rs`.
 - [ ] Maybe: a `fatou index` CLI subcommand to warm and inspect the cache.
 
 ### Phase 4: core semantic features

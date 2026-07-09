@@ -10,6 +10,7 @@ pub mod linter;
 pub mod lsp;
 pub mod parser;
 pub mod project;
+pub mod resolve;
 pub mod semantic;
 pub mod syntax;
 pub mod text;
