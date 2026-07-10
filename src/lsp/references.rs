@@ -90,9 +90,8 @@ pub(crate) fn references_via_db(
         let model = snapshot.semantic_model(file);
         // A workspace top-level symbol is answered from the reverse-occurrence
         // index across every member file; anything else stays intra-file.
-        if let Some((ns, name)) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
-            let locations =
-                cross_file_references(snapshot, ns, &name, encoding, include_declaration);
+        if let Some(symbol) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
+            let locations = cross_file_references(snapshot, &symbol, encoding, include_declaration);
             // A non-empty cross-file result wins; an empty one (member set not
             // seeded yet) falls through to the intra-file answer.
             if !locations.is_empty() {
@@ -119,12 +118,11 @@ pub(crate) fn references_via_db(
 /// definition sites.
 fn cross_file_references(
     snapshot: &Analysis,
-    namespace: crate::resolve::Namespace,
-    name: &smol_str::SmolStr,
+    symbol: &crate::resolve::OccurrenceKey,
     encoding: PositionEncoding,
     include_declaration: bool,
 ) -> Vec<Location> {
-    cross_file::gather_sites(snapshot, namespace, name, encoding)
+    cross_file::gather_sites(snapshot, symbol, encoding)
         .into_iter()
         .filter(|site| include_declaration || !site.is_def)
         .map(|site| Location {

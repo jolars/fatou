@@ -13,10 +13,9 @@
 
 use lsp_types::{Range, Uri};
 use rowan::TextSize;
-use smol_str::SmolStr;
 
 use crate::incremental::{Analysis, SourceFile};
-use crate::resolve::{Namespace, OccurrenceRec, Resolver};
+use crate::resolve::{OccurrenceKey, OccurrenceRec, Resolver};
 use crate::text::{LineIndex, PositionEncoding};
 
 use super::uri::from_path;
@@ -31,15 +30,16 @@ pub(crate) struct CrossFileSite {
 }
 
 /// The workspace top-level symbol at `offset` in the file at `path`, if the
-/// cursor is on one. `None` for a local, a library symbol, or a non-member file
-/// — the caller then falls back to its intra-file path.
+/// cursor is on one — the `(module path, namespace, name)` key that identifies
+/// it in the reverse-occurrence index. `None` for a local, a library symbol, or
+/// a non-member file — the caller then falls back to its intra-file path.
 pub(crate) fn workspace_symbol_at(
     snapshot: &Analysis,
     path: &std::path::Path,
     model: &crate::semantic::SemanticModel,
     offset: TextSize,
-) -> Option<(Namespace, SmolStr)> {
-    let workspace = snapshot.workspace_module(path);
+) -> Option<OccurrenceKey> {
+    let workspace = snapshot.workspace_member(path);
     Resolver::new(model, snapshot)
         .with_workspace(workspace)
         .workspace_symbol_at(offset)
@@ -54,12 +54,11 @@ pub(crate) fn workspace_symbol_at(
 /// the caller fall back to its intra-file path.
 pub(crate) fn gather_sites(
     snapshot: &Analysis,
-    namespace: Namespace,
-    name: &SmolStr,
+    symbol: &OccurrenceKey,
     encoding: PositionEncoding,
 ) -> Vec<CrossFileSite> {
     let index = snapshot.workspace_reference_index();
-    let Some(bucket) = index.0.get(&(namespace, name.clone())) else {
+    let Some(bucket) = index.0.get(symbol) else {
         return Vec::new();
     };
 
@@ -150,11 +149,19 @@ pub(crate) mod test_support {
             macros: Vec::new(),
             submodules: Vec::new(),
         };
-        let members = files.iter().map(|(rel, _)| member_path(rel)).collect();
+        let members: Vec<PathBuf> = files.iter().map(|(rel, _)| member_path(rel)).collect();
+        // Every member's top level lives in the root module here (keyed by the
+        // package-relative path the harvester uses); the nested-module membership
+        // tests build their own indices with populated module paths.
+        let member_modules = files
+            .iter()
+            .map(|(rel, _)| (PathBuf::from("src").join(rel), Vec::new()))
+            .collect();
         let pkg = PackageIndex {
             name: "MyPkg".to_string(),
             root,
             members,
+            member_modules,
             diagnostics: Vec::new(),
         };
 

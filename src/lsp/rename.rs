@@ -136,8 +136,8 @@ pub(crate) fn rename_via_db(
         // A workspace top-level symbol renames across every member file; anything
         // else stays intra-file. A cross-file edit that touches at least this
         // file wins; an empty one (member set not seeded yet) falls through.
-        if let Some((ns, name)) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
-            let edit = cross_file_rename(snapshot, ns, &name, new_name, encoding);
+        if let Some(symbol) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
+            let edit = cross_file_rename(snapshot, &symbol, new_name, encoding);
             if edit
                 .changes
                 .as_ref()
@@ -167,13 +167,12 @@ pub(crate) fn rename_via_db(
 /// so the `@` sigil is preserved automatically, as in the intra-file path.
 fn cross_file_rename(
     snapshot: &Analysis,
-    namespace: crate::resolve::Namespace,
-    name: &smol_str::SmolStr,
+    symbol: &crate::resolve::OccurrenceKey,
     new_name: &str,
     encoding: PositionEncoding,
 ) -> WorkspaceEdit {
     let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
-    for site in cross_file::gather_sites(snapshot, namespace, name, encoding) {
+    for site in cross_file::gather_sites(snapshot, symbol, encoding) {
         changes.entry(site.uri).or_default().push(TextEdit {
             range: site.range,
             new_text: new_name.to_string(),

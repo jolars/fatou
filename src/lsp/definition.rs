@@ -30,7 +30,9 @@ use crate::incremental::Analysis;
 use crate::index::model::{DefLocation, Span};
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::parse;
-use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, resolve_submodule};
+use crate::resolve::{
+    ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_submodule,
+};
 use crate::semantic::{LoadKind, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
 
@@ -49,7 +51,7 @@ pub fn compute_definition<P: PackageSource>(
     let model = SemanticModel::build(&parse(text).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
-    let workspace = super::uri::to_path(uri).and_then(|p| packages.workspace_module(&p));
+    let workspace = super::uri::to_path(uri).and_then(|p| packages.workspace_member(&p));
     definition_for(
         &model,
         packages,
@@ -82,7 +84,7 @@ pub(crate) fn definition_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
-        let workspace = snapshot.workspace_module(path);
+        let workspace = snapshot.workspace_member(path);
         // The inner `Option` is the definition (a cursor on nothing definable is
         // a legitimate `None`); the outer distinguishes that from a cache miss.
         Some(definition_for(
@@ -109,7 +111,7 @@ pub(crate) fn definition_via_db(
 fn definition_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    workspace: Option<Arc<PackageIndex>>,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     uri: &Uri,
     line_index: &LineIndex,
     offset: TextSize,
@@ -189,7 +191,7 @@ fn self_location(
 fn free_read_location<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    workspace: Option<Arc<PackageIndex>>,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     uri: &Uri,
     name: &str,
     offset: TextSize,
@@ -207,11 +209,12 @@ fn free_read_location<P: PackageSource>(
             line_index,
             encoding,
         )),
-        // A same-module sibling: look the name up in the workspace package's
-        // module and jump into the sibling file on disk (the depot path).
-        Resolution::Workspace { name } => {
-            let pkg = workspace?;
-            library_location(packages, &pkg, &pkg.root, &name, encoding)
+        // A same-module sibling: look the name up in the file's host module and
+        // jump into the sibling file on disk (the depot path).
+        Resolution::Workspace { module, name } => {
+            let pkg = workspace?.0;
+            let host = module_at(&pkg.root, &module)?;
+            library_location(packages, &pkg, host, &name, encoding)
         }
         Resolution::System { module, name } => {
             let pkg = packages.package(&module)?;
@@ -346,7 +349,7 @@ mod tests {
         roots: BTreeMap<String, PathBuf>,
         /// The workspace package, returned for any path (tests pass member
         /// paths); mirrors the live server's [`Analysis::workspace_module`].
-        workspace: Option<Arc<PackageIndex>>,
+        workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     }
 
     impl PackageSource for TestLib {
@@ -356,7 +359,7 @@ mod tests {
         fn package_root(&self, name: &str) -> Option<PathBuf> {
             self.roots.get(name).cloned()
         }
-        fn workspace_module(&self, _path: &Path) -> Option<Arc<PackageIndex>> {
+        fn workspace_member(&self, _path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
             self.workspace.clone()
         }
     }
@@ -492,7 +495,7 @@ mod tests {
         let mut lib = TestLib::default();
         lib.packages.insert("MyPkg".to_string(), Arc::clone(&pkg));
         lib.roots.insert("MyPkg".to_string(), tmp.path.clone());
-        lib.workspace = Some(pkg);
+        lib.workspace = Some((pkg, Vec::new()));
 
         let loc = def_at("bar|(1)", &lib).unwrap();
         assert_eq!(to_path(&loc.uri), Some(bar));

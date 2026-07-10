@@ -20,7 +20,10 @@ use salsa::{Durability, Setter};
 use crate::index::PackageIndex;
 use crate::parser::{ParseDiagnostic, parse};
 use crate::project::{self, IncludeEdge};
-use crate::resolve::{Candidate, Namespace, OccurrenceRec, PackageSource, Resolution, Resolver};
+use crate::resolve::{
+    Candidate, ModulePath, Namespace, OccurrenceKey, OccurrenceRec, PackageSource, Resolution,
+    Resolver,
+};
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
 
@@ -230,7 +233,7 @@ pub fn file_workspace_occurrences(
     let workspace = file
         .path(db)
         .as_deref()
-        .and_then(|p| packages.workspace_module(p));
+        .and_then(|p| packages.workspace_member(p));
     let map = Resolver::new(model, &packages)
         .with_workspace(workspace)
         .workspace_occurrences();
@@ -241,7 +244,7 @@ pub fn file_workspace_occurrences(
 /// projection). Wrapped so it carries an opaque whole-value [`salsa::Update`],
 /// keeping the [`OccurrenceRec`]/[`SmolStr`] leaves salsa-free.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WorkspaceOccurrences(pub BTreeMap<(Namespace, SmolStr), Vec<OccurrenceRec>>);
+pub struct WorkspaceOccurrences(pub BTreeMap<OccurrenceKey, Vec<OccurrenceRec>>);
 
 // SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]): overwrite
 // the whole value when it differs by `Eq` and report the change.
@@ -278,17 +281,33 @@ impl PackageSource for DbPackages<'_> {
             .cloned()
     }
 
-    fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
+    fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
         let index = LibraryIndex::try_get(self.0)?;
         let name = index.workspace(self.0).as_ref()?;
         let root = index.roots(self.0).0.get(name)?;
         let src = normalize_path(&root.join("src"));
-        if normalize_path(path).starts_with(&src) {
-            index.packages(self.0).0.get(name).cloned()
-        } else {
-            None
+        if !normalize_path(path).starts_with(&src) {
+            return None;
         }
+        let pkg = index.packages(self.0).0.get(name).cloned()?;
+        let host = host_module_path(&pkg, root, path);
+        Some((pkg, host))
     }
+}
+
+/// The host module path of `path` within workspace `pkg` rooted at `root`: the
+/// nested `module` the harvester spliced the file's top level into (empty for
+/// the root module). Falls back to the root module for a file under `src/` that
+/// the harvester has not recorded as a member (e.g. a freshly opened,
+/// not-yet-harvested buffer), preserving the pre-nested-module behavior.
+fn host_module_path(pkg: &PackageIndex, root: &Path, path: &Path) -> ModulePath {
+    let root = normalize_path(root);
+    normalize_path(path)
+        .strip_prefix(&root)
+        .ok()
+        .and_then(|rel| pkg.member_modules.get(rel))
+        .map(|segments| segments.iter().map(SmolStr::new).collect())
+        .unwrap_or_default()
 }
 
 /// The workspace package's reverse-occurrence index: every occurrence of each
@@ -303,7 +322,7 @@ impl PackageSource for DbPackages<'_> {
 /// been seeded.
 #[salsa::tracked(returns(ref))]
 pub fn workspace_reference_index(db: &dyn IncrementalDb) -> WorkspaceReferenceIndex {
-    let mut out: BTreeMap<(Namespace, SmolStr), Vec<(SourceFile, OccurrenceRec)>> = BTreeMap::new();
+    let mut out: BTreeMap<OccurrenceKey, Vec<(SourceFile, OccurrenceRec)>> = BTreeMap::new();
     let Some(wf) = WorkspaceFiles::try_get(db) else {
         return WorkspaceReferenceIndex::default();
     };
@@ -321,9 +340,7 @@ pub fn workspace_reference_index(db: &dyn IncrementalDb) -> WorkspaceReferenceIn
 /// query). Wrapped for the opaque whole-value [`salsa::Update`]. No `Debug`
 /// derive: [`SourceFile`] is a salsa input without one.
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct WorkspaceReferenceIndex(
-    pub BTreeMap<(Namespace, SmolStr), Vec<(SourceFile, OccurrenceRec)>>,
-);
+pub struct WorkspaceReferenceIndex(pub BTreeMap<OccurrenceKey, Vec<(SourceFile, OccurrenceRec)>>);
 
 // SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]).
 unsafe impl salsa::Update for WorkspaceReferenceIndex {
@@ -669,23 +686,18 @@ impl IncrementalDatabase {
         LibraryIndex::try_get(self)?.workspace(self).clone()
     }
 
-    /// The workspace package's harvested index when `path` is one of its source
-    /// files (a file under the package's source root). Its top-level symbols are
-    /// the enclosing module's globals, visible across the package's files.
-    ///
-    /// Step-1 approximation: membership is a `src/` prefix check and the file
-    /// resolves against the package's *root* module; nested-`module` include
-    /// membership is deferred.
+    /// The workspace package and the host module path of `path`, when `path` is
+    /// one of its source files (a file under the package's source root). The host
+    /// module is the nested `module` the harvester spliced the file's top level
+    /// into (empty for the root module), so the file's globals and free reads
+    /// resolve against it rather than always the root.
+    pub fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
+        DbPackages(self).workspace_member(path)
+    }
+
+    /// Just the workspace package for `path` (see [`workspace_member`](Self::workspace_member)).
     pub fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
-        let index = LibraryIndex::try_get(self)?;
-        let name = index.workspace(self).as_ref()?;
-        let root = index.roots(self).0.get(name)?;
-        let src = normalize_path(&root.join("src"));
-        if normalize_path(path).starts_with(&src) {
-            index.packages(self).0.get(name).cloned()
-        } else {
-            None
-        }
+        self.workspace_member(path).map(|(pkg, _)| pkg)
     }
 
     /// Mint a read-only [`Analysis`] snapshot: a short-lived db clone wrapped so
@@ -786,8 +798,14 @@ impl Analysis {
         self.0.workspace_package()
     }
 
-    /// The workspace package's harvested index when `path` is one of its source
-    /// files. See [`IncrementalDatabase::workspace_module`].
+    /// The workspace package and host module path of `path`, when `path` is one
+    /// of its source files. See [`IncrementalDatabase::workspace_member`].
+    pub fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
+        self.0.workspace_member(path)
+    }
+
+    /// Just the workspace package for `path`. See
+    /// [`IncrementalDatabase::workspace_module`].
     pub fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
         self.0.workspace_module(path)
     }
@@ -820,11 +838,11 @@ impl Analysis {
             .visible(offset, namespace)
     }
 
-    /// The workspace package `file` belongs to (tier 2), if it is one of the
-    /// workspace package's source files.
-    fn workspace_module_for(&self, file: SourceFile) -> Option<Arc<PackageIndex>> {
+    /// The workspace package and host module path `file` belongs to (tier 2), if
+    /// it is one of the workspace package's source files.
+    fn workspace_module_for(&self, file: SourceFile) -> Option<(Arc<PackageIndex>, ModulePath)> {
         let path = self.0.file_path(file)?;
-        self.workspace_module(&path)
+        self.workspace_member(&path)
     }
 }
 
@@ -839,8 +857,8 @@ impl PackageSource for Analysis {
         Analysis::package_root(self, name)
     }
 
-    fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
-        Analysis::workspace_module(self, path)
+    fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
+        Analysis::workspace_member(self, path)
     }
 }
 

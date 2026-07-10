@@ -9,7 +9,7 @@
 //! best-effort: unreadable files, unresolved includes, parse errors, and
 //! include cycles are recorded as [`HarvestDiagnostic`]s and the walk continues.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rowan::TextRange;
@@ -49,6 +49,8 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
         root: source_root.to_path_buf(),
         visited: HashSet::new(),
         members: Vec::new(),
+        member_modules: BTreeMap::new(),
+        module_path: Vec::new(),
         diagnostics: Vec::new(),
         root_filled: false,
     };
@@ -89,6 +91,7 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
         name: name.to_string(),
         root,
         members: harvester.members,
+        member_modules: harvester.member_modules,
         diagnostics: harvester.diagnostics,
     }
 }
@@ -101,6 +104,13 @@ struct Harvester {
     /// Every source file walked, package-relative and in walk order. Recorded
     /// once per unique file (the `visited` guard runs before [`walk_text`]).
     members: Vec<PathBuf>,
+    /// The host module path of each member (see
+    /// [`PackageIndex::member_modules`]), captured from [`module_path`] at the
+    /// point the file is first walked.
+    member_modules: BTreeMap<PathBuf, Vec<String>>,
+    /// The current nested-`module` path (relative to the root module, empty at
+    /// root), pushed/popped as [`handle_module`](Self::handle_module) recurses.
+    module_path: Vec<String>,
     diagnostics: Vec<HarvestDiagnostic>,
     /// Whether the synthesized root module has been matched to a literal
     /// `module <Name>` in the source yet.
@@ -144,7 +154,10 @@ impl Harvester {
     }
 
     fn walk_text(&mut self, text: &str, file: &Path, dest: &mut ModuleIndex, at_root: bool) {
-        self.members.push(self.relative(file));
+        let rel = self.relative(file);
+        self.member_modules
+            .insert(rel.clone(), self.module_path.clone());
+        self.members.push(rel);
         let parsed = crate::parser::parse(text);
         if !parsed.diagnostics.is_empty() {
             self.diagnostics.push(HarvestDiagnostic::ParseError {
@@ -296,7 +309,7 @@ impl Harvester {
         }
 
         let mut child = ModuleIndex {
-            name,
+            name: name.clone(),
             bare,
             loc: self.loc(file, range),
             exports: Vec::new(),
@@ -306,11 +319,13 @@ impl Harvester {
             macros: Vec::new(),
             submodules: Vec::new(),
         };
+        self.module_path.push(name);
         if let Some(block) = block {
             for item in block.children() {
                 self.walk_item(&item, file, &mut child, false, None);
             }
         }
+        self.module_path.pop();
         dest.submodules.push(child);
     }
 
@@ -1076,6 +1091,8 @@ mod tests {
             root: PathBuf::from("/pkg"),
             visited: HashSet::new(),
             members: Vec::new(),
+            member_modules: BTreeMap::new(),
+            module_path: Vec::new(),
             diagnostics: Vec::new(),
             root_filled: false,
         };

@@ -25,7 +25,9 @@ use rowan::{TextRange, TextSize};
 use crate::incremental::Analysis;
 use crate::index::{FunctionGroup, ModuleIndex, PackageIndex};
 use crate::parser::parse;
-use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, resolve_submodule};
+use crate::resolve::{
+    ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_submodule,
+};
 use crate::semantic::{BindingId, BindingKind, LoadKind, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
 
@@ -71,7 +73,7 @@ pub(crate) fn hover_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
-        let workspace = snapshot.workspace_module(path);
+        let workspace = snapshot.workspace_member(path);
         // The inner `Option` is the hover result (a cursor on nothing hoverable
         // is a legitimate `None`); the outer distinguishes that from a cache miss.
         Some(hover_for(
@@ -97,7 +99,7 @@ pub(crate) fn hover_via_db(
 fn hover_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    workspace: Option<Arc<PackageIndex>>,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     text: &str,
     offset: TextSize,
     line_index: &LineIndex,
@@ -118,7 +120,7 @@ fn hover_for<P: PackageSource>(
 fn hover_content<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    workspace: Option<Arc<PackageIndex>>,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     text: &str,
     offset: TextSize,
 ) -> Option<(String, TextRange)> {
@@ -164,7 +166,7 @@ fn hover_content<P: PackageSource>(
 fn render_free_read<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    workspace: Option<Arc<PackageIndex>>,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     text: &str,
     name: &str,
     offset: TextSize,
@@ -176,8 +178,11 @@ fn render_free_read<P: PackageSource>(
     {
         // A binding the occurrence walk missed but resolution finds: still local.
         Resolution::Binding(bid) => Some(render_local(model, bid, text)),
-        // A same-module sibling: render from the workspace package's module.
-        Resolution::Workspace { name } => render_library_symbol(&workspace?.root, &name),
+        // A same-module sibling: render from the file's host module.
+        Resolution::Workspace { module, name } => {
+            let pkg = &workspace.as_ref()?.0;
+            render_library_symbol(module_at(&pkg.root, &module)?, &name)
+        }
         Resolution::System { module, name } => {
             let pkg = packages.package(&module)?;
             render_library_symbol(&pkg.root, &name)
@@ -383,6 +388,7 @@ mod tests {
             name: root.name.clone(),
             root,
             members: Vec::new(),
+            member_modules: Default::default(),
             diagnostics: Vec::new(),
         })
     }
@@ -432,7 +438,8 @@ mod tests {
         let model = SemanticModel::build(&parse(src).cst);
         let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
         let lib: BTreeMap<String, Arc<PackageIndex>> = BTreeMap::new();
-        hover_content(&model, &lib, Some(workspace), src, offset).map(|(value, _)| value)
+        hover_content(&model, &lib, Some((workspace, Vec::new())), src, offset)
+            .map(|(value, _)| value)
     }
 
     #[test]

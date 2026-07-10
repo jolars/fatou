@@ -148,6 +148,16 @@ fn include_inside_submodule_lands_in_submodule() {
     assert!(index.root.functions.is_empty(), "nothing at top level");
     assert_eq!(index.root.submodules.len(), 1);
     assert_eq!(fn_names(&index.root.submodules[0]), ["inner"]);
+    // The included file's top level belongs to the nested `Sub` module, while
+    // the entry file itself belongs to the root (empty path).
+    assert_eq!(
+        index.member_modules.get(Path::new("src/sub.jl")),
+        Some(&vec!["Sub".to_string()]),
+    );
+    assert_eq!(
+        index.member_modules.get(Path::new("src/Pkg.jl")),
+        Some(&Vec::new()),
+    );
 }
 
 #[test]

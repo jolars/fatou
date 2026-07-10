@@ -440,6 +440,7 @@ mod tests {
             name: root.name.clone(),
             root,
             members: Vec::new(),
+            member_modules: Default::default(),
             diagnostics: Vec::new(),
         })
     }

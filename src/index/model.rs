@@ -10,6 +10,7 @@
 //! positions (parameter defaults, const right-hand sides) are normalized source
 //! strings, since they are arbitrary expressions rather than types.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,13 @@ pub struct PackageIndex {
     /// file first, then each statically `include`d file). The reverse-occurrence
     /// index (cross-file references/rename) seeds a salsa input per member.
     pub members: Vec<PathBuf>,
+    /// The host module of each member file: the module path (relative to
+    /// [`root`](Self::root), empty for the root module itself) that the file's
+    /// `include` lexically landed in, so its top-level items splice there. Keyed
+    /// by the same package-relative path as [`members`](Self::members). Lets the
+    /// workspace resolver resolve a member file's top-level globals and free
+    /// reads against its enclosing nested `module`, not just the root.
+    pub member_modules: BTreeMap<PathBuf, Vec<String>>,
     pub diagnostics: Vec<HarvestDiagnostic>,
 }
 

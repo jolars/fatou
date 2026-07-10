@@ -40,6 +40,7 @@ fn package(name: &str, exports: &[&str]) -> Arc<PackageIndex> {
             submodules: Vec::new(),
         },
         members: Vec::new(),
+        member_modules: Default::default(),
         diagnostics: Vec::new(),
     })
 }

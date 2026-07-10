@@ -34,7 +34,9 @@ use serde::{Deserialize, Serialize};
 use crate::incremental::Analysis;
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::{KEYWORDS, parse};
-use crate::resolve::{Candidate, Namespace, PackageSource, Resolver, Source, resolve_submodule};
+use crate::resolve::{
+    Candidate, ModulePath, Namespace, PackageSource, Resolver, Source, resolve_submodule,
+};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
 
@@ -85,7 +87,7 @@ pub(crate) fn completion_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
-        let workspace = snapshot.workspace_module(path);
+        let workspace = snapshot.workspace_member(path);
         Some(completions_for(model, snapshot, workspace, text, offset))
     }));
     match cached {
@@ -109,7 +111,7 @@ pub(crate) fn resolve_completion(snapshot: &Analysis, item: CompletionItem) -> C
 fn completions_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    workspace: Option<Arc<PackageIndex>>,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     text: &str,
     offset: TextSize,
 ) -> Vec<CompletionItem> {
@@ -475,6 +477,7 @@ mod tests {
             name: root.name.clone(),
             root,
             members: Vec::new(),
+            member_modules: Default::default(),
             diagnostics: Vec::new(),
         })
     }
@@ -518,7 +521,7 @@ mod tests {
     ) -> Vec<CompletionItem> {
         let model = SemanticModel::build(&parse(src).cst);
         let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
-        completions_for(&model, lib, Some(workspace), src, offset)
+        completions_for(&model, lib, Some((workspace, Vec::new())), src, offset)
     }
 
     #[test]

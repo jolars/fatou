@@ -183,6 +183,7 @@ fn synthetic_index(name: &str, list: &str) -> PackageIndex {
             submodules: Vec::new(),
         },
         members: Vec::new(),
+        member_modules: Default::default(),
         diagnostics: Vec::new(),
     }
 }

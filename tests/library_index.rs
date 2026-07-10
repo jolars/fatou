@@ -27,6 +27,7 @@ fn empty_package(name: &str) -> PackageIndex {
             submodules: Vec::new(),
         },
         members: Vec::new(),
+        member_modules: Default::default(),
         diagnostics: Vec::new(),
     }
 }
@@ -285,7 +286,7 @@ fn workspace_reference_index_unions_across_member_files() {
     let recs: Vec<_> = index
         .0
         .iter()
-        .filter(|(k, _)| k.0 == Namespace::Value && k.1.as_str() == "f")
+        .filter(|(k, _)| k.1 == Namespace::Value && k.2.as_str() == "f")
         .flat_map(|(_, v)| v.iter())
         .collect();
 
@@ -301,6 +302,87 @@ fn workspace_reference_index_unions_across_member_files() {
         1,
         "exactly one definition site across the package"
     );
+}
+
+#[test]
+fn nested_module_symbols_do_not_conflate_with_the_root() {
+    // `MyPkg` defines `f` at the root and *also* `f` inside a nested `module
+    // Sub`. Two member files: `a.jl` (host = root) and `sub.jl` (host = Sub).
+    // The reverse index must key them by module path so the two `f`s stay apart.
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    use fatou::index::model::{DefLocation, Span};
+    use fatou::index::{FunctionGroup, ModuleIndex};
+    use fatou::resolve::Namespace;
+    use smol_str::SmolStr;
+
+    let func = |name: &str| FunctionGroup {
+        name: name.to_string(),
+        owner: None,
+        methods: Vec::new(),
+        doc: None,
+    };
+    let mut pkg = empty_package("MyPkg");
+    pkg.root.functions.push(func("f"));
+    pkg.root.submodules.push(ModuleIndex {
+        name: "Sub".to_string(),
+        bare: false,
+        loc: DefLocation {
+            file: "src/MyPkg.jl".into(),
+            range: Span { start: 0, end: 0 },
+        },
+        exports: Vec::new(),
+        functions: vec![func("f")],
+        types: Vec::new(),
+        consts: Vec::new(),
+        macros: Vec::new(),
+        submodules: Vec::new(),
+    });
+    // `a.jl`'s top level is the root module; `sub.jl`'s is `Sub`.
+    pkg.member_modules
+        .insert(PathBuf::from("src/a.jl"), Vec::new());
+    pkg.member_modules
+        .insert(PathBuf::from("src/sub.jl"), vec!["Sub".to_string()]);
+
+    let mut db = IncrementalDatabase::new();
+    let a = db.upsert_file(
+        Path::new("/work/MyPkg/src/a.jl"),
+        "function f()\n    f()\nend\n".to_string(),
+    );
+    let sub = db.upsert_file(
+        Path::new("/work/MyPkg/src/sub.jl"),
+        "g() = f()\n".to_string(),
+    );
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(pkg));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_workspace_files(vec![a, sub]);
+
+    let snap = db.snapshot();
+    let index = snap.workspace_reference_index();
+
+    // Root `f`: only a.jl's definition and recursive call.
+    let root_key = (Vec::new(), Namespace::Value, SmolStr::new("f"));
+    let root_recs = index.0.get(&root_key).expect("root `f` bucket");
+    assert_eq!(root_recs.len(), 2, "def plus recursive call in a.jl only");
+    assert!(
+        root_recs.iter().all(|(file, _)| *file == a),
+        "no Sub occurrence leaked into the root `f`",
+    );
+
+    // `Sub.f`: only sub.jl's free-read call.
+    let sub_key = (
+        vec![SmolStr::new("Sub")],
+        Namespace::Value,
+        SmolStr::new("f"),
+    );
+    let sub_recs = index.0.get(&sub_key).expect("Sub `f` bucket");
+    assert_eq!(sub_recs.len(), 1, "just the call in sub.jl");
+    assert!(sub_recs.iter().all(|(file, _)| *file == sub));
 }
 
 #[test]
@@ -336,7 +418,7 @@ fn resetting_workspace_files_drops_removed_members() {
         snap.workspace_reference_index()
             .0
             .iter()
-            .filter(|(k, _)| k.0 == Namespace::Value && k.1.as_str() == "f")
+            .filter(|(k, _)| k.1 == Namespace::Value && k.2.as_str() == "f")
             .map(|(_, v)| v.len())
             .sum()
     };
