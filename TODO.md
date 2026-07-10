@@ -111,6 +111,13 @@ completion would feel broken on day one.
   text plus position and returns the response type (arity's pattern), plus
   the existing in-memory connection test in `tests/lsp.rs`. Established by
   document symbols (`compute_document_symbols`); apply to each new feature.
+  *Gap:* cross-file references and rename are covered only at the db/`Analysis`
+  level (hand-built workspace via `cross_file::test_support`), not by a
+  full-server `tests/lsp.rs` test — the workspace harvest runs on a detached
+  thread, so an end-to-end test must drive a real temp package through
+  `initialize`-with-root and synchronize by polling until the reverse index is
+  populated. Add `serves_cross_file_references`/`serves_cross_file_rename` on
+  that pattern (reusable for any future harvest-dependent feature).
 
 ### Phase 1: syntax-only features
 
@@ -378,6 +385,15 @@ The payoff phase, in roughly arity's shipping order.
   wholesale, dropping stale members. *Deferred:* qualified reads (`Pkg.foo`) —
   the model records only the whole chain's range, not the `foo` sub-span — and
   navigation into `using`'d workspace submodules.
+- [ ] Nested-`module` file membership. A member file still resolves against the
+  package's *root* module (`workspace_module`/`Resolver::with_workspace`), so a
+  top-level symbol declared inside a nested `module` is classified against the
+  wrong module: cross-file go-to-definition, references, and rename (and the
+  workspace resolution tier generally) can miss or misattribute it. Track which
+  module each member file's top level belongs to (from the harvester's module
+  walk) and resolve free reads and `workspace_symbol_at`/`workspace_occurrences`
+  against that module rather than the root. Unblocks correct cross-file behavior
+  for multi-module packages.
 - [x] Workspace symbols (fuzzy subsequence match over top-level definitions):
   pure `compute_workspace_symbols` (`src/lsp/workspace_symbols.rs`) walks the
   harvested `PackageIndex` of the package under development (recursing
