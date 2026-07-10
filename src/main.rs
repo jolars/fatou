@@ -279,8 +279,11 @@ fn resolve_style(
 
 fn load_config(explicit_config: &Option<PathBuf>, no_config: bool) -> Result<Config, String> {
     let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
-    let (config, _path) = Config::resolve(explicit_config.as_deref(), no_config, &anchor)
+    let (config, _path, warnings) = Config::resolve(explicit_config.as_deref(), no_config, &anchor)
         .map_err(|e| e.to_string())?;
+    for warning in &warnings {
+        eprintln!("warning: {warning}");
+    }
     Ok(config)
 }
 

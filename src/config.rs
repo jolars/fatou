@@ -76,8 +76,44 @@ struct RawConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawFormat {
+    #[serde(rename = "line-width")]
     line_width: Option<u32>,
+    #[serde(rename = "indent-width")]
     indent_width: Option<u32>,
+    /// Deprecated snake_case alias for `line-width`, still accepted with a warning.
+    #[serde(rename = "line_width")]
+    line_width_snake: Option<u32>,
+    /// Deprecated snake_case alias for `indent-width`, still accepted with a warning.
+    #[serde(rename = "indent_width")]
+    indent_width_snake: Option<u32>,
+}
+
+impl RawFormat {
+    /// Resolve to concrete widths, preferring the canonical kebab-case keys and
+    /// recording a deprecation warning for any snake_case key that was present.
+    fn resolve(self, defaults: &FormatConfig, warnings: &mut Vec<String>) -> FormatConfig {
+        if self.line_width_snake.is_some() {
+            warnings.push(deprecated_key("line_width", "line-width"));
+        }
+        if self.indent_width_snake.is_some() {
+            warnings.push(deprecated_key("indent_width", "indent-width"));
+        }
+        FormatConfig {
+            line_width: self
+                .line_width
+                .or(self.line_width_snake)
+                .unwrap_or(defaults.line_width),
+            indent_width: self
+                .indent_width
+                .or(self.indent_width_snake)
+                .unwrap_or(defaults.indent_width),
+        }
+    }
+}
+
+/// Message for a deprecated snake_case `[format]` key.
+fn deprecated_key(old: &str, new: &str) -> String {
+    format!("`{old}` in [format] is deprecated; use `{new}`")
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -93,27 +129,31 @@ impl Config {
     /// explicit path, load exactly that file. Otherwise discover the nearest
     /// `fatou.toml` walking up from `anchor`. Returns the config and the path it
     /// was loaded from (if any).
+    ///
+    /// Along with the config and its source path, returns any deprecation
+    /// warnings raised while parsing (e.g. snake_case `[format]` keys).
     pub fn resolve(
         explicit: Option<&Path>,
         no_config: bool,
         anchor: &Path,
-    ) -> Result<(Self, Option<PathBuf>), ConfigError> {
+    ) -> Result<(Self, Option<PathBuf>, Vec<String>), ConfigError> {
         if no_config {
-            return Ok((Self::default(), None));
+            return Ok((Self::default(), None, Vec::new()));
         }
         if let Some(path) = explicit {
-            return Ok((Self::load(path)?, Some(path.to_path_buf())));
+            let (config, warnings) = Self::load(path)?;
+            return Ok((config, Some(path.to_path_buf()), warnings));
         }
         match discover(anchor) {
             Some(path) => {
-                let config = Self::load(&path)?;
-                Ok((config, Some(path)))
+                let (config, warnings) = Self::load(&path)?;
+                Ok((config, Some(path), warnings))
             }
-            None => Ok((Self::default(), None)),
+            None => Ok((Self::default(), None, Vec::new())),
         }
     }
 
-    fn load(path: &Path) -> Result<Self, ConfigError> {
+    fn load(path: &Path) -> Result<(Self, Vec<String>), ConfigError> {
         let text = std::fs::read_to_string(path).map_err(|err| ConfigError::Read {
             path: path.to_path_buf(),
             message: err.to_string(),
@@ -127,18 +167,17 @@ impl Config {
 }
 
 impl RawConfig {
-    fn into_config(self) -> Config {
+    fn into_config(self) -> (Config, Vec<String>) {
         let defaults = FormatConfig::default();
-        Config {
-            format: FormatConfig {
-                line_width: self.format.line_width.unwrap_or(defaults.line_width),
-                indent_width: self.format.indent_width.unwrap_or(defaults.indent_width),
-            },
+        let mut warnings = Vec::new();
+        let config = Config {
+            format: self.format.resolve(&defaults, &mut warnings),
             lint: LintConfig {
                 select: self.lint.select,
                 ignore: self.lint.ignore,
             },
-        }
+        };
+        (config, warnings)
     }
 }
 
@@ -166,16 +205,45 @@ mod tests {
 
     #[test]
     fn parses_partial_toml() {
-        let raw: RawConfig = toml::from_str("[format]\nline_width = 100\n").unwrap();
-        let config = raw.into_config();
+        let raw: RawConfig = toml::from_str("[format]\nline-width = 100\n").unwrap();
+        let (config, warnings) = raw.into_config();
         assert_eq!(config.format.line_width, 100);
         assert_eq!(config.format.indent_width, 4);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn snake_case_keys_are_accepted_with_a_warning() {
+        let raw: RawConfig =
+            toml::from_str("[format]\nline_width = 100\nindent_width = 2\n").unwrap();
+        let (config, warnings) = raw.into_config();
+        assert_eq!(config.format.line_width, 100);
+        assert_eq!(config.format.indent_width, 2);
+        assert_eq!(
+            warnings,
+            vec![
+                "`line_width` in [format] is deprecated; use `line-width`".to_string(),
+                "`indent_width` in [format] is deprecated; use `indent-width`".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn kebab_case_wins_when_both_forms_present() {
+        let raw: RawConfig =
+            toml::from_str("[format]\nline-width = 100\nline_width = 80\n").unwrap();
+        let (config, warnings) = raw.into_config();
+        assert_eq!(config.format.line_width, 100);
+        // The deprecated key is still reported even though it is overridden.
+        assert_eq!(warnings.len(), 1);
     }
 
     #[test]
     fn no_config_returns_defaults() {
-        let (config, path) = Config::resolve(None, true, Path::new("/nonexistent")).unwrap();
+        let (config, path, warnings) =
+            Config::resolve(None, true, Path::new("/nonexistent")).unwrap();
         assert_eq!(config, Config::default());
         assert!(path.is_none());
+        assert!(warnings.is_empty());
     }
 }

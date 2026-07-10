@@ -18,17 +18,22 @@ On the command line:
 
   | Key            | Type    | Default | Description                                         |
   | -------------- | ------- | ------- | --------------------------------------------------- |
-  | `line_width`   | integer | `92`    | The width the formatter tries to keep lines within. |
-  | `indent_width` | integer | `4`     | Number of spaces per indentation level.             |
+  | `line-width`   | integer | `92`    | The width the formatter tries to keep lines within. |
+  | `indent-width` | integer | `4`     | Number of spaces per indentation level.             |
 
 Defaults follow common Julia conventions. Both keys can be overridden per run
 with the `--line-width`/`--indent-width` flags on `fatou format`.
 
 ```toml
 [format]
-line_width = 92
-indent_width = 4
+line-width = 92
+indent-width = 4
 ```
+
+> **Deprecation**: the snake_case keys `line_width` and `indent_width` are still
+> accepted but print a warning. Use the kebab-case `line-width` and
+> `indent-width` instead; the snake_case forms will be removed in a future
+> release.
 
 ## `[lint]`
 

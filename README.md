@@ -44,7 +44,7 @@ fatou lint --check <dir>       # lint
 fatou lsp                      # run the language server on stdio
 ```
 
-Configuration lives in `fatou.toml` (`[format]` line_width/indent_width,
+Configuration lives in `fatou.toml` (`[format]` line-width/indent-width,
 `[lint]` select/ignore).
 
 ## Editor integration
