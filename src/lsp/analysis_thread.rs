@@ -19,6 +19,7 @@ use lsp_types::Uri;
 use salsa::Database as _;
 
 use crate::incremental::IncrementalDatabase;
+use crate::index::HarvestedLibrary;
 use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
@@ -36,9 +37,12 @@ pub(crate) struct AnalysisRequest {
 }
 
 /// Spawn the dedicated analysis thread that owns the persistent salsa database.
+/// `library_rx` delivers the harvested package index once the background loader
+/// has resolved the environment; the thread swaps it into the db as a write.
 pub(crate) fn spawn_analysis_thread(
     analysis_rx: Receiver<AnalysisRequest>,
     read_rx: Receiver<ReadJob>,
+    library_rx: Receiver<HarvestedLibrary>,
     out_tx: Sender<Outbound>,
     read_spawner: Spawner,
     encoding: PositionEncoding,
@@ -56,7 +60,7 @@ pub(crate) fn spawn_analysis_thread(
                 read_spawner,
                 encoding,
             };
-            worker.run(&analysis_rx, &read_rx, &done_rx);
+            worker.run(&analysis_rx, &read_rx, &library_rx, &done_rx);
         })
         .expect("spawn analysis thread")
 }
@@ -136,10 +140,20 @@ impl AnalysisWorker {
         &mut self,
         analysis_rx: &Receiver<AnalysisRequest>,
         read_rx: &Receiver<ReadJob>,
+        library_rx: &Receiver<HarvestedLibrary>,
         done_rx: &Receiver<AnalyzeDone>,
     ) {
         loop {
             select! {
+                recv(library_rx) -> msg => {
+                    // The background loader finished harvesting: swap the index
+                    // into the db (a write). Later requests read it from their
+                    // snapshot; open files need no re-analysis because no
+                    // diagnostic depends on the library yet.
+                    if let Ok(lib) = msg {
+                        self.db.set_library(lib.packages, lib.roots);
+                    }
+                }
                 recv(analysis_rx) -> msg => {
                     let Ok(req) = msg else { break };
                     // Coalesce: keep only the latest version per URI, so a fast

@@ -2,6 +2,7 @@
 //! the main event loop that wires the channels, pools, and threads together.
 
 use std::error::Error;
+use std::path::PathBuf;
 
 use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
@@ -12,6 +13,8 @@ use lsp_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
+use crate::environment::EnvContext;
+use crate::index::{HarvestedLibrary, harvest_library};
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, spawn_analysis_thread};
@@ -19,6 +22,7 @@ use super::read_jobs::ReadJob;
 use super::semantic_tokens::legend;
 use super::state::{GlobalState, Outbound};
 use super::task_pool::{TaskPool, read_pool_size};
+use super::uri::to_path;
 
 pub(crate) type DynError = Box<dyn Error + Sync + Send>;
 
@@ -41,9 +45,25 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
     let encoding = negotiate_position_encoding(&params.capabilities);
+    let workspace_root = workspace_root(&params);
     let result = serde_json::json!({ "capabilities": server_capabilities(encoding) });
     connection.initialize_finish(id, result)?;
-    main_loop(connection, encoding)
+    main_loop(connection, encoding, workspace_root)
+}
+
+/// The workspace root to resolve the Julia environment against: the first
+/// workspace folder, then the (deprecated) `root_uri`, decoded to a path. `None`
+/// when the client opened no folder (a single loose file); the loader then falls
+/// back to the process working directory.
+fn workspace_root(params: &InitializeParams) -> Option<PathBuf> {
+    #[allow(deprecated)]
+    params
+        .workspace_folders
+        .as_ref()
+        .and_then(|folders| folders.first())
+        .map(|folder| &folder.uri)
+        .or(params.root_uri.as_ref())
+        .and_then(to_path)
 }
 
 /// Pick the position encoding for the session: UTF-8 (plain byte offsets, no
@@ -81,6 +101,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             ..Default::default()
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        definition_provider: Some(OneOf::Left(true)),
         signature_help_provider: Some(SignatureHelpOptions {
             // `(` opens signature help, `,` (also a retrigger) advances the
             // active parameter.
@@ -106,17 +127,35 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
 /// The main event loop: dispatch incoming JSON-RPC messages and analysis
 /// results. Owns no salsa database (see the module docs); joins the analysis
 /// thread before returning.
-fn main_loop(connection: &Connection, encoding: PositionEncoding) -> Result<(), DynError> {
+fn main_loop(
+    connection: &Connection,
+    encoding: PositionEncoding,
+    workspace_root: Option<PathBuf>,
+) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
     let (read_tx, read_rx) = crossbeam_channel::unbounded::<ReadJob>();
+    let (library_tx, library_rx) = crossbeam_channel::bounded::<HarvestedLibrary>(1);
+
+    // Resolve the environment and harvest its packages off the event loop: it
+    // walks the filesystem and parses all of Base, so it must not block the
+    // handshake (nor shutdown — the thread is detached). The result is swapped
+    // into the db when it lands; every feature stays usable in the meantime, and
+    // library go-to-definition/completion start answering once it arrives.
+    spawn_library_loader(workspace_root, library_tx);
 
     // The read pool serves latency-sensitive work (formatting, the analysis
     // read-phase). Its workers must outlive both `state` and the analysis
     // thread; the drop order at the end of this function guarantees that.
     let read_pool = TaskPool::new("fatou-lsp-read", read_pool_size());
-    let analysis_handle =
-        spawn_analysis_thread(analysis_rx, read_rx, out_tx, read_pool.spawner(), encoding);
+    let analysis_handle = spawn_analysis_thread(
+        analysis_rx,
+        read_rx,
+        library_rx,
+        out_tx,
+        read_pool.spawner(),
+        encoding,
+    );
 
     let mut state = GlobalState::new(connection.sender.clone(), analysis_tx, read_tx, encoding);
 
@@ -143,10 +182,37 @@ fn main_loop(connection: &Connection, encoding: PositionEncoding) -> Result<(), 
     }
 
     // Dropping `state` drops `analysis_tx`/`read_tx` → the analysis thread's
-    // recv disconnects → it exits and drops the db.
+    // recv disconnects → it exits and drops the db. The library loader is
+    // detached; it ends on its own (or when its send fails after teardown).
     drop(state);
     let _ = analysis_handle.join();
     Ok(())
+}
+
+/// Resolve the Julia environment for `workspace_root` and harvest its library on
+/// a detached background thread, sending the result to the analysis thread.
+///
+/// Only runs when the client provided a workspace root: without one there is no
+/// project to resolve against (a single loose file), and resolving the machine's
+/// default environment would harvest all of Base for no benefit — notably in the
+/// in-memory server tests, which open no folder. Best-effort: an unresolved
+/// environment or harvest failure simply leaves the library empty.
+fn spawn_library_loader(
+    workspace_root: Option<PathBuf>,
+    library_tx: crossbeam_channel::Sender<HarvestedLibrary>,
+) {
+    let Some(root) = workspace_root else { return };
+    let spawned = std::thread::Builder::new()
+        .name("fatou-index-loader".to_string())
+        .spawn(move || {
+            let ctx = EnvContext::from_process(root);
+            if let Ok(Some(env)) = crate::environment::resolve(&ctx) {
+                let _ = library_tx.send(harvest_library(&env));
+            }
+        });
+    // A spawn failure is non-fatal: the server runs without a library index.
+    debug_assert!(spawned.is_ok(), "spawn index loader thread");
+    drop(spawned);
 }
 
 #[cfg(test)]

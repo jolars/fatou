@@ -292,9 +292,23 @@ The payoff phase, in roughly arity's shipping order.
   from the shared `signature_label` in `src/lsp/render.rs` (which `render_method`
   now reuses). Warm `signature_help_via_db` path off the cached parse; behavior
   locked by inline units plus the `serves_signature_help` end-to-end test.
-- [ ] Go-to-definition: intra-file bindings; library symbols jump straight
-  into depot sources (real files on disk—nicer than R's compiled lazy-load
-  DBs).
+- [x] Go-to-definition (`textDocument/definition`): pure `compute_definition`
+  (`src/lsp/definition.rs`) classifies the symbol at the cursor exactly as hover
+  does (qualified read, local occurrence, free read) but returns a `Location`.
+  Intra-file bindings point back into the document at `def_range`; library
+  symbols (Base/Core, `using`'d exports, `Foo.bar`) resolve through the shared
+  masking order to a harvested `DefLocation`, whose package-relative path is
+  joined with the package's source root and read off disk to convert the byte
+  span. Warm `definition_via_db` path off the cached parse. This required wiring
+  the environment/index into the live server for the first time: a detached
+  background loader (`spawn_library_loader`, only when the client sends a
+  workspace root) resolves the environment and harvests its library
+  (`harvest_library`), handing it to the analysis thread, which swaps it into a
+  new `LibraryIndex.roots` salsa field (`set_library`, exposed via
+  `Analysis::package_root` and a defaulted `PackageSource::package_root`).
+  Multiple-dispatch "go to all methods" stays deferred to Phase 6. Locked by
+  `definition` units (intra-file plus an on-disk depot jump) and
+  `serves_goto_definition` in `tests/lsp.rs`.
 - [ ] References and document highlight (read/write sites of a binding).
 - [ ] Rename (intra-file first, with `prepareRename` validation).
 

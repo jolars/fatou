@@ -66,15 +66,41 @@ unsafe impl salsa::Update for LibraryPackages {
     }
 }
 
+/// Each harvested package's absolute source root (the directory its
+/// [`DefLocation::file`](crate::index::model::DefLocation) paths are relative
+/// to), keyed by name. Kept beside [`LibraryPackages`] rather than in the
+/// serializable [`PackageIndex`] model, which is deliberately depot-independent:
+/// only the live server, which knows where the depot is on disk, fills this, and
+/// go-to-definition joins a root with a relative path to reach the real file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LibraryRoots(pub BTreeMap<String, PathBuf>);
+
+// SAFETY: same opaque-leaf pattern as [`LibraryPackages`].
+unsafe impl salsa::Update for LibraryRoots {
+    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
+        let old = unsafe { &mut *old_pointer };
+        if *old == new {
+            false
+        } else {
+            *old = new;
+            true
+        }
+    }
+}
+
 /// The whole harvested library, as a single HIGH-durability salsa input. One
 /// input holds every package (rather than one input per package): the library
 /// set changes only on a manifest change or a re-harvest, which HIGH durability
 /// encodes, and there are no per-package incremental consumers yet. Per-package
-/// replacement stays cheap because [`LibraryPackages`] holds `Arc`s.
+/// replacement stays cheap because [`LibraryPackages`] holds `Arc`s. The
+/// package-name -> source-root map rides alongside so go-to-definition can turn
+/// a package-relative `DefLocation` into an on-disk path.
 #[salsa::input(singleton)]
 pub struct LibraryIndex {
     #[returns(ref)]
     pub packages: LibraryPackages,
+    #[returns(ref)]
+    pub roots: LibraryRoots,
 }
 
 /// The cached parse of a file. The `GreenNode` is not `Eq`/`salsa::Update`, so
@@ -323,26 +349,45 @@ impl IncrementalDatabase {
         parsed_tree_root(self, file)
     }
 
-    /// Replace the whole harvested library index, at HIGH durability. Creates
-    /// the singleton input on first call. Re-analyze open files after a swap:
-    /// dependents of the index (once they exist) will have been invalidated.
-    pub fn set_library_packages(&mut self, packages: BTreeMap<String, Arc<PackageIndex>>) {
-        let value = LibraryPackages(packages);
+    /// Replace the whole harvested library index and its source roots, at HIGH
+    /// durability. Creates the singleton input on first call. Re-analyze open
+    /// files after a swap: dependents of the index (once they exist) will have
+    /// been invalidated.
+    pub fn set_library(
+        &mut self,
+        packages: BTreeMap<String, Arc<PackageIndex>>,
+        roots: BTreeMap<String, PathBuf>,
+    ) {
+        let packages = LibraryPackages(packages);
+        let roots = LibraryRoots(roots);
         match LibraryIndex::try_get(self) {
             Some(index) => {
                 index
                     .set_packages(self)
                     .with_durability(Durability::HIGH)
-                    .to(value);
+                    .to(packages);
+                index
+                    .set_roots(self)
+                    .with_durability(Durability::HIGH)
+                    .to(roots);
             }
             None => {
                 // Creating the singleton input registers it in storage; the
                 // handle is refetched via `try_get` on later calls.
-                let _ = LibraryIndex::builder(value)
+                let _ = LibraryIndex::builder(packages, roots)
                     .durability(Durability::HIGH)
                     .new(self);
             }
         }
+    }
+
+    /// Replace the whole harvested library index, preserving any existing source
+    /// roots. Convenience for callers (tests) that only supply package data.
+    pub fn set_library_packages(&mut self, packages: BTreeMap<String, Arc<PackageIndex>>) {
+        let roots = LibraryIndex::try_get(self)
+            .map(|lib| lib.roots(self).0.clone())
+            .unwrap_or_default();
+        self.set_library(packages, roots);
     }
 
     /// Insert or replace a single package's index, keeping the rest. Cheap: the
@@ -360,6 +405,16 @@ impl IncrementalDatabase {
     pub fn library_package(&self, name: &str) -> Option<Arc<PackageIndex>> {
         LibraryIndex::try_get(self)?
             .packages(self)
+            .0
+            .get(name)
+            .cloned()
+    }
+
+    /// The absolute source root of package `name` (the directory its
+    /// `DefLocation` paths are relative to), if known.
+    pub fn package_root(&self, name: &str) -> Option<PathBuf> {
+        LibraryIndex::try_get(self)?
+            .roots(self)
             .0
             .get(name)
             .cloned()
@@ -433,6 +488,12 @@ impl Analysis {
         self.0.library_package(name)
     }
 
+    /// The absolute source root of package `name`, if the live server has
+    /// located the depot and harvested it.
+    pub fn package_root(&self, name: &str) -> Option<PathBuf> {
+        self.0.package_root(name)
+    }
+
     /// Resolve `name` read at `offset` in `file` through the shared masking
     /// order (locals/imports, then `using`'d exports, then Base/Core). `name` is
     /// bare even for a macro; pick the namespace with `namespace`.
@@ -463,6 +524,10 @@ impl Analysis {
 impl PackageSource for Analysis {
     fn package(&self, name: &str) -> Option<Arc<PackageIndex>> {
         self.library_package(name)
+    }
+
+    fn package_root(&self, name: &str) -> Option<PathBuf> {
+        Analysis::package_root(self, name)
     }
 }
 

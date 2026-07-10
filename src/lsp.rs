@@ -46,6 +46,7 @@
 
 mod analysis_thread;
 mod completion;
+mod definition;
 mod folding;
 mod format;
 mod hover;
@@ -61,6 +62,7 @@ mod task_pool;
 mod uri;
 
 pub use completion::compute_completions;
+pub use definition::compute_definition;
 pub use folding::compute_folding_ranges;
 pub use format::{compute_format_edits, compute_format_range_edits};
 pub use hover::compute_hover;

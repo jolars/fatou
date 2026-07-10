@@ -14,9 +14,10 @@ use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DocumentFormattingParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
     FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
-    GeneralClientCapabilities, Hover, HoverContents, HoverParams, InitializeParams, Position,
-    PositionEncodingKind, PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams,
-    SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams, SymbolKind,
+    GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, InitializeParams, Location, Position, PositionEncodingKind,
+    PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams, SemanticTokens,
+    SemanticTokensParams, SignatureHelp, SignatureHelpParams, SymbolKind,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
@@ -438,6 +439,114 @@ fn serves_signature_help() {
             );
         }
         other => panic!("expected a signatureHelp response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn serves_goto_definition() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capabilities announce the definition provider ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let init_response = client.receiver.recv().unwrap();
+    match init_response {
+        Message::Response(resp) => {
+            assert_eq!(
+                resp.result.unwrap()["capabilities"]["definitionProvider"],
+                serde_json::json!(true),
+                "expected the definition provider to be advertised"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document defining and calling a local function ---
+    let uri = Uri::from_str("file:///work/s.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a) = a\ngreet(1)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag_note = client.receiver.recv().unwrap();
+    assert!(matches!(diag_note, Message::Notification(_)));
+
+    // --- go-to-definition on the call `greet` at (1, 2) ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/definition".to_string(),
+            params: serde_json::to_value(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(1, 2),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let def_response = client.receiver.recv().unwrap();
+    match def_response {
+        Message::Response(resp) => {
+            let response: GotoDefinitionResponse =
+                serde_json::from_value(resp.result.unwrap()).unwrap();
+            let GotoDefinitionResponse::Scalar(Location { uri: target, range }) = response else {
+                panic!("expected a scalar location, got {response:?}");
+            };
+            assert_eq!(target, uri, "definition is in the same document");
+            // The `greet` in the definition on line 0, columns 0..5.
+            assert_eq!(range, Range::new(Position::new(0, 0), Position::new(0, 5)));
+        }
+        other => panic!("expected a definition response, got {other:?}"),
     }
 
     // --- shutdown / exit ---

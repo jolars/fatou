@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use crate::environment::JuliaInstall;
 
+use super::HarvestedLibrary;
 use super::harvest::{harvest_entry, harvest_package_named};
 use super::model::{DefLocation, ExportedName, ModuleIndex, PackageIndex, Span, Visibility};
 
@@ -31,26 +32,42 @@ const BASE_FALLBACK: &str = include_str!("fallback/base_exports.txt");
 const CORE_FALLBACK: &str = include_str!("fallback/core_exports.txt");
 
 /// Build the Base/Core/stdlib index for `install`, keyed by module name. Falls
-/// back to the baked-in export list when `install` is `None`.
+/// back to the baked-in export list when `install` is `None`. Drops the source
+/// roots; callers that need go-to-definition into system sources use
+/// [`build_system_library`].
 pub fn build_system_index(install: Option<&JuliaInstall>) -> BTreeMap<String, Arc<PackageIndex>> {
+    build_system_library(install).packages
+}
+
+/// Build the Base/Core/stdlib index for `install` along with each package's
+/// absolute source root (empty for the baked-in fallback, which has no on-disk
+/// sources).
+pub fn build_system_library(install: Option<&JuliaInstall>) -> HarvestedLibrary {
     match install {
         Some(install) => harvest_system(install),
-        None => fallback_system(),
+        None => HarvestedLibrary {
+            packages: fallback_system(),
+            roots: BTreeMap::new(),
+        },
     }
 }
 
 /// Harvest Base, Core, and every stdlib package from the installation's plain
-/// sources. Best-effort: harvesting all of Base is not cheap, which is what the
-/// on-disk cache and parallel harvest (next phase) address; here it stays
-/// simple and correct.
-fn harvest_system(install: &JuliaInstall) -> BTreeMap<String, Arc<PackageIndex>> {
-    let mut out = BTreeMap::new();
+/// sources, recording each one's source root. Best-effort: harvesting all of
+/// Base is not cheap, which is what the on-disk cache and parallel harvest (next
+/// phase) address; here it stays simple and correct.
+fn harvest_system(install: &JuliaInstall) -> HarvestedLibrary {
+    let mut packages = BTreeMap::new();
+    let mut roots = BTreeMap::new();
 
-    // Base and Core live directly in `base/`, not under a `src/` directory.
+    // Base and Core live directly in `base/`, not under a `src/` directory, so
+    // their `DefLocation`s are relative to `base_dir`.
     let base = harvest_base(&install.base_dir);
-    out.insert("Base".to_string(), Arc::new(base));
+    packages.insert("Base".to_string(), Arc::new(base));
+    roots.insert("Base".to_string(), install.base_dir.clone());
     let core = harvest_entry(&install.base_dir, &install.base_dir.join("boot.jl"), "Core");
-    out.insert("Core".to_string(), Arc::new(core));
+    packages.insert("Core".to_string(), Arc::new(core));
+    roots.insert("Core".to_string(), install.base_dir.clone());
 
     // Every installed stdlib package is `using`-able regardless of the manifest,
     // so harvest them all through the ordinary `src/<Name>.jl` entry.
@@ -62,12 +79,13 @@ fn harvest_system(install: &JuliaInstall) -> BTreeMap<String, Arc<PackageIndex>>
             };
             if dir.join("src").join(format!("{name}.jl")).is_file() {
                 let index = harvest_package_named(&dir, name);
-                out.insert(name.to_string(), Arc::new(index));
+                packages.insert(name.to_string(), Arc::new(index));
+                roots.insert(name.to_string(), dir);
             }
         }
     }
 
-    out
+    HarvestedLibrary { packages, roots }
 }
 
 /// Harvest Base by merging every present [`BASE_ENTRIES`] file into one index.

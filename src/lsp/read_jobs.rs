@@ -5,13 +5,17 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, RequestId, Response};
 
-use lsp_types::{CompletionItem, CompletionResponse, DocumentSymbolResponse, Position, Range};
+use lsp_types::{
+    CompletionItem, CompletionResponse, DocumentSymbolResponse, GotoDefinitionResponse, Position,
+    Range, Uri,
+};
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
 use super::completion::{completion_via_db, resolve_completion};
+use super::definition::definition_via_db;
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
@@ -91,6 +95,14 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: Sender<Message>,
     },
+    Definition {
+        id: RequestId,
+        uri: Uri,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -108,6 +120,7 @@ impl ReadJob {
             ReadJob::CompletionResolve { id, sender, .. } => (id, sender),
             ReadJob::Hover { id, sender, .. } => (id, sender),
             ReadJob::SignatureHelp { id, sender, .. } => (id, sender),
+            ReadJob::Definition { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -211,6 +224,18 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let help = signature_help_via_db(&snapshot, &path, &text, position, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, help)));
+        }
+        ReadJob::Definition {
+            id,
+            uri,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let location = definition_via_db(&snapshot, &uri, &path, &text, position, encoding);
+            let result = location.map(GotoDefinitionResponse::Scalar);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
     }
 }

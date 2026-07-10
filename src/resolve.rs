@@ -81,6 +81,15 @@ pub enum Source {
 /// read-only [`Analysis`](crate::incremental::Analysis) snapshot.
 pub trait PackageSource {
     fn package(&self, name: &str) -> Option<Arc<PackageIndex>>;
+
+    /// The absolute source root of package `name` (the directory its
+    /// `DefLocation` paths are relative to), if known. Only the live server,
+    /// which has located the depot on disk, can answer this; the plain harvest
+    /// map has no roots, so the default is `None`. Go-to-definition uses it to
+    /// turn a package-relative definition location into a real file path.
+    fn package_root(&self, _name: &str) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 impl PackageSource for BTreeMap<String, Arc<PackageIndex>> {

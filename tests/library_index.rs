@@ -80,3 +80,50 @@ fn snapshot_reads_the_library() {
     let snapshot = db.snapshot();
     assert_eq!(snapshot.library_package("Foo").unwrap().name, "Foo");
 }
+
+#[test]
+fn source_roots_round_trip_through_set_library() {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    let mut db = IncrementalDatabase::new();
+    assert!(db.package_root("Foo").is_none(), "no roots before any set");
+
+    let mut packages = BTreeMap::new();
+    packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
+    let mut roots = BTreeMap::new();
+    roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo/abcde"));
+    db.set_library(packages, roots);
+
+    assert_eq!(
+        db.package_root("Foo"),
+        Some(PathBuf::from("/depot/Foo/abcde"))
+    );
+    // The roots are visible through a read-only snapshot too.
+    assert_eq!(
+        db.snapshot().package_root("Foo"),
+        Some(PathBuf::from("/depot/Foo/abcde"))
+    );
+    // A package with no registered root reads back `None`.
+    assert!(db.package_root("Bar").is_none());
+}
+
+#[test]
+fn set_library_packages_preserves_existing_roots() {
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    let mut db = IncrementalDatabase::new();
+    let mut packages = BTreeMap::new();
+    packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
+    let mut roots = BTreeMap::new();
+    roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo"));
+    db.set_library(packages, roots);
+
+    // A packages-only update (the back-compat convenience) keeps the roots.
+    let mut map = BTreeMap::new();
+    map.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
+    db.set_library_packages(map);
+
+    assert_eq!(db.package_root("Foo"), Some(PathBuf::from("/depot/Foo")));
+}
