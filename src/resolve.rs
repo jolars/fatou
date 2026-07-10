@@ -34,11 +34,12 @@ use rowan::TextSize;
 use smol_str::SmolStr;
 
 use crate::index::{ModuleIndex, PackageIndex, Visibility};
-use crate::semantic::{Binding, BindingId, BindingKind, LoadKind, ScopeId, SemanticModel};
+use crate::semantic::{Access, Binding, BindingId, BindingKind, LoadKind, ScopeId, SemanticModel};
 
 /// The namespace a name is resolved in. Julia keeps macros separate: `@time`
-/// and a value `time` never resolve to one another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// and a value `time` never resolve to one another. `Ord` so it can key the
+/// reverse-occurrence index's per-name buckets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Namespace {
     Value,
     Macro,
@@ -62,6 +63,16 @@ pub enum Resolution {
     System { module: SmolStr, name: SmolStr },
     /// No tier provides the name.
     Unresolved,
+}
+
+/// One recorded occurrence of a workspace top-level symbol: its byte range, the
+/// definition-vs-use flag, and how the site accesses the binding. The unit the
+/// reverse-occurrence index unions across files (cross-file references/rename).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OccurrenceRec {
+    pub range: rowan::TextRange,
+    pub is_def: bool,
+    pub access: Access,
 }
 
 /// One name visible at a position, tagged with the tier that provides it. The
@@ -257,6 +268,82 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
             }
         }
 
+        out
+    }
+
+    /// Every occurrence, in this file, of a top-level symbol of the enclosing
+    /// workspace package, keyed by `(namespace, bare-or-@ name)`. Two sources
+    /// unify under one name: this file's own module-global bindings (a file that
+    /// *defines* the symbol, contributing its definition and intra-file uses) and
+    /// its free reads that resolve to the workspace tier (a file that only *uses*
+    /// it). Keying by name — not [`BindingId`], which is per-file — is what lets
+    /// the aggregate stitch a defining file's occurrences together with a calling
+    /// file's, including multi-file multiple dispatch (`function f end` plus
+    /// methods of `f` across files).
+    ///
+    /// Empty when the file is not a workspace member. Qualified reads (`Pkg.foo`)
+    /// are deferred: the model records only the whole chain's range, not the
+    /// `foo` sub-span a precise rename needs.
+    pub fn workspace_occurrences(&self) -> BTreeMap<(Namespace, SmolStr), Vec<OccurrenceRec>> {
+        let mut out: BTreeMap<(Namespace, SmolStr), Vec<OccurrenceRec>> = BTreeMap::new();
+        let Some(workspace) = &self.workspace else {
+            return out;
+        };
+
+        // Defining files: occurrences of each module-global binding whose name
+        // the package actually defines at top level. The `module_defines` gate
+        // matches exactly what the workspace tier of `resolve` fires on, so a
+        // plain file-scope global (`x = 1`) or an import the harvester skips is
+        // left out, keeping this in lockstep with go-to-definition.
+        for (i, binding) in self.model.bindings().iter().enumerate() {
+            if !self.model.scope(binding.scope).kind.is_global() {
+                continue;
+            }
+            for ns in [Namespace::Value, Namespace::Macro] {
+                let Some(name) = namespaced_binding_name(binding, ns) else {
+                    continue;
+                };
+                if !module_defines(&workspace.root, &name, ns) {
+                    continue;
+                }
+                let recs = out.entry((ns, name)).or_default();
+                for occ in self.model.occurrences(BindingId(i as u32)) {
+                    recs.push(OccurrenceRec {
+                        range: occ.range,
+                        is_def: occ.is_def,
+                        access: occ.access,
+                    });
+                }
+            }
+        }
+
+        // Using files: free reads that resolve to the workspace tier.
+        for ident in self.model.idents() {
+            if ident.binding.is_some() {
+                continue;
+            }
+            let ns = if ident.is_macro {
+                Namespace::Macro
+            } else {
+                Namespace::Value
+            };
+            if let Resolution::Workspace { name } =
+                self.resolve(&ident.name, ident.range.start(), ns)
+            {
+                out.entry((ns, name)).or_default().push(OccurrenceRec {
+                    range: ident.range,
+                    is_def: false,
+                    access: ident.access,
+                });
+            }
+        }
+
+        // Source order within each name, deduped by range for a stable, unique
+        // result (defensive: the two sources never overlap in practice).
+        for recs in out.values_mut() {
+            recs.sort_by_key(|r| (r.range.start(), r.range.end()));
+            recs.dedup_by_key(|r| (r.range.start(), r.range.end()));
+        }
         out
     }
 
@@ -934,5 +1021,104 @@ mod tests {
         let src = "function f()\n    map = 1\n    \nend";
         let names = visible_names(src, "map = 1\n    ", &lib);
         assert_eq!(names.iter().filter(|n| *n == "map").count(), 1);
+    }
+
+    /// A flattened occurrence bucket: `(start, end, is_def)` per site, keyed by
+    /// namespace and name.
+    type OccMap = BTreeMap<(Namespace, SmolStr), Vec<(u32, u32, bool)>>;
+
+    /// The occurrences keyed by `(namespace, name)` for `src`, resolved as a
+    /// member of `workspace` against `lib`.
+    fn workspace_occ(
+        src: &str,
+        workspace: &Arc<PackageIndex>,
+        lib: &BTreeMap<String, Arc<PackageIndex>>,
+    ) -> OccMap {
+        let model = model_of(src);
+        Resolver::new(&model, lib)
+            .with_workspace(Some(Arc::clone(workspace)))
+            .workspace_occurrences()
+            .into_iter()
+            .map(|(k, recs)| {
+                let simple = recs
+                    .iter()
+                    .map(|r| (r.range.start().into(), r.range.end().into(), r.is_def))
+                    .collect();
+                (k, simple)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn defining_file_reports_its_module_global() {
+        // The file defines `f`; the def site plus the intra-file use are recorded.
+        let ws = workspace_pkg("MyPkg", &["f"], &[]);
+        let src = "function f()\n    f()\nend\n";
+        let occ = workspace_occ(src, &ws, &library(&[]));
+        let recs = occ
+            .get(&(Namespace::Value, SmolStr::new("f")))
+            .expect("f is a workspace symbol");
+        // The definition (is_def) and the recursive call.
+        assert_eq!(recs.len(), 2);
+        assert!(recs.iter().any(|r| r.2), "the definition site is present");
+        assert!(recs.iter().any(|r| !r.2), "the intra-file use is present");
+    }
+
+    #[test]
+    fn using_file_reports_free_reads_of_a_workspace_symbol() {
+        // This file does not define `f`, only calls it: a free read resolving to
+        // the workspace tier, recorded as a non-def use.
+        let ws = workspace_pkg("MyPkg", &["f"], &[]);
+        let src = "g() = f() + f()\n";
+        let occ = workspace_occ(src, &ws, &library(&[]));
+        let recs = occ
+            .get(&(Namespace::Value, SmolStr::new("f")))
+            .expect("f resolves to the workspace");
+        assert_eq!(recs.len(), 2, "both calls to f");
+        assert!(recs.iter().all(|r| !r.2), "uses, not definitions");
+    }
+
+    #[test]
+    fn a_shadowing_local_is_not_a_workspace_occurrence() {
+        // A local `f` masks the workspace symbol: its uses bind locally and are
+        // not reported as references to the package-level `f`.
+        let ws = workspace_pkg("MyPkg", &["f"], &[]);
+        let src = "function g()\n    f = 1\n    f + f\nend\n";
+        let occ = workspace_occ(src, &ws, &library(&[]));
+        assert!(
+            !occ.contains_key(&(Namespace::Value, SmolStr::new("f"))),
+            "the local f shadows the workspace symbol"
+        );
+    }
+
+    #[test]
+    fn non_member_file_reports_nothing() {
+        // With no workspace set, nothing is a workspace occurrence.
+        let model = model_of("f() = f()\n");
+        let lib = library(&[]);
+        let occ = Resolver::new(&model, &lib).workspace_occurrences();
+        assert!(occ.is_empty());
+    }
+
+    #[test]
+    fn macro_occurrences_use_the_macro_namespace() {
+        let ws = workspace_pkg("MyPkg", &[], &["@m"]);
+        // Defining file: `macro m() end` binds `m` in the macro namespace.
+        let occ = workspace_occ("macro m()\nend\n", &ws, &library(&[]));
+        assert!(occ.contains_key(&(Namespace::Macro, SmolStr::new("@m"))));
+        // Using file: an `@m` free read resolves to the workspace macro.
+        let occ2 = workspace_occ("f() = @m\n", &ws, &library(&[]));
+        assert!(occ2.contains_key(&(Namespace::Macro, SmolStr::new("@m"))));
+    }
+
+    #[test]
+    fn a_plain_global_is_not_a_workspace_occurrence() {
+        // `x = 1` is a file-scope global, but the package does not define `x` at
+        // top level (the harvester skips plain globals), so it stays intra-file.
+        let ws = workspace_pkg("MyPkg", &["f"], &[]);
+        let src = "x = 1\nf() = x\n";
+        let occ = workspace_occ(src, &ws, &library(&[]));
+        assert!(!occ.contains_key(&(Namespace::Value, SmolStr::new("x"))));
+        assert!(occ.contains_key(&(Namespace::Value, SmolStr::new("f"))));
     }
 }

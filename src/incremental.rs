@@ -20,11 +20,12 @@ use salsa::{Durability, Setter};
 use crate::index::PackageIndex;
 use crate::parser::{ParseDiagnostic, parse};
 use crate::project::{self, IncludeEdge};
-use crate::resolve::{Candidate, Namespace, PackageSource, Resolution, Resolver};
+use crate::resolve::{Candidate, Namespace, OccurrenceRec, PackageSource, Resolution, Resolver};
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
 
 use rowan::TextSize;
+use smol_str::SmolStr;
 
 /// An opaque, process-local file identity, allocated once when a file is first
 /// seen and never reused. The stable handle the rest of the system keys on
@@ -206,6 +207,88 @@ pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> Vec<IncludeEdg
     let root = parsed_tree_root(db, file);
     let base_dir = file.path(db).as_deref().and_then(Path::parent);
     project::include_edges(&root, base_dir)
+}
+
+/// The reverse-occurrence projection for one file: every occurrence of a
+/// workspace top-level symbol, keyed by `(namespace, name)`, from this file's
+/// own module-global bindings and its free reads resolving to the workspace
+/// tier. See [`Resolver::workspace_occurrences`].
+///
+/// Reads the [`LibraryIndex`] input (through [`DbPackages`]) so a re-harvest
+/// invalidates it; otherwise re-runs only when the file's [`semantic_model`]
+/// changes. **Demand-only:** the aggregate [`workspace_reference_index`] and the
+/// references/rename read jobs pull it lazily. It must never become a dependency
+/// of an eager query (e.g. [`parse_diagnostics`]), or every keystroke in any
+/// member file would recompute the whole reverse index.
+#[salsa::tracked(returns(ref))]
+pub fn file_workspace_occurrences(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> WorkspaceOccurrences {
+    let model = semantic_model(db, file);
+    let packages = DbPackages(db);
+    let workspace = file
+        .path(db)
+        .as_deref()
+        .and_then(|p| packages.workspace_module(p));
+    let map = Resolver::new(model, &packages)
+        .with_workspace(workspace)
+        .workspace_occurrences();
+    WorkspaceOccurrences(map)
+}
+
+/// The per-name occurrence buckets of one file (the [`file_workspace_occurrences`]
+/// projection). Wrapped so it carries an opaque whole-value [`salsa::Update`],
+/// keeping the [`OccurrenceRec`]/[`SmolStr`] leaves salsa-free.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkspaceOccurrences(pub BTreeMap<(Namespace, SmolStr), Vec<OccurrenceRec>>);
+
+// SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]): overwrite
+// the whole value when it differs by `Eq` and report the change.
+unsafe impl salsa::Update for WorkspaceOccurrences {
+    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
+        let old = unsafe { &mut *old_pointer };
+        if *old == new {
+            false
+        } else {
+            *old = new;
+            true
+        }
+    }
+}
+
+/// A [`PackageSource`] over the raw db, so a tracked query can build a
+/// [`Resolver`] whose [`LibraryIndex`] reads are recorded as salsa dependencies.
+struct DbPackages<'a>(&'a dyn IncrementalDb);
+
+impl PackageSource for DbPackages<'_> {
+    fn package(&self, name: &str) -> Option<Arc<PackageIndex>> {
+        LibraryIndex::try_get(self.0)?
+            .packages(self.0)
+            .0
+            .get(name)
+            .cloned()
+    }
+
+    fn package_root(&self, name: &str) -> Option<PathBuf> {
+        LibraryIndex::try_get(self.0)?
+            .roots(self.0)
+            .0
+            .get(name)
+            .cloned()
+    }
+
+    fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
+        let index = LibraryIndex::try_get(self.0)?;
+        let name = index.workspace(self.0).as_ref()?;
+        let root = index.roots(self.0).0.get(name)?;
+        let src = normalize_path(&root.join("src"));
+        if normalize_path(path).starts_with(&src) {
+            index.packages(self.0).0.get(name).cloned()
+        } else {
+            None
+        }
+    }
 }
 
 /// Lexically normalize `path` for use as a deduplication key: absolutize it
