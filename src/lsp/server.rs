@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use crate::environment::EnvContext;
 use crate::incremental::normalize_path;
-use crate::index::{harvest_library, harvest_workspace};
+use crate::index::{PackageIndex, harvest_library, harvest_workspace};
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, LibraryMessage, spawn_analysis_thread};
@@ -253,11 +253,22 @@ fn spawn_workspace_harvester(
             // and every save when the workspace is not a package, are ignored.
             let Some(dev) = dev else { return };
             let src = normalize_path(&dev.root.join("src"));
+            // The last index we sent, so an unchanged re-harvest is skipped. A
+            // save touching a `src/` file re-harvests, but body-only and
+            // formatting-only edits leave the public API identical; resending
+            // then would force a `set_package_index` db write that needlessly
+            // cancels in-flight diagnostics (the write races the very
+            // format-on-save that triggered the save). Only send on a real change.
+            let mut last: Option<Arc<PackageIndex>> = None;
             while let Ok(saved) = save_rx.recv() {
                 if !normalize_path(&saved).starts_with(&src) {
                     continue;
                 }
                 let index = Arc::new(harvest_workspace(&dev));
+                if last.as_deref() == Some(&*index) {
+                    continue;
+                }
+                last = Some(Arc::clone(&index));
                 if library_tx
                     .send(LibraryMessage::Package {
                         name: dev.name.clone(),

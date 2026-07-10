@@ -60,6 +60,30 @@ fn single_file_package() {
     assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
 }
 
+/// The language server's save-time re-harvest dedup compares successive
+/// `PackageIndex` values and only writes the db on a change. That relies on
+/// harvesting being deterministic: the same source must harvest identically
+/// (so a no-op save elides the write), while a changed API must differ (so a
+/// real edit still republishes).
+#[test]
+fn harvest_is_deterministic_for_dedup() {
+    let tmp = TempDir::new();
+    let entry = tmp.path().join("src/Pkg.jl");
+    write(&entry, "module Pkg\nexport f\nf(x) = x + 1\nend\n");
+
+    let first = harvest_package_named(tmp.path(), "Pkg");
+    let again = harvest_package_named(tmp.path(), "Pkg");
+    assert_eq!(first, again, "unchanged source must harvest identically");
+
+    // A new exported binding changes the public API: dedup must not suppress it.
+    write(
+        &entry,
+        "module Pkg\nexport f, g\nf(x) = x + 1\ng(x) = x - 1\nend\n",
+    );
+    let changed = harvest_package_named(tmp.path(), "Pkg");
+    assert_ne!(first, changed, "an API change must harvest differently");
+}
+
 #[test]
 fn harvest_entry_enters_non_src_layout() {
     // Julia's Base enters at `base/Base.jl`, not `src/<name>.jl`. `harvest_entry`
