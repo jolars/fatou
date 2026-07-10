@@ -20,4 +20,4 @@ pub use core::{
     FormatError, RangeFormatted, format, format_node, format_range, format_with_style,
     print_document,
 };
-pub use style::FormatStyle;
+pub use style::{FormatStyle, LineEnding};

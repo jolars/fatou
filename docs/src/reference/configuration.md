@@ -16,18 +16,28 @@ On the command line:
 
 ## `[format]`
 
-  | Key            | Type    | Default | Description                                         |
-  | -------------- | ------- | ------- | --------------------------------------------------- |
-  | `line-width`   | integer | `92`    | The width the formatter tries to keep lines within. |
-  | `indent-width` | integer | `4`     | Number of spaces per indentation level.             |
+  | Key            | Type    | Default  | Description                                         |
+  | -------------- | ------- | -------- | --------------------------------------------------- |
+  | `line-width`   | integer | `92`     | The width the formatter tries to keep lines within. |
+  | `indent-width` | integer | `4`      | Number of spaces per indentation level.             |
+  | `line-ending`  | string  | `"auto"` | The newline style emitted at the end of each line.  |
 
-Defaults follow common Julia conventions. Both keys can be overridden per run
-with the `--line-width`/`--indent-width` flags on `fatou format`.
+Defaults follow common Julia conventions. The width keys can be overridden per
+run with the `--line-width`/`--indent-width` flags on `fatou format`.
+
+`line-ending` accepts:
+
+- `auto` (default): mirror the source file's first line ending, defaulting to
+  `lf` when the file has none.
+- `lf`: always `\n` (Unix).
+- `crlf`: always `\r\n` (Windows).
+- `native`: `\n` on Unix, `\r\n` on Windows.
 
 ```toml
 [format]
 line-width = 92
 indent-width = 4
+line-ending = "auto"
 ```
 
 > **Deprecation**: the snake_case keys `line_width` and `indent_width` are still

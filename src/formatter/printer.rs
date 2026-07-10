@@ -245,6 +245,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 80,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print(&list_doc(), style), "[a, b, c]");
     }
@@ -254,6 +255,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 5,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print(&list_doc(), style), "[\n    a,\n    b,\n    c\n]");
     }
@@ -266,6 +268,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 9,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print_at(&list_doc(), style, 0), "[a, b, c]");
         assert_eq!(
@@ -295,6 +298,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 80,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print(&trailing_comma_doc(), style), "(a, b)");
     }
@@ -304,6 +308,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 4,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print(&trailing_comma_doc(), style), "(\n    a,\n    b,\n)");
     }
@@ -354,6 +359,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 80,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print(&hug_doc(), style), "f(aa, [x, y])");
     }
@@ -364,6 +370,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 8,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(print(&hug_doc(), style), "f(aa, [\n    x,\n    y\n])");
     }
@@ -375,6 +382,7 @@ mod tests {
         let style = FormatStyle {
             line_width: 6,
             indent_width: 4,
+            ..FormatStyle::default()
         };
         assert_eq!(
             print(&hug_doc(), style),

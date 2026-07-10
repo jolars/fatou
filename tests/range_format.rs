@@ -63,6 +63,7 @@ fn narrow() -> FormatStyle {
     FormatStyle {
         line_width: 16,
         indent_width: 4,
+        ..FormatStyle::default()
     }
 }
 

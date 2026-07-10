@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::formatter::LineEnding;
+
 pub const CONFIG_FILE_NAME: &str = "fatou.toml";
 
 const DEFAULT_LINE_WIDTH: u32 = 92;
@@ -22,6 +24,8 @@ pub struct Config {
 pub struct FormatConfig {
     pub line_width: u32,
     pub indent_width: u32,
+    /// The newline style the formatter emits. See [`LineEndingConfig`].
+    pub line_ending: LineEnding,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -37,6 +41,35 @@ impl Default for FormatConfig {
         Self {
             line_width: DEFAULT_LINE_WIDTH,
             indent_width: DEFAULT_INDENT_WIDTH,
+            line_ending: LineEnding::default(),
+        }
+    }
+}
+
+/// The `line-ending` key under `[format]`. A thin, serde-named mirror of
+/// [`LineEnding`] (the formatter's own type), kept separate so the TOML spelling
+/// (`kebab-case`) is a config concern, not baked into the formatter API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineEndingConfig {
+    /// Detect per file from the source; default `\n` when none is present.
+    #[default]
+    Auto,
+    /// Always `\n` (Unix).
+    Lf,
+    /// Always `\r\n` (Windows).
+    Crlf,
+    /// `\n` on Unix, `\r\n` on Windows.
+    Native,
+}
+
+impl From<LineEndingConfig> for LineEnding {
+    fn from(value: LineEndingConfig) -> Self {
+        match value {
+            LineEndingConfig::Auto => LineEnding::Auto,
+            LineEndingConfig::Lf => LineEnding::Lf,
+            LineEndingConfig::Crlf => LineEnding::Crlf,
+            LineEndingConfig::Native => LineEnding::Native,
         }
     }
 }
@@ -86,6 +119,8 @@ struct RawFormat {
     /// Deprecated snake_case alias for `indent-width`, still accepted with a warning.
     #[serde(rename = "indent_width")]
     indent_width_snake: Option<u32>,
+    #[serde(rename = "line-ending")]
+    line_ending: Option<LineEndingConfig>,
 }
 
 impl RawFormat {
@@ -107,6 +142,10 @@ impl RawFormat {
                 .indent_width
                 .or(self.indent_width_snake)
                 .unwrap_or(defaults.indent_width),
+            line_ending: self
+                .line_ending
+                .map(LineEnding::from)
+                .unwrap_or(defaults.line_ending),
         }
     }
 }
@@ -201,6 +240,35 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.format.line_width, 92);
         assert_eq!(config.format.indent_width, 4);
+        assert_eq!(config.format.line_ending, LineEnding::Auto);
+    }
+
+    #[test]
+    fn line_ending_defaults_to_auto() {
+        let raw: RawConfig = toml::from_str("[format]\n").unwrap();
+        let (config, _) = raw.into_config();
+        assert_eq!(config.format.line_ending, LineEnding::Auto);
+    }
+
+    #[test]
+    fn parses_line_ending_variants() {
+        for (key, expected) in [
+            ("auto", LineEnding::Auto),
+            ("lf", LineEnding::Lf),
+            ("crlf", LineEnding::Crlf),
+            ("native", LineEnding::Native),
+        ] {
+            let text = format!("[format]\nline-ending = \"{key}\"\n");
+            let raw: RawConfig = toml::from_str(&text).unwrap();
+            let (config, _) = raw.into_config();
+            assert_eq!(config.format.line_ending, expected, "for {key}");
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_line_ending() {
+        toml::from_str::<RawConfig>("[format]\nline-ending = \"mac\"\n")
+            .expect_err("unknown variant should be rejected");
     }
 
     #[test]
