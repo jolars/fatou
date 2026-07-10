@@ -111,13 +111,16 @@ completion would feel broken on day one.
   text plus position and returns the response type (arity's pattern), plus
   the existing in-memory connection test in `tests/lsp.rs`. Established by
   document symbols (`compute_document_symbols`); apply to each new feature.
-  *Gap:* cross-file references and rename are covered only at the db/`Analysis`
-  level (hand-built workspace via `cross_file::test_support`), not by a
-  full-server `tests/lsp.rs` test — the workspace harvest runs on a detached
-  thread, so an end-to-end test must drive a real temp package through
-  `initialize`-with-root and synchronize by polling until the reverse index is
-  populated. Add `serves_cross_file_references`/`serves_cross_file_rename` on
-  that pattern (reusable for any future harvest-dependent feature).
+  Cross-file references and rename—previously covered only at the db/`Analysis`
+  level (hand-built workspace via `cross_file::test_support`)—now also have a
+  full-server end-to-end test (`serves_cross_file_references_and_rename` in
+  `tests/lsp.rs`): it drives a real temp package through `initialize`-with-root,
+  isolates the environment so the detached harvest is fast and hermetic (empty
+  `PATH`/`JULIA_DEPOT_PATH`/`JULIA_BINDIR` make `locate_install` fall back to the
+  embedded minimal Base, ~1ms instead of parsing all of Base), and polls
+  `references` until the harvest seeds the reverse index—since the library swap
+  fires no client-visible readiness signal. The `poll`/`EnvGuard` scaffolding is
+  reusable for any future harvest-dependent feature.
 
 ### Phase 1: syntax-only features
 

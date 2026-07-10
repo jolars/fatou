@@ -23,7 +23,12 @@ use lsp_types::{
     TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
     WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 #[test]
 fn initialize_format_and_shutdown() {
@@ -2821,5 +2826,339 @@ fn serves_semantic_tokens() {
         }))
         .unwrap();
 
+    server_thread.join().unwrap();
+}
+
+// --- cross-file references and rename, end to end ---------------------------
+//
+// Unlike every other test in this file, this one opens a real workspace root so
+// the server spawns its library harvester, resolves a temp package under
+// development, harvests it, and seeds its member files into the reverse-
+// occurrence index — the live path cross-file references and rename escalate
+// onto. The harvest runs on a detached thread with no client-visible readiness
+// signal (the analysis thread swaps the library in without re-publishing
+// diagnostics), so we poll a real `references` request until the index is
+// populated (the result spans both member files). See the plan for why a poll,
+// not a signal, is the synchronization mechanism.
+
+/// Serialize env-touching setup: `JULIA_*` is process-global and read
+/// asynchronously by the detached harvester, so only one such test may run at a
+/// time.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// A unique temp directory removed on drop. Avoids a `tempfile` dev-dependency
+/// (mirrors the pattern in `tests/environment.rs`).
+struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    fn new(prefix: &str) -> Self {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("{prefix}-{}-{}", std::process::id(), n));
+        fs::create_dir_all(&path).unwrap();
+        Self { path }
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn write_file(path: &Path, contents: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, contents).unwrap();
+}
+
+/// Build a `file:` URI for an absolute temp path. The temp paths here contain
+/// only unreserved characters, so no percent-encoding is needed and the URI
+/// round-trips to the exact path the server tracks.
+fn file_uri(path: &Path) -> Uri {
+    Uri::from_str(&format!("file://{}", path.to_str().unwrap())).unwrap()
+}
+
+/// Set env vars for the duration of a test, restoring their prior values on
+/// drop. `set_var`/`remove_var` are `unsafe` in edition 2024; safe here because
+/// this runs under `ENV_LOCK` and before the harvester thread (the sole reader
+/// of these vars) is spawned, so there is no concurrent read.
+struct EnvGuard {
+    prev: Vec<(String, Option<String>)>,
+}
+
+impl EnvGuard {
+    fn set(vars: &[(&str, &str)]) -> Self {
+        let mut prev = Vec::new();
+        for (key, value) in vars {
+            prev.push(((*key).to_string(), std::env::var(key).ok()));
+            unsafe { std::env::set_var(key, value) };
+        }
+        Self { prev }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in &self.prev {
+            match value {
+                Some(v) => unsafe { std::env::set_var(key, v) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+}
+
+/// The two-message initialize handshake with a workspace `root_uri` set (the
+/// existing tests inline `InitializeParams::default()`, which opens no folder).
+fn initialize_with_root(client: &Connection, root_uri: &Uri) {
+    #[allow(deprecated)]
+    let params = InitializeParams {
+        root_uri: Some(root_uri.clone()),
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    let init = client.receiver.recv().unwrap();
+    assert!(
+        matches!(init, Message::Response(_)),
+        "expected an InitializeResult, got {init:?}"
+    );
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+}
+
+/// Receive messages until the response with `id` arrives, skipping unrelated
+/// notifications and stale responses.
+fn recv_response(client: &Connection, id: RequestId) -> lsp_server::Response {
+    loop {
+        match client.receiver.recv().unwrap() {
+            Message::Response(resp) if resp.id == id => return resp,
+            Message::Response(_) | Message::Notification(_) => continue,
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+}
+
+/// Resend `textDocument/references` at `greet`'s definition (position 0,0 of
+/// `a.jl`) until the harvest has landed and the reverse index is seeded — i.e.
+/// the response spans both member files — or the deadline elapses. Before the
+/// harvest, the intra-file fallback returns only the two `a.jl` sites; after it,
+/// three sites across `a.jl` and `b.jl`.
+fn poll_cross_file_references(client: &Connection, uri: &Uri, deadline: Duration) -> Vec<Location> {
+    let start = Instant::now();
+    let mut id = 100;
+    loop {
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/references".to_string(),
+                params: serde_json::to_value(ReferenceParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position: Position::new(0, 0),
+                    },
+                    context: ReferenceContext {
+                        include_declaration: true,
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        let resp = recv_response(client, RequestId::from(id));
+        let locations: Vec<Location> = serde_json::from_value(resp.result.unwrap()).unwrap();
+        let files: std::collections::HashSet<&str> =
+            locations.iter().map(|l| l.uri.as_str()).collect();
+        if files.len() >= 2 {
+            return locations;
+        }
+        if start.elapsed() >= deadline {
+            panic!(
+                "cross-file references never populated within {deadline:?}: got \
+                 {} location(s) across {} file(s) — the harvest or member seeding \
+                 likely failed",
+                locations.len(),
+                files.len()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(25));
+        id += 1;
+    }
+}
+
+/// A single test covers both features against one initialized, harvested server:
+/// the `JULIA_*` env is process-global and read asynchronously by the detached
+/// harvester, so two parallel env-setting tests would race. One env setup, one
+/// harvest, both assertions once the index is warm.
+#[test]
+fn serves_cross_file_references_and_rename() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    // A real package under development: a named `Project.toml` with a matching
+    // `src/MyPkg.jl`, `greet` defined in `a.jl` and called in `b.jl` (the same
+    // shape as the db-level `cross_file` tests, driven end-to-end here).
+    let pkg = TempDir::new("fatou-lsp-xfile");
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "greet(a) = a\ngreet(1)\n");
+    write_file(&pkg.path.join("src/b.jl"), "callit() = greet(2)\n");
+
+    // Isolate the environment so the harvest is fast and hermetic:
+    // - `JULIA_PROJECT` points resolution at this package (it is consulted
+    //   before the workspace-root walk-up, so a stray dev-shell value would
+    //   otherwise hijack it);
+    // - an empty `JULIA_DEPOT_PATH` and empty `JULIA_BINDIR` skip install
+    //   discovery via juliaup and the bindir override;
+    // - an empty `PATH` stops the last install-discovery probe (`julia` on
+    //   `PATH`), so `locate_install` returns `None` and the harvester uses the
+    //   embedded minimal-Base fallback instead of parsing all of Base (~1ms vs
+    //   tens of seconds). The cross-file symbols are workspace-local, so the
+    //   real Base index is not needed here.
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_root(&client, &root_uri);
+
+    // Open `a.jl` (the cursor file must be open; its member siblings are served
+    // from disk-seeded text).
+    let a_uri = file_uri(&pkg.path.join("src/a.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: a_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a) = a\ngreet(1)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Notification(n) => assert_eq!(n.method, "textDocument/publishDiagnostics"),
+        other => panic!("expected publishDiagnostics, got {other:?}"),
+    }
+
+    // References at `greet`'s definition, once the harvest lands: def + call in
+    // `a.jl`, call in `b.jl`.
+    let locations = poll_cross_file_references(&client, &a_uri, Duration::from_secs(10));
+    assert_eq!(locations.len(), 3, "def + call in a.jl, call in b.jl");
+    let a_count = locations
+        .iter()
+        .filter(|l| l.uri.as_str().ends_with("a.jl"))
+        .count();
+    let b_count = locations
+        .iter()
+        .filter(|l| l.uri.as_str().ends_with("b.jl"))
+        .count();
+    assert_eq!((a_count, b_count), (2, 1), "two sites in a.jl, one in b.jl");
+
+    // prepareRename reports the `greet` identifier's range.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(200),
+            method: "textDocument/prepareRename".to_string(),
+            params: serde_json::to_value(TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: a_uri.clone() },
+                position: Position::new(0, 0),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(200));
+    let range: Range = serde_json::from_value(resp.result.unwrap()).unwrap();
+    assert_eq!(range.start, Position::new(0, 0));
+    assert_eq!(range.end, Position::new(0, 5));
+
+    // Rename `greet` -> `hello` across both member files.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(201),
+            method: "textDocument/rename".to_string(),
+            params: serde_json::to_value(RenameParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: a_uri.clone() },
+                    position: Position::new(0, 0),
+                },
+                new_name: "hello".to_string(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(201));
+    let edit: WorkspaceEdit = serde_json::from_value(resp.result.unwrap()).unwrap();
+    let changes = edit.changes.expect("multi-file changes");
+    for edits in changes.values() {
+        for e in edits {
+            assert_eq!(e.new_text, "hello");
+        }
+    }
+    let a_edits = changes
+        .iter()
+        .find(|(u, _)| u.as_str().ends_with("a.jl"))
+        .map(|(_, e)| e.len());
+    let b_edits = changes
+        .iter()
+        .find(|(u, _)| u.as_str().ends_with("b.jl"))
+        .map(|(_, e)| e.len());
+    assert_eq!(a_edits, Some(2), "a.jl: def + call rewritten");
+    assert_eq!(b_edits, Some(1), "b.jl: call rewritten");
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(202),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(202));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
     server_thread.join().unwrap();
 }
