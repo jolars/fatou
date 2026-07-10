@@ -17,11 +17,11 @@ use lsp_types::{
     FoldingRangeKind, FoldingRangeParams, FormattingOptions, GeneralClientCapabilities,
     GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
     InitializeParams, Location, PartialResultParams, Position, PositionEncodingKind,
-    PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, SelectionRange,
-    SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
-    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams,
+    PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RenameParams,
+    SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp,
+    SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceEdit,
 };
 use std::str::FromStr;
 
@@ -782,6 +782,144 @@ fn serves_document_highlight() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(3),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// End-to-end rename: the provider (with prepare support) is advertised,
+/// `prepareRename` reports the identifier range, and `rename` returns a
+/// workspace edit touching every occurrence of the binding.
+// `WorkspaceEdit::changes` is keyed by `Uri`, which clippy flags as a mutable
+// key type (a false positive: the interior mutability is never used for hashing).
+#[allow(clippy::mutable_key_type)]
+#[test]
+fn serves_rename() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let init_response = client.receiver.recv().unwrap();
+    match init_response {
+        Message::Response(resp) => {
+            let caps = resp.result.unwrap();
+            assert_eq!(
+                caps["capabilities"]["renameProvider"]["prepareProvider"],
+                serde_json::json!(true),
+                "expected the rename provider to advertise prepare support"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let uri = Uri::from_str("file:///work/s.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f()\n    x = 1\n    x + x\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag_note = client.receiver.recv().unwrap();
+    assert!(matches!(diag_note, Message::Notification(_)));
+
+    // prepareRename on the use `x` at (2, 4) reports the identifier's range.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/prepareRename".to_string(),
+            params: serde_json::to_value(TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(2, 4),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let response = client.receiver.recv().unwrap();
+    match response {
+        Message::Response(resp) => {
+            let range: Range = serde_json::from_value(resp.result.unwrap()).unwrap();
+            assert_eq!(range.start, Position::new(2, 4));
+            assert_eq!(range.end, Position::new(2, 5));
+        }
+        other => panic!("expected a prepareRename response, got {other:?}"),
+    }
+
+    // rename that `x` to `total`.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/rename".to_string(),
+            params: serde_json::to_value(RenameParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(2, 4),
+                },
+                new_name: "total".to_string(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let response = client.receiver.recv().unwrap();
+    match response {
+        Message::Response(resp) => {
+            let edit: WorkspaceEdit = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let changes = edit.changes.expect("intra-file changes");
+            let edits = changes.get(&uri).expect("edits for the document");
+            let sites: Vec<_> = edits
+                .iter()
+                .map(|e| {
+                    assert_eq!(e.new_text, "total");
+                    (e.range.start.line, e.range.start.character)
+                })
+                .collect();
+            // `x = 1` on line 1, then the two uses on line 2.
+            assert_eq!(sites, vec![(1, 4), (2, 4), (2, 8)]);
+        }
+        other => panic!("expected a rename response, got {other:?}"),
+    }
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

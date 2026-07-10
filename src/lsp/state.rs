@@ -12,15 +12,17 @@ use lsp_types::notification::{
 };
 use lsp_types::request::{
     Completion, DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting,
-    GotoDefinition, HoverRequest, RangeFormatting, References, Request as RequestTrait,
-    ResolveCompletionItem, SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
+    GotoDefinition, HoverRequest, PrepareRenameRequest, RangeFormatting, References, Rename,
+    Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
+    SemanticTokensFullRequest, SignatureHelpRequest,
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
     DocumentHighlightParams, DocumentRangeFormattingParams, DocumentSymbolParams,
     FoldingRangeParams, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams,
-    ReferenceParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams, Uri,
+    ReferenceParams, RenameParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams,
+    TextDocumentPositionParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -91,6 +93,8 @@ impl GlobalState {
             GotoDefinition::METHOD => self.on_definition(req),
             References::METHOD => self.on_references(req),
             DocumentHighlightRequest::METHOD => self.on_document_highlight(req),
+            PrepareRenameRequest::METHOD => self.on_prepare_rename(req),
+            Rename::METHOD => self.on_rename(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -349,6 +353,50 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             position: params.text_document_position_params.position,
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_prepare_rename(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<TextDocumentPositionParams>(PrepareRenameRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid prepareRename params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::PrepareRename {
+            id,
+            path: path_for(&uri),
+            position: params.position,
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_rename(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<RenameParams>(Rename::METHOD) else {
+            self.respond_err(id, "invalid rename params");
+            return;
+        };
+        let uri = params.text_document_position.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::Rename {
+            id,
+            path: path_for(&uri),
+            position: params.text_document_position.position,
+            new_name: params.new_name,
+            uri,
             text,
             sender: self.sender.clone(),
         });

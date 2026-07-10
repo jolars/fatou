@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crossbeam_channel::Sender;
-use lsp_server::{Message, RequestId, Response};
+use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
     CompletionItem, CompletionResponse, DocumentSymbolResponse, GotoDefinitionResponse, Position,
@@ -20,6 +20,7 @@ use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
+use super::rename::{prepare_rename_via_db, rename_via_db};
 use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
 use super::signature_help::signature_help_via_db;
@@ -120,6 +121,22 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: Sender<Message>,
     },
+    PrepareRename {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
+    Rename {
+        id: RequestId,
+        uri: Uri,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        new_name: String,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -140,6 +157,8 @@ impl ReadJob {
             ReadJob::Definition { id, sender, .. } => (id, sender),
             ReadJob::References { id, sender, .. } => (id, sender),
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
+            ReadJob::PrepareRename { id, sender, .. } => (id, sender),
+            ReadJob::Rename { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -286,6 +305,32 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             let highlights =
                 document_highlights_via_db(&snapshot, &path, &text, position, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, highlights)));
+        }
+        ReadJob::PrepareRename {
+            id,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let result = prepare_rename_via_db(&snapshot, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::Rename {
+            id,
+            uri,
+            path,
+            text,
+            position,
+            new_name,
+            sender,
+        } => {
+            let response =
+                match rename_via_db(&snapshot, &uri, &path, &text, position, &new_name, encoding) {
+                    Ok(edit) => Response::new_ok(id, edit),
+                    Err(message) => Response::new_err(id, ErrorCode::InvalidParams as i32, message),
+                };
+            let _ = sender.send(Message::Response(response));
         }
     }
 }

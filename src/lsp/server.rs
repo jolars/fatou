@@ -8,7 +8,7 @@ use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
     ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability,
-    InitializeParams, OneOf, PositionEncodingKind, SelectionRangeProviderCapability,
+    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
     SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
@@ -104,6 +104,10 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
         signature_help_provider: Some(SignatureHelpOptions {
             // `(` opens signature help, `,` (also a retrigger) advances the
             // active parameter.

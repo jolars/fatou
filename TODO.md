@@ -322,7 +322,22 @@ The payoff phase, in roughly arity's shipping order.
   `document_highlights_via_db` paths off the cached parse; behavior locked by
   inline units plus `serves_references` and `serves_document_highlight` in
   `tests/lsp.rs`.
-- [ ] Rename (intra-file first, with `prepareRename` validation).
+- [x] Rename (intra-file, with `prepareRename` validation): pure
+  `compute_prepare_rename` and `compute_rename` (`src/lsp/rename.rs`) classify
+  the symbol at the cursor as references does (an occurrence resolving to a
+  binding, or a name on its own definition site) and rewrite every
+  `SemanticModel::occurrences` range to the new name in a single-document
+  `WorkspaceEdit`. Because the occurrences come from the scope-resolved model,
+  a shadowing same-name local is left untouched and a nested-function capture
+  is correctly included (both locked by tests). Only intra-file bindings
+  rename; a free or qualified read (library symbol) is reported non-renameable
+  by `prepareRename` (which returns the identifier's range) and yields no edit,
+  so cross-file rename stays a Phase 5 item. Macros rename by their bare name
+  (occurrence ranges cover the identifier after the `@`, preserving the sigil);
+  `new_name` is validated as a legal Julia identifier, an invalid one returning
+  an LSP error rather than a silent no-op. Warm `prepare_rename_via_db`/
+  `rename_via_db` paths off the cached parse; behavior locked by inline units
+  plus `serves_rename` in `tests/lsp.rs`.
 
 ### Phase 5: project and workspace level
 
