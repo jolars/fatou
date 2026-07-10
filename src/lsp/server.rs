@@ -102,6 +102,8 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
+        references_provider: Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
         signature_help_provider: Some(SignatureHelpOptions {
             // `(` opens signature help, `,` (also a retrigger) advances the
             // active parameter.

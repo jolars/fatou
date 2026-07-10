@@ -11,16 +11,16 @@ use lsp_types::notification::{
     Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
-    Completion, DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition,
-    HoverRequest, RangeFormatting, Request as RequestTrait, ResolveCompletionItem,
-    SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
+    Completion, DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting,
+    GotoDefinition, HoverRequest, RangeFormatting, References, Request as RequestTrait,
+    ResolveCompletionItem, SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    DocumentRangeFormattingParams, DocumentSymbolParams, FoldingRangeParams, GotoDefinitionParams,
-    HoverParams, PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams,
-    SignatureHelpParams, Uri,
+    DocumentHighlightParams, DocumentRangeFormattingParams, DocumentSymbolParams,
+    FoldingRangeParams, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams,
+    ReferenceParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -89,6 +89,8 @@ impl GlobalState {
             HoverRequest::METHOD => self.on_hover(req),
             SignatureHelpRequest::METHOD => self.on_signature_help(req),
             GotoDefinition::METHOD => self.on_definition(req),
+            References::METHOD => self.on_references(req),
+            DocumentHighlightRequest::METHOD => self.on_document_highlight(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -303,6 +305,50 @@ impl GlobalState {
             path: path_for(&uri),
             position: params.text_document_position_params.position,
             uri,
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_references(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<ReferenceParams>(References::METHOD) else {
+            self.respond_err(id, "invalid references params");
+            return;
+        };
+        let uri = params.text_document_position.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::References {
+            id,
+            path: path_for(&uri),
+            position: params.text_document_position.position,
+            include_declaration: params.context.include_declaration,
+            uri,
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_document_highlight(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<DocumentHighlightParams>(DocumentHighlightRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid documentHighlight params");
+            return;
+        };
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::DocumentHighlight {
+            id,
+            path: path_for(&uri),
+            position: params.text_document_position_params.position,
             text,
             sender: self.sender.clone(),
         });

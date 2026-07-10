@@ -309,7 +309,19 @@ The payoff phase, in roughly arity's shipping order.
   Multiple-dispatch "go to all methods" stays deferred to Phase 6. Locked by
   `definition` units (intra-file plus an on-disk depot jump) and
   `serves_goto_definition` in `tests/lsp.rs`.
-- [ ] References and document highlight (read/write sites of a binding).
+- [x] References and document highlight (read/write sites of a binding): pure
+  `compute_references` and `compute_document_highlights`
+  (`src/lsp/references.rs`) classify the symbol at the cursor as go-to-definition
+  does (an occurrence resolving to a binding, or a name on its own definition
+  site) and gather `SemanticModel::occurrences`—the definition plus every
+  resolved `IdentRef` with its `Access`. References returns intra-file
+  `Location`s honoring `includeDeclaration`; document highlight tags each site
+  read/write from the `Access` (augmented `+=` reports as a write). Free and
+  qualified reads (library symbols) have no intra-file binding, so both yield
+  nothing—cross-file references stay a Phase 5 item. Warm `references_via_db`/
+  `document_highlights_via_db` paths off the cached parse; behavior locked by
+  inline units plus `serves_references` and `serves_document_highlight` in
+  `tests/lsp.rs`.
 - [ ] Rename (intra-file first, with `prepareRename` validation).
 
 ### Phase 5: project and workspace level

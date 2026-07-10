@@ -19,6 +19,7 @@ use super::definition::definition_via_db;
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
+use super::references::{document_highlights_via_db, references_via_db};
 use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
 use super::signature_help::signature_help_via_db;
@@ -103,6 +104,22 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: Sender<Message>,
     },
+    References {
+        id: RequestId,
+        uri: Uri,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        include_declaration: bool,
+        sender: Sender<Message>,
+    },
+    DocumentHighlight {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -121,6 +138,8 @@ impl ReadJob {
             ReadJob::Hover { id, sender, .. } => (id, sender),
             ReadJob::SignatureHelp { id, sender, .. } => (id, sender),
             ReadJob::Definition { id, sender, .. } => (id, sender),
+            ReadJob::References { id, sender, .. } => (id, sender),
+            ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -236,6 +255,37 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             let location = definition_via_db(&snapshot, &uri, &path, &text, position, encoding);
             let result = location.map(GotoDefinitionResponse::Scalar);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::References {
+            id,
+            uri,
+            path,
+            text,
+            position,
+            include_declaration,
+            sender,
+        } => {
+            let locations = references_via_db(
+                &snapshot,
+                &uri,
+                &path,
+                &text,
+                position,
+                encoding,
+                include_declaration,
+            );
+            let _ = sender.send(Message::Response(Response::new_ok(id, locations)));
+        }
+        ReadJob::DocumentHighlight {
+            id,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let highlights =
+                document_highlights_via_db(&snapshot, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, highlights)));
         }
     }
 }
