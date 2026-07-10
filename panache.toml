@@ -1,3 +1,11 @@
 flavor = "gfm"
 
-extend-exclude = [".claude/**/*", "TODO.md", "AGENTS.md"]
+extend-exclude = [
+  ".claude/**/*",
+  "TODO.md",
+  "AGENTS.md",
+  "CHANGELOG.md",
+  "editors/code/CHANGELOG.md",
+  "docs/src/reference/cli.md",
+  "docs/src/reference/rules/*.md",
+]
