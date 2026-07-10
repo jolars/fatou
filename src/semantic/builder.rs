@@ -397,6 +397,7 @@ impl Builder {
             parent,
             range,
             bindings: Vec::new(),
+            module_name: None,
         });
         self.global_decls.push(Vec::new());
         id
@@ -1215,12 +1216,14 @@ impl Builder {
     /// `module M ... end`: the name binds in the enclosing scope; the body
     /// is a fresh global scope that does *not* see enclosing names.
     fn handle_module(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let mut module_name = None;
         if let Some(name) = node
             .children()
             .find(|c| c.kind() == SyntaxKind::SIGNATURE)
             .and_then(|sig| sig.children().find(|c| c.kind() == SyntaxKind::NAME))
             && let Some(token) = name_ident(&name)
         {
+            module_name = Some(SmolStr::new(token.text()));
             self.write_name(&token, scope, Access::Write);
         }
         let body = node.children().find(|c| c.kind() == SyntaxKind::BLOCK);
@@ -1228,6 +1231,7 @@ impl Builder {
             .as_ref()
             .map_or_else(|| node.text_range(), |b| b.text_range());
         let module_scope = self.push_scope(ScopeKind::Module, Some(scope), range);
+        self.model.scopes[module_scope.0 as usize].module_name = module_name;
         if let Some(body) = body {
             self.declare_in(&body, module_scope);
             self.walk_children(&body, module_scope);

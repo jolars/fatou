@@ -370,9 +370,9 @@ The payoff phase, in roughly arity's shipping order.
   hover, and completion for the package's own top-level symbols across files.
   The workspace package re-harvests on `didSave` via a long-lived harvester
   thread (`spawn_workspace_harvester`, `src/lsp/server.rs`) that swaps it with
-  `set_package_index`. *Deferred:* the transitive include-edge graph proper,
-  nested-`module` file membership (a member file resolves against the root
-  module for now), and multi-folder workspaces.
+  `set_package_index`. *Deferred:* the transitive include-edge graph proper and
+  multi-folder workspaces. (Nested-`module` file membership has since landed;
+  see below.)
 - [x] Cross-file go-to-definition, references, and rename for top-level
   symbols. Within-package go-to-definition, hover, and completion landed with
   the project graph; cross-file **references and rename** now land on a
@@ -394,15 +394,26 @@ The payoff phase, in roughly arity's shipping order.
   wholesale, dropping stale members. *Deferred:* qualified reads (`Pkg.foo`) —
   the model records only the whole chain's range, not the `foo` sub-span — and
   navigation into `using`'d workspace submodules.
-- [ ] Nested-`module` file membership. A member file still resolves against the
-  package's *root* module (`workspace_module`/`Resolver::with_workspace`), so a
-  top-level symbol declared inside a nested `module` is classified against the
-  wrong module: cross-file go-to-definition, references, and rename (and the
-  workspace resolution tier generally) can miss or misattribute it. Track which
-  module each member file's top level belongs to (from the harvester's module
-  walk) and resolve free reads and `workspace_symbol_at`/`workspace_occurrences`
-  against that module rather than the root. Unblocks correct cross-file behavior
-  for multi-module packages.
+- [x] Nested-`module` file membership. A member file now resolves against the
+  module its top level actually belongs to, not always the package root, along
+  two axes. (1) *Host module:* the harvester records each member file's host
+  module path (`PackageIndex::member_modules`, the nested `module` its `include`
+  lexically landed in); `workspace_member` (`src/incremental.rs`) returns it
+  alongside the package, and `Resolver` (`src/resolve.rs`) resolves the file's
+  globals and free reads against `module_at(&root, host)`. (2) *File-internal
+  nesting:* `ScopeKind::Module` scopes carry their name
+  (`SemanticModel::enclosing_module_path`, `src/semantic.rs`), so a symbol
+  declared inside an inline `module Sub` is attributed to `host ++ [Sub]`. The
+  reverse-occurrence index is keyed by `(module path, namespace, name)`, so
+  same-named symbols in different modules never conflate across cross-file
+  references and rename. Locked by `member_modules` harvest units
+  (`tests/harvest.rs`), collision/attribution units through the real salsa index
+  (`tests/library_index.rs`), and an end-to-end nested-module cross-file
+  references test (`serves_cross_file_references_in_a_nested_module`,
+  `tests/lsp.rs`). *Deferred:* a file included at two different module sites is
+  attributed to its first (the harvester's `visited` guard walks it once); a
+  single file that both contributes host-level globals *and* opens an inline
+  `module` of the same name as a sibling is not distinguished beyond the path.
 - [x] Workspace symbols (fuzzy subsequence match over top-level definitions):
   pure `compute_workspace_symbols` (`src/lsp/workspace_symbols.rs`) walks the
   harvested `PackageIndex` of the package under development (recursing

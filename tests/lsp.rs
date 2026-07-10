@@ -3162,3 +3162,98 @@ fn serves_cross_file_references_and_rename() {
         .unwrap();
     server_thread.join().unwrap();
 }
+
+/// Cross-file references across a *nested* `module`, driven end-to-end. `greet`
+/// lives in `MyPkg.Sub`, split across two included files; the whole harvest →
+/// host-module → reverse-index pipeline must attribute both sites to `Sub` and
+/// stitch them, exactly as it does for a root-module symbol. Guards the
+/// nested-`module` file-membership behavior at the server level.
+#[test]
+fn serves_cross_file_references_in_a_nested_module() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-nested");
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000002\"\n",
+    );
+    // The `Sub` module wrapper is in the parent; `a.jl`/`b.jl` splice into it, so
+    // both files' host module is `Sub`.
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\nmodule Sub\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "greet(a) = a\ngreet(1)\n");
+    write_file(&pkg.path.join("src/b.jl"), "callit() = greet(2)\n");
+
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_root(&client, &root_uri);
+
+    let a_uri = file_uri(&pkg.path.join("src/a.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: a_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a) = a\ngreet(1)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Notification(n) => assert_eq!(n.method, "textDocument/publishDiagnostics"),
+        other => panic!("expected publishDiagnostics, got {other:?}"),
+    }
+
+    let locations = poll_cross_file_references(&client, &a_uri, Duration::from_secs(10));
+    assert_eq!(
+        locations.len(),
+        3,
+        "def + call in a.jl, call in b.jl — all attributed to Sub"
+    );
+    let a_count = locations
+        .iter()
+        .filter(|l| l.uri.as_str().ends_with("a.jl"))
+        .count();
+    let b_count = locations
+        .iter()
+        .filter(|l| l.uri.as_str().ends_with("b.jl"))
+        .count();
+    assert_eq!((a_count, b_count), (2, 1), "two sites in a.jl, one in b.jl");
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(210),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(210));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}

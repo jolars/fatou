@@ -386,6 +386,92 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
 }
 
 #[test]
+fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
+    // Shape A: the `module Sub` wrapper sits *inside* the included file, so the
+    // file's host is the root but `Sub`'s symbols must be attributed to `Sub`
+    // via the file-internal `module` nesting. Both a root `f` and a `Sub.f`
+    // exist; each file hosts at the root, and the two `f`s must stay apart.
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    use fatou::index::model::{DefLocation, Span};
+    use fatou::index::{FunctionGroup, ModuleIndex};
+    use fatou::resolve::Namespace;
+    use smol_str::SmolStr;
+
+    let func = |name: &str| FunctionGroup {
+        name: name.to_string(),
+        owner: None,
+        methods: Vec::new(),
+        doc: None,
+    };
+    let mut pkg = empty_package("MyPkg");
+    pkg.root.functions.push(func("f"));
+    pkg.root.submodules.push(ModuleIndex {
+        name: "Sub".to_string(),
+        bare: false,
+        loc: DefLocation {
+            file: "src/sub.jl".into(),
+            range: Span { start: 0, end: 0 },
+        },
+        exports: Vec::new(),
+        functions: vec![func("f")],
+        types: Vec::new(),
+        consts: Vec::new(),
+        macros: Vec::new(),
+        submodules: Vec::new(),
+    });
+    // Both files' top level hosts at the *root* module; `sub.jl` opens `Sub`
+    // inline, so its `f` belongs to `Sub` through the model's scope nesting.
+    pkg.member_modules
+        .insert(PathBuf::from("src/root.jl"), Vec::new());
+    pkg.member_modules
+        .insert(PathBuf::from("src/sub.jl"), Vec::new());
+
+    let mut db = IncrementalDatabase::new();
+    let root = db.upsert_file(
+        Path::new("/work/MyPkg/src/root.jl"),
+        "f() = 2\nh() = f()\n".to_string(),
+    );
+    let sub = db.upsert_file(
+        Path::new("/work/MyPkg/src/sub.jl"),
+        "module Sub\nf() = 1\ng() = f()\nend\n".to_string(),
+    );
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(pkg));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_workspace_files(vec![root, sub]);
+
+    let snap = db.snapshot();
+    let index = snap.workspace_reference_index();
+
+    // Root `f`: def + call in root.jl only.
+    let root_recs = index
+        .0
+        .get(&(Vec::new(), Namespace::Value, SmolStr::new("f")))
+        .expect("root `f` bucket");
+    assert_eq!(root_recs.len(), 2);
+    assert!(root_recs.iter().all(|(file, _)| *file == root));
+
+    // `Sub.f`: def + call in sub.jl — attributed to `Sub` through the inline
+    // `module`, not missed (as it would be if resolved against the root) nor
+    // merged with the root `f`.
+    let sub_recs = index
+        .0
+        .get(&(
+            vec![SmolStr::new("Sub")],
+            Namespace::Value,
+            SmolStr::new("f"),
+        ))
+        .expect("Sub `f` bucket");
+    assert_eq!(sub_recs.len(), 2);
+    assert!(sub_recs.iter().all(|(file, _)| *file == sub));
+}
+
+#[test]
 fn resetting_workspace_files_drops_removed_members() {
     // Reconciliation on re-harvest: a file no longer in the member set stops
     // contributing to the reverse index (occurrences from a dropped file vanish).

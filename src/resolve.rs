@@ -205,6 +205,16 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         self
     }
 
+    /// The full module path (relative to the package root) of a position in
+    /// `scope`: the file's host module followed by the file-internal nested
+    /// `module` path. This is where a top-level symbol declared, or a free read
+    /// issued, at `scope` resolves against in the package's module tree.
+    fn full_module_path(&self, workspace: &WorkspaceCtx, scope: ScopeId) -> ModulePath {
+        let mut path = workspace.host.clone();
+        path.extend(self.model.enclosing_module_path(scope));
+        path
+    }
+
     /// Resolve `name` (bare, without `@` even in [`Namespace::Macro`]) as read
     /// at `offset`, walking the four tiers and returning the first hit.
     pub fn resolve(&self, name: &str, offset: TextSize, namespace: Namespace) -> Resolution {
@@ -215,17 +225,19 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
             return Resolution::Binding(binding);
         }
         // Tier 2 (cross-file): a same-module sibling top-level symbol of the
-        // file's host module in the workspace package. Ranks above `using`/Base
-        // — an `include`-spliced module global masks them, just as a same-file
-        // global would.
-        if let Some(workspace) = &self.workspace
-            && let Some(module) = module_at(&workspace.pkg.root, &workspace.host)
-            && module_defines(module, &wanted, namespace)
-        {
-            return Resolution::Workspace {
-                module: workspace.host.clone(),
-                name: wanted,
-            };
+        // module enclosing this read (the file's host module plus any file-internal
+        // nested `module`). Ranks above `using`/Base — an `include`-spliced module
+        // global masks them, just as a same-file global would.
+        if let Some(workspace) = &self.workspace {
+            let path = self.full_module_path(workspace, self.model.scope_at(offset));
+            if let Some(module) = module_at(&workspace.pkg.root, &path)
+                && module_defines(module, &wanted, namespace)
+            {
+                return Resolution::Workspace {
+                    module: path,
+                    name: wanted,
+                };
+            }
         }
         // Tier 3: a whole-module `using`'s exports, in source order.
         if let Some((module, name)) = self.using_export(&wanted, offset) {
@@ -268,9 +280,13 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         }
 
         // Tier 2 (cross-file): same-module sibling top-level symbols of the
-        // file's host module, masked by anything bound in this file already.
+        // module enclosing this position, masked by anything bound in this file
+        // already.
         if let Some(workspace) = &self.workspace
-            && let Some(module) = module_at(&workspace.pkg.root, &workspace.host)
+            && let Some(module) = module_at(
+                &workspace.pkg.root,
+                &self.full_module_path(workspace, self.model.scope_at(offset)),
+            )
         {
             for name in defined_names(module, namespace) {
                 if seen.insert(name.clone()) {
@@ -342,28 +358,29 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         let Some(workspace) = &self.workspace else {
             return out;
         };
-        let Some(host_module) = module_at(&workspace.pkg.root, &workspace.host) else {
-            return out;
-        };
 
-        // Defining files: occurrences of each module-global binding whose name
-        // the file's host module actually defines at top level. The
-        // `module_defines` gate matches exactly what the workspace tier of
-        // `resolve` fires on, so a plain file-scope global (`x = 1`) or an import
-        // the harvester skips is left out, keeping this in lockstep with
-        // go-to-definition.
+        // Defining files: occurrences of each module-global binding whose name the
+        // module enclosing it (host module plus file-internal nested `module`s)
+        // actually defines at top level. The `module_defines` gate matches exactly
+        // what the workspace tier of `resolve` fires on, so a plain file-scope
+        // global (`x = 1`) or an import the harvester skips is left out, keeping
+        // this in lockstep with go-to-definition.
         for (i, binding) in self.model.bindings().iter().enumerate() {
             if !self.model.scope(binding.scope).kind.is_global() {
                 continue;
             }
+            let path = self.full_module_path(workspace, binding.scope);
+            let Some(module) = module_at(&workspace.pkg.root, &path) else {
+                continue;
+            };
             for ns in [Namespace::Value, Namespace::Macro] {
                 let Some(name) = namespaced_binding_name(binding, ns) else {
                     continue;
                 };
-                if !module_defines(host_module, &name, ns) {
+                if !module_defines(module, &name, ns) {
                     continue;
                 }
-                let recs = out.entry((workspace.host.clone(), ns, name)).or_default();
+                let recs = out.entry((path.clone(), ns, name)).or_default();
                 for occ in self.model.occurrences(BindingId(i as u32)) {
                     recs.push(OccurrenceRec {
                         range: occ.range,
@@ -435,11 +452,11 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         None
     }
 
-    /// `(module path, namespace, name)` when `bid` is a module-global the file's
-    /// host module defines at top level — i.e. a package symbol other files can
-    /// reference, not a plain local or a file-scope global the harvester skips.
-    /// The gate matches `resolve`'s workspace tier, keeping references/rename in
-    /// lockstep.
+    /// `(module path, namespace, name)` when `bid` is a module-global the module
+    /// enclosing it (host module plus file-internal nested `module`s) defines at
+    /// top level — i.e. a package symbol other files can reference, not a plain
+    /// local or a file-scope global the harvester skips. The gate matches
+    /// `resolve`'s workspace tier, keeping references/rename in lockstep.
     fn binding_workspace_symbol(
         &self,
         bid: BindingId,
@@ -449,12 +466,13 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         if !self.model.scope(binding.scope).kind.is_global() {
             return None;
         }
-        let host_module = module_at(&workspace.pkg.root, &workspace.host)?;
+        let path = self.full_module_path(workspace, binding.scope);
+        let module = module_at(&workspace.pkg.root, &path)?;
         for ns in [Namespace::Value, Namespace::Macro] {
             if let Some(name) = namespaced_binding_name(binding, ns)
-                && module_defines(host_module, &name, ns)
+                && module_defines(module, &name, ns)
             {
-                return Some((workspace.host.clone(), ns, name));
+                return Some((path.clone(), ns, name));
             }
         }
         None

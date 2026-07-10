@@ -1,6 +1,7 @@
 //! Scopes: the tree of binding regions built from one CST walk.
 
 use rowan::TextRange;
+use smol_str::SmolStr;
 
 use super::binding::BindingId;
 
@@ -73,4 +74,8 @@ pub struct Scope {
     pub range: TextRange,
     /// Bindings introduced directly in this scope, in introduction order.
     pub bindings: Vec<BindingId>,
+    /// For a [`ScopeKind::Module`] scope, the module's name (`module Sub` →
+    /// `Sub`); `None` for every other kind and for an unnamed module. Lets a
+    /// position be mapped to its file-internal nested-`module` path.
+    pub module_name: Option<SmolStr>,
 }

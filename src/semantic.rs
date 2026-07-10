@@ -106,6 +106,27 @@ impl SemanticModel {
         &self.scopes[id.0 as usize]
     }
 
+    /// The file-internal nested-`module` path enclosing `scope`, outermost
+    /// first: the names of the `module` scopes on the chain from `scope` up to
+    /// (and including) `scope` itself when it is a module body. Empty at the file
+    /// top level. Combined with the file's host module path, this places a
+    /// position in the package's module tree (nested-`module` file membership).
+    pub fn enclosing_module_path(&self, scope: ScopeId) -> Vec<SmolStr> {
+        let mut path = Vec::new();
+        let mut cursor = Some(scope);
+        while let Some(id) = cursor {
+            let scope = self.scope(id);
+            if scope.kind == ScopeKind::Module
+                && let Some(name) = &scope.module_name
+            {
+                path.push(name.clone());
+            }
+            cursor = scope.parent;
+        }
+        path.reverse();
+        path
+    }
+
     pub fn binding(&self, id: BindingId) -> &Binding {
         &self.bindings[id.0 as usize]
     }
