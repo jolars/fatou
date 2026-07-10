@@ -357,11 +357,27 @@ The payoff phase, in roughly arity's shipping order.
   `set_package_index`. *Deferred:* the transitive include-edge graph proper,
   nested-`module` file membership (a member file resolves against the root
   module for now), and multi-folder workspaces.
-- [ ] Cross-file go-to-definition, references, and rename for top-level
-  symbols. *Within-package go-to-definition, hover, and completion for the
-  package under development have landed (see the project-graph note above);*
-  cross-file references and rename (needing a reverse occurrence index across
-  files) and navigation into `using`'d workspace submodules remain.
+- [x] Cross-file go-to-definition, references, and rename for top-level
+  symbols. Within-package go-to-definition, hover, and completion landed with
+  the project graph; cross-file **references and rename** now land on a
+  salsa-input reverse-occurrence index. The harvester records the include
+  closure (`PackageIndex::members`), the analysis thread seeds each member as a
+  `SourceFile` input registered in the `WorkspaceFiles` singleton (via
+  `seed_disk_file`, create-or-return so an open buffer is never clobbered), and
+  two salsa queries build the index: the demand-only per-file
+  `file_workspace_occurrences` projection (`Resolver::workspace_occurrences`,
+  keyed by `(namespace, name)` so a defining file's occurrences and a calling
+  file's free reads — and multi-file dispatch — stitch together) and the
+  `workspace_reference_index` aggregate unioning it over the member set. The
+  shared `src/lsp/cross_file.rs` classifies the workspace symbol at the cursor
+  (`Resolver::workspace_symbol_at`, the same oracle as go-to-definition) and
+  materializes per-file sites; `references_via_db`/`rename_via_db` escalate to
+  it and fall back to the intra-file path for locals and library symbols.
+  `didClose` reverts a member's input to disk (`revert_file_to_disk`) so a
+  discarded buffer leaves the index; each re-harvest rebuilds `WorkspaceFiles`
+  wholesale, dropping stale members. *Deferred:* qualified reads (`Pkg.foo`) —
+  the model records only the whole chain's range, not the `foo` sub-span — and
+  navigation into `using`'d workspace submodules.
 - [x] Workspace symbols (fuzzy subsequence match over top-level definitions):
   pure `compute_workspace_symbols` (`src/lsp/workspace_symbols.rs`) walks the
   harvested `PackageIndex` of the package under development (recursing
