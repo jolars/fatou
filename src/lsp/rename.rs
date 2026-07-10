@@ -9,12 +9,16 @@
 //! variable in a nested scope is left untouched; this is the correctness win over
 //! a textual find-and-replace.
 //!
-//! Only intra-file bindings can be renamed. A free read or qualified read (a
-//! Base/Core or `using`'d library symbol) has no intra-file binding, so
-//! `prepareRename` reports it as not renameable and `rename` yields no edit;
-//! cross-file rename of top-level symbols is a Phase 5 item. Macro definitions
-//! rename by their bare name: the occurrence ranges cover the identifier after
-//! the `@`, so the sigil is preserved automatically.
+//! A **workspace top-level symbol** (a global of the package under development)
+//! renames across every member file: `rename_via_db` gathers its occurrences
+//! from the reverse-occurrence index and returns a multi-document
+//! [`WorkspaceEdit`] (see [`cross_file`]), and `prepareRename` accepts it even
+//! where it is a free read (defined in a sibling file). Everything else stays
+//! intra-file. A library free or qualified read (a Base/Core or `using`'d
+//! symbol) has no workspace binding, so `prepareRename` reports it as not
+//! renameable and `rename` yields no edit. Macro definitions rename by their
+//! bare name: the occurrence ranges cover the identifier after the `@`, so the
+//! sigil is preserved automatically, cross-file as well as intra-file.
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
@@ -27,6 +31,8 @@ use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::semantic::{BindingId, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
+
+use super::cross_file;
 
 /// The prepare-rename response for the symbol at `position` in `text`,
 /// re-parsing it. Pure and unit-testable. `Some(range)` marks the identifier
@@ -86,6 +92,18 @@ pub(crate) fn prepare_rename_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        // A workspace top-level symbol is renameable even when it is a free read
+        // here (defined in a sibling file), where the intra-file `prepare_for`
+        // would decline it. Offer the identifier under the cursor.
+        if cross_file::workspace_symbol_at(snapshot, path, model, offset).is_some()
+            && let Some(range) = identifier_range_at(model, offset)
+        {
+            return Some(Some(PrepareRenameResponse::Range(to_range(
+                range,
+                &line_index,
+                encoding,
+            ))));
+        }
         Some(prepare_for(model, &line_index, offset, encoding))
     }));
     match cached {
@@ -115,6 +133,19 @@ pub(crate) fn rename_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        // A workspace top-level symbol renames across every member file; anything
+        // else stays intra-file. A cross-file edit that touches at least this
+        // file wins; an empty one (member set not seeded yet) falls through.
+        if let Some((ns, name)) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
+            let edit = cross_file_rename(snapshot, ns, &name, new_name, encoding);
+            if edit
+                .changes
+                .as_ref()
+                .is_some_and(|changes| !changes.is_empty())
+            {
+                return Some(Some(edit));
+            }
+        }
         Some(rename_for(
             model,
             uri,
@@ -128,6 +159,46 @@ pub(crate) fn rename_via_db(
         Ok(Some(result)) => Ok(result),
         Ok(None) | Err(_) => compute_rename(uri, text, position, new_name, encoding),
     }
+}
+
+/// The multi-file workspace edit renaming a workspace symbol: every occurrence
+/// across the package's member files (definitions and uses) rewritten to
+/// `new_name`, grouped by document. Macro occurrence ranges cover the bare name,
+/// so the `@` sigil is preserved automatically, as in the intra-file path.
+fn cross_file_rename(
+    snapshot: &Analysis,
+    namespace: crate::resolve::Namespace,
+    name: &smol_str::SmolStr,
+    new_name: &str,
+    encoding: PositionEncoding,
+) -> WorkspaceEdit {
+    let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+    for site in cross_file::gather_sites(snapshot, namespace, name, encoding) {
+        changes.entry(site.uri).or_default().push(TextEdit {
+            range: site.range,
+            new_text: new_name.to_string(),
+        });
+    }
+    for edits in changes.values_mut() {
+        edits.sort_by_key(|e| (e.range.start.line, e.range.start.character));
+        edits.dedup_by_key(|e| (e.range.start.line, e.range.start.character));
+    }
+    WorkspaceEdit {
+        changes: Some(changes),
+        ..Default::default()
+    }
+}
+
+/// The range of the identifier token under the cursor at `offset`: an occurrence
+/// or a definition site, whether or not it binds intra-file. Used by
+/// `prepareRename` to offer a workspace free read (a symbol defined in a sibling
+/// file) as renameable.
+fn identifier_range_at(model: &SemanticModel, offset: TextSize) -> Option<TextRange> {
+    if let Some(ident) = model.ident_at(offset) {
+        return Some(ident.range);
+    }
+    let bid = model.binding_at(offset)?;
+    Some(model.binding(bid).def_range)
 }
 
 /// The binding the cursor at `offset` refers to, together with the range of the
@@ -362,5 +433,70 @@ mod tests {
         // A valid identifier with a trailing `!` and Unicode is accepted.
         assert!(validate_new_name("mutate!").is_ok());
         assert!(validate_new_name("δx").is_ok());
+    }
+
+    /// Cross-file rename rewrites a workspace symbol everywhere: the definition
+    /// and every use, across all member files, in one multi-document edit.
+    #[test]
+    fn cross_file_rename_rewrites_every_member_file() {
+        use crate::lsp::cross_file::test_support::{member_path, workspace_db};
+        use crate::text::PositionEncoding::Utf16;
+
+        let a_text = "greet(a) = a\ngreet(1)\n";
+        let b_text = "callit() = greet(2)\n";
+        let (db, _) = workspace_db(&["greet"], &[("a.jl", a_text), ("b.jl", b_text)]);
+        let snapshot = db.snapshot();
+
+        let a_path = member_path("a.jl");
+        let a_uri = crate::lsp::uri::from_path(&a_path).unwrap();
+        let b_uri = crate::lsp::uri::from_path(&member_path("b.jl")).unwrap();
+
+        // Rename from the definition site in a.jl.
+        let edit = rename_via_db(
+            &snapshot,
+            &a_uri,
+            &a_path,
+            a_text,
+            Position::new(0, 0),
+            "hello",
+            Utf16,
+        )
+        .expect("a valid new name")
+        .expect("greet is a renameable workspace symbol");
+        let changes = edit.changes.expect("multi-file changes");
+
+        // a.jl: the definition and the call; b.jl: the one call.
+        let a_edits = changes.get(&a_uri).expect("edits in a.jl");
+        assert_eq!(a_edits.len(), 2);
+        assert!(a_edits.iter().all(|e| e.new_text == "hello"));
+        let b_edits = changes.get(&b_uri).expect("edits in b.jl");
+        assert_eq!(b_edits.len(), 1);
+        assert_eq!(b_edits[0].range.start, Position::new(0, 11));
+    }
+
+    /// `prepareRename` accepts a workspace symbol even where it is a free read
+    /// (defined in a sibling file), returning the identifier's range.
+    #[test]
+    fn prepare_rename_accepts_a_workspace_free_read() {
+        use crate::lsp::cross_file::test_support::{member_path, workspace_db};
+        use crate::text::PositionEncoding::Utf16;
+
+        let a_text = "greet(a) = a\n";
+        let b_text = "callit() = greet(2)\n";
+        let (db, _) = workspace_db(&["greet"], &[("a.jl", a_text), ("b.jl", b_text)]);
+        let snapshot = db.snapshot();
+        let b_path = member_path("b.jl");
+
+        let response =
+            prepare_rename_via_db(&snapshot, &b_path, b_text, Position::new(0, 11), Utf16)
+                .expect("the workspace free read is renameable");
+        match response {
+            PrepareRenameResponse::Range(range) => {
+                // The `greet` token spans columns 11..16 on line 0.
+                assert_eq!(range.start, Position::new(0, 11));
+                assert_eq!(range.end, Position::new(0, 16));
+            }
+            other => panic!("expected a plain range, got {other:?}"),
+        }
     }
 }
