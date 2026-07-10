@@ -124,6 +124,40 @@ pub struct Environment {
     pub install: Option<JuliaInstall>,
 }
 
+/// The package under development: the workspace's own `Project.toml` package,
+/// whose `src/` tree fatou indexes like a depot package so its top-level symbols
+/// resolve across the package's files. `root` is the directory containing `src/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DevPackage {
+    pub name: String,
+    pub root: PathBuf,
+}
+
+impl Environment {
+    /// The package under development, if this environment *is* a package project
+    /// (a named `Project.toml` with a matching `src/<Name>.jl` entry file). A
+    /// bare shared environment (`DefaultEnv`) or a nameless project has none.
+    ///
+    /// The entry-file check is what distinguishes a package project from a plain
+    /// environment that merely carries a `name`; only the former has a module
+    /// tree to harvest.
+    pub fn dev_package(&self) -> Option<DevPackage> {
+        if self.source == EnvSource::DefaultEnv {
+            return None;
+        }
+        let name = self.name.as_ref()?;
+        let entry = self.project_dir.join("src").join(format!("{name}.jl"));
+        if entry.is_file() {
+            Some(DevPackage {
+                name: name.clone(),
+                root: self.project_dir.clone(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
 /// Everything environment-dependent, injected so resolution stays testable
 /// (no direct `std::env`/`$HOME` reads in the logic).
 #[derive(Debug, Clone)]

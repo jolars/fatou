@@ -10,14 +10,18 @@ use lsp_types::{
     ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability,
     InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
     SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions,
 };
 
+use std::sync::Arc;
+
 use crate::environment::EnvContext;
-use crate::index::{HarvestedLibrary, harvest_library};
+use crate::incremental::normalize_path;
+use crate::index::{harvest_library, harvest_workspace};
 use crate::text::PositionEncoding;
 
-use super::analysis_thread::{AnalysisRequest, spawn_analysis_thread};
+use super::analysis_thread::{AnalysisRequest, LibraryMessage, spawn_analysis_thread};
 use super::read_jobs::ReadJob;
 use super::semantic_tokens::legend;
 use super::state::{GlobalState, Outbound};
@@ -88,8 +92,16 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             PositionEncoding::Utf8 => PositionEncodingKind::UTF8,
             PositionEncoding::Utf16 => PositionEncodingKind::UTF16,
         }),
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(
-            TextDocumentSyncKind::INCREMENTAL,
+        text_document_sync: Some(TextDocumentSyncCapability::Options(
+            TextDocumentSyncOptions {
+                open_close: Some(true),
+                change: Some(TextDocumentSyncKind::INCREMENTAL),
+                // Save notifications trigger a re-harvest of the workspace
+                // package so cross-file navigation reflects added/removed
+                // top-level symbols; the text is not needed (we read from disk).
+                save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                ..Default::default()
+            },
         )),
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: Some(OneOf::Left(true)),
@@ -141,14 +153,18 @@ fn main_loop(
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
     let (read_tx, read_rx) = crossbeam_channel::unbounded::<ReadJob>();
-    let (library_tx, library_rx) = crossbeam_channel::bounded::<HarvestedLibrary>(1);
+    let (library_tx, library_rx) = crossbeam_channel::unbounded::<LibraryMessage>();
+    // Save signals from the main loop to the workspace harvester: the saved
+    // file's path (the harvester ignores saves outside the workspace package).
+    let (save_tx, save_rx) = crossbeam_channel::unbounded::<PathBuf>();
 
     // Resolve the environment and harvest its packages off the event loop: it
     // walks the filesystem and parses all of Base, so it must not block the
     // handshake (nor shutdown — the thread is detached). The result is swapped
     // into the db when it lands; every feature stays usable in the meantime, and
-    // library go-to-definition/completion start answering once it arrives.
-    spawn_library_loader(workspace_root, library_tx);
+    // library go-to-definition/completion start answering once it arrives. The
+    // same thread re-harvests the workspace package on each save signal.
+    spawn_workspace_harvester(workspace_root, library_tx, save_rx);
 
     // The read pool serves latency-sensitive work (formatting, the analysis
     // read-phase). Its workers must outlive both `state` and the analysis
@@ -163,7 +179,13 @@ fn main_loop(
         encoding,
     );
 
-    let mut state = GlobalState::new(connection.sender.clone(), analysis_tx, read_tx, encoding);
+    let mut state = GlobalState::new(
+        connection.sender.clone(),
+        analysis_tx,
+        read_tx,
+        save_tx,
+        encoding,
+    );
 
     loop {
         select! {
@@ -195,25 +217,50 @@ fn main_loop(
     Ok(())
 }
 
-/// Resolve the Julia environment for `workspace_root` and harvest its library on
-/// a detached background thread, sending the result to the analysis thread.
+/// Resolve the Julia environment for `workspace_root`, harvest its library on a
+/// detached background thread, then stay alive re-harvesting the workspace
+/// package whenever a save signal names one of its files.
 ///
 /// Only runs when the client provided a workspace root: without one there is no
 /// project to resolve against (a single loose file), and resolving the machine's
 /// default environment would harvest all of Base for no benefit — notably in the
 /// in-memory server tests, which open no folder. Best-effort: an unresolved
 /// environment or harvest failure simply leaves the library empty.
-fn spawn_library_loader(
+fn spawn_workspace_harvester(
     workspace_root: Option<PathBuf>,
-    library_tx: crossbeam_channel::Sender<HarvestedLibrary>,
+    library_tx: crossbeam_channel::Sender<LibraryMessage>,
+    save_rx: crossbeam_channel::Receiver<PathBuf>,
 ) {
     let Some(root) = workspace_root else { return };
     let spawned = std::thread::Builder::new()
         .name("fatou-index-loader".to_string())
         .spawn(move || {
             let ctx = EnvContext::from_process(root);
-            if let Ok(Some(env)) = crate::environment::resolve(&ctx) {
-                let _ = library_tx.send(harvest_library(&env));
+            let Ok(Some(env)) = crate::environment::resolve(&ctx) else {
+                return;
+            };
+            let dev = env.dev_package();
+            let _ = library_tx.send(LibraryMessage::Full(harvest_library(&env)));
+
+            // With a package under development, re-harvest it on each save that
+            // touches one of its files (a `src/` prefix check). Saves elsewhere,
+            // and every save when the workspace is not a package, are ignored.
+            let Some(dev) = dev else { return };
+            let src = normalize_path(&dev.root.join("src"));
+            while let Ok(saved) = save_rx.recv() {
+                if !normalize_path(&saved).starts_with(&src) {
+                    continue;
+                }
+                let index = Arc::new(harvest_workspace(&dev));
+                if library_tx
+                    .send(LibraryMessage::Package {
+                        name: dev.name.clone(),
+                        index,
+                    })
+                    .is_err()
+                {
+                    break; // The analysis thread is gone; stop harvesting.
+                }
             }
         });
     // A spawn failure is non-fatal: the server runs without a library index.

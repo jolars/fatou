@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
+    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
     Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
@@ -18,11 +18,11 @@ use lsp_types::request::{
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    DocumentHighlightParams, DocumentRangeFormattingParams, DocumentSymbolParams,
-    FoldingRangeParams, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams,
-    ReferenceParams, RenameParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams,
-    TextDocumentPositionParams, Uri,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentFormattingParams, DocumentHighlightParams, DocumentRangeFormattingParams,
+    DocumentSymbolParams, FoldingRangeParams, GotoDefinitionParams, HoverParams,
+    PublishDiagnosticsParams, ReferenceParams, RenameParams, SelectionRangeParams,
+    SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -58,6 +58,9 @@ pub(crate) struct GlobalState {
     /// job and runs the read off-thread against the cached parse. See
     /// [`run_read`](super::read_jobs::run_read).
     read_tx: Sender<ReadJob>,
+    /// Save signals to the workspace harvester: the saved file's path. It
+    /// re-harvests the workspace package when the path is one of its files.
+    save_tx: Sender<PathBuf>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
 }
@@ -67,6 +70,7 @@ impl GlobalState {
         sender: Sender<Message>,
         analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
+        save_tx: Sender<PathBuf>,
         encoding: PositionEncoding,
     ) -> Self {
         Self {
@@ -74,6 +78,7 @@ impl GlobalState {
             sender,
             analysis_tx,
             read_tx,
+            save_tx,
             encoding,
         }
     }
@@ -457,6 +462,18 @@ impl GlobalState {
                     apply_content_changes(&mut doc.text, params.content_changes, self.encoding);
                     doc.version = params.text_document.version;
                     self.send_analysis(uri);
+                }
+            }
+            DidSaveTextDocument::METHOD => {
+                if let Ok(params) =
+                    note.extract::<DidSaveTextDocumentParams>(DidSaveTextDocument::METHOD)
+                {
+                    // Signal the workspace harvester with the saved path; it
+                    // re-harvests the workspace package if the file belongs to
+                    // it. A dead channel (no workspace) is a no-op.
+                    if let Some(path) = uri::to_path(&params.text_document.uri) {
+                        let _ = self.save_tx.send(path);
+                    }
                 }
             }
             DidCloseTextDocument::METHOD => {

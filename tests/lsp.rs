@@ -960,9 +960,14 @@ fn applies_incremental_range_edits() {
         Message::Response(resp) => {
             let result = resp.result.unwrap();
             assert_eq!(
-                result["capabilities"]["textDocumentSync"],
+                result["capabilities"]["textDocumentSync"]["change"],
                 serde_json::json!(2),
                 "expected TextDocumentSyncKind::INCREMENTAL"
+            );
+            assert_eq!(
+                result["capabilities"]["textDocumentSync"]["save"],
+                serde_json::json!(true),
+                "save notifications drive the workspace re-harvest"
             );
             assert_eq!(
                 result["capabilities"]["positionEncoding"],

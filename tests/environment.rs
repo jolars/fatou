@@ -220,6 +220,71 @@ fn falls_back_to_newest_default_env() {
     assert_eq!(env.project_file, envs.join("v1.11/Project.toml"));
 }
 
+#[test]
+fn dev_package_detected_for_named_project_with_entry() {
+    let tmp = TempDir::new();
+    let ws = tmp.path().join("MyPkg");
+    write(&ws.join("Project.toml"), "name = \"MyPkg\"\n");
+    write(&ws.join("src/MyPkg.jl"), "module MyPkg\nend\n");
+
+    let ctx = EnvContext {
+        workspace_root: ws.clone(),
+        julia_project: None,
+        julia_depot_path: None,
+        home: None,
+        julia_bindir: None,
+        path: None,
+    };
+    let env = environment::resolve(&ctx).unwrap().unwrap();
+    let dev = env.dev_package().expect("a package under development");
+    assert_eq!(dev.name, "MyPkg");
+    assert_eq!(dev.root, ws);
+}
+
+#[test]
+fn dev_package_absent_without_entry_file() {
+    // A named project with no matching `src/<Name>.jl` is a plain environment,
+    // not a package under development.
+    let tmp = TempDir::new();
+    let ws = tmp.path().join("proj");
+    write(&ws.join("Project.toml"), "name = \"Proj\"\n");
+
+    let ctx = EnvContext {
+        workspace_root: ws,
+        julia_project: None,
+        julia_depot_path: None,
+        home: None,
+        julia_bindir: None,
+        path: None,
+    };
+    let env = environment::resolve(&ctx).unwrap().unwrap();
+    assert!(env.dev_package().is_none());
+}
+
+#[test]
+fn dev_package_absent_for_default_env() {
+    // Even if the newest default env carries a name, a bare shared environment
+    // is never a package under development.
+    let tmp = TempDir::new();
+    let home = tmp.path().join("home");
+    let envs = home.join(".julia/environments");
+    write(&envs.join("v1.11/Project.toml"), "name = \"Shared\"\n");
+    write(&envs.join("v1.11/src/Shared.jl"), "module Shared\nend\n");
+
+    let ctx = EnvContext {
+        workspace_root: tmp.path().join("empty/ws"),
+        julia_project: None,
+        julia_depot_path: None,
+        home: Some(home),
+        julia_bindir: None,
+        path: None,
+    };
+    fs::create_dir_all(tmp.path().join("empty/ws")).unwrap();
+    let env = environment::resolve(&ctx).unwrap().unwrap();
+    assert_eq!(env.source, EnvSource::DefaultEnv);
+    assert!(env.dev_package().is_none());
+}
+
 /// Manual end-to-end check against the developer's real depot. Ignored in CI
 /// (depends on `~/.julia`); run with `cargo test --test environment -- --ignored`.
 #[test]

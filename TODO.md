@@ -344,8 +344,24 @@ The payoff phase, in roughly arity's shipping order.
 - [ ] Project graph: workspace membership from `initialize`, `include()`
   edges, package-project awareness (a workspace `Project.toml` means the
   package under development; index its module tree like a depot package).
+  *Package-project awareness has landed:* `Environment::dev_package`
+  (`src/environment.rs`) detects a named workspace `Project.toml` with a
+  matching `src/<Name>.jl`; `harvest_library`/`harvest_workspace`
+  (`src/index.rs`) index it like a depot package, flagged as `workspace` on the
+  `LibraryIndex` salsa input (`src/incremental.rs`). A file's free reads resolve
+  against the enclosing package module through a new tier-2 in `Resolver`
+  (`Resolution::Workspace`, `src/resolve.rs`), lighting up go-to-definition,
+  hover, and completion for the package's own top-level symbols across files.
+  The workspace package re-harvests on `didSave` via a long-lived harvester
+  thread (`spawn_workspace_harvester`, `src/lsp/server.rs`) that swaps it with
+  `set_package_index`. *Deferred:* the transitive include-edge graph proper,
+  nested-`module` file membership (a member file resolves against the root
+  module for now), and multi-folder workspaces.
 - [ ] Cross-file go-to-definition, references, and rename for top-level
-  symbols.
+  symbols. *Within-package go-to-definition, hover, and completion for the
+  package under development have landed (see the project-graph note above);*
+  cross-file references and rename (needing a reverse occurrence index across
+  files) and navigation into `using`'d workspace submodules remain.
 - [ ] Workspace symbols (fuzzy subsequence match over top-level definitions).
 - [ ] `workspace/didChangeWatchedFiles`: `Project.toml`/`Manifest.toml`
   changes re-resolve the environment; file create/delete refreshes

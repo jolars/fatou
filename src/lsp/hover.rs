@@ -8,7 +8,8 @@
 //! - an **ordinary occurrence** that binds locally shows the binding's kind (and,
 //!   for a function/type/macro, its definition line);
 //! - a **free read** resolves through the shared masking order
-//!   ([`Resolver::resolve`]) to a `using`'d export or a Base/Core symbol.
+//!   ([`Resolver::resolve`]) to a workspace-package sibling, a `using`'d export,
+//!   or a Base/Core symbol.
 //!
 //! Library symbols render their signature(s) and docstring as markdown. A
 //! function shows its whole method group (multiple dispatch), capped so a
@@ -16,12 +17,13 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::Arc;
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 use rowan::{TextRange, TextSize};
 
 use crate::incremental::Analysis;
-use crate::index::{FunctionGroup, ModuleIndex};
+use crate::index::{FunctionGroup, ModuleIndex, PackageIndex};
 use crate::parser::parse;
 use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, resolve_submodule};
 use crate::semantic::{BindingId, BindingKind, LoadKind, SemanticModel};
@@ -44,7 +46,9 @@ pub fn compute_hover<P: PackageSource>(
     let model = SemanticModel::build(&parse(text).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
-    hover_for(&model, packages, text, offset, &line_index, encoding)
+    // The pure path has no file path to key workspace membership on; the live
+    // server passes the workspace module through `hover_via_db`.
+    hover_for(&model, packages, None, text, offset, &line_index, encoding)
 }
 
 /// Compute the hover off the snapshot's cached parse when the db's tracked buffer
@@ -67,11 +71,13 @@ pub(crate) fn hover_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        let workspace = snapshot.workspace_module(path);
         // The inner `Option` is the hover result (a cursor on nothing hoverable
         // is a legitimate `None`); the outer distinguishes that from a cache miss.
         Some(hover_for(
             model,
             snapshot,
+            workspace,
             text,
             offset,
             &line_index,
@@ -87,15 +93,17 @@ pub(crate) fn hover_via_db(
 
 /// Shared entry point for the fresh-parse and cached-model paths: `model` must be
 /// the semantic model of exactly `text`.
+#[allow(clippy::too_many_arguments)]
 fn hover_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
+    workspace: Option<Arc<PackageIndex>>,
     text: &str,
     offset: TextSize,
     line_index: &LineIndex,
     encoding: PositionEncoding,
 ) -> Option<Hover> {
-    let (value, range) = hover_content(model, packages, text, offset)?;
+    let (value, range) = hover_content(model, packages, workspace, text, offset)?;
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -110,6 +118,7 @@ fn hover_for<P: PackageSource>(
 fn hover_content<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
+    workspace: Option<Arc<PackageIndex>>,
     text: &str,
     offset: TextSize,
 ) -> Option<(String, TextRange)> {
@@ -137,7 +146,7 @@ fn hover_content<P: PackageSource>(
             Namespace::Value
         };
         return Some((
-            render_free_read(model, packages, text, &ident.name, offset, ns)?,
+            render_free_read(model, packages, workspace, text, &ident.name, offset, ns)?,
             ident.range,
         ));
     }
@@ -155,14 +164,20 @@ fn hover_content<P: PackageSource>(
 fn render_free_read<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
+    workspace: Option<Arc<PackageIndex>>,
     text: &str,
     name: &str,
     offset: TextSize,
     ns: Namespace,
 ) -> Option<String> {
-    match Resolver::new(model, packages).resolve(name, offset, ns) {
+    match Resolver::new(model, packages)
+        .with_workspace(workspace.clone())
+        .resolve(name, offset, ns)
+    {
         // A binding the occurrence walk missed but resolution finds: still local.
         Resolution::Binding(bid) => Some(render_local(model, bid, text)),
+        // A same-module sibling: render from the workspace package's module.
+        Resolution::Workspace { name } => render_library_symbol(&workspace?.root, &name),
         Resolution::System { module, name } => {
             let pkg = packages.package(&module)?;
             render_library_symbol(&pkg.root, &name)
@@ -408,6 +423,33 @@ mod tests {
             HoverContents::Markup(m) => m.value,
             _ => panic!("expected markup hover"),
         })
+    }
+
+    /// The hover markdown for `src` just past `needle`, resolving free reads
+    /// against `workspace` (the enclosing package's module).
+    fn hover_ws(src: &str, needle: &str, workspace: Arc<PackageIndex>) -> Option<String> {
+        let model = SemanticModel::build(&parse(src).cst);
+        let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
+        let lib: BTreeMap<String, Arc<PackageIndex>> = BTreeMap::new();
+        hover_content(&model, &lib, Some(workspace), src, offset).map(|(value, _)| value)
+    }
+
+    #[test]
+    fn workspace_sibling_shows_its_signature() {
+        // `sibling` is a top-level function of the enclosing workspace package,
+        // defined in another file: hover renders its method signature.
+        let root = ModuleIndex {
+            functions: vec![FunctionGroup {
+                name: "sibling".to_string(),
+                owner: None,
+                methods: vec![method(&["x"])],
+                doc: doc("a sibling function"),
+            }],
+            ..module("MyPkg", &[])
+        };
+        let value = hover_ws("sibling(1)", "sibling", package(root)).unwrap();
+        assert!(value.contains("sibling"), "{value}");
+        assert!(value.contains("a sibling function"), "{value}");
     }
 
     #[test]

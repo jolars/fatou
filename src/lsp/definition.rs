@@ -6,6 +6,10 @@
 //!
 //! - an **intra-file** binding points back into the current document at its
 //!   `def_range`;
+//! - a **workspace sibling** (a top-level symbol of the enclosing package under
+//!   development, defined in another of its files) resolves through the shared
+//!   masking order's workspace tier and jumps into that file, reusing the
+//!   library-location path below;
 //! - a **library** symbol (Base/Core, a `using`'d export, or a `Foo.bar`
 //!   qualified read) points into the depot source on disk — the package's
 //!   harvested [`DefLocation`] is package-relative, so it is joined with the
@@ -17,6 +21,7 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::Arc;
 
 use lsp_types::{Location, Position, Range, Uri};
 use rowan::{TextRange, TextSize};
@@ -44,7 +49,16 @@ pub fn compute_definition<P: PackageSource>(
     let model = SemanticModel::build(&parse(text).cst);
     let line_index = LineIndex::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
-    definition_for(&model, packages, uri, &line_index, offset, encoding)
+    let workspace = super::uri::to_path(uri).and_then(|p| packages.workspace_module(&p));
+    definition_for(
+        &model,
+        packages,
+        workspace,
+        uri,
+        &line_index,
+        offset,
+        encoding,
+    )
 }
 
 /// Compute the definition off the snapshot's cached parse when the db's tracked
@@ -68,11 +82,13 @@ pub(crate) fn definition_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        let workspace = snapshot.workspace_module(path);
         // The inner `Option` is the definition (a cursor on nothing definable is
         // a legitimate `None`); the outer distinguishes that from a cache miss.
         Some(definition_for(
             model,
             snapshot,
+            workspace,
             uri,
             &line_index,
             offset,
@@ -89,9 +105,11 @@ pub(crate) fn definition_via_db(
 /// Shared entry point for the fresh-parse and cached-model paths. Mirrors the
 /// three shapes of [`hover_content`](super::hover). `line_index` indexes the
 /// *current* document, for intra-file results.
+#[allow(clippy::too_many_arguments)]
 fn definition_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
+    workspace: Option<Arc<PackageIndex>>,
     uri: &Uri,
     line_index: &LineIndex,
     offset: TextSize,
@@ -128,6 +146,7 @@ fn definition_for<P: PackageSource>(
         return free_read_location(
             model,
             packages,
+            workspace,
             uri,
             &ident.name,
             offset,
@@ -170,6 +189,7 @@ fn self_location(
 fn free_read_location<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
+    workspace: Option<Arc<PackageIndex>>,
     uri: &Uri,
     name: &str,
     offset: TextSize,
@@ -177,13 +197,22 @@ fn free_read_location<P: PackageSource>(
     line_index: &LineIndex,
     encoding: PositionEncoding,
 ) -> Option<Location> {
-    match Resolver::new(model, packages).resolve(name, offset, ns) {
+    match Resolver::new(model, packages)
+        .with_workspace(workspace.clone())
+        .resolve(name, offset, ns)
+    {
         Resolution::Binding(bid) => Some(self_location(
             uri,
             model.binding(bid).def_range,
             line_index,
             encoding,
         )),
+        // A same-module sibling: look the name up in the workspace package's
+        // module and jump into the sibling file on disk (the depot path).
+        Resolution::Workspace { name } => {
+            let pkg = workspace?;
+            library_location(packages, &pkg, &pkg.root, &name, encoding)
+        }
         Resolution::System { module, name } => {
             let pkg = packages.package(&module)?;
             library_location(packages, &pkg, &pkg.root, &name, encoding)
@@ -315,6 +344,9 @@ mod tests {
     struct TestLib {
         packages: BTreeMap<String, Arc<PackageIndex>>,
         roots: BTreeMap<String, PathBuf>,
+        /// The workspace package, returned for any path (tests pass member
+        /// paths); mirrors the live server's [`Analysis::workspace_module`].
+        workspace: Option<Arc<PackageIndex>>,
     }
 
     impl PackageSource for TestLib {
@@ -323,6 +355,9 @@ mod tests {
         }
         fn package_root(&self, name: &str) -> Option<PathBuf> {
             self.roots.get(name).cloned()
+        }
+        fn workspace_module(&self, _path: &Path) -> Option<Arc<PackageIndex>> {
+            self.workspace.clone()
         }
     }
 
@@ -435,5 +470,57 @@ mod tests {
         lib.packages.insert("Greetings".to_string(), Arc::new(pkg));
 
         assert!(def_at("using Greetings\ngreet|(1)", &lib).is_none());
+    }
+
+    #[test]
+    fn workspace_sibling_jumps_into_the_other_file() {
+        // A package under development: `MyPkg.jl` includes `bar.jl`, which
+        // defines `bar`. A free read of `bar` in a member file resolves through
+        // the workspace tier and jumps into `bar.jl` on disk.
+        let tmp = TempDir::new();
+        let src = tmp.path.join("src");
+        fs::create_dir_all(&src).unwrap();
+        let bar = src.join("bar.jl");
+        fs::write(
+            src.join("MyPkg.jl"),
+            "module MyPkg\ninclude(\"bar.jl\")\nend\n",
+        )
+        .unwrap();
+        fs::write(&bar, "bar(x) = x\n").unwrap();
+
+        let pkg = Arc::new(harvest_package_named(&tmp.path, "MyPkg"));
+        let mut lib = TestLib::default();
+        lib.packages.insert("MyPkg".to_string(), Arc::clone(&pkg));
+        lib.roots.insert("MyPkg".to_string(), tmp.path.clone());
+        lib.workspace = Some(pkg);
+
+        let loc = def_at("bar|(1)", &lib).unwrap();
+        assert_eq!(to_path(&loc.uri), Some(bar));
+        // The `bar` definition on line 0, columns 0..3 of the sibling file.
+        assert_eq!(loc.range.start, Position::new(0, 0));
+        assert_eq!(loc.range.end, Position::new(0, 3));
+    }
+
+    #[test]
+    fn workspace_tier_is_off_without_membership() {
+        // The same package, but no workspace module registered (the file is not
+        // a member): `bar` stays unresolved.
+        let tmp = TempDir::new();
+        let src = tmp.path.join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("MyPkg.jl"),
+            "module MyPkg\ninclude(\"bar.jl\")\nend\n",
+        )
+        .unwrap();
+        fs::write(src.join("bar.jl"), "bar(x) = x\n").unwrap();
+
+        let pkg = Arc::new(harvest_package_named(&tmp.path, "MyPkg"));
+        let mut lib = TestLib::default();
+        lib.packages.insert("MyPkg".to_string(), pkg);
+        lib.roots.insert("MyPkg".to_string(), tmp.path.clone());
+        // `lib.workspace` left `None`.
+
+        assert!(def_at("bar|(1)", &lib).is_none());
     }
 }

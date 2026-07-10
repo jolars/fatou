@@ -23,6 +23,7 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::Arc;
 
 use lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Position,
@@ -31,7 +32,7 @@ use rowan::TextSize;
 use serde::{Deserialize, Serialize};
 
 use crate::incremental::Analysis;
-use crate::index::ModuleIndex;
+use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::{KEYWORDS, parse};
 use crate::resolve::{Candidate, Namespace, PackageSource, Resolver, Source, resolve_submodule};
 use crate::semantic::{BindingKind, SemanticModel};
@@ -60,7 +61,9 @@ pub fn compute_completions<P: PackageSource>(
 ) -> Vec<CompletionItem> {
     let offset = LineIndex::new(text).position_to_byte(position, encoding);
     let model = SemanticModel::build(&parse(text).cst);
-    completions_for(&model, packages, text, TextSize::new(offset as u32))
+    // The pure path has no file path to key workspace membership on; the live
+    // server passes the workspace module through `completion_via_db`.
+    completions_for(&model, packages, None, text, TextSize::new(offset as u32))
 }
 
 /// Compute completions off the snapshot's cached parse when the db's tracked
@@ -82,7 +85,8 @@ pub(crate) fn completion_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
-        Some(completions_for(model, snapshot, text, offset))
+        let workspace = snapshot.workspace_module(path);
+        Some(completions_for(model, snapshot, workspace, text, offset))
     }));
     match cached {
         Ok(Some(items)) => items,
@@ -105,6 +109,7 @@ pub(crate) fn resolve_completion(snapshot: &Analysis, item: CompletionItem) -> C
 fn completions_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
+    workspace: Option<Arc<PackageIndex>>,
     text: &str,
     offset: TextSize,
 ) -> Vec<CompletionItem> {
@@ -114,12 +119,14 @@ fn completions_for<P: PackageSource>(
             macro_member,
         } => member_completions(packages, &receiver, macro_member),
         Context::Macro => Resolver::new(model, packages)
+            .with_workspace(workspace)
             .visible(offset, Namespace::Macro)
             .into_iter()
             .map(|c| candidate_item(model, c, Namespace::Macro))
             .collect(),
         Context::Value => {
             let mut items: Vec<CompletionItem> = Resolver::new(model, packages)
+                .with_workspace(workspace)
                 .visible(offset, Namespace::Value)
                 .into_iter()
                 .map(|c| candidate_item(model, c, Namespace::Value))
@@ -227,7 +234,9 @@ fn candidate_item(model: &SemanticModel, cand: Candidate, ns: Namespace) -> Comp
                 ..Default::default()
             }
         }
-        Source::Using { module } | Source::System { module } => {
+        // A workspace sibling lives in the library map under its package name,
+        // so it resolves lazily through the same key as any library item.
+        Source::Workspace { module } | Source::Using { module } | Source::System { module } => {
             library_item(label, &[module.to_string()], ns)
         }
     }
@@ -496,6 +505,38 @@ mod tests {
 
     fn labels(items: &[CompletionItem]) -> Vec<String> {
         items.iter().map(|i| i.label.clone()).collect()
+    }
+
+    /// Completions at the position just past `needle`, resolving free names
+    /// against `workspace` (the enclosing package's module) too.
+    fn completions_ws(
+        src: &str,
+        needle: &str,
+        lib: &BTreeMap<String, Arc<PackageIndex>>,
+        workspace: Arc<PackageIndex>,
+    ) -> Vec<CompletionItem> {
+        let model = SemanticModel::build(&parse(src).cst);
+        let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
+        completions_for(&model, lib, Some(workspace), src, offset)
+    }
+
+    #[test]
+    fn value_context_offers_workspace_siblings() {
+        // `sibling`, a top-level function of the enclosing workspace package,
+        // is offered even though it is not defined in this file.
+        let lib = library(vec![package(module("Base", &["println"]))]);
+        let ws = package(ModuleIndex {
+            functions: vec![func("sibling")],
+            ..module("MyPkg", &[])
+        });
+        let src = "function f()\n    \nend";
+        let items = completions_ws(src, "    ", &lib, ws);
+        let names = labels(&items);
+        assert!(names.contains(&"sibling".to_string()), "{names:?}");
+        // The sibling ranks after locals and before Base.
+        assert!(
+            names.iter().position(|n| n == "sibling") < names.iter().position(|n| n == "println")
+        );
     }
 
     #[test]

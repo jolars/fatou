@@ -93,7 +93,7 @@ fn source_roots_round_trip_through_set_library() {
     packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
     let mut roots = BTreeMap::new();
     roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo/abcde"));
-    db.set_library(packages, roots);
+    db.set_library(packages, roots, None);
 
     assert_eq!(
         db.package_root("Foo"),
@@ -118,7 +118,7 @@ fn set_library_packages_preserves_existing_roots() {
     packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
     let mut roots = BTreeMap::new();
     roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo"));
-    db.set_library(packages, roots);
+    db.set_library(packages, roots, None);
 
     // A packages-only update (the back-compat convenience) keeps the roots.
     let mut map = BTreeMap::new();
@@ -126,4 +126,33 @@ fn set_library_packages_preserves_existing_roots() {
     db.set_library_packages(map);
 
     assert_eq!(db.package_root("Foo"), Some(PathBuf::from("/depot/Foo")));
+}
+
+#[test]
+fn workspace_name_and_membership_round_trip() {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    let mut db = IncrementalDatabase::new();
+    assert!(db.workspace_package().is_none());
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(empty_package("MyPkg")));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+
+    assert_eq!(db.workspace_package().as_deref(), Some("MyPkg"));
+    // A file under the package's `src/` is a member; one outside is not.
+    assert!(
+        db.workspace_module(Path::new("/work/MyPkg/src/bar.jl"))
+            .is_some()
+    );
+    assert!(db.workspace_module(Path::new("/other/x.jl")).is_none());
+
+    // A packages-only re-harvest (the on-save path) keeps the workspace name.
+    let mut map = BTreeMap::new();
+    map.insert("MyPkg".to_string(), Arc::new(empty_package("MyPkg")));
+    db.set_library_packages(map);
+    assert_eq!(db.workspace_package().as_deref(), Some("MyPkg"));
 }

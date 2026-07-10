@@ -12,6 +12,7 @@
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{Receiver, Sender, select};
@@ -19,7 +20,7 @@ use lsp_types::Uri;
 use salsa::Database as _;
 
 use crate::incremental::IncrementalDatabase;
-use crate::index::HarvestedLibrary;
+use crate::index::{HarvestedLibrary, PackageIndex};
 use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
@@ -36,13 +37,29 @@ pub(crate) struct AnalysisRequest {
     pub(crate) version: i32,
 }
 
+/// A library-index update delivered to the analysis thread by the background
+/// harvester. The full harvest lands once at startup; a re-harvest of the
+/// workspace package (on save) lands as a single-package swap.
+pub(crate) enum LibraryMessage {
+    /// The whole harvested environment (Base/stdlib, deps, and the workspace
+    /// package): replace the library index wholesale.
+    Full(HarvestedLibrary),
+    /// A re-harvested single package (the workspace package on save): swap just
+    /// its entry, keeping the rest and the workspace name.
+    Package {
+        name: String,
+        index: Arc<PackageIndex>,
+    },
+}
+
 /// Spawn the dedicated analysis thread that owns the persistent salsa database.
 /// `library_rx` delivers the harvested package index once the background loader
-/// has resolved the environment; the thread swaps it into the db as a write.
+/// has resolved the environment (and later single-package re-harvests); the
+/// thread swaps it into the db as a write.
 pub(crate) fn spawn_analysis_thread(
     analysis_rx: Receiver<AnalysisRequest>,
     read_rx: Receiver<ReadJob>,
-    library_rx: Receiver<HarvestedLibrary>,
+    library_rx: Receiver<LibraryMessage>,
     out_tx: Sender<Outbound>,
     read_spawner: Spawner,
     encoding: PositionEncoding,
@@ -140,18 +157,24 @@ impl AnalysisWorker {
         &mut self,
         analysis_rx: &Receiver<AnalysisRequest>,
         read_rx: &Receiver<ReadJob>,
-        library_rx: &Receiver<HarvestedLibrary>,
+        library_rx: &Receiver<LibraryMessage>,
         done_rx: &Receiver<AnalyzeDone>,
     ) {
         loop {
             select! {
                 recv(library_rx) -> msg => {
-                    // The background loader finished harvesting: swap the index
+                    // The background harvester delivered an index update: swap it
                     // into the db (a write). Later requests read it from their
                     // snapshot; open files need no re-analysis because no
                     // diagnostic depends on the library yet.
-                    if let Ok(lib) = msg {
-                        self.db.set_library(lib.packages, lib.roots);
+                    match msg {
+                        Ok(LibraryMessage::Full(lib)) => {
+                            self.db.set_library(lib.packages, lib.roots, lib.workspace);
+                        }
+                        Ok(LibraryMessage::Package { name, index }) => {
+                            self.db.set_package_index(name, index);
+                        }
+                        Err(_) => {}
                     }
                 }
                 recv(analysis_rx) -> msg => {

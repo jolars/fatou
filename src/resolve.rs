@@ -51,6 +51,11 @@ pub enum Namespace {
 pub enum Resolution {
     /// A binding in this file: a local, parameter, global, or explicit import.
     Binding(BindingId),
+    /// A top-level symbol of the enclosing workspace package's module, defined
+    /// in one of its *other* files (tier 2 — the same-module globals an
+    /// `include` splices in). `name` is bare for a value, `@`-prefixed for a
+    /// macro; the consumer looks it up in the workspace package's module.
+    Workspace { name: SmolStr },
     /// An `export`ed name brought in by a whole-module `using` (tier 3).
     Using { module: SmolStr, name: SmolStr },
     /// An implicitly available Base/Core name (tier 4).
@@ -72,8 +77,16 @@ pub struct Candidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
     Binding(BindingId),
-    Using { module: SmolStr },
-    System { module: SmolStr },
+    /// A same-module sibling top-level symbol of the workspace package.
+    Workspace {
+        module: SmolStr,
+    },
+    Using {
+        module: SmolStr,
+    },
+    System {
+        module: SmolStr,
+    },
 }
 
 /// The harvested library, seen as "give me the [`PackageIndex`] named `name`".
@@ -90,6 +103,15 @@ pub trait PackageSource {
     fn package_root(&self, _name: &str) -> Option<std::path::PathBuf> {
         None
     }
+
+    /// The workspace package's harvested index when `path` is one of its source
+    /// files — the package whose same-module globals a file's free reads resolve
+    /// against (resolution tier 2). Only the live server knows the workspace, so
+    /// the default is `None`. See
+    /// [`Analysis::workspace_module`](crate::incremental::Analysis::workspace_module).
+    fn workspace_module(&self, _path: &std::path::Path) -> Option<Arc<PackageIndex>> {
+        None
+    }
 }
 
 impl PackageSource for BTreeMap<String, Arc<PackageIndex>> {
@@ -103,11 +125,28 @@ impl PackageSource for BTreeMap<String, Arc<PackageIndex>> {
 pub struct Resolver<'a, P: PackageSource> {
     model: &'a SemanticModel,
     packages: &'a P,
+    /// The enclosing workspace package's index, when the file being resolved is
+    /// one of its source files. Its root module's top-level symbols resolve as
+    /// tier-2 same-module globals. `None` for a non-member file or a
+    /// non-package workspace.
+    workspace: Option<Arc<PackageIndex>>,
 }
 
 impl<'a, P: PackageSource> Resolver<'a, P> {
     pub fn new(model: &'a SemanticModel, packages: &'a P) -> Self {
-        Resolver { model, packages }
+        Resolver {
+            model,
+            packages,
+            workspace: None,
+        }
+    }
+
+    /// Set the enclosing workspace package (tier 2). Chain onto [`new`](Self::new)
+    /// at a call site that knows the file's path, via
+    /// [`PackageSource::workspace_module`].
+    pub fn with_workspace(mut self, workspace: Option<Arc<PackageIndex>>) -> Self {
+        self.workspace = workspace;
+        self
     }
 
     /// Resolve `name` (bare, without `@` even in [`Namespace::Macro`]) as read
@@ -118,6 +157,14 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         // Tiers 1 + 2: a binding in this file.
         if let Some(binding) = self.file_binding(&wanted, offset, namespace) {
             return Resolution::Binding(binding);
+        }
+        // Tier 2 (cross-file): a same-module sibling top-level symbol of the
+        // workspace package. Ranks above `using`/Base — an `include`-spliced
+        // module global masks them, just as a same-file global would.
+        if let Some(workspace) = &self.workspace
+            && module_defines(&workspace.root, &wanted, namespace)
+        {
+            return Resolution::Workspace { name: wanted };
         }
         // Tier 3: a whole-module `using`'s exports, in source order.
         if let Some((module, name)) = self.using_export(&wanted, offset) {
@@ -157,6 +204,21 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
             } else {
                 scope.parent
             };
+        }
+
+        // Tier 2 (cross-file): same-module sibling top-level symbols of the
+        // workspace package, masked by anything bound in this file already.
+        if let Some(workspace) = &self.workspace {
+            for name in defined_names(&workspace.root, namespace) {
+                if seen.insert(name.clone()) {
+                    out.push(Candidate {
+                        name,
+                        source: Source::Workspace {
+                            module: SmolStr::new(&workspace.name),
+                        },
+                    });
+                }
+            }
         }
 
         // Tier 3: whole-module `using`'d exports, in source order.
@@ -348,6 +410,43 @@ fn module_exports(module: &ModuleIndex, wanted: &SmolStr) -> bool {
         .exports
         .iter()
         .any(|e| e.visibility == Visibility::Exported && e.name == wanted.as_str())
+}
+
+/// Whether `module` *defines* `wanted` at top level (a function, type, or const
+/// in [`Namespace::Value`]; a macro in [`Namespace::Macro`]). Unlike
+/// [`module_exports`], visibility is irrelevant: within a module every top-level
+/// binding is a global its own files see, exported or not. Names are stored bare
+/// for values and `@`-prefixed for macros, matching `wanted`.
+fn module_defines(module: &ModuleIndex, wanted: &SmolStr, namespace: Namespace) -> bool {
+    match namespace {
+        Namespace::Value => {
+            module.functions.iter().any(|f| f.name == wanted.as_str())
+                || module.types.iter().any(|t| t.name == wanted.as_str())
+                || module.consts.iter().any(|c| c.name == wanted.as_str())
+        }
+        Namespace::Macro => module.macros.iter().any(|m| m.name == wanted.as_str()),
+    }
+}
+
+/// Every name `module` defines at top level in `namespace`, as it would be typed
+/// (macros keep `@`), in definition order. The completion counterpart of
+/// [`module_defines`].
+fn defined_names(module: &ModuleIndex, namespace: Namespace) -> Vec<SmolStr> {
+    match namespace {
+        Namespace::Value => module
+            .functions
+            .iter()
+            .map(|f| f.name.as_str())
+            .chain(module.types.iter().map(|t| t.name.as_str()))
+            .chain(module.consts.iter().map(|c| c.name.as_str()))
+            .map(SmolStr::new)
+            .collect(),
+        Namespace::Macro => module
+            .macros
+            .iter()
+            .map(|m| SmolStr::new(&m.name))
+            .collect(),
+    }
 }
 
 /// The `export`ed names of `module` in the given namespace, as they would be
@@ -667,6 +766,130 @@ mod tests {
             Resolution::Binding(b) => assert_eq!(model.binding(b).kind, BindingKind::Import),
             other => panic!("expected the imported macro binding, got {other:?}"),
         }
+    }
+
+    // --- workspace tier (same-module cross-file siblings) ------------------
+
+    /// A package whose root module defines value symbols `functions` and macro
+    /// symbols `macros` (each `@name`), none of them exported — the shape of a
+    /// package's own top-level globals a sibling file sees.
+    fn workspace_pkg(name: &str, functions: &[&str], macros: &[&str]) -> Arc<PackageIndex> {
+        use crate::index::model::{FunctionGroup, MacroDef};
+        let mut pkg = (*package(name, &[])).clone();
+        pkg.root.functions = functions
+            .iter()
+            .map(|f| FunctionGroup {
+                name: f.to_string(),
+                owner: None,
+                methods: Vec::new(),
+                doc: None,
+            })
+            .collect();
+        pkg.root.macros = macros
+            .iter()
+            .map(|m| MacroDef {
+                name: m.to_string(),
+                params: Vec::new(),
+                doc: None,
+                loc: loc(),
+            })
+            .collect();
+        Arc::new(pkg)
+    }
+
+    fn resolve_ws(
+        src: &str,
+        name: &str,
+        lib: &BTreeMap<String, Arc<PackageIndex>>,
+        workspace: Option<Arc<PackageIndex>>,
+    ) -> Resolution {
+        let model = model_of(src);
+        let offset = after(src, name);
+        Resolver::new(&model, lib)
+            .with_workspace(workspace)
+            .resolve(name, offset, Namespace::Value)
+    }
+
+    #[test]
+    fn workspace_sibling_resolves_when_free() {
+        // `bar` is defined in a sibling file (harvested into the workspace
+        // package), not in this file: it resolves as a workspace symbol.
+        let ws = workspace_pkg("MyPkg", &["bar"], &[]);
+        let lib = library(&[package("Base", &[])]);
+        assert_eq!(
+            resolve_ws("bar()", "bar", &lib, Some(ws)),
+            Resolution::Workspace {
+                name: SmolStr::new("bar")
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_sibling_masks_using_and_base() {
+        // A same-module global outranks both a `using`'d export and Base.
+        let ws = workspace_pkg("MyPkg", &["dup"], &[]);
+        let lib = library(&[package("Base", &["dup"]), package("A", &["dup"])]);
+        assert_eq!(
+            resolve_ws("using A\ndup()", "dup", &lib, Some(ws)),
+            Resolution::Workspace {
+                name: SmolStr::new("dup")
+            }
+        );
+    }
+
+    #[test]
+    fn local_binding_still_wins_over_workspace() {
+        // A shadowing local must not be captured by the workspace tier.
+        let ws = workspace_pkg("MyPkg", &["x"], &[]);
+        let lib = library(&[package("Base", &[])]);
+        let src = "function f()\n    x = 1\n    x\nend";
+        let model = model_of(src);
+        let offset = after(src, "    x");
+        match Resolver::new(&model, &lib)
+            .with_workspace(Some(ws))
+            .resolve("x", offset, Namespace::Value)
+        {
+            Resolution::Binding(b) => assert_eq!(model.binding(b).kind, BindingKind::Local),
+            other => panic!("expected the local binding, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workspace_macro_resolves_in_macro_namespace() {
+        let ws = workspace_pkg("MyPkg", &[], &["@sib"]);
+        let lib = library(&[package("Base", &[])]);
+        let src = "@sib f()";
+        let model = model_of(src);
+        let offset = after(src, "@sib");
+        assert_eq!(
+            Resolver::new(&model, &lib)
+                .with_workspace(Some(ws))
+                .resolve("sib", offset, Namespace::Macro),
+            Resolution::Workspace {
+                name: SmolStr::new("@sib")
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_names_appear_in_completion_between_locals_and_using() {
+        let ws = workspace_pkg("MyPkg", &["sibling"], &[]);
+        let lib = library(&[package("Base", &["println"]), package("A", &["greet"])]);
+        let src = "using A\nfunction f(a)\n    b = 1\n    \nend";
+        let model = model_of(src);
+        let offset = after(src, "b = 1\n    ");
+        let names: Vec<String> = Resolver::new(&model, &lib)
+            .with_workspace(Some(ws))
+            .visible(offset, Namespace::Value)
+            .into_iter()
+            .map(|c| c.name.to_string())
+            .collect();
+        assert!(names.contains(&"sibling".to_string()), "{names:?}");
+        // Ordering: local `b` < workspace `sibling` < using `greet` < Base.
+        let pos = |n: &str| names.iter().position(|x| x == n).unwrap();
+        assert!(pos("b") < pos("sibling"));
+        assert!(pos("sibling") < pos("greet"));
+        assert!(pos("greet") < pos("println"));
     }
 
     // --- completion enumeration --------------------------------------------

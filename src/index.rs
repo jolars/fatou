@@ -37,6 +37,12 @@ pub use typeexpr::TypeExpr;
 pub struct HarvestedLibrary {
     pub packages: BTreeMap<String, Arc<PackageIndex>>,
     pub roots: BTreeMap<String, PathBuf>,
+    /// The package under development, if the environment is a package project:
+    /// its name, keying its entry in `packages`/`roots`. Unlike the read-only
+    /// depot packages, the workspace package's files are edited live, so its
+    /// symbols also resolve as the enclosing module's globals (see
+    /// [`Resolver`](crate::resolve::Resolver)) and it is re-harvested on save.
+    pub workspace: Option<String>,
 }
 
 /// Harvest a whole resolved environment: Base/Core/stdlib from its located
@@ -53,5 +59,21 @@ pub fn harvest_library(env: &Environment) -> HarvestedLibrary {
         lib.packages.insert(package.name.clone(), Arc::new(index));
         lib.roots.insert(package.name.clone(), source.clone());
     }
+    // The package under development, indexed like a depot package so its
+    // top-level symbols resolve across its own files. Registered last so it
+    // wins the name slot over any same-named dependency.
+    if let Some(dev) = env.dev_package() {
+        lib.packages
+            .insert(dev.name.clone(), Arc::new(harvest_workspace(&dev)));
+        lib.roots.insert(dev.name.clone(), dev.root);
+        lib.workspace = Some(dev.name);
+    }
     lib
+}
+
+/// Harvest just the package under development into a fresh [`PackageIndex`].
+/// Split out so the language server can re-run it on save without re-resolving
+/// the whole environment.
+pub fn harvest_workspace(dev: &crate::environment::DevPackage) -> PackageIndex {
+    harvest_package_named(&dev.root, &dev.name)
 }

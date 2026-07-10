@@ -101,6 +101,12 @@ pub struct LibraryIndex {
     pub packages: LibraryPackages,
     #[returns(ref)]
     pub roots: LibraryRoots,
+    /// The name of the package under development, keying its entry in
+    /// [`packages`](LibraryIndex::packages)/[`roots`](LibraryIndex::roots), or
+    /// `None` when the workspace is not a package project. Distinguishes the one
+    /// live, editable, re-harvested-on-save package from the read-only depot set.
+    #[returns(ref)]
+    pub workspace: Option<String>,
 }
 
 /// The cached parse of a file. The `GreenNode` is not `Eq`/`salsa::Update`, so
@@ -345,18 +351,25 @@ impl IncrementalDatabase {
         file.text(self).as_str()
     }
 
+    /// The on-disk path `file` was tracked under, or `None` for an in-memory
+    /// document.
+    pub fn file_path(&self, file: SourceFile) -> Option<PathBuf> {
+        file.path(self).clone()
+    }
+
     pub fn parsed_tree(&self, file: SourceFile) -> SyntaxNode {
         parsed_tree_root(self, file)
     }
 
-    /// Replace the whole harvested library index and its source roots, at HIGH
-    /// durability. Creates the singleton input on first call. Re-analyze open
-    /// files after a swap: dependents of the index (once they exist) will have
-    /// been invalidated.
+    /// Replace the whole harvested library index, its source roots, and the
+    /// workspace-package name, at HIGH durability. Creates the singleton input on
+    /// first call. Re-analyze open files after a swap: dependents of the index
+    /// (once they exist) will have been invalidated.
     pub fn set_library(
         &mut self,
         packages: BTreeMap<String, Arc<PackageIndex>>,
         roots: BTreeMap<String, PathBuf>,
+        workspace: Option<String>,
     ) {
         let packages = LibraryPackages(packages);
         let roots = LibraryRoots(roots);
@@ -370,11 +383,15 @@ impl IncrementalDatabase {
                     .set_roots(self)
                     .with_durability(Durability::HIGH)
                     .to(roots);
+                index
+                    .set_workspace(self)
+                    .with_durability(Durability::HIGH)
+                    .to(workspace);
             }
             None => {
                 // Creating the singleton input registers it in storage; the
                 // handle is refetched via `try_get` on later calls.
-                let _ = LibraryIndex::builder(packages, roots)
+                let _ = LibraryIndex::builder(packages, roots, workspace)
                     .durability(Durability::HIGH)
                     .new(self);
             }
@@ -382,16 +399,19 @@ impl IncrementalDatabase {
     }
 
     /// Replace the whole harvested library index, preserving any existing source
-    /// roots. Convenience for callers (tests) that only supply package data.
+    /// roots and workspace name. Convenience for callers (tests) that only supply
+    /// package data.
     pub fn set_library_packages(&mut self, packages: BTreeMap<String, Arc<PackageIndex>>) {
-        let roots = LibraryIndex::try_get(self)
-            .map(|lib| lib.roots(self).0.clone())
+        let (roots, workspace) = LibraryIndex::try_get(self)
+            .map(|lib| (lib.roots(self).0.clone(), lib.workspace(self).clone()))
             .unwrap_or_default();
-        self.set_library(packages, roots);
+        self.set_library(packages, roots, workspace);
     }
 
-    /// Insert or replace a single package's index, keeping the rest. Cheap: the
-    /// map's other entries are `Arc` pointer clones.
+    /// Insert or replace a single package's index, keeping the rest (and the
+    /// roots and workspace name). Cheap: the map's other entries are `Arc`
+    /// pointer clones. This is the on-save re-harvest path for the workspace
+    /// package.
     pub fn set_package_index(&mut self, name: impl Into<String>, index: Arc<PackageIndex>) {
         let mut packages = LibraryIndex::try_get(self)
             .map(|lib| lib.packages(self).0.clone())
@@ -418,6 +438,31 @@ impl IncrementalDatabase {
             .0
             .get(name)
             .cloned()
+    }
+
+    /// The name of the package under development, if the workspace is a package
+    /// project.
+    pub fn workspace_package(&self) -> Option<String> {
+        LibraryIndex::try_get(self)?.workspace(self).clone()
+    }
+
+    /// The workspace package's harvested index when `path` is one of its source
+    /// files (a file under the package's source root). Its top-level symbols are
+    /// the enclosing module's globals, visible across the package's files.
+    ///
+    /// Step-1 approximation: membership is a `src/` prefix check and the file
+    /// resolves against the package's *root* module; nested-`module` include
+    /// membership is deferred.
+    pub fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
+        let index = LibraryIndex::try_get(self)?;
+        let name = index.workspace(self).as_ref()?;
+        let root = index.roots(self).0.get(name)?;
+        let src = normalize_path(&root.join("src"));
+        if normalize_path(path).starts_with(&src) {
+            index.packages(self).0.get(name).cloned()
+        } else {
+            None
+        }
     }
 
     /// Mint a read-only [`Analysis`] snapshot: a short-lived db clone wrapped so
@@ -494,6 +539,17 @@ impl Analysis {
         self.0.package_root(name)
     }
 
+    /// The name of the package under development, if any.
+    pub fn workspace_package(&self) -> Option<String> {
+        self.0.workspace_package()
+    }
+
+    /// The workspace package's harvested index when `path` is one of its source
+    /// files. See [`IncrementalDatabase::workspace_module`].
+    pub fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
+        self.0.workspace_module(path)
+    }
+
     /// Resolve `name` read at `offset` in `file` through the shared masking
     /// order (locals/imports, then `using`'d exports, then Base/Core). `name` is
     /// bare even for a macro; pick the namespace with `namespace`.
@@ -504,7 +560,9 @@ impl Analysis {
         offset: TextSize,
         namespace: Namespace,
     ) -> Resolution {
-        Resolver::new(self.semantic_model(file), self).resolve(name, offset, namespace)
+        Resolver::new(self.semantic_model(file), self)
+            .with_workspace(self.workspace_module_for(file))
+            .resolve(name, offset, namespace)
     }
 
     /// Every name visible at `offset` in `file`, in the shared masking order
@@ -515,7 +573,16 @@ impl Analysis {
         offset: TextSize,
         namespace: Namespace,
     ) -> Vec<Candidate> {
-        Resolver::new(self.semantic_model(file), self).visible(offset, namespace)
+        Resolver::new(self.semantic_model(file), self)
+            .with_workspace(self.workspace_module_for(file))
+            .visible(offset, namespace)
+    }
+
+    /// The workspace package `file` belongs to (tier 2), if it is one of the
+    /// workspace package's source files.
+    fn workspace_module_for(&self, file: SourceFile) -> Option<Arc<PackageIndex>> {
+        let path = self.0.file_path(file)?;
+        self.workspace_module(&path)
     }
 }
 
@@ -528,6 +595,10 @@ impl PackageSource for Analysis {
 
     fn package_root(&self, name: &str) -> Option<PathBuf> {
         Analysis::package_root(self, name)
+    }
+
+    fn workspace_module(&self, path: &Path) -> Option<Arc<PackageIndex>> {
+        Analysis::workspace_module(self, path)
     }
 }
 

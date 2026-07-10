@@ -221,6 +221,10 @@ fn resolve_callee<P: PackageSource>(
             let pkg = packages.package(&module)?;
             library_callee(&pkg.root, &name)
         }
+        // This resolver carries no workspace context, so a same-module sibling
+        // never reaches here; signature help for workspace functions is a later
+        // Phase 5 item.
+        Resolution::Workspace { .. } => None,
         Resolution::Unresolved => None,
     }
 }
