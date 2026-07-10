@@ -39,17 +39,16 @@
 
       package = (
         pkgs.julia-bin.withPackages [
-          "JuliaFormatter"
-          "Makie"
           "CairoMakie"
+          "JET"
+          "JuliaFormatter"
+          "JuliaSyntax"
+          "Makie"
           "Plots"
+          "Revise"
           "Runic"
           "StaticLint"
-          "Revise"
           "Test"
-          "JuliaSyntax"
-          "JET"
-          "StaticLint"
         ]
       );
     };

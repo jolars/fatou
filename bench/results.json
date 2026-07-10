@@ -15,10 +15,10 @@
       "commit": "09576ca"
     },
     "versions": {
-      "fatou": "0.4.0",
+      "fatou": "0.5.0",
       "julia": "1.12.6",
-      "runic": "1.7.0",
-      "juliaformatter": "2.10.1"
+      "runic": "1.5.0",
+      "juliaformatter": "2.1.6"
     }
   },
   "scenarios": {
@@ -28,25 +28,25 @@
         "fatou": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 7008855,
-          "min_total_ns": 5927794,
-          "throughput_mbps": 5.983,
+          "median_total_ns": 6410487,
+          "min_total_ns": 6097265,
+          "throughput_mbps": 6.542,
           "skipped": []
         },
         "runic": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 21212802,
-          "min_total_ns": 19507440,
-          "throughput_mbps": 1.977,
+          "median_total_ns": 21856334,
+          "min_total_ns": 20169592,
+          "throughput_mbps": 1.919,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 9887118,
-          "min_total_ns": 9286923,
-          "throughput_mbps": 4.242,
+          "median_total_ns": 7841053,
+          "min_total_ns": 7181960,
+          "throughput_mbps": 5.348,
           "skipped": []
         }
       }
@@ -57,25 +57,17 @@
         "fatou": {
           "files_ok": 15,
           "total_bytes": 332783,
-          "median_total_ns": 53971893,
-          "min_total_ns": 46110277,
-          "throughput_mbps": 6.166,
-          "skipped": []
-        },
-        "runic": {
-          "files_ok": 15,
-          "total_bytes": 332783,
-          "median_total_ns": 216793170,
-          "min_total_ns": 199356285,
-          "throughput_mbps": 1.535,
+          "median_total_ns": 25932408,
+          "min_total_ns": 21468396,
+          "throughput_mbps": 12.833,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 15,
           "total_bytes": 332783,
-          "median_total_ns": 84545826,
-          "min_total_ns": 75625604,
-          "throughput_mbps": 3.936,
+          "median_total_ns": 32068487,
+          "min_total_ns": 25466609,
+          "throughput_mbps": 10.377,
           "skipped": []
         }
       }

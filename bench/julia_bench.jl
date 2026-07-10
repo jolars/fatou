@@ -11,8 +11,11 @@
 # and no first-call compilation counted.
 #
 # Usage:
-#   julia --startup-file=no bench/julia_bench.jl <filelist> <iterations> <warmup> <out.json>
-# where <filelist> has one source path per line.
+#   julia --startup-file=no bench/julia_bench.jl <target> <iterations> <warmup> <out.json> [mode]
+# where <mode> is "files" (default) and <target> is a file list (one path per
+# line), or "dir" and <target> is a directory. In "dir" mode only JuliaFormatter
+# is measured, via its recursive `format(dir; overwrite=false)`; Runic has no
+# in-process directory API and is reported unavailable.
 
 # --- minimal JSON writer (no JSON.jl dependency in the pinned env) -----------
 
@@ -57,6 +60,56 @@ function stats(samples::Vector{UInt64})
     mean = sum(Float64.(sorted)) / n
     var = sum((Float64.(sorted) .- mean) .^ 2) / n
     (mn, med, mean, sqrt(var))
+end
+
+# Recursively total the size and count of `.jl` files under `dir`, the byte and
+# file denominators for the directory measurement (matching what Fatou's
+# `collect_julia_files` discovers over the same tree).
+function jl_stats(dir::AbstractString)
+    total = 0
+    count = 0
+    for (root, _dirs, files) in walkdir(dir)
+        for f in files
+            if endswith(f, ".jl")
+                total += filesize(joinpath(root, f))
+                count += 1
+            end
+        end
+    end
+    (total, count)
+end
+
+# Project scenario: time a tool's whole-directory formatting entry point as a
+# single unit (discover + format every file, read-only), mirroring the Rust
+# harness's directory mode. `fmt` takes the directory path.
+function bench_dir(fmt, path::AbstractString, iterations::Int, warmup::Int)
+    bytes, n_files = jl_stats(path)
+
+    try
+        for _ in 1:max(warmup, 1)
+            fmt(path)
+        end
+    catch e
+        return Dict(
+            "path" => path, "bytes" => bytes, "n_files" => n_files, "ok" => false,
+            "error" => "format: $(sprint(showerror, e))",
+        )
+    end
+
+    samples = Vector{UInt64}(undef, iterations)
+    for i in 1:iterations
+        GC.gc()
+        t0 = time_ns()
+        fmt(path)
+        t1 = time_ns()
+        samples[i] = t1 - t0
+    end
+
+    mn, med, mean, sd = stats(samples)
+    Dict(
+        "path" => path, "bytes" => bytes, "n_files" => n_files, "ok" => true,
+        "min_ns" => mn, "median_ns" => med, "mean_ns" => mean, "stddev_ns" => sd,
+    )
 end
 
 function bench_file(fmt, path::AbstractString, iterations::Int, warmup::Int)
@@ -126,22 +179,43 @@ end
 # --- main --------------------------------------------------------------------
 
 function main()
-    filelist = ARGS[1]
+    target = ARGS[1]
     iterations = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 50
     warmup = length(ARGS) >= 3 ? parse(Int, ARGS[3]) : 3
     outpath = length(ARGS) >= 4 ? ARGS[4] : nothing
+    mode = length(ARGS) >= 5 ? ARGS[5] : "files"
 
-    files = filter(!isempty, strip.(readlines(filelist)))
+    tools = if mode == "dir"
+        # Folder scenario: JuliaFormatter's recursive, read-only directory mode.
+        # Runic has no in-process directory API, so it is excluded by design.
+        jlfmt_dir = HAVE_JLFMT ? (p -> JuliaFormatter.format(p; overwrite = false)) : identity
+        jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
+        jlfmt = if HAVE_JLFMT
+            Dict(
+                "tool" => "juliaformatter", "available" => true,
+                "version" => string(jlfmt_ver),
+                "files" => [bench_dir(jlfmt_dir, target, iterations, warmup)],
+            )
+        else
+            Dict("tool" => "juliaformatter", "available" => false, "version" => nothing, "files" => [])
+        end
+        [
+            Dict("tool" => "runic", "available" => false, "version" => nothing, "files" => []),
+            jlfmt,
+        ]
+    else
+        files = filter(!isempty, strip.(readlines(target)))
 
-    runic_fmt = HAVE_RUNIC ? (s -> Runic.format_string(s)) : identity
-    runic_ver = HAVE_RUNIC ? pkgversion(Runic) : nothing
-    jlfmt_fmt = HAVE_JLFMT ? (s -> JuliaFormatter.format_text(s)) : identity
-    jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
+        runic_fmt = HAVE_RUNIC ? (s -> Runic.format_string(s)) : identity
+        runic_ver = HAVE_RUNIC ? pkgversion(Runic) : nothing
+        jlfmt_fmt = HAVE_JLFMT ? (s -> JuliaFormatter.format_text(s)) : identity
+        jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
 
-    tools = [
-        run_tool("runic", HAVE_RUNIC, runic_fmt, runic_ver, files, iterations, warmup),
-        run_tool("juliaformatter", HAVE_JLFMT, jlfmt_fmt, jlfmt_ver, files, iterations, warmup),
-    ]
+        [
+            run_tool("runic", HAVE_RUNIC, runic_fmt, runic_ver, files, iterations, warmup),
+            run_tool("juliaformatter", HAVE_JLFMT, jlfmt_fmt, jlfmt_ver, files, iterations, warmup),
+        ]
+    end
 
     report = Dict(
         "julia_version" => string(VERSION),

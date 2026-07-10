@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Warm-loop benchmark: Fatou vs Runic vs JuliaFormatter over JuliaSyntax.jl.
 #
-# Each tool's pure String -> String formatter is timed in a warm loop inside its
-# own runtime (Rust for Fatou, a long-lived Julia process for Runic and
-# JuliaFormatter), so process startup and first-call JIT are excluded. Results
-# land in bench/results.json and docs/src/performance-table.md.
+# Each tool is timed in a warm loop inside its own runtime (Rust for Fatou, a
+# long-lived Julia process for Runic and JuliaFormatter), so process startup and
+# first-call JIT are excluded. Results land in bench/results.json, which the docs
+# `doc-utils` mdBook preprocessor reads to render the performance page.
 #
 # Scenarios:
-#   single_file  one substantial file all three tools handle (parse_stream.jl)
-#   project      every .jl in JuliaSyntax/src (per-tool coverage; skips reported)
+#   single_file  one substantial file all three tools handle (parse_stream.jl),
+#                via each tool's pure String -> String formatter.
+#   project      the whole JuliaSyntax/src tree via each tool's directory entry
+#                point: Fatou's parallel `check_paths` (discovery + read +
+#                rayon-parallel format, read-only) and JuliaFormatter's recursive
+#                `format(dir; overwrite=false)`. Runic has no in-process
+#                directory API, so it is excluded from this scenario.
 #
 # Env overrides: SINGLE_ITERS, PROJECT_ITERS, WARMUP, SINGLE_FILE, JULIA_PROJECT.
 # JULIA_PROJECT points Julia at an environment that provides Runic and
@@ -32,36 +37,37 @@ trap 'rm -rf "$TMP"' EXIT
 "$BENCH/corpus/download.sh"
 
 single_list="$TMP/single.txt"
-project_list="$TMP/project.txt"
 printf '%s\n' "$SRC/$SINGLE_FILE" > "$single_list"
-ls "$SRC"/*.jl > "$project_list"
 
 # --- Fatou (Rust warm harness) ----------------------------------------------
 echo "==> building fatou (release)"
 cargo build --release --quiet --manifest-path "$ROOT/Cargo.toml"
 
-run_fatou() {
-  local list="$1" iters="$2" out="$3"
-  FATOU_BENCH_FILELIST="$list" \
-  FATOU_BENCH_ITERATIONS="$iters" \
-  FATOU_BENCH_WARMUP="$WARMUP" \
-  FATOU_BENCH_OUTPUT_JSON="$out" \
-    cargo bench --quiet --manifest-path "$ROOT/Cargo.toml" --bench format_compare
-}
 echo "==> fatou: single file"
-run_fatou "$single_list" "$SINGLE_ITERS" "$TMP/fatou_single.json"
-echo "==> fatou: project"
-run_fatou "$project_list" "$PROJECT_ITERS" "$TMP/fatou_project.json"
+FATOU_BENCH_FILELIST="$single_list" \
+FATOU_BENCH_ITERATIONS="$SINGLE_ITERS" \
+FATOU_BENCH_WARMUP="$WARMUP" \
+FATOU_BENCH_OUTPUT_JSON="$TMP/fatou_single.json" \
+  cargo bench --quiet --manifest-path "$ROOT/Cargo.toml" --bench format_compare
+echo "==> fatou: project (directory)"
+FATOU_BENCH_DIR="$SRC" \
+FATOU_BENCH_ITERATIONS="$PROJECT_ITERS" \
+FATOU_BENCH_WARMUP="$WARMUP" \
+FATOU_BENCH_OUTPUT_JSON="$TMP/fatou_project.json" \
+  cargo bench --quiet --manifest-path "$ROOT/Cargo.toml" --bench format_compare
 
 # --- Runic + JuliaFormatter (Julia warm harness) -----------------------------
-julia_args=(--startup-file=no)
+# --threads=auto lets JuliaFormatter's recursive directory mode (Threads.@threads)
+# use every core in the project scenario, comparable to Fatou's rayon pool; the
+# single-threaded string loop is unaffected.
+julia_args=(--startup-file=no --threads=auto)
 [[ -n "${JULIA_PROJECT:-}" ]] && julia_args+=(--project="$JULIA_PROJECT")
 echo "==> julia tools: single file"
 julia "${julia_args[@]}" "$BENCH/julia_bench.jl" \
   "$single_list" "$SINGLE_ITERS" "$WARMUP" "$TMP/julia_single.json"
-echo "==> julia tools: project"
+echo "==> julia tools: project (directory)"
 julia "${julia_args[@]}" "$BENCH/julia_bench.jl" \
-  "$project_list" "$PROJECT_ITERS" "$WARMUP" "$TMP/julia_project.json"
+  "$SRC" "$PROJECT_ITERS" "$WARMUP" "$TMP/julia_project.json" dir
 
 if grep -q '"tool":"runic","available":false' "$TMP/julia_single.json"; then
   echo "WARNING: Runic is not loadable in this Julia environment." >&2
@@ -95,7 +101,6 @@ python3 "$BENCH/merge.py" \
   --fatou-single "$TMP/fatou_single.json" --julia-single "$TMP/julia_single.json" \
   --fatou-project "$TMP/fatou_project.json" --julia-project "$TMP/julia_project.json" \
   --meta "$TMP/meta.json" \
-  --out "$BENCH/results.json" \
-  --table "$ROOT/docs/src/performance-table.md"
+  --out "$BENCH/results.json"
 
 echo "==> done"
