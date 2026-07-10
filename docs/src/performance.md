@@ -12,7 +12,8 @@ few warmup calls, and then timed over many iterations. This deliberately
 **excludes process startup and first-call JIT compilation** for the Julia tools,
 which would otherwise dominate and obscure the actual formatting cost. In other
 words, these numbers reflect a long-lived editor or language-server session, not
-the cold `julia -e ...` command-line invocation.
+the cold `julia -e ...` command-line invocation. That cold path is measured
+separately in [Cold start](#cold-start) below.
 
 Because each tool runs in its own runtime, we report **throughput in MB/s**,
 which normalizes for byte count and stays comparable even when tools cover
@@ -46,3 +47,17 @@ the Julia path). Results are written to `bench/results.json`.
 ## Results
 
 {{ benchmark-results }}
+
+## Cold start
+
+The warm loop above is the right model for an editor or language server that
+stays resident, but it hides the cost a command-line user pays on the very first
+run. This section measures that **cold start** directly: each tool is invoked as
+a fresh process that starts up, formats the single file once, and exits. For the
+Julia tools that means paying Julia's startup, package loading, and first-call
+JIT compilation every time, through the same `julia -e 'using ...'` path a shell
+user would take; Fatou, a compiled binary, pays only process startup through
+`fatou format`. Only the single-file scenario is measured, and the numbers are
+dominated by fixed startup and compilation cost, not by the file's size.
+
+{{ benchmark-cold-start }}

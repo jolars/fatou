@@ -6,6 +6,7 @@
     "cpu": "Intel(R) Core(TM) Ultra 7 155U",
     "iterations_single": 50,
     "iterations_project": 20,
+    "iterations_cold": 5,
     "warmup": 3,
     "single_target": "parse_stream.jl",
     "project_target": "JuliaSyntax/src",
@@ -68,6 +69,35 @@
           "median_total_ns": 32068487,
           "min_total_ns": 25466609,
           "throughput_mbps": 10.377,
+          "skipped": []
+        }
+      }
+    },
+    "cold_start": {
+      "target": "parse_stream.jl",
+      "tools": {
+        "fatou": {
+          "files_ok": 1,
+          "total_bytes": 41937,
+          "median_total_ns": 9852525,
+          "min_total_ns": 8546055,
+          "throughput_mbps": 4.256,
+          "skipped": []
+        },
+        "runic": {
+          "files_ok": 1,
+          "total_bytes": 41937,
+          "median_total_ns": 266288952,
+          "min_total_ns": 239271272,
+          "throughput_mbps": 0.157,
+          "skipped": []
+        },
+        "juliaformatter": {
+          "files_ok": 1,
+          "total_bytes": 41937,
+          "median_total_ns": 321022504,
+          "min_total_ns": 293883200,
+          "throughput_mbps": 0.131,
           "skipped": []
         }
       }

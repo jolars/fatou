@@ -82,6 +82,20 @@ def scenario(target, fatou_report, julia_report):
     }
 
 
+def cold_scenario(report):
+    """Build the cold-start scenario from bench/cold_start.py's report, which
+    carries every tool (Fatou included) in one `tools` list. `julia_tools` keys
+    the available ones by name, so the same aggregation and ordering apply."""
+    if report is None:
+        return None
+    tools = julia_tools(report)
+    order = ["fatou", "runic", "juliaformatter"]
+    return {
+        "target": report.get("target", ""),
+        "tools": {t: aggregate(tools[t]) for t in order if t in tools},
+    }
+
+
 def version_of(fatou_report, julia_report):
     versions = {}
     if fatou_report:
@@ -99,22 +113,29 @@ def main():
     ap.add_argument("--julia-single", required=True)
     ap.add_argument("--fatou-project", required=True)
     ap.add_argument("--julia-project", required=True)
+    ap.add_argument("--cold", help="path to bench/cold_start.py's report (optional)")
     ap.add_argument("--meta", required=True, help="path to a JSON meta file")
     ap.add_argument("--out", required=True, help="results.json output path")
     args = ap.parse_args()
 
     fs, js = load(args.fatou_single), load(args.julia_single)
     fp, jp = load(args.fatou_project), load(args.julia_project)
+    cold = load(args.cold) if args.cold else None
     meta = json.loads(Path(args.meta).read_text())
     meta["versions"] = version_of(fs or fp, js or jp)
+
+    scenarios = {
+        "single_file": scenario(meta.get("single_target", ""), fs, js),
+        "project": scenario(meta.get("project_target", ""), fp, jp),
+    }
+    cold_sc = cold_scenario(cold)
+    if cold_sc is not None:
+        scenarios["cold_start"] = cold_sc
 
     results = {
         "schema_version": 1,
         "meta": meta,
-        "scenarios": {
-            "single_file": scenario(meta.get("single_target", ""), fs, js),
-            "project": scenario(meta.get("project_target", ""), fp, jp),
-        },
+        "scenarios": scenarios,
     }
 
     Path(args.out).write_text(json.dumps(results, indent=2) + "\n")

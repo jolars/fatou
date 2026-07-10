@@ -14,8 +14,12 @@
 #                rayon-parallel format, read-only) and JuliaFormatter's recursive
 #                `format(dir; overwrite=false)`. Runic has no in-process
 #                directory API, so it is excluded from this scenario.
+#   cold_start   the opposite of the warm loop: one fresh process per run on the
+#                single file, so process startup and (for the Julia tools) package
+#                load and first-call JIT all count. See bench/cold_start.py.
 #
-# Env overrides: SINGLE_ITERS, PROJECT_ITERS, WARMUP, SINGLE_FILE, JULIA_PROJECT.
+# Env overrides: SINGLE_ITERS, PROJECT_ITERS, COLD_ITERS, WARMUP, SINGLE_FILE,
+# JULIA_PROJECT.
 # JULIA_PROJECT points Julia at an environment that provides Runic and
 # JuliaFormatter; leave it unset to use the devenv default env.
 set -euo pipefail
@@ -27,6 +31,7 @@ SRC="$CORPUS/src"
 
 SINGLE_ITERS="${SINGLE_ITERS:-50}"
 PROJECT_ITERS="${PROJECT_ITERS:-20}"
+COLD_ITERS="${COLD_ITERS:-5}"
 WARMUP="${WARMUP:-3}"
 SINGLE_FILE="${SINGLE_FILE:-parse_stream.jl}"
 
@@ -74,6 +79,20 @@ if grep -q '"tool":"runic","available":false' "$TMP/julia_single.json"; then
   echo "         Reload the devenv/direnv shell (Runic is in devenv.nix) and re-run." >&2
 fi
 
+# --- cold start (fresh-process invocation, single file) ----------------------
+# Unlike the warm loops above, this times a full CLI invocation per iteration:
+# process startup plus, for the Julia tools, package load and first-call JIT.
+echo "==> cold start: single file (fresh process per run)"
+cold_project_args=()
+[[ -n "${JULIA_PROJECT:-}" ]] && cold_project_args=(--julia-project "$JULIA_PROJECT")
+python3 "$BENCH/cold_start.py" \
+  --file "$SRC/$SINGLE_FILE" \
+  --iterations "$COLD_ITERS" \
+  --out "$TMP/cold.json" \
+  --fatou "$ROOT/target/release/fatou" \
+  --julia julia \
+  "${cold_project_args[@]}"
+
 # --- metadata ----------------------------------------------------------------
 cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo unknown)"
 commit="$(git -C "$CORPUS" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -85,6 +104,7 @@ cat > "$TMP/meta.json" <<EOF
   "cpu": "$cpu",
   "iterations_single": $SINGLE_ITERS,
   "iterations_project": $PROJECT_ITERS,
+  "iterations_cold": $COLD_ITERS,
   "warmup": $WARMUP,
   "single_target": "$SINGLE_FILE",
   "project_target": "JuliaSyntax/src",
@@ -100,6 +120,7 @@ EOF
 python3 "$BENCH/merge.py" \
   --fatou-single "$TMP/fatou_single.json" --julia-single "$TMP/julia_single.json" \
   --fatou-project "$TMP/fatou_project.json" --julia-project "$TMP/julia_project.json" \
+  --cold "$TMP/cold.json" \
   --meta "$TMP/meta.json" \
   --out "$BENCH/results.json"
 
