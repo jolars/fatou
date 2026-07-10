@@ -109,6 +109,18 @@ pub struct LibraryIndex {
     pub workspace: Option<String>,
 }
 
+/// The workspace package's member files as salsa input handles, so the
+/// demand-only reverse-occurrence index ([`workspace_reference_index`],
+/// cross-file references/rename) can fan out over exactly the package's source
+/// set. Rebuilt on each (re-)harvest from [`PackageIndex::members`]. A separate
+/// input from [`LibraryIndex`] because it changes at a different cadence (its
+/// members are LOW-durability editable buffers, not the HIGH-durability library).
+#[salsa::input(singleton)]
+pub struct WorkspaceFiles {
+    #[returns(ref)]
+    pub files: Vec<SourceFile>,
+}
+
 /// The cached parse of a file. The `GreenNode` is not `Eq`/`salsa::Update`, so
 /// [`parsed_document`] is `no_eq, unsafe(non_update_types)`: salsa never
 /// compares parse outputs and relies purely on input (text) change detection to
@@ -418,6 +430,69 @@ impl IncrementalDatabase {
             .unwrap_or_default();
         packages.insert(name.into(), index);
         self.set_library_packages(packages);
+    }
+
+    /// Track the file at `path` for the reverse-occurrence index, seeding its
+    /// text from disk on first sight. **Create-or-return, never clobber:** if the
+    /// path is already tracked (an open editor buffer or a previously seeded
+    /// member) the existing input is returned untouched, because the tracked text
+    /// is authoritative and a stale disk read must never overwrite an open,
+    /// unsaved buffer. Inputs are created at the default (LOW) durability, like
+    /// open files, since a member's text changes per keystroke once it is opened.
+    /// Returns `None` if the file cannot be read and was not already tracked.
+    pub fn seed_disk_file(&mut self, path: &Path) -> Option<SourceFile> {
+        let key = normalize_path(path);
+        if let Some(file) = self.lookup_file(&key) {
+            return Some(file);
+        }
+        let text = std::fs::read_to_string(&key).ok()?;
+        let id = self
+            .source_map
+            .lock()
+            .expect("file source map mutex poisoned")
+            .alloc_id();
+        let file = SourceFile::new(self, id, Some(key.clone()), text);
+        self.source_map
+            .lock()
+            .expect("file source map mutex poisoned")
+            .by_path
+            .insert(key, file);
+        Some(file)
+    }
+
+    /// Replace the reverse-index file set (the [`WorkspaceFiles`] singleton),
+    /// creating it on first call. Unchanged membership still re-sets, but the
+    /// only consumer ([`workspace_reference_index`]) is demanded lazily, so a
+    /// needless revision bump costs at most one recompute on the next request.
+    pub fn set_workspace_files(&mut self, files: Vec<SourceFile>) {
+        match WorkspaceFiles::try_get(self) {
+            Some(wf) => {
+                wf.set_files(self).to(files);
+            }
+            None => {
+                let _ = WorkspaceFiles::builder(files).new(self);
+            }
+        }
+    }
+
+    /// Seed the workspace package's member files as inputs and register them as
+    /// the reverse-index file set. A no-op when the workspace is not a package
+    /// project or its index/root has not been harvested yet. Called right after
+    /// the library index is swapped in (on the analysis thread's write path).
+    pub fn seed_workspace_members(&mut self) {
+        let Some(name) = self.workspace_package() else {
+            return;
+        };
+        let (Some(pkg), Some(root)) = (self.library_package(&name), self.package_root(&name))
+        else {
+            return;
+        };
+        let files: Vec<SourceFile> = pkg
+            .members
+            .iter()
+            .filter_map(|rel| self.seed_disk_file(&root.join(rel)))
+            .collect();
+        self.set_workspace_files(files);
     }
 
     /// The harvested index for `name`, if the library has been populated and

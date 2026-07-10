@@ -157,3 +157,68 @@ fn workspace_name_and_membership_round_trip() {
     db.set_library_packages(map);
     assert_eq!(db.workspace_package().as_deref(), Some("MyPkg"));
 }
+
+/// A throwaway temp file, removed on drop.
+struct TempFile(std::path::PathBuf);
+
+impl TempFile {
+    fn new(name: &str, contents: &str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("fatou_seed_{}_{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        TempFile(path)
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if let Some(dir) = self.0.parent() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+#[test]
+fn seed_disk_file_reads_a_fresh_file_from_disk() {
+    let file = TempFile::new("fresh.jl", "f() = 1\n");
+    let mut db = IncrementalDatabase::new();
+
+    let seeded = db.seed_disk_file(&file.0).expect("the file reads");
+    assert_eq!(db.file_text(seeded), "f() = 1\n");
+    // A second seed of the same path returns the same input (create-or-return).
+    let again = db.seed_disk_file(&file.0).expect("still there");
+    assert!(seeded == again, "the same input is reused");
+}
+
+#[test]
+fn seed_disk_file_never_clobbers_an_open_buffer() {
+    // The load-bearing invariant: seeding must not overwrite an open, unsaved
+    // buffer with stale disk text, or the editor loses unsaved work.
+    let file = TempFile::new("open.jl", "on_disk() = 1\n");
+    let mut db = IncrementalDatabase::new();
+
+    // The editor opens the file with unsaved edits.
+    let opened = db.upsert_file(&file.0, "in_buffer() = 2\n".to_string());
+    // A re-harvest seeds the same member path.
+    let seeded = db.seed_disk_file(&file.0).expect("the file reads");
+
+    assert!(seeded == opened, "the open buffer's input is reused");
+    assert_eq!(
+        db.file_text(seeded),
+        "in_buffer() = 2\n",
+        "the buffer text wins over the disk read"
+    );
+}
+
+#[test]
+fn seed_disk_file_of_a_missing_file_is_none() {
+    let mut db = IncrementalDatabase::new();
+    assert!(
+        db.seed_disk_file(std::path::Path::new("/no/such/file.jl"))
+            .is_none()
+    );
+}

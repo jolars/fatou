@@ -170,9 +170,13 @@ impl AnalysisWorker {
                     match msg {
                         Ok(LibraryMessage::Full(lib)) => {
                             self.db.set_library(lib.packages, lib.roots, lib.workspace);
+                            // Seed the workspace package's member files as inputs
+                            // so cross-file references/rename can index them.
+                            self.db.seed_workspace_members();
                         }
                         Ok(LibraryMessage::Package { name, index }) => {
                             self.db.set_package_index(name, index);
+                            self.db.seed_workspace_members();
                         }
                         Err(_) => {}
                     }
