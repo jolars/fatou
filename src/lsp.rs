@@ -46,6 +46,7 @@
 
 mod analysis_thread;
 mod completion;
+mod cross_file;
 mod definition;
 mod folding;
 mod format;

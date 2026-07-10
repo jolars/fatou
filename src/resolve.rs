@@ -347,6 +347,58 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
         out
     }
 
+    /// The workspace top-level symbol the cursor at `offset` names, if any — a
+    /// package global defined in this file, or a free read resolving to the
+    /// workspace tier. `None` for a local, a library symbol, or a non-member
+    /// file. The classification cross-file references and rename escalate on;
+    /// it mirrors go-to-definition's cursor classification exactly.
+    pub fn workspace_symbol_at(&self, offset: TextSize) -> Option<(Namespace, SmolStr)> {
+        let workspace = self.workspace.as_ref()?;
+        // An identifier occurrence: local when it binds, else a free read.
+        if let Some(ident) = self.model.ident_at(offset) {
+            if let Some(bid) = ident.binding {
+                return self.binding_workspace_symbol(bid, workspace);
+            }
+            let ns = if ident.is_macro {
+                Namespace::Macro
+            } else {
+                Namespace::Value
+            };
+            return match self.resolve(&ident.name, offset, ns) {
+                Resolution::Workspace { name } => Some((ns, name)),
+                _ => None,
+            };
+        }
+        // A definition site (the cursor sits on a name in its own definition).
+        if let Some(bid) = self.model.binding_at(offset) {
+            return self.binding_workspace_symbol(bid, workspace);
+        }
+        None
+    }
+
+    /// `(namespace, name)` when `bid` is a module-global the workspace package
+    /// defines at top level — i.e. a package symbol other files can reference,
+    /// not a plain local or a file-scope global the harvester skips. The gate
+    /// matches `resolve`'s workspace tier, keeping references/rename in lockstep.
+    fn binding_workspace_symbol(
+        &self,
+        bid: BindingId,
+        workspace: &Arc<PackageIndex>,
+    ) -> Option<(Namespace, SmolStr)> {
+        let binding = self.model.binding(bid);
+        if !self.model.scope(binding.scope).kind.is_global() {
+            return None;
+        }
+        for ns in [Namespace::Value, Namespace::Macro] {
+            if let Some(name) = namespaced_binding_name(binding, ns)
+                && module_defines(&workspace.root, &name, ns)
+            {
+                return Some((ns, name));
+            }
+        }
+        None
+    }
+
     /// Tiers 1 + 2: the binding `wanted` reads to, resolving up the scope chain
     /// and stopping after the first global scope (module bodies do not see
     /// enclosing globals). Mirrors the builder's `resolve_read`.

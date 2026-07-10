@@ -6,12 +6,17 @@
 //! definition site plus every resolved identifier with its [`Access`]. The
 //! symbol at the cursor is classified as in [`definition`](super::definition):
 //! an occurrence that resolves to a binding, or a name sitting on its own
-//! definition site. A qualified or free read (a Base/Core or `using`'d library
-//! symbol) has no intra-file binding, so it yields nothing here; cross-file
-//! references are a Phase 5 item.
+//! definition site.
 //!
-//! References returns [`Location`]s in the current document (honoring the
-//! request's `include_declaration`); document highlight returns
+//! When the cursor is on a **workspace top-level symbol** (a global of the
+//! package under development), `references_via_db` escalates to the reverse-
+//! occurrence index and returns [`Location`]s across every member file (see
+//! [`cross_file`]). Anything else stays intra-file: a local binding reports its
+//! own document's sites, and a library free read (Base/Core, a `using`'d export,
+//! or a `Foo.bar` qualified read) has no workspace binding, so it yields nothing.
+//!
+//! References returns [`Location`]s (honoring the request's
+//! `include_declaration`); document highlight stays single-document and returns
 //! [`DocumentHighlight`]s tagged read/write from the occurrence's [`Access`].
 
 use std::panic::AssertUnwindSafe;
@@ -24,6 +29,8 @@ use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::semantic::{Access, BindingId, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
+
+use super::cross_file;
 
 /// The references to the symbol at `position` in `text`, re-parsing it. Pure and
 /// unit-testable; `uri` is the requesting document, since results point back at
@@ -81,6 +88,17 @@ pub(crate) fn references_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
+        // A workspace top-level symbol is answered from the reverse-occurrence
+        // index across every member file; anything else stays intra-file.
+        if let Some((ns, name)) = cross_file::workspace_symbol_at(snapshot, path, model, offset) {
+            let locations =
+                cross_file_references(snapshot, ns, &name, encoding, include_declaration);
+            // A non-empty cross-file result wins; an empty one (member set not
+            // seeded yet) falls through to the intra-file answer.
+            if !locations.is_empty() {
+                return Some(Some(locations));
+            }
+        }
         Some(references_for(
             model,
             uri,
@@ -94,6 +112,26 @@ pub(crate) fn references_via_db(
         Ok(Some(result)) => result,
         Ok(None) | Err(_) => compute_references(uri, text, position, encoding, include_declaration),
     }
+}
+
+/// The cross-file references to a workspace symbol, drawn from the
+/// reverse-occurrence index. Honors `include_declaration` by dropping the
+/// definition sites.
+fn cross_file_references(
+    snapshot: &Analysis,
+    namespace: crate::resolve::Namespace,
+    name: &smol_str::SmolStr,
+    encoding: PositionEncoding,
+    include_declaration: bool,
+) -> Vec<Location> {
+    cross_file::gather_sites(snapshot, namespace, name, encoding)
+        .into_iter()
+        .filter(|site| include_declaration || !site.is_def)
+        .map(|site| Location {
+            uri: site.uri,
+            range: site.range,
+        })
+        .collect()
 }
 
 /// Compute document highlights off the snapshot's cached parse when the tracked
@@ -291,5 +329,91 @@ mod tests {
         // `println` binds nowhere in this file, so there is nothing to report.
         assert!(refs("println|(1)", true).is_none());
         assert!(highlights("println|(1)").is_none());
+    }
+
+    /// Cross-file references over a hand-built workspace package: a request on a
+    /// top-level symbol reaches its uses in sibling files, not just this one.
+    #[test]
+    fn cross_file_references_span_member_files() {
+        use crate::lsp::cross_file::test_support::{member_path, workspace_db};
+        use crate::text::PositionEncoding::Utf16;
+
+        let a_text = "greet(a) = a\ngreet(1)\n";
+        let b_text = "callit() = greet(2)\n";
+        let (db, _) = workspace_db(&["greet"], &[("a.jl", a_text), ("b.jl", b_text)]);
+        let snapshot = db.snapshot();
+
+        let a_path = member_path("a.jl");
+        let a_uri = crate::lsp::uri::from_path(&a_path).unwrap();
+        let b_uri = crate::lsp::uri::from_path(&member_path("b.jl")).unwrap();
+
+        // Cursor on the `greet` definition in a.jl; declaration included.
+        let locs = references_via_db(
+            &snapshot,
+            &a_uri,
+            &a_path,
+            a_text,
+            Position::new(0, 0),
+            Utf16,
+            true,
+        )
+        .expect("greet is a workspace symbol");
+
+        // a.jl: definition (0,0) and the call (1,0); b.jl: the call at (0,11).
+        assert_eq!(locs.len(), 3, "{locs:?}");
+        assert!(
+            locs.iter()
+                .any(|l| l.uri == a_uri && l.range.start == Position::new(0, 0))
+        );
+        assert!(
+            locs.iter()
+                .any(|l| l.uri == a_uri && l.range.start == Position::new(1, 0))
+        );
+        assert!(
+            locs.iter()
+                .any(|l| l.uri == b_uri && l.range.start == Position::new(0, 11))
+        );
+
+        // Excluding the declaration drops the definition site, keeping the calls.
+        let uses = references_via_db(
+            &snapshot,
+            &a_uri,
+            &a_path,
+            a_text,
+            Position::new(0, 0),
+            Utf16,
+            false,
+        )
+        .unwrap();
+        assert_eq!(uses.len(), 2);
+        assert!(uses.iter().all(|l| l.range.start != Position::new(0, 0)));
+    }
+
+    /// A request from a *calling* file (the symbol is a free read there) still
+    /// reaches the definition and every use across the package.
+    #[test]
+    fn cross_file_references_from_a_calling_file() {
+        use crate::lsp::cross_file::test_support::{member_path, workspace_db};
+        use crate::text::PositionEncoding::Utf16;
+
+        let a_text = "greet(a) = a\n";
+        let b_text = "callit() = greet(2)\n";
+        let (db, _) = workspace_db(&["greet"], &[("a.jl", a_text), ("b.jl", b_text)]);
+        let snapshot = db.snapshot();
+        let b_path = member_path("b.jl");
+        let b_uri = crate::lsp::uri::from_path(&b_path).unwrap();
+
+        // Cursor on the `greet` call in b.jl (a free read resolving to MyPkg).
+        let locs = references_via_db(
+            &snapshot,
+            &b_uri,
+            &b_path,
+            b_text,
+            Position::new(0, 11),
+            Utf16,
+            true,
+        )
+        .expect("greet resolves to the workspace");
+        assert_eq!(locs.len(), 2, "the def in a.jl and the call in b.jl");
     }
 }
