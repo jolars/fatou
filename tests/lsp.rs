@@ -3127,6 +3127,7 @@ fn serves_cross_file_references_and_rename() {
         .unwrap();
     let resp = recv_response(&client, RequestId::from(201));
     let edit: WorkspaceEdit = serde_json::from_value(resp.result.unwrap()).unwrap();
+    #[allow(clippy::mutable_key_type)]
     let changes = edit.changes.expect("multi-file changes");
     for edits in changes.values() {
         for e in edits {
