@@ -222,3 +222,59 @@ fn seed_disk_file_of_a_missing_file_is_none() {
             .is_none()
     );
 }
+
+#[test]
+fn workspace_reference_index_unions_across_member_files() {
+    use std::collections::{BTreeMap, HashSet};
+    use std::path::{Path, PathBuf};
+
+    use fatou::index::FunctionGroup;
+    use fatou::resolve::Namespace;
+
+    // A workspace package MyPkg that defines a top-level `f`.
+    let mut pkg = empty_package("MyPkg");
+    pkg.root.functions.push(FunctionGroup {
+        name: "f".to_string(),
+        owner: None,
+        methods: Vec::new(),
+        doc: None,
+    });
+
+    let mut db = IncrementalDatabase::new();
+    // Two member files: `a.jl` defines `f` (def + a recursive use), `b.jl`
+    // only calls it (one free-read use).
+    let a = db.upsert_file(
+        Path::new("/work/MyPkg/src/a.jl"),
+        "function f()\n    f()\nend\n".to_string(),
+    );
+    let b = db.upsert_file(Path::new("/work/MyPkg/src/b.jl"), "g() = f()\n".to_string());
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(pkg));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_workspace_files(vec![a, b]);
+
+    let snap = db.snapshot();
+    let index = snap.workspace_reference_index();
+    let recs: Vec<_> = index
+        .0
+        .iter()
+        .filter(|(k, _)| k.0 == Namespace::Value && k.1.as_str() == "f")
+        .flat_map(|(_, v)| v.iter())
+        .collect();
+
+    // a.jl: definition + recursive call = 2; b.jl: one call = 1.
+    assert_eq!(recs.len(), 3, "occurrences from both files are unioned");
+    let paths: HashSet<_> = recs
+        .iter()
+        .filter_map(|(file, _)| snap.file_path_of(*file))
+        .collect();
+    assert_eq!(paths.len(), 2, "the symbol is referenced in both files");
+    assert_eq!(
+        recs.iter().filter(|(_, r)| r.is_def).count(),
+        1,
+        "exactly one definition site across the package"
+    );
+}

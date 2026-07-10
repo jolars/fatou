@@ -291,6 +291,53 @@ impl PackageSource for DbPackages<'_> {
     }
 }
 
+/// The workspace package's reverse-occurrence index: every occurrence of each
+/// top-level symbol across *all* member files, keyed by `(namespace, name)`,
+/// each tagged with the [`SourceFile`] it lives in. Cross-file references and
+/// rename read this directly. Unions [`file_workspace_occurrences`] over the
+/// [`WorkspaceFiles`] set, so editing one member re-runs only that file's
+/// projection before the (cheap) re-union.
+///
+/// **Demand-only** — pulled by the references/rename read jobs, never by an
+/// eager query. Empty when there is no workspace package or its files have not
+/// been seeded.
+#[salsa::tracked(returns(ref))]
+pub fn workspace_reference_index(db: &dyn IncrementalDb) -> WorkspaceReferenceIndex {
+    let mut out: BTreeMap<(Namespace, SmolStr), Vec<(SourceFile, OccurrenceRec)>> = BTreeMap::new();
+    let Some(wf) = WorkspaceFiles::try_get(db) else {
+        return WorkspaceReferenceIndex::default();
+    };
+    for &file in wf.files(db) {
+        let projection = file_workspace_occurrences(db, file);
+        for (key, recs) in &projection.0 {
+            let bucket = out.entry(key.clone()).or_default();
+            bucket.extend(recs.iter().map(|rec| (file, *rec)));
+        }
+    }
+    WorkspaceReferenceIndex(out)
+}
+
+/// The unioned reverse-occurrence index (the [`workspace_reference_index`]
+/// query). Wrapped for the opaque whole-value [`salsa::Update`]. No `Debug`
+/// derive: [`SourceFile`] is a salsa input without one.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct WorkspaceReferenceIndex(
+    pub BTreeMap<(Namespace, SmolStr), Vec<(SourceFile, OccurrenceRec)>>,
+);
+
+// SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]).
+unsafe impl salsa::Update for WorkspaceReferenceIndex {
+    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
+        let old = unsafe { &mut *old_pointer };
+        if *old == new {
+            false
+        } else {
+            *old = new;
+            true
+        }
+    }
+}
+
 /// Lexically normalize `path` for use as a deduplication key: absolutize it
 /// (without touching the filesystem) and collapse `.`/`..` segments. Purely
 /// textual, so it is stable for not-yet-saved buffers and never blocks on I/O.
@@ -684,6 +731,25 @@ impl Analysis {
     /// The file's static `include` edges (the [`include_edges`] firewall query).
     pub fn include_edges(&self, file: SourceFile) -> &[IncludeEdge] {
         include_edges(&self.0, file)
+    }
+
+    /// The workspace reverse-occurrence index: every member file's occurrences of
+    /// every top-level symbol, keyed by `(namespace, name)`. Backs cross-file
+    /// references and rename. See [`workspace_reference_index`].
+    pub fn workspace_reference_index(&self) -> &WorkspaceReferenceIndex {
+        workspace_reference_index(&self.0)
+    }
+
+    /// The on-disk path tracked for `file` (the reverse index tags each
+    /// occurrence with its [`SourceFile`]; this turns that back into a path).
+    pub fn file_path_of(&self, file: SourceFile) -> Option<PathBuf> {
+        self.0.file_path(file)
+    }
+
+    /// The text currently tracked for `file` (the buffer if open, else the
+    /// seeded disk text) — consistent with the reverse index within one snapshot.
+    pub fn file_text_of(&self, file: SourceFile) -> &str {
+        self.0.file_text(file)
     }
 
     /// The harvested index for package `name`, if present.
