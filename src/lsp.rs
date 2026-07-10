@@ -62,6 +62,7 @@ mod state;
 mod symbols;
 mod task_pool;
 mod uri;
+mod workspace_symbols;
 
 pub use completion::compute_completions;
 pub use definition::compute_definition;
@@ -75,3 +76,4 @@ pub use semantic_tokens::compute_semantic_tokens;
 pub use server::{run, serve};
 pub use signature_help::compute_signature_help;
 pub use symbols::compute_document_symbols;
+pub use workspace_symbols::compute_workspace_symbols;

@@ -14,7 +14,7 @@ use lsp_types::request::{
     Completion, DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting,
     GotoDefinition, HoverRequest, PrepareRenameRequest, RangeFormatting, References, Rename,
     Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
-    SemanticTokensFullRequest, SignatureHelpRequest,
+    SemanticTokensFullRequest, SignatureHelpRequest, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
@@ -23,6 +23,7 @@ use lsp_types::{
     DocumentSymbolParams, FoldingRangeParams, GotoDefinitionParams, HoverParams,
     PublishDiagnosticsParams, ReferenceParams, RenameParams, SelectionRangeParams,
     SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams, Uri,
+    WorkspaceSymbolParams,
 };
 
 use crate::formatter::FormatStyle;
@@ -88,6 +89,7 @@ impl GlobalState {
             Formatting::METHOD => self.on_formatting(req),
             RangeFormatting::METHOD => self.on_range_formatting(req),
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
+            WorkspaceSymbolRequest::METHOD => self.on_workspace_symbols(req),
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
@@ -172,6 +174,23 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    /// `workspace/symbol` is not tied to a text document; it searches the
+    /// harvested index of the package under development, so there is no buffer to
+    /// look up — the query goes straight to the analysis thread.
+    fn on_workspace_symbols(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<WorkspaceSymbolParams>(WorkspaceSymbolRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid workspaceSymbol params");
+            return;
+        };
+        self.dispatch_read(ReadJob::WorkspaceSymbols {
+            id,
+            query: params.query,
             sender: self.sender.clone(),
         });
     }

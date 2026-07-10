@@ -106,6 +106,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
+        workspace_symbol_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
             // `.` opens member completion, `@` opens macro completion.
             trigger_characters: Some(vec![".".to_string(), "@".to_string()]),

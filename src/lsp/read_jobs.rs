@@ -7,7 +7,7 @@ use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
     CompletionItem, CompletionResponse, DocumentSymbolResponse, GotoDefinitionResponse, Position,
-    Range, Uri,
+    Range, Uri, WorkspaceSymbolResponse,
 };
 
 use crate::formatter::FormatStyle;
@@ -25,6 +25,7 @@ use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
 use super::signature_help::signature_help_via_db;
 use super::symbols::document_symbols_via_db;
+use super::workspace_symbols::workspace_symbols_via_db;
 
 /// A read-only request the analysis thread services by cloning its salsa db
 /// and running the work off-thread on the read pool. Each variant carries the
@@ -50,6 +51,11 @@ pub(crate) enum ReadJob {
         id: RequestId,
         path: PathBuf,
         text: String,
+        sender: Sender<Message>,
+    },
+    WorkspaceSymbols {
+        id: RequestId,
+        query: String,
         sender: Sender<Message>,
     },
     FoldingRanges {
@@ -147,6 +153,7 @@ impl ReadJob {
             ReadJob::Format { id, sender, .. } => (id, sender),
             ReadJob::FormatRange { id, sender, .. } => (id, sender),
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
+            ReadJob::WorkspaceSymbols { id, sender, .. } => (id, sender),
             ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
             ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
             ReadJob::SemanticTokensFull { id, sender, .. } => (id, sender),
@@ -197,6 +204,11 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let symbols = document_symbols_via_db(&snapshot, &path, &text, encoding);
             let result = DocumentSymbolResponse::Nested(symbols);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+        }
+        ReadJob::WorkspaceSymbols { id, query, sender } => {
+            let symbols = workspace_symbols_via_db(&snapshot, &query, encoding);
+            let result = WorkspaceSymbolResponse::Nested(symbols);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
         ReadJob::FoldingRanges {

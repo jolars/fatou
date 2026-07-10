@@ -21,7 +21,7 @@ use lsp_types::{
     SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp,
     SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
     TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceEdit,
+    WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::str::FromStr;
 
@@ -1709,6 +1709,94 @@ fn serves_document_symbols() {
         .sender
         .send(Message::Request(Request {
             id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// End-to-end workspace symbols: the server advertises the provider, and a
+/// `workspace/symbol` query with no Julia environment loaded returns an empty
+/// list (the in-memory connection stands up no depot, so the depot-resolution
+/// path is covered by the unit tests, as go-to-definition's is).
+#[test]
+fn serves_workspace_symbols() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            assert_eq!(
+                resp.result.unwrap()["capabilities"]["workspaceSymbolProvider"],
+                serde_json::json!(true),
+                "expected the workspace symbol provider to be advertised"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- query with no workspace package loaded → an empty symbol list ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "workspace/symbol".to_string(),
+            params: serde_json::to_value(WorkspaceSymbolParams {
+                query: "foo".to_string(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let response: WorkspaceSymbolResponse =
+                serde_json::from_value(resp.result.unwrap()).unwrap();
+            match response {
+                WorkspaceSymbolResponse::Nested(symbols) => assert!(
+                    symbols.is_empty(),
+                    "no environment loaded, so no workspace symbols"
+                ),
+                WorkspaceSymbolResponse::Flat(symbols) => assert!(symbols.is_empty()),
+            }
+        }
+        other => panic!("expected a workspaceSymbol response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

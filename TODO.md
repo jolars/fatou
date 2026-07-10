@@ -362,7 +362,23 @@ The payoff phase, in roughly arity's shipping order.
   package under development have landed (see the project-graph note above);*
   cross-file references and rename (needing a reverse occurrence index across
   files) and navigation into `using`'d workspace submodules remain.
-- [ ] Workspace symbols (fuzzy subsequence match over top-level definitions).
+- [x] Workspace symbols (fuzzy subsequence match over top-level definitions):
+  pure `compute_workspace_symbols` (`src/lsp/workspace_symbols.rs`) walks the
+  harvested `PackageIndex` of the package under development (recursing
+  submodules), keeps every function/type/const/macro/(sub)module whose name is a
+  case-insensitive subsequence of the query (empty query returns all), and
+  materializes each match's `DefLocation` into an on-disk `Location` the same way
+  go-to-definition does (join the package-relative path with the source root,
+  read the file once, convert the byte span). Symbols carry the enclosing
+  module's `container_name`; kinds mirror document symbols (`MODULE`, `STRUCT`,
+  `INTERFACE`, `CONSTANT`, `FUNCTION` for functions and macros). There is no
+  live-buffer or cached-parse gate: the result is a projection of the
+  `LibraryIndex` salsa input, so `workspace_symbols_via_db` reads the workspace
+  name off the `Analysis` snapshot (itself the `PackageSource`) and delegates.
+  Wired through a document-less `ReadJob::WorkspaceSymbols`, advertised via
+  `workspace_symbol_provider`. Locked by inline units plus `serves_workspace_symbols`
+  in `tests/lsp.rs`. *Deferred:* fuzzy *ranking* (results follow harvest order)
+  and lazy `workspaceSymbol/resolve` (locations resolve eagerly).
 - [ ] `workspace/didChangeWatchedFiles`: `Project.toml`/`Manifest.toml`
   changes re-resolve the environment; file create/delete refreshes
   membership.
