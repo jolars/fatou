@@ -48,6 +48,7 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
     let mut harvester = Harvester {
         root: source_root.to_path_buf(),
         visited: HashSet::new(),
+        members: Vec::new(),
         diagnostics: Vec::new(),
         root_filled: false,
     };
@@ -87,6 +88,7 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
     PackageIndex {
         name: name.to_string(),
         root,
+        members: harvester.members,
         diagnostics: harvester.diagnostics,
     }
 }
@@ -96,6 +98,9 @@ struct Harvester {
     root: PathBuf,
     /// Canonicalized files already walked — the cycle and duplicate guard.
     visited: HashSet<PathBuf>,
+    /// Every source file walked, package-relative and in walk order. Recorded
+    /// once per unique file (the `visited` guard runs before [`walk_text`]).
+    members: Vec<PathBuf>,
     diagnostics: Vec<HarvestDiagnostic>,
     /// Whether the synthesized root module has been matched to a literal
     /// `module <Name>` in the source yet.
@@ -139,6 +144,7 @@ impl Harvester {
     }
 
     fn walk_text(&mut self, text: &str, file: &Path, dest: &mut ModuleIndex, at_root: bool) {
+        self.members.push(self.relative(file));
         let parsed = crate::parser::parse(text);
         if !parsed.diagnostics.is_empty() {
             self.diagnostics.push(HarvestDiagnostic::ParseError {
@@ -1069,6 +1075,7 @@ mod tests {
         let mut harvester = Harvester {
             root: PathBuf::from("/pkg"),
             visited: HashSet::new(),
+            members: Vec::new(),
             diagnostics: Vec::new(),
             root_filled: false,
         };

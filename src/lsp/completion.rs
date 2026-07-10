@@ -474,6 +474,7 @@ mod tests {
         Arc::new(PackageIndex {
             name: root.name.clone(),
             root,
+            members: Vec::new(),
             diagnostics: Vec::new(),
         })
     }

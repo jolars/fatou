@@ -26,6 +26,7 @@ fn empty_package(name: &str) -> PackageIndex {
             macros: Vec::new(),
             submodules: Vec::new(),
         },
+        members: Vec::new(),
         diagnostics: Vec::new(),
     }
 }

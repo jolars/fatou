@@ -100,6 +100,16 @@ fn include_chain_splices_into_top_module() {
         "both included files land in the top module"
     );
     assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+    // The member set is the include closure, package-relative, entry first.
+    let members: Vec<&Path> = index.members.iter().map(PathBuf::as_path).collect();
+    assert_eq!(
+        members,
+        [
+            Path::new("src/Pkg.jl"),
+            Path::new("src/a.jl"),
+            Path::new("src/b.jl"),
+        ],
+    );
 }
 
 #[test]
@@ -202,6 +212,11 @@ fn duplicate_include_walks_once() {
         index.root.functions[0].methods.len(),
         1,
         "the second include is skipped, not a second method"
+    );
+    // The duplicated include records the file once, not twice.
+    assert_eq!(
+        index.members,
+        [PathBuf::from("src/Pkg.jl"), PathBuf::from("src/a.jl")],
     );
 }
 

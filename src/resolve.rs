@@ -544,6 +544,7 @@ mod tests {
                 macros: Vec::new(),
                 submodules,
             },
+            members: Vec::new(),
             diagnostics: Vec::new(),
         })
     }

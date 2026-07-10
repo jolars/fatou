@@ -39,6 +39,7 @@ fn package(name: &str, exports: &[&str]) -> Arc<PackageIndex> {
             macros: Vec::new(),
             submodules: Vec::new(),
         },
+        members: Vec::new(),
         diagnostics: Vec::new(),
     })
 }

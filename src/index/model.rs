@@ -42,13 +42,18 @@ pub struct DefLocation {
     pub range: Span,
 }
 
-/// A harvested package: its name, the root module tree, and any non-fatal
-/// diagnostics gathered along the way (unreadable files, unresolved includes,
-/// parse errors, include cycles).
+/// A harvested package: its name, the root module tree, the source files that
+/// make up the package (the include closure), and any non-fatal diagnostics
+/// gathered along the way (unreadable files, unresolved includes, parse errors,
+/// include cycles).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackageIndex {
     pub name: String,
     pub root: ModuleIndex,
+    /// Every source file walked, package-relative and in walk order (the entry
+    /// file first, then each statically `include`d file). The reverse-occurrence
+    /// index (cross-file references/rename) seeds a salsa input per member.
+    pub members: Vec<PathBuf>,
     pub diagnostics: Vec<HarvestDiagnostic>,
 }
 
