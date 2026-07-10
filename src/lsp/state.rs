@@ -13,13 +13,13 @@ use lsp_types::notification::{
 use lsp_types::request::{
     Completion, DocumentSymbolRequest, FoldingRangeRequest, Formatting, HoverRequest,
     RangeFormatting, Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
-    SemanticTokensFullRequest,
+    SemanticTokensFullRequest, SignatureHelpRequest,
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, FoldingRangeParams, HoverParams,
-    PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams, Uri,
+    PublishDiagnosticsParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams, Uri,
 };
 
 use crate::formatter::FormatStyle;
@@ -86,6 +86,7 @@ impl GlobalState {
             Completion::METHOD => self.on_completion(req),
             ResolveCompletionItem::METHOD => self.on_completion_resolve(req),
             HoverRequest::METHOD => self.on_hover(req),
+            SignatureHelpRequest::METHOD => self.on_signature_help(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -255,6 +256,27 @@ impl GlobalState {
             return;
         };
         self.dispatch_read(ReadJob::Hover {
+            id,
+            path: path_for(&uri),
+            text,
+            position: params.text_document_position_params.position,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_signature_help(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<SignatureHelpParams>(SignatureHelpRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid signatureHelp params");
+            return;
+        };
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::SignatureHelp {
             id,
             path: path_for(&uri),
             text,

@@ -8,7 +8,7 @@ use lsp_server::{Connection, Message};
 use lsp_types::{
     ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability,
     InitializeParams, OneOf, PositionEncodingKind, SelectionRangeProviderCapability,
-    SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities,
+    SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 
@@ -81,6 +81,13 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             ..Default::default()
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        signature_help_provider: Some(SignatureHelpOptions {
+            // `(` opens signature help, `,` (also a retrigger) advances the
+            // active parameter.
+            trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+            retrigger_characters: Some(vec![",".to_string()]),
+            work_done_progress_options: Default::default(),
+        }),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(

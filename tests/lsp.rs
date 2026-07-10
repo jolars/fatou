@@ -16,9 +16,9 @@ use lsp_types::{
     FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
     GeneralClientCapabilities, Hover, HoverContents, HoverParams, InitializeParams, Position,
     PositionEncodingKind, PublishDiagnosticsParams, Range, SelectionRange, SelectionRangeParams,
-    SemanticTokens, SemanticTokensParams, SymbolKind, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri,
-    VersionedTextDocumentIdentifier,
+    SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams, SymbolKind,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
 };
 use std::str::FromStr;
 
@@ -319,6 +319,125 @@ fn hovers_a_local_definition() {
             );
         }
         other => panic!("expected a hover response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// The server advertises signature help and answers `textDocument/signatureHelp`
+/// for a call to an intra-file function, highlighting the argument the cursor is
+/// on.
+#[test]
+fn serves_signature_help() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capabilities announce signature help ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let init_response = client.receiver.recv().unwrap();
+    match init_response {
+        Message::Response(resp) => {
+            let triggers =
+                &resp.result.unwrap()["capabilities"]["signatureHelpProvider"]["triggerCharacters"];
+            assert_eq!(
+                *triggers,
+                serde_json::json!(["(", ","]),
+                "expected signature help trigger characters to be advertised"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document defining and calling a local function ---
+    let uri = Uri::from_str("file:///work/s.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a, b) = a\ngreet(1, 2)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag_note = client.receiver.recv().unwrap();
+    assert!(matches!(diag_note, Message::Notification(_)));
+
+    // --- signature help on the second argument of `greet(1, 2)` at (1, 9) ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/signatureHelp".to_string(),
+            params: serde_json::to_value(SignatureHelpParams {
+                context: None,
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(1, 9),
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let help_response = client.receiver.recv().unwrap();
+    match help_response {
+        Message::Response(resp) => {
+            let help: SignatureHelp = serde_json::from_value(resp.result.unwrap()).unwrap();
+            assert_eq!(
+                help.signatures
+                    .iter()
+                    .map(|s| s.label.as_str())
+                    .collect::<Vec<_>>(),
+                ["greet(a, b)"],
+                "expected the local function signature"
+            );
+            assert_eq!(
+                help.active_parameter,
+                Some(1),
+                "cursor is in the second argument"
+            );
+        }
+        other => panic!("expected a signatureHelp response, got {other:?}"),
     }
 
     // --- shutdown / exit ---

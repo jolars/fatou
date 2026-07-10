@@ -17,6 +17,7 @@ use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
 use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
+use super::signature_help::signature_help_via_db;
 use super::symbols::document_symbols_via_db;
 
 /// A read-only request the analysis thread services by cloning its salsa db
@@ -83,6 +84,13 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: Sender<Message>,
     },
+    SignatureHelp {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -99,6 +107,7 @@ impl ReadJob {
             ReadJob::Completion { id, sender, .. } => (id, sender),
             ReadJob::CompletionResolve { id, sender, .. } => (id, sender),
             ReadJob::Hover { id, sender, .. } => (id, sender),
+            ReadJob::SignatureHelp { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -192,6 +201,16 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let hover = hover_via_db(&snapshot, &path, &text, position, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, hover)));
+        }
+        ReadJob::SignatureHelp {
+            id,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let help = signature_help_via_db(&snapshot, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, help)));
         }
     }
 }

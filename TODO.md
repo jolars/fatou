@@ -280,7 +280,18 @@ The payoff phase, in roughly arity's shipping order.
   `completionItem/resolve` for lazy docs.
 - [x] Hover: local binding info; for library symbols, signature(s) and
   docstring rendered as markdown (multiple dispatch: show the method group).
-- [ ] Signature help (triggers `(` and `,`), including keyword arguments.
+- [x] Signature help (triggers `(` and `,`), including keyword arguments):
+  pure `compute_signature_help` (`src/lsp/signature_help.rs`) finds the
+  innermost enclosing `CALL_EXPR`, counts top-level commas for the active
+  positional parameter (clamping into a trailing `x...` vararg) and matches the
+  keyword under the cursor past the `;` against the method's keyword params. The
+  callee resolves through the shared masking order (`Resolver`): a library
+  method group renders one `SignatureInformation` per method (capped at 10,
+  docstring as documentation), an intra-file function shows the single signature
+  read off its definition's parameter list. Per-parameter label offsets come
+  from the shared `signature_label` in `src/lsp/render.rs` (which `render_method`
+  now reuses). Warm `signature_help_via_db` path off the cached parse; behavior
+  locked by inline units plus the `serves_signature_help` end-to-end test.
 - [ ] Go-to-definition: intra-file bindings; library symbols jump straight
   into depot sources (real files on disk—nicer than R's compiled lazy-load
   DBs).

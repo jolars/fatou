@@ -17,20 +17,45 @@ pub(crate) fn function_detail(group: &FunctionGroup) -> String {
 
 /// The `(params; keywords)` of a method, rendered compactly.
 pub(crate) fn render_method(method: &Method) -> String {
-    let mut out = String::from("(");
-    let positional: Vec<String> = method.params.iter().map(render_param).collect();
-    out.push_str(&positional.join(", "));
+    // Share the assembly with [`signature_label`]; the empty name yields a bare
+    // `(params; keywords)::ret` and the offsets are discarded.
+    signature_label("", method).0
+}
+
+/// A method's full signature label (`name(params; keywords)::ret`) together with
+/// the `[start, end)` UTF-16 offsets of each parameter within it, positional
+/// then keyword in order. Feeds LSP signature help's per-parameter highlighting.
+pub(crate) fn signature_label(name: &str, method: &Method) -> (String, Vec<(u32, u32)>) {
+    let mut out = String::from(name);
+    out.push('(');
+    let mut spans: Vec<(u32, u32)> = Vec::new();
+    let mut push_param = |out: &mut String, param: &Param| {
+        let start = out.encode_utf16().count() as u32;
+        out.push_str(&render_param(param));
+        let end = out.encode_utf16().count() as u32;
+        spans.push((start, end));
+    };
+    for (i, param) in method.params.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        push_param(&mut out, param);
+    }
     if !method.keyword_params.is_empty() {
         out.push_str("; ");
-        let kw: Vec<String> = method.keyword_params.iter().map(render_param).collect();
-        out.push_str(&kw.join(", "));
+        for (i, param) in method.keyword_params.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            push_param(&mut out, param);
+        }
     }
     out.push(')');
     if let Some(ret) = &method.return_type {
         out.push_str("::");
         out.push_str(&render_type(ret));
     }
-    out
+    (out, spans)
 }
 
 pub(crate) fn render_param(param: &Param) -> String {
