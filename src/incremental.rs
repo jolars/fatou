@@ -605,6 +605,24 @@ impl IncrementalDatabase {
         }
     }
 
+    /// Revert the tracked input for `path` to its on-disk text, if the file is
+    /// tracked and readable. Used when an editor closes a member file: the
+    /// discarded (possibly unsaved) buffer must not linger in the
+    /// reverse-occurrence index, where on-disk content is authoritative once the
+    /// document is closed. A no-op for an untracked path, an unreadable or deleted
+    /// file, or text already matching disk (so no needless revision bump).
+    pub fn revert_file_to_disk(&mut self, path: &Path) {
+        let Some(file) = self.lookup_file(path) else {
+            return;
+        };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        if file.text(self) != &text {
+            file.set_text(self).to(text);
+        }
+    }
+
     /// Seed the workspace package's member files as inputs and register them as
     /// the reverse-index file set. A no-op when the workspace is not a package
     /// project or its index/root has not been harvested yet. Called right after

@@ -195,6 +195,30 @@ fn seed_disk_file_reads_a_fresh_file_from_disk() {
 }
 
 #[test]
+fn revert_file_to_disk_drops_an_unsaved_buffer() {
+    // On close, a member file's discarded buffer must be replaced by on-disk
+    // text so it stops contributing stale occurrences to the reverse index.
+    let file = TempFile::new("m.jl", "greet() = 1\n");
+    let mut db = IncrementalDatabase::new();
+    let f = db.upsert_file(&file.0, "greet() = 999\n".to_string());
+    assert_eq!(db.file_text(f), "greet() = 999\n");
+
+    db.revert_file_to_disk(&file.0);
+    assert_eq!(db.file_text(f), "greet() = 1\n", "reverted to on-disk text");
+}
+
+#[test]
+fn revert_file_to_disk_ignores_untracked_and_missing() {
+    let mut db = IncrementalDatabase::new();
+    // An untracked path is a no-op (must not panic or create an input).
+    db.revert_file_to_disk(std::path::Path::new("/no/such/file.jl"));
+    assert!(
+        db.lookup_file(std::path::Path::new("/no/such/file.jl"))
+            .is_none()
+    );
+}
+
+#[test]
 fn seed_disk_file_never_clobbers_an_open_buffer() {
     // The load-bearing invariant: seeding must not overwrite an open, unsaved
     // buffer with stale disk text, or the editor loses unsaved work.
@@ -277,4 +301,51 @@ fn workspace_reference_index_unions_across_member_files() {
         1,
         "exactly one definition site across the package"
     );
+}
+
+#[test]
+fn resetting_workspace_files_drops_removed_members() {
+    // Reconciliation on re-harvest: a file no longer in the member set stops
+    // contributing to the reverse index (occurrences from a dropped file vanish).
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    use fatou::index::FunctionGroup;
+    use fatou::resolve::Namespace;
+
+    let mut pkg = empty_package("MyPkg");
+    pkg.root.functions.push(FunctionGroup {
+        name: "f".to_string(),
+        owner: None,
+        methods: Vec::new(),
+        doc: None,
+    });
+
+    let mut db = IncrementalDatabase::new();
+    let a = db.upsert_file(Path::new("/work/MyPkg/src/a.jl"), "f() = 1\n".to_string());
+    let b = db.upsert_file(Path::new("/work/MyPkg/src/b.jl"), "g() = f()\n".to_string());
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(pkg));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+
+    let count_f = |db: &IncrementalDatabase| -> usize {
+        let snap = db.snapshot();
+        snap.workspace_reference_index()
+            .0
+            .iter()
+            .filter(|(k, _)| k.0 == Namespace::Value && k.1.as_str() == "f")
+            .map(|(_, v)| v.len())
+            .sum()
+    };
+
+    // Both files in the set: the definition in a.jl plus the call in b.jl.
+    db.set_workspace_files(vec![a, b]);
+    assert_eq!(count_f(&db), 2);
+
+    // A re-harvest that drops b.jl from the member set: only a.jl's def remains.
+    db.set_workspace_files(vec![a]);
+    assert_eq!(count_f(&db), 1, "the removed member no longer contributes");
 }

@@ -158,6 +158,9 @@ fn main_loop(
     // Save signals from the main loop to the workspace harvester: the saved
     // file's path (the harvester ignores saves outside the workspace package).
     let (save_tx, save_rx) = crossbeam_channel::unbounded::<PathBuf>();
+    // Close signals from the main loop to the analysis thread: the closed file's
+    // path, reverted to on-disk text so a discarded buffer leaves the index.
+    let (close_tx, close_rx) = crossbeam_channel::unbounded::<PathBuf>();
 
     // Resolve the environment and harvest its packages off the event loop: it
     // walks the filesystem and parses all of Base, so it must not block the
@@ -175,6 +178,7 @@ fn main_loop(
         analysis_rx,
         read_rx,
         library_rx,
+        close_rx,
         out_tx,
         read_pool.spawner(),
         encoding,
@@ -185,6 +189,7 @@ fn main_loop(
         analysis_tx,
         read_tx,
         save_tx,
+        close_tx,
         encoding,
     );
 

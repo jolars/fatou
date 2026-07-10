@@ -62,6 +62,10 @@ pub(crate) struct GlobalState {
     /// Save signals to the workspace harvester: the saved file's path. It
     /// re-harvests the workspace package when the path is one of its files.
     save_tx: Sender<PathBuf>,
+    /// Close signals to the analysis thread: the closed file's path, whose
+    /// tracked input is reverted to on-disk text (a discarded buffer must not
+    /// linger in the reverse-occurrence index).
+    close_tx: Sender<PathBuf>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
 }
@@ -72,6 +76,7 @@ impl GlobalState {
         analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
         save_tx: Sender<PathBuf>,
+        close_tx: Sender<PathBuf>,
         encoding: PositionEncoding,
     ) -> Self {
         Self {
@@ -80,6 +85,7 @@ impl GlobalState {
             analysis_tx,
             read_tx,
             save_tx,
+            close_tx,
             encoding,
         }
     }
@@ -501,6 +507,12 @@ impl GlobalState {
                 {
                     let uri = params.text_document.uri;
                     self.documents.remove(&uri);
+                    // Revert the tracked input to on-disk text: the closed
+                    // buffer's (possibly unsaved) edits must not linger in the
+                    // reverse-occurrence index. A dead channel is a no-op.
+                    if let Some(path) = uri::to_path(&uri) {
+                        let _ = self.close_tx.send(path);
+                    }
                     // Tell the client to clear stale diagnostics.
                     self.publish(uri, Vec::new(), None);
                 }
