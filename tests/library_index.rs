@@ -95,7 +95,7 @@ fn source_roots_round_trip_through_set_library() {
     packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
     let mut roots = BTreeMap::new();
     roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo/abcde"));
-    db.set_library(packages, roots, None);
+    db.set_library(packages, roots, Vec::new());
 
     assert_eq!(
         db.package_root("Foo"),
@@ -120,7 +120,7 @@ fn set_library_packages_preserves_existing_roots() {
     packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
     let mut roots = BTreeMap::new();
     roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo"));
-    db.set_library(packages, roots, None);
+    db.set_library(packages, roots, Vec::new());
 
     // A packages-only update (the back-compat convenience) keeps the roots.
     let mut map = BTreeMap::new();
@@ -136,15 +136,15 @@ fn workspace_name_and_membership_round_trip() {
     use std::path::{Path, PathBuf};
 
     let mut db = IncrementalDatabase::new();
-    assert!(db.workspace_package().is_none());
+    assert!(db.workspace_packages().is_empty());
 
     let mut packages = BTreeMap::new();
     packages.insert("MyPkg".to_string(), Arc::new(empty_package("MyPkg")));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
 
-    assert_eq!(db.workspace_package().as_deref(), Some("MyPkg"));
+    assert_eq!(db.workspace_packages(), vec!["MyPkg".to_string()]);
     // A file under the package's `src/` is a member; one outside is not.
     assert!(
         db.workspace_module(Path::new("/work/MyPkg/src/bar.jl"))
@@ -156,7 +156,7 @@ fn workspace_name_and_membership_round_trip() {
     let mut map = BTreeMap::new();
     map.insert("MyPkg".to_string(), Arc::new(empty_package("MyPkg")));
     db.set_library_packages(map);
-    assert_eq!(db.workspace_package().as_deref(), Some("MyPkg"));
+    assert_eq!(db.workspace_packages(), vec!["MyPkg".to_string()]);
 }
 
 /// A throwaway temp file, removed on drop.
@@ -278,7 +278,7 @@ fn workspace_reference_index_unions_across_member_files() {
     packages.insert("MyPkg".to_string(), Arc::new(pkg));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
     db.set_workspace_files(vec![a, b]);
 
     let snap = db.snapshot();
@@ -359,7 +359,7 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
     packages.insert("MyPkg".to_string(), Arc::new(pkg));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
     db.set_workspace_files(vec![entry, a, sub]);
 
     let snap = db.snapshot();
@@ -442,7 +442,7 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
     packages.insert("MyPkg".to_string(), Arc::new(pkg));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
     db.set_workspace_files(vec![entry, root, sub]);
 
     let snap = db.snapshot();
@@ -497,7 +497,7 @@ fn resetting_workspace_files_drops_removed_members() {
     packages.insert("MyPkg".to_string(), Arc::new(pkg));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
 
     let count_f = |db: &IncrementalDatabase| -> usize {
         let snap = db.snapshot();
@@ -539,7 +539,7 @@ fn seed_project(files: &[(&str, &str)]) -> IncrementalDatabase {
     packages.insert("MyPkg".to_string(), Arc::new(empty_package("MyPkg")));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
     db.set_workspace_files(seeded);
     db
 }
@@ -699,7 +699,7 @@ fn graph_host_modules_agree_with_the_harvester() {
     packages.insert("Pkg".to_string(), Arc::clone(&index));
     let mut roots = BTreeMap::new();
     roots.insert("Pkg".to_string(), root.clone());
-    db.set_library(packages, roots, Some("Pkg".to_string()));
+    db.set_library(packages, roots, vec!["Pkg".to_string()]);
     db.seed_workspace_members();
 
     let snap = db.snapshot();

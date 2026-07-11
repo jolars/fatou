@@ -261,7 +261,7 @@ fn host_module_of_backdates_across_graph_rederivations() {
     packages.insert("MyPkg".to_string(), Arc::new(pkg));
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
     db.set_workspace_files(vec![entry, b]);
 
     assert_eq!(probe_host_module(&db, b), 1, "b.jl hosts inside Sub");

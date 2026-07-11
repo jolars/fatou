@@ -174,7 +174,7 @@ pub(crate) mod test_support {
         packages.insert("MyPkg".to_string(), Arc::new(pkg));
         let mut roots = BTreeMap::new();
         roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
-        db.set_library(packages, roots, Some("MyPkg".to_string()));
+        db.set_library(packages, roots, vec!["MyPkg".to_string()]);
         db.set_workspace_files(handles.clone());
         (db, handles)
     }

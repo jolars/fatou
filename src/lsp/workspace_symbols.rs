@@ -28,21 +28,20 @@ use crate::text::{LineIndex, PositionEncoding};
 use super::uri::from_path;
 
 /// The workspace symbols matching `query`, drawn from the package under
-/// development named `workspace`. Pure and unit-testable; `packages` supplies the
-/// harvested index plus its source roots (mirroring [`compute_definition`]'s
-/// shape). Yields nothing when there is no workspace package, its index or source
-/// root is unknown, or nothing matches.
+/// development named `workspace` (one folder's package; the caller merges
+/// across folders). Pure and unit-testable; `packages` supplies the harvested
+/// index plus its source roots (mirroring [`compute_definition`]'s shape).
+/// Yields nothing when the package's index or source root is unknown, or
+/// nothing matches.
 ///
 /// [`compute_definition`]: super::definition::compute_definition
 pub fn compute_workspace_symbols<P: PackageSource>(
     query: &str,
     packages: &P,
-    workspace: Option<&str>,
+    workspace: &str,
     encoding: PositionEncoding,
 ) -> Vec<WorkspaceSymbol> {
-    let Some(name) = workspace else {
-        return Vec::new();
-    };
+    let name = workspace;
     let (Some(pkg), Some(root)) = (packages.package(name), packages.package_root(name)) else {
         return Vec::new();
     };
@@ -97,8 +96,11 @@ pub(crate) fn workspace_symbols_via_db(
     query: &str,
     encoding: PositionEncoding,
 ) -> Vec<WorkspaceSymbol> {
-    let workspace = snapshot.workspace_package();
-    compute_workspace_symbols(query, snapshot, workspace.as_deref(), encoding)
+    snapshot
+        .workspace_packages()
+        .iter()
+        .flat_map(|name| compute_workspace_symbols(query, snapshot, name, encoding))
+        .collect()
 }
 
 /// A definition that matched the query, before its location is read off disk.
@@ -307,7 +309,7 @@ mod tests {
     }
 
     /// The matched symbol names for `query`, sorted for order-independent asserts.
-    fn names(query: &str, lib: &TestLib, workspace: Option<&str>) -> Vec<String> {
+    fn names(query: &str, lib: &TestLib, workspace: &str) -> Vec<String> {
         let mut got: Vec<String> =
             compute_workspace_symbols(query, lib, workspace, PositionEncoding::Utf16)
                 .into_iter()
@@ -346,7 +348,7 @@ mod tests {
         );
         // The module itself plus its six members.
         assert_eq!(
-            names("", &lib, Some("MyPkg")),
+            names("", &lib, "MyPkg"),
             vec!["@m", "K", "MyPkg", "Point", "Shape", "bar", "foo"]
         );
     }
@@ -360,17 +362,19 @@ mod tests {
             )],
             "MyPkg",
         );
-        assert_eq!(names("fb", &lib, Some("MyPkg")), vec!["foobar"]);
-        assert_eq!(names("f", &lib, Some("MyPkg")), vec!["fizz", "foobar"]);
+        assert_eq!(names("fb", &lib, "MyPkg"), vec!["foobar"]);
+        assert_eq!(names("f", &lib, "MyPkg"), vec!["fizz", "foobar"]);
     }
 
     #[test]
-    fn no_workspace_returns_empty() {
+    fn unknown_workspace_returns_empty() {
         let (_tmp, lib) = harvest(
             &[("src/MyPkg.jl", "module MyPkg\nfoo(x) = x\nend\n")],
             "MyPkg",
         );
-        assert!(compute_workspace_symbols("foo", &lib, None, PositionEncoding::Utf16).is_empty());
+        assert!(
+            compute_workspace_symbols("foo", &lib, "Missing", PositionEncoding::Utf16).is_empty()
+        );
     }
 
     #[test]
@@ -382,8 +386,7 @@ mod tests {
             )],
             "MyPkg",
         );
-        let syms =
-            compute_workspace_symbols("inner_fn", &lib, Some("MyPkg"), PositionEncoding::Utf16);
+        let syms = compute_workspace_symbols("inner_fn", &lib, "MyPkg", PositionEncoding::Utf16);
         assert_eq!(syms.len(), 1);
         assert_eq!(syms[0].name, "inner_fn");
         assert_eq!(syms[0].container_name.as_deref(), Some("Inner"));
@@ -396,7 +399,7 @@ mod tests {
             "MyPkg",
         );
         // Typed without the sigil, `timed` is still a subsequence of `@timed`.
-        let syms = compute_workspace_symbols("timed", &lib, Some("MyPkg"), PositionEncoding::Utf16);
+        let syms = compute_workspace_symbols("timed", &lib, "MyPkg", PositionEncoding::Utf16);
         assert_eq!(syms.len(), 1);
         assert_eq!(syms[0].name, "@timed");
         let OneOf::Left(loc) = &syms[0].location else {
@@ -421,7 +424,7 @@ mod tests {
             ],
             "MyPkg",
         );
-        let syms = compute_workspace_symbols("bar", &lib, Some("MyPkg"), PositionEncoding::Utf16);
+        let syms = compute_workspace_symbols("bar", &lib, "MyPkg", PositionEncoding::Utf16);
         assert_eq!(syms.len(), 1);
         let OneOf::Left(loc) = &syms[0].location else {
             panic!("expected a resolved location");
@@ -444,8 +447,7 @@ mod tests {
         lib.packages.insert("MyPkg".to_string(), Arc::new(pkg));
         // No `roots` entry.
         assert!(
-            compute_workspace_symbols("foo", &lib, Some("MyPkg"), PositionEncoding::Utf16)
-                .is_empty()
+            compute_workspace_symbols("foo", &lib, "MyPkg", PositionEncoding::Utf16).is_empty()
         );
     }
 }

@@ -185,8 +185,8 @@ impl AnalysisWorker {
                     // diagnostic depends on the library yet.
                     match msg {
                         Ok(LibraryMessage::Full(lib)) => {
-                            self.db.set_library(lib.packages, lib.roots, lib.workspace);
-                            // Seed the workspace package's member files as inputs
+                            self.db.set_library(lib.packages, lib.roots, lib.workspaces);
+                            // Seed the workspace packages' member files as inputs
                             // so cross-file references/rename can index them.
                             self.db.seed_workspace_members();
                             self.refresh_graph_diagnostics();

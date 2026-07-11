@@ -37,12 +37,13 @@ pub use typeexpr::TypeExpr;
 pub struct HarvestedLibrary {
     pub packages: BTreeMap<String, Arc<PackageIndex>>,
     pub roots: BTreeMap<String, PathBuf>,
-    /// The package under development, if the environment is a package project:
-    /// its name, keying its entry in `packages`/`roots`. Unlike the read-only
-    /// depot packages, the workspace package's files are edited live, so its
-    /// symbols also resolve as the enclosing module's globals (see
-    /// [`Resolver`](crate::resolve::Resolver)) and it is re-harvested on save.
-    pub workspace: Option<String>,
+    /// The packages under development, one per workspace folder that is a
+    /// package project: their names, sorted, each keying an entry in
+    /// `packages`/`roots`. Unlike the read-only depot packages, a workspace
+    /// package's files are edited live, so its symbols also resolve as the
+    /// enclosing module's globals (see [`Resolver`](crate::resolve::Resolver))
+    /// and it is re-harvested on save.
+    pub workspaces: Vec<String>,
 }
 
 /// Harvest a whole resolved environment: Base/Core/stdlib from its located
@@ -66,7 +67,7 @@ pub fn harvest_library(env: &Environment) -> HarvestedLibrary {
         lib.packages
             .insert(dev.name.clone(), Arc::new(harvest_workspace(&dev)));
         lib.roots.insert(dev.name.clone(), dev.root);
-        lib.workspace = Some(dev.name);
+        lib.workspaces = vec![dev.name];
     }
     lib
 }

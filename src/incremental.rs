@@ -105,12 +105,13 @@ pub struct LibraryIndex {
     pub packages: LibraryPackages,
     #[returns(ref)]
     pub roots: LibraryRoots,
-    /// The name of the package under development, keying its entry in
-    /// [`packages`](LibraryIndex::packages)/[`roots`](LibraryIndex::roots), or
-    /// `None` when the workspace is not a package project. Distinguishes the one
-    /// live, editable, re-harvested-on-save package from the read-only depot set.
+    /// The names of the packages under development (one per workspace folder
+    /// that is a package project), sorted, each keying an entry in
+    /// [`packages`](LibraryIndex::packages)/[`roots`](LibraryIndex::roots).
+    /// Empty when no folder is a package project. Distinguishes the live,
+    /// editable, re-harvested-on-save packages from the read-only depot set.
     #[returns(ref)]
-    pub workspace: Option<String>,
+    pub workspaces: Vec<String>,
 }
 
 /// The workspace package's member files as salsa input handles, so the
@@ -285,23 +286,20 @@ enum IncludeColor {
     Black,
 }
 
-/// The package's transitive include graph (see [`ProjectGraph`]). Demand-only:
-/// pulled by the diagnostics path and, through [`host_module_of`], by the
-/// workspace resolution tier — never by an eager query. Empty when there is no
-/// workspace package or its member files have not been seeded.
+/// The transitive include graph of every workspace package, merged (see
+/// [`ProjectGraph`]; paths under distinct package roots cannot collide, so one
+/// shared graph is unambiguous). Demand-only: pulled by the diagnostics path
+/// and, through [`host_module_of`], by the workspace resolution tier — never by
+/// an eager query. Empty when no folder is a package project or the member
+/// files have not been seeded.
 #[salsa::tracked(returns(ref))]
 pub fn project_graph(db: &dyn IncrementalDb) -> ProjectGraph {
     let mut graph = ProjectGraph::default();
     let (Some(wf), Some(lib)) = (WorkspaceFiles::try_get(db), LibraryIndex::try_get(db)) else {
         return graph;
     };
-    let Some(name) = lib.workspace(db).clone() else {
-        return graph;
-    };
-    let Some(root) = lib.roots(db).0.get(&name).cloned() else {
-        return graph;
-    };
-    let entry = normalize_path(&root.join("src").join(format!("{name}.jl")));
+    let mut names = lib.workspaces(db).clone();
+    names.sort();
 
     // Normalized path -> seeded input, so an include target resolves to a member
     // without reaching the concrete db's path map (unavailable from `&dyn`).
@@ -311,21 +309,33 @@ pub fn project_graph(db: &dyn IncrementalDb) -> ProjectGraph {
             by_path.insert(normalize_path(path), file);
         }
     }
-    let Some(&entry_file) = by_path.get(&entry) else {
-        return graph;
-    };
 
+    // The walks share `color` (and the graph): first visit wins across
+    // packages too, matching today's diamond semantics should one package's
+    // closure reach into another's files.
     let mut color: HashMap<PathBuf, IncludeColor> = HashMap::new();
-    walk_include_graph(
-        db,
-        &by_path,
-        entry,
-        entry_file,
-        Vec::new(),
-        &name,
-        &mut color,
-        &mut graph,
-    );
+    for name in names {
+        let Some(root) = lib.roots(db).0.get(&name).cloned() else {
+            continue;
+        };
+        let entry = normalize_path(&root.join("src").join(format!("{name}.jl")));
+        let Some(&entry_file) = by_path.get(&entry) else {
+            continue; // Not seeded (yet); skip this package, keep the rest.
+        };
+        if color.contains_key(&entry) {
+            continue; // Already reached from an earlier package's closure.
+        }
+        walk_include_graph(
+            db,
+            &by_path,
+            entry,
+            entry_file,
+            Vec::new(),
+            &name,
+            &mut color,
+            &mut graph,
+        );
+    }
     graph
 }
 
@@ -424,16 +434,28 @@ pub fn host_module_of(db: &dyn IncrementalDb, file: SourceFile) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// The workspace package when `path` lies under its source root — the gate of
-/// `workspace_member`, shared by the path- and file-keyed variants.
+/// The workspace package whose source root contains `path` — the gate of
+/// `workspace_member`, shared by the path- and file-keyed variants. With
+/// several workspace packages the *longest* matching `src/` prefix wins, so a
+/// package folder nested inside another folder claims its own files.
 fn workspace_package_for(db: &dyn IncrementalDb, path: &Path) -> Option<Arc<PackageIndex>> {
     let index = LibraryIndex::try_get(db)?;
-    let name = index.workspace(db).as_ref()?;
-    let root = index.roots(db).0.get(name)?;
-    let src = normalize_path(&root.join("src"));
-    if !normalize_path(path).starts_with(&src) {
-        return None;
+    let path = normalize_path(path);
+    let mut best: Option<(usize, &String)> = None;
+    for name in index.workspaces(db) {
+        let Some(root) = index.roots(db).0.get(name) else {
+            continue;
+        };
+        let src = normalize_path(&root.join("src"));
+        if !path.starts_with(&src) {
+            continue;
+        }
+        let depth = src.components().count();
+        if best.is_none_or(|(d, _)| depth > d) {
+            best = Some((depth, name));
+        }
     }
+    let (_, name) = best?;
     index.packages(db).0.get(name).cloned()
 }
 
@@ -729,14 +751,14 @@ impl IncrementalDatabase {
     }
 
     /// Replace the whole harvested library index, its source roots, and the
-    /// workspace-package name, at HIGH durability. Creates the singleton input on
-    /// first call. Re-analyze open files after a swap: dependents of the index
-    /// (once they exist) will have been invalidated.
+    /// workspace-package names, at HIGH durability. Creates the singleton input
+    /// on first call. Re-analyze open files after a swap: dependents of the
+    /// index (once they exist) will have been invalidated.
     pub fn set_library(
         &mut self,
         packages: BTreeMap<String, Arc<PackageIndex>>,
         roots: BTreeMap<String, PathBuf>,
-        workspace: Option<String>,
+        workspaces: Vec<String>,
     ) {
         let packages = LibraryPackages(packages);
         let roots = LibraryRoots(roots);
@@ -751,14 +773,14 @@ impl IncrementalDatabase {
                     .with_durability(Durability::HIGH)
                     .to(roots);
                 index
-                    .set_workspace(self)
+                    .set_workspaces(self)
                     .with_durability(Durability::HIGH)
-                    .to(workspace);
+                    .to(workspaces);
             }
             None => {
                 // Creating the singleton input registers it in storage; the
                 // handle is refetched via `try_get` on later calls.
-                let _ = LibraryIndex::builder(packages, roots, workspace)
+                let _ = LibraryIndex::builder(packages, roots, workspaces)
                     .durability(Durability::HIGH)
                     .new(self);
             }
@@ -766,18 +788,18 @@ impl IncrementalDatabase {
     }
 
     /// Replace the whole harvested library index, preserving any existing source
-    /// roots and workspace name. Convenience for callers (tests) that only supply
-    /// package data.
+    /// roots and workspace names. Convenience for callers (tests) that only
+    /// supply package data.
     pub fn set_library_packages(&mut self, packages: BTreeMap<String, Arc<PackageIndex>>) {
-        let (roots, workspace) = LibraryIndex::try_get(self)
-            .map(|lib| (lib.roots(self).0.clone(), lib.workspace(self).clone()))
+        let (roots, workspaces) = LibraryIndex::try_get(self)
+            .map(|lib| (lib.roots(self).0.clone(), lib.workspaces(self).clone()))
             .unwrap_or_default();
-        self.set_library(packages, roots, workspace);
+        self.set_library(packages, roots, workspaces);
     }
 
     /// Insert or replace a single package's index, keeping the rest (and the
-    /// roots and workspace name). Cheap: the map's other entries are `Arc`
-    /// pointer clones. This is the on-save re-harvest path for the workspace
+    /// roots and workspace names). Cheap: the map's other entries are `Arc`
+    /// pointer clones. This is the on-save re-harvest path for a workspace
     /// package.
     pub fn set_package_index(&mut self, name: impl Into<String>, index: Arc<PackageIndex>) {
         let mut packages = LibraryIndex::try_get(self)
@@ -848,23 +870,32 @@ impl IncrementalDatabase {
         }
     }
 
-    /// Seed the workspace package's member files as inputs and register them as
-    /// the reverse-index file set. A no-op when the workspace is not a package
-    /// project or its index/root has not been harvested yet. Called right after
-    /// the library index is swapped in (on the analysis thread's write path).
+    /// Seed every workspace package's member files as inputs and register their
+    /// union as the reverse-index file set. A no-op when no folder is a package
+    /// project or nothing has been harvested yet. Called right after the library
+    /// index is swapped in (on the analysis thread's write path).
     pub fn seed_workspace_members(&mut self) {
-        let Some(name) = self.workspace_package() else {
+        let names = self.workspace_packages();
+        if names.is_empty() {
             return;
-        };
-        let (Some(pkg), Some(root)) = (self.library_package(&name), self.package_root(&name))
-        else {
-            return;
-        };
-        let files: Vec<SourceFile> = pkg
-            .members
-            .iter()
-            .filter_map(|rel| self.seed_disk_file(&root.join(rel)))
-            .collect();
+        }
+        let mut files: Vec<SourceFile> = Vec::new();
+        let mut seen: std::collections::HashSet<SourceFile> = std::collections::HashSet::new();
+        for name in names {
+            let (Some(pkg), Some(root)) = (self.library_package(&name), self.package_root(&name))
+            else {
+                continue;
+            };
+            // Dedup across packages: overlapping folders must not register a
+            // file twice, or the reference index would double-count it.
+            for rel in &pkg.members {
+                if let Some(file) = self.seed_disk_file(&root.join(rel))
+                    && seen.insert(file)
+                {
+                    files.push(file);
+                }
+            }
+        }
         self.set_workspace_files(files);
     }
 
@@ -888,10 +919,12 @@ impl IncrementalDatabase {
             .cloned()
     }
 
-    /// The name of the package under development, if the workspace is a package
-    /// project.
-    pub fn workspace_package(&self) -> Option<String> {
-        LibraryIndex::try_get(self)?.workspace(self).clone()
+    /// The names of the packages under development (one per workspace folder
+    /// that is a package project), empty when none.
+    pub fn workspace_packages(&self) -> Vec<String> {
+        LibraryIndex::try_get(self)
+            .map(|lib| lib.workspaces(self).clone())
+            .unwrap_or_default()
     }
 
     /// The workspace package and the host module path of `path`, when `path` is
@@ -1020,9 +1053,9 @@ impl Analysis {
         self.0.package_root(name)
     }
 
-    /// The name of the package under development, if any.
-    pub fn workspace_package(&self) -> Option<String> {
-        self.0.workspace_package()
+    /// The names of the packages under development, empty when none.
+    pub fn workspace_packages(&self) -> Vec<String> {
+        self.0.workspace_packages()
     }
 
     /// The workspace package and host module path of `path`, when `path` is one

@@ -48,7 +48,7 @@ pub fn build_system_library(install: Option<&JuliaInstall>) -> HarvestedLibrary 
         None => HarvestedLibrary {
             packages: fallback_system(),
             roots: BTreeMap::new(),
-            workspace: None,
+            workspaces: Vec::new(),
         },
     }
 }
@@ -89,7 +89,7 @@ fn harvest_system(install: &JuliaInstall) -> HarvestedLibrary {
     HarvestedLibrary {
         packages,
         roots,
-        workspace: None,
+        workspaces: Vec::new(),
     }
 }
 
