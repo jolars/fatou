@@ -2,7 +2,7 @@
 //! and the non-triggering cases that guard against false positives.
 
 use fatou::config::LintConfig;
-use fatou::linter::check_source;
+use fatou::linter::{Severity, check_source};
 
 /// Lint `src` with only `rule` enabled and return the messages it produced, in
 /// source order.
@@ -189,6 +189,69 @@ fn assignment_in_condition_ignores_plain_condition_and_call_kwarg() {
     assert_eq!(
         count("assignment-in-condition", "if f(x = 1)\n    1\nend\n"),
         0
+    );
+}
+
+// --- severity ----------------------------------------------------------------
+
+/// The severity a single finding of `rule` in `src` carries under `config`.
+fn severity_of(rule: &str, src: &str, config: &LintConfig) -> Severity {
+    let report = check_source(None, src, config);
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.rule == rule)
+        .expect("rule should fire");
+    diag.severity
+}
+
+#[test]
+fn findings_carry_the_rule_default_severity() {
+    let config = LintConfig::default();
+    // duplicate-argument is a hard error (Julia rejects the definition).
+    assert_eq!(
+        severity_of("duplicate-argument", "f(x, x) = x\n", &config),
+        Severity::Error
+    );
+    assert_eq!(
+        severity_of("unused-import", "using A: foo\n1\n", &config),
+        Severity::Warning
+    );
+}
+
+#[test]
+fn config_overrides_severity_per_rule() {
+    let config = LintConfig {
+        severity: [
+            ("unused-import".to_string(), Severity::Error),
+            ("duplicate-argument".to_string(), Severity::Hint),
+        ]
+        .into(),
+        ..Default::default()
+    };
+    // Both directions: promote a warning-by-default rule and demote an
+    // error-by-default one.
+    assert_eq!(
+        severity_of("unused-import", "using A: foo\n1\n", &config),
+        Severity::Error
+    );
+    assert_eq!(
+        severity_of("duplicate-argument", "f(x, x) = x\n", &config),
+        Severity::Hint
+    );
+}
+
+#[test]
+fn severity_override_applies_to_node_dispatch_rules() {
+    // assignment-in-condition runs via the shared CST traversal (`interests`),
+    // not `check_file`; the engine must stamp that path too.
+    let config = LintConfig {
+        severity: [("assignment-in-condition".to_string(), Severity::Error)].into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        severity_of("assignment-in-condition", "if x = 5\n    x\nend\n", &config),
+        Severity::Error
     );
 }
 
