@@ -370,9 +370,23 @@ The payoff phase, in roughly arity's shipping order.
   hover, and completion for the package's own top-level symbols across files.
   The workspace package re-harvests on `didSave` via a long-lived harvester
   thread (`spawn_workspace_harvester`, `src/lsp/server.rs`) that swaps it with
-  `set_package_index`. *Deferred:* the transitive include-edge graph proper and
-  multi-folder workspaces. (Nested-`module` file membership has since landed;
-  see below.)
+  `set_package_index`. *The transitive include-edge graph proper has since
+  landed:* a tracked `project_graph` query (`src/incremental.rs`) re-derives the
+  include closure, forward/reverse edges, host modules, cycles, and unresolved
+  includes purely from the seeded `WorkspaceFiles` and each member's
+  `include_edges` firewall (now carrying a range-free `host_suffix`,
+  `src/project.rs`), so editing one member re-runs only that file's edges before
+  a cheap re-derivation. It keys on normalized `PathBuf` (a tracked query cannot
+  reach the concrete db's path map) and distinguishes a true cycle from a diamond
+  via a three-color DFS, unlike the harvester's over-broad `IncludeCycle`.
+  Unresolved includes and include cycles now surface as LSP diagnostics on the
+  offending `include(...)` call (`src/lsp/graph_diagnostics.rs`), published per
+  member file on each harvest and merged with parse diagnostics in `GlobalState`
+  (`src/lsp/state.rs`). *Deferred:* multi-folder workspaces; and the graph's
+  `host_modules` are validated against the harvester but not yet flipped in as
+  the resolution authority (the harvester still owns `member_modules`, which
+  needs no change for the diagnostics feature). (Nested-`module` file membership
+  has since landed; see below.)
 - [x] Cross-file go-to-definition, references, and rename for top-level
   symbols. Within-package go-to-definition, hover, and completion landed with
   the project graph; cross-file **references and rename** now land on a

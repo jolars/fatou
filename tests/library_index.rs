@@ -517,3 +517,99 @@ fn resetting_workspace_files_drops_removed_members() {
     db.set_workspace_files(vec![a]);
     assert_eq!(count_f(&db), 1, "the removed member no longer contributes");
 }
+
+/// Build an in-memory workspace package `MyPkg` rooted at `/work/MyPkg` from
+/// `(relative src path, contents)` pairs, seed every file as a workspace member,
+/// and return the database ready for `project_graph`.
+#[cfg(test)]
+fn seed_project(files: &[(&str, &str)]) -> IncrementalDatabase {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    let mut db = IncrementalDatabase::new();
+    let seeded: Vec<_> = files
+        .iter()
+        .map(|(rel, text)| {
+            let path = format!("/work/MyPkg/src/{rel}");
+            db.upsert_file(Path::new(&path), (*text).to_string())
+        })
+        .collect();
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(empty_package("MyPkg")));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_workspace_files(seeded);
+    db
+}
+
+#[cfg(test)]
+fn src(rel: &str) -> std::path::PathBuf {
+    fatou::incremental::normalize_path(std::path::Path::new(&format!("/work/MyPkg/src/{rel}")))
+}
+
+#[test]
+fn project_graph_closure_hosts_and_diamond() {
+    // MyPkg.jl wraps everything in `module MyPkg` (the absorbed root); `Sub`
+    // nests; `shared.jl` is included from both `a.jl` (root) and `b.jl` (Sub),
+    // a diamond that must appear once and never as a cycle.
+    let db = seed_project(&[
+        (
+            "MyPkg.jl",
+            "module MyPkg\ninclude(\"a.jl\")\nmodule Sub\ninclude(\"b.jl\")\nend\nend\n",
+        ),
+        ("a.jl", "include(\"shared.jl\")\n"),
+        ("b.jl", "include(\"shared.jl\")\n"),
+        ("shared.jl", "x = 1\n"),
+    ]);
+    let snap = db.snapshot();
+    let g = snap.project_graph();
+
+    // Depth-first, source order; `shared.jl` (a diamond) is walked once.
+    assert_eq!(
+        g.nodes,
+        vec![src("MyPkg.jl"), src("a.jl"), src("shared.jl"), src("b.jl")]
+    );
+
+    // Root-module absorption: everything inside `module MyPkg` is at the root,
+    // so `a.jl`/`shared.jl` host to [] and only `Sub` survives for `b.jl`.
+    assert_eq!(g.host_modules[&src("MyPkg.jl")], Vec::<String>::new());
+    assert_eq!(g.host_modules[&src("a.jl")], Vec::<String>::new());
+    assert_eq!(g.host_modules[&src("shared.jl")], Vec::<String>::new());
+    assert_eq!(g.host_modules[&src("b.jl")], vec!["Sub".to_string()]);
+
+    // Both includers of `shared.jl` show up in its reverse adjacency.
+    let mut includers = g.reverse[&src("shared.jl")].clone();
+    includers.sort();
+    assert_eq!(includers, vec![src("a.jl"), src("b.jl")]);
+    assert_eq!(g.forward[&src("MyPkg.jl")], vec![src("a.jl"), src("b.jl")]);
+
+    assert!(g.cycles.is_empty(), "a diamond is not a cycle");
+    assert!(g.unresolved.is_empty());
+}
+
+#[test]
+fn project_graph_reports_cycles_and_unresolved() {
+    // `a.jl` -> `b.jl` -> `a.jl` is a true cycle; `missing.jl` does not exist.
+    let db = seed_project(&[
+        (
+            "MyPkg.jl",
+            "module MyPkg\ninclude(\"a.jl\")\ninclude(\"missing.jl\")\nend\n",
+        ),
+        ("a.jl", "include(\"b.jl\")\n"),
+        ("b.jl", "include(\"a.jl\")\n"),
+    ]);
+    let snap = db.snapshot();
+    let g = snap.project_graph();
+
+    assert_eq!(g.cycles.len(), 1, "one back-edge closes the a<->b cycle");
+    let cycle = &g.cycles[0];
+    assert_eq!(cycle.from, src("b.jl"));
+    assert_eq!(cycle.to, src("a.jl"));
+    assert_eq!(cycle.raw, "a.jl");
+
+    assert_eq!(g.unresolved.len(), 1, "missing.jl is unresolved");
+    assert_eq!(g.unresolved[0].from, src("MyPkg.jl"));
+    assert_eq!(g.unresolved[0].raw, "missing.jl");
+}

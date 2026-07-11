@@ -9,14 +9,14 @@
 //! analysis in flight, canceled only when superseded by a strictly-newer edit
 //! of the *same* URI.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use crossbeam_channel::{Receiver, Sender, select};
-use lsp_types::Uri;
+use lsp_types::{Diagnostic, Uri};
 use salsa::Database as _;
 
 use crate::incremental::IncrementalDatabase;
@@ -24,6 +24,7 @@ use crate::index::{HarvestedLibrary, PackageIndex};
 use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
+use super::graph_diagnostics::graph_diagnostics;
 use super::read_jobs::{ReadJob, run_read};
 use super::state::Outbound;
 use super::task_pool::Spawner;
@@ -77,6 +78,7 @@ pub(crate) fn spawn_analysis_thread(
                 pending: HashMap::new(),
                 read_spawner,
                 encoding,
+                published_graph_files: HashSet::new(),
             };
             worker.run(&analysis_rx, &read_rx, &library_rx, &close_rx, &done_rx);
         })
@@ -151,6 +153,9 @@ struct AnalysisWorker {
     read_spawner: Spawner,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
+    /// The URIs that carried include-graph diagnostics at the last re-harvest, so
+    /// a file whose problems are fixed gets an explicit empty publish to clear it.
+    published_graph_files: HashSet<Uri>,
 }
 
 impl AnalysisWorker {
@@ -184,10 +189,12 @@ impl AnalysisWorker {
                             // Seed the workspace package's member files as inputs
                             // so cross-file references/rename can index them.
                             self.db.seed_workspace_members();
+                            self.refresh_graph_diagnostics();
                         }
                         Ok(LibraryMessage::Package { name, index }) => {
                             self.db.set_package_index(name, index);
                             self.db.seed_workspace_members();
+                            self.refresh_graph_diagnostics();
                         }
                         Err(_) => {}
                     }
@@ -308,6 +315,44 @@ impl AnalysisWorker {
             drop(snapshot);
             let _ = done_tx.send(AnalyzeDone { uri, version });
         });
+    }
+
+    /// Recompute the include-graph diagnostics from the freshly seeded workspace
+    /// and publish them per member file, clearing any file whose problems are now
+    /// gone. Runs on each (re-)harvest — the same save cadence as the rest of the
+    /// workspace index; a live edit that changes an `include` is reflected on the
+    /// next save.
+    fn refresh_graph_diagnostics(&mut self) {
+        let updates: BTreeMap<PathBuf, Vec<Diagnostic>> = {
+            let snapshot = self.db.snapshot();
+            let graph = snapshot.project_graph();
+            graph_diagnostics(graph, self.encoding, |path| {
+                let file = snapshot.lookup_file(path)?;
+                Some((
+                    snapshot.file_text_of(file).to_string(),
+                    snapshot.parsed_tree(file),
+                ))
+            })
+        };
+
+        let mut now = HashSet::new();
+        for (path, diags) in updates {
+            if let Some(uri) = super::uri::from_path(&path) {
+                now.insert(uri.clone());
+                let _ = self
+                    .out_tx
+                    .send(Outbound::ProjectDiagnostics { uri, diags });
+            }
+        }
+        // A file that had diagnostics last time but none now needs an explicit
+        // empty publish to clear its squiggles.
+        for uri in self.published_graph_files.difference(&now) {
+            let _ = self.out_tx.send(Outbound::ProjectDiagnostics {
+                uri: uri.clone(),
+                diags: Vec::new(),
+            });
+        }
+        self.published_graph_files = now;
     }
 }
 

@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 
 use rowan::ast::AstNode;
 
-use crate::ast::{AstToken, CallExpr, Expr, HasArgList};
+use crate::ast::{AstToken, CallExpr, Expr, HasArgList, Name};
 use crate::semantic::{ScopeKind, SemanticModel};
-use crate::syntax::SyntaxNode;
+use crate::syntax::{SyntaxKind, SyntaxNode};
 
 /// The names bound at file (top) level — what another file that `include`s this
 /// one sees. Every binding whose scope is the file top level, `import`/`using`
@@ -78,6 +78,14 @@ pub struct IncludeEdge {
     /// `raw` resolved against the including file's directory, when that
     /// directory is known. An absolute `raw` is taken as-is.
     pub target: Option<PathBuf>,
+    /// The intra-file nested-`module` path (outermost first) the `include` call
+    /// lexically sits in; empty at the file top level. Range-free (just names),
+    /// so a body edit that shifts the call leaves it equal and the firewall
+    /// still backdates. The include graph composes it with the including file's
+    /// own host module to place the included file in the package's module tree:
+    /// `host(child) = host(parent) ++ host_suffix`. Unnamed modules (a parse
+    /// error left no name) are skipped, matching the harvester.
+    pub host_suffix: Vec<String>,
 }
 
 /// The file's static `include("literal")` edges, in source order.
@@ -93,11 +101,51 @@ pub struct IncludeEdge {
 pub fn include_edges(root: &SyntaxNode, base_dir: Option<&Path>) -> Vec<IncludeEdge> {
     root.descendants()
         .filter_map(CallExpr::cast)
-        .filter_map(|call| include_target(&call))
-        .map(|raw| {
+        .filter_map(|call| {
+            let raw = include_target(&call)?;
             let target = resolve_target(&raw, base_dir);
-            IncludeEdge { raw, target }
+            let host_suffix = enclosing_module_names(call.syntax());
+            Some(IncludeEdge {
+                raw,
+                target,
+                host_suffix,
+            })
         })
+        .collect()
+}
+
+/// The names of the nested `module`/`baremodule` blocks enclosing `node`,
+/// outermost first. Unnamed modules (a parse error left no name) are skipped,
+/// matching the harvester's `handle_module`.
+fn enclosing_module_names(node: &SyntaxNode) -> Vec<String> {
+    let mut names: Vec<String> = node
+        .ancestors()
+        .filter(|ancestor| ancestor.kind() == SyntaxKind::MODULE_DEF)
+        .filter_map(|module| module_def_name(&module))
+        .collect();
+    names.reverse();
+    names
+}
+
+/// The declared name of a `MODULE_DEF` node: the `NAME` under its `SIGNATURE`.
+fn module_def_name(module: &SyntaxNode) -> Option<String> {
+    let signature = module
+        .children()
+        .find(|child| child.kind() == SyntaxKind::SIGNATURE)?;
+    let name = signature
+        .children()
+        .find(|child| child.kind() == SyntaxKind::NAME)?;
+    Some(Name::cast(name)?.ident()?.text().to_string())
+}
+
+/// The static `include("literal")` call sites in `root`: each `(raw, range)`
+/// where `range` covers the whole `include(...)` call. Recovers the spans the
+/// range-free [`include_edges`] deliberately drops, for attaching a diagnostic
+/// (unresolved include, include cycle) to the offending call.
+pub fn include_call_sites(root: &SyntaxNode) -> Vec<(String, rowan::TextRange)> {
+    root.descendants()
+        .filter_map(CallExpr::cast)
+        .filter_map(|call| Some((include_target(&call)?, call.syntax().text_range())))
         .collect()
 }
 
@@ -212,6 +260,24 @@ mod tests {
     fn absolute_include_ignores_base_dir() {
         let edges = edges_of("include(\"/etc/a.jl\")\n", Some(Path::new("/proj")));
         assert_eq!(edges[0].target, Some(PathBuf::from("/etc/a.jl")));
+    }
+
+    #[test]
+    fn host_suffix_is_empty_at_file_top_level() {
+        let edges = edges_of("include(\"a.jl\")\n", None);
+        assert!(edges[0].host_suffix.is_empty());
+    }
+
+    #[test]
+    fn host_suffix_records_single_enclosing_module() {
+        let edges = edges_of("module A\ninclude(\"a.jl\")\nend\n", None);
+        assert_eq!(edges[0].host_suffix, ["A"]);
+    }
+
+    #[test]
+    fn host_suffix_records_nested_modules_outermost_first() {
+        let edges = edges_of("module A\nmodule B\ninclude(\"a.jl\")\nend\nend\n", None);
+        assert_eq!(edges[0].host_suffix, ["A", "B"]);
     }
 
     #[test]

@@ -42,12 +42,19 @@ struct Document {
 
 /// Messages from the analysis thread back to the main loop.
 pub(crate) enum Outbound {
-    /// Diagnostics for `uri` at `version`; published only if still current.
+    /// Per-file parse diagnostics for `uri` at `version`; published only if still
+    /// current (the open buffer is still at that version).
     Diagnostics {
         uri: Uri,
         version: i32,
         diags: Vec<Diagnostic>,
     },
+    /// Project-level include-graph diagnostics (unresolved includes, cycles) for
+    /// `uri`. Version-free: they attach to a member file that need not be open,
+    /// and an empty list clears a file that no longer has any. Merged with the
+    /// file's parse diagnostics before publishing (a single `publishDiagnostics`
+    /// replaces *all* diagnostics for a URI).
+    ProjectDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
 }
 
 pub(crate) struct GlobalState {
@@ -68,6 +75,14 @@ pub(crate) struct GlobalState {
     close_tx: Sender<PathBuf>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
+    /// The latest per-file parse diagnostics, kept so a project-diagnostic update
+    /// can republish the union (a `publishDiagnostics` replaces *all* diagnostics
+    /// for a URI). Cleared when a document closes.
+    parse_diags: HashMap<Uri, Vec<Diagnostic>>,
+    /// The latest include-graph diagnostics per file, kept so a parse-diagnostic
+    /// update can republish the union. Set/cleared by the analysis thread on each
+    /// re-harvest.
+    graph_diags: HashMap<Uri, Vec<Diagnostic>>,
 }
 
 impl GlobalState {
@@ -81,6 +96,8 @@ impl GlobalState {
     ) -> Self {
         Self {
             documents: HashMap::new(),
+            parse_diags: HashMap::new(),
+            graph_diags: HashMap::new(),
             sender,
             analysis_tx,
             read_tx,
@@ -513,8 +530,11 @@ impl GlobalState {
                     if let Some(path) = uri::to_path(&uri) {
                         let _ = self.close_tx.send(path);
                     }
-                    // Tell the client to clear stale diagnostics.
-                    self.publish(uri, Vec::new(), None);
+                    // Drop the buffer's parse diagnostics, but keep any project-
+                    // level include-graph diagnostics (they attach to the file on
+                    // disk, open or not): republish just those.
+                    self.parse_diags.remove(&uri);
+                    self.publish_merged(uri, None);
                 }
             }
             _ => {}
@@ -534,9 +554,30 @@ impl GlobalState {
                 if !matches!(self.documents.get(&uri), Some(d) if d.version == version) {
                     return;
                 }
-                self.publish(uri, diags, Some(version));
+                self.parse_diags.insert(uri.clone(), diags);
+                self.publish_merged(uri, Some(version));
+            }
+            Outbound::ProjectDiagnostics { uri, diags } => {
+                if diags.is_empty() {
+                    self.graph_diags.remove(&uri);
+                } else {
+                    self.graph_diags.insert(uri.clone(), diags);
+                }
+                let version = self.documents.get(&uri).map(|d| d.version);
+                self.publish_merged(uri, version);
             }
         }
+    }
+
+    /// Publish the union of `uri`'s parse and include-graph diagnostics — a
+    /// single `publishDiagnostics` replaces *all* diagnostics for a URI, so the
+    /// two sources must be sent together or each would clobber the other.
+    fn publish_merged(&self, uri: Uri, version: Option<i32>) {
+        let mut diagnostics = self.parse_diags.get(&uri).cloned().unwrap_or_default();
+        if let Some(graph) = self.graph_diags.get(&uri) {
+            diagnostics.extend(graph.iter().cloned());
+        }
+        self.publish(uri, diagnostics, version);
     }
 
     /// Send an analysis request for `uri`'s current buffer to the analysis

@@ -11,12 +11,12 @@ use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     ClientCapabilities, CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
-    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, FoldingRange,
-    FoldingRangeKind, FoldingRangeParams, FormattingOptions, GeneralClientCapabilities,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    InitializeParams, Location, PartialResultParams, Position, PositionEncodingKind,
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
+    DocumentHighlightParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
+    GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, InitializeParams, Location, PartialResultParams, Position, PositionEncodingKind,
     PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RenameParams,
     SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp,
     SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
@@ -3249,6 +3249,104 @@ fn serves_cross_file_references_in_a_nested_module() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(210));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Drain server notifications until a `publishDiagnostics` for a URI ending in
+/// `uri_suffix` carries at least one diagnostic, returning them. Panics on
+/// timeout — the harvest or graph-diagnostics publish never landed.
+fn poll_publish_diagnostics(
+    client: &Connection,
+    uri_suffix: &str,
+    deadline: Duration,
+) -> Vec<Diagnostic> {
+    let start = Instant::now();
+    loop {
+        let remaining = deadline
+            .checked_sub(start.elapsed())
+            .filter(|d| !d.is_zero())
+            .unwrap_or_else(|| panic!("no diagnostics for {uri_suffix} within {deadline:?}"));
+        match client.receiver.recv_timeout(remaining) {
+            Ok(Message::Notification(n)) if n.method == "textDocument/publishDiagnostics" => {
+                let params: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
+                if params.uri.as_str().ends_with(uri_suffix) && !params.diagnostics.is_empty() {
+                    return params.diagnostics;
+                }
+            }
+            Ok(_) => {}
+            Err(_) => panic!("no diagnostics for {uri_suffix} within {deadline:?}"),
+        }
+    }
+}
+
+/// A static `include("missing.jl")` to a nonexistent file surfaces as an
+/// include-graph diagnostic on the entry file, published end-to-end after the
+/// harvest lands. Guards the whole `project_graph` -> graph-diagnostics ->
+/// `publishDiagnostics` pipeline at the server level.
+#[test]
+fn publishes_unresolved_include_diagnostic() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-badinclude");
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    // The entry includes an existing `a.jl` and a nonexistent `missing.jl`.
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"missing.jl\")\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "f() = 1\n");
+
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_root(&client, &root_uri);
+
+    // The diagnostic attaches to the entry file that holds the bad `include`.
+    let diags = poll_publish_diagnostics(&client, "src/MyPkg.jl", Duration::from_secs(10));
+    let unresolved: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("cannot resolve include"))
+        .collect();
+    assert_eq!(unresolved.len(), 1, "one unresolved include is reported");
+    let diag = unresolved[0];
+    assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
+    assert!(
+        diag.message.contains("missing.jl"),
+        "names the missing file"
+    );
+    // The `include("missing.jl")` call is on the third line (0-based line 2).
+    assert_eq!(diag.range.start.line, 2);
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(300),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(300));
     client
         .sender
         .send(Message::Notification(Notification {

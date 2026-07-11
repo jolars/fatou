@@ -212,6 +212,192 @@ pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> Vec<IncludeEdg
     project::include_edges(&root, base_dir)
 }
 
+/// One unresolvable static `include("literal")` site: the `raw` literal written
+/// in `from` whose target is not a package member (the file does not exist or
+/// was not reached). Range-free — the include call's span is recovered from a
+/// fresh parse of `from` when the diagnostic is published.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedInclude {
+    pub from: PathBuf,
+    pub raw: String,
+}
+
+/// One `include` back-edge that closes a cycle: `from` statically includes `to`,
+/// which transitively includes `from` again. The diagnostic attaches to the
+/// `include("raw")` call in `from`. Only true cycles are recorded; a file
+/// included twice along disjoint paths (a diamond) is not a cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CycleEdge {
+    pub from: PathBuf,
+    pub raw: String,
+    pub to: PathBuf,
+}
+
+/// The package's transitive `include` graph, re-derived purely from the seeded
+/// [`WorkspaceFiles`] set and each member's [`include_edges`] firewall (never
+/// from the filesystem, so it stays incremental: editing one member re-runs only
+/// that file's `include_edges`, then this cheap re-derivation). Keyed on
+/// normalized absolute paths — a tracked query holds `&dyn IncrementalDb` and so
+/// cannot reach the concrete db's path->`SourceFile` map, and paths keep the
+/// value `Eq` for backdating.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectGraph {
+    /// The include closure, entry first, in depth-first source order (mirroring
+    /// the harvester's recursive walk).
+    pub nodes: Vec<PathBuf>,
+    /// Each file to the files it statically includes, in source order.
+    pub forward: BTreeMap<PathBuf, Vec<PathBuf>>,
+    /// Each file to the files that include it.
+    pub reverse: BTreeMap<PathBuf, Vec<PathBuf>>,
+    /// Each member's host module path (the nested `module` its `include`
+    /// lexically landed in), empty for the root module — a re-derivation of
+    /// [`PackageIndex::member_modules`](crate::index::model::PackageIndex).
+    pub host_modules: BTreeMap<PathBuf, Vec<String>>,
+    /// `include` back-edges that close a cycle.
+    pub cycles: Vec<CycleEdge>,
+    /// Static includes whose target is not a package member.
+    pub unresolved: Vec<UnresolvedInclude>,
+}
+
+// SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]): none of
+// `PathBuf`/`String` are `salsa::Update`, so overwrite the whole value when it
+// differs by `Eq` and report the change.
+unsafe impl salsa::Update for ProjectGraph {
+    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
+        let old = unsafe { &mut *old_pointer };
+        if *old == new {
+            false
+        } else {
+            *old = new;
+            true
+        }
+    }
+}
+
+/// DFS coloring: `Gray` while a file is on the current stack (re-entering it is a
+/// true include cycle); `Black` once fully walked (re-entering is a diamond).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IncludeColor {
+    Gray,
+    Black,
+}
+
+/// The package's transitive include graph (see [`ProjectGraph`]). Demand-only:
+/// pulled by the diagnostics path, never by an eager query. Empty when there is
+/// no workspace package or its member files have not been seeded.
+#[salsa::tracked(returns(ref))]
+pub fn project_graph(db: &dyn IncrementalDb) -> ProjectGraph {
+    let mut graph = ProjectGraph::default();
+    let (Some(wf), Some(lib)) = (WorkspaceFiles::try_get(db), LibraryIndex::try_get(db)) else {
+        return graph;
+    };
+    let Some(name) = lib.workspace(db).clone() else {
+        return graph;
+    };
+    let Some(root) = lib.roots(db).0.get(&name).cloned() else {
+        return graph;
+    };
+    let entry = normalize_path(&root.join("src").join(format!("{name}.jl")));
+
+    // Normalized path -> seeded input, so an include target resolves to a member
+    // without reaching the concrete db's path map (unavailable from `&dyn`).
+    let mut by_path: HashMap<PathBuf, SourceFile> = HashMap::new();
+    for &file in wf.files(db) {
+        if let Some(path) = file.path(db) {
+            by_path.insert(normalize_path(path), file);
+        }
+    }
+    let Some(&entry_file) = by_path.get(&entry) else {
+        return graph;
+    };
+
+    let mut color: HashMap<PathBuf, IncludeColor> = HashMap::new();
+    walk_include_graph(
+        db,
+        &by_path,
+        entry,
+        entry_file,
+        Vec::new(),
+        &name,
+        &mut color,
+        &mut graph,
+    );
+    graph
+}
+
+/// Depth-first, source-order walk of the include graph from `path` (host module
+/// `host`), first visit winning so `host_modules`/`nodes` match the harvester's
+/// recursive walk. `pkg` is the package name, stripped once as a leading segment
+/// at the root level to reproduce the harvester's root-module absorption (the
+/// entry's top-level `module <Pkg>` is the synthesized root, not a nesting).
+#[allow(clippy::too_many_arguments)]
+fn walk_include_graph(
+    db: &dyn IncrementalDb,
+    by_path: &HashMap<PathBuf, SourceFile>,
+    path: PathBuf,
+    file: SourceFile,
+    host: Vec<String>,
+    pkg: &str,
+    color: &mut HashMap<PathBuf, IncludeColor>,
+    graph: &mut ProjectGraph,
+) {
+    color.insert(path.clone(), IncludeColor::Gray);
+    graph.nodes.push(path.clone());
+    graph.host_modules.insert(path.clone(), host.clone());
+
+    for edge in include_edges(db, file) {
+        let target = match &edge.target {
+            Some(target) => normalize_path(target),
+            None => {
+                graph.unresolved.push(UnresolvedInclude {
+                    from: path.clone(),
+                    raw: edge.raw.clone(),
+                });
+                continue;
+            }
+        };
+        let Some(&child_file) = by_path.get(&target) else {
+            graph.unresolved.push(UnresolvedInclude {
+                from: path.clone(),
+                raw: edge.raw.clone(),
+            });
+            continue;
+        };
+        graph
+            .forward
+            .entry(path.clone())
+            .or_default()
+            .push(target.clone());
+        graph
+            .reverse
+            .entry(target.clone())
+            .or_default()
+            .push(path.clone());
+
+        // host(child) = host(parent) ++ host_suffix, with the absorbed root
+        // module dropped: it only surfaces as a leading `pkg` segment at the
+        // root level (parent host empty).
+        let mut child_host = host.clone();
+        child_host.extend(edge.host_suffix.iter().cloned());
+        if host.is_empty() && child_host.first().map(String::as_str) == Some(pkg) {
+            child_host.remove(0);
+        }
+
+        match color.get(&target) {
+            Some(IncludeColor::Gray) => graph.cycles.push(CycleEdge {
+                from: path.clone(),
+                raw: edge.raw.clone(),
+                to: target,
+            }),
+            Some(IncludeColor::Black) => {}
+            None => walk_include_graph(
+                db, by_path, target, child_file, child_host, pkg, color, graph,
+            ),
+        }
+    }
+    color.insert(path, IncludeColor::Black);
+}
+
 /// The reverse-occurrence projection for one file: every occurrence of a
 /// workspace top-level symbol, keyed by `(namespace, name)`, from this file's
 /// own module-global bindings and its free reads resolving to the workspace
@@ -768,6 +954,12 @@ impl Analysis {
     /// references and rename. See [`workspace_reference_index`].
     pub fn workspace_reference_index(&self) -> &WorkspaceReferenceIndex {
         workspace_reference_index(&self.0)
+    }
+
+    /// The package's transitive `include` graph (see [`project_graph`]): closure,
+    /// forward/reverse edges, host modules, cycles, and unresolved includes.
+    pub fn project_graph(&self) -> &ProjectGraph {
+        project_graph(&self.0)
     }
 
     /// The on-disk path tracked for `file` (the reverse index tags each

@@ -50,6 +50,7 @@ mod cross_file;
 mod definition;
 mod folding;
 mod format;
+mod graph_diagnostics;
 mod hover;
 mod read_jobs;
 mod references;
