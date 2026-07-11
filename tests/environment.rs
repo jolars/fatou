@@ -349,6 +349,9 @@ fn locate_install_via_path() {
 
     let install = environment::locate_install(&ctx, &[]).expect("install");
     assert_eq!(install.version, "1.10");
+    // `install_from_path` canonicalizes the resolved binary, so compare against a
+    // canonicalized prefix (on macOS `/var` is a symlink to `/private/var`).
+    let prefix = fs::canonicalize(&prefix).unwrap();
     assert_eq!(install.base_dir, prefix.join("share/julia/base"));
 }
 

@@ -114,8 +114,11 @@ pub(crate) mod test_support {
     use crate::index::{FunctionGroup, ModuleIndex, PackageIndex};
 
     /// The absolute path of member file `rel` under the fixture package root.
+    /// Normalized so it is drive-absolute on Windows too (a bare `/work/...` is
+    /// root-relative there), matching what the database stores after upsert and
+    /// keeping the URIs the tests build in sync with the gathered ones.
     pub(crate) fn member_path(rel: &str) -> PathBuf {
-        PathBuf::from("/work/MyPkg/src").join(rel)
+        crate::incremental::normalize_path(&PathBuf::from("/work/MyPkg/src").join(rel))
     }
 
     /// Build a database for a workspace package `MyPkg` (root `/work/MyPkg`) whose
