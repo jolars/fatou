@@ -2881,9 +2881,12 @@ fn write_file(path: &Path, contents: &str) {
 
 /// Build a `file:` URI for an absolute temp path. The temp paths here contain
 /// only unreserved characters, so no percent-encoding is needed and the URI
-/// round-trips to the exact path the server tracks.
+/// round-trips to the exact path the server tracks. Windows drive-rooted paths
+/// (`C:\...`) need a leading slash and forward slashes.
 fn file_uri(path: &Path) -> Uri {
-    Uri::from_str(&format!("file://{}", path.to_str().unwrap())).unwrap()
+    let text = path.to_str().unwrap().replace('\\', "/");
+    let slash = if text.starts_with('/') { "" } else { "/" };
+    Uri::from_str(&format!("file://{slash}{text}")).unwrap()
 }
 
 /// Set env vars for the duration of a test, restoring their prior values on
