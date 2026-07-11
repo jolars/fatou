@@ -8,6 +8,22 @@ use fatou::incremental::IncrementalDatabase;
 use fatou::index::model::DefLocation;
 use fatou::index::{ModuleIndex, PackageIndex, Span};
 
+/// The reverse-occurrence-index key for a symbol of dev package `package` in
+/// the nested module at `module`.
+fn occurrence_key(
+    package: &str,
+    module: &[&str],
+    namespace: fatou::resolve::Namespace,
+    name: &str,
+) -> fatou::resolve::OccurrenceKey {
+    fatou::resolve::OccurrenceKey {
+        package: package.into(),
+        module: module.iter().map(smol_str::SmolStr::new).collect(),
+        namespace,
+        name: name.into(),
+    }
+}
+
 /// A minimal empty package index named `name`.
 fn empty_package(name: &str) -> PackageIndex {
     PackageIndex {
@@ -286,7 +302,7 @@ fn workspace_reference_index_unions_across_member_files() {
     let recs: Vec<_> = index
         .0
         .iter()
-        .filter(|(k, _)| k.1 == Namespace::Value && k.2.as_str() == "f")
+        .filter(|(k, _)| k.namespace == Namespace::Value && k.name.as_str() == "f")
         .flat_map(|(_, v)| v.iter())
         .collect();
 
@@ -315,7 +331,6 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
     use fatou::index::model::{DefLocation, Span};
     use fatou::index::{FunctionGroup, ModuleIndex};
     use fatou::resolve::Namespace;
-    use smol_str::SmolStr;
 
     let func = |name: &str| FunctionGroup {
         name: name.to_string(),
@@ -366,7 +381,7 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
     let index = snap.workspace_reference_index();
 
     // Root `f`: only a.jl's definition and recursive call.
-    let root_key = (Vec::new(), Namespace::Value, SmolStr::new("f"));
+    let root_key = occurrence_key("MyPkg", &[], Namespace::Value, "f");
     let root_recs = index.0.get(&root_key).expect("root `f` bucket");
     assert_eq!(root_recs.len(), 2, "def plus recursive call in a.jl only");
     assert!(
@@ -375,11 +390,7 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
     );
 
     // `Sub.f`: only sub.jl's free-read call.
-    let sub_key = (
-        vec![SmolStr::new("Sub")],
-        Namespace::Value,
-        SmolStr::new("f"),
-    );
+    let sub_key = occurrence_key("MyPkg", &["Sub"], Namespace::Value, "f");
     let sub_recs = index.0.get(&sub_key).expect("Sub `f` bucket");
     assert_eq!(sub_recs.len(), 1, "just the call in sub.jl");
     assert!(sub_recs.iter().all(|(file, _)| *file == sub));
@@ -397,7 +408,6 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
     use fatou::index::model::{DefLocation, Span};
     use fatou::index::{FunctionGroup, ModuleIndex};
     use fatou::resolve::Namespace;
-    use smol_str::SmolStr;
 
     let func = |name: &str| FunctionGroup {
         name: name.to_string(),
@@ -451,7 +461,7 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
     // Root `f`: def + call in root.jl only.
     let root_recs = index
         .0
-        .get(&(Vec::new(), Namespace::Value, SmolStr::new("f")))
+        .get(&occurrence_key("MyPkg", &[], Namespace::Value, "f"))
         .expect("root `f` bucket");
     assert_eq!(root_recs.len(), 2);
     assert!(root_recs.iter().all(|(file, _)| *file == root));
@@ -461,11 +471,7 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
     // merged with the root `f`.
     let sub_recs = index
         .0
-        .get(&(
-            vec![SmolStr::new("Sub")],
-            Namespace::Value,
-            SmolStr::new("f"),
-        ))
+        .get(&occurrence_key("MyPkg", &["Sub"], Namespace::Value, "f"))
         .expect("Sub `f` bucket");
     assert_eq!(sub_recs.len(), 2);
     assert!(sub_recs.iter().all(|(file, _)| *file == sub));
@@ -504,7 +510,7 @@ fn resetting_workspace_files_drops_removed_members() {
         snap.workspace_reference_index()
             .0
             .iter()
-            .filter(|(k, _)| k.1 == Namespace::Value && k.2.as_str() == "f")
+            .filter(|(k, _)| k.namespace == Namespace::Value && k.name.as_str() == "f")
             .map(|(_, v)| v.len())
             .sum()
     };

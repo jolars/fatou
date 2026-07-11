@@ -52,10 +52,19 @@ pub enum Namespace {
 /// same-named symbols in different modules never conflate.
 pub type ModulePath = Vec<SmolStr>;
 
-/// The key of a workspace symbol in the reverse-occurrence index: the module it
-/// lives in, its namespace, and its bare-or-`@` name. The module path keeps
-/// same-named symbols in different (nested) modules from conflating.
-pub type OccurrenceKey = (ModulePath, Namespace, SmolStr);
+/// The key of a workspace symbol in the reverse-occurrence index: the dev
+/// package it belongs to, the module it lives in, its namespace, and its
+/// bare-or-`@` name. The module path keeps same-named symbols in different
+/// (nested) modules from conflating; the package name does the same across
+/// workspace folders, whose reverse indexes share one map.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OccurrenceKey {
+    /// The dev package the symbol belongs to ([`PackageIndex::name`]).
+    pub package: SmolStr,
+    pub module: ModulePath,
+    pub namespace: Namespace,
+    pub name: SmolStr,
+}
 
 /// The submodule of `root` reached by following `path`, or `None` if any
 /// segment is missing. An empty `path` returns `root` itself.
@@ -381,7 +390,14 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
                 if !module_defines(module, &name, ns) {
                     continue;
                 }
-                let recs = out.entry((path.clone(), ns, name)).or_default();
+                let recs = out
+                    .entry(OccurrenceKey {
+                        package: SmolStr::new(&workspace.pkg.name),
+                        module: path.clone(),
+                        namespace: ns,
+                        name,
+                    })
+                    .or_default();
                 for occ in self.model.occurrences(BindingId(i as u32)) {
                     recs.push(OccurrenceRec {
                         range: occ.range,
@@ -405,13 +421,18 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
             if let Resolution::Workspace { module, name } =
                 self.resolve(&ident.name, ident.range.start(), ns)
             {
-                out.entry((module, ns, name))
-                    .or_default()
-                    .push(OccurrenceRec {
-                        range: ident.range,
-                        is_def: false,
-                        access: ident.access,
-                    });
+                out.entry(OccurrenceKey {
+                    package: SmolStr::new(&workspace.pkg.name),
+                    module,
+                    namespace: ns,
+                    name,
+                })
+                .or_default()
+                .push(OccurrenceRec {
+                    range: ident.range,
+                    is_def: false,
+                    access: ident.access,
+                });
             }
         }
 
@@ -442,7 +463,12 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
                 Namespace::Value
             };
             return match self.resolve(&ident.name, offset, ns) {
-                Resolution::Workspace { module, name } => Some((module, ns, name)),
+                Resolution::Workspace { module, name } => Some(OccurrenceKey {
+                    package: SmolStr::new(&workspace.pkg.name),
+                    module,
+                    namespace: ns,
+                    name,
+                }),
                 _ => None,
             };
         }
@@ -473,7 +499,12 @@ impl<'a, P: PackageSource> Resolver<'a, P> {
             if let Some(name) = namespaced_binding_name(binding, ns)
                 && module_defines(module, &name, ns)
             {
-                return Some((path.clone(), ns, name));
+                return Some(OccurrenceKey {
+                    package: SmolStr::new(&workspace.pkg.name),
+                    module: path.clone(),
+                    namespace: ns,
+                    name,
+                });
             }
         }
         None
@@ -1153,6 +1184,36 @@ mod tests {
         assert_eq!(names.iter().filter(|n| *n == "map").count(), 1);
     }
 
+    #[test]
+    fn occurrence_keys_carry_the_dev_package() {
+        // Two dev packages (two workspace folders) each define a root-level
+        // `f`; the same source resolved as a member of each must yield keys
+        // that differ in `package`, or the shared reverse index would bleed
+        // references across folders.
+        let src = "function f()\n    f()\nend\n";
+        let model = model_of(src);
+        let lib = library(&[]);
+        let key_in = |pkg_name: &str| -> OccurrenceKey {
+            let ws = workspace_pkg(pkg_name, &["f"], &[]);
+            let keys: Vec<OccurrenceKey> = Resolver::new(&model, &lib)
+                .with_workspace(Some((ws, Vec::new())))
+                .workspace_occurrences()
+                .into_keys()
+                .collect();
+            assert_eq!(keys.len(), 1, "one bucket for `f` in {pkg_name}");
+            keys.into_iter().next().unwrap()
+        };
+        let a = key_in("PkgA");
+        let b = key_in("PkgB");
+        assert_eq!(a.package.as_str(), "PkgA");
+        assert_eq!(b.package.as_str(), "PkgB");
+        assert_eq!(
+            (a.module.clone(), a.namespace, a.name.clone()),
+            (b.module.clone(), b.namespace, b.name.clone())
+        );
+        assert_ne!(a, b, "same symbol shape, different package, distinct keys");
+    }
+
     /// A flattened occurrence bucket: `(start, end, is_def)` per site, keyed by
     /// namespace and name.
     type OccMap = BTreeMap<(Namespace, SmolStr), Vec<(u32, u32, bool)>>;
@@ -1169,12 +1230,12 @@ mod tests {
             .with_workspace(Some((Arc::clone(workspace), Vec::new())))
             .workspace_occurrences()
             .into_iter()
-            .map(|((_module, ns, name), recs)| {
+            .map(|(key, recs)| {
                 let simple = recs
                     .iter()
                     .map(|r| (r.range.start().into(), r.range.end().into(), r.is_def))
                     .collect();
-                ((ns, name), simple)
+                ((key.namespace, key.name), simple)
             })
             .collect()
     }
