@@ -8,7 +8,7 @@
 //! job of a different rule (`unused-import`). Names beginning with `_` follow
 //! Julia's throwaway convention and are skipped.
 
-use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::semantic::BindingKind;
 
@@ -45,19 +45,15 @@ impl Rule for UnusedBinding {
             if binding.name.starts_with('_') {
                 continue;
             }
-            sink.push(Diagnostic {
-                path: None,
-                start: binding.def_range.start().into(),
-                end: binding.def_range.end().into(),
-                rule: self.id().to_string(),
-                severity: Severity::Warning,
-                message: format!(
+            sink.push(Diagnostic::new(
+                self.id(),
+                binding.def_range.start().into(),
+                binding.def_range.end().into(),
+                format!(
                     "local variable `{}` is assigned but never used",
                     binding.name
                 ),
-                fixes: Vec::new(),
-                suppressed: false,
-            });
+            ));
         }
     }
 }

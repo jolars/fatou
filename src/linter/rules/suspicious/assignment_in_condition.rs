@@ -8,7 +8,7 @@
 //! (`if (x = 1)`) is unwrapped first.
 
 use crate::ast::{AstNode, AstToken, Condition, Expr};
-use crate::linter::diagnostic::{Applicability, Diagnostic, Fix, Severity};
+use crate::linter::diagnostic::{Applicability, Diagnostic, Fix};
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::syntax::{SyntaxElement, SyntaxKind};
 
@@ -55,21 +55,19 @@ impl Rule for AssignmentInCondition {
 
         let range = op.syntax().text_range();
         let assign_range = assign.syntax().text_range();
-        sink.push(Diagnostic {
-            path: None,
-            start: assign_range.start().into(),
-            end: assign_range.end().into(),
-            rule: self.id().to_string(),
-            severity: Severity::Warning,
-            message: "assignment used as a condition; did you mean `==`?".to_string(),
-            fixes: vec![Fix {
-                description: "Replace `=` with `==`".to_string(),
-                content: "==".to_string(),
-                start: range.start().into(),
-                end: range.end().into(),
-                applicability: Applicability::Safe,
-            }],
-            suppressed: false,
+        let mut diag = Diagnostic::new(
+            self.id(),
+            assign_range.start().into(),
+            assign_range.end().into(),
+            "assignment used as a condition; did you mean `==`?".to_string(),
+        );
+        diag.fixes.push(Fix {
+            description: "Replace `=` with `==`".to_string(),
+            content: "==".to_string(),
+            start: range.start().into(),
+            end: range.end().into(),
+            applicability: Applicability::Safe,
         });
+        sink.push(diag);
     }
 }

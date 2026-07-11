@@ -19,6 +19,11 @@ impl Rule for DuplicateArgument {
         "duplicate-argument"
     }
 
+    /// Julia rejects the definition outright, so this is always an error.
+    fn default_severity(&self) -> Severity {
+        Severity::Error
+    }
+
     fn description(&self) -> &'static str {
         "Flag the same parameter name declared more than once in a single \
          signature. Julia rejects such a definition outright, so it is always a \
@@ -41,16 +46,12 @@ impl Rule for DuplicateArgument {
                     continue;
                 }
                 if seen.contains(&binding.name.as_str()) {
-                    sink.push(Diagnostic {
-                        path: None,
-                        start: binding.def_range.start().into(),
-                        end: binding.def_range.end().into(),
-                        rule: self.id().to_string(),
-                        severity: Severity::Error,
-                        message: format!("argument name `{}` is used more than once", binding.name),
-                        fixes: Vec::new(),
-                        suppressed: false,
-                    });
+                    sink.push(Diagnostic::new(
+                        self.id(),
+                        binding.def_range.start().into(),
+                        binding.def_range.end().into(),
+                        format!("argument name `{}` is used more than once", binding.name),
+                    ));
                 } else {
                     seen.push(binding.name.as_str());
                 }

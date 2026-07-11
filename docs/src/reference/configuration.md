@@ -47,17 +47,23 @@ line-ending = "auto"
 
 ## `[lint]`
 
-  | Key      | Type             | Default | Description                      |
-  | -------- | ---------------- | ------- | -------------------------------- |
-  | `select` | array of strings | unset   | If set, only these rule IDs run. |
-  | `ignore` | array of strings | `[]`    | Rule IDs to disable.             |
+  | Key        | Type             | Default | Description                      |
+  | ---------- | ---------------- | ------- | -------------------------------- |
+  | `select`   | array of strings | unset   | If set, only these rule IDs run. |
+  | `ignore`   | array of strings | `[]`    | Rule IDs to disable.             |
+  | `severity` | table            | `{}`    | Per-rule severity overrides.     |
 
-> **Note**: no lint rules ship yet, so `[lint]` is scaffolding today. The keys
-> are accepted so a `fatou.toml` can be prepared ahead of the first rules
-> landing.
+See the [rule reference](rules.md) for the available rule IDs.
+
+`[lint.severity]` maps a rule ID to the severity its findings report, one of
+`"error"`, `"warning"`, `"info"`, or `"hint"`. Rules not listed keep their
+default severity.
 
 ```toml
 [lint]
 select = ["some-rule"]
 ignore = ["another-rule"]
+
+[lint.severity]
+some-rule = "error"
 ```

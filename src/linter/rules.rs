@@ -15,12 +15,15 @@
 //! 1. Create a module under `src/linter/rules/<category>/<id>.rs`.
 //! 2. Define a unit `pub struct` that implements [`Rule`] — subscribe to node
 //!    kinds via `interests` + `check`, or do a whole-file pass via `check_file`.
+//!    Build findings with [`Diagnostic::new`]: severity (like the path) is
+//!    stamped by the engine — override `default_severity` instead of setting it.
 //! 3. Add it to [`all_rules`] below — the single source of truth. The set of
 //!    valid rule IDs ([`all_rule_ids`]) is derived from it, so there is no
 //!    second list to keep in sync.
 
 use std::path::Path;
 
+use crate::config::LintConfig;
 use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
@@ -51,7 +54,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
 }
 
 /// Every shipped rule's ID, derived from [`all_rules`] so the two never drift.
-/// Used to validate `LintConfig::select` / `ignore`.
+/// Used to validate `LintConfig::select` / `ignore` / `severity`.
 pub fn all_rule_ids() -> Vec<&'static str> {
     all_rules().iter().map(|r| r.id()).collect()
 }
@@ -112,25 +115,42 @@ pub trait Rule: Send + Sync {
     }
 }
 
-/// The set of rules enabled for a run, after applying `select`/`ignore`.
+/// One enabled rule plus the severity this run stamps on its findings: the
+/// `[lint.severity]` override when present, the rule's default otherwise.
+struct ConfiguredRule {
+    rule: Box<dyn Rule>,
+    severity: Severity,
+}
+
+/// The set of rules enabled for a run, after applying `select`/`ignore`,
+/// each carrying its resolved severity.
 pub struct ResolvedRules {
-    rules: Vec<Box<dyn Rule>>,
+    rules: Vec<ConfiguredRule>,
 }
 
 impl ResolvedRules {
-    /// Build the rule set honoring `select` / `ignore`, alongside any
-    /// `select`/`ignore` entries that name no shipped rule.
+    /// Build the rule set honoring `config`, alongside any `select`/`ignore`/
+    /// `severity` entries that name no shipped rule.
     ///
     /// Resolution order: start with every default-enabled rule (or, when
     /// `select` is set, the listed rules), then subtract anything in `ignore`.
+    /// Each surviving rule gets the `[lint.severity]` override for its ID, or
+    /// its own default severity.
     ///
     /// The returned `Vec<String>` holds the unrecognized IDs (first-seen order,
-    /// deduplicated) so callers can warn on a typo'd `--select`/`--ignore`.
-    pub fn resolve(select: Option<&[String]>, ignore: &[String]) -> (Self, Vec<String>) {
+    /// deduplicated) so callers can warn on a typo'd `--select`/`--ignore` or
+    /// `[lint.severity]` key.
+    pub fn resolve(config: &LintConfig) -> (Self, Vec<String>) {
         let all = all_rules();
+        let select = config.select.as_deref();
 
         let mut unknown = Vec::new();
-        for id in select.into_iter().flatten().chain(ignore) {
+        for id in select
+            .into_iter()
+            .flatten()
+            .chain(&config.ignore)
+            .chain(config.severity.keys())
+        {
             let recognized = all.iter().any(|rule| rule.id() == id);
             if !recognized && !unknown.contains(id) {
                 unknown.push(id.clone());
@@ -144,7 +164,15 @@ impl ResolvedRules {
                     Some(selected) => selected.iter().any(|id| id == rule.id()),
                     None => rule.default_enabled(),
                 };
-                enabled && !ignore.iter().any(|id| id == rule.id())
+                enabled && !config.ignore.iter().any(|id| id == rule.id())
+            })
+            .map(|rule| {
+                let severity = config
+                    .severity
+                    .get(rule.id())
+                    .copied()
+                    .unwrap_or(rule.default_severity());
+                ConfiguredRule { rule, severity }
             })
             .collect();
         (Self { rules }, unknown)
@@ -163,7 +191,7 @@ impl ResolvedRules {
 }
 
 /// Run `rules` against one file's CST + model. See [`ResolvedRules::run`].
-fn run_rules(rules: &[Box<dyn Rule>], ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
+fn run_rules(rules: &[ConfiguredRule], ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
     let mut all = Vec::new();
 
     // Node-dispatch table: kind discriminant -> indices of subscribed rules.
@@ -171,8 +199,8 @@ fn run_rules(rules: &[Box<dyn Rule>], ctx: &RuleContext<'_>) -> Vec<Diagnostic> 
     // `kind as usize` beats a hash map.
     let mut by_kind: Vec<Vec<usize>> = vec![Vec::new(); SyntaxKind::COUNT];
     let mut any_node_rules = false;
-    for (i, rule) in rules.iter().enumerate() {
-        for kind in rule.interests() {
+    for (i, configured) in rules.iter().enumerate() {
+        for kind in configured.rule.interests() {
             by_kind[*kind as usize].push(i);
             any_node_rules = true;
         }
@@ -181,17 +209,24 @@ fn run_rules(rules: &[Box<dyn Rule>], ctx: &RuleContext<'_>) -> Vec<Diagnostic> 
     // Single shared traversal feeding every node-shape rule. Visits tokens too
     // (`descendants_with_tokens`) so token-level rules can subscribe to e.g.
     // `IDENT` or `COMMENT`.
+    //
+    // Severity is stamped centrally, right after each rule call, onto whatever
+    // that call pushed: rules never choose it (see [`Diagnostic::new`]).
     if any_node_rules {
         for el in ctx.root.descendants_with_tokens() {
             for &i in &by_kind[el.kind() as usize] {
-                rules[i].check(&el, ctx, &mut all);
+                let before = all.len();
+                rules[i].rule.check(&el, ctx, &mut all);
+                stamp_severity(&mut all[before..], rules[i].severity);
             }
         }
     }
 
     // Whole-file pass for model-/comment-driven rules.
-    for rule in rules {
-        rule.check_file(ctx, &mut all);
+    for configured in rules {
+        let before = all.len();
+        configured.rule.check_file(ctx, &mut all);
+        stamp_severity(&mut all[before..], configured.severity);
     }
 
     // Stamp the file path onto every finding centrally; rules leave it `None`.
@@ -205,6 +240,16 @@ fn run_rules(rules: &[Box<dyn Rule>], ctx: &RuleContext<'_>) -> Vec<Diagnostic> 
     all
 }
 
+/// Stamp `severity` onto the findings a rule just pushed. Severity is an
+/// engine concern: the config override when set, the rule's default otherwise
+/// (both already folded into [`ConfiguredRule::severity`] by
+/// [`ResolvedRules::resolve`]).
+fn stamp_severity(diags: &mut [Diagnostic], severity: Severity) {
+    for diag in diags {
+        diag.severity = severity;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,23 +260,64 @@ mod tests {
 
     #[test]
     fn resolve_flags_unknown_select_and_ignore_ids() {
-        let select = ids(&["unused-binding", "made-up-rule"]);
-        let ignore = ids(&["also-bogus"]);
-        let (_rules, unknown) = ResolvedRules::resolve(Some(&select), &ignore);
+        let config = LintConfig {
+            select: Some(ids(&["unused-binding", "made-up-rule"])),
+            ignore: ids(&["also-bogus"]),
+            ..Default::default()
+        };
+        let (_rules, unknown) = ResolvedRules::resolve(&config);
         assert_eq!(unknown, ids(&["made-up-rule", "also-bogus"]));
     }
 
     #[test]
     fn resolve_reports_no_unknowns_for_valid_ids() {
-        let ignore = ids(&["unused-import"]);
-        let (_rules, unknown) = ResolvedRules::resolve(None, &ignore);
+        let config = LintConfig {
+            ignore: ids(&["unused-import"]),
+            ..Default::default()
+        };
+        let (_rules, unknown) = ResolvedRules::resolve(&config);
         assert!(unknown.is_empty());
     }
 
     #[test]
     fn resolve_dedupes_repeated_unknown_ids() {
-        let select = ids(&["typo", "typo"]);
-        let (_rules, unknown) = ResolvedRules::resolve(Some(&select), &["typo".to_string()]);
+        let config = LintConfig {
+            select: Some(ids(&["typo", "typo"])),
+            ignore: ids(&["typo"]),
+            ..Default::default()
+        };
+        let (_rules, unknown) = ResolvedRules::resolve(&config);
         assert_eq!(unknown, ids(&["typo"]));
+    }
+
+    #[test]
+    fn resolve_flags_unknown_severity_keys() {
+        let config = LintConfig {
+            severity: [("no-such-rule".to_string(), Severity::Error)].into(),
+            ..Default::default()
+        };
+        let (_rules, unknown) = ResolvedRules::resolve(&config);
+        assert_eq!(unknown, ids(&["no-such-rule"]));
+    }
+
+    #[test]
+    fn resolved_severity_is_override_or_rule_default() {
+        let config = LintConfig {
+            severity: [("unused-binding".to_string(), Severity::Error)].into(),
+            ..Default::default()
+        };
+        let (rules, _) = ResolvedRules::resolve(&config);
+        let severity_of = |id: &str| {
+            rules
+                .rules
+                .iter()
+                .find(|c| c.rule.id() == id)
+                .map(|c| c.severity)
+                .unwrap()
+        };
+        assert_eq!(severity_of("unused-binding"), Severity::Error);
+        // No override: the rule's own default wins.
+        assert_eq!(severity_of("duplicate-argument"), Severity::Error);
+        assert_eq!(severity_of("unused-import"), Severity::Warning);
     }
 }

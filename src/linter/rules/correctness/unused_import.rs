@@ -10,7 +10,7 @@
 //! A qualified use (`X.f()`) marks the module binding read, and a re-`export`
 //! marks the imported name read, so neither is a false positive.
 
-use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::semantic::{BindingKind, LoadKind};
 
@@ -44,16 +44,12 @@ impl Rule for UnusedImport {
             if is_whole_module_using(ctx, binding.def_range) {
                 continue;
             }
-            sink.push(Diagnostic {
-                path: None,
-                start: binding.def_range.start().into(),
-                end: binding.def_range.end().into(),
-                rule: self.id().to_string(),
-                severity: Severity::Warning,
-                message: format!("`{}` is imported but never used", binding.name),
-                fixes: Vec::new(),
-                suppressed: false,
-            });
+            sink.push(Diagnostic::new(
+                self.id(),
+                binding.def_range.start().into(),
+                binding.def_range.end().into(),
+                format!("`{}` is imported but never used", binding.name),
+            ));
         }
     }
 }

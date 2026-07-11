@@ -187,8 +187,7 @@ fn run_lint_fix(
     config: &Config,
 ) -> Result<ExitCode, String> {
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
-    let (_, unknown_rules) =
-        linter::ResolvedRules::resolve(config.lint.select.as_deref(), &config.lint.ignore);
+    let (_, unknown_rules) = linter::ResolvedRules::resolve(&config.lint);
     warn_unknown_rules(&unknown_rules);
     let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
 
@@ -238,7 +237,7 @@ fn run_lint_fix(
 /// shipped rule, so a typo'd `--select` doesn't silently select nothing.
 fn warn_unknown_rules(unknown: &[String]) {
     for id in unknown {
-        eprintln!("warning: unknown rule `{id}` in select/ignore");
+        eprintln!("warning: unknown rule `{id}` in select/ignore/severity");
     }
 }
 

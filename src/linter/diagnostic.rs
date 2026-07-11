@@ -2,9 +2,9 @@
 
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
@@ -54,4 +54,23 @@ pub struct Diagnostic {
     pub message: String,
     pub fixes: Vec<Fix>,
     pub suppressed: bool,
+}
+
+impl Diagnostic {
+    /// A finding for `rule` spanning `start..end`. `path` and `severity` are
+    /// stamped centrally by the engine after the rule runs (see
+    /// `linter::rules::run_rules`), so rules never set either; the values here
+    /// are placeholders.
+    pub fn new(rule: &str, start: usize, end: usize, message: String) -> Self {
+        Self {
+            path: None,
+            start,
+            end,
+            rule: rule.to_string(),
+            severity: Severity::Warning,
+            message,
+            fixes: Vec::new(),
+            suppressed: false,
+        }
+    }
 }

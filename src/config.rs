@@ -3,11 +3,13 @@
 //! Defaults follow common Julia conventions (line width 92, 4-space indent).
 //! Discovery walks up from an anchor directory looking for a `fatou.toml`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::formatter::LineEnding;
+use crate::linter::Severity;
 
 pub const CONFIG_FILE_NAME: &str = "fatou.toml";
 
@@ -34,6 +36,9 @@ pub struct LintConfig {
     pub select: Option<Vec<String>>,
     /// Rule IDs to disable.
     pub ignore: Vec<String>,
+    /// Per-rule severity overrides (`[lint.severity]`); rules not listed keep
+    /// their default severity.
+    pub severity: BTreeMap<String, Severity>,
 }
 
 impl Default for FormatConfig {
@@ -161,6 +166,8 @@ struct RawLint {
     select: Option<Vec<String>>,
     #[serde(default)]
     ignore: Vec<String>,
+    #[serde(default)]
+    severity: BTreeMap<String, Severity>,
 }
 
 impl Config {
@@ -214,6 +221,7 @@ impl RawConfig {
             lint: LintConfig {
                 select: self.lint.select,
                 ignore: self.lint.ignore,
+                severity: self.lint.severity,
             },
         };
         (config, warnings)
@@ -304,6 +312,29 @@ mod tests {
         assert_eq!(config.format.line_width, 100);
         // The deprecated key is still reported even though it is overridden.
         assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn parses_lint_severity_table() {
+        let raw: RawConfig = toml::from_str(
+            "[lint.severity]\nunused-binding = \"error\"\nunused-import = \"hint\"\n",
+        )
+        .unwrap();
+        let (config, _) = raw.into_config();
+        assert_eq!(
+            config.lint.severity.get("unused-binding"),
+            Some(&Severity::Error)
+        );
+        assert_eq!(
+            config.lint.severity.get("unused-import"),
+            Some(&Severity::Hint)
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_severity_value() {
+        toml::from_str::<RawConfig>("[lint.severity]\nunused-binding = \"fatal\"\n")
+            .expect_err("unknown severity should be rejected");
     }
 
     #[test]
