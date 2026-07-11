@@ -69,6 +69,82 @@ leverage.
   `annotate-snippets` lands: `rule: &'static str` (no per-finding `String`),
   `TextRange` instead of raw `usize` offsets, and a structured message
   (`name`/`body`/`suggestion`) for richer LSP code actions.
+- [ ] Port arity's autofix-correctness harness
+  (`fixed_output_is_parseable_and_clean`): one curated case per fixable rule
+  asserting the fixed output reparses clean, so "a fix is a textual edit,
+  never a formatter" is enforced by a gate rather than per-rule diligence.
+
+### Rule roadmap
+
+Candidates probed from StaticLint.jl's check catalog (its `LintCodes` names in
+parentheses). Each entry carries category and cost tier: `syn` = CST + typed
+AST wrappers only, `sem` = needs the `SemanticModel`. To land one, use the
+`add-lint-rule` skill (`.claude/skills/add-lint-rule/`).
+
+Ready now (no new infrastructure):
+
+- [ ] `nothing-comparison` (suspicious, syn): `x == nothing` / `x != nothing`
+  compares by value; suggest `===`/`!==` or `isnothing`. Safe fix `==` ->
+  `===` and `!=` -> `!==`. `nothing` is a `Core` const that is practically
+  never shadowed, so a name-based match is fine. (NothingEquality,
+  NothingNotEq)
+- [ ] `unused-argument` (correctness, sem): function argument never read in
+  the body. Copy StaticLint's mitigations: skip all-underscore names (the
+  documented escape hatch) and functions whose body is a lone literal (stub
+  methods). Interface methods that must accept an argument are the real-world
+  FP source; consider `Hint` severity or `default_enabled() == false`.
+  (UnusedFunctionArgument)
+- [ ] `break-outside-loop` (correctness, syn, error severity): `break` or
+  `continue` with no enclosing `for`/`while`. Parses clean but errors at
+  lowering, so the lint has real value. Ancestor walk. (ShouldBeInALoop)
+- [ ] `constant-condition` (suspicious, syn): boolean literal as an `if`/
+  `while` test or as an operand of `&&`/`||`. One rule where StaticLint has
+  three codes. Caveat: `false && expr` is occasionally used deliberately.
+  (ConstIfCondition, PointlessOR, PointlessAND)
+- [ ] `module-shadows-parent` (suspicious, sem): module named the same as its
+  parent module; `SemanticModel::enclosing_module_path` answers this
+  directly. (InvalidModuleName)
+- [ ] `noteq-definition` (correctness, syn): defining `!=` (or `≠`) instead
+  of `==`; `!=` is `const != = !(==)` and should not be overloaded. (NotEqDef)
+- [ ] `unused-type-parameter` (correctness, sem): `where {T}` with `T` never
+  used in the signature or body. Needs the model to bind where-clause params
+  first. (UnusedTypeParameter)
+- [ ] `index-from-length` (suspicious, syn, opinionated): `for i in
+  1:length(x)` where `i` indexes `x` -> suggest `eachindex`/`axes`; also
+  iterating a bare numeric literal (`for i in 3.5`). Name-based match on
+  `length`/`size` (no resolution); StaticLint exempts known `Vector`/`Array`
+  bindings, which we cannot without type info -- document as opinionated.
+  (IncorrectIterSpec, IndexFromLength)
+
+Blocked on future infrastructure:
+
+- [ ] `undefined-name` (correctness): unresolved identifier. Blocked on name
+  resolution against the Base/stdlib/package index (LSP Phase 3); already
+  tracked in the LSP roadmap as the undefined-name lint. (MissingRef)
+- [ ] `call-arity` (correctness): call-site positional/keyword counts vs. the
+  method table. Blocked on method indexing plus an environment of Base
+  signatures. StaticLint's noisiest check in practice (macros, callable
+  structs, `do`-blocks); its `compare_f_call` min/max/kw model is a
+  reasonable spec, but gate behind solid resolution. (IncorrectCallArgs)
+- [ ] `type-piracy` (correctness): extending an imported function with no
+  owned argument type. Blocked on cross-file import and ownership
+  resolution. (TypePiracy)
+- [ ] `missing-include-file` plus include-graph checks (correctness): flag
+  `include` of a nonexistent path; detect include cycles. Blocked on
+  include-following in project discovery. (MissingFile, IncludeLoop,
+  IncludePathContainsNULL)
+- [ ] `redefined-constant` (correctness): reassigning a `const` binding, or
+  defining a function over a name that already holds a value. A single-file
+  version is feasible with current bindings; needs branch-awareness
+  (StaticLint's `in_same_if_branch`) to not flag legal redefinitions in
+  disjoint `if` branches. (InvalidRedefofConst, CannotDeclareConst,
+  CannotDefineFuncAlreadyHasValue)
+
+Probed and deliberately skipped: TypeDeclOnGlobalVariable (pre-1.8 Julia
+only), UnsupportedConstLocalVariable (low value), KwDefaultMismatch (fiddly
+per-type literal matching with known FPs), InappropriateUseOfLiteral (mostly
+parse/lowering errors the parser should surface), FileTooBig/FileNotAvailable
+(operational limits of the server, not lints).
 
 ## Language server
 
