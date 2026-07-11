@@ -50,12 +50,16 @@ leverage.
 - [x] Report unknown rule IDs in `select`/`ignore`. `ResolvedRules::resolve` now
   returns `(Self, Vec<String>)` with the unrecognized IDs, surfaced on
   `LintResult` so the CLI warns on a typo'd `select`/`ignore`.
-- [ ] Stamp severity in the engine, not the rule. `Rule::default_severity()` is
-  currently declared but never consulted — rules emit a hardcoded `Severity`, so
-  overriding it is a no-op. Have `run_rules` assign
-  `config_override.unwrap_or(rule.default_severity())`, which also unlocks
-  per-rule severity configuration (`fatou.toml`). Same latent redundancy exists
-  in arity.
+- [x] Stamp severity in the engine, not the rule. `ResolvedRules::resolve` now
+  takes the whole `LintConfig` and pairs each enabled rule with
+  `config.severity override or rule.default_severity()`; `run_rules` stamps it
+  onto whatever each rule call pushed, alongside the existing path stamping.
+  Rules build findings via `Diagnostic::new` (no severity choice; the
+  hard-error `duplicate-argument` overrides `default_severity`), and a
+  `[lint.severity]` table in `fatou.toml` maps rule ID → severity, with unknown
+  IDs surfaced through the same typo warning as `select`/`ignore`. Locked by
+  units in `src/linter/rules.rs` + `src/config.rs` and the severity block in
+  `tests/linter_rules.rs`. Same latent redundancy still exists in arity.
 - [ ] Precompute the node-dispatch table. `run_rules` rebuilds the
   `Vec<Vec<usize>>` (sized `SyntaxKind::COUNT`) from `interests()` on every file;
   the interests are fixed once `ResolvedRules` is built. Move the table into
