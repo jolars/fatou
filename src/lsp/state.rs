@@ -7,30 +7,33 @@ use std::path::PathBuf;
 use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument,
-    Notification as NotificationTrait, PublishDiagnostics,
+    DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
+    DidSaveTextDocument, Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
     Completion, DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting,
-    GotoDefinition, HoverRequest, PrepareRenameRequest, RangeFormatting, References, Rename,
-    Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
-    SemanticTokensFullRequest, SignatureHelpRequest, WorkspaceSymbolRequest,
+    GotoDefinition, HoverRequest, PrepareRenameRequest, RangeFormatting, References,
+    RegisterCapability, Rename, Request as RequestTrait, ResolveCompletionItem,
+    SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentFormattingParams, DocumentHighlightParams, DocumentRangeFormattingParams,
-    DocumentSymbolParams, FoldingRangeParams, GotoDefinitionParams, HoverParams,
-    PublishDiagnosticsParams, ReferenceParams, RenameParams, SelectionRangeParams,
-    SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams, Uri,
-    WorkspaceSymbolParams,
+    DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams, GlobPattern, GotoDefinitionParams,
+    HoverParams, PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams,
+    RenameParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams,
+    TextDocumentPositionParams, Uri, WorkspaceSymbolParams,
 };
 
+use crate::environment::is_environment_file;
 use crate::formatter::FormatStyle;
 use crate::text::{PositionEncoding, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
 use super::read_jobs::ReadJob;
+use super::server::HarvestSignal;
 use super::uri;
 
 /// An open document's live buffer and client-reported version.
@@ -66,13 +69,16 @@ pub(crate) struct GlobalState {
     /// job and runs the read off-thread against the cached parse. See
     /// [`run_read`](super::read_jobs::run_read).
     read_tx: Sender<ReadJob>,
-    /// Save signals to the workspace harvester: the saved file's path. It
-    /// re-harvests the workspace package when the path is one of its files.
-    save_tx: Sender<PathBuf>,
-    /// Close signals to the analysis thread: the closed file's path, whose
-    /// tracked input is reverted to on-disk text (a discarded buffer must not
-    /// linger in the reverse-occurrence index).
-    close_tx: Sender<PathBuf>,
+    /// Harvest signals to the workspace harvester: a changed source file's
+    /// path (it re-harvests the workspace package owning the file) or an
+    /// environment-file change (it re-resolves every workspace environment).
+    harvest_tx: Sender<HarvestSignal>,
+    /// Disk-sync signals to the analysis thread: a file's path, whose tracked
+    /// input is reverted to on-disk text. Sent when a document closes (a
+    /// discarded buffer must not linger in the reverse-occurrence index) and
+    /// when a watched file changes outside any open buffer (the stale seeded
+    /// text must catch up with disk).
+    sync_tx: Sender<PathBuf>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
     /// The latest per-file parse diagnostics, kept so a project-diagnostic update
@@ -90,8 +96,8 @@ impl GlobalState {
         sender: Sender<Message>,
         analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
-        save_tx: Sender<PathBuf>,
-        close_tx: Sender<PathBuf>,
+        harvest_tx: Sender<HarvestSignal>,
+        sync_tx: Sender<PathBuf>,
         encoding: PositionEncoding,
     ) -> Self {
         Self {
@@ -101,8 +107,8 @@ impl GlobalState {
             sender,
             analysis_tx,
             read_tx,
-            save_tx,
-            close_tx,
+            harvest_tx,
+            sync_tx,
             encoding,
         }
     }
@@ -512,10 +518,19 @@ impl GlobalState {
                 {
                     // Signal the workspace harvester with the saved path; it
                     // re-harvests the workspace package if the file belongs to
-                    // it. A dead channel (no workspace) is a no-op.
+                    // it, or re-resolves the environment if the save touched a
+                    // project or manifest file. A dead channel (no workspace)
+                    // is a no-op.
                     if let Some(path) = uri::to_path(&params.text_document.uri) {
-                        let _ = self.save_tx.send(path);
+                        let _ = self.harvest_tx.send(harvest_signal(path));
                     }
+                }
+            }
+            DidChangeWatchedFiles::METHOD => {
+                if let Ok(params) =
+                    note.extract::<DidChangeWatchedFilesParams>(DidChangeWatchedFiles::METHOD)
+                {
+                    self.on_watched_files(params);
                 }
             }
             DidCloseTextDocument::METHOD => {
@@ -528,7 +543,7 @@ impl GlobalState {
                     // buffer's (possibly unsaved) edits must not linger in the
                     // reverse-occurrence index. A dead channel is a no-op.
                     if let Some(path) = uri::to_path(&uri) {
-                        let _ = self.close_tx.send(path);
+                        let _ = self.sync_tx.send(path);
                     }
                     // Drop the buffer's parse diagnostics, but keep any project-
                     // level include-graph diagnostics (they attach to the file on
@@ -539,6 +554,81 @@ impl GlobalState {
             }
             _ => {}
         }
+    }
+
+    /// Handle a `workspace/didChangeWatchedFiles` batch. An environment-file
+    /// event escalates to one environment re-resolve for the whole batch (which
+    /// subsumes any per-package re-harvest); otherwise each `.jl` event
+    /// re-harvests the workspace package owning the file, so created and
+    /// deleted members refresh the membership. A `.jl` file with no open buffer
+    /// is first synced to disk — the seeded text must not go stale when the
+    /// file changes outside the editor — while an open buffer stays
+    /// authoritative until it closes (a create not yet tracked and a delete no
+    /// longer readable both sync as no-ops; the re-harvest itself adds or drops
+    /// the member).
+    fn on_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
+        let environment_changed = params
+            .changes
+            .iter()
+            .filter_map(|event| uri::to_path(&event.uri))
+            .any(|path| is_environment_file(&path));
+        for event in &params.changes {
+            let Some(path) = uri::to_path(&event.uri) else {
+                continue;
+            };
+            if is_environment_file(&path) || path.extension().is_none_or(|ext| ext != "jl") {
+                continue;
+            }
+            if !self.documents.contains_key(&event.uri) {
+                let _ = self.sync_tx.send(path.clone());
+            }
+            if !environment_changed {
+                let _ = self.harvest_tx.send(HarvestSignal::Source(path));
+            }
+        }
+        if environment_changed {
+            let _ = self.harvest_tx.send(HarvestSignal::Environment);
+        }
+    }
+
+    /// Ask the client to watch the files whose external changes matter: `.jl`
+    /// sources (workspace membership and the cross-file indexes) and the
+    /// environment files (the project/manifest flavors, which steer
+    /// resolution). Called once by the main loop as it starts — past
+    /// `initialize_finish`, which has already consumed the client's
+    /// `initialized`, so the protocol permits server-to-client requests. The
+    /// client's response carries nothing and is ignored.
+    pub(crate) fn register_file_watchers(&self) {
+        let watchers = [
+            "**/*.jl",
+            "**/Project.toml",
+            "**/JuliaProject.toml",
+            "**/Manifest.toml",
+            "**/JuliaManifest.toml",
+            "**/Manifest-v*.toml",
+        ]
+        .into_iter()
+        .map(|glob| FileSystemWatcher {
+            glob_pattern: GlobPattern::String(glob.to_string()),
+            // The default kind: create + change + delete.
+            kind: None,
+        })
+        .collect();
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: "fatou-watched-files".to_string(),
+                method: DidChangeWatchedFiles::METHOD.to_string(),
+                register_options: Some(
+                    serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers })
+                        .expect("watcher registration options serialize"),
+                ),
+            }],
+        };
+        let _ = self.sender.send(Message::Request(Request {
+            id: RequestId::from("fatou-register-watched-files".to_string()),
+            method: RegisterCapability::METHOD.to_string(),
+            params: serde_json::to_value(params).expect("registration params serialize"),
+        }));
     }
 
     pub(crate) fn on_outbound(&mut self, outbound: Outbound) {
@@ -620,4 +710,14 @@ impl GlobalState {
 /// editor's untitled buffer) share a synthetic fallback path.
 fn path_for(uri: &Uri) -> PathBuf {
     uri::to_path(uri).unwrap_or_else(|| PathBuf::from("untitled.jl"))
+}
+
+/// Classify a changed path for the harvester: an environment file warrants a
+/// full re-resolve, anything else a re-harvest of the package owning it.
+fn harvest_signal(path: PathBuf) -> HarvestSignal {
+    if is_environment_file(&path) {
+        HarvestSignal::Environment
+    } else {
+        HarvestSignal::Source(path)
+    }
 }

@@ -211,6 +211,24 @@ impl std::error::Error for EnvironmentError {}
 const PROJECT_NAMES: [&str; 2] = ["JuliaProject.toml", "Project.toml"];
 const MANIFEST_NAMES: [&str; 2] = ["JuliaManifest.toml", "Manifest.toml"];
 
+/// Whether `path` names a file that steers environment resolution: a project
+/// file (`Project.toml`/`JuliaProject.toml`) or a manifest (`Manifest.toml`/
+/// `JuliaManifest.toml`, or a version-specific `Manifest-vX.Y.toml`). The LSP
+/// uses this to escalate a watched-file change to a full environment
+/// re-resolve instead of a workspace re-harvest.
+pub fn is_environment_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    PROJECT_NAMES.contains(&name)
+        || MANIFEST_NAMES.contains(&name)
+        || name
+            .strip_prefix("Manifest-v")
+            .and_then(|rest| rest.strip_suffix(".toml"))
+            .and_then(parse_version)
+            .is_some()
+}
+
 /// Resolve the active Julia environment for `ctx`. Returns `Ok(None)` when no
 /// project can be located by any strategy.
 pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError> {
@@ -880,6 +898,28 @@ mod tests {
             depot_roots(&ctx),
             vec![PathBuf::from("/custom"), PathBuf::from("/home/u/.julia")]
         );
+    }
+
+    #[test]
+    fn classifies_environment_files() {
+        for name in [
+            "Project.toml",
+            "JuliaProject.toml",
+            "Manifest.toml",
+            "JuliaManifest.toml",
+            "Manifest-v1.11.toml",
+        ] {
+            assert!(
+                is_environment_file(&PathBuf::from("/ws").join(name)),
+                "{name} steers resolution"
+            );
+        }
+        for name in ["a.jl", "Cargo.toml", "Manifest-vX.toml", "Manifest-v1.11"] {
+            assert!(
+                !is_environment_file(&PathBuf::from("/ws").join(name)),
+                "{name} does not steer resolution"
+            );
+        }
     }
 
     #[test]

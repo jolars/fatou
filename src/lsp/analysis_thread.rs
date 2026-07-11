@@ -61,7 +61,7 @@ pub(crate) fn spawn_analysis_thread(
     analysis_rx: Receiver<AnalysisRequest>,
     read_rx: Receiver<ReadJob>,
     library_rx: Receiver<LibraryMessage>,
-    close_rx: Receiver<PathBuf>,
+    sync_rx: Receiver<PathBuf>,
     out_tx: Sender<Outbound>,
     read_spawner: Spawner,
     encoding: PositionEncoding,
@@ -80,7 +80,7 @@ pub(crate) fn spawn_analysis_thread(
                 encoding,
                 published_graph_files: HashSet::new(),
             };
-            worker.run(&analysis_rx, &read_rx, &library_rx, &close_rx, &done_rx);
+            worker.run(&analysis_rx, &read_rx, &library_rx, &sync_rx, &done_rx);
         })
         .expect("spawn analysis thread")
 }
@@ -164,16 +164,17 @@ impl AnalysisWorker {
         analysis_rx: &Receiver<AnalysisRequest>,
         read_rx: &Receiver<ReadJob>,
         library_rx: &Receiver<LibraryMessage>,
-        close_rx: &Receiver<PathBuf>,
+        sync_rx: &Receiver<PathBuf>,
         done_rx: &Receiver<AnalyzeDone>,
     ) {
         loop {
             select! {
-                recv(close_rx) -> path => {
-                    // An editor closed a document: revert its tracked input to
-                    // on-disk text so a discarded buffer stops contributing to
-                    // the reverse-occurrence index. A no-op for a non-member or a
-                    // buffer already matching disk.
+                recv(sync_rx) -> path => {
+                    // An editor closed a document, or a watched file changed
+                    // outside any open buffer: revert its tracked input to
+                    // on-disk text so a discarded buffer (or stale seeded text)
+                    // stops contributing to the reverse-occurrence index. A
+                    // no-op for a non-member or a buffer already matching disk.
                     if let Ok(path) = path {
                         self.db.revert_file_to_disk(&path);
                     }

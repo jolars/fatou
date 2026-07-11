@@ -50,9 +50,26 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
     let params: InitializeParams = serde_json::from_value(params)?;
     let encoding = negotiate_position_encoding(&params.capabilities);
     let workspace_roots = workspace_roots(&params);
+    // Watching only pays off with a workspace to keep fresh; without roots the
+    // harvester never runs and every watched event would be dropped anyway.
+    let register_watchers =
+        supports_watched_files_registration(&params.capabilities) && !workspace_roots.is_empty();
     let result = serde_json::json!({ "capabilities": server_capabilities(encoding) });
     connection.initialize_finish(id, result)?;
-    main_loop(connection, encoding, workspace_roots)
+    main_loop(connection, encoding, workspace_roots, register_watchers)
+}
+
+/// Whether the client accepts a dynamic `workspace/didChangeWatchedFiles`
+/// registration. File watching has no static server capability: without this,
+/// the server never hears about external file events and relies on saves
+/// alone.
+fn supports_watched_files_registration(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.did_change_watched_files.as_ref())
+        .and_then(|caps| caps.dynamic_registration)
+        .unwrap_or(false)
 }
 
 /// The workspace roots to resolve Julia environments against: every workspace
@@ -164,25 +181,29 @@ fn main_loop(
     connection: &Connection,
     encoding: PositionEncoding,
     workspace_roots: Vec<PathBuf>,
+    register_watchers: bool,
 ) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
     let (read_tx, read_rx) = crossbeam_channel::unbounded::<ReadJob>();
     let (library_tx, library_rx) = crossbeam_channel::unbounded::<LibraryMessage>();
-    // Save signals from the main loop to the workspace harvester: the saved
-    // file's path (the harvester ignores saves outside the workspace package).
-    let (save_tx, save_rx) = crossbeam_channel::unbounded::<PathBuf>();
-    // Close signals from the main loop to the analysis thread: the closed file's
-    // path, reverted to on-disk text so a discarded buffer leaves the index.
-    let (close_tx, close_rx) = crossbeam_channel::unbounded::<PathBuf>();
+    // Harvest signals from the main loop to the workspace harvester: a changed
+    // source file's path (saves and watched events; the harvester ignores paths
+    // outside every workspace package) or an environment-file change.
+    let (harvest_tx, harvest_rx) = crossbeam_channel::unbounded::<HarvestSignal>();
+    // Disk-sync signals from the main loop to the analysis thread: a file's
+    // path, whose tracked input is reverted to on-disk text (a closed
+    // document's discarded buffer, or a watched file changed outside any open
+    // buffer).
+    let (sync_tx, sync_rx) = crossbeam_channel::unbounded::<PathBuf>();
 
     // Resolve the environment and harvest its packages off the event loop: it
     // walks the filesystem and parses all of Base, so it must not block the
     // handshake (nor shutdown — the thread is detached). The result is swapped
     // into the db when it lands; every feature stays usable in the meantime, and
     // library go-to-definition/completion start answering once it arrives. The
-    // same thread re-harvests the workspace package on each save signal.
-    spawn_workspace_harvester(workspace_roots, library_tx, save_rx);
+    // same thread re-harvests the workspace package on each harvest signal.
+    spawn_workspace_harvester(workspace_roots, library_tx, harvest_rx);
 
     // The read pool serves latency-sensitive work (formatting, the analysis
     // read-phase). Its workers must outlive both `state` and the analysis
@@ -192,7 +213,7 @@ fn main_loop(
         analysis_rx,
         read_rx,
         library_rx,
-        close_rx,
+        sync_rx,
         out_tx,
         read_pool.spawner(),
         encoding,
@@ -202,10 +223,17 @@ fn main_loop(
         connection.sender.clone(),
         analysis_tx,
         read_tx,
-        save_tx,
-        close_tx,
+        harvest_tx,
+        sync_tx,
         encoding,
     );
+
+    // `initialize_finish` has already consumed the client's `initialized`
+    // notification (lsp-server handles it inside the handshake), so the
+    // registration request is legal from the first turn of the loop.
+    if register_watchers {
+        state.register_file_watchers();
+    }
 
     loop {
         select! {
@@ -237,9 +265,23 @@ fn main_loop(
     Ok(())
 }
 
+/// A signal from the main loop to the workspace harvester thread.
+pub(crate) enum HarvestSignal {
+    /// A source file changed on disk (a save, or a watched create, change, or
+    /// delete): re-harvest the workspace package owning it, if any.
+    Source(PathBuf),
+    /// An environment file (a `Project.toml` or `Manifest.toml` flavor)
+    /// changed: re-resolve every workspace environment and re-harvest from
+    /// scratch.
+    Environment,
+}
+
 /// Resolve the Julia environment of every workspace root, harvest the merged
-/// library on a detached background thread, then stay alive re-harvesting a
-/// workspace package whenever a save signal names one of its files.
+/// library on a detached background thread, then stay alive serving harvest
+/// signals: a source signal re-harvests the workspace package owning the file,
+/// and an environment signal starts the resolve-and-harvest cycle over (a
+/// `Pkg.add`, or a created or deleted `Project.toml`, must reshape the whole
+/// library).
 ///
 /// Only runs when the client provided at least one workspace root: without one
 /// there is no project to resolve against (a single loose file), and resolving
@@ -250,7 +292,7 @@ fn main_loop(
 fn spawn_workspace_harvester(
     workspace_roots: Vec<PathBuf>,
     library_tx: crossbeam_channel::Sender<LibraryMessage>,
-    save_rx: crossbeam_channel::Receiver<PathBuf>,
+    signal_rx: crossbeam_channel::Receiver<HarvestSignal>,
 ) {
     if workspace_roots.is_empty() {
         return;
@@ -258,72 +300,88 @@ fn spawn_workspace_harvester(
     let spawned = std::thread::Builder::new()
         .name("fatou-index-loader".to_string())
         .spawn(move || {
-            // One environment per folder, deduped on the resolved project file:
-            // two folders under one project (or a user-set `JULIA_PROJECT`,
-            // which wins over every folder's walk-up) collapse to one.
-            let mut envs = Vec::new();
-            let mut projects = std::collections::HashSet::new();
-            for root in workspace_roots {
-                let ctx = EnvContext::from_process(root);
-                let Ok(Some(env)) = crate::environment::resolve(&ctx) else {
-                    continue;
-                };
-                if projects.insert(normalize_path(&env.project_file)) {
-                    envs.push(env);
+            'resolve: loop {
+                // One environment per folder, deduped on the resolved project file:
+                // two folders under one project (or a user-set `JULIA_PROJECT`,
+                // which wins over every folder's walk-up) collapse to one.
+                let mut envs = Vec::new();
+                let mut projects = std::collections::HashSet::new();
+                for root in &workspace_roots {
+                    let ctx = EnvContext::from_process(root.clone());
+                    let Ok(Some(env)) = crate::environment::resolve(&ctx) else {
+                        continue;
+                    };
+                    if projects.insert(normalize_path(&env.project_file)) {
+                        envs.push(env);
+                    }
                 }
-            }
-            if envs.is_empty() {
-                return;
-            }
-            let devs = dev_packages(&envs);
-            let _ = library_tx.send(LibraryMessage::Full(harvest_libraries(&envs)));
-
-            // With packages under development, re-harvest the one whose files a
-            // save touches (a `src/` prefix check, longest prefix winning for
-            // nested folders — the same rule as `workspace_package_for`). Saves
-            // elsewhere, and every save when no folder is a package, are ignored.
-            if devs.is_empty() {
-                return;
-            }
-            let prefixes: Vec<(crate::environment::DevPackage, PathBuf)> = devs
-                .into_iter()
-                .map(|dev| {
-                    let src = normalize_path(&dev.root.join("src"));
-                    (dev, src)
-                })
-                .collect();
-            // The last index sent per package, so an unchanged re-harvest is
-            // skipped. A save touching a `src/` file re-harvests, but body-only
-            // and formatting-only edits leave the public API identical;
-            // resending then would force a `set_package_index` db write that
-            // needlessly cancels in-flight diagnostics (the write races the
-            // very format-on-save that triggered the save). Only send on a real
-            // change.
-            let mut last: std::collections::HashMap<String, Arc<PackageIndex>> =
-                std::collections::HashMap::new();
-            while let Ok(saved) = save_rx.recv() {
-                let saved = normalize_path(&saved);
-                let Some((dev, _)) = prefixes
-                    .iter()
-                    .filter(|(_, src)| saved.starts_with(src))
-                    .max_by_key(|(_, src)| src.components().count())
-                else {
-                    continue;
-                };
-                let index = Arc::new(harvest_workspace(dev));
-                if last.get(&dev.name) == Some(&index) {
-                    continue;
-                }
-                last.insert(dev.name.clone(), Arc::clone(&index));
+                // An empty resolve still sends: a deleted `Project.toml` must clear
+                // the previously harvested library (and the first send with nothing
+                // resolved is a cheap no-op harvest).
+                let devs = dev_packages(&envs);
                 if library_tx
-                    .send(LibraryMessage::Package {
-                        name: dev.name.clone(),
-                        index,
-                    })
+                    .send(LibraryMessage::Full(harvest_libraries(&envs)))
                     .is_err()
                 {
-                    break; // The analysis thread is gone; stop harvesting.
+                    return; // The analysis thread is gone; stop harvesting.
                 }
+
+                // With packages under development, re-harvest the one whose files a
+                // source signal touches (a `src/` prefix check, longest prefix
+                // winning for nested folders — the same rule as
+                // `workspace_package_for`). Signals elsewhere, and every source
+                // signal when no folder is a package, are ignored.
+                let prefixes: Vec<(crate::environment::DevPackage, PathBuf)> = devs
+                    .into_iter()
+                    .map(|dev| {
+                        let src = normalize_path(&dev.root.join("src"));
+                        (dev, src)
+                    })
+                    .collect();
+                // The last index sent per package, so an unchanged re-harvest is
+                // skipped. A save touching a `src/` file re-harvests, but body-only
+                // and formatting-only edits leave the public API identical;
+                // resending then would force a `set_package_index` db write that
+                // needlessly cancels in-flight diagnostics (the write races the
+                // very format-on-save that triggered the save). Only send on a real
+                // change.
+                let mut last: std::collections::HashMap<String, Arc<PackageIndex>> =
+                    std::collections::HashMap::new();
+                while let Ok(signal) = signal_rx.recv() {
+                    let changed = match signal {
+                        HarvestSignal::Environment => {
+                            // Coalesce the burst (`Pkg.add` rewrites the project and
+                            // manifest together; an editor save and its watched
+                            // event double-fire): drain everything queued — the
+                            // full re-resolve subsumes any drained source signal.
+                            while signal_rx.try_recv().is_ok() {}
+                            continue 'resolve;
+                        }
+                        HarvestSignal::Source(path) => normalize_path(&path),
+                    };
+                    let Some((dev, _)) = prefixes
+                        .iter()
+                        .filter(|(_, src)| changed.starts_with(src))
+                        .max_by_key(|(_, src)| src.components().count())
+                    else {
+                        continue;
+                    };
+                    let index = Arc::new(harvest_workspace(dev));
+                    if last.get(&dev.name) == Some(&index) {
+                        continue;
+                    }
+                    last.insert(dev.name.clone(), Arc::clone(&index));
+                    if library_tx
+                        .send(LibraryMessage::Package {
+                            name: dev.name.clone(),
+                            index,
+                        })
+                        .is_err()
+                    {
+                        return; // The analysis thread is gone; stop harvesting.
+                    }
+                }
+                return; // The main loop is gone; stop harvesting.
             }
         });
     // A spawn failure is non-fatal: the server runs without a library index.
@@ -451,5 +509,25 @@ mod tests {
     #[test]
     fn no_folders_yields_no_roots() {
         assert!(workspace_roots(&InitializeParams::default()).is_empty());
+    }
+
+    #[test]
+    fn watcher_registration_requires_the_client_capability() {
+        assert!(!supports_watched_files_registration(
+            &ClientCapabilities::default()
+        ));
+        let caps = ClientCapabilities {
+            workspace: Some(lsp_types::WorkspaceClientCapabilities {
+                did_change_watched_files: Some(
+                    lsp_types::DidChangeWatchedFilesClientCapabilities {
+                        dynamic_registration: Some(true),
+                        relative_pattern_support: None,
+                    },
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(supports_watched_files_registration(&caps));
     }
 }
