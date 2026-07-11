@@ -21,7 +21,8 @@ use lsp_types::{
     SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp,
     SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
     TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    WorkDoneProgressParams, WorkspaceEdit, WorkspaceFolder, WorkspaceSymbolParams,
+    WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -2942,6 +2943,44 @@ fn initialize_with_root(client: &Connection, root_uri: &Uri) {
         .unwrap();
 }
 
+/// The two-message initialize handshake with several workspace folders open.
+/// Returns the raw `InitializeResult` so callers can assert on the advertised
+/// capabilities.
+fn initialize_with_folders(client: &Connection, roots: &[&Uri]) -> serde_json::Value {
+    let params = InitializeParams {
+        workspace_folders: Some(
+            roots
+                .iter()
+                .map(|uri| WorkspaceFolder {
+                    uri: (*uri).clone(),
+                    name: String::new(),
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    let result = match client.receiver.recv().unwrap() {
+        Message::Response(resp) => resp.result.expect("an InitializeResult"),
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    };
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+    result
+}
+
 /// Receive messages until the response with `id` arrives, skipping unrelated
 /// notifications and stale responses.
 fn recv_response(client: &Connection, id: RequestId) -> lsp_server::Response {
@@ -3347,6 +3386,150 @@ fn publishes_unresolved_include_diagnostic() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(300));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Two workspace folders, each its own package project, driven end-to-end:
+/// both harvest, cross-file references stay inside the folder that owns the
+/// cursor (the other folder defines a same-named `greet`), and workspace
+/// symbols span both packages. One test for the whole multi-folder behavior —
+/// the `JULIA_*` env is process-global (see `serves_cross_file_references_and_
+/// rename`), so the assertions share one initialized server.
+#[test]
+fn serves_multi_folder_workspaces() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg_a = TempDir::new("fatou-lsp-multi-a");
+    write_file(
+        &pkg_a.path.join("Project.toml"),
+        "name = \"PkgA\"\nuuid = \"00000000-0000-0000-0000-00000000000a\"\n",
+    );
+    write_file(
+        &pkg_a.path.join("src/PkgA.jl"),
+        "module PkgA\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write_file(&pkg_a.path.join("src/a.jl"), "greet(a) = a\ngreet(1)\n");
+    write_file(&pkg_a.path.join("src/b.jl"), "callit() = greet(2)\n");
+
+    // The second folder defines its *own* `greet`: references in PkgA must not
+    // leak here.
+    let pkg_b = TempDir::new("fatou-lsp-multi-b");
+    write_file(
+        &pkg_b.path.join("Project.toml"),
+        "name = \"PkgB\"\nuuid = \"00000000-0000-0000-0000-00000000000b\"\n",
+    );
+    write_file(
+        &pkg_b.path.join("src/PkgB.jl"),
+        "module PkgB\ngreet(b) = b\nother() = greet(3)\nend\n",
+    );
+
+    // An *empty* `JULIA_PROJECT` is trimmed and skipped by env resolution, so
+    // each folder resolves via walk-up to its own `Project.toml` (a set value
+    // would win over both walk-ups and collapse the folders into one env). The
+    // rest isolates install discovery exactly as the single-folder e2e does.
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", ""),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let a_root = file_uri(&pkg_a.path);
+    let b_root = file_uri(&pkg_b.path);
+    let result = initialize_with_folders(&client, &[&a_root, &b_root]);
+    assert_eq!(
+        result["capabilities"]["workspace"]["workspaceFolders"]["supported"],
+        serde_json::Value::Bool(true),
+        "multi-folder support is advertised"
+    );
+
+    let a_uri = file_uri(&pkg_a.path.join("src/a.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: a_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a) = a\ngreet(1)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Notification(n) => assert_eq!(n.method, "textDocument/publishDiagnostics"),
+        other => panic!("expected publishDiagnostics, got {other:?}"),
+    }
+
+    // References on PkgA's `greet`: def + call in a.jl, call in b.jl — and
+    // nothing from PkgB, whose same-named `greet` lives in another package.
+    let locations = poll_cross_file_references(&client, &a_uri, Duration::from_secs(10));
+    assert_eq!(locations.len(), 3, "def + call in a.jl, call in b.jl");
+    let b_prefix = b_root.as_str().to_string();
+    assert!(
+        locations
+            .iter()
+            .all(|l| !l.uri.as_str().starts_with(&b_prefix)),
+        "PkgB's same-named `greet` never leaks into PkgA references: {locations:?}"
+    );
+
+    // Workspace symbols with an empty query span both folders' packages (the
+    // harvest has landed — the references poll above proved it).
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(400),
+            method: "workspace/symbol".to_string(),
+            params: serde_json::to_value(WorkspaceSymbolParams {
+                query: String::new(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(400));
+    let response: WorkspaceSymbolResponse = serde_json::from_value(resp.result.unwrap()).unwrap();
+    // The untagged response enum parses as either shape; keep just the names.
+    let names: Vec<String> = match response {
+        WorkspaceSymbolResponse::Flat(symbols) => symbols.into_iter().map(|s| s.name).collect(),
+        WorkspaceSymbolResponse::Nested(symbols) => symbols.into_iter().map(|s| s.name).collect(),
+    };
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    for expected in ["PkgA", "PkgB", "callit", "other"] {
+        assert!(names.contains(&expected), "missing {expected} in {names:?}");
+    }
+    assert_eq!(
+        names.iter().filter(|n| **n == "greet").count(),
+        2,
+        "each package contributes its own greet"
+    );
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(401),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(401));
     client
         .sender
         .send(Message::Notification(Notification {

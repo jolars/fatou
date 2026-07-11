@@ -729,3 +729,194 @@ fn graph_host_modules_agree_with_the_harvester() {
         "the graph covers exactly the harvested members"
     );
 }
+
+// --- multi-folder workspaces -------------------------------------------------
+
+#[test]
+fn longest_prefix_routes_nested_workspace_roots() {
+    // Package `B` lives *inside* package `A`'s folder: a file under B's `src/`
+    // must route to B (the longer prefix), not A; a file under A's own `src/`
+    // still routes to A; an outsider routes nowhere.
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    let mut db = IncrementalDatabase::new();
+    let mut packages = BTreeMap::new();
+    packages.insert("A".to_string(), Arc::new(empty_package("A")));
+    packages.insert("B".to_string(), Arc::new(empty_package("B")));
+    let mut roots = BTreeMap::new();
+    roots.insert("A".to_string(), PathBuf::from("/work/A"));
+    roots.insert("B".to_string(), PathBuf::from("/work/A/src/vendor/B"));
+    db.set_library(packages, roots, vec!["A".to_string(), "B".to_string()]);
+
+    let pkg_of = |path: &str| {
+        db.workspace_module(Path::new(path))
+            .map(|pkg| pkg.name.clone())
+    };
+    assert_eq!(pkg_of("/work/A/src/x.jl").as_deref(), Some("A"));
+    assert_eq!(
+        pkg_of("/work/A/src/vendor/B/src/y.jl").as_deref(),
+        Some("B"),
+        "the nested root's longer src prefix wins"
+    );
+    assert_eq!(pkg_of("/other/x.jl"), None);
+}
+
+#[test]
+fn project_graph_merges_every_workspace_package() {
+    // Two workspace folders, each a package project: one graph covers both
+    // include closures, with per-package root absorption and host modules.
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    use fatou::incremental::normalize_path;
+
+    let mut db = IncrementalDatabase::new();
+    let mut seeded = Vec::new();
+    for (path, text) in [
+        ("/work/A/src/A.jl", "module A\ninclude(\"util.jl\")\nend\n"),
+        ("/work/A/src/util.jl", "a() = 1\n"),
+        (
+            "/work/B/src/B.jl",
+            "module B\nmodule Sub\ninclude(\"deep.jl\")\nend\nend\n",
+        ),
+        ("/work/B/src/deep.jl", "b() = 2\n"),
+    ] {
+        seeded.push(db.upsert_file(Path::new(path), text.to_string()));
+    }
+
+    let mut packages = BTreeMap::new();
+    packages.insert("A".to_string(), Arc::new(empty_package("A")));
+    packages.insert("B".to_string(), Arc::new(empty_package("B")));
+    let mut roots = BTreeMap::new();
+    roots.insert("A".to_string(), PathBuf::from("/work/A"));
+    roots.insert("B".to_string(), PathBuf::from("/work/B"));
+    db.set_library(packages, roots, vec!["A".to_string(), "B".to_string()]);
+    db.set_workspace_files(seeded);
+
+    let snap = db.snapshot();
+    let g = snap.project_graph();
+    let p = |s: &str| normalize_path(Path::new(s));
+
+    // Sorted workspace order: A's closure first, then B's.
+    assert_eq!(
+        g.nodes,
+        vec![
+            p("/work/A/src/A.jl"),
+            p("/work/A/src/util.jl"),
+            p("/work/B/src/B.jl"),
+            p("/work/B/src/deep.jl"),
+        ]
+    );
+    // Root absorption is per package; B's nested `Sub` survives.
+    assert_eq!(
+        g.host_modules[&p("/work/A/src/util.jl")],
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        g.host_modules[&p("/work/B/src/deep.jl")],
+        vec!["Sub".to_string()]
+    );
+    assert!(g.cycles.is_empty());
+    assert!(g.unresolved.is_empty());
+}
+
+#[test]
+fn reference_index_separates_same_named_symbols_across_packages() {
+    // Two workspace packages each define a root-level `f`. The shared reverse
+    // index must keep them in per-package buckets, or references/rename in one
+    // folder would drag in the other's sites.
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    use fatou::index::FunctionGroup;
+    use fatou::resolve::Namespace;
+
+    let func_f = || FunctionGroup {
+        name: "f".to_string(),
+        owner: None,
+        methods: Vec::new(),
+        doc: None,
+    };
+    let mut pkg_a = empty_package("A");
+    pkg_a.root.functions.push(func_f());
+    let mut pkg_b = empty_package("B");
+    pkg_b.root.functions.push(func_f());
+
+    let mut db = IncrementalDatabase::new();
+    let a_def = db.upsert_file(
+        Path::new("/work/A/src/a.jl"),
+        "function f()\n    f()\nend\n".to_string(),
+    );
+    let b_use = db.upsert_file(Path::new("/work/B/src/b.jl"), "g() = f()\n".to_string());
+
+    let mut packages = BTreeMap::new();
+    packages.insert("A".to_string(), Arc::new(pkg_a));
+    packages.insert("B".to_string(), Arc::new(pkg_b));
+    let mut roots = BTreeMap::new();
+    roots.insert("A".to_string(), PathBuf::from("/work/A"));
+    roots.insert("B".to_string(), PathBuf::from("/work/B"));
+    db.set_library(packages, roots, vec!["A".to_string(), "B".to_string()]);
+    db.set_workspace_files(vec![a_def, b_use]);
+
+    let snap = db.snapshot();
+    let index = snap.workspace_reference_index();
+
+    let a_recs = index
+        .0
+        .get(&occurrence_key("A", &[], Namespace::Value, "f"))
+        .expect("A's `f` bucket");
+    assert_eq!(a_recs.len(), 2, "def plus recursive call in a.jl");
+    assert!(a_recs.iter().all(|(file, _)| *file == a_def));
+
+    let b_recs = index
+        .0
+        .get(&occurrence_key("B", &[], Namespace::Value, "f"))
+        .expect("B's `f` bucket");
+    assert_eq!(b_recs.len(), 1, "just the call in b.jl");
+    assert!(b_recs.iter().all(|(file, _)| *file == b_use));
+}
+
+#[test]
+fn seed_workspace_members_unions_every_package() {
+    // Two harvested on-disk packages: one seeding pass registers both member
+    // sets, and the merged project graph covers both closures.
+    use std::collections::BTreeMap;
+
+    use fatou::incremental::normalize_path;
+
+    let tree_a = TempTree::new(&[
+        ("src/PkgA.jl", "module PkgA\ninclude(\"a.jl\")\nend\n"),
+        ("src/a.jl", "a() = 1\n"),
+    ]);
+    let tree_b = TempTree::new(&[("src/PkgB.jl", "module PkgB\nb() = 2\nend\n")]);
+
+    let mut db = IncrementalDatabase::new();
+    let mut packages = BTreeMap::new();
+    let mut roots = BTreeMap::new();
+    for (name, root) in [("PkgA", &tree_a.0), ("PkgB", &tree_b.0)] {
+        let index = Arc::new(fatou::index::harvest_package_named(root, name));
+        packages.insert(name.to_string(), index);
+        roots.insert(name.to_string(), root.clone());
+    }
+    db.set_library(
+        packages,
+        roots,
+        vec!["PkgA".to_string(), "PkgB".to_string()],
+    );
+    db.seed_workspace_members();
+
+    let snap = db.snapshot();
+    let g = snap.project_graph();
+    for path in [
+        tree_a.0.join("src/PkgA.jl"),
+        tree_a.0.join("src/a.jl"),
+        tree_b.0.join("src/PkgB.jl"),
+    ] {
+        assert!(
+            g.host_modules.contains_key(&normalize_path(&path)),
+            "{} is covered by the merged graph",
+            path.display()
+        );
+    }
+}
