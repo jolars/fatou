@@ -186,9 +186,12 @@ Hand-authored fixtures (`tests/formatter.rs`) gate the output; grow them with th
 
 **Linter** (`src/linter/`): `check_paths` parses each file and reports
 `LintStatus` (`Clean`/`Findings`/`ParseDiagnostics`); parse diagnostics
-block linting a file. The `Rule` trait + registry (`rules.rs`), `# fatou-ignore`
-suppression (`suppression.rs`), diagnostics (`diagnostic.rs`), and rendering
-(`render.rs`) are in place; no rules ship yet.
+block linting a file. The `Rule` trait + registry (`rules.rs`, `all_rules()` is
+the single source of truth), `# fatou-ignore` suppression (`suppression.rs`),
+diagnostics + autofixes (`diagnostic.rs`, `fix.rs`), and rendering
+(`render.rs`) are in place, with the first rules shipped. The rule roadmap
+lives in `TODO.md` ("Rule roadmap"); **to add a rule, use the `add-lint-rule`
+skill** (`.claude/skills/add-lint-rule/`).
 
 **Language server** (`src/lsp.rs`, CLI `fatou lsp`): a stdio JSON-RPC server on
 the `lsp-server` crate (rust-analyzer's transport). Single-threaded for now:
