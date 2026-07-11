@@ -11,14 +11,14 @@ use lsp_types::{
     InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
     SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions,
+    TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 
 use std::sync::Arc;
 
 use crate::environment::EnvContext;
 use crate::incremental::normalize_path;
-use crate::index::{PackageIndex, harvest_library, harvest_workspace};
+use crate::index::{PackageIndex, dev_packages, harvest_libraries, harvest_workspace};
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, LibraryMessage, spawn_analysis_thread};
@@ -49,25 +49,29 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
     let encoding = negotiate_position_encoding(&params.capabilities);
-    let workspace_root = workspace_root(&params);
+    let workspace_roots = workspace_roots(&params);
     let result = serde_json::json!({ "capabilities": server_capabilities(encoding) });
     connection.initialize_finish(id, result)?;
-    main_loop(connection, encoding, workspace_root)
+    main_loop(connection, encoding, workspace_roots)
 }
 
-/// The workspace root to resolve the Julia environment against: the first
-/// workspace folder, then the (deprecated) `root_uri`, decoded to a path. `None`
-/// when the client opened no folder (a single loose file); the loader then falls
-/// back to the process working directory.
-fn workspace_root(params: &InitializeParams) -> Option<PathBuf> {
-    #[allow(deprecated)]
-    params
-        .workspace_folders
-        .as_ref()
-        .and_then(|folders| folders.first())
-        .map(|folder| &folder.uri)
-        .or(params.root_uri.as_ref())
-        .and_then(to_path)
+/// The workspace roots to resolve Julia environments against: every workspace
+/// folder in client order (deduped on the normalized path), falling back to the
+/// (deprecated) `root_uri` when the client sent no folders. Empty when the
+/// client opened no folder at all (a single loose file); the loader then does
+/// nothing.
+fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
+    let folder_uris: Vec<&lsp_types::Uri> = match params.workspace_folders.as_deref() {
+        Some(folders) if !folders.is_empty() => folders.iter().map(|f| &f.uri).collect(),
+        #[allow(deprecated)]
+        _ => params.root_uri.iter().collect(),
+    };
+    let mut seen = std::collections::HashSet::new();
+    folder_uris
+        .into_iter()
+        .filter_map(to_path)
+        .filter(|path| seen.insert(normalize_path(path)))
+        .collect()
 }
 
 /// Pick the position encoding for the session: UTF-8 (plain byte offsets, no
@@ -139,6 +143,16 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
             }
             .into(),
         ),
+        workspace: Some(WorkspaceServerCapabilities {
+            // Every folder from `initialize` gets the full workspace treatment;
+            // dynamic add/remove (`didChangeWorkspaceFolders`) is not handled
+            // yet, so change notifications are not requested.
+            workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                supported: Some(true),
+                change_notifications: None,
+            }),
+            file_operations: None,
+        }),
         ..Default::default()
     }
 }
@@ -149,7 +163,7 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
 fn main_loop(
     connection: &Connection,
     encoding: PositionEncoding,
-    workspace_root: Option<PathBuf>,
+    workspace_roots: Vec<PathBuf>,
 ) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
@@ -168,7 +182,7 @@ fn main_loop(
     // into the db when it lands; every feature stays usable in the meantime, and
     // library go-to-definition/completion start answering once it arrives. The
     // same thread re-harvests the workspace package on each save signal.
-    spawn_workspace_harvester(workspace_root, library_tx, save_rx);
+    spawn_workspace_harvester(workspace_roots, library_tx, save_rx);
 
     // The read pool serves latency-sensitive work (formatting, the analysis
     // read-phase). Its workers must outlive both `state` and the analysis
@@ -223,52 +237,84 @@ fn main_loop(
     Ok(())
 }
 
-/// Resolve the Julia environment for `workspace_root`, harvest its library on a
-/// detached background thread, then stay alive re-harvesting the workspace
-/// package whenever a save signal names one of its files.
+/// Resolve the Julia environment of every workspace root, harvest the merged
+/// library on a detached background thread, then stay alive re-harvesting a
+/// workspace package whenever a save signal names one of its files.
 ///
-/// Only runs when the client provided a workspace root: without one there is no
-/// project to resolve against (a single loose file), and resolving the machine's
-/// default environment would harvest all of Base for no benefit — notably in the
-/// in-memory server tests, which open no folder. Best-effort: an unresolved
-/// environment or harvest failure simply leaves the library empty.
+/// Only runs when the client provided at least one workspace root: without one
+/// there is no project to resolve against (a single loose file), and resolving
+/// the machine's default environment would harvest all of Base for no benefit —
+/// notably in the in-memory server tests, which open no folder. Best-effort: an
+/// unresolved environment or harvest failure simply leaves the library empty
+/// (or without that folder's contribution).
 fn spawn_workspace_harvester(
-    workspace_root: Option<PathBuf>,
+    workspace_roots: Vec<PathBuf>,
     library_tx: crossbeam_channel::Sender<LibraryMessage>,
     save_rx: crossbeam_channel::Receiver<PathBuf>,
 ) {
-    let Some(root) = workspace_root else { return };
+    if workspace_roots.is_empty() {
+        return;
+    }
     let spawned = std::thread::Builder::new()
         .name("fatou-index-loader".to_string())
         .spawn(move || {
-            let ctx = EnvContext::from_process(root);
-            let Ok(Some(env)) = crate::environment::resolve(&ctx) else {
+            // One environment per folder, deduped on the resolved project file:
+            // two folders under one project (or a user-set `JULIA_PROJECT`,
+            // which wins over every folder's walk-up) collapse to one.
+            let mut envs = Vec::new();
+            let mut projects = std::collections::HashSet::new();
+            for root in workspace_roots {
+                let ctx = EnvContext::from_process(root);
+                let Ok(Some(env)) = crate::environment::resolve(&ctx) else {
+                    continue;
+                };
+                if projects.insert(normalize_path(&env.project_file)) {
+                    envs.push(env);
+                }
+            }
+            if envs.is_empty() {
                 return;
-            };
-            let dev = env.dev_package();
-            let _ = library_tx.send(LibraryMessage::Full(harvest_library(&env)));
+            }
+            let devs = dev_packages(&envs);
+            let _ = library_tx.send(LibraryMessage::Full(harvest_libraries(&envs)));
 
-            // With a package under development, re-harvest it on each save that
-            // touches one of its files (a `src/` prefix check). Saves elsewhere,
-            // and every save when the workspace is not a package, are ignored.
-            let Some(dev) = dev else { return };
-            let src = normalize_path(&dev.root.join("src"));
-            // The last index we sent, so an unchanged re-harvest is skipped. A
-            // save touching a `src/` file re-harvests, but body-only and
-            // formatting-only edits leave the public API identical; resending
-            // then would force a `set_package_index` db write that needlessly
-            // cancels in-flight diagnostics (the write races the very
-            // format-on-save that triggered the save). Only send on a real change.
-            let mut last: Option<Arc<PackageIndex>> = None;
+            // With packages under development, re-harvest the one whose files a
+            // save touches (a `src/` prefix check, longest prefix winning for
+            // nested folders — the same rule as `workspace_package_for`). Saves
+            // elsewhere, and every save when no folder is a package, are ignored.
+            if devs.is_empty() {
+                return;
+            }
+            let prefixes: Vec<(crate::environment::DevPackage, PathBuf)> = devs
+                .into_iter()
+                .map(|dev| {
+                    let src = normalize_path(&dev.root.join("src"));
+                    (dev, src)
+                })
+                .collect();
+            // The last index sent per package, so an unchanged re-harvest is
+            // skipped. A save touching a `src/` file re-harvests, but body-only
+            // and formatting-only edits leave the public API identical;
+            // resending then would force a `set_package_index` db write that
+            // needlessly cancels in-flight diagnostics (the write races the
+            // very format-on-save that triggered the save). Only send on a real
+            // change.
+            let mut last: std::collections::HashMap<String, Arc<PackageIndex>> =
+                std::collections::HashMap::new();
             while let Ok(saved) = save_rx.recv() {
-                if !normalize_path(&saved).starts_with(&src) {
+                let saved = normalize_path(&saved);
+                let Some((dev, _)) = prefixes
+                    .iter()
+                    .filter(|(_, src)| saved.starts_with(src))
+                    .max_by_key(|(_, src)| src.components().count())
+                else {
+                    continue;
+                };
+                let index = Arc::new(harvest_workspace(dev));
+                if last.get(&dev.name) == Some(&index) {
                     continue;
                 }
-                let index = Arc::new(harvest_workspace(&dev));
-                if last.as_deref() == Some(&*index) {
-                    continue;
-                }
-                last = Some(Arc::clone(&index));
+                last.insert(dev.name.clone(), Arc::clone(&index));
                 if library_tx
                     .send(LibraryMessage::Package {
                         name: dev.name.clone(),
@@ -329,5 +375,81 @@ mod tests {
             ]))),
             PositionEncoding::Utf8
         );
+    }
+
+    fn folder(uri: &str) -> lsp_types::WorkspaceFolder {
+        lsp_types::WorkspaceFolder {
+            uri: uri.parse().unwrap(),
+            name: String::new(),
+        }
+    }
+
+    /// The platform path a `file:` URI decodes to, so assertions hold on
+    /// Windows too.
+    fn path_of(uri: &str) -> PathBuf {
+        to_path(&uri.parse().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn workspace_roots_takes_every_folder_in_client_order() {
+        let params = InitializeParams {
+            workspace_folders: Some(vec![folder("file:///work/b"), folder("file:///work/a")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            workspace_roots(&params),
+            vec![path_of("file:///work/b"), path_of("file:///work/a")]
+        );
+    }
+
+    #[test]
+    fn workspace_roots_dedups_equivalent_folders() {
+        let params = InitializeParams {
+            workspace_folders: Some(vec![
+                folder("file:///work/a"),
+                folder("file:///work/./a"),
+                folder("file:///work/b"),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            workspace_roots(&params),
+            vec![path_of("file:///work/a"), path_of("file:///work/b")]
+        );
+    }
+
+    #[test]
+    fn workspace_roots_falls_back_to_root_uri() {
+        #[allow(deprecated)]
+        let params = InitializeParams {
+            root_uri: Some("file:///work/a".parse().unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(workspace_roots(&params), vec![path_of("file:///work/a")]);
+
+        // Folders, when present, win over the deprecated root_uri; an empty
+        // folder list falls back too.
+        #[allow(deprecated)]
+        let both = InitializeParams {
+            workspace_folders: Some(vec![folder("file:///work/b")]),
+            root_uri: Some("file:///work/a".parse().unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(workspace_roots(&both), vec![path_of("file:///work/b")]);
+        #[allow(deprecated)]
+        let empty_folders = InitializeParams {
+            workspace_folders: Some(Vec::new()),
+            root_uri: Some("file:///work/a".parse().unwrap()),
+            ..Default::default()
+        };
+        assert_eq!(
+            workspace_roots(&empty_folders),
+            vec![path_of("file:///work/a")]
+        );
+    }
+
+    #[test]
+    fn no_folders_yields_no_roots() {
+        assert!(workspace_roots(&InitializeParams::default()).is_empty());
     }
 }

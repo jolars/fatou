@@ -327,3 +327,73 @@ fn locations_are_relative_to_package_root() {
         "the location is depot-independent"
     );
 }
+
+// --- multi-environment merge (multi-folder workspaces) ----------------------
+
+/// A hand-built package-project environment rooted at `dir` for package
+/// `name`, with `src/<Name>.jl` written (if absent) so `dev_package()` fires.
+fn package_env(dir: &Path, name: &str) -> fatou::environment::Environment {
+    use std::collections::BTreeMap;
+
+    let entry = dir.join("src").join(format!("{name}.jl"));
+    if !entry.is_file() {
+        write(&entry, &format!("module {name}\nend\n"));
+    }
+    fatou::environment::Environment {
+        project_file: dir.join("Project.toml"),
+        project_dir: dir.to_path_buf(),
+        manifest_file: None,
+        name: Some(name.to_string()),
+        uuid: None,
+        direct_deps: BTreeMap::new(),
+        packages: Vec::new(),
+        depots: Vec::new(),
+        source: fatou::environment::EnvSource::WorkspaceWalkUp,
+        install: None,
+    }
+}
+
+#[test]
+fn dev_packages_collects_one_per_folder_first_name_wins() {
+    use fatou::index::dev_packages;
+
+    let a = TempDir::new();
+    let b = TempDir::new();
+    let a_again = TempDir::new();
+    let envs = [
+        package_env(a.path(), "PkgA"),
+        package_env(b.path(), "PkgB"),
+        // A same-named package in a later folder loses the name slot.
+        package_env(a_again.path(), "PkgA"),
+    ];
+    let devs = dev_packages(&envs);
+    assert_eq!(
+        devs.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+        ["PkgA", "PkgB"]
+    );
+    assert_eq!(devs[0].root, a.path(), "the first folder won PkgA");
+}
+
+#[test]
+fn harvest_libraries_merges_dev_packages_sorted() {
+    use fatou::index::harvest_libraries;
+
+    let b = TempDir::new();
+    let a = TempDir::new();
+    write(
+        &b.path().join("src/PkgB.jl"),
+        "module PkgB\nbee() = 1\nend\n",
+    );
+    write(
+        &a.path().join("src/PkgA.jl"),
+        "module PkgA\nay() = 1\nend\n",
+    );
+    // Folder order B, A: the workspace list still comes out sorted.
+    let envs = [package_env(b.path(), "PkgB"), package_env(a.path(), "PkgA")];
+    let lib = harvest_libraries(&envs);
+    assert_eq!(lib.workspaces, ["PkgA", "PkgB"]);
+    assert_eq!(lib.roots["PkgA"], a.path());
+    assert_eq!(lib.roots["PkgB"], b.path());
+    assert_eq!(lib.packages["PkgB"].root.functions[0].name, "bee");
+    assert_eq!(lib.packages["PkgA"].root.functions[0].name, "ay");
+}

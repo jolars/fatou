@@ -51,24 +51,65 @@ pub struct HarvestedLibrary {
 /// resolved source root. Best-effort — a package whose source is unknown or
 /// unreadable is skipped (its own harvest records any diagnostics).
 pub fn harvest_library(env: &Environment) -> HarvestedLibrary {
-    let mut lib = build_system_library(env.install.as_ref());
-    for package in &env.packages {
-        let Some(source) = &package.source else {
+    harvest_libraries(std::slice::from_ref(env))
+}
+
+/// The packages under development across `envs` (one workspace folder each):
+/// each environment's [`Environment::dev_package`], deduped by name with the
+/// first (folder-order) winning. The loser folder's files simply stay
+/// non-members — the library map is name-keyed, so two same-named live
+/// packages cannot coexist.
+pub fn dev_packages(envs: &[Environment]) -> Vec<crate::environment::DevPackage> {
+    let mut out: Vec<crate::environment::DevPackage> = Vec::new();
+    for env in envs {
+        let Some(dev) = env.dev_package() else {
             continue;
         };
-        let index = harvest_package_named(source, &package.name);
-        lib.packages.insert(package.name.clone(), Arc::new(index));
-        lib.roots.insert(package.name.clone(), source.clone());
+        if out.iter().any(|d| d.name == dev.name) {
+            continue; // First folder wins the name slot.
+        }
+        out.push(dev);
     }
-    // The package under development, indexed like a depot package so its
-    // top-level symbols resolve across its own files. Registered last so it
-    // wins the name slot over any same-named dependency.
-    if let Some(dev) = env.dev_package() {
+    out
+}
+
+/// Harvest several resolved environments (one per workspace folder) into one
+/// merged library. The system index is harvested once, from the first
+/// environment with a located installation; depot packages merge by name with
+/// the first environment winning a conflict (the map is name-keyed, so two
+/// pinned versions of one package cannot coexist — a documented limitation);
+/// each folder's dev package is registered last, winning the name slot over
+/// any same-named dependency, exactly as in the single-environment harvest.
+pub fn harvest_libraries(envs: &[Environment]) -> HarvestedLibrary {
+    let install = envs.iter().find_map(|env| env.install.as_ref());
+    let mut lib = build_system_library(install);
+    // Names claimed by an earlier environment's manifest: a later environment
+    // pinning the same package (possibly at another version) is skipped. Within
+    // one environment a manifest package still overwrites a same-named system
+    // entry, as in the single-environment harvest.
+    let mut claimed = std::collections::BTreeSet::new();
+    for env in envs {
+        for package in &env.packages {
+            let Some(source) = &package.source else {
+                continue;
+            };
+            if !claimed.insert(package.name.clone()) {
+                continue; // First environment wins the name slot.
+            }
+            let index = harvest_package_named(source, &package.name);
+            lib.packages.insert(package.name.clone(), Arc::new(index));
+            lib.roots.insert(package.name.clone(), source.clone());
+        }
+    }
+    // The packages under development, indexed like depot packages so their
+    // top-level symbols resolve across their own files.
+    for dev in dev_packages(envs) {
         lib.packages
             .insert(dev.name.clone(), Arc::new(harvest_workspace(&dev)));
         lib.roots.insert(dev.name.clone(), dev.root);
-        lib.workspaces = vec![dev.name];
+        lib.workspaces.push(dev.name);
     }
+    lib.workspaces.sort();
     lib
 }
 
