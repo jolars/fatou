@@ -11,18 +11,21 @@ use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     ClientCapabilities, CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams,
+    DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
     DocumentHighlightParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
-    GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, InitializeParams, Location, PartialResultParams, Position, PositionEncodingKind,
-    PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RenameParams,
-    SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp,
-    SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceEdit, WorkspaceFolder, WorkspaceSymbolParams,
-    WorkspaceSymbolResponse,
+    FileChangeType, FileEvent, FoldingRange, FoldingRangeKind, FoldingRangeParams,
+    FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
+    PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
+    ReferenceContext, ReferenceParams, RegistrationParams, RenameParams, SelectionRange,
+    SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
+    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -2994,14 +2997,20 @@ fn recv_response(client: &Connection, id: RequestId) -> lsp_server::Response {
 }
 
 /// Resend `textDocument/references` at `greet`'s definition (position 0,0 of
-/// `a.jl`) until the harvest has landed and the reverse index is seeded — i.e.
-/// the response spans both member files — or the deadline elapses. Before the
-/// harvest, the intra-file fallback returns only the two `a.jl` sites; after it,
-/// three sites across `a.jl` and `b.jl`.
-fn poll_cross_file_references(client: &Connection, uri: &Uri, deadline: Duration) -> Vec<Location> {
+/// `a.jl`) until the response spans exactly `spanning` files — i.e. a harvest
+/// and member seeding have landed and settled on that membership — or the
+/// deadline elapses. Before a harvest, the intra-file fallback returns only
+/// the `a.jl` sites (one file); each (re-)harvest grows or shrinks the span.
+fn poll_references_spanning(
+    client: &Connection,
+    uri: &Uri,
+    spanning: usize,
+    deadline: Duration,
+) -> Vec<Location> {
+    static POLL_ID: AtomicU64 = AtomicU64::new(100);
     let start = Instant::now();
-    let mut id = 100;
     loop {
+        let id = i32::try_from(POLL_ID.fetch_add(1, Ordering::Relaxed)).unwrap();
         client
             .sender
             .send(Message::Request(Request {
@@ -3025,12 +3034,12 @@ fn poll_cross_file_references(client: &Connection, uri: &Uri, deadline: Duration
         let locations: Vec<Location> = serde_json::from_value(resp.result.unwrap()).unwrap();
         let files: std::collections::HashSet<&str> =
             locations.iter().map(|l| l.uri.as_str()).collect();
-        if files.len() >= 2 {
+        if files.len() == spanning {
             return locations;
         }
         if start.elapsed() >= deadline {
             panic!(
-                "cross-file references never populated within {deadline:?}: got \
+                "references never spanned {spanning} file(s) within {deadline:?}: got \
                  {} location(s) across {} file(s) — the harvest or member seeding \
                  likely failed",
                 locations.len(),
@@ -3038,7 +3047,6 @@ fn poll_cross_file_references(client: &Connection, uri: &Uri, deadline: Duration
             );
         }
         std::thread::sleep(Duration::from_millis(25));
-        id += 1;
     }
 }
 
@@ -3117,7 +3125,7 @@ fn serves_cross_file_references_and_rename() {
 
     // References at `greet`'s definition, once the harvest lands: def + call in
     // `a.jl`, call in `b.jl`.
-    let locations = poll_cross_file_references(&client, &a_uri, Duration::from_secs(10));
+    let locations = poll_references_spanning(&client, &a_uri, 2, Duration::from_secs(10));
     assert_eq!(locations.len(), 3, "def + call in a.jl, call in b.jl");
     let a_count = locations
         .iter()
@@ -3263,7 +3271,7 @@ fn serves_cross_file_references_in_a_nested_module() {
         other => panic!("expected publishDiagnostics, got {other:?}"),
     }
 
-    let locations = poll_cross_file_references(&client, &a_uri, Duration::from_secs(10));
+    let locations = poll_references_spanning(&client, &a_uri, 2, Duration::from_secs(10));
     assert_eq!(
         locations.len(),
         3,
@@ -3479,7 +3487,7 @@ fn serves_multi_folder_workspaces() {
 
     // References on PkgA's `greet`: def + call in a.jl, call in b.jl — and
     // nothing from PkgB, whose same-named `greet` lives in another package.
-    let locations = poll_cross_file_references(&client, &a_uri, Duration::from_secs(10));
+    let locations = poll_references_spanning(&client, &a_uri, 2, Duration::from_secs(10));
     assert_eq!(locations.len(), 3, "def + call in a.jl, call in b.jl");
     let b_prefix = b_root.as_str().to_string();
     assert!(
@@ -3530,6 +3538,292 @@ fn serves_multi_folder_workspaces() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(401));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Send a `workspace/didChangeWatchedFiles` batch.
+fn did_change_watched_files(client: &Connection, changes: Vec<FileEvent>) {
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "workspace/didChangeWatchedFiles".to_string(),
+            params: serde_json::to_value(DidChangeWatchedFilesParams { changes }).unwrap(),
+        }))
+        .unwrap();
+}
+
+/// A client that supports dynamic `didChangeWatchedFiles` registration and
+/// opens a workspace folder gets asked, right after `initialized`, to watch
+/// `.jl` sources and the project/manifest flavors.
+#[test]
+fn registers_file_watchers_when_the_client_supports_it() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let ws = TempDir::new("fatou-lsp-watch-reg");
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", ws.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    #[allow(deprecated)]
+    let params = InitializeParams {
+        root_uri: Some(file_uri(&ws.path)),
+        capabilities: ClientCapabilities {
+            workspace: Some(WorkspaceClientCapabilities {
+                did_change_watched_files: Some(DidChangeWatchedFilesClientCapabilities {
+                    dynamic_registration: Some(true),
+                    relative_pattern_support: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    assert!(matches!(
+        client.receiver.recv().unwrap(),
+        Message::Response(_)
+    ));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // The registration request arrives after `initialized`; skip any
+    // notifications published in between. Bounded so a missing registration
+    // fails instead of hanging.
+    let request = loop {
+        match client
+            .receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+        {
+            Message::Request(req) => break req,
+            Message::Notification(_) => continue,
+            other => panic!("unexpected message: {other:?}"),
+        }
+    };
+    assert_eq!(request.method, "client/registerCapability");
+    let params: RegistrationParams = serde_json::from_value(request.params).unwrap();
+    assert_eq!(params.registrations.len(), 1);
+    let registration = &params.registrations[0];
+    assert_eq!(registration.method, "workspace/didChangeWatchedFiles");
+    let options: DidChangeWatchedFilesRegistrationOptions =
+        serde_json::from_value(registration.register_options.clone().unwrap()).unwrap();
+    let globs: Vec<&str> = options
+        .watchers
+        .iter()
+        .map(|watcher| match &watcher.glob_pattern {
+            GlobPattern::String(glob) => glob.as_str(),
+            other => panic!("expected a string glob, got {other:?}"),
+        })
+        .collect();
+    for expected in [
+        "**/*.jl",
+        "**/Project.toml",
+        "**/JuliaProject.toml",
+        "**/Manifest.toml",
+        "**/JuliaManifest.toml",
+        "**/Manifest-v*.toml",
+    ] {
+        assert!(globs.contains(&expected), "missing {expected} in {globs:?}");
+    }
+    // Acknowledge the registration; the server ignores the response.
+    client
+        .sender
+        .send(Message::Response(lsp_server::Response::new_ok(
+            request.id,
+            serde_json::Value::Null,
+        )))
+        .unwrap();
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(2));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Watched-file events drive the workspace index without any editor saves,
+/// end-to-end: a created `Project.toml` re-resolves the environment (cross-file
+/// references appear), a created-and-included member file joins the membership
+/// (references span it), and deleting it shrinks the membership back. The
+/// notifications are handled without dynamic registration — a client may watch
+/// on its own initiative — so the handshake needs no watcher capability. One
+/// test for the whole lifecycle: the `JULIA_*` env is process-global (see
+/// `serves_cross_file_references_and_rename`), so the phases share one
+/// initialized server.
+#[test]
+fn watched_file_events_refresh_environment_and_membership() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    // The package files exist up front, but *no* `Project.toml`: nothing
+    // resolves, so nothing harvests.
+    let pkg = TempDir::new("fatou-lsp-watch");
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "greet(a) = a\ngreet(1)\n");
+    write_file(&pkg.path.join("src/b.jl"), "callit() = greet(2)\n");
+
+    // The usual hermetic env (see `serves_cross_file_references_and_rename`),
+    // plus `HOME` pointed into the temp depot: with no `Project.toml` yet,
+    // resolution would otherwise fall through to the machine's real
+    // `~/.julia/environments` default env.
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_root(&client, &root_uri);
+
+    let a_uri = file_uri(&pkg.path.join("src/a.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: a_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a) = a\ngreet(1)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Notification(n) => assert_eq!(n.method, "textDocument/publishDiagnostics"),
+        other => panic!("expected publishDiagnostics, got {other:?}"),
+    }
+
+    // Without an environment, references stay on the intra-file fallback.
+    let locations = poll_references_spanning(&client, &a_uri, 1, Duration::from_secs(10));
+    assert_eq!(locations.len(), 2, "def + call in a.jl only");
+
+    // Phase 1: `Project.toml` appears (a `Pkg.generate`, a `git checkout`) —
+    // the environment re-resolves and the package harvests, so references now
+    // span the members.
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    did_change_watched_files(
+        &client,
+        vec![FileEvent::new(
+            file_uri(&pkg.path.join("Project.toml")),
+            FileChangeType::CREATED,
+        )],
+    );
+    let locations = poll_references_spanning(&client, &a_uri, 2, Duration::from_secs(10));
+    assert_eq!(locations.len(), 3, "def + call in a.jl, call in b.jl");
+
+    // Phase 2: a new member file is created and included, both outside the
+    // editor — membership refreshes and references span three files.
+    write_file(&pkg.path.join("src/c.jl"), "alsocall() = greet(3)\n");
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"b.jl\")\ninclude(\"c.jl\")\nend\n",
+    );
+    did_change_watched_files(
+        &client,
+        vec![
+            FileEvent::new(
+                file_uri(&pkg.path.join("src/c.jl")),
+                FileChangeType::CREATED,
+            ),
+            FileEvent::new(
+                file_uri(&pkg.path.join("src/MyPkg.jl")),
+                FileChangeType::CHANGED,
+            ),
+        ],
+    );
+    let locations = poll_references_spanning(&client, &a_uri, 3, Duration::from_secs(10));
+    assert_eq!(locations.len(), 4, "a new call site in c.jl");
+
+    // Phase 3: the member file is deleted (and no longer included) —
+    // membership shrinks back.
+    fs::remove_file(pkg.path.join("src/c.jl")).unwrap();
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    did_change_watched_files(
+        &client,
+        vec![
+            FileEvent::new(
+                file_uri(&pkg.path.join("src/c.jl")),
+                FileChangeType::DELETED,
+            ),
+            FileEvent::new(
+                file_uri(&pkg.path.join("src/MyPkg.jl")),
+                FileChangeType::CHANGED,
+            ),
+        ],
+    );
+    let locations = poll_references_spanning(&client, &a_uri, 2, Duration::from_secs(10));
+    assert_eq!(locations.len(), 3, "c.jl's call site is gone");
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(300),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(300));
     client
         .sender
         .send(Message::Notification(Notification {
