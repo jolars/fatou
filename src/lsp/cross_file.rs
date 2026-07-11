@@ -153,18 +153,14 @@ pub(crate) mod test_support {
             submodules: Vec::new(),
         };
         let members: Vec<PathBuf> = files.iter().map(|(rel, _)| member_path(rel)).collect();
-        // Every member's top level lives in the root module here (keyed by the
-        // package-relative path the harvester uses); the nested-module membership
-        // tests build their own indices with populated module paths.
-        let member_modules = files
-            .iter()
-            .map(|(rel, _)| (PathBuf::from("src").join(rel), Vec::new()))
-            .collect();
+        // No include structure: every member's host falls back to the root
+        // module through the project graph; nested-module membership tests
+        // seed an entry file with real `include`s instead.
         let pkg = PackageIndex {
             name: "MyPkg".to_string(),
             root,
             members,
-            member_modules,
+            member_modules: Default::default(),
             diagnostics: Vec::new(),
         };
 

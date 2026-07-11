@@ -2,7 +2,8 @@
 
 use fatou::incremental::{
     IncrementalDatabase, IncrementalDb, SourceFile, file_exports, file_free_reads,
-    file_qualified_reads, include_edges, parse_diagnostics, parsed_tree_root, semantic_model,
+    file_qualified_reads, host_module_of, include_edges, parse_diagnostics, parsed_tree_root,
+    project_graph, semantic_model,
 };
 
 #[test]
@@ -205,3 +206,99 @@ firewall_backdates_test!(
     "k() = 1\ninclude(\"a.jl\")\n",
     "k() = 111\ninclude(\"a.jl\")\n"
 );
+
+/// A probe over the per-file host-module firewall, to observe backdating.
+#[salsa::tracked]
+fn probe_host_module(db: &dyn IncrementalDb, file: SourceFile) -> usize {
+    use std::sync::atomic::Ordering;
+    HOST_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
+    host_module_of(db, file).len()
+}
+
+static HOST_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[test]
+fn host_module_of_backdates_across_graph_rederivations() {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+
+    use fatou::index::model::{DefLocation, Span};
+    use fatou::index::{ModuleIndex, PackageIndex};
+
+    // A minimal workspace package: the graph derives hosts from include edges,
+    // so the index itself can stay empty.
+    let pkg = PackageIndex {
+        name: "MyPkg".to_string(),
+        root: ModuleIndex {
+            name: "MyPkg".to_string(),
+            bare: false,
+            loc: DefLocation {
+                file: "src/MyPkg.jl".into(),
+                range: Span { start: 0, end: 0 },
+            },
+            exports: Vec::new(),
+            functions: Vec::new(),
+            types: Vec::new(),
+            consts: Vec::new(),
+            macros: Vec::new(),
+            submodules: Vec::new(),
+        },
+        members: Vec::new(),
+        member_modules: Default::default(),
+        diagnostics: Vec::new(),
+    };
+
+    let mut db = IncrementalDatabase::new();
+    let entry = db.upsert_file(
+        Path::new("/work/MyPkg/src/MyPkg.jl"),
+        "module MyPkg\nk() = 1\nmodule Sub\ninclude(\"b.jl\")\nend\nend\n".to_string(),
+    );
+    let b = db.upsert_file(Path::new("/work/MyPkg/src/b.jl"), "x = 1\n".to_string());
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(pkg));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, Some("MyPkg".to_string()));
+    db.set_workspace_files(vec![entry, b]);
+
+    assert_eq!(probe_host_module(&db, b), 1, "b.jl hosts inside Sub");
+    assert_eq!(HOST_PROBE_RUNS.load(Ordering::SeqCst), 1);
+
+    // A body edit in the entry that shifts positions but keeps the include
+    // structure: `include_edges` backdates, so the graph is not even re-derived
+    // and the probe rests.
+    db.set_file_text(
+        entry,
+        "module MyPkg\nk() = 111\nmodule Sub\ninclude(\"b.jl\")\nend\nend\n".to_string(),
+    );
+    assert_eq!(probe_host_module(&db, b), 1);
+    assert_eq!(
+        HOST_PROBE_RUNS.load(Ordering::SeqCst),
+        1,
+        "a position shift must not reach past the include-edge firewall"
+    );
+
+    // An include-structure edit: the graph re-derives (c.jl joins the closure),
+    // `host_module_of(b)` re-runs but returns an equal host — it backdates and
+    // the probe is still not re-run.
+    let c = db.upsert_file(Path::new("/work/MyPkg/src/c.jl"), "y = 2\n".to_string());
+    db.set_file_text(
+        entry,
+        "module MyPkg\nk() = 111\ninclude(\"c.jl\")\nmodule Sub\ninclude(\"b.jl\")\nend\nend\n"
+            .to_string(),
+    );
+    db.set_workspace_files(vec![entry, b, c]);
+    assert!(
+        project_graph(&db).nodes.iter().any(|p| p.ends_with("c.jl")),
+        "witness: the graph really re-derived with c.jl in the closure"
+    );
+    assert_eq!(probe_host_module(&db, b), 1);
+    assert_eq!(
+        HOST_PROBE_RUNS.load(Ordering::SeqCst),
+        1,
+        "an unchanged per-file host must backdate across a graph re-derivation"
+    );
+}

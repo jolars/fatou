@@ -182,9 +182,10 @@ pub struct Resolver<'a, P: PackageSource> {
 struct WorkspaceCtx {
     pkg: Arc<PackageIndex>,
     /// The host module path (relative to [`pkg`](Self::pkg)'s root, empty for the
-    /// root itself) the file's top-level items splice into, from the harvester's
-    /// [`member_modules`](crate::index::PackageIndex::member_modules). The
-    /// file's top-level globals and free reads resolve against this module.
+    /// root itself) the file's top-level items splice into, derived from the
+    /// include graph (`host_module_of` over `project_graph`,
+    /// `src/incremental.rs`). The file's top-level globals and free reads
+    /// resolve against this module.
     host: ModulePath,
 }
 

@@ -58,9 +58,10 @@ pub struct PackageIndex {
     /// The host module of each member file: the module path (relative to
     /// [`root`](Self::root), empty for the root module itself) that the file's
     /// `include` lexically landed in, so its top-level items splice there. Keyed
-    /// by the same package-relative path as [`members`](Self::members). Lets the
-    /// workspace resolver resolve a member file's top-level globals and free
-    /// reads against its enclosing nested `module`, not just the root.
+    /// by the same package-relative path as [`members`](Self::members). The
+    /// harvester's own record: resolution derives the same hosts from the
+    /// include graph (`project_graph`'s `host_modules`, the authority), and a
+    /// parity test holds the two walks in lockstep.
     pub member_modules: BTreeMap<PathBuf, Vec<String>>,
     pub diagnostics: Vec<HarvestDiagnostic>,
 }

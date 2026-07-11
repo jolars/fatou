@@ -339,13 +339,13 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
         macros: Vec::new(),
         submodules: Vec::new(),
     });
-    // `a.jl`'s top level is the root module; `sub.jl`'s is `Sub`.
-    pkg.member_modules
-        .insert(PathBuf::from("src/a.jl"), Vec::new());
-    pkg.member_modules
-        .insert(PathBuf::from("src/sub.jl"), vec!["Sub".to_string()]);
-
+    // Membership derives from the include graph: the entry places `a.jl` at
+    // the root and `sub.jl` inside `module Sub`.
     let mut db = IncrementalDatabase::new();
+    let entry = db.upsert_file(
+        Path::new("/work/MyPkg/src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\nmodule Sub\ninclude(\"sub.jl\")\nend\nend\n".to_string(),
+    );
     let a = db.upsert_file(
         Path::new("/work/MyPkg/src/a.jl"),
         "function f()\n    f()\nend\n".to_string(),
@@ -360,7 +360,7 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
     db.set_library(packages, roots, Some("MyPkg".to_string()));
-    db.set_workspace_files(vec![a, sub]);
+    db.set_workspace_files(vec![entry, a, sub]);
 
     let snap = db.snapshot();
     let index = snap.workspace_reference_index();
@@ -421,14 +421,14 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
         macros: Vec::new(),
         submodules: Vec::new(),
     });
-    // Both files' top level hosts at the *root* module; `sub.jl` opens `Sub`
-    // inline, so its `f` belongs to `Sub` through the model's scope nesting.
-    pkg.member_modules
-        .insert(PathBuf::from("src/root.jl"), Vec::new());
-    pkg.member_modules
-        .insert(PathBuf::from("src/sub.jl"), Vec::new());
-
+    // Both files are included at the entry's top level, so each hosts at the
+    // *root* module; `sub.jl` opens `Sub` inline, so its `f` belongs to `Sub`
+    // through the model's scope nesting.
     let mut db = IncrementalDatabase::new();
+    let entry = db.upsert_file(
+        Path::new("/work/MyPkg/src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"root.jl\")\ninclude(\"sub.jl\")\nend\n".to_string(),
+    );
     let root = db.upsert_file(
         Path::new("/work/MyPkg/src/root.jl"),
         "f() = 2\nh() = f()\n".to_string(),
@@ -443,7 +443,7 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
     let mut roots = BTreeMap::new();
     roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
     db.set_library(packages, roots, Some("MyPkg".to_string()));
-    db.set_workspace_files(vec![root, sub]);
+    db.set_workspace_files(vec![entry, root, sub]);
 
     let snap = db.snapshot();
     let index = snap.workspace_reference_index();
@@ -612,4 +612,114 @@ fn project_graph_reports_cycles_and_unresolved() {
     assert_eq!(g.unresolved.len(), 1, "missing.jl is unresolved");
     assert_eq!(g.unresolved[0].from, src("MyPkg.jl"));
     assert_eq!(g.unresolved[0].raw, "missing.jl");
+}
+
+#[test]
+fn workspace_member_hosts_derive_from_the_project_graph() {
+    // `workspace_member`'s host module comes from the include graph, not the
+    // harvester: `seed_project` builds an *empty* package index (no
+    // `member_modules`), so only the graph can place `b.jl` inside `Sub`.
+    use smol_str::SmolStr;
+
+    let db = seed_project(&[
+        (
+            "MyPkg.jl",
+            "module MyPkg\ninclude(\"a.jl\")\nmodule Sub\ninclude(\"b.jl\")\nend\nend\n",
+        ),
+        ("a.jl", "x = 1\n"),
+        ("b.jl", "y = 2\n"),
+    ]);
+    let snap = db.snapshot();
+
+    let (_, host) = snap
+        .workspace_member(&src("a.jl"))
+        .expect("a.jl is a member");
+    assert!(host.is_empty(), "a.jl splices into the root module");
+    let (_, host) = snap
+        .workspace_member(&src("b.jl"))
+        .expect("b.jl is a member");
+    assert_eq!(host, vec![SmolStr::new("Sub")]);
+
+    // A file under `src/` the graph has never seen keeps the root-module
+    // fallback instead of dropping out of the workspace.
+    let (_, host) = snap
+        .workspace_member(std::path::Path::new("/work/MyPkg/src/loose.jl"))
+        .expect("still a workspace member");
+    assert!(host.is_empty(), "an unknown member falls back to the root");
+}
+
+/// A throwaway on-disk file tree, removed on drop.
+struct TempTree(std::path::PathBuf);
+
+impl TempTree {
+    fn new(files: &[(&str, &str)]) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("fatou_parity_{}_{n}", std::process::id()));
+        for (rel, contents) in files {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, contents).unwrap();
+        }
+        TempTree(root)
+    }
+}
+
+impl Drop for TempTree {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn graph_host_modules_agree_with_the_harvester() {
+    // The graph re-derives the harvester's `member_modules` from include edges.
+    // This parity check holds the two walks in lockstep (diamond included) so
+    // the graph can be the resolution authority while the harvester keeps its
+    // own record.
+    use std::collections::BTreeMap;
+
+    use fatou::incremental::normalize_path;
+
+    let tree = TempTree::new(&[
+        (
+            "src/Pkg.jl",
+            "module Pkg\ninclude(\"a.jl\")\nmodule Sub\ninclude(\"b.jl\")\nend\nend\n",
+        ),
+        ("src/a.jl", "include(\"shared.jl\")\n"),
+        ("src/b.jl", "include(\"shared.jl\")\n"),
+        ("src/shared.jl", "x = 1\n"),
+    ]);
+    let root = tree.0.clone();
+    let index = Arc::new(fatou::index::harvest_package_named(&root, "Pkg"));
+
+    let mut db = IncrementalDatabase::new();
+    let mut packages = BTreeMap::new();
+    packages.insert("Pkg".to_string(), Arc::clone(&index));
+    let mut roots = BTreeMap::new();
+    roots.insert("Pkg".to_string(), root.clone());
+    db.set_library(packages, roots, Some("Pkg".to_string()));
+    db.seed_workspace_members();
+
+    let snap = db.snapshot();
+    let g = snap.project_graph();
+
+    let from_graph: BTreeMap<_, _> = index
+        .members
+        .iter()
+        .map(|rel| {
+            let host = g
+                .host_modules
+                .get(&normalize_path(&root.join(rel)))
+                .unwrap_or_else(|| panic!("member {} missing from the graph", rel.display()));
+            (rel.clone(), host.clone())
+        })
+        .collect();
+    assert_eq!(from_graph, index.member_modules);
+    assert_eq!(
+        g.host_modules.len(),
+        index.member_modules.len(),
+        "the graph covers exactly the harvested members"
+    );
 }

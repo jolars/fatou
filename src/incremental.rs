@@ -250,8 +250,11 @@ pub struct ProjectGraph {
     /// Each file to the files that include it.
     pub reverse: BTreeMap<PathBuf, Vec<PathBuf>>,
     /// Each member's host module path (the nested `module` its `include`
-    /// lexically landed in), empty for the root module — a re-derivation of
-    /// [`PackageIndex::member_modules`](crate::index::model::PackageIndex).
+    /// lexically landed in), empty for the root module. The resolution
+    /// authority for nested-`module` file membership, read through the
+    /// [`host_module_of`] firewall; the harvester's parallel record
+    /// ([`PackageIndex::member_modules`](crate::index::model::PackageIndex)) is
+    /// held in lockstep by a parity test.
     pub host_modules: BTreeMap<PathBuf, Vec<String>>,
     /// `include` back-edges that close a cycle.
     pub cycles: Vec<CycleEdge>,
@@ -283,8 +286,9 @@ enum IncludeColor {
 }
 
 /// The package's transitive include graph (see [`ProjectGraph`]). Demand-only:
-/// pulled by the diagnostics path, never by an eager query. Empty when there is
-/// no workspace package or its member files have not been seeded.
+/// pulled by the diagnostics path and, through [`host_module_of`], by the
+/// workspace resolution tier — never by an eager query. Empty when there is no
+/// workspace package or its member files have not been seeded.
 #[salsa::tracked(returns(ref))]
 pub fn project_graph(db: &dyn IncrementalDb) -> ProjectGraph {
     let mut graph = ProjectGraph::default();
@@ -398,14 +402,64 @@ fn walk_include_graph(
     color.insert(path, IncludeColor::Black);
 }
 
+/// The host module path of `file` within the workspace package, from the
+/// project graph — the resolution authority for nested-`module` file
+/// membership. Empty for the root module, and as the fallback for a file the
+/// graph does not reach (an orphan under `src/`, or a pathless in-memory
+/// document), preserving the pre-nested-module behavior.
+///
+/// A per-file firewall over [`project_graph`]: the graph is one shared `Eq`
+/// value, so an include-edge edit anywhere re-derives it — but when this file's
+/// own host is unchanged the equal result backdates, and file-keyed dependents
+/// (e.g. [`file_workspace_occurrences`]) are not re-run.
+#[salsa::tracked(returns(ref))]
+pub fn host_module_of(db: &dyn IncrementalDb, file: SourceFile) -> Vec<String> {
+    let Some(path) = file.path(db) else {
+        return Vec::new();
+    };
+    project_graph(db)
+        .host_modules
+        .get(&normalize_path(path))
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The workspace package when `path` lies under its source root — the gate of
+/// `workspace_member`, shared by the path- and file-keyed variants.
+fn workspace_package_for(db: &dyn IncrementalDb, path: &Path) -> Option<Arc<PackageIndex>> {
+    let index = LibraryIndex::try_get(db)?;
+    let name = index.workspace(db).as_ref()?;
+    let root = index.roots(db).0.get(name)?;
+    let src = normalize_path(&root.join("src"));
+    if !normalize_path(path).starts_with(&src) {
+        return None;
+    }
+    index.packages(db).0.get(name).cloned()
+}
+
+/// [`PackageSource::workspace_member`] keyed by [`SourceFile`], for tracked
+/// queries: the host comes through the [`host_module_of`] firewall, so a graph
+/// change that leaves this file's host unchanged does not re-run the caller.
+fn workspace_member_of(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> Option<(Arc<PackageIndex>, ModulePath)> {
+    let path = file.path(db).as_deref()?;
+    let pkg = workspace_package_for(db, path)?;
+    let host = host_module_of(db, file).iter().map(SmolStr::new).collect();
+    Some((pkg, host))
+}
+
 /// The reverse-occurrence projection for one file: every occurrence of a
 /// workspace top-level symbol, keyed by `(namespace, name)`, from this file's
 /// own module-global bindings and its free reads resolving to the workspace
 /// tier. See [`Resolver::workspace_occurrences`].
 ///
-/// Reads the [`LibraryIndex`] input (through [`DbPackages`]) so a re-harvest
-/// invalidates it; otherwise re-runs only when the file's [`semantic_model`]
-/// changes. **Demand-only:** the aggregate [`workspace_reference_index`] and the
+/// Reads the [`LibraryIndex`] input (through [`DbPackages`]) and the file's
+/// host module (through the [`host_module_of`] firewall), so a re-harvest or a
+/// change to this file's own host invalidates it; otherwise re-runs only when
+/// the file's [`semantic_model`] changes. **Demand-only:** the aggregate
+/// [`workspace_reference_index`] and the
 /// references/rename read jobs pull it lazily. It must never become a dependency
 /// of an eager query (e.g. [`parse_diagnostics`]), or every keystroke in any
 /// member file would recompute the whole reverse index.
@@ -416,12 +470,8 @@ pub fn file_workspace_occurrences(
 ) -> WorkspaceOccurrences {
     let model = semantic_model(db, file);
     let packages = DbPackages(db);
-    let workspace = file
-        .path(db)
-        .as_deref()
-        .and_then(|p| packages.workspace_member(p));
     let map = Resolver::new(model, &packages)
-        .with_workspace(workspace)
+        .with_workspace(workspace_member_of(db, file))
         .workspace_occurrences();
     WorkspaceOccurrences(map)
 }
@@ -466,34 +516,6 @@ impl PackageSource for DbPackages<'_> {
             .get(name)
             .cloned()
     }
-
-    fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
-        let index = LibraryIndex::try_get(self.0)?;
-        let name = index.workspace(self.0).as_ref()?;
-        let root = index.roots(self.0).0.get(name)?;
-        let src = normalize_path(&root.join("src"));
-        if !normalize_path(path).starts_with(&src) {
-            return None;
-        }
-        let pkg = index.packages(self.0).0.get(name).cloned()?;
-        let host = host_module_path(&pkg, root, path);
-        Some((pkg, host))
-    }
-}
-
-/// The host module path of `path` within workspace `pkg` rooted at `root`: the
-/// nested `module` the harvester spliced the file's top level into (empty for
-/// the root module). Falls back to the root module for a file under `src/` that
-/// the harvester has not recorded as a member (e.g. a freshly opened,
-/// not-yet-harvested buffer), preserving the pre-nested-module behavior.
-fn host_module_path(pkg: &PackageIndex, root: &Path, path: &Path) -> ModulePath {
-    let root = normalize_path(root);
-    normalize_path(path)
-        .strip_prefix(&root)
-        .ok()
-        .and_then(|rel| pkg.member_modules.get(rel))
-        .map(|segments| segments.iter().map(SmolStr::new).collect())
-        .unwrap_or_default()
 }
 
 /// The workspace package's reverse-occurrence index: every occurrence of each
@@ -874,11 +896,24 @@ impl IncrementalDatabase {
 
     /// The workspace package and the host module path of `path`, when `path` is
     /// one of its source files (a file under the package's source root). The host
-    /// module is the nested `module` the harvester spliced the file's top level
-    /// into (empty for the root module), so the file's globals and free reads
-    /// resolve against it rather than always the root.
+    /// module is the nested `module` the file's `include` lexically landed in
+    /// (empty for the root module), from the [`project_graph`]'s
+    /// [`host_module_of`] firewall, so the file's globals and free reads resolve
+    /// against it rather than always the root. A path not tracked as an input
+    /// (e.g. a freshly opened, not-yet-seeded buffer) falls back to the root
+    /// module rather than dropping out of the workspace.
     pub fn workspace_member(&self, path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
-        DbPackages(self).workspace_member(path)
+        let pkg = workspace_package_for(self, path)?;
+        let host = self
+            .lookup_file(path)
+            .map(|file| {
+                host_module_of(self, file)
+                    .iter()
+                    .map(SmolStr::new)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some((pkg, host))
     }
 
     /// Just the workspace package for `path` (see [`workspace_member`](Self::workspace_member)).

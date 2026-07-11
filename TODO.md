@@ -382,11 +382,17 @@ The payoff phase, in roughly arity's shipping order.
   Unresolved includes and include cycles now surface as LSP diagnostics on the
   offending `include(...)` call (`src/lsp/graph_diagnostics.rs`), published per
   member file on each harvest and merged with parse diagnostics in `GlobalState`
-  (`src/lsp/state.rs`). *Deferred:* multi-folder workspaces; and the graph's
-  `host_modules` are validated against the harvester but not yet flipped in as
-  the resolution authority (the harvester still owns `member_modules`, which
-  needs no change for the diagnostics feature). (Nested-`module` file membership
-  has since landed; see below.)
+  (`src/lsp/state.rs`). *The authority flip has since landed:* the graph's
+  `host_modules` are now the resolution authority — `workspace_member` reads a
+  per-file `host_module_of` firewall over `project_graph`
+  (`src/incremental.rs`) instead of the harvester's `member_modules`, so a
+  file's host module tracks unsaved include-structure edits live, an unchanged
+  host backdates across graph re-derivations, and a file the graph does not
+  reach falls back to the root module. `member_modules` stays as the
+  harvester's own record, held in lockstep by a parity test
+  (`tests/library_index.rs`); drop it once graph authority has soaked.
+  *Deferred:* multi-folder workspaces. (Nested-`module` file membership has
+  since landed; see below.)
 - [x] Cross-file go-to-definition, references, and rename for top-level
   symbols. Within-package go-to-definition, hover, and completion landed with
   the project graph; cross-file **references and rename** now land on a
