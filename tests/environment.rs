@@ -17,7 +17,9 @@ fn make_fake_install(prefix: &Path, stdlib_version: &str) {
         &julia.join(format!("stdlib/v{stdlib_version}/Foo/src/Foo.jl")),
         "module Foo\nend\n",
     );
-    write(&prefix.join("bin/julia"), "#!/bin/sh\n");
+    // The PATH locator looks for `julia.exe` on Windows.
+    let exe = if cfg!(windows) { "julia.exe" } else { "julia" };
+    write(&prefix.join("bin").join(exe), "#!/bin/sh\n");
 }
 
 fn bare_ctx(workspace_root: PathBuf) -> EnvContext {
