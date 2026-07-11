@@ -466,9 +466,32 @@ The payoff phase, in roughly arity's shipping order.
   `workspace_symbol_provider`. Locked by inline units plus `serves_workspace_symbols`
   in `tests/lsp.rs`. *Deferred:* fuzzy *ranking* (results follow harvest order)
   and lazy `workspaceSymbol/resolve` (locations resolve eagerly).
-- [ ] `workspace/didChangeWatchedFiles`: `Project.toml`/`Manifest.toml`
-  changes re-resolve the environment; file create/delete refreshes
-  membership.
+- [x] `workspace/didChangeWatchedFiles`: watched events feed the same channels
+  the editor does. An environment file (any project/manifest flavor, classified
+  by `is_environment_file`, `src/environment.rs`) escalates to
+  `HarvestSignal::Environment`: the harvester (`spawn_workspace_harvester`,
+  `src/lsp/server.rs`) drains the queued burst (a `Pkg.add` rewrites project
+  and manifest together) and restarts its resolve-and-harvest cycle, so a
+  changed manifest or a created/deleted `Project.toml` reshapes the whole
+  library (an empty re-resolve still sends, clearing a deleted environment).
+  A `.jl` event sends `HarvestSignal::Source`, re-harvesting the owning
+  workspace package exactly like a save, so created and deleted files refresh
+  membership on the next member seeding; a file with no open buffer is first
+  synced to disk over the widened close-to-sync channel
+  (`revert_file_to_disk`), while an open buffer stays authoritative until it
+  closes. Saves classify through the same `harvest_signal`, so an in-editor
+  `Project.toml` save also re-resolves. Watchers (`**/*.jl` plus the four
+  project/manifest names and `Manifest-v*.toml`) are registered via
+  `client/registerCapability` when the client advertises
+  `didChangeWatchedFiles.dynamicRegistration` and a folder is open — sent as
+  the main loop starts, since `lsp-server` consumes `initialized` inside
+  `initialize_finish`. Locked by classifier/capability units
+  (`src/environment.rs`, `src/lsp/server.rs`) and two e2e tests
+  (`registers_file_watchers_when_the_client_supports_it`,
+  `watched_file_events_refresh_environment_and_membership`, `tests/lsp.rs`).
+  *Deferred:* no debounce beyond burst-draining (each source event re-harvests,
+  deduped on an unchanged index), and an open buffer ignores on-disk changes
+  until it closes.
 - [ ] Diagnostics maturation: pull diagnostics (`textDocument/diagnostic`)
   with push fallback; lint findings as diagnostics with quick-fix code
   actions (needs the Linter section's first rules); first semantic
