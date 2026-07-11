@@ -8,6 +8,10 @@ Test](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml/badge
 VSX](https://img.shields.io/open-vsx/v/jolars/fatou?logo=vsix)](https://open-vsx.org/extension/jolars/fatou)
 [![VS
 Code](https://vsmarketplacebadges.dev/version-short/jolars.fatou.svg?logo=vsix)](https://marketplace.visualstudio.com/items?itemName=jolars.fatou)
+[![PyPI
+version](https://badge.fury.io/py/fatou.svg?icon=si%3Apython)](https://pypi.org/project/fatou/)
+[![npm
+version](https://badge.fury.io/js/@fatou-cli%2Ffatou-cli.svg?icon=si%3Anpm)](https://www.npmjs.com/package/fatou-cli)
 
 A language server, formatter, and linter for [Julia](https://julialang.org) that
 doesn't require running Julia itself. Fatou is written in Rust and is designed
