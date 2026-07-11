@@ -391,7 +391,22 @@ The payoff phase, in roughly arity's shipping order.
   reach falls back to the root module. `member_modules` stays as the
   harvester's own record, held in lockstep by a parity test
   (`tests/library_index.rs`); drop it once graph authority has soaked.
-  *Deferred:* multi-folder workspaces. (Nested-`module` file membership has
+  *Multi-folder workspaces have since landed:* `workspace_roots`
+  (`src/lsp/server.rs`) honors every `initialize` folder (deduped, `root_uri`
+  fallback) and advertises `workspaceFolders.supported`; the harvester
+  resolves one environment per folder (deduped on the resolved project file)
+  and merges them via `harvest_libraries`/`dev_packages` (`src/index.rs`) —
+  system index once, depot packages first-env-wins, one dev package per
+  package-project folder. `LibraryIndex.workspaces` is plural, a path routes
+  to its package by longest-src-prefix (`workspace_package_for`), the one
+  `project_graph` merges every package's include closure, saves route to the
+  owning package, and `OccurrenceKey` carries the package name so
+  cross-file references/rename never bleed across folders. *Still deferred:*
+  `workspace/didChangeWorkspaceFolders` (folders are read once at
+  `initialize`); depot-package version conflicts across folders resolve
+  first-env-wins (the library map is name-keyed); a user-set `JULIA_PROJECT`
+  wins over every folder's walk-up, collapsing all folders into one
+  environment (pre-existing precedence). (Nested-`module` file membership has
   since landed; see below.)
 - [x] Cross-file go-to-definition, references, and rename for top-level
   symbols. Within-package go-to-definition, hover, and completion landed with
