@@ -75,3 +75,20 @@ fn unsafe_fix_requires_opt_in() {
     assert_eq!(opted_in.output, "xyz");
     assert_eq!(opted_in.applied, 1);
 }
+
+/// `nothing-comparison` rewrites `==`/`!=` against `nothing` to the identity
+/// operators `===`/`!==` in one pass, leaving no findings behind.
+#[test]
+fn fixes_every_nothing_comparison() {
+    let src = "\
+a = x == nothing
+b = y != nothing
+";
+    let outcome = fix_source(None, src, &select("nothing-comparison"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = x === nothing
+    b = y !== nothing
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}

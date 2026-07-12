@@ -192,6 +192,49 @@ fn assignment_in_condition_ignores_plain_condition_and_call_kwarg() {
     );
 }
 
+// --- nothing-comparison ----------------------------------------------------
+
+#[test]
+fn nothing_comparison_flags_eq_and_ne() {
+    assert_eq!(count("nothing-comparison", "x == nothing\n"), 1);
+    assert_eq!(count("nothing-comparison", "x != nothing\n"), 1);
+}
+
+#[test]
+fn nothing_comparison_flags_nothing_on_either_side() {
+    assert_eq!(count("nothing-comparison", "nothing == x\n"), 1);
+    assert_eq!(count("nothing-comparison", "nothing != x\n"), 1);
+}
+
+#[test]
+fn nothing_comparison_ignores_identity_operators() {
+    // `===` / `!==` are already the recommended form.
+    assert_eq!(count("nothing-comparison", "x === nothing\n"), 0);
+    assert_eq!(count("nothing-comparison", "x !== nothing\n"), 0);
+}
+
+#[test]
+fn nothing_comparison_ignores_unrelated_comparisons() {
+    assert_eq!(count("nothing-comparison", "x == y\n"), 0);
+    assert_eq!(count("nothing-comparison", "isnothing(x)\n"), 0);
+    // The `Nothing` *type* is a different, capitalized identifier.
+    assert_eq!(count("nothing-comparison", "x == Nothing\n"), 0);
+}
+
+#[test]
+fn nothing_comparison_carries_a_safe_fix() {
+    let config = LintConfig {
+        select: Some(vec!["nothing-comparison".to_string()]),
+        ..Default::default()
+    };
+    let src = "x == nothing\n";
+    let report = check_source(None, src, &config);
+    let fix = &report.diagnostics[0].fixes[0];
+    assert_eq!(fix.content, "===");
+    // The replacement spans exactly the `==` operator token.
+    assert_eq!(&src[fix.start..fix.end], "==");
+}
+
 // --- severity ----------------------------------------------------------------
 
 /// The severity a single finding of `rule` in `src` carries under `config`.

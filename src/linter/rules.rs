@@ -50,6 +50,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UnusedImport),
         Box::new(correctness::DuplicateArgument),
         Box::new(suspicious::AssignmentInCondition),
+        Box::new(suspicious::NothingComparison),
     ]
 }
 

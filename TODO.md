@@ -83,11 +83,10 @@ AST wrappers only, `sem` = needs the `SemanticModel`. To land one, use the
 
 Ready now (no new infrastructure):
 
-- [ ] `nothing-comparison` (suspicious, syn): `x == nothing` / `x != nothing`
-  compares by value; suggest `===`/`!==` or `isnothing`. Safe fix `==` ->
-  `===` and `!=` -> `!==`. `nothing` is a `Core` const that is practically
-  never shadowed, so a name-based match is fine. (NothingEquality,
-  NothingNotEq)
+- [x] `nothing-comparison` (suspicious, syn): flags bare `x == nothing` /
+  `x != nothing` (either side) with a safe fix `==` -> `===` and `!=` ->
+  `!==`. Warning; name-based `nothing` match on `BINARY_EXPR` only (chains fold
+  into `COMPARISON_EXPR`).
 - [ ] `unused-argument` (correctness, sem): function argument never read in
   the body. Copy StaticLint's mitigations: skip all-underscore names (the
   documented escape hatch) and functions whose body is a lone literal (stub

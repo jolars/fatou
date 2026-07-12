@@ -16,3 +16,4 @@
   - [`unused-import`](reference/rules/unused-import.md)
   - [`duplicate-argument`](reference/rules/duplicate-argument.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
+  - [`nothing-comparison`](reference/rules/nothing-comparison.md)

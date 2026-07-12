@@ -1,0 +1,28 @@
+# `nothing-comparison`
+
+Flag `x == nothing` / `x != nothing`, which compares against `nothing` by value. `nothing` is the singleton instance of `Nothing`, so an identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and cannot be overloaded. The rule reports a safe fix rewriting `==` to `===` and `!=` to `!==`.
+
+Comparing against `nothing` by value:
+
+```julia
+if x == nothing
+    1
+end
+```
+
+```text
+warning: nothing-comparison
+ --> example.jl:1:4
+  |
+1 | if x == nothing
+  |    ^^^^^^^^^^^^ comparison against `nothing` by value; use `===` or `isnothing`
+  = help: Replace `==` with `===`
+```
+
+After applying the fix:
+
+```julia
+if x === nothing
+    1
+end
+```
