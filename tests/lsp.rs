@@ -34,6 +34,22 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+/// Bridge lsp-server 0.9's `ResponseKind` split back to the flat `result`
+/// accessor these tests were written against: `Some(value)` for an `Ok`
+/// response, `None` for an error (matching the pre-0.9 `Option` field).
+trait ResponseResultExt {
+    fn result(&self) -> Option<serde_json::Value>;
+}
+
+impl ResponseResultExt for lsp_server::Response {
+    fn result(&self) -> Option<serde_json::Value> {
+        match &self.response_kind {
+            lsp_server::ResponseKind::Ok { result } => Some(result.clone()),
+            lsp_server::ResponseKind::Err { .. } => None,
+        }
+    }
+}
+
 #[test]
 fn initialize_format_and_shutdown() {
     let (server, client) = Connection::memory();
@@ -110,7 +126,7 @@ fn initialize_format_and_shutdown() {
     match format_response {
         Message::Response(resp) => {
             let edits: Option<Vec<TextEdit>> =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             assert_eq!(edits.unwrap_or_default(), Vec::new());
         }
         other => panic!("expected a formatting response, got {other:?}"),
@@ -155,7 +171,7 @@ fn initialize_format_and_shutdown() {
     match messy_response {
         Message::Response(resp) => {
             let edits: Option<Vec<TextEdit>> =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             let edits = edits.expect("formatting edits");
             assert_eq!(edits.len(), 1, "expected a single whole-document edit");
             assert_eq!(edits[0].new_text, "x = 1\n");
@@ -205,7 +221,7 @@ fn initialize_format_and_shutdown() {
     match scoped_response {
         Message::Response(resp) => {
             let edits: Option<Vec<TextEdit>> =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             let edits = edits.expect("range formatting edits");
             assert_eq!(edits.len(), 1, "expected a single scoped edit");
             assert_eq!(edits[0].new_text, "b = 2");
@@ -261,7 +277,7 @@ fn hovers_a_local_definition() {
     match init_response {
         Message::Response(resp) => {
             assert_eq!(
-                resp.result.unwrap()["capabilities"]["hoverProvider"],
+                resp.result().unwrap()["capabilities"]["hoverProvider"],
                 serde_json::json!(true),
                 "expected hover to be advertised"
             );
@@ -315,7 +331,7 @@ fn hovers_a_local_definition() {
     let hover_response = client.receiver.recv().unwrap();
     match hover_response {
         Message::Response(resp) => {
-            let hover: Hover = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let hover: Hover = serde_json::from_value(resp.result().unwrap()).unwrap();
             let HoverContents::Markup(markup) = hover.contents else {
                 panic!("expected markup hover contents");
             };
@@ -376,8 +392,7 @@ fn serves_signature_help() {
     let init_response = client.receiver.recv().unwrap();
     match init_response {
         Message::Response(resp) => {
-            let triggers =
-                &resp.result.unwrap()["capabilities"]["signatureHelpProvider"]["triggerCharacters"];
+            let triggers = &resp.result().unwrap()["capabilities"]["signatureHelpProvider"]["triggerCharacters"];
             assert_eq!(
                 *triggers,
                 serde_json::json!(["(", ","]),
@@ -434,7 +449,7 @@ fn serves_signature_help() {
     let help_response = client.receiver.recv().unwrap();
     match help_response {
         Message::Response(resp) => {
-            let help: SignatureHelp = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let help: SignatureHelp = serde_json::from_value(resp.result().unwrap()).unwrap();
             assert_eq!(
                 help.signatures
                     .iter()
@@ -493,7 +508,7 @@ fn serves_goto_definition() {
     match init_response {
         Message::Response(resp) => {
             assert_eq!(
-                resp.result.unwrap()["capabilities"]["definitionProvider"],
+                resp.result().unwrap()["capabilities"]["definitionProvider"],
                 serde_json::json!(true),
                 "expected the definition provider to be advertised"
             );
@@ -549,7 +564,7 @@ fn serves_goto_definition() {
     match def_response {
         Message::Response(resp) => {
             let response: GotoDefinitionResponse =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             let GotoDefinitionResponse::Scalar(Location { uri: target, range }) = response else {
                 panic!("expected a scalar location, got {response:?}");
             };
@@ -603,7 +618,7 @@ fn serves_references() {
     match init_response {
         Message::Response(resp) => {
             assert_eq!(
-                resp.result.unwrap()["capabilities"]["referencesProvider"],
+                resp.result().unwrap()["capabilities"]["referencesProvider"],
                 serde_json::json!(true),
                 "expected the references provider to be advertised"
             );
@@ -660,7 +675,7 @@ fn serves_references() {
     let response = client.receiver.recv().unwrap();
     match response {
         Message::Response(resp) => {
-            let locations: Vec<Location> = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let locations: Vec<Location> = serde_json::from_value(resp.result().unwrap()).unwrap();
             let ranges: Vec<_> = locations
                 .iter()
                 .map(|l| {
@@ -714,7 +729,7 @@ fn serves_document_highlight() {
     match init_response {
         Message::Response(resp) => {
             assert_eq!(
-                resp.result.unwrap()["capabilities"]["documentHighlightProvider"],
+                resp.result().unwrap()["capabilities"]["documentHighlightProvider"],
                 serde_json::json!(true),
                 "expected the document highlight provider to be advertised"
             );
@@ -769,7 +784,7 @@ fn serves_document_highlight() {
     match response {
         Message::Response(resp) => {
             let highlights: Vec<DocumentHighlight> =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             let tagged: Vec<_> = highlights
                 .iter()
                 .map(|h| (h.range.start.line, h.kind.unwrap()))
@@ -830,7 +845,7 @@ fn serves_rename() {
     let init_response = client.receiver.recv().unwrap();
     match init_response {
         Message::Response(resp) => {
-            let caps = resp.result.unwrap();
+            let caps = resp.result().unwrap();
             assert_eq!(
                 caps["capabilities"]["renameProvider"]["prepareProvider"],
                 serde_json::json!(true),
@@ -882,7 +897,7 @@ fn serves_rename() {
     let response = client.receiver.recv().unwrap();
     match response {
         Message::Response(resp) => {
-            let range: Range = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let range: Range = serde_json::from_value(resp.result().unwrap()).unwrap();
             assert_eq!(range.start, Position::new(2, 4));
             assert_eq!(range.end, Position::new(2, 5));
         }
@@ -909,7 +924,7 @@ fn serves_rename() {
     let response = client.receiver.recv().unwrap();
     match response {
         Message::Response(resp) => {
-            let edit: WorkspaceEdit = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let edit: WorkspaceEdit = serde_json::from_value(resp.result().unwrap()).unwrap();
             let changes = edit.changes.expect("intra-file changes");
             let edits = changes.get(&uri).expect("edits for the document");
             let sites: Vec<_> = edits
@@ -967,7 +982,7 @@ fn applies_incremental_range_edits() {
     let init_response = client.receiver.recv().unwrap();
     match init_response {
         Message::Response(resp) => {
-            let result = resp.result.unwrap();
+            let result = resp.result().unwrap();
             assert_eq!(
                 result["capabilities"]["textDocumentSync"]["change"],
                 serde_json::json!(2),
@@ -1286,7 +1301,7 @@ fn negotiates_utf8_position_encoding() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let result = resp.result.unwrap();
+            let result = resp.result().unwrap();
             assert_eq!(
                 result["capabilities"]["positionEncoding"],
                 serde_json::json!("utf-8"),
@@ -1381,7 +1396,7 @@ fn negotiates_utf8_position_encoding() {
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
             let edits: Option<Vec<TextEdit>> =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             let edits = edits.expect("formatting edits");
             assert_eq!(edits.len(), 1, "expected a single whole-document edit");
             assert_eq!(
@@ -1633,7 +1648,7 @@ fn serves_document_symbols() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let result = resp.result.unwrap();
+            let result = resp.result().unwrap();
             assert_eq!(
                 result["capabilities"]["documentSymbolProvider"],
                 serde_json::json!(true),
@@ -1688,7 +1703,7 @@ fn serves_document_symbols() {
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
             let symbols: Vec<DocumentSymbol> =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             assert_eq!(names_and_kinds(&symbols), vec![("M", SymbolKind::MODULE)]);
             let children = symbols[0].children.as_deref().unwrap_or_default();
             assert_eq!(names_and_kinds(children), vec![("f", SymbolKind::FUNCTION)]);
@@ -1708,7 +1723,7 @@ fn serves_document_symbols() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            assert_eq!(resp.result, Some(serde_json::Value::Null));
+            assert_eq!(resp.result(), Some(serde_json::Value::Null));
         }
         other => panic!("expected a null response, got {other:?}"),
     }
@@ -1757,7 +1772,7 @@ fn serves_workspace_symbols() {
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
             assert_eq!(
-                resp.result.unwrap()["capabilities"]["workspaceSymbolProvider"],
+                resp.result().unwrap()["capabilities"]["workspaceSymbolProvider"],
                 serde_json::json!(true),
                 "expected the workspace symbol provider to be advertised"
             );
@@ -1789,7 +1804,7 @@ fn serves_workspace_symbols() {
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
             let response: WorkspaceSymbolResponse =
-                serde_json::from_value(resp.result.unwrap()).unwrap();
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             match response {
                 WorkspaceSymbolResponse::Nested(symbols) => assert!(
                     symbols.is_empty(),
@@ -1840,7 +1855,7 @@ fn serves_completion_and_resolve() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let result = resp.result.unwrap();
+            let result = resp.result().unwrap();
             assert_eq!(
                 result["capabilities"]["completionProvider"]["resolveProvider"],
                 serde_json::json!(true),
@@ -1899,7 +1914,7 @@ fn serves_completion_and_resolve() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let items = match serde_json::from_value(resp.result.unwrap()).unwrap() {
+            let items = match serde_json::from_value(resp.result().unwrap()).unwrap() {
                 CompletionResponse::Array(items) => items,
                 CompletionResponse::List(list) => list.items,
             };
@@ -1929,7 +1944,7 @@ fn serves_completion_and_resolve() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let resolved: CompletionItem = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let resolved: CompletionItem = serde_json::from_value(resp.result().unwrap()).unwrap();
             assert_eq!(resolved.label, "alpha");
         }
         other => panic!("expected a resolve response, got {other:?}"),
@@ -2184,7 +2199,7 @@ fn serves_folding_ranges() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let result = resp.result.unwrap();
+            let result = resp.result().unwrap();
             assert_eq!(
                 result["capabilities"]["foldingRangeProvider"],
                 serde_json::json!(true),
@@ -2238,7 +2253,7 @@ fn serves_folding_ranges() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let folds: Vec<FoldingRange> = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let folds: Vec<FoldingRange> = serde_json::from_value(resp.result().unwrap()).unwrap();
             let triples: Vec<_> = folds
                 .into_iter()
                 .map(|f| (f.start_line, f.end_line, f.kind))
@@ -2263,7 +2278,7 @@ fn serves_folding_ranges() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            assert_eq!(resp.result, Some(serde_json::Value::Null));
+            assert_eq!(resp.result(), Some(serde_json::Value::Null));
         }
         other => panic!("expected a null response, got {other:?}"),
     }
@@ -2452,7 +2467,7 @@ fn serves_selection_ranges() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let result = resp.result.unwrap();
+            let result = resp.result().unwrap();
             assert_eq!(
                 result["capabilities"]["selectionRangeProvider"],
                 serde_json::json!(true),
@@ -2507,7 +2522,8 @@ fn serves_selection_ranges() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let chains: Vec<SelectionRange> = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let chains: Vec<SelectionRange> =
+                serde_json::from_value(resp.result().unwrap()).unwrap();
             let innermost: Vec<Range> = chains
                 .into_iter()
                 .map(|chain| flatten_chain(chain)[0])
@@ -2529,7 +2545,7 @@ fn serves_selection_ranges() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            assert_eq!(resp.result, Some(serde_json::Value::Null));
+            assert_eq!(resp.result(), Some(serde_json::Value::Null));
         }
         other => panic!("expected a null response, got {other:?}"),
     }
@@ -2731,7 +2747,7 @@ fn serves_semantic_tokens() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let provider = &resp.result.unwrap()["capabilities"]["semanticTokensProvider"];
+            let provider = &resp.result().unwrap()["capabilities"]["semanticTokensProvider"];
             assert_eq!(
                 provider["legend"]["tokenTypes"],
                 serde_json::json!(["keyword", "macro", "string", "number"]),
@@ -2786,7 +2802,7 @@ fn serves_semantic_tokens() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            let tokens: SemanticTokens = serde_json::from_value(resp.result.unwrap()).unwrap();
+            let tokens: SemanticTokens = serde_json::from_value(resp.result().unwrap()).unwrap();
             assert_eq!(
                 decode(&tokens),
                 vec![(0, 0, 5, MACRO), (0, 6, 1, NUMBER), (0, 10, 4, KEYWORD)],
@@ -2807,7 +2823,7 @@ fn serves_semantic_tokens() {
         .unwrap();
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
-            assert_eq!(resp.result, Some(serde_json::Value::Null));
+            assert_eq!(resp.result(), Some(serde_json::Value::Null));
         }
         other => panic!("expected a null response, got {other:?}"),
     }
@@ -2974,7 +2990,7 @@ fn initialize_with_folders(client: &Connection, roots: &[&Uri]) -> serde_json::V
         }))
         .unwrap();
     let result = match client.receiver.recv().unwrap() {
-        Message::Response(resp) => resp.result.expect("an InitializeResult"),
+        Message::Response(resp) => resp.result().expect("an InitializeResult"),
         other => panic!("expected an InitializeResult, got {other:?}"),
     };
     client
@@ -3034,7 +3050,7 @@ fn poll_references_spanning(
             }))
             .unwrap();
         let resp = recv_response(client, RequestId::from(id));
-        let locations: Vec<Location> = serde_json::from_value(resp.result.unwrap()).unwrap();
+        let locations: Vec<Location> = serde_json::from_value(resp.result().unwrap()).unwrap();
         let files: std::collections::HashSet<&str> =
             locations.iter().map(|l| l.uri.as_str()).collect();
         if files.len() == spanning {
@@ -3154,7 +3170,7 @@ fn serves_cross_file_references_and_rename() {
         }))
         .unwrap();
     let resp = recv_response(&client, RequestId::from(200));
-    let range: Range = serde_json::from_value(resp.result.unwrap()).unwrap();
+    let range: Range = serde_json::from_value(resp.result().unwrap()).unwrap();
     assert_eq!(range.start, Position::new(0, 0));
     assert_eq!(range.end, Position::new(0, 5));
 
@@ -3176,7 +3192,7 @@ fn serves_cross_file_references_and_rename() {
         }))
         .unwrap();
     let resp = recv_response(&client, RequestId::from(201));
-    let edit: WorkspaceEdit = serde_json::from_value(resp.result.unwrap()).unwrap();
+    let edit: WorkspaceEdit = serde_json::from_value(resp.result().unwrap()).unwrap();
     #[allow(clippy::mutable_key_type)]
     let changes = edit.changes.expect("multi-file changes");
     for edits in changes.values() {
@@ -3516,7 +3532,7 @@ fn serves_multi_folder_workspaces() {
         }))
         .unwrap();
     let resp = recv_response(&client, RequestId::from(400));
-    let response: WorkspaceSymbolResponse = serde_json::from_value(resp.result.unwrap()).unwrap();
+    let response: WorkspaceSymbolResponse = serde_json::from_value(resp.result().unwrap()).unwrap();
     // The untagged response enum parses as either shape; keep just the names.
     let names: Vec<String> = match response {
         WorkspaceSymbolResponse::Flat(symbols) => symbols.into_iter().map(|s| s.name).collect(),
