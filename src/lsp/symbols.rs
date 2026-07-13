@@ -144,7 +144,7 @@ fn def_symbol(def: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbol> {
         name.insert(0, '@');
     }
     let detail = function_like
-        .then(|| signature_detail(&sig_expr, selection, ctx))
+        .then(|| signature_detail(&sig_expr, selection, ctx.text))
         .flatten();
 
     let kind = match def.kind() {
@@ -187,7 +187,7 @@ fn short_form_symbol(assign: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbo
         return None;
     }
     let (name, selection) = callee_name(&head)?;
-    let detail = signature_detail(&lhs, selection, ctx);
+    let detail = signature_detail(&lhs, selection, ctx.text);
 
     // Nested definitions live in the value side; the signature binds none.
     let mut children = Vec::new();
@@ -307,13 +307,13 @@ fn field_symbol(
 }
 
 /// The expression inside a definition's `SIGNATURE` child.
-fn signature_expr(def: &SyntaxNode) -> Option<SyntaxNode> {
+pub(crate) fn signature_expr(def: &SyntaxNode) -> Option<SyntaxNode> {
     child_of_kind(def, SyntaxKind::SIGNATURE)?.children().next()
 }
 
 /// Strip `where` clauses and `::` return-type annotations down to the callable
 /// or named head: `f(x)::T where U` → `f(x)`, `x::Int` → `x`.
-fn unwrap_head(mut node: SyntaxNode) -> SyntaxNode {
+pub(crate) fn unwrap_head(mut node: SyntaxNode) -> SyntaxNode {
     while matches!(
         node.kind(),
         SyntaxKind::WHERE_EXPR | SyntaxKind::TYPE_ANNOTATION
@@ -329,7 +329,7 @@ fn unwrap_head(mut node: SyntaxNode) -> SyntaxNode {
 /// The defined name and its selection range for a call signature's callee: a
 /// plain or `var"..."` name, a dot-qualified path (`Base.show`, `Base.:+`), a
 /// parametric constructor head (`Foo{T}`), or a bare operator (`+`).
-fn callee_name(call: &SyntaxNode) -> Option<(String, rowan::TextRange)> {
+pub(crate) fn callee_name(call: &SyntaxNode) -> Option<(String, rowan::TextRange)> {
     let callee = call
         .children_with_tokens()
         .find(|el| !is_trivia(el.kind()))?;
@@ -341,7 +341,7 @@ fn callee_name(call: &SyntaxNode) -> Option<(String, rowan::TextRange)> {
 
 /// The display name and selection range of a name-position expression, or
 /// `None` when it has no static name (interpolation, tuple, error node).
-fn head_name(node: &SyntaxNode) -> Option<(String, rowan::TextRange)> {
+pub(crate) fn head_name(node: &SyntaxNode) -> Option<(String, rowan::TextRange)> {
     match node.kind() {
         SyntaxKind::NAME => {
             let ident = node
@@ -383,20 +383,20 @@ fn head_name(node: &SyntaxNode) -> Option<(String, rowan::TextRange)> {
 /// The signature rendered after the name — `(x::Int, y) where T` for
 /// `f(x::Int, y) where T` — as the symbol's `detail`. `None` when nothing
 /// follows the name (`function f end`).
-fn signature_detail(
+pub(crate) fn signature_detail(
     sig_expr: &SyntaxNode,
     name_range: rowan::TextRange,
-    ctx: &Ctx<'_>,
+    text: &str,
 ) -> Option<String> {
     let start = usize::from(name_range.end());
     let end = usize::from(sig_expr.text_range().end());
-    let detail = ctx.text.get(start..end)?.trim();
+    let detail = text.get(start..end)?.trim();
     (!detail.is_empty()).then(|| detail.to_string())
 }
 
 /// The first non-trivia operator-position token of a binary-shaped node (the
 /// token after its first child node).
-fn op_token(node: &SyntaxNode) -> Option<SyntaxToken> {
+pub(crate) fn op_token(node: &SyntaxNode) -> Option<SyntaxToken> {
     let first_child_end = node.first_child()?.text_range().end();
     node.children_with_tokens()
         .filter_map(|el| el.into_token())
@@ -407,7 +407,7 @@ fn child_of_kind(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     node.children().find(|c| c.kind() == kind)
 }
 
-fn is_trivia(kind: SyntaxKind) -> bool {
+pub(crate) fn is_trivia(kind: SyntaxKind) -> bool {
     matches!(
         kind,
         SyntaxKind::WHITESPACE

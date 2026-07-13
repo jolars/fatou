@@ -160,8 +160,9 @@ pub(crate) fn document_highlights_via_db(
 
 /// The binding the cursor at `offset` refers to: an occurrence that resolves to
 /// a binding, or a name sitting on its own definition site. A free or qualified
-/// read has no intra-file binding, so it yields `None`. Shared by both requests.
-fn binding_at_cursor(model: &SemanticModel, offset: TextSize) -> Option<BindingId> {
+/// read has no intra-file binding, so it yields `None`. Shared by both requests
+/// (and by call hierarchy's prepare/incoming classification).
+pub(crate) fn binding_at_cursor(model: &SemanticModel, offset: TextSize) -> Option<BindingId> {
     if let Some(ident) = model.ident_at(offset) {
         return ident.binding;
     }

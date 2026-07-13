@@ -227,21 +227,21 @@ fn free_read_location<P: PackageSource>(
     }
 }
 
-/// Find the module a whole-module `using` brings in and locate `name` in it.
-/// `module` is the clause's display name (its last component): a plain
-/// `using LinearAlgebra` names the package directly; a `using A.B` needs the
-/// clause walked from its package root. Mirrors hover's `library_from_using`.
-fn library_from_using<P: PackageSource>(
+/// Find the module a whole-module `using` brings in and locate `name`'s
+/// definition site in it. `module` is the clause's display name (its last
+/// component): a plain `using LinearAlgebra` names the package directly; a
+/// `using A.B` needs the clause walked from its package root. Mirrors hover's
+/// `library_from_using`. Shared with call hierarchy's outgoing library targets.
+pub(crate) fn using_def_site<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
     module: &str,
     name: &str,
-    encoding: PositionEncoding,
-) -> Option<Location> {
+) -> Option<(std::path::PathBuf, Span)> {
     if let Some(pkg) = packages.package(module)
-        && let Some(location) = library_location(packages, &pkg, &pkg.root, name, encoding)
+        && let Some(site) = library_def_site(packages, &pkg, &pkg.root, name)
     {
-        return Some(location);
+        return Some(site);
     }
     for load in model.module_loads() {
         if load.kind != LoadKind::Using || load.items.is_some() {
@@ -257,19 +257,51 @@ fn library_from_using<P: PackageSource>(
         };
         let rest: Vec<&str> = comps[1..].iter().map(|c| c.as_str()).collect();
         if let Some(m) = resolve_submodule(&pkg.root, &rest)
-            && let Some(location) = library_location(packages, &pkg, m, name, encoding)
+            && let Some(site) = library_def_site(packages, &pkg, m, name)
         {
-            return Some(location);
+            return Some(site);
         }
     }
     None
 }
 
+/// [`using_def_site`] materialized into a [`Location`], for go-to-definition.
+fn library_from_using<P: PackageSource>(
+    model: &SemanticModel,
+    packages: &P,
+    module: &str,
+    name: &str,
+    encoding: PositionEncoding,
+) -> Option<Location> {
+    let (abs, span) = using_def_site(model, packages, module, name)?;
+    let text = std::fs::read_to_string(&abs).ok()?;
+    let line_index = LineIndex::new(&text);
+    Some(Location {
+        uri: from_path(&abs)?,
+        range: span_to_range(span, &line_index, encoding),
+    })
+}
+
+/// The on-disk definition site of a library symbol: its [`DefLocation`] in
+/// `module`, with the package-relative path joined onto `pkg`'s source root
+/// (known only to the live server). `None` when the symbol is not defined in
+/// `module` or the root is unknown (e.g. the baked-in fallback Base). Shared
+/// with call hierarchy, which re-derives the definition's shape from the file.
+pub(crate) fn library_def_site<P: PackageSource>(
+    packages: &P,
+    pkg: &PackageIndex,
+    module: &ModuleIndex,
+    name: &str,
+) -> Option<(std::path::PathBuf, Span)> {
+    let def = library_def_location(module, name)?;
+    let root = packages.package_root(&pkg.name)?;
+    Some((root.join(&def.file), def.range))
+}
+
 /// Turn a library symbol into a [`Location`] in a depot source file: find its
-/// [`DefLocation`] in `module`, join the package-relative path with `pkg`'s
-/// source root (known only to the live server), read the target file, and
-/// convert the byte span to a line/column range. `None` when the root is unknown
-/// (e.g. the baked-in fallback Base) or the file cannot be read.
+/// definition site via [`library_def_site`], read the target file, and convert
+/// the byte span to a line/column range. `None` when the site is unknown or the
+/// file cannot be read.
 fn library_location<P: PackageSource>(
     packages: &P,
     pkg: &PackageIndex,
@@ -277,14 +309,12 @@ fn library_location<P: PackageSource>(
     name: &str,
     encoding: PositionEncoding,
 ) -> Option<Location> {
-    let def = library_def_location(module, name)?;
-    let root = packages.package_root(&pkg.name)?;
-    let abs = root.join(&def.file);
+    let (abs, span) = library_def_site(packages, pkg, module, name)?;
     let text = std::fs::read_to_string(&abs).ok()?;
     let line_index = LineIndex::new(&text);
     Some(Location {
         uri: from_path(&abs)?,
-        range: span_to_range(def.range, &line_index, encoding),
+        range: span_to_range(span, &line_index, encoding),
     })
 }
 

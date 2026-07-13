@@ -45,6 +45,7 @@
 #![allow(clippy::mutable_key_type)]
 
 mod analysis_thread;
+mod call_hierarchy;
 mod code_action;
 mod completion;
 mod cross_file;
@@ -69,6 +70,7 @@ mod task_pool;
 mod uri;
 mod workspace_symbols;
 
+pub use call_hierarchy::compute_prepare_call_hierarchy;
 pub use completion::compute_completions;
 pub use definition::compute_definition;
 pub use folding::compute_folding_ranges;

@@ -11,6 +11,7 @@ use lsp_types::notification::{
     DidSaveTextDocument, Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
+    CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
     CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentHighlightRequest,
     DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest,
     PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
@@ -19,6 +20,7 @@ use lsp_types::request::{
     WorkspaceSymbolRequest,
 };
 use lsp_types::{
+    CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     CodeActionParams, CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
@@ -158,6 +160,9 @@ impl GlobalState {
             DocumentHighlightRequest::METHOD => self.on_document_highlight(req),
             PrepareRenameRequest::METHOD => self.on_prepare_rename(req),
             Rename::METHOD => self.on_rename(req),
+            CallHierarchyPrepare::METHOD => self.on_prepare_call_hierarchy(req),
+            CallHierarchyIncomingCalls::METHOD => self.on_call_hierarchy_incoming(req),
+            CallHierarchyOutgoingCalls::METHOD => self.on_call_hierarchy_outgoing(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -523,6 +528,63 @@ impl GlobalState {
             new_name: params.new_name,
             uri,
             text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_prepare_call_hierarchy(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<CallHierarchyPrepareParams>(CallHierarchyPrepare::METHOD)
+        else {
+            self.respond_err(id, "invalid prepareCallHierarchy params");
+            return;
+        };
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::PrepareCallHierarchy {
+            id,
+            path: path_for(&uri),
+            position: params.text_document_position_params.position,
+            uri,
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    /// Incoming/outgoing carry a [`CallHierarchyItem`](lsp_types::CallHierarchyItem)
+    /// rather than a document position, and the item's file may be a closed
+    /// member — so there is no buffer lookup; the read job re-derives the text
+    /// off the snapshot (the `workspace/symbol` pattern).
+    fn on_call_hierarchy_incoming(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<CallHierarchyIncomingCallsParams>(CallHierarchyIncomingCalls::METHOD)
+        else {
+            self.respond_err(id, "invalid incomingCalls params");
+            return;
+        };
+        self.dispatch_read(ReadJob::CallHierarchyIncoming {
+            id,
+            item: Box::new(params.item),
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_call_hierarchy_outgoing(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<CallHierarchyOutgoingCallsParams>(CallHierarchyOutgoingCalls::METHOD)
+        else {
+            self.respond_err(id, "invalid outgoingCalls params");
+            return;
+        };
+        self.dispatch_read(ReadJob::CallHierarchyOutgoing {
+            id,
+            item: Box::new(params.item),
             sender: self.sender.clone(),
         });
     }

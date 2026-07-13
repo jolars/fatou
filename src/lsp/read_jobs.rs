@@ -6,16 +6,19 @@ use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
-    CodeActionOrCommand, CompletionItem, CompletionResponse, DocumentDiagnosticReport,
-    DocumentDiagnosticReportResult, DocumentSymbolResponse, FullDocumentDiagnosticReport,
-    GotoDefinitionResponse, Position, Range, RelatedFullDocumentDiagnosticReport, Uri,
-    WorkspaceSymbolResponse,
+    CallHierarchyItem, CodeActionOrCommand, CompletionItem, CompletionResponse,
+    DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse,
+    FullDocumentDiagnosticReport, GotoDefinitionResponse, Position, Range,
+    RelatedFullDocumentDiagnosticReport, Uri, WorkspaceSymbolResponse,
 };
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
+use super::call_hierarchy::{
+    incoming_calls_via_db, outgoing_calls_via_db, prepare_call_hierarchy_via_db,
+};
 use super::code_action::code_actions_via_db;
 use super::completion::{completion_via_db, resolve_completion};
 use super::definition::definition_via_db;
@@ -161,6 +164,26 @@ pub(crate) enum ReadJob {
         new_name: String,
         sender: Sender<Message>,
     },
+    PrepareCallHierarchy {
+        id: RequestId,
+        uri: Uri,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
+    /// Document-less (like `CompletionResolve`): the item's file may be a
+    /// closed member, so the worker resolves its text off the snapshot.
+    CallHierarchyIncoming {
+        id: RequestId,
+        item: Box<CallHierarchyItem>,
+        sender: Sender<Message>,
+    },
+    CallHierarchyOutgoing {
+        id: RequestId,
+        item: Box<CallHierarchyItem>,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -186,6 +209,9 @@ impl ReadJob {
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
             ReadJob::PrepareRename { id, sender, .. } => (id, sender),
             ReadJob::Rename { id, sender, .. } => (id, sender),
+            ReadJob::PrepareCallHierarchy { id, sender, .. } => (id, sender),
+            ReadJob::CallHierarchyIncoming { id, sender, .. } => (id, sender),
+            ReadJob::CallHierarchyOutgoing { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -400,6 +426,26 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
                     Err(message) => Response::new_err(id, ErrorCode::InvalidParams as i32, message),
                 };
             let _ = sender.send(Message::Response(response));
+        }
+        ReadJob::PrepareCallHierarchy {
+            id,
+            uri,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let items =
+                prepare_call_hierarchy_via_db(&snapshot, &uri, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, items)));
+        }
+        ReadJob::CallHierarchyIncoming { id, item, sender } => {
+            let calls = incoming_calls_via_db(&snapshot, &item, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, calls)));
+        }
+        ReadJob::CallHierarchyOutgoing { id, item, sender } => {
+            let calls = outgoing_calls_via_db(&snapshot, &item, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, calls)));
         }
     }
 }

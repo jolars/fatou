@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
-    ClientCapabilities, CodeActionKind, CodeActionOptions, CodeActionProviderCapability,
-    CompletionOptions, DiagnosticOptions, DiagnosticServerCapabilities,
-    FoldingRangeProviderCapability, HoverProviderCapability, InitializeParams, OneOf,
-    PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
+    CallHierarchyServerCapability, ClientCapabilities, CodeActionKind, CodeActionOptions,
+    CodeActionProviderCapability, CompletionOptions, DiagnosticOptions,
+    DiagnosticServerCapabilities, FoldingRangeProviderCapability, HoverProviderCapability,
+    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
     SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
@@ -197,6 +197,7 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
             prepare_provider: Some(true),
             work_done_progress_options: Default::default(),
         })),
+        call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
         signature_help_provider: Some(SignatureHelpOptions {
             // `(` opens signature help, `,` (also a retrigger) advances the
             // active parameter.

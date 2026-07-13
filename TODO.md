@@ -652,7 +652,35 @@ The payoff phase, in roughly arity's shipping order.
   before (`walk_macro_name`, `src/semantic/builder.rs`). Locked by units
   (`src/lsp/semantic_tokens.rs`, `src/semantic.rs`) plus
   `serves_semantic_tokens` (`tests/lsp.rs`).
-- [ ] Call hierarchy (incoming/outgoing calls).
+- [x] Call hierarchy (incoming/outgoing calls): prepare
+  (`textDocument/prepareCallHierarchy`) classifies the cursor exactly as
+  references does — a workspace top-level function through the reverse-
+  occurrence index (resolved to its defining file's first definition site), or
+  an intra-file `BindingKind::Function` binding — returning one item per
+  function *name* (methods share a binding). Incoming calls ride the reverse
+  index: each non-definition site is kept iff it is syntactically a call
+  (`is_call_site`, re-derived per request from the cached CST — occurrences do
+  not record call-ness) and attributed to its nearest *named* enclosing
+  callable via a CST ancestor walk (anonymous fns and `do` blocks walk past;
+  a top-level call synthesizes a module or file caller item so nothing drops).
+  Outgoing calls walk the definition's subtree (nested named callables and
+  modules own their own calls), resolving each plain-name callee through the
+  shared masking order: intra-file bindings and workspace siblings off tracked
+  text, Base/depot targets materialized from disk via the harvested
+  `DefLocation` (def-site helpers factored out of go-to-definition; one
+  read+parse per target file per request). Incoming/outgoing re-derive their
+  item from `uri` + `selection_range` against *tracked* text (closed members
+  are disk-seeded; the state handlers dispatch document-lessly like workspace
+  symbols), answering `None` on skew or a racing write rather than wrong data.
+  Broadcast `f.(x)` and `do`-block calls count; `enclosing`/`callable`
+  extraction reuses the promoted document-symbols helpers
+  (`callee_name`/`head_name`/`unwrap_head`, `src/lsp/symbols.rs`). All in
+  `src/lsp/call_hierarchy.rs`; locked by inline units (intra-file, library,
+  and workspace-db cross-file) plus `serves_call_hierarchy` in `tests/lsp.rs`.
+  *Deferred:* macro calls (`@foo`), qualified-call sites (`Pkg.foo(x)`,
+  matching `workspace_occurrences`), per-method items under multiple dispatch,
+  incoming calls for library symbols, and a persisted call-site index (the
+  per-request CST walk protects keystroke latency instead).
 - [ ] Type hierarchy from the declared type tree (supertypes/subtypes of
   structs and abstract types)—a Julia-specific win that needs no inference.
 - [ ] Multiple-dispatch-aware navigation: go-to-definition returning all

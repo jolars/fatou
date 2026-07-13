@@ -10,6 +10,8 @@ use fatou::lsp::{
 use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
+    CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
+    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
     ClientCapabilities, CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Diagnostic,
     DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities,
@@ -3256,6 +3258,185 @@ fn serves_cross_file_references_and_rename() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(202));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Call hierarchy end-to-end over a harvested workspace package (the
+/// `serves_cross_file_references_and_rename` scaffolding): prepare on a
+/// cross-file call resolves the item into the defining file, incoming calls
+/// reach both a closed sibling member and a synthesized top-level caller, and
+/// outgoing calls on a caller jump back — exercising the document-less
+/// incoming/outgoing path against a file with no open buffer.
+#[test]
+fn serves_call_hierarchy() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    // The same hermetic package + env isolation as
+    // `serves_cross_file_references_and_rename`.
+    let pkg = TempDir::new("fatou-lsp-callhier");
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "greet(a) = a\ngreet(1)\n");
+    write_file(&pkg.path.join("src/b.jl"), "callit() = greet(2)\n");
+
+    let depot = TempDir::new("fatou-lsp-callhier-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    let init = initialize_with_folders(&client, &[&root_uri]);
+    assert_eq!(
+        init["capabilities"]["callHierarchyProvider"],
+        serde_json::json!(true),
+        "the capability must be advertised"
+    );
+
+    // Open `b.jl` only: `a.jl` stays a closed, disk-seeded member.
+    let b_uri = file_uri(&pkg.path.join("src/b.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: b_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "callit() = greet(2)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Notification(n) => assert_eq!(n.method, "textDocument/publishDiagnostics"),
+        other => panic!("expected publishDiagnostics, got {other:?}"),
+    }
+
+    // Poll prepare at the `greet` call in b.jl until the harvest lands: before
+    // it, `greet` is an unresolvable free read and prepare returns null; after,
+    // the item points into the defining file a.jl.
+    static POLL_ID: AtomicU64 = AtomicU64::new(300);
+    let deadline = Duration::from_secs(10);
+    let start = Instant::now();
+    let item: CallHierarchyItem = loop {
+        let id = i32::try_from(POLL_ID.fetch_add(1, Ordering::Relaxed)).unwrap();
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/prepareCallHierarchy".to_string(),
+                params: serde_json::to_value(CallHierarchyPrepareParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: b_uri.clone() },
+                        position: Position::new(0, 11),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        let resp = recv_response(&client, RequestId::from(id));
+        let items: Option<Vec<CallHierarchyItem>> =
+            serde_json::from_value(resp.result().unwrap()).unwrap();
+        if let Some(items) = items
+            && let Some(item) = items.into_iter().next()
+            && item.uri.as_str().ends_with("a.jl")
+        {
+            break item;
+        }
+        if start.elapsed() >= deadline {
+            panic!("prepare never resolved `greet` into a.jl within {deadline:?}");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    assert_eq!(item.name, "greet");
+    assert_eq!(item.kind, SymbolKind::FUNCTION);
+    assert_eq!(item.selection_range.start, Position::new(0, 0));
+
+    // Incoming calls to `greet`: the top-level `greet(1)` in the *closed* a.jl
+    // (synthesized file caller) and `callit` in b.jl, in file order.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(400),
+            method: "callHierarchy/incomingCalls".to_string(),
+            params: serde_json::to_value(CallHierarchyIncomingCallsParams {
+                item: item.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(400));
+    let incoming: Vec<CallHierarchyIncomingCall> =
+        serde_json::from_value(resp.result().unwrap()).unwrap();
+    assert_eq!(incoming.len(), 2, "{incoming:#?}");
+    assert_eq!(incoming[0].from.kind, SymbolKind::FILE);
+    assert_eq!(incoming[0].from.name, "a.jl");
+    assert_eq!(
+        incoming[0].from_ranges,
+        vec![Range::new(Position::new(1, 0), Position::new(1, 5))]
+    );
+    assert_eq!(incoming[1].from.name, "callit");
+    assert!(incoming[1].from.uri.as_str().ends_with("b.jl"));
+    assert_eq!(incoming[1].from_ranges[0].start, Position::new(0, 11));
+
+    // Outgoing calls from the `callit` caller: back to `greet` in a.jl, the
+    // call site reported in callit's own document.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(401),
+            method: "callHierarchy/outgoingCalls".to_string(),
+            params: serde_json::to_value(CallHierarchyOutgoingCallsParams {
+                item: incoming[1].from.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(401));
+    let outgoing: Vec<CallHierarchyOutgoingCall> =
+        serde_json::from_value(resp.result().unwrap()).unwrap();
+    assert_eq!(outgoing.len(), 1, "{outgoing:#?}");
+    assert_eq!(outgoing[0].to.name, "greet");
+    assert!(outgoing[0].to.uri.as_str().ends_with("a.jl"));
+    assert_eq!(outgoing[0].from_ranges[0].start, Position::new(0, 11));
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(402),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(402));
     client
         .sender
         .send(Message::Notification(Notification {
