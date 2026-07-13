@@ -87,12 +87,11 @@ Ready now (no new infrastructure):
   `x != nothing` (either side) with a safe fix `==` -> `===` and `!=` ->
   `!==`. Warning; name-based `nothing` match on `BINARY_EXPR` only (chains fold
   into `COMPARISON_EXPR`).
-- [ ] `unused-argument` (correctness, sem): function argument never read in
-  the body. Copy StaticLint's mitigations: skip all-underscore names (the
-  documented escape hatch) and functions whose body is a lone literal (stub
-  methods). Interface methods that must accept an argument are the real-world
-  FP source; consider `Hint` severity or `default_enabled() == false`.
-  (UnusedFunctionArgument)
+- [x] `unused-argument` (correctness, sem): function parameter never read in
+  its body, across every signature form (long, short, anonymous, `do`).
+  Warning severity but `default_enabled() == false` (dispatch-only params make
+  it too noisy on by default). Skips all-underscore names and lone-literal stub
+  bodies (`f(x) = 0`). No fix. (UnusedFunctionArgument)
 - [ ] `break-outside-loop` (correctness, syn, error severity): `break` or
   `continue` with no enclosing `for`/`while`. Parses clean but errors at
   lowering, so the lint has real value. Ancestor walk. (ShouldBeInALoop)

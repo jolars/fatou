@@ -15,5 +15,6 @@
   - [`unused-binding`](reference/rules/unused-binding.md)
   - [`unused-import`](reference/rules/unused-import.md)
   - [`duplicate-argument`](reference/rules/duplicate-argument.md)
+  - [`unused-argument`](reference/rules/unused-argument.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)

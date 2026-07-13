@@ -137,6 +137,100 @@ fn duplicate_argument_does_not_confuse_separate_signatures() {
     assert_eq!(count("duplicate-argument", "f(x) = x\ng(x) = x\n"), 0);
 }
 
+// --- unused-argument -------------------------------------------------------
+
+#[test]
+fn unused_argument_flags_unread_positional() {
+    // `factor` is never read; the body is not a lone literal.
+    assert_eq!(
+        count(
+            "unused-argument",
+            "function scale(x, factor)\n    2 * x\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unused_argument_flags_short_form_and_keyword() {
+    assert_eq!(count("unused-argument", "f(x) = rand()\n"), 1);
+    assert_eq!(count("unused-argument", "f(; k = 1) = rand()\n"), 1);
+}
+
+#[test]
+fn unused_argument_flags_anonymous_and_do_forms() {
+    assert_eq!(count("unused-argument", "map(x -> rand(), xs)\n"), 1);
+    assert_eq!(
+        count("unused-argument", "map(xs) do x\n    rand()\nend\n"),
+        1
+    );
+}
+
+#[test]
+fn unused_argument_ignores_read_parameter() {
+    assert_eq!(count("unused-argument", "f(x) = x + 1\n"), 0);
+    // Captured by a closure counts as read.
+    assert_eq!(
+        count("unused-argument", "function f(x)\n    () -> x\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn unused_argument_ignores_underscore_names() {
+    assert_eq!(count("unused-argument", "f(_) = rand()\n"), 0);
+    assert_eq!(count("unused-argument", "f(__) = rand()\n"), 0);
+}
+
+#[test]
+fn unused_argument_ignores_stub_bodies() {
+    // Placeholder bodies that intentionally ignore their arguments: a lone
+    // literal, `nothing`, or an `error(...)`/`throw(...)` call.
+    assert_eq!(count("unused-argument", "f(x) = 0\n"), 0);
+    assert_eq!(count("unused-argument", "f(x) = \"todo\"\n"), 0);
+    assert_eq!(
+        count("unused-argument", "function stub(x)\n    0\nend\n"),
+        0
+    );
+    assert_eq!(count("unused-argument", "f(x) = nothing\n"), 0);
+    assert_eq!(
+        count("unused-argument", "f(x) = error(\"not implemented\")\n"),
+        0
+    );
+    assert_eq!(
+        count("unused-argument", "f(x) = throw(ArgumentError(\"nope\"))\n"),
+        0
+    );
+}
+
+#[test]
+fn unused_argument_flags_nonstub_single_expression_bodies() {
+    // A bare identifier that is not `nothing`, and an ordinary call, are real
+    // bodies, not stubs -> the unused parameter is still flagged.
+    assert_eq!(count("unused-argument", "f(x) = y\n"), 1);
+    assert_eq!(count("unused-argument", "f(x) = g()\n"), 1);
+    // An assignment body is not a stub either.
+    assert_eq!(
+        count(
+            "unused-argument",
+            "function required(x)\n    tmp = true\n    tmp\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unused_argument_is_disabled_by_default() {
+    // Noisy opt-in rule: absent an explicit `--select`, it stays silent.
+    let report = check_source(None, "f(x) = rand()\n", &LintConfig::default());
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|d| d.rule != "unused-argument")
+    );
+}
+
 // --- assignment-in-condition -----------------------------------------------
 
 #[test]
