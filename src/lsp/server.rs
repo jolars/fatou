@@ -8,8 +8,9 @@ use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
     ClientCapabilities, CodeActionKind, CodeActionOptions, CodeActionProviderCapability,
-    CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability, InitializeParams,
-    OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
+    CompletionOptions, DiagnosticOptions, DiagnosticServerCapabilities,
+    FoldingRangeProviderCapability, HoverProviderCapability, InitializeParams, OneOf,
+    PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
     SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
@@ -55,9 +56,42 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
     // harvester never runs and every watched event would be dropped anyway.
     let register_watchers =
         supports_watched_files_registration(&params.capabilities) && !workspace_roots.is_empty();
-    let result = serde_json::json!({ "capabilities": server_capabilities(encoding) });
+    let pull_diagnostics = supports_pull_diagnostics(&params.capabilities);
+    let diagnostic_refresh = supports_diagnostic_refresh(&params.capabilities);
+    let result =
+        serde_json::json!({ "capabilities": server_capabilities(encoding, pull_diagnostics) });
     connection.initialize_finish(id, result)?;
-    main_loop(connection, encoding, workspace_roots, register_watchers)
+    main_loop(
+        connection,
+        encoding,
+        workspace_roots,
+        register_watchers,
+        pull_diagnostics,
+        diagnostic_refresh,
+    )
+}
+
+/// Whether the client pulls diagnostics (`textDocument/diagnostic`). With
+/// pull support the server advertises a diagnostic provider and keeps the
+/// push path only for files with no open buffer; without it, push stays the
+/// sole channel (the fallback).
+fn supports_pull_diagnostics(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .text_document
+        .as_ref()
+        .is_some_and(|text_document| text_document.diagnostic.is_some())
+}
+
+/// Whether the client accepts `workspace/diagnostic/refresh`, the server's
+/// nudge to re-pull open documents after a re-harvest changes the include
+/// graph.
+fn supports_diagnostic_refresh(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.diagnostic.as_ref())
+        .and_then(|diagnostic| diagnostic.refresh_support)
+        .unwrap_or(false)
 }
 
 /// Whether the client accepts a dynamic `workspace/didChangeWatchedFiles`
@@ -108,8 +142,21 @@ fn negotiate_position_encoding(capabilities: &ClientCapabilities) -> PositionEnc
     }
 }
 
-fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
+fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> ServerCapabilities {
     ServerCapabilities {
+        // Advertised only to a client that pulls: pushing and pulling the
+        // same document's diagnostics would double them up, so per-document
+        // publishes are gated off in the same breath (see `GlobalState`).
+        diagnostic_provider: pull_diagnostics.then(|| {
+            DiagnosticServerCapabilities::Options(DiagnosticOptions {
+                identifier: Some("fatou".to_string()),
+                // Include-graph diagnostics cross files: an include edit in
+                // one member can change another member's report.
+                inter_file_dependencies: true,
+                workspace_diagnostics: false,
+                work_done_progress_options: Default::default(),
+            })
+        }),
         position_encoding: Some(match encoding {
             PositionEncoding::Utf8 => PositionEncodingKind::UTF8,
             PositionEncoding::Utf16 => PositionEncodingKind::UTF16,
@@ -190,6 +237,8 @@ fn main_loop(
     encoding: PositionEncoding,
     workspace_roots: Vec<PathBuf>,
     register_watchers: bool,
+    pull_diagnostics: bool,
+    diagnostic_refresh: bool,
 ) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
@@ -225,6 +274,8 @@ fn main_loop(
         out_tx,
         read_pool.spawner(),
         encoding,
+        // The per-edit push is the fallback for a client that cannot pull.
+        !pull_diagnostics,
     );
 
     let mut state = GlobalState::new(
@@ -234,6 +285,8 @@ fn main_loop(
         harvest_tx,
         sync_tx,
         encoding,
+        pull_diagnostics,
+        diagnostic_refresh,
     );
 
     // `initialize_finish` has already consumed the client's `initialized`
@@ -517,6 +570,46 @@ mod tests {
     #[test]
     fn no_folders_yields_no_roots() {
         assert!(workspace_roots(&InitializeParams::default()).is_empty());
+    }
+
+    #[test]
+    fn pull_diagnostics_require_the_client_capability() {
+        assert!(!supports_pull_diagnostics(&ClientCapabilities::default()));
+        let caps = ClientCapabilities {
+            text_document: Some(lsp_types::TextDocumentClientCapabilities {
+                diagnostic: Some(lsp_types::DiagnosticClientCapabilities::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(supports_pull_diagnostics(&caps));
+
+        // The provider is advertised exactly when the client pulls.
+        assert!(
+            server_capabilities(PositionEncoding::Utf16, true)
+                .diagnostic_provider
+                .is_some()
+        );
+        assert!(
+            server_capabilities(PositionEncoding::Utf16, false)
+                .diagnostic_provider
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn diagnostic_refresh_requires_the_client_capability() {
+        assert!(!supports_diagnostic_refresh(&ClientCapabilities::default()));
+        let caps = ClientCapabilities {
+            workspace: Some(lsp_types::WorkspaceClientCapabilities {
+                diagnostic: Some(lsp_types::DiagnosticWorkspaceClientCapabilities {
+                    refresh_support: Some(true),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(supports_diagnostic_refresh(&caps));
     }
 
     #[test]

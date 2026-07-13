@@ -4148,3 +4148,197 @@ fn serves_quick_fix_code_actions() {
 
     server_thread.join().unwrap();
 }
+
+/// A client advertising `textDocument.diagnostic` gets the pull model: the
+/// server advertises a diagnostic provider, answers `textDocument/diagnostic`
+/// with a full report (parse errors, or lint findings on a clean tree), and
+/// publishes nothing for open documents — while a client without the
+/// capability (every other test here) keeps the push fallback.
+#[test]
+fn serves_pull_diagnostics() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let params = InitializeParams {
+        capabilities: ClientCapabilities {
+            text_document: Some(lsp_types::TextDocumentClientCapabilities {
+                diagnostic: Some(lsp_types::DiagnosticClientCapabilities::default()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    let init = recv_response(&client, RequestId::from(1));
+    let capabilities = init.result().unwrap()["capabilities"].clone();
+    assert_eq!(
+        capabilities["diagnosticProvider"]["identifier"],
+        serde_json::json!("fatou"),
+        "a pulling client must be offered the diagnostic provider"
+    );
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document with an unused local; no publish must arrive ---
+    let uri = Uri::from_str("file:///work/pull.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(x)\n    tmp = x + 1\n    return x\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // --- pull; the report carries the lint finding ---
+    let pull = |id: i32| {
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/diagnostic".to_string(),
+                params: serde_json::to_value(lsp_types::DocumentDiagnosticParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    identifier: Some("fatou".to_string()),
+                    previous_result_id: None,
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+    };
+    // Any push for the opened document would arrive before the pull response;
+    // fail on it instead of skipping past.
+    let recv_report = |id: i32| -> Vec<Diagnostic> {
+        loop {
+            match client.receiver.recv().unwrap() {
+                Message::Response(resp) if resp.id == RequestId::from(id) => {
+                    let report: lsp_types::DocumentDiagnosticReportResult =
+                        serde_json::from_value(resp.result().unwrap()).unwrap();
+                    let lsp_types::DocumentDiagnosticReportResult::Report(
+                        lsp_types::DocumentDiagnosticReport::Full(full),
+                    ) = report
+                    else {
+                        panic!("expected a full document diagnostic report");
+                    };
+                    return full.full_document_diagnostic_report.items;
+                }
+                Message::Notification(note) if note.method == "textDocument/publishDiagnostics" => {
+                    panic!("a pull client must not receive pushes for open documents: {note:?}");
+                }
+                _ => {}
+            }
+        }
+    };
+
+    pull(2);
+    let items = recv_report(2);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].code,
+        Some(lsp_types::NumberOrString::String(
+            "unused-binding".to_string()
+        ))
+    );
+
+    // --- break the parse; the next pull reports the parse error only ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "function f(x)\n    tmp = x + 1\n    return x\n".to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    pull(3);
+    let items = recv_report(3);
+    assert!(!items.is_empty(), "expected the parse error in the report");
+    assert!(
+        items
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR) && d.code.is_none()),
+        "a parse-broken buffer must report parse errors only, got {items:?}"
+    );
+
+    // --- a pull for a never-opened document answers an empty report ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "textDocument/diagnostic".to_string(),
+            params: serde_json::to_value(lsp_types::DocumentDiagnosticParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Uri::from_str("file:///work/never-opened.jl").unwrap(),
+                },
+                identifier: Some("fatou".to_string()),
+                previous_result_id: None,
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(4));
+    let report: lsp_types::DocumentDiagnosticReportResult =
+        serde_json::from_value(resp.result().unwrap()).unwrap();
+    let lsp_types::DocumentDiagnosticReportResult::Report(
+        lsp_types::DocumentDiagnosticReport::Full(full),
+    ) = report
+    else {
+        panic!("expected a full document diagnostic report");
+    };
+    assert_eq!(full.full_document_diagnostic_report.items, Vec::new());
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(5),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(5));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}

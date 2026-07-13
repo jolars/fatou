@@ -58,6 +58,7 @@ pub(crate) enum LibraryMessage {
 /// `library_rx` delivers the harvested package index once the background loader
 /// has resolved the environment (and later single-package re-harvests); the
 /// thread swaps it into the db as a write.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_analysis_thread(
     analysis_rx: Receiver<AnalysisRequest>,
     read_rx: Receiver<ReadJob>,
@@ -66,6 +67,7 @@ pub(crate) fn spawn_analysis_thread(
     out_tx: Sender<Outbound>,
     read_spawner: Spawner,
     encoding: PositionEncoding,
+    push_diagnostics: bool,
 ) -> JoinHandle<()> {
     let (done_tx, done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
     std::thread::Builder::new()
@@ -79,6 +81,7 @@ pub(crate) fn spawn_analysis_thread(
                 pending: HashMap::new(),
                 read_spawner,
                 encoding,
+                push_diagnostics,
                 published_graph_files: HashSet::new(),
             };
             worker.run(&analysis_rx, &read_rx, &library_rx, &sync_rx, &done_rx);
@@ -154,6 +157,11 @@ struct AnalysisWorker {
     read_spawner: Spawner,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
+    /// Whether the per-edit read-phase publishes diagnostics. Off for a
+    /// pull-model client: the write-phase still keeps the db current (and the
+    /// parse it warms serves the next pull), but computing and publishing the
+    /// diagnostics here would double the client's own pulls.
+    push_diagnostics: bool,
     /// The URIs that carried include-graph diagnostics at the last re-harvest, so
     /// a file whose problems are fixed gets an explicit empty publish to clear it.
     published_graph_files: HashSet<Uri>,
@@ -302,24 +310,27 @@ impl AnalysisWorker {
             uri: uri.clone(),
             version,
         });
+        let push = self.push_diagnostics;
         self.read_spawner.spawn(move || {
-            let result = salsa::Cancelled::catch(AssertUnwindSafe(|| {
-                let mut diags =
-                    parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding);
-                // Lint findings join the same publish, but only on a clean
-                // tree: rules would misfire on error-recovered shapes, and a
-                // broken buffer's parse errors are the actionable signal.
-                if diags.is_empty() {
-                    diags.extend(lint_diagnostics_via_db(&snapshot, &path, &text, encoding));
+            if push {
+                let result = salsa::Cancelled::catch(AssertUnwindSafe(|| {
+                    let mut diags =
+                        parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding);
+                    // Lint findings join the same publish, but only on a clean
+                    // tree: rules would misfire on error-recovered shapes, and a
+                    // broken buffer's parse errors are the actionable signal.
+                    if diags.is_empty() {
+                        diags.extend(lint_diagnostics_via_db(&snapshot, &path, &text, encoding));
+                    }
+                    diags
+                }));
+                if let Ok(diags) = result {
+                    let _ = out_tx.send(Outbound::Diagnostics {
+                        uri: uri.clone(),
+                        version,
+                        diags,
+                    });
                 }
-                diags
-            }));
-            if let Ok(diags) = result {
-                let _ = out_tx.send(Outbound::Diagnostics {
-                    uri: uri.clone(),
-                    version,
-                    diags,
-                });
             }
             // The clone MUST drop before we signal `done`: `trigger_cancellation`
             // / the next write-phase blocks until it's gone, so a premature
@@ -366,6 +377,10 @@ impl AnalysisWorker {
             });
         }
         self.published_graph_files = now;
+        // A pull client's open documents don't get the pushes above; nudge it
+        // to re-pull them. The main loop forwards this only when the client
+        // supports pull plus the refresh request.
+        let _ = self.out_tx.send(Outbound::DiagnosticsRefresh);
     }
 }
 

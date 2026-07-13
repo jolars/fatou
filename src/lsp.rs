@@ -54,6 +54,7 @@ mod format;
 mod graph_diagnostics;
 mod hover;
 mod lint;
+mod pull_diagnostics;
 mod read_jobs;
 mod references;
 mod rename;

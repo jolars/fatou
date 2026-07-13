@@ -6,8 +6,10 @@ use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
-    CodeActionOrCommand, CompletionItem, CompletionResponse, DocumentSymbolResponse,
-    GotoDefinitionResponse, Position, Range, Uri, WorkspaceSymbolResponse,
+    CodeActionOrCommand, CompletionItem, CompletionResponse, DocumentDiagnosticReport,
+    DocumentDiagnosticReportResult, DocumentSymbolResponse, FullDocumentDiagnosticReport,
+    GotoDefinitionResponse, Position, Range, RelatedFullDocumentDiagnosticReport, Uri,
+    WorkspaceSymbolResponse,
 };
 
 use crate::formatter::FormatStyle;
@@ -20,6 +22,7 @@ use super::definition::definition_via_db;
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
+use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
 use super::selection::selection_ranges_via_db;
@@ -39,6 +42,12 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: String,
         range: Range,
+        sender: Sender<Message>,
+    },
+    DocumentDiagnostic {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
         sender: Sender<Message>,
     },
     Format {
@@ -160,6 +169,7 @@ impl ReadJob {
     pub(crate) fn into_reply_parts(self) -> (RequestId, Sender<Message>) {
         match self {
             ReadJob::CodeAction { id, sender, .. } => (id, sender),
+            ReadJob::DocumentDiagnostic { id, sender, .. } => (id, sender),
             ReadJob::Format { id, sender, .. } => (id, sender),
             ReadJob::FormatRange { id, sender, .. } => (id, sender),
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
@@ -180,6 +190,21 @@ impl ReadJob {
     }
 }
 
+/// The `DocumentDiagnosticReportResult` shape for a full (non-cached) report.
+/// `result_id`-based `unchanged` responses are deferred; every pull is
+/// answered in full.
+pub(crate) fn full_report(items: Vec<lsp_types::Diagnostic>) -> DocumentDiagnosticReportResult {
+    DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+        RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                result_id: None,
+                items,
+            },
+        },
+    ))
+}
+
 /// Service a read-only job against a db `snapshot`, replying to the client.
 /// Runs on a read-pool worker; the `snapshot` is dropped on return so it never
 /// blocks the analysis thread's next write longer than the job itself.
@@ -196,6 +221,16 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             let actions: Vec<CodeActionOrCommand> =
                 code_actions_via_db(&snapshot, &uri, &path, &text, range, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, actions)));
+        }
+        ReadJob::DocumentDiagnostic {
+            id,
+            path,
+            text,
+            sender,
+        } => {
+            let items = document_diagnostics_via_db(&snapshot, &path, &text, encoding);
+            let result = full_report(items);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
         ReadJob::Format {
             id,

@@ -596,7 +596,22 @@ The payoff phase, in roughly arity's shipping order.
   (`src/lsp/code_action.rs`) with a single-document `WorkspaceEdit` and the
   finding's diagnostic attached; safe fixes are `isPreferred`, unsafe ones say
   so in the title (the LSP has no `--unsafe-fixes` gate). Locked by units plus
-  `serves_quick_fix_code_actions` (`tests/lsp.rs`).
+  `serves_quick_fix_code_actions` (`tests/lsp.rs`). *Pull diagnostics with
+  push fallback has landed:* a client advertising `textDocument.diagnostic`
+  gets a diagnostic provider (`identifier: "fatou"`, inter-file dependencies
+  on for the include graph) and `textDocument/diagnostic` answered as a
+  `ReadJob` with a full report — parse diagnostics, lint findings on a clean
+  tree, and the file's include-graph problems re-derived from the cached
+  `project_graph` (`src/lsp/pull_diagnostics.rs`); `resultId`/`unchanged`
+  responses are deferred. With pull on, the per-edit push is off end to end
+  (the analysis read-phase skips computing it; the write-phase still keeps
+  the db warm), an opened document's previously pushed graph diagnostics are
+  cleared as pull takes over, files with *no* open buffer keep the graph-diag
+  push (the client never pulls them), and each re-harvest nudges
+  `workspace/diagnostic/refresh` when the client supports it. A client
+  without the capability keeps the push pipeline unchanged. Locked by units
+  (`src/lsp/pull_diagnostics.rs`, `src/lsp/server.rs`) plus
+  `serves_pull_diagnostics` (`tests/lsp.rs`).
 
 ### Phase 6: later polish and Julia-specific ambitions
 

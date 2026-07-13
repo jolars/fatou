@@ -11,21 +11,22 @@ use lsp_types::notification::{
     DidSaveTextDocument, Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
-    CodeActionRequest, Completion, DocumentHighlightRequest, DocumentSymbolRequest,
-    FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest, PrepareRenameRequest,
-    RangeFormatting, References, RegisterCapability, Rename, Request as RequestTrait,
-    ResolveCompletionItem, SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
+    CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentHighlightRequest,
+    DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest,
+    PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
+    Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
+    SemanticTokensFullRequest, SignatureHelpRequest, WorkspaceDiagnosticRefresh,
     WorkspaceSymbolRequest,
 };
 use lsp_types::{
     CodeActionParams, CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentFormattingParams, DocumentHighlightParams, DocumentRangeFormattingParams,
-    DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams, GlobPattern, GotoDefinitionParams,
-    HoverParams, PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams,
-    RenameParams, SelectionRangeParams, SemanticTokensParams, SignatureHelpParams,
-    TextDocumentPositionParams, Uri, WorkspaceSymbolParams,
+    DocumentDiagnosticParams, DocumentFormattingParams, DocumentHighlightParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
+    GlobPattern, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams, ReferenceParams,
+    Registration, RegistrationParams, RenameParams, SelectionRangeParams, SemanticTokensParams,
+    SignatureHelpParams, TextDocumentPositionParams, Uri, WorkspaceSymbolParams,
 };
 
 use crate::environment::is_environment_file;
@@ -59,6 +60,11 @@ pub(crate) enum Outbound {
     /// file's parse diagnostics before publishing (a single `publishDiagnostics`
     /// replaces *all* diagnostics for a URI).
     ProjectDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
+    /// A re-harvest changed the include graph: a pull-model client should
+    /// re-pull its open documents (`workspace/diagnostic/refresh`). Sent once
+    /// per harvest; the main loop forwards it only when the client supports
+    /// both pull diagnostics and the refresh request.
+    DiagnosticsRefresh,
 }
 
 pub(crate) struct GlobalState {
@@ -82,6 +88,18 @@ pub(crate) struct GlobalState {
     sync_tx: Sender<PathBuf>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
+    /// Whether the client pulls diagnostics (`textDocument/diagnostic`). When
+    /// set, the per-edit push path is off for open documents (the pull report
+    /// carries parse + lint + graph diagnostics); pushes remain only for files
+    /// with no open buffer, which carry include-graph problems the client
+    /// never pulls.
+    pull_diagnostics: bool,
+    /// Whether the client accepts `workspace/diagnostic/refresh`, the nudge to
+    /// re-pull after a re-harvest changes the include graph.
+    diagnostic_refresh: bool,
+    /// Sequence number for server-to-client refresh requests, so each carries
+    /// a fresh JSON-RPC id.
+    refresh_seq: u64,
     /// The latest per-file parse diagnostics, kept so a project-diagnostic update
     /// can republish the union (a `publishDiagnostics` replaces *all* diagnostics
     /// for a URI). Cleared when a document closes.
@@ -93,6 +111,7 @@ pub(crate) struct GlobalState {
 }
 
 impl GlobalState {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sender: Sender<Message>,
         analysis_tx: Sender<AnalysisRequest>,
@@ -100,6 +119,8 @@ impl GlobalState {
         harvest_tx: Sender<HarvestSignal>,
         sync_tx: Sender<PathBuf>,
         encoding: PositionEncoding,
+        pull_diagnostics: bool,
+        diagnostic_refresh: bool,
     ) -> Self {
         Self {
             documents: HashMap::new(),
@@ -111,12 +132,16 @@ impl GlobalState {
             harvest_tx,
             sync_tx,
             encoding,
+            pull_diagnostics,
+            diagnostic_refresh,
+            refresh_seq: 0,
         }
     }
 
     pub(crate) fn on_request(&mut self, req: Request) {
         match req.method.as_str() {
             CodeActionRequest::METHOD => self.on_code_action(req),
+            DocumentDiagnosticRequest::METHOD => self.on_document_diagnostic(req),
             Formatting::METHOD => self.on_formatting(req),
             RangeFormatting::METHOD => self.on_range_formatting(req),
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
@@ -142,6 +167,30 @@ impl GlobalState {
                 let _ = self.sender.send(Message::Response(resp));
             }
         }
+    }
+
+    fn on_document_diagnostic(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<DocumentDiagnosticParams>(DocumentDiagnosticRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid documentDiagnostic params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            // The spec wants a report, not null; an unknown document has none.
+            let empty = serde_json::to_value(super::read_jobs::full_report(Vec::new()))
+                .expect("empty diagnostic report serializes");
+            self.respond_ok(id, empty);
+            return;
+        };
+        self.dispatch_read(ReadJob::DocumentDiagnostic {
+            id,
+            path: path_for(&uri),
+            text,
+            sender: self.sender.clone(),
+        });
     }
 
     fn on_code_action(&mut self, req: Request) {
@@ -517,6 +566,13 @@ impl GlobalState {
                             version: params.text_document.version,
                         },
                     );
+                    // A pull client takes over an opened document's
+                    // diagnostics: clear any include-graph problems pushed
+                    // while it had no buffer, or they would double up with the
+                    // pull report's.
+                    if self.pull_diagnostics && self.graph_diags.contains_key(&uri) {
+                        self.publish(uri.clone(), Vec::new(), None);
+                    }
                     self.send_analysis(uri);
                 }
             }
@@ -661,6 +717,12 @@ impl GlobalState {
                 version,
                 diags,
             } => {
+                // A pull client fetches these itself; the push path is off for
+                // open documents (defense in depth — the analysis thread does
+                // not produce this outbound then).
+                if self.pull_diagnostics {
+                    return;
+                }
                 // Stale results (a newer edit superseded this analysis, or the
                 // document closed) are dropped: the newer version's analysis
                 // will produce its own `Outbound`.
@@ -676,8 +738,27 @@ impl GlobalState {
                 } else {
                     self.graph_diags.insert(uri.clone(), diags);
                 }
+                // With a pull client, an *open* document's graph diagnostics
+                // travel in its pull report (the refresh nudge below triggers
+                // the re-pull); pushing them too would double them up. Files
+                // with no open buffer keep the push — the client never pulls
+                // them.
+                if self.pull_diagnostics && self.documents.contains_key(&uri) {
+                    return;
+                }
                 let version = self.documents.get(&uri).map(|d| d.version);
                 self.publish_merged(uri, version);
+            }
+            Outbound::DiagnosticsRefresh => {
+                if !(self.pull_diagnostics && self.diagnostic_refresh) {
+                    return;
+                }
+                self.refresh_seq += 1;
+                let _ = self.sender.send(Message::Request(Request {
+                    id: RequestId::from(format!("fatou-diagnostic-refresh-{}", self.refresh_seq)),
+                    method: WorkspaceDiagnosticRefresh::METHOD.to_string(),
+                    params: serde_json::Value::Null,
+                }));
             }
         }
     }
