@@ -264,7 +264,7 @@ semantic model grows.
   and multi-line spans split per line (most clients reject multiline
   tokens); the delta encoding counts code units of the negotiated encoding
   via `LineIndex`. Plus a `semantic_tokens_via_db` warm path off the cached
-  parse. Refined with resolved names in Phase 6.
+  parse. Refined with resolved names in Phase 6 (landed).
 
 ### Phase 2: per-file semantic model
 
@@ -631,8 +631,27 @@ The payoff phase, in roughly arity's shipping order.
 
 ### Phase 6: later polish and Julia-specific ambitions
 
-- [ ] Semantic tokens refined with resolved names (function vs macro vs type
-  vs module).
+- [x] Semantic tokens refined with resolved names (function vs macro vs type
+  vs module): identifiers paint by what they resolve to. Definition-site
+  names, export-list entries, and resolved occurrences classify by their
+  binding's `BindingKind`; free reads go through the shared masking order
+  (`Resolver::resolve`) with the target module supplying the kind (functions,
+  types, macros, and submodules as `namespace`; consts stay plain — the
+  legend has no constant type yet). Qualified reads (`Base.Threads.@spawn`)
+  paint each library-resolvable module component as `namespace` and the final
+  member by its kind. The legend appends `function`/`type`/`namespace`, so
+  the syntax indices stay stable. Locals, parameters, and operators (`x + y`
+  lighting up as "function" is noise) stay plain; `import`ed names are not
+  chased into the library (matching hover and go-to-definition) and
+  `using`/`import` statement paths stay plain — both deferred. Resolved and
+  syntax spans merge position-sorted (syntax wins overlaps), and
+  `semantic_tokens_via_db` threads the cached model plus workspace membership
+  through, so same-package siblings classify too. En route the semantic
+  builder learned deep qualified macro reads — a multi-component qualifier
+  parses as a nested field-access chain under `MACRO_NAME` and was dropped
+  before (`walk_macro_name`, `src/semantic/builder.rs`). Locked by units
+  (`src/lsp/semantic_tokens.rs`, `src/semantic.rs`) plus
+  `serves_semantic_tokens` (`tests/lsp.rs`).
 - [ ] Call hierarchy (incoming/outgoing calls).
 - [ ] Type hierarchy from the declared type tree (supertypes/subtypes of
   structs and abstract types)—a Julia-specific win that needs no inference.

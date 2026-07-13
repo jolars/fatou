@@ -2581,6 +2581,7 @@ const KEYWORD: u32 = 0;
 const MACRO: u32 = 1;
 const STRING: u32 = 2;
 const NUMBER: u32 = 3;
+const FUNCTION: u32 = 4;
 
 /// Fold the relative encoding back into absolute
 /// `(line, character, length, legend index)` tuples.
@@ -2599,9 +2600,19 @@ fn decode(tokens: &SemanticTokens) -> Vec<(u32, u32, u32, u32)> {
     out
 }
 
-/// The decoded semantic tokens for `text` under UTF-8.
+/// The decoded semantic tokens for `text` under UTF-8, with no library (free
+/// reads stay unresolved, so only syntax and file-local names paint).
 fn toks(text: &str) -> Vec<(u32, u32, u32, u32)> {
-    decode(&compute_semantic_tokens(text, PositionEncoding::Utf8))
+    decode(&compute_semantic_tokens(
+        text,
+        PositionEncoding::Utf8,
+        &no_library(),
+    ))
+}
+
+/// An empty harvested library for the pure-path helpers.
+fn no_library() -> std::collections::BTreeMap<String, std::sync::Arc<fatou::index::PackageIndex>> {
+    std::collections::BTreeMap::new()
 }
 
 #[test]
@@ -2627,8 +2638,8 @@ fn semantic_tokens_paint_a_macro_call_as_one_token() {
 
 #[test]
 fn semantic_tokens_leave_macro_qualifiers_plain() {
-    // Trailing sigil: only `@time` paints, the module path stays plain
-    // until name resolution can classify it (Phase 6).
+    // Trailing sigil: only `@time` paints; with no library harvested the
+    // module path cannot resolve, so it stays plain.
     assert_eq!(toks("Base.@time f()\n"), vec![(0, 5, 5, MACRO)]);
     // Leading sigil: the sigil and the final component paint.
     assert_eq!(
@@ -2705,7 +2716,11 @@ fn semantic_tokens_respect_the_negotiated_encoding() {
     // the string token's length and every later start on the line.
     let text = "\"αβ\"; if true end\n";
     assert_eq!(
-        decode(&compute_semantic_tokens(text, PositionEncoding::Utf8)),
+        decode(&compute_semantic_tokens(
+            text,
+            PositionEncoding::Utf8,
+            &no_library()
+        )),
         vec![
             (0, 0, 6, STRING),
             (0, 8, 2, KEYWORD),
@@ -2714,7 +2729,11 @@ fn semantic_tokens_respect_the_negotiated_encoding() {
         ],
     );
     assert_eq!(
-        decode(&compute_semantic_tokens(text, PositionEncoding::Utf16)),
+        decode(&compute_semantic_tokens(
+            text,
+            PositionEncoding::Utf16,
+            &no_library()
+        )),
         vec![
             (0, 0, 4, STRING),
             (0, 6, 2, KEYWORD),
@@ -2751,7 +2770,15 @@ fn serves_semantic_tokens() {
             let provider = &resp.result().unwrap()["capabilities"]["semanticTokensProvider"];
             assert_eq!(
                 provider["legend"]["tokenTypes"],
-                serde_json::json!(["keyword", "macro", "string", "number"]),
+                serde_json::json!([
+                    "keyword",
+                    "macro",
+                    "string",
+                    "number",
+                    "function",
+                    "type",
+                    "namespace"
+                ]),
             );
             assert_eq!(provider["full"], serde_json::json!(true));
         }
@@ -2776,7 +2803,7 @@ fn serves_semantic_tokens() {
                     uri: uri.clone(),
                     language_id: "julia".to_string(),
                     version: 1,
-                    text: "@show 1 + true\n".to_string(),
+                    text: "@show f(1)\nf(x) = x\n".to_string(),
                 },
             })
             .unwrap(),
@@ -2804,9 +2831,17 @@ fn serves_semantic_tokens() {
     match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
             let tokens: SemanticTokens = serde_json::from_value(resp.result().unwrap()).unwrap();
+            // `@show` paints syntactically; both `f`s classify as function
+            // through the semantic model (the call resolves to the file-local
+            // definition below it).
             assert_eq!(
                 decode(&tokens),
-                vec![(0, 0, 5, MACRO), (0, 6, 1, NUMBER), (0, 10, 4, KEYWORD)],
+                vec![
+                    (0, 0, 5, MACRO),
+                    (0, 6, 1, FUNCTION),
+                    (0, 8, 1, NUMBER),
+                    (1, 0, 1, FUNCTION),
+                ],
             );
         }
         other => panic!("expected a semanticTokens response, got {other:?}"),
