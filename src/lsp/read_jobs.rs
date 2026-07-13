@@ -9,7 +9,7 @@ use lsp_types::{
     CallHierarchyItem, CodeActionOrCommand, CompletionItem, CompletionResponse,
     DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse,
     FullDocumentDiagnosticReport, GotoDefinitionResponse, Position, Range,
-    RelatedFullDocumentDiagnosticReport, Uri, WorkspaceSymbolResponse,
+    RelatedFullDocumentDiagnosticReport, TypeHierarchyItem, Uri, WorkspaceSymbolResponse,
 };
 
 use crate::formatter::FormatStyle;
@@ -32,6 +32,7 @@ use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
 use super::signature_help::signature_help_via_db;
 use super::symbols::document_symbols_via_db;
+use super::type_hierarchy::{prepare_type_hierarchy_via_db, subtypes_via_db, supertypes_via_db};
 use super::workspace_symbols::workspace_symbols_via_db;
 
 /// A read-only request the analysis thread services by cloning its salsa db
@@ -184,6 +185,26 @@ pub(crate) enum ReadJob {
         item: Box<CallHierarchyItem>,
         sender: Sender<Message>,
     },
+    PrepareTypeHierarchy {
+        id: RequestId,
+        uri: Uri,
+        path: PathBuf,
+        text: String,
+        position: Position,
+        sender: Sender<Message>,
+    },
+    /// Document-less (like `CallHierarchyIncoming`): the item's file may be a
+    /// closed member, so the worker resolves its text off the snapshot.
+    TypeHierarchySupertypes {
+        id: RequestId,
+        item: Box<TypeHierarchyItem>,
+        sender: Sender<Message>,
+    },
+    TypeHierarchySubtypes {
+        id: RequestId,
+        item: Box<TypeHierarchyItem>,
+        sender: Sender<Message>,
+    },
 }
 
 impl ReadJob {
@@ -212,6 +233,9 @@ impl ReadJob {
             ReadJob::PrepareCallHierarchy { id, sender, .. } => (id, sender),
             ReadJob::CallHierarchyIncoming { id, sender, .. } => (id, sender),
             ReadJob::CallHierarchyOutgoing { id, sender, .. } => (id, sender),
+            ReadJob::PrepareTypeHierarchy { id, sender, .. } => (id, sender),
+            ReadJob::TypeHierarchySupertypes { id, sender, .. } => (id, sender),
+            ReadJob::TypeHierarchySubtypes { id, sender, .. } => (id, sender),
         }
     }
 }
@@ -446,6 +470,26 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         ReadJob::CallHierarchyOutgoing { id, item, sender } => {
             let calls = outgoing_calls_via_db(&snapshot, &item, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, calls)));
+        }
+        ReadJob::PrepareTypeHierarchy {
+            id,
+            uri,
+            path,
+            text,
+            position,
+            sender,
+        } => {
+            let items =
+                prepare_type_hierarchy_via_db(&snapshot, &uri, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, items)));
+        }
+        ReadJob::TypeHierarchySupertypes { id, item, sender } => {
+            let items = supertypes_via_db(&snapshot, &item, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, items)));
+        }
+        ReadJob::TypeHierarchySubtypes { id, item, sender } => {
+            let items = subtypes_via_db(&snapshot, &item, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, items)));
         }
     }
 }

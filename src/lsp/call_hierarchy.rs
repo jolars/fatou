@@ -45,14 +45,14 @@ use crate::index::model::Span;
 use crate::parser::parse;
 use crate::resolve::{Namespace, OccurrenceKey, PackageSource, Resolution, Resolver};
 use crate::semantic::{BindingKind, SemanticModel};
-use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+use crate::syntax::{SyntaxKind, SyntaxNode};
 use crate::text::{LineIndex, PositionEncoding};
 
 use super::cross_file;
 use super::definition::{library_def_site, using_def_site};
 use super::references::binding_at_cursor;
 use super::symbols::{
-    callee_name, head_name, op_token, signature_detail, signature_expr, unwrap_head,
+    callee_name, head_name, op_token, signature_detail, signature_expr, token_at, unwrap_head,
 };
 use super::uri::{from_path, to_path};
 
@@ -116,12 +116,6 @@ fn callable_def(node: &SyntaxNode, text: &str) -> Option<Callable> {
         }
         _ => None,
     }
-}
-
-/// The token at `offset`, preferring the right-hand side on a boundary (an
-/// item's `selection_range.start` sits exactly on the name's first character).
-fn token_at(root: &SyntaxNode, offset: TextSize) -> Option<SyntaxToken> {
-    root.token_at_offset(offset).right_biased()
 }
 
 /// The callable definition whose *name* spans `offset`, with its node: what

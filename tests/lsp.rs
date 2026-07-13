@@ -26,9 +26,10 @@ use lsp_types::{
     RegistrationParams, RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens,
     SemanticTokensParams, SignatureHelp, SignatureHelpParams, SymbolKind,
     TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
-    WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
+    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
+    WorkspaceEdit, WorkspaceFolder, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -3437,6 +3438,180 @@ fn serves_call_hierarchy() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(402));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Type hierarchy end-to-end over a harvested workspace package (the
+/// `serves_call_hierarchy` scaffolding): the capability rides the serialized
+/// JSON (lsp-types 0.97 has no struct field for it), prepare on a cross-file
+/// supertype use resolves the item into the defining file, subtypes reach the
+/// declaration in a sibling member, and supertypes on that subtype jump back —
+/// exercising the document-less supertypes/subtypes path against a file with
+/// no open buffer.
+#[test]
+fn serves_type_hierarchy() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-typehier");
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000003\"\n",
+    );
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "abstract type Animal end\n");
+    write_file(
+        &pkg.path.join("src/b.jl"),
+        "struct Dog <: Animal\n    name\nend\n",
+    );
+
+    let depot = TempDir::new("fatou-lsp-typehier-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    let init = initialize_with_folders(&client, &[&root_uri]);
+    assert_eq!(
+        init["capabilities"]["typeHierarchyProvider"],
+        serde_json::json!(true),
+        "the capability must be advertised (it is injected into the JSON)"
+    );
+
+    // Open `b.jl` only: `a.jl` stays a closed, disk-seeded member.
+    let b_uri = file_uri(&pkg.path.join("src/b.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: b_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "struct Dog <: Animal\n    name\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Notification(n) => assert_eq!(n.method, "textDocument/publishDiagnostics"),
+        other => panic!("expected publishDiagnostics, got {other:?}"),
+    }
+
+    // Poll prepare at the `Animal` supertype use in b.jl until the harvest
+    // lands: before it, `Animal` is an unresolvable free read and prepare
+    // returns null; after, the item points into the defining file a.jl.
+    static POLL_ID: AtomicU64 = AtomicU64::new(500);
+    let deadline = Duration::from_secs(10);
+    let start = Instant::now();
+    let animal: TypeHierarchyItem = loop {
+        let id = i32::try_from(POLL_ID.fetch_add(1, Ordering::Relaxed)).unwrap();
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/prepareTypeHierarchy".to_string(),
+                params: serde_json::to_value(TypeHierarchyPrepareParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: b_uri.clone() },
+                        position: Position::new(0, 14),
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        let resp = recv_response(&client, RequestId::from(id));
+        let items: Option<Vec<TypeHierarchyItem>> =
+            serde_json::from_value(resp.result().unwrap()).unwrap();
+        if let Some(items) = items
+            && let Some(item) = items.into_iter().next()
+            && item.uri.as_str().ends_with("a.jl")
+        {
+            break item;
+        }
+        if start.elapsed() >= deadline {
+            panic!("prepare never resolved `Animal` into a.jl within {deadline:?}");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    assert_eq!(animal.name, "Animal");
+    assert_eq!(animal.kind, SymbolKind::INTERFACE);
+    assert_eq!(animal.selection_range.start, Position::new(0, 14));
+
+    // Subtypes of `Animal`: the `Dog` declaration in b.jl.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(600),
+            method: "typeHierarchy/subtypes".to_string(),
+            params: serde_json::to_value(TypeHierarchySubtypesParams {
+                item: animal.clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(600));
+    let subtypes: Vec<TypeHierarchyItem> = serde_json::from_value(resp.result().unwrap()).unwrap();
+    assert_eq!(subtypes.len(), 1, "{subtypes:#?}");
+    assert_eq!(subtypes[0].name, "Dog");
+    assert!(subtypes[0].uri.as_str().ends_with("b.jl"));
+    assert_eq!(subtypes[0].kind, SymbolKind::STRUCT);
+    assert_eq!(subtypes[0].detail.as_deref(), Some("<: Animal"));
+    assert_eq!(subtypes[0].selection_range.start, Position::new(0, 7));
+
+    // Supertypes of that `Dog` item: back to `Animal` in the *closed* a.jl.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(601),
+            method: "typeHierarchy/supertypes".to_string(),
+            params: serde_json::to_value(TypeHierarchySupertypesParams {
+                item: subtypes[0].clone(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(601));
+    let supertypes: Vec<TypeHierarchyItem> =
+        serde_json::from_value(resp.result().unwrap()).unwrap();
+    assert_eq!(supertypes.len(), 1, "{supertypes:#?}");
+    assert_eq!(supertypes[0].name, "Animal");
+    assert!(supertypes[0].uri.as_str().ends_with("a.jl"));
+    assert_eq!(supertypes[0].selection_range.start, Position::new(0, 14));
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(602),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(602));
     client
         .sender
         .send(Message::Notification(Notification {

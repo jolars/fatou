@@ -394,6 +394,13 @@ pub(crate) fn signature_detail(
     (!detail.is_empty()).then(|| detail.to_string())
 }
 
+/// The token at `offset`, preferring the right-hand side on a boundary (a
+/// symbol's `selection_range.start` sits exactly on the name's first
+/// character).
+pub(crate) fn token_at(root: &SyntaxNode, offset: rowan::TextSize) -> Option<SyntaxToken> {
+    root.token_at_offset(offset).right_biased()
+}
+
 /// The first non-trivia operator-position token of a binary-shaped node (the
 /// token after its first child node).
 pub(crate) fn op_token(node: &SyntaxNode) -> Option<SyntaxToken> {

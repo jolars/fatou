@@ -16,8 +16,8 @@ use lsp_types::request::{
     DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest,
     PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
     Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
-    SemanticTokensFullRequest, SignatureHelpRequest, WorkspaceDiagnosticRefresh,
-    WorkspaceSymbolRequest,
+    SemanticTokensFullRequest, SignatureHelpRequest, TypeHierarchyPrepare, TypeHierarchySubtypes,
+    TypeHierarchySupertypes, WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
@@ -28,7 +28,8 @@ use lsp_types::{
     DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
     GlobPattern, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams, ReferenceParams,
     Registration, RegistrationParams, RenameParams, SelectionRangeParams, SemanticTokensParams,
-    SignatureHelpParams, TextDocumentPositionParams, Uri, WorkspaceSymbolParams,
+    SignatureHelpParams, TextDocumentPositionParams, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
 };
 
 use crate::environment::is_environment_file;
@@ -163,6 +164,9 @@ impl GlobalState {
             CallHierarchyPrepare::METHOD => self.on_prepare_call_hierarchy(req),
             CallHierarchyIncomingCalls::METHOD => self.on_call_hierarchy_incoming(req),
             CallHierarchyOutgoingCalls::METHOD => self.on_call_hierarchy_outgoing(req),
+            TypeHierarchyPrepare::METHOD => self.on_prepare_type_hierarchy(req),
+            TypeHierarchySupertypes::METHOD => self.on_type_hierarchy_supertypes(req),
+            TypeHierarchySubtypes::METHOD => self.on_type_hierarchy_subtypes(req),
             _ => {
                 let resp = Response::new_err(
                     req.id,
@@ -583,6 +587,63 @@ impl GlobalState {
             return;
         };
         self.dispatch_read(ReadJob::CallHierarchyOutgoing {
+            id,
+            item: Box::new(params.item),
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_prepare_type_hierarchy(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<TypeHierarchyPrepareParams>(TypeHierarchyPrepare::METHOD)
+        else {
+            self.respond_err(id, "invalid prepareTypeHierarchy params");
+            return;
+        };
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::PrepareTypeHierarchy {
+            id,
+            path: path_for(&uri),
+            position: params.text_document_position_params.position,
+            uri,
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    /// Supertypes/subtypes carry a [`TypeHierarchyItem`](lsp_types::TypeHierarchyItem)
+    /// rather than a document position, and the item's file may be a closed
+    /// member — so there is no buffer lookup; the read job re-derives the text
+    /// off the snapshot (the call-hierarchy expansion pattern).
+    fn on_type_hierarchy_supertypes(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<TypeHierarchySupertypesParams>(TypeHierarchySupertypes::METHOD)
+        else {
+            self.respond_err(id, "invalid supertypes params");
+            return;
+        };
+        self.dispatch_read(ReadJob::TypeHierarchySupertypes {
+            id,
+            item: Box::new(params.item),
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_type_hierarchy_subtypes(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<TypeHierarchySubtypesParams>(TypeHierarchySubtypes::METHOD)
+        else {
+            self.respond_err(id, "invalid subtypes params");
+            return;
+        };
+        self.dispatch_read(ReadJob::TypeHierarchySubtypes {
             id,
             item: Box::new(params.item),
             sender: self.sender.clone(),

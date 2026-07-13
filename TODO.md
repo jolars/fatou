@@ -681,8 +681,34 @@ The payoff phase, in roughly arity's shipping order.
   matching `workspace_occurrences`), per-method items under multiple dispatch,
   incoming calls for library symbols, and a persisted call-site index (the
   per-request CST walk protects keystroke latency instead).
-- [ ] Type hierarchy from the declared type tree (supertypes/subtypes of
+- [x] Type hierarchy from the declared type tree (supertypes/subtypes of
   structs and abstract types)—a Julia-specific win that needs no inference.
+  Prepare (`textDocument/prepareTypeHierarchy`) classifies the cursor exactly
+  as call hierarchy does — a workspace top-level type through the reverse-
+  occurrence index (the definition rec re-derived through `type_decl_at`, so
+  outer constructors sharing the struct's name never shadow the declaration),
+  or an intra-file `BindingKind::Type` binding. Supertypes re-derives the
+  declaration from the item, peels the `<:` clause off the signature head
+  (parametric supers unwrap to their base: `AbstractArray{T,1}` →
+  `AbstractArray`), and resolves the base name through the shared masking
+  order: intra-file bindings and workspace siblings off tracked text,
+  Base/depot types materialized from disk via the harvested `DefLocation`. No
+  declared supertype answers empty (the implicit `Any` is a hierarchy root;
+  no synthesized item). Subtypes rides the reverse index: each non-definition
+  site is kept iff it is syntactically a *declared-supertype* position
+  (`supertype_site_decl`, re-derived per request from the cached CST —
+  occurrences do not record supertype-ness; curly type-param bounds, `where`
+  bounds, annotations, and supertype *arguments* like `S <: Tree{Animal}` all
+  reject), and its enclosing declaration is the subtype. STRUCT/INTERFACE
+  kinds follow document symbols. The capability is injected into the
+  serialized initialize JSON — lsp-types 0.97 ships the request/item types
+  but no `type_hierarchy_provider` field. All in `src/lsp/type_hierarchy.rs`;
+  locked by inline units (intra-file, library, and workspace-db cross-file)
+  plus `serves_type_hierarchy` in `tests/lsp.rs`. *Deferred:* qualified
+  supertypes (`<: Base.Number`, matching `workspace_occurrences`), imported
+  supertypes (imports are not chased, matching hover and go-to-definition),
+  and subtypes of library types (the reverse index only covers workspace
+  members).
 - [ ] Multiple-dispatch-aware navigation: go-to-definition returning all
   methods of a function.
 - [ ] Inlay hints for keyword-argument names and elided defaults.

@@ -59,7 +59,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
     let pull_diagnostics = supports_pull_diagnostics(&params.capabilities);
     let diagnostic_refresh = supports_diagnostic_refresh(&params.capabilities);
     let result =
-        serde_json::json!({ "capabilities": server_capabilities(encoding, pull_diagnostics) });
+        serde_json::json!({ "capabilities": capabilities_json(encoding, pull_diagnostics) });
     connection.initialize_finish(id, result)?;
     main_loop(
         connection,
@@ -228,6 +228,18 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
         }),
         ..Default::default()
     }
+}
+
+/// The `initialize` result's `capabilities` value. Built from the serialized
+/// [`ServerCapabilities`] because lsp-types 0.97 has no
+/// `type_hierarchy_provider` field (the request, param, and item types exist;
+/// the capability field was never added upstream), so it is injected into the
+/// serialized map here.
+fn capabilities_json(encoding: PositionEncoding, pull_diagnostics: bool) -> serde_json::Value {
+    let mut capabilities = serde_json::to_value(server_capabilities(encoding, pull_diagnostics))
+        .expect("server capabilities serialize");
+    capabilities["typeHierarchyProvider"] = serde_json::Value::Bool(true);
+    capabilities
 }
 
 /// The main event loop: dispatch incoming JSON-RPC messages and analysis
@@ -595,6 +607,22 @@ mod tests {
             server_capabilities(PositionEncoding::Utf16, false)
                 .diagnostic_provider
                 .is_none()
+        );
+    }
+
+    /// The type-hierarchy capability rides the serialized JSON (lsp-types 0.97
+    /// has no struct field for it); the injection must not clobber the
+    /// struct-borne capabilities around it.
+    #[test]
+    fn type_hierarchy_capability_is_injected_into_the_json() {
+        let capabilities = capabilities_json(PositionEncoding::Utf16, false);
+        assert_eq!(
+            capabilities["typeHierarchyProvider"],
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            capabilities["callHierarchyProvider"],
+            serde_json::json!(true)
         );
     }
 
