@@ -6,14 +6,15 @@ use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
-    CompletionItem, CompletionResponse, DocumentSymbolResponse, GotoDefinitionResponse, Position,
-    Range, Uri, WorkspaceSymbolResponse,
+    CodeActionOrCommand, CompletionItem, CompletionResponse, DocumentSymbolResponse,
+    GotoDefinitionResponse, Position, Range, Uri, WorkspaceSymbolResponse,
 };
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
 
+use super::code_action::code_actions_via_db;
 use super::completion::{completion_via_db, resolve_completion};
 use super::definition::definition_via_db;
 use super::folding::folding_ranges_via_db;
@@ -32,6 +33,14 @@ use super::workspace_symbols::workspace_symbols_via_db;
 /// live buffer `text` and the client `sender` so the worker can reply
 /// directly; the analysis thread only adds the db snapshot. See [`run_read`].
 pub(crate) enum ReadJob {
+    CodeAction {
+        id: RequestId,
+        uri: Uri,
+        path: PathBuf,
+        text: String,
+        range: Range,
+        sender: Sender<Message>,
+    },
     Format {
         id: RequestId,
         path: PathBuf,
@@ -150,6 +159,7 @@ impl ReadJob {
     /// the client still gets a (null) response instead of hanging.
     pub(crate) fn into_reply_parts(self) -> (RequestId, Sender<Message>) {
         match self {
+            ReadJob::CodeAction { id, sender, .. } => (id, sender),
             ReadJob::Format { id, sender, .. } => (id, sender),
             ReadJob::FormatRange { id, sender, .. } => (id, sender),
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
@@ -175,6 +185,18 @@ impl ReadJob {
 /// blocks the analysis thread's next write longer than the job itself.
 pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncoding) {
     match job {
+        ReadJob::CodeAction {
+            id,
+            uri,
+            path,
+            text,
+            range,
+            sender,
+        } => {
+            let actions: Vec<CodeActionOrCommand> =
+                code_actions_via_db(&snapshot, &uri, &path, &text, range, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, actions)));
+        }
         ReadJob::Format {
             id,
             path,

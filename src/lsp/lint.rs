@@ -31,6 +31,24 @@ pub(crate) fn lint_diagnostics_via_db(
     text: &str,
     encoding: PositionEncoding,
 ) -> Vec<Diagnostic> {
+    findings_to_lsp(lint_findings_via_db(snapshot, path, text), text, encoding)
+}
+
+/// Compute the lint diagnostics for `text`, re-parsing it. The pure core of
+/// the lint-diagnostic pipeline; empty on a parse-broken document.
+pub fn compute_lint_diagnostics(text: &str, encoding: PositionEncoding) -> Vec<Diagnostic> {
+    findings_to_lsp(lint_findings(text), text, encoding)
+}
+
+/// The raw lint findings for `text`, warm off the snapshot's cached parse and
+/// semantic model (see [`lint_diagnostics_via_db`] for the cache contract).
+/// Raw so code actions can reach the byte-ranged [`linter::Fix`]es a finding
+/// carries, which the LSP diagnostic conversion drops.
+pub(crate) fn lint_findings_via_db(
+    snapshot: &Analysis,
+    path: &Path,
+    text: &str,
+) -> Vec<linter::Diagnostic> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
         if snapshot.file_text(file) != text {
@@ -42,32 +60,30 @@ pub(crate) fn lint_diagnostics_via_db(
         }
         let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
-        Some(findings_to_lsp(
-            lint_parsed(Some(path), text, &root, model, &default_rules()),
+        Some(lint_parsed(
+            Some(path),
             text,
-            encoding,
+            &root,
+            model,
+            &default_rules(),
         ))
     }));
     match cached {
-        Ok(Some(diags)) => diags,
+        Ok(Some(findings)) => findings,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_lint_diagnostics(text, encoding),
+        Ok(None) | Err(_) => lint_findings(text),
     }
 }
 
-/// Compute the lint diagnostics for `text`, re-parsing it. The pure core of
-/// the lint-diagnostic pipeline; empty on a parse-broken document.
-pub fn compute_lint_diagnostics(text: &str, encoding: PositionEncoding) -> Vec<Diagnostic> {
+/// The raw lint findings for `text`, re-parsing it; empty on a parse-broken
+/// document (rules need a clean tree).
+fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
     let parsed = parse(text);
     if !parsed.diagnostics.is_empty() {
         return Vec::new();
     }
     let model = SemanticModel::build(&parsed.cst);
-    findings_to_lsp(
-        lint_parsed(None, text, &parsed.cst, &model, &default_rules()),
-        text,
-        encoding,
-    )
+    lint_parsed(None, text, &parsed.cst, &model, &default_rules())
 }
 
 /// The rule set the server lints with: the defaults, until configuration
@@ -90,7 +106,7 @@ fn findings_to_lsp(
 
 /// Convert one lint finding into an LSP diagnostic against `line_index`'s text
 /// (the source the finding's byte offsets index).
-fn finding_to_lsp(
+pub(crate) fn finding_to_lsp(
     finding: &linter::Diagnostic,
     line_index: &LineIndex,
     encoding: PositionEncoding,

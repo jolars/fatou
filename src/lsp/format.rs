@@ -158,7 +158,11 @@ pub(crate) fn edits_for_range_formatted(
 /// Convert an LSP selection to the byte range it covers, clamped to `text`
 /// (via [`LineIndex::position_to_byte`]'s clamping) and normalized so an
 /// inverted selection cannot panic `TextRange::new`.
-fn lsp_range_to_text_range(text: &str, range: Range, encoding: PositionEncoding) -> TextRange {
+pub(crate) fn lsp_range_to_text_range(
+    text: &str,
+    range: Range,
+    encoding: PositionEncoding,
+) -> TextRange {
     let line_index = LineIndex::new(text);
     let start = line_index.position_to_byte(range.start, encoding);
     let end = line_index.position_to_byte(range.end, encoding);

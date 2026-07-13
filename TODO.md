@@ -586,7 +586,17 @@ The payoff phase, in roughly arity's shipping order.
   `UNNECESSARY` tag. This delivers the unused-binding and unused-import
   semantic diagnostics via the existing rules. Locked by units in
   `src/lsp/lint.rs` plus `publishes_lint_findings_as_diagnostics`
-  (`tests/lsp.rs`).
+  (`tests/lsp.rs`). *Quick-fix code actions have landed:*
+  `textDocument/codeAction` (a `ReadJob`, advertised as a `quickfix`-only
+  provider) re-lints warm off the cached parse rather than round-tripping fix
+  data through published diagnostics — a `linter::Fix`'s byte offsets are only
+  valid against the exact buffer they were computed from, so recomputing
+  against the live text is the correct thing to do. Each fix on a finding
+  overlapping the requested range becomes one action
+  (`src/lsp/code_action.rs`) with a single-document `WorkspaceEdit` and the
+  finding's diagnostic attached; safe fixes are `isPreferred`, unsafe ones say
+  so in the title (the LSP has no `--unsafe-fixes` gate). Locked by units plus
+  `serves_quick_fix_code_actions` (`tests/lsp.rs`).
 
 ### Phase 6: later polish and Julia-specific ambitions
 

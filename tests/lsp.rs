@@ -10,19 +10,20 @@ use fatou::lsp::{
 use fatou::text::PositionEncoding;
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
-    ClientCapabilities, CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesClientCapabilities, DidChangeWatchedFilesParams,
-    DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind,
-    DocumentHighlightParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-    FileChangeType, FileEvent, FoldingRange, FoldingRangeKind, FoldingRangeParams,
-    FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
-    PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
-    ReferenceContext, ReferenceParams, RegistrationParams, RenameParams, SelectionRange,
-    SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
-    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    ClientCapabilities, CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
+    CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse, Diagnostic,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities,
+    DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
+    DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
+    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, FileChangeType, FileEvent,
+    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
+    GeneralClientCapabilities, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, HoverParams, InitializeParams, Location, PartialResultParams, Position,
+    PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
+    RegistrationParams, RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens,
+    SemanticTokensParams, SignatureHelp, SignatureHelpParams, SymbolKind,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, TextEdit, Uri, VersionedTextDocumentIdentifier,
     WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
@@ -3994,6 +3995,149 @@ fn publishes_lint_findings_as_diagnostics() {
         }))
         .unwrap();
     let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// `textDocument/codeAction` over a lint finding returns a preferred quick fix
+/// whose edit resolves it: the `nothing-comparison` on the cursor line offers
+/// `===`, carrying the diagnostic it fixes and a single-document edit.
+#[test]
+fn serves_quick_fix_code_actions() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let init = recv_response(&client, RequestId::from(1));
+    let capabilities = init.result().unwrap()["capabilities"].clone();
+    assert_eq!(
+        capabilities["codeActionProvider"]["codeActionKinds"],
+        serde_json::json!(["quickfix"]),
+        "the server must advertise quick-fix code actions"
+    );
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let text = "check(x) = x == nothing\n";
+    let uri = Uri::from_str("file:///work/fixme.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // --- request code actions with the cursor inside the comparison ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/codeAction".to_string(),
+            params: serde_json::to_value(CodeActionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                range: Range::new(Position::new(0, 14), Position::new(0, 14)),
+                context: CodeActionContext::default(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let response = recv_response(&client, RequestId::from(2));
+    let actions: Vec<CodeActionOrCommand> =
+        serde_json::from_value(response.result().unwrap()).unwrap();
+    assert_eq!(actions.len(), 1);
+    let CodeActionOrCommand::CodeAction(action) = &actions[0] else {
+        panic!("expected a code action, got {:?}", actions[0]);
+    };
+    assert_eq!(action.title, "Replace `==` with `===`");
+    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.is_preferred, Some(true));
+    let attached = action.diagnostics.as_ref().expect("attached diagnostics");
+    assert_eq!(
+        attached[0].code,
+        Some(lsp_types::NumberOrString::String(
+            "nothing-comparison".to_string()
+        ))
+    );
+
+    // --- the edit rewrites exactly the operator ---
+    // `Uri`-keyed maps trip `mutable_key_type` (see the allow in `src/lsp.rs`).
+    #[allow(clippy::mutable_key_type)]
+    let changes = action
+        .edit
+        .as_ref()
+        .and_then(|edit| edit.changes.as_ref())
+        .expect("single-document changes");
+    let edits = &changes[&uri];
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].new_text, "===");
+    assert_eq!(
+        edits[0].range,
+        Range::new(Position::new(0, 13), Position::new(0, 15))
+    );
+
+    // --- a cursor outside any finding yields no actions ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/codeAction".to_string(),
+            params: serde_json::to_value(CodeActionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                range: Range::new(Position::new(0, 2), Position::new(0, 4)),
+                context: CodeActionContext::default(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let response = recv_response(&client, RequestId::from(3));
+    let actions: Vec<CodeActionOrCommand> =
+        serde_json::from_value(response.result().unwrap()).unwrap();
+    assert_eq!(actions, Vec::new());
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(4));
     client
         .sender
         .send(Message::Notification(Notification {

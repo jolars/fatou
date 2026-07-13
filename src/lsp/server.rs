@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use crossbeam_channel::select;
 use lsp_server::{Connection, Message};
 use lsp_types::{
-    ClientCapabilities, CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability,
-    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
+    ClientCapabilities, CodeActionKind, CodeActionOptions, CodeActionProviderCapability,
+    CompletionOptions, FoldingRangeProviderCapability, HoverProviderCapability, InitializeParams,
+    OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
     SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
@@ -124,6 +125,13 @@ fn server_capabilities(encoding: PositionEncoding) -> ServerCapabilities {
                 ..Default::default()
             },
         )),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            // Only lint quick fixes for now; organize-imports style actions are
+            // a Phase 6 item.
+            code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+            work_done_progress_options: Default::default(),
+            resolve_provider: None,
+        })),
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),

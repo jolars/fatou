@@ -45,6 +45,7 @@
 #![allow(clippy::mutable_key_type)]
 
 mod analysis_thread;
+mod code_action;
 mod completion;
 mod cross_file;
 mod definition;

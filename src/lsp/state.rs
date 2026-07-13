@@ -11,13 +11,14 @@ use lsp_types::notification::{
     DidSaveTextDocument, Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
-    Completion, DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting,
-    GotoDefinition, HoverRequest, PrepareRenameRequest, RangeFormatting, References,
-    RegisterCapability, Rename, Request as RequestTrait, ResolveCompletionItem,
-    SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest, WorkspaceSymbolRequest,
+    CodeActionRequest, Completion, DocumentHighlightRequest, DocumentSymbolRequest,
+    FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest, PrepareRenameRequest,
+    RangeFormatting, References, RegisterCapability, Rename, Request as RequestTrait,
+    ResolveCompletionItem, SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
+    WorkspaceSymbolRequest,
 };
 use lsp_types::{
-    CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
+    CodeActionParams, CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentFormattingParams, DocumentHighlightParams, DocumentRangeFormattingParams,
@@ -115,6 +116,7 @@ impl GlobalState {
 
     pub(crate) fn on_request(&mut self, req: Request) {
         match req.method.as_str() {
+            CodeActionRequest::METHOD => self.on_code_action(req),
             Formatting::METHOD => self.on_formatting(req),
             RangeFormatting::METHOD => self.on_range_formatting(req),
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
@@ -140,6 +142,27 @@ impl GlobalState {
                 let _ = self.sender.send(Message::Response(resp));
             }
         }
+    }
+
+    fn on_code_action(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<CodeActionParams>(CodeActionRequest::METHOD) else {
+            self.respond_err(id, "invalid codeAction params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::CodeAction {
+            id,
+            path: path_for(&uri),
+            text,
+            range: params.range,
+            uri,
+            sender: self.sender.clone(),
+        });
     }
 
     fn on_formatting(&mut self, req: Request) {
