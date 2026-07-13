@@ -1093,6 +1093,21 @@ end",
     }
 
     #[test]
+    fn deep_qualified_macro_records_and_reads_root() {
+        // A multi-component qualifier parses as a nested field-access chain
+        // under the `MACRO_NAME`; the whole chain is still one qualified read.
+        let m = model_of("Base.Threads.@spawn f()");
+        let q = &m.qualified_reads()[0];
+        assert_eq!(q.path, ["Base", "Threads", "@spawn"]);
+        assert!(q.is_macro);
+        assert_eq!(free_read_names(&m), ["Base", "f"]);
+        assert!(
+            !m.idents().iter().any(|i| i.is_macro),
+            "a qualified macro is not a local macro-namespace read"
+        );
+    }
+
+    #[test]
     fn call_chains_are_not_qualified_reads() {
         let m = model_of("f(x).y");
         assert!(m.qualified_reads().is_empty());

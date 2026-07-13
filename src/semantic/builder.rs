@@ -1652,9 +1652,10 @@ impl Builder {
     }
 
     fn walk_macro_name(&mut self, name: &SyntaxNode, scope: ScopeId) {
-        // Qualifier components are NAME nodes (`Base.@time`) or the leading
-        // IDENT tokens of the `@Base.time` form; the final IDENT is the
-        // macro's own name in either.
+        // Qualifier components are NAME nodes (`Base.@time`), a nested
+        // field-access chain (`Base.Threads.@spawn` — two or more components
+        // parse as one BINARY_EXPR), or the leading IDENT tokens of the
+        // `@Base.time` form; the final IDENT is the macro's own name in each.
         let mut parts: Vec<(SmolStr, Option<SyntaxToken>)> = Vec::new();
         for element in name.children_with_tokens() {
             match element {
@@ -1664,6 +1665,15 @@ impl Builder {
                 rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::NAME => {
                     if let Some(t) = name_ident(&n) {
                         parts.push((SmolStr::new(t.text()), Some(t)));
+                    }
+                }
+                rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::BINARY_EXPR => {
+                    if let Some((path, root)) = qualified_name_chain(&n) {
+                        let root_token = name_ident(&root);
+                        parts.extend(
+                            path.into_iter()
+                                .zip(std::iter::once(root_token).chain(std::iter::repeat(None))),
+                        );
                     }
                 }
                 _ => {}
