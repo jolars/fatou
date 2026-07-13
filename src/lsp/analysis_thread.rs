@@ -25,6 +25,7 @@ use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
+use super::lint::lint_diagnostics_via_db;
 use super::read_jobs::{ReadJob, run_read};
 use super::state::Outbound;
 use super::task_pool::Spawner;
@@ -292,7 +293,10 @@ impl AnalysisWorker {
         let done_tx = self.done_tx.clone();
         let encoding = self.encoding;
         let AnalysisRequest {
-            uri, text, version, ..
+            uri,
+            path,
+            text,
+            version,
         } = req;
         self.inflight = Some(InflightAnalyze {
             uri: uri.clone(),
@@ -300,7 +304,15 @@ impl AnalysisWorker {
         });
         self.read_spawner.spawn(move || {
             let result = salsa::Cancelled::catch(AssertUnwindSafe(|| {
-                parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding)
+                let mut diags =
+                    parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding);
+                // Lint findings join the same publish, but only on a clean
+                // tree: rules would misfire on error-recovered shapes, and a
+                // broken buffer's parse errors are the actionable signal.
+                if diags.is_empty() {
+                    diags.extend(lint_diagnostics_via_db(&snapshot, &path, &text, encoding));
+                }
+                diags
             }));
             if let Ok(diags) = result {
                 let _ = out_tx.send(Outbound::Diagnostics {

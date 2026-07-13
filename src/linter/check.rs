@@ -13,6 +13,7 @@ use crate::linter::rules::{ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
+use crate::syntax::SyntaxNode;
 use crate::text::LineIndex;
 
 /// The pseudo-rule id under which parse diagnostics are reported.
@@ -144,22 +145,7 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
     }
 
     let model = SemanticModel::build(&parsed.cst);
-    let ctx = RuleContext {
-        path,
-        root: &parsed.cst,
-        model: &model,
-    };
-    let raw = rules.run(&ctx);
-
-    let suppressions = SuppressionMap::build(text);
-    let line_index = LineIndex::new(text);
-    let diagnostics: Vec<Diagnostic> = raw
-        .into_iter()
-        .filter(|diag| {
-            let line = line_index.byte_to_lc(diag.start).line;
-            !suppressions.is_suppressed(&diag.rule, line)
-        })
-        .collect();
+    let diagnostics = lint_parsed(path, text, &parsed.cst, &model, rules);
 
     let status = if diagnostics.is_empty() {
         LintStatus::Clean
@@ -174,6 +160,30 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
         status,
         diagnostics,
     }
+}
+
+/// Run `rules` against an already-parsed *clean* tree (rules need one; the
+/// caller is responsible for gating on parse diagnostics) and filter suppressed
+/// findings. Shared by [`check_text`] and the language server, whose warm path
+/// lints off the salsa-cached tree and model instead of re-parsing.
+pub fn lint_parsed(
+    path: Option<&Path>,
+    text: &str,
+    root: &SyntaxNode,
+    model: &SemanticModel,
+    rules: &ResolvedRules,
+) -> Vec<Diagnostic> {
+    let ctx = RuleContext { path, root, model };
+    let raw = rules.run(&ctx);
+
+    let suppressions = SuppressionMap::build(text);
+    let line_index = LineIndex::new(text);
+    raw.into_iter()
+        .filter(|diag| {
+            let line = line_index.byte_to_lc(diag.start).line;
+            !suppressions.is_suppressed(&diag.rule, line)
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -3852,3 +3852,155 @@ fn watched_file_events_refresh_environment_and_membership() {
         .unwrap();
     server_thread.join().unwrap();
 }
+
+/// Lint findings publish alongside parse diagnostics in the push pipeline: an
+/// unused local yields a tagged `unused-binding` warning, a parse-broken edit
+/// suppresses lint findings (rules need a clean tree) in favor of the parse
+/// errors, and a fixing edit clears the report.
+#[test]
+fn publishes_lint_findings_as_diagnostics() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let _init_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let recv_diagnostics = |client: &Connection| -> PublishDiagnosticsParams {
+        loop {
+            match client.receiver.recv().unwrap() {
+                Message::Notification(note) if note.method == "textDocument/publishDiagnostics" => {
+                    return serde_json::from_value(note.params).unwrap();
+                }
+                _ => {}
+            }
+        }
+    };
+
+    // --- open a document with an unused local; expect a lint warning @v1 ---
+    let uri = Uri::from_str("file:///work/lint.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "function f(x)\n    tmp = x + 1\n    return x\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(1));
+    assert_eq!(diag.diagnostics.len(), 1);
+    let finding = &diag.diagnostics[0];
+    assert_eq!(
+        finding.code,
+        Some(lsp_types::NumberOrString::String(
+            "unused-binding".to_string()
+        ))
+    );
+    assert_eq!(finding.severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(finding.source.as_deref(), Some("fatou"));
+    assert_eq!(
+        finding.range,
+        Range::new(Position::new(1, 4), Position::new(1, 7)),
+        "the finding must cover `tmp`"
+    );
+    assert!(finding.message.contains("tmp"));
+
+    // --- break the parse; the lint finding yields to the parse error @v2 ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "function f(x)\n    tmp = x + 1\n    return x\n".to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(2));
+    assert!(
+        !diag.diagnostics.is_empty(),
+        "expected a parse diagnostic for the unterminated function"
+    );
+    assert!(
+        diag.diagnostics
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR) && d.code.is_none()),
+        "a parse-broken buffer must carry parse errors only, got {:?}",
+        diag.diagnostics
+    );
+
+    // --- fix the code entirely; expect an empty report @v3 ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 3,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "function f(x)\n    tmp = x + 1\n    return tmp\nend\n".to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag = recv_diagnostics(&client);
+    assert_eq!(diag.version, Some(3));
+    assert_eq!(diag.diagnostics, Vec::new());
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}

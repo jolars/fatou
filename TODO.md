@@ -574,6 +574,19 @@ The payoff phase, in roughly arity's shipping order.
   with push fallback; lint findings as diagnostics with quick-fix code
   actions (needs the Linter section's first rules); first semantic
   diagnostics (undefined name—masking-aware, unused binding, unused import).
+  *Lint findings as diagnostics has landed:* the analysis read-phase runs the
+  linter (default config until configuration discovery lands, Phase 6) on a
+  parse-clean tree and merges the findings into the same versioned publish as
+  the parse diagnostics (`src/lsp/analysis_thread.rs`). `lint_parsed`
+  (`src/linter/check.rs`) is the shared run-rules-and-filter-suppressions
+  core; `lint_diagnostics_via_db` (`src/lsp/lint.rs`) lints off the
+  salsa-cached tree and semantic model, falling back to a fresh parse on a
+  cache miss or racing write. Findings map rule ID → `code`, engine-stamped
+  severity across, `source: "fatou"`, and the `unused-` family carries the
+  `UNNECESSARY` tag. This delivers the unused-binding and unused-import
+  semantic diagnostics via the existing rules. Locked by units in
+  `src/lsp/lint.rs` plus `publishes_lint_findings_as_diagnostics`
+  (`tests/lsp.rs`).
 
 ### Phase 6: later polish and Julia-specific ambitions
 
