@@ -21,12 +21,15 @@ use crate::text::{LineIndex, PositionEncoding};
 use super::uri::from_path;
 
 /// One gathered occurrence of a workspace symbol: the file it lives in (as an
-/// LSP [`Uri`]), its range in the negotiated encoding, and whether it is the
-/// definition site (so references can honor `includeDeclaration`).
+/// LSP [`Uri`]), its range in the negotiated encoding, whether it is the
+/// definition site (so references can honor `includeDeclaration`), and its
+/// access (so go-to-definition can pick out later method definitions, which
+/// are `Write` occurrences on the shared binding).
 pub(crate) struct CrossFileSite {
     pub uri: Uri,
     pub range: Range,
     pub is_def: bool,
+    pub access: crate::semantic::Access,
 }
 
 /// The workspace top-level symbol at `offset` in the file at `path`, if the
@@ -87,6 +90,7 @@ pub(crate) fn gather_sites(
                     end: line_index.byte_to_position(rec.range.end().into(), encoding),
                 },
                 is_def: rec.is_def,
+                access: rec.access,
             });
         }
     }

@@ -600,6 +600,113 @@ fn serves_goto_definition() {
     server_thread.join().unwrap();
 }
 
+/// End-to-end multiple dispatch: go-to-definition on a call of a two-method
+/// function returns an array with both method definition sites.
+#[test]
+fn serves_goto_definition_with_multiple_methods() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let _init_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document defining two methods of `greet` and calling it ---
+    let uri = Uri::from_str("file:///work/s.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "greet(a) = a\ngreet(a, b) = a\ngreet(1)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let diag_note = client.receiver.recv().unwrap();
+    assert!(matches!(diag_note, Message::Notification(_)));
+
+    // --- go-to-definition on the call `greet` at (2, 2) ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/definition".to_string(),
+            params: serde_json::to_value(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(2, 2),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let def_response = client.receiver.recv().unwrap();
+    match def_response {
+        Message::Response(resp) => {
+            let response: GotoDefinitionResponse =
+                serde_json::from_value(resp.result().unwrap()).unwrap();
+            let GotoDefinitionResponse::Array(locations) = response else {
+                panic!("expected an array of locations, got {response:?}");
+            };
+            assert_eq!(locations.len(), 2, "{locations:?}");
+            assert!(locations.iter().all(|l| l.uri == uri));
+            // The two `greet` method names on lines 0 and 1, columns 0..5.
+            assert_eq!(
+                locations[0].range,
+                Range::new(Position::new(0, 0), Position::new(0, 5))
+            );
+            assert_eq!(
+                locations[1].range,
+                Range::new(Position::new(1, 0), Position::new(1, 5))
+            );
+        }
+        other => panic!("expected a definition response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
 /// End-to-end references: the server advertises the provider, and a request on
 /// a local variable returns every use plus the declaration in the same
 /// document.

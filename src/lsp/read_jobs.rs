@@ -390,8 +390,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             position,
             sender,
         } => {
-            let location = definition_via_db(&snapshot, &uri, &path, &text, position, encoding);
-            let result = location.map(GotoDefinitionResponse::Scalar);
+            let mut locations =
+                definition_via_db(&snapshot, &uri, &path, &text, position, encoding);
+            // A single site stays scalar (a plain jump); several methods of a
+            // function come back as an array (the client shows a picker).
+            let result = match locations.len() {
+                0 => None,
+                1 => Some(GotoDefinitionResponse::Scalar(locations.remove(0))),
+                _ => Some(GotoDefinitionResponse::Array(locations)),
+            };
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
         ReadJob::References {

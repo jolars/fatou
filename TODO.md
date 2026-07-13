@@ -709,8 +709,12 @@ The payoff phase, in roughly arity's shipping order.
   supertypes (imports are not chased, matching hover and go-to-definition),
   and subtypes of library types (the reverse index only covers workspace
   members).
-- [ ] Multiple-dispatch-aware navigation: go-to-definition returning all
+- [x] Multiple-dispatch-aware navigation: go-to-definition returning all
   methods of a function.
+- [ ] Qualified method extensions in navigation: go-to-definition on
+  `Base.show` surfacing workspace methods harvested with `owner`
+  (`Base.show(io, x) = ...`), not just the target package's own definitions
+  (same wrinkle as hover).
 - [ ] Inlay hints for keyword-argument names and elided defaults.
 - [ ] Document links for `include("...")` paths.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
