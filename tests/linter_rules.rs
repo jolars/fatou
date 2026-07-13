@@ -404,3 +404,139 @@ fn assignment_in_condition_carries_a_safe_fix() {
     // The replacement spans exactly the `=` token.
     assert_eq!(&"if x = 5\n    x\nend\n"[fix.start..fix.end], "=");
 }
+
+// --- undefined-name ----------------------------------------------------------
+
+#[test]
+fn undefined_name_flags_an_unknown_identifier() {
+    let msgs = findings("undefined-name", "x = undefined_var + 1\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("undefined_var"), "{msgs:?}");
+}
+
+#[test]
+fn undefined_name_resolves_base_and_core_names() {
+    // `println`, `sqrt`, `pi`, and `Int` come from the built-in Base/Core
+    // export snapshot; a plain script using them is clean.
+    assert_eq!(
+        count("undefined-name", "x::Int = 4\nprintln(sqrt(x) * pi)\n"),
+        0
+    );
+}
+
+#[test]
+fn undefined_name_respects_locals_params_and_globals() {
+    assert_eq!(
+        count(
+            "undefined-name",
+            "total = 0\nfunction add(x)\n    y = x + total\n    y\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn undefined_name_allows_use_before_definition_at_top_level() {
+    // Julia resolves globals at call time, so a function may call a sibling
+    // defined later in the file.
+    assert_eq!(count("undefined-name", "g() = h()\nh() = 1\n"), 0);
+}
+
+#[test]
+fn undefined_name_flags_an_unknown_macro() {
+    let msgs = findings("undefined-name", "@nosuchmacro x = 1\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("@nosuchmacro"), "{msgs:?}");
+}
+
+#[test]
+fn undefined_name_resolves_base_macros() {
+    assert_eq!(count("undefined-name", "@assert true\n"), 0);
+}
+
+#[test]
+fn undefined_name_skips_value_reads_inside_macro_calls() {
+    // A macro receives unevaluated expressions and may bind names itself
+    // (`@testset`, DSL macros), so value reads inside a macro call are exempt.
+    // The unknown macro itself is still the one finding here.
+    assert_eq!(
+        count("undefined-name", "@nosuchmacro some_dsl_name + other\n"),
+        1
+    );
+    assert_eq!(count("undefined-name", "@assert never_bound == 1\n"), 0);
+}
+
+#[test]
+fn undefined_name_skips_files_with_unresolvable_whole_module_usings() {
+    // `using Foo` may export anything; without Foo's index nothing in the
+    // file can be called undefined.
+    assert_eq!(count("undefined-name", "using Foo\nnotdefined()\n"), 0);
+    // Relative usings never resolve against the library either.
+    assert_eq!(count("undefined-name", "using .Local\nnotdefined()\n"), 0);
+}
+
+#[test]
+fn undefined_name_still_fires_with_item_list_imports() {
+    // `using Foo: bar` binds exactly `bar`; the file stays checkable and the
+    // unrelated unknown name is still flagged.
+    let src = "using Foo: bar\nbar()\nnotdefined()\n";
+    let msgs = findings("undefined-name", src);
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("notdefined"), "{msgs:?}");
+}
+
+#[test]
+fn undefined_name_skips_files_that_eval() {
+    // `eval`/`@eval` can define names statically invisible to the model.
+    assert_eq!(count("undefined-name", "eval(:(x = 1))\nuses_x() = x\n"), 0);
+    assert_eq!(count("undefined-name", "@eval $name = 1\nmystery()\n"), 0);
+}
+
+#[test]
+fn undefined_name_skips_files_that_include() {
+    // Without project context an `include` splices in unknown definitions.
+    assert_eq!(
+        count("undefined-name", "include(\"defs.jl\")\nfrom_include()\n"),
+        0
+    );
+}
+
+#[test]
+fn undefined_name_skips_module_implicit_names() {
+    // Every module implicitly defines `eval` and `include`; `new` is the
+    // inner-constructor primitive. (The `include` call here is a *literal*
+    // self-include-free file... it also triggers the include bail, so use a
+    // shape that exercises `new` alone.)
+    assert_eq!(
+        count(
+            "undefined-name",
+            "struct P\n    x\n    P(x) = new(x)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn undefined_name_flags_reads_in_string_interpolation() {
+    let msgs = findings("undefined-name", "greet(name) = \"hi $namee\"\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("namee"), "{msgs:?}");
+}
+
+#[test]
+fn undefined_name_leaves_string_macros_alone() {
+    assert_eq!(count("undefined-name", "pattern = r\"a.b\"\n"), 0);
+}
+
+#[test]
+fn undefined_name_is_opt_in() {
+    // Too noisy without project context (a bare file may be an `include`d
+    // fragment reading its host's globals), so the CLI leaves it off unless
+    // selected; the language server enables it for workspace member files.
+    let report = check_source(None, "x = undefined_var\n", &LintConfig::default());
+    assert!(
+        report.diagnostics.is_empty(),
+        "undefined-name must be off by default, got {:?}",
+        report.diagnostics
+    );
+}

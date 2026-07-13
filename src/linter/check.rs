@@ -6,10 +6,14 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
+use std::collections::BTreeMap;
+use std::sync::{Arc, OnceLock};
+
 use crate::config::LintConfig;
 use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
+use crate::index::{PackageIndex, build_system_index};
 use crate::linter::diagnostic::{Diagnostic, Severity};
-use crate::linter::rules::{ResolvedRules, RuleContext};
+use crate::linter::rules::{ResolutionContext, ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
@@ -145,7 +149,16 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
     }
 
     let model = SemanticModel::build(&parsed.cst);
-    let diagnostics = lint_parsed(path, text, &parsed.cst, &model, rules);
+    // The CLI resolves free reads against the built-in Base/Core export
+    // snapshot — deterministic and cheap, where harvesting a real install per
+    // lint run would not be. No workspace context: a bare file may be an
+    // `include`d fragment, which is exactly why `undefined-name` is opt-in
+    // here (the language server, which knows the workspace, enables it).
+    let resolution = Some(ResolutionContext {
+        packages: system_snapshot(),
+        workspace: None,
+    });
+    let diagnostics = lint_parsed(path, text, &parsed.cst, &model, rules, resolution);
 
     let status = if diagnostics.is_empty() {
         LintStatus::Clean
@@ -162,18 +175,33 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
     }
 }
 
+/// The built-in Base/Core export snapshot, built once per process. The
+/// resolution floor for CLI lint runs (and docs generation), where locating
+/// and harvesting a real Julia install would be slow and nondeterministic.
+fn system_snapshot() -> &'static BTreeMap<String, Arc<PackageIndex>> {
+    static SNAPSHOT: OnceLock<BTreeMap<String, Arc<PackageIndex>>> = OnceLock::new();
+    SNAPSHOT.get_or_init(|| build_system_index(None))
+}
+
 /// Run `rules` against an already-parsed *clean* tree (rules need one; the
 /// caller is responsible for gating on parse diagnostics) and filter suppressed
 /// findings. Shared by [`check_text`] and the language server, whose warm path
-/// lints off the salsa-cached tree and model instead of re-parsing.
+/// lints off the salsa-cached tree and model instead of re-parsing (and passes
+/// its own harvested library as the `resolution` context).
 pub fn lint_parsed(
     path: Option<&Path>,
     text: &str,
     root: &SyntaxNode,
     model: &SemanticModel,
     rules: &ResolvedRules,
+    resolution: Option<ResolutionContext<'_>>,
 ) -> Vec<Diagnostic> {
-    let ctx = RuleContext { path, root, model };
+    let ctx = RuleContext {
+        path,
+        root,
+        model,
+        resolution,
+    };
     let raw = rules.run(&ctx);
 
     let suppressions = SuppressionMap::build(text);

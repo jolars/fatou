@@ -176,7 +176,9 @@ impl PackageSource for BTreeMap<String, Arc<PackageIndex>> {
 
 /// Resolves names against one file's [`SemanticModel`] and a [`PackageSource`],
 /// following the shared masking order. Cheap to construct; holds only borrows.
-pub struct Resolver<'a, P: PackageSource> {
+/// `P` may be unsized (`Resolver<'a, dyn PackageSource>`) for callers that
+/// only have a trait object, like the linter's `undefined-name` rule.
+pub struct Resolver<'a, P: PackageSource + ?Sized> {
     model: &'a SemanticModel,
     packages: &'a P,
     /// The enclosing workspace package's index, when the file being resolved is
@@ -198,7 +200,7 @@ struct WorkspaceCtx {
     host: ModulePath,
 }
 
-impl<'a, P: PackageSource> Resolver<'a, P> {
+impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
     pub fn new(model: &'a SemanticModel, packages: &'a P) -> Self {
         Resolver {
             model,

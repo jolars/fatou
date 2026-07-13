@@ -15,7 +15,8 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, R
 
 use crate::config::LintConfig;
 use crate::incremental::Analysis;
-use crate::linter::{self, ResolvedRules, Severity, lint_parsed};
+use crate::linter::rules::ResolutionContext;
+use crate::linter::{self, ResolvedRules, Severity, all_rules, lint_parsed};
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
 use crate::text::{LineIndex, PositionEncoding};
@@ -60,12 +61,25 @@ pub(crate) fn lint_findings_via_db(
         }
         let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
+        // The server resolves free reads against its harvested library, with
+        // the workspace tier when the file belongs to the package under
+        // development. `undefined-name` joins the rule set only then: for a
+        // workspace member the include graph pins the host module, so sibling
+        // and host globals resolve; a loose file may be an `include`d fragment
+        // whose host we cannot know.
+        let workspace = snapshot.workspace_member(path);
+        let rules = server_rules(workspace.is_some());
+        let resolution = Some(ResolutionContext {
+            packages: snapshot,
+            workspace,
+        });
         Some(lint_parsed(
             Some(path),
             text,
             &root,
             model,
-            &default_rules(),
+            &rules,
+            resolution,
         ))
     }));
     match cached {
@@ -76,20 +90,35 @@ pub(crate) fn lint_findings_via_db(
 }
 
 /// The raw lint findings for `text`, re-parsing it; empty on a parse-broken
-/// document (rules need a clean tree).
+/// document (rules need a clean tree). No resolution context: this cold path
+/// serves a racing write, and inventing undefined-name findings without the
+/// library would flash false positives — missing them for one round trip is
+/// the safe failure.
 fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
     let parsed = parse(text);
     if !parsed.diagnostics.is_empty() {
         return Vec::new();
     }
     let model = SemanticModel::build(&parsed.cst);
-    lint_parsed(None, text, &parsed.cst, &model, &default_rules())
+    lint_parsed(None, text, &parsed.cst, &model, &server_rules(false), None)
 }
 
-/// The rule set the server lints with: the defaults, until configuration
-/// discovery lands (`workspace/didChangeConfiguration` + `fatou.toml`).
-fn default_rules() -> ResolvedRules {
-    ResolvedRules::resolve(&LintConfig::default()).0
+/// The rule set the server lints with: the defaults (until configuration
+/// discovery lands — `workspace/didChangeConfiguration` + `fatou.toml`), plus
+/// `undefined-name` for workspace member files, where the server carries the
+/// resolution context that makes the rule sound.
+fn server_rules(workspace_member: bool) -> ResolvedRules {
+    let mut config = LintConfig::default();
+    if workspace_member {
+        config.select = Some(
+            all_rules()
+                .iter()
+                .filter(|rule| rule.default_enabled() || rule.id() == "undefined-name")
+                .map(|rule| rule.id().to_string())
+                .collect(),
+        );
+    }
+    ResolvedRules::resolve(&config).0
 }
 
 fn findings_to_lsp(
@@ -197,6 +226,38 @@ mod tests {
         let broken = "function f(x)\n    tmp = x + 1\n    return x\n";
         assert_eq!(
             compute_lint_diagnostics(broken, PositionEncoding::Utf16),
+            Vec::new()
+        );
+    }
+
+    /// A workspace member file gets the `undefined-name` rule: siblings from
+    /// the package index resolve, a typo is flagged. A non-member file (no
+    /// workspace context) does not run the rule at all.
+    #[test]
+    fn undefined_name_runs_only_for_workspace_members() {
+        use super::super::cross_file::test_support::{member_path, workspace_db};
+
+        let src = "f() = helper() + helprr()\n";
+        let (db, _) = workspace_db(&["helper"], &[("a.jl", src)]);
+        let diags = lint_diagnostics_via_db(
+            &db.snapshot(),
+            &member_path("a.jl"),
+            src,
+            PositionEncoding::Utf16,
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("undefined-name".to_string()))
+        );
+        assert!(diags[0].message.contains("helprr"));
+
+        // The same source outside any workspace: no undefined-name findings.
+        let path = Path::new("/work/loose.jl");
+        let mut plain = IncrementalDatabase::default();
+        plain.upsert_file(path, src.to_string());
+        assert_eq!(
+            lint_diagnostics_via_db(&plain.snapshot(), path, src, PositionEncoding::Utf16),
             Vec::new()
         );
     }

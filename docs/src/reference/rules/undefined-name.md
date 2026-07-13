@@ -1,0 +1,19 @@
+# `undefined-name`
+
+Flag an identifier that no resolution tier provides: not a local or a file binding, not a workspace sibling, not a whole-module `using`'s export, and not a Base/Core name. Such a read raises `UndefVarError` at runtime. The whole file is skipped when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve — in those cases any name may exist; value reads inside macro calls and quoted code are likewise exempt. Off by default: the rule needs project context to be sound, so the language server enables it for workspace member files, while the CLI (resolving against a built-in Base/Core snapshot) leaves it opt-in for self-contained scripts.
+
+`raduis` is a typo; no tier resolves it:
+
+```julia
+function area(radius)
+    return pi * raduis^2
+end
+```
+
+```text
+warning: undefined-name
+ --> example.jl:2:17
+  |
+2 |     return pi * raduis^2
+  |                 ^^^^^^ `raduis` is not defined
+```

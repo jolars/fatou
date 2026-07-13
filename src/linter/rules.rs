@@ -22,9 +22,12 @@
 //!    second list to keep in sync.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::config::LintConfig;
+use crate::index::PackageIndex;
 use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::resolve::{ModulePath, PackageSource};
 use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
@@ -50,6 +53,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UnusedImport),
         Box::new(correctness::DuplicateArgument),
         Box::new(correctness::UnusedArgument),
+        Box::new(correctness::UndefinedName),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
     ]
@@ -66,6 +70,21 @@ pub struct RuleContext<'a> {
     pub path: Option<&'a Path>,
     pub root: &'a SyntaxNode,
     pub model: &'a SemanticModel,
+    /// The name-resolution context, when the caller has one: the harvested
+    /// library (Base/Core at minimum) plus the enclosing workspace package.
+    /// `None` leaves resolution-dependent rules (`undefined-name`) silent.
+    pub resolution: Option<ResolutionContext<'a>>,
+}
+
+/// What a resolution-dependent rule resolves free reads against: a
+/// [`PackageSource`] (the CLI passes the built-in Base/Core export snapshot;
+/// the language server its harvested library) and, when the file belongs to a
+/// package under development, that package plus the file's host module path —
+/// the same tier-2 context every LSP feature threads through
+/// [`crate::resolve::Resolver::with_workspace`].
+pub struct ResolutionContext<'a> {
+    pub packages: &'a dyn PackageSource,
+    pub workspace: Option<(Arc<PackageIndex>, ModulePath)>,
 }
 
 pub trait Rule: Send + Sync {

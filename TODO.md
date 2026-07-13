@@ -116,9 +116,18 @@ Ready now (no new infrastructure):
 
 Blocked on future infrastructure:
 
-- [ ] `undefined-name` (correctness): unresolved identifier. Blocked on name
-  resolution against the Base/stdlib/package index (LSP Phase 3); already
-  tracked in the LSP roadmap as the undefined-name lint. (MissingRef)
+- [x] `undefined-name` (correctness, sem): free read no resolution tier
+  provides, via the shared `Resolver` masking order (locals/imports →
+  workspace siblings → `using` exports → Base/Core) — Phase 3 unblocked it.
+  `RuleContext` gained an optional `ResolutionContext` (a `dyn PackageSource`
+  plus the workspace member context); the CLI resolves against the embedded
+  Base/Core snapshot, the LSP against its harvested library. Soundness
+  bail-outs: unresolvable whole-module `using`, `eval`/`@eval`, `include`
+  without a workspace (or with a dynamic path), value reads inside macro
+  calls, quoted code, and the module-implicit `eval`/`include`/`new`/`ccall`.
+  Warning; `default_enabled() == false` (a bare file may be an `include`d
+  fragment) — the LSP enables it per file for workspace members, where the
+  include graph pins the host module. (MissingRef)
 - [ ] `call-arity` (correctness): call-site positional/keyword counts vs. the
   method table. Blocked on method indexing plus an environment of Base
   signatures. StaticLint's noisiest check in practice (macros, callable
@@ -570,7 +579,7 @@ The payoff phase, in roughly arity's shipping order.
   *Deferred:* no debounce beyond burst-draining (each source event re-harvests,
   deduped on an unchanged index), and an open buffer ignores on-disk changes
   until it closes.
-- [ ] Diagnostics maturation: pull diagnostics (`textDocument/diagnostic`)
+- [x] Diagnostics maturation: pull diagnostics (`textDocument/diagnostic`)
   with push fallback; lint findings as diagnostics with quick-fix code
   actions (needs the Linter section's first rules); first semantic
   diagnostics (undefined name—masking-aware, unused binding, unused import).
@@ -611,7 +620,14 @@ The payoff phase, in roughly arity's shipping order.
   `workspace/diagnostic/refresh` when the client supports it. A client
   without the capability keeps the push pipeline unchanged. Locked by units
   (`src/lsp/pull_diagnostics.rs`, `src/lsp/server.rs`) plus
-  `serves_pull_diagnostics` (`tests/lsp.rs`).
+  `serves_pull_diagnostics` (`tests/lsp.rs`). *The undefined-name diagnostic
+  has landed* (see the Linter roadmap's `undefined-name` entry): the server
+  enables the rule per file for workspace members, resolving through the
+  shared masking order with the harvested library and the file's host module
+  (`server_rules`, `src/lsp/lint.rs`; locked by
+  `undefined_name_runs_only_for_workspace_members`). With unused-binding and
+  unused-import already shipping as rules, all three first semantic
+  diagnostics are live.
 
 ### Phase 6: later polish and Julia-specific ambitions
 
