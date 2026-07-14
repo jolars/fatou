@@ -715,7 +715,6 @@ The payoff phase, in roughly arity's shipping order.
   `Base.show` surfacing workspace methods harvested with `owner`
   (`Base.show(io, x) = ...`), not just the target package's own definitions
   (same wrinkle as hover).
-- [ ] Inlay hints for keyword-argument names and elided defaults.
 - [ ] Document links for `include("...")` paths.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
