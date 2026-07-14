@@ -444,7 +444,7 @@ The payoff phase, in roughly arity's shipping order.
 
 ### Phase 5: project and workspace level
 
-- [ ] Project graph: workspace membership from `initialize`, `include()`
+- [x] Project graph: workspace membership from `initialize`, `include()`
   edges, package-project awareness (a workspace `Project.toml` means the
   package under development; index its module tree like a depot package).
   *Package-project awareness has landed:* `Environment::dev_package`
