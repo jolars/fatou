@@ -60,11 +60,13 @@ leverage.
   IDs surfaced through the same typo warning as `select`/`ignore`. Locked by
   units in `src/linter/rules.rs` + `src/config.rs` and the severity block in
   `tests/linter_rules.rs`. Same latent redundancy still exists in arity.
-- [ ] Precompute the node-dispatch table. `run_rules` rebuilds the
-  `Vec<Vec<usize>>` (sized `SyntaxKind::COUNT`) from `interests()` on every file;
-  the interests are fixed once `ResolvedRules` is built. Move the table into
-  `ResolvedRules` so the LSP's per-keystroke path drops a per-file allocation and
-  rebuild. Also applies to arity.
+- [x] Precompute the node-dispatch table. The `Vec<Vec<usize>>` (sized
+  `SyntaxKind::COUNT`) is now built from `interests()` once in
+  `ResolvedRules::resolve` instead of on every file (`run_rules` folded into
+  `ResolvedRules::run`), and the LSP caches its two rule sets (default, and
+  +`undefined-name` for workspace members) in `LazyLock` statics, so the
+  per-keystroke path no longer re-resolves rules or rebuilds the table. Still
+  applies to arity.
 - [ ] Reconcile the `Diagnostic` shape with arity's when the autofix engine or
   `annotate-snippets` lands: `rule: &'static str` (no per-finding `String`),
   `TextRange` instead of raw `usize` offsets, and a structured message

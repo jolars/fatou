@@ -10,6 +10,7 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range};
 
@@ -78,7 +79,7 @@ pub(crate) fn lint_findings_via_db(
             text,
             &root,
             model,
-            &rules,
+            rules,
             resolution,
         ))
     }));
@@ -100,25 +101,38 @@ fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
         return Vec::new();
     }
     let model = SemanticModel::build(&parsed.cst);
-    lint_parsed(None, text, &parsed.cst, &model, &server_rules(false), None)
+    lint_parsed(None, text, &parsed.cst, &model, server_rules(false), None)
 }
 
 /// The rule set the server lints with: the defaults (until configuration
 /// discovery lands — `workspace/didChangeConfiguration` + `fatou.toml`), plus
 /// `undefined-name` for workspace member files, where the server carries the
 /// resolution context that makes the rule sound.
-fn server_rules(workspace_member: bool) -> ResolvedRules {
-    let mut config = LintConfig::default();
+///
+/// Both sets are fixed for the process lifetime today, so they are resolved
+/// once (dispatch table included) rather than per lint run; configuration
+/// discovery will move them into server state with the same lifetime.
+fn server_rules(workspace_member: bool) -> &'static ResolvedRules {
+    static DEFAULT_RULES: LazyLock<ResolvedRules> =
+        LazyLock::new(|| ResolvedRules::resolve(&LintConfig::default()).0);
+    static WORKSPACE_RULES: LazyLock<ResolvedRules> = LazyLock::new(|| {
+        let config = LintConfig {
+            select: Some(
+                all_rules()
+                    .iter()
+                    .filter(|rule| rule.default_enabled() || rule.id() == "undefined-name")
+                    .map(|rule| rule.id().to_string())
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        ResolvedRules::resolve(&config).0
+    });
     if workspace_member {
-        config.select = Some(
-            all_rules()
-                .iter()
-                .filter(|rule| rule.default_enabled() || rule.id() == "undefined-name")
-                .map(|rule| rule.id().to_string())
-                .collect(),
-        );
+        &WORKSPACE_RULES
+    } else {
+        &DEFAULT_RULES
     }
-    ResolvedRules::resolve(&config).0
 }
 
 fn findings_to_lsp(

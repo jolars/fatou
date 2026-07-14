@@ -1,9 +1,9 @@
 //! Lint rule trait, registry, and per-file dispatch.
 //!
 //! Rules run over a file in a single shared CST traversal: each rule declares
-//! the [`SyntaxKind`]s it cares about via [`Rule::interests`], and [`run_rules`]
-//! walks the tree once, calling [`Rule::check`] on every element whose kind a
-//! rule subscribed to. Rules that work off the whole file rather than node shape
+//! the [`SyntaxKind`]s it cares about via [`Rule::interests`], and
+//! [`ResolvedRules::run`] walks the tree once, calling [`Rule::check`] on every
+//! element whose kind a rule subscribed to. Rules that work off the whole file rather than node shape
 //! (semantic-model queries, comment directives) leave `interests` empty and
 //! override [`Rule::check_file`], which runs once per file after the walk.
 //!
@@ -112,7 +112,7 @@ pub trait Rule: Send + Sync {
         &[]
     }
 
-    /// The `SyntaxKind`s this rule subscribes to. During [`run_rules`]' single
+    /// The `SyntaxKind`s this rule subscribes to. During [`ResolvedRules::run`]'s single
     /// shared traversal, [`Rule::check`] is invoked once for every element whose
     /// kind appears here. The default (`&[]`) opts out of node dispatch entirely
     /// — appropriate for rules that work off the whole file via
@@ -147,6 +147,13 @@ struct ConfiguredRule {
 /// each carrying its resolved severity.
 pub struct ResolvedRules {
     rules: Vec<ConfiguredRule>,
+    /// Node-dispatch table: kind discriminant -> indices into `rules` of the
+    /// subscribed rules. `SyntaxKind` is a contiguous `#[repr(u16)]`, so a
+    /// flat Vec indexed by `kind as usize` beats a hash map. Built once here
+    /// so [`ResolvedRules::run`]'s per-file path allocates nothing for it.
+    by_kind: Vec<Vec<usize>>,
+    /// Whether any rule subscribes to node dispatch at all.
+    any_node_rules: bool,
 }
 
 impl ResolvedRules {
@@ -178,7 +185,7 @@ impl ResolvedRules {
             }
         }
 
-        let rules = all
+        let rules: Vec<ConfiguredRule> = all
             .into_iter()
             .filter(|rule| {
                 let enabled = match select {
@@ -196,69 +203,72 @@ impl ResolvedRules {
                 ConfiguredRule { rule, severity }
             })
             .collect();
-        (Self { rules }, unknown)
+
+        let mut by_kind: Vec<Vec<usize>> = vec![Vec::new(); SyntaxKind::COUNT];
+        let mut any_node_rules = false;
+        for (i, configured) in rules.iter().enumerate() {
+            for kind in configured.rule.interests() {
+                by_kind[*kind as usize].push(i);
+                any_node_rules = true;
+            }
+        }
+
+        (
+            Self {
+                rules,
+                by_kind,
+                any_node_rules,
+            },
+            unknown,
+        )
     }
 
     /// Run every configured rule against `ctx` in one shared CST traversal.
     /// Diagnostics carry `ctx.path` and are stably sorted by `(start, end,
     /// rule)`.
     pub fn run(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
-        run_rules(&self.rules, ctx)
+        let mut all = Vec::new();
+
+        // Single shared traversal feeding every node-shape rule, dispatched
+        // off the precomputed `by_kind` table. Visits tokens too
+        // (`descendants_with_tokens`) so token-level rules can subscribe to
+        // e.g. `IDENT` or `COMMENT`.
+        //
+        // Severity is stamped centrally, right after each rule call, onto
+        // whatever that call pushed: rules never choose it (see
+        // [`Diagnostic::new`]).
+        if self.any_node_rules {
+            for el in ctx.root.descendants_with_tokens() {
+                for &i in &self.by_kind[el.kind() as usize] {
+                    let before = all.len();
+                    self.rules[i].rule.check(&el, ctx, &mut all);
+                    stamp_severity(&mut all[before..], self.rules[i].severity);
+                }
+            }
+        }
+
+        // Whole-file pass for model-/comment-driven rules.
+        for configured in &self.rules {
+            let before = all.len();
+            configured.rule.check_file(ctx, &mut all);
+            stamp_severity(&mut all[before..], configured.severity);
+        }
+
+        // Stamp the file path onto every finding centrally; rules leave it
+        // `None`.
+        if let Some(path) = ctx.path {
+            for diag in &mut all {
+                diag.path = Some(path.to_path_buf());
+            }
+        }
+
+        all.sort_by(|a, b| (a.start, a.end, &a.rule).cmp(&(b.start, b.end, &b.rule)));
+        all
     }
 
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
-}
-
-/// Run `rules` against one file's CST + model. See [`ResolvedRules::run`].
-fn run_rules(rules: &[ConfiguredRule], ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
-    let mut all = Vec::new();
-
-    // Node-dispatch table: kind discriminant -> indices of subscribed rules.
-    // `SyntaxKind` is a contiguous `#[repr(u16)]`, so a flat Vec indexed by
-    // `kind as usize` beats a hash map.
-    let mut by_kind: Vec<Vec<usize>> = vec![Vec::new(); SyntaxKind::COUNT];
-    let mut any_node_rules = false;
-    for (i, configured) in rules.iter().enumerate() {
-        for kind in configured.rule.interests() {
-            by_kind[*kind as usize].push(i);
-            any_node_rules = true;
-        }
-    }
-
-    // Single shared traversal feeding every node-shape rule. Visits tokens too
-    // (`descendants_with_tokens`) so token-level rules can subscribe to e.g.
-    // `IDENT` or `COMMENT`.
-    //
-    // Severity is stamped centrally, right after each rule call, onto whatever
-    // that call pushed: rules never choose it (see [`Diagnostic::new`]).
-    if any_node_rules {
-        for el in ctx.root.descendants_with_tokens() {
-            for &i in &by_kind[el.kind() as usize] {
-                let before = all.len();
-                rules[i].rule.check(&el, ctx, &mut all);
-                stamp_severity(&mut all[before..], rules[i].severity);
-            }
-        }
-    }
-
-    // Whole-file pass for model-/comment-driven rules.
-    for configured in rules {
-        let before = all.len();
-        configured.rule.check_file(ctx, &mut all);
-        stamp_severity(&mut all[before..], configured.severity);
-    }
-
-    // Stamp the file path onto every finding centrally; rules leave it `None`.
-    if let Some(path) = ctx.path {
-        for diag in &mut all {
-            diag.path = Some(path.to_path_buf());
-        }
-    }
-
-    all.sort_by(|a, b| (a.start, a.end, &a.rule).cmp(&(b.start, b.end, &b.rule)));
-    all
 }
 
 /// Stamp `severity` onto the findings a rule just pushed. Severity is an

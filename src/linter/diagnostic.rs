@@ -59,7 +59,7 @@ pub struct Diagnostic {
 impl Diagnostic {
     /// A finding for `rule` spanning `start..end`. `path` and `severity` are
     /// stamped centrally by the engine after the rule runs (see
-    /// `linter::rules::run_rules`), so rules never set either; the values here
+    /// `ResolvedRules::run`), so rules never set either; the values here
     /// are placeholders.
     pub fn new(rule: &str, start: usize, end: usize, message: String) -> Self {
         Self {
