@@ -23,8 +23,14 @@ pub(crate) fn to_path(uri: &Uri) -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn from_uri_path(p: &str) -> PathBuf {
-    // "/C:/Users/x" → "C:\Users\x"
-    PathBuf::from(p.strip_prefix('/').unwrap_or(p).replace('/', "\\"))
+    // "/C:/Users/x" → "C:\Users\x"; without a drive letter the leading slash
+    // stays, so "/work/x" maps to the rooted "\work\x" rather than a relative
+    // path.
+    let bytes = p.as_bytes();
+    let has_drive =
+        bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':';
+    let trimmed = if has_drive { &p[1..] } else { p };
+    PathBuf::from(trimmed.replace('/', "\\"))
 }
 
 #[cfg(not(windows))]
@@ -69,6 +75,23 @@ mod tests {
     fn file_uri_decodes_to_path() {
         let uri = Uri::from_str("file:///work/some%20dir/a.jl").unwrap();
         assert_eq!(to_path(&uri), Some(PathBuf::from("/work/some dir/a.jl")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn drive_letter_uri_decodes_to_path() {
+        let uri = Uri::from_str("file:///C:/work/a%20b.jl").unwrap();
+        assert_eq!(to_path(&uri), Some(PathBuf::from("C:\\work\\a b.jl")));
+        // Percent-encoded drive colons (as sent by VS Code) decode the same.
+        let uri = Uri::from_str("file:///c%3A/work/a.jl").unwrap();
+        assert_eq!(to_path(&uri), Some(PathBuf::from("c:\\work\\a.jl")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn driveless_uri_stays_rooted() {
+        let uri = Uri::from_str("file:///work/a.jl").unwrap();
+        assert_eq!(to_path(&uri), Some(PathBuf::from("\\work\\a.jl")));
     }
 
     #[test]
