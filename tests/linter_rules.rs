@@ -731,3 +731,89 @@ fn constant_condition_ignores_literals_in_value_position() {
     assert_eq!(count("constant-condition", "f(true)\n"), 0);
     assert_eq!(count("constant-condition", "return true\n"), 0);
 }
+
+// --- module-shadows-parent ---------------------------------------------------
+
+#[test]
+fn module_shadows_parent_flags_nested_same_name() {
+    let msgs = findings("module-shadows-parent", "module A\nmodule A\nend\nend\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(
+        msgs[0].contains("`A`"),
+        "message names the module: {msgs:?}"
+    );
+}
+
+#[test]
+fn module_shadows_parent_flags_baremodule_forms() {
+    // Both keywords produce the same module shape, in either position.
+    assert_eq!(
+        count(
+            "module-shadows-parent",
+            "baremodule A\nmodule A\nend\nend\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "module-shadows-parent",
+            "module A\nbaremodule A\nend\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn module_shadows_parent_ignores_distinct_names() {
+    assert_eq!(
+        count("module-shadows-parent", "module A\nmodule B\nend\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn module_shadows_parent_ignores_top_level_module() {
+    assert_eq!(count("module-shadows-parent", "module A\nend\n"), 0);
+}
+
+#[test]
+fn module_shadows_parent_ignores_grandparent_match() {
+    // Only the direct parent counts: `A.B.A` is unusual but unambiguous.
+    assert_eq!(
+        count(
+            "module-shadows-parent",
+            "module A\nmodule B\nmodule A\nend\nend\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn module_shadows_parent_flags_each_shadowing_sibling() {
+    assert_eq!(
+        count(
+            "module-shadows-parent",
+            "module A\nmodule A\nend\nmodule A\nend\nend\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn module_shadows_parent_stays_silent_in_quotes_and_macro_calls() {
+    // Quoted code is data, and a macro may rewrite its argument into anything.
+    assert_eq!(
+        count(
+            "module-shadows-parent",
+            "module A\nquote\nmodule A\nend\nend\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "module-shadows-parent",
+            "module A\n@eval module A\nend\nend\n"
+        ),
+        0
+    );
+}

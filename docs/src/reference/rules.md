@@ -11,3 +11,4 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)
 - [`constant-condition`](rules/constant-condition.md)
+- [`module-shadows-parent`](rules/module-shadows-parent.md)

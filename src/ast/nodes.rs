@@ -604,6 +604,14 @@ impl Signature {
     }
 }
 
+impl ModuleDef {
+    /// The module's name, e.g. `M` in `module M ... end`. (The body is
+    /// [`HasBody::body`].)
+    pub fn name(&self) -> Option<Name> {
+        support::child::<Signature>(&self.0).and_then(|sig| support::child(&sig.0))
+    }
+}
+
 impl ForBinding {
     /// The loop variable/pattern (left of `in`/`=`).
     pub fn pattern(&self) -> Option<Expr> {
@@ -757,6 +765,15 @@ mod tests {
             .signature()
             .unwrap();
         assert!(Expr::cast(sig.syntax().clone()).is_none());
+    }
+
+    #[test]
+    fn module_def_name_and_body() {
+        let module: ModuleDef = find("module M\nx = 1\nend\n");
+        assert_eq!(module.name().unwrap().syntax().text(), "M");
+        assert!(module.body().is_some());
+        let bare: ModuleDef = find("baremodule B\nend\n");
+        assert_eq!(bare.name().unwrap().syntax().text(), "B");
     }
 
     #[test]

@@ -107,9 +107,12 @@ Ready now (no new infrastructure):
   Warning; exempts `while true` (Julia's idiomatic infinite loop) but still
   flags `while false`. Deliberate `false && expr` sites suppress with
   `# fatou-ignore`. No fix. (ConstIfCondition, PointlessOR, PointlessAND)
-- [ ] `module-shadows-parent` (suspicious, sem): module named the same as its
-  parent module; `SemanticModel::enclosing_module_path` answers this
-  directly. (InvalidModuleName)
+- [x] `module-shadows-parent` (suspicious, sem): nested `module`/`baremodule`
+  named the same as its direct parent module (the last component of
+  `SemanticModel::enclosing_module_path` at the definition). Warning; stays
+  silent in quoted code and macro calls (`@eval module A` is the deliberate
+  way to build one). No fix (renaming is a semantic rewrite). Grew
+  `ModuleDef::name()` in the AST wrappers. (InvalidModuleName)
 - [ ] `noteq-definition` (correctness, syn): defining `!=` (or `≠`) instead
   of `==`; `!=` is `const != = !(==)` and should not be overloaded. (NotEqDef)
 - [ ] `unused-type-parameter` (correctness, sem): `where {T}` with `T` never
