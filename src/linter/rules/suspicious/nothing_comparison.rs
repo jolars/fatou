@@ -69,12 +69,10 @@ impl Rule for NothingComparison {
             return;
         }
 
-        let range = bin.syntax().text_range();
         let op_range = op.syntax().text_range();
         let mut diag = Diagnostic::new(
             self.id(),
-            range.start().into(),
-            range.end().into(),
+            bin.syntax().text_range(),
             format!("comparison against `nothing` by value; use `{replacement}` or `isnothing`"),
         );
         diag.fixes.push(Fix {

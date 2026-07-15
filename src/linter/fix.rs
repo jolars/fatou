@@ -112,18 +112,12 @@ pub fn fix_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::linter::diagnostic::Severity;
+    use rowan::TextRange;
 
     fn diag(fixes: Vec<Fix>) -> Diagnostic {
         Diagnostic {
-            path: None,
-            start: 0,
-            end: 0,
-            rule: "test".to_string(),
-            severity: Severity::Warning,
-            message: String::new(),
             fixes,
-            suppressed: false,
+            ..Diagnostic::new("test", TextRange::empty(0.into()), "")
         }
     }
 

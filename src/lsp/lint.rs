@@ -162,13 +162,13 @@ pub(crate) fn finding_to_lsp(
         .then(|| vec![DiagnosticTag::UNNECESSARY]);
     Diagnostic {
         range: Range::new(
-            line_index.byte_to_position(finding.start, encoding),
-            line_index.byte_to_position(finding.end, encoding),
+            line_index.byte_to_position(finding.range.start().into(), encoding),
+            line_index.byte_to_position(finding.range.end().into(), encoding),
         ),
         severity: Some(severity_to_lsp(finding.severity)),
-        code: Some(NumberOrString::String(finding.rule.clone())),
+        code: Some(NumberOrString::String(finding.rule.to_string())),
         source: Some("fatou".to_string()),
-        message: finding.message.clone(),
+        message: finding.message.body.clone(),
         tags,
         ..Default::default()
     }

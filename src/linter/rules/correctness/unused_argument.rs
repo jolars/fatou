@@ -76,8 +76,7 @@ impl Rule for UnusedArgument {
             }
             sink.push(Diagnostic::new(
                 self.id(),
-                binding.def_range.start().into(),
-                binding.def_range.end().into(),
+                binding.def_range,
                 format!("function argument `{}` is never used", binding.name),
             ));
         }

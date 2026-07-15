@@ -48,8 +48,7 @@ impl Rule for DuplicateArgument {
                 if seen.contains(&binding.name.as_str()) {
                     sink.push(Diagnostic::new(
                         self.id(),
-                        binding.def_range.start().into(),
-                        binding.def_range.end().into(),
+                        binding.def_range,
                         format!("argument name `{}` is used more than once", binding.name),
                     ));
                 } else {

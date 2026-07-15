@@ -47,8 +47,7 @@ impl Rule for UnusedBinding {
             }
             sink.push(Diagnostic::new(
                 self.id(),
-                binding.def_range.start().into(),
-                binding.def_range.end().into(),
+                binding.def_range,
                 format!(
                     "local variable `{}` is assigned but never used",
                     binding.name

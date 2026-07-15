@@ -49,7 +49,7 @@ fn render_concise(
         let path = diag.path.as_deref();
         let (line, column) = match source_for(path) {
             Some(text) => {
-                let lc = LineIndex::new(&text).byte_to_lc(diag.start);
+                let lc = LineIndex::new(&text).byte_to_lc(diag.range.start().into());
                 (lc.line, lc.column)
             }
             None => (0, 0),
@@ -62,7 +62,7 @@ fn render_concise(
             "{location}:{line}:{column}: {}[{}] {}",
             diag.severity.label(),
             diag.rule,
-            diag.message
+            diag.message.body
         );
     }
     out
@@ -86,7 +86,7 @@ fn render_pretty(
     }
     let mut out = String::new();
     for (path, mut diags) in by_path {
-        diags.sort_by_key(|d| (d.start, d.end));
+        diags.sort_by_key(|d| (d.range.start(), d.range.end()));
         let origin = path
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "<stdin>".to_string());
@@ -98,7 +98,7 @@ fn render_pretty(
                     "{origin}: {}[{}] {}",
                     d.severity.label(),
                     d.rule,
-                    d.message
+                    d.message.body
                 );
             }
             continue;
@@ -106,14 +106,17 @@ fn render_pretty(
         for d in &diags {
             let snippet = Snippet::source(&source).path(&origin).annotation(
                 AnnotationKind::Primary
-                    .span(d.start..d.end)
-                    .label(&d.message),
+                    .span(usize::from(d.range.start())..usize::from(d.range.end()))
+                    .label(&d.message.body),
             );
             let group = severity_level(d.severity)
-                .primary_title(d.rule.as_str())
+                .primary_title(d.rule)
                 .element(snippet);
             let rendered = renderer.render(&[group]);
             let _ = writeln!(out, "{rendered}");
+            if let Some(suggestion) = &d.message.suggestion {
+                let _ = writeln!(out, "  = help: {suggestion}");
+            }
             for fix in &d.fixes {
                 let _ = writeln!(out, "  = help: {}", fix.description);
             }
@@ -135,18 +138,10 @@ fn severity_level(s: Severity) -> Level<'static> {
 mod tests {
     use super::*;
     use crate::linter::diagnostic::{Applicability, Fix};
+    use rowan::TextRange;
 
-    fn warning(start: usize, end: usize, rule: &str, message: &str) -> Diagnostic {
-        Diagnostic {
-            path: None,
-            start,
-            end,
-            rule: rule.to_string(),
-            severity: Severity::Warning,
-            message: message.to_string(),
-            fixes: Vec::new(),
-            suppressed: false,
-        }
+    fn warning(start: u32, end: u32, rule: &'static str, message: &str) -> Diagnostic {
+        Diagnostic::new(rule, TextRange::new(start.into(), end.into()), message)
     }
 
     #[test]

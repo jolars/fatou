@@ -46,8 +46,7 @@ impl Rule for UnusedImport {
             }
             sink.push(Diagnostic::new(
                 self.id(),
-                binding.def_range.start().into(),
-                binding.def_range.end().into(),
+                binding.def_range,
                 format!("`{}` is imported but never used", binding.name),
             ));
         }

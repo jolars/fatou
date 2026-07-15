@@ -54,12 +54,10 @@ impl Rule for AssignmentInCondition {
         };
 
         let range = op.syntax().text_range();
-        let assign_range = assign.syntax().text_range();
         let mut diag = Diagnostic::new(
             self.id(),
-            assign_range.start().into(),
-            assign_range.end().into(),
-            "assignment used as a condition; did you mean `==`?".to_string(),
+            assign.syntax().text_range(),
+            "assignment used as a condition; did you mean `==`?",
         );
         diag.fixes.push(Fix {
             description: "Replace `=` with `==`".to_string(),

@@ -55,11 +55,12 @@ fn actions_for(
     encoding: PositionEncoding,
 ) -> Vec<CodeActionOrCommand> {
     let requested = lsp_range_to_text_range(text, range, encoding);
-    let (req_start, req_end) = (usize::from(requested.start()), usize::from(requested.end()));
     let line_index = LineIndex::new(text);
     findings
         .iter()
-        .filter(|finding| finding.start <= req_end && req_start <= finding.end)
+        .filter(|finding| {
+            finding.range.start() <= requested.end() && requested.start() <= finding.range.end()
+        })
         .flat_map(|finding| {
             finding
                 .fixes
@@ -200,7 +201,11 @@ mod tests {
                 end: 2,
                 applicability: Applicability::Unsafe,
             }],
-            ..linter::Diagnostic::new("test-rule", 0, 2, "message".to_string())
+            ..linter::Diagnostic::new(
+                "test-rule",
+                rowan::TextRange::new(0.into(), 2.into()),
+                "message",
+            )
         };
         let text = "== x\n";
         let action = action_for_fix(

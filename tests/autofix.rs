@@ -3,9 +3,7 @@
 //! synthetic diagnostics.
 
 use fatou::config::LintConfig;
-use fatou::linter::{
-    Applicability, Diagnostic, Fix, Severity, apply_fixes, check_source, fix_source,
-};
+use fatou::linter::{Applicability, Diagnostic, Fix, apply_fixes, check_source, fix_source};
 
 fn select(rule: &str) -> LintConfig {
     LintConfig {
@@ -51,12 +49,6 @@ fn safe_fix_applies_by_default() {
 #[test]
 fn unsafe_fix_requires_opt_in() {
     let diag = Diagnostic {
-        path: None,
-        start: 0,
-        end: 3,
-        rule: "synthetic".to_string(),
-        severity: Severity::Warning,
-        message: String::new(),
         fixes: vec![Fix {
             description: "rewrite".to_string(),
             content: "xyz".to_string(),
@@ -64,7 +56,7 @@ fn unsafe_fix_requires_opt_in() {
             end: 3,
             applicability: Applicability::Unsafe,
         }],
-        suppressed: false,
+        ..Diagnostic::new("synthetic", rowan::TextRange::new(0.into(), 3.into()), "")
     };
 
     let withheld = apply_fixes("abc", std::slice::from_ref(&diag), false);

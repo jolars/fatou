@@ -21,7 +21,7 @@ pub use check::{
     LintError, LintFileReport, LintResult, LintStatus, check_document, check_paths,
     check_paths_with_config, check_source, lint_parsed,
 };
-pub use diagnostic::{Applicability, Diagnostic, Fix, Severity};
+pub use diagnostic::{Applicability, Diagnostic, Fix, Severity, ViolationData};
 pub use docs::render_rule_doc;
 pub use fix::{Applied, FixOutcome, apply_fixes, fix_source};
 pub use render::{OutputMode, render_findings};

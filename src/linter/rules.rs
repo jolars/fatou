@@ -262,7 +262,7 @@ impl ResolvedRules {
             }
         }
 
-        all.sort_by(|a, b| (a.start, a.end, &a.rule).cmp(&(b.start, b.end, &b.rule)));
+        all.sort_by_key(|d| (d.range.start(), d.range.end(), d.rule));
         all
     }
 

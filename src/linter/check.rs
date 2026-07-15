@@ -12,7 +12,9 @@ use std::sync::{Arc, OnceLock};
 use crate::config::LintConfig;
 use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
 use crate::index::{PackageIndex, build_system_index};
-use crate::linter::diagnostic::{Diagnostic, Severity};
+use rowan::TextRange;
+
+use crate::linter::diagnostic::{Diagnostic, Severity, ViolationData};
 use crate::linter::rules::{ResolutionContext, ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
@@ -129,14 +131,12 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
             .diagnostics
             .iter()
             .map(|diag| Diagnostic {
-                path: path.map(Path::to_path_buf),
-                start: diag.start,
-                end: diag.end,
-                rule: PARSE_ERROR_RULE.to_string(),
+                rule: PARSE_ERROR_RULE,
                 severity: Severity::Error,
-                message: diag.message.clone(),
+                path: path.map(Path::to_path_buf),
+                range: TextRange::new((diag.start as u32).into(), (diag.end as u32).into()),
+                message: ViolationData::new(PARSE_ERROR_RULE, diag.message.clone()),
                 fixes: Vec::new(),
-                suppressed: false,
             })
             .collect();
         return LintFileReport {
@@ -208,8 +208,8 @@ pub fn lint_parsed(
     let line_index = LineIndex::new(text);
     raw.into_iter()
         .filter(|diag| {
-            let line = line_index.byte_to_lc(diag.start).line;
-            !suppressions.is_suppressed(&diag.rule, line)
+            let line = line_index.byte_to_lc(diag.range.start().into()).line;
+            !suppressions.is_suppressed(diag.rule, line)
         })
         .collect()
 }
@@ -235,6 +235,6 @@ mod tests {
         let diag = &report.diagnostics[0];
         assert_eq!(diag.rule, PARSE_ERROR_RULE);
         assert_eq!(diag.severity, Severity::Error);
-        assert!(!diag.message.is_empty());
+        assert!(!diag.message.body.is_empty());
     }
 }

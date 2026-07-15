@@ -16,7 +16,7 @@ fn findings(rule: &str, src: &str) -> Vec<String> {
         .diagnostics
         .into_iter()
         .filter(|d| d.rule == rule)
-        .map(|d| d.message)
+        .map(|d| d.message.body)
         .collect()
 }
 

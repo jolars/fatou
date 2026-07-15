@@ -131,8 +131,7 @@ impl Rule for UndefinedName {
                 };
                 sink.push(Diagnostic::new(
                     self.id(),
-                    ident.range.start().into(),
-                    ident.range.end().into(),
+                    ident.range,
                     format!("`{display}` is not defined"),
                 ));
             }
@@ -324,7 +323,7 @@ mod tests {
         };
         let mut sink = Vec::new();
         UndefinedName.check_file(&ctx, &mut sink);
-        sink.into_iter().map(|d| d.message).collect()
+        sink.into_iter().map(|d| d.message.body).collect()
     }
 
     #[test]

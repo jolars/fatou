@@ -67,10 +67,15 @@ leverage.
   +`undefined-name` for workspace members) in `LazyLock` statics, so the
   per-keystroke path no longer re-resolves rules or rebuilds the table. Still
   applies to arity.
-- [ ] Reconcile the `Diagnostic` shape with arity's when the autofix engine or
-  `annotate-snippets` lands: `rule: &'static str` (no per-finding `String`),
-  `TextRange` instead of raw `usize` offsets, and a structured message
-  (`name`/`body`/`suggestion`) for richer LSP code actions.
+- [x] Reconcile the `Diagnostic` shape with arity's: `rule: &'static str` (no
+  per-finding `String`), `range: TextRange` instead of raw `usize` offsets
+  (serialized as `{start, end}` like arity's), and a structured
+  `ViolationData` message (`name`/`body`/`suggestion`; rules default the name
+  to the rule ID via `Diagnostic::new`, and the pretty renderer prints a
+  suggestion as a `help:` note). The write-only `suppressed` field is gone —
+  suppression filters findings in `lint_parsed`. Kept deliberately un-arity:
+  `path: Option<PathBuf>` (stdin) and `fixes: Vec<Fix>` (the autofix engine
+  applies multiple fixes per finding).
 - [ ] Port arity's autofix-correctness harness
   (`fixed_output_is_parseable_and_clean`): one curated case per fixable rule
   asserting the fixed output reparses clean, so "a fix is a textual edit,
