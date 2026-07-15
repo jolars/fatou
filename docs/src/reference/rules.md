@@ -7,5 +7,6 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`duplicate-argument`](rules/duplicate-argument.md)
 - [`unused-argument`](rules/unused-argument.md)
 - [`undefined-name`](rules/undefined-name.md)
+- [`break-outside-loop`](rules/break-outside-loop.md)
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)

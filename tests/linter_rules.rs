@@ -540,3 +540,127 @@ fn undefined_name_is_opt_in() {
         report.diagnostics
     );
 }
+
+// --- break-outside-loop ------------------------------------------------------
+
+#[test]
+fn break_outside_loop_flags_top_level_break_and_continue() {
+    let msgs = findings("break-outside-loop", "break\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("`break`"), "{msgs:?}");
+
+    let msgs = findings("break-outside-loop", "continue\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("`continue`"), "{msgs:?}");
+}
+
+#[test]
+fn break_outside_loop_flags_loopless_function_and_if() {
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "function f(x)\n    if x > 0\n        break\n    end\nend\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count("break-outside-loop", "if true\n    continue\nend\n"),
+        1
+    );
+}
+
+#[test]
+fn break_outside_loop_flags_function_boundaries_inside_loops() {
+    // A closure body is a new function: `break` cannot reach the outer loop.
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    function f()\n        break\n    end\nend\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    g = x -> break\nend\n"
+        ),
+        1
+    );
+    // The do-block body is an anonymous function too.
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    foreach(1:2) do x\n        break\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn break_outside_loop_ignores_break_inside_loops() {
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    if i == 2\n        break\n    end\n    continue\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "while true\n    let\n        break\n    end\nend\n"
+        ),
+        0
+    );
+    // `try` does not sever the loop connection.
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    try\n        break\n    catch\n    end\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn break_outside_loop_treats_loop_headers_as_inside() {
+    // The iterator spec and the `while` condition are within the loop's
+    // break scope (verified against Julia 1.12 lowering).
+    assert_eq!(
+        count("break-outside-loop", "for i in (break; 1:3)\nend\n"),
+        0
+    );
+    assert_eq!(count("break-outside-loop", "while (break; true)\nend\n"), 0);
+}
+
+#[test]
+fn break_outside_loop_walks_through_enclosing_scope_positions() {
+    // A do-call's *arguments* and a comprehension's iterator run in the
+    // enclosing scope: legal inside a loop, an error without one.
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    foreach((break; 1:2)) do x\n        x\n    end\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for i in 1:3\n    [x for x in (break; 1:2)]\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("break-outside-loop", "[x for x in (break; 1:2)]\n"),
+        1
+    );
+}
+
+#[test]
+fn break_outside_loop_stays_silent_in_quotes_and_macro_calls() {
+    // Quoted code is data; a macro may rewrite its arguments arbitrarily.
+    assert_eq!(count("break-outside-loop", "quote\n    break\nend\n"), 0);
+    assert_eq!(count("break-outside-loop", "ex = :(break)\n"), 0);
+    assert_eq!(count("break-outside-loop", "@inbounds break\n"), 0);
+}

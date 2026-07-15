@@ -95,9 +95,12 @@ Ready now (no new infrastructure):
   Warning severity but `default_enabled() == false` (dispatch-only params make
   it too noisy on by default). Skips all-underscore names and lone-literal stub
   bodies (`f(x) = 0`). No fix. (UnusedFunctionArgument)
-- [ ] `break-outside-loop` (correctness, syn, error severity): `break` or
-  `continue` with no enclosing `for`/`while`. Parses clean but errors at
-  lowering, so the lint has real value. Ancestor walk. (ShouldBeInALoop)
+- [x] `break-outside-loop` (correctness, syn, error severity): `break` or
+  `continue` with no enclosing `for`/`while`. Ancestor walk that flags at
+  function boundaries (closures, do-block and comprehension bodies) even
+  inside a loop, walks through enclosing-scope positions (loop headers,
+  do-call arguments, comprehension iterators), and stays silent in quotes and
+  macro calls. No fix. (ShouldBeInALoop)
 - [ ] `constant-condition` (suspicious, syn): boolean literal as an `if`/
   `while` test or as an operand of `&&`/`||`. One rule where StaticLint has
   three codes. Caveat: `false && expr` is occasionally used deliberately.

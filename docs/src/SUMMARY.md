@@ -17,5 +17,6 @@
   - [`duplicate-argument`](reference/rules/duplicate-argument.md)
   - [`unused-argument`](reference/rules/unused-argument.md)
   - [`undefined-name`](reference/rules/undefined-name.md)
+  - [`break-outside-loop`](reference/rules/break-outside-loop.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)
