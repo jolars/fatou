@@ -331,6 +331,14 @@ impl Name {
     }
 }
 
+impl Literal {
+    /// The `true`/`false` keyword token, when the literal is a boolean.
+    pub fn bool_token(&self) -> Option<SyntaxToken> {
+        support::token(&self.0, SyntaxKind::TRUE_KW)
+            .or_else(|| support::token(&self.0, SyntaxKind::FALSE_KW))
+    }
+}
+
 impl NonstandardIdentifier {
     /// The quoted body of a `var"..."` identifier (its `STRING_CONTENT` token).
     pub fn content(&self) -> Option<SyntaxToken> {
@@ -689,6 +697,19 @@ mod tests {
         assert_eq!(expr_text(cond.expr()), "x");
         assert!(if_expr.then_body().is_some());
         assert!(if_expr.else_clause().and_then(|e| e.body()).is_some());
+    }
+
+    #[test]
+    fn literal_bool_token() {
+        assert_eq!(
+            find::<Literal>("true\n").bool_token().unwrap().text(),
+            "true"
+        );
+        assert_eq!(
+            find::<Literal>("false\n").bool_token().unwrap().text(),
+            "false"
+        );
+        assert!(find::<Literal>("1\n").bool_token().is_none());
     }
 
     #[test]

@@ -10,3 +10,4 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`break-outside-loop`](rules/break-outside-loop.md)
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)
+- [`constant-condition`](rules/constant-condition.md)

@@ -101,10 +101,12 @@ Ready now (no new infrastructure):
   inside a loop, walks through enclosing-scope positions (loop headers,
   do-call arguments, comprehension iterators), and stays silent in quotes and
   macro calls. No fix. (ShouldBeInALoop)
-- [ ] `constant-condition` (suspicious, syn): boolean literal as an `if`/
-  `while` test or as an operand of `&&`/`||`. One rule where StaticLint has
-  three codes. Caveat: `false && expr` is occasionally used deliberately.
-  (ConstIfCondition, PointlessOR, PointlessAND)
+- [x] `constant-condition` (suspicious, syn): boolean literal as an `if`/
+  `elseif`/`while` test or as a bare operand of the lazy `&&`/`||` (eager
+  `&`/`|`, broadcast `.&&`/`.||`, and ternary tests are out of scope).
+  Warning; exempts `while true` (Julia's idiomatic infinite loop) but still
+  flags `while false`. Deliberate `false && expr` sites suppress with
+  `# fatou-ignore`. No fix. (ConstIfCondition, PointlessOR, PointlessAND)
 - [ ] `module-shadows-parent` (suspicious, sem): module named the same as its
   parent module; `SemanticModel::enclosing_module_path` answers this
   directly. (InvalidModuleName)

@@ -664,3 +664,70 @@ fn break_outside_loop_stays_silent_in_quotes_and_macro_calls() {
     assert_eq!(count("break-outside-loop", "ex = :(break)\n"), 0);
     assert_eq!(count("break-outside-loop", "@inbounds break\n"), 0);
 }
+
+// --- constant-condition ------------------------------------------------------
+
+#[test]
+fn constant_condition_flags_literal_if_test() {
+    assert_eq!(count("constant-condition", "if true\n    1\nend\n"), 1);
+    assert_eq!(count("constant-condition", "if false\n    1\nend\n"), 1);
+    assert_eq!(
+        count(
+            "constant-condition",
+            "if x\n    1\nelseif true\n    2\nend\n"
+        ),
+        1
+    );
+    // `Condition::expr` unwraps a single paren layer.
+    assert_eq!(count("constant-condition", "if (true)\n    1\nend\n"), 1);
+}
+
+#[test]
+fn constant_condition_flags_while_false() {
+    assert_eq!(count("constant-condition", "while false\n    1\nend\n"), 1);
+}
+
+#[test]
+fn constant_condition_exempts_while_true() {
+    // `while true` + `break` is Julia's idiomatic infinite loop; there is no
+    // dedicated loop construct to rewrite it to.
+    assert_eq!(
+        count("constant-condition", "while true\n    break\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn constant_condition_flags_literal_lazy_operand() {
+    assert_eq!(count("constant-condition", "x && true\n"), 1);
+    assert_eq!(count("constant-condition", "false && g()\n"), 1);
+    assert_eq!(count("constant-condition", "true || g()\n"), 1);
+    assert_eq!(count("constant-condition", "x || false\n"), 1);
+    // Each literal operand is its own finding.
+    assert_eq!(count("constant-condition", "true && false\n"), 2);
+}
+
+#[test]
+fn constant_condition_reports_lazy_operand_once_inside_a_condition() {
+    // The `&&` operand check fires; the condition check stays out of it (the
+    // test expression is a `BINARY_EXPR`, not a literal).
+    assert_eq!(count("constant-condition", "if x && true\n    1\nend\n"), 1);
+}
+
+#[test]
+fn constant_condition_ignores_nonliteral_tests_and_eager_operators() {
+    assert_eq!(count("constant-condition", "if x\n    1\nend\n"), 0);
+    // Eager bitwise `&`/`|` and broadcast `.&&`/`.||` operate on values.
+    assert_eq!(count("constant-condition", "x & true\n"), 0);
+    assert_eq!(count("constant-condition", "x | false\n"), 0);
+    assert_eq!(count("constant-condition", "x .&& true\n"), 0);
+    // A ternary test is out of scope (no `CONDITION` node).
+    assert_eq!(count("constant-condition", "true ? a : b\n"), 0);
+}
+
+#[test]
+fn constant_condition_ignores_literals_in_value_position() {
+    assert_eq!(count("constant-condition", "x = true\n"), 0);
+    assert_eq!(count("constant-condition", "f(true)\n"), 0);
+    assert_eq!(count("constant-condition", "return true\n"), 0);
+}
