@@ -76,10 +76,6 @@ leverage.
   suppression filters findings in `lint_parsed`. Kept deliberately un-arity:
   `path: Option<PathBuf>` (stdin) and `fixes: Vec<Fix>` (the autofix engine
   applies multiple fixes per finding).
-- [ ] Port arity's autofix-correctness harness
-  (`fixed_output_is_parseable_and_clean`): one curated case per fixable rule
-  asserting the fixed output reparses clean, so "a fix is a textual edit,
-  never a formatter" is enforced by a gate rather than per-rule diligence.
 
 ### Rule roadmap
 
