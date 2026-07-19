@@ -1,8 +1,8 @@
 //! Salsa-backed incremental layer: file text → parse tree.
 //!
 //! The CST is cached as a `rowan::GreenNode` (Arc-backed, `Send + Sync`) rather
-//! than a `SyntaxNode` (which holds non-`Send` cursor state and is neither `Eq`
-//! nor `salsa::Update`). Callers materialize a fresh cursor via
+//! than a `SyntaxNode` (which holds non-`Send` cursor state and is not `Eq`).
+//! Callers materialize a fresh cursor via
 //! [`parsed_tree_root`] — a cheap atomic clone.
 //!
 //! This honors Tenet 2 (incremental parsing is first-class): a text edit
@@ -49,26 +49,12 @@ pub struct SourceFile {
 }
 
 /// The harvested library index: every resolved package's [`PackageIndex`]
-/// keyed by name. Wrapped so it carries an opaque whole-value [`salsa::Update`]
-/// (the model types stay salsa-free), and so the map is cheap to swap — each
-/// value is an [`Arc`], so replacing one package clones only pointers.
+/// keyed by name. Wrapped so the map stays an opaque whole-value leaf (the
+/// model types stay salsa-free; salsa compares by `Eq` and swaps the whole
+/// value), and so the swap is cheap — each value is an [`Arc`], so replacing
+/// one package clones only pointers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LibraryPackages(pub BTreeMap<String, Arc<PackageIndex>>);
-
-// SAFETY: `maybe_update` overwrites the whole value when it differs (by `Eq`)
-// and reports the change, leaving no dangling references — the standard opaque
-// leaf pattern. This is why the [`PackageIndex`] model needs no `Update` impl.
-unsafe impl salsa::Update for LibraryPackages {
-    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
-        let old = unsafe { &mut *old_pointer };
-        if *old == new {
-            false
-        } else {
-            *old = new;
-            true
-        }
-    }
-}
 
 /// Each harvested package's absolute source root (the directory its
 /// [`DefLocation::file`](crate::index::model::DefLocation) paths are relative
@@ -78,19 +64,6 @@ unsafe impl salsa::Update for LibraryPackages {
 /// go-to-definition joins a root with a relative path to reach the real file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LibraryRoots(pub BTreeMap<String, PathBuf>);
-
-// SAFETY: same opaque-leaf pattern as [`LibraryPackages`].
-unsafe impl salsa::Update for LibraryRoots {
-    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
-        let old = unsafe { &mut *old_pointer };
-        if *old == new {
-            false
-        } else {
-            *old = new;
-            true
-        }
-    }
-}
 
 /// The whole harvested library, as a single HIGH-durability salsa input. One
 /// input holds every package (rather than one input per package): the library
@@ -126,10 +99,10 @@ pub struct WorkspaceFiles {
     pub files: Vec<SourceFile>,
 }
 
-/// The cached parse of a file. The `GreenNode` is not `Eq`/`salsa::Update`, so
-/// [`parsed_document`] is `no_eq, unsafe(non_update_types)`: salsa never
-/// compares parse outputs and relies purely on input (text) change detection to
-/// invalidate. Sound because the tree is a pure function of the text.
+/// The cached parse of a file. The `GreenNode` is not `Eq`, so
+/// [`parsed_document`] is `no_eq`: salsa never compares parse outputs and
+/// relies purely on input (text) change detection to invalidate. Sound because
+/// the tree is a pure function of the text.
 #[derive(Debug, Clone)]
 pub struct ParsedDocument {
     pub green: rowan::GreenNode,
@@ -140,7 +113,7 @@ pub struct ParsedDocument {
 pub trait IncrementalDb: salsa::Database {}
 
 /// Parse `file`'s text into a cached green tree plus diagnostics.
-#[salsa::tracked(returns(ref), no_eq, unsafe(non_update_types))]
+#[salsa::tracked(returns(ref), no_eq)]
 pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
     let text = file.text(db);
     let parsed = parse(text.as_str());
@@ -167,7 +140,7 @@ pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode 
 /// re-run. The robust invalidation barrier for position-shifting edits is the
 /// range-free firewall projections (`file_exports`, `file_free_reads`; see
 /// `TODO.md` Phase 2), which layer on top of this query.
-#[salsa::tracked(returns(ref), unsafe(non_update_types))]
+#[salsa::tracked(returns(ref))]
 pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel {
     SemanticModel::build(&parsed_tree_root(db, file))
 }
@@ -261,21 +234,6 @@ pub struct ProjectGraph {
     pub cycles: Vec<CycleEdge>,
     /// Static includes whose target is not a package member.
     pub unresolved: Vec<UnresolvedInclude>,
-}
-
-// SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]): none of
-// `PathBuf`/`String` are `salsa::Update`, so overwrite the whole value when it
-// differs by `Eq` and report the change.
-unsafe impl salsa::Update for ProjectGraph {
-    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
-        let old = unsafe { &mut *old_pointer };
-        if *old == new {
-            false
-        } else {
-            *old = new;
-            true
-        }
-    }
 }
 
 /// DFS coloring: `Gray` while a file is on the current stack (re-entering it is a
@@ -499,24 +457,10 @@ pub fn file_workspace_occurrences(
 }
 
 /// The per-name occurrence buckets of one file (the [`file_workspace_occurrences`]
-/// projection). Wrapped so it carries an opaque whole-value [`salsa::Update`],
-/// keeping the [`OccurrenceRec`]/[`SmolStr`] leaves salsa-free.
+/// projection). Wrapped so the map stays an opaque whole-value leaf, keeping
+/// the [`OccurrenceRec`]/[`SmolStr`] leaves salsa-free.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkspaceOccurrences(pub BTreeMap<OccurrenceKey, Vec<OccurrenceRec>>);
-
-// SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]): overwrite
-// the whole value when it differs by `Eq` and report the change.
-unsafe impl salsa::Update for WorkspaceOccurrences {
-    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
-        let old = unsafe { &mut *old_pointer };
-        if *old == new {
-            false
-        } else {
-            *old = new;
-            true
-        }
-    }
-}
 
 /// A [`PackageSource`] over the raw db, so a tracked query can build a
 /// [`Resolver`] whose [`LibraryIndex`] reads are recorded as salsa dependencies.
@@ -567,23 +511,10 @@ pub fn workspace_reference_index(db: &dyn IncrementalDb) -> WorkspaceReferenceIn
 }
 
 /// The unioned reverse-occurrence index (the [`workspace_reference_index`]
-/// query). Wrapped for the opaque whole-value [`salsa::Update`]. No `Debug`
-/// derive: [`SourceFile`] is a salsa input without one.
+/// query). Wrapped so it stays an opaque whole-value leaf. No `Debug` derive:
+/// [`SourceFile`] is a salsa input without one.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct WorkspaceReferenceIndex(pub BTreeMap<OccurrenceKey, Vec<(SourceFile, OccurrenceRec)>>);
-
-// SAFETY: the standard opaque-leaf pattern (see [`LibraryPackages`]).
-unsafe impl salsa::Update for WorkspaceReferenceIndex {
-    unsafe fn maybe_update(old_pointer: *mut Self, new: Self) -> bool {
-        let old = unsafe { &mut *old_pointer };
-        if *old == new {
-            false
-        } else {
-            *old = new;
-            true
-        }
-    }
-}
 
 /// Lexically normalize `path` for use as a deduplication key: absolutize it
 /// (without touching the filesystem) and collapse `.`/`..` segments. Purely
