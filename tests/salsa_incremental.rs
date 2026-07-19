@@ -55,7 +55,7 @@ fn edit_rebuilds_the_semantic_model() {
 }
 
 /// A downstream query that counts its own executions, to observe backdating.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn probe_binding_count(db: &dyn IncrementalDb, file: SourceFile) -> usize {
     use std::sync::atomic::Ordering;
     PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
@@ -88,7 +88,7 @@ fn same_shape_edit_backdates_the_semantic_model() {
 }
 
 /// A downstream query over the import model, to observe backdating.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn probe_load_count(db: &dyn IncrementalDb, file: SourceFile) -> usize {
     use std::sync::atomic::Ordering;
     LOAD_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
@@ -133,7 +133,7 @@ fn file_span_len(db: &IncrementalDatabase, file: SourceFile) -> u32 {
 
 macro_rules! firewall_backdates_test {
     ($test:ident, $probe:ident, $counter:ident, $query:ident, $seed:expr, $edited:expr) => {
-        #[salsa::tracked]
+        #[salsa::tracked(returns(copy))]
         fn $probe(db: &dyn IncrementalDb, file: SourceFile) -> usize {
             use std::sync::atomic::Ordering;
             $counter.fetch_add(1, Ordering::SeqCst);
@@ -208,7 +208,7 @@ firewall_backdates_test!(
 );
 
 /// A probe over the per-file host-module firewall, to observe backdating.
-#[salsa::tracked]
+#[salsa::tracked(returns(copy))]
 fn probe_host_module(db: &dyn IncrementalDb, file: SourceFile) -> usize {
     use std::sync::atomic::Ordering;
     HOST_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);

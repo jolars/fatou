@@ -70,7 +70,7 @@ pub fn file_qualified_reads(model: &SemanticModel) -> BTreeSet<String> {
 /// One static `include("path")` edge from this file to another source file.
 /// Range-free (carries no `TextRange`) so it survives position-shifting edits;
 /// a consumer recovers the call's span from the fresh parse tree per request.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, salsa::Update)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IncludeEdge {
     /// The literal string passed to `include`, exactly as written
     /// (`include("sub/a.jl")` → `"sub/a.jl"`).
