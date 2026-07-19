@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use rowan::ast::AstNode;
 
-use crate::ast::{AstToken, CallExpr, Expr, HasArgList, Name};
+use crate::ast::{AstToken, CallExpr, Expr, HasArgList, Name, StringLiteral};
 use crate::semantic::{ScopeKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
@@ -152,6 +152,19 @@ pub fn include_call_sites(root: &SyntaxNode) -> Vec<(String, rowan::TextRange)> 
 /// The literal path of `call` if it is a static `include("literal")`, else
 /// `None`.
 pub(crate) fn include_target(call: &CallExpr) -> Option<String> {
+    Some(
+        include_literal(call)?
+            .content_tokens()
+            .map(|token| token.text().to_string())
+            .collect(),
+    )
+}
+
+/// The string-literal argument of `call` if it is a static
+/// `include("literal")`, else `None`. Split from [`include_target`] so a
+/// consumer that needs the literal's *span* (document links) shares the
+/// staticness test.
+pub(crate) fn include_literal(call: &CallExpr) -> Option<StringLiteral> {
     // The callee must be the bare name `include` (a qualified `M.include` is a
     // `BinaryExpr`, an operator call a token — neither is an `Expr::Name`).
     let Expr::Name(callee) = call.callee()? else {
@@ -175,12 +188,7 @@ pub(crate) fn include_target(call: &CallExpr) -> Option<String> {
     if string.prefix().is_some() || string.interpolations().next().is_some() {
         return None;
     }
-    Some(
-        string
-            .content_tokens()
-            .map(|token| token.text().to_string())
-            .collect(),
-    )
+    Some(string)
 }
 
 /// Resolve an include's literal path against the including file's directory.

@@ -9,11 +9,12 @@ use lsp_server::{Connection, Message};
 use lsp_types::{
     CallHierarchyServerCapability, ClientCapabilities, CodeActionKind, CodeActionOptions,
     CodeActionProviderCapability, CompletionOptions, DiagnosticOptions,
-    DiagnosticServerCapabilities, FoldingRangeProviderCapability, HoverProviderCapability,
-    InitializeParams, OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
-    SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
+    DiagnosticServerCapabilities, DocumentLinkOptions, FoldingRangeProviderCapability,
+    HoverProviderCapability, InitializeParams, OneOf, PositionEncodingKind, RenameOptions,
+    SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
+    ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities,
 };
 
 use std::sync::Arc;
@@ -206,6 +207,12 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
             work_done_progress_options: Default::default(),
         }),
         folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+        document_link_provider: Some(DocumentLinkOptions {
+            // Targets resolve eagerly (a lexical path join, no I/O worth
+            // deferring), so no `documentLink/resolve`.
+            resolve_provider: Some(false),
+            work_done_progress_options: Default::default(),
+        }),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(
             SemanticTokensOptions {

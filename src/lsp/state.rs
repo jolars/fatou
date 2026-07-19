@@ -13,8 +13,8 @@ use lsp_types::notification::{
 use lsp_types::request::{
     CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
     CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentHighlightRequest,
-    DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition, HoverRequest,
-    PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
+    DocumentLinkRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition,
+    HoverRequest, PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
     Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
     SemanticTokensFullRequest, SignatureHelpRequest, TypeHierarchyPrepare, TypeHierarchySubtypes,
     TypeHierarchySupertypes, WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
@@ -25,11 +25,12 @@ use lsp_types::{
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentDiagnosticParams, DocumentFormattingParams, DocumentHighlightParams,
-    DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
-    GlobPattern, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams, ReferenceParams,
-    Registration, RegistrationParams, RenameParams, SelectionRangeParams, SemanticTokensParams,
-    SignatureHelpParams, TextDocumentPositionParams, TypeHierarchyPrepareParams,
-    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
+    DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher,
+    FoldingRangeParams, GlobPattern, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams,
+    ReferenceParams, Registration, RegistrationParams, RenameParams, SelectionRangeParams,
+    SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
+    WorkspaceSymbolParams,
 };
 
 use crate::environment::is_environment_file;
@@ -150,6 +151,7 @@ impl GlobalState {
             DocumentSymbolRequest::METHOD => self.on_document_symbols(req),
             WorkspaceSymbolRequest::METHOD => self.on_workspace_symbols(req),
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
+            DocumentLinkRequest::METHOD => self.on_document_links(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
             Completion::METHOD => self.on_completion(req),
@@ -317,6 +319,25 @@ impl GlobalState {
             return;
         };
         self.dispatch_read(ReadJob::FoldingRanges {
+            id,
+            path: path_for(&uri),
+            text,
+            sender: self.sender.clone(),
+        });
+    }
+
+    fn on_document_links(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<DocumentLinkParams>(DocumentLinkRequest::METHOD) else {
+            self.respond_err(id, "invalid documentLink params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        self.dispatch_read(ReadJob::DocumentLinks {
             id,
             path: path_for(&uri),
             text,

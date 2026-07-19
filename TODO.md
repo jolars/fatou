@@ -726,7 +726,17 @@ The payoff phase, in roughly arity's shipping order.
   `Base.show` surfacing workspace methods harvested with `owner`
   (`Base.show(io, x) = ...`), not just the target package's own definitions
   (same wrinkle as hover).
-- [ ] Document links for `include("...")` paths.
+- [x] Document links for `include("...")` paths: pure `compute_document_links`
+  (`src/lsp/document_link.rs`) turns every static `include("literal")` string
+  (the include graph's staticness test, via the factored-out
+  `project::include_literal`) into a `DocumentLink` covering just the path text
+  inside the quotes, targeting the literal resolved against the file's
+  directory and lexically normalized (`../` collapses). Purely lexical, no
+  I/O — a link to a missing file still emits (the include graph diagnoses
+  those); relative includes with no known directory (untitled buffers) yield
+  no link. Warm `document_links_via_db` path off the cached parse; targets
+  resolve eagerly (`resolveProvider: false`). Locked by inline units plus
+  `serves_document_links` in `tests/lsp.rs`.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
 - [ ] `workspace/didChangeConfiguration` handling with `fatou.toml` discovery

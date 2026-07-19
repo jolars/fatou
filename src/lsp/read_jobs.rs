@@ -22,6 +22,7 @@ use super::call_hierarchy::{
 use super::code_action::code_actions_via_db;
 use super::completion::{completion_via_db, resolve_completion};
 use super::definition::definition_via_db;
+use super::document_link::document_links_via_db;
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
@@ -81,6 +82,12 @@ pub(crate) enum ReadJob {
         sender: Sender<Message>,
     },
     FoldingRanges {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        sender: Sender<Message>,
+    },
+    DocumentLinks {
         id: RequestId,
         path: PathBuf,
         text: String,
@@ -219,6 +226,7 @@ impl ReadJob {
             ReadJob::DocumentSymbols { id, sender, .. } => (id, sender),
             ReadJob::WorkspaceSymbols { id, sender, .. } => (id, sender),
             ReadJob::FoldingRanges { id, sender, .. } => (id, sender),
+            ReadJob::DocumentLinks { id, sender, .. } => (id, sender),
             ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
             ReadJob::SemanticTokensFull { id, sender, .. } => (id, sender),
             ReadJob::Completion { id, sender, .. } => (id, sender),
@@ -327,6 +335,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             // Folds are line-only, so the position encoding is irrelevant.
             let folds = folding_ranges_via_db(&snapshot, &path, &text);
             let _ = sender.send(Message::Response(Response::new_ok(id, folds)));
+        }
+        ReadJob::DocumentLinks {
+            id,
+            path,
+            text,
+            sender,
+        } => {
+            let links = document_links_via_db(&snapshot, &path, &text, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, links)));
         }
         ReadJob::SelectionRanges {
             id,

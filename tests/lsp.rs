@@ -17,15 +17,15 @@ use lsp_types::{
     DiagnosticSeverity, DidChangeTextDocumentParams, DidChangeWatchedFilesClientCapabilities,
     DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
-    DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams, FileChangeType, FileEvent,
-    FoldingRange, FoldingRangeKind, FoldingRangeParams, FormattingOptions,
-    GeneralClientCapabilities, GlobPattern, GotoDefinitionParams, GotoDefinitionResponse, Hover,
-    HoverContents, HoverParams, InitializeParams, Location, PartialResultParams, Position,
-    PositionEncodingKind, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
-    RegistrationParams, RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens,
-    SemanticTokensParams, SignatureHelp, SignatureHelpParams, SymbolKind,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams, DocumentLink,
+    DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
+    FileChangeType, FileEvent, FoldingRange, FoldingRangeKind, FoldingRangeParams,
+    FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
+    PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
+    ReferenceContext, ReferenceParams, RegistrationParams, RenameParams, SelectionRange,
+    SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
+    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
     TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
     TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
     VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
@@ -2385,6 +2385,133 @@ fn serves_folding_ranges() {
             id: RequestId::from(3),
             method: "textDocument/foldingRange".to_string(),
             params: folding_params(&unknown),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            assert_eq!(resp.result(), Some(serde_json::Value::Null));
+        }
+        other => panic!("expected a null response, got {other:?}"),
+    }
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(4),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
+/// A document's static `include("path")` strings come back as document links
+/// targeting the resolved file; an unknown document answers null.
+#[test]
+fn serves_document_links() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake; capability advertised ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result = resp.result().unwrap();
+            assert!(
+                result["capabilities"]["documentLinkProvider"].is_object(),
+                "documentLinkProvider must be advertised"
+            );
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // --- open a document; drain its diagnostics publish ---
+    let uri = Uri::from_str("file:///work/src/Pkg.jl").unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "include(\"sub/a.jl\")\ninclude(dynamic)\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+
+    // --- request document links ---
+    let link_params = |uri: &Uri| {
+        serde_json::to_value(DocumentLinkParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .unwrap()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "textDocument/documentLink".to_string(),
+            params: link_params(&uri),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let links: Vec<DocumentLink> = serde_json::from_value(resp.result().unwrap()).unwrap();
+            assert_eq!(links.len(), 1, "only the static include links");
+            assert_eq!(
+                links[0].target.as_ref().map(|t| t.as_str()),
+                Some("file:///work/src/sub/a.jl"),
+            );
+            // The link covers exactly `sub/a.jl`, inside the quotes.
+            assert_eq!(
+                links[0].range,
+                Range::new(Position::new(0, 9), Position::new(0, 17)),
+            );
+        }
+        other => panic!("expected a documentLink response, got {other:?}"),
+    }
+
+    // --- an unknown document answers null ---
+    let unknown = Uri::from_str("file:///work/never-opened.jl").unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/documentLink".to_string(),
+            params: link_params(&unknown),
         }))
         .unwrap();
     match client.receiver.recv().unwrap() {
