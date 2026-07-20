@@ -54,6 +54,16 @@ impl ResponseResultExt for lsp_server::Response {
     }
 }
 
+/// A `file:` URI on a platform-native absolute path: `native_file_uri("/work/a.jl")`
+/// is `file:///work/a.jl` on Unix and `file:///C:/work/a.jl` on Windows. A
+/// driveless `/work` path is not absolute on Windows, so the server's lexical
+/// normalization would graft the CWD's drive onto it, skewing any assertion on
+/// a server-produced URI (see AGENTS.md, "Testing layout").
+fn native_file_uri(path: &str) -> Uri {
+    let drive = if cfg!(windows) { "/C:" } else { "" };
+    Uri::from_str(&format!("file://{drive}{path}")).unwrap()
+}
+
 #[test]
 fn initialize_format_and_shutdown() {
     let (server, client) = Connection::memory();
@@ -2452,7 +2462,7 @@ fn serves_document_links() {
         .unwrap();
 
     // --- open a document; drain its diagnostics publish ---
-    let uri = Uri::from_str("file:///work/src/Pkg.jl").unwrap();
+    let uri = native_file_uri("/work/src/Pkg.jl");
     client
         .sender
         .send(Message::Notification(Notification {
@@ -2493,7 +2503,7 @@ fn serves_document_links() {
             assert_eq!(links.len(), 1, "only the static include links");
             assert_eq!(
                 links[0].target.as_ref().map(|t| t.as_str()),
-                Some("file:///work/src/sub/a.jl"),
+                Some(native_file_uri("/work/src/sub/a.jl").as_str()),
             );
             // The link covers exactly `sub/a.jl`, inside the quotes.
             assert_eq!(
