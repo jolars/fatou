@@ -1455,6 +1455,19 @@ impl Builder {
                         SyntaxKind::PAREN_EXPR | SyntaxKind::TUPLE_EXPR => {
                             self.bind_params(&callee, fn_scope, false);
                         }
+                        // `Foo{T}(x)`: a parametric constructor/method — the
+                        // name part is a read in the enclosing scope, but the
+                        // curly type arguments read the `where` parameters,
+                        // so they walk in the function scope.
+                        SyntaxKind::CURLY_EXPR => {
+                            let mut parts = callee.children();
+                            if let Some(name) = parts.next() {
+                                self.walk_node(&name, enclosing);
+                            }
+                            for args in parts {
+                                self.walk_node(&args, fn_scope);
+                            }
+                        }
                         // `Base.foo(x)`: a method extension, reads only.
                         _ => self.walk_node(&callee, enclosing),
                     }

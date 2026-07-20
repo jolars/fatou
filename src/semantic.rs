@@ -483,6 +483,16 @@ mod tests {
     }
 
     #[test]
+    fn curly_callee_reads_where_params() {
+        // `P{T}() where T = new()`: the constructor's curly type arguments
+        // read the `where` parameters, not the enclosing scope.
+        let m = model_of("struct P{T}\n    P{T}() where T = new()\nend");
+        let ts: Vec<_> = m.bindings().iter().filter(|b| b.name == "T").collect();
+        assert_eq!(ts.len(), 2, "struct param and where param");
+        assert!(ts[1].read, "the constructor callee reads the where param");
+    }
+
+    #[test]
     fn return_type_is_read_in_function_scope() {
         let m = model_of("function f(x)::Int\n    x\nend");
         assert_eq!(kind_of(&m, "f"), BindingKind::Function);
