@@ -233,3 +233,10 @@ indent_width) and `[lint]` (select, ignore). Defaults follow Julia conventions
   which also guards idempotence + clean reparse over all fixtures).
 - `insta` snapshots live in `tests/snapshots/`.
 - `tests/lsp.rs` drives the language server over an in-memory connection.
+- **CI tests on Windows too.** Unix-style absolute paths (`/work`, `/abs/c.jl`)
+  are **not absolute on Windows**: `is_absolute()` is false without a drive
+  letter, and `std::path::absolute` grafts the CWD's drive onto driveless
+  paths. Any test that exercises absolute-path resolution or asserts on `file:`
+  URIs must build platform-native paths — see the `abs`/`file_uri` helpers in
+  the `src/lsp/document_link.rs` tests. Paths that stay relative-joined and are
+  never asserted on verbatim are fine as-is.

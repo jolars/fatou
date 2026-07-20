@@ -119,6 +119,27 @@ mod tests {
         link.target.as_ref().expect("link target").as_str()
     }
 
+    /// A platform-native absolute path. Unix-style `/work` is *not* absolute on
+    /// Windows (`is_absolute()` needs a drive letter, and `std::path::absolute`
+    /// grafts the CWD's drive onto driveless paths), so prefix one there.
+    /// Forward slashes, so the result can be embedded in Julia source literals.
+    fn abs(path: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{path}")
+        } else {
+            path.to_string()
+        }
+    }
+
+    /// The `file:` URI [`from_path`](uri::from_path) yields for [`abs`]`(path)`.
+    fn file_uri(path: &str) -> String {
+        if cfg!(windows) {
+            format!("file:///C:{path}")
+        } else {
+            format!("file://{path}")
+        }
+    }
+
     #[test]
     fn static_include_links_and_dynamic_forms_do_not() {
         let text = concat!(
@@ -129,9 +150,9 @@ mod tests {
             "include(mapexpr, \"d.jl\")\n", // two-argument
             "M.include(\"e.jl\")\n",        // qualified callee
         );
-        let links = links(text, Some("/work"));
+        let links = links(text, Some(&abs("/work")));
         assert_eq!(links.len(), 1, "only the static include links");
-        assert_eq!(target(&links[0]), "file:///work/sub/a.jl");
+        assert_eq!(target(&links[0]), file_uri("/work/sub/a.jl"));
         // The range covers exactly `sub/a.jl`, inside the quotes.
         assert_eq!(
             links[0].range,
@@ -141,19 +162,21 @@ mod tests {
 
     #[test]
     fn relative_paths_normalize_and_absolute_paths_ignore_base() {
-        let links = links(
-            "include(\"../lib/b.jl\")\ninclude(\"/abs/c.jl\")\n",
-            Some("/work/src"),
+        let text = format!(
+            "include(\"../lib/b.jl\")\ninclude(\"{}\")\n",
+            abs("/abs/c.jl")
         );
+        let links = links(&text, Some(&abs("/work/src")));
         let targets: Vec<_> = links.iter().map(target).collect();
-        assert_eq!(targets, ["file:///work/lib/b.jl", "file:///abs/c.jl"]);
+        assert_eq!(targets, [file_uri("/work/lib/b.jl"), file_uri("/abs/c.jl")]);
     }
 
     #[test]
     fn relative_include_without_a_base_dir_has_no_link() {
-        let links = links("include(\"a.jl\")\ninclude(\"/abs/c.jl\")\n", None);
+        let text = format!("include(\"a.jl\")\ninclude(\"{}\")\n", abs("/abs/c.jl"));
+        let links = links(&text, None);
         let targets: Vec<_> = links.iter().map(target).collect();
-        assert_eq!(targets, ["file:///abs/c.jl"]);
+        assert_eq!(targets, [file_uri("/abs/c.jl")]);
     }
 
     #[test]
