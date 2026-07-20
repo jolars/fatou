@@ -6,8 +6,9 @@
 //! diagnostic conversion) that runs on the read pool holding a short-lived db
 //! clone, so the thread returns to its `select!` immediately. Requests are
 //! coalesced (latest version per URI) and scheduled by [`decide`]: at most one
-//! analysis in flight, canceled only when superseded by a strictly-newer edit
-//! of the *same* URI.
+//! analysis in flight, the most-recently-edited URI preferred when several are
+//! pending, canceled only when superseded by a strictly-newer edit of the
+//! *same* URI.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
@@ -79,6 +80,7 @@ pub(crate) fn spawn_analysis_thread(
                 done_tx,
                 inflight: None,
                 pending: HashMap::new(),
+                active: None,
                 read_spawner,
                 encoding,
                 push_diagnostics,
@@ -122,10 +124,19 @@ pub(crate) enum DispatchAction {
 
 /// Decide the next dispatch action. `inflight` is the running analysis's
 /// `(uri, version)`, if any; `pending` maps each queued URI to its latest
-/// version. Cancel only on a strictly-newer edit of the *same* URI.
-pub(crate) fn decide(inflight: Option<(&Uri, i32)>, pending: &HashMap<Uri, i32>) -> DispatchAction {
+/// version; `active` is the most-recently-edited URI, preferred when several
+/// URIs are pending (a bulk dirty) so the focused document is analyzed first.
+/// Cancel only on a strictly-newer edit of the *same* URI.
+pub(crate) fn decide(
+    inflight: Option<(&Uri, i32)>,
+    pending: &HashMap<Uri, i32>,
+    active: Option<&Uri>,
+) -> DispatchAction {
     match inflight {
-        None => match pending.keys().next() {
+        None => match active
+            .filter(|uri| pending.contains_key(*uri))
+            .or_else(|| pending.keys().next())
+        {
             Some(uri) => DispatchAction::Start(uri.clone()),
             None => DispatchAction::Wait,
         },
@@ -152,6 +163,10 @@ struct AnalysisWorker {
     inflight: Option<InflightAnalyze>,
     /// Coalesced queue: the latest pending request per URI.
     pending: HashMap<Uri, AnalysisRequest>,
+    /// The most-recently-edited URI (requests come only from didOpen and
+    /// didChange, so the last-received request tracks the focused document).
+    /// Preferred by [`decide`] when a bulk dirty queues several URIs at once.
+    active: Option<Uri>,
     /// Submit-side handle onto the read pool, shared with the main loop. Used
     /// for read jobs (formatting) and the analysis read-phase.
     read_spawner: Spawner,
@@ -247,6 +262,8 @@ impl AnalysisWorker {
     /// Add `req` to the pending queue, keeping the highest version per URI
     /// (guards against an out-of-order lower version clobbering a newer one).
     fn enqueue(&mut self, req: AnalysisRequest) {
+        // Even a stale-version duplicate signals recent activity on this URI.
+        self.active = Some(req.uri.clone());
         match self.pending.get(&req.uri) {
             Some(existing) if existing.version >= req.version => {}
             _ => {
@@ -265,7 +282,7 @@ impl AnalysisWorker {
             .map(|(uri, req)| (uri.clone(), req.version))
             .collect();
         let inflight = self.inflight.as_ref().map(|f| (&f.uri, f.version));
-        let uri = match decide(inflight, &versions) {
+        let uri = match decide(inflight, &versions, self.active.as_ref()) {
             DispatchAction::Wait => return,
             DispatchAction::Start(uri) => uri,
             DispatchAction::SupersedeAndStart(uri) => {
@@ -397,13 +414,45 @@ mod tests {
     fn decide_idle_starts_a_pending_uri() {
         let a = uri_named("a.jl");
         let pending = HashMap::from([(a.clone(), 1)]);
-        assert_eq!(decide(None, &pending), DispatchAction::Start(a));
+        assert_eq!(decide(None, &pending, None), DispatchAction::Start(a));
     }
 
     #[test]
     fn decide_idle_empty_queue_waits() {
         let pending: HashMap<Uri, i32> = HashMap::new();
-        assert_eq!(decide(None, &pending), DispatchAction::Wait);
+        assert_eq!(decide(None, &pending, None), DispatchAction::Wait);
+    }
+
+    #[test]
+    fn decide_idle_prefers_active_uri() {
+        // Several URIs pending at once (a bulk dirty): the active document is
+        // started first, not whatever HashMap order yields.
+        let (a, b, c) = (uri_named("a.jl"), uri_named("b.jl"), uri_named("c.jl"));
+        let pending = HashMap::from([(a, 1), (b.clone(), 1), (c, 1)]);
+        assert_eq!(decide(None, &pending, Some(&b)), DispatchAction::Start(b));
+    }
+
+    #[test]
+    fn decide_idle_active_not_pending_falls_back() {
+        // The active document has no pending request (already analyzed): fall
+        // back to any pending URI rather than waiting.
+        let a = uri_named("a.jl");
+        let pending = HashMap::from([(a.clone(), 1)]);
+        assert_eq!(
+            decide(None, &pending, Some(&uri_named("focused.jl"))),
+            DispatchAction::Start(a)
+        );
+    }
+
+    #[test]
+    fn decide_active_never_cancels_a_different_inflight_uri() {
+        // Activity on B must not cancel A's running analysis; B waits its turn.
+        let (a, b) = (uri_named("a.jl"), uri_named("b.jl"));
+        let pending = HashMap::from([(b.clone(), 1)]);
+        assert_eq!(
+            decide(Some((&a, 1)), &pending, Some(&b)),
+            DispatchAction::Wait
+        );
     }
 
     #[test]
@@ -411,7 +460,7 @@ mod tests {
         let a = uri_named("a.jl");
         let pending = HashMap::from([(a.clone(), 2)]);
         assert_eq!(
-            decide(Some((&a, 1)), &pending),
+            decide(Some((&a, 1)), &pending, None),
             DispatchAction::SupersedeAndStart(a)
         );
     }
@@ -422,7 +471,7 @@ mod tests {
         // restart it.
         let a = uri_named("a.jl");
         let pending = HashMap::from([(a.clone(), 1)]);
-        assert_eq!(decide(Some((&a, 1)), &pending), DispatchAction::Wait);
+        assert_eq!(decide(Some((&a, 1)), &pending, None), DispatchAction::Wait);
     }
 
     #[test]
@@ -432,7 +481,7 @@ mod tests {
         // diagnostics.
         let a = uri_named("a.jl");
         let pending = HashMap::from([(uri_named("b.jl"), 5), (uri_named("c.jl"), 9)]);
-        assert_eq!(decide(Some((&a, 1)), &pending), DispatchAction::Wait);
+        assert_eq!(decide(Some((&a, 1)), &pending, None), DispatchAction::Wait);
     }
 
     #[test]
@@ -444,19 +493,22 @@ mod tests {
         let mut pending = HashMap::from([(a.clone(), 1), (b.clone(), 1), (c.clone(), 1)]);
 
         // Idle: start some URI.
-        let DispatchAction::Start(first) = decide(None, &pending) else {
+        let DispatchAction::Start(first) = decide(None, &pending, None) else {
             panic!("expected Start");
         };
         assert!(pending.contains_key(&first));
         pending.remove(&first);
 
         // Busy with `first`, two others still queued → wait, never supersede.
-        assert_eq!(decide(Some((&first, 1)), &pending), DispatchAction::Wait);
+        assert_eq!(
+            decide(Some((&first, 1)), &pending, None),
+            DispatchAction::Wait
+        );
 
         // Each `done` frees the slot; the next URI starts. Repeat to drain.
         let mut started = vec![first];
         while !pending.is_empty() {
-            let DispatchAction::Start(next) = decide(None, &pending) else {
+            let DispatchAction::Start(next) = decide(None, &pending, None) else {
                 panic!("expected Start");
             };
             pending.remove(&next);

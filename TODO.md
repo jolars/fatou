@@ -195,12 +195,6 @@ completion would feel broken on day one.
   error → versioned diagnostics → fixing edit → clear on close).
   **Deferred:** the single-thread index pool lands with the package index
   (Phase 3) — there is no unbounded background job to isolate yet.
-- [ ] Active-document prioritization in `decide`: when several URIs are pending
-  at once, `decide` starts them in arbitrary `HashMap` order, so the focused
-  document is not analyzed first. Low priority — a normal edit only dirties one
-  URI; this bites only on a bulk multi-file dirty (e.g. a workspace-wide external
-  change). Option: thread the active/most-recently-edited URI through and prefer
-  it in `decide`. rust-analyzer prioritizes the visible file.
 - [x] Incremental (range) document sync (`TextDocumentSyncKind::INCREMENTAL`):
   range edits are spliced into the live buffer by the pure
   `apply_content_changes` (`src/text/edit.rs`) — sequential application per
