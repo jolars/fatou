@@ -1,0 +1,19 @@
+# `unused-type-parameter`
+
+Flag a `where` clause type parameter that is never used in the signature or body, covering bare (`where T`), braced (`where {T, S}`), bounded (`where {T<:Number}`), and chained (`where T where S`) clauses. An unread parameter is usually a refactoring leftover or a forgotten `::T` annotation. Struct type parameters are exempt (phantom parameters like `struct Unit{T} end` are idiomatic), as are all-underscore names.
+
+`T` is bound but never referenced:
+
+```julia
+function f(x) where {T}
+    x + 1
+end
+```
+
+```text
+warning: unused-type-parameter
+ --> example.jl:1:22
+  |
+1 | function f(x) where {T}
+  |                      ^ type parameter `T` is never used
+```

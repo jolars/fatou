@@ -912,3 +912,105 @@ fn noteq_definition_ignores_keyword_default_comparison() {
     // A `!=` comparison as a keyword default is a use, not a definition.
     assert_eq!(count("noteq-definition", "f(; x = a != b) = x\n"), 0);
 }
+
+// --- unused-type-parameter ---------------------------------------------------
+
+#[test]
+fn unused_type_parameter_flags_short_form() {
+    assert_eq!(
+        findings("unused-type-parameter", "f(x) where T = x\n"),
+        ["type parameter `T` is never used"]
+    );
+}
+
+#[test]
+fn unused_type_parameter_flags_long_form_braced() {
+    assert_eq!(
+        count(
+            "unused-type-parameter",
+            "function f(x) where {T}\n    x\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unused_type_parameter_flags_only_the_unused_param() {
+    assert_eq!(
+        findings("unused-type-parameter", "f(x::S) where {T, S} = x\n"),
+        ["type parameter `T` is never used"]
+    );
+}
+
+#[test]
+fn unused_type_parameter_flags_in_chained_where() {
+    assert_eq!(
+        findings("unused-type-parameter", "f(x::S) where T where S = x\n"),
+        ["type parameter `T` is never used"]
+    );
+}
+
+#[test]
+fn unused_type_parameter_ignores_annotation_use() {
+    assert_eq!(
+        count("unused-type-parameter", "f(x::T) where {T<:Number} = x\n"),
+        0
+    );
+}
+
+#[test]
+fn unused_type_parameter_ignores_body_use() {
+    assert_eq!(
+        count(
+            "unused-type-parameter",
+            "function f(x) where {T}\n    convert(T, x)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unused_type_parameter_ignores_type_selector_use() {
+    assert_eq!(
+        count("unused-type-parameter", "f(::Type{T}) where T = T\n"),
+        0
+    );
+}
+
+#[test]
+fn unused_type_parameter_ignores_use_as_bound() {
+    // `T` appears only as `S`'s upper bound — still a use.
+    assert_eq!(
+        count("unused-type-parameter", "f(x::S) where {T, S<:T} = x\n"),
+        0
+    );
+}
+
+#[test]
+fn unused_type_parameter_ignores_struct_type_params() {
+    // Phantom struct parameters (`struct Unit{T} end`) are idiomatic Julia;
+    // only `where` clause parameters are in scope for this rule.
+    assert_eq!(count("unused-type-parameter", "struct Unit{T}\nend\n"), 0);
+}
+
+#[test]
+fn unused_type_parameter_ignores_constructor_curly_callee() {
+    // The `P{T}` callee of a parametric inner constructor reads `T`.
+    assert_eq!(
+        count(
+            "unused-type-parameter",
+            "struct P{T}\n    P{T}() where T = new()\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unused_type_parameter_skips_underscore_names() {
+    assert_eq!(count("unused-type-parameter", "f(x) where _ = x\n"), 0);
+}
+
+#[test]
+fn unused_type_parameter_stays_silent_in_quoted_code() {
+    assert_eq!(count("unused-type-parameter", ":(f(x) where T = x)\n"), 0);
+}

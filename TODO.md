@@ -122,9 +122,14 @@ Ready now (no new infrastructure):
   (moving the method to `==` negates the body). Both the prefix
   `≠(a, b) = ...` form (the parser now accepts unicode operators as call
   names) and the infix `a ≠ b = ...` form are covered. (NotEqDef)
-- [ ] `unused-type-parameter` (correctness, sem): `where {T}` with `T` never
-  used in the signature or body. Needs the model to bind where-clause params
-  first. (UnusedTypeParameter)
+- [x] `unused-type-parameter` (correctness, sem): `where {T}` with `T` never
+  used in the signature or body — bare, braced, bounded, and chained clause
+  forms. Warning; struct `{T}` params are exempt (phantom parameters are
+  idiomatic), as are all-underscore names; silent in quoted code (the model
+  binds nothing there). Fixed the builder to walk a `Foo{T}(...)` signature
+  callee's type arguments in the function scope (the constructor's `where`
+  params are read there). No fix (deleting a param restructures the `where`
+  clause). (UnusedTypeParameter)
 - [ ] `index-from-length` (suspicious, syn, opinionated): `for i in
   1:length(x)` where `i` indexes `x` -> suggest `eachindex`/`axes`; also
   iterating a bare numeric literal (`for i in 3.5`). Name-based match on

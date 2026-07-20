@@ -56,6 +56,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UndefinedName),
         Box::new(correctness::BreakOutsideLoop),
         Box::new(correctness::NotEqDefinition),
+        Box::new(correctness::UnusedTypeParameter),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::ConstantCondition),

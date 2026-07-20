@@ -7,6 +7,7 @@ mod undefined_name;
 mod unused_argument;
 mod unused_binding;
 mod unused_import;
+mod unused_type_parameter;
 
 pub use break_outside_loop::BreakOutsideLoop;
 pub use duplicate_argument::DuplicateArgument;
@@ -15,3 +16,4 @@ pub use undefined_name::UndefinedName;
 pub use unused_argument::UnusedArgument;
 pub use unused_binding::UnusedBinding;
 pub use unused_import::UnusedImport;
+pub use unused_type_parameter::UnusedTypeParameter;

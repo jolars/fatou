@@ -19,6 +19,7 @@
   - [`undefined-name`](reference/rules/undefined-name.md)
   - [`break-outside-loop`](reference/rules/break-outside-loop.md)
   - [`noteq-definition`](reference/rules/noteq-definition.md)
+  - [`unused-type-parameter`](reference/rules/unused-type-parameter.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)
   - [`constant-condition`](reference/rules/constant-condition.md)
