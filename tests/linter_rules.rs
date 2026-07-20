@@ -817,3 +817,83 @@ fn module_shadows_parent_stays_silent_in_quotes_and_macro_calls() {
         0
     );
 }
+
+// --- noteq-definition --------------------------------------------------------
+
+#[test]
+fn noteq_definition_flags_long_form() {
+    let msgs = findings(
+        "noteq-definition",
+        "function !=(a, b)\n    !(a == b)\nend\n",
+    );
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("`==`"), "message points at `==`: {msgs:?}");
+}
+
+#[test]
+fn noteq_definition_flags_short_form() {
+    assert_eq!(count("noteq-definition", "!=(a::Foo, b::Foo) = true\n"), 1);
+}
+
+#[test]
+fn noteq_definition_flags_infix_short_form() {
+    // `a != b = true` is a legal infix definition of `!=`.
+    assert_eq!(count("noteq-definition", "a != b = true\n"), 1);
+}
+
+#[test]
+fn noteq_definition_flags_unicode_infix_form() {
+    assert_eq!(count("noteq-definition", "a \u{2260} b = true\n"), 1);
+}
+
+#[test]
+fn noteq_definition_flags_qualified_forms() {
+    // `Base.:!=` and `Base.:(!=)`, in both the short and the long form.
+    assert_eq!(count("noteq-definition", "Base.:!=(a, b) = true\n"), 1);
+    assert_eq!(
+        count(
+            "noteq-definition",
+            "function Base.:(!=)(a, b)\n    true\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn noteq_definition_flags_parenthesized_callee() {
+    assert_eq!(count("noteq-definition", "(!=)(a, b) = false\n"), 1);
+}
+
+#[test]
+fn noteq_definition_peels_where_and_return_type() {
+    assert_eq!(
+        count("noteq-definition", "!=(a::T, b::T) where {T} = true\n"),
+        1
+    );
+    assert_eq!(count("noteq-definition", "!=(a, b)::Bool = true\n"), 1);
+}
+
+#[test]
+fn noteq_definition_ignores_comparisons_and_calls() {
+    // Using `!=` is fine; only defining it is flagged.
+    assert_eq!(count("noteq-definition", "a != b\n"), 0);
+    assert_eq!(count("noteq-definition", "x = a != b\n"), 0);
+    assert_eq!(count("noteq-definition", "!=(a, b)\n"), 0);
+    assert_eq!(count("noteq-definition", "x = !=(a, b)\n"), 0);
+}
+
+#[test]
+fn noteq_definition_ignores_eqeq_definition() {
+    // Defining `==` is exactly what the rule asks for.
+    assert_eq!(count("noteq-definition", "==(a::Foo, b::Foo) = true\n"), 0);
+    assert_eq!(
+        count("noteq-definition", "function ==(a, b)\n    true\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn noteq_definition_ignores_keyword_default_comparison() {
+    // A `!=` comparison as a keyword default is a use, not a definition.
+    assert_eq!(count("noteq-definition", "f(; x = a != b) = x\n"), 0);
+}

@@ -113,8 +113,16 @@ Ready now (no new infrastructure):
   silent in quoted code and macro calls (`@eval module A` is the deliberate
   way to build one). No fix (renaming is a semantic rewrite). Grew
   `ModuleDef::name()` in the AST wrappers. (InvalidModuleName)
-- [ ] `noteq-definition` (correctness, syn): defining `!=` (or `≠`) instead
-  of `==`; `!=` is `const != = !(==)` and should not be overloaded. (NotEqDef)
+- [x] `noteq-definition` (correctness, syn): defining `!=` (or `≠`) instead
+  of `==`; `!=` is `const != = !(==)` and should not be overloaded. Warning;
+  long, short, infix (`a != b = ...`), parenthesized, and qualified
+  (`Base.:!=`) forms, through `where` clauses and return-type annotations.
+  Still flags in quotes and macro calls (`@eval` defines the method just the
+  same). Grew `CallExpr::callee_operator()` in the AST wrappers. No fix
+  (moving the method to `==` negates the body). The prefix `≠(a, b) = ...`
+  form is dormant until the parser accepts unicode operators as call names
+  (`is_operator_call_name` lacks `UniComparison`); the infix `a ≠ b = ...`
+  form is covered. (NotEqDef)
 - [ ] `unused-type-parameter` (correctness, sem): `where {T}` with `T` never
   used in the signature or body. Needs the model to bind where-clause params
   first. (UnusedTypeParameter)

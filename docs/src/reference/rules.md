@@ -8,6 +8,7 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`unused-argument`](rules/unused-argument.md)
 - [`undefined-name`](rules/undefined-name.md)
 - [`break-outside-loop`](rules/break-outside-loop.md)
+- [`noteq-definition`](rules/noteq-definition.md)
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)
 - [`constant-condition`](rules/constant-condition.md)

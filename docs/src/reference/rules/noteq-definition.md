@@ -1,0 +1,17 @@
+# `noteq-definition`
+
+Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.
+
+Defining `!=` where `==` should carry the method:
+
+```julia
+!=(a::Grade, b::Grade) = a.score != b.score
+```
+
+```text
+warning: noteq-definition
+ --> example.jl:1:1
+  |
+1 | !=(a::Grade, b::Grade) = a.score != b.score
+  | ^^ `!=` is defined as `!(==)` and should not be overloaded; define `==` instead
+```

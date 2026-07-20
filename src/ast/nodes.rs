@@ -10,7 +10,7 @@
 
 use rowan::ast::{AstChildren, AstNode, support};
 
-use super::tokens::{Ident, Operator, child_token};
+use super::tokens::{AstToken, Ident, Operator, child_token};
 use crate::syntax::{JuliaLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
 
 macro_rules! ast_node {
@@ -478,6 +478,67 @@ impl CallExpr {
     pub fn callee(&self) -> Option<Expr> {
         support::child(&self.0)
     }
+
+    /// The operator token naming the callee, when the callee is an operator
+    /// rather than an ordinary expression: bare (`!=(a, b)`), parenthesized
+    /// (`(!=)(a, b)`), or the quoted symbol ending a qualified path
+    /// (`Base.:!=(a, b)`, `Base.:(==)(a, b)`). `None` for every other callee
+    /// shape.
+    pub fn callee_operator(&self) -> Option<Operator> {
+        for el in self.0.children_with_tokens() {
+            match el {
+                rowan::NodeOrToken::Token(token) => {
+                    if let Some(op) = Operator::cast(token) {
+                        return Some(op);
+                    }
+                }
+                rowan::NodeOrToken::Node(node) => {
+                    return match node.kind() {
+                        SyntaxKind::PAREN_EXPR => paren_operator(&node),
+                        // A qualified path callee (`Base.:!=`): the operator is
+                        // the quoted symbol ending the path.
+                        SyntaxKind::BINARY_EXPR => node
+                            .children()
+                            .last()
+                            .filter(|last| last.kind() == SyntaxKind::QUOTE_SYM)
+                            .and_then(|quote| quote_sym_operator(&quote)),
+                        _ => None,
+                    };
+                }
+            }
+        }
+        None
+    }
+}
+
+/// The lone operator token directly inside a `PAREN_EXPR` (`(!=)`), if any.
+fn paren_operator(paren: &SyntaxNode) -> Option<Operator> {
+    paren
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find_map(Operator::cast)
+}
+
+/// The operator a `QUOTE_SYM` quotes (`:!=`, `:(==)`), skipping the leading
+/// quoting `:` (itself an operator kind).
+fn quote_sym_operator(quote: &SyntaxNode) -> Option<Operator> {
+    let mut seen_quote_colon = false;
+    for el in quote.children_with_tokens() {
+        match el {
+            rowan::NodeOrToken::Token(token) => {
+                if !seen_quote_colon && token.kind() == SyntaxKind::COLON {
+                    seen_quote_colon = true;
+                } else if let Some(op) = Operator::cast(token) {
+                    return Some(op);
+                }
+            }
+            rowan::NodeOrToken::Node(node) if node.kind() == SyntaxKind::PAREN_EXPR => {
+                return paren_operator(&node);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 impl IndexExpr {
@@ -696,6 +757,25 @@ mod tests {
             .map(|a| a.expr().unwrap().syntax().text().to_string())
             .collect();
         assert_eq!(texts, ["a", "b"]);
+    }
+
+    #[test]
+    fn call_callee_operator_shapes() {
+        // Bare, parenthesized, and qualified (`:!=` and `:(==)`) operator
+        // callees all surface the operator token.
+        let call: CallExpr = find("!=(a, b)\n");
+        assert_eq!(call.callee_operator().unwrap().text(), "!=");
+        let call: CallExpr = find("(!=)(a, b)\n");
+        assert_eq!(call.callee_operator().unwrap().text(), "!=");
+        let call: CallExpr = find("Base.:!=(a, b)\n");
+        assert_eq!(call.callee_operator().unwrap().text(), "!=");
+        let call: CallExpr = find("Base.:(==)(a, b)\n");
+        assert_eq!(call.callee_operator().unwrap().text(), "==");
+        // Ordinary callees have no operator name.
+        let call: CallExpr = find("g(a, b)\n");
+        assert!(call.callee_operator().is_none());
+        let call: CallExpr = find("Base.g(a, b)\n");
+        assert!(call.callee_operator().is_none());
     }
 
     #[test]
