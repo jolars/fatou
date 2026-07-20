@@ -1,0 +1,1 @@
+(toplevel (= (call ≠ a b) (call-pre ! (call-i a == b))) (call ≤ x y) (call ⊕ a b) (call → a b) (call ∘ f g) (call ∈ a) (call ± a b) (call-pre ± a) (call-pre ∓ a) (call ⋆ a b) (call √ a b) (call ¬ a b) (= (where (call ≠ a b) T) c) (call (. ≠) a b) (call ≠₁ a b) (call filter (call ≥ 3) xs) (curly ≤ T) (call sort xs (= lt ≥)) (ref a ≤) (= ≥ 1))

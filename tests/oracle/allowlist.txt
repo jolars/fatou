@@ -190,6 +190,7 @@ typed_concat
 type_operator_call
 unary_operator_call
 unclosed_delimiter
+unicode_operator_call
 unicode_operators
 unterminated_command
 unterminated_string

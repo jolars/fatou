@@ -847,6 +847,21 @@ fn noteq_definition_flags_unicode_infix_form() {
 }
 
 #[test]
+fn noteq_definition_flags_unicode_prefix_form() {
+    // `≠(a, b) = ...` — the unicode operator as a call name.
+    assert_eq!(count("noteq-definition", "\u{2260}(a, b) = !(a == b)\n"), 1);
+    assert_eq!(
+        count(
+            "noteq-definition",
+            "function \u{2260}(a, b)\n    !(a == b)\nend\n"
+        ),
+        1
+    );
+    // Another unicode comparison operator is not `!=`.
+    assert_eq!(count("noteq-definition", "\u{2264}(a, b) = true\n"), 0);
+}
+
+#[test]
 fn noteq_definition_flags_qualified_forms() {
     // `Base.:!=` and `Base.:(!=)`, in both the short and the long form.
     assert_eq!(count("noteq-definition", "Base.:!=(a, b) = true\n"), 1);

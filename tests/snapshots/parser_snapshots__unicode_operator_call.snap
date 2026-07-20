@@ -1,0 +1,291 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..222
+  ASSIGNMENT_EXPR@0..21
+    CALL_EXPR@0..9
+      UNICODE_OP@0..3 "≠"
+      ARG_LIST@3..9
+        LPAREN@3..4 "("
+        ARG@4..5
+          NAME@4..5
+            IDENT@4..5 "a"
+        COMMA@5..6 ","
+        WHITESPACE@6..7 " "
+        ARG@7..8
+          NAME@7..8
+            IDENT@7..8 "b"
+        RPAREN@8..9 ")"
+    WHITESPACE@9..10 " "
+    EQ@10..11 "="
+    WHITESPACE@11..12 " "
+    UNARY_EXPR@12..21
+      BANG@12..13 "!"
+      PAREN_EXPR@13..21
+        LPAREN@13..14 "("
+        BINARY_EXPR@14..20
+          NAME@14..15
+            IDENT@14..15 "a"
+          WHITESPACE@15..16 " "
+          EQ_EQ@16..18 "=="
+          WHITESPACE@18..19 " "
+          NAME@19..20
+            IDENT@19..20 "b"
+        RPAREN@20..21 ")"
+  NEWLINE@21..22 "\n"
+  CALL_EXPR@22..31
+    UNICODE_OP@22..25 "≤"
+    ARG_LIST@25..31
+      LPAREN@25..26 "("
+      ARG@26..27
+        NAME@26..27
+          IDENT@26..27 "x"
+      COMMA@27..28 ","
+      WHITESPACE@28..29 " "
+      ARG@29..30
+        NAME@29..30
+          IDENT@29..30 "y"
+      RPAREN@30..31 ")"
+  NEWLINE@31..32 "\n"
+  CALL_EXPR@32..41
+    UNICODE_OP@32..35 "⊕"
+    ARG_LIST@35..41
+      LPAREN@35..36 "("
+      ARG@36..37
+        NAME@36..37
+          IDENT@36..37 "a"
+      COMMA@37..38 ","
+      WHITESPACE@38..39 " "
+      ARG@39..40
+        NAME@39..40
+          IDENT@39..40 "b"
+      RPAREN@40..41 ")"
+  NEWLINE@41..42 "\n"
+  CALL_EXPR@42..51
+    UNICODE_OP@42..45 "→"
+    ARG_LIST@45..51
+      LPAREN@45..46 "("
+      ARG@46..47
+        NAME@46..47
+          IDENT@46..47 "a"
+      COMMA@47..48 ","
+      WHITESPACE@48..49 " "
+      ARG@49..50
+        NAME@49..50
+          IDENT@49..50 "b"
+      RPAREN@50..51 ")"
+  NEWLINE@51..52 "\n"
+  CALL_EXPR@52..61
+    UNICODE_OP@52..55 "∘"
+    ARG_LIST@55..61
+      LPAREN@55..56 "("
+      ARG@56..57
+        NAME@56..57
+          IDENT@56..57 "f"
+      COMMA@57..58 ","
+      WHITESPACE@58..59 " "
+      ARG@59..60
+        NAME@59..60
+          IDENT@59..60 "g"
+      RPAREN@60..61 ")"
+  NEWLINE@61..62 "\n"
+  CALL_EXPR@62..68
+    UNICODE_OP@62..65 "∈"
+    ARG_LIST@65..68
+      LPAREN@65..66 "("
+      ARG@66..67
+        NAME@66..67
+          IDENT@66..67 "a"
+      RPAREN@67..68 ")"
+  NEWLINE@68..69 "\n"
+  CALL_EXPR@69..77
+    UNICODE_OP@69..71 "±"
+    ARG_LIST@71..77
+      LPAREN@71..72 "("
+      ARG@72..73
+        NAME@72..73
+          IDENT@72..73 "a"
+      COMMA@73..74 ","
+      WHITESPACE@74..75 " "
+      ARG@75..76
+        NAME@75..76
+          IDENT@75..76 "b"
+      RPAREN@76..77 ")"
+  NEWLINE@77..78 "\n"
+  UNARY_EXPR@78..83
+    UNICODE_OP@78..80 "±"
+    PAREN_EXPR@80..83
+      LPAREN@80..81 "("
+      NAME@81..82
+        IDENT@81..82 "a"
+      RPAREN@82..83 ")"
+  NEWLINE@83..84 "\n"
+  UNARY_EXPR@84..88
+    UNICODE_OP@84..87 "∓"
+    NAME@87..88
+      IDENT@87..88 "a"
+  NEWLINE@88..89 "\n"
+  CALL_EXPR@89..98
+    UNICODE_OP@89..92 "⋆"
+    ARG_LIST@92..98
+      LPAREN@92..93 "("
+      ARG@93..94
+        NAME@93..94
+          IDENT@93..94 "a"
+      COMMA@94..95 ","
+      WHITESPACE@95..96 " "
+      ARG@96..97
+        NAME@96..97
+          IDENT@96..97 "b"
+      RPAREN@97..98 ")"
+  NEWLINE@98..99 "\n"
+  CALL_EXPR@99..108
+    UNICODE_RADICAL@99..102 "√"
+    ARG_LIST@102..108
+      LPAREN@102..103 "("
+      ARG@103..104
+        NAME@103..104
+          IDENT@103..104 "a"
+      COMMA@104..105 ","
+      WHITESPACE@105..106 " "
+      ARG@106..107
+        NAME@106..107
+          IDENT@106..107 "b"
+      RPAREN@107..108 ")"
+  NEWLINE@108..109 "\n"
+  CALL_EXPR@109..117
+    UNICODE_RADICAL@109..111 "¬"
+    ARG_LIST@111..117
+      LPAREN@111..112 "("
+      ARG@112..113
+        NAME@112..113
+          IDENT@112..113 "a"
+      COMMA@113..114 ","
+      WHITESPACE@114..115 " "
+      ARG@115..116
+        NAME@115..116
+          IDENT@115..116 "b"
+      RPAREN@116..117 ")"
+  NEWLINE@117..118 "\n"
+  ASSIGNMENT_EXPR@118..139
+    WHERE_EXPR@118..135
+      CALL_EXPR@118..127
+        UNICODE_OP@118..121 "≠"
+        ARG_LIST@121..127
+          LPAREN@121..122 "("
+          ARG@122..123
+            NAME@122..123
+              IDENT@122..123 "a"
+          COMMA@123..124 ","
+          WHITESPACE@124..125 " "
+          ARG@125..126
+            NAME@125..126
+              IDENT@125..126 "b"
+          RPAREN@126..127 ")"
+      WHITESPACE@127..128 " "
+      WHERE_KW@128..133 "where"
+      WHITESPACE@133..134 " "
+      NAME@134..135
+        IDENT@134..135 "T"
+    WHITESPACE@135..136 " "
+    EQ@136..137 "="
+    WHITESPACE@137..138 " "
+    NAME@138..139
+      IDENT@138..139 "c"
+  NEWLINE@139..140 "\n"
+  CALL_EXPR@140..150
+    UNICODE_OP@140..144 ".≠"
+    ARG_LIST@144..150
+      LPAREN@144..145 "("
+      ARG@145..146
+        NAME@145..146
+          IDENT@145..146 "a"
+      COMMA@146..147 ","
+      WHITESPACE@147..148 " "
+      ARG@148..149
+        NAME@148..149
+          IDENT@148..149 "b"
+      RPAREN@149..150 ")"
+  NEWLINE@150..151 "\n"
+  CALL_EXPR@151..163
+    UNICODE_OP@151..157 "≠₁"
+    ARG_LIST@157..163
+      LPAREN@157..158 "("
+      ARG@158..159
+        NAME@158..159
+          IDENT@158..159 "a"
+      COMMA@159..160 ","
+      WHITESPACE@160..161 " "
+      ARG@161..162
+        NAME@161..162
+          IDENT@161..162 "b"
+      RPAREN@162..163 ")"
+  NEWLINE@163..164 "\n"
+  CALL_EXPR@164..182
+    NAME@164..170
+      IDENT@164..170 "filter"
+    ARG_LIST@170..182
+      LPAREN@170..171 "("
+      ARG@171..177
+        CALL_EXPR@171..177
+          UNICODE_OP@171..174 "≥"
+          ARG_LIST@174..177
+            LPAREN@174..175 "("
+            ARG@175..176
+              LITERAL@175..176
+                INTEGER@175..176 "3"
+            RPAREN@176..177 ")"
+      COMMA@177..178 ","
+      WHITESPACE@178..179 " "
+      ARG@179..181
+        NAME@179..181
+          IDENT@179..181 "xs"
+      RPAREN@181..182 ")"
+  NEWLINE@182..183 "\n"
+  CURLY_EXPR@183..189
+    UNICODE_OP@183..186 "≤"
+    ARG_LIST@186..189
+      LBRACE@186..187 "{"
+      ARG@187..188
+        NAME@187..188
+          IDENT@187..188 "T"
+      RBRACE@188..189 "}"
+  NEWLINE@189..190 "\n"
+  CALL_EXPR@190..206
+    NAME@190..194
+      IDENT@190..194 "sort"
+    ARG_LIST@194..206
+      LPAREN@194..195 "("
+      ARG@195..197
+        NAME@195..197
+          IDENT@195..197 "xs"
+      COMMA@197..198 ","
+      WHITESPACE@198..199 " "
+      KEYWORD_ARG@199..205
+        NAME@199..201
+          IDENT@199..201 "lt"
+        EQ@201..202 "="
+        OPERATOR_ATOM@202..205
+          UNICODE_OP@202..205 "≥"
+      RPAREN@205..206 ")"
+  NEWLINE@206..207 "\n"
+  INDEX_EXPR@207..213
+    NAME@207..208
+      IDENT@207..208 "a"
+    ARG_LIST@208..213
+      LBRACKET@208..209 "["
+      ARG@209..212
+        OPERATOR_ATOM@209..212
+          UNICODE_OP@209..212 "≤"
+      RBRACKET@212..213 "]"
+  NEWLINE@213..214 "\n"
+  ASSIGNMENT_EXPR@214..221
+    OPERATOR_ATOM@214..217
+      UNICODE_OP@214..217 "≥"
+    WHITESPACE@217..218 " "
+    EQ@218..219 "="
+    WHITESPACE@219..220 " "
+    LITERAL@220..221
+      INTEGER@220..221 "1"
+  NEWLINE@221..222 "\n"

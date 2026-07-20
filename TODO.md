@@ -119,10 +119,9 @@ Ready now (no new infrastructure):
   (`Base.:!=`) forms, through `where` clauses and return-type annotations.
   Still flags in quotes and macro calls (`@eval` defines the method just the
   same). Grew `CallExpr::callee_operator()` in the AST wrappers. No fix
-  (moving the method to `==` negates the body). The prefix `≠(a, b) = ...`
-  form is dormant until the parser accepts unicode operators as call names
-  (`is_operator_call_name` lacks `UniComparison`); the infix `a ≠ b = ...`
-  form is covered. (NotEqDef)
+  (moving the method to `==` negates the body). Both the prefix
+  `≠(a, b) = ...` form (the parser now accepts unicode operators as call
+  names) and the infix `a ≠ b = ...` form are covered. (NotEqDef)
 - [ ] `unused-type-parameter` (correctness, sem): `where {T}` with `T` never
   used in the signature or body. Needs the model to bind where-clause params
   first. (UnusedTypeParameter)

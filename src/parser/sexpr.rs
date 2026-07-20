@@ -973,6 +973,18 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
                 head = operator_func_repr(t.kind());
                 break;
             }
+            // A Unicode operator callee carries its spelling in the token text
+            // (`≠(a, b)` → `(call ≠ a b)`, `√(a, b)` → `(call √ a b)`);
+            // `operator_func_repr` is keyed on kind and cannot recover it. A
+            // broadcast form strips the leading dot (`.≠(a, b)` →
+            // `(call (. ≠) a b)`).
+            NodeOrToken::Token(t) if matches!(t.kind(), UNICODE_OP | UNICODE_RADICAL) => {
+                parts.push(match t.text().strip_prefix('.') {
+                    Some(rest) => format!("(. {rest})"),
+                    None => t.text().to_string(),
+                });
+                break;
+            }
             NodeOrToken::Token(t) if is_operator(t.kind()) => {
                 // A suffixed operator callee (`+₁(x)` → `(call +₁ x)`) keeps its
                 // suffix, which `operator_func_repr` (keyed on kind) would drop.

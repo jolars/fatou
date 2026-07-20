@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **198 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **199 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,34 +134,54 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-09—name-list comment continuation)
+## Latest session (2026-07-20—unicode operators as call names and value atoms)
 
-Real-world find (harvesting Julia 1.12's own `base/exports.jl`/`boot.jl` for the
-Base/stdlib index): an `export`/`public` list continued across a **comment** was
-truncated at the first comment. `export Core,\n # key types\n Any, Int` parsed as
-just `(export Core)`, and `export\n # c\n Any` (boot.jl's Core block) as an empty
-`(export)` — so the harvested Base export set collapsed to `["Core"]` and Core's
-to `[]`. Root cause: `parse_name_list_stmt` (`structural.rs`) skipped the
-post-keyword and post-comma gap with `skip_ws_and_newlines`, which crosses
-newlines but **not** comments — the 2026-07-02d comma-continuation cluster
-(bare tuple, `let`, `import`) switched to `skip_trivia`, but the name-list
-statement was left behind.
+User-named target (TODO's `noteq-definition` bullet): the prefix `≠(a, b) = ...`
+definition form was dormant because `is_operator_call_name` lacked the Unicode
+tiers — `≠(a, b)` left `≠` as a *silently dropped* loose toplevel token
+(`(toplevel (tuple-p a b))`). Probed Julia: every Unicode infix op glued to `(`
+is a plain call even single-arg (`≠(a)` ⇒ `(call ≠ a)`, unlike ASCII `+(x)`),
+**except** the unary-capable `± ∓ ⋆`, which follow the `+`-style paren-call
+heuristic (`±(a)` ⇒ `(call-pre ± a)`, `±(a, b)` ⇒ `(call ± a b)`).
 
-- **Fix**: two call sites in `parse_name_list_stmt` switched
-  `skip_ws_and_newlines` → `skip_trivia` (ws + newlines + comments). A bare
-  newline without a comma still terminates (`header_ends` stops on `Newline`;
-  `export a \n b` ⇒ `(export a) b`), so only the after-keyword and after-comma
-  gaps gained comment-crossing. Parser-bucket fix; projector untouched.
-- **Probed** byte-identical: `export Core,\n #c\n Any, Int` ⇒ `(export Core Any
-  Int)`, `export\n #c\n Any, Int` ⇒ `(export Any Int)`, `public foo,\n #c\n bar`
-  ⇒ `(public foo bar)`, and the terminator `export a \n b` ⇒ `(export a) b`.
-- **Fixtures**: parser snapshot + oracle dir slug `name_list_comment_continuation`.
-- **Counts**: JS 677 (held, 8 permanent FAILs unchanged); dir 197 → **198**.
-- **Next**: no queued parser target — surfaced while building the Base/stdlib
-  index (TODO Phase 3); batch-probe real-world Julia against the oracle for the
-  next divergence.
+- **Parser** (`expr.rs`): `is_operator_call_name` gained all six Unicode infix
+  tiers (`UniArrow|UniComparison|UniColon|UniPlus|UniTimes|UniPower`; dotted
+  `.≠(a,b)` and suffixed `≠₁(a,b)` forms share the tier `TokKind` and come along).
+  The unary-prefix arm's or-pattern became a guard (`is_unary_prefix_op(kind,
+  text)`) so exact-text `± ∓ ⋆` (and the radicals) route there first;
+  `is_unary_paren_op` gained `UniRadical|UniPlus|UniTimes`, fixing a latent
+  divergence: `√(a, b)` was `(call-pre √ (tuple-p a b))`, now `(call √ a b)`
+  (likewise `¬`). `is_value_operator` gained the six tiers: `a[≤]` ⇒ `(ref a ≤)`,
+  `≥ = 1` ⇒ `(= ≥ 1)`, `sort(xs, lt=≥)`, and error-prefix `≠a` ⇒
+  `(call-pre (error ≠) a)` all work now. `≤{T}` ⇒ `(curly ≤ T)` came free via
+  `is_curly_operator_name`.
+- **Projector** (`sexpr.rs`): one new `project_call` callee arm — a
+  `UNICODE_OP`/`UNICODE_RADICAL` callee token renders by *text* (dot-stripped
+  `(. ≠)` for broadcast); `operator_func_repr` is kind-keyed and would have
+  emitted its `?` fallback. Genuine new-node mapping, not compensation.
+- **Linter**: the dormant NotEqDef prefix form now fires; added
+  `noteq_definition_flags_unicode_prefix_form` (short + long form flagged, `≤`
+  definition not flagged). Rule code untouched — it was already wired for a
+  `UNICODE_OP` callee.
+- **Fixtures**: parser snapshot + oracle dir slug `unicode_operator_call`
+  (20 lines, byte-identical to JuliaSyntax; includes `filter(≥(3), xs)` — the
+  common `Base.Fix2` idiom).
+- **Counts**: JS 677 (held, same 8 permanent FAILs); dir 198 → **199**.
+- **Deferred**: spaced `≠ (a, b)` joins the existing non-unary spaced-operator
+  bucket (`* (a, b)` ⇒ `(call-pre (error *) (tuple-p a b))` vs Julia's
+  `(call op (error-t) a b)`, deferral of 2026-06-24g); dotted unary `.±`;
+  suffixed-op prefix without parens (`±₁ x`, joins the 2026-06-26b sibling).
+- **Next**: no queued parser target — batch-probe real-world Julia against the
+  oracle for the next divergence.
 
 ## Earlier sessions
+
+- **2026-07-09**—name-list comment continuation. `export Core,\n #c\n Any` was
+  truncated at the comment (`parse_name_list_stmt` skipped gaps with
+  `skip_ws_and_newlines`, which crosses newlines but not comments); two call
+  sites switched to `skip_trivia`. Bare newline without a comma still
+  terminates. Fixture `name_list_comment_continuation`. JS 677 (held);
+  dir 197 → 198.
 
 - **2026-07-07b**—space-sensitive macro space-form arguments. `@foo f (x)` fused
   a whitespace-preceded opener into a call with a spurious `(error-t)`; set
