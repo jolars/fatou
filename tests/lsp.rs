@@ -38,7 +38,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// Bridge lsp-server 0.9's `ResponseKind` split back to the flat `result`
+/// Bridge lsp-server 0.10's `response_result` field back to the flat `result`
 /// accessor these tests were written against: `Some(value)` for an `Ok`
 /// response, `None` for an error (matching the pre-0.9 `Option` field).
 trait ResponseResultExt {
@@ -47,10 +47,7 @@ trait ResponseResultExt {
 
 impl ResponseResultExt for lsp_server::Response {
     fn result(&self) -> Option<serde_json::Value> {
-        match &self.response_kind {
-            lsp_server::ResponseKind::Ok { result } => Some(result.clone()),
-            lsp_server::ResponseKind::Err { .. } => None,
-        }
+        self.response_result.as_ref().ok().cloned()
     }
 }
 
