@@ -38,7 +38,7 @@ env_logger = "0.11.10"
 globset = "0.4.18"
 ignore = "0.4.26"
 log = { version = "0.4.32", features = ["release_max_level_info"] }
-lsp-server = "0.9"
+lsp-server = "0.10"
 lsp-types = "0.97"
 rayon = "1.12"
 rowan = "0.16.1"
