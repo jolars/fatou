@@ -4,6 +4,7 @@ version = "0.6.0"
 edition = "2024"
 readme = "README.md"
 description = "A language server, formatter, and linter for Julia"
+homepage = "https://fatou.dev"
 license = "MIT"
 repository = "https://github.com/jolars/fatou"
 authors = ["Johan Larsson <johan@jolars.co>"]
