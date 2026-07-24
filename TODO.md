@@ -159,10 +159,18 @@ Blocked on future infrastructure:
 - [ ] `type-piracy` (correctness): extending an imported function with no
   owned argument type. Blocked on cross-file import and ownership
   resolution. (TypePiracy)
-- [ ] `missing-include-file` plus include-graph checks (correctness): flag
-  `include` of a nonexistent path; detect include cycles. Blocked on
-  include-following in project discovery. (MissingFile, IncludeLoop,
-  IncludePathContainsNULL)
+- [x] `missing-include-file` + `include-cycle` (correctness, syn): static
+  `include("literal")` whose target is not a file on disk (error severity),
+  and one whose target transitively includes the file again, self-include
+  smallest (warning). Unblocked by a CLI include-following pre-pass
+  (`src/linter/include_graph.rs`): edges of the lint set come from its parsed
+  trees, out-of-set targets are read from disk (memoized), and per-file
+  problems flow to the rules through `RuleContext::includes` — the language
+  server passes none and keeps its own graph diagnostics. Dynamic,
+  interpolated, qualified, and two-argument includes are invisible, as is a
+  pathless document (stdin). A NUL-escaped path never names a file, so the
+  missing check covers IncludePathContainsNULL. No fixes. (MissingFile,
+  IncludeLoop, IncludePathContainsNULL)
 - [ ] `redefined-constant` (correctness): reassigning a `const` binding, or
   defining a function over a name that already holds a value. A single-file
   version is feasible with current bindings; needs branch-awareness

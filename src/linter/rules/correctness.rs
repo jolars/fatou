@@ -2,6 +2,8 @@
 
 mod break_outside_loop;
 mod duplicate_argument;
+mod include_cycle;
+mod missing_include_file;
 mod noteq_definition;
 mod undefined_name;
 mod unused_argument;
@@ -11,6 +13,8 @@ mod unused_type_parameter;
 
 pub use break_outside_loop::BreakOutsideLoop;
 pub use duplicate_argument::DuplicateArgument;
+pub use include_cycle::IncludeCycle;
+pub use missing_include_file::MissingIncludeFile;
 pub use noteq_definition::NotEqDefinition;
 pub use undefined_name::UndefinedName;
 pub use unused_argument::UnusedArgument;

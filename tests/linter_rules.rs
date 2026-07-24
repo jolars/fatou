@@ -1014,3 +1014,156 @@ fn unused_type_parameter_skips_underscore_names() {
 fn unused_type_parameter_stays_silent_in_quoted_code() {
     assert_eq!(count("unused-type-parameter", ":(f(x) where T = x)\n"), 0);
 }
+
+// --- missing-include-file --------------------------------------------------
+
+/// Lint `src` as if it lived at `path`, with only `rule` enabled. The file at
+/// `path` need not exist; `path` supplies the base directory the include graph
+/// resolves relative targets against.
+fn findings_at(rule: &str, path: &std::path::Path, src: &str) -> Vec<String> {
+    let config = LintConfig {
+        select: Some(vec![rule.to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(Some(path), src, &config);
+    report
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.rule == rule)
+        .map(|d| d.message.body)
+        .collect()
+}
+
+fn count_at(rule: &str, path: &std::path::Path, src: &str) -> usize {
+    findings_at(rule, path, src).len()
+}
+
+#[test]
+fn missing_include_file_flags_nonexistent_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"missing.jl\")\n"),
+        1
+    );
+}
+
+#[test]
+fn missing_include_file_ignores_existing_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"a.jl\")\n"),
+        0
+    );
+}
+
+#[test]
+fn missing_include_file_flags_directory_target() {
+    // `include` of a directory throws just like a missing file.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"sub\")\n"),
+        1
+    );
+}
+
+#[test]
+fn missing_include_file_ignores_dynamic_includes() {
+    // Dynamic, interpolated, qualified, and two-argument includes cannot be
+    // resolved statically and are skipped.
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    let src = "include(x)\ninclude(\"$d/a.jl\")\nM.include(\"a.jl\")\ninclude(f, \"a.jl\")\n";
+    assert_eq!(count_at("missing-include-file", &main, src), 0);
+}
+
+#[test]
+fn missing_include_file_stays_silent_without_a_path() {
+    // A pathless document (stdin) has no base directory to resolve against.
+    assert_eq!(
+        count("missing-include-file", "include(\"missing.jl\")\n"),
+        0
+    );
+}
+
+#[test]
+fn missing_include_file_is_suppressible() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "missing-include-file",
+            &main,
+            "# fatou-ignore missing-include-file\ninclude(\"missing.jl\")\n"
+        ),
+        0
+    );
+}
+
+// --- include-cycle ---------------------------------------------------------
+
+#[test]
+fn include_cycle_flags_self_include() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("include-cycle", &main, "include(\"main.jl\")\n"),
+        1
+    );
+}
+
+#[test]
+fn include_cycle_flags_two_file_cycle() {
+    // `a.jl` on disk includes us back; the cycle closes through a file that is
+    // not part of the lint set.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "include(\"main.jl\")\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(count_at("include-cycle", &main, "include(\"a.jl\")\n"), 1);
+}
+
+#[test]
+fn include_cycle_ignores_diamond() {
+    // Two paths to the same file are not a cycle.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "include(\"c.jl\")\n").unwrap();
+    std::fs::write(dir.path().join("b.jl"), "include(\"c.jl\")\n").unwrap();
+    std::fs::write(dir.path().join("c.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "include-cycle",
+            &main,
+            "include(\"a.jl\")\ninclude(\"b.jl\")\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn include_cycle_ignores_acyclic_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "include(\"b.jl\")\n").unwrap();
+    std::fs::write(dir.path().join("b.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(count_at("include-cycle", &main, "include(\"a.jl\")\n"), 0);
+}
+
+#[test]
+fn include_cycle_does_not_flag_the_missing_rule_and_vice_versa() {
+    // A missing target is not a cycle, and a cycle's target is not missing.
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("include-cycle", &main, "include(\"missing.jl\")\n"),
+        0
+    );
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"main.jl\")\n"),
+        0
+    );
+}

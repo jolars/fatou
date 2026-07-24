@@ -74,6 +74,9 @@ pub(crate) fn lint_findings_via_db(
             packages: snapshot,
             workspace,
         });
+        // No include problems: the server publishes its own include-graph
+        // diagnostics (see `crate::lsp::graph_diagnostics`), so the
+        // include-graph lint rules stay silent here.
         Some(lint_parsed(
             Some(path),
             text,
@@ -81,6 +84,7 @@ pub(crate) fn lint_findings_via_db(
             model,
             rules,
             resolution,
+            &[],
         ))
     }));
     match cached {
@@ -101,7 +105,15 @@ fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
         return Vec::new();
     }
     let model = SemanticModel::build(&parsed.cst);
-    lint_parsed(None, text, &parsed.cst, &model, server_rules(false), None)
+    lint_parsed(
+        None,
+        text,
+        &parsed.cst,
+        &model,
+        server_rules(false),
+        None,
+        &[],
+    )
 }
 
 /// The rule set the server lints with: the defaults (until configuration

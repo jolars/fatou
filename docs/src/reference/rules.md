@@ -10,6 +10,8 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`break-outside-loop`](rules/break-outside-loop.md)
 - [`noteq-definition`](rules/noteq-definition.md)
 - [`unused-type-parameter`](rules/unused-type-parameter.md)
+- [`missing-include-file`](rules/missing-include-file.md)
+- [`include-cycle`](rules/include-cycle.md)
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)
 - [`constant-condition`](rules/constant-condition.md)

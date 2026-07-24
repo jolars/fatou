@@ -15,6 +15,7 @@ use crate::index::{PackageIndex, build_system_index};
 use rowan::TextRange;
 
 use crate::linter::diagnostic::{Diagnostic, Severity, ViolationData};
+use crate::linter::include_graph::{IncludeProblem, include_problems};
 use crate::linter::rules::{ResolutionContext, ResolvedRules, RuleContext};
 use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
@@ -80,18 +81,47 @@ pub fn check_paths_with_config(
     let files = collect_julia_files(paths).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config);
 
-    // Files are independent; lint them in parallel. `collect` into an ordered
-    // Vec keeps the sorted discovery order for deterministic reporting.
-    let reports = files
+    // Read and parse every file up front (in parallel): the include-graph
+    // pre-pass wants all trees before the per-file rule runs, so a file's
+    // include edges are answered from the lint set instead of re-parsed from
+    // disk. Only the green trees cross the thread boundary (`SyntaxNode` is
+    // `Rc`-based and not `Send`); each consumer rebuilds its red tree, which
+    // is cheap. `collect` keeps the sorted discovery order for deterministic
+    // reporting.
+    let parsed = files
         .par_iter()
         .map(|path| {
             let text = std::fs::read_to_string(path).map_err(|err| LintError::Io {
                 path: path.clone(),
                 message: err.to_string(),
             })?;
-            Ok(check_text(Some(path), &text, &rules))
+            let out = parse(&text);
+            Ok((
+                path.clone(),
+                text,
+                out.cst.green().into_owned(),
+                out.diagnostics,
+            ))
         })
         .collect::<Result<Vec<_>, LintError>>()?;
+
+    let seeds: Vec<(PathBuf, SyntaxNode)> = parsed
+        .iter()
+        .map(|(path, _, green, _)| (path.clone(), SyntaxNode::new_root(green.clone())))
+        .collect();
+    let include_problems = include_problems(&seeds);
+
+    let reports: Vec<LintFileReport> = parsed
+        .par_iter()
+        .map(|(path, text, green, diagnostics)| {
+            let root = SyntaxNode::new_root(green.clone());
+            let includes = include_problems
+                .get(path)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            check_parsed(Some(path), text, &root, diagnostics, &rules, includes)
+        })
+        .collect();
 
     let total_findings = reports
         .iter()
@@ -122,13 +152,41 @@ pub fn check_source(path: Option<&Path>, text: &str, config: &LintConfig) -> Lin
     check_text(path, text, &rules)
 }
 
-/// Core single-file pass: parse, run rules on a clean tree, filter suppressed
-/// findings.
+/// Single-file entry: parse, follow the file's own include chains (no lint-set
+/// siblings to seed — used for stdin, docs examples, and tests), then lint.
 fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFileReport {
     let parsed = parse(text);
-    if !parsed.diagnostics.is_empty() {
-        let diagnostics = parsed
-            .diagnostics
+    let include_problems = match path {
+        // A pathless document has no base directory to resolve includes
+        // against; the include-graph rules stay silent.
+        Some(path) => {
+            let seeds = [(path.to_path_buf(), parsed.cst.clone())];
+            include_problems(&seeds).remove(path).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    check_parsed(
+        path,
+        text,
+        &parsed.cst,
+        &parsed.diagnostics,
+        rules,
+        &include_problems,
+    )
+}
+
+/// Core per-file pass over an already-parsed file: run rules on a clean tree,
+/// filter suppressed findings.
+fn check_parsed(
+    path: Option<&Path>,
+    text: &str,
+    root: &SyntaxNode,
+    parse_diagnostics: &[crate::parser::ParseDiagnostic],
+    rules: &ResolvedRules,
+    includes: &[IncludeProblem],
+) -> LintFileReport {
+    if !parse_diagnostics.is_empty() {
+        let diagnostics = parse_diagnostics
             .iter()
             .map(|diag| Diagnostic {
                 rule: PARSE_ERROR_RULE,
@@ -142,13 +200,13 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
         return LintFileReport {
             path: path.map(Path::to_path_buf),
             status: LintStatus::ParseDiagnostics {
-                count: parsed.diagnostics.len(),
+                count: parse_diagnostics.len(),
             },
             diagnostics,
         };
     }
 
-    let model = SemanticModel::build(&parsed.cst);
+    let model = SemanticModel::build(root);
     // The CLI resolves free reads against the built-in Base/Core export
     // snapshot — deterministic and cheap, where harvesting a real install per
     // lint run would not be. No workspace context: a bare file may be an
@@ -158,7 +216,7 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
         packages: system_snapshot(),
         workspace: None,
     });
-    let diagnostics = lint_parsed(path, text, &parsed.cst, &model, rules, resolution);
+    let diagnostics = lint_parsed(path, text, root, &model, rules, resolution, includes);
 
     let status = if diagnostics.is_empty() {
         LintStatus::Clean
@@ -195,10 +253,12 @@ pub fn lint_parsed(
     model: &SemanticModel,
     rules: &ResolvedRules,
     resolution: Option<ResolutionContext<'_>>,
+    includes: &[IncludeProblem],
 ) -> Vec<Diagnostic> {
     let ctx = RuleContext {
         path,
         root,
+        includes,
         model,
         resolution,
     };

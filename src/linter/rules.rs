@@ -27,6 +27,7 @@ use std::sync::Arc;
 use crate::config::LintConfig;
 use crate::index::PackageIndex;
 use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::linter::include_graph::IncludeProblem;
 use crate::resolve::{ModulePath, PackageSource};
 use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
@@ -57,6 +58,8 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::BreakOutsideLoop),
         Box::new(correctness::NotEqDefinition),
         Box::new(correctness::UnusedTypeParameter),
+        Box::new(correctness::MissingIncludeFile),
+        Box::new(correctness::IncludeCycle),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::ConstantCondition),
@@ -79,6 +82,11 @@ pub struct RuleContext<'a> {
     /// library (Base/Core at minimum) plus the enclosing workspace package.
     /// `None` leaves resolution-dependent rules (`undefined-name`) silent.
     pub resolution: Option<ResolutionContext<'a>>,
+    /// This file's include-graph problems, precomputed by the lint driver (see
+    /// [`crate::linter::include_graph`]). Empty leaves the include-graph rules
+    /// (`missing-include-file`, `include-cycle`) silent — the language server
+    /// passes no problems and keeps publishing its own graph diagnostics.
+    pub includes: &'a [IncludeProblem],
 }
 
 /// What a resolution-dependent rule resolves free reads against: a

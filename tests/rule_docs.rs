@@ -37,7 +37,10 @@ fn every_rule_is_documented() {
 }
 
 /// Every documented example must actually produce a finding of its own rule —
-/// guards against a snippet that looks plausible but no longer triggers.
+/// guards against a snippet that looks plausible but no longer triggers. Lints
+/// under the same synthetic `example.jl` path as `render_rule_doc`, which the
+/// include-graph rules need for a base directory (and the self-include
+/// example's own identity).
 #[test]
 fn documented_examples_actually_trigger() {
     for rule in all_rules() {
@@ -46,7 +49,11 @@ fn documented_examples_actually_trigger() {
                 select: Some(vec![rule.id().to_string()]),
                 ..Default::default()
             };
-            let report = check_source(None, example.source, &config);
+            let report = check_source(
+                Some(std::path::Path::new("example.jl")),
+                example.source,
+                &config,
+            );
             assert!(
                 report.diagnostics.iter().any(|d| d.rule == rule.id()),
                 "example for rule `{}` produced no finding of that rule:\n{}",

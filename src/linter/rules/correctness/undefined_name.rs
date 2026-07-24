@@ -320,6 +320,7 @@ mod tests {
                 packages,
                 workspace: ws.map(|pkg| (pkg, Vec::new())),
             }),
+            includes: &[],
         };
         let mut sink = Vec::new();
         UndefinedName.check_file(&ctx, &mut sink);
@@ -393,6 +394,7 @@ mod tests {
             root: &parsed.cst,
             model: &model,
             resolution: None,
+            includes: &[],
         };
         let mut sink = Vec::new();
         UndefinedName.check_file(&ctx, &mut sink);

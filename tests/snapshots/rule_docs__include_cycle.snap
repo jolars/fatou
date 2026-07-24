@@ -1,0 +1,21 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+# `include-cycle`
+
+Flag a static `include("path")` whose target transitively `include`s this file again — including a file that includes itself. Running such a file recurses without end. Every linted file on the cycle is flagged at its own `include` call; a file merely included twice along different paths (a diamond) is not a cycle.
+
+A file (here `example.jl`) that includes itself:
+
+```julia
+include("example.jl")
+```
+
+```text
+warning: include-cycle
+ --> example.jl:1:9
+  |
+1 | include("example.jl")
+  |         ^^^^^^^^^^^^ include cycle: "example.jl" transitively includes this file
+```
