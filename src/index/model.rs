@@ -85,6 +85,37 @@ pub struct ModuleIndex {
     pub submodules: Vec<ModuleIndex>,
 }
 
+impl ModuleIndex {
+    /// Every [`FunctionGroup`] in this module tree extending `owner.name`
+    /// (`Base.show(io, x) = ...` harvested with `owner == ["Base"]`). The whole
+    /// tree is walked because a Julia method extension is global: an extension
+    /// in any nested module adds a method to the owner's function. Matching is
+    /// textual against the as-written path, so `Base.Multimedia.display` does
+    /// not surface under `Base.display`.
+    pub fn extension_groups<'m>(&'m self, owner: &[&str], name: &str) -> Vec<&'m FunctionGroup> {
+        let mut groups = Vec::new();
+        self.collect_extension_groups(owner, name, &mut groups);
+        groups
+    }
+
+    fn collect_extension_groups<'m>(
+        &'m self,
+        owner: &[&str],
+        name: &str,
+        groups: &mut Vec<&'m FunctionGroup>,
+    ) {
+        groups.extend(self.functions.iter().filter(|g| {
+            g.name == name
+                && g.owner
+                    .as_ref()
+                    .is_some_and(|o| o.iter().map(String::as_str).eq(owner.iter().copied()))
+        }));
+        for sub in &self.submodules {
+            sub.collect_extension_groups(owner, name, groups);
+        }
+    }
+}
+
 /// An `export`ed or `public` name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExportedName {

@@ -21,6 +21,10 @@
 //! than one). Same-file methods come from the binding's `Write` occurrences,
 //! workspace methods from the reverse-occurrence index across member files, and
 //! library methods from the harvested [`FunctionGroup`](crate::index::FunctionGroup).
+//! A qualified read (and a bare read reaching the implicit Base/Core tier)
+//! additionally surfaces workspace methods *extending* the library function
+//! (`Base.show(io, x) = ...`, harvested with `owner`), unioned with the target
+//! package's own sites.
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -28,6 +32,7 @@ use std::sync::Arc;
 
 use lsp_types::{Location, Position, Range, Uri};
 use rowan::{TextRange, TextSize};
+use smol_str::SmolStr;
 
 use crate::incremental::Analysis;
 use crate::index::model::{DefLocation, Span};
@@ -183,7 +188,7 @@ fn definition_for<P: PackageSource>(
         .iter()
         .find(|q| q.range.contains_inclusive(offset))
     {
-        return qualified_locations(q, packages, encoding).unwrap_or_default();
+        return qualified_locations(q, packages, workspace.as_ref(), encoding);
     }
     // An ordinary identifier occurrence: local when it binds, else a free read.
     if let Some(ident) = model.ident_at(offset) {
@@ -216,20 +221,55 @@ fn definition_for<P: PackageSource>(
     Vec::new()
 }
 
-/// Resolve a qualified read (`Foo.bar`) into the named package's index and
-/// return every definition site of the symbol there. `None` when any step of
-/// the module walk fails.
+/// Resolve a qualified read (`Foo.bar`) into every definition site of the
+/// symbol: the named package's own sites, unioned with workspace methods
+/// extending it (`Foo.bar(x) = ...` harvested with `owner`). The library walk
+/// is best-effort, so an unindexed target package still surfaces the
+/// workspace extensions.
 fn qualified_locations<P: PackageSource>(
     q: &QualifiedRead,
     packages: &P,
+    workspace: Option<&(Arc<PackageIndex>, ModulePath)>,
     encoding: PositionEncoding,
-) -> Option<Vec<Location>> {
-    let (name, module_path) = q.path.split_last()?;
-    let head = module_path.first()?;
-    let pkg = packages.package(head)?;
-    let rest: Vec<&str> = module_path[1..].iter().map(|s| s.as_str()).collect();
-    let module = resolve_submodule(&pkg.root, &rest)?;
-    Some(library_locations(packages, &pkg, module, name, encoding))
+) -> Vec<Location> {
+    let Some((name, module_path)) = q.path.split_last() else {
+        return Vec::new();
+    };
+    let mut sites = workspace_extension_sites(packages, workspace, module_path, name);
+    if let Some(head) = module_path.first()
+        && let Some(pkg) = packages.package(head)
+    {
+        let rest: Vec<&str> = module_path[1..].iter().map(|s| s.as_str()).collect();
+        if let Some(module) = resolve_submodule(&pkg.root, &rest) {
+            sites.extend(library_def_sites(packages, &pkg, module, name));
+        }
+    }
+    site_locations(sites, encoding)
+}
+
+/// The on-disk definition sites of workspace methods extending
+/// `module_path.name` (`Base.show(io, x) = ...` harvested with
+/// `owner == module_path`), across the workspace package's whole module tree.
+/// Empty without a workspace or a known source root.
+fn workspace_extension_sites<P: PackageSource>(
+    packages: &P,
+    workspace: Option<&(Arc<PackageIndex>, ModulePath)>,
+    module_path: &[SmolStr],
+    name: &str,
+) -> Vec<(PathBuf, Span)> {
+    let Some((pkg, _)) = workspace else {
+        return Vec::new();
+    };
+    let Some(root) = packages.package_root(&pkg.name) else {
+        return Vec::new();
+    };
+    let owner: Vec<&str> = module_path.iter().map(|s| s.as_str()).collect();
+    pkg.root
+        .extension_groups(&owner, name)
+        .into_iter()
+        .flat_map(|g| &g.methods)
+        .map(|m| (root.join(&m.loc.file), m.loc.range))
+        .collect()
 }
 
 /// Every definition site of `bid` in the current document. A plain binding is
@@ -309,11 +349,21 @@ fn free_read_locations<P: PackageSource>(
             };
             library_locations(packages, &pkg, host, &name, encoding)
         }
+        // A bare read resolving through the implicit Base/Core tier *is* the
+        // library function, so workspace methods extending it are among its
+        // definition sites too (the Workspace tier only sees the file's host
+        // module, so an extension in a sibling module lands here).
         Resolution::System { module, name } => {
-            let Some(pkg) = packages.package(&module) else {
-                return Vec::new();
-            };
-            library_locations(packages, &pkg, &pkg.root, &name, encoding)
+            let mut sites = workspace_extension_sites(
+                packages,
+                workspace.as_ref(),
+                std::slice::from_ref(&module),
+                &name,
+            );
+            if let Some(pkg) = packages.package(&module) {
+                sites.extend(library_def_sites(packages, &pkg, &pkg.root, &name));
+            }
+            site_locations(sites, encoding)
         }
         Resolution::Using { module, name } => {
             library_from_using(model, packages, &module, &name, encoding)
@@ -476,7 +526,17 @@ fn library_def_locations<'m>(module: &'m ModuleIndex, name: &str) -> Vec<&'m Def
             .into_iter()
             .collect();
     }
-    if let Some(f) = module.functions.iter().find(|f| f.name == name) {
+    // Prefer the bare group: a module can also hold a qualified-extension
+    // group of the same name (`Base.show` next to its own `show`), whose
+    // methods belong to the *owner's* function. The name-only fallback keeps
+    // a module that only extends navigable — the Workspace tier resolves
+    // bare reads by name alone, and there those methods are the answer.
+    if let Some(f) = module
+        .functions
+        .iter()
+        .find(|f| f.name == name && f.owner.is_none())
+        .or_else(|| module.functions.iter().find(|f| f.name == name))
+    {
         return f.methods.iter().map(|m| &m.loc).collect();
     }
     if let Some(t) = module.types.iter().find(|t| t.name == name) {
@@ -831,6 +891,139 @@ mod tests {
         // Ordered by path: bar.jl before baz.jl.
         assert_eq!(to_path(&locs[0].uri), Some(bar));
         assert_eq!(to_path(&locs[1].uri), Some(baz));
+    }
+
+    /// A fake `Base` depot exporting `show`, plus a workspace package `MyPkg`
+    /// with `mypkg_src` as its entry file, both registered with source roots
+    /// and `MyPkg` set as the workspace.
+    struct ExtensionFixture {
+        lib: TestLib,
+        base_entry: PathBuf,
+        mypkg_entry: PathBuf,
+        _dirs: (TempDir, TempDir),
+    }
+
+    fn extension_fixture(mypkg_src: &str) -> ExtensionFixture {
+        let base_tmp = TempDir::new();
+        let base_entry = base_tmp.path.join("src").join("Base.jl");
+        fs::create_dir_all(base_entry.parent().unwrap()).unwrap();
+        fs::write(
+            &base_entry,
+            "module Base\nexport show\nshow(io) = nothing\nend\n",
+        )
+        .unwrap();
+        let ws_tmp = TempDir::new();
+        let mypkg_entry = ws_tmp.path.join("src").join("MyPkg.jl");
+        fs::create_dir_all(mypkg_entry.parent().unwrap()).unwrap();
+        fs::write(&mypkg_entry, mypkg_src).unwrap();
+
+        let base = harvest_package_named(&base_tmp.path, "Base");
+        let pkg = Arc::new(harvest_package_named(&ws_tmp.path, "MyPkg"));
+
+        let mut lib = TestLib::default();
+        lib.packages.insert("Base".to_string(), Arc::new(base));
+        lib.roots.insert("Base".to_string(), base_tmp.path.clone());
+        lib.packages.insert("MyPkg".to_string(), Arc::clone(&pkg));
+        lib.roots.insert("MyPkg".to_string(), ws_tmp.path.clone());
+        lib.workspace = Some((pkg, Vec::new()));
+        ExtensionFixture {
+            lib,
+            base_entry,
+            mypkg_entry,
+            _dirs: (base_tmp, ws_tmp),
+        }
+    }
+
+    #[test]
+    fn qualified_extension_surfaces_workspace_methods() {
+        // `Base.show` unions Base's own method with the workspace extension.
+        let fx = extension_fixture("module MyPkg\nBase.show(io, x) = 1\nend\n");
+        let locs = def_at("Base.show|(io, 2)", &fx.lib);
+        assert_eq!(locs.len(), 2, "{locs:?}");
+        assert!(
+            locs.iter()
+                .any(|l| to_path(&l.uri) == Some(fx.base_entry.clone())),
+            "{locs:?}"
+        );
+        assert!(
+            locs.iter()
+                .any(|l| to_path(&l.uri) == Some(fx.mypkg_entry.clone())),
+            "{locs:?}"
+        );
+    }
+
+    #[test]
+    fn extension_definition_callee_navigates() {
+        // The callee of an extension definition is a whole-chain qualified
+        // read, so the cursor on it takes the same unioned path.
+        let fx = extension_fixture("module MyPkg\nBase.show(io, x) = 1\nend\n");
+        let locs = def_at("Base.sho|w(io, x) = 1", &fx.lib);
+        assert_eq!(locs.len(), 2, "{locs:?}");
+    }
+
+    #[test]
+    fn extension_in_submodule_surfaces() {
+        // The whole module tree is walked: an extension inside a nested
+        // `module` still adds a method to `Base.show`.
+        let fx = extension_fixture("module MyPkg\nmodule Inner\nBase.show(io, x) = 1\nend\nend\n");
+        let locs = def_at("Base.show|(io, 2)", &fx.lib);
+        assert_eq!(locs.len(), 2, "{locs:?}");
+        assert!(
+            locs.iter()
+                .any(|l| to_path(&l.uri) == Some(fx.mypkg_entry.clone())),
+            "{locs:?}"
+        );
+    }
+
+    #[test]
+    fn extension_without_target_package_surfaces() {
+        // No `Base` index loaded: the library walk is best-effort, so the
+        // workspace extension still comes back alone.
+        let mut fx = extension_fixture("module MyPkg\nBase.show(io, x) = 1\nend\n");
+        fx.lib.packages.remove("Base");
+        fx.lib.roots.remove("Base");
+        let loc = single_def_at("Base.show|(io, 2)", &fx.lib).unwrap();
+        assert_eq!(to_path(&loc.uri), Some(fx.mypkg_entry.clone()));
+    }
+
+    #[test]
+    fn qualified_read_prefers_the_bare_group() {
+        // A depot module holding both an extension group and its own bare
+        // group of the same name: `Foo.g` means the bare one, even when the
+        // extension is harvested first.
+        let tmp = TempDir::new();
+        let entry = tmp.path.join("src").join("Foo.jl");
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(&entry, "module Foo\nBase.g(x) = 1\ng(x) = 2\nend\n").unwrap();
+        let pkg = harvest_package_named(&tmp.path, "Foo");
+        let mut lib = TestLib::default();
+        lib.packages.insert("Foo".to_string(), Arc::new(pkg));
+        lib.roots.insert("Foo".to_string(), tmp.path.clone());
+
+        let loc = single_def_at("Foo.g|(1)", &lib).unwrap();
+        assert_eq!(to_path(&loc.uri), Some(entry));
+        assert_eq!(loc.range.start, Position::new(2, 0));
+    }
+
+    #[test]
+    fn bare_base_name_includes_workspace_extension() {
+        // A bare `show` resolving through the implicit Base tier is
+        // `Base.show`, so the workspace extension is among its sites. The
+        // extension lives in a submodule so the workspace tier (which only
+        // sees the file's host module) cannot answer first.
+        let fx = extension_fixture("module MyPkg\nmodule Inner\nBase.show(io, x) = 1\nend\nend\n");
+        let locs = def_at("show|(1)", &fx.lib);
+        assert_eq!(locs.len(), 2, "{locs:?}");
+        assert!(
+            locs.iter()
+                .any(|l| to_path(&l.uri) == Some(fx.base_entry.clone())),
+            "{locs:?}"
+        );
+        assert!(
+            locs.iter()
+                .any(|l| to_path(&l.uri) == Some(fx.mypkg_entry.clone())),
+            "{locs:?}"
+        );
     }
 
     /// Cross-file definitions over a hand-built workspace package: a request

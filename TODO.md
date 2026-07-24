@@ -728,10 +728,30 @@ The payoff phase, in roughly arity's shipping order.
   members).
 - [x] Multiple-dispatch-aware navigation: go-to-definition returning all
   methods of a function.
-- [ ] Qualified method extensions in navigation: go-to-definition on
+- [x] Qualified method extensions in navigation: go-to-definition on
   `Base.show` surfacing workspace methods harvested with `owner`
   (`Base.show(io, x) = ...`), not just the target package's own definitions
-  (same wrinkle as hover).
+  (same wrinkle as hover). A qualified read now unions `library_def_sites`
+  with owner-matched workspace extension groups across the package's whole
+  module tree (`ModuleIndex::extension_groups`, `src/index/model.rs` — a
+  method extension is global, so a nested module's extension counts), joined
+  through the workspace package's own source root; the library walk turned
+  best-effort, so an unindexed target package still surfaces the extensions.
+  Bare reads reaching the implicit Base/Core tier get the same union (the
+  workspace tier only sees the file's host module, so a sibling-module
+  extension lands there). `library_def_locations` and hover's group lookup
+  now prefer the bare group over a same-name extension group (whose methods
+  belong to the *owner's* function), keeping the name-only fallback so a
+  module that only extends stays navigable through the workspace tier.
+  Hover's qualified branch merges the extension methods into the rendered
+  method group via the shared `render_qualified_symbol` (a library
+  macro/type/const hit renders unchanged; extensions on a type name are
+  constructor methods and the type detail wins). Locked by `definition` and
+  hover units. *Deferred:* the `Resolution::Using` arm (its display-name
+  module is not comparable to the as-written owner path), dotted-owner
+  aliasing (`Base.Multimedia.display` under `Base.display` — matching is
+  textual), and extensions from other environment packages (only the
+  file's own workspace package is scanned).
 - [x] Document links for `include("...")` paths: pure `compute_document_links`
   (`src/lsp/document_link.rs`) turns every static `include("literal")` string
   (the include graph's staticness test, via the factored-out
