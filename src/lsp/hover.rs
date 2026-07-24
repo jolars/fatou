@@ -21,6 +21,7 @@ use std::sync::Arc;
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 use rowan::{TextRange, TextSize};
+use smol_str::SmolStr;
 
 use crate::incremental::Analysis;
 use crate::index::{FunctionGroup, ModuleIndex, PackageIndex};
@@ -131,11 +132,10 @@ fn hover_content<P: PackageSource>(
         .find(|q| q.range.contains_inclusive(offset))
     {
         let (name, module_path) = q.path.split_last()?;
-        let head = module_path.first()?;
-        let pkg = packages.package(head)?;
-        let rest: Vec<&str> = module_path[1..].iter().map(|s| s.as_str()).collect();
-        let module = resolve_submodule(&pkg.root, &rest)?;
-        return Some((render_library_symbol(module, name)?, q.range));
+        return Some((
+            render_qualified_symbol(packages, workspace.as_ref(), module_path, name)?,
+            q.range,
+        ));
     }
     // An ordinary identifier occurrence: local when it binds, else a free read.
     if let Some(ident) = model.ident_at(offset) {
@@ -229,6 +229,69 @@ fn library_from_using<P: PackageSource>(
     None
 }
 
+/// Render a qualified read (`Foo.bar`): the target module's symbol, with
+/// workspace methods extending it (`Foo.bar(x) = ...` harvested with `owner`)
+/// merged into the rendered method group. The module walk is best-effort — an
+/// unindexed target package still renders the extensions alone. Macro reads
+/// and library macro/type/const hits render unchanged (extensions on a type
+/// name are constructor methods; the type detail wins).
+fn render_qualified_symbol<P: PackageSource>(
+    packages: &P,
+    workspace: Option<&(Arc<PackageIndex>, ModulePath)>,
+    module_path: &[SmolStr],
+    name: &str,
+) -> Option<String> {
+    let pkg = module_path.first().and_then(|h| packages.package(h));
+    let module = pkg.as_ref().and_then(|pkg| {
+        let rest: Vec<&str> = module_path[1..].iter().map(|s| s.as_str()).collect();
+        resolve_submodule(&pkg.root, &rest)
+    });
+    let owner: Vec<&str> = module_path.iter().map(|s| s.as_str()).collect();
+    let extensions = workspace
+        .map(|(ws, _)| ws.root.extension_groups(&owner, name))
+        .unwrap_or_default();
+    if name.starts_with('@') || extensions.is_empty() {
+        return render_library_symbol(module?, name);
+    }
+    if let Some(m) = module
+        && !m.functions.iter().any(|f| f.name == name)
+        && (m.types.iter().any(|t| t.name == name) || m.consts.iter().any(|c| c.name == name))
+    {
+        return render_library_symbol(m, name);
+    }
+    let mut group = module
+        .and_then(|m| library_function_group(m, name))
+        .cloned()
+        .unwrap_or_else(|| FunctionGroup {
+            name: name.to_string(),
+            owner: None,
+            methods: Vec::new(),
+            doc: None,
+        });
+    for ext in extensions {
+        group.methods.extend(ext.methods.iter().cloned());
+        if group.doc.is_none() {
+            group.doc = ext.doc.clone();
+        }
+    }
+    Some(markdown(
+        &method_group(&group),
+        group.doc.as_ref().map(|d| d.text.as_str()),
+    ))
+}
+
+/// The function group `name` refers to in `module`: the bare group when one
+/// exists — a qualified-extension group of the same name holds the *owner's*
+/// methods — falling back to any name match so a module that only extends
+/// still answers.
+fn library_function_group<'m>(module: &'m ModuleIndex, name: &str) -> Option<&'m FunctionGroup> {
+    module
+        .functions
+        .iter()
+        .find(|f| f.name == name && f.owner.is_none())
+        .or_else(|| module.functions.iter().find(|f| f.name == name))
+}
+
 /// Look `name` up among `module`'s defined symbols (macros for an `@` name, then
 /// functions, types, consts) and render its signature(s) and docstring. Mirrors
 /// the search order of completion's `enrich`.
@@ -244,7 +307,7 @@ fn render_library_symbol(module: &ModuleIndex, name: &str) -> Option<String> {
         }
         return Some(markdown(&head, m.doc.as_ref().map(|d| d.text.as_str())));
     }
-    if let Some(f) = module.functions.iter().find(|f| f.name == name) {
+    if let Some(f) = library_function_group(module, name) {
         return Some(markdown(
             &method_group(f),
             f.doc.as_ref().map(|d| d.text.as_str()),
@@ -569,6 +632,60 @@ mod tests {
         let value = hover_at("LinearAlgebra.norm(v)", "LinearAlgebra.no", &lib).unwrap();
         assert!(value.contains("norm(x)"), "{value}");
         assert!(value.contains("The norm."), "{value}");
+    }
+
+    /// [`hover_ws`] with a library map too, for qualified reads that merge
+    /// workspace extension methods.
+    fn hover_qualified(
+        src: &str,
+        needle: &str,
+        lib: &BTreeMap<String, Arc<PackageIndex>>,
+        workspace: Arc<PackageIndex>,
+    ) -> Option<String> {
+        let model = SemanticModel::build(&parse(src).cst);
+        let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
+        hover_content(&model, lib, Some((workspace, Vec::new())), src, offset)
+            .map(|(value, _)| value)
+    }
+
+    /// A workspace package whose root holds one `Base.show` extension group.
+    fn extending_workspace() -> Arc<PackageIndex> {
+        let root = ModuleIndex {
+            functions: vec![FunctionGroup {
+                name: "show".to_string(),
+                owner: Some(vec!["Base".to_string()]),
+                methods: vec![method(&["io", "x"])],
+                doc: None,
+            }],
+            ..module("MyPkg", &[])
+        };
+        package(root)
+    }
+
+    #[test]
+    fn qualified_read_merges_workspace_extension_methods() {
+        let mut base = module("Base", &["show"]);
+        base.functions.push(FunctionGroup {
+            name: "show".into(),
+            owner: None,
+            methods: vec![method(&["io"])],
+            doc: doc("Write a representation."),
+        });
+        let lib = library(vec![package(base)]);
+        let value =
+            hover_qualified("Base.show(io, 2)", "Base.sh", &lib, extending_workspace()).unwrap();
+        assert!(value.contains("show(io)"), "{value}");
+        assert!(value.contains("show(io, x)"), "{value}");
+        assert!(value.contains("Write a representation."), "{value}");
+    }
+
+    #[test]
+    fn qualified_read_renders_extensions_without_the_target_package() {
+        // No `Base` index loaded: the extension methods still render alone.
+        let lib = library(vec![]);
+        let value =
+            hover_qualified("Base.show(io, 2)", "Base.sh", &lib, extending_workspace()).unwrap();
+        assert!(value.contains("show(io, x)"), "{value}");
     }
 
     #[test]
