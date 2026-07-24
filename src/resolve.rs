@@ -66,6 +66,28 @@ pub struct OccurrenceKey {
     pub name: SmolStr,
 }
 
+/// Whether any whole-module `using` in the file fails to resolve against
+/// `packages`: a relative or interpolated path, an unharvested package, or a
+/// missing submodule. Such a `using` may export anything, so no conclusion
+/// about what a free name means (or what methods it carries) is sound for the
+/// file. (Item lists — `using X: a` — bind their names explicitly and don't
+/// gate the file.) Shared by the resolution-dependent lint rules
+/// (`undefined-name`, `call-arity`).
+pub fn has_unresolvable_using(model: &SemanticModel, packages: &dyn PackageSource) -> bool {
+    model.module_loads().iter().any(|load| {
+        if load.kind != LoadKind::Using || load.items.is_some() {
+            return false;
+        }
+        if load.path.leading_dots != 0 || load.path.components.is_empty() {
+            return true;
+        }
+        let Some(pkg) = packages.package(&load.path.components[0]) else {
+            return true;
+        };
+        module_at(&pkg.root, &load.path.components[1..]).is_none()
+    })
+}
+
 /// The submodule of `root` reached by following `path`, or `None` if any
 /// segment is missing. An empty `path` returns `root` itself.
 pub fn module_at<'m>(root: &'m ModuleIndex, path: &[SmolStr]) -> Option<&'m ModuleIndex> {

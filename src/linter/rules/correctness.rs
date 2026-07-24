@@ -1,6 +1,7 @@
 //! Correctness rules: findings that point at a probable bug or dead code.
 
 mod break_outside_loop;
+mod call_arity;
 mod duplicate_argument;
 mod include_cycle;
 mod missing_include_file;
@@ -12,6 +13,7 @@ mod unused_import;
 mod unused_type_parameter;
 
 pub use break_outside_loop::BreakOutsideLoop;
+pub use call_arity::CallArity;
 pub use duplicate_argument::DuplicateArgument;
 pub use include_cycle::IncludeCycle;
 pub use missing_include_file::MissingIncludeFile;

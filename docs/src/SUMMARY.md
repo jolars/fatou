@@ -22,6 +22,7 @@
   - [`unused-type-parameter`](reference/rules/unused-type-parameter.md)
   - [`missing-include-file`](reference/rules/missing-include-file.md)
   - [`include-cycle`](reference/rules/include-cycle.md)
+  - [`call-arity`](reference/rules/call-arity.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)
   - [`constant-condition`](reference/rules/constant-condition.md)

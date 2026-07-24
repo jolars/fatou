@@ -151,11 +151,18 @@ Blocked on future infrastructure:
   Warning; `default_enabled() == false` (a bare file may be an `include`d
   fragment) — the LSP enables it per file for workspace members, where the
   include graph pins the host module. (MissingRef)
-- [ ] `call-arity` (correctness): call-site positional/keyword counts vs. the
-  method table. Blocked on method indexing plus an environment of Base
-  signatures. StaticLint's noisiest check in practice (macros, callable
-  structs, `do`-blocks); its `compare_f_call` min/max/kw model is a
-  reasonable spec, but gate behind solid resolution. (IncorrectCallArgs)
+- [x] `call-arity` (correctness, sem): call-site positional counts and keyword
+  names vs. the method table, unioned over-approximately from a fresh
+  single-tree harvest of the file (`harvest_tree`), the workspace index, and
+  the harvested library (Base/Core plus whole-module `using`s), qualified
+  extensions included — an unknown method silences the check, never triggers
+  it. Warning; `default_enabled() == false` like `undefined-name` (an
+  `include`d fragment's siblings may add methods) — the LSP enables it for
+  workspace members; the CLI's baked-in snapshot has no Base signatures, so
+  library calls check only under a harvested install. Bails on `eval`,
+  unresolvable whole-module `using`, and includes without a workspace; skips
+  splats, `do` calls, macro/quoted contexts, constructors, callable values,
+  local closures, and `function f end` groups. No fix. (IncorrectCallArgs)
 - [ ] `type-piracy` (correctness): extending an imported function with no
   owned argument type. Blocked on cross-file import and ownership
   resolution. (TypePiracy)

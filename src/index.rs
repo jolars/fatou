@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::environment::Environment;
 
 pub use base::{build_system_index, build_system_library};
-pub use harvest::{harvest_entry, harvest_package, harvest_package_named};
+pub use harvest::{harvest_entry, harvest_package, harvest_package_named, harvest_tree};
 pub use model::{
     ConstDef, DefLocation, Docstring, ExportedName, Field, FunctionGroup, HarvestDiagnostic,
     MacroDef, Method, ModuleIndex, PackageIndex, Param, Span, TypeDef, TypeKind, Visibility,

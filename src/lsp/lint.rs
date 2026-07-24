@@ -116,10 +116,15 @@ fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
     )
 }
 
+/// The rules that are sound only with the resolution context a workspace
+/// member file carries: the server adds them to the member rule set, while
+/// the CLI leaves them opt-in via `--select`.
+const WORKSPACE_MEMBER_RULES: &[&str] = &["undefined-name", "call-arity"];
+
 /// The rule set the server lints with: the defaults (until configuration
 /// discovery lands — `workspace/didChangeConfiguration` + `fatou.toml`), plus
-/// `undefined-name` for workspace member files, where the server carries the
-/// resolution context that makes the rule sound.
+/// [`WORKSPACE_MEMBER_RULES`] for workspace member files, where the server
+/// carries the resolution context that makes those rules sound.
 ///
 /// Both sets are fixed for the process lifetime today, so they are resolved
 /// once (dispatch table included) rather than per lint run; configuration
@@ -132,7 +137,9 @@ fn server_rules(workspace_member: bool) -> &'static ResolvedRules {
             select: Some(
                 all_rules()
                     .iter()
-                    .filter(|rule| rule.default_enabled() || rule.id() == "undefined-name")
+                    .filter(|rule| {
+                        rule.default_enabled() || WORKSPACE_MEMBER_RULES.contains(&rule.id())
+                    })
                     .map(|rule| rule.id().to_string())
                     .collect(),
             ),

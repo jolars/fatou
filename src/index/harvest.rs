@@ -53,6 +53,7 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
         module_path: Vec::new(),
         diagnostics: Vec::new(),
         root_filled: false,
+        follow_includes: true,
     };
     let mut root = ModuleIndex {
         name: name.to_string(),
@@ -96,6 +97,44 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
     }
 }
 
+/// Harvest one already-parsed source tree into an anonymous [`ModuleIndex`]:
+/// the file's own top-level definitions, with nested `module`s as submodules.
+/// `include`s are *not* followed (the walk never touches disk) and no
+/// diagnostics are recorded — the caller owns its include policy. This gives
+/// consumers with a live tree (the linter's `call-arity`) a method table for
+/// the file's own definitions that stays fresh between saves, where the
+/// workspace index would lag.
+pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
+    let mut harvester = Harvester {
+        root: PathBuf::new(),
+        visited: HashSet::new(),
+        members: Vec::new(),
+        member_modules: BTreeMap::new(),
+        module_path: Vec::new(),
+        diagnostics: Vec::new(),
+        root_filled: false,
+        follow_includes: false,
+    };
+    let mut root = ModuleIndex {
+        name: String::new(),
+        bare: false,
+        loc: DefLocation {
+            file: PathBuf::new(),
+            range: Span { start: 0, end: 0 },
+        },
+        exports: Vec::new(),
+        functions: Vec::new(),
+        types: Vec::new(),
+        consts: Vec::new(),
+        macros: Vec::new(),
+        submodules: Vec::new(),
+    };
+    for child in cst.children() {
+        harvester.walk_item(&child, Path::new(""), &mut root, false, None);
+    }
+    root
+}
+
 struct Harvester {
     /// The package source root, for relativizing [`DefLocation::file`].
     root: PathBuf,
@@ -115,6 +154,9 @@ struct Harvester {
     /// Whether the synthesized root module has been matched to a literal
     /// `module <Name>` in the source yet.
     root_filled: bool,
+    /// Whether `include("literal")` targets are read and walked. Off for
+    /// [`harvest_tree`], whose single-tree walk must never touch disk.
+    follow_includes: bool,
 }
 
 impl Harvester {
@@ -258,6 +300,9 @@ impl Harvester {
     /// A bare call: follow a static `include("literal")`; report a dynamic or
     /// unreadable include; ignore any other call.
     fn walk_call(&mut self, node: &SyntaxNode, file: &Path, dest: &mut ModuleIndex, at_root: bool) {
+        if !self.follow_includes {
+            return;
+        }
         let Some(call) = CallExpr::cast(node.clone()) else {
             return;
         };
@@ -1095,6 +1140,7 @@ mod tests {
             module_path: Vec::new(),
             diagnostics: Vec::new(),
             root_filled: false,
+            follow_includes: true,
         };
         let mut root = ModuleIndex {
             name: name.to_string(),
@@ -1341,5 +1387,22 @@ mod tests {
         let m = harvest_str("x = 1", "Pkg");
         assert!(m.functions.is_empty());
         assert!(m.consts.is_empty());
+    }
+
+    #[test]
+    fn harvest_tree_collects_definitions_without_following_includes() {
+        let parsed = crate::parser::parse(
+            "include(\"other.jl\")\nf(x) = x\nf(x, y) = x\nmodule Sub\n    g(a; b = 1) = a\nend\n",
+        );
+        let root = harvest_tree(&parsed.cst);
+        let f = root.functions.iter().find(|g| g.name == "f").unwrap();
+        assert_eq!(f.methods.len(), 2);
+        assert_eq!(f.methods[0].params.len(), 1);
+        assert_eq!(f.methods[1].params.len(), 2);
+        let sub = &root.submodules[0];
+        assert_eq!(sub.name, "Sub");
+        let g = sub.functions.iter().find(|g| g.name == "g").unwrap();
+        assert_eq!(g.methods[0].params.len(), 1);
+        assert_eq!(g.methods[0].keyword_params.len(), 1);
     }
 }

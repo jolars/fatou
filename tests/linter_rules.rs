@@ -1167,3 +1167,189 @@ fn include_cycle_does_not_flag_the_missing_rule_and_vice_versa() {
         0
     );
 }
+
+// --- call-arity -------------------------------------------------------------
+
+#[test]
+fn call_arity_flags_extra_positional_args() {
+    let msgs = findings("call-arity", "half(x) = x / 2\nhalf(1, 2)\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("half"), "{msgs:?}");
+    assert!(msgs[0].contains('2'), "{msgs:?}");
+}
+
+#[test]
+fn call_arity_flags_missing_positional_args() {
+    assert_eq!(
+        count("call-arity", "function f(x, y)\n    x + y\nend\nf(1)\n"),
+        1
+    );
+}
+
+#[test]
+fn call_arity_respects_defaulted_positionals() {
+    // `f()` (too few) and `f(1, 2, 3)` (too many) flag; the two in-range
+    // calls do not.
+    assert_eq!(
+        count(
+            "call-arity",
+            "f(x, y = 2) = x + y\nf(1)\nf(1, 2)\nf()\nf(1, 2, 3)\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn call_arity_respects_vararg() {
+    assert_eq!(
+        count("call-arity", "f(x, xs...) = x\nf()\nf(1)\nf(1, 2, 3, 4)\n"),
+        1
+    );
+}
+
+#[test]
+fn call_arity_checks_the_whole_dispatch_group() {
+    // Any method admitting the count clears the call.
+    assert_eq!(
+        count(
+            "call-arity",
+            "f(x) = 1\nf(x, y) = 2\nf(1)\nf(1, 2)\nf(1, 2, 3)\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn call_arity_flags_unknown_keyword() {
+    let msgs = findings("call-arity", "f(x; a = 1) = x\nf(1, b = 2)\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains('b'), "{msgs:?}");
+}
+
+#[test]
+fn call_arity_accepts_declared_keywords() {
+    assert_eq!(
+        count("call-arity", "f(x; a = 1) = x\nf(1; a = 2)\nf(1, a = 3)\n"),
+        0
+    );
+}
+
+#[test]
+fn call_arity_accepts_shorthand_keyword() {
+    // `f(1; a)` passes the binding `a` as the keyword `a`.
+    assert_eq!(count("call-arity", "f(x; a = 1) = x\na = 1\nf(1; a)\n"), 0);
+}
+
+#[test]
+fn call_arity_skips_calls_with_positional_splat() {
+    assert_eq!(count("call-arity", "f(x) = x\nxs = (1, 2)\nf(xs...)\n"), 0);
+}
+
+#[test]
+fn call_arity_keyword_splat_skips_the_keyword_check() {
+    // The splat may carry any keyword name...
+    assert_eq!(
+        count(
+            "call-arity",
+            "f(x; a = 1) = x\nkw = (b = 2,)\nf(1; kw...)\n"
+        ),
+        0
+    );
+    // ...but the positional count is still checked.
+    assert_eq!(
+        count("call-arity", "f(x; a = 1) = x\nkw = (a = 1,)\nf(; kw...)\n"),
+        1
+    );
+}
+
+#[test]
+fn call_arity_skips_do_block_calls() {
+    // The `do` block passes a leading function argument invisibly.
+    assert_eq!(
+        count("call-arity", "f(g, x) = g(x)\nf(1) do x\n    x\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn call_arity_skips_macro_calls_and_quotes() {
+    assert_eq!(
+        count(
+            "call-arity",
+            "f(x) = x\n@info f(1, 2)\nex = :(f(1, 2))\nblock = quote\n    f(1, 2)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn call_arity_eval_bails_the_file() {
+    // `eval` may define further methods the model cannot see.
+    assert_eq!(
+        count("call-arity", "f(x) = x\neval(:(f(x, y) = x))\nf(1, 2)\n"),
+        0
+    );
+}
+
+#[test]
+fn call_arity_include_bails_without_workspace() {
+    // An included sibling may add methods of `f`.
+    assert_eq!(
+        count("call-arity", "f(x) = x\ninclude(\"more.jl\")\nf(1, 2)\n"),
+        0
+    );
+}
+
+#[test]
+fn call_arity_unresolvable_using_bails_the_file() {
+    // `Mystery` may export an `f` that masks the file's own.
+    assert_eq!(count("call-arity", "using Mystery\nf(x) = x\nf(1, 2)\n"), 0);
+}
+
+#[test]
+fn call_arity_skips_constructors() {
+    // Implicit and inner constructors are invisible to the harvest.
+    assert_eq!(
+        count("call-arity", "struct P\n    x\n    y\nend\nP(1, 2, 3)\n"),
+        0
+    );
+    // A same-named outer-constructor group does not re-enable the check.
+    assert_eq!(
+        count("call-arity", "struct Q\n    x\nend\nQ(x, y) = Q(x)\nQ(1)\n"),
+        0
+    );
+}
+
+#[test]
+fn call_arity_skips_callable_values() {
+    assert_eq!(count("call-arity", "g = sin\ng(1, 2)\n"), 0);
+}
+
+#[test]
+fn call_arity_skips_local_functions() {
+    // Closures never reach the harvest's method table.
+    assert_eq!(
+        count(
+            "call-arity",
+            "function outer()\n    inner(x) = x\n    inner(1, 2)\nend\nouter()\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn call_arity_skips_bodyless_declarations() {
+    // `function f end` announces methods defined elsewhere.
+    assert_eq!(count("call-arity", "function f end\nf(1, 2)\n"), 0);
+}
+
+#[test]
+fn call_arity_is_silent_for_base_calls_on_the_fallback_snapshot() {
+    // The CLI's baked-in Base index carries names, not signatures.
+    assert_eq!(count("call-arity", "sqrt(1.0, 2.0, 3.0)\n"), 0);
+}
+
+#[test]
+fn call_arity_checks_inside_nested_modules() {
+    assert_eq!(count("call-arity", "module A\nf(x) = x\nf(1, 2)\nend\n"), 1);
+}

@@ -39,8 +39,7 @@ use crate::ast::{AstNode, AstToken, CallExpr, Expr, MacroCall};
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::project::include_target;
-use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, module_at};
-use crate::semantic::{LoadKind, SemanticModel};
+use crate::resolve::{Namespace, Resolution, Resolver, has_unresolvable_using};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 pub struct UndefinedName;
@@ -139,26 +138,6 @@ impl Rule for UndefinedName {
     }
 }
 
-/// Whether any whole-module `using` in the file fails to resolve against
-/// `packages`: a relative or interpolated path, an unharvested package, or a
-/// missing submodule. Such a `using` may export anything, so no free read in
-/// the file can be called undefined. (Item lists — `using X: a` — bind their
-/// names explicitly and don't gate the file.)
-fn has_unresolvable_using(model: &SemanticModel, packages: &dyn PackageSource) -> bool {
-    model.module_loads().iter().any(|load| {
-        if load.kind != LoadKind::Using || load.items.is_some() {
-            return false;
-        }
-        if load.path.leading_dots != 0 || load.path.components.is_empty() {
-            return true;
-        }
-        let Some(pkg) = packages.package(&load.path.components[0]) else {
-            return true;
-        };
-        module_at(&pkg.root, &load.path.components[1..]).is_none()
-    })
-}
-
 /// One pass over the CST collecting everything the rule skips or bails on:
 /// macro-call and quote extents, and the `eval`/`include` call shapes.
 struct FileScan {
@@ -233,6 +212,7 @@ mod tests {
         DefLocation, ExportedName, FunctionGroup, ModuleIndex, PackageIndex, Span, Visibility,
     };
     use crate::linter::rules::ResolutionContext;
+    use crate::semantic::SemanticModel;
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
