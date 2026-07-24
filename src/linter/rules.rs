@@ -61,6 +61,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::MissingIncludeFile),
         Box::new(correctness::IncludeCycle),
         Box::new(correctness::CallArity),
+        Box::new(correctness::RedefinedConstant),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::ConstantCondition),

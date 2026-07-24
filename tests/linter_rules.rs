@@ -1353,3 +1353,169 @@ fn call_arity_is_silent_for_base_calls_on_the_fallback_snapshot() {
 fn call_arity_checks_inside_nested_modules() {
     assert_eq!(count("call-arity", "module A\nf(x) = x\nf(1, 2)\nend\n"), 1);
 }
+
+// --- redefined-constant ----------------------------------------------------
+
+#[test]
+fn redefined_constant_flags_const_reassignment() {
+    let msgs = findings("redefined-constant", "const x = 1\nx = 2\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("reassignment of constant `x`"), "{msgs:?}");
+}
+
+#[test]
+fn redefined_constant_flags_const_redeclaration() {
+    assert_eq!(count("redefined-constant", "const x = 1\nconst x = 2\n"), 1);
+}
+
+#[test]
+fn redefined_constant_flags_augmented_const_write() {
+    assert_eq!(count("redefined-constant", "const x = 1\nx += 1\n"), 1);
+}
+
+#[test]
+fn redefined_constant_flags_function_over_value() {
+    let msgs = findings("redefined-constant", "x = 1\nfunction x()\nend\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("cannot define function `x`"), "{msgs:?}");
+}
+
+#[test]
+fn redefined_constant_flags_short_form_over_value() {
+    assert_eq!(count("redefined-constant", "x = 1\nx() = 2\n"), 1);
+}
+
+#[test]
+fn redefined_constant_flags_const_over_value() {
+    let msgs = findings("redefined-constant", "x = 1\nconst x = 2\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("cannot declare `x` constant"), "{msgs:?}");
+}
+
+#[test]
+fn redefined_constant_flags_function_name_reassignment() {
+    assert_eq!(count("redefined-constant", "f() = 1\nf = 2\n"), 1);
+}
+
+#[test]
+fn redefined_constant_flags_type_name_reassignment() {
+    assert_eq!(count("redefined-constant", "struct S\nend\nS = 1\n"), 1);
+}
+
+#[test]
+fn redefined_constant_flags_local_function_over_value() {
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "function g()\n    x = 1\n    x() = 2\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_plain_reassignment() {
+    assert_eq!(count("redefined-constant", "x = 1\nx = 2\n"), 0);
+}
+
+#[test]
+fn redefined_constant_ignores_method_addition() {
+    assert_eq!(count("redefined-constant", "f() = 1\nf(x) = 2\n"), 0);
+}
+
+#[test]
+fn redefined_constant_ignores_outer_constructor() {
+    // `S(x) = ...` over a struct name defines an outer constructor.
+    assert_eq!(
+        count("redefined-constant", "struct S\nend\nS(x) = S()\n"),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_disjoint_if_branches() {
+    // Only one branch runs, so the second `const` is legal.
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "if a\n    const x = 1\nelse\n    const x = 2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_disjoint_elseif_chain() {
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "if a\n    const x = 1\nelseif b\n    const x = 2\nelse\n    const x = 3\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_disjoint_function_over_value() {
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "if a\n    x = 1\nelse\n    x() = 2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_flags_same_branch_reassignment() {
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "if a\n    const x = 1\n    x = 2\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn redefined_constant_flags_write_after_branched_def() {
+    // The write outside the `if` is not in a disjoint branch of the def.
+    assert_eq!(
+        count("redefined-constant", "if a\n    const x = 1\nend\nx = 2\n"),
+        1
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_local_closure_rebind() {
+    // A local function name is an ordinary local, not a constant.
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "function g()\n    f() = 1\n    f = 2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_macro_namespace() {
+    // `@x` and the value `x` live in different namespaces.
+    assert_eq!(count("redefined-constant", "x = 1\nmacro x()\nend\n"), 0);
+    assert_eq!(count("redefined-constant", "macro m()\nend\nm = 1\n"), 0);
+}
+
+#[test]
+fn redefined_constant_ignores_struct_redefinition() {
+    // An identical struct redefinition is legal; field comparison is out of
+    // scope, so type-over-type stays silent.
+    assert_eq!(
+        count("redefined-constant", "struct S\nend\nstruct S\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_imported_name() {
+    assert_eq!(count("redefined-constant", "import A\nA = 1\n"), 0);
+}

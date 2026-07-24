@@ -178,11 +178,16 @@ Blocked on future infrastructure:
   pathless document (stdin). A NUL-escaped path never names a file, so the
   missing check covers IncludePathContainsNULL. No fixes. (MissingFile,
   IncludeLoop, IncludePathContainsNULL)
-- [ ] `redefined-constant` (correctness): reassigning a `const` binding, or
-  defining a function over a name that already holds a value. A single-file
-  version is feasible with current bindings; needs branch-awareness
-  (StaticLint's `in_same_if_branch`) to not flag legal redefinitions in
-  disjoint `if` branches. (InvalidRedefofConst, CannotDeclareConst,
+- [x] `redefined-constant` (correctness, sem): reassigning a `const` binding
+  (second `const` and augmented writes included), assigning to a global
+  function/type/module name (implicit constants), defining a function over a
+  name holding a value, or declaring a value `const` after the fact — a
+  non-def write occurrence classified by the CST at the write site. Warning
+  (the branch-dependent cases can run). Branch-aware: a def and a write in
+  disjoint branches of one `if` are exempt. Method additions, outer
+  constructors, type/module redefinitions, macro-vs-value namespaces, and
+  local closure rebinds stay silent. No fix (the rule cannot pick which
+  definition to keep). (InvalidRedefofConst, CannotDeclareConst,
   CannotDefineFuncAlreadyHasValue)
 
 Probed and deliberately skipped: TypeDeclOnGlobalVariable (pre-1.8 Julia
