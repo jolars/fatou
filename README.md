@@ -59,6 +59,29 @@ binary and starts the server automatically; see [`editors/code`](editors/code).
 For Neovim and other editors, see the [editor setup
 guide](https://fatou.dev/guide/editors.html).
 
+## CI integration
+
+Run format and lint checks in GitHub Actions with
+[fatou-action](https://github.com/jolars/fatou-action), which installs a
+prebuilt, checksum- and provenance-verified binary:
+
+```yaml
+- uses: jolars/fatou-action@v1
+```
+
+Or as [pre-commit](https://pre-commit.com) hooks with
+[fatou-pre-commit](https://github.com/jolars/fatou-pre-commit):
+
+```yaml
+repos:
+  - repo: https://github.com/jolars/fatou-pre-commit
+    # fatou version
+    rev: v0.7.0
+    hooks:
+      - id: fatou-lint
+      - id: fatou-format
+```
+
 ## Development
 
 ```sh
