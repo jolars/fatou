@@ -2,7 +2,6 @@
 
 [![Build and
 Test](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml/badge.svg?branch=main)](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml)
-[![Lint](https://github.com/jolars/fatou/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/jolars/fatou/actions/workflows/lint.yml)
 [![Documentation](https://github.com/jolars/fatou/actions/workflows/docs.yml/badge.svg?branch=main)](https://fatou.dev/)
 [![Open
 VSX](https://img.shields.io/open-vsx/v/jolars/fatou?logo=vsix)](https://open-vsx.org/extension/jolars/fatou)
