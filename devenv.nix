@@ -85,6 +85,7 @@
 
       biome = {
         enable = true;
+        args = [ "--no-errors-on-unmatched" ];
       };
 
       # panache-format = {
