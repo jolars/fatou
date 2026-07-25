@@ -125,10 +125,13 @@ impl ExcludeFilter {
         }
         match &self.matcher {
             Some(matcher) => {
-                // `matched_path_or_any_parents` asserts that `path` lives under
-                // the matcher root; an absolute path outside it cannot match
-                // root-relative patterns anyway.
-                if path.is_absolute() && !path.starts_with(matcher.path()) {
+                // `matched_path_or_any_parents` asserts that `path`, after
+                // stripping the matcher root, has no root component left; a
+                // rooted path outside the matcher root cannot match its
+                // root-relative patterns anyway. `has_root` rather than
+                // `is_absolute`: on Windows a driveless path like `\foo` is
+                // rooted but not absolute, and would still trip the assert.
+                if path.has_root() && !path.starts_with(matcher.path()) {
                     return false;
                 }
                 matcher.matched_path_or_any_parents(path, false).is_ignore()
