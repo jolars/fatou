@@ -82,6 +82,17 @@ pub enum Commands {
         /// Override the indent width.
         #[arg(long, value_name = "N")]
         indent_width: Option<u32>,
+
+        /// Additional gitignore-style exclude patterns (repeatable or
+        /// comma-separated); augments the configured `exclude`/`extend-exclude`.
+        #[arg(long, value_name = "PATTERN", value_delimiter = ',')]
+        exclude: Vec<String>,
+
+        /// Apply exclude patterns to files named explicitly on the command line
+        /// too (they are normally always processed); for runners like
+        /// pre-commit that pass staged files as arguments.
+        #[arg(long)]
+        force_exclude: bool,
     },
     /// Lint `.jl` files.
     Lint {
@@ -96,6 +107,17 @@ pub enum Commands {
         /// Also apply fixes marked unsafe (implies `--fix`).
         #[arg(long)]
         unsafe_fixes: bool,
+
+        /// Additional gitignore-style exclude patterns (repeatable or
+        /// comma-separated); augments the configured `exclude`/`extend-exclude`.
+        #[arg(long, value_name = "PATTERN", value_delimiter = ',')]
+        exclude: Vec<String>,
+
+        /// Apply exclude patterns to files named explicitly on the command line
+        /// too (they are normally always processed); for runners like
+        /// pre-commit that pass staged files as arguments.
+        #[arg(long)]
+        force_exclude: bool,
 
         /// Output format.
         #[arg(long, value_enum, default_value_t = LintOutput::Pretty)]

@@ -14,6 +14,28 @@ On the command line:
 - `--config <PATH>` loads an explicit file and skips discovery.
 - `--no-config` ignores any discovered file and uses the built-in defaults.
 
+## Top-level keys
+
+  | Key              | Type             | Default | Description                                    |
+  | ---------------- | ---------------- | ------- | ---------------------------------------------- |
+  | `exclude`        | array of strings | `[]`    | Patterns to exclude from file discovery.       |
+  | `extend-exclude` | array of strings | `[]`    | Additional patterns, appended to `exclude`.    |
+
+Both keys take gitignore-style patterns, resolved relative to the directory
+containing `fatou.toml`. Excluded directories are pruned during discovery, so
+`fatou format src` and `fatou lint src` never descend into them.
+
+```toml
+exclude = ["vendored/"]
+extend-exclude = ["generated.jl"]
+```
+
+A file named explicitly on the command line is always processed, even if it
+matches an exclude pattern. Pass `--force-exclude` to apply the patterns to
+explicitly named files too; this is meant for runners like pre-commit that
+invoke Fatou with the staged files as arguments. Extra patterns can also be
+supplied per run with `--exclude` on `fatou format` and `fatou lint`.
+
 ## `[format]`
 
   | Key            | Type    | Default  | Description                                         |

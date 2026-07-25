@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use crate::config::LintConfig;
-use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
+use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
 use crate::index::{PackageIndex, build_system_index};
 use rowan::TextRange;
 
@@ -70,15 +70,16 @@ impl std::error::Error for LintError {}
 
 /// Lint every `.jl` file under `paths` with default configuration.
 pub fn check_paths(paths: &[PathBuf]) -> Result<LintResult, LintError> {
-    check_paths_with_config(paths, &LintConfig::default())
+    check_paths_with_config(paths, &LintConfig::default(), &ExcludeFilter::none())
 }
 
-/// Lint every `.jl` file under `paths`, honoring `config`.
+/// Lint every `.jl` file under `paths`, honoring `config` and `exclude`.
 pub fn check_paths_with_config(
     paths: &[PathBuf],
     config: &LintConfig,
+    exclude: &ExcludeFilter,
 ) -> Result<LintResult, LintError> {
-    let files = collect_julia_files(paths).map_err(LintError::Discovery)?;
+    let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config);
 
     // Read and parse every file up front (in parallel): the include-graph

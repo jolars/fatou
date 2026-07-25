@@ -74,6 +74,12 @@ Format `.jl` files
 `--indent-width <N>`
 :   Override the indent width
 
+`--exclude <PATTERN>`
+:   Additional gitignore-style exclude patterns (repeatable or comma-separated); augments the configured `exclude`/`extend-exclude`
+
+`--force-exclude`
+:   Apply exclude patterns to files named explicitly on the command line too (they are normally always processed); for runners like pre-commit that pass staged files as arguments
+
 ## `fatou lint`
 
 Lint `.jl` files
@@ -92,6 +98,12 @@ Lint `.jl` files
 
 `--unsafe-fixes`
 :   Also apply fixes marked unsafe (implies `--fix`)
+
+`--exclude <PATTERN>`
+:   Additional gitignore-style exclude patterns (repeatable or comma-separated); augments the configured `exclude`/`extend-exclude`
+
+`--force-exclude`
+:   Apply exclude patterns to files named explicitly on the command line too (they are normally always processed); for runners like pre-commit that pass staged files as arguments
 
 `--output <OUTPUT>`
 :   Output format

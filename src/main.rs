@@ -7,6 +7,7 @@ use rayon::prelude::*;
 
 use fatou::cli::{Cli, ColorChoice, Commands, LintOutput, ParseFormat};
 use fatou::config::Config;
+use fatou::file_discovery::ExcludeFilter;
 use fatou::formatter::{self, FormatStyle};
 use fatou::linter::{self, LintStatus, OutputMode};
 use fatou::parser::{parse, reconstruct, to_juliasyntax_sexpr};
@@ -37,18 +38,35 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             check,
             line_width,
             indent_width,
+            exclude,
+            force_exclude,
         } => {
-            let style = resolve_style(&cli.config, cli.no_config, line_width, indent_width)?;
-            run_format(paths, check, style)
+            let (config, config_path) = load_config(&cli.config, cli.no_config)?;
+            let style = style_with_overrides(&config, line_width, indent_width);
+            let filter =
+                resolve_exclude_filter(&config, config_path.as_deref(), &exclude, force_exclude)?;
+            run_format(paths, check, style, &filter)
         }
         Commands::Lint {
             paths,
             fix,
             unsafe_fixes,
+            exclude,
+            force_exclude,
             output,
         } => {
-            let config = load_config(&cli.config, cli.no_config)?;
-            run_lint(paths, output, fix, unsafe_fixes, cli.color, &config)
+            let (config, config_path) = load_config(&cli.config, cli.no_config)?;
+            let filter =
+                resolve_exclude_filter(&config, config_path.as_deref(), &exclude, force_exclude)?;
+            run_lint(
+                paths,
+                output,
+                fix,
+                unsafe_fixes,
+                cli.color,
+                &config,
+                &filter,
+            )
         }
         Commands::Lsp => fatou::lsp::run()
             .map(|()| ExitCode::SUCCESS)
@@ -93,7 +111,12 @@ fn run_parse(
     Ok(ExitCode::SUCCESS)
 }
 
-fn run_format(paths: Vec<PathBuf>, check: bool, style: FormatStyle) -> Result<ExitCode, String> {
+fn run_format(
+    paths: Vec<PathBuf>,
+    check: bool,
+    style: FormatStyle,
+    exclude: &ExcludeFilter,
+) -> Result<ExitCode, String> {
     // No paths: format stdin to stdout.
     if paths.is_empty() {
         let text = read_source(None)?;
@@ -103,7 +126,7 @@ fn run_format(paths: Vec<PathBuf>, check: bool, style: FormatStyle) -> Result<Ex
     }
 
     if check {
-        let result = formatter::check_paths(&paths, style).map_err(|e| e.to_string())?;
+        let result = formatter::check_paths(&paths, style, exclude).map_err(|e| e.to_string())?;
         for changed in &result.changed {
             println!("would reformat {}", changed.path.display());
             print!("{}", changed.diff);
@@ -115,7 +138,8 @@ fn run_format(paths: Vec<PathBuf>, check: bool, style: FormatStyle) -> Result<Ex
         });
     }
 
-    let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
+    let files =
+        fatou::file_discovery::collect_julia_files(&paths, exclude).map_err(|e| e.to_string())?;
     files.par_iter().try_for_each(|path| {
         let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let formatted =
@@ -135,6 +159,7 @@ fn run_lint(
     unsafe_fixes: bool,
     color: ColorChoice,
     config: &Config,
+    exclude: &ExcludeFilter,
 ) -> Result<ExitCode, String> {
     if paths.is_empty() {
         return Err("lint requires at least one path".to_string());
@@ -147,12 +172,12 @@ fn run_lint(
     };
 
     if fix || unsafe_fixes {
-        return run_lint_fix(paths, mode, unsafe_fixes, color, config);
+        return run_lint_fix(paths, mode, unsafe_fixes, color, config, exclude);
     }
 
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
-    let result =
-        linter::check_paths_with_config(&paths, &config.lint).map_err(|e| e.to_string())?;
+    let result = linter::check_paths_with_config(&paths, &config.lint, exclude)
+        .map_err(|e| e.to_string())?;
     warn_unknown_rules(&result.unknown_rules);
 
     let diagnostics: Vec<_> = result
@@ -185,11 +210,13 @@ fn run_lint_fix(
     unsafe_fixes: bool,
     color: ColorChoice,
     config: &Config,
+    exclude: &ExcludeFilter,
 ) -> Result<ExitCode, String> {
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
     let (_, unknown_rules) = linter::ResolvedRules::resolve(&config.lint);
     warn_unknown_rules(&unknown_rules);
-    let files = fatou::file_discovery::collect_julia_files(&paths).map_err(|e| e.to_string())?;
+    let files =
+        fatou::file_discovery::collect_julia_files(&paths, exclude).map_err(|e| e.to_string())?;
 
     // Fix files in parallel; each writes back to its own path. Per-file results
     // are reduced afterward so counts and the `remaining` list stay stable.
@@ -259,13 +286,11 @@ fn color_enabled(choice: ColorChoice, is_terminal: bool) -> bool {
     }
 }
 
-fn resolve_style(
-    explicit_config: &Option<PathBuf>,
-    no_config: bool,
+fn style_with_overrides(
+    config: &Config,
     line_width: Option<u32>,
     indent_width: Option<u32>,
-) -> Result<FormatStyle, String> {
-    let config = load_config(explicit_config, no_config)?;
+) -> FormatStyle {
     let mut style = FormatStyle::from(&config.format);
     if let Some(width) = line_width {
         style.line_width = width;
@@ -273,17 +298,40 @@ fn resolve_style(
     if let Some(width) = indent_width {
         style.indent_width = width;
     }
-    Ok(style)
+    style
 }
 
-fn load_config(explicit_config: &Option<PathBuf>, no_config: bool) -> Result<Config, String> {
+/// Build the file-discovery exclude filter from the resolved config plus any
+/// `--exclude` CLI patterns, applying `--force-exclude`. Patterns resolve
+/// relative to the directory holding `fatou.toml` (or the working directory
+/// when there is no config file).
+fn resolve_exclude_filter(
+    config: &Config,
+    config_path: Option<&Path>,
+    cli_patterns: &[String],
+    force: bool,
+) -> Result<ExcludeFilter, String> {
     let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
-    let (config, _path, warnings) = Config::resolve(explicit_config.as_deref(), no_config, &anchor)
+    let filter = config
+        .exclude_filter(config_path, &anchor, cli_patterns)
+        .map_err(|e| e.to_string())?;
+    Ok(filter.with_force_exclude(force))
+}
+
+/// Resolve the config, returning it alongside the loaded file's path (if any),
+/// needed to root exclude patterns relative to the directory containing
+/// `fatou.toml`.
+fn load_config(
+    explicit_config: &Option<PathBuf>,
+    no_config: bool,
+) -> Result<(Config, Option<PathBuf>), String> {
+    let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
+    let (config, path, warnings) = Config::resolve(explicit_config.as_deref(), no_config, &anchor)
         .map_err(|e| e.to_string())?;
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
-    Ok(config)
+    Ok((config, path))
 }
 
 fn read_source(path: Option<&Path>) -> Result<String, String> {

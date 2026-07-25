@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use similar::{ChangeTag, TextDiff};
 
-use crate::file_discovery::{FileDiscoveryError, collect_julia_files};
+use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
 use crate::formatter::core::{FormatError, format_with_style};
 use crate::formatter::style::FormatStyle;
 
@@ -44,8 +44,12 @@ impl std::error::Error for CheckError {}
 
 /// Check every `.jl` file under `paths`. Files whose formatted output differs
 /// from disk are collected with a unified-style diff.
-pub fn check_paths(paths: &[PathBuf], style: FormatStyle) -> Result<CheckResult, CheckError> {
-    let files = collect_julia_files(paths).map_err(CheckError::Discovery)?;
+pub fn check_paths(
+    paths: &[PathBuf],
+    style: FormatStyle,
+    exclude: &ExcludeFilter,
+) -> Result<CheckResult, CheckError> {
+    let files = collect_julia_files(paths, exclude).map_err(CheckError::Discovery)?;
 
     // Each file is independent, so check them in parallel; `collect` preserves
     // the sorted discovery order for deterministic output.
@@ -101,6 +105,10 @@ fn line_diff(original: &str, formatted: &str) -> String {
 
 /// Convenience for callers that only have a path slice (used in tests).
 pub fn diff_for(path: &Path, style: FormatStyle) -> Result<Option<String>, CheckError> {
-    let result = check_paths(std::slice::from_ref(&path.to_path_buf()), style)?;
+    let result = check_paths(
+        std::slice::from_ref(&path.to_path_buf()),
+        style,
+        &ExcludeFilter::none(),
+    )?;
     Ok(result.changed.into_iter().next().map(|c| c.diff))
 }

@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fatou::file_discovery::collect_julia_files;
+use fatou::file_discovery::{ExcludeFilter, collect_julia_files};
 use fatou::formatter::{FormatStyle, check_paths, format};
 use serde_json::{Value, json};
 
@@ -100,7 +100,7 @@ fn bench_file(path: &str, iterations: usize, warmup: usize) -> Value {
 fn bench_dir(dir: &str, iterations: usize, warmup: usize) -> Value {
     let paths = [PathBuf::from(dir)];
 
-    let files = match collect_julia_files(&paths) {
+    let files = match collect_julia_files(&paths, &ExcludeFilter::none()) {
         Ok(f) => f,
         Err(e) => {
             return json!({ "path": dir, "ok": false, "error": format!("discovery: {e}") });
@@ -114,7 +114,7 @@ fn bench_dir(dir: &str, iterations: usize, warmup: usize) -> Value {
 
     // Sanity gate: the folder counts only if Fatou checks it without error.
     for _ in 0..warmup.max(1) {
-        if let Err(e) = check_paths(&paths, FormatStyle::default()) {
+        if let Err(e) = check_paths(&paths, FormatStyle::default(), &ExcludeFilter::none()) {
             return json!({
                 "path": dir, "bytes": bytes, "ok": false,
                 "error": format!("check: {e}"),
@@ -125,7 +125,7 @@ fn bench_dir(dir: &str, iterations: usize, warmup: usize) -> Value {
     let mut samples = Vec::with_capacity(iterations);
     for _ in 0..iterations {
         let start = Instant::now();
-        let out = check_paths(&paths, FormatStyle::default());
+        let out = check_paths(&paths, FormatStyle::default(), &ExcludeFilter::none());
         let elapsed = start.elapsed().as_nanos();
         black_box(out.ok());
         samples.push(elapsed);

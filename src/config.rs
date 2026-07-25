@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::file_discovery::{ExcludeError, ExcludeFilter};
 use crate::formatter::LineEnding;
 use crate::linter::Severity;
 
@@ -20,6 +21,14 @@ const DEFAULT_INDENT_WIDTH: u32 = 4;
 pub struct Config {
     pub format: FormatConfig,
     pub lint: LintConfig,
+    /// Gitignore-style patterns to exclude from file discovery, resolved
+    /// relative to the directory containing `fatou.toml`.
+    pub exclude: Vec<String>,
+    /// Gitignore-style patterns to exclude *in addition to*
+    /// [`exclude`](Self::exclude). Kept separate for forward compatibility: if
+    /// `exclude` ever gains built-in defaults, setting it replaces them, while
+    /// `extend-exclude` only ever adds patterns.
+    pub extend_exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +118,10 @@ struct RawConfig {
     format: RawFormat,
     #[serde(default)]
     lint: RawLint,
+    #[serde(default)]
+    exclude: Vec<String>,
+    #[serde(rename = "extend-exclude", default)]
+    extend_exclude: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -199,6 +212,23 @@ impl Config {
         }
     }
 
+    /// Build the file-discovery [`ExcludeFilter`] from this config's `exclude`
+    /// and `extend-exclude` plus any `extra` patterns (e.g. CLI `--exclude`).
+    /// Patterns are rooted at the directory containing the loaded config file
+    /// (`config_path`), falling back to `anchor` when no config was found.
+    pub fn exclude_filter(
+        &self,
+        config_path: Option<&Path>,
+        anchor: &Path,
+        extra: &[String],
+    ) -> Result<ExcludeFilter, ExcludeError> {
+        let root = config_path.and_then(Path::parent).unwrap_or(anchor);
+        let mut patterns = self.exclude.clone();
+        patterns.extend(self.extend_exclude.iter().cloned());
+        patterns.extend(extra.iter().cloned());
+        ExcludeFilter::new(root, &patterns)
+    }
+
     fn load(path: &Path) -> Result<(Self, Vec<String>), ConfigError> {
         let text = std::fs::read_to_string(path).map_err(|err| ConfigError::Read {
             path: path.to_path_buf(),
@@ -223,6 +253,8 @@ impl RawConfig {
                 ignore: self.lint.ignore,
                 severity: self.lint.severity,
             },
+            exclude: self.exclude,
+            extend_exclude: self.extend_exclude,
         };
         (config, warnings)
     }
@@ -335,6 +367,62 @@ mod tests {
     fn rejects_unknown_severity_value() {
         toml::from_str::<RawConfig>("[lint.severity]\nunused-binding = \"fatal\"\n")
             .expect_err("unknown severity should be rejected");
+    }
+
+    #[test]
+    fn parses_top_level_exclude_and_extend_exclude() {
+        let raw: RawConfig =
+            toml::from_str("exclude = [\"vendor/\"]\nextend-exclude = [\"generated/\"]\n").unwrap();
+        let (config, warnings) = raw.into_config();
+        assert_eq!(config.exclude, vec!["vendor/".to_string()]);
+        assert_eq!(config.extend_exclude, vec!["generated/".to_string()]);
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn exclude_defaults_to_empty() {
+        let config = Config::default();
+        assert!(config.exclude.is_empty());
+        assert!(config.extend_exclude.is_empty());
+    }
+
+    #[test]
+    fn exclude_filter_combines_config_and_extra_patterns() {
+        let config = Config {
+            exclude: vec!["vendor/".to_string()],
+            extend_exclude: vec!["generated/".to_string()],
+            ..Config::default()
+        };
+        let filter = config
+            .exclude_filter(None, Path::new("/tmp"), &["cli/".to_string()])
+            .unwrap()
+            .with_force_exclude(true);
+        for dir in ["vendor", "generated", "cli"] {
+            assert!(
+                filter.force_excludes(Path::new(&format!("/tmp/{dir}/a.jl"))),
+                "{dir} should be excluded"
+            );
+        }
+        assert!(!filter.force_excludes(Path::new("/tmp/src/a.jl")));
+    }
+
+    #[test]
+    fn exclude_filter_roots_at_config_file_directory() {
+        let config = Config {
+            exclude: vec!["vendor/".to_string()],
+            ..Config::default()
+        };
+        let filter = config
+            .exclude_filter(
+                Some(Path::new("/project/fatou.toml")),
+                Path::new("/elsewhere"),
+                &[],
+            )
+            .unwrap()
+            .with_force_exclude(true);
+        assert!(filter.force_excludes(Path::new("/project/vendor/a.jl")));
+        // Outside the config root, patterns cannot apply.
+        assert!(!filter.force_excludes(Path::new("/elsewhere/vendor/a.jl")));
     }
 
     #[test]
