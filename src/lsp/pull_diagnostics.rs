@@ -22,7 +22,7 @@ use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
-use super::lint::lint_diagnostics_via_db;
+use super::lint::{ServerRules, lint_diagnostics_via_db};
 
 /// The full diagnostic report for one document: parse diagnostics, lint
 /// findings on a clean tree, and the file's include-graph problems. Reads warm
@@ -33,6 +33,7 @@ pub(crate) fn document_diagnostics_via_db(
     path: &Path,
     text: &str,
     encoding: PositionEncoding,
+    rules: &ServerRules,
 ) -> Vec<Diagnostic> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -54,7 +55,9 @@ pub(crate) fn document_diagnostics_via_db(
     // Lint findings join the report on a clean tree only, exactly like the
     // push path: rules would misfire on error-recovered shapes.
     if diags.is_empty() {
-        diags.extend(lint_diagnostics_via_db(snapshot, path, text, encoding));
+        diags.extend(lint_diagnostics_via_db(
+            snapshot, path, text, encoding, rules,
+        ));
     }
     diags.extend(graph_diagnostics_for(snapshot, path, encoding));
     diags
@@ -95,7 +98,13 @@ mod tests {
         let path = PathBuf::from("/work/a.jl");
         let mut db = IncrementalDatabase::default();
         db.upsert_file(&path, text.to_string());
-        document_diagnostics_via_db(&db.snapshot(), &path, text, PositionEncoding::Utf16)
+        document_diagnostics_via_db(
+            &db.snapshot(),
+            &path,
+            text,
+            PositionEncoding::Utf16,
+            &ServerRules::defaults(),
+        )
     }
 
     #[test]
@@ -136,6 +145,7 @@ mod tests {
             Path::new("/work/never-seen.jl"),
             text,
             PositionEncoding::Utf16,
+            &ServerRules::defaults(),
         );
         assert_eq!(diags.len(), 1);
         assert_eq!(

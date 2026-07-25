@@ -22,7 +22,7 @@ use crate::linter::{self, Applicability};
 use crate::text::{LineIndex, PositionEncoding};
 
 use super::format::lsp_range_to_text_range;
-use super::lint::{finding_to_lsp, lint_findings_via_db};
+use super::lint::{ServerRules, finding_to_lsp, lint_findings_via_db};
 
 /// Compute the quick-fix actions for `range`, linting off the snapshot's
 /// cached parse when the tracked buffer for `path` still matches `text` (the
@@ -34,9 +34,10 @@ pub(crate) fn code_actions_via_db(
     text: &str,
     range: Range,
     encoding: PositionEncoding,
+    rules: &ServerRules,
 ) -> Vec<CodeActionOrCommand> {
     actions_for(
-        &lint_findings_via_db(snapshot, path, text),
+        &lint_findings_via_db(snapshot, path, text, rules),
         uri,
         text,
         range,
@@ -129,6 +130,7 @@ mod tests {
             text,
             range,
             PositionEncoding::Utf16,
+            &ServerRules::defaults(),
         )
     }
 

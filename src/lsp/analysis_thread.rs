@@ -26,7 +26,7 @@ use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
-use super::lint::lint_diagnostics_via_db;
+use super::lint::{ServerRules, lint_diagnostics_via_db};
 use super::read_jobs::{ReadJob, run_read};
 use super::state::Outbound;
 use super::task_pool::Spawner;
@@ -38,6 +38,9 @@ pub(crate) struct AnalysisRequest {
     pub(crate) path: PathBuf,
     pub(crate) text: String,
     pub(crate) version: i32,
+    /// The lint rules the main loop resolved for this document (discovered
+    /// `fatou.toml` shadowing editor-pushed settings), current at dispatch.
+    pub(crate) rules: Arc<ServerRules>,
 }
 
 /// A library-index update delivered to the analysis thread by the background
@@ -322,6 +325,7 @@ impl AnalysisWorker {
             path,
             text,
             version,
+            rules,
         } = req;
         self.inflight = Some(InflightAnalyze {
             uri: uri.clone(),
@@ -337,7 +341,9 @@ impl AnalysisWorker {
                     // tree: rules would misfire on error-recovered shapes, and a
                     // broken buffer's parse errors are the actionable signal.
                     if diags.is_empty() {
-                        diags.extend(lint_diagnostics_via_db(&snapshot, &path, &text, encoding));
+                        diags.extend(lint_diagnostics_via_db(
+                            &snapshot, &path, &text, encoding, &rules,
+                        ));
                     }
                     diags
                 }));

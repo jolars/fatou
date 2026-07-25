@@ -1,16 +1,16 @@
 //! Lint findings as LSP diagnostics.
 //!
-//! Runs the linter with the default configuration (editor-pushed settings and
-//! `fatou.toml` discovery are a later roadmap item) and converts each finding
-//! into an LSP diagnostic: the rule ID as `code`, the engine-stamped severity
-//! mapped across, and `source: "fatou"` like the parse diagnostics it is
-//! published alongside. Rules only run on a parse-clean tree (the CLI's rule),
-//! so the analysis pipeline gates on empty parse diagnostics before calling in
-//! here.
+//! Runs the linter with the rule set the main loop resolved for the document
+//! (discovered `fatou.toml` shadowing editor-pushed settings, see
+//! `crate::lsp::config`) and converts each finding into an LSP diagnostic: the
+//! rule ID as `code`, the engine-stamped severity mapped across, and
+//! `source: "fatou"` like the parse diagnostics it is published alongside.
+//! Rules only run on a parse-clean tree (the CLI's rule), so the analysis
+//! pipeline gates on empty parse diagnostics before calling in here.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range};
 
@@ -32,14 +32,24 @@ pub(crate) fn lint_diagnostics_via_db(
     path: &Path,
     text: &str,
     encoding: PositionEncoding,
+    rules: &ServerRules,
 ) -> Vec<Diagnostic> {
-    findings_to_lsp(lint_findings_via_db(snapshot, path, text), text, encoding)
+    findings_to_lsp(
+        lint_findings_via_db(snapshot, path, text, rules),
+        text,
+        encoding,
+    )
 }
 
-/// Compute the lint diagnostics for `text`, re-parsing it. The pure core of
-/// the lint-diagnostic pipeline; empty on a parse-broken document.
+/// Compute the lint diagnostics for `text` with the default rules, re-parsing
+/// it. The pure core of the lint-diagnostic pipeline; empty on a parse-broken
+/// document.
 pub fn compute_lint_diagnostics(text: &str, encoding: PositionEncoding) -> Vec<Diagnostic> {
-    findings_to_lsp(lint_findings(text), text, encoding)
+    findings_to_lsp(
+        lint_findings(text, &ServerRules::defaults()),
+        text,
+        encoding,
+    )
 }
 
 /// The raw lint findings for `text`, warm off the snapshot's cached parse and
@@ -50,6 +60,7 @@ pub(crate) fn lint_findings_via_db(
     snapshot: &Analysis,
     path: &Path,
     text: &str,
+    rules: &ServerRules,
 ) -> Vec<linter::Diagnostic> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -69,7 +80,7 @@ pub(crate) fn lint_findings_via_db(
         // and host globals resolve; a loose file may be an `include`d fragment
         // whose host we cannot know.
         let workspace = snapshot.workspace_member(path);
-        let rules = server_rules(workspace.is_some());
+        let rules = rules.get(workspace.is_some());
         let resolution = Some(ResolutionContext {
             packages: snapshot,
             workspace,
@@ -90,7 +101,7 @@ pub(crate) fn lint_findings_via_db(
     match cached {
         Ok(Some(findings)) => findings,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => lint_findings(text),
+        Ok(None) | Err(_) => lint_findings(text, rules),
     }
 }
 
@@ -99,21 +110,13 @@ pub(crate) fn lint_findings_via_db(
 /// serves a racing write, and inventing undefined-name findings without the
 /// library would flash false positives — missing them for one round trip is
 /// the safe failure.
-fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
+fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
     let parsed = parse(text);
     if !parsed.diagnostics.is_empty() {
         return Vec::new();
     }
     let model = SemanticModel::build(&parsed.cst);
-    lint_parsed(
-        None,
-        text,
-        &parsed.cst,
-        &model,
-        server_rules(false),
-        None,
-        &[],
-    )
+    lint_parsed(None, text, &parsed.cst, &model, rules.get(false), None, &[])
 }
 
 /// The rules that are sound only with the resolution context a workspace
@@ -121,36 +124,63 @@ fn lint_findings(text: &str) -> Vec<linter::Diagnostic> {
 /// the CLI leaves them opt-in via `--select`.
 const WORKSPACE_MEMBER_RULES: &[&str] = &["undefined-name", "call-arity"];
 
-/// The rule set the server lints with: the defaults (until configuration
-/// discovery lands — `workspace/didChangeConfiguration` + `fatou.toml`), plus
-/// [`WORKSPACE_MEMBER_RULES`] for workspace member files, where the server
-/// carries the resolution context that makes those rules sound.
-///
-/// Both sets are fixed for the process lifetime today, so they are resolved
-/// once (dispatch table included) rather than per lint run; configuration
-/// discovery will move them into server state with the same lifetime.
-fn server_rules(workspace_member: bool) -> &'static ResolvedRules {
-    static DEFAULT_RULES: LazyLock<ResolvedRules> =
-        LazyLock::new(|| ResolvedRules::resolve(&LintConfig::default()).0);
-    static WORKSPACE_RULES: LazyLock<ResolvedRules> = LazyLock::new(|| {
-        let config = LintConfig {
-            select: Some(
-                all_rules()
-                    .iter()
-                    .filter(|rule| {
-                        rule.default_enabled() || WORKSPACE_MEMBER_RULES.contains(&rule.id())
-                    })
-                    .map(|rule| rule.id().to_string())
-                    .collect(),
-            ),
-            ..Default::default()
+/// The rule sets the server lints with, resolved once per configuration (the
+/// dispatch table included) rather than per lint run: the configured set
+/// as-is, plus a variant with [`WORKSPACE_MEMBER_RULES`] added for workspace
+/// member files, where the server carries the resolution context that makes
+/// those rules sound.
+pub(crate) struct ServerRules {
+    plain: ResolvedRules,
+    member: ResolvedRules,
+}
+
+impl ServerRules {
+    /// Resolve both rule sets from `lint`, returning the unknown rule IDs the
+    /// configuration named (for the caller to log). The member variant unions
+    /// [`WORKSPACE_MEMBER_RULES`] into the effective enabled set before
+    /// resolving, so `ignore` still subtracts afterward (a user who ignores
+    /// `call-arity` keeps it off even for members) and `severity` overrides
+    /// carry through.
+    pub(crate) fn from_config(lint: &LintConfig) -> (Self, Vec<String>) {
+        let (plain, unknown) = ResolvedRules::resolve(lint);
+        let mut select = match &lint.select {
+            Some(select) => select.clone(),
+            None => all_rules()
+                .iter()
+                .filter(|rule| rule.default_enabled())
+                .map(|rule| rule.id().to_string())
+                .collect(),
         };
-        ResolvedRules::resolve(&config).0
-    });
-    if workspace_member {
-        &WORKSPACE_RULES
-    } else {
-        &DEFAULT_RULES
+        for rule in WORKSPACE_MEMBER_RULES {
+            if !select.iter().any(|id| id == rule) {
+                select.push(rule.to_string());
+            }
+        }
+        let member_config = LintConfig {
+            select: Some(select),
+            ignore: lint.ignore.clone(),
+            severity: lint.severity.clone(),
+        };
+        // Unknown IDs are reported off the plain resolve only: the member
+        // config repeats the user's IDs, so its unknowns are duplicates.
+        let (member, _) = ResolvedRules::resolve(&member_config);
+        (Self { plain, member }, unknown)
+    }
+
+    pub(crate) fn get(&self, workspace_member: bool) -> &ResolvedRules {
+        if workspace_member {
+            &self.member
+        } else {
+            &self.plain
+        }
+    }
+
+    /// The default-configuration rule sets, shared by the cold fallback paths
+    /// and tests.
+    pub(crate) fn defaults() -> Arc<ServerRules> {
+        static DEFAULTS: LazyLock<Arc<ServerRules>> =
+            LazyLock::new(|| Arc::new(ServerRules::from_config(&LintConfig::default()).0));
+        Arc::clone(&DEFAULTS)
     }
 }
 
@@ -277,6 +307,7 @@ mod tests {
             &member_path("a.jl"),
             src,
             PositionEncoding::Utf16,
+            &ServerRules::defaults(),
         );
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert_eq!(
@@ -290,7 +321,13 @@ mod tests {
         let mut plain = IncrementalDatabase::default();
         plain.upsert_file(path, src.to_string());
         assert_eq!(
-            lint_diagnostics_via_db(&plain.snapshot(), path, src, PositionEncoding::Utf16),
+            lint_diagnostics_via_db(
+                &plain.snapshot(),
+                path,
+                src,
+                PositionEncoding::Utf16,
+                &ServerRules::defaults()
+            ),
             Vec::new()
         );
     }
@@ -309,7 +346,13 @@ mod tests {
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, UNUSED_LOCAL.to_string());
         assert_eq!(
-            lint_diagnostics_via_db(&db.snapshot(), path, UNUSED_LOCAL, encoding),
+            lint_diagnostics_via_db(
+                &db.snapshot(),
+                path,
+                UNUSED_LOCAL,
+                encoding,
+                &ServerRules::defaults()
+            ),
             expected,
             "cached-tree lint must match the re-parse path"
         );
@@ -318,7 +361,13 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            lint_diagnostics_via_db(&stale.snapshot(), path, UNUSED_LOCAL, encoding),
+            lint_diagnostics_via_db(
+                &stale.snapshot(),
+                path,
+                UNUSED_LOCAL,
+                encoding,
+                &ServerRules::defaults()
+            ),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -326,7 +375,13 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            lint_diagnostics_via_db(&empty.snapshot(), path, UNUSED_LOCAL, encoding),
+            lint_diagnostics_via_db(
+                &empty.snapshot(),
+                path,
+                UNUSED_LOCAL,
+                encoding,
+                &ServerRules::defaults()
+            ),
             expected,
             "untracked path must fall back to the buffer text"
         );

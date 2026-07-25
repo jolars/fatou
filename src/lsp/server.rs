@@ -69,6 +69,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
         register_watchers,
         pull_diagnostics,
         diagnostic_refresh,
+        params.initialization_options,
     )
 }
 
@@ -252,6 +253,7 @@ fn capabilities_json(encoding: PositionEncoding, pull_diagnostics: bool) -> serd
 /// The main event loop: dispatch incoming JSON-RPC messages and analysis
 /// results. Owns no salsa database (see the module docs); joins the analysis
 /// thread before returning.
+#[allow(clippy::too_many_arguments)]
 fn main_loop(
     connection: &Connection,
     encoding: PositionEncoding,
@@ -259,6 +261,7 @@ fn main_loop(
     register_watchers: bool,
     pull_diagnostics: bool,
     diagnostic_refresh: bool,
+    initialization_options: Option<serde_json::Value>,
 ) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
     let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
@@ -307,6 +310,7 @@ fn main_loop(
         encoding,
         pull_diagnostics,
         diagnostic_refresh,
+        initialization_options,
     );
 
     // `initialize_finish` has already consumed the client's `initialized`

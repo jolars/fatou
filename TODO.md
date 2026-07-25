@@ -785,7 +785,7 @@ The payoff phase, in roughly arity's shipping order.
   `serves_document_links` in `tests/lsp.rs`.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
-- [ ] `workspace/didChangeConfiguration` handling with `fatou.toml` discovery
+- [x] `workspace/didChangeConfiguration` handling with `fatou.toml` discovery
   taking precedence (arity's rule).
 
 ## Tooling

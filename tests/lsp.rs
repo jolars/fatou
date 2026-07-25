@@ -4304,6 +4304,7 @@ fn registers_file_watchers_when_the_client_supports_it() {
         "**/Manifest.toml",
         "**/JuliaManifest.toml",
         "**/Manifest-v*.toml",
+        "**/fatou.toml",
     ] {
         assert!(globs.contains(&expected), "missing {expected} in {globs:?}");
     }
@@ -4972,5 +4973,267 @@ fn serves_pull_diagnostics() {
         }))
         .unwrap();
 
+    server_thread.join().unwrap();
+}
+
+// --- configuration: initializationOptions, didChangeConfiguration, and
+// `fatou.toml` discovery (file config shadows client settings) ---------------
+
+/// The two-message initialize handshake with `initializationOptions` set (no
+/// workspace folder, so no harvester spawns and discovery anchors on the
+/// opened documents alone).
+fn initialize_with_options(client: &Connection, options: serde_json::Value) {
+    let params = InitializeParams {
+        initialization_options: Some(options),
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    assert!(matches!(
+        client.receiver.recv().unwrap(),
+        Message::Response(_)
+    ));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+}
+
+/// Drain messages until a `publishDiagnostics` for `uri` arrives.
+fn recv_publish_for(client: &Connection, uri: &Uri) -> PublishDiagnosticsParams {
+    loop {
+        match client
+            .receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+        {
+            Message::Notification(n) if n.method == "textDocument/publishDiagnostics" => {
+                let params: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
+                if params.uri == *uri {
+                    return params;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn open_document(client: &Connection, uri: &Uri, text: &str) {
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+}
+
+/// Request full-document formatting and return the single whole-document
+/// edit's new text (`None` when formatting returns no edits).
+fn format_document(client: &Connection, uri: &Uri, id: i32) -> Option<String> {
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(id),
+            method: "textDocument/formatting".to_string(),
+            params: serde_json::to_value(DocumentFormattingParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                options: FormattingOptions {
+                    tab_size: 4,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(client, RequestId::from(id));
+    let edits: Option<Vec<TextEdit>> = serde_json::from_value(resp.result().unwrap()).unwrap();
+    let mut edits = edits.unwrap_or_default();
+    match edits.len() {
+        0 => None,
+        1 => Some(edits.remove(0).new_text),
+        n => panic!("expected a single whole-document edit, got {n}"),
+    }
+}
+
+const UNUSED_BINDING_SOURCE: &str = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
+const UNFORMATTED_FUNCTION: &str = "function f(x)\nreturn x\nend\n";
+
+/// `initializationOptions` reconfigure the formatter: an `indent-width` of 2
+/// shows up in the formatted output.
+#[test]
+fn initialization_options_set_format_style() {
+    let dir = TempDir::new("fatou-lsp-init-options");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::json!({"format": {"indent-width": 2}}));
+
+    let uri = file_uri(&dir.path.join("a.jl"));
+    open_document(&client, &uri, UNFORMATTED_FUNCTION);
+    assert_eq!(
+        format_document(&client, &uri, 2).as_deref(),
+        Some("function f(x)\n  return x\nend\n")
+    );
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
+/// `workspace/didChangeConfiguration` re-resolves the lint rules and
+/// re-publishes for open documents: ignoring `unused-binding` clears the
+/// finding without any edit.
+#[test]
+fn did_change_configuration_reconfigures_lint() {
+    let dir = TempDir::new("fatou-lsp-config-change");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::Value::Null);
+
+    let uri = file_uri(&dir.path.join("lint.jl"));
+    open_document(&client, &uri, UNUSED_BINDING_SOURCE);
+    let published = recv_publish_for(&client, &uri);
+    assert_eq!(published.diagnostics.len(), 1);
+    assert_eq!(
+        published.diagnostics[0].code,
+        Some(lsp_types::NumberOrString::String(
+            "unused-binding".to_string()
+        ))
+    );
+
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "workspace/didChangeConfiguration".to_string(),
+            params: serde_json::json!({
+                "settings": {"fatou": {"lint": {"ignore": ["unused-binding"]}}}
+            }),
+        }))
+        .unwrap();
+    let republished = recv_publish_for(&client, &uri);
+    assert_eq!(
+        republished.diagnostics,
+        Vec::new(),
+        "the ignored rule's finding must clear on the re-publish"
+    );
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
+/// A discovered `fatou.toml` fully shadows conflicting client settings
+/// (arity's rule): the file's `indent-width` wins over the
+/// `initializationOptions` one.
+#[test]
+fn fatou_toml_wins_over_client_settings() {
+    let dir = TempDir::new("fatou-lsp-toml-wins");
+    write_file(&dir.path.join("fatou.toml"), "[format]\nindent-width = 2\n");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::json!({"format": {"indent-width": 8}}));
+
+    let uri = file_uri(&dir.path.join("a.jl"));
+    open_document(&client, &uri, UNFORMATTED_FUNCTION);
+    assert_eq!(
+        format_document(&client, &uri, 2).as_deref(),
+        Some("function f(x)\n  return x\nend\n")
+    );
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
+/// A watched `fatou.toml` change invalidates the discovery cache and
+/// re-publishes: dropping an `ignore` brings the finding back with no edit to
+/// the document.
+#[test]
+fn fatou_toml_edit_invalidates_config() {
+    let dir = TempDir::new("fatou-lsp-toml-edit");
+    let toml_path = dir.path.join("fatou.toml");
+    write_file(&toml_path, "[lint]\nignore = [\"unused-binding\"]\n");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::Value::Null);
+
+    let uri = file_uri(&dir.path.join("lint.jl"));
+    open_document(&client, &uri, UNUSED_BINDING_SOURCE);
+    let published = recv_publish_for(&client, &uri);
+    assert_eq!(
+        published.diagnostics,
+        Vec::new(),
+        "the fatou.toml ignore must suppress the finding on open"
+    );
+
+    write_file(&toml_path, "[lint]\n");
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: file_uri(&toml_path),
+            typ: FileChangeType::CHANGED,
+        }],
+    );
+    let republished = recv_publish_for(&client, &uri);
+    assert_eq!(republished.diagnostics.len(), 1, "{republished:?}");
+    assert_eq!(
+        republished.diagnostics[0].code,
+        Some(lsp_types::NumberOrString::String(
+            "unused-binding".to_string()
+        ))
+    );
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
+/// A `[lint.severity]` override in the client settings escalates the
+/// published diagnostic's severity.
+#[test]
+fn severity_override_via_settings() {
+    let dir = TempDir::new("fatou-lsp-severity");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(
+        &client,
+        serde_json::json!({"lint": {"severity": {"unused-binding": "error"}}}),
+    );
+
+    let uri = file_uri(&dir.path.join("lint.jl"));
+    open_document(&client, &uri, UNUSED_BINDING_SOURCE);
+    let published = recv_publish_for(&client, &uri);
+    assert_eq!(published.diagnostics.len(), 1);
+    assert_eq!(
+        published.diagnostics[0].severity,
+        Some(DiagnosticSeverity::ERROR)
+    );
+
+    drop(client);
     server_thread.join().unwrap();
 }

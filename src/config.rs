@@ -110,10 +110,12 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 /// The on-disk TOML shape. Every field optional so a partial file falls back to
-/// defaults.
+/// defaults. The serde derives are format-agnostic, so the LSP reuses this
+/// shape to parse editor-pushed JSON settings (`initializationOptions`,
+/// `workspace/didChangeConfiguration`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawConfig {
+pub(crate) struct RawConfig {
     #[serde(default)]
     format: RawFormat,
     #[serde(default)]
@@ -243,7 +245,7 @@ impl Config {
 }
 
 impl RawConfig {
-    fn into_config(self) -> (Config, Vec<String>) {
+    pub(crate) fn into_config(self) -> (Config, Vec<String>) {
         let defaults = FormatConfig::default();
         let mut warnings = Vec::new();
         let config = Config {

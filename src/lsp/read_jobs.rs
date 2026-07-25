@@ -12,6 +12,8 @@ use lsp_types::{
     RelatedFullDocumentDiagnosticReport, TypeHierarchyItem, Uri, WorkspaceSymbolResponse,
 };
 
+use std::sync::Arc;
+
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
 use crate::text::PositionEncoding;
@@ -26,6 +28,7 @@ use super::document_link::document_links_via_db;
 use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
+use super::lint::ServerRules;
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
@@ -47,12 +50,14 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: String,
         range: Range,
+        rules: Arc<ServerRules>,
         sender: Sender<Message>,
     },
     DocumentDiagnostic {
         id: RequestId,
         path: PathBuf,
         text: String,
+        rules: Arc<ServerRules>,
         sender: Sender<Message>,
     },
     Format {
@@ -274,19 +279,21 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             path,
             text,
             range,
+            rules,
             sender,
         } => {
             let actions: Vec<CodeActionOrCommand> =
-                code_actions_via_db(&snapshot, &uri, &path, &text, range, encoding);
+                code_actions_via_db(&snapshot, &uri, &path, &text, range, encoding, &rules);
             let _ = sender.send(Message::Response(Response::new_ok(id, actions)));
         }
         ReadJob::DocumentDiagnostic {
             id,
             path,
             text,
+            rules,
             sender,
         } => {
-            let items = document_diagnostics_via_db(&snapshot, &path, &text, encoding);
+            let items = document_diagnostics_via_db(&snapshot, &path, &text, encoding, &rules);
             let result = full_report(items);
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }

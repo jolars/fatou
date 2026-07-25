@@ -3,12 +3,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
-    DidSaveTextDocument, Notification as NotificationTrait, PublishDiagnostics,
+    DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument,
+    DidOpenTextDocument, DidSaveTextDocument, LogMessage, Notification as NotificationTrait,
+    PublishDiagnostics,
 };
 use lsp_types::request::{
     CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
@@ -21,23 +23,25 @@ use lsp_types::request::{
 };
 use lsp_types::{
     CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
-    CodeActionParams, CompletionItem, CompletionParams, Diagnostic, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidChangeWatchedFilesRegistrationOptions,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentDiagnosticParams, DocumentFormattingParams, DocumentHighlightParams,
-    DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher,
-    FoldingRangeParams, GlobPattern, GotoDefinitionParams, HoverParams, PublishDiagnosticsParams,
-    ReferenceParams, Registration, RegistrationParams, RenameParams, SelectionRangeParams,
-    SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
+    CodeActionParams, CompletionItem, CompletionParams, Diagnostic, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
+    DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
+    GlobPattern, GotoDefinitionParams, HoverParams, LogMessageParams, MessageType,
+    PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameParams,
+    SelectionRangeParams, SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
     TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
     WorkspaceSymbolParams,
 };
 
+use crate::config::CONFIG_FILE_NAME;
 use crate::environment::is_environment_file;
-use crate::formatter::FormatStyle;
 use crate::text::{PositionEncoding, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
+use super::config::{ConfigStore, ResolvedConfig};
 use super::read_jobs::ReadJob;
 use super::server::HarvestSignal;
 use super::uri;
@@ -112,6 +116,10 @@ pub(crate) struct GlobalState {
     /// update can republish the union. Set/cleared by the analysis thread on each
     /// re-harvest.
     graph_diags: HashMap<Uri, Vec<Diagnostic>>,
+    /// Per-document configuration: discovered `fatou.toml` shadowing
+    /// editor-pushed settings (see [`ConfigStore`]). Owned by the main loop
+    /// alone; resolved config travels with each dispatched request.
+    config: ConfigStore,
 }
 
 impl GlobalState {
@@ -125,8 +133,10 @@ impl GlobalState {
         encoding: PositionEncoding,
         pull_diagnostics: bool,
         diagnostic_refresh: bool,
+        initialization_options: Option<serde_json::Value>,
     ) -> Self {
-        Self {
+        let (config, warnings) = ConfigStore::new(initialization_options);
+        let state = Self {
             documents: HashMap::new(),
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
@@ -139,7 +149,10 @@ impl GlobalState {
             pull_diagnostics,
             diagnostic_refresh,
             refresh_seq: 0,
-        }
+            config,
+        };
+        state.log_warnings(warnings);
+        state
     }
 
     pub(crate) fn on_request(&mut self, req: Request) {
@@ -196,10 +209,12 @@ impl GlobalState {
             self.respond_ok(id, empty);
             return;
         };
+        let rules = Arc::clone(&self.config_for(&uri).rules);
         self.dispatch_read(ReadJob::DocumentDiagnostic {
             id,
             path: path_for(&uri),
             text,
+            rules,
             sender: self.sender.clone(),
         });
     }
@@ -215,11 +230,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let rules = Arc::clone(&self.config_for(&uri).rules);
         self.dispatch_read(ReadJob::CodeAction {
             id,
             path: path_for(&uri),
             text,
             range: params.range,
+            rules,
             uri,
             sender: self.sender.clone(),
         });
@@ -236,13 +253,12 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
-        // Style resolution (fatou.toml discovery, editor-pushed settings) is a
-        // later roadmap item; the LSP formats with the defaults for now.
+        let style = self.config_for(&uri).style;
         self.dispatch_read(ReadJob::Format {
             id,
             path: path_for(&uri),
             text,
-            style: FormatStyle::default(),
+            style,
             sender: self.sender.clone(),
         });
     }
@@ -259,13 +275,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
-        // Style resolution mirrors full formatting: defaults for now.
+        let style = self.config_for(&uri).style;
         self.dispatch_read(ReadJob::FormatRange {
             id,
             path: path_for(&uri),
             text,
             range: params.range,
-            style: FormatStyle::default(),
+            style,
             sender: self.sender.clone(),
         });
     }
@@ -756,6 +772,19 @@ impl GlobalState {
                     self.on_watched_files(params);
                 }
             }
+            DidChangeConfiguration::METHOD => {
+                if let Ok(params) =
+                    note.extract::<DidChangeConfigurationParams>(DidChangeConfiguration::METHOD)
+                {
+                    // Follow-up: on an empty `settings` payload, pull the
+                    // authoritative values via `workspace/configuration` — that
+                    // needs response routing the main loop doesn't have yet
+                    // (it drops all `Message::Response`).
+                    let warnings = self.config.set_client_settings(params.settings);
+                    self.log_warnings(warnings);
+                    self.on_config_changed();
+                }
+            }
             DidCloseTextDocument::METHOD => {
                 if let Ok(params) =
                     note.extract::<DidCloseTextDocumentParams>(DidCloseTextDocument::METHOD)
@@ -790,6 +819,20 @@ impl GlobalState {
     /// longer readable both sync as no-ops; the re-harvest itself adds or drops
     /// the member).
     fn on_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
+        // A created, changed, or deleted `fatou.toml` reshapes discovery for
+        // every cached directory; drop the cache wholesale and re-derive the
+        // open documents' diagnostics. The `.jl` guard below skips these
+        // events, so they never reach the harvest/sync plumbing.
+        let config_changed = params.changes.iter().any(|event| {
+            uri::to_path(&event.uri).is_some_and(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == CONFIG_FILE_NAME)
+            })
+        });
+        if config_changed {
+            self.config.invalidate_discovered();
+            self.on_config_changed();
+        }
         let environment_changed = params
             .changes
             .iter()
@@ -815,9 +858,10 @@ impl GlobalState {
     }
 
     /// Ask the client to watch the files whose external changes matter: `.jl`
-    /// sources (workspace membership and the cross-file indexes) and the
+    /// sources (workspace membership and the cross-file indexes), the
     /// environment files (the project/manifest flavors, which steer
-    /// resolution). Called once by the main loop as it starts — past
+    /// resolution), and `fatou.toml` (per-document configuration
+    /// discovery). Called once by the main loop as it starts — past
     /// `initialize_finish`, which has already consumed the client's
     /// `initialized`, so the protocol permits server-to-client requests. The
     /// client's response carries nothing and is ignored.
@@ -829,6 +873,7 @@ impl GlobalState {
             "**/Manifest.toml",
             "**/JuliaManifest.toml",
             "**/Manifest-v*.toml",
+            "**/fatou.toml",
         ]
         .into_iter()
         .map(|glob| FileSystemWatcher {
@@ -893,17 +938,7 @@ impl GlobalState {
                 let version = self.documents.get(&uri).map(|d| d.version);
                 self.publish_merged(uri, version);
             }
-            Outbound::DiagnosticsRefresh => {
-                if !(self.pull_diagnostics && self.diagnostic_refresh) {
-                    return;
-                }
-                self.refresh_seq += 1;
-                let _ = self.sender.send(Message::Request(Request {
-                    id: RequestId::from(format!("fatou-diagnostic-refresh-{}", self.refresh_seq)),
-                    method: WorkspaceDiagnosticRefresh::METHOD.to_string(),
-                    params: serde_json::Value::Null,
-                }));
-            }
+            Outbound::DiagnosticsRefresh => self.send_diagnostic_refresh(),
         }
     }
 
@@ -919,8 +954,9 @@ impl GlobalState {
     }
 
     /// Send an analysis request for `uri`'s current buffer to the analysis
-    /// thread.
+    /// thread, carrying the lint rules resolved for the document.
     fn send_analysis(&mut self, uri: Uri) {
+        let rules = Arc::clone(&self.config_for(&uri).rules);
         let Some(doc) = self.documents.get(&uri) else {
             return;
         };
@@ -928,8 +964,64 @@ impl GlobalState {
             path: path_for(&uri),
             text: doc.text.clone(),
             version: doc.version,
+            rules,
             uri,
         });
+    }
+
+    /// Resolve the configuration for `uri`, logging any warnings its load
+    /// raised (once per load — cache hits are silent).
+    fn config_for(&mut self, uri: &Uri) -> Arc<ResolvedConfig> {
+        let (config, warnings) = self.config.for_uri(uri);
+        self.log_warnings(warnings);
+        config
+    }
+
+    /// Re-derive the open documents' diagnostics after a configuration change
+    /// (editor-pushed settings, or a `fatou.toml` event). A pull client is
+    /// nudged to re-pull (each pull resolves config afresh); a push client
+    /// gets a re-analysis per open document — same version, new rules — which
+    /// the analysis thread's coalescing absorbs.
+    fn on_config_changed(&mut self) {
+        if self.pull_diagnostics {
+            self.send_diagnostic_refresh();
+        } else {
+            let uris: Vec<Uri> = self.documents.keys().cloned().collect();
+            for uri in uris {
+                self.send_analysis(uri);
+            }
+        }
+    }
+
+    /// Ask a pull client to re-pull its open documents
+    /// (`workspace/diagnostic/refresh`); a no-op without the client
+    /// capability (such a client re-pulls on its next edit anyway).
+    fn send_diagnostic_refresh(&mut self) {
+        if !(self.pull_diagnostics && self.diagnostic_refresh) {
+            return;
+        }
+        self.refresh_seq += 1;
+        let _ = self.sender.send(Message::Request(Request {
+            id: RequestId::from(format!("fatou-diagnostic-refresh-{}", self.refresh_seq)),
+            method: WorkspaceDiagnosticRefresh::METHOD.to_string(),
+            params: serde_json::Value::Null,
+        }));
+    }
+
+    fn log_warnings(&self, warnings: Vec<String>) {
+        for warning in warnings {
+            self.log_message(MessageType::WARNING, warning);
+        }
+    }
+
+    /// Send a `window/logMessage` — the log channel, not a popup, so config
+    /// warnings on keystroke-adjacent events stay unobtrusive.
+    fn log_message(&self, typ: MessageType, message: String) {
+        let note = Notification::new(
+            LogMessage::METHOD.to_string(),
+            LogMessageParams { typ, message },
+        );
+        let _ = self.sender.send(Message::Notification(note));
     }
 
     fn publish(&self, uri: Uri, diagnostics: Vec<Diagnostic>, version: Option<i32>) {
