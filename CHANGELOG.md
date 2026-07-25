@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0](https://github.com/jolars/fatou/compare/v0.6.0...v0.7.0) (2026-07-25)
+
+### Features
+- add `exclude` config and `--force-exclude` ([`973972b`](https://github.com/jolars/fatou/commit/973972b324cc00d3d83546f7b5fd3e64c1fb5038))
+- **lint:** add `redefined-constant` ([`918bbb6`](https://github.com/jolars/fatou/commit/918bbb6c86199df156d21801fc6fc85d3dbfefbd))
+- **lint:** add `call-arity` ([`856dd87`](https://github.com/jolars/fatou/commit/856dd87f062943aa04727be9201b559f27667a14))
+- **lint:** add `missing-include-file` and `include-cycle` ([`b8daf2e`](https://github.com/jolars/fatou/commit/b8daf2e4a02d4fd59a94f2c428707524eeab48a7))
+- **lsp:** merge workspace extensions into qualified hover ([`2d19656`](https://github.com/jolars/fatou/commit/2d19656341ba6cb17603fdace017cd9a0c60f00a))
+- **lsp:** surface workspace method extensions in navigation ([`61f1e83`](https://github.com/jolars/fatou/commit/61f1e83c23db966f9940f7a6921c67713e8e4e5c))
+
+### Bug Fixes
+- guard force-exclude paths by `has_root` ([`766dc0f`](https://github.com/jolars/fatou/commit/766dc0fbe7038f265086d3c1a56b5e4336ba564c))
+- **deps:** bump `brace-expansion` to patched versions ([`86222e2`](https://github.com/jolars/fatou/commit/86222e2687c43d974ccbd7214f83eff848b35aae))
+
 ## [0.6.0](https://github.com/jolars/fatou/compare/v0.5.0...v0.6.0) (2026-07-20)
 
 ### Features

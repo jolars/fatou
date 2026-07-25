@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/jolars/fatou/compare/fatou-code-v0.6.0...fatou-code-v0.7.0) (2026-07-25)
+
+### Bug Fixes
+- **deps:** bump `brace-expansion` to patched versions ([`86222e2`](https://github.com/jolars/fatou/commit/86222e2687c43d974ccbd7214f83eff848b35aae))
+
+### Dependencies
+- updated fatou to v0.7.0
+
 ## [0.6.0](https://github.com/jolars/fatou/compare/fatou-code-v0.5.0...fatou-code-v0.6.0) (2026-07-20)
 
 ### Dependencies
