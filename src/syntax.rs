@@ -254,8 +254,12 @@ pub enum SyntaxKind {
     DOT_OR_OR,
     DOT_AMP,
     DOT_PIPE,
+    /// Broadcast unary-not `.!`.
+    DOT_BANG,
     // Broadcast augmented assignment `.op=`.
     DOT_PLUS_EQ,
+    DOT_AMP_EQ,
+    DOT_PIPE_EQ,
     DOT_MINUS_EQ,
     DOT_STAR_EQ,
     DOT_SLASH_EQ,
@@ -385,6 +389,7 @@ impl SyntaxKind {
                 | DOT_PIPE_GT
                 | DOT_AMP
                 | DOT_PIPE
+                | DOT_BANG
                 | PLUS_EQ
                 | MINUS_EQ
                 | STAR_EQ
@@ -401,6 +406,8 @@ impl SyntaxKind {
                 | DIV_EQ
                 | XOR_EQ
                 | DOT_PLUS_EQ
+                | DOT_AMP_EQ
+                | DOT_PIPE_EQ
                 | DOT_MINUS_EQ
                 | DOT_STAR_EQ
                 | DOT_SLASH_EQ

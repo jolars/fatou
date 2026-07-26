@@ -874,6 +874,7 @@ fn project_unary(node: &SyntaxNode) -> String {
         DOT_PLUS => format!("(dotcall-pre + {operand})"),
         DOT_MINUS => format!("(dotcall-pre - {operand})"),
         DOT_TILDE => format!("(dotcall-pre ~ {operand})"),
+        DOT_BANG => format!("(dotcall-pre ! {operand})"),
         _ => format!("(call-pre {} {operand})", op.text()),
     }
 }

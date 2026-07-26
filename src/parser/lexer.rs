@@ -207,6 +207,8 @@ pub(crate) enum TokKind {
     /// The broadcast bitwise operators `.&` and `.|`.
     DotAmp,
     DotPipe,
+    /// The broadcast unary-not operator `.!` (prefix-only, like plain `!`).
+    DotBang,
     // Broadcast augmented assignment `.op=` (e.g. `.+=`). Same precedence and
     // modeling as the undotted forms.
     DotPlusEq,
@@ -217,6 +219,8 @@ pub(crate) enum TokKind {
     DotSlashSlashEq,
     DotCaretEq,
     DotPercentEq,
+    DotAmpEq,
+    DotPipeEq,
     /// Broadcast bitshift augmented assignment `.<<=`, `.>>=`, `.>>>=`.
     DotShlEq,
     DotShrEq,
@@ -1032,6 +1036,11 @@ impl<'a> Lexer<'a> {
                 (Some(b'\\'), Some(b'=')) => Some(TokKind::DotBackslashEq),
                 (Some(b'^'), Some(b'=')) => Some(TokKind::DotCaretEq),
                 (Some(b'%'), Some(b'=')) => Some(TokKind::DotPercentEq),
+                // Broadcast bitwise augmented assignment `.&=`/`.|=`. The `.&&`/
+                // `.||` short-circuits and `.|>` pipe are matched above, so a
+                // `&`/`|` followed by `=` here is the augmented-assign form.
+                (Some(b'&'), Some(b'=')) => Some(TokKind::DotAmpEq),
+                (Some(b'|'), Some(b'=')) => Some(TokKind::DotPipeEq),
                 _ => None,
             };
             if let Some(kind) = dotted3 {
@@ -1055,6 +1064,10 @@ impl<'a> Lexer<'a> {
                 // lone `&`/`|` after the dot is the broadcast bitwise operator.
                 Some(b'&') => Some(TokKind::DotAmp),
                 Some(b'|') => Some(TokKind::DotPipe),
+                // The broadcast unary-not `.!`. The `.!=`/`.!==` inequality ops
+                // are matched above (they require a trailing `=`), so a lone `!`
+                // after the dot is the prefix broadcast-not.
+                Some(b'!') => Some(TokKind::DotBang),
                 _ => None,
             };
             if let Some(kind) = dotted2 {
@@ -1898,6 +1911,17 @@ mod tests {
         // Longest match: the 4-char `.===`/`.!==` beat the 3-char `.==`/`.!=`.
         assert_eq!(kinds("x .=== y").get(2), Some(&TokKind::DotEqEqEq));
         assert_eq!(kinds("x .!== y").get(2), Some(&TokKind::DotNotEqEq));
+        // Broadcast unary-not `.!` — the `.!=`/`.!==` inequalities still win the
+        // longest match, so a lone `!` after the dot is `DotBang`.
+        assert_eq!(kinds(".!y").first(), Some(&TokKind::DotBang));
+        assert_eq!(kinds("x .!= y").get(2), Some(&TokKind::DotNotEq));
+        // Broadcast bitwise augmented assignment `.&=`/`.|=` — distinct from the
+        // `.&`/`.|` bitwise ops and the `.&&`/`.||`/`.|>` triples.
+        assert_eq!(kinds("a .&= b").get(2), Some(&TokKind::DotAmpEq));
+        assert_eq!(kinds("a .|= b").get(2), Some(&TokKind::DotPipeEq));
+        assert_eq!(kinds("a .& b").get(2), Some(&TokKind::DotAmp));
+        assert_eq!(kinds("a .| b").get(2), Some(&TokKind::DotPipe));
+        assert_eq!(kinds("a .|> b").get(2), Some(&TokKind::DotPipeGt));
         // A `.` fuses to operators but never to an ident (`a.b` field access).
         assert_eq!(
             kinds("a.b"),

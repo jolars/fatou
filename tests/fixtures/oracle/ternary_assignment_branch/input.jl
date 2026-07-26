@@ -1,0 +1,3 @@
+a ? b = c : d
+a ? b : c = d
+x = cond ? T = a : S

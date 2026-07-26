@@ -26,9 +26,11 @@ block_trailing_junk
 bracescat
 braces_generator
 braces_newline_comprehension
+broadcast_bitwise_assign
 broadcast_bitwise_operators
 broadcast_identity_operators
 broadcasting
+broadcast_not
 broadcast_type_comparison
 broadcast_unicode_operator
 byte_string
@@ -108,6 +110,7 @@ lone_operator_error
 loops
 macro_bracket_postfix
 macro_broadcast_call
+macro_comprehension_generator
 macro_definition
 macro_directive_names
 macro_keyword_name
@@ -116,8 +119,8 @@ macro_operator_names
 macros
 macro_sigil_leading
 macro_sigil_trailing
-macro_space_arg_trailing_comment
 macro_space_args
+macro_space_arg_trailing_comment
 matrices
 matrix_end_keyword
 multi_clause_generators
@@ -173,6 +176,7 @@ struct_module
 suffixed_prefix_operator
 symbols
 ternary
+ternary_assignment_branch
 ternary_incomplete_if
 ternary_whitespace_error
 tilde_operator

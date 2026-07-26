@@ -134,7 +134,42 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-20—unicode operators as call names and value atoms)
+## Latest session (2026-07-27—broadcast/ternary/macro-generator gaps from a DataFrames smoke-test)
+
+Triage of debug-format issue #19 (`JuliaData/DataFrames.jl`, `format-error`). The
+issue's sample (`docs/make.jl`) was already fixed by `a810624`; the other sampled
+files exposed four distinct parser gaps that all rejected valid Julia. Fixed all
+four (each byte-identical to JuliaSyntax now):
+
+- **`.!` broadcast unary-not** (`z = .!y` ⇒ `(= z (dotcall-pre ! y))`). New
+  `TokKind::DotBang` (2-char table, after the `.!=`/`.!==` longest-match arms) →
+  `SyntaxKind::DOT_BANG`; added to `is_unary_prefix_op`, the `is_operator` token
+  set, and `project_unary` (`DOT_BANG => (dotcall-pre ! …)`, mirroring `.~`).
+- **`.|=`/`.&=` broadcast bitwise augmented assign** (`.+=` worked; these fell to
+  the 2-char `.&`/`.|` + a stray `=`). New `DotAmpEq`/`DotPipeEq` in the 3-char
+  dotted table + `is_assignment_op`; `project_assignment` already keys off text.
+- **Assignment as a ternary branch** (`a ? b = c : d` ⇒ `(? a (= b c) d)`). Julia
+  parses branches with `parse_eq*`; branches now parse at `TERNARY_BRANCH_BP`
+  (`= COMMA_BP`, below assignment) with `stmt_comma: false` so a bare comma still
+  errors instead of tupling (`a ? b, c : d`). `TERNARY_R` retired (only the
+  `TERNARY_L` fire gate remains).
+- **Macro space-args swallowing a generator `for`** (`[@inbounds f(x) for x in
+  xs]`). `parse_macro_args` now ends the space-arg loop at `for` when
+  `inside_brackets || array_mode` (threaded `array_mode` through
+  `parse_macro`/`parse_qualified_macro`); statement-level `@time for … end` still
+  takes the for-loop as an argument.
+
+- **Fixtures**: four oracle dir slugs (`broadcast_not`,
+  `broadcast_bitwise_assign`, `ternary_assignment_branch`,
+  `macro_comprehension_generator`), all byte-identical to JuliaSyntax; lexer
+  longest-match unit assertions for `.!`/`.&=`/`.|=`.
+- **Counts**: JS 677 (held, zero regressions); dir 202 → **206**.
+- **Deferred** (found in the broader DataFrames scan, out of this issue's scope):
+  `x.function` (reserved keyword as a field name after `)`); `end` inside a nested
+  `[…]` array within an index (`df[[1; 2; end:-1:3], :]`, "misplaced `end` in
+  array"); one formatter idempotency drift in `src/dataframe/dataframe.jl`.
+
+## Earlier session (2026-07-20—unicode operators as call names and value atoms)
 
 User-named target (TODO's `noteq-definition` bullet): the prefix `≠(a, b) = ...`
 definition form was dormant because `is_operator_call_name` lacked the Unicode

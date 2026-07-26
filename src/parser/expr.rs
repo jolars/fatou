@@ -93,13 +93,21 @@ struct ExprFlags {
 /// binary arithmetic operators so `-a + b` parses as `(-a) + b`.
 const PREFIX_BP: u8 = 28;
 
-/// Binding powers for the ternary `? :`. Right-associative (`l == r`) and just
-/// above assignment (`Eq` at `(2, 1)`), so a whole ternary can be an
-/// assignment's right-hand side while keeping `=` out of an unparenthesized
-/// branch. Both branches parse at `TERNARY_R`, capturing everything tighter than
-/// the ternary (including `||`/`&&`/comparisons) and nesting right-associatively.
+/// Fire gate for the ternary `? :`. Just above assignment (`Eq` at `(2, 1)`), so
+/// a whole ternary can be an assignment's right-hand side (`w = a ? b : c`) while
+/// the `?` still fires whenever `TERNARY_L >= min_bp`. The branches themselves
+/// parse at [`TERNARY_BRANCH_BP`] (below assignment), which is what admits an
+/// unparenthesized assignment *inside* a branch and nests a right-hand ternary.
 const TERNARY_L: u8 = 3;
-const TERNARY_R: u8 = 3;
+
+/// Binding power at which each ternary *branch* is parsed. JuliaSyntax parses the
+/// true- and false-branches with `parse_eq*`, so an unparenthesized assignment is
+/// allowed inside a branch (`a ? b = c : d` ⇒ `(? a (= b c) d)`, `a ? b : c = d`
+/// ⇒ `(? a b (= c d))`). That means dropping below the assignment tier (`=` at
+/// `(2, 1)`) — `COMMA_BP` — while the branch flags clear `stmt_comma` so a bare
+/// comma still does not build a tuple (`a ? b, c : d` stays a ternary that then
+/// errors on the missing `:`, as in Julia).
+const TERNARY_BRANCH_BP: u8 = COMMA_BP;
 
 /// Binding powers for numeric-literal-coefficient juxtaposition (`2x`, `(x-1)y`,
 /// `1√x`). Julia binds juxtaposition tighter than `*`/`//`/`<<` but looser than
@@ -600,7 +608,8 @@ fn parse_expr_in(
         if op_kind == TokKind::Dot
             && ctx.token(ctx.skip_trivia(op_idx + 1)).map(|t| t.kind) == Some(TokKind::At)
         {
-            lhs = parse_qualified_macro(&ctx, lhs, op_idx, diagnostics, inside_brackets);
+            lhs =
+                parse_qualified_macro(&ctx, lhs, op_idx, diagnostics, inside_brackets, array_mode);
             continue;
         }
 
@@ -1602,7 +1611,13 @@ fn parse_prefix(
         // not at parse time — so the field-access right-hand side (`f.$x`) and
         // quoted contexts (`:($x)`) reuse the same node.
         TokKind::Dollar => Some(parse_prefix_interpolation(ctx, start, diagnostics)),
-        TokKind::At => Some(parse_macro(ctx, start, diagnostics, flags.inside_brackets)),
+        TokKind::At => Some(parse_macro(
+            ctx,
+            start,
+            diagnostics,
+            flags.inside_brackets,
+            flags.array_mode,
+        )),
         TokKind::LParen => parse_paren(ctx, start, flags.end_marker, diagnostics),
         TokKind::LBracket => Some(parse_bracket_literal(
             ctx,
@@ -1835,6 +1850,7 @@ fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
             | DotPlus
             | DotMinus
             | Bang
+            | DotBang
             | Tilde
             | DotTilde
             | Amp
@@ -3600,6 +3616,7 @@ fn parse_macro(
     at_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
+    array_mode: bool,
 ) -> ExprParse {
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
@@ -3607,7 +3624,14 @@ fn parse_macro(
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     events.push(Event::Finish); // close MACRO_NAME
 
-    let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, inside_brackets);
+    let end = parse_macro_args(
+        ctx,
+        &mut events,
+        name_end,
+        diagnostics,
+        inside_brackets,
+        array_mode,
+    );
     events.push(Event::Finish); // close MACRO_CALL
     ExprParse {
         start: at_idx,
@@ -3625,6 +3649,7 @@ fn parse_qualified_macro(
     dot_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
+    array_mode: bool,
 ) -> ExprParse {
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
@@ -3654,7 +3679,14 @@ fn parse_qualified_macro(
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
     events.push(Event::Finish); // close MACRO_NAME
 
-    let end = parse_macro_args(ctx, &mut events, name_end, diagnostics, inside_brackets);
+    let end = parse_macro_args(
+        ctx,
+        &mut events,
+        name_end,
+        diagnostics,
+        inside_brackets,
+        array_mode,
+    );
     events.push(Event::Finish); // close MACRO_CALL
     ExprParse {
         start: lhs.start,
@@ -3838,6 +3870,10 @@ fn parse_macro_args(
     name_end: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
+    // Space-sensitive element position (a comprehension/array body or a call-arg
+    // generator body), where a trailing `for` opens a generator and so ends the
+    // macro's space-args rather than being consumed as a for-loop argument.
+    array_mode: bool,
 ) -> usize {
     // Paren form `@m(a, b)`: the `(` must be adjacent (no whitespace), otherwise
     // `@m (a, b)` is the space form with a single parenthesized argument.
@@ -3897,6 +3933,12 @@ fn parse_macro_args(
                 | TokKind::RBrace
                 | TokKind::Semicolon,
             ) => break,
+            // In a generator-bearing position, a `for` after the arguments opens a
+            // generator (`[@inbounds f(x) for x in xs]`, `g(@m a for a in as)`), so
+            // it ends the macro's space-args. At statement scope `for` is instead a
+            // for-loop argument (`@time for i in xs … end`), so this only fires in a
+            // bracket or an array/comprehension-element context.
+            Some(TokKind::ForKw) if inside_brackets || array_mode => break,
             _ => {
                 push_range(events, pos, next);
                 let arg_flags = ExprFlags {
@@ -4650,6 +4692,8 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::DotSlashSlashEq
             | TokKind::DotCaretEq
             | TokKind::DotPercentEq
+            | TokKind::DotAmpEq
+            | TokKind::DotPipeEq
             | TokKind::DotShlEq
             | TokKind::DotShrEq
             | TokKind::DotUShrEq
@@ -4922,10 +4966,16 @@ fn parse_ternary(
     let then_flags = ExprFlags {
         no_range: true,
         array_mode: false,
+        stmt_comma: false,
         ..flags
     };
-    let Some(then_br) = parse_expr_in(tokens, then_start, TERNARY_R, diagnostics, then_flags)
-    else {
+    let Some(then_br) = parse_expr_in(
+        tokens,
+        then_start,
+        TERNARY_BRANCH_BP,
+        diagnostics,
+        then_flags,
+    ) else {
         let op = &tokens[q_idx];
         push_diagnostic(
             diagnostics,
@@ -4959,10 +5009,16 @@ fn parse_ternary(
     // it (`a ? b ? c : d : e`), while a top-level else may hold a range.
     let else_flags = ExprFlags {
         array_mode: false,
+        stmt_comma: false,
         ..flags
     };
-    let Some(else_br) = parse_expr_in(tokens, else_start, TERNARY_R, diagnostics, else_flags)
-    else {
+    let Some(else_br) = parse_expr_in(
+        tokens,
+        else_start,
+        TERNARY_BRANCH_BP,
+        diagnostics,
+        else_flags,
+    ) else {
         // When the missing branch is terminated by a closing block keyword
         // (`x ? true end`, `x ? true : elseif …`), JuliaSyntax re-heads the
         // recovered node from `?` to `if`, splicing one zero-width `(error-t)`
