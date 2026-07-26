@@ -676,6 +676,8 @@ mod tests {
             "a; b\n",
             "a;;;b;;\n",
             ";a\n",
+            "@assert nl > 1  # trailing comment\nnx = 2\n",
+            "@foo x  # c\n",
         ] {
             assert_lossless(input);
         }

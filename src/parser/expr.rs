@@ -3878,8 +3878,10 @@ fn parse_macro_args(
     // Space form `@m a b`: each argument is a full expression parsed
     // space-sensitively (`array_mode`), so a whitespace-preceded `(`/`[`/`{` or a
     // space-glued prefix operator begins the next argument (`@m f (x)` is two
-    // arguments, `@m a +b` likewise). Stop at a newline, end of input, or a
-    // delimiter that closes/separates an enclosing list.
+    // arguments, `@m a +b` likewise). Stop at a newline, a line comment (which
+    // runs to end of line, so no argument can follow it), end of input, or a
+    // delimiter that closes/separates an enclosing list. The terminating trivia
+    // is left for the caller to attach, so it must not be consumed here.
     let mut pos = name_end;
     let mut n_args = 0;
     loop {
@@ -3888,6 +3890,7 @@ fn parse_macro_args(
             None
             | Some(
                 TokKind::Newline
+                | TokKind::Comment
                 | TokKind::Comma
                 | TokKind::RParen
                 | TokKind::RBracket
