@@ -125,6 +125,68 @@ pub enum Commands {
     },
     /// Run the language server on stdio.
     Lsp,
+    /// Debug utilities for parser and formatter diagnostics.
+    ///
+    /// Intended for CI smoke tests and local triage; hidden from help and the
+    /// generated docs, and covered by no stability promise.
+    #[command(hide = true)]
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommand,
+    },
+}
+
+/// Subcommands under `fatou debug`.
+#[derive(Subcommand)]
+pub enum DebugCommand {
+    /// Check formatter and parser invariants per file, writing nothing back.
+    ///
+    /// Runs the selected checks (losslessness: `reconstruct(x) == x`;
+    /// idempotency: `fmt(fmt(x)) == fmt(x)`) over each input file. `--report`
+    /// emits a Markdown summary to stdout; `--dump-dir` writes per-pass
+    /// artifacts for triage.
+    Format {
+        /// Files, directories, or globs to check.
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
+
+        /// Which invariant checks to run.
+        #[arg(long, value_enum, default_value_t = DebugChecksArg::All)]
+        checks: DebugChecksArg,
+
+        /// Emit a Markdown report to stdout instead of log lines.
+        #[arg(long)]
+        report: bool,
+
+        /// Directory where per-pass artifacts are written on failure.
+        #[arg(long, value_name = "DIR")]
+        dump_dir: Option<PathBuf>,
+
+        /// Write pass artifacts even when all checks pass.
+        #[arg(long, requires = "dump_dir")]
+        dump_passes: bool,
+
+        /// Additional gitignore-style exclude patterns (repeatable or
+        /// comma-separated); augments the configured `exclude`/`extend-exclude`.
+        #[arg(long, value_name = "PATTERN", value_delimiter = ',')]
+        exclude: Vec<String>,
+
+        /// Apply exclude patterns to files named explicitly on the command line
+        /// too (they are normally always processed).
+        #[arg(long)]
+        force_exclude: bool,
+    },
+}
+
+/// Which checks `fatou debug format` runs.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugChecksArg {
+    /// Only the formatter fixed-point check: `fmt(fmt(x)) == fmt(x)`.
+    Idempotency,
+    /// Only the parser round-trip check: `reconstruct(x) == x`.
+    Losslessness,
+    /// Both checks (default).
+    All,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

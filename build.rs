@@ -94,10 +94,11 @@ fn generate_man_pages() -> Result<()> {
     // Generate main man page and all subcommand pages (like git/cargo do)
     let cmd = Cli::command();
 
-    // Collect top-level subcommand names (skip "help") for SEE ALSO sections
+    // Collect top-level subcommand names (skip "help" and hidden commands)
+    // for SEE ALSO sections
     let subcommand_names: Vec<String> = cmd
         .get_subcommands()
-        .filter(|s| s.get_name() != "help")
+        .filter(|s| s.get_name() != "help" && !s.is_hide_set())
         .map(|s| format!("fatou-{}", s.get_name()))
         .collect();
 
@@ -112,8 +113,8 @@ fn generate_man_pages() -> Result<()> {
     // Generate pages for each top-level subcommand
     for subcommand in cmd.get_subcommands() {
         let subcommand_name = subcommand.get_name();
-        if subcommand_name == "help" {
-            continue; // Skip help command
+        if subcommand_name == "help" || subcommand.is_hide_set() {
+            continue; // No pages for help or hidden commands
         }
 
         let name = format!("fatou-{}", subcommand_name);

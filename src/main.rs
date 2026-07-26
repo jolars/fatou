@@ -5,8 +5,14 @@ use std::process::ExitCode;
 use clap::Parser;
 use rayon::prelude::*;
 
-use fatou::cli::{Cli, ColorChoice, Commands, LintOutput, ParseFormat};
+use fatou::cli::{
+    Cli, ColorChoice, Commands, DebugChecksArg, DebugCommand, LintOutput, ParseFormat,
+};
 use fatou::config::Config;
+use fatou::debug::{
+    CheckKind, DebugArtifacts, DebugFailure, build_debug_report, checks_label,
+    run_debug_checks_for_file, sanitize_path_for_filename, write_debug_artifacts,
+};
 use fatou::file_discovery::ExcludeFilter;
 use fatou::formatter::{self, FormatStyle};
 use fatou::linter::{self, LintStatus, OutputMode};
@@ -71,7 +77,125 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         Commands::Lsp => fatou::lsp::run()
             .map(|()| ExitCode::SUCCESS)
             .map_err(|err| err.to_string()),
+        Commands::Debug { command } => match command {
+            DebugCommand::Format {
+                paths,
+                checks,
+                report,
+                dump_dir,
+                dump_passes,
+                exclude,
+                force_exclude,
+            } => {
+                let (config, config_path) = load_config(&cli.config, cli.no_config)?;
+                let style = style_with_overrides(&config, None, None);
+                let filter = resolve_exclude_filter(
+                    &config,
+                    config_path.as_deref(),
+                    &exclude,
+                    force_exclude,
+                )?;
+                run_debug_format(
+                    &paths,
+                    checks,
+                    report,
+                    dump_dir.as_deref(),
+                    dump_passes,
+                    style,
+                    &filter,
+                )
+            }
+        },
     }
+}
+
+/// `fatou debug format`: check invariants over the discovered files, writing
+/// nothing back. Exit 0 when everything passes, 1 on any failure or unreadable
+/// file (config and discovery errors keep their usual codes upstream).
+fn run_debug_format(
+    paths: &[PathBuf],
+    checks: DebugChecksArg,
+    report: bool,
+    dump_dir: Option<&Path>,
+    dump_passes: bool,
+    style: FormatStyle,
+    exclude: &ExcludeFilter,
+) -> Result<ExitCode, String> {
+    if paths.is_empty() {
+        eprintln!("fatou: debug format requires at least one file or directory");
+        return Ok(ExitCode::from(2));
+    }
+    let files =
+        fatou::file_discovery::collect_julia_files(paths, exclude).map_err(|e| e.to_string())?;
+    if files.is_empty() {
+        if exclude.force() {
+            return Ok(ExitCode::SUCCESS);
+        }
+        return Err("no .jl files found under the provided input paths".to_string());
+    }
+
+    // Checks are pure functions of the file content, so they parallelize like
+    // `run_format`; the order-preserving collect keeps output and report
+    // numbering deterministic.
+    let outcomes: Vec<(String, Result<DebugArtifacts, String>)> = files
+        .par_iter()
+        .map(|path| {
+            let label = path.display().to_string();
+            let outcome = match std::fs::read_to_string(path) {
+                Ok(content) => Ok(run_debug_checks_for_file(&content, style, checks)),
+                Err(err) => Err(format!("fatou: cannot read {label}: {err}")),
+            };
+            (label, outcome)
+        })
+        .collect();
+
+    let mut files_checked = 0usize;
+    let mut io_failed = false;
+    let mut collected: Vec<(String, DebugFailure)> = Vec::new();
+    for (label, outcome) in outcomes {
+        match outcome {
+            Err(msg) => {
+                eprintln!("{msg}");
+                io_failed = true;
+            }
+            Ok(artifacts) => {
+                files_checked += 1;
+                if let Some(dir) = dump_dir {
+                    let stem = sanitize_path_for_filename(&label);
+                    if let Err(err) = write_debug_artifacts(dir, &stem, &artifacts, dump_passes) {
+                        eprintln!(
+                            "fatou: cannot write debug artifacts to {}: {err}",
+                            dir.display()
+                        );
+                        io_failed = true;
+                    }
+                }
+                for failure in artifacts.failures {
+                    if !report {
+                        eprintln!("Debug check failed ({}) in {label}", failure.kind.label());
+                        if failure.kind == CheckKind::FormatError {
+                            eprintln!("  {}", failure.left);
+                        }
+                    }
+                    collected.push((label.clone(), failure));
+                }
+            }
+        }
+    }
+
+    if report {
+        print!("{}", build_debug_report(checks, files_checked, &collected));
+    } else if collected.is_empty() && !io_failed {
+        println!(
+            "All checks passed (checks: {}, files: {files_checked})",
+            checks_label(checks)
+        );
+    }
+    Ok(if collected.is_empty() && !io_failed {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 fn run_parse(
