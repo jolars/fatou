@@ -1511,15 +1511,17 @@ fn parse_header(
     i
 }
 
-/// Whether the keyword-line header ends at `i`: at a newline, a `;`, a block
-/// terminator keyword (so one-liners like `struct Foo end` stop correctly), or
-/// end of input.
 /// Whether `kind` is a closing bracket token (`)`, `]`, `}`). Used to detect a
 /// stray closer where a keyword's optional value would otherwise begin.
 fn is_close_delimiter_tok(kind: TokKind) -> bool {
     matches!(kind, TokKind::RParen | TokKind::RBracket | TokKind::RBrace)
 }
 
+/// Whether the keyword-line header ends at `i`: at a newline, a `;`, a block
+/// terminator keyword (so one-liners like `struct Foo end` stop correctly), a
+/// closing bracket (so a header nested in brackets, e.g. a quoted
+/// `:(using Flux)`, lets the enclosing bracket close rather than swallowing the
+/// closer), or end of input.
 fn header_ends(ctx: &ParserCtx<'_>, i: usize) -> bool {
     match ctx.token(i).map(|t| t.kind) {
         None => true,
@@ -1533,6 +1535,7 @@ fn header_ends(ctx: &ParserCtx<'_>, i: usize) -> bool {
                         | TokKind::CatchKw
                         | TokKind::FinallyKw
                 )
+                || is_close_delimiter_tok(k)
         }
     }
 }
