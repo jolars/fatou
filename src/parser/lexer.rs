@@ -1321,18 +1321,27 @@ fn keyword_kind(text: &str) -> Option<TokKind> {
     })
 }
 
+/// Whether `c` may begin an identifier, mirroring JuliaSyntax's
+/// `is_identifier_start_char` (`Base.is_id_start_char`). ASCII is handled inline;
+/// non-ASCII code points defer to the generated [`super::unicode_ident`] tables.
 fn is_ident_start(c: char) -> bool {
-    c == '_' || c.is_alphabetic() || (!c.is_ascii() && is_unicode_ident(c))
+    if c.is_ascii() {
+        c == '_' || c.is_ascii_alphabetic()
+    } else {
+        super::unicode_ident::is_unicode_ident_start(c)
+    }
 }
 
+/// Whether `c` may continue an identifier, mirroring JuliaSyntax's
+/// `is_identifier_char` (`Base.is_id_char`). ASCII is handled inline; non-ASCII
+/// code points defer to the generated [`super::unicode_ident`] tables. The `!=`
+/// operator split for a trailing `!` is handled by the caller in `scan_ident`.
 fn is_ident_continue(c: char) -> bool {
-    c == '_' || c == '!' || c.is_alphanumeric() || (!c.is_ascii() && is_unicode_ident(c))
-}
-
-/// Non-ASCII identifier characters: accept any alphabetic/alphanumeric or common
-/// math/symbol code points Julia allows (a pragmatic superset for the skeleton).
-fn is_unicode_ident(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '\u{391}'..='\u{3c9}' | '\u{2070}'..='\u{209f}')
+    if c.is_ascii() {
+        c == '_' || c == '!' || c.is_ascii_alphanumeric()
+    } else {
+        super::unicode_ident::is_unicode_ident_continue(c)
+    }
 }
 
 /// The explicit operator-suffix characters Julia allows after an operator
@@ -1658,6 +1667,23 @@ mod tests {
             kinds("a!!=b"),
             vec![TokKind::Ident, TokKind::NotEq, TokKind::Ident]
         );
+    }
+
+    #[test]
+    fn unicode_identifier_chars() {
+        // Combining marks (category Mn) continue an identifier, so `x` + U+0304
+        // is one token, not `x` followed by stray trivia. Regression for Flux's
+        // gradient names like `x̄`, `ŷ`, `h̃` (smoke-test issue #17).
+        assert_eq!(kinds("x\u{304}"), vec![TokKind::Ident]);
+        assert_eq!(kinds("x\u{302}r"), vec![TokKind::Ident]);
+        // Primes and a math symbol also continue an identifier (`α′`, `ρ∞`).
+        assert_eq!(kinds("\u{3b1}\u{2032}"), vec![TokKind::Ident]);
+        assert_eq!(kinds("\u{3c1}\u{221e}"), vec![TokKind::Ident]);
+        // `∇` (U+2207) is a valid identifier *start* char (`∇batchnorm`).
+        assert_eq!(kinds("\u{2207}batchnorm"), vec![TokKind::Ident]);
+        // Every case lexes losslessly.
+        assert!(roundtrips("x\u{304} = 1"));
+        assert!(roundtrips("\u{2207}f(x) = x"));
     }
 
     #[test]

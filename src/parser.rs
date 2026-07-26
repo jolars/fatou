@@ -17,6 +17,7 @@ mod recovery;
 mod sexpr;
 mod structural;
 mod tree_builder;
+mod unicode_ident;
 mod unicode_ops;
 
 pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};

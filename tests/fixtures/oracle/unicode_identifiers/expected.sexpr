@@ -1,0 +1,1 @@
+(toplevel (= x̄ (call copyto! x)) (= x̂ (call log y)) (= h̃ (call tanh z)) (= m̂ (dotcall-i θ + 1)) (= α′ -1.758) (= x′ (call m x)) (= ρ∞ (call-i 2 / β)) (= (call ∇batchnorm g x) g))
