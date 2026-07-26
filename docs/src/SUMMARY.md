@@ -28,3 +28,7 @@
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)
   - [`constant-condition`](reference/rules/constant-condition.md)
   - [`module-shadows-parent`](reference/rules/module-shadows-parent.md)
+
+# Development
+
+- [Contributing](development/contributing.md)

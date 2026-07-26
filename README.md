@@ -91,6 +91,7 @@ cargo fmt -- --check
 ```
 
 Or via [`task`](https://taskfile.dev): `task test`, `task lint`, `task format`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
