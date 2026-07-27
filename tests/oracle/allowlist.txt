@@ -124,6 +124,8 @@ macros
 macro_sigil_leading
 macro_sigil_trailing
 macro_space_args
+macro_space_arg_block_end
+macro_space_arg_emoji
 macro_space_arg_trailing_comment
 matrices
 matrix_end_keyword

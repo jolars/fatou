@@ -3968,7 +3968,6 @@ fn parse_macro_args(
             // bracket or an array/comprehension-element context.
             Some(TokKind::ForKw) if inside_brackets || array_mode => break,
             _ => {
-                push_range(events, pos, next);
                 let arg_flags = ExprFlags {
                     inside_brackets,
                     array_mode: true,
@@ -3976,6 +3975,13 @@ fn parse_macro_args(
                 };
                 match parse_expr_in(ctx.tokens(), next, 0, diagnostics, arg_flags) {
                     Some(arg) => {
+                        // Commit the inter-argument trivia only once an argument
+                        // actually parses. When nothing does (a block-closing
+                        // `end`/`else`/`catch`/… where an argument was expected),
+                        // the whitespace is terminating trivia the caller attaches;
+                        // pushing it here would duplicate it (once in the macrocall,
+                        // once in the enclosing block) and break losslessness.
+                        push_range(events, pos, next);
                         events.extend(arg.events);
                         pos = arg.end;
                         n_args += 1;

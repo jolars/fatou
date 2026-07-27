@@ -1,0 +1,1 @@
+(toplevel (= dog_slider (macrocall @bind 🐶 (macrocall @html_str (string-r "<input type=range>")))) (= cat_slider (macrocall @bind 🐱 (macrocall @html_str (string-r "<input type=range>")))))
