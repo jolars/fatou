@@ -81,6 +81,7 @@ function_forward_decl
 function_signature_newline
 generator_after_comma
 generator_arguments
+generator_parameters
 generators
 generator_whitespace_error
 global_local_assignment

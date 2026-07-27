@@ -3462,6 +3462,34 @@ fn parse_postfix(
         if let Some(first) = parse_expr_in(ctx.tokens(), first_start, 0, diagnostics, flags)
             && ctx.token(ctx.skip_trivia(first.end)).map(|t| t.kind) == Some(TokKind::ForKw)
         {
+            // A call generator can carry keyword parameters after a `;`
+            // (`sum(x for x in xs; init = 0)`). Peek past the clauses: when they
+            // are followed by a `;` at the call level, defer to the general
+            // argument-list path, which builds the same delimiter-less
+            // `GENERATOR` plus a `PARAMETERS` sibling as the multi-argument form
+            // `f(a, x for x in xs; k)`. Bracketed comprehensions never take
+            // parameters, so this only applies to calls (`)` close).
+            if node == SyntaxKind::CALL_EXPR {
+                let mut scratch = Vec::new();
+                let mut scratch_diags = Vec::new();
+                let clauses_end =
+                    parse_generator_clauses(ctx, first.end, &mut scratch, &mut scratch_diags);
+                if ctx.token(ctx.skip_trivia(clauses_end)).map(|t| t.kind)
+                    == Some(TokKind::Semicolon)
+                {
+                    diagnostics.truncate(diag_mark);
+                    // Fall through to `parse_arg_list` below.
+                    return parse_postfix_arg_list(
+                        ctx,
+                        lhs,
+                        open_idx,
+                        close,
+                        node,
+                        end_marker,
+                        diagnostics,
+                    );
+                }
+            }
             let generator = parse_comprehension(
                 ctx,
                 open_idx,
@@ -3489,6 +3517,23 @@ fn parse_postfix(
         diagnostics.truncate(diag_mark);
     }
 
+    parse_postfix_arg_list(ctx, lhs, open_idx, close, node, end_marker, diagnostics)
+}
+
+/// Parse the delimited-list form of a postfix suffix (a call `f(a, b)`, index
+/// `a[i]`, curly `S{T}`, or typed concatenation `T[x y]`) into `node` wrapping
+/// `lhs` and an `ARG_LIST`. Split out from [`parse_postfix`] so the lone
+/// generator-argument path can defer here when the generator is followed by
+/// keyword parameters (`sum(x for x in xs; init = 0)`).
+fn parse_postfix_arg_list(
+    ctx: &ParserCtx<'_>,
+    lhs: ExprParse,
+    open_idx: usize,
+    close: TokKind,
+    node: SyntaxKind,
+    end_marker: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
     // A space-, `;`-, or newline-separated bracket body after a value is a typed
     // concatenation (`T[x y]` → `(typed_hcat T x y)`), not an index. A comma
     // list, single element, or empty `T[]` stays an `INDEX_EXPR`.

@@ -1,0 +1,5 @@
+a = sum(x for x in xs; init = 0)
+b = f(x for x in xs; k)
+c = g(x for x in xs; a, b = 2)
+d = sum(f(xi) for xi in x; init)
+e = f(x for x in xs; a; b)
