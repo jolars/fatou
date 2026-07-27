@@ -1940,6 +1940,12 @@ fn is_quotable_operator(kind: TokKind) -> bool {
             | UniTimes
             | UniPower
             | Question
+            // The assignment-tier `:=` (`ColonEq`) and the Unicode assignment
+            // operators `≔ ≕ ⩴` (`UniAssign`) are symbols under a quote (`:≔`,
+            // `:(:=)` ⇒ `(quote-: :=)`); both are kept out of `is_assignment_op`
+            // so their operator parse keeps its own head, so name them here.
+            | ColonEq
+            | UniAssign
     )
 }
 
@@ -5042,6 +5048,8 @@ fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
                 | XorEq
                 | ColonColon
                 | Colon
+                | ColonEq
+                | UniAssign
         )
 }
 
