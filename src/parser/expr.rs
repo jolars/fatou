@@ -1922,16 +1922,16 @@ fn is_value_operator(kind: TokKind) -> bool {
 
 /// Whether `kind` is an operator that a prefix `:` quotes into a symbol but that
 /// is *not* already covered by `is_op_name`/`is_assignment_op`: the range `..`,
-/// the Unicode operators and radicals, and the ternary `?`. Julia quotes all of
-/// these (`:..` ⇒ `(quote-: ..)`, `:√` ⇒ `(quote-: √)`, `:?` ⇒ `(quote-: ?)`).
-/// The broadcast dotted operators are handled by their own quote arm; the
-/// syntactic sigils `$`/`.`/`...` are deferred (Julia quotes the sigil alone and
-/// drops any operand to an `error-t`, an error-shape we don't model yet).
+/// the field-access dot `.` (`:.` ⇒ `(quote-: .)`, the `Expr(:., …)` head), the
+/// Unicode operators and radicals, and the ternary `?`. Julia quotes all of these
+/// (`:..` ⇒ `(quote-: ..)`, `:√` ⇒ `(quote-: √)`, `:?` ⇒ `(quote-: ?)`). The
+/// broadcast dotted operators (`:.+`) are handled by their own quote arm; the
+/// remaining syntactic sigils `$`/`...` are still deferred.
 fn is_quotable_operator(kind: TokKind) -> bool {
     use TokKind::*;
     matches!(
         kind,
-        DotDot
+        Dot | DotDot
             | UniRadical
             | UniArrow
             | UniComparison

@@ -61,6 +61,7 @@ docstring
 docstring_stray_closer
 dot_logical_operator
 dot_prime_recovery
+dot_symbol_quote
 dotted_operator_quote
 else_if_recovery
 empty_semicolon_param_group
