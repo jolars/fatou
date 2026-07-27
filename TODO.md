@@ -19,6 +19,15 @@
 
 ## Formatter
 
+- [ ] Prefer breaking a function signature's argument list over exploding a
+  short `where` clause. Today an over-width `f(a, b, c) where {T}` breaks the
+  single-param where bound (`where {\n    T,\n}`) rather than the args, because
+  the where bound is a breakable group (`lower_where` in
+  `src/formatter/rules.rs`). This is idempotent and matches the `where_break`
+  fixture's break-when-long convention, but the args-broken form is more
+  idiomatic when the bound is short. Needs a hand-authored `expected.jl` via the
+  formatter flow.
+
 ## Linter
 
 ### Rules

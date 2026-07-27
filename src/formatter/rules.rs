@@ -904,7 +904,12 @@ fn lower_where(node: &SyntaxNode) -> Ir {
     let bound = if rhs.kind() == SyntaxKind::BRACES {
         lower_node(rhs)
     } else {
-        Ir::concat([Ir::text("{"), lower_node(rhs), Ir::text("}")])
+        // A bare bound (`where T`) is normalized to braces (`where {T}`). It must
+        // lower to the *same* breakable group as an already-braced single bound,
+        // not a plain-text `{...}`: otherwise the two spellings produce different
+        // IR — one breakable, one not — and a bare bound that gains braces on the
+        // first pass would relayout on the second, breaking idempotency.
+        Ir::group(collection_explode_body("{", &[lower_node(rhs)], "}", false))
     };
 
     Ir::concat([lower_node(lhs), Ir::text(" where "), bound])
