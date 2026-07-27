@@ -726,7 +726,7 @@ fn infix_call_string(op: &SyntaxToken, lhs: &str, rhs: &str) -> Option<String> {
             return Some(format!("(dotcall-i {lhs} {} {rhs})", &op.text()[1..]));
         }
         UNICODE_OP => return Some(format!("(call-i {lhs} {} {rhs})", op.text())),
-        UNICODE_ASSIGN_OP => return Some(format!("({} {lhs} {rhs})", op.text())),
+        UNICODE_ASSIGN_OP | COLON_EQ => return Some(format!("({} {lhs} {rhs})", op.text())),
         _ => {}
     }
     // A suffixed operator (`a +₁ b`, `x -->₁ y`) carries its sub/superscript

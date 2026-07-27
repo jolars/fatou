@@ -273,6 +273,10 @@ pub enum SyntaxKind {
     DOT_DIV_EQ,
     DOT_XOR_EQ,
 
+    /// The assignment-tier operator `:=`. Parses like the Unicode `≔`
+    /// (right-associative, loose as `=`) and projects with its own head.
+    COLON_EQ,
+
     // Single-codepoint Unicode operator tokens. The tier distinctions the parser
     // needs live in the `TokKind`; here only the projection shape matters, so the
     // six `call-i` tiers collapse to `UNICODE_OP`, the assignment tier projects
@@ -341,6 +345,7 @@ impl SyntaxKind {
                 | DOT_AND_AND
                 | DOT_OR_OR
                 | COLON
+                | COLON_EQ
                 | DOT_DOT
                 | COLON_COLON
                 | TILDE

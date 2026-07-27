@@ -40,6 +40,7 @@ catch_var_error
 char_errors
 char_escapes
 char_unterminated
+colon_eq_operator
 colon_range
 colon_range_newline
 colon_space_closer_keyword

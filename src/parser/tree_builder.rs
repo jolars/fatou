@@ -103,6 +103,7 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::OrOr => SyntaxKind::OR_OR,
         TokKind::Colon => SyntaxKind::COLON,
         TokKind::ColonColon => SyntaxKind::COLON_COLON,
+        TokKind::ColonEq => SyntaxKind::COLON_EQ,
         TokKind::Subtype => SyntaxKind::SUBTYPE,
         TokKind::Supertype => SyntaxKind::SUPERTYPE,
         TokKind::Arrow => SyntaxKind::ARROW,

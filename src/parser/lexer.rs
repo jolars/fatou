@@ -109,6 +109,10 @@ pub(crate) enum TokKind {
     OrOr,
     Colon,
     ColonColon,
+    /// The assignment-tier operator `:=`. Right-associative and as loose as `=`,
+    /// but keeps its own head (`(:= a b)`) like the Unicode `≔`, rather than
+    /// lowering to an assignment.
+    ColonEq,
     Subtype,
     Supertype,
     Arrow,
@@ -1170,6 +1174,7 @@ impl<'a> Lexer<'a> {
             (Some(b'&'), Some(b'&')) => Some(TokKind::AndAnd),
             (Some(b'|'), Some(b'|')) => Some(TokKind::OrOr),
             (Some(b':'), Some(b':')) => Some(TokKind::ColonColon),
+            (Some(b':'), Some(b'=')) => Some(TokKind::ColonEq),
             (Some(b'<'), Some(b':')) => Some(TokKind::Subtype),
             (Some(b'>'), Some(b':')) => Some(TokKind::Supertype),
             (Some(b'-'), Some(b'>')) => Some(TokKind::Arrow),

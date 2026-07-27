@@ -5213,6 +5213,10 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // assignment. Handled here (not `is_assignment_op`) so the node stays
         // `BINARY_EXPR`.
         TokKind::Tilde | TokKind::DotTilde => (2, 1),
+        // `:=` sits at the assignment tier like the Unicode `≔`: right-associative
+        // and as loose as `=`, but builds an ordinary `BINARY_EXPR` that keeps its
+        // own head (`(:= a b)`) rather than lowering to an assignment.
+        TokKind::ColonEq => (2, 1),
         // Unicode operators share the tier of their ASCII precedence class. The
         // assignment-tier ops (`≔ ≕ ⩴`) are right-associative like `~`; the arrow
         // tier (`→ ← ↔ …`) is right-associative like `=>`/`-->`; the rest mirror

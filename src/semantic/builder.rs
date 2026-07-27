@@ -125,7 +125,10 @@ fn assign_op(node: &SyntaxNode) -> AssignOp {
             if is_broadcast_assign(kind) {
                 return AssignOp::Broadcast;
             }
-            if matches!(kind, SyntaxKind::EQ | SyntaxKind::UNICODE_ASSIGN_OP) {
+            if matches!(
+                kind,
+                SyntaxKind::EQ | SyntaxKind::UNICODE_ASSIGN_OP | SyntaxKind::COLON_EQ
+            ) {
                 return AssignOp::Plain;
             }
         }
