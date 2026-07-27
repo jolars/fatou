@@ -1,0 +1,1 @@
+(toplevel (call f a (generator x (= x xs))) (call sum a (generator (call-i x ^ 2) (= x v))) (call f a b (generator x (= x c))) (call f a (generator x (filter (= x xs) (call-i x > 0)))) (call f a (generator (= k v) (= v c))) (call _stack dims (generator (call f x) (= x iter))) (vect a (generator x (= x c))))

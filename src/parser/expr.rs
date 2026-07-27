@@ -3086,6 +3086,66 @@ fn emit_cat_child(
     events.push(Event::Finish); // MATRIX_ROW
 }
 
+/// Parse the trailing `for <specs> [if <cond>]` clauses of a comprehension or
+/// generator, given `pos` just past the already-emitted body. Each `for` becomes
+/// a `FOR_BINDING` and each trailing `if` a `COMPREHENSION_IF` wrapping the
+/// preceding clause. Returns the index past the last clause; the caller owns any
+/// surrounding delimiters. Shared by the bracketed comprehension driver and the
+/// delimiter-less generator-argument path (`f(a, x for x in xs)`).
+fn parse_generator_clauses(
+    ctx: &ParserCtx<'_>,
+    mut pos: usize,
+    events: &mut Vec<Event>,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    loop {
+        let for_idx = ctx.skip_trivia(pos);
+        if ctx.token(for_idx).map(|t| t.kind) != Some(TokKind::ForKw) {
+            break;
+        }
+        // JuliaSyntax requires whitespace before a comprehension/generator `for`;
+        // when it is glued to the preceding element (`[(x)for x in xs]`), record a
+        // `GluedFor` diagnostic at the `for`, projected as a `(error-t)` between
+        // the body and the iteration clause.
+        if for_idx == pos {
+            let for_tok = &ctx.tokens()[for_idx];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::GluedFor,
+                "expected whitespace before `for`",
+                for_tok.start,
+                for_tok.start,
+            );
+        }
+        push_range(events, pos, for_idx);
+        events.push(Event::Start(SyntaxKind::FOR_BINDING));
+        events.push(Event::Tok(for_idx)); // `for`
+        pos = parse_for_specs(ctx, for_idx + 1, events, true, diagnostics);
+        events.push(Event::Finish); // FOR_BINDING
+
+        // Optional `if <cond>` filter on this clause.
+        let if_idx = ctx.skip_trivia(pos);
+        if ctx.token(if_idx).map(|t| t.kind) == Some(TokKind::IfKw) {
+            push_range(events, pos, if_idx);
+            events.push(Event::Start(SyntaxKind::COMPREHENSION_IF));
+            events.push(Event::Tok(if_idx)); // `if`
+            pos = if_idx + 1;
+            let cond_start = ctx.skip_trivia(pos);
+            push_range(events, pos, cond_start);
+            if let Some(cond) =
+                parse_expr_in_brackets(ctx.tokens(), cond_start, 0, false, diagnostics)
+            {
+                events.extend(cond.events);
+                pos = cond.end;
+            } else {
+                pos = cond_start;
+            }
+            events.push(Event::Finish); // COMPREHENSION_IF
+        }
+    }
+    pos
+}
+
 /// Parse a comprehension `[elem for v in iter if cond]` or generator
 /// `(elem for v in iter)` given the already-parsed `elem` and the open delimiter
 /// at `open` (closing kind `close`). Each `for` becomes a `FOR_BINDING` and each
@@ -3109,49 +3169,7 @@ fn parse_comprehension(
     events.extend(elem.events);
 
     // One or more `for <specs> [if <cond>]` clauses.
-    loop {
-        let for_idx = ctx.skip_trivia(pos);
-        if ctx.token(for_idx).map(|t| t.kind) != Some(TokKind::ForKw) {
-            break;
-        }
-        // JuliaSyntax requires whitespace before a comprehension/generator `for`;
-        // when it is glued to the preceding element (`[(x)for x in xs]`), record a
-        // `GluedFor` diagnostic at the `for`, projected as a `(error-t)` between
-        // the body and the iteration clause.
-        if for_idx == pos {
-            let for_tok = &ctx.tokens()[for_idx];
-            push_diagnostic(
-                diagnostics,
-                DiagnosticKind::GluedFor,
-                "expected whitespace before `for`",
-                for_tok.start,
-                for_tok.start,
-            );
-        }
-        push_range(&mut events, pos, for_idx);
-        events.push(Event::Start(SyntaxKind::FOR_BINDING));
-        events.push(Event::Tok(for_idx)); // `for`
-        pos = parse_for_specs(ctx, for_idx + 1, &mut events, true, diagnostics);
-        events.push(Event::Finish); // FOR_BINDING
-
-        // Optional `if <cond>` filter on this clause.
-        let if_idx = ctx.skip_trivia(pos);
-        if ctx.token(if_idx).map(|t| t.kind) == Some(TokKind::IfKw) {
-            push_range(&mut events, pos, if_idx);
-            events.push(Event::Start(SyntaxKind::COMPREHENSION_IF));
-            events.push(Event::Tok(if_idx)); // `if`
-            pos = if_idx + 1;
-            let cond_start = ctx.skip_trivia(pos);
-            push_range(&mut events, pos, cond_start);
-            if let Some(cond) = parse_expr_in_brackets(tokens, cond_start, 0, false, diagnostics) {
-                events.extend(cond.events);
-                pos = cond.end;
-            } else {
-                pos = cond_start;
-            }
-            events.push(Event::Finish); // COMPREHENSION_IF
-        }
-    }
+    pos = parse_generator_clauses(ctx, pos, &mut events, diagnostics);
 
     // Closing delimiter.
     let close_idx = ctx.skip_trivia(pos);
@@ -4300,29 +4318,56 @@ fn parse_one_arg(
         parse_expr_in(tokens, start, 0, diagnostics, flags)
     };
     if let Some(eq_idx) = kwarg_eq(ctx, i) {
-        events.push(Event::Start(SyntaxKind::KEYWORD_ARG));
-        events.push(Event::Start(SyntaxKind::NAME));
-        events.push(Event::Tok(i));
-        events.push(Event::Finish);
+        // Build the `KEYWORD_ARG` into a local buffer so it can become a generator
+        // body when a `for` follows (`f(a, k=v for v in xs)` →
+        // `(call f a (generator (= k v) (= v xs)))`).
+        let mut kw = vec![
+            Event::Start(SyntaxKind::KEYWORD_ARG),
+            Event::Start(SyntaxKind::NAME),
+            Event::Tok(i),
+            Event::Finish,
+        ];
         // Whitespace + `=` between the name and the value.
-        push_range(events, i + 1, eq_idx);
-        events.push(Event::Tok(eq_idx));
+        push_range(&mut kw, i + 1, eq_idx);
+        kw.push(Event::Tok(eq_idx));
         let val_start = ctx.skip_trivia(eq_idx + 1);
-        push_range(events, eq_idx + 1, val_start);
+        push_range(&mut kw, eq_idx + 1, val_start);
         let end = match parse_arg_expr(tokens, val_start, diagnostics) {
             Some(val) => {
-                events.extend(val.events);
+                kw.extend(val.events);
                 val.end
             }
             None => val_start,
         };
-        events.push(Event::Finish);
-        end
+        kw.push(Event::Finish); // KEYWORD_ARG
+        if ctx.token(ctx.skip_trivia(end)).map(|t| t.kind) == Some(TokKind::ForKw) {
+            events.push(Event::Start(SyntaxKind::GENERATOR));
+            events.extend(kw);
+            let gen_end = parse_generator_clauses(ctx, end, events, diagnostics);
+            events.push(Event::Finish); // GENERATOR
+            gen_end
+        } else {
+            events.extend(kw);
+            end
+        }
     } else if let Some(arg) = parse_arg_expr(tokens, i, diagnostics) {
-        events.push(Event::Start(SyntaxKind::ARG));
-        events.extend(arg.events);
-        events.push(Event::Finish);
-        arg.end
+        // A `for` following the element turns this argument into a generator:
+        // `f(a, x for x in xs)` → `(call f a (generator x (= x xs)))`. The body is
+        // the element just parsed; the enclosing `(`/`)` stay with the arg list, so
+        // the `GENERATOR` is delimiter-less (the lone-generator `f(x for x in xs)`
+        // is instead handled up in `parse_postfix`, before the list is entered).
+        if ctx.token(ctx.skip_trivia(arg.end)).map(|t| t.kind) == Some(TokKind::ForKw) {
+            events.push(Event::Start(SyntaxKind::GENERATOR));
+            events.extend(arg.events);
+            let end = parse_generator_clauses(ctx, arg.end, events, diagnostics);
+            events.push(Event::Finish); // GENERATOR
+            end
+        } else {
+            events.push(Event::Start(SyntaxKind::ARG));
+            events.extend(arg.events);
+            events.push(Event::Finish);
+            arg.end
+        }
     } else {
         events.push(Event::Tok(i));
         i + 1

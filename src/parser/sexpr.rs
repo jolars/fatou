@@ -1370,6 +1370,9 @@ fn project_generator(node: &SyntaxNode) -> String {
                     clauses[n - 1] = format!("(filter {last} {})", project(&cond));
                 }
             }
+            // A generator whose body is a keyword-form assignment
+            // (`f(a, k=v for v in xs)`) keeps the `(= k v)` shape JuliaSyntax uses.
+            KEYWORD_ARG if body.is_empty() => body = project_keyword_arg(&child),
             _ if body.is_empty() => body = project(&child),
             _ => {}
         }

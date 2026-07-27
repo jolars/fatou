@@ -1,0 +1,5 @@
+_stack(dims, f(x) for x in iter)
+sum(a, x^2 for x in v)
+f(a, b, x for x in c)
+f(a, x for x in xs if x > 0)
+g(a, x for x in xs, y in ys)
