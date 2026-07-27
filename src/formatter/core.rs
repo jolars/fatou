@@ -63,14 +63,24 @@ pub fn format_node(
 /// source as a tree ([`format_node`], [`format_range`]) rather than a `&str`.
 /// Only [`LineEnding::Auto`](crate::formatter::LineEnding) consults it.
 fn node_source_is_crlf(root: &SyntaxNode) -> bool {
-    let text = root.text();
-    match text.find_char('\n') {
-        Some(offset) => {
-            let idx = u32::from(offset);
-            idx > 0 && text.char_at((idx - 1).into()) == Some('\r')
+    // Find the char immediately preceding the first `\n` and report whether it
+    // is `\r`. We scan chunks rather than indexing by byte offset: the byte
+    // before a `\n` can land inside a multibyte char (e.g. a box-drawing `─`),
+    // and rowan's `char_at`/`slice` panic on a non-char-boundary offset.
+    let mut prev: Option<char> = None;
+    let mut is_crlf = false;
+    let _ = root.text().try_for_each_chunk(|chunk: &str| {
+        if let Some(idx) = chunk.find('\n') {
+            let before = chunk[..idx].chars().next_back().or(prev);
+            is_crlf = before == Some('\r');
+            return Err(());
         }
-        None => false,
-    }
+        if let Some(last) = chunk.chars().next_back() {
+            prev = Some(last);
+        }
+        Ok::<(), ()>(())
+    });
+    is_crlf
 }
 
 /// Render an arbitrary IR document. Exposed so the (forthcoming) per-construct
