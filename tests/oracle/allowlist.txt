@@ -69,6 +69,7 @@ end_marker_propagation
 escaped_dollar
 export_name_list
 export_paren_item
+field_access_keyword
 field_access_space
 field_access_suffix
 for_oneline_body
@@ -92,6 +93,7 @@ import_unicode_dot_names
 incomplete_begin
 incomplete_block
 incomplete_try
+index_end_marker_nested
 interpolation_expr
 interpolation_names
 invalid_doubled_operators

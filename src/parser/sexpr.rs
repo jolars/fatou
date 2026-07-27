@@ -3188,9 +3188,12 @@ fn name_text(node: &SyntaxNode) -> String {
     node.children_with_tokens()
         .filter_map(|el| el.into_token())
         // A `NAME` normally wraps an `IDENT`; a reserved keyword misused as a
-        // signature name (`struct try end` ⇒ `(error try)`) is wrapped here too,
-        // so fall back to its keyword text.
-        .find(|t| t.kind() == IDENT || is_keyword(t.kind()))
+        // signature name (`struct try end` ⇒ `(error try)`) or a keyword field
+        // name (`x.function` ⇒ `(quote function)`, `x.true` ⇒ `(quote true)`) is
+        // wrapped here too, so fall back to its keyword text.
+        .find(|t| {
+            t.kind() == IDENT || is_keyword(t.kind()) || matches!(t.kind(), TRUE_KW | FALSE_KW)
+        })
         .map(|t| t.text().to_string())
         .unwrap_or_default()
 }

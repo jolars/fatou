@@ -1368,6 +1368,13 @@ fn parse_prefix(
                 events: vec![Event::Tok(start)],
             })
         }
+        // On the right-hand side of a field-access dot, any reserved keyword is an
+        // ordinary field name, not its keyword form: `x.function`, `x.end`, and
+        // `x.true` all project as `(. x (quote <kw>))`. This must precede the
+        // `end`/`begin`/`true`/`false` arms below so a field name never reads as an
+        // index marker or a boolean literal. Keywords Fatou already lexes as plain
+        // identifiers (`type`, `in`, …) fall through to the `Ident` arm unchanged.
+        k if flags.field_access_rhs && k.is_keyword() => Some(atom(SyntaxKind::NAME, start)),
         // A bare `end` inside square brackets is the index-end marker (`a[end]`,
         // `a[end - 1]`); elsewhere `end` is a block terminator and not an atom.
         TokKind::EndKw if flags.end_marker => Some(atom(SyntaxKind::END_MARKER, start)),
@@ -2874,16 +2881,19 @@ fn parse_matrix(
             // `(hcat x (error-t ✘ y))`, `[a b@c]` ⇒ `(hcat a b (error-t ✘ c))`).
             // A spaced `@` (`[x @y]`) keeps a real separator run and stays a
             // macrocall element, so the run must be empty to trigger this.
-            // A misplaced `end` keyword as a non-leading array element: `end` is a
-            // valid index marker only as the sole/leading element, so once another
-            // element precedes it (`a[1 end]`, `[1 2 end]`, `a[:(end)]`) JuliaSyntax
-            // stops the array, splices a zero-width `(error-t)` after the last real
-            // element, and bumps the `end` plus the remaining closers up as a
-            // trailing-junk run handled by the top-level leftover driver. We stop
+            // A misplaced `end` keyword as a non-leading array element in a *plain*
+            // array literal: `end` is a valid index marker only as the sole/leading
+            // element, so once another element precedes it (`[1 2 end]`, `[1; end]`)
+            // JuliaSyntax stops the array, splices a zero-width `(error-t)` after the
+            // last real element, and bumps the `end` plus the remaining closers up as
+            // a trailing-junk run handled by the top-level leftover driver. We stop
             // the array *before* the `end` (without consuming the closer) and record
             // a `MatrixKeywordRecovery` diagnostic at the last element's end; the
             // projector splices the marker and the leftover driver renders the run.
-            Some(TokKind::EndKw) => {
+            // Inside an indexing bracket (`end_marker`), though, `end` is the
+            // index-end marker at *any* position (`a[[1; end]]` ⇒ `(ref a (vcat 1
+            // end))`), so it falls through to the ordinary element parse below.
+            Some(TokKind::EndKw) if !end_marker => {
                 seps.push(run);
                 let anchor = tokens[elems[elems.len() - 1].end - 1].end;
                 push_diagnostic(
