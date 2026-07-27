@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **199 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **213 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,7 +134,37 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-27—broadcast/ternary/macro-generator gaps from a DataFrames smoke-test)
+## Latest session (2026-07-27b—lambda arrow `->` precedence)
+
+Batch-probed real-world Julia against the oracle (no queued target; the two
+2026-07-27 deferred items—`x.function` field name, `end` in a nested `[…]` within
+an index—both already pass, no regression). Surfaced one genuine
+precedence/associativity bug: **the lambda arrow `->` bound far too loosely**.
+`x |> y -> y + 1` parsed as `(-> (call-i x |> y) …)` but Julia gives
+`(call-i x |> (-> y (call-i y + 1)))`.
+
+Julia's `->` is *not* an ordinary arrow-tier operator: it has a **high left
+binding power and a very low right one** (asymmetric, right-associative). It binds
+a tight left operand but sweeps everything looser into its body:
+`1 + 2 -> 3` ⇒ `(call-i 1 + (-> 2 3))`, `a -> b = c` ⇒ `(-> a (= b c))`,
+`a -> b ? c : d` ⇒ `(-> a (? …))`, `2 ^ 3 -> 4` ⇒ `2 ^ (3 -> 4)`; only `::`/`.`/
+postfix `'` bind tighter on the left (`a::b -> c` ⇒ `(-> (::-i a b) c)`).
+
+- **Fix** (`expr.rs`, one line + comment): split `TokKind::Arrow` out of the
+  shared `(4,3)` arrow group into its own tier `(35, 1)`—lbp just below `::`(36)
+  and above `^`(33), rbp below assignment(2)/ternary(`TERNARY_L`=3). No new node
+  kind, no projector change (still `ARROW_EXPR` ⇒ `(-> …)`). Verified the other
+  arrows (`-->`, `→`, `<--`, `=>`) stay ordinary loose arrow-tier ops (probed:
+  `a + b --> c` ⇒ `((a+b) --> c)`).
+- **Fixtures**: parser snapshot + oracle dir slug `arrow_precedence` (7 lines,
+  byte-identical to JuliaSyntax).
+- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
+  dir 212 → **213**.
+- **Next**: no queued parser target. Remaining batch-probe diffs are all
+  known/blocked (float display `.5`/`1e10`/`100_000.5`; bare-`where` toplevel
+  error shape). Keep batch-probing real-world Julia for the next divergence.
+
+## Earlier session (2026-07-27—broadcast/ternary/macro-generator gaps from a DataFrames smoke-test)
 
 Triage of debug-format issue #19 (`JuliaData/DataFrames.jl`, `format-error`). The
 issue's sample (`docs/make.jl`) was already fixed by `a810624`; the other sampled

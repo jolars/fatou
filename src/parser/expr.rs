@@ -5225,10 +5225,21 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         TokKind::UniPlus => (20, 21),
         TokKind::UniTimes => (24, 25),
         TokKind::UniPower => (34, 33),
+        // The lambda arrow `->` is *not* an ordinary arrow-tier operator: Julia
+        // parses it with a high left binding power and a very low right one, so it
+        // binds a tight left operand but sweeps everything looser into its body
+        // (`1 + 2 -> 3` ⇒ `(call-i 1 + (-> 2 3))`, `x |> y -> y + 1` ⇒
+        // `(call-i x |> (-> y (call-i y + 1)))`, `a -> b = c` ⇒ `(-> a (= b c))`).
+        // The left binding power sits just below `::`/`.`/postfix `'` (so
+        // `a::b -> c` ⇒ `(-> (::-i a b) c)`) and above `^` (so `2 ^ 3 -> 4` ⇒
+        // `2 ^ (3 -> 4)`); the right one is below assignment/ternary so the body
+        // absorbs them. Right-associative (`a -> b -> c` ⇒ `(-> a (-> b c))`).
+        // The other arrows (`-->`, `→`, `<--`, …) and the pair `=>` stay ordinary
+        // arrow-tier operators below.
+        TokKind::Arrow => (35, 1),
         // The pair `=>` shares the arrow/ternary tier: right-associative, looser
         // than `||` and tighter than `=` (`a || b => c = d` ⇒ `(= (=> (|| a b) c) d)`).
-        TokKind::Arrow
-        | TokKind::FatArrow
+        TokKind::FatArrow
         | TokKind::DotFatArrow
         | TokKind::LongArrow
         | TokKind::LeftRightArrow

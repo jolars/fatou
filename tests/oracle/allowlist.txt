@@ -13,6 +13,7 @@ array_separator_mismatch
 array_space_call
 array_trailing_junk
 arrow_pipe_bitshift_operators
+arrow_precedence
 augmented_assignment
 bare_function_keyword
 bare_operator
@@ -123,9 +124,9 @@ macro_operator_names
 macros
 macro_sigil_leading
 macro_sigil_trailing
-macro_space_args
 macro_space_arg_block_end
 macro_space_arg_emoji
+macro_space_args
 macro_space_arg_trailing_comment
 matrices
 matrix_end_keyword
