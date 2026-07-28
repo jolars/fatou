@@ -165,11 +165,13 @@ postfix_space_error
 prefix_operator_error
 prefix_operator_newline
 prefix_operator_spaced_call
+primitive_type_paren_size
 public_statement
 public_stop_at_equals
 quote_paren_empty
 quoted_assignment_operators
 quoted_dollar_symbol
+quoted_literal
 quoted_macro_name
 quoted_var_identifier
 range_operator

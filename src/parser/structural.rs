@@ -19,7 +19,7 @@ use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
     is_var_identifier_start, parse_block_stmt, parse_expr, parse_for_specs,
     parse_name_signature_expr, parse_paren, parse_prefix_interpolation, parse_quote_sym,
-    parse_signature_expr, push_var_macro_name,
+    parse_signature_expr, parse_type_spec_expr, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -508,7 +508,7 @@ pub(crate) fn parse_primitive_type(
     push_range(&mut events, type_idx + 1, spec_start);
     let mut i = spec_start;
     if ctx.token(spec_start).map(|t| t.kind) != Some(TokKind::EndKw)
-        && let Some(expr) = parse_expr(tokens, spec_start, 0, diagnostics)
+        && let Some(expr) = parse_type_spec_expr(tokens, spec_start, diagnostics)
     {
         events.push(Event::Start(SyntaxKind::SIGNATURE));
         events.extend(expr.events);
