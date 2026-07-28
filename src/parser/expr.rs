@@ -4613,8 +4613,7 @@ fn word_operator(ctx: &ParserCtx<'_>, from: usize, inside_brackets: bool) -> Opt
     } else {
         op_idx
     };
-    let op = ctx.token(op_idx)?;
-    (op.kind == TokKind::Ident && (op.text == "in" || op.text == "isa")).then_some(op_idx)
+    is_word_operator_tok(ctx.token(op_idx)?).then_some(op_idx)
 }
 
 fn is_operator(kind: TokKind) -> bool {
@@ -4850,6 +4849,13 @@ fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u
     {
         return false;
     }
+    // A glued `in`/`isa` is the *word operator*, not a juxtaposed value
+    // (`"identity"in c` ⇒ `(call-i (string "identity") in c)`, `1isa Int` ⇒
+    // `(call-i 1 isa Int)`). Both are lexed as identifiers, so `is_keyword`
+    // above does not filter them out.
+    if is_word_operator_tok(next) {
+        return false;
+    }
     if lhs_is_plain_string(ctx, lhs) {
         // `prev == string`: juxtaposes with any non-number term (a glued number
         // after a string is a docstring target, `"a"2` ⇒ `(doc (string "a") 2)`).
@@ -4866,6 +4872,13 @@ fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u
 /// multiplication with no operator between (`2x`, `2(x)`, `(x-1)y`, `1√x`).
 /// Mirrors JuliaSyntax's `parse_juxtapose`/`is_juxtapose` (the non-string-literal
 /// branch; string juxtaposition is error recovery and deferred).
+/// Whether `tok` is one of the word operators `in`/`isa`, which the lexer emits
+/// as plain identifiers (they are ordinary names elsewhere) and the operator loop
+/// picks up by text.
+fn is_word_operator_tok(tok: &Token) -> bool {
+    tok.kind == TokKind::Ident && (tok.text == "in" || tok.text == "isa")
+}
+
 fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
     if JUXTAPOSE_L < min_bp {
         return false;
@@ -4888,6 +4901,13 @@ fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
         || k.is_keyword()
         || k == TokKind::At
     {
+        return false;
+    }
+    // A glued `in`/`isa` is the *word operator*, not a juxtaposed value
+    // (`"identity"in c` ⇒ `(call-i (string "identity") in c)`, `1isa Int` ⇒
+    // `(call-i 1 isa Int)`). Both are lexed as identifiers, so `is_keyword`
+    // above does not filter them out.
+    if is_word_operator_tok(next) {
         return false;
     }
     // A numeric coefficient juxtaposes with any such value.
