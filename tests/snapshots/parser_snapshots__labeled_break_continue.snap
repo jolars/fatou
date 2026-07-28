@@ -1,0 +1,346 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..526
+  BREAK_EXPR@0..5
+    BREAK_KW@0..5 "break"
+  NEWLINE@5..6 "\n"
+  CONTINUE_EXPR@6..14
+    CONTINUE_KW@6..14 "continue"
+  NEWLINE@14..15 "\n"
+  BREAK_EXPR@15..26
+    BREAK_KW@15..20 "break"
+    WHITESPACE@20..21 " "
+    NAME@21..26
+      IDENT@21..26 "outer"
+  NEWLINE@26..27 "\n"
+  CONTINUE_EXPR@27..41
+    CONTINUE_KW@27..35 "continue"
+    WHITESPACE@35..36 " "
+    NAME@36..41
+      IDENT@36..41 "outer"
+  NEWLINE@41..42 "\n"
+  BREAK_EXPR@42..55
+    BREAK_KW@42..47 "break"
+    WHITESPACE@47..48 " "
+    NAME@48..53
+      IDENT@48..53 "outer"
+    WHITESPACE@53..54 " "
+    NAME@54..55
+      IDENT@54..55 "x"
+  NEWLINE@55..56 "\n"
+  BREAK_EXPR@56..73
+    BREAK_KW@56..61 "break"
+    WHITESPACE@61..62 " "
+    NAME@62..67
+      IDENT@62..67 "outer"
+    WHITESPACE@67..68 " "
+    BINARY_EXPR@68..73
+      NAME@68..69
+        IDENT@68..69 "i"
+      WHITESPACE@69..70 " "
+      STAR@70..71 "*"
+      WHITESPACE@71..72 " "
+      LITERAL@72..73
+        INTEGER@72..73 "2"
+  NEWLINE@73..74 "\n"
+  BREAK_EXPR@74..82
+    BREAK_KW@74..79 "break"
+    WHITESPACE@79..80 " "
+    INTERPOLATION@80..82
+      DOLLAR@80..81 "$"
+      IDENT@81..82 "x"
+  NEWLINE@82..83 "\n"
+  BREAK_EXPR@83..97
+    BREAK_KW@83..88 "break"
+    WHITESPACE@88..89 " "
+    NONSTANDARD_IDENTIFIER@89..97
+      STRING_PREFIX@89..92 "var"
+      STRING_DELIM_OPEN@92..93 "\""
+      STRING_CONTENT@93..96 "a b"
+      STRING_DELIM_CLOSE@96..97 "\""
+  NEWLINE@97..98 "\n"
+  BREAK_EXPR@98..105
+    BREAK_KW@98..103 "break"
+    WHITESPACE@103..104 " "
+    ERROR@104..105
+      LITERAL@104..105
+        INTEGER@104..105 "1"
+  NEWLINE@105..106 "\n"
+  FOR_EXPR@106..172
+    FOR_KW@106..109 "for"
+    WHITESPACE@109..110 " "
+    FOR_BINDING@110..119
+      NAME@110..111
+        IDENT@110..111 "i"
+      WHITESPACE@111..112 " "
+      IDENT@112..114 "in"
+      WHITESPACE@114..115 " "
+      BINARY_EXPR@115..119
+        LITERAL@115..116
+          INTEGER@115..116 "1"
+        COLON@116..117 ":"
+        LITERAL@117..119
+          INTEGER@117..119 "10"
+    BLOCK@119..169
+      NEWLINE@119..120 "\n"
+      WHITESPACE@120..124 "    "
+      IF_EXPR@124..168
+        IF_KW@124..126 "if"
+        WHITESPACE@126..127 " "
+        CONDITION@127..132
+          BINARY_EXPR@127..132
+            NAME@127..128
+              IDENT@127..128 "i"
+            WHITESPACE@128..129 " "
+            GT@129..130 ">"
+            WHITESPACE@130..131 " "
+            LITERAL@131..132
+              INTEGER@131..132 "5"
+        BLOCK@132..165
+          NEWLINE@132..133 "\n"
+          WHITESPACE@133..141 "        "
+          BREAK_EXPR@141..160
+            BREAK_KW@141..146 "break"
+            WHITESPACE@146..147 " "
+            NAME@147..154
+              IDENT@147..154 "myblock"
+            WHITESPACE@154..155 " "
+            BINARY_EXPR@155..160
+              NAME@155..156
+                IDENT@155..156 "i"
+              WHITESPACE@156..157 " "
+              STAR@157..158 "*"
+              WHITESPACE@158..159 " "
+              LITERAL@159..160
+                INTEGER@159..160 "2"
+          NEWLINE@160..161 "\n"
+          WHITESPACE@161..165 "    "
+        END_KW@165..168 "end"
+      NEWLINE@168..169 "\n"
+    END_KW@169..172 "end"
+  NEWLINE@172..173 "\n"
+  MACRO_CALL@173..282
+    MACRO_NAME@173..179
+      AT@173..174 "@"
+      IDENT@174..179 "label"
+    WHITESPACE@179..180 " "
+    NAME@180..189
+      IDENT@180..189 "writeback"
+    WHITESPACE@189..190 " "
+    BEGIN_EXPR@190..282
+      BEGIN_KW@190..195 "begin"
+      BLOCK@195..279
+        NEWLINE@195..196 "\n"
+        WHITESPACE@196..200 "    "
+        BINARY_EXPR@200..232
+          BINARY_EXPR@200..213
+            NAME@200..201
+              IDENT@200..201 "n"
+            WHITESPACE@201..202 " "
+            EQ_EQ_EQ@202..205 "==="
+            WHITESPACE@205..206 " "
+            NAME@206..213
+              IDENT@206..213 "nothing"
+          WHITESPACE@213..214 " "
+          AND_AND@214..216 "&&"
+          WHITESPACE@216..217 " "
+          BREAK_EXPR@217..232
+            BREAK_KW@217..222 "break"
+            WHITESPACE@222..223 " "
+            NAME@223..232
+              IDENT@223..232 "writeback"
+        NEWLINE@232..233 "\n"
+        WHITESPACE@233..237 "    "
+        IF_EXPR@237..278
+          IF_KW@237..239 "if"
+          WHITESPACE@239..240 " "
+          CONDITION@240..246
+            BINARY_EXPR@240..246
+              NAME@240..241
+                IDENT@240..241 "n"
+              WHITESPACE@241..242 " "
+              LE@242..244 "<="
+              WHITESPACE@244..245 " "
+              LITERAL@245..246
+                INTEGER@245..246 "0"
+          BLOCK@246..275
+            NEWLINE@246..247 "\n"
+            WHITESPACE@247..255 "        "
+            BREAK_EXPR@255..270
+              BREAK_KW@255..260 "break"
+              WHITESPACE@260..261 " "
+              NAME@261..270
+                IDENT@261..270 "writeback"
+            NEWLINE@270..271 "\n"
+            WHITESPACE@271..275 "    "
+          END_KW@275..278 "end"
+        NEWLINE@278..279 "\n"
+      END_KW@279..282 "end"
+  NEWLINE@282..283 "\n"
+  BINARY_EXPR@283..313
+    BINARY_EXPR@283..298
+      NAME@283..286
+        IDENT@283..286 "val"
+      WHITESPACE@286..287 " "
+      EQ_EQ_EQ@287..290 "==="
+      WHITESPACE@290..291 " "
+      NAME@291..298
+        IDENT@291..298 "nothing"
+    WHITESPACE@298..299 " "
+    AND_AND@299..301 "&&"
+    WHITESPACE@301..302 " "
+    BREAK_EXPR@302..313
+      BREAK_KW@302..307 "break"
+      WHITESPACE@307..308 " "
+      NAME@308..313
+        IDENT@308..313 "error"
+  NEWLINE@313..314 "\n"
+  BINARY_EXPR@314..360
+    BINARY_EXPR@314..346
+      BINARY_EXPR@314..325
+        NAME@314..316
+          IDENT@314..316 "ex"
+        WHITESPACE@316..317 " "
+        IDENT@317..320 "isa"
+        WHITESPACE@320..321 " "
+        NAME@321..325
+          IDENT@321..325 "Expr"
+      WHITESPACE@325..326 " "
+      AND_AND@326..328 "&&"
+      WHITESPACE@328..329 " "
+      BINARY_EXPR@329..346
+        BINARY_EXPR@329..336
+          NAME@329..331
+            IDENT@329..331 "ex"
+          DOT@331..332 "."
+          NAME@332..336
+            IDENT@332..336 "head"
+        WHITESPACE@336..337 " "
+        EQ_EQ_EQ@337..340 "==="
+        WHITESPACE@340..341 " "
+        QUOTE_SYM@341..346
+          COLON@341..342 ":"
+          NAME@342..346
+            IDENT@342..346 "call"
+    WHITESPACE@346..347 " "
+    OR_OR@347..349 "||"
+    WHITESPACE@349..350 " "
+    BREAK_EXPR@350..360
+      BREAK_KW@350..355 "break"
+      WHITESPACE@355..356 " "
+      NAME@356..360
+        IDENT@356..360 "fail"
+  NEWLINE@360..361 "\n"
+  WHILE_EXPR@361..403
+    WHILE_KW@361..366 "while"
+    WHITESPACE@366..367 " "
+    CONDITION@367..368
+      NAME@367..368
+        IDENT@367..368 "c"
+    BLOCK@368..400
+      NEWLINE@368..369 "\n"
+      WHITESPACE@369..373 "    "
+      BREAK_EXPR@373..382
+        BREAK_KW@373..378 "break"
+        WHITESPACE@378..379 " "
+        NAME@379..382
+          IDENT@379..382 "lbl"
+      NEWLINE@382..383 "\n"
+      WHITESPACE@383..387 "    "
+      CONTINUE_EXPR@387..399
+        CONTINUE_KW@387..395 "continue"
+        WHITESPACE@395..396 " "
+        NAME@396..399
+          IDENT@396..399 "lbl"
+      NEWLINE@399..400 "\n"
+    END_KW@400..403 "end"
+  NEWLINE@403..404 "\n"
+  BINARY_EXPR@404..478
+    BINARY_EXPR@404..419
+      NAME@404..405
+        IDENT@404..405 "c"
+      WHITESPACE@405..406 " "
+      IDENT@406..408 "in"
+      WHITESPACE@408..409 " "
+      NAME@409..419
+        IDENT@409..419 "whitespace"
+    WHITESPACE@419..420 " "
+    AND_AND@420..422 "&&"
+    WHITESPACE@422..423 " "
+    PAREN_EXPR@423..478
+      LPAREN@423..424 "("
+      TERNARY_EXPR@424..477
+        NAME@424..440
+          IDENT@424..440 "allow_whitespace"
+        WHITESPACE@440..441 " "
+        QUESTION@441..442 "?"
+        WHITESPACE@442..443 " "
+        CONTINUE_EXPR@443..451
+          CONTINUE_KW@443..451 "continue"
+        WHITESPACE@451..452 " "
+        COLON@452..453 ":"
+        WHITESPACE@453..454 " "
+        PAREN_BLOCK@454..477
+          LPAREN@454..455 "("
+          KEYWORD_ARG@455..469
+            NAME@455..461
+              IDENT@455..461 "result"
+            WHITESPACE@461..462 " "
+            EQ@462..463 "="
+            WHITESPACE@463..464 " "
+            LITERAL@464..469
+              FALSE_KW@464..469 "false"
+          PARAMETERS@469..476
+            SEMICOLON@469..470 ";"
+            WHITESPACE@470..471 " "
+            ARG@471..476
+              BREAK_EXPR@471..476
+                BREAK_KW@471..476 "break"
+          RPAREN@476..477 ")"
+      RPAREN@477..478 ")"
+  NEWLINE@478..479 "\n"
+  TERNARY_EXPR@479..496
+    NAME@479..480
+      IDENT@479..480 "x"
+    WHITESPACE@480..481 " "
+    QUESTION@481..482 "?"
+    WHITESPACE@482..483 " "
+    BREAK_EXPR@483..492
+      BREAK_KW@483..488 "break"
+      WHITESPACE@488..489 " "
+      NAME@489..492
+        IDENT@489..492 "lbl"
+    WHITESPACE@492..493 " "
+    COLON@493..494 ":"
+    WHITESPACE@494..495 " "
+    NAME@495..496
+      IDENT@495..496 "y"
+  NEWLINE@496..497 "\n"
+  BREAK_EXPR@497..511
+    BREAK_KW@497..502 "break"
+    WHITESPACE@502..503 " "
+    NAME@503..506
+      IDENT@503..506 "lbl"
+    WHITESPACE@506..507 " "
+    QUOTE_SYM@507..511
+      COLON@507..508 ":"
+      NAME@508..511
+        IDENT@508..511 "sym"
+  NEWLINE@511..512 "\n"
+  BREAK_EXPR@512..525
+    BREAK_KW@512..517 "break"
+    WHITESPACE@517..518 " "
+    NAME@518..521
+      IDENT@518..521 "lbl"
+    WHITESPACE@521..522 " "
+    BINARY_EXPR@522..525
+      LITERAL@522..523
+        INTEGER@522..523 "1"
+      COLON@523..524 ":"
+      LITERAL@524..525
+        INTEGER@524..525 "2"
+  NEWLINE@525..526 "\n"
+
+diagnostic [104..105]: expected identifier for break label

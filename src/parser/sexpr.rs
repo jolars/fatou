@@ -117,6 +117,7 @@ fn is_recovery_error(node: &SyntaxNode) -> bool {
                 DiagnosticKind::StrayCloser
                     | DiagnosticKind::TrailingJunk
                     | DiagnosticKind::ImportRecoveryColon
+                    | DiagnosticKind::InvalidBreakLabel
             ) && *ds >= s
                 && *de <= e
         })
@@ -291,8 +292,10 @@ fn project(node: &SyntaxNode) -> String {
         DO_EXPR => project_do(node),
 
         RETURN_EXPR => project_keyword_stmt("return", node),
-        BREAK_EXPR => "(break)".to_string(),
-        CONTINUE_EXPR => "(continue)".to_string(),
+        // A `break`/`continue` is bare or carries a label, and `break` may add a
+        // value after it (`break outer i * 2` ⇒ `(break outer (call-i i * 2))`).
+        BREAK_EXPR => sexp("break", project_each(child_nodes(node))),
+        CONTINUE_EXPR => sexp("continue", project_each(child_nodes(node))),
         CONST_STMT => {
             // A `const` whose declaration is not a plain `=` assignment is wrapped
             // in `(error …)` (`const x` ⇒ `(error (const x))`); the parser records
