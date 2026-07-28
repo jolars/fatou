@@ -25,6 +25,7 @@ binary_precedence
 block_comment_infix
 block_form_operand
 block_trailing_junk
+broadcast_bitshift
 bracescat
 braces_generator
 braces_newline_comprehension
