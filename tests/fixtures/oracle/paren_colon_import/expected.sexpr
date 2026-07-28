@@ -1,0 +1,1 @@
+(toplevel (import (: (importpath . Base) (importpath +) (importpath -) (importpath *) (importpath :))) (import (: (importpath A) (importpath :))) (import (: (importpath A) (as (importpath :) c))) (call f :))
