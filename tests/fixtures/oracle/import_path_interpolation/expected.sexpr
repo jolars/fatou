@@ -1,0 +1,1 @@
+(toplevel (import (importpath Base ($ op))) (import (importpath a ($ b))) (import (importpath A ($ b) c)) (using (: (importpath A ($ b)) (importpath c))) (import (importpath . . ($ x))) (import (importpath ($ x))) (import (importpath a ($ b))) (import (importpath . . x)) (import (importpath x)) (import (importpath a b)) (macrocall @eval (import (importpath Base ($ op)))))

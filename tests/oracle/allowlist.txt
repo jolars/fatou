@@ -99,6 +99,7 @@ import_as_colon_error
 import_newline_continuation
 import_operator_names
 import_paren_quote
+import_path_interpolation
 import_paths
 import_stmt_quote
 import_unicode_dot_names

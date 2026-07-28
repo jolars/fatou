@@ -9,14 +9,6 @@
   parser. Until then, oracle fixtures must use NFC-stable identifiers (see
   `tests/fixtures/oracle/unicode_identifiers`).
 
-- [ ] Accept parenthesized `$(...)` interpolation as an import-path component
-  (`src/parser/expr.rs`). The import-path parser takes a bare `$name` but
-  rejects `$(name)`, so `import a.$(b)` and relative forms like
-  `:(import ..($(x)).$(y))` raise `trailing tokens after statement` where
-  JuliaSyntax parses `(import (importpath a ($ b)))`. Surfaced by the
-  `fonsp/Pluto.jl` smoke-test scan (`deleting globals.jl`, a `format-error`,
-  distinct from the losslessness fix in #39).
-
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
