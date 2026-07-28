@@ -1133,6 +1133,12 @@ fn parse_import_path(
             body.push(Event::Tok(rparen)); // `)`
             i = rparen + 1;
         }
+        // A parenthesized path name (`import (x)`, `import ..($(x))`). The parens
+        // are punctuation JuliaSyntax drops, so the component projects as if bare.
+        // Falls through to the no-name path when the parens hold anything else.
+        Some(TokKind::LParen) if paren_path_name(ctx, i).is_some() => {
+            i = push_paren_path_name(ctx, &mut body, i, diagnostics);
+        }
         _ => {
             // No name: a bare relative path (`import .`) keeps just the dots;
             // nothing at all means no path here.
@@ -1159,6 +1165,15 @@ fn parse_import_path(
                 body.push(Event::Tok(i)); // separating `.`
                 body.push(Event::Tok(i + 1)); // name
                 i += 2;
+            }
+            (Some(TokKind::Dot), Some(TokKind::Dollar)) => {
+                // An interpolated component (`import A.$b`, `@eval import
+                // Base.$(op)`): an `INTERPOLATION` node the projector reads as
+                // `($ b)`, exactly like an interpolated path root.
+                let interp = parse_prefix_interpolation(ctx, i + 1, diagnostics);
+                body.push(Event::Tok(i)); // separating `.`
+                body.extend(interp.events);
+                i = interp.end;
             }
             (Some(TokKind::Dot), Some(TokKind::At)) => {
                 // A macro-name component (`import A.@x` → `(importpath A @x)`).
@@ -1201,6 +1216,14 @@ fn parse_import_path(
                 body.push(Event::Finish); // PAREN_EXPR
                 i = rparen + 1;
             }
+            (Some(TokKind::Dot), Some(TokKind::LParen))
+                if paren_path_name(ctx, i + 1).is_some() =>
+            {
+                // A parenthesized component (`import a.(b)`, `import a.($(b))`),
+                // the paren-wrapped twin of the plain `.name` arm above.
+                body.push(Event::Tok(i)); // separating `.`
+                i = push_paren_path_name(ctx, &mut body, i + 1, diagnostics);
+            }
             (Some(TokKind::DotDotDot), _) => {
                 // A `..` range-operator component (`import A...` → `(importpath A
                 // ..)`): the `...` is the separator dot fused with the `..` name.
@@ -1242,6 +1265,50 @@ fn paren_operator_name(ctx: &ParserCtx<'_>, lparen_idx: usize) -> Option<(usize,
     }
     let rparen = ctx.skip_ws(op + 1);
     (ctx.token(rparen)?.kind == TokKind::RParen).then_some((op, rparen))
+}
+
+/// A `(name)` group at `lparen_idx` wrapping a single import-path *name* — an
+/// identifier (`import (x)`) or an interpolation (`import ..($(x))`, `import
+/// a.($(b))`). Returns the closing paren's index. JuliaSyntax drops the parens
+/// entirely (`import a.(b)` ⇒ `(importpath a b)`), so they are punctuation here.
+/// Operator names go through [`paren_operator_name`] instead, which the caller
+/// tries first.
+fn paren_path_name(ctx: &ParserCtx<'_>, lparen_idx: usize) -> Option<usize> {
+    let name = ctx.skip_ws(lparen_idx + 1);
+    let end = match ctx.token(name)?.kind {
+        TokKind::Ident => name + 1,
+        // Measure the interpolation with a throwaway diagnostics sink; the real
+        // parse in `push_paren_path_name` records them once.
+        TokKind::Dollar => parse_prefix_interpolation(ctx, name, &mut Vec::new()).end,
+        _ => return None,
+    };
+    let rparen = ctx.skip_ws(end);
+    (ctx.token(rparen)?.kind == TokKind::RParen).then_some(rparen)
+}
+
+/// Emit the `(name)` group [`paren_path_name`] accepted, delimiters and all, and
+/// return the index just past the closing paren. Only call after that guard.
+fn push_paren_path_name(
+    ctx: &ParserCtx<'_>,
+    body: &mut Vec<Event>,
+    lparen_idx: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    let rparen = paren_path_name(ctx, lparen_idx).expect("guarded by `paren_path_name`");
+    let name = ctx.skip_ws(lparen_idx + 1);
+    body.push(Event::Tok(lparen_idx)); // `(`
+    push_range(body, lparen_idx + 1, name);
+    let end = if ctx.token(name).map(|t| t.kind) == Some(TokKind::Dollar) {
+        let interp = parse_prefix_interpolation(ctx, name, diagnostics);
+        body.extend(interp.events);
+        interp.end
+    } else {
+        body.push(Event::Tok(name));
+        name + 1
+    };
+    push_range(body, end, rparen);
+    body.push(Event::Tok(rparen)); // `)`
+    rparen + 1
 }
 
 /// An undotted operator symbol usable as a bare import-path name (`import A: +`,
