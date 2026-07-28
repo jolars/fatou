@@ -1,0 +1,1 @@
+(toplevel (quote-: $) (= (call dottable (::-i x Expr)) (call-i (. x (quote head)) !== (quote-: $))) (call isexpr e (quote-: $)) (vect (quote-: $) (quote-: .) (quote-: +)) (curly Val (quote-: $)) (. A (quote-: $)))

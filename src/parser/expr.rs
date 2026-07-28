@@ -1946,6 +1946,10 @@ fn is_quotable_operator(kind: TokKind) -> bool {
             // so their operator parse keeps its own head, so name them here.
             | ColonEq
             | UniAssign
+            // `$` is a plus-tier operator in Julia's kind table, so a quote
+            // takes it as a symbol (`x.head !== :$` ⇒ `(quote-: $)`) even though
+            // an unquoted `$` is an interpolation sigil.
+            | Dollar
     )
 }
 
@@ -2066,6 +2070,16 @@ pub(super) fn parse_quote_sym(
             let end = paren.end;
             events.extend(paren.events);
             events.push(Event::Finish);
+            Some(ExprParse { start, end, events })
+        }
+        // `:var"…"` — a quoted non-standard identifier. Under a quote Julia
+        // parses the operand as a plain atom, where `var"…"` keeps its
+        // identifier meaning, so the quoted form is the `(var …)` name itself
+        // (`:var"dict key"` ⇒ `(quote-: (var dict key))`). Triple-quoted
+        // `var"""…"""` is an ordinary `@var_str` string macro and is excluded.
+        TokKind::StringPrefix if is_var_identifier_start(ctx, next) => {
+            let end = push_var_macro_name(ctx, &mut events, next, diagnostics)?;
+            events.push(Event::Finish); // QUOTE_SYM
             Some(ExprParse { start, end, events })
         }
         // `:name` — an identifier symbol.
@@ -3774,6 +3788,18 @@ fn parse_qualified_macro(
     }
 }
 
+/// Whether `i` begins a `var"…"` single-quoted non-standard identifier. Julia
+/// models these as `(var name)` names rather than `@var_str` string macros;
+/// triple-quoted `var"""…"""` is an ordinary string macro and is excluded.
+pub(crate) fn is_var_identifier_start(ctx: &ParserCtx<'_>, i: usize) -> bool {
+    ctx.token(i)
+        .is_some_and(|t| t.kind == TokKind::StringPrefix && t.text == "var")
+        && matches!(
+            ctx.token(i + 1),
+            Some(t) if t.kind == TokKind::StringDelimOpen && t.text.len() == 1
+        )
+}
+
 /// If `i` begins a `var"…"` single-quoted non-standard identifier — the macro
 /// name in `@var"#"` (`(var @#)`) — append its `NONSTANDARD_IDENTIFIER` node to
 /// `events` and return the index past it. Otherwise return `None`. Triple-quoted
@@ -3784,13 +3810,7 @@ pub(crate) fn push_var_macro_name(
     i: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<usize> {
-    let is_var = ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix)
-        && ctx.token(i).map(|t| t.text.as_str()) == Some("var");
-    let single_quote = matches!(
-        ctx.token(i + 1),
-        Some(t) if t.kind == TokKind::StringDelimOpen && t.text.len() == 1
-    );
-    if is_var && single_quote {
+    if is_var_identifier_start(ctx, i) {
         let lit = parse_string_literal(ctx, i, diagnostics);
         let end = lit.end;
         events.extend(lit.events);
