@@ -239,6 +239,26 @@ pub(crate) fn parse_signature_expr(
     parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
+/// Parse a `primitive type` spec — the declared name with any `<: B` bound and
+/// `{T}` parameters, sitting immediately before the bit size. Julia parses it
+/// with `parse_subtype_spec`, which takes no call suffix, so a *spaced* `(` opens
+/// the size expression rather than an argument list: `primitive type A (18 * 8)
+/// end` declares `A` with size `18 * 8`, not a call `A(18 * 8)`. `array_mode` is
+/// exactly that rule — a whitespace-preceded opener starts a new element instead
+/// of chaining — so the spec borrows it. A *glued* `(` still chains, matching
+/// JuliaSyntax.
+pub(crate) fn parse_type_spec_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        array_mode: true,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
+}
+
 /// Parse the name expression of a `struct`/`module` signature, where a leading
 /// reserved keyword used as the name is error-wrapped (`struct try end` ⇒
 /// `(struct (error try) …)`) rather than dispatched to its block form. See
@@ -2200,6 +2220,36 @@ pub(super) fn parse_quote_sym(
                 end: next + 1,
                 events,
             })
+        }
+        // `:1`, `:1.5`, `:0x10`, `:'c'` — a quoted literal. Julia parses a
+        // quote's operand as a plain atom, and a literal is one. Without this the
+        // `:` fell back to a bare Colon atom and the literal became a separate
+        // element, so `w.ext[:14878]` read as a two-element `typed_hcat` — which
+        // the formatter then printed as `[: 14878]`, output that no longer parses.
+        TokKind::Integer
+        | TokKind::BinInt
+        | TokKind::OctInt
+        | TokKind::HexInt
+        | TokKind::Float
+        | TokKind::Float32
+        | TokKind::Char => {
+            events.push(Event::Start(SyntaxKind::LITERAL));
+            events.push(Event::Tok(next));
+            events.push(Event::Finish); // LITERAL
+            events.push(Event::Finish); // QUOTE_SYM
+            Some(ExprParse {
+                start,
+                end: next + 1,
+                events,
+            })
+        }
+        // `:"str"`, `` :`cmd` `` — a quoted string/command literal.
+        TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
+            let lit = parse_string_literal(ctx, next, diagnostics);
+            let end = lit.end;
+            events.extend(lit.events);
+            events.push(Event::Finish); // QUOTE_SYM
+            Some(ExprParse { start, end, events })
         }
         // `:.+`, `:.&`, `:.=`, `:.&&`, `:.+=` — a quoted *dotted* (broadcast)
         // operator. Julia models the dotted operator as a `(. op)` access, so
