@@ -127,8 +127,10 @@ fn parse_function_like(
     // bare annotation and a trailing `where` binds the whole signature (rather
     // than the return type), so parse it with `no_decl_where`. A newline between
     // the keyword and the signature is insignificant (`function\n f() end` ⇒
-    // `(function (call f) (block))`), so skip newlines too.
-    let sig_start = ctx.skip_ws_and_newlines(start + 1);
+    // `(function (call f) (block))`), and so is a comment (`function # c\n f()
+    // end`) — the signature is never empty, so nothing here can end it. Skip all
+    // trivia.
+    let sig_start = ctx.skip_trivia(start + 1);
     let mut i = if let Some(sig) = parse_signature_expr(tokens, sig_start, diagnostics) {
         push_range(&mut events, start + 1, sig.start);
         events.push(Event::Start(SyntaxKind::SIGNATURE));
@@ -306,7 +308,7 @@ pub(crate) fn parse_try_expr(
                 events.push(Event::Start(SyntaxKind::CATCH_CLAUSE));
                 events.push(Event::Tok(i));
                 // Optional exception variable on the `catch` line (`catch e`).
-                let var_start = ctx.skip_ws(i + 1);
+                let var_start = ctx.skip_ws_and_block_comments(i + 1);
                 push_range(&mut events, i + 1, var_start);
                 let mut j = var_start;
                 if !header_ends(&ctx, var_start)
@@ -584,7 +586,7 @@ pub(crate) fn parse_keyword_stmt(
 
     let mut i = start + 1;
     if !matches!(body, KwStmt::Bare) {
-        let operand_start = ctx.skip_ws(i);
+        let operand_start = ctx.skip_ws_and_block_comments(i);
         // A keyword whose value is optional (`return`) ends right after the
         // keyword when its operand position is a stray closing delimiter
         // (`return)`, `return ]`): the empty form `(return)` is emitted and the
@@ -1327,7 +1329,7 @@ fn parse_do_params(
     after_kw: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    let start = ctx.skip_ws(after_kw);
+    let start = ctx.skip_ws_and_block_comments(after_kw);
     push_range(events, after_kw, start);
 
     if header_ends(ctx, start) {
@@ -1344,12 +1346,12 @@ fn parse_do_params(
     };
     // Continue the list only across commas; the first non-comma ends the args.
     loop {
-        let next = ctx.skip_ws(i);
+        let next = ctx.skip_ws_and_block_comments(i);
         if ctx.token(next).map(|t| t.kind) != Some(TokKind::Comma) {
             break;
         }
         push_range(events, i, next + 1);
-        let arg_start = ctx.skip_ws(next + 1);
+        let arg_start = ctx.skip_ws_and_block_comments(next + 1);
         push_range(events, next + 1, arg_start);
         match parse_expr(ctx.tokens(), arg_start, 0, diagnostics) {
             Some(expr) => {
@@ -1375,7 +1377,7 @@ fn parse_condition(
     after_kw: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    let cond_start = ctx.skip_ws(after_kw);
+    let cond_start = ctx.skip_ws_and_block_comments(after_kw);
     push_range(events, after_kw, cond_start);
     match parse_expr(ctx.tokens(), cond_start, 0, diagnostics) {
         Some(cond) => {
@@ -1414,7 +1416,7 @@ fn parse_signature(
     after_kw: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    let sig_start = ctx.skip_ws(after_kw);
+    let sig_start = ctx.skip_ws_and_block_comments(after_kw);
     push_range(events, after_kw, sig_start);
 
     if header_ends(ctx, sig_start) {
@@ -1452,7 +1454,7 @@ fn parse_header(
     run_expr: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    let header_start = ctx.skip_ws(after_kw);
+    let header_start = ctx.skip_ws_and_block_comments(after_kw);
     push_range(events, after_kw, header_start);
 
     if header_ends(ctx, header_start) {
@@ -1489,9 +1491,9 @@ fn parse_header(
             events.extend(interp.events);
             i = interp.end;
         }
-        // A `,` (possibly preceded by horizontal whitespace) separates the next
-        // binding. Absent a comma, the binding list ends.
-        let sep = ctx.skip_ws(i);
+        // A `,` (possibly preceded by horizontal whitespace or a block comment)
+        // separates the next binding. Absent a comma, the binding list ends.
+        let sep = ctx.skip_ws_and_block_comments(i);
         if ctx.token(sep).map(|t| t.kind) != Some(TokKind::Comma) {
             break;
         }
@@ -1521,7 +1523,8 @@ fn is_close_delimiter_tok(kind: TokKind) -> bool {
 /// comment (which runs to the end of the line, so the header is empty either
 /// way — and stopping here keeps `let # c` from opening a zero-width
 /// `LET_BINDINGS` that `let` alone would not; a `#= … =#` block comment can be
-/// followed by a real binding, so it is not a terminator), a block terminator
+/// followed by a real binding, so it is not a terminator — the header parse
+/// crosses it as trivia via `skip_ws_and_block_comments`), a block terminator
 /// keyword (so one-liners like
 /// `struct Foo end` stop correctly), a closing bracket (so a header nested in
 /// brackets, e.g. a quoted `:(using Flux)`, lets the enclosing bracket close

@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **213 allowlisted**, 1 blocked
+8 divergence, 0 unsupported. Dir corpus: **219 allowlisted**, 1 blocked
 (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,7 +134,48 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-27b—lambda arrow `->` precedence)
+## Latest session (2026-07-28—a block comment after a block keyword swallowed the header)
+
+Issue #42. `skip_ws` does not cross comments, so every "header starts after the
+keyword" site landed on a `#= … =#` token instead of the header. `header_ends`
+correctly does *not* list `BlockComment` (a real header can follow one — that is
+the opposite of #26's line-comment fix), so the header opened anyway, `parse_expr`
+returned `None` at the comment, and the header expression fell through into the
+body block. `let` did this **silently** (a binding moved out of `LET_BINDINGS` —
+a scoping change); `if`/`while`/`elseif` also raised a spurious
+`expected a condition`, so those files failed `debug format` with `format-error`.
+
+Root cause is one cursor helper, so the fix is one helper + swaps at the header
+sites; nothing in `sexpr.rs`.
+
+- **`cursor::skip_ws_and_block_comments`** (+ `ParserCtx` method): whitespace and
+  `BlockComment` only. A block comment's own newlines ride along — Julia does not
+  end the header at a multi-line `#= … =#` either (`let #=\nc\n=# x = 1` ⇒
+  `(let (block (= x 1)) (block))`). A **line** comment stays a terminator.
+- **Swapped in** at every header-start site: `parse_header` (let/for),
+  `parse_condition` (if/elseif/while), `parse_signature` (struct/module),
+  `parse_do_params` (do), the `catch` exception variable, and
+  `parse_keyword_stmt`'s operand (return/const/global/local) — plus the two
+  comma lookaheads that continue a header list (`let x = 1 #= c =#, y = 2`,
+  `f() do x #= c =#, y`).
+- **`parse_function_like`** already crossed newlines (`function\n f() end`), so it
+  moved from `skip_ws_and_newlines` to the full `skip_trivia`: the signature is
+  never empty, so no comment there can end it. That also fixes the line-comment
+  sibling `function # c\n f() end` ⇒ `(function (call f) (block))`.
+- **Trivia placement**: the comment is emitted before the `Start(node)` event, so
+  it sits as a sibling of the header node, exactly like the whitespace around it.
+  `for` was already correct via `parse_for_specs`; its comment just moves out of
+  `FOR_BINDING`. Formatter output is unchanged and `debug format` stays green.
+- **Verified**: 33 probe cases (10 keyword forms × comment positions) now match
+  JuliaSyntax byte-for-byte, all lossless.
+- **Fixtures**: parser snapshot + oracle dir slug `keyword_header_block_comment`.
+- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
+  dir 218 → **219**.
+- **Next**: no queued parser target. `else #= c =# if x` still takes the plain
+  `else` path rather than the `else if` recovery — left alone deliberately, error
+  shapes are a separate phase. Keep batch-probing real-world Julia.
+
+## Earlier session (2026-07-27b—lambda arrow `->` precedence)
 
 Batch-probed real-world Julia against the oracle (no queued target; the two
 2026-07-27 deferred items—`x.function` field name, `end` in a nested `[…]` within

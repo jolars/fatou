@@ -104,6 +104,7 @@ interpolation_names
 invalid_doubled_operators
 juxtaposition
 keyword_args
+keyword_header_block_comment
 keyword_name_error
 keyword_statements
 left_arrow_operator

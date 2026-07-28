@@ -1,0 +1,250 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..349
+  LET_EXPR@0..46
+    LET_KW@0..3 "let"
+    WHITESPACE@3..4 " "
+    BLOCK_COMMENT@4..11 "#= c =#"
+    WHITESPACE@11..12 " "
+    LET_BINDINGS@12..32
+      ASSIGNMENT_EXPR@12..17
+        NAME@12..13
+          IDENT@12..13 "x"
+        WHITESPACE@13..14 " "
+        EQ@14..15 "="
+        WHITESPACE@15..16 " "
+        LITERAL@16..17
+          INTEGER@16..17 "1"
+      COMMA@17..18 ","
+      WHITESPACE@18..19 " "
+      BLOCK_COMMENT@19..26 "#= d =#"
+      WHITESPACE@26..27 " "
+      ASSIGNMENT_EXPR@27..32
+        NAME@27..28
+          IDENT@27..28 "y"
+        WHITESPACE@28..29 " "
+        EQ@29..30 "="
+        WHITESPACE@30..31 " "
+        LITERAL@31..32
+          INTEGER@31..32 "2"
+    BLOCK@32..43
+      NEWLINE@32..33 "\n"
+      WHITESPACE@33..37 "    "
+      BINARY_EXPR@37..42
+        NAME@37..38
+          IDENT@37..38 "x"
+        WHITESPACE@38..39 " "
+        PLUS@39..40 "+"
+        WHITESPACE@40..41 " "
+        NAME@41..42
+          IDENT@41..42 "y"
+      NEWLINE@42..43 "\n"
+    END_KW@43..46 "end"
+  NEWLINE@46..47 "\n"
+  NEWLINE@47..48 "\n"
+  WHILE_EXPR@48..82
+    WHILE_KW@48..53 "while"
+    WHITESPACE@53..54 " "
+    BLOCK_COMMENT@54..61 "#= c =#"
+    WHITESPACE@61..62 " "
+    CONDITION@62..66
+      NAME@62..66
+        IDENT@62..66 "cond"
+    BLOCK@66..79
+      NEWLINE@66..67 "\n"
+      WHITESPACE@67..71 "    "
+      CALL_EXPR@71..78
+        NAME@71..76
+          IDENT@71..76 "step!"
+        ARG_LIST@76..78
+          LPAREN@76..77 "("
+          RPAREN@77..78 ")"
+      NEWLINE@78..79 "\n"
+    END_KW@79..82 "end"
+  NEWLINE@82..83 "\n"
+  NEWLINE@83..84 "\n"
+  IF_EXPR@84..132
+    IF_KW@84..86 "if"
+    WHITESPACE@86..87 " "
+    BLOCK_COMMENT@87..94 "#= c =#"
+    WHITESPACE@94..95 " "
+    CONDITION@95..99
+      NAME@95..99
+        IDENT@95..99 "cond"
+    BLOCK@99..106
+      NEWLINE@99..100 "\n"
+      WHITESPACE@100..104 "    "
+      NAME@104..105
+        IDENT@104..105 "a"
+      NEWLINE@105..106 "\n"
+    ELSEIF_CLAUSE@106..129
+      ELSEIF_KW@106..112 "elseif"
+      WHITESPACE@112..113 " "
+      BLOCK_COMMENT@113..120 "#= d =#"
+      WHITESPACE@120..121 " "
+      CONDITION@121..122
+        NAME@121..122
+          IDENT@121..122 "b"
+      BLOCK@122..129
+        NEWLINE@122..123 "\n"
+        WHITESPACE@123..127 "    "
+        NAME@127..128
+          IDENT@127..128 "c"
+        NEWLINE@128..129 "\n"
+    END_KW@129..132 "end"
+  NEWLINE@132..133 "\n"
+  NEWLINE@133..134 "\n"
+  FOR_EXPR@134..164
+    FOR_KW@134..137 "for"
+    WHITESPACE@137..138 " "
+    BLOCK_COMMENT@138..145 "#= c =#"
+    WHITESPACE@145..146 " "
+    FOR_BINDING@146..154
+      NAME@146..147
+        IDENT@146..147 "i"
+      WHITESPACE@147..148 " "
+      IDENT@148..150 "in"
+      WHITESPACE@150..151 " "
+      BINARY_EXPR@151..154
+        LITERAL@151..152
+          INTEGER@151..152 "1"
+        COLON@152..153 ":"
+        LITERAL@153..154
+          INTEGER@153..154 "3"
+    BLOCK@154..161
+      NEWLINE@154..155 "\n"
+      WHITESPACE@155..159 "    "
+      NAME@159..160
+        IDENT@159..160 "a"
+      NEWLINE@160..161 "\n"
+    END_KW@161..164 "end"
+  NEWLINE@164..165 "\n"
+  NEWLINE@165..166 "\n"
+  STRUCT_DEF@166..188
+    STRUCT_KW@166..172 "struct"
+    WHITESPACE@172..173 " "
+    BLOCK_COMMENT@173..180 "#= c =#"
+    WHITESPACE@180..181 " "
+    SIGNATURE@181..184
+      NAME@181..184
+        IDENT@181..184 "Foo"
+    BLOCK@184..185
+      NEWLINE@184..185 "\n"
+    END_KW@185..188 "end"
+  NEWLINE@188..189 "\n"
+  NEWLINE@189..190 "\n"
+  FUNCTION_DEF@190..214
+    FUNCTION_KW@190..198 "function"
+    WHITESPACE@198..199 " "
+    BLOCK_COMMENT@199..206 "#= c =#"
+    WHITESPACE@206..207 " "
+    SIGNATURE@207..210
+      CALL_EXPR@207..210
+        NAME@207..208
+          IDENT@207..208 "f"
+        ARG_LIST@208..210
+          LPAREN@208..209 "("
+          RPAREN@209..210 ")"
+    BLOCK@210..211
+      NEWLINE@210..211 "\n"
+    END_KW@211..214 "end"
+  NEWLINE@214..215 "\n"
+  NEWLINE@215..216 "\n"
+  MACRO_DEF@216..237
+    MACRO_KW@216..221 "macro"
+    WHITESPACE@221..222 " "
+    BLOCK_COMMENT@222..229 "#= c =#"
+    WHITESPACE@229..230 " "
+    SIGNATURE@230..233
+      CALL_EXPR@230..233
+        NAME@230..231
+          IDENT@230..231 "m"
+        ARG_LIST@231..233
+          LPAREN@231..232 "("
+          RPAREN@232..233 ")"
+    BLOCK@233..234
+      NEWLINE@233..234 "\n"
+    END_KW@234..237 "end"
+  NEWLINE@237..238 "\n"
+  NEWLINE@238..239 "\n"
+  MODULE_DEF@239..259
+    MODULE_KW@239..245 "module"
+    WHITESPACE@245..246 " "
+    BLOCK_COMMENT@246..253 "#= c =#"
+    WHITESPACE@253..254 " "
+    SIGNATURE@254..255
+      NAME@254..255
+        IDENT@254..255 "M"
+    BLOCK@255..256
+      NEWLINE@255..256 "\n"
+    END_KW@256..259 "end"
+  NEWLINE@259..260 "\n"
+  NEWLINE@260..261 "\n"
+  DO_EXPR@261..290
+    CALL_EXPR@261..264
+      NAME@261..262
+        IDENT@261..262 "f"
+      ARG_LIST@262..264
+        LPAREN@262..263 "("
+        RPAREN@263..264 ")"
+    WHITESPACE@264..265 " "
+    DO_KW@265..267 "do"
+    WHITESPACE@267..268 " "
+    BLOCK_COMMENT@268..275 "#= c =#"
+    WHITESPACE@275..276 " "
+    DO_PARAMS@276..280
+      NAME@276..277
+        IDENT@276..277 "x"
+      COMMA@277..278 ","
+      WHITESPACE@278..279 " "
+      NAME@279..280
+        IDENT@279..280 "y"
+    BLOCK@280..287
+      NEWLINE@280..281 "\n"
+      WHITESPACE@281..285 "    "
+      NAME@285..286
+        IDENT@285..286 "x"
+      NEWLINE@286..287 "\n"
+    END_KW@287..290 "end"
+  NEWLINE@290..291 "\n"
+  NEWLINE@291..292 "\n"
+  TRY_EXPR@292..327
+    TRY_KW@292..295 "try"
+    BLOCK@295..302
+      NEWLINE@295..296 "\n"
+      WHITESPACE@296..300 "    "
+      NAME@300..301
+        IDENT@300..301 "a"
+      NEWLINE@301..302 "\n"
+    CATCH_CLAUSE@302..324
+      CATCH_KW@302..307 "catch"
+      WHITESPACE@307..308 " "
+      BLOCK_COMMENT@308..315 "#= c =#"
+      WHITESPACE@315..316 " "
+      NAME@316..317
+        IDENT@316..317 "e"
+      BLOCK@317..324
+        NEWLINE@317..318 "\n"
+        WHITESPACE@318..322 "    "
+        NAME@322..323
+          IDENT@322..323 "b"
+        NEWLINE@323..324 "\n"
+    END_KW@324..327 "end"
+  NEWLINE@327..328 "\n"
+  NEWLINE@328..329 "\n"
+  CONST_STMT@329..348
+    CONST_KW@329..334 "const"
+    WHITESPACE@334..335 " "
+    BLOCK_COMMENT@335..342 "#= c =#"
+    WHITESPACE@342..343 " "
+    ASSIGNMENT_EXPR@343..348
+      NAME@343..344
+        IDENT@343..344 "k"
+      WHITESPACE@344..345 " "
+      EQ@345..346 "="
+      WHITESPACE@346..347 " "
+      LITERAL@347..348
+        INTEGER@347..348 "1"
+  NEWLINE@348..349 "\n"
