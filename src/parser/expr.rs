@@ -1672,6 +1672,8 @@ fn parse_prefix(
             diagnostics,
             !flags.field_access_rhs,
             flags.end_marker,
+            flags.inside_brackets,
+            flags.array_mode,
         )
         .or_else(|| Some(atom(SyntaxKind::OPERATOR_ATOM, start))),
         // A prefix `$` is an interpolation (`$x`, `$(x + y)`). It parses
@@ -2043,6 +2045,11 @@ pub(super) fn parse_quote_sym(
     diagnostics: &mut Vec<ParseDiagnostic>,
     value_position: bool,
     end_marker: bool,
+    // Inherited space-sensitivity, forwarded to a quoted macro call so its
+    // space-argument loop ends at a generator's `for` exactly as an unquoted one
+    // does (`[:@m x for x in xs]`).
+    inside_brackets: bool,
+    array_mode: bool,
 ) -> Option<ExprParse> {
     let next = ctx.skip_trivia(start + 1);
     // A space-separated *closing* block keyword (`end`/`else`/`elseif`/`catch`/
@@ -2151,6 +2158,18 @@ pub(super) fn parse_quote_sym(
         // `var"""…"""` is an ordinary `@var_str` string macro and is excluded.
         TokKind::StringPrefix if is_var_identifier_start(ctx, next) => {
             let end = push_var_macro_name(ctx, &mut events, next, diagnostics)?;
+            events.push(Event::Finish); // QUOTE_SYM
+            Some(ExprParse { start, end, events })
+        }
+        // `:@m` — a quoted macro call. Julia quotes the whole call, space
+        // arguments and all (`:@doc x` ⇒ `(quote-: (macrocall @doc x))`), so
+        // this is the ordinary macro parser under the quote rather than a bare
+        // name. Base writes the argument-less form to attach a docstring to a
+        // macro (`"""…"""\n:@MethodTable`).
+        TokKind::At => {
+            let mac = parse_macro(ctx, next, diagnostics, inside_brackets, array_mode);
+            let end = mac.end;
+            events.extend(mac.events);
             events.push(Event::Finish); // QUOTE_SYM
             Some(ExprParse { start, end, events })
         }
