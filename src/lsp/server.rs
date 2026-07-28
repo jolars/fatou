@@ -24,7 +24,7 @@ use crate::incremental::normalize_path;
 use crate::index::{PackageIndex, dev_packages, harvest_libraries, harvest_workspace};
 use crate::text::PositionEncoding;
 
-use super::analysis_thread::{AnalysisRequest, LibraryMessage, spawn_analysis_thread};
+use super::analysis_thread::{AnalysisRequest, LibraryMessage, guard, spawn_analysis_thread};
 use super::read_jobs::ReadJob;
 use super::semantic_tokens::legend;
 use super::state::{GlobalState, Outbound};
@@ -329,15 +329,20 @@ fn main_loop(
                         if connection.handle_shutdown(&req)? {
                             break;
                         }
-                        state.on_request(req);
+                        // Guard the handler so a panic in one request can't take
+                        // down the main loop (which would zombie the server: the
+                        // analysis thread keeps running but no one drives it).
+                        guard("on_request", || state.on_request(req));
                     }
-                    Message::Notification(note) => state.on_notification(note),
+                    Message::Notification(note) => {
+                        guard("on_notification", || state.on_notification(note));
+                    }
                     Message::Response(_) => {}
                 }
             }
             recv(out_rx) -> outbound => {
                 let Ok(outbound) = outbound else { break };
-                state.on_outbound(outbound);
+                guard("on_outbound", || state.on_outbound(outbound));
             }
         }
     }

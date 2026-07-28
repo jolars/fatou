@@ -31,6 +31,30 @@ use super::read_jobs::{ReadJob, run_read};
 use super::state::Outbound;
 use super::task_pool::Spawner;
 
+/// Run `f` on the analysis thread, catching any panic so a single malformed
+/// request can't take down the sole salsa-db writer and, with it, the whole
+/// server. This mirrors the read pool's per-job `catch_unwind`
+/// (`task_pool::TaskPool`); the analysis thread and main loop were the two
+/// places a panic still meant process death. Returns `true` if `f` ran to
+/// completion, `false` if it panicked (logged). The db's `source_map` mutex
+/// recovers from poisoning (see `IncrementalDatabase`), so a panic mid-write
+/// leaves the db usable for the next request rather than bricked. Also used by
+/// the main loop (`server::main_loop`) to isolate request handlers.
+pub(crate) fn guard(label: &str, f: impl FnOnce()) -> bool {
+    match std::panic::catch_unwind(AssertUnwindSafe(f)) {
+        Ok(()) => true,
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&'static str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("<non-string panic payload>");
+            log::error!("analysis thread caught panic in {label}: {msg}");
+            false
+        }
+    }
+}
+
 /// An analysis request handed to the dedicated analysis thread: refresh the
 /// diagnostics for `uri`'s live buffer at `version`.
 pub(crate) struct AnalysisRequest {
@@ -202,16 +226,19 @@ impl AnalysisWorker {
                     // on-disk text so a discarded buffer (or stale seeded text)
                     // stops contributing to the reverse-occurrence index. A
                     // no-op for a non-member or a buffer already matching disk.
-                    if let Ok(path) = path {
-                        self.db.revert_file_to_disk(&path);
-                    }
+                    // Guarded so a panic mid-revert can't kill the sole writer.
+                    guard("sync", || {
+                        if let Ok(path) = path {
+                            self.db.revert_file_to_disk(&path);
+                        }
+                    });
                 }
                 recv(library_rx) -> msg => {
                     // The background harvester delivered an index update: swap it
                     // into the db (a write). Later requests read it from their
                     // snapshot; open files need no re-analysis because no
                     // diagnostic depends on the library yet.
-                    match msg {
+                    guard("library", || match msg {
                         Ok(LibraryMessage::Full(lib)) => {
                             self.db.set_library(lib.packages, lib.roots, lib.workspaces);
                             // Seed the workspace packages' member files as inputs
@@ -225,27 +252,31 @@ impl AnalysisWorker {
                             self.refresh_graph_diagnostics();
                         }
                         Err(_) => {}
-                    }
+                    });
                 }
                 recv(analysis_rx) -> msg => {
                     let Ok(req) = msg else { break };
                     // Coalesce: keep only the latest version per URI, so a fast
                     // typist's stale edits are dropped before they're analyzed.
-                    self.enqueue(req);
-                    while let Ok(more) = analysis_rx.try_recv() {
-                        self.enqueue(more);
-                    }
-                    self.try_dispatch();
+                    guard("analyze", || {
+                        self.enqueue(req);
+                        while let Ok(more) = analysis_rx.try_recv() {
+                            self.enqueue(more);
+                        }
+                        self.try_dispatch();
+                    });
                 }
                 recv(done_rx) -> done => {
                     let Ok(done) = done else { continue };
                     // Free the slot only if this `done` is for the *current*
                     // in-flight analysis — a late `done` from a superseded one
                     // (older version) must not clear the new analysis.
-                    if matches!(&self.inflight, Some(f) if f.uri == done.uri && f.version == done.version) {
-                        self.inflight = None;
-                    }
-                    self.try_dispatch();
+                    guard("done", || {
+                        if matches!(&self.inflight, Some(f) if f.uri == done.uri && f.version == done.version) {
+                            self.inflight = None;
+                        }
+                        self.try_dispatch();
+                    });
                 }
                 recv(read_rx) -> job => {
                     let Ok(job) = job else { continue };
@@ -254,9 +285,11 @@ impl AnalysisWorker {
                     // the next write isn't blocked once the read finishes (or a
                     // racing write trips `salsa::Cancelled`, handled by the
                     // job's fallback).
-                    let snapshot = self.db.snapshot();
-                    let encoding = self.encoding;
-                    self.read_spawner.spawn(move || run_read(snapshot, job, encoding));
+                    guard("read-dispatch", || {
+                        let snapshot = self.db.snapshot();
+                        let encoding = self.encoding;
+                        self.read_spawner.spawn(move || run_read(snapshot, job, encoding));
+                    });
                 }
             }
         }
@@ -526,5 +559,19 @@ mod tests {
             all.sort_by_key(|u| u.as_str().to_string());
             all
         });
+    }
+
+    #[test]
+    fn guard_contains_a_panic_and_reports_completion() {
+        // A panicking unit of work is caught and reported as not-completed, so
+        // the analysis thread's `select!` loop (and the main loop) keep running
+        // rather than the sole db writer dying and zombieing the server.
+        assert!(guard("ok", || {}));
+        let mut ran = false;
+        assert!(!guard("boom", || {
+            ran = true;
+            panic!("kaboom");
+        }));
+        assert!(ran, "the guarded closure should have started");
     }
 }

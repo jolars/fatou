@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use salsa::{Durability, Setter};
 
@@ -605,14 +605,22 @@ impl IncrementalDatabase {
         Self::default()
     }
 
+    /// Lock the path→input map, recovering from poisoning. A panic while the
+    /// lock is held (now caught by the analysis thread's `guard`, see
+    /// `lsp::analysis_thread`) would otherwise poison the mutex and turn every
+    /// later access into a hard crash, defeating the point of the panic guard.
+    /// The map is a plain lookup table with no cross-field invariant a panic
+    /// could leave half-updated, so proceeding past poison is safe.
+    fn source_map(&self) -> MutexGuard<'_, FileSourceMap> {
+        self.source_map
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Track an in-memory document with no on-disk path. Gets a fresh
     /// [`FileId`] and a `None` path, so it never aliases another file.
     pub fn add_file(&self, text: impl Into<String>) -> SourceFile {
-        let id = self
-            .source_map
-            .lock()
-            .expect("file source map mutex poisoned")
-            .alloc_id();
+        let id = self.source_map().alloc_id();
         SourceFile::new(self, id, None, text.into())
     }
 
@@ -620,13 +628,7 @@ impl IncrementalDatabase {
     /// spellings map to the same input.
     pub fn upsert_file(&mut self, path: &Path, text: String) -> SourceFile {
         let key = normalize_path(path);
-        let existing = self
-            .source_map
-            .lock()
-            .expect("file source map mutex poisoned")
-            .by_path
-            .get(&key)
-            .copied();
+        let existing = self.source_map().by_path.get(&key).copied();
         match existing {
             Some(file) => {
                 if file.text(self) != &text {
@@ -635,17 +637,9 @@ impl IncrementalDatabase {
                 file
             }
             None => {
-                let id = self
-                    .source_map
-                    .lock()
-                    .expect("file source map mutex poisoned")
-                    .alloc_id();
+                let id = self.source_map().alloc_id();
                 let file = SourceFile::new(self, id, Some(key.clone()), text);
-                self.source_map
-                    .lock()
-                    .expect("file source map mutex poisoned")
-                    .by_path
-                    .insert(key, file);
+                self.source_map().by_path.insert(key, file);
                 file
             }
         }
@@ -654,12 +648,7 @@ impl IncrementalDatabase {
     /// Look up the input tracked for `path`, if any.
     pub fn lookup_file(&self, path: &Path) -> Option<SourceFile> {
         let key = normalize_path(path);
-        self.source_map
-            .lock()
-            .expect("file source map mutex poisoned")
-            .by_path
-            .get(&key)
-            .copied()
+        self.source_map().by_path.get(&key).copied()
     }
 
     pub fn set_file_text(&mut self, file: SourceFile, text: impl Into<String>) {
@@ -754,17 +743,9 @@ impl IncrementalDatabase {
             return Some(file);
         }
         let text = std::fs::read_to_string(&key).ok()?;
-        let id = self
-            .source_map
-            .lock()
-            .expect("file source map mutex poisoned")
-            .alloc_id();
+        let id = self.source_map().alloc_id();
         let file = SourceFile::new(self, id, Some(key.clone()), text);
-        self.source_map
-            .lock()
-            .expect("file source map mutex poisoned")
-            .by_path
-            .insert(key, file);
+        self.source_map().by_path.insert(key, file);
         Some(file)
     }
 
@@ -1076,5 +1057,27 @@ mod tests {
         let b = db.upsert_file(Path::new("/tmp/./a.jl"), "x = 2\n".into());
         assert!(a == b, "equivalent path spellings should reuse one input");
         assert_eq!(parsed_tree_root(&db, a).to_string(), "x = 2\n");
+    }
+
+    #[test]
+    fn poisoned_source_map_lock_recovers() {
+        // Panicking while the `source_map` mutex is held poisons it. With the
+        // analysis thread's `guard` now catching such panics, the next db access
+        // must recover past the poison rather than crash the sole writer.
+        let mut db = IncrementalDatabase::new();
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = db.source_map.lock().unwrap();
+            panic!("poison the source map");
+        }));
+        assert!(poisoned.is_err(), "the closure should have panicked");
+        assert!(db.source_map.is_poisoned(), "the mutex should be poisoned");
+
+        // Every path through the recovery helper still works.
+        let file = db.upsert_file(Path::new("/tmp/x.jl"), "x = 1\n".into());
+        assert!(
+            db.lookup_file(Path::new("/tmp/x.jl")) == Some(file),
+            "lookup should find the just-upserted file after poison recovery"
+        );
+        assert_eq!(parsed_tree_root(&db, file).to_string(), "x = 1\n");
     }
 }
