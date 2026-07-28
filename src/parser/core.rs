@@ -487,7 +487,7 @@ fn leftover_starts_with_subtree(tail: &[Event], tokens: &[Token]) -> bool {
 /// the first inner token is not a `STRING_PREFIX`. Such a statement starts a
 /// potential docstring, so a trailing statement on the same logical line is left
 /// to `fold_docstrings` rather than wrapped as junk.
-fn stmt_is_doc_string(events: &[Event], tokens: &[Token]) -> bool {
+pub(super) fn stmt_is_doc_string(events: &[Event], tokens: &[Token]) -> bool {
     matches!(
         events.first(),
         Some(Event::Start(SyntaxKind::STRING_LITERAL))
