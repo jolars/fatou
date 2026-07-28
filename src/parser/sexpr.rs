@@ -19,6 +19,7 @@
 //! `(unsupported KIND)` sentinel so a gap stays loud rather than silently
 //! dropping content.
 
+use crate::parser::core::is_bare_signature_name;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 use rowan::NodeOrToken;
@@ -3007,13 +3008,13 @@ fn is_forward_declaration(node: &SyntaxNode) -> bool {
     signature_is_bare_name(node) && !invalid_bare_signature(node)
 }
 
-/// Whether the signature's first node is a bare name (`f`, `$f`) rather than a
-/// call or other expression.
+/// Whether the signature's first node is a bare name (`f`, `$f`, `+`) rather
+/// than a call or other expression.
 fn signature_is_bare_name(node: &SyntaxNode) -> bool {
     node.children()
         .find(|c| c.kind() == SIGNATURE)
         .and_then(|sig| first_node(&sig))
-        .map(|inner| matches!(inner.kind(), NAME | INTERPOLATION))
+        .map(|inner| is_bare_signature_name(&inner))
         .unwrap_or(false)
 }
 

@@ -317,9 +317,9 @@ fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<Pars
         let Some(sig) = node.children().find(|c| c.kind() == SyntaxKind::SIGNATURE) else {
             continue;
         };
-        let sig_is_bare_name = sig.first_child().is_some_and(|inner| {
-            matches!(inner.kind(), SyntaxKind::NAME | SyntaxKind::INTERPOLATION)
-        });
+        let sig_is_bare_name = sig
+            .first_child()
+            .is_some_and(|inner| is_bare_signature_name(&inner));
         if sig_is_bare_name && !function_body_is_empty(&node) {
             let pos = usize::from(sig.text_range().start());
             push_diagnostic(
@@ -330,6 +330,22 @@ fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<Pars
                 pos,
             );
         }
+    }
+}
+
+/// Whether a `function`/`macro` signature's first node is a *bare name* — the
+/// thing being declared rather than a call or other expression. Besides a plain
+/// identifier and a `$`-interpolation, an operator name counts (`function + end`,
+/// `function .+ end`), including one Julia rejects as a name, which the parser
+/// leaves as an `ERROR`-wrapped operator atom (`function = end` ⇒
+/// `(function (error =))`).
+pub(super) fn is_bare_signature_name(node: &SyntaxNode) -> bool {
+    match node.kind() {
+        SyntaxKind::NAME | SyntaxKind::INTERPOLATION | SyntaxKind::OPERATOR_ATOM => true,
+        SyntaxKind::ERROR => node
+            .first_child()
+            .is_some_and(|inner| inner.kind() == SyntaxKind::OPERATOR_ATOM),
+        _ => false,
     }
 }
 

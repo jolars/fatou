@@ -1384,6 +1384,60 @@ fn parse_prefix(
         // A bare `begin` inside an indexing `a[…]` is the index-begin marker
         // (`a[begin]`, `a[begin + 1]`); elsewhere `begin` opens a block.
         TokKind::BeginKw if flags.begin_marker => Some(atom(SyntaxKind::BEGIN_MARKER, start)),
+        // In a signature-name position an operator *names* the method being
+        // defined; it is never applied. JuliaSyntax parses the name with
+        // `parse_unary_prefix`, which routes every non-syntactic operator to
+        // `parse_atom`, so the operator is a plain atom that an argument list may
+        // then call: `function + end` ⇒ `(function +)` and `function +(x) end` ⇒
+        // `(function (call + x))`, where an ordinary expression position would
+        // instead read the prefix application `(call-pre + x)`. Without this the
+        // bare form has no operand and swallows the closing `end` (`function ⊑
+        // end` ⇒ `(function (call-pre ⊑ (error end)) …)`), which is how
+        // `function ∘ end`, `function ⊇ end` and `typeof(function + end)` in Base
+        // fail to parse at all.
+        //
+        // Restricted to the operators that have a value form (`is_value_operator`):
+        // the purely syntactic ones stay errors here too (`function = end` ⇒
+        // `(function (error =))`). The syntactic prefixes `&`/`::`/`$` keep their
+        // own node shapes in a signature (`function &(x) end` ⇒ `(function (& x))`)
+        // and a prefix `:` still quotes, so all four are left to their own arms —
+        // `:` by the explicit exclusion, the rest by not being value operators.
+        //
+        // A bare name is only a *declaration* (`function f end`); with a non-empty
+        // body JuliaSyntax error-wraps the name, which the shared signature path
+        // already does for identifiers (`function f\nx\nend` ⇒
+        // `(function (error f) (block x))`) and now reaches operators unchanged.
+        // The syntactic `&` is the one value operator that keeps its prefix node
+        // over an argument list (`function &(x) end` ⇒ `(function (& x))`), so
+        // only its *bare* form is a name here; the parenthesized form is left to
+        // the unary arm.
+        k if flags.name_context
+            && k != TokKind::Colon
+            && is_value_operator(k)
+            && !(k == TokKind::Amp
+                && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen)) =>
+        {
+            // Glued to `(` the name heads a call, exactly as for the non-unary
+            // operator callees below (`function *(x) end` already took that path);
+            // the unary-capable operators would otherwise apply their single-operand
+            // prefix heuristic and yield `call-pre`.
+            if ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen) {
+                let (list_events, end) = parse_arg_list(
+                    ctx,
+                    start + 1,
+                    TokKind::RParen,
+                    SyntaxKind::ARG_LIST,
+                    flags.end_marker,
+                    diagnostics,
+                );
+                let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
+                events.extend(list_events);
+                events.push(Event::Finish);
+                Some(ExprParse { start, end, events })
+            } else {
+                Some(atom(SyntaxKind::OPERATOR_ATOM, start))
+            }
+        }
         // Signed numeric literal: a `+`/`-` glued to an adjacent number folds into
         // a single signed literal rather than a unary prefix call (`-2` → `-2`,
         // `+2.0` → `2.0`, `-2*x` → `(call-i -2 * x)`). Mirrors JuliaSyntax
