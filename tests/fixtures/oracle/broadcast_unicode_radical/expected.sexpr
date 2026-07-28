@@ -1,0 +1,1 @@
+(toplevel (dotcall-pre √ (vect 3 4 5)) (dotcall-pre ∛ x) (dotcall-pre ∜ x) (dotcall-pre ¬ a) (dotcall-pre √ a) (call (. √) a b) (call f (. √)))

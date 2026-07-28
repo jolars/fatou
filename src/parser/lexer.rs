@@ -1134,14 +1134,15 @@ impl<'a> Lexer<'a> {
                 }
             }
             // A broadcast `.` fused to a single-codepoint Unicode infix operator
-            // (`.…`, `.×`, `.⊕`, …): emit the operator's precedence-tier kind on a
-            // token spanning `.op`. The projector strips the leading `.` and heads
-            // `dotcall-i`. Radicals (`.√`, prefix) and the assignment tier are not
-            // fused here — they need their own (currently deferred) projections.
+            // (`.…`, `.×`, `.⊕`, …) or to a prefix-only radical (`.√`, `.¬`):
+            // emit the operator's precedence-tier kind on a token spanning `.op`.
+            // The projector strips the leading `.` and heads `dotcall-i` (infix)
+            // or `dotcall-pre` (radical). The assignment tier is not fused here —
+            // it needs its own (currently deferred) projection.
             if b1.is_some_and(|b| !b.is_ascii()) {
                 let ch = self.char_at(self.pos + 1);
-                if let Some(kind) =
-                    super::unicode_ops::unicode_op_kind(ch).filter(|&k| is_unicode_infix_tier(k))
+                if let Some(kind) = super::unicode_ops::unicode_op_kind(ch)
+                    .filter(|&k| is_unicode_infix_tier(k) || k == TokKind::UniRadical)
                 {
                     self.pos += 1 + ch.len_utf8();
                     self.push_op(kind, start);
@@ -1981,6 +1982,10 @@ mod tests {
         // longest match, so a lone `!` after the dot is `DotBang`.
         assert_eq!(kinds(".!y").first(), Some(&TokKind::DotBang));
         assert_eq!(kinds("x .!= y").get(2), Some(&TokKind::DotNotEq));
+        // The broadcast Unicode radicals fuse into one `UniRadical` token
+        // spanning `.op`, like the infix tiers (`.×`) above.
+        assert_eq!(kinds(".√[3]").first(), Some(&TokKind::UniRadical));
+        assert_eq!(kinds(".¬a").first(), Some(&TokKind::UniRadical));
         // Broadcast bitwise augmented assignment `.&=`/`.|=` — distinct from the
         // `.&`/`.|` bitwise ops and the `.&&`/`.||`/`.|>` triples.
         assert_eq!(kinds("a .&= b").get(2), Some(&TokKind::DotAmpEq));

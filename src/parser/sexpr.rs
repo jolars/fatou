@@ -886,6 +886,11 @@ fn project_unary(node: &SyntaxNode) -> String {
         DOT_MINUS => format!("(dotcall-pre - {operand})"),
         DOT_TILDE => format!("(dotcall-pre ~ {operand})"),
         DOT_BANG => format!("(dotcall-pre ! {operand})"),
+        // A broadcast Unicode radical (`.√x`) carries the leading `.` in its
+        // token text: strip it and head `dotcall-pre`, like the ASCII forms.
+        UNICODE_RADICAL if op.text().starts_with('.') => {
+            format!("(dotcall-pre {} {operand})", &op.text()[1..])
+        }
         _ => format!("(call-pre {} {operand})", op.text()),
     }
 }

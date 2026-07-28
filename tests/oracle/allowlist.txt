@@ -37,6 +37,7 @@ broadcasting
 broadcast_not
 broadcast_type_comparison
 broadcast_unicode_operator
+broadcast_unicode_radical
 byte_string
 call_and_index
 catch_var_error
