@@ -873,8 +873,13 @@ impl<'a> Lexer<'a> {
             self.consume_digits(|c| c.is_ascii_digit());
         }
         // Exponent: `e`/`E` mark a `Float`, `f` marks a `Float32`; both take an
-        // optional sign.
-        if matches!(self.peek(0), Some(b'e' | b'E' | b'f')) {
+        // optional sign. The marker only belongs to the number when a digit or
+        // a sign follows it; otherwise it starts an identifier and the number
+        // ends here (`3E₁` is `3 * E₁`, not a malformed float, and `3f` is
+        // `3 * f`).
+        if matches!(self.peek(0), Some(b'e' | b'E' | b'f'))
+            && matches!(self.peek(1), Some(c) if c.is_ascii_digit() || c == b'+' || c == b'-')
+        {
             if self.peek(0) == Some(b'f') {
                 is_f32 = true;
             } else {
