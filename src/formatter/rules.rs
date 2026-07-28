@@ -67,6 +67,7 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         | SyntaxKind::CONST_STMT
         | SyntaxKind::GLOBAL_STMT
         | SyntaxKind::LOCAL_STMT => lower_keyword_stmt(node),
+        SyntaxKind::BREAK_EXPR | SyntaxKind::CONTINUE_EXPR => lower_break_stmt(node),
         SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => lower_import_stmt(node),
         SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => lower_export_stmt(node),
         SyntaxKind::LITERAL => lower_literal(node),
@@ -930,6 +931,35 @@ fn lower_where(node: &SyntaxNode) -> Ir {
 /// interleaved comment, a comma-separated name list (`global a, b`, a bare-tuple
 /// shape we don't model), or any unexpected token—falls back to the verbatim
 /// transparent lowering.
+/// `break`/`continue`, each optionally labeled and `break` optionally carrying
+/// the labeled block's value: the keyword and its operands joined by single
+/// spaces (`break  outer   i*2` ⇒ `break outer i * 2`). Unlike
+/// [`lower_keyword_stmt`], two operands are the normal shape here rather than a
+/// comma list. A comment or any loose token among the children bails to the
+/// lossless transparent passthrough.
+fn lower_break_stmt(node: &SyntaxNode) -> Ir {
+    let mut kw: Option<SyntaxToken> = None;
+    let mut parts: Vec<Ir> = Vec::new();
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) if tok.kind() == SyntaxKind::WHITESPACE => {}
+            NodeOrToken::Token(tok) if kw.is_none() => kw = Some(tok),
+            NodeOrToken::Node(operand) => {
+                parts.push(Ir::text(" "));
+                parts.push(lower_node(&operand));
+            }
+            _ => return lower_transparent(node),
+        }
+    }
+
+    let Some(kw) = kw else {
+        return lower_transparent(node);
+    };
+    parts.insert(0, Ir::text(kw.text().to_string()));
+    Ir::concat(parts)
+}
+
 fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
     // First non-whitespace token is the keyword; everything after it (sans
     // incidental whitespace) is the operand sequence.

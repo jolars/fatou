@@ -24,6 +24,23 @@
   (only JuliaSyntax's own tests do), so this is deferred until the pinned oracle
   advances past JuliaSyntax 0.4.10, which predates the whole family.
 
+- [ ] Fuse the broadcast Unicode *radical* `.√` (and `.∛`, `.∜`, `.¬`) in
+  `src/parser/lexer.rs`, and project it `dotcall-pre`. The infix Unicode tiers
+  already fuse (`.×`, `.⊕`), but the prefix-only radicals fall through to a lone
+  `.` plus the radical, so `.√[3,4,5]` parses as `(call-pre √ …)` where
+  JuliaSyntax has `(dotcall-pre √ …)`. Surfaced by the `JuliaLang/julia` scan
+  (`test/broadcast.jl`, a `format-error`).
+
+- [ ] Two error-recovery gaps left over from labeled `break`/`continue`
+  (`src/parser/structural.rs`). Junk after a complete labeled keyword drops
+  JuliaSyntax's trailing zero-width marker (`break l x y` ⇒ `(break l x)
+  (error-t y)`, not `(error-t y (error-t))`), and a bare comma after one does not
+  fold into a tuple (`break l, y` ⇒ `(break l) (error-t ✘ y)`, not
+  `(tuple (break l) y)`) — the latter predates labels, since `break, y` behaved
+  the same way. Both are error/edge shapes no corpus code hits, and neither is
+  pinnable until the oracle advances past JuliaSyntax 0.4.10, which predates the
+  whole feature.
+
 ### Incremental
 
 - [ ] Token/block reparse splicing beneath `parsed_document`

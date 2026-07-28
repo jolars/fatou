@@ -85,6 +85,10 @@ pub enum DiagnosticKind {
     /// valid forward-declaration form `(function f)` and is left alone. Anchored
     /// at the `SIGNATURE` node's start.
     InvalidFunctionSignature,
+    /// A `break`/`continue` label that is not a name (`break 1`) — JuliaSyntax
+    /// wraps the operand in a recovery error (`(break (error-t 1))`). Anchored at
+    /// the offending token.
+    InvalidBreakLabel,
     /// A `catch` variable that is not a plain identifier (`catch e+3`,
     /// `catch e.f`, `catch f(e)`) — JuliaSyntax wraps the variable expression in
     /// `(error …)` (`(catch (error (call-i e + 3)) …)`). A bare identifier,

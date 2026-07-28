@@ -375,7 +375,10 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::BREAK_EXPR,
-                    KwStmt::Bare,
+                    KwStmt::Label {
+                        takes_value: true,
+                        colon_ends: no_range,
+                    },
                     false,
                     diagnostics,
                 );
@@ -385,7 +388,10 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::CONTINUE_EXPR,
-                    KwStmt::Bare,
+                    KwStmt::Label {
+                        takes_value: false,
+                        colon_ends: no_range,
+                    },
                     false,
                     diagnostics,
                 );

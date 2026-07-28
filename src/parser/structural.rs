@@ -16,8 +16,9 @@ use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
-    parse_block_stmt, parse_expr, parse_for_specs, parse_name_signature_expr, parse_paren,
-    parse_prefix_interpolation, parse_quote_sym, parse_signature_expr, push_var_macro_name,
+    is_var_identifier_start, parse_block_stmt, parse_expr, parse_for_specs,
+    parse_name_signature_expr, parse_paren, parse_prefix_interpolation, parse_quote_sym,
+    parse_signature_expr, push_var_macro_name,
 };
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::SyntaxKind;
@@ -558,15 +559,19 @@ pub(crate) fn parse_module_expr(
 /// The shape of a simple keyword statement's body — the part (if any) that
 /// follows the keyword on its line.
 pub(crate) enum KwStmt {
-    /// Just the keyword (`break`, `continue`); any trailing trivia is left to
-    /// the enclosing block loop, exactly like a single-token atom.
-    Bare,
     /// An optional leading expression parsed at statement level, so a top-level
     /// bare comma folds into a tuple (`return x, y` ⇒ `(return (tuple x y))`,
     /// `const x, y = 1, 2` ⇒ `(const (= (tuple x y) (tuple 1 2)))`,
     /// `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`). Any
     /// remaining same-line tokens are carried through verbatim.
     ExprTuple,
+    /// An optional block label, as `break`/`continue` take one in Julia 1.14
+    /// (`break outer` ⇒ `(break outer)`). `takes_value` additionally admits a
+    /// value after the label, which only `break` accepts (`break outer i * 2` ⇒
+    /// `(break outer (call-i i * 2))`). `colon_ends` marks a context where a `:`
+    /// is the ternary separator rather than a range colon, so it closes the
+    /// keyword instead of starting a label or value (`c ? continue : (x; break)`).
+    Label { takes_value: bool, colon_ends: bool },
 }
 
 /// Parse a simple keyword-led statement that is not a `… end` block form. The
@@ -585,59 +590,67 @@ pub(crate) fn parse_keyword_stmt(
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
     let mut i = start + 1;
-    if !matches!(body, KwStmt::Bare) {
-        let operand_start = ctx.skip_ws_and_block_comments(i);
-        // A keyword whose value is optional (`return`) ends right after the
-        // keyword when its operand position is a stray closing delimiter
-        // (`return)`, `return ]`): the empty form `(return)` is emitted and the
-        // delimiter is left for the toplevel-leftover driver to wrap as `✘`,
-        // matching `break)`. Value-required keywords (`const`/`global`/`local`)
-        // instead need an inner `(error)` synthesis and so do not take this path.
-        if optional_value
-            && ctx
-                .token(operand_start)
-                .is_some_and(|t| is_close_delimiter_tok(t.kind))
-        {
-            events.push(Event::Finish);
-            return Some(ExprParse {
-                start,
-                end: i,
-                events,
-            });
-        }
-        push_range(&mut events, i, operand_start);
-        i = operand_start;
+    if let KwStmt::Label {
+        takes_value,
+        colon_ends,
+    } = body
+    {
+        i = parse_break_label(&ctx, &mut events, i, takes_value, colon_ends, diagnostics);
+        events.push(Event::Finish);
+        return Some(ExprParse {
+            start,
+            end: i,
+            events,
+        });
+    }
+    // Everything below is `KwStmt::ExprTuple`, the only other body shape.
+    let operand_start = ctx.skip_ws_and_block_comments(i);
+    // A keyword whose value is optional (`return`) ends right after the
+    // keyword when its operand position is a stray closing delimiter
+    // (`return)`, `return ]`): the empty form `(return)` is emitted and the
+    // delimiter is left for the toplevel-leftover driver to wrap as `✘`,
+    // matching `break)`. Value-required keywords (`const`/`global`/`local`)
+    // instead need an inner `(error)` synthesis and so do not take this path.
+    if optional_value
+        && ctx
+            .token(operand_start)
+            .is_some_and(|t| is_close_delimiter_tok(t.kind))
+    {
+        events.push(Event::Finish);
+        return Some(ExprParse {
+            start,
+            end: i,
+            events,
+        });
+    }
+    push_range(&mut events, i, operand_start);
+    i = operand_start;
 
-        if !header_ends(&ctx, i) {
-            let operand = match body {
-                KwStmt::ExprTuple => parse_block_stmt(tokens, i, false, diagnostics),
-                _ => None,
-            };
-            if let Some(expr) = operand {
-                events.extend(expr.events);
-                i = expr.end;
+    if !header_ends(&ctx, i)
+        && let Some(expr) = parse_block_stmt(tokens, i, false, diagnostics)
+    {
+        events.extend(expr.events);
+        i = expr.end;
+    }
+
+    // Carry any remaining same-line tokens through verbatim, but build real
+    // nodes for the name forms the projector models: an `INTERPOLATION` for an
+    // interpolated name (`export $a, $(a*b)`) and a `MACRO_NAME` for a macro
+    // name (`export @a`), so the projector reads them as `($ …)`/`@a` rather
+    // than a loose `$`/`@` + operand.
+    while !header_ends(&ctx, i) {
+        match ctx.token(i).map(|t| t.kind) {
+            Some(TokKind::Dollar) => {
+                let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
+                events.extend(interp.events);
+                i = interp.end;
             }
-        }
-
-        // Carry any remaining same-line tokens through verbatim, but build real
-        // nodes for the name forms the projector models: an `INTERPOLATION` for an
-        // interpolated name (`export $a, $(a*b)`) and a `MACRO_NAME` for a macro
-        // name (`export @a`), so the projector reads them as `($ …)`/`@a` rather
-        // than a loose `$`/`@` + operand.
-        while !header_ends(&ctx, i) {
-            match ctx.token(i).map(|t| t.kind) {
-                Some(TokKind::Dollar) => {
-                    let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
-                    events.extend(interp.events);
-                    i = interp.end;
-                }
-                Some(TokKind::At) => {
-                    i = push_macro_name(&ctx, &mut events, i, diagnostics);
-                }
-                _ => {
-                    events.push(Event::Tok(i));
-                    i += 1;
-                }
+            Some(TokKind::At) => {
+                i = push_macro_name(&ctx, &mut events, i, diagnostics);
+            }
+            _ => {
+                events.push(Event::Tok(i));
+                i += 1;
             }
         }
     }
@@ -648,6 +661,102 @@ pub(crate) fn parse_keyword_stmt(
         end: i,
         events,
     })
+}
+
+/// Parse the optional label (and, for `break`, the optional value) that follows
+/// a `break`/`continue` keyword, appending the events. `i` is the index just past
+/// the keyword; returns the index after whatever was consumed.
+///
+/// Julia 1.14 labels a block with `@label name begin … end` and jumps out of it
+/// with `break name` — or `break name value`, which also supplies the block's
+/// value. The label must be a name: an identifier, an interpolation, or a
+/// `var"…"` non-standard identifier; anything else is error-wrapped
+/// (`break 1` ⇒ `(break (error-t 1))`). A `continue` takes no value, so anything
+/// after its label is left to the enclosing trailing-junk driver.
+fn parse_break_label(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    i: usize,
+    takes_value: bool,
+    colon_ends: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    // Where the label (or the value after it) would start, the keyword may
+    // instead already be complete. Besides the ordinary header terminators that
+    // is a `,`, which belongs to an enclosing tuple or argument list
+    // (`break outer, y` ⇒ `(tuple (break outer) y)`), and — only where a `:` is
+    // the ternary separator rather than a range colon — the `:` itself, so
+    // `allow_ws ? continue : (result = false; break)` keeps its else-branch.
+    let ends = |at: usize| {
+        header_ends(ctx, at)
+            || matches!(ctx.token(at).map(|t| t.kind), Some(TokKind::Comma))
+            || (colon_ends && ctx.token(at).map(|t| t.kind) == Some(TokKind::Colon))
+    };
+    let label_start = ctx.skip_ws_and_block_comments(i);
+    if ends(label_start) {
+        // A bare `break`/`continue`. The trivia belongs to the enclosing block
+        // loop, so leave the index where it was.
+        return i;
+    }
+    push_range(events, i, label_start);
+
+    let mut i = match ctx.token(label_start).map(|t| t.kind) {
+        Some(TokKind::Ident) => {
+            events.push(Event::Start(SyntaxKind::NAME));
+            events.push(Event::Tok(label_start));
+            events.push(Event::Finish);
+            label_start + 1
+        }
+        Some(TokKind::Dollar) => {
+            let interp = parse_prefix_interpolation(ctx, label_start, diagnostics);
+            events.extend(interp.events);
+            interp.end
+        }
+        Some(TokKind::StringPrefix) if is_var_identifier_start(ctx, label_start) => {
+            match push_var_macro_name(ctx, events, label_start, diagnostics) {
+                Some(end) => end,
+                None => label_start,
+            }
+        }
+        _ => {
+            // Not a name. JuliaSyntax parses the operand anyway and wraps it in a
+            // recovery error, keeping the keyword's own node intact
+            // (`break 1` ⇒ `(break (error-t 1))`).
+            let Some(expr) = parse_expr(ctx.tokens(), label_start, 0, diagnostics) else {
+                return i;
+            };
+            let tok = &ctx.tokens()[label_start];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::InvalidBreakLabel,
+                "expected identifier for break label",
+                tok.start,
+                tok.end,
+            );
+            events.push(Event::Start(SyntaxKind::ERROR));
+            events.extend(expr.events);
+            events.push(Event::Finish);
+            return expr.end;
+        }
+    };
+
+    if !takes_value {
+        return i;
+    }
+    let value_start = ctx.skip_ws_and_block_comments(i);
+    if ends(value_start) {
+        return i;
+    }
+    // The value is a plain expression, not a statement: a bare comma after it
+    // belongs to the enclosing tuple, not to the `break` (`break lbl, y` ⇒
+    // `(tuple (break lbl) y)`).
+    let Some(expr) = parse_expr(ctx.tokens(), value_start, 0, diagnostics) else {
+        return i;
+    };
+    push_range(events, i, value_start);
+    events.extend(expr.events);
+    i = expr.end;
+    i
 }
 
 /// Parse an `export`/`public` name-list statement. The keyword at `start` opens
