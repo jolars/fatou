@@ -14,7 +14,7 @@ use crate::parser::structural::{
     KwStmt, is_op_name, parse_abstract_type, parse_begin_expr, parse_do_block, parse_for_expr,
     parse_function_expr, parse_if_expr, parse_import_stmt, parse_keyword_stmt, parse_let_expr,
     parse_macro_def, parse_module_expr, parse_name_list_stmt, parse_primitive_type,
-    parse_quote_expr, parse_struct_expr, parse_try_expr, parse_while_expr,
+    parse_quote_expr, parse_struct_expr, parse_try_expr, parse_typegroup_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
 
@@ -352,6 +352,8 @@ fn parse_expr_in(
             TypeDecl::Abstract => parse_abstract_type(tokens, start, diagnostics),
             TypeDecl::Primitive => parse_primitive_type(tokens, start, diagnostics),
         })
+    } else if is_typegroup_keyword(&ctx, start) {
+        Some(parse_typegroup_expr(tokens, start, diagnostics))
     } else {
         match ctx.token(start).map(|t| t.kind) {
             Some(TokKind::IfKw) => Some(parse_if_expr(tokens, start, diagnostics)),
@@ -906,6 +908,29 @@ fn type_decl_keyword(ctx: &ParserCtx<'_>, start: usize) -> Option<TypeDecl> {
     };
     let next = ctx.token(ctx.skip_trivia(start + 1))?;
     (next.kind == TokKind::Ident && next.text == "type").then_some(word)
+}
+
+/// Whether the identifier `typegroup` at `start` opens Julia 1.14's grouped type
+/// definition. Julia 1.14 reserves the word outright, but keeping it contextual
+/// here leaves it usable as an ordinary identifier in pre-1.14 code, so it only
+/// opens the block form when the next significant token — across newlines, since
+/// the body normally starts on the following line — can begin a type definition:
+/// `struct`, `mutable`, `abstract`, `primitive`, a macro call, or a docstring.
+/// Mirrors the set JuliaSyntax recovers on when parsing below 1.14.
+fn is_typegroup_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
+    match ctx.token(start) {
+        Some(t) if t.kind == TokKind::Ident && t.text == "typegroup" => {}
+        _ => return false,
+    }
+    let next = ctx.skip_trivia(start + 1);
+    match ctx.token(next) {
+        Some(t) => match t.kind {
+            TokKind::StructKw | TokKind::MutableKw | TokKind::At | TokKind::StringDelimOpen => true,
+            TokKind::Ident => matches!(t.text.as_ref(), "abstract" | "primitive"),
+            _ => false,
+        },
+        None => false,
+    }
 }
 
 fn is_public_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {

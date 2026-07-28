@@ -37,7 +37,9 @@ fn lower_node(node: &SyntaxNode) -> Ir {
         SyntaxKind::SPLAT_EXPR => lower_splat(node),
         SyntaxKind::TYPE_ANNOTATION => lower_type_annotation(node),
         SyntaxKind::MATRIX_EXPR | SyntaxKind::BRACESCAT_EXPR => lower_matrix(node),
-        SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR => lower_block_expr(node),
+        SyntaxKind::BEGIN_EXPR | SyntaxKind::QUOTE_EXPR | SyntaxKind::TYPEGROUP_DEF => {
+            lower_block_expr(node)
+        }
         SyntaxKind::LET_EXPR => lower_let(node),
         SyntaxKind::WHILE_EXPR | SyntaxKind::FOR_EXPR => lower_loop(node),
         SyntaxKind::STRUCT_DEF => lower_struct(node),
@@ -3802,10 +3804,10 @@ fn lower_matrix_row(node: &SyntaxNode) -> Option<Ir> {
     Some(Ir::concat(row))
 }
 
-/// Lay out a keyword block whose body is a bare `BLOCK` — `begin … end` and
-/// `quote … end` — by indenting each statement one step, matching the target
-/// style. The shape is `<kw> BLOCK <end>`; the body is lowered by
-/// [`lower_block_body`].
+/// Lay out a keyword block whose body is a bare `BLOCK` — `begin … end`,
+/// `quote … end`, and `typegroup … end` — by indenting each statement one step,
+/// matching the target style. The shape is `<kw> BLOCK <end>`; the body is
+/// lowered by [`lower_block_body`].
 ///
 /// A **non-empty** block is always exploded to the vertical form, even if the
 /// source wrote it on one line: `begin x end` → `begin⏎    x⏎end`. An **empty**
@@ -3818,6 +3820,8 @@ fn lower_block_expr(node: &SyntaxNode) -> Ir {
     let kw = match node.kind() {
         SyntaxKind::BEGIN_EXPR => "begin",
         SyntaxKind::QUOTE_EXPR => "quote",
+        // `typegroup` is contextual, so its keyword arrives as a plain `IDENT`.
+        SyntaxKind::TYPEGROUP_DEF => "typegroup",
         _ => return lower_transparent(node),
     };
 
@@ -3835,6 +3839,7 @@ fn lower_block_expr(node: &SyntaxNode) -> Ir {
             NodeOrToken::Node(_) => return lower_transparent(node),
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::BEGIN_KW | SyntaxKind::QUOTE_KW => {}
+                SyntaxKind::IDENT if node.kind() == SyntaxKind::TYPEGROUP_DEF => {}
                 SyntaxKind::END_KW => saw_end = true,
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 _ => return lower_transparent(node),

@@ -1,0 +1,184 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..365
+  TYPEGROUP_DEF@0..146
+    IDENT@0..9 "typegroup"
+    BLOCK@9..143
+      NEWLINE@9..10 "\n"
+      WHITESPACE@10..14 "    "
+      STRUCT_DEF@14..85
+        STRUCT_KW@14..20 "struct"
+        WHITESPACE@20..21 " "
+        SIGNATURE@21..28
+          NAME@21..28
+            IDENT@21..28 "TG_Node"
+        BLOCK@28..82
+          NEWLINE@28..29 "\n"
+          WHITESPACE@29..37 "        "
+          TYPE_ANNOTATION@37..46
+            NAME@37..41
+              IDENT@37..41 "data"
+            COLON_COLON@41..43 "::"
+            NAME@43..46
+              IDENT@43..46 "Int"
+          NEWLINE@46..47 "\n"
+          WHITESPACE@47..55 "        "
+          TYPE_ANNOTATION@55..77
+            NAME@55..60
+              IDENT@55..60 "edges"
+            COLON_COLON@60..62 "::"
+            CURLY_EXPR@62..77
+              NAME@62..68
+                IDENT@62..68 "Vector"
+              ARG_LIST@68..77
+                LBRACE@68..69 "{"
+                ARG@69..76
+                  NAME@69..76
+                    IDENT@69..76 "TG_Edge"
+                RBRACE@76..77 "}"
+          NEWLINE@77..78 "\n"
+          WHITESPACE@78..82 "    "
+        END_KW@82..85 "end"
+      NEWLINE@85..86 "\n"
+      WHITESPACE@86..90 "    "
+      STRUCT_DEF@90..142
+        MUTABLE_KW@90..97 "mutable"
+        WHITESPACE@97..98 " "
+        STRUCT_KW@98..104 "struct"
+        WHITESPACE@104..105 " "
+        SIGNATURE@105..112
+          NAME@105..112
+            IDENT@105..112 "TG_Edge"
+        BLOCK@112..139
+          NEWLINE@112..113 "\n"
+          WHITESPACE@113..121 "        "
+          TYPE_ANNOTATION@121..134
+            NAME@121..125
+              IDENT@121..125 "from"
+            COLON_COLON@125..127 "::"
+            NAME@127..134
+              IDENT@127..134 "TG_Node"
+          NEWLINE@134..135 "\n"
+          WHITESPACE@135..139 "    "
+        END_KW@139..142 "end"
+      NEWLINE@142..143 "\n"
+    END_KW@143..146 "end"
+  NEWLINE@146..147 "\n"
+  TYPEGROUP_DEF@147..173
+    IDENT@147..156 "typegroup"
+    BLOCK@156..170
+      WHITESPACE@156..157 " "
+      STRUCT_DEF@157..169
+        STRUCT_KW@157..163 "struct"
+        WHITESPACE@163..164 " "
+        SIGNATURE@164..165
+          NAME@164..165
+            IDENT@164..165 "A"
+        BLOCK@165..166
+          WHITESPACE@165..166 " "
+        END_KW@166..169 "end"
+      WHITESPACE@169..170 " "
+    END_KW@170..173 "end"
+  NEWLINE@173..174 "\n"
+  TYPEGROUP_DEF@174..222
+    IDENT@174..183 "typegroup"
+    BLOCK@183..219
+      NEWLINE@183..184 "\n"
+      WHITESPACE@184..188 "    "
+      DOC@188..218
+        STRING_LITERAL@188..201
+          STRING_DELIM_OPEN@188..189 "\""
+          STRING_CONTENT@189..200 "a docstring"
+          STRING_DELIM_CLOSE@200..201 "\""
+        NEWLINE@201..202 "\n"
+        WHITESPACE@202..206 "    "
+        STRUCT_DEF@206..218
+          STRUCT_KW@206..212 "struct"
+          WHITESPACE@212..213 " "
+          SIGNATURE@213..214
+            NAME@213..214
+              IDENT@213..214 "D"
+          BLOCK@214..215
+            WHITESPACE@214..215 " "
+          END_KW@215..218 "end"
+      NEWLINE@218..219 "\n"
+    END_KW@219..222 "end"
+  NEWLINE@222..223 "\n"
+  TYPEGROUP_DEF@223..287
+    IDENT@223..232 "typegroup"
+    BLOCK@232..284
+      NEWLINE@232..233 "\n"
+      WHITESPACE@233..237 "    "
+      ABSTRACT_DEF@237..256
+        IDENT@237..245 "abstract"
+        WHITESPACE@245..246 " "
+        IDENT@246..250 "type"
+        WHITESPACE@250..251 " "
+        SIGNATURE@251..252
+          NAME@251..252
+            IDENT@251..252 "X"
+        WHITESPACE@252..253 " "
+        END_KW@253..256 "end"
+      NEWLINE@256..257 "\n"
+      WHITESPACE@257..261 "    "
+      PRIMITIVE_DEF@261..283
+        IDENT@261..270 "primitive"
+        WHITESPACE@270..271 " "
+        IDENT@271..275 "type"
+        WHITESPACE@275..276 " "
+        SIGNATURE@276..277
+          NAME@276..277
+            IDENT@276..277 "Y"
+        WHITESPACE@277..278 " "
+        LITERAL@278..279
+          INTEGER@278..279 "8"
+        WHITESPACE@279..280 " "
+        END_KW@280..283 "end"
+      NEWLINE@283..284 "\n"
+    END_KW@284..287 "end"
+  NEWLINE@287..288 "\n"
+  TYPEGROUP_DEF@288..323
+    IDENT@288..297 "typegroup"
+    BLOCK@297..320
+      NEWLINE@297..298 "\n"
+      WHITESPACE@298..302 "    "
+      MACRO_CALL@302..319
+        MACRO_NAME@302..317
+          AT@302..303 "@"
+          IDENT@303..317 "generate_types"
+        ARG_LIST@317..319
+          LPAREN@317..318 "("
+          RPAREN@318..319 ")"
+      NEWLINE@319..320 "\n"
+    END_KW@320..323 "end"
+  NEWLINE@323..324 "\n"
+  ASSIGNMENT_EXPR@324..337
+    NAME@324..333
+      IDENT@324..333 "typegroup"
+    WHITESPACE@333..334 " "
+    EQ@334..335 "="
+    WHITESPACE@335..336 " "
+    LITERAL@336..337
+      INTEGER@336..337 "1"
+  NEWLINE@337..338 "\n"
+  CALL_EXPR@338..350
+    NAME@338..347
+      IDENT@338..347 "typegroup"
+    ARG_LIST@347..350
+      LPAREN@347..348 "("
+      ARG@348..349
+        NAME@348..349
+          IDENT@348..349 "x"
+      RPAREN@349..350 ")"
+  NEWLINE@350..351 "\n"
+  ASSIGNMENT_EXPR@351..364
+    NAME@351..352
+      IDENT@351..352 "x"
+    WHITESPACE@352..353 " "
+    EQ@353..354 "="
+    WHITESPACE@354..355 " "
+    NAME@355..364
+      IDENT@355..364 "typegroup"
+  NEWLINE@364..365 "\n"

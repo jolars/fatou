@@ -236,6 +236,15 @@ impl Harvester {
             SyntaxKind::STRUCT_DEF | SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => {
                 self.handle_type(node, file, dest, pending_doc);
             }
+            // A `typegroup` block introduces no scope of its own — its types
+            // are defined in the enclosing one — so walk its body in place.
+            SyntaxKind::TYPEGROUP_DEF => {
+                if let Some(block) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+                    for child in block.children() {
+                        self.walk_item(&child, file, dest, at_root, None);
+                    }
+                }
+            }
             SyntaxKind::MODULE_DEF => self.handle_module(node, file, dest, at_root),
             SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => {
                 self.handle_name_list(node, file, dest);
