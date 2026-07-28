@@ -170,6 +170,8 @@ pub enum SyntaxKind {
     /// The wrapping arithmetic operators `+%`, `-%`, `*%` (Julia 1.14). Each
     /// keeps its own name in an ordinary infix call (`(call-i a +% b)`).
     PLUS_PERCENT,
+    /// The `+`-tier operator name `++`.
+    PLUS_PLUS,
     MINUS_PERCENT,
     STAR_PERCENT,
     // Invalid doubled operators `**`/`--` (project `(Error**)` /
@@ -213,6 +215,7 @@ pub enum SyntaxKind {
     MINUS_PERCENT_EQ,
     STAR_PERCENT_EQ,
     PIPE_EQ,
+    DOLLAR_EQ,
     AMP_EQ,
     SHL_EQ,
     SHR_EQ,
@@ -346,6 +349,7 @@ impl SyntaxKind {
                 | CARET
                 | PERCENT
                 | PLUS_PERCENT
+                | PLUS_PLUS
                 | MINUS_PERCENT
                 | STAR_PERCENT
                 | EQ_EQ
@@ -426,6 +430,7 @@ impl SyntaxKind {
                 | MINUS_PERCENT_EQ
                 | STAR_PERCENT_EQ
                 | PIPE_EQ
+                | DOLLAR_EQ
                 | AMP_EQ
                 | SHL_EQ
                 | SHR_EQ

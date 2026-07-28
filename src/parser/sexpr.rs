@@ -384,6 +384,7 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         CARET => CallI("^"),
         PERCENT => CallI("%"),
         PLUS_PERCENT => CallI("+%"),
+        PLUS_PLUS => CallI("++"),
         MINUS_PERCENT => CallI("-%"),
         STAR_PERCENT => CallI("*%"),
         COLON => CallI(":"),

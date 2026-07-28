@@ -94,6 +94,10 @@ pub(crate) enum TokKind {
     /// binary, `*%` sits at the `*` tier and is binary-only — and each keeps its
     /// own name, so `a +% b` projects `(call-i a +% b)`.
     PlusPercent,
+    /// The concatenation-style operator `++`: a real `+`-tier operator name in
+    /// Julia (binary-only, and variadic like `+`), unlike the invalid doubled
+    /// `--`/`**`.
+    PlusPlus,
     MinusPercent,
     StarPercent,
     /// The invalid doubled operators `**` and `--` (and broadcast `.**`/`.--`).
@@ -152,6 +156,9 @@ pub(crate) enum TokKind {
     MinusPercentEq,
     StarPercentEq,
     PipeEq,
+    /// The augmented assignment `$=` (Julia's historical xor-assign, still a
+    /// valid operator name — `base/show.jl` lists it among the infix operators).
+    DollarEq,
     AmpEq,
     /// Bitshift augmented assignment `<<=`, `>>=`, `>>>=`.
     ShlEq,
@@ -1222,6 +1229,9 @@ impl<'a> Lexer<'a> {
             // by the 3-char table above). `--`/`->`/`**` are matched by earlier
             // arms, so a `%` after `+`/`-`/`*` is always the wrapping form.
             (Some(b'+'), Some(b'%')) => Some(TokKind::PlusPercent),
+            // `++`. `+++` falls out as `++` then `+`, and `++=` as `++` then `=`
+            // (there is no augmented `++=` form), both matching JuliaSyntax.
+            (Some(b'+'), Some(b'+')) => Some(TokKind::PlusPlus),
             (Some(b'-'), Some(b'%')) => Some(TokKind::MinusPercent),
             (Some(b'*'), Some(b'%')) => Some(TokKind::StarPercent),
             // Augmented assignment `op=`.
@@ -1233,6 +1243,9 @@ impl<'a> Lexer<'a> {
             (Some(b'^'), Some(b'=')) => Some(TokKind::CaretEq),
             (Some(b'%'), Some(b'=')) => Some(TokKind::PercentEq),
             (Some(b'|'), Some(b'=')) => Some(TokKind::PipeEq),
+            // `$=`. A `$` elsewhere is the interpolation sigil, which never
+            // precedes an `=`.
+            (Some(b'$'), Some(b'=')) => Some(TokKind::DollarEq),
             (Some(b'&'), Some(b'=')) => Some(TokKind::AmpEq),
             _ => None,
         };

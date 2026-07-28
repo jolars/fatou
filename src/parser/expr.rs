@@ -1281,7 +1281,11 @@ fn pop_one(operands: Vec<ExprParse>) -> ExprParse {
 fn is_flat_arith_op(tok: &Token) -> bool {
     matches!(
         tok.kind,
-        TokKind::Plus | TokKind::Star | TokKind::PlusPercent | TokKind::StarPercent
+        TokKind::Plus
+            | TokKind::Star
+            | TokKind::PlusPercent
+            | TokKind::StarPercent
+            | TokKind::PlusPlus
     ) && !tok.text.chars().any(is_op_suffix_char)
 }
 
@@ -4948,6 +4952,7 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::MinusPercentEq
             | TokKind::StarPercentEq
             | TokKind::PipeEq
+            | TokKind::DollarEq
             | TokKind::AmpEq
             | TokKind::ShlEq
             | TokKind::ShrEq
@@ -5099,6 +5104,7 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             // The wrapping `*%` is binary-only, so `*%(a, b)` is a plain call.
             // Its unary-capable siblings `+%`/`-%` route through the unary arm.
             | StarPercent
+            | PlusPlus
             // The range `..` is not a Base operator but packages define it
             // (`..(x, y) = x == y`), and `..(a, b)` is an ordinary call on it,
             // not the prefix application `(call-pre (error ..) …)`.
@@ -5522,6 +5528,7 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         | TokKind::Minus
         | TokKind::PlusPercent
         | TokKind::MinusPercent
+        | TokKind::PlusPlus
         | TokKind::DotPlus
         | TokKind::DotMinus
         | TokKind::Pipe
