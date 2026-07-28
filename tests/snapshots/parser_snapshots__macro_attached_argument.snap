@@ -1,0 +1,220 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..233
+  ASSIGNMENT_EXPR@0..127
+    NAME@0..17
+      IDENT@0..17 "issue49823_events"
+    WHITESPACE@17..18 " "
+    EQ@18..19 "="
+    WHITESPACE@19..20 " "
+    INDEX_EXPR@20..127
+      MACRO_CALL@20..63
+        MACRO_NAME@20..31
+          AT@20..21 "@"
+          IDENT@21..31 "NamedTuple"
+        BRACES@31..63
+          LBRACE@31..32 "{"
+          ARG@32..42
+            TYPE_ANNOTATION@32..42
+              NAME@32..36
+                IDENT@32..36 "evid"
+              COLON_COLON@36..38 "::"
+              NAME@38..42
+                IDENT@38..42 "Int8"
+          COMMA@42..43 ","
+          WHITESPACE@43..44 " "
+          ARG@44..62
+            TYPE_ANNOTATION@44..62
+              NAME@44..53
+                IDENT@44..53 "base_time"
+              COLON_COLON@53..55 "::"
+              NAME@55..62
+                IDENT@55..62 "Float64"
+          RBRACE@62..63 "}"
+      ARG_LIST@63..127
+        LBRACKET@63..64 "["
+        NEWLINE@64..65 "\n"
+        WHITESPACE@65..69 "    "
+        ARG@69..96
+          TUPLE_EXPR@69..96
+            LPAREN@69..70 "("
+            KEYWORD_ARG@70..78
+              NAME@70..74
+                IDENT@70..74 "evid"
+              WHITESPACE@74..75 " "
+              EQ@75..76 "="
+              WHITESPACE@76..77 " "
+              LITERAL@77..78
+                INTEGER@77..78 "1"
+            COMMA@78..79 ","
+            WHITESPACE@79..80 " "
+            KEYWORD_ARG@80..95
+              NAME@80..89
+                IDENT@80..89 "base_time"
+              WHITESPACE@89..90 " "
+              EQ@90..91 "="
+              WHITESPACE@91..92 " "
+              LITERAL@92..95
+                FLOAT@92..95 "0.0"
+            RPAREN@95..96 ")"
+        COMMA@96..97 ","
+        WHITESPACE@97..98 " "
+        ARG@98..126
+          TUPLE_EXPR@98..126
+            LPAREN@98..99 "("
+            KEYWORD_ARG@99..108
+              NAME@99..103
+                IDENT@99..103 "evid"
+              WHITESPACE@103..104 " "
+              EQ@104..105 "="
+              WHITESPACE@105..106 " "
+              LITERAL@106..108
+                MINUS@106..107 "-"
+                INTEGER@107..108 "1"
+            COMMA@108..109 ","
+            WHITESPACE@109..110 " "
+            KEYWORD_ARG@110..125
+              NAME@110..119
+                IDENT@110..119 "base_time"
+              WHITESPACE@119..120 " "
+              EQ@120..121 "="
+              WHITESPACE@121..122 " "
+              LITERAL@122..125
+                FLOAT@122..125 "0.0"
+            RPAREN@125..126 ")"
+        RBRACKET@126..127 "]"
+  NEWLINE@127..128 "\n"
+  ASSIGNMENT_EXPR@128..152
+    NAME@128..130
+      IDENT@128..130 "nt"
+    WHITESPACE@130..131 " "
+    EQ@131..132 "="
+    WHITESPACE@132..133 " "
+    MACRO_CALL@133..152
+      MACRO_NAME@133..144
+        AT@133..134 "@"
+        IDENT@134..144 "NamedTuple"
+      BRACES@144..152
+        LBRACE@144..145 "{"
+        ARG@145..151
+          TYPE_ANNOTATION@145..151
+            NAME@145..146
+              IDENT@145..146 "a"
+            COLON_COLON@146..148 "::"
+            NAME@148..151
+              IDENT@148..151 "Int"
+        RBRACE@151..152 "}"
+  NEWLINE@152..153 "\n"
+  ASSIGNMENT_EXPR@153..171
+    NAME@153..154
+      IDENT@153..154 "x"
+    WHITESPACE@154..155 " "
+    EQ@155..156 "="
+    WHITESPACE@156..157 " "
+    MACRO_CALL@157..171
+      MACRO_NAME@157..165
+        AT@157..158 "@"
+        IDENT@158..165 "SVector"
+      VECT_EXPR@165..171
+        LBRACKET@165..166 "["
+        ARG@166..167
+          LITERAL@166..167
+            INTEGER@166..167 "1"
+        COMMA@167..168 ","
+        WHITESPACE@168..169 " "
+        ARG@169..170
+          LITERAL@169..170
+            INTEGER@169..170 "2"
+        RBRACKET@170..171 "]"
+  NEWLINE@171..172 "\n"
+  ASSIGNMENT_EXPR@172..189
+    NAME@172..173
+      IDENT@172..173 "y"
+    WHITESPACE@173..174 " "
+    EQ@174..175 "="
+    WHITESPACE@175..176 " "
+    MACRO_CALL@176..189
+      MACRO_NAME@176..182
+        AT@176..177 "@"
+        IDENT@177..182 "views"
+      WHITESPACE@182..183 " "
+      INDEX_EXPR@183..189
+        NAME@183..184
+          IDENT@183..184 "A"
+        ARG_LIST@184..189
+          LBRACKET@184..185 "["
+          ARG@185..188
+            BINARY_EXPR@185..188
+              LITERAL@185..186
+                INTEGER@185..186 "1"
+              COLON@186..187 ":"
+              LITERAL@187..188
+                INTEGER@187..188 "2"
+          RBRACKET@188..189 "]"
+  NEWLINE@189..190 "\n"
+  ASSIGNMENT_EXPR@190..200
+    NAME@190..191
+      IDENT@190..191 "z"
+    WHITESPACE@191..192 " "
+    EQ@192..193 "="
+    WHITESPACE@193..194 " "
+    MACRO_CALL@194..200
+      MACRO_NAME@194..196
+        AT@194..195 "@"
+        IDENT@195..196 "m"
+      WHITESPACE@196..197 " "
+      BRACES@197..200
+        LBRACE@197..198 "{"
+        ARG@198..199
+          NAME@198..199
+            IDENT@198..199 "a"
+        RBRACE@199..200 "}"
+  NEWLINE@200..201 "\n"
+  ASSIGNMENT_EXPR@201..216
+    NAME@201..202
+      IDENT@201..202 "w"
+    WHITESPACE@202..203 " "
+    EQ@203..204 "="
+    WHITESPACE@204..205 " "
+    MACRO_CALL@205..216
+      MACRO_NAME@205..210
+        AT@205..206 "@"
+        IDENT@206..210 "eval"
+      ARG_LIST@210..216
+        LPAREN@210..211 "("
+        ARG@211..215
+          NAME@211..215
+            IDENT@211..215 "expr"
+        RPAREN@215..216 ")"
+  NEWLINE@216..217 "\n"
+  ASSIGNMENT_EXPR@217..232
+    NAME@217..218
+      IDENT@217..218 "v"
+    WHITESPACE@218..219 " "
+    EQ@219..220 "="
+    WHITESPACE@220..221 " "
+    INDEX_EXPR@221..232
+      MACRO_CALL@221..229
+        MACRO_NAME@221..223
+          AT@221..222 "@"
+          IDENT@222..223 "m"
+        ARG_LIST@223..229
+          LPAREN@223..224 "("
+          ARG@224..225
+            NAME@224..225
+              IDENT@224..225 "a"
+          COMMA@225..226 ","
+          WHITESPACE@226..227 " "
+          ARG@227..228
+            NAME@227..228
+              IDENT@227..228 "b"
+          RPAREN@228..229 ")"
+      ARG_LIST@229..232
+        LBRACKET@229..230 "["
+        ARG@230..231
+          LITERAL@230..231
+            INTEGER@230..231 "1"
+        RBRACKET@231..232 "]"
+  NEWLINE@232..233 "\n"

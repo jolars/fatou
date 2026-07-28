@@ -2915,10 +2915,17 @@ fn lower_macro_call(node: &SyntaxNode) -> Ir {
                 }
                 // An argument must follow the name.
                 _ if saw_name => {
-                    // Attached `ARG_LIST` → call form (`@eval(expr)`); otherwise the
-                    // argument is space-separated and gets one leading space.
-                    let call_form = child.kind() == SyntaxKind::ARG_LIST && !had_gap;
-                    if !call_form {
+                    // An argument written with no gap before it stays attached —
+                    // for *any* opener, not just the `ARG_LIST` of a call form
+                    // (`@eval(expr)`). The gap is meaning-bearing: a following
+                    // `[…]`/`(…)` suffix binds to the macro call when the opener
+                    // is glued but to the argument when it is not, so inserting
+                    // a space rewrites the program. `@NamedTuple{T}[x]` is
+                    // `(ref (macrocall @NamedTuple (braces T)) x)` — indexing the
+                    // named-tuple type — while `@NamedTuple {T}[x]` hands the
+                    // macro `{T}[x]` as one argument. A spaced argument still
+                    // gets its single leading space.
+                    if had_gap {
                         parts.push(Ir::text(" "));
                     }
                     parts.push(lower_node(&child));
