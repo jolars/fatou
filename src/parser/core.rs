@@ -265,14 +265,43 @@ fn export_paren_is_symbol(item: &SyntaxNode) -> bool {
     match first {
         // A symbol-shaped node: a bare name, `var"…"`, or `$`-interpolation. A
         // `LITERAL`, `TYPE_ANNOTATION`, nested `PAREN_EXPR`, etc. is not.
-        rowan::NodeOrToken::Node(n) => matches!(
-            n.kind(),
-            SyntaxKind::NAME | SyntaxKind::NONSTANDARD_IDENTIFIER | SyntaxKind::INTERPOLATION
-        ),
+        rowan::NodeOrToken::Node(n) => match n.kind() {
+            SyntaxKind::NAME | SyntaxKind::NONSTANDARD_IDENTIFIER | SyntaxKind::INTERPOLATION => {
+                true
+            }
+            // A parenthesized operator value (`(..)`, `(√)`, `(⊕)`) — which
+            // `parse_paren` wraps in an `OPERATOR_ATOM` — is a valid export
+            // symbol, but a dotted broadcast operator (`(.+)`, `(.≤)`) is not:
+            // JuliaSyntax error-wraps it (`export (.+)` ⇒ `(export (error (. +)))`).
+            SyntaxKind::OPERATOR_ATOM => !export_operator_atom_is_dotted(&n),
+            _ => false,
+        },
         // The only bare token a `PAREN_EXPR` carries is the lone operator-value
         // form (`(+)`, `(:)`), which `parse_paren` builds for `is_paren_value_op`.
         rowan::NodeOrToken::Token(_) => true,
     }
+}
+
+/// Whether a parenthesized `export`/`import` operator atom is a *dotted*
+/// (broadcast) operator (`.+`, `.≤`, `.&&`), which JuliaSyntax rejects as an
+/// export symbol. The range/splat operators `..`/`...` lead with a *doubled*
+/// dot and are not broadcasts, so they are valid; a lone `√`/`⊕` has no dot.
+fn export_operator_atom_is_dotted(atom: &SyntaxNode) -> bool {
+    atom.children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE
+                    | SyntaxKind::NEWLINE
+                    | SyntaxKind::COMMENT
+                    | SyntaxKind::BLOCK_COMMENT
+            )
+        })
+        .is_some_and(|t| {
+            let bytes = t.text().as_bytes();
+            bytes.first() == Some(&b'.') && bytes.len() > 1 && bytes[1] != b'.'
+        })
 }
 
 /// Flag each `const` whose declaration is not the plain `=` assignment
