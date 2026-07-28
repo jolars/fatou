@@ -63,6 +63,7 @@ do_blocks
 doc_macro
 docstring
 docstring_stray_closer
+dollar_assign_operator
 dot_logical_operator
 dot_prime_recovery
 dot_symbol_quote
@@ -157,6 +158,7 @@ paren_block
 paren_block_juxtapose_error
 paren_macro_name
 paren_operator
+plus_plus_operator
 postfix_space_error
 prefix_operator_error
 prefix_operator_newline

@@ -1,0 +1,1 @@
+(toplevel (call-i a ++ b) (call-i a ++ b c) (call-i a ++ (call-pre + b)) (call ++ a b) (call-pre (error ++) x) (quote-: ++) (quote-: ++) (call-i s in (tuple-p (quote-: +) (quote-: ++) (quote-: *))) (= (call ++ x y) (call vcat x y)) (import (: (importpath A) (importpath ++))) (call-i a ++ (call-i b * c)))

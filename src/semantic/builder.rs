@@ -79,6 +79,7 @@ fn is_augmented_assign(kind: SyntaxKind) -> bool {
             | SyntaxKind::MINUS_PERCENT_EQ
             | SyntaxKind::STAR_PERCENT_EQ
             | SyntaxKind::PIPE_EQ
+            | SyntaxKind::DOLLAR_EQ
             | SyntaxKind::AMP_EQ
             | SyntaxKind::SHL_EQ
             | SyntaxKind::SHR_EQ

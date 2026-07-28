@@ -1,0 +1,1 @@
+(toplevel ($= a b) (quote-: $=) (const (= expr_infix_wide (call (curly Set Symbol) (vect (quote-: =) (quote-: +=) (quote-: -=) (quote-: *=) (quote-: /=) (quote-: //=) (quote-: \=) (quote-: ^=) (quote-: ÷=) (quote-: %=) (quote-: &&) (quote-: ||) (quote-: <:) (quote-: $=) (quote-: ⊻=) (quote-: >:) (quote-: -->))))) (= x (error $=)) ($ x) (quote-: ($ x)) (call f ($ x)))
