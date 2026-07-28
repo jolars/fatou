@@ -1517,16 +1517,20 @@ fn is_close_delimiter_tok(kind: TokKind) -> bool {
     matches!(kind, TokKind::RParen | TokKind::RBracket | TokKind::RBrace)
 }
 
-/// Whether the keyword-line header ends at `i`: at a newline, a `;`, a block
-/// terminator keyword (so one-liners like `struct Foo end` stop correctly), a
-/// closing bracket (so a header nested in brackets, e.g. a quoted
-/// `:(using Flux)`, lets the enclosing bracket close rather than swallowing the
-/// closer), or end of input.
+/// Whether the keyword-line header ends at `i`: at a newline, a `;`, a line
+/// comment (which runs to the end of the line, so the header is empty either
+/// way — and stopping here keeps `let # c` from opening a zero-width
+/// `LET_BINDINGS` that `let` alone would not; a `#= … =#` block comment can be
+/// followed by a real binding, so it is not a terminator), a block terminator
+/// keyword (so one-liners like
+/// `struct Foo end` stop correctly), a closing bracket (so a header nested in
+/// brackets, e.g. a quoted `:(using Flux)`, lets the enclosing bracket close
+/// rather than swallowing the closer), or end of input.
 fn header_ends(ctx: &ParserCtx<'_>, i: usize) -> bool {
     match ctx.token(i).map(|t| t.kind) {
         None => true,
         Some(k) => {
-            matches!(k, TokKind::Newline | TokKind::Semicolon)
+            matches!(k, TokKind::Newline | TokKind::Semicolon | TokKind::Comment)
                 || matches!(
                     k,
                     TokKind::EndKw
