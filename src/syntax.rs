@@ -167,6 +167,11 @@ pub enum SyntaxKind {
     SLASH_SLASH,
     CARET,
     PERCENT,
+    /// The wrapping arithmetic operators `+%`, `-%`, `*%` (Julia 1.14). Each
+    /// keeps its own name in an ordinary infix call (`(call-i a +% b)`).
+    PLUS_PERCENT,
+    MINUS_PERCENT,
+    STAR_PERCENT,
     // Invalid doubled operators `**`/`--` (project `(Error**)` /
     // `(ErrorInvalidOperator)`).
     STAR_STAR,
@@ -202,6 +207,11 @@ pub enum SyntaxKind {
     SLASH_SLASH_EQ,
     CARET_EQ,
     PERCENT_EQ,
+    /// Augmented assignment for the wrapping arithmetic operators: `+%=`, `-%=`,
+    /// `*%=`.
+    PLUS_PERCENT_EQ,
+    MINUS_PERCENT_EQ,
+    STAR_PERCENT_EQ,
     PIPE_EQ,
     AMP_EQ,
     SHL_EQ,
@@ -332,6 +342,9 @@ impl SyntaxKind {
                 | SLASH_SLASH
                 | CARET
                 | PERCENT
+                | PLUS_PERCENT
+                | MINUS_PERCENT
+                | STAR_PERCENT
                 | EQ_EQ
                 | NOT_EQ
                 | EQ_EQ_EQ
@@ -403,6 +416,9 @@ impl SyntaxKind {
                 | SLASH_SLASH_EQ
                 | CARET_EQ
                 | PERCENT_EQ
+                | PLUS_PERCENT_EQ
+                | MINUS_PERCENT_EQ
+                | STAR_PERCENT_EQ
                 | PIPE_EQ
                 | AMP_EQ
                 | SHL_EQ

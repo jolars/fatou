@@ -1089,6 +1089,9 @@ pub(super) fn is_op_name(kind: TokKind) -> bool {
             | SlashSlash
             | Caret
             | Percent
+            | PlusPercent
+            | MinusPercent
+            | StarPercent
             | EqEq
             | NotEq
             | EqEqEq
@@ -1213,6 +1216,9 @@ fn is_call_infix_operator(kind: TokKind) -> bool {
             | SlashSlash
             | Caret
             | Percent
+            | PlusPercent
+            | MinusPercent
+            | StarPercent
             | Colon
             | DotDot
             | FatArrow

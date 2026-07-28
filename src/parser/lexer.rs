@@ -88,6 +88,14 @@ pub(crate) enum TokKind {
     SlashSlash,
     Caret,
     Percent,
+    /// The wrapping arithmetic operators `+%`, `-%`, `*%` (Julia 1.14). They
+    /// share the precedence and unary/binary classification of their unwrapped
+    /// counterparts — `+%`/`-%` sit at the `+` tier and are both unary and
+    /// binary, `*%` sits at the `*` tier and is binary-only — and each keeps its
+    /// own name, so `a +% b` projects `(call-i a +% b)`.
+    PlusPercent,
+    MinusPercent,
+    StarPercent,
     /// The invalid doubled operators `**` and `--` (and broadcast `.**`/`.--`).
     /// Julia has no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a
     /// single error operator at a fixed low precedence tier (between `+` and `:`)
@@ -138,6 +146,11 @@ pub(crate) enum TokKind {
     SlashSlashEq,
     CaretEq,
     PercentEq,
+    /// Augmented assignment for the wrapping arithmetic operators: `+%=`, `-%=`,
+    /// `*%=`.
+    PlusPercentEq,
+    MinusPercentEq,
+    StarPercentEq,
     PipeEq,
     AmpEq,
     /// Bitshift augmented assignment `<<=`, `>>=`, `>>>=`.
@@ -1151,6 +1164,11 @@ impl<'a> Lexer<'a> {
             // (the `>>>=` 4-char form was matched above).
             (Some(b'<'), Some(b'<'), Some(b'=')) => Some(TokKind::ShlEq),
             (Some(b'>'), Some(b'>'), Some(b'=')) => Some(TokKind::ShrEq),
+            // Augmented assignment for the wrapping operators; beats the 2-char
+            // `+%`/`-%`/`*%` below, exactly as `+=` beats `+`.
+            (Some(b'+'), Some(b'%'), Some(b'=')) => Some(TokKind::PlusPercentEq),
+            (Some(b'-'), Some(b'%'), Some(b'=')) => Some(TokKind::MinusPercentEq),
+            (Some(b'*'), Some(b'%'), Some(b'=')) => Some(TokKind::StarPercentEq),
             _ => None,
         };
         if let Some(kind) = three {
@@ -1182,6 +1200,12 @@ impl<'a> Lexer<'a> {
             (Some(b'<'), Some(b'|')) => Some(TokKind::PipeLt),
             (Some(b'<'), Some(b'<')) => Some(TokKind::Shl),
             (Some(b'>'), Some(b'>')) => Some(TokKind::Shr),
+            // Wrapping arithmetic `+%`/`-%`/`*%` (the `+%=` family was matched
+            // by the 3-char table above). `--`/`->`/`**` are matched by earlier
+            // arms, so a `%` after `+`/`-`/`*` is always the wrapping form.
+            (Some(b'+'), Some(b'%')) => Some(TokKind::PlusPercent),
+            (Some(b'-'), Some(b'%')) => Some(TokKind::MinusPercent),
+            (Some(b'*'), Some(b'%')) => Some(TokKind::StarPercent),
             // Augmented assignment `op=`.
             (Some(b'+'), Some(b'=')) => Some(TokKind::PlusEq),
             (Some(b'-'), Some(b'=')) => Some(TokKind::MinusEq),
@@ -1391,6 +1415,9 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | SlashSlash
             | Caret
             | Percent
+            | PlusPercent
+            | MinusPercent
+            | StarPercent
             | EqEq
             | NotEq
             | EqEqEq

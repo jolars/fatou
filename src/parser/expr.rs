@@ -1267,13 +1267,16 @@ fn pop_one(operands: Vec<ExprParse>) -> ExprParse {
     operands.into_iter().next().expect("comparison lhs present")
 }
 
-/// The plain `+`/`*` operators that fold a same-operator run into one flat
-/// variadic call. Dotted `.+`/`.*` are excluded (they nest in JuliaSyntax), as
-/// is `-` (left-associative, not variadic) and the missing `++` operator. A
-/// *suffixed* operator (`+₁`, `*₂`) is non-syntactic and never folds
-/// (`a +₁ b +₁ c` ⇒ `(call-i (call-i a +₁ b) +₁ c)`).
+/// The plain `+`/`*` operators (and their wrapping forms `+%`/`*%`) that fold a
+/// same-operator run into one flat variadic call. Dotted `.+`/`.*` are excluded
+/// (they nest in JuliaSyntax), as is `-`/`-%` (left-associative, not variadic)
+/// and the missing `++` operator. A *suffixed* operator (`+₁`, `*₂`) is
+/// non-syntactic and never folds (`a +₁ b +₁ c` ⇒ `(call-i (call-i a +₁ b) +₁ c)`).
 fn is_flat_arith_op(tok: &Token) -> bool {
-    matches!(tok.kind, TokKind::Plus | TokKind::Star) && !tok.text.chars().any(is_op_suffix_char)
+    matches!(
+        tok.kind,
+        TokKind::Plus | TokKind::Star | TokKind::PlusPercent | TokKind::StarPercent
+    ) && !tok.text.chars().any(is_op_suffix_char)
 }
 
 /// Parse a flat arithmetic chain starting at the operator `first_op` (the first
@@ -1427,6 +1430,10 @@ fn parse_prefix(
                 tok.kind,
                 TokKind::Plus
                     | TokKind::Minus
+                    // The wrapping `+%`/`-%` are unary-capable like `+`/`-`, so
+                    // `+%(x, y)` → `(call +% x y)` and `-%(x)` → `(call-pre -% x)`.
+                    | TokKind::PlusPercent
+                    | TokKind::MinusPercent
                     | TokKind::DotPlus
                     | TokKind::DotMinus
                     | TokKind::Bang
@@ -1854,6 +1861,8 @@ fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
     matches!(
         kind,
         Plus | Minus
+            | PlusPercent
+            | MinusPercent
             | DotPlus
             | DotMinus
             | Bang
@@ -2568,9 +2577,9 @@ fn array_element_boundary(ctx: &ParserCtx<'_>, operand_end: usize, op_idx: usize
 
 /// Whether `op`, glued to the following operand inside an array literal, reads as
 /// that operand's prefix (so it begins a new element). The leading operators are
-/// the unary-and-binary infix operators `+ - & ~` (broadcast `.+ .- .~`) and the
-/// symbol-quote `:` (glued `:a` is a quoted symbol). Binary-only operators
-/// (`* / % | :: <: >:`, broadcast `.& .|`) and any *suffixed* operator (`+₁`,
+/// the unary-and-binary infix operators `+ - +% -% & ~` (broadcast `.+ .- .~`)
+/// and the symbol-quote `:` (glued `:a` is a quoted symbol). Binary-only
+/// operators (`* / % *% | :: <: >:`, broadcast `.& .|`) and any *suffixed* (`+₁`,
 /// never unary) stay infix and do not split. Unary-only prefixes (`! ¬ √ $`) have
 /// no infix binding power, so they end the element naturally and are not listed
 /// here. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
@@ -2579,6 +2588,8 @@ fn op_can_lead_array_element(op: &Token) -> bool {
         op.kind,
         TokKind::Plus
             | TokKind::Minus
+            | TokKind::PlusPercent
+            | TokKind::MinusPercent
             | TokKind::DotPlus
             | TokKind::DotMinus
             | TokKind::Tilde
@@ -4809,6 +4820,9 @@ fn is_assignment_op(kind: TokKind) -> bool {
             | TokKind::SlashSlashEq
             | TokKind::CaretEq
             | TokKind::PercentEq
+            | TokKind::PlusPercentEq
+            | TokKind::MinusPercentEq
+            | TokKind::StarPercentEq
             | TokKind::PipeEq
             | TokKind::AmpEq
             | TokKind::ShlEq
@@ -4958,6 +4972,9 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | SlashSlash
             | Caret
             | Percent
+            // The wrapping `*%` is binary-only, so `*%(a, b)` is a plain call.
+            // Its unary-capable siblings `+%`/`-%` route through the unary arm.
+            | StarPercent
             | EqEq
             | NotEq
             | EqEqEq
@@ -5024,7 +5041,16 @@ fn is_curly_operator_name(kind: TokKind) -> bool {
     is_operator_call_name(kind)
         || matches!(
             kind,
-            Plus | Minus | DotPlus | DotMinus | Bang | Tilde | DotTilde | Subtype | Supertype
+            Plus | Minus
+                | PlusPercent
+                | MinusPercent
+                | DotPlus
+                | DotMinus
+                | Bang
+                | Tilde
+                | DotTilde
+                | Subtype
+                | Supertype
         )
 }
 
@@ -5059,6 +5085,9 @@ fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
                 | SlashSlashEq
                 | CaretEq
                 | PercentEq
+                | PlusPercentEq
+                | MinusPercentEq
+                | StarPercentEq
                 | PipeEq
                 | AmpEq
                 | ShlEq
@@ -5371,18 +5400,23 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         }
         // Bitwise-or `|` shares the `+` (plus) precedence family, left-associative
         // (`a | b & c` ⇒ `(a | (b & c))`, `a & b | c` ⇒ `((a & b) | c)`).
+        // The wrapping `+%`/`-%` share the `+` tier (JuliaSyntax `is_prec_plus`).
         TokKind::Plus
         | TokKind::Minus
+        | TokKind::PlusPercent
+        | TokKind::MinusPercent
         | TokKind::DotPlus
         | TokKind::DotMinus
         | TokKind::Pipe
         | TokKind::DotPipe => (20, 21),
         // Bitwise-and `&` shares the `*` (times) precedence family, left-associative
         // (`a & b * c` ⇒ `((a & b) * c)`, `a + b & c` ⇒ `(a + (b & c))`).
+        // The wrapping `*%` shares the `*` tier (JuliaSyntax `is_prec_times`).
         TokKind::Star
         | TokKind::Slash
         | TokKind::Backslash
         | TokKind::Percent
+        | TokKind::StarPercent
         | TokKind::Amp
         | TokKind::DotAmp
         | TokKind::DotStar

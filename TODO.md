@@ -17,6 +17,13 @@
   `fonsp/Pluto.jl` smoke-test scan (`deleting globals.jl`, a `format-error`,
   distinct from the losslessness fix in #39).
 
+- [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
+  augmented forms `.+%= .-%= .*%=`) in `src/parser/lexer.rs`. The undotted
+  `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
+  mis-parses rather than erroring. No code in the smoke-test corpus uses them
+  (only JuliaSyntax's own tests do), so this is deferred until the pinned oracle
+  advances past JuliaSyntax 0.4.10, which predates the whole family.
+
 ### Incremental
 
 - [ ] Token/block reparse splicing beneath `parsed_document`
