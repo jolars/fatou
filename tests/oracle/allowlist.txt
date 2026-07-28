@@ -88,6 +88,7 @@ generators
 generator_whitespace_error
 global_local_assignment
 glued_colon_operator
+glued_word_operator
 identity_operators
 if_missing_condition
 import_as_colon_error
@@ -220,6 +221,7 @@ unicode_operators
 unterminated_command
 unterminated_string
 using_as_error
+var_identifier_name_list
 var_identifier_suffix
 var_macro_name
 vect_newline_comma

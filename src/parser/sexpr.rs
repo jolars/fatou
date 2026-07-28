@@ -1844,6 +1844,12 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 parts.push(name_text(&n));
                 seen_name = true;
             }
+            // A `var"…"` non-standard identifier path name
+            // (`import A: var"a b"` → `(importpath (var a b))`).
+            NodeOrToken::Node(n) if n.kind() == NONSTANDARD_IDENTIFIER => {
+                parts.push(project_var(&n));
+                seen_name = true;
+            }
             // A parenthesized operator name (`using A: (..)` → `(importpath ..)`).
             // The operator arrives wrapped rather than as a loose token so its own
             // dots are not counted as relative-import dots; the parens themselves
@@ -3235,6 +3241,8 @@ fn name_run_item(el: SyntaxElement) -> Option<String> {
         NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
         // A macro name (`export @a`) → `@a`.
         NodeOrToken::Node(n) if n.kind() == MACRO_NAME => Some(project_macro_name(&n)),
+        // A `var"…"` non-standard identifier (`export var"a b"`) → `(var a b)`.
+        NodeOrToken::Node(n) if n.kind() == NONSTANDARD_IDENTIFIER => Some(project_var(&n)),
         // An operator used as a name (`export +, ==`, `export ⊕`) → the bare
         // operator text.
         NodeOrToken::Token(t) if is_operator(t.kind()) => Some(t.text().to_string()),

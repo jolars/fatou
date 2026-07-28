@@ -1,0 +1,1 @@
+(toplevel (macrocall @test (call-i (string "identity") in c)) (call-i 1 in c) (call-i 1 isa Int) (macrocall @x_str (string-r "s") "in") (error-t c) (call-i (string "a") in c) (juxtapose 2 x) (juxtapose (string "a") (error-t) x) (call-i a in b) (call-i (call f x) in y))

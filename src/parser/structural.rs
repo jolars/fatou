@@ -801,6 +801,16 @@ pub(crate) fn parse_name_list_stmt(
                 i = interp.end;
                 consumed_name = true;
             }
+            // A `var"…"` non-standard identifier (`export var"complicated name"`)
+            // → `(var …)`. Without this it falls through to the verbatim arm,
+            // where the projector's name filter drops it entirely.
+            Some(TokKind::StringPrefix) if is_var_identifier_start(&ctx, i) => {
+                match push_var_macro_name(&ctx, &mut events, i, diagnostics) {
+                    Some(end) => i = end,
+                    None => i += 1,
+                }
+                consumed_name = true;
+            }
             // A macro name (`export @a`, `export @var"#"`) → `@a`.
             Some(TokKind::At) => {
                 i = push_macro_name(&ctx, &mut events, i, diagnostics);
@@ -1089,6 +1099,15 @@ fn parse_import_path(
             // A macro-name path root (`import @x`, `import .@x`): a `MACRO_NAME`
             // node the projector reads as `@x`.
             i = push_macro_name(ctx, &mut body, i, diagnostics);
+        }
+        Some(TokKind::StringPrefix) if is_var_identifier_start(ctx, i) => {
+            // A `var"…"` non-standard identifier as the path name
+            // (`import A: var"a b"`): a `NONSTANDARD_IDENTIFIER` the projector
+            // reads as `(var a b)`.
+            match push_var_macro_name(ctx, &mut body, i, diagnostics) {
+                Some(end) => i = end,
+                None => return start,
+            }
         }
         Some(k) if is_op_name(k) || is_unicode_op_name(k) || is_dotted_op_name(k) => {
             // A leading operator name. A fused dotted operator (`import .==`,
