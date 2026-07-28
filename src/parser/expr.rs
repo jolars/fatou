@@ -1703,6 +1703,12 @@ fn parse_prefix(
         )),
         TokKind::LBrace => parse_braces(ctx, start, flags.end_marker, diagnostics),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
+        // `where` is contextual: it is the type-variable operator only *after* a
+        // complete expression, which is the operator loop's business. Where an
+        // atom is expected it is an ordinary identifier, and Base uses it as one
+        // (`for where in keys(graph)`, `if where.name === name`,
+        // `identify_package_env(where::PkgId, name)` — all in `loading.jl`).
+        TokKind::WhereKw => Some(atom(SyntaxKind::NAME, start)),
         TokKind::StringPrefix | TokKind::StringDelimOpen | TokKind::CmdDelimOpen => {
             Some(parse_string_literal(ctx, start, diagnostics))
         }

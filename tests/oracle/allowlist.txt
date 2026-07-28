@@ -224,5 +224,6 @@ var_identifier_suffix
 var_macro_name
 vect_newline_comma
 version_string
+where_as_identifier
 where_precedence
 word_operators
