@@ -1226,14 +1226,18 @@ fn parse_import_path(
 }
 
 /// A `(op)` group at `lparen_idx` naming a single operator, as an import clause
-/// spells one that cannot stand bare (`using A: (..)`). Returns the operator's
+/// spells one that cannot stand bare (`using A: (..)`, `import .Base: (:)`).
+/// Returns the operator's
 /// token index and the closing paren's. Only a lone *undotted* operator qualifies
 /// — anything else in the parens is an expression, not a name, and a broadcast
 /// operator is not importable at all (`import A: (.==)` is an error in Julia).
 fn paren_operator_name(ctx: &ParserCtx<'_>, lparen_idx: usize) -> Option<(usize, usize)> {
     let op = ctx.skip_ws(lparen_idx + 1);
     let kind = ctx.token(op)?.kind;
-    if !(is_op_name(kind) || is_unicode_op_name(kind) || kind == TokKind::DotDot) {
+    if !(is_op_name(kind)
+        || is_unicode_op_name(kind)
+        || matches!(kind, TokKind::DotDot | TokKind::Colon))
+    {
         return None;
     }
     let rparen = ctx.skip_ws(op + 1);

@@ -157,6 +157,7 @@ pairs
 parametric_types
 paren_block
 paren_block_juxtapose_error
+paren_colon_import
 paren_macro_name
 paren_operator
 plus_plus_operator
