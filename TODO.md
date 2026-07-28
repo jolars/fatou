@@ -51,6 +51,14 @@
 
 ## Formatter
 
+- [ ] Canonicalize the gap before a macro's *attached* argument
+  (`lower_macro_call` in `src/formatter/rules.rs`). The gap is preserved
+  verbatim because it is meaning-bearing whenever a `[…]`/`(…)` suffix follows
+  (`@NamedTuple{T}[x]` indexes the type; `@NamedTuple {T}[x]` hands the macro
+  `{T}[x]`), so `@m{a}` and `@m {a}` both survive even where no suffix makes
+  them differ. Deciding "no suffix follows" needs the parent context, which
+  `lower_macro_call` does not have today.
+
 - [ ] Prefer breaking a function signature's argument list over exploding a
   short `where` clause. Today an over-width `f(a, b, c) where {T}` breaks the
   single-param where bound (`where {\n    T,\n}`) rather than the args, because
