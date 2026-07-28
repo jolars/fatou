@@ -165,6 +165,7 @@ public_stop_at_equals
 quote_paren_empty
 quoted_assignment_operators
 quoted_dollar_symbol
+quoted_macro_name
 quoted_var_identifier
 range_operator
 range_operator_name
