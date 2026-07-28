@@ -22,6 +22,7 @@ bare_tuple_newline
 based_int_display
 begin_index
 binary_precedence
+block_comment_infix
 block_form_operand
 block_trailing_junk
 bracescat
