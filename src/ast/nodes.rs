@@ -511,12 +511,18 @@ impl CallExpr {
     }
 }
 
-/// The lone operator token directly inside a `PAREN_EXPR` (`(!=)`), if any.
+/// The lone operator inside a `PAREN_EXPR` (`(!=)`, `:(==)`), if any. The
+/// operator is either a direct token or wrapped in an `OPERATOR_ATOM` (the
+/// operator-as-value node a quote-paren builds).
 fn paren_operator(paren: &SyntaxNode) -> Option<Operator> {
-    paren
-        .children_with_tokens()
-        .filter_map(|el| el.into_token())
-        .find_map(Operator::cast)
+    paren.children_with_tokens().find_map(|el| match el {
+        rowan::NodeOrToken::Token(token) => Operator::cast(token),
+        rowan::NodeOrToken::Node(node) if node.kind() == SyntaxKind::OPERATOR_ATOM => node
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find_map(Operator::cast),
+        rowan::NodeOrToken::Node(_) => None,
+    })
 }
 
 /// The operator a `QUOTE_SYM` quotes (`:!=`, `:(==)`), skipping the leading

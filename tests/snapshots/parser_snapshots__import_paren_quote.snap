@@ -13,7 +13,8 @@ ROOT@0..73
         COLON@9..10 ":"
         PAREN_EXPR@10..13
           LPAREN@10..11 "("
-          PLUS@11..12 "+"
+          OPERATOR_ATOM@11..12
+            PLUS@11..12 "+"
           RPAREN@12..13 ")"
   NEWLINE@13..14 "\n"
   IMPORT_STMT@14..27
@@ -67,6 +68,7 @@ ROOT@0..73
         COLON@68..69 ":"
         PAREN_EXPR@69..72
           LPAREN@69..70 "("
-          STAR@70..71 "*"
+          OPERATOR_ATOM@70..71
+            STAR@70..71 "*"
           RPAREN@71..72 ")"
   NEWLINE@72..73 "\n"

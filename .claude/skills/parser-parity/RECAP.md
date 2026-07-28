@@ -134,7 +134,57 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-28—a block comment after a block keyword swallowed the header)
+## Latest session (2026-07-28b—quoted syntactic operators `:(.=)`, `:(.)`, `:(...)`)
+
+Issue #24 (`JuliaLang/julia` `debug format` scan), continuing the backlog left by
+the wrapping-arithmetic commit. Target was the two adjacent buckets in that
+triage: 12 files on `operator is not a valid value` and 6 on `expected
+right-hand side for operator`, both from quoted operator forms inside
+`Expr(...)` constructors.
+
+`parse_quote_sym`'s `:(op)` arm was gated on `is_paren_quotable_op`, which
+listed only *undotted* operator names and undotted assignments. The dotted
+syntactic operators fell through to the general `:(expr)` path, where they are
+not values — `:(.=)` ⇒ `(quote-: (error (. =)))`, `:(.)` ⇒ a broken field access,
+`:(...)` ⇒ `(quote-: (error ...))`. Note the *already-working* set: `:(.+)`,
+`:(.≤)`, `:(..)`, `:(√)` reach `parse_paren` and build an `OPERATOR_ATOM`, which
+is exactly the right shape. So the gap was only the operators that are not
+values in the first place.
+
+- **`is_paren_quotable_op`** (`expr.rs`) now also accepts `is_assignment_op`
+  (which pulls in every broadcast augmented form `.= .+= .÷= …`), plus `Dot`,
+  `DotDotDot`, `DotAndAnd`, `DotOrOr`. Deliberately *not* added: `?`, which
+  JuliaSyntax error-wraps even under a quote (`:(?)` ⇒ `(quote-: (error ?))`,
+  which Fatou already matched), and the dotted value ops that already route
+  through `parse_paren`.
+- **The `:(op)` arm now wraps the operator token in an `OPERATOR_ATOM`** inside
+  the `PAREN_EXPR` — the same node the non-paren `:.=` form builds — so
+  `project_operator_atom` splits the broadcast dot (`(. =)`) and renders `.`/`...`
+  verbatim. Nothing added to `sexpr.rs`; the old `PAREN_EXPR` loose-token
+  fallback would have emitted the raw `.=` text.
+- **`paren_operator`** (`ast/nodes.rs`) had to learn to descend one level into an
+  `OPERATOR_ATOM` child; it read only direct tokens, so `Base.:(==)(a, b)` lost
+  its `callee_operator`. Caught by `call_callee_operator_shapes`.
+- **Verified**: 25 probe cases match JuliaSyntax byte-for-byte, including the
+  ones that already passed (no regression in the `?`/`.+`/`..` siblings).
+- **Fixtures**: `operator_symbol_quote_paren` (parser + oracle) extended 8 → 16
+  lines. Six unrelated snapshots re-accepted for the `OPERATOR_ATOM` wrapping.
+- **Counts**: JS 677 (held, same 8 permanent FAILs); dir 219 (held — the slug
+  already existed; coverage widened, not count). Zero regressions.
+- **`JuliaLang/julia` scan** (928 files, A/B on the same checkout):
+  **69 → 58 failures**.
+- **Next**: from issue #24's table, the biggest remaining bucket is 31 on
+  `trailing tokens after statement` — but most of that is Julia *master*'s
+  labeled `break <label> [value]`, which the pinned oracle (0.4.10) predates, so
+  it would land like the wrapping operators did (snapshot-only, no oracle
+  fixture). The cleanly oracle-checkable slice is the `#=…=#` block comment in
+  *argument* position (`@test #=T=# f(x)`, `#=ephemeral_cache=#true`) — the
+  sibling of 2026-07-28's header fix, one bucket down. After that: 7 on
+  `whitespace before opener` (`@jl_assert !is_leaf(st) (st, "…")`,
+  `primitive type T (18 * 8) end`) and 3 on `function ⊑ end` (a bare method
+  declaration named by a Unicode operator).
+
+## Earlier session (2026-07-28—a block comment after a block keyword swallowed the header)
 
 Issue #42. `skip_ws` does not cross comments, so every "header starts after the
 keyword" site landed on a `#= … =#` token instead of the header. `header_ends`

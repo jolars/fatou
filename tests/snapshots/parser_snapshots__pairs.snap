@@ -1,6 +1,5 @@
 ---
 source: tests/parser_snapshots.rs
-assertion_line: 41
 expression: rendered
 ---
 ROOT@0..67
