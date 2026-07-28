@@ -75,6 +75,9 @@ fn is_augmented_assign(kind: SyntaxKind) -> bool {
             | SyntaxKind::SLASH_SLASH_EQ
             | SyntaxKind::CARET_EQ
             | SyntaxKind::PERCENT_EQ
+            | SyntaxKind::PLUS_PERCENT_EQ
+            | SyntaxKind::MINUS_PERCENT_EQ
+            | SyntaxKind::STAR_PERCENT_EQ
             | SyntaxKind::PIPE_EQ
             | SyntaxKind::AMP_EQ
             | SyntaxKind::SHL_EQ

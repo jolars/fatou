@@ -349,11 +349,11 @@ fn same_break_tier(a: SyntaxKind, b: SyntaxKind) -> bool {
 fn binary_prec_class(kind: SyntaxKind) -> Option<u8> {
     use SyntaxKind::*;
     Some(match kind {
-        // Plus tier: `+ - |` (and broadcast `.+ .- .|`), left-associative.
-        PLUS | MINUS | PIPE | DOT_PLUS | DOT_MINUS | DOT_PIPE => 0,
-        // Times tier: `* / \ % &` (and their broadcast forms), left-associative.
-        STAR | SLASH | BACKSLASH | PERCENT | AMP | DOT_STAR | DOT_SLASH | DOT_BACKSLASH
-        | DOT_PERCENT | DOT_AMP => 1,
+        // Plus tier: `+ - +% -% |` (and broadcast `.+ .- .|`), left-associative.
+        PLUS | MINUS | PLUS_PERCENT | MINUS_PERCENT | PIPE | DOT_PLUS | DOT_MINUS | DOT_PIPE => 0,
+        // Times tier: `* / \ % *% &` (and their broadcast forms), left-associative.
+        STAR | SLASH | BACKSLASH | PERCENT | STAR_PERCENT | AMP | DOT_STAR | DOT_SLASH
+        | DOT_BACKSLASH | DOT_PERCENT | DOT_AMP => 1,
         // Bitshift tier: `<< >> >>>`, left-associative.
         SHL | SHR | USHR => 2,
         // Arrow/pair tier: `=> --> <-- <-->` (and their broadcast forms),

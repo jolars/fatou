@@ -1,0 +1,364 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..330
+  BINARY_EXPR@0..6
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    PLUS_PERCENT@2..4 "+%"
+    WHITESPACE@4..5 " "
+    NAME@5..6
+      IDENT@5..6 "b"
+  NEWLINE@6..7 "\n"
+  BINARY_EXPR@7..13
+    NAME@7..8
+      IDENT@7..8 "a"
+    WHITESPACE@8..9 " "
+    MINUS_PERCENT@9..11 "-%"
+    WHITESPACE@11..12 " "
+    NAME@12..13
+      IDENT@12..13 "b"
+  NEWLINE@13..14 "\n"
+  BINARY_EXPR@14..20
+    NAME@14..15
+      IDENT@14..15 "a"
+    WHITESPACE@15..16 " "
+    STAR_PERCENT@16..18 "*%"
+    WHITESPACE@18..19 " "
+    NAME@19..20
+      IDENT@19..20 "b"
+  NEWLINE@20..21 "\n"
+  BINARY_EXPR@21..32
+    NAME@21..22
+      IDENT@21..22 "a"
+    WHITESPACE@22..23 " "
+    PLUS_PERCENT@23..25 "+%"
+    WHITESPACE@25..26 " "
+    NAME@26..27
+      IDENT@26..27 "b"
+    WHITESPACE@27..28 " "
+    PLUS_PERCENT@28..30 "+%"
+    WHITESPACE@30..31 " "
+    NAME@31..32
+      IDENT@31..32 "c"
+  NEWLINE@32..33 "\n"
+  BINARY_EXPR@33..44
+    BINARY_EXPR@33..39
+      NAME@33..34
+        IDENT@33..34 "a"
+      WHITESPACE@34..35 " "
+      MINUS_PERCENT@35..37 "-%"
+      WHITESPACE@37..38 " "
+      NAME@38..39
+        IDENT@38..39 "b"
+    WHITESPACE@39..40 " "
+    MINUS_PERCENT@40..42 "-%"
+    WHITESPACE@42..43 " "
+    NAME@43..44
+      IDENT@43..44 "c"
+  NEWLINE@44..45 "\n"
+  BINARY_EXPR@45..56
+    NAME@45..46
+      IDENT@45..46 "a"
+    WHITESPACE@46..47 " "
+    STAR_PERCENT@47..49 "*%"
+    WHITESPACE@49..50 " "
+    NAME@50..51
+      IDENT@50..51 "b"
+    WHITESPACE@51..52 " "
+    STAR_PERCENT@52..54 "*%"
+    WHITESPACE@54..55 " "
+    NAME@55..56
+      IDENT@55..56 "c"
+  NEWLINE@56..57 "\n"
+  BINARY_EXPR@57..73
+    BINARY_EXPR@57..68
+      NAME@57..58
+        IDENT@57..58 "a"
+      WHITESPACE@58..59 " "
+      PLUS_PERCENT@59..61 "+%"
+      WHITESPACE@61..62 " "
+      BINARY_EXPR@62..68
+        NAME@62..63
+          IDENT@62..63 "b"
+        WHITESPACE@63..64 " "
+        STAR_PERCENT@64..66 "*%"
+        WHITESPACE@66..67 " "
+        NAME@67..68
+          IDENT@67..68 "c"
+    WHITESPACE@68..69 " "
+    MINUS_PERCENT@69..71 "-%"
+    WHITESPACE@71..72 " "
+    NAME@72..73
+      IDENT@72..73 "d"
+  NEWLINE@73..74 "\n"
+  ASSIGNMENT_EXPR@74..81
+    NAME@74..75
+      IDENT@74..75 "a"
+    WHITESPACE@75..76 " "
+    PLUS_PERCENT_EQ@76..79 "+%="
+    WHITESPACE@79..80 " "
+    NAME@80..81
+      IDENT@80..81 "b"
+  NEWLINE@81..82 "\n"
+  ASSIGNMENT_EXPR@82..89
+    NAME@82..83
+      IDENT@82..83 "a"
+    WHITESPACE@83..84 " "
+    MINUS_PERCENT_EQ@84..87 "-%="
+    WHITESPACE@87..88 " "
+    NAME@88..89
+      IDENT@88..89 "b"
+  NEWLINE@89..90 "\n"
+  ASSIGNMENT_EXPR@90..97
+    NAME@90..91
+      IDENT@90..91 "a"
+    WHITESPACE@91..92 " "
+    STAR_PERCENT_EQ@92..95 "*%="
+    WHITESPACE@95..96 " "
+    NAME@96..97
+      IDENT@96..97 "b"
+  NEWLINE@97..98 "\n"
+  ASSIGNMENT_EXPR@98..122
+    UNARY_EXPR@98..109
+      MINUS_PERCENT@98..100 "-%"
+      PAREN_EXPR@100..109
+        LPAREN@100..101 "("
+        TYPE_ANNOTATION@101..108
+          NAME@101..102
+            IDENT@101..102 "x"
+          COLON_COLON@102..104 "::"
+          NAME@104..108
+            IDENT@104..108 "Bool"
+        RPAREN@108..109 ")"
+    WHITESPACE@109..110 " "
+    EQ@110..111 "="
+    WHITESPACE@111..112 " "
+    UNARY_EXPR@112..122
+      MINUS_PERCENT@112..114 "-%"
+      PAREN_EXPR@114..122
+        LPAREN@114..115 "("
+        CALL_EXPR@115..121
+          NAME@115..118
+            IDENT@115..118 "Int"
+          ARG_LIST@118..121
+            LPAREN@118..119 "("
+            ARG@119..120
+              NAME@119..120
+                IDENT@119..120 "x"
+            RPAREN@120..121 ")"
+        RPAREN@121..122 ")"
+  NEWLINE@122..123 "\n"
+  ASSIGNMENT_EXPR@123..170
+    CALL_EXPR@123..147
+      PLUS_PERCENT@123..125 "+%"
+      ARG_LIST@125..147
+        LPAREN@125..126 "("
+        ARG@126..135
+          TYPE_ANNOTATION@126..135
+            NAME@126..127
+              IDENT@126..127 "x"
+            COLON_COLON@127..129 "::"
+            NAME@129..135
+              IDENT@129..135 "Number"
+        COMMA@135..136 ","
+        WHITESPACE@136..137 " "
+        ARG@137..146
+          TYPE_ANNOTATION@137..146
+            NAME@137..138
+              IDENT@137..138 "y"
+            COLON_COLON@138..140 "::"
+            NAME@140..146
+              IDENT@140..146 "Number"
+        RPAREN@146..147 ")"
+    WHITESPACE@147..148 " "
+    EQ@148..149 "="
+    WHITESPACE@149..150 " "
+    CALL_EXPR@150..170
+      PLUS_PERCENT@150..152 "+%"
+      ARG_LIST@152..170
+        LPAREN@152..153 "("
+        ARG@153..169
+          SPLAT_EXPR@153..169
+            CALL_EXPR@153..166
+              NAME@153..160
+                IDENT@153..160 "promote"
+              ARG_LIST@160..166
+                LPAREN@160..161 "("
+                ARG@161..162
+                  NAME@161..162
+                    IDENT@161..162 "x"
+                COMMA@162..163 ","
+                WHITESPACE@163..164 " "
+                ARG@164..165
+                  NAME@164..165
+                    IDENT@164..165 "y"
+                RPAREN@165..166 ")"
+            DOT_DOT_DOT@166..169 "..."
+        RPAREN@169..170 ")"
+  NEWLINE@170..171 "\n"
+  CALL_EXPR@171..187
+    PAREN_EXPR@171..175
+      LPAREN@171..172 "("
+      STAR_PERCENT@172..174 "*%"
+      RPAREN@174..175 ")"
+    ARG_LIST@175..187
+      LPAREN@175..176 "("
+      ARG@176..177
+        NAME@176..177
+          IDENT@176..177 "x"
+      COMMA@177..178 ","
+      WHITESPACE@178..179 " "
+      ARG@179..180
+        NAME@179..180
+          IDENT@179..180 "y"
+      COMMA@180..181 ","
+      WHITESPACE@181..182 " "
+      ARG@182..186
+        SPLAT_EXPR@182..186
+          NAME@182..183
+            IDENT@182..183 "z"
+          DOT_DOT_DOT@183..186 "..."
+      RPAREN@186..187 ")"
+  NEWLINE@187..188 "\n"
+  FOR_EXPR@188..224
+    FOR_KW@188..191 "for"
+    WHITESPACE@191..192 " "
+    FOR_BINDING@192..220
+      NAME@192..194
+        IDENT@192..194 "op"
+      WHITESPACE@194..195 " "
+      IDENT@195..197 "in"
+      WHITESPACE@197..198 " "
+      TUPLE_EXPR@198..220
+        LPAREN@198..199 "("
+        ARG@199..201
+          QUOTE_SYM@199..201
+            COLON@199..200 ":"
+            PLUS@200..201 "+"
+        COMMA@201..202 ","
+        WHITESPACE@202..203 " "
+        ARG@203..208
+          QUOTE_SYM@203..208
+            COLON@203..204 ":"
+            PAREN_EXPR@204..208
+              LPAREN@204..205 "("
+              PLUS_PERCENT@205..207 "+%"
+              RPAREN@207..208 ")"
+        COMMA@208..209 ","
+        WHITESPACE@209..210 " "
+        ARG@210..212
+          QUOTE_SYM@210..212
+            COLON@210..211 ":"
+            STAR@211..212 "*"
+        COMMA@212..213 ","
+        WHITESPACE@213..214 " "
+        ARG@214..219
+          QUOTE_SYM@214..219
+            COLON@214..215 ":"
+            PAREN_EXPR@215..219
+              LPAREN@215..216 "("
+              STAR_PERCENT@216..218 "*%"
+              RPAREN@218..219 ")"
+        RPAREN@219..220 ")"
+    BLOCK@220..221
+      NEWLINE@220..221 "\n"
+    END_KW@221..224 "end"
+  NEWLINE@224..225 "\n"
+  IMPORT_STMT@225..248
+    IMPORT_KW@225..231 "import"
+    WHITESPACE@231..232 " "
+    IMPORT_PATH@232..237
+      DOT@232..233 "."
+      IDENT@233..237 "Base"
+    COLON@237..238 ":"
+    WHITESPACE@238..239 " "
+    IMPORT_PATH@239..240
+      STAR@239..240 "*"
+    COMMA@240..241 ","
+    WHITESPACE@241..242 " "
+    IMPORT_PATH@242..244
+      STAR_PERCENT@242..244 "*%"
+    COMMA@244..245 ","
+    WHITESPACE@245..246 " "
+    IMPORT_PATH@246..248
+      PLUS_PERCENT@246..248 "+%"
+  NEWLINE@248..249 "\n"
+  ASSIGNMENT_EXPR@249..257
+    NAME@249..252
+      IDENT@249..252 "mul"
+    WHITESPACE@252..253 " "
+    EQ@253..254 "="
+    WHITESPACE@254..255 " "
+    OPERATOR_ATOM@255..257
+      STAR_PERCENT@255..257 "*%"
+  NEWLINE@257..258 "\n"
+  ASSIGNMENT_EXPR@258..329
+    WHERE_EXPR@258..299
+      CALL_EXPR@258..280
+        NAME@258..266
+          IDENT@258..266 "midpoint"
+        ARG_LIST@266..280
+          LPAREN@266..267 "("
+          ARG@267..272
+            TYPE_ANNOTATION@267..272
+              NAME@267..269
+                IDENT@267..269 "lo"
+              COLON_COLON@269..271 "::"
+              NAME@271..272
+                IDENT@271..272 "T"
+          COMMA@272..273 ","
+          WHITESPACE@273..274 " "
+          ARG@274..279
+            TYPE_ANNOTATION@274..279
+              NAME@274..276
+                IDENT@274..276 "hi"
+              COLON_COLON@276..278 "::"
+              NAME@278..279
+                IDENT@278..279 "T"
+          RPAREN@279..280 ")"
+      WHITESPACE@280..281 " "
+      WHERE_KW@281..286 "where"
+      WHITESPACE@286..287 " "
+      BRACES@287..299
+        LBRACE@287..288 "{"
+        ARG@288..298
+          BINARY_EXPR@288..298
+            NAME@288..289
+              IDENT@288..289 "T"
+            SUBTYPE@289..291 "<:"
+            NAME@291..298
+              IDENT@291..298 "Integer"
+        RBRACE@298..299 "}"
+    WHITESPACE@299..300 " "
+    EQ@300..301 "="
+    WHITESPACE@301..302 " "
+    BINARY_EXPR@302..329
+      NAME@302..304
+        IDENT@302..304 "lo"
+      WHITESPACE@304..305 " "
+      PLUS_PERCENT@305..307 "+%"
+      WHITESPACE@307..308 " "
+      PAREN_EXPR@308..329
+        LPAREN@308..309 "("
+        BINARY_EXPR@309..328
+          PAREN_EXPR@309..319
+            LPAREN@309..310 "("
+            BINARY_EXPR@310..318
+              NAME@310..312
+                IDENT@310..312 "hi"
+              WHITESPACE@312..313 " "
+              MINUS_PERCENT@313..315 "-%"
+              WHITESPACE@315..316 " "
+              NAME@316..318
+                IDENT@316..318 "lo"
+            RPAREN@318..319 ")"
+          WHITESPACE@319..320 " "
+          USHR@320..323 ">>>"
+          WHITESPACE@323..324 " "
+          LITERAL@324..328
+            HEX_INT@324..328 "0x01"
+        RPAREN@328..329 ")"
+  NEWLINE@329..330 "\n"
