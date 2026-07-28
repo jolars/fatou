@@ -2356,7 +2356,7 @@ fn parse_string_literal(
                 i += 1;
             }
             Some(TokKind::Dollar) => {
-                i = parse_interpolation(ctx, &mut events, i, diagnostics);
+                i = parse_interpolation(ctx, &mut events, i, true, diagnostics);
             }
             Some(k) if k == close_kind => {
                 events.push(Event::Tok(i));
@@ -2456,7 +2456,7 @@ pub(super) fn parse_prefix_interpolation(
         Some(TokKind::LParen | TokKind::Ident)
     ) {
         let mut events = Vec::new();
-        let end = parse_interpolation(ctx, &mut events, dollar, diagnostics);
+        let end = parse_interpolation(ctx, &mut events, dollar, false, diagnostics);
         return ExprParse {
             start: dollar,
             end,
@@ -2492,10 +2492,16 @@ pub(super) fn parse_prefix_interpolation(
 /// Parse one `$ident` or `$(expr)` interpolation into an `INTERPOLATION` node,
 /// returning the token index just past it. `$(...)` interiors reuse the Pratt
 /// parser, so they become real expression subtrees.
+///
+/// `in_string` marks a string/command literal's interpolation, the only context
+/// where the multi-value paren forms are rejected — in expression position
+/// (`quote`/`:(…)`/a bare `$`) Julia accepts them, since the interpolated value
+/// is an ordinary expression rather than something to be stringified.
 fn parse_interpolation(
     ctx: &ParserCtx<'_>,
     events: &mut Vec<Event>,
     dollar: usize,
+    in_string: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     events.push(Event::Start(SyntaxKind::INTERPOLATION));
@@ -2509,17 +2515,20 @@ fn parse_interpolation(
             // `PAREN_EXPR` the projector unwraps, while the multi-value forms
             // `$(x;y)` (`PAREN_BLOCK`), `$(x,y)` (`TUPLE_EXPR`), `$(x for …)`
             // (`GENERATOR`), and the empty `$()` (`TUPLE_EXPR`) are what
-            // JuliaSyntax rejects as a `(error …)` interpolation.
+            // JuliaSyntax rejects as a `(error …)` interpolation — but only
+            // inside a string, where the value has to be stringified.
             let Some(inner) = parse_paren(ctx, next, false, diagnostics) else {
                 events.push(Event::Finish);
                 return next + 1;
             };
-            if matches!(
-                inner.events.first(),
-                Some(Event::Start(
-                    SyntaxKind::PAREN_BLOCK | SyntaxKind::TUPLE_EXPR | SyntaxKind::GENERATOR
-                ))
-            ) {
+            if in_string
+                && matches!(
+                    inner.events.first(),
+                    Some(Event::Start(
+                        SyntaxKind::PAREN_BLOCK | SyntaxKind::TUPLE_EXPR | SyntaxKind::GENERATOR
+                    ))
+                )
+            {
                 let dollar_tok = &ctx.tokens()[dollar];
                 push_diagnostic(
                     diagnostics,
@@ -2728,9 +2737,10 @@ fn array_element_boundary(ctx: &ParserCtx<'_>, operand_end: usize, op_idx: usize
 /// the unary-and-binary infix operators `+ - +% -% & ~` (broadcast `.+ .- .~`)
 /// and the symbol-quote `:` (glued `:a` is a quoted symbol). Binary-only
 /// operators (`* / % *% | :: <: >:`, broadcast `.& .|`) and any *suffixed* (`+₁`,
-/// never unary) stay infix and do not split. Unary-only prefixes (`! ¬ √ $`) have
+/// never unary) stay infix and do not split. Unary-only prefixes (`! ¬ √`) have
 /// no infix binding power, so they end the element naturally and are not listed
-/// here. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
+/// here; the interpolation sigil `$` does have one (Julia's old xor operator),
+/// so it is listed. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
 fn op_can_lead_array_element(op: &Token) -> bool {
     matches!(
         op.kind,
@@ -2744,6 +2754,7 @@ fn op_can_lead_array_element(op: &Token) -> bool {
             | TokKind::DotTilde
             | TokKind::Amp
             | TokKind::Colon
+            | TokKind::Dollar
     ) && !op.text.chars().next_back().is_some_and(is_op_suffix_char)
 }
 
@@ -5574,7 +5585,12 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // Bitwise-or `|` shares the `+` (plus) precedence family, left-associative
         // (`a | b & c` ⇒ `(a | (b & c))`, `a & b | c` ⇒ `((a & b) | c)`).
         // The wrapping `+%`/`-%` share the `+` tier (JuliaSyntax `is_prec_plus`).
-        TokKind::Plus
+        // `$` is two operators in one spelling: the interpolation sigil in atom
+        // position (handled by `parse_prefix_interpolation`) and Julia's old xor
+        // operator in infix position, also at the `+` tier — the Pratt loop only
+        // consults this table in infix position, so the two never collide.
+        TokKind::Dollar
+        | TokKind::Plus
         | TokKind::Minus
         | TokKind::PlusPercent
         | TokKind::MinusPercent

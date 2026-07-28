@@ -220,7 +220,7 @@ fn project(node: &SyntaxNode) -> String {
         // inside a string the inner value is used instead (via `string_parts`).
         // A bare `$` with no operand (`$\n`) is the `$` symbol itself.
         INTERPOLATION => {
-            let inner = project_interpolation(node);
+            let inner = project_interpolation(node, false);
             if inner.is_empty() && !node.children_with_tokens().any(|el| el.kind() == LPAREN) {
                 "$".to_string()
             } else {
@@ -386,6 +386,9 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
         SLASH_SLASH => CallI("//"),
         CARET => CallI("^"),
         PERCENT => CallI("%"),
+        // Infix `$` is Julia's old xor operator; in atom position the same token
+        // is the interpolation sigil, which never reaches an infix projection.
+        DOLLAR => CallI("$"),
         PLUS_PERCENT => CallI("+%"),
         PLUS_PLUS => CallI("++"),
         MINUS_PERCENT => CallI("-%"),
@@ -545,8 +548,12 @@ fn op_has_suffix(text: &str) -> bool {
         .is_some_and(super::lexer::is_op_suffix_char)
 }
 
+/// [`SyntaxKind::is_operator`], plus the infix `$` (Julia's old xor operator).
+/// The shared predicate excludes `DOLLAR` because the same token is the
+/// interpolation sigil, which is not an operator anywhere else; in an infix
+/// position the projector needs it to be one.
 fn is_operator(kind: SyntaxKind) -> bool {
-    kind.is_operator()
+    kind.is_operator() || kind == DOLLAR
 }
 
 // --- Binary / unary / assignment -------------------------------------------
@@ -2589,7 +2596,7 @@ fn triple_string_parts(node: &SyntaxNode, raw: bool) -> Vec<String> {
                 lines
                     .last_mut()
                     .unwrap()
-                    .push(TripleItem::Interp(project_interpolation(&n)));
+                    .push(TripleItem::Interp(project_interpolation(&n, true)));
             }
             _ => {}
         }
@@ -2880,7 +2887,7 @@ fn decoded_string_parts(node: &SyntaxNode) -> Option<Vec<String>> {
                 }
             }
             NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
-                parts.push(project_interpolation(&n));
+                parts.push(project_interpolation(&n, true));
             }
             _ => {}
         }
@@ -2907,7 +2914,7 @@ fn raw_string_parts(node: &SyntaxNode) -> Vec<String> {
                 parts.push(format!("\"{}\"", t.text()));
             }
             NodeOrToken::Node(n) if n.kind() == INTERPOLATION => {
-                parts.push(project_interpolation(&n));
+                parts.push(project_interpolation(&n, true));
             }
             _ => {}
         }
@@ -2969,14 +2976,18 @@ fn escape_string_value(s: &str) -> String {
     out
 }
 
-fn project_interpolation(node: &SyntaxNode) -> String {
-    // `$name` → the bare identifier; `$(expr)` → the projected sub-expression. A
-    // `$(…)` whose parens hold a multi-value form is invalid: JuliaSyntax renders
-    // a block (`$(x;y)`), tuple (`$(x,y)`, empty `$()`), or generator
-    // (`$(x for …)`) operand as `(error …)`, flattening block/tuple children and
-    // keeping the generator nested. A single expression is a `PAREN_EXPR` the
-    // normal `project` unwraps.
+fn project_interpolation(node: &SyntaxNode, in_string: bool) -> String {
+    // `$name` → the bare identifier; `$(expr)` → the projected sub-expression.
+    // *Inside a string*, a `$(…)` whose parens hold a multi-value form is
+    // invalid: JuliaSyntax renders a block (`$(x;y)`), tuple (`$(x,y)`, empty
+    // `$()`), or generator (`$(x for …)`) operand as `(error …)`, flattening
+    // block/tuple children and keeping the generator nested. In expression
+    // position the same forms are legal and project as themselves. A single
+    // expression is a `PAREN_EXPR` the normal `project` unwraps.
     if let Some(inner) = first_node(node) {
+        if !in_string {
+            return project(&inner);
+        }
         return match inner.kind() {
             PAREN_BLOCK => sexp("error", project_block_args(&inner)),
             TUPLE_EXPR => sexp("error", project_args(&inner)),
