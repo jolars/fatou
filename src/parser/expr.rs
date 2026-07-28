@@ -5048,6 +5048,10 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             // The wrapping `*%` is binary-only, so `*%(a, b)` is a plain call.
             // Its unary-capable siblings `+%`/`-%` route through the unary arm.
             | StarPercent
+            // The range `..` is not a Base operator but packages define it
+            // (`..(x, y) = x == y`), and `..(a, b)` is an ordinary call on it,
+            // not the prefix application `(call-pre (error ..) …)`.
+            | DotDot
             | EqEq
             | NotEq
             | EqEqEq

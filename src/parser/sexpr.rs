@@ -1841,6 +1841,14 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 parts.push(name_text(&n));
                 seen_name = true;
             }
+            // A parenthesized operator name (`using A: (..)` → `(importpath ..)`).
+            // The operator arrives wrapped rather than as a loose token so its own
+            // dots are not counted as relative-import dots; the parens themselves
+            // are dropped like every other delimiter here.
+            NodeOrToken::Node(n) if n.kind() == OPERATOR_ATOM => {
+                parts.push(project_operator_atom(&n));
+                seen_name = true;
+            }
             // A quoted operator symbol component (`import A.:+` → `(quote-: +)`).
             NodeOrToken::Node(n) if n.kind() == QUOTE_SYM => {
                 parts.push(project_quote_sym(&n));

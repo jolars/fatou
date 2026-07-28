@@ -987,6 +987,23 @@ fn parse_import_path(
             body.push(Event::Tok(i));
             i += 1;
         }
+        Some(TokKind::LParen) if paren_operator_name(ctx, i).is_some() => {
+            // A parenthesized operator name (`using A: (..)`, `import A: (+)`).
+            // The parens are how `..` is named at all — bare, its dots read as a
+            // relative path (`using A: ..` is `(importpath . . (error (error)))`)
+            // — and JuliaSyntax projects them away: `(importpath ..)`. Wrap the
+            // operator in an `OPERATOR_ATOM` so the projector renders the name
+            // whole rather than counting its dots as relative-import dots.
+            let (op, rparen) = paren_operator_name(ctx, i).expect("guarded above");
+            body.push(Event::Tok(i)); // `(`
+            push_range(&mut body, i + 1, op);
+            body.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
+            body.push(Event::Tok(op));
+            body.push(Event::Finish);
+            push_range(&mut body, op + 1, rparen);
+            body.push(Event::Tok(rparen)); // `)`
+            i = rparen + 1;
+        }
         _ => {
             // No name: a bare relative path (`import .`) keeps just the dots;
             // nothing at all means no path here.
@@ -1073,6 +1090,21 @@ fn parse_import_path(
     events.extend(body);
     events.push(Event::Finish);
     i
+}
+
+/// A `(op)` group at `lparen_idx` naming a single operator, as an import clause
+/// spells one that cannot stand bare (`using A: (..)`). Returns the operator's
+/// token index and the closing paren's. Only a lone *undotted* operator qualifies
+/// — anything else in the parens is an expression, not a name, and a broadcast
+/// operator is not importable at all (`import A: (.==)` is an error in Julia).
+fn paren_operator_name(ctx: &ParserCtx<'_>, lparen_idx: usize) -> Option<(usize, usize)> {
+    let op = ctx.skip_ws(lparen_idx + 1);
+    let kind = ctx.token(op)?.kind;
+    if !(is_op_name(kind) || is_unicode_op_name(kind) || kind == TokKind::DotDot) {
+        return None;
+    }
+    let rparen = ctx.skip_ws(op + 1);
+    (ctx.token(rparen)?.kind == TokKind::RParen).then_some((op, rparen))
 }
 
 /// An undotted operator symbol usable as a bare import-path name (`import A: +`,
