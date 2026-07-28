@@ -1,0 +1,1 @@
+(toplevel (module Sort (block (doc (string-s "    searchsorted(v, x)\n") searchsorted))) (module-bare M (block (doc (string "doc") f))) (block (doc (string "doc") f)) (quote (block (doc (string "Second docstring") Module29432))) (call eval (quote (block (doc (string "Second docstring") Module29432)))) (module M (block (doc (string-s "doc\n") (= (call f x) x)))))

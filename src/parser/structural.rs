@@ -13,6 +13,7 @@
 //! module directives (`import`/`using`/`export`).
 
 use crate::parser::context::ParserCtx;
+use crate::parser::core::stmt_is_doc_string;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
@@ -205,7 +206,7 @@ fn parse_block_only(
     let ctx = ParserCtx::new(tokens);
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
-    let mut i = run_block(&ctx, &mut events, start + 1, END_ONLY, diagnostics);
+    let mut i = run_doc_block(&ctx, &mut events, start + 1, END_ONLY, diagnostics);
     i = expect_end(&ctx, &mut events, i, start, diagnostics);
     events.push(Event::Finish);
     Some(ExprParse {
@@ -1732,7 +1733,21 @@ fn run_block(
     terminators: &[TokKind],
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    run_block_inner(ctx, events, start, terminators, false, diagnostics)
+    run_block_inner(ctx, events, start, terminators, false, false, diagnostics)
+}
+
+/// Like [`run_block`], but a *docstring* block — `begin`/`quote`, whose bodies
+/// Julia parses with `parse_docstring` (`begin\n"doc" f\nend` ⇒
+/// `(block (doc (string "doc") f))`). A `function`/`let`/`for`/`struct` body does
+/// not take one, so it keeps the plain [`run_block`].
+fn run_doc_block(
+    ctx: &ParserCtx<'_>,
+    events: &mut Vec<Event>,
+    start: usize,
+    terminators: &[TokKind],
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> usize {
+    run_block_inner(ctx, events, start, terminators, false, true, diagnostics)
 }
 
 /// Like [`run_block`], but a module body where the contextual keyword `public`
@@ -1744,7 +1759,7 @@ fn run_module_block(
     terminators: &[TokKind],
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
-    run_block_inner(ctx, events, start, terminators, true, diagnostics)
+    run_block_inner(ctx, events, start, terminators, true, true, diagnostics)
 }
 
 fn run_block_inner(
@@ -1753,12 +1768,19 @@ fn run_block_inner(
     start: usize,
     terminators: &[TokKind],
     public_context: bool,
+    // Whether a docstring may attach to the *next* statement on the same line
+    // (`begin\n"doc" f\nend`). Only `begin`/`quote` and module bodies take one;
+    // elsewhere the glued statement is trailing junk, as it is for any other pair.
+    doc_container: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
     events.push(Event::Start(SyntaxKind::BLOCK));
     let mut i = start;
     let mut parsed_any = false;
+    // Whether the statement just parsed is a doc-eligible string, so a statement
+    // glued to it is its documentation target rather than junk.
+    let mut pending_doc = false;
 
     loop {
         // Trivia and `;` statement separators belong to the block. A newline or
@@ -1785,10 +1807,11 @@ fn run_block_inner(
             // leaves the remainder for the closing recovery (`expect_end`), which
             // bumps it as flat error tokens up to the closing keyword
             // (`begin x y end` ⇒ `(block x (error-t y))`).
-            Some(_) if parsed_any && !saw_separator => break,
+            Some(_) if parsed_any && !saw_separator && !(doc_container && pending_doc) => break,
             Some(_) => {
                 let parsed = parse_block_stmt(tokens, i, public_context, diagnostics);
                 if let Some(stmt) = parsed {
+                    pending_doc = stmt_is_doc_string(&stmt.events, tokens);
                     events.extend(stmt.events);
                     i = stmt.end;
                     parsed_any = true;
