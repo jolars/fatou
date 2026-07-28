@@ -1117,6 +1117,23 @@ impl<'a> Lexer<'a> {
                 self.push_op(kind, start);
                 return;
             }
+            // The broadcast minus sign `.−` and its augmented form `.−=`. U+2212
+            // lexes as the ASCII `-` (see the undotted case below), so these are
+            // plain `DotMinus`/`DotMinusEq` tokens spanning the sign.
+            if matches!(b1, Some(b) if !b.is_ascii()) {
+                let ch = self.char_at(self.pos + 1);
+                if ch == MINUS_SIGN {
+                    let eq = self.peek(1 + ch.len_utf8()) == Some(b'=');
+                    let kind = if eq {
+                        TokKind::DotMinusEq
+                    } else {
+                        TokKind::DotMinus
+                    };
+                    self.pos += 1 + ch.len_utf8() + usize::from(eq);
+                    self.push_op(kind, start);
+                    return;
+                }
+            }
             // The broadcast Unicode augmented assignments `.÷=`/`.⊻=` fuse `.` +
             // the operator + a trailing `=` into one token.
             if matches!(b1, Some(b) if !b.is_ascii()) {
@@ -1141,7 +1158,7 @@ impl<'a> Lexer<'a> {
             // it needs its own (currently deferred) projection.
             if b1.is_some_and(|b| !b.is_ascii()) {
                 let ch = self.char_at(self.pos + 1);
-                if let Some(kind) = super::unicode_ops::unicode_op_kind(ch)
+                if let Some(kind) = unicode_op_kind(ch)
                     .filter(|&k| is_unicode_infix_tier(k) || k == TokKind::UniRadical)
                 {
                     self.pos += 1 + ch.len_utf8();
@@ -1307,7 +1324,16 @@ impl<'a> Lexer<'a> {
                     };
                     self.pos += ch.len_utf8() + 1;
                     self.push_op(kind, start);
-                } else if let Some(kind) = super::unicode_ops::unicode_op_kind(ch) {
+                } else if ch == MINUS_SIGN {
+                    // U+2212 MINUS SIGN is the ASCII `-`: JuliaSyntax's tokenizer
+                    // emits the `-` kind for it, with the augmented `−=` fused
+                    // like `-=`. The multi-char `-> -- -%` forms are ASCII-only,
+                    // so nothing else can follow.
+                    let eq = self.peek(ch.len_utf8()) == Some(b'=');
+                    let kind = if eq { TokKind::MinusEq } else { TokKind::Minus };
+                    self.pos += ch.len_utf8() + usize::from(eq);
+                    self.push_op(kind, start);
+                } else if let Some(kind) = unicode_op_kind(ch) {
                     self.pos += ch.len_utf8();
                     self.push_op(kind, start);
                 } else {
@@ -1503,6 +1529,22 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | UniTimes
             | UniPower
     )
+}
+
+/// U+2212 MINUS SIGN, which Julia treats as the ASCII `-`.
+const MINUS_SIGN: char = '\u{2212}';
+
+/// [`unicode_ops::unicode_op_kind`], extended with the operator chars Julia
+/// folds onto an existing operator rather than giving a kind of their own: the
+/// two middle dots `·` (U+00B7) and `·` (U+0387) both lex as the times-tier
+/// `⋅` (U+22C5). They are absent from the generated table because it is keyed
+/// on JuliaSyntax's *kinds*, where all three share the `⋅` entry; the
+/// projector folds their text back to `⋅`.
+fn unicode_op_kind(ch: char) -> Option<TokKind> {
+    match ch {
+        '\u{b7}' | '\u{387}' => Some(TokKind::UniTimes),
+        _ => super::unicode_ops::unicode_op_kind(ch),
+    }
 }
 
 /// Whether a Unicode operator tier is an infix `call-i` tier (so a broadcast

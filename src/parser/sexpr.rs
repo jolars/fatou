@@ -23,6 +23,7 @@ use crate::parser::core::is_bare_signature_name;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 use rowan::NodeOrToken;
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use SyntaxKind::*;
@@ -234,7 +235,9 @@ fn project(node: &SyntaxNode) -> String {
             None => significant(node)
                 .iter()
                 .find_map(|el| match el {
-                    NodeOrToken::Token(t) if is_operator(t.kind()) => Some(t.text().to_string()),
+                    NodeOrToken::Token(t) if is_operator(t.kind()) => {
+                        Some(folded_op_text(t.text()).into_owned())
+                    }
                     _ => None,
                 })
                 .unwrap_or_else(|| "(block)".to_string()),
@@ -459,6 +462,29 @@ fn infix_head(kind: SyntaxKind) -> InfixHead {
     }
 }
 
+/// Fold an operator token's source text onto the spelling JuliaSyntax shows.
+/// Julia's `normalize_identifier` maps a few operator chars onto an existing
+/// operator — the two middle dots `·` (U+00B7) and `·` (U+0387) onto `⋅`
+/// (U+22C5), and the minus sign `−` (U+2212) onto the ASCII `-` — so
+/// JuliaSyntax's token *kind*, and hence its s-expression, uses the folded
+/// spelling. The CST keeps the raw source bytes (losslessness requires it), so
+/// the fold belongs here, in the projector's encoding translation. Non-folding
+/// text (the overwhelming majority) is returned borrowed.
+fn folded_op_text(text: &str) -> Cow<'_, str> {
+    if text.is_ascii() || !text.contains(['\u{b7}', '\u{387}', '\u{2212}']) {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(
+        text.chars()
+            .map(|c| match c {
+                '\u{b7}' | '\u{387}' => '\u{22c5}',
+                '\u{2212}' => '-',
+                other => other,
+            })
+            .collect(),
+    )
+}
+
 /// A bare operator used as a value atom (`+` → `+`, `.&` → `(. &)`, `:` → `:`).
 /// Broadcast operators project to `(. op)` (via `operator_func_repr`); every
 /// other operator projects to its raw token text, so kinds without an
@@ -488,7 +514,7 @@ fn project_operator_atom(node: &SyntaxNode) -> String {
             {
                 Some(format!("(. {})", &t.text()[1..]))
             }
-            NodeOrToken::Token(t) => Some(t.text().to_string()),
+            NodeOrToken::Token(t) => Some(folded_op_text(t.text()).into_owned()),
             _ => None,
         })
         .unwrap_or_else(|| "(operator)".to_string())
@@ -734,9 +760,17 @@ fn infix_call_string(op: &SyntaxToken, lhs: &str, rhs: &str) -> Option<String> {
         // A broadcast Unicode operator (`.…`, `.×`) carries a leading `.`: strip
         // it and head `dotcall-i`, like the ASCII broadcast forms.
         UNICODE_OP if op.text().starts_with('.') => {
-            return Some(format!("(dotcall-i {lhs} {} {rhs})", &op.text()[1..]));
+            return Some(format!(
+                "(dotcall-i {lhs} {} {rhs})",
+                folded_op_text(&op.text()[1..])
+            ));
         }
-        UNICODE_OP => return Some(format!("(call-i {lhs} {} {rhs})", op.text())),
+        UNICODE_OP => {
+            return Some(format!(
+                "(call-i {lhs} {} {rhs})",
+                folded_op_text(op.text())
+            ));
+        }
         UNICODE_ASSIGN_OP | COLON_EQ => return Some(format!("({} {lhs} {rhs})", op.text())),
         _ => {}
     }
@@ -822,9 +856,9 @@ fn project_comparison(node: &SyntaxNode) -> String {
             NodeOrToken::Token(t) => {
                 let text = t.text();
                 if text.starts_with('.') && text.len() > 1 && text.as_bytes()[1] != b'.' {
-                    parts.push(format!("(. {})", &text[1..]));
+                    parts.push(format!("(. {})", folded_op_text(&text[1..])));
                 } else {
-                    parts.push(text.to_string());
+                    parts.push(folded_op_text(text).into_owned());
                 }
                 last_op = Some(t);
             }
@@ -841,7 +875,7 @@ fn project_assignment(node: &SyntaxNode) -> String {
     // `.+=`, … all project as `(<op> lhs rhs)`.
     let op = operator_token(node);
     let head = match &op {
-        Some(t) => t.text().to_string(),
+        Some(t) => folded_op_text(t.text()).into_owned(),
         None => "=".to_string(),
     };
     let operands = child_nodes(node);
@@ -891,7 +925,7 @@ fn project_unary(node: &SyntaxNode) -> String {
         UNICODE_RADICAL if op.text().starts_with('.') => {
             format!("(dotcall-pre {} {operand})", &op.text()[1..])
         }
-        _ => format!("(call-pre {} {operand})", op.text()),
+        _ => format!("(call-pre {} {operand})", folded_op_text(op.text())),
     }
 }
 
@@ -997,8 +1031,8 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
             // `(call (. ≠) a b)`).
             NodeOrToken::Token(t) if matches!(t.kind(), UNICODE_OP | UNICODE_RADICAL) => {
                 parts.push(match t.text().strip_prefix('.') {
-                    Some(rest) => format!("(. {rest})"),
-                    None => t.text().to_string(),
+                    Some(rest) => format!("(. {})", folded_op_text(rest)),
+                    None => folded_op_text(t.text()).into_owned(),
                 });
                 break;
             }
@@ -1642,7 +1676,9 @@ fn project_quote_sym(node: &SyntaxNode) -> String {
                 return format!("(quote-: {prefix}(error-t))");
             }
             NodeOrToken::Token(t) if is_trivia(t.kind()) => continue,
-            NodeOrToken::Token(t) => return format!("(quote-: {prefix}{})", t.text()),
+            NodeOrToken::Token(t) => {
+                return format!("(quote-: {prefix}{})", folded_op_text(t.text()));
+            }
         }
     }
     "(quote-:)".to_string()
@@ -2180,7 +2216,7 @@ fn project_literal(node: &SyntaxNode) -> String {
     // dropped (`+2.0` → `2.0`, matching JuliaSyntax's glued literal).
     if let [sign, num] = toks.as_slice() {
         let n = literal_token_text(num);
-        return if sign.text() == "-" {
+        return if matches!(sign.text(), "-" | "−") {
             format!("-{n}")
         } else {
             n

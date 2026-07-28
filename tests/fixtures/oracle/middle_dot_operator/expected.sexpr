@@ -1,0 +1,1 @@
+(toplevel (call-i a ⋅ b) (call-i a ⋅ b) (call-i a ⋅ b) (call-i a ⋅ b) (call-i 1 ⋅ 2) ⋅ ⋅ (quote-: ⋅) (call ⋅ a b) (dotcall-i a ⋅ b) (dotcall-i (dotcall-i a ⋅ b) ⋅ c))

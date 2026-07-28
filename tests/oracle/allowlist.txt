@@ -139,6 +139,8 @@ macro_space_args
 macro_space_arg_trailing_comment
 matrices
 matrix_end_keyword
+middle_dot_operator
+minus_sign_operator
 multi_clause_generators
 multi_param_groups
 name_list_comment_continuation
