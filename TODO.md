@@ -96,6 +96,71 @@
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
 
+### Architecture & robustness audit
+
+Cross-applied from the arity and badness audits (both modeled on
+rust-analyzer). Fatou is already ahead on several axes that are still open there
+— `positionEncoding` negotiation, `didChangeWatchedFiles` watchers, salsa
+durability tiers (HIGH `LibraryIndex`, LOW `SourceFile`/`WorkspaceFiles`),
+firewall queries, an opaque `FileId`/`FileSourceMap`, and read-pool per-job
+panic isolation — so those need no work. The items below are the remaining gaps.
+
+- [x] Analysis-thread + main-loop panic guard. A `guard(label, f)` wraps every
+  analysis-thread `select!` arm (`src/lsp/analysis_thread.rs`) and the main
+  loop's request/notification/outbound dispatch (`src/lsp/server.rs`) in
+  `catch_unwind`, mirroring the read pool's per-job isolation
+  (`src/lsp/task_pool.rs`). A panic mid-write no longer kills the sole db writer
+  and zombies the server. Covered by
+  `guard_contains_a_panic_and_reports_completion`.
+- [x] Mutex-poison recovery. `IncrementalDatabase::source_map` now locks through
+  a helper that recovers via `PoisonError::into_inner` instead of
+  `.expect(...)`, so a panic caught by the guard above leaves the path→input map
+  usable rather than crashing the next access. Covered by
+  `poisoned_source_map_lock_recovers`.
+- [x] Parser stuck-loop guard. `ParserCtx` (`src/parser/context.rs`) carries a
+  step budget ticked by every peek primitive and reset on frontier progress; a
+  non-advancing loop trips `PARSER_STEP_LIMIT` and panics loudly instead of
+  hanging (the LSP read pool and analysis-thread guard recover; the CLI aborts
+  with a diagnosable message). Adapted from badness's `grammar.rs` to fatou's
+  functional index-threaded parser rather than a stateful cursor. Covered by
+  `step_guard_trips_when_wedged` and `step_budget_resets_on_progress`. Directly
+  targets the `timeout` class in the smoke-test corpus.
+
+- [ ] **P1 — Request cancellation + stale-read protocol.** Fatou has none today:
+  no `$/cancelRequest` handler, no live-request-id tracking, and read jobs
+  (hover, format, completion, etc.) reply against the buffer captured at
+  dispatch even after a newer edit has landed, instead of `ContentModified`.
+  Track live request ids in `GlobalState`; handle `$/cancelRequest` →
+  `RequestCancelled` (-32800); gate read replies on the document version →
+  `ContentModified` (-32801) when superseded; wire the existing edit-scoped
+  `db.trigger_cancellation()` (`analysis_thread.rs`, `SupersedeAndStart`) to
+  request ids. Land a baseline `cancel_request_is_currently_a_noop` test that
+  flips to expect `RequestCancelled` when the work lands (arity's pattern).
+- [ ] **P2 — Concurrency/scheduler test coverage.** `decide`'s idle branch is
+  unit-tested and the supersede branch has pure-decision tests, but nothing
+  drives the *cancellation signal flow* end to end. Add an integration test over
+  `Connection::memory()` that fires rapid `didChange`s and asserts coalescing
+  plus version-gated publishes (only the latest version is published, stale ones
+  dropped), and one exercising `SupersedeAndStart` → `trigger_cancellation`.
+- [ ] **P2 — Work-done progress for the harvester.** `spawn_workspace_harvester`
+  (`src/lsp/server.rs`) walks the filesystem and parses all of Base with no
+  `$/progress` reporting. Advertise the capability and emit begin/report/end
+  around the harvest and any re-harvest.
+- [ ] **P3 — Content-derived pull `resultId`.** Already stubbed: every pull
+  returns `result_id: None` (`src/lsp/read_jobs.rs`, `semantic_tokens.rs`), so
+  `Unchanged` never fires. Derive the id from a hash of the file's findings so an
+  unchanged file re-pulls as `Unchanged` (bandwidth win).
+- [ ] **P3 — Debug open/close balance assertion.** The event parser has
+  balanced-slice helpers (`src/parser/structural.rs`) but no debug-only
+  Start/Finish balance walk over the event stream (badness landed one as a
+  `DropBomb` analog). Add a `debug_assert`-gated check to catch a leaked
+  `open()`/`precede` splice; compiled out of release.
+- [ ] **P3 — Deterministic workspace seed order.** `WorkspaceFiles` is a
+  `Vec<SourceFile>` singleton input; if seed order churns between reharvests it
+  bumps the input revision needlessly (the value-ordering fragility arity and
+  badness both flag for their interned `Project`). Pin a stable sort at the seed
+  site (`seed_workspace_members`) as an invariant.
+
 ## Tooling
 
 - [ ] `build.rs` generating shell completions + man pages
