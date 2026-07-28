@@ -291,6 +291,9 @@ fn project(node: &SyntaxNode) -> String {
         STRUCT_DEF => project_struct(node),
         ABSTRACT_DEF => sexp("abstract", vec![project_signature(node)]),
         PRIMITIVE_DEF => project_primitive(node),
+        // `typegroup … end` keeps its `BLOCK` (unlike `begin`, which folds into
+        // one): `(typegroup (block …))`.
+        TYPEGROUP_DEF => sexp("typegroup", vec![project_block_child_folding_error(node)]),
         MODULE_DEF => project_module(node),
         DO_EXPR => project_do(node),
 

@@ -195,6 +195,18 @@ pub(crate) fn parse_quote_expr(
     parse_block_only(tokens, start, SyntaxKind::QUOTE_EXPR, diagnostics)
 }
 
+/// `typegroup … end` — Julia 1.14's grouped (mutually recursive) type
+/// definition. Its body is a plain docstring-aware statement block, like
+/// `begin`/`quote`; the caller has already checked the contextual keyword (see
+/// `typegroup_keyword` in `expr.rs`).
+pub(crate) fn parse_typegroup_expr(
+    tokens: &[Token],
+    start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    parse_block_only(tokens, start, SyntaxKind::TYPEGROUP_DEF, diagnostics)
+}
+
 /// A keyword form whose body is a bare statement block: `begin … end` and
 /// `quote … end`. The keyword opens `node_kind`, a block runs to `end`.
 fn parse_block_only(

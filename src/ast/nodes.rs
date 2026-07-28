@@ -215,6 +215,7 @@ pub fn is_expr_kind(kind: SyntaxKind) -> bool {
             | STRUCT_DEF
             | ABSTRACT_DEF
             | PRIMITIVE_DEF
+            | TYPEGROUP_DEF
             | MODULE_DEF
             | DO_EXPR
             | RETURN_EXPR

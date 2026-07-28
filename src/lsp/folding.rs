@@ -78,6 +78,7 @@ fn folds_for_tree(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
             | SyntaxKind::LET_EXPR
             | SyntaxKind::BEGIN_EXPR
             | SyntaxKind::QUOTE_EXPR
+            | SyntaxKind::TYPEGROUP_DEF
             | SyntaxKind::TRY_EXPR
             | SyntaxKind::CATCH_CLAUSE
             | SyntaxKind::FINALLY_CLAUSE
