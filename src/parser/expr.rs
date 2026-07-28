@@ -3374,8 +3374,10 @@ fn parse_postfix_chain(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     loop {
-        // No newline between the callee and `(`/`[` — only horizontal space.
-        let next = ctx.skip_ws(lhs.end);
+        // No newline between the callee and `(`/`[` — only horizontal space, of
+        // which a `#= … =#` block comment is a form (`f #=c=# (x)` chains the
+        // call exactly as `f (x)` does, opener-whitespace error included).
+        let next = ctx.skip_ws_and_block_comments(lhs.end);
         // In a space-sensitive position (an array-literal element or a space-form
         // macro argument), a `(`/`[`/`{` with whitespace before it begins a new
         // element rather than chaining as a call/index/curly: `[f (x)]` is
@@ -3513,7 +3515,7 @@ fn parse_postfix_chain(
 
     // A `do` block can follow a call on the same line: `f(x) do y … end`. It is
     // terminal in the postfix chain — to call its result you parenthesize.
-    let next = ctx.skip_ws(lhs.end);
+    let next = ctx.skip_ws_and_block_comments(lhs.end);
     if ctx.token(next).map(|t| t.kind) == Some(TokKind::DoKw) {
         lhs = parse_do_block(ctx, lhs, next, diagnostics);
     }
@@ -4087,11 +4089,14 @@ fn parse_macro_args(
     // arguments, `@m a +b` likewise). Stop at a newline, a line comment (which
     // runs to end of line, so no argument can follow it), end of input, or a
     // delimiter that closes/separates an enclosing list. The terminating trivia
-    // is left for the caller to attach, so it must not be consumed here.
+    // is left for the caller to attach, so it must not be consumed here. A
+    // `#= … =#` block comment is horizontal whitespace between arguments, not a
+    // terminator like the line comment it sits beside here (`@test #=T=# f(x)`,
+    // `@newinterp Interp #=ephemeral_cache=#true`).
     let mut pos = name_end;
     let mut n_args = 0;
     loop {
-        let next = ctx.skip_ws(pos);
+        let next = ctx.skip_ws_and_block_comments(pos);
         match ctx.token(next).map(|t| t.kind) {
             None
             | Some(
@@ -4535,12 +4540,17 @@ fn kwarg_eq(ctx: &ParserCtx<'_>, i: usize) -> Option<usize> {
 
 /// Find the next infix/assignment operator after `from`, honoring newline
 /// sensitivity. Returns its token index and kind.
+///
+/// A `#= … =#` block comment between the operand and the operator is horizontal
+/// whitespace, so it is skipped: `a #=c=# + b` is `(call-i a + b)`, and so is
+/// `a #=\n…\n=# + b` — a block comment never terminates the expression, however
+/// many lines it spans. Only a real newline is significant here.
 fn next_operator(
     ctx: &ParserCtx<'_>,
     from: usize,
     inside_brackets: bool,
 ) -> Option<(usize, TokKind)> {
-    let op_idx = ctx.skip_ws(from);
+    let op_idx = ctx.skip_ws_and_block_comments(from);
     let op = ctx.token(op_idx)?;
     if op.kind == TokKind::Newline {
         if !inside_brackets {
@@ -4559,7 +4569,7 @@ fn next_operator(
 /// newline ends the expression at statement scope, but inside brackets the
 /// operator may continue onto the next line.
 fn word_operator(ctx: &ParserCtx<'_>, from: usize, inside_brackets: bool) -> Option<usize> {
-    let op_idx = ctx.skip_ws(from);
+    let op_idx = ctx.skip_ws_and_block_comments(from);
     let op = ctx.token(op_idx)?;
     let op_idx = if op.kind == TokKind::Newline {
         if !inside_brackets {
