@@ -252,6 +252,9 @@ pub enum SyntaxKind {
     DOT_LE,
     DOT_GT,
     DOT_GE,
+    DOT_SHL,
+    DOT_SHR,
+    DOT_USHR,
     DOT_SUBTYPE,
     DOT_SUPERTYPE,
     DOT_FAT_ARROW,
@@ -398,6 +401,9 @@ impl SyntaxKind {
                 | DOT_LE
                 | DOT_GT
                 | DOT_GE
+                | DOT_SHL
+                | DOT_SHR
+                | DOT_USHR
                 | DOT_SUBTYPE
                 | DOT_SUPERTYPE
                 | DOT_FAT_ARROW

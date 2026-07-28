@@ -1971,6 +1971,9 @@ fn is_value_operator(kind: TokKind) -> bool {
                 | DotLe
                 | DotGt
                 | DotGe
+                | DotShl
+                | DotShr
+                | DotUShr
                 | DotSubtype
                 | DotSupertype
                 | DotFatArrow
@@ -5077,6 +5080,9 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | DotLe
             | DotGt
             | DotGe
+            | DotShl
+            | DotShr
+            | DotUShr
             | DotSubtype
             | DotSupertype
             | DotFatArrow
@@ -5485,6 +5491,7 @@ fn infix_binding_power(kind: TokKind) -> Option<(u8, u8)> {
         // Bitshift `<< >> >>>` binds tighter than `//` and looser than `^`
         // (Julia precedence 14), left-associative.
         TokKind::Shl | TokKind::Shr | TokKind::UShr => (30, 31),
+        TokKind::DotShl | TokKind::DotShr | TokKind::DotUShr => (30, 31),
         TokKind::Caret | TokKind::DotCaret => (34, 33),
         TokKind::ColonColon => (36, 37),
         TokKind::Dot => (40, 41),

@@ -1262,6 +1262,9 @@ fn is_dotted_op_name(kind: TokKind) -> bool {
             | DotLe
             | DotGt
             | DotGe
+            | DotShl
+            | DotShr
+            | DotUShr
             | DotAndAnd
             | DotOrOr
             | DotTilde

@@ -202,6 +202,12 @@ pub(crate) enum TokKind {
     DotLe,
     DotGt,
     DotGe,
+    /// The broadcast bitshift operators `.<<`/`.>>`/`.>>>` (project
+    /// `(dotcall-i a << b)` and so on). Their augmented forms `.<<=`/`.>>=`/
+    /// `.>>>=` are `DotShlEq`/`DotShrEq`/`DotUShrEq`.
+    DotShl,
+    DotShr,
+    DotUShr,
     /// The broadcast type-comparison operators `.<:`/`.>:` (project
     /// `(dotcall-i a <: b)`/`(dotcall-i a >: b)`).
     DotSubtype,
@@ -981,6 +987,13 @@ impl<'a> Lexer<'a> {
                 self.push_op(TokKind::DotUShrEq, start);
                 return;
             }
+            // The 4-char broadcast unsigned shift `.>>>` beats the 3-char `.>>`
+            // (`.>>>=` is matched above, so a 5th `=` never reaches here).
+            if (b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'>')) {
+                self.pos += 4;
+                self.push_op(TokKind::DotUShr, start);
+                return;
+            }
             // The lone 4-char dotted op `.//=` must beat the 3-char `.//`.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
                 self.pos += 4;
@@ -1034,6 +1047,11 @@ impl<'a> Lexer<'a> {
                 (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
                 (Some(b'<'), Some(b'=')) => Some(TokKind::DotLe),
                 (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
+                // Broadcast bitshift `.<<`/`.>>`. The augmented `.<<=`/`.>>=` and
+                // the unsigned `.>>>` are matched above, so a doubled `<`/`>`
+                // here is the plain shift.
+                (Some(b'<'), Some(b'<')) => Some(TokKind::DotShl),
+                (Some(b'>'), Some(b'>')) => Some(TokKind::DotShr),
                 (Some(b'<'), Some(b':')) => Some(TokKind::DotSubtype),
                 (Some(b'>'), Some(b':')) => Some(TokKind::DotSupertype),
                 (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
@@ -1454,6 +1472,9 @@ fn op_takes_suffix(kind: TokKind) -> bool {
             | DotLe
             | DotGt
             | DotGe
+            | DotShl
+            | DotShr
+            | DotUShr
             | DotFatArrow
             | DotLongArrow
             | DotLeftLongArrow
