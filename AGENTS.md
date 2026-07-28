@@ -25,6 +25,13 @@ live roadmap and records known issues and follow-ups.
 The dev environment is provided via `devenv`/Nix (`devenv.nix`, `devenv.yaml`)
 and includes a Julia toolchain.
 
+Claude Code on the web runs in a container with neither, so a `SessionStart`
+hook (`.claude/hooks/session-start.sh`) provisions them there; it no-ops
+outside a remote session, leaving local machines to `devenv`. Julia is optional
+in that container — it is needed only to *regenerate* the oracle corpus (see
+below), never to run the tests — so the hook warns and continues if it cannot
+be provisioned.
+
 ## Tenets
 
 1. **Deterministic, canonical formatting.** Output is decided solely by the
@@ -85,6 +92,13 @@ allowlists (no Julia needed at test time → CI-safe). A curated dir corpus
 the `parser-parity` skill** (`.claude/skills/parser-parity/`). It documents the
 loop (probe → grammar + projector → fixture → re-triage → allowlist) and keeps a
 rolling `RECAP.md`. See `TODO.md` for the current standing and backlog.
+
+Regenerating the pinned corpus (`scripts/update-juliasyntax-corpus.sh`) is the
+one task that does need Julia, at the exact versions recorded in
+`tests/fixtures/oracle/.juliasyntax-source` — a different Julia or JuliaSyntax
+rewrites unrelated fixtures and buries the intended change. Re-running the
+script should leave every file it did not target byte-identical; treat any
+other diff as a version mismatch, not a parser change.
 
 ## Commands
 
