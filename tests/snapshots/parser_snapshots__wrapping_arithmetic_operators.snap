@@ -245,7 +245,8 @@ ROOT@0..330
             COLON@203..204 ":"
             PAREN_EXPR@204..208
               LPAREN@204..205 "("
-              PLUS_PERCENT@205..207 "+%"
+              OPERATOR_ATOM@205..207
+                PLUS_PERCENT@205..207 "+%"
               RPAREN@207..208 ")"
         COMMA@208..209 ","
         WHITESPACE@209..210 " "
@@ -260,7 +261,8 @@ ROOT@0..330
             COLON@214..215 ":"
             PAREN_EXPR@215..219
               LPAREN@215..216 "("
-              STAR_PERCENT@216..218 "*%"
+              OPERATOR_ATOM@216..218
+                STAR_PERCENT@216..218 "*%"
               RPAREN@218..219 ")"
         RPAREN@219..220 ")"
     BLOCK@220..221

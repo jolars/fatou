@@ -2022,10 +2022,12 @@ pub(super) fn parse_quote_sym(
     }
     match ctx.token(next).map(|t| t.kind)? {
         // `:(op)` — a lone operator quoted in parens, e.g. `:(=)`, `:(::)`,
-        // `:(:)`, `:(+)`. In a quote context a bare operator (including the
-        // syntactic `=`/`::`/`:` that are errors in value position) is a symbol.
-        // Build a `PAREN_EXPR` wrapping the operator token; the projector reads a
-        // lone-operator paren as the operator's text.
+        // `:(:)`, `:(+)`, `:(.=)`, `:(.)`, `:(...)`. In a quote context a bare
+        // operator (including the syntactic `=`/`::`/`.`/`...` and the broadcast
+        // assignments that are errors in value position) is a symbol. Build a
+        // `PAREN_EXPR` around an `OPERATOR_ATOM` holding the operator token, the
+        // same node the non-paren form `:.=` uses, so the projector splits a
+        // broadcast dot off the same way (`:(.=)` ⇒ `(quote-: (. =))`).
         TokKind::LParen
             if {
                 let op = ctx.skip_trivia(next + 1);
@@ -2036,7 +2038,11 @@ pub(super) fn parse_quote_sym(
             let op = ctx.skip_trivia(next + 1);
             let rparen = ctx.skip_trivia(op + 1);
             events.push(Event::Start(SyntaxKind::PAREN_EXPR));
-            push_range(&mut events, next, rparen + 1);
+            push_range(&mut events, next, op);
+            events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
+            events.push(Event::Tok(op));
+            events.push(Event::Finish); // OPERATOR_ATOM
+            push_range(&mut events, op + 1, rparen + 1);
             events.push(Event::Finish); // PAREN_EXPR
             events.push(Event::Finish); // QUOTE_SYM
             Some(ExprParse {
@@ -5054,11 +5060,6 @@ fn is_curly_operator_name(kind: TokKind) -> bool {
         )
 }
 
-/// A lone operator that may be quoted inside parens, `:(op)`. Accepts undotted
-/// operator names, undotted augmented/plain assignment operators, and the
-/// syntactic `::`/`:` — all of which are valid symbols in a quote context (even
-/// `=`/`::`, which are errors in value position). Broadcast forms (`.+`, `.=`)
-/// quote to a `(. op)` shape and are excluded here.
 /// Whether `kind` is an operator that, alone inside parens in *value* position,
 /// is the operator as a value (`(+)` → `+`, `(:)` → `:`, `(<:)` → `<:`). This is
 /// the non-syntactic subset: `is_op_name` minus the syntactic `&&`/`||`/`->`
@@ -5071,35 +5072,26 @@ fn is_paren_value_op(kind: Option<TokKind>) -> bool {
     (is_op_name(k) && !matches!(k, AndAnd | OrOr | Arrow)) || k == Colon
 }
 
+/// A lone operator that may be quoted inside parens, `:(op)`. Accepts undotted
+/// operator names, every assignment operator (plain, augmented, and their
+/// broadcast forms), the syntactic `::`/`:`/`.`/`...`, and the broadcast
+/// short-circuits `.&&`/`.||` — all of which are valid symbols in a quote
+/// context even though most are errors in value position (`(.=)` ⇒
+/// `(error (. =))` but `:(.=)` ⇒ `(quote-: (. =))`).
+///
+/// Operators that are already valid *values* (`.+`, `.≤`, `..`, `√`) are
+/// deliberately excluded: `parse_paren` builds an `OPERATOR_ATOM` for them and
+/// the quote projects that, which is the same shape. So is `?`, which JuliaSyntax
+/// error-wraps even under a quote (`:(?)` ⇒ `(quote-: (error ?))`).
 fn is_paren_quotable_op(kind: Option<TokKind>) -> bool {
     let Some(k) = kind else { return false };
     use TokKind::*;
     is_op_name(k)
-        || matches!(
-            k,
-            Eq | PlusEq
-                | MinusEq
-                | StarEq
-                | SlashEq
-                | BackslashEq
-                | SlashSlashEq
-                | CaretEq
-                | PercentEq
-                | PlusPercentEq
-                | MinusPercentEq
-                | StarPercentEq
-                | PipeEq
-                | AmpEq
-                | ShlEq
-                | ShrEq
-                | UShrEq
-                | DivEq
-                | XorEq
-                | ColonColon
-                | Colon
-                | ColonEq
-                | UniAssign
-        )
+        || is_assignment_op(k)
+        || matches!(k, ColonColon | Colon | ColonEq | UniAssign)
+        // `.` is the field-access dot (the `Expr(:., …)` head) and `...` the
+        // splat; neither is a value, but both quote as themselves.
+        || matches!(k, Dot | DotDotDot | DotAndAnd | DotOrOr)
 }
 
 /// Parse the `then : else` tail of a ternary whose `?` sits at `q_idx`, given the

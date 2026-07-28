@@ -2,60 +2,151 @@
 source: tests/parser_snapshots.rs
 expression: rendered
 ---
-ROOT@0..45
+ROOT@0..114
   QUOTE_SYM@0..4
     COLON@0..1 ":"
     PAREN_EXPR@1..4
       LPAREN@1..2 "("
-      EQ@2..3 "="
+      OPERATOR_ATOM@2..3
+        EQ@2..3 "="
       RPAREN@3..4 ")"
   NEWLINE@4..5 "\n"
   QUOTE_SYM@5..10
     COLON@5..6 ":"
     PAREN_EXPR@6..10
       LPAREN@6..7 "("
-      COLON_COLON@7..9 "::"
+      OPERATOR_ATOM@7..9
+        COLON_COLON@7..9 "::"
       RPAREN@9..10 ")"
   NEWLINE@10..11 "\n"
   QUOTE_SYM@11..15
     COLON@11..12 ":"
     PAREN_EXPR@12..15
       LPAREN@12..13 "("
-      COLON@13..14 ":"
+      OPERATOR_ATOM@13..14
+        COLON@13..14 ":"
       RPAREN@14..15 ")"
   NEWLINE@15..16 "\n"
   QUOTE_SYM@16..20
     COLON@16..17 ":"
     PAREN_EXPR@17..20
       LPAREN@17..18 "("
-      PLUS@18..19 "+"
+      OPERATOR_ATOM@18..19
+        PLUS@18..19 "+"
       RPAREN@19..20 ")"
   NEWLINE@20..21 "\n"
   QUOTE_SYM@21..26
     COLON@21..22 ":"
     PAREN_EXPR@22..26
       LPAREN@22..23 "("
-      AND_AND@23..25 "&&"
+      OPERATOR_ATOM@23..25
+        AND_AND@23..25 "&&"
       RPAREN@25..26 ")"
   NEWLINE@26..27 "\n"
   QUOTE_SYM@27..32
     COLON@27..28 ":"
     PAREN_EXPR@28..32
       LPAREN@28..29 "("
-      SUBTYPE@29..31 "<:"
+      OPERATOR_ATOM@29..31
+        SUBTYPE@29..31 "<:"
       RPAREN@31..32 ")"
   NEWLINE@32..33 "\n"
   QUOTE_SYM@33..38
     COLON@33..34 ":"
     PAREN_EXPR@34..38
       LPAREN@34..35 "("
-      PLUS_EQ@35..37 "+="
+      OPERATOR_ATOM@35..37
+        PLUS_EQ@35..37 "+="
       RPAREN@37..38 ")"
   NEWLINE@38..39 "\n"
   QUOTE_SYM@39..44
     COLON@39..40 ":"
     PAREN_EXPR@40..44
       LPAREN@40..41 "("
-      EQ_EQ@41..43 "=="
+      OPERATOR_ATOM@41..43
+        EQ_EQ@41..43 "=="
       RPAREN@43..44 ")"
   NEWLINE@44..45 "\n"
+  QUOTE_SYM@45..49
+    COLON@45..46 ":"
+    PAREN_EXPR@46..49
+      LPAREN@46..47 "("
+      OPERATOR_ATOM@47..48
+        DOT@47..48 "."
+      RPAREN@48..49 ")"
+  NEWLINE@49..50 "\n"
+  QUOTE_SYM@50..56
+    COLON@50..51 ":"
+    PAREN_EXPR@51..56
+      LPAREN@51..52 "("
+      OPERATOR_ATOM@52..55
+        DOT_DOT_DOT@52..55 "..."
+      RPAREN@55..56 ")"
+  NEWLINE@56..57 "\n"
+  QUOTE_SYM@57..62
+    COLON@57..58 ":"
+    PAREN_EXPR@58..62
+      LPAREN@58..59 "("
+      OPERATOR_ATOM@59..61
+        DOT_EQ@59..61 ".="
+      RPAREN@61..62 ")"
+  NEWLINE@62..63 "\n"
+  QUOTE_SYM@63..69
+    COLON@63..64 ":"
+    PAREN_EXPR@64..69
+      LPAREN@64..65 "("
+      OPERATOR_ATOM@65..68
+        DOT_PLUS_EQ@65..68 ".+="
+      RPAREN@68..69 ")"
+  NEWLINE@69..70 "\n"
+  QUOTE_SYM@70..76
+    COLON@70..71 ":"
+    PAREN_EXPR@71..76
+      LPAREN@71..72 "("
+      OPERATOR_ATOM@72..75
+        DOT_AND_AND@72..75 ".&&"
+      RPAREN@75..76 ")"
+  NEWLINE@76..77 "\n"
+  QUOTE_SYM@77..83
+    COLON@77..78 ":"
+    PAREN_EXPR@78..83
+      LPAREN@78..79 "("
+      OPERATOR_ATOM@79..82
+        DOT_OR_OR@79..82 ".||"
+      RPAREN@82..83 ")"
+  NEWLINE@83..84 "\n"
+  QUOTE_SYM@84..91
+    COLON@84..85 ":"
+    PAREN_EXPR@85..91
+      LPAREN@85..86 "("
+      OPERATOR_ATOM@86..90
+        DOT_DIV_EQ@86..90 ".÷="
+      RPAREN@90..91 ")"
+  NEWLINE@91..92 "\n"
+  CALL_EXPR@92..113
+    NAME@92..96
+      IDENT@92..96 "Expr"
+    ARG_LIST@96..113
+      LPAREN@96..97 "("
+      ARG@97..102
+        QUOTE_SYM@97..102
+          COLON@97..98 ":"
+          NAME@98..102
+            IDENT@98..102 "call"
+      COMMA@102..103 ","
+      WHITESPACE@103..104 " "
+      ARG@104..109
+        QUOTE_SYM@104..109
+          COLON@104..105 ":"
+          PAREN_EXPR@105..109
+            LPAREN@105..106 "("
+            OPERATOR_ATOM@106..108
+              DOT_EQ@106..108 ".="
+            RPAREN@108..109 ")"
+      COMMA@109..110 ","
+      WHITESPACE@110..111 " "
+      ARG@111..112
+        NAME@111..112
+          IDENT@111..112 "x"
+      RPAREN@112..113 ")"
+  NEWLINE@113..114 "\n"
