@@ -9,13 +9,15 @@
   (only JuliaSyntax's own tests do), so this is deferred until the pinned oracle
   advances past JuliaSyntax 0.4.10, which predates the whole family.
 
-- [ ] Stop the numeric-literal lexer from eating an exponent letter that no
-  exponent follows (`src/parser/lexer.rs`). `3E₁` lexes as the float `3E` plus a
-  stray subscript, where Julia reads it as the juxtaposition `3 * E₁`
-  (`(juxtapose 3 E₁)`, exactly as `3k₁` already parses). Only `E`/`e`/`f`/`p`
-  followed by a digit or sign continue a literal. Surfaced by the
-  `SciML/OrdinaryDiffEq.jl` scan (`lib/StochasticDiffEqHighOrder/src/
-  perform_step/sra.jl`, a `format-error`).
+- [ ] Diagnose an incomplete hex-float binary exponent (`src/parser/lexer.rs`).
+  `0x1p` with no exponent digit is accepted as a valid `Float`, so `0x1p₁` lexes
+  as that float plus a stray subscript, where JuliaSyntax reads
+  `(juxtapose (ErrorInvalidNumericConstant) (ErrorUnknownCharacter))`. Note this
+  is *not* the decimal split: Julia still consumes `0x1p` as one (invalid)
+  numeric token rather than `0x1 * p₁`, so the `p`/`P` marker must keep binding
+  to the literal — the fix is to flag the missing exponent, not to stop eating
+  the marker. The decimal counterpart (`3E₁` splitting to `(juxtapose 3 E₁)` for
+  `e`/`E`/`f`) was fixed in `0989d2f` (closes #31).
 
 - [ ] Start a new macro space-argument at a whitespace-separated `(` when the
   previous argument already ended in a call (`src/parser/expr.rs`).
