@@ -27,6 +27,9 @@ jobs:
         JuliaData/DataFrames.jl
         JuliaDocs/Documenter.jl
         JuliaLang/julia
+        JuliaLang/LinearAlgebra.jl
+        JuliaLang/JuliaSyntax.jl
+        JuliaLang/Pkg.jl
         JuliaPlots/Plots.jl
         MakieOrg/Makie.jl
         SciML/OrdinaryDiffEq.jl
