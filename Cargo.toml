@@ -49,6 +49,7 @@ serde_json = "1.0.145"
 similar = { version = "3.1.1", features = ["text"] }
 smol_str = "0.3"
 toml = "1.1.2"
+unicode-normalization = "0.1.24"
 
 [dev-dependencies]
 insta = "1.47.2"

@@ -491,6 +491,41 @@ fn folded_op_text(text: &str) -> Cow<'_, str> {
     )
 }
 
+/// NFC-normalize an identifier's raw source text to the spelling JuliaSyntax
+/// shows. JuliaSyntax's `normalize_identifier` leaves ASCII untouched (the vast
+/// majority) and otherwise applies utf8proc with `STABLE | COMPOSE` — canonical
+/// composition, i.e. NFC — after a handful of custom per-codepoint folds
+/// (`utf8proc_custom_func`). So `y`+U+0302 composes to the precomposed `ŷ`, and
+/// the micro sign `µ` folds to Greek `μ`. The CST keeps the raw source bytes
+/// (losslessness requires it), so the fold belongs here, in the projector's
+/// encoding translation. ASCII text (and text that is already normalized) is
+/// returned unchanged.
+fn norm_ident(text: &str) -> Cow<'_, str> {
+    if text.is_ascii() {
+        return Cow::Borrowed(text);
+    }
+    use unicode_normalization::UnicodeNormalization;
+    // The custom folds are applied per-codepoint before composition, matching
+    // utf8proc's decompose-time callback.
+    Cow::Owned(text.chars().map(fold_ident_char).nfc().collect())
+}
+
+/// JuliaSyntax's `utf8proc_custom_func`: a fixed table of confusable codepoints
+/// folded onto a canonical spelling during identifier normalization. Shares the
+/// three operator folds with [`folded_op_text`] (`·`/`−`) plus the
+/// identifier-only ones (`ɛ`, `µ`, `ℏ`).
+fn fold_ident_char(c: char) -> char {
+    match c {
+        '\u{025B}' => '\u{03B5}', // 'ɛ' => 'ε'
+        '\u{00B5}' => '\u{03BC}', // 'µ' => 'μ'
+        '\u{00B7}' => '\u{22C5}', // '·' => '⋅'
+        '\u{0387}' => '\u{22C5}', // '·' => '⋅'
+        '\u{2212}' => '\u{002D}', // '−' (\minus) => '-'
+        '\u{210F}' => '\u{0127}', // 'ℏ' (\hslash) => 'ħ' (\hbar)
+        other => other,
+    }
+}
+
 /// A bare operator used as a value atom (`+` → `+`, `.&` → `(. &)`, `:` → `:`).
 /// Broadcast operators project to `(. op)` (via `operator_func_repr`); every
 /// other operator projects to its raw token text, so kinds without an
@@ -1732,7 +1767,7 @@ fn do_param_strings(node: &SyntaxNode) -> Vec<String> {
         .into_iter()
         .filter_map(|el| match el {
             NodeOrToken::Node(n) => Some(project(&n)),
-            NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
+            NodeOrToken::Token(t) if t.kind() == IDENT => Some(norm_ident(t.text()).into_owned()),
             NodeOrToken::Token(_) => None,
         })
         .collect()
@@ -1766,7 +1801,7 @@ fn project_decl(head: &str, node: &SyntaxNode) -> String {
         .into_iter()
         .filter_map(|el| match el {
             NodeOrToken::Node(n) => Some(project(&n)),
-            NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
+            NodeOrToken::Token(t) if t.kind() == IDENT => Some(norm_ident(t.text()).into_owned()),
             NodeOrToken::Token(_) => None,
         })
         .collect();
@@ -1870,7 +1905,7 @@ fn project_import_path(node: &SyntaxNode) -> String {
                     parts.extend([".".to_string(), ".".to_string(), ".".to_string()])
                 }
                 IDENT => {
-                    parts.push(t.text().to_string());
+                    parts.push(norm_ident(t.text()).into_owned());
                     seen_name = true;
                 }
                 // After a name, a `...` is a separator dot fused with the `..`
@@ -1950,7 +1985,7 @@ fn project_import_alias(node: &SyntaxNode) -> String {
         .children_with_tokens()
         .filter_map(|el| match el {
             NodeOrToken::Token(t) if t.kind() == IDENT && t.text() != "as" => {
-                Some(t.text().to_string())
+                Some(norm_ident(t.text()).into_owned())
             }
             _ => None,
         })
@@ -2037,7 +2072,7 @@ fn project_macro_name(node: &SyntaxNode) -> String {
                         return None;
                     }
                     if after_at && (t.kind() == IDENT || is_macro_name_part_token(t.kind())) {
-                        Some(t.text().to_string())
+                        Some(norm_ident(t.text()).into_owned())
                     } else {
                         None
                     }
@@ -2095,12 +2130,12 @@ fn project_macro_name(node: &SyntaxNode) -> String {
     let comps: Vec<String> = node
         .children_with_tokens()
         .filter_map(|el| match el {
-            NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
+            NodeOrToken::Token(t) if t.kind() == IDENT => Some(norm_ident(t.text()).into_owned()),
             // An operator, `$`, or keyword name token (`@+`, `@$`, `@end`). The
             // qualifying `.` and broadcast `@.` dot are excluded so they don't
             // count as a name component.
             NodeOrToken::Token(t) if is_macro_name_part_token(t.kind()) => {
-                Some(t.text().to_string())
+                Some(norm_ident(t.text()).into_owned())
             }
             _ => None,
         })
@@ -2145,20 +2180,20 @@ fn project_leading_macro_path(sig_toks: &[SyntaxToken]) -> String {
     let mut comps: Vec<(SyntaxKind, String)> = Vec::new();
     let mut i = 1;
     if sig_toks.get(i).map(|t| t.kind()) == Some(IDENT) {
-        comps.push((IDENT, sig_toks[i].text().to_string()));
+        comps.push((IDENT, norm_ident(sig_toks[i].text()).into_owned()));
         i += 1;
     }
     while sig_toks.get(i).map(|t| t.kind()) == Some(DOT) {
         i += 1; // `.`
         match sig_toks.get(i).map(|t| t.kind()) {
             Some(IDENT) => {
-                comps.push((IDENT, sig_toks[i].text().to_string()));
+                comps.push((IDENT, norm_ident(sig_toks[i].text()).into_owned()));
                 i += 1;
             }
             Some(k @ (DOLLAR | AT)) => {
                 let name = sig_toks
                     .get(i + 1)
-                    .map(|t| t.text().to_string())
+                    .map(|t| norm_ident(t.text()).into_owned())
                     .unwrap_or_default();
                 comps.push((k, name));
                 i += 2;
@@ -2197,7 +2232,7 @@ fn macro_name_after_at(node: &SyntaxNode) -> String {
     for el in node.children_with_tokens() {
         if let NodeOrToken::Token(t) = el {
             if after_at {
-                return t.text().to_string();
+                return norm_ident(t.text()).into_owned();
             }
             if t.kind() == AT {
                 after_at = true;
@@ -2755,7 +2790,9 @@ fn escape_display(s: &str, raw: bool) -> String {
 /// `var"\""` → `(var ")` — follows Julia's raw-string rules and is deferred, so
 /// only escape-free names match the oracle today.)
 fn project_var(node: &SyntaxNode) -> String {
-    let content = unescape_raw_string(&raw_content(node));
+    // A `var"…"` identifier is a raw-string-flagged identifier in JuliaSyntax, so
+    // its unescaped content is `normalize_identifier`-folded like any other name.
+    let content = norm_ident(&unescape_raw_string(&raw_content(node))).into_owned();
     let parts = if content.is_empty() {
         vec![]
     } else {
@@ -3001,7 +3038,7 @@ fn project_interpolation(node: &SyntaxNode, in_string: bool) -> String {
     node.children_with_tokens()
         .filter_map(|el| el.into_token())
         .find(|t| t.kind() == IDENT)
-        .map(|t| t.text().to_string())
+        .map(|t| norm_ident(t.text()).into_owned())
         .unwrap_or_default()
 }
 
@@ -3277,7 +3314,7 @@ fn name_text(node: &SyntaxNode) -> String {
         .find(|t| {
             t.kind() == IDENT || is_keyword(t.kind()) || matches!(t.kind(), TRUE_KW | FALSE_KW)
         })
-        .map(|t| t.text().to_string())
+        .map(|t| norm_ident(t.text()).into_owned())
         .unwrap_or_default()
 }
 
@@ -3291,7 +3328,7 @@ fn operator_token(node: &SyntaxNode) -> Option<SyntaxToken> {
 /// `NAME` node, an interpolated name (`$a`), or a macro name (`@a`).
 fn name_run_item(el: SyntaxElement) -> Option<String> {
     match el {
-        NodeOrToken::Token(t) if t.kind() == IDENT => Some(t.text().to_string()),
+        NodeOrToken::Token(t) if t.kind() == IDENT => Some(norm_ident(t.text()).into_owned()),
         NodeOrToken::Node(n) if n.kind() == NAME => Some(name_text(&n)),
         // An interpolated name (`export $a, $(a*b)`) → `($ …)`.
         NodeOrToken::Node(n) if n.kind() == INTERPOLATION => Some(project(&n)),
@@ -3339,9 +3376,8 @@ fn project_element(el: &SyntaxElement) -> Option<String> {
     match el {
         NodeOrToken::Node(n) => Some(project(n)),
         NodeOrToken::Token(t) => match t.kind() {
-            IDENT | INTEGER | BIN_INT | OCT_INT | HEX_INT | FLOAT | FLOAT32 => {
-                Some(t.text().to_string())
-            }
+            IDENT => Some(norm_ident(t.text()).into_owned()),
+            INTEGER | BIN_INT | OCT_INT | HEX_INT | FLOAT | FLOAT32 => Some(t.text().to_string()),
             CHAR => Some(project_char(t)),
             TRUE_KW => Some("true".to_string()),
             FALSE_KW => Some("false".to_string()),

@@ -2,13 +2,6 @@
 
 ## Parser
 
-- [ ] NFC-normalize identifiers in the s-expr projector (`src/parser/sexpr.rs`)
-  to match JuliaSyntax, which applies `normalize_identifier` (NFC) so `y` +
-  U+0302 prints as precomposed `ŷ`. The CST keeps raw source bytes (losslessness
-  requires it), so this belongs in the projector's encoding translation, not the
-  parser. Until then, oracle fixtures must use NFC-stable identifiers (see
-  `tests/fixtures/oracle/unicode_identifiers`).
-
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which

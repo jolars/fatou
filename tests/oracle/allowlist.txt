@@ -229,6 +229,7 @@ type_operator_call
 unary_operator_call
 unclosed_delimiter
 unicode_identifiers
+unicode_identifiers_nfc
 unicode_operator_call
 unicode_operators
 unterminated_command
