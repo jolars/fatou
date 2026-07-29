@@ -1786,6 +1786,7 @@ fn parse_prefix(
         | TokKind::Float32
         | TokKind::ErrorInvalidNumber
         | TokKind::ErrorHexFloatNoP
+        | TokKind::Unknown
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
         // A lone syntactic operator (`=`, an assignment op, `&&`/`||`/`->`/`...`)
@@ -4775,12 +4776,28 @@ fn is_number_tok(kind: TokKind) -> bool {
     )
 }
 
+/// Whether `kind` is a malformed numeric literal Julia keeps as a single error
+/// token (`0x1p`, `0x1.8`). It still juxtaposes like a real coefficient, so a
+/// stray following term joins it (`0x1p₁` ⇒
+/// `(juxtapose (ErrorInvalidNumericConstant) (ErrorUnknownCharacter))`).
+fn is_error_number_tok(kind: TokKind) -> bool {
+    matches!(
+        kind,
+        TokKind::ErrorInvalidNumber | TokKind::ErrorHexFloatNoP
+    )
+}
+
 /// Whether `lhs` is a bare numeric literal (a single number token). A numeric
 /// coefficient juxtaposes with almost any adjacent value, and a `(` glued to it
 /// is a multiplication rather than a call (`2(x)` ⇒ `(juxtapose 2 x)`).
 fn lhs_is_number(ctx: &ParserCtx<'_>, lhs: &ExprParse) -> bool {
-    // A bare numeric literal: a single number token.
-    if lhs.end == lhs.start + 1 && ctx.token(lhs.start).is_some_and(|t| is_number_tok(t.kind)) {
+    // A bare numeric literal: a single number token. An error-numeric literal
+    // (`0x1p`, `0x1.8`) juxtaposes too, so a stray trailing term joins it.
+    if lhs.end == lhs.start + 1
+        && ctx
+            .token(lhs.start)
+            .is_some_and(|t| is_number_tok(t.kind) || is_error_number_tok(t.kind))
+    {
         return true;
     }
     // A folded signed literal (`-2`, `+2.0`): a `LITERAL` wrapping a `+`/`-` sign

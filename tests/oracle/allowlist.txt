@@ -95,6 +95,7 @@ glued_colon_operator
 glued_word_operator
 hex_float_missing_p_exponent
 hex_literal_invalid_numeric_constant
+hex_literal_unknown_char_juxtapose
 identity_operators
 if_missing_condition
 import_as_colon_error

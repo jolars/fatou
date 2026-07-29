@@ -123,6 +123,9 @@ pub enum SyntaxKind {
     /// A hex float with a `.` fraction but no `p`/`P` binary exponent. Projects
     /// to `(ErrorHexFloatMustContainP)`.
     ERROR_HEX_FLOAT_NO_P,
+    /// A stray character Julia does not recognize (a subscript that cannot start
+    /// an identifier, a lone unknown glyph). Projects to `(ErrorUnknownCharacter)`.
+    ERROR_UNKNOWN_CHAR,
     CHAR,
     STRING_DELIM_OPEN,
     STRING_DELIM_CLOSE,

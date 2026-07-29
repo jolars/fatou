@@ -1,0 +1,1 @@
+(toplevel (juxtapose (ErrorInvalidNumericConstant) (ErrorUnknownCharacter)) (juxtapose (ErrorInvalidNumericConstant) x) (ErrorUnknownCharacter))

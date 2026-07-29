@@ -220,6 +220,6 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::Semicolon => SyntaxKind::SEMICOLON,
         TokKind::At => SyntaxKind::AT,
         TokKind::Dollar => SyntaxKind::DOLLAR,
-        TokKind::Unknown => SyntaxKind::ERROR,
+        TokKind::Unknown => SyntaxKind::ERROR_UNKNOWN_CHAR,
     }
 }
