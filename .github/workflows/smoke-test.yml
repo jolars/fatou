@@ -23,16 +23,16 @@ jobs:
       failure_count: ${{ steps.summarize.outputs.failure_count }}
     env:
       TARGET_REPOS: |
-        JuliaLang/julia
-        SciML/OrdinaryDiffEq.jl
         FluxML/Flux.jl
         JuliaData/DataFrames.jl
-        MakieOrg/Makie.jl
-        jump-dev/JuMP.jl
-        TuringLang/Turing.jl
         JuliaDocs/Documenter.jl
+        JuliaLang/julia
         JuliaPlots/Plots.jl
+        MakieOrg/Makie.jl
+        SciML/OrdinaryDiffEq.jl
+        TuringLang/Turing.jl
         fonsp/Pluto.jl
+        jump-dev/JuMP.jl
     steps:
       - uses: actions/checkout@v7
 
