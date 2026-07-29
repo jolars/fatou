@@ -1625,12 +1625,17 @@ fn parse_prefix(
             // `(where (call-pre + (<:-pre A)) B)`, mirroring JuliaSyntax's
             // `parse_unary` operand sitting below `parse_where`).
             let is_subtype = matches!(tok.kind, TokKind::Subtype | TokKind::Supertype);
-            // PREFIX_BP is above the range colon and the array-element boundary
-            // only matters at low binding powers, so neither `no_range` nor
-            // `array_mode` changes the operand here; carry the rest through.
+            // PREFIX_BP is above the range colon, so `no_range` never changes the
+            // operand and is cleared. `array_mode` must carry through, though: the
+            // space-form boundary lives in the postfix chain (a whitespace-preceded
+            // `(`/`[`/`{` opens a new element), which runs at every binding power,
+            // so `[!a (b)]` is `(hcat (call-pre ! a) b)` and `@m !is_leaf(st) (x)`
+            // takes `(x)` as the next macro argument, not a spaced call on the
+            // operand (`-a (b)` at statement scope, array_mode off, still binds the
+            // spaced call).
             let operand_flags = ExprFlags {
                 no_range: false,
-                array_mode: false,
+                array_mode: flags.array_mode,
                 no_where: !is_subtype || flags.no_where,
                 ..flags
             };

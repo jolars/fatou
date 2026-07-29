@@ -2,7 +2,7 @@
 source: tests/parser_snapshots.rs
 expression: rendered
 ---
-ROOT@0..80
+ROOT@0..104
   MATRIX_EXPR@0..7
     LBRACKET@0..1 "["
     ARG@1..2
@@ -153,3 +153,48 @@ ROOT@0..80
           RPAREN@77..78 ")"
     RBRACKET@78..79 "]"
   NEWLINE@79..80 "\n"
+  MATRIX_EXPR@80..94
+    LBRACKET@80..81 "["
+    ARG@81..86
+      UNARY_EXPR@81..86
+        BANG@81..82 "!"
+        CALL_EXPR@82..86
+          NAME@82..83
+            IDENT@82..83 "f"
+          ARG_LIST@83..86
+            LPAREN@83..84 "("
+            ARG@84..85
+              NAME@84..85
+                IDENT@84..85 "x"
+            RPAREN@85..86 ")"
+    WHITESPACE@86..87 " "
+    ARG@87..93
+      TUPLE_EXPR@87..93
+        LPAREN@87..88 "("
+        ARG@88..89
+          NAME@88..89
+            IDENT@88..89 "a"
+        COMMA@89..90 ","
+        WHITESPACE@90..91 " "
+        ARG@91..92
+          NAME@91..92
+            IDENT@91..92 "b"
+        RPAREN@92..93 ")"
+    RBRACKET@93..94 "]"
+  NEWLINE@94..95 "\n"
+  MATRIX_EXPR@95..103
+    LBRACKET@95..96 "["
+    ARG@96..98
+      UNARY_EXPR@96..98
+        BANG@96..97 "!"
+        NAME@97..98
+          IDENT@97..98 "a"
+    WHITESPACE@98..99 " "
+    ARG@99..102
+      PAREN_EXPR@99..102
+        LPAREN@99..100 "("
+        NAME@100..101
+          IDENT@100..101 "b"
+        RPAREN@101..102 ")"
+    RBRACKET@102..103 "]"
+  NEWLINE@103..104 "\n"

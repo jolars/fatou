@@ -2,7 +2,7 @@
 source: tests/parser_snapshots.rs
 expression: rendered
 ---
-ROOT@0..171
+ROOT@0..233
   MACRO_CALL@0..67
     MACRO_NAME@0..7
       AT@0..1 "@"
@@ -186,3 +186,79 @@ ROOT@0..171
             RPAREN@168..169 ")"
       RPAREN@169..170 ")"
   NEWLINE@170..171 "\n"
+  MACRO_CALL@171..206
+    MACRO_NAME@171..181
+      AT@171..172 "@"
+      IDENT@172..181 "jl_assert"
+    WHITESPACE@181..182 " "
+    UNARY_EXPR@182..194
+      BANG@182..183 "!"
+      CALL_EXPR@183..194
+        NAME@183..190
+          IDENT@183..190 "is_leaf"
+        ARG_LIST@190..194
+          LPAREN@190..191 "("
+          ARG@191..193
+            NAME@191..193
+              IDENT@191..193 "st"
+          RPAREN@193..194 ")"
+    WHITESPACE@194..195 " "
+    TUPLE_EXPR@195..206
+      LPAREN@195..196 "("
+      ARG@196..198
+        NAME@196..198
+          IDENT@196..198 "st"
+      COMMA@198..199 ","
+      WHITESPACE@199..200 " "
+      ARG@200..205
+        STRING_LITERAL@200..205
+          STRING_DELIM_OPEN@200..201 "\""
+          STRING_CONTENT@201..204 "msg"
+          STRING_DELIM_CLOSE@204..205 "\""
+      RPAREN@205..206 ")"
+  NEWLINE@206..207 "\n"
+  MACRO_CALL@207..222
+    MACRO_NAME@207..209
+      AT@207..208 "@"
+      IDENT@208..209 "m"
+    WHITESPACE@209..210 " "
+    UNARY_EXPR@210..215
+      MINUS@210..211 "-"
+      CALL_EXPR@211..215
+        NAME@211..212
+          IDENT@211..212 "a"
+        ARG_LIST@212..215
+          LPAREN@212..213 "("
+          ARG@213..214
+            NAME@213..214
+              IDENT@213..214 "b"
+          RPAREN@214..215 ")"
+    WHITESPACE@215..216 " "
+    TUPLE_EXPR@216..222
+      LPAREN@216..217 "("
+      ARG@217..218
+        NAME@217..218
+          IDENT@217..218 "c"
+      COMMA@218..219 ","
+      WHITESPACE@219..220 " "
+      ARG@220..221
+        NAME@220..221
+          IDENT@220..221 "d"
+      RPAREN@221..222 ")"
+  NEWLINE@222..223 "\n"
+  MACRO_CALL@223..232
+    MACRO_NAME@223..225
+      AT@223..224 "@"
+      IDENT@224..225 "m"
+    WHITESPACE@225..226 " "
+    UNARY_EXPR@226..228
+      BANG@226..227 "!"
+      NAME@227..228
+        IDENT@227..228 "a"
+    WHITESPACE@228..229 " "
+    PAREN_EXPR@229..232
+      LPAREN@229..230 "("
+      NAME@230..231
+        IDENT@230..231 "b"
+      RPAREN@231..232 ")"
+  NEWLINE@232..233 "\n"

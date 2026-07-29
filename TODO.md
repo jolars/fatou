@@ -9,15 +9,6 @@
   (only JuliaSyntax's own tests do), so this is deferred until the pinned oracle
   advances past JuliaSyntax 0.4.10, which predates the whole family.
 
-- [ ] Start a new macro space-argument at a whitespace-separated `(` when the
-  previous argument already ended in a call (`src/parser/expr.rs`).
-  `@jl_assert !is_leaf(st) (st, "msg")` binds the parens as a spaced call on
-  `is_leaf(st)` and records `whitespace before opener`, where JuliaSyntax takes
-  them as the macro's second argument (`(macrocall @jl_assert (call-pre !
-  (call is_leaf st)) (tuple-p st (string "msg")))`). Surfaced by the vendored
-  `JuliaLowering/src/` tree in the `JuliaLang/julia` checkout — outside the
-  scan's `base/`+`stdlib/` pathspec, so it is not reported by CI today.
-
 - [ ] Two error-recovery gaps left over from labeled `break`/`continue`
   (`src/parser/structural.rs`). Junk after a complete labeled keyword drops
   JuliaSyntax's trailing zero-width marker (`break l x y` ⇒ `(break l x)

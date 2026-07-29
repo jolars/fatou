@@ -10,3 +10,6 @@ end
 @foo (f)(x)
 @foo g(x) [1]
 f(@m a (b))
+@jl_assert !is_leaf(st) (st, "msg")
+@m -a(b) (c, d)
+@m !a (b)
