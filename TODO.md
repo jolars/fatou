@@ -9,15 +9,19 @@
   (only JuliaSyntax's own tests do), so this is deferred until the pinned oracle
   advances past JuliaSyntax 0.4.10, which predates the whole family.
 
-- [ ] Diagnose an incomplete hex-float binary exponent (`src/parser/lexer.rs`).
-  `0x1p` with no exponent digit is accepted as a valid `Float`, so `0x1p₁` lexes
-  as that float plus a stray subscript, where JuliaSyntax reads
-  `(juxtapose (ErrorInvalidNumericConstant) (ErrorUnknownCharacter))`. Note this
-  is *not* the decimal split: Julia still consumes `0x1p` as one (invalid)
-  numeric token rather than `0x1 * p₁`, so the `p`/`P` marker must keep binding
-  to the literal — the fix is to flag the missing exponent, not to stop eating
-  the marker. The decimal counterpart (`3E₁` splitting to `(juxtapose 3 E₁)` for
-  `e`/`E`/`f`) was fixed in `0989d2f` (closes #31).
+- [ ] Emit `(ErrorUnknownCharacter)` for a stray subscript and juxtapose it onto
+  a preceding literal (`src/parser/lexer.rs`, `src/parser/expr.rs`). The
+  malformed-hex-literal classification now diagnoses `0x1p` as
+  `(ErrorInvalidNumericConstant)` and `0x1.8` as `(ErrorHexFloatMustContainP)`,
+  but `0x1p₁` still projects as `(ErrorInvalidNumericConstant) (error-t)` (two
+  statements) where JuliaSyntax reads the single juxtaposition
+  `(juxtapose (ErrorInvalidNumericConstant) (ErrorUnknownCharacter))`. Two gaps
+  remain: Fatou has no `(ErrorUnknownCharacter)` leaf (a stray `₁` becomes a
+  trailing-junk `(error-t)`), and an error-numeric literal does not participate
+  in juxtaposition. The hex-literal error classification itself is done and
+  pinned (`hex_literal_invalid_numeric_constant`,
+  `hex_float_missing_p_exponent`); the decimal counterpart (`3E₁` →
+  `(juxtapose 3 E₁)`) was fixed in `0989d2f` (closes #31).
 
 - [ ] Start a new macro space-argument at a whitespace-separated `(` when the
   previous argument already ended in a call (`src/parser/expr.rs`).

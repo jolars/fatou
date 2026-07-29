@@ -41,6 +41,8 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::HexInt => SyntaxKind::HEX_INT,
         TokKind::Float => SyntaxKind::FLOAT,
         TokKind::Float32 => SyntaxKind::FLOAT32,
+        TokKind::ErrorInvalidNumber => SyntaxKind::ERROR_INVALID_NUMBER,
+        TokKind::ErrorHexFloatNoP => SyntaxKind::ERROR_HEX_FLOAT_NO_P,
         TokKind::Char => SyntaxKind::CHAR,
         TokKind::StringDelimOpen => SyntaxKind::STRING_DELIM_OPEN,
         TokKind::StringDelimClose => SyntaxKind::STRING_DELIM_CLOSE,

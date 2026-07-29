@@ -30,6 +30,15 @@ pub(crate) enum TokKind {
     Float,
     Float32,
     Char,
+    /// A malformed numeric literal Julia still lexes as a single (error) token:
+    /// a hex float whose `p`/`P` binary exponent has no digits (`0x1p`, `0x1p+`),
+    /// or a hex constant with no mantissa digits at all (`0x`, `0xp3`). Projects
+    /// to JuliaSyntax's `(ErrorInvalidNumericConstant)`.
+    ErrorInvalidNumber,
+    /// A hex float with a `.` fraction but no `p`/`P` binary exponent (`0x1.8`,
+    /// `0x.8`, `0x1.`). Julia requires the exponent; projects to
+    /// `(ErrorHexFloatMustContainP)`.
+    ErrorHexFloatNoP,
 
     // String / command literal pieces. A single literal is lexed as a run of
     // these (plus `Dollar`/`Ident` and, inside `$(...)`, normal-mode tokens),
@@ -820,27 +829,48 @@ impl<'a> Lexer<'a> {
             match self.peek(1) {
                 Some(b'x') => {
                     self.pos += 2;
-                    self.consume_digits(|c| c.is_ascii_hexdigit());
-                    // A `.`-fraction or `p`/`P` binary exponent turns the hex
-                    // literal into a (always Float64) hex float.
-                    let mut is_float = false;
-                    if self.peek(0) == Some(b'.') {
-                        is_float = true;
+                    // Hex literal classification mirrors Julia's tokenizer. A
+                    // `.`-fraction or `p`/`P` binary exponent makes it a (always
+                    // Float64) hex float, but Julia constrains the shape: a hex
+                    // literal needs at least one mantissa digit (integer or
+                    // fractional), a `.` fraction requires a `p`/`P` exponent, and
+                    // a `p`/`P` requires at least one exponent digit. Each
+                    // violation is one of JuliaSyntax's two numeric error tokens,
+                    // not a valid literal (e.g. `0x1p` is `(ErrorInvalidNumeric-
+                    // Constant)`, `0x1.8` is `(ErrorHexFloatMustContainP)`).
+                    let int_digits = self.consume_digits(|c| c.is_ascii_hexdigit());
+                    // A `.` followed by another `.` is the `..` range operator
+                    // (`0x1..n`), not a decimal point.
+                    let mut had_dot = false;
+                    let mut frac_digits = false;
+                    if self.peek(0) == Some(b'.') && self.peek(1) != Some(b'.') {
+                        had_dot = true;
                         self.pos += 1;
-                        self.consume_digits(|c| c.is_ascii_hexdigit());
+                        frac_digits = self.consume_digits(|c| c.is_ascii_hexdigit());
                     }
+                    let mut had_exponent = false;
+                    let mut exp_digits = false;
                     if matches!(self.peek(0), Some(b'p' | b'P')) {
-                        is_float = true;
+                        had_exponent = true;
                         self.pos += 1;
                         if matches!(self.peek(0), Some(b'+' | b'-')) {
                             self.pos += 1;
                         }
-                        self.consume_digits(|c| c.is_ascii_digit());
+                        exp_digits = self.consume_digits(|c| c.is_ascii_digit());
                     }
-                    let kind = if is_float {
-                        TokKind::Float
-                    } else {
+                    let has_mantissa = int_digits || frac_digits;
+                    let kind = if had_exponent {
+                        if has_mantissa && exp_digits {
+                            TokKind::Float
+                        } else {
+                            TokKind::ErrorInvalidNumber
+                        }
+                    } else if had_dot {
+                        TokKind::ErrorHexFloatNoP
+                    } else if int_digits {
                         TokKind::HexInt
+                    } else {
+                        TokKind::ErrorInvalidNumber
                     };
                     self.push(kind, start, self.pos);
                     return;
@@ -905,11 +935,16 @@ impl<'a> Lexer<'a> {
     }
 
     /// Advance past a run of digits accepted by `is_digit`, with `_` allowed as
-    /// a digit separator anywhere within the run.
-    fn consume_digits(&mut self, is_digit: impl Fn(u8) -> bool) {
+    /// a digit separator anywhere within the run. Returns whether at least one
+    /// real (non-`_`) digit was consumed, which the hex path uses to tell a
+    /// digit-bearing mantissa/exponent from an empty one (`0x1p` vs `0x1p3`).
+    fn consume_digits(&mut self, is_digit: impl Fn(u8) -> bool) -> bool {
+        let mut seen = false;
         while matches!(self.peek(0), Some(c) if is_digit(c) || c == b'_') {
+            seen |= self.peek(0) != Some(b'_');
             self.pos += 1;
         }
+        seen
     }
 
     fn lex_ident_or_keyword(&mut self, start: usize) {
@@ -1849,6 +1884,38 @@ mod tests {
         assert_eq!(kinds("2.5f-3"), vec![TokKind::Float32]);
         assert_eq!(kinds("0x1p0"), vec![TokKind::Float]);
         assert_eq!(kinds("0x1.8p3"), vec![TokKind::Float]);
+        // A valid hex float needs a mantissa digit and, once a `p`/`P` appears,
+        // an exponent digit; the fraction/exponent forms below are all valid.
+        assert_eq!(kinds("0x1.p3"), vec![TokKind::Float]);
+        assert_eq!(kinds("0x.8p3"), vec![TokKind::Float]);
+        assert_eq!(kinds("0x1P+2"), vec![TokKind::Float]);
+        assert_eq!(kinds("0x1_2p3"), vec![TokKind::Float]);
+        // `e`/`f` are hex digits, not exponent markers, so no `p` means an int.
+        assert_eq!(kinds("0x1e3"), vec![TokKind::HexInt]);
+    }
+
+    #[test]
+    fn malformed_hex_literal_kinds() {
+        // A `p`/`P` binary exponent with no digits is an invalid constant, as is
+        // a hex literal with no mantissa digit at all (Julia keeps the whole run
+        // as one error token rather than splitting it).
+        for src in [
+            "0x1p", "0x1p+", "0x1.8p", "0x1.p", "0x.p3", "0xp3", "0x", "0x_",
+        ] {
+            assert_eq!(
+                kinds(src),
+                vec![TokKind::ErrorInvalidNumber],
+                "{src} should be an invalid numeric constant"
+            );
+        }
+        // A `.` fraction with no `p`/`P` exponent must contain a `p`.
+        for src in ["0x1.8", "0x1.", "0x.8", "0x.", "0x1.8e2"] {
+            assert_eq!(
+                kinds(src),
+                vec![TokKind::ErrorHexFloatNoP],
+                "{src} should require a p exponent"
+            );
+        }
     }
 
     #[test]

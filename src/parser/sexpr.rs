@@ -2285,6 +2285,10 @@ fn literal_token_text(tok: &SyntaxToken) -> String {
         TRUE_KW => "true".to_string(),
         FALSE_KW => "false".to_string(),
         INTEGER => tok.text().replace('_', ""),
+        // Malformed numeric literals: JuliaSyntax keeps the whole run as one
+        // error token whose value is the error name, not the source text.
+        ERROR_INVALID_NUMBER => "(ErrorInvalidNumericConstant)".to_string(),
+        ERROR_HEX_FLOAT_NO_P => "(ErrorHexFloatMustContainP)".to_string(),
         HEX_INT => normalize_based_int(tok.text(), 16),
         OCT_INT => normalize_based_int(tok.text(), 8),
         BIN_INT => normalize_based_int(tok.text(), 2),

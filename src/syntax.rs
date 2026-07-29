@@ -116,6 +116,13 @@ pub enum SyntaxKind {
     HEX_INT,
     FLOAT,
     FLOAT32,
+    /// A malformed numeric literal Julia keeps as a single error token (a hex
+    /// float with an empty `p`/`P` exponent, or a hex constant with no mantissa
+    /// digits). Projects to `(ErrorInvalidNumericConstant)`.
+    ERROR_INVALID_NUMBER,
+    /// A hex float with a `.` fraction but no `p`/`P` binary exponent. Projects
+    /// to `(ErrorHexFloatMustContainP)`.
+    ERROR_HEX_FLOAT_NO_P,
     CHAR,
     STRING_DELIM_OPEN,
     STRING_DELIM_CLOSE,

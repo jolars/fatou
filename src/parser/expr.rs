@@ -1784,6 +1784,8 @@ fn parse_prefix(
         | TokKind::HexInt
         | TokKind::Float
         | TokKind::Float32
+        | TokKind::ErrorInvalidNumber
+        | TokKind::ErrorHexFloatNoP
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
         // A lone syntactic operator (`=`, an assignment op, `&&`/`||`/`->`/`...`)
@@ -2257,6 +2259,8 @@ pub(super) fn parse_quote_sym(
         | TokKind::HexInt
         | TokKind::Float
         | TokKind::Float32
+        | TokKind::ErrorInvalidNumber
+        | TokKind::ErrorHexFloatNoP
         | TokKind::Char => {
             events.push(Event::Start(SyntaxKind::LITERAL));
             events.push(Event::Tok(next));
