@@ -21,18 +21,16 @@ map(
     configuration_extra,
     [item_one, item_two],
 )
-wrapped = outer_wrapper(
-    inner_builder(first_dimension_specification, second_dimension_specification, [
-        row_data,
-    ]),
-)
-deep = wrap_everything(
-    construct_matrix(
-        first_dimension_specification_value,
-        second_dimension_specification_value,
-        [row],
-    ),
-)
+wrapped = outer_wrapper(inner_builder(
+    first_dimension_specification,
+    second_dimension_specification,
+    [row_data],
+))
+deep = wrap_everything(construct_matrix(
+    first_dimension_specification_value,
+    second_dimension_specification_value,
+    [row],
+))
 totals = accumulate_totals(
     first_partial_result,
     second_partial_result,

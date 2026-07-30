@@ -201,18 +201,27 @@ fn fits_stack(mut remaining: isize, mut stack: Vec<(bool, Mode, &Ir)>) -> bool {
                 let s = if mode == Mode::Break { broken } else { flat };
                 remaining -= s.chars().count() as isize;
             }
-            // Measured as its hug branch: flat, the hug's width equals the
-            // explode group's flat width; in trailing break-mode content this
-            // walks exactly the parts the hug layout would print.
+            // Inside the group under test, the hug must sit flat, so measure it
+            // flat (prefix + body + close): the hug's width equals the explode
+            // group's flat width. As trailing content on an already-broken line,
+            // though, the hug will render broken — its first line ends at the open
+            // bracket, exactly as a plain trailing `Group` ends at its first
+            // `SoftLine`. Measure the explode fallback's broken first line (open
+            // bracket, then its `SoftLine` ends the line) so a preceding group is
+            // not forced to break by the hug's full flat prefix width.
             Ir::HugGroup {
                 prefix,
                 body,
                 close,
-                ..
+                explode,
             } => {
-                stack.push((in_group, mode, close));
-                stack.push((in_group, mode, body));
-                stack.push((in_group, mode, prefix));
+                if !in_group && mode == Mode::Break {
+                    stack.push((false, Mode::Break, explode));
+                } else {
+                    stack.push((in_group, mode, close));
+                    stack.push((in_group, mode, body));
+                    stack.push((in_group, mode, prefix));
+                }
             }
         }
     }

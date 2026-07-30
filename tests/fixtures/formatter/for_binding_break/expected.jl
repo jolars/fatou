@@ -59,3 +59,14 @@ result = [
 for element in short_call(a, b)
     body
 end
+
+# a destructuring target stays flat when a huggable-tail iterable breaks: the
+# target's fit check sees the collection break after its opening bracket, not its
+# full flat width, so only the iterable explodes
+for (name, strat) in [
+        ("newton_strategy_label", NewtonStrategyConstructor()),
+        ("gradient_descent", GradientCtor()),
+        ("exact", ExactCtor()),
+    ]
+    body_statement
+end
