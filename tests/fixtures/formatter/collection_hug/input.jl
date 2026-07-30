@@ -13,3 +13,8 @@ prebroken = [
 mixture_components = [first_component_weight_value, second_component_weight_value, build_tail(a, b)]
 picked = [first_coefficient, second_coefficient, compute_remaining(alpha, beta, gamma, delta_val)][chosen_index]
 tiny = [a, b, g(1)]
+# a trailing bare tuple literal is a peer, not a container: it does not hug, so
+# a list of tuples explodes one per line rather than hugging its last element
+strategy_pairs = [("newton", NewtonStrategy()), ("gradient", GradientStrategy()), ("exact", ExactStrategy())]
+# a trailing bare vector literal likewise explodes its host rather than hugging
+nested_lists = [first_leading_element_value, second_leading_element_value, [tail_one, tail_two, tail_three]]

@@ -2087,6 +2087,36 @@ fn value_is_huggable(value: &SyntaxNode) -> bool {
     huggable_kind(value.kind()) || pair_hug_chain(value).is_some()
 }
 
+/// Whether a collection literal's trailing item may hug the closing bracket.
+/// Mirrors [`item_is_huggable`], but a *bare* bracket literal (a peer
+/// tuple/vector/braces held by a plain positional `ARG`, not a call, index, curly
+/// application, comprehension, named field, or pair) does **not** hug: hugging one
+/// sibling of a homogeneous literal list only relocates the asymmetry, so the list
+/// explodes one element per line instead. A call-like or named-field tail still
+/// hugs (see the collection_hug fixture). The arg-list hug (`f(x, [a, b, c])`) is
+/// a distinct path and keeps hugging bare literals.
+fn item_is_huggable_in_collection(item: &SyntaxNode) -> bool {
+    if item.kind() == SyntaxKind::ARG {
+        let mut children = item.children();
+        if let (Some(child), None) = (children.next(), children.next())
+            && is_bare_bracket_literal(child.kind())
+        {
+            return false;
+        }
+    }
+    item_is_huggable(item)
+}
+
+/// The plain comma-separated bracket literals (`[…]`, `(…)`, `{…}`) — as opposed
+/// to the call-like or generator brackets in [`huggable_kind`]. Such a literal,
+/// appearing as a bare positional element, does not hug its enclosing collection.
+fn is_bare_bracket_literal(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::VECT_EXPR | SyntaxKind::TUPLE_EXPR | SyntaxKind::BRACES
+    )
+}
+
 /// Parse a clean two-operand `=>`/`.=>` pair into its left operand, operator
 /// text, and right operand. `None` for a non-`BINARY_EXPR`, a non-pair operator
 /// (`-->`, `<-->`, … share the parser tier but not the pair idiom), a comment,
@@ -2565,7 +2595,7 @@ fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
                     if !items.is_empty() && !pending_comma {
                         return None;
                     }
-                    last_huggable = item_is_huggable(&child);
+                    last_huggable = item_is_huggable_in_collection(&child);
                     items.push(lower_node(&child));
                     pending_comma = false;
                 }
