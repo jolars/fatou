@@ -36,6 +36,36 @@ jobs:
         TuringLang/Turing.jl
         fonsp/Pluto.jl
         jump-dev/JuMP.jl
+      # Known non-actionable failures to suppress from issue filing. Each entry
+      # is `repo|path|type`; the path is repo-relative (as `git ls-files`
+      # prints it, spaces and all). Only the *named* failure type is
+      # suppressed — if the same file starts failing a different way
+      # (losslessness, idempotency, timeout, a panic), that failure is still
+      # recorded, so the allowlist can never mask a new regression. Drop an
+      # entry the moment fatou can handle the file (it then simply passes and
+      # records nothing).
+      #
+      # The bar for an entry is *genuinely-broken upstream input*, not merely
+      # unfixed: the file has real parse errors that JuliaSyntax reports too,
+      # so no fatou change could be correct — `debug format` rightly refuses
+      # input it cannot losslessly parse. In practice that means confirming
+      # parity: fatou's diagnostics and JuliaSyntax's diagnostics fall at the
+      # same byte offsets (`fatou parse <file>` vs the JuliaSyntax oracle). A
+      # real parser gap — fatou erroring where JuliaSyntax parses cleanly —
+      # does **not** belong here; allowlisting it would bury the
+      # parser-parity work. Group entries under a comment naming the root
+      # cause and issue.
+      ALLOWLIST: |
+        # Pluto.jl ships deliberately-broken editor crash-test and
+        # safe-preview fixtures: `cm6 crash test.jl` juxtaposes adjacent
+        # string literals and has whitespace before an opener; `test1.jl` and
+        # `safe_preview.jl` are notebook cells holding bare English prose
+        # ("TODO: ...", "modify me to make me safe"). JuliaSyntax reports the
+        # same parse errors at the same offsets, so these stay format-error.
+        # Issue #51.
+        fonsp/Pluto.jl|sample/cm6 crash test.jl|format-error
+        fonsp/Pluto.jl|sample/test1.jl|format-error
+        fonsp/Pluto.jl|test/frontend/fixtures/safe_preview.jl|format-error
     steps:
       - uses: actions/checkout@v7
 
@@ -65,6 +95,17 @@ jobs:
           {
             printf 'repo\tfailure_type\tfile\tlog_path\treport_path\trepo_sha\tfatou_sha\tfatou_version\tidempotency_input_path\tidempotency_once_path\tidempotency_twice_path\n'
           } > "$FAILURES_TSV"
+
+          # Normalize the allowlist into exact `repo|path|type` lines (drop
+          # blank and `#` comment lines). A recorded failure whose key matches
+          # one of these is suppressed (see `ALLOWLIST` in the job env).
+          ALLOWLIST_ENTRIES="$(printf '%s\n' "$ALLOWLIST" | sed 's/[[:space:]]*$//' | grep -Ev '^[[:space:]]*(#|$)' || true)"
+          SUPPRESSED_COUNT=0
+
+          is_allowlisted() {
+            # args: repo file failure_type
+            grep -Fxq "$1|$2|$3" <<< "$ALLOWLIST_ENTRIES"
+          }
 
           while IFS= read -r repo; do
             if [ -z "$repo" ]; then
@@ -165,6 +206,11 @@ jobs:
                   matched=1
                   while IFS= read -r failure_type; do
                     [ -z "$failure_type" ] && continue
+                    if is_allowlisted "$repo" "$rel_file" "$failure_type"; then
+                      echo "notice: allowlisted $failure_type for $repo:$rel_file (record-only)"
+                      SUPPRESSED_COUNT=$((SUPPRESSED_COUNT + 1))
+                      continue
+                    fi
                     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                       "$repo" \
                       "$failure_type" \
@@ -200,6 +246,11 @@ jobs:
             done < <(git -C "$repo_dir" ls-files -z -- "${pathspecs[@]}")
           done <<< "$TARGET_REPOS"
 
+          # Hand the suppressed-record tally to the summarize step (separate
+          # shells share only the results dir, which is also the uploaded
+          # artifact).
+          echo "$SUPPRESSED_COUNT" > "$RESULTS_DIR/suppressed_count"
+
       - name: Summarize scan results
         id: summarize
         shell: bash
@@ -211,12 +262,17 @@ jobs:
           if [ "$failure_count" -lt 0 ]; then
             failure_count=0
           fi
+          suppressed_count=0
+          if [ -f "$RESULTS_DIR/suppressed_count" ]; then
+            suppressed_count="$(cat "$RESULTS_DIR/suppressed_count")"
+          fi
 
           echo "failure_count=$failure_count" >> "$GITHUB_OUTPUT"
           {
             echo "### Fatou debug format repo scan"
             echo ""
             echo "- Failure records: $failure_count"
+            echo "- Suppressed (allowlisted, record-only): $suppressed_count"
             echo "- Scanned extension: \`.jl\` (JuliaLang/julia restricted to \`base/\` and \`stdlib/\`)"
           } >> "$GITHUB_STEP_SUMMARY"
 
