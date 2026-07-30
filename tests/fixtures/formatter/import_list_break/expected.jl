@@ -5,11 +5,13 @@ using aaaaaaaaaaaaaaaaaaaa,
     bbbbbbbbbbbbbbbbbbbb,
     cccccccccccccccccccc,
     ddddddddddddddddddddd
-using SomeModule: aaaaaaaaaaaaaaaa,
+using SomeModule:
+    aaaaaaaaaaaaaaaa,
     bbbbbbbbbbbbbbbb,
     cccccccccccccccc,
     ddddddddddddddddddddd
-import Base: aaaaaaaaaaaaaaaa,
+import Base:
+    aaaaaaaaaaaaaaaa,
     bbbbbbbbbbbbbbbb,
     cccccccccccccccc,
     dddddddddddddddddddddddddd

@@ -128,7 +128,41 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (char + string-macro literals locked)
+## Latest session (selector import breaks colon-first)
+
+`feat(formatter)`. User-driven style change to the too-wide **selector** import
+(`import Mod: a, b, c`). Old form kept the first name on the module line
+(`import Intercepts: LogisticLoss,⏎    residual,…`); the ragged first name looked
+off. New form treats the `:` as a **bracket-like opener** — the colon terminates
+the head line (`import Intercepts:`) and the whole name list wraps beneath it, one
+name per +4 line, uniformly aligned. Flat still packs `import Mod: a, b`. **Bare**
+lists (no colon) are unchanged — the keyword is their head, so the first item still
+rides the opening line (`using aaaa,⏎    bbbb`); there's no colon/bracket to open a
+list beneath.
+
+**Decision (AskUserQuestion).** User chose "colon opens, names indented" over
+"keep first name on head line." Surfaced the friction: it's a conscious divergence
+from the bare-list break (which keeps its first item on the head line), justified
+by reading `:` as an opener (a bracket break never leaves an arg on the opener
+line) and the alignment win. Verified the colon-terminated form reparses to the
+same `IMPORT_STMT`/`IMPORT_PATH` tree in both Fatou and JuliaSyntax before
+committing to it (stability-safe).
+
+**Change (~10 lines, `lower_import_stmt` only).** New `colon_seen` flag: the
+selector-position `COLON` now pushes `":"` (not `": "`) to the head and opens the
+indented `rest` with a leading `Ir::Line` (flat = space, break = newline); items
+route to `rest` when `seen_comma || colon_seen`. Same `group(concat[first,
+indent(rest)])` shape. Updated the two selector cases in
+`import_list_break/expected.jl` to Form B (bare + `export` cases unchanged).
+
+Gate 114 (unchanged — updated an existing fixture, no new slug); stability +
+clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) **Switch to the LSP semantic model** — standing
+strategic recommendation; the construct queue is empty. (2) Minor: the ~50
+per-rule Runic-rationale doc comments (debt #2).
+
+## Earlier: char + string-macro literals locked
 
 `test(formatter)` (fixtures-only, **no code change**). Closed the last
 construct-shaped ranked target. Char literals (`'a'`, `'\n'`, `'\''`, `'\\'`,

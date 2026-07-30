@@ -1039,12 +1039,15 @@ fn lower_keyword_stmt(node: &SyntaxNode) -> Ir {
 ///
 /// The layout is width-driven: flat `using A, B, C` when it fits, else each
 /// comma-group on its own line with the comma trailing and the wrapped groups
-/// indented one continuation step (the first group stays on the opening line after
-/// the keyword). The selector colon is **not** a break point—`using Mod: a, b, c`
-/// breaks only at the commas, so `Mod: a` heads the opening line. A bare list has
-/// no brackets to frame the break, so the comma serves as the breakable separator;
-/// there is no broken-only trailing comma. Source line breaks carry no layout
-/// information (Tenet 1): `using A,\n B` reflows to the same form as `using A, B`.
+/// indented one continuation step. For a **bare** list (no selector) the first
+/// group stays on the opening line after the keyword (`using aaaa,\n    bbbb`). For
+/// a **selector** list the colon acts as a bracket-like opener: it terminates the
+/// head line (`import Mod:`) and the whole name list wraps beneath it, one name per
+/// indented line, uniformly aligned—so `LogisticLoss` does **not** ride the module
+/// line. Flat, the colon still packs as `Mod: a, b`. A bare list has no brackets to
+/// frame the break, so the comma serves as the breakable separator; there is no
+/// broken-only trailing comma. Source line breaks carry no layout information
+/// (Tenet 1): `using A,\n B` reflows to the same form as `using A, B`.
 ///
 /// Only the clean alternating shape—item, separator, item, …—is reshaped. A
 /// comment, a leading/trailing/doubled separator, or any unexpected token bails to
@@ -1071,13 +1074,14 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
     let mut first: Vec<Ir> = vec![Ir::text(kw.text().to_string()), Ir::text(" ")];
     let mut rest: Vec<Ir> = Vec::new();
     let mut seen_comma = false;
+    let mut colon_seen = false;
     let mut expect_item = true;
 
     for el in &rest_els {
         match el {
             NodeOrToken::Node(child) if expect_item => {
                 let ir = lower_node(child);
-                if seen_comma {
+                if seen_comma || colon_seen {
                     rest.push(ir);
                 } else {
                     first.push(ir);
@@ -1092,11 +1096,16 @@ fn lower_import_stmt(node: &SyntaxNode) -> Ir {
                 expect_item = true;
             }
             NodeOrToken::Token(tok) if !expect_item && tok.kind() == SyntaxKind::COLON => {
-                // The selector colon stays on the opening line with its module.
+                // The selector colon opens the list: it terminates the head line
+                // (`import Mod:`) and the whole selector list wraps beneath it, one
+                // name per indented line. The leading `Ir::Line` is a space when the
+                // list fits flat (`import Mod: a, b`) and a newline when it breaks.
                 if seen_comma {
                     rest.push(Ir::text(": "));
                 } else {
-                    first.push(Ir::text(": "));
+                    first.push(Ir::text(":"));
+                    rest.push(Ir::Line);
+                    colon_seen = true;
                 }
                 expect_item = true;
             }
