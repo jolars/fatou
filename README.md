@@ -33,7 +33,10 @@ Fatou is available from several sources:
 - **PyPI**: `uv tool install fatou`/`pipx install fatou`
 - **Prebuilt binaries**: from the [releases
   page](https://github.com/jolars/fatou/releases)
-- **VS Code/Open VSX**: the **Fatou** extension (also works in Positron)
+- **VS Code/Open VSX**: the **Fatou** extension
+  ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
+  [Open VSX](https://open-vsx.org/extension/jolars/fatou)); also works in
+  Positron
 
 Runs on Linux, macOS, and Windows (x86_64 and arm64).
 
@@ -52,9 +55,15 @@ Configuration lives in `fatou.toml` (`[format]` line-width/indent-width,
 
 ## Editor integration
 
-The language server (`fatou lsp`) provides formatting and parse diagnostics over
-stdio. The **Fatou** extension for VS Code/Open VSX (and Positron) bundles the
-binary and starts the server automatically; see [`editors/code`](editors/code).
+The language server (`fatou lsp`) provides a broad set of features over stdio:
+completion, hover, go-to-definition, find references and document highlights,
+rename, document and workspace symbols, call and type hierarchy, signature help,
+code actions, folding and selection ranges, document links, and semantic tokens,
+alongside formatting (whole-document and range) and diagnostics (push and pull).
+The **Fatou** extension for VS Code/Open VSX (and Positron)
+([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
+[Open VSX](https://open-vsx.org/extension/jolars/fatou)) bundles the binary and
+starts the server automatically; see [`editors/code`](editors/code).
 For Neovim and other editors, see the [editor setup
 guide](https://fatou.dev/guide/editors.html).
 

@@ -17,10 +17,10 @@ this is modeled directly):
 - `lsp-server` for the language-server transport,
 - an event-pipeline parser built for incremental reparse.
 
-**Strategy (see `TODO.md`):** bring the parser + formatter foundation toward
-completion *first*; the linter and the richer language-server features are
-deferred to later phases. When in doubt about scope/priority, `TODO.md` is the
-live roadmap and records known issues and follow-ups.
+**Scope (see `TODO.md`):** Fatou has a working parser, formatter, linter, and a
+broad language-server surface (see **Language server** below). `TODO.md` is the
+live roadmap for remaining work and records known issues and follow-ups; when in
+doubt about scope or priority, it is the source of truth.
 
 The dev environment is provided via `devenv`/Nix (`devenv.nix`, `devenv.yaml`)
 and includes a Julia toolchain.
@@ -207,12 +207,23 @@ diagnostics + autofixes (`diagnostic.rs`, `fix.rs`), and rendering
 lives in `TODO.md` ("Rule roadmap"); **to add a rule, use the `add-lint-rule`
 skill** (`.claude/skills/add-lint-rule/`).
 
-**Language server** (`src/lsp.rs`, CLI `fatou lsp`): a stdio JSON-RPC server on
-the `lsp-server` crate (rust-analyzer's transport). Single-threaded for now:
-advertises full-document sync + document formatting, pushes parse diagnostics on
-open/change, and formats on request. The dedicated-lint-thread + rayon read-pool
-model (forced by salsa's single-writer constraint) is a deliberate later step
-(`TODO.md`).
+**Language server** (`src/lsp.rs`, `src/lsp/`, CLI `fatou lsp`): a stdio
+JSON-RPC server on the `lsp-server` crate (rust-analyzer's transport). Advertised
+capabilities (`server.rs::server_capabilities`, negotiated against the client's)
+include completion, hover, definition, references + document highlight, rename
+(with prepare), document + workspace symbols, call hierarchy + type hierarchy,
+signature help, code actions, folding + selection ranges, document links,
+semantic tokens, whole-document + range formatting, and diagnostics (push and,
+when the client supports it, pull), plus workspace-folder/file-watch
+registration and UTF-8/UTF-16 position-encoding negotiation. Concurrency follows
+the rust-analyzer model forced by salsa's single-writer constraint: a dedicated
+**analysis thread** (`analysis_thread.rs`) is the sole db owner/writer, splitting
+each analysis into a cheap `&mut db` write-phase and a read-phase dispatched to a
+fixed **read pool** (`task_pool.rs`, `read_jobs.rs`) holding a short-lived db
+clone; requests are coalesced per URI and cancelable, with a stale-read protocol
+so a superseded edit's results are dropped. Per-job `catch_unwind` on both the
+analysis thread and the read pool keeps one malformed request from killing the
+server. Background package indexing gets its own pool (`TODO.md`).
 
 **File discovery** (`src/file_discovery.rs`): `collect_julia_files` walks paths
 for `.jl` files (via `ignore`); rejects non-`.jl` explicit file paths.
