@@ -22,14 +22,15 @@ use lsp_types::{
     FileChangeType, FileEvent, FoldingRange, FoldingRangeKind, FoldingRangeParams,
     FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
-    PartialResultParams, Position, PositionEncodingKind, PublishDiagnosticsParams, Range,
-    ReferenceContext, ReferenceParams, RegistrationParams, RenameParams, SelectionRange,
-    SelectionRangeParams, SemanticTokens, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
-    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
-    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceClientCapabilities,
-    WorkspaceEdit, WorkspaceFolder, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    PartialResultParams, Position, PositionEncodingKind, ProgressParams, ProgressParamsValue,
+    PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RegistrationParams,
+    RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams,
+    SignatureHelp, SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextEdit,
+    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Uri, VersionedTextDocumentIdentifier, WindowClientCapabilities,
+    WorkDoneProgress, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit,
+    WorkspaceFolder, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -3530,6 +3531,43 @@ fn initialize_with_root(client: &Connection, root_uri: &Uri) {
         .unwrap();
 }
 
+/// Like [`initialize_with_root`], but advertising `window.workDoneProgress` so
+/// the server reports its harvest via `$/progress`.
+fn initialize_with_work_done_progress(client: &Connection, root_uri: &Uri) {
+    #[allow(deprecated)]
+    let params = InitializeParams {
+        root_uri: Some(root_uri.clone()),
+        capabilities: ClientCapabilities {
+            window: Some(WindowClientCapabilities {
+                work_done_progress: Some(true),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    let init = client.receiver.recv().unwrap();
+    assert!(
+        matches!(init, Message::Response(_)),
+        "expected an InitializeResult, got {init:?}"
+    );
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+}
+
 /// The two-message initialize handshake with several workspace folders open.
 /// Returns the raw `InitializeResult` so callers can assert on the advertised
 /// capabilities.
@@ -3785,6 +3823,223 @@ fn serves_cross_file_references_and_rename() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(202));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Write a minimal harvestable package (`Project.toml` + `src/MyPkg.jl`) into a
+/// fresh temp dir and return it. Shared by the progress tests.
+fn write_harvestable_pkg(prefix: &str) -> TempDir {
+    let pkg = TempDir::new(prefix);
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ngreet(a) = a\nend\n",
+    );
+    pkg
+}
+
+/// The env isolation from `serves_cross_file_references_and_rename`: resolve
+/// against `pkg` with an empty depot and `PATH` so the harvest uses the embedded
+/// minimal-Base fallback (fast and hermetic) instead of parsing all of Base.
+fn isolate_env(pkg: &TempDir, depot: &TempDir) -> EnvGuard {
+    EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+    ])
+}
+
+/// A client advertising `window.workDoneProgress` gets a create request plus a
+/// `$/progress` begin/report/end cycle around the harvest, all sharing one
+/// token — the harvester's indexing pass surfaced to the editor.
+#[test]
+fn reports_harvest_progress_when_the_client_supports_it() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let pkg = write_harvestable_pkg("fatou-lsp-progress");
+    let depot = TempDir::new("fatou-lsp-progress-depot");
+    let _guard = isolate_env(&pkg, &depot);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_work_done_progress(&client, &root_uri);
+
+    // Collect the create request and the $/progress cycle. The harvester fires
+    // these right after the handshake; drain until `end` or the deadline.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut create_request_token = None;
+    let mut kinds: Vec<&'static str> = Vec::new();
+    let mut progress_tokens = Vec::new();
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .expect("harvest progress never completed within the deadline");
+        match client.receiver.recv_timeout(remaining).unwrap() {
+            Message::Request(req) if req.method == "window/workDoneProgress/create" => {
+                let params: lsp_types::WorkDoneProgressCreateParams =
+                    serde_json::from_value(req.params).unwrap();
+                create_request_token = Some(params.token);
+            }
+            Message::Notification(n) if n.method == "$/progress" => {
+                let params: ProgressParams = serde_json::from_value(n.params).unwrap();
+                progress_tokens.push(params.token);
+                let ProgressParamsValue::WorkDone(value) = params.value;
+                match value {
+                    WorkDoneProgress::Begin(_) => kinds.push("begin"),
+                    WorkDoneProgress::Report(_) => kinds.push("report"),
+                    WorkDoneProgress::End(_) => {
+                        kinds.push("end");
+                        break;
+                    }
+                }
+            }
+            // publishDiagnostics and other notifications are irrelevant here.
+            Message::Notification(_) | Message::Response(_) | Message::Request(_) => {}
+        }
+    }
+
+    assert_eq!(
+        kinds,
+        vec!["begin", "report", "end"],
+        "a full begin/report/end cycle in order"
+    );
+    let create_request_token = create_request_token.expect("a create request preceded $/progress");
+    assert!(
+        progress_tokens.iter().all(|t| *t == create_request_token),
+        "every $/progress carries the created token"
+    );
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(900),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(900));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// A client that does not advertise `window.workDoneProgress` gets no create
+/// request and no `$/progress` — even though the harvest runs (proven by
+/// `greet` resolving across the package once the index lands).
+#[test]
+fn suppresses_harvest_progress_without_client_support() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let pkg = write_harvestable_pkg("fatou-lsp-noprogress");
+    let depot = TempDir::new("fatou-lsp-noprogress-depot");
+    let _guard = isolate_env(&pkg, &depot);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_root(&client, &root_uri); // default caps: no progress support
+
+    // Open the source so document-symbol requests have something to answer, and
+    // so a harvest-completion probe has a live buffer.
+    let src_uri = file_uri(&pkg.path.join("src/MyPkg.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: src_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "module MyPkg\ngreet(a) = a\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // Drive to harvest completion by polling workspace/symbol for `greet` (empty
+    // until the index lands), asserting no progress message slips through. Any
+    // server-initiated request would be a leak: with these caps the server has
+    // no reason to send one.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut poll_id = 400;
+    loop {
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(poll_id),
+                method: "workspace/symbol".to_string(),
+                params: serde_json::to_value(WorkspaceSymbolParams {
+                    query: "greet".to_string(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        let symbols = loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("harvest never landed within the deadline");
+            match client.receiver.recv_timeout(remaining).unwrap() {
+                Message::Notification(n) => assert_ne!(
+                    n.method, "$/progress",
+                    "server must not send $/progress without client support"
+                ),
+                Message::Request(req) => {
+                    panic!("unexpected server-initiated request: {}", req.method)
+                }
+                Message::Response(resp) if resp.id == RequestId::from(poll_id) => {
+                    let response: Option<WorkspaceSymbolResponse> =
+                        serde_json::from_value(resp.result().unwrap_or(serde_json::Value::Null))
+                            .unwrap();
+                    break match response {
+                        Some(WorkspaceSymbolResponse::Flat(items)) => items.len(),
+                        Some(WorkspaceSymbolResponse::Nested(items)) => items.len(),
+                        None => 0,
+                    };
+                }
+                Message::Response(_) => {}
+            }
+        };
+        if symbols > 0 {
+            break; // The harvest landed; no progress was seen along the way.
+        }
+        poll_id += 1;
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(901),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(901));
     client
         .sender
         .send(Message::Notification(Notification {

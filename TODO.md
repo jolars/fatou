@@ -133,10 +133,11 @@ panic isolation — so those need no work. The items below are the remaining gap
   `try_dispatch_supersedes_inflight_and_triggers_cancellation`
   (`src/lsp/analysis_thread.rs`), which dispatches v1, leaves it in flight, then
   dispatches v2 and asserts the slot advances via the cancellation branch.
-- [ ] **P2 — Work-done progress for the harvester.** `spawn_workspace_harvester`
-  (`src/lsp/server.rs`) walks the filesystem and parses all of Base with no
-  `$/progress` reporting. Advertise the capability and emit begin/report/end
-  around the harvest and any re-harvest.
+- [x] **P2 — Work-done progress for the harvester.** `spawn_workspace_harvester`
+  (`src/lsp/server.rs`) reports its indexing passes via `$/progress`, gated on
+  the client's `window.workDoneProgress` capability: a `HarvestProgress` reporter
+  (`src/lsp/progress.rs`) mints a token, then emits begin/report/end around the
+  full harvest and each single-package re-harvest.
 - [ ] **P3 — Content-derived pull `resultId`.** Already stubbed: every pull
   returns `result_id: None` (`src/lsp/read_jobs.rs`, `semantic_tokens.rs`), so
   `Unchanged` never fires. Derive the id from a hash of the file's findings so an

@@ -25,6 +25,7 @@ use crate::index::{PackageIndex, dev_packages, harvest_libraries, harvest_worksp
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, LibraryMessage, guard, spawn_analysis_thread};
+use super::progress::HarvestProgress;
 use super::read_jobs::ReadJob;
 use super::semantic_tokens::legend;
 use super::state::{GlobalState, Outbound};
@@ -59,6 +60,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
         supports_watched_files_registration(&params.capabilities) && !workspace_roots.is_empty();
     let pull_diagnostics = supports_pull_diagnostics(&params.capabilities);
     let diagnostic_refresh = supports_diagnostic_refresh(&params.capabilities);
+    let work_done_progress = supports_work_done_progress(&params.capabilities);
     let result =
         serde_json::json!({ "capabilities": capabilities_json(encoding, pull_diagnostics) });
     connection.initialize_finish(id, result)?;
@@ -69,6 +71,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
         register_watchers,
         pull_diagnostics,
         diagnostic_refresh,
+        work_done_progress,
         params.initialization_options,
     )
 }
@@ -106,6 +109,19 @@ fn supports_watched_files_registration(capabilities: &ClientCapabilities) -> boo
         .as_ref()
         .and_then(|workspace| workspace.did_change_watched_files.as_ref())
         .and_then(|caps| caps.dynamic_registration)
+        .unwrap_or(false)
+}
+
+/// Whether the client accepts server-initiated work-done progress
+/// (`window/workDoneProgress/create` plus `$/progress`), the channel the
+/// harvester reports its indexing passes on. There is no matching
+/// `ServerCapabilities` field: server-initiated progress is gated on this
+/// client capability alone.
+fn supports_work_done_progress(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .window
+        .as_ref()
+        .and_then(|window| window.work_done_progress)
         .unwrap_or(false)
 }
 
@@ -261,6 +277,7 @@ fn main_loop(
     register_watchers: bool,
     pull_diagnostics: bool,
     diagnostic_refresh: bool,
+    work_done_progress: bool,
     initialization_options: Option<serde_json::Value>,
 ) -> Result<(), DynError> {
     let (out_tx, out_rx) = crossbeam_channel::unbounded::<Outbound>();
@@ -282,8 +299,12 @@ fn main_loop(
     // handshake (nor shutdown — the thread is detached). The result is swapped
     // into the db when it lands; every feature stays usable in the meantime, and
     // library go-to-definition/completion start answering once it arrives. The
-    // same thread re-harvests the workspace package on each harvest signal.
-    spawn_workspace_harvester(workspace_roots, library_tx, harvest_rx);
+    // same thread re-harvests the workspace package on each harvest signal, and
+    // reports each pass on the client's message channel directly (it never
+    // touches the db, so progress stays off the `Outbound` path). A client
+    // without work-done support gets a `None` sender and no progress at all.
+    let progress_sender = work_done_progress.then(|| connection.sender.clone());
+    spawn_workspace_harvester(workspace_roots, library_tx, harvest_rx, progress_sender);
 
     // The read pool serves latency-sensitive work (formatting, the analysis
     // read-phase). Its workers must outlive both `state` and the analysis
@@ -409,6 +430,7 @@ fn spawn_workspace_harvester(
     workspace_roots: Vec<PathBuf>,
     library_tx: crossbeam_channel::Sender<LibraryMessage>,
     signal_rx: crossbeam_channel::Receiver<HarvestSignal>,
+    progress_sender: Option<crossbeam_channel::Sender<Message>>,
 ) {
     if workspace_roots.is_empty() {
         return;
@@ -416,7 +438,11 @@ fn spawn_workspace_harvester(
     let spawned = std::thread::Builder::new()
         .name("fatou-index-loader".to_string())
         .spawn(move || {
+            let progress = HarvestProgress::new(progress_sender);
             'resolve: loop {
+                // Report the full pass (initial resolve, and every re-resolve a
+                // `continue 'resolve` restarts) as one begin/report/end cycle.
+                progress.begin("Indexing Julia environment", "Resolving environment");
                 // One environment per folder, deduped on the resolved project file:
                 // two folders under one project (or a user-set `JULIA_PROJECT`,
                 // which wins over every folder's walk-up) collapse to one.
@@ -435,12 +461,13 @@ fn spawn_workspace_harvester(
                 // the previously harvested library (and the first send with nothing
                 // resolved is a cheap no-op harvest).
                 let devs = dev_packages(&envs);
-                if library_tx
-                    .send(LibraryMessage::Full(harvest_libraries(&envs)))
-                    .is_err()
-                {
+                progress.report("Indexing Base and packages");
+                let library = harvest_libraries(&envs);
+                let indexed = library.packages.len();
+                if library_tx.send(LibraryMessage::Full(library)).is_err() {
                     return; // The analysis thread is gone; stop harvesting.
                 }
+                progress.end(&format!("Indexed {indexed} packages"));
 
                 // With packages under development, re-harvest the one whose files a
                 // source signal touches (a `src/` prefix check, longest prefix
@@ -482,7 +509,14 @@ fn spawn_workspace_harvester(
                     else {
                         continue;
                     };
+                    // A matched source signal re-harvests one package: a short
+                    // cycle so the editor shows the same spinner as a full pass.
+                    progress.begin(
+                        "Indexing Julia environment",
+                        &format!("Re-indexing {}", dev.name),
+                    );
                     let index = Arc::new(harvest_workspace(dev));
+                    progress.end(&format!("Re-indexed {}", dev.name));
                     if last.get(&dev.name) == Some(&index) {
                         continue;
                     }
