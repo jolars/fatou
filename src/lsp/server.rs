@@ -236,7 +236,9 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
                 work_done_progress_options: Default::default(),
                 legend: legend(),
                 range: None,
-                full: Some(SemanticTokensFullOptions::Bool(true)),
+                // Delta so an unchanged re-pull answers an empty edit list
+                // instead of the full token set (see `semantic_tokens_delta`).
+                full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
             }
             .into(),
         ),

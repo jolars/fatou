@@ -63,6 +63,7 @@ mod read_jobs;
 mod references;
 mod rename;
 mod render;
+mod result_id;
 mod selection;
 mod semantic_tokens;
 mod server;

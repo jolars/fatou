@@ -26,10 +26,14 @@ use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
 
-use lsp_types::{Position, SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensLegend};
+use lsp_types::{
+    Position, SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensDelta,
+    SemanticTokensFullDeltaResult, SemanticTokensLegend,
+};
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
 
+use super::result_id::content_hash;
 use crate::incremental::Analysis;
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::parse;
@@ -138,10 +142,51 @@ fn tokens_for<P: PackageSource + ?Sized>(
     // and the overlap drop keeps the syntax paint.
     spans.sort_by_key(|&(range, _)| (range.start(), range.end()));
     let spans = drop_overlaps(spans);
+    let data = delta_encode(&spans, text, encoding);
     SemanticTokens {
-        result_id: None,
-        data: delta_encode(&spans, text, encoding),
+        // Content-derived so a `full/delta` re-pull of unchanged highlighting
+        // can short-circuit to an empty edit list (see `semantic_tokens_delta`).
+        // `SemanticToken` is neither `Hash` nor `Serialize`, so hash its five
+        // `u32` fields laid out flat.
+        result_id: Some(content_hash(&token_fingerprint(&data))),
+        data,
     }
+}
+
+/// The tokens' `u32` fields flattened for hashing: `SemanticToken` itself is
+/// neither `Hash` nor `Serialize` (its wire form is a custom flat array), so
+/// the `resultId` keys off this stand-in instead.
+fn token_fingerprint(data: &[SemanticToken]) -> Vec<[u32; 5]> {
+    data.iter()
+        .map(|t| {
+            [
+                t.delta_line,
+                t.delta_start,
+                t.length,
+                t.token_type,
+                t.token_modifiers_bitset,
+            ]
+        })
+        .collect()
+}
+
+/// Answer a `textDocument/semanticTokens/full/delta` pull. When the client's
+/// `previous_result_id` matches the freshly computed id the highlighting is
+/// unchanged, so the response is an empty edit list (id only); otherwise the
+/// full token set is resent. We recompute the whole set rather than diff it, so
+/// any change re-sends in full — the win is purely the unchanged case, mirroring
+/// the diagnostics `Unchanged` shortcut.
+pub(crate) fn semantic_tokens_delta(
+    tokens: SemanticTokens,
+    previous_result_id: &str,
+) -> SemanticTokensFullDeltaResult {
+    if tokens.result_id.as_deref() == Some(previous_result_id) {
+        return SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
+            result_id: tokens.result_id,
+            edits: Vec::new(),
+        });
+    }
+    SemanticTokensFullDeltaResult::Tokens(tokens)
 }
 
 /// The syntax-driven spans of the tree, in document order: keywords, macro
@@ -909,6 +954,38 @@ mod tests {
             painted("1 + 2\n", &lib),
             expect(&[("1", HighlightKind::Number), ("2", HighlightKind::Number),]),
         );
+    }
+
+    /// A `full/delta` pull whose `previous_result_id` matches the freshly
+    /// computed id collapses to an empty edit list; a mismatch resends the full
+    /// token set. The two ids must also actually differ for differing content.
+    #[test]
+    fn semantic_tokens_delta_short_circuits_only_on_a_matching_id() {
+        let no_lib = no_library();
+        let tokens = compute_semantic_tokens("f(x) = x\n", PositionEncoding::Utf8, &no_lib);
+        let id = tokens.result_id.clone().expect("tokens carry an id");
+
+        // A matching id: empty delta, same id echoed back.
+        match semantic_tokens_delta(tokens.clone(), &id) {
+            SemanticTokensFullDeltaResult::TokensDelta(delta) => {
+                assert_eq!(delta.result_id, Some(id.clone()));
+                assert!(delta.edits.is_empty());
+            }
+            other => panic!("a matching id must answer an empty delta, got {other:?}"),
+        }
+
+        // A stale id: the full token set is resent unchanged.
+        match semantic_tokens_delta(tokens.clone(), "stale") {
+            SemanticTokensFullDeltaResult::Tokens(full) => assert_eq!(full, tokens),
+            other => panic!("a stale id must resend the full tokens, got {other:?}"),
+        }
+
+        // A different token layout mints a differing id (so a change can't
+        // masquerade as unchanged). The id keys off the encoded token stream —
+        // positions, lengths, and kinds — not the identifier text, so the
+        // contrast case must actually change that stream.
+        let other = compute_semantic_tokens("struct T end\n", PositionEncoding::Utf8, &no_lib);
+        assert_ne!(other.result_id, tokens.result_id);
     }
 
     #[test]

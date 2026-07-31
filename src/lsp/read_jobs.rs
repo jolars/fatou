@@ -9,7 +9,8 @@ use lsp_types::{
     CallHierarchyItem, CodeActionOrCommand, CompletionItem, CompletionResponse,
     DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse,
     FullDocumentDiagnosticReport, GotoDefinitionResponse, Position, Range,
-    RelatedFullDocumentDiagnosticReport, TypeHierarchyItem, Uri, WorkspaceSymbolResponse,
+    RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
+    TypeHierarchyItem, UnchangedDocumentDiagnosticReport, Uri, WorkspaceSymbolResponse,
 };
 
 use std::sync::Arc;
@@ -32,8 +33,9 @@ use super::lint::ServerRules;
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
+use super::result_id::content_hash;
 use super::selection::selection_ranges_via_db;
-use super::semantic_tokens::semantic_tokens_via_db;
+use super::semantic_tokens::{semantic_tokens_delta, semantic_tokens_via_db};
 use super::signature_help::signature_help_via_db;
 use super::state::Outbound;
 use super::symbols::document_symbols_via_db;
@@ -83,6 +85,10 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: String,
         rules: Arc<ServerRules>,
+        /// The `resultId` the client last held for this document, if any; a
+        /// match against the freshly computed id collapses the report to
+        /// `Unchanged` (see [`diagnostic_report`]).
+        previous_result_id: Option<String>,
         sender: ReadReply,
     },
     Format {
@@ -134,6 +140,15 @@ pub(crate) enum ReadJob {
         id: RequestId,
         path: PathBuf,
         text: String,
+        sender: ReadReply,
+    },
+    SemanticTokensDelta {
+        id: RequestId,
+        path: PathBuf,
+        text: String,
+        /// The `resultId` from the client's last full or delta response; a
+        /// match against the freshly computed id answers an empty delta.
+        previous_result_id: String,
         sender: ReadReply,
     },
     Completion {
@@ -259,6 +274,7 @@ impl ReadJob {
             ReadJob::DocumentLinks { id, sender, .. } => (id, sender),
             ReadJob::SelectionRanges { id, sender, .. } => (id, sender),
             ReadJob::SemanticTokensFull { id, sender, .. } => (id, sender),
+            ReadJob::SemanticTokensDelta { id, sender, .. } => (id, sender),
             ReadJob::Completion { id, sender, .. } => (id, sender),
             ReadJob::CompletionResolve { id, sender, .. } => (id, sender),
             ReadJob::Hover { id, sender, .. } => (id, sender),
@@ -278,15 +294,48 @@ impl ReadJob {
     }
 }
 
-/// The `DocumentDiagnosticReportResult` shape for a full (non-cached) report.
-/// `result_id`-based `unchanged` responses are deferred; every pull is
-/// answered in full.
+/// An id-less full report, used for the unknown-document case (a never-opened
+/// path the client can't hold a prior `resultId` for, so there is nothing to
+/// match against). Reports for open documents go through [`diagnostic_report`],
+/// which keys them by content so a re-pull can answer `Unchanged`.
 pub(crate) fn full_report(items: Vec<lsp_types::Diagnostic>) -> DocumentDiagnosticReportResult {
     DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
         RelatedFullDocumentDiagnosticReport {
             related_documents: None,
             full_document_diagnostic_report: FullDocumentDiagnosticReport {
                 result_id: None,
+                items,
+            },
+        },
+    ))
+}
+
+/// Build the pull-diagnostic report for `items`, keyed by a content hash so an
+/// unchanged file re-pulls cheaply. When the client's `previous_result_id`
+/// matches the freshly computed id the findings are unchanged since its last
+/// pull, so the report collapses to `Unchanged` (id only, no items); otherwise
+/// it is a `Full` report carrying the new id for the client to echo back next
+/// time.
+pub(crate) fn diagnostic_report(
+    items: Vec<lsp_types::Diagnostic>,
+    previous_result_id: Option<&str>,
+) -> DocumentDiagnosticReportResult {
+    let result_id = content_hash(&items);
+    if previous_result_id == Some(result_id.as_str()) {
+        return DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Unchanged(
+            RelatedUnchangedDocumentDiagnosticReport {
+                related_documents: None,
+                unchanged_document_diagnostic_report: UnchangedDocumentDiagnosticReport {
+                    result_id,
+                },
+            },
+        ));
+    }
+    DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(
+        RelatedFullDocumentDiagnosticReport {
+            related_documents: None,
+            full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                result_id: Some(result_id),
                 items,
             },
         },
@@ -316,10 +365,11 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             path,
             text,
             rules,
+            previous_result_id,
             sender,
         } => {
             let items = document_diagnostics_via_db(&snapshot, &path, &text, encoding, &rules);
-            let result = full_report(items);
+            let result = diagnostic_report(items, previous_result_id.as_deref());
             let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
         ReadJob::Format {
@@ -395,6 +445,17 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let tokens = semantic_tokens_via_db(&snapshot, &path, &text, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, tokens)));
+        }
+        ReadJob::SemanticTokensDelta {
+            id,
+            path,
+            text,
+            previous_result_id,
+            sender,
+        } => {
+            let tokens = semantic_tokens_via_db(&snapshot, &path, &text, encoding);
+            let result = semantic_tokens_delta(tokens, &previous_result_id);
+            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
         }
         ReadJob::Completion {
             id,

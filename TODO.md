@@ -138,10 +138,18 @@ panic isolation — so those need no work. The items below are the remaining gap
   the client's `window.workDoneProgress` capability: a `HarvestProgress` reporter
   (`src/lsp/progress.rs`) mints a token, then emits begin/report/end around the
   full harvest and each single-package re-harvest.
-- [ ] **P3 — Content-derived pull `resultId`.** Already stubbed: every pull
-  returns `result_id: None` (`src/lsp/read_jobs.rs`, `semantic_tokens.rs`), so
-  `Unchanged` never fires. Derive the id from a hash of the file's findings so an
-  unchanged file re-pulls as `Unchanged` (bandwidth win).
+- [x] **P3 — Content-derived pull `resultId`.** Both pull responses now key off
+  a content hash (`src/lsp/result_id.rs`: hex SipHash of the findings'
+  serialization, seeded deterministically). Pull diagnostics thread the client's
+  `previous_result_id` through the `DocumentDiagnostic` read job and collapse to
+  `Unchanged` on a match, else a `Full` report carrying the new id
+  (`diagnostic_report`, `src/lsp/read_jobs.rs`). Semantic tokens now advertise
+  `full/delta` (`server.rs`) and derive the `resultId` from the encoded token
+  stream; a matching `full/delta` re-pull answers an empty edit list
+  (`semantic_tokens_delta`), else the full set is resent (we recompute rather
+  than diff, so the win is purely the unchanged case). The id keys off token
+  positions/lengths/kinds, not identifier text, so a rename that leaves the
+  layout intact legitimately re-pulls unchanged.
 - [ ] **P3 — Debug open/close balance assertion.** The event parser has
   balanced-slice helpers (`src/parser/structural.rs`) but no debug-only
   Start/Finish balance walk over the event stream (badness landed one as a

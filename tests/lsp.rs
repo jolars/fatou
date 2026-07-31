@@ -24,13 +24,14 @@ use lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
     PartialResultParams, Position, PositionEncodingKind, ProgressParams, ProgressParamsValue,
     PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RegistrationParams,
-    RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensParams,
-    SignatureHelp, SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextEdit,
-    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Uri, VersionedTextDocumentIdentifier, WindowClientCapabilities,
-    WorkDoneProgress, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit,
-    WorkspaceFolder, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensDeltaParams,
+    SemanticTokensFullDeltaResult, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
+    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
+    VersionedTextDocumentIdentifier, WindowClientCapabilities, WorkDoneProgress,
+    WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -3310,7 +3311,9 @@ fn serves_semantic_tokens() {
                     "namespace"
                 ]),
             );
-            assert_eq!(provider["full"], serde_json::json!(true));
+            // Delta advertised so `full/delta` re-pulls can answer an empty
+            // edit list for unchanged highlighting.
+            assert_eq!(provider["full"], serde_json::json!({ "delta": true }));
         }
         other => panic!("expected an InitializeResult, got {other:?}"),
     }
@@ -3358,7 +3361,7 @@ fn serves_semantic_tokens() {
             params: semantic_params(&uri),
         }))
         .unwrap();
-    match client.receiver.recv().unwrap() {
+    let result_id = match client.receiver.recv().unwrap() {
         Message::Response(resp) => {
             let tokens: SemanticTokens = serde_json::from_value(resp.result().unwrap()).unwrap();
             // `@show` paints syntactically; both `f`s classify as function
@@ -3373,8 +3376,41 @@ fn serves_semantic_tokens() {
                     (1, 0, 1, FUNCTION),
                 ],
             );
+            // The full response carries a content-derived id for the delta pull.
+            tokens.result_id.expect("full tokens carry a resultId")
         }
         other => panic!("expected a semanticTokens response, got {other:?}"),
+    };
+
+    // --- a `full/delta` re-pull of the unchanged buffer answers empty edits ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/semanticTokens/full/delta".to_string(),
+            params: serde_json::to_value(SemanticTokensDeltaParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                previous_result_id: result_id.clone(),
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let result: SemanticTokensFullDeltaResult =
+                serde_json::from_value(resp.result().unwrap()).unwrap();
+            let SemanticTokensFullDeltaResult::TokensDelta(delta) = result else {
+                panic!("an unchanged buffer must answer a token delta, got {result:?}");
+            };
+            assert_eq!(delta.result_id, Some(result_id), "the id is unchanged");
+            assert!(
+                delta.edits.is_empty(),
+                "unchanged highlighting has no edits"
+            );
+        }
+        other => panic!("expected a semanticTokens delta response, got {other:?}"),
     }
 
     // --- an unknown document answers null ---
@@ -3382,7 +3418,7 @@ fn serves_semantic_tokens() {
     client
         .sender
         .send(Message::Request(Request {
-            id: RequestId::from(3),
+            id: RequestId::from(4),
             method: "textDocument/semanticTokens/full".to_string(),
             params: semantic_params(&unknown),
         }))
@@ -3398,7 +3434,7 @@ fn serves_semantic_tokens() {
     client
         .sender
         .send(Message::Request(Request {
-            id: RequestId::from(4),
+            id: RequestId::from(5),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))
@@ -5386,7 +5422,7 @@ fn serves_pull_diagnostics() {
         .unwrap();
 
     // --- pull; the report carries the lint finding ---
-    let pull = |id: i32| {
+    let pull = |id: i32, previous_result_id: Option<String>| {
         client
             .sender
             .send(Message::Request(Request {
@@ -5395,7 +5431,7 @@ fn serves_pull_diagnostics() {
                 params: serde_json::to_value(lsp_types::DocumentDiagnosticParams {
                     text_document: TextDocumentIdentifier { uri: uri.clone() },
                     identifier: Some("fatou".to_string()),
-                    previous_result_id: None,
+                    previous_result_id,
                     work_done_progress_params: Default::default(),
                     partial_result_params: Default::default(),
                 })
@@ -5405,19 +5441,11 @@ fn serves_pull_diagnostics() {
     };
     // Any push for the opened document would arrive before the pull response;
     // fail on it instead of skipping past.
-    let recv_report = |id: i32| -> Vec<Diagnostic> {
+    let recv_result = |id: i32| -> lsp_types::DocumentDiagnosticReportResult {
         loop {
             match client.receiver.recv().unwrap() {
                 Message::Response(resp) if resp.id == RequestId::from(id) => {
-                    let report: lsp_types::DocumentDiagnosticReportResult =
-                        serde_json::from_value(resp.result().unwrap()).unwrap();
-                    let lsp_types::DocumentDiagnosticReportResult::Report(
-                        lsp_types::DocumentDiagnosticReport::Full(full),
-                    ) = report
-                    else {
-                        panic!("expected a full document diagnostic report");
-                    };
-                    return full.full_document_diagnostic_report.items;
+                    return serde_json::from_value(resp.result().unwrap()).unwrap();
                 }
                 Message::Notification(note) if note.method == "textDocument/publishDiagnostics" => {
                     panic!("a pull client must not receive pushes for open documents: {note:?}");
@@ -5426,15 +5454,42 @@ fn serves_pull_diagnostics() {
             }
         }
     };
+    // Assert a full report and return its items paired with the content id the
+    // client echoes back to detect an unchanged re-pull.
+    let recv_full = |id: i32| -> (Vec<Diagnostic>, String) {
+        let lsp_types::DocumentDiagnosticReportResult::Report(
+            lsp_types::DocumentDiagnosticReport::Full(full),
+        ) = recv_result(id)
+        else {
+            panic!("expected a full document diagnostic report");
+        };
+        let report = full.full_document_diagnostic_report;
+        let result_id = report.result_id.expect("a full report carries a resultId");
+        (report.items, result_id)
+    };
 
-    pull(2);
-    let items = recv_report(2);
+    pull(2, None);
+    let (items, result_id) = recv_full(2);
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0].code,
         Some(lsp_types::NumberOrString::String(
             "unused-binding".to_string()
         ))
+    );
+
+    // --- re-pull the unchanged buffer with its id; the report collapses to
+    // `Unchanged` (id only, no items resent) ---
+    pull(100, Some(result_id.clone()));
+    let lsp_types::DocumentDiagnosticReportResult::Report(
+        lsp_types::DocumentDiagnosticReport::Unchanged(unchanged),
+    ) = recv_result(100)
+    else {
+        panic!("a matching previousResultId must answer Unchanged");
+    };
+    assert_eq!(
+        unchanged.unchanged_document_diagnostic_report.result_id, result_id,
+        "the Unchanged report echoes the same content id"
     );
 
     // --- break the parse; the next pull reports the parse error only ---
@@ -5456,8 +5511,11 @@ fn serves_pull_diagnostics() {
             .unwrap(),
         }))
         .unwrap();
-    pull(3);
-    let items = recv_report(3);
+    // Re-pull with the stale id: the findings changed, so it must not collapse
+    // to `Unchanged` but resend a full report (carrying a fresh id).
+    pull(3, Some(result_id.clone()));
+    let (items, changed_id) = recv_full(3);
+    assert_ne!(changed_id, result_id, "changed findings mint a new id");
     assert!(!items.is_empty(), "expected the parse error in the report");
     assert!(
         items

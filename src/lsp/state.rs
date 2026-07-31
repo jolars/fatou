@@ -18,8 +18,9 @@ use lsp_types::request::{
     DocumentLinkRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition,
     HoverRequest, PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
     Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
-    SemanticTokensFullRequest, SignatureHelpRequest, TypeHierarchyPrepare, TypeHierarchySubtypes,
-    TypeHierarchySupertypes, WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
+    SemanticTokensFullDeltaRequest, SemanticTokensFullRequest, SignatureHelpRequest,
+    TypeHierarchyPrepare, TypeHierarchySubtypes, TypeHierarchySupertypes,
+    WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
@@ -31,9 +32,9 @@ use lsp_types::{
     DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
     GlobPattern, GotoDefinitionParams, HoverParams, LogMessageParams, MessageType, NumberOrString,
     PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameParams,
-    SelectionRangeParams, SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
-    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
-    WorkspaceSymbolParams,
+    SelectionRangeParams, SemanticTokensDeltaParams, SemanticTokensParams, SignatureHelpParams,
+    TextDocumentPositionParams, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
 };
 
 use crate::config::CONFIG_FILE_NAME;
@@ -197,6 +198,7 @@ impl GlobalState {
             DocumentLinkRequest::METHOD => self.on_document_links(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
+            SemanticTokensFullDeltaRequest::METHOD => self.on_semantic_tokens_full_delta(req),
             Completion::METHOD => self.on_completion(req),
             ResolveCompletionItem::METHOD => self.on_completion_resolve(req),
             HoverRequest::METHOD => self.on_hover(req),
@@ -246,6 +248,7 @@ impl GlobalState {
             path: path_for(&uri),
             text,
             rules,
+            previous_result_id: params.previous_result_id,
             sender: reply,
         });
     }
@@ -439,6 +442,29 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
+            sender: reply,
+        });
+    }
+
+    fn on_semantic_tokens_full_delta(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) =
+            req.extract::<SemanticTokensDeltaParams>(SemanticTokensFullDeltaRequest::METHOD)
+        else {
+            self.respond_err(id, "invalid semanticTokens/full/delta params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+            self.respond_ok(id, serde_json::Value::Null);
+            return;
+        };
+        let reply = self.read_reply(id.clone(), Some(&uri));
+        self.dispatch_read(ReadJob::SemanticTokensDelta {
+            id,
+            path: path_for(&uri),
+            text,
+            previous_result_id: params.previous_result_id,
             sender: reply,
         });
     }
