@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{SendError, Sender};
 use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
@@ -35,14 +35,39 @@ use super::rename::{prepare_rename_via_db, rename_via_db};
 use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::semantic_tokens_via_db;
 use super::signature_help::signature_help_via_db;
+use super::state::Outbound;
 use super::symbols::document_symbols_via_db;
 use super::type_hierarchy::{prepare_type_hierarchy_via_db, subtypes_via_db, supertypes_via_db};
 use super::workspace_symbols::workspace_symbols_via_db;
 
+/// A read job's reply channel. Rather than answering the client directly, a
+/// worker routes its response back through the main loop (as
+/// [`Outbound::ReadReply`]), which owns the document versions: it gates the
+/// reply on the version the read was dispatched against (a superseded buffer
+/// becomes `ContentModified`) and drops it entirely when a `$/cancelRequest`
+/// landed while the job ran. The `send` shape mirrors the `Sender<Message>` the
+/// workers replied on before, so [`run_read`] is unchanged.
+pub(crate) struct ReadReply {
+    out_tx: Sender<Outbound>,
+}
+
+impl ReadReply {
+    pub(crate) fn new(out_tx: Sender<Outbound>) -> Self {
+        Self { out_tx }
+    }
+
+    /// Route `message` (always a `Message::Response`) to the main loop for
+    /// gating. Errors only if the main loop is gone (shutdown), like the old
+    /// direct send.
+    pub(crate) fn send(self, message: Message) -> Result<(), SendError<Outbound>> {
+        self.out_tx.send(Outbound::ReadReply { message })
+    }
+}
+
 /// A read-only request the analysis thread services by cloning its salsa db
 /// and running the work off-thread on the read pool. Each variant carries the
-/// live buffer `text` and the client `sender` so the worker can reply
-/// directly; the analysis thread only adds the db snapshot. See [`run_read`].
+/// live buffer `text` and the [`ReadReply`] channel so the worker can reply;
+/// the analysis thread only adds the db snapshot. See [`run_read`].
 pub(crate) enum ReadJob {
     CodeAction {
         id: RequestId,
@@ -51,21 +76,21 @@ pub(crate) enum ReadJob {
         text: String,
         range: Range,
         rules: Arc<ServerRules>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     DocumentDiagnostic {
         id: RequestId,
         path: PathBuf,
         text: String,
         rules: Arc<ServerRules>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     Format {
         id: RequestId,
         path: PathBuf,
         text: String,
         style: FormatStyle,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     FormatRange {
         id: RequestId,
@@ -73,69 +98,69 @@ pub(crate) enum ReadJob {
         text: String,
         range: Range,
         style: FormatStyle,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     DocumentSymbols {
         id: RequestId,
         path: PathBuf,
         text: String,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     WorkspaceSymbols {
         id: RequestId,
         query: String,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     FoldingRanges {
         id: RequestId,
         path: PathBuf,
         text: String,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     DocumentLinks {
         id: RequestId,
         path: PathBuf,
         text: String,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     SelectionRanges {
         id: RequestId,
         path: PathBuf,
         text: String,
         positions: Vec<Position>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     SemanticTokensFull {
         id: RequestId,
         path: PathBuf,
         text: String,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     Completion {
         id: RequestId,
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     CompletionResolve {
         id: RequestId,
         item: Box<CompletionItem>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     Hover {
         id: RequestId,
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     SignatureHelp {
         id: RequestId,
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     Definition {
         id: RequestId,
@@ -143,7 +168,7 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     References {
         id: RequestId,
@@ -152,21 +177,21 @@ pub(crate) enum ReadJob {
         text: String,
         position: Position,
         include_declaration: bool,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     DocumentHighlight {
         id: RequestId,
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     PrepareRename {
         id: RequestId,
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     Rename {
         id: RequestId,
@@ -175,7 +200,7 @@ pub(crate) enum ReadJob {
         text: String,
         position: Position,
         new_name: String,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     PrepareCallHierarchy {
         id: RequestId,
@@ -183,19 +208,19 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     /// Document-less (like `CompletionResolve`): the item's file may be a
     /// closed member, so the worker resolves its text off the snapshot.
     CallHierarchyIncoming {
         id: RequestId,
         item: Box<CallHierarchyItem>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     CallHierarchyOutgoing {
         id: RequestId,
         item: Box<CallHierarchyItem>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     PrepareTypeHierarchy {
         id: RequestId,
@@ -203,26 +228,26 @@ pub(crate) enum ReadJob {
         path: PathBuf,
         text: String,
         position: Position,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     /// Document-less (like `CallHierarchyIncoming`): the item's file may be a
     /// closed member, so the worker resolves its text off the snapshot.
     TypeHierarchySupertypes {
         id: RequestId,
         item: Box<TypeHierarchyItem>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
     TypeHierarchySubtypes {
         id: RequestId,
         item: Box<TypeHierarchyItem>,
-        sender: Sender<Message>,
+        sender: ReadReply,
     },
 }
 
 impl ReadJob {
-    /// Recover the request `id` and reply `sender` from an undeliverable job so
+    /// Recover the request `id` and reply channel from an undeliverable job so
     /// the client still gets a (null) response instead of hanging.
-    pub(crate) fn into_reply_parts(self) -> (RequestId, Sender<Message>) {
+    pub(crate) fn into_reply_parts(self) -> (RequestId, ReadReply) {
         match self {
             ReadJob::CodeAction { id, sender, .. } => (id, sender),
             ReadJob::DocumentDiagnostic { id, sender, .. } => (id, sender),

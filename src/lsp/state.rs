@@ -8,9 +8,9 @@ use std::sync::Arc;
 use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
-    DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument,
-    DidOpenTextDocument, DidSaveTextDocument, LogMessage, Notification as NotificationTrait,
-    PublishDiagnostics,
+    Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
+    DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, LogMessage,
+    Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
     CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
@@ -23,13 +23,13 @@ use lsp_types::request::{
 };
 use lsp_types::{
     CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
-    CodeActionParams, CompletionItem, CompletionParams, Diagnostic, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    CancelParams, CodeActionParams, CompletionItem, CompletionParams, Diagnostic,
+    DidChangeConfigurationParams, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidChangeWatchedFilesRegistrationOptions, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
     DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
-    GlobPattern, GotoDefinitionParams, HoverParams, LogMessageParams, MessageType,
+    GlobPattern, GotoDefinitionParams, HoverParams, LogMessageParams, MessageType, NumberOrString,
     PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameParams,
     SelectionRangeParams, SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
     TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
@@ -42,7 +42,7 @@ use crate::text::{PositionEncoding, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
 use super::config::{ConfigStore, ResolvedConfig};
-use super::read_jobs::ReadJob;
+use super::read_jobs::{ReadJob, ReadReply};
 use super::server::HarvestSignal;
 use super::uri;
 
@@ -73,11 +73,38 @@ pub(crate) enum Outbound {
     /// per harvest; the main loop forwards it only when the client supports
     /// both pull diagnostics and the refresh request.
     DiagnosticsRefresh,
+    /// A finished read job (hover, format, …). The worker routes its response
+    /// here instead of straight to the client so the main loop can version-gate
+    /// it against the buffer the read was dispatched on (stale → `ContentModified`)
+    /// and drop it when a `$/cancelRequest` already answered the request. Always
+    /// a `Message::Response`; the request id rides inside it. See
+    /// [`GlobalState::on_read_reply`].
+    ReadReply { message: Message },
+}
+
+/// What an in-flight read was dispatched against, kept in
+/// [`GlobalState::inflight_reads`] so its reply can be version-gated and a
+/// `$/cancelRequest` can find and cancel it. A non-document read (e.g.
+/// `workspace/symbol`) carries `None`: it is cancellable but never stale.
+struct ReadMeta {
+    uri: Option<Uri>,
+    version: Option<i32>,
 }
 
 pub(crate) struct GlobalState {
     documents: HashMap<Uri, Document>,
     sender: Sender<Message>,
+    /// The analysis thread's outbound channel, cloned into every dispatched
+    /// [`ReadReply`] so a finished read job routes back here for version-gating
+    /// (see [`Outbound::ReadReply`]) rather than answering the client directly.
+    out_tx: Sender<Outbound>,
+    /// Read requests dispatched but not yet answered, keyed by request id. An
+    /// entry is inserted at dispatch and removed when the reply is gated and
+    /// forwarded, or when `$/cancelRequest` cancels it. Its absence at reply
+    /// time means the request was already answered (cancelled), so the reply is
+    /// dropped — the main loop is the sole responder, so every id is answered
+    /// exactly once.
+    inflight_reads: HashMap<RequestId, ReadMeta>,
     analysis_tx: Sender<AnalysisRequest>,
     /// Channel to the analysis thread for read-only jobs (formatting). The
     /// analysis thread owns the salsa db, so it mints a short-lived clone per
@@ -126,6 +153,7 @@ impl GlobalState {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sender: Sender<Message>,
+        out_tx: Sender<Outbound>,
         analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
         harvest_tx: Sender<HarvestSignal>,
@@ -141,6 +169,8 @@ impl GlobalState {
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
             sender,
+            out_tx,
+            inflight_reads: HashMap::new(),
             analysis_tx,
             read_tx,
             harvest_tx,
@@ -210,12 +240,13 @@ impl GlobalState {
             return;
         };
         let rules = Arc::clone(&self.config_for(&uri).rules);
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::DocumentDiagnostic {
             id,
             path: path_for(&uri),
             text,
             rules,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -231,6 +262,7 @@ impl GlobalState {
             return;
         };
         let rules = Arc::clone(&self.config_for(&uri).rules);
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::CodeAction {
             id,
             path: path_for(&uri),
@@ -238,7 +270,7 @@ impl GlobalState {
             range: params.range,
             rules,
             uri,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -254,12 +286,13 @@ impl GlobalState {
             return;
         };
         let style = self.config_for(&uri).style;
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Format {
             id,
             path: path_for(&uri),
             text,
             style,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -276,13 +309,14 @@ impl GlobalState {
             return;
         };
         let style = self.config_for(&uri).style;
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::FormatRange {
             id,
             path: path_for(&uri),
             text,
             range: params.range,
             style,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -298,11 +332,12 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::DocumentSymbols {
             id,
             path: path_for(&uri),
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -316,10 +351,11 @@ impl GlobalState {
             self.respond_err(id, "invalid workspaceSymbol params");
             return;
         };
+        let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::WorkspaceSymbols {
             id,
             query: params.query,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -334,11 +370,12 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::FoldingRanges {
             id,
             path: path_for(&uri),
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -353,11 +390,12 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::DocumentLinks {
             id,
             path: path_for(&uri),
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -373,12 +411,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::SelectionRanges {
             id,
             path: path_for(&uri),
             text,
             positions: params.positions,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -395,11 +434,12 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::SemanticTokensFull {
             id,
             path: path_for(&uri),
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -414,12 +454,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Completion {
             id,
             path: path_for(&uri),
             text,
             position: params.text_document_position.position,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -434,12 +475,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Hover {
             id,
             path: path_for(&uri),
             text,
             position: params.text_document_position_params.position,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -455,12 +497,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::SignatureHelp {
             id,
             path: path_for(&uri),
             text,
             position: params.text_document_position_params.position,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -475,13 +518,14 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Definition {
             id,
             path: path_for(&uri),
             position: params.text_document_position_params.position,
             uri,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -496,6 +540,7 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::References {
             id,
             path: path_for(&uri),
@@ -503,7 +548,7 @@ impl GlobalState {
             include_declaration: params.context.include_declaration,
             uri,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -520,12 +565,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::DocumentHighlight {
             id,
             path: path_for(&uri),
             position: params.text_document_position_params.position,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -542,12 +588,13 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::PrepareRename {
             id,
             path: path_for(&uri),
             position: params.position,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -562,6 +609,7 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::Rename {
             id,
             path: path_for(&uri),
@@ -569,7 +617,7 @@ impl GlobalState {
             new_name: params.new_name,
             uri,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -586,13 +634,14 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::PrepareCallHierarchy {
             id,
             path: path_for(&uri),
             position: params.text_document_position_params.position,
             uri,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -608,10 +657,11 @@ impl GlobalState {
             self.respond_err(id, "invalid incomingCalls params");
             return;
         };
+        let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::CallHierarchyIncoming {
             id,
             item: Box::new(params.item),
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -623,10 +673,11 @@ impl GlobalState {
             self.respond_err(id, "invalid outgoingCalls params");
             return;
         };
+        let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::CallHierarchyOutgoing {
             id,
             item: Box::new(params.item),
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -643,13 +694,14 @@ impl GlobalState {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::PrepareTypeHierarchy {
             id,
             path: path_for(&uri),
             position: params.text_document_position_params.position,
             uri,
             text,
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -665,10 +717,11 @@ impl GlobalState {
             self.respond_err(id, "invalid supertypes params");
             return;
         };
+        let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::TypeHierarchySupertypes {
             id,
             item: Box::new(params.item),
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -680,10 +733,11 @@ impl GlobalState {
             self.respond_err(id, "invalid subtypes params");
             return;
         };
+        let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::TypeHierarchySubtypes {
             id,
             item: Box::new(params.item),
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
@@ -693,19 +747,38 @@ impl GlobalState {
             self.respond_err(id, "invalid completionItem/resolve params");
             return;
         };
+        let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::CompletionResolve {
             id,
             item: Box::new(item),
-            sender: self.sender.clone(),
+            sender: reply,
         });
     }
 
+    /// Register an in-flight read against the buffer it was dispatched on and
+    /// hand back its [`ReadReply`] channel. The recorded `(uri, version)` lets
+    /// the reply be version-gated ([`Self::on_read_reply`]) and lets a
+    /// `$/cancelRequest` find it; a non-document read passes `uri: None`.
+    fn read_reply(&mut self, id: RequestId, uri: Option<&Uri>) -> ReadReply {
+        let version = uri.and_then(|uri| self.documents.get(uri).map(|doc| doc.version));
+        self.inflight_reads.insert(
+            id,
+            ReadMeta {
+                uri: uri.cloned(),
+                version,
+            },
+        );
+        ReadReply::new(self.out_tx.clone())
+    }
+
     /// Hand a read job to the analysis thread; if its channel is gone
-    /// (shutdown), answer with `null` so the client is not left waiting.
-    fn dispatch_read(&self, job: ReadJob) {
+    /// (shutdown), answer with `null` directly so the client is not left
+    /// waiting, and forget the now-unanswerable in-flight entry.
+    fn dispatch_read(&mut self, job: ReadJob) {
         if let Err(crossbeam_channel::SendError(job)) = self.read_tx.send(job) {
-            let (id, sender) = job.into_reply_parts();
-            let _ = sender.send(Message::Response(Response::new_ok(
+            let (id, _reply) = job.into_reply_parts();
+            self.inflight_reads.remove(&id);
+            let _ = self.sender.send(Message::Response(Response::new_ok(
                 id,
                 serde_json::Value::Null,
             )));
@@ -714,6 +787,11 @@ impl GlobalState {
 
     pub(crate) fn on_notification(&mut self, note: Notification) {
         match note.method.as_str() {
+            Cancel::METHOD => {
+                if let Ok(params) = note.extract::<CancelParams>(Cancel::METHOD) {
+                    self.on_cancel(params.id);
+                }
+            }
             DidOpenTextDocument::METHOD => {
                 if let Ok(params) =
                     note.extract::<DidOpenTextDocumentParams>(DidOpenTextDocument::METHOD)
@@ -939,6 +1017,59 @@ impl GlobalState {
                 self.publish_merged(uri, version);
             }
             Outbound::DiagnosticsRefresh => self.send_diagnostic_refresh(),
+            Outbound::ReadReply { message } => self.on_read_reply(message),
+        }
+    }
+
+    /// Gate a finished read job's response and forward it to the client. The
+    /// main loop is the sole responder for reads, so this answers each request
+    /// id exactly once:
+    ///
+    /// - id no longer in-flight → the request was already answered (a
+    ///   `$/cancelRequest` cancelled it); drop this reply.
+    /// - the buffer it was computed against moved on (a newer edit landed, or
+    ///   the document closed) → `ContentModified`, so the client re-requests
+    ///   against the current buffer instead of applying a stale result.
+    /// - otherwise → forward the worker's response unchanged.
+    fn on_read_reply(&mut self, message: Message) {
+        let Message::Response(response) = message else {
+            return;
+        };
+        let Some(meta) = self.inflight_reads.remove(&response.id) else {
+            return;
+        };
+        if let (Some(uri), Some(version)) = (&meta.uri, meta.version)
+            && !matches!(self.documents.get(uri), Some(doc) if doc.version == version)
+        {
+            let stale = Response::new_err(
+                response.id,
+                ErrorCode::ContentModified as i32,
+                "document was modified".to_string(),
+            );
+            let _ = self.sender.send(Message::Response(stale));
+            return;
+        }
+        let _ = self.sender.send(Message::Response(response));
+    }
+
+    /// Handle `$/cancelRequest`. If the id names a read still in flight, answer
+    /// it now with `RequestCancelled` and forget it — its eventual worker reply
+    /// finds no entry and is dropped, so the request is still answered exactly
+    /// once. An unknown id (already answered, or never a tracked read) is a
+    /// no-op, as the spec allows. The in-flight salsa work runs to completion;
+    /// only its result is discarded (cooperative cancellation).
+    fn on_cancel(&mut self, id: NumberOrString) {
+        let id = match id {
+            NumberOrString::Number(n) => RequestId::from(n),
+            NumberOrString::String(s) => RequestId::from(s),
+        };
+        if self.inflight_reads.remove(&id).is_some() {
+            let cancelled = Response::new_err(
+                id,
+                ErrorCode::RequestCanceled as i32,
+                "request cancelled".to_string(),
+            );
+            let _ = self.sender.send(Message::Response(cancelled));
         }
     }
 
@@ -1059,5 +1190,178 @@ fn harvest_signal(path: PathBuf) -> HarvestSignal {
         HarvestSignal::Environment
     } else {
         HarvestSignal::Source(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::{Receiver, unbounded};
+    use std::str::FromStr;
+
+    /// A `GlobalState` wired to in-memory channels, returned with the client's
+    /// receiver so a test can assert on the responses it emits. Only the read
+    /// registry, version gate, and cancel paths are exercised here — those
+    /// touch nothing but `documents`, `inflight_reads`, and the client sender.
+    fn test_state() -> (GlobalState, Receiver<Message>) {
+        let (client_tx, client_rx) = unbounded();
+        let (out_tx, _out_rx) = unbounded();
+        let (analysis_tx, _analysis_rx) = unbounded();
+        let (read_tx, _read_rx) = unbounded();
+        let (harvest_tx, _harvest_rx) = unbounded();
+        let (sync_tx, _sync_rx) = unbounded();
+        let state = GlobalState::new(
+            client_tx,
+            out_tx,
+            analysis_tx,
+            read_tx,
+            harvest_tx,
+            sync_tx,
+            PositionEncoding::Utf16,
+            false,
+            false,
+            None,
+        );
+        // The auxiliary receivers drop here; the methods under test only touch
+        // `documents`, `inflight_reads`, and the client sender, so a
+        // disconnected analysis/out channel is harmless. Discard any startup log.
+        while client_rx.try_recv().is_ok() {}
+        (state, client_rx)
+    }
+
+    fn uri(path: &str) -> Uri {
+        Uri::from_str(path).unwrap()
+    }
+
+    fn open(state: &mut GlobalState, uri: &Uri, version: i32) {
+        state.documents.insert(
+            uri.clone(),
+            Document {
+                text: String::new(),
+                version,
+            },
+        );
+    }
+
+    fn ok_reply(id: i32) -> Message {
+        Message::Response(Response::new_ok(
+            RequestId::from(id),
+            serde_json::json!("ok"),
+        ))
+    }
+
+    /// The error code of the next response, or `None` for an `Ok` response.
+    fn next_error_code(rx: &Receiver<Message>) -> Option<i32> {
+        match rx.try_recv().expect("a response") {
+            Message::Response(resp) => resp.response_result.err().map(|e| e.code),
+            other => panic!("expected a response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_reply_forwards_when_version_matches() {
+        let (mut state, rx) = test_state();
+        let doc = uri("file:///a.jl");
+        open(&mut state, &doc, 1);
+        let _reply = state.read_reply(RequestId::from(1), Some(&doc));
+
+        state.on_read_reply(ok_reply(1));
+
+        assert_eq!(
+            next_error_code(&rx),
+            None,
+            "a current read forwards its result"
+        );
+        assert!(state.inflight_reads.is_empty(), "the entry is consumed");
+    }
+
+    #[test]
+    fn read_reply_is_content_modified_when_superseded() {
+        let (mut state, rx) = test_state();
+        let doc = uri("file:///a.jl");
+        open(&mut state, &doc, 1);
+        let _reply = state.read_reply(RequestId::from(1), Some(&doc));
+        // A newer edit lands while the read was in flight.
+        state.documents.get_mut(&doc).unwrap().version = 2;
+
+        state.on_read_reply(ok_reply(1));
+
+        assert_eq!(
+            next_error_code(&rx),
+            Some(ErrorCode::ContentModified as i32),
+            "a stale read is rejected so the client re-requests"
+        );
+    }
+
+    #[test]
+    fn read_reply_is_content_modified_when_document_closed() {
+        let (mut state, rx) = test_state();
+        let doc = uri("file:///a.jl");
+        open(&mut state, &doc, 1);
+        let _reply = state.read_reply(RequestId::from(1), Some(&doc));
+        state.documents.remove(&doc);
+
+        state.on_read_reply(ok_reply(1));
+
+        assert_eq!(
+            next_error_code(&rx),
+            Some(ErrorCode::ContentModified as i32),
+            "a closed document's read is stale"
+        );
+    }
+
+    #[test]
+    fn cancel_answers_and_suppresses_the_reply() {
+        let (mut state, rx) = test_state();
+        let doc = uri("file:///a.jl");
+        open(&mut state, &doc, 1);
+        let _reply = state.read_reply(RequestId::from(1), Some(&doc));
+
+        state.on_cancel(NumberOrString::Number(1));
+        assert_eq!(
+            next_error_code(&rx),
+            Some(ErrorCode::RequestCanceled as i32),
+            "cancel answers the request promptly"
+        );
+        assert!(state.inflight_reads.is_empty());
+
+        // The worker's late reply finds no entry and is dropped: exactly once.
+        state.on_read_reply(ok_reply(1));
+        assert!(
+            rx.try_recv().is_err(),
+            "a cancelled request is not answered twice"
+        );
+    }
+
+    #[test]
+    fn cancel_of_unknown_id_is_a_noop() {
+        let (mut state, rx) = test_state();
+        state.on_cancel(NumberOrString::Number(99));
+        assert!(
+            rx.try_recv().is_err(),
+            "an already-answered or unknown id draws no response"
+        );
+    }
+
+    #[test]
+    fn non_document_read_is_never_content_modified() {
+        let (mut state, rx) = test_state();
+        // A `workspace/symbol`-style read: no uri, no version.
+        let _reply = state.read_reply(RequestId::from(1), None);
+
+        state.on_read_reply(ok_reply(1));
+        assert_eq!(
+            next_error_code(&rx),
+            None,
+            "a document-less read has no version to go stale"
+        );
+
+        // It is still cancellable.
+        let _reply = state.read_reply(RequestId::from(2), None);
+        state.on_cancel(NumberOrString::Number(2));
+        assert_eq!(
+            next_error_code(&rx),
+            Some(ErrorCode::RequestCanceled as i32)
+        );
     }
 }

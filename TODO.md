@@ -109,16 +109,18 @@ panic isolation — so those need no work. The items below are the remaining gap
   `step_guard_trips_when_wedged` and `step_budget_resets_on_progress`. Directly
   targets the `timeout` class in the smoke-test corpus.
 
-- [ ] **P1 — Request cancellation + stale-read protocol.** Fatou has none today:
-  no `$/cancelRequest` handler, no live-request-id tracking, and read jobs
-  (hover, format, completion, etc.) reply against the buffer captured at
-  dispatch even after a newer edit has landed, instead of `ContentModified`.
-  Track live request ids in `GlobalState`; handle `$/cancelRequest` →
-  `RequestCancelled` (-32800); gate read replies on the document version →
-  `ContentModified` (-32801) when superseded; wire the existing edit-scoped
-  `db.trigger_cancellation()` (`analysis_thread.rs`, `SupersedeAndStart`) to
-  request ids. Land a baseline `cancel_request_is_currently_a_noop` test that
-  flips to expect `RequestCancelled` when the work lands (arity's pattern).
+- [x] **P1 — Request cancellation + stale-read protocol.** Read replies now
+  route back through the main loop (`Outbound::ReadReply`), which tracks live
+  request ids in `GlobalState.inflight_reads`: `$/cancelRequest` →
+  `RequestCancelled` (-32800), and a reply against a superseded buffer →
+  `ContentModified` (-32801). The main loop drains client input ahead of read
+  replies so cancels are prompt and deterministic. Covered by unit tests on the
+  gate/registry (`src/lsp/state.rs`) plus E2E `cancel_request_yields_request_cancelled`
+  and `stale_read_yields_content_modified` (`tests/lsp.rs`). Cancellation is
+  cooperative: the in-flight salsa work runs to completion and its result is
+  discarded. **Follow-up:** true per-request interruption (salsa's
+  `trigger_cancellation()` is storage-global, so it can't target one read
+  without cancelling concurrent siblings).
 - [ ] **P2 — Concurrency/scheduler test coverage.** `decide`'s idle branch is
   unit-tested and the supersede branch has pure-decision tests, but nothing
   drives the *cancellation signal flow* end to end. Add an integration test over

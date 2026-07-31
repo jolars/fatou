@@ -381,6 +381,124 @@ fn hovers_a_local_definition() {
     server_thread.join().unwrap();
 }
 
+/// A `$/cancelRequest` for an in-flight read is answered with `RequestCancelled`
+/// (-32800), exactly once. This is the "arity pattern" anchor from TODO.md: it
+/// began life as `cancel_request_is_currently_a_noop` documenting the pre-feature
+/// behavior (the cancel was ignored and the real result returned) and flipped
+/// here once cancellation landed.
+#[test]
+fn cancel_request_yields_request_cancelled() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::json!({}));
+
+    let uri = Uri::from_str("file:///work/cancel.jl").unwrap();
+    open_document(&client, &uri, "greet(name) = name\n");
+    let _ = recv_publish_for(&client, &uri);
+
+    // Fire a hover, then immediately cancel it. The read pipeline (analysis
+    // thread → read pool) is many thread-hops slower than delivering the cancel,
+    // and the main loop drains client input ahead of the pending read reply, so
+    // the cancel reliably wins.
+    let hover_id = RequestId::from(2);
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: hover_id.clone(),
+            method: "textDocument/hover".to_string(),
+            params: serde_json::to_value(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(0, 0),
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "$/cancelRequest".to_string(),
+            params: serde_json::json!({ "id": 2 }),
+        }))
+        .unwrap();
+
+    let resp = recv_response(&client, hover_id);
+    match resp.response_result {
+        Err(err) => assert_eq!(err.code, -32800, "expected RequestCancelled"),
+        Ok(value) => panic!("expected a RequestCancelled error, got {value:?}"),
+    }
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
+/// A read computed against a buffer that a newer edit superseded is answered
+/// with `ContentModified` (-32801), so the client re-requests against the
+/// current text instead of applying a stale result.
+#[test]
+fn stale_read_yields_content_modified() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::json!({}));
+
+    let uri = Uri::from_str("file:///work/stale.jl").unwrap();
+    open_document(&client, &uri, "greet(name) = name\n");
+    let _ = recv_publish_for(&client, &uri);
+
+    // Hover against v1, then immediately land a v2 edit. The edit is processed
+    // (main loop drains client input first) before the slower hover reply, so
+    // the reply is gated as stale.
+    let hover_id = RequestId::from(2);
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: hover_id.clone(),
+            method: "textDocument/hover".to_string(),
+            params: serde_json::to_value(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(0, 0),
+                },
+                work_done_progress_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "x = 1\n".to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    let resp = recv_response(&client, hover_id);
+    match resp.response_result {
+        Err(err) => assert_eq!(err.code, -32801, "expected ContentModified"),
+        Ok(value) => panic!("expected a ContentModified error, got {value:?}"),
+    }
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
 /// The server advertises signature help and answers `textDocument/signatureHelp`
 /// for a call to an intra-file function, highlighting the argument the cursor is
 /// on.

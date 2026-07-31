@@ -4,7 +4,7 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-use crossbeam_channel::select;
+use crossbeam_channel::{TryRecvError, select};
 use lsp_server::{Connection, Message};
 use lsp_types::{
     CallHierarchyServerCapability, ClientCapabilities, CodeActionKind, CodeActionOptions,
@@ -294,7 +294,9 @@ fn main_loop(
         read_rx,
         library_rx,
         sync_rx,
-        out_tx,
+        // The main loop keeps a clone so finished read jobs route back here for
+        // version-gating (see `GlobalState::on_read_reply`).
+        out_tx.clone(),
         read_pool.spawner(),
         encoding,
         // The per-edit push is the fallback for a client that cannot pull.
@@ -303,6 +305,7 @@ fn main_loop(
 
     let mut state = GlobalState::new(
         connection.sender.clone(),
+        out_tx,
         analysis_tx,
         read_tx,
         harvest_tx,
@@ -320,24 +323,47 @@ fn main_loop(
         state.register_file_watchers();
     }
 
+    // Dispatch one client message; returns `true` to break the loop (a valid
+    // shutdown or a disconnected channel). Guarded so a panic in one handler
+    // can't take down the main loop (which would zombie the server: the
+    // analysis thread keeps running but no one drives it).
+    let handle_client = |state: &mut GlobalState, msg| -> Result<bool, DynError> {
+        match msg {
+            Message::Request(req) => {
+                if connection.handle_shutdown(&req)? {
+                    return Ok(true);
+                }
+                guard("on_request", || state.on_request(req));
+            }
+            Message::Notification(note) => {
+                guard("on_notification", || state.on_notification(note));
+            }
+            Message::Response(_) => {}
+        }
+        Ok(false)
+    };
+
     loop {
+        // Drain queued client messages before servicing outbound results, so a
+        // `$/cancelRequest` already in the channel is applied before a read
+        // reply waiting in `out_rx` — cancellation stays prompt, and a cancel
+        // sent right after its request reliably beats the reply. Diagnostics and
+        // read replies are version-gated, so deferring them a beat is safe.
+        match connection.receiver.try_recv() {
+            Ok(msg) => {
+                if handle_client(&mut state, msg)? {
+                    break;
+                }
+                continue;
+            }
+            Err(TryRecvError::Disconnected) => break,
+            Err(TryRecvError::Empty) => {}
+        }
         select! {
             recv(connection.receiver) -> msg => {
                 let Ok(msg) = msg else { break };
-                match msg {
-                    Message::Request(req) => {
-                        if connection.handle_shutdown(&req)? {
-                            break;
-                        }
-                        // Guard the handler so a panic in one request can't take
-                        // down the main loop (which would zombie the server: the
-                        // analysis thread keeps running but no one drives it).
-                        guard("on_request", || state.on_request(req));
-                    }
-                    Message::Notification(note) => {
-                        guard("on_notification", || state.on_notification(note));
-                    }
-                    Message::Response(_) => {}
+                if handle_client(&mut state, msg)? {
+                    break;
                 }
             }
             recv(out_rx) -> outbound => {
