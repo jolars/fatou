@@ -561,6 +561,84 @@ mod tests {
         });
     }
 
+    /// A superseding edit of the *in-flight* URI drives `try_dispatch` through
+    /// its `SupersedeAndStart` arm, which calls `db.trigger_cancellation()` and
+    /// re-dispatches. The pure `decide` tests cover the *choice*; this exercises
+    /// the actual cancellation wiring (that the branch runs without deadlock and
+    /// advances the in-flight slot to the newer version).
+    #[test]
+    fn try_dispatch_supersedes_inflight_and_triggers_cancellation() {
+        use std::time::Duration;
+
+        use crate::lsp::lint::ServerRules;
+        use crate::lsp::task_pool::TaskPool;
+        use crate::text::PositionEncoding;
+
+        let a = uri_named("a.jl");
+        let rules = ServerRules::defaults();
+        let req = |version: i32| AnalysisRequest {
+            uri: a.clone(),
+            path: PathBuf::from("/work/a.jl"),
+            text: "x = 1\n".to_string(),
+            version,
+            rules: Arc::clone(&rules),
+        };
+
+        // A real read pool so `start` can spawn its read-phase; kept alive for
+        // the test so its workers don't disconnect mid-dispatch.
+        let pool = TaskPool::new("test-analysis-read", 1);
+        let (out_tx, _out_rx) = crossbeam_channel::unbounded::<Outbound>();
+        let (done_tx, done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
+        let mut worker = AnalysisWorker {
+            db: IncrementalDatabase::default(),
+            out_tx,
+            done_tx,
+            inflight: None,
+            pending: HashMap::new(),
+            active: None,
+            read_spawner: pool.spawner(),
+            encoding: PositionEncoding::Utf16,
+            push_diagnostics: true,
+            published_graph_files: HashSet::new(),
+        };
+
+        // Dispatch v1 and leave it "in flight": we never drain `done_rx`, so the
+        // slot stays occupied regardless of whether the read-phase has finished.
+        worker.enqueue(req(1));
+        worker.try_dispatch();
+        assert!(
+            matches!(&worker.inflight, Some(f) if f.uri == a && f.version == 1),
+            "v1 should be in flight after the first dispatch"
+        );
+
+        // A strictly-newer edit of the same URI must supersede: `try_dispatch`
+        // takes the `SupersedeAndStart` arm, calls `trigger_cancellation`
+        // (blocks only until the v1 clone drops on the pool thread), then starts
+        // v2. `Wait`/`Start` are unreachable while v1 holds the slot.
+        worker.enqueue(req(2));
+        worker.try_dispatch();
+        assert!(
+            matches!(&worker.inflight, Some(f) if f.uri == a && f.version == 2),
+            "supersede should advance the in-flight slot to v2, got {:?}",
+            worker.inflight.as_ref().map(|f| f.version)
+        );
+        assert!(
+            !worker.pending.contains_key(&a),
+            "the superseding request should have been dispatched, not left pending"
+        );
+
+        // The restarted read-phase runs to completion (both v1 and v2 signal
+        // `done` as their clones drop) — proves the harness doesn't deadlock.
+        let mut done = 0;
+        while done_rx.recv_timeout(Duration::from_secs(5)).is_ok() {
+            done += 1;
+            if done == 2 {
+                break;
+            }
+        }
+        assert_eq!(done, 2, "both analyses should have signaled done");
+    }
+
     #[test]
     fn guard_contains_a_panic_and_reports_completion() {
         // A panicking unit of work is caught and reported as not-completed, so

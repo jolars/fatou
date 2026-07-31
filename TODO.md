@@ -121,12 +121,18 @@ panic isolation — so those need no work. The items below are the remaining gap
   discarded. **Follow-up:** true per-request interruption (salsa's
   `trigger_cancellation()` is storage-global, so it can't target one read
   without cancelling concurrent siblings).
-- [ ] **P2 — Concurrency/scheduler test coverage.** `decide`'s idle branch is
+- [x] **P2 — Concurrency/scheduler test coverage.** `decide`'s idle branch is
   unit-tested and the supersede branch has pure-decision tests, but nothing
-  drives the *cancellation signal flow* end to end. Add an integration test over
-  `Connection::memory()` that fires rapid `didChange`s and asserts coalescing
-  plus version-gated publishes (only the latest version is published, stale ones
-  dropped), and one exercising `SupersedeAndStart` → `trigger_cancellation`.
+  drove the *cancellation signal flow* end to end. Covered now by
+  `coalesces_rapid_didchanges_and_gates_stale_versions` (`tests/lsp.rs`): a burst
+  of `didChange`s over `Connection::memory()` collapses into far fewer publishes
+  than edits (coalescing), versions arrive monotonically with none past the last
+  edit (the main-loop version gate drops stale results), and the final
+  diagnostics reflect the last buffer. The `SupersedeAndStart` →
+  `trigger_cancellation` wiring is driven deterministically by the white-box
+  `try_dispatch_supersedes_inflight_and_triggers_cancellation`
+  (`src/lsp/analysis_thread.rs`), which dispatches v1, leaves it in flight, then
+  dispatches v2 and asserts the slot advances via the cancellation branch.
 - [ ] **P2 — Work-done progress for the harvester.** `spawn_workspace_harvester`
   (`src/lsp/server.rs`) walks the filesystem and parses all of Base with no
   `$/progress` reporting. Advertise the capability and emit begin/report/end

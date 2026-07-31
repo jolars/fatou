@@ -1501,6 +1501,173 @@ fn publishes_versioned_diagnostics_across_edits() {
     server_thread.join().unwrap();
 }
 
+/// A burst of `didChange`s is coalesced by the analysis scheduler and gated by
+/// the main loop's version check: intermediate versions are dropped (fewer
+/// publishes than edits), no stale version is ever published (versions arrive
+/// monotonically), and the client's final diagnostics reflect the last edit,
+/// tagged with its version. This drives the cancellation/coalescing signal flow
+/// end to end, complementing the pure-decision `decide` unit tests.
+#[test]
+fn coalesces_rapid_didchanges_and_gates_stale_versions() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    // --- initialize handshake (push-diagnostics client) ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let _init_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let uri = Uri::from_str("file:///work/rapid.jl").unwrap();
+
+    // --- open clean @v1 ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "x = 1\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // --- fire a burst of full-document edits v2..=FINAL, back to back ---
+    // Intermediate versions are clean; only the final one carries a parse error,
+    // so the terminal diagnostic set uniquely identifies the last edit.
+    const FINAL: i32 = 13;
+    for version in 2..=FINAL {
+        let text = if version == FINAL {
+            // Unterminated `function` → a parse error mentioning `end`.
+            "function f(x)\n".to_string()
+        } else {
+            format!("x = {version}\n")
+        };
+        client
+            .sender
+            .send(Message::Notification(Notification {
+                method: "textDocument/didChange".to_string(),
+                params: serde_json::to_value(DidChangeTextDocumentParams {
+                    text_document: VersionedTextDocumentIdentifier {
+                        uri: uri.clone(),
+                        version,
+                    },
+                    content_changes: vec![TextDocumentContentChangeEvent {
+                        range: None,
+                        range_length: None,
+                        text,
+                    }],
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+    }
+
+    // Drain publishes until the final version lands, recording every version
+    // seen; then drain any stragglers with a short timeout.
+    let mut versions: Vec<i32> = Vec::new();
+    let final_diags: Vec<Diagnostic> = loop {
+        match client
+            .receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap()
+        {
+            Message::Notification(n) if n.method == "textDocument/publishDiagnostics" => {
+                let params: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
+                if let Some(v) = params.version {
+                    versions.push(v);
+                    if v == FINAL {
+                        break params.diagnostics;
+                    }
+                }
+            }
+            _ => {}
+        }
+    };
+    // Collect stragglers (there should be none after the final version, but
+    // draining guards against an off-by-one in the assertions below).
+    while let Ok(msg) = client.receiver.recv_timeout(Duration::from_millis(500)) {
+        if let Message::Notification(n) = msg
+            && n.method == "textDocument/publishDiagnostics"
+        {
+            let params: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
+            versions.extend(params.version);
+        }
+    }
+
+    // The final publish reflects the last edit's content.
+    assert!(
+        final_diags
+            .iter()
+            .any(|d| d.message.contains("expected `end`")),
+        "final diagnostics should carry the unterminated-function parse error, got {final_diags:?}"
+    );
+
+    // Version gate: nothing stale or from the future is published, and versions
+    // arrive monotonically (a superseded version never appears after a newer one).
+    assert!(
+        versions.windows(2).all(|w| w[0] <= w[1]),
+        "published versions must be monotonically non-decreasing, got {versions:?}"
+    );
+    assert!(
+        versions.iter().all(|&v| v <= FINAL),
+        "no version beyond the last edit may be published, got {versions:?}"
+    );
+    assert_eq!(
+        *versions.last().unwrap(),
+        FINAL,
+        "the last publish must be the final version"
+    );
+
+    // Coalescing: the burst of 12 edits (v2..=13) plus the open collapse into far
+    // fewer publishes than versions sent — stale intermediates are dropped.
+    let edits_sent = FINAL; // v1 open + 12 changes = 13 buffer versions total.
+    assert!(
+        (versions.len() as i32) < edits_sent,
+        "expected coalescing to drop intermediate versions: saw {} publishes for {edits_sent} edits ({versions:?})",
+        versions.len()
+    );
+
+    // --- shutdown / exit ---
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _shutdown_response = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+
+    server_thread.join().unwrap();
+}
+
 /// A client offering `utf-8` in `general.positionEncodings` gets it advertised
 /// back, and the server then reads incoming range positions as byte offsets:
 /// an edit deleting the 2-byte `é` (1 UTF-16 unit) is specified as 2 character
