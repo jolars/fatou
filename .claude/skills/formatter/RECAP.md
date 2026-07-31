@@ -128,7 +128,43 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (selector import breaks colon-first)
+## Latest session (signature args break before a single-param `where`)
+
+`feat(formatter)`. Fixed the ranked TODO bullet: an over-width
+`f(args) where {T}` used to explode the lone bound (`) where {\n    T,\n}`)
+instead of breaking the signature's argument list — even though breaking a
+single `{T}` never helps the width. Root cause: the arg-list group and the
+bound group are independent siblings, and the continuation-aware `fits` check
+for the arg-list group stops at the bound group's leading break (right after
+`{`), so the args are judged to fit and the bound is forced to break.
+
+**Fix (`lower_where` only, ~12 lines, no engine change).** A **single type
+parameter is atomic**: `where {T}` (and bare `where T`) now lowers to flat,
+non-breaking `{T}` — `concat["{", lower_node(param), "}"]` — instead of a
+breakable group. The arg-list `fits` check then measures the whole `{T}` and
+correctly breaks the args, leaving `) where {T}` on the closing line. Single
+vs multi is `rhs.children().count()` on the `BRACES` (elements are `ARG`
+nodes); a multi-parameter bound keeps the old `lower_node(rhs)` exploding group,
+so `where_break` (6 params) is unchanged. Bare bounds are always single, so
+they collapse to the same flat `{T}` — the two spellings stay IR-identical
+(idempotency preserved).
+
+**Decision (AskUserQuestion).** User chose **ship the element-count heuristic**
+over generalizing now. Surfaced the limitation: a *short but multi-param* bound
+with long args (`f(longargs...) where {T, S}`) still explodes the bound, because
+"short" is a width judgment the heuristic can't make — recorded as a follow-up
+`TODO.md` bullet (needs a `HugGroup`-style conditional-layout primitive).
+
+Gated `where_bare_signature_break/` (the previously-ungated fixture, 7 lines).
+Gate 114→115; stability + clippy + fmt + full suite green. No parser/lexer
+blocker.
+
+**Ranked next targets:** (1) Extend the where-bound priority to short
+multi-param bounds via a conditional-layout primitive (the follow-up TODO).
+(2) **Switch to the LSP semantic model** — standing strategic recommendation.
+(3) Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
+
+## Earlier: selector import breaks colon-first
 
 `feat(formatter)`. User-driven style change to the too-wide **selector** import
 (`import Mod: a, b, c`). Old form kept the first name on the module line

@@ -37,14 +37,21 @@
   them differ. Deciding "no suffix follows" needs the parent context, which
   `lower_macro_call` does not have today.
 
-- [ ] Prefer breaking a function signature's argument list over exploding a
-  short `where` clause. Today an over-width `f(a, b, c) where {T}` breaks the
-  single-param where bound (`where {\n    T,\n}`) rather than the args, because
-  the where bound is a breakable group (`lower_where` in
-  `src/formatter/rules.rs`). This is idempotent and matches the `where_break`
-  fixture's break-when-long convention, but the args-broken form is more
-  idiomatic when the bound is short. Needs a hand-authored `expected.jl` via the
-  formatter flow.
+- [x] Prefer breaking a function signature's argument list over exploding a
+  short `where` clause. A single-parameter bound is now atomic: `lower_where`
+  renders `where {T}` (and bare `where T`) as flat, non-breaking `{T}`, so an
+  over-width `f(a, b, c) where {T}` breaks the args and keeps `) where {T}` on
+  the closing line. A multi-parameter bound stays a breakable exploding group
+  (`where_break` unchanged). Gated by `where_bare_signature_break`.
+
+- [ ] Extend the where-bound break-priority to *short multi-parameter* bounds.
+  A short but multi-param bound with long args (`f(longargs...) where {T, S}`)
+  still explodes the bound rather than the args, because the element-count
+  heuristic in `lower_where` only treats a single param as atomic. "Short"
+  (fits on the closing line) is a width judgment the heuristic cannot make;
+  handling it needs a conditional-layout primitive (like `HugGroup`) that
+  chooses args-break-with-flat-bound over flat-args-with-broken-bound by
+  measuring which first line fits.
 
 ## Linter
 

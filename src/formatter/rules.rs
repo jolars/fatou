@@ -904,20 +904,27 @@ fn lower_where(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     };
 
-    let bound = if rhs.kind() == SyntaxKind::BRACES {
-        lower_node(rhs)
-    } else {
-        // A bare bound (`where T`) is normalized to braces (`where {T}`). It must
-        // lower to the *same* breakable group as an already-braced single bound,
-        // not a plain-text `{...}`: otherwise the two spellings produce different
-        // IR — one breakable, one not — and a bare bound that gains braces on the
-        // first pass would relayout on the second, breaking idempotency.
-        Ir::group(collection_explode_body(
-            "{",
-            &[lower_node(rhs)],
-            "}",
-            Ir::if_break(",", ""),
-        ))
+    // A single type parameter is atomic: render `{T}` as flat, non-breaking
+    // content so that when the whole `f(args) where {T}` overflows it is the
+    // signature's argument list — not the lone bound — that breaks. Exploding a
+    // single `{T}` across three lines never helps the width and reads worse than
+    // breaking the args (see `where_bare_signature_break`). A multi-parameter
+    // bound stays a width-driven exploding group (`where_break`).
+    //
+    // A bare bound (`where T`) is always single and normalizes to the same flat
+    // `{T}`: the two spellings must produce identical IR, or a bare bound that
+    // gains braces on the first pass would relayout on the second.
+    let single_braced = rhs.kind() == SyntaxKind::BRACES && rhs.children().count() == 1;
+    let bound = match rhs.kind() {
+        SyntaxKind::BRACES if !single_braced => lower_node(rhs),
+        SyntaxKind::BRACES => {
+            let param = rhs
+                .children()
+                .next()
+                .expect("single-braced bound has one child");
+            Ir::concat([Ir::text("{"), lower_node(&param), Ir::text("}")])
+        }
+        _ => Ir::concat([Ir::text("{"), lower_node(rhs), Ir::text("}")]),
     };
 
     Ir::concat([lower_node(lhs), Ir::text(" where "), bound])
