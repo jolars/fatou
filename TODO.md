@@ -85,6 +85,46 @@
   owned argument type. Blocked on cross-file import and ownership
   resolution. (TypePiracy)
 
+### False positives (from the Makie.jl linter-investigation sweep)
+
+- [ ] `unused-binding` on attribute-DSL macro blocks. A `name = default`
+  inside a consuming macro's `begin ... end` (Makie's `@gen_defaults! d begin
+  color_map = nothing => Texture end`, `@DocumentedAttributes begin space =
+  :data end`) is handed to the macro as an attribute, not left a dead local,
+  but the walker binds it as an ordinary local and flags it (~176 findings in
+  Makie: ~144 `@gen_defaults!`, ~32 `@DocumentedAttributes`). This collides
+  head-on with the deliberate `unused_binding_flags_dead_local_in_macro_block_argument`
+  test, whose `@testset begin t = 1 end` is a scope-*transparent* macro where
+  flagging IS correct. The linter cannot tell a consuming DSL from a
+  transparent wrapper without knowing the macro, so this is a policy call:
+  either exempt all macro-block bindings (matching the `redefined-constant`
+  guard just added, at the cost of false negatives on `@testset`/`@inbounds`),
+  or keep an allowlist of known scope-transparent macros. Repro: `printf
+  '@gen_defaults! d begin\n    color = nothing\nend\n' | lint`.
+- [ ] `unused-binding` misses interpolation inside non-standard string
+  literals: `$x` in `js"... $x ..."` (WGLMakie, ~16) or a GLSL string is not
+  counted as a use, though `@js_str` does interpolate. Plain `"$x"` is handled;
+  the gap is that `foo"...$x..."` lexes `$x` as raw `STRING_CONTENT`, not an
+  `INTERPOLATION` node. `@u_str`/`@format_str` *application* is now counted
+  (fixed); interpolation *inside* a string macro is the remaining gap. Repro:
+  `printf 'using M: @js_str\nf(rect) = (x, y = rect; js"pick($x, $y)")\n' |
+  lint` flags `x`, `y`.
+- [ ] `unused-binding` on `@show a, b = expr` (GLMakie `GLInfo.jl`, ~4): the
+  whole tuple-assignment is the macro's argument, so `@show` uses every name,
+  but the walker flags the non-first names (`typ`, `uniform_size`). Same
+  macro-argument-opacity root as the DSL-block class.
+- [ ] `unused-import` misses three within-file use forms (spans are otherwise
+  exact; ~71% of the 264 Makie findings are the known file-scoped/`include`
+  limitation, not these). Verified with `julia`: (1) an imported name used only
+  inside `quote ... end` / `:( ... )` (e.g. `benchmark-ttfp.jl` `median` used
+  in a `quote` macro body); (2) an imported operator via infix `a == b` or a
+  parenthesized method def `(==)(a::S, b::S) = ...` (`GLTypes.jl`) — regular
+  `import Base: *` + `*(a,b)=...` is counted, but the `(op)` target and infix
+  tokens are not resolved to the operator's import; (3) interpolation inside a
+  non-standard string macro (same lex gap as the `unused-binding` item). The
+  string/command-macro *application* form (`u"ns"` -> `@u_str`) is now counted
+  (fixed).
+
 ## Language server
 
 - [x] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in
