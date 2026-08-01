@@ -94,13 +94,42 @@ fn unused_binding_ignores_macro_keyword_argument() {
 
 #[test]
 fn unused_binding_flags_dead_local_in_macro_block_argument() {
-    // A real assignment inside a macro's block argument is still a local.
+    // A real assignment inside a scope-transparent macro's block argument is
+    // still a local: `@testset` (like `@inbounds`) runs its body as written.
     assert_eq!(
         count(
             "unused-binding",
             "function f()\n    @testset begin\n        t = 1\n    end\nend\n"
         ),
         1
+    );
+}
+
+#[test]
+fn unused_binding_exempts_attribute_dsl_macro_block() {
+    // A consuming attribute DSL reads each `name = default` in its block as an
+    // attribute, so those names are not dead locals.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f(d)\n    @gen_defaults! d begin\n        color = nothing\n    end\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    @DocumentedAttributes begin\n        space = :data\n    end\nend\n"
+        ),
+        0
+    );
+    // A qualified DSL name (`Makie.@recipe`) is matched on its final component.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    Makie.@recipe Foo begin\n        marker = automatic\n    end\nend\n"
+        ),
+        0
     );
 }
 

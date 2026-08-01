@@ -87,20 +87,17 @@
 
 ### False positives (from the Makie.jl linter-investigation sweep)
 
-- [ ] `unused-binding` on attribute-DSL macro blocks. A `name = default`
-  inside a consuming macro's `begin ... end` (Makie's `@gen_defaults! d begin
-  color_map = nothing => Texture end`, `@DocumentedAttributes begin space =
-  :data end`) is handed to the macro as an attribute, not left a dead local,
-  but the walker binds it as an ordinary local and flags it (~176 findings in
-  Makie: ~144 `@gen_defaults!`, ~32 `@DocumentedAttributes`). This collides
-  head-on with the deliberate `unused_binding_flags_dead_local_in_macro_block_argument`
-  test, whose `@testset begin t = 1 end` is a scope-*transparent* macro where
-  flagging IS correct. The linter cannot tell a consuming DSL from a
-  transparent wrapper without knowing the macro, so this is a policy call:
-  either exempt all macro-block bindings (matching the `redefined-constant`
-  guard just added, at the cost of false negatives on `@testset`/`@inbounds`),
-  or keep an allowlist of known scope-transparent macros. Repro: `printf
-  '@gen_defaults! d begin\n    color = nothing\nend\n' | lint`.
+- [x] `unused-binding` on attribute-DSL macro blocks. A `name = default`
+  inside a consuming macro's `begin ... end` was bound as an ordinary local and
+  flagged (~176 Makie findings: ~144 `@gen_defaults!`, ~32
+  `@DocumentedAttributes`), colliding with the deliberate
+  `unused_binding_flags_dead_local_in_macro_block_argument` test where
+  `@testset`'s block is scope-*transparent* and flagging is correct. Resolved
+  by exempting a curated denylist of consuming attribute DSLs
+  (`ATTRIBUTE_DSL_MACROS` in `unused_binding.rs`: `gen_defaults!`,
+  `DocumentedAttributes`, `recipe`, matched on the final name component) while
+  still flagging transparent macros. Name-based, so an aliased macro evades it;
+  grow the list as new DSLs surface.
 - [ ] `unused-binding` misses interpolation inside non-standard string
   literals: `$x` in `js"... $x ..."` (WGLMakie, ~16) or a GLSL string is not
   counted as a use, though `@js_str` does interpolate. Plain `"$x"` is handled;
