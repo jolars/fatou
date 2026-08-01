@@ -7,6 +7,7 @@ pub mod file_discovery;
 pub mod formatter;
 pub mod incremental;
 pub mod index;
+pub mod julia_version;
 pub mod linter;
 pub mod lsp;
 pub mod parser;
