@@ -105,6 +105,25 @@ fn unused_binding_flags_dead_local_in_macro_block_argument() {
 }
 
 #[test]
+fn unused_binding_ignores_typed_defaulted_parameter() {
+    // `space::Symbol = :data` is a parameter with a default, not a local, so
+    // it is exempt like any parameter even when unread. Unlike the untyped
+    // `space = :data` (a `KEYWORD_ARG`), it parses as an `ARG` wrapping an
+    // assignment, which the scope builder previously mistook for a local.
+    assert_eq!(
+        count("unused-binding", "f(pl, space::Symbol = :data) = pl\n"),
+        0
+    );
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function g(pl; opt::Int = 1)\n    return pl\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
 fn unused_binding_ignores_kwdef_field_default() {
     // `@kwdef` field defaults are struct fields, not local variables.
     assert_eq!(

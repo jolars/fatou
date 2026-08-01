@@ -1774,6 +1774,20 @@ impl Builder {
                     self.bind_param_pattern(&child, scope, kind);
                 }
             }
+            // A parameter carrying both a type and a default, `x::T = v`,
+            // parses as an assignment (an untyped default `x = v` is a
+            // `KEYWORD_ARG` handled in `bind_params`). The annotated left side
+            // is the parameter; the default is a read in the function scope,
+            // where earlier parameters are visible.
+            SyntaxKind::ASSIGNMENT_EXPR => {
+                let mut children = node.children();
+                if let Some(pattern) = children.next() {
+                    self.bind_param_pattern(&pattern, scope, kind);
+                }
+                for default in children {
+                    self.walk_node(&default, scope);
+                }
+            }
             _ => self.walk_node(node, scope),
         }
     }
