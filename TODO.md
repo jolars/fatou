@@ -29,6 +29,16 @@
 
 ## Formatter
 
+- [x] Stop a trailing `key => [bracket]` pair from hugging in a multi-item list.
+  A homogeneous mapping like `Dict("a" => [x], "b" => [y], "c" => [z])` used to
+  keep every pair flat on the opening line and explode only the last, relocating
+  the asymmetry. Now `suppress_bare_bracket_pair_hug` downgrades the trailing hug
+  when the tail is a pair whose innermost value is a *bare* bracket literal
+  (`[]`/`()`/`{}`) and the list has >1 item — for both calls and collections. A
+  sole-argument pair still hugs, a call/curly-valued tail still hugs, and a direct
+  bare-literal arg (`map(cb, [a, b])`) still hugs. Gated by `pair_list_no_hug`;
+  updated the `mapping` case in `pair_hug`.
+
 - [ ] Canonicalize the gap before a macro's *attached* argument
   (`lower_macro_call` in `src/formatter/rules.rs`). The gap is preserved
   verbatim because it is meaning-bearing whenever a `[…]`/`(…)` suffix follows

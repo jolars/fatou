@@ -128,7 +128,49 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (signature args break before a single-param `where`)
+## Latest session (bare-bracket-valued pair tail stops hugging in multi-item lists)
+
+`feat(formatter)`. User-reported bug: a homogeneous mapping
+`Dict{String, Any}("dataset" => ["w1a"], "reg" => [0.05], "strategy" => [:g, :n, :e])`
+kept all three pairs flat on the opening line and exploded only the *last*
+array — the trailing-pair hug firing on a `key => [bracket]` tail. This is the
+exact "relocating the asymmetry" antipattern the **collection** path already
+guards against (`item_is_huggable_in_collection` refuses a bare bracket-literal
+element), but that guard only caught *direct* bare literals, not `key => [...]`
+pairs, and didn't cover the call path at all.
+
+**Fix (`rules.rs` only, ~55 lines incl. docs, no engine change).** New
+`suppress_bare_bracket_pair_hug(node, item_count, last_huggable)` downgrades a
+computed `last_huggable` to `false` when the list has **>1 item** and the last
+item is a **bare-bracket-valued pair** (`item_is_bare_bracket_pair_tail`:
+`item_value` → walk the `=>`/`.=>` chain via `pair_operands` → innermost
+`huggable_kind` is a `is_bare_bracket_literal`, i.e. `VECT`/`TUPLE`/`BRACES`).
+Called at the tail of both `collect_arg_list` (calls) and
+`collect_collection_items` (collections), so calls and collections behave
+identically. No `ir.rs`/`printer.rs` change — the explode fallback the printer
+already owns takes over once the hug is withheld.
+
+**Decision (AskUserQuestion, two knobs — both "recommended" chosen).**
+(1) **Single-argument pairs still hug** (`Dict("k" => [big list])`): one entry has
+no sibling to be asymmetric with, so the `item_count > 1` guard leaves `config`,
+`chained_pair_hug`, `fence_high`, `pairs`, `prebroken`, `small` untouched.
+(2) **Apply to collections too** — a conscious divergence, edited the gated
+`mapping` case in `pair_hug/expected.jl` to explode one pair per line. What stays
+hugging: call/curly-valued pair tails (`options`, `register!`), and *direct*
+bare-literal args (`map(cb, [a, b])` — the guard is pair-specific, not a general
+bare-literal ban on calls).
+
+Gated `pair_list_no_hug/` (6 cases: user's multi-pair explode; single-pair still
+hugs; call-tail still hugs; tuple-tail explodes; direct bare-literal arg still
+hugs; chained-pair `k => label => [...]` innermost explodes). Gate 115→116;
+stability + clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) Extend the where-bound priority to short
+multi-param bounds via a conditional-layout primitive (the follow-up TODO).
+(2) **Switch to the LSP semantic model** — standing strategic recommendation.
+(3) Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
+
+## Earlier: signature args break before a single-param `where`
 
 `feat(formatter)`. Fixed the ranked TODO bullet: an over-width
 `f(args) where {T}` used to explode the lone bound (`) where {\n    T,\n}`)

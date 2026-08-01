@@ -31,10 +31,10 @@ schedule = assemble(
     "phase_one" => [warmup_steps, ramp_steps],
     final_phase_marker_value_arg_x,
 )
-mapping = ["alpha_key" => [one_component, two_component], "beta_key" => [
-    first_beta,
-    second_beta,
-]]
+mapping = [
+    "alpha_key" => [one_component, two_component],
+    "beta_key" => [first_beta, second_beta],
+]
 fit = optimize(objective; schedule = "warmup_phase" => build_schedule(
     ramp_step_count,
     decay_rate,

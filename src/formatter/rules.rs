@@ -1917,6 +1917,7 @@ fn collect_arg_list(node: &SyntaxNode) -> Option<ArgListParts> {
         }
     }
 
+    let last_huggable = suppress_bare_bracket_pair_hug(node, items.len(), last_huggable);
     Some(ArgListParts {
         open: open?,
         close: close?,
@@ -2122,6 +2123,65 @@ fn is_bare_bracket_literal(kind: SyntaxKind) -> bool {
         kind,
         SyntaxKind::VECT_EXPR | SyntaxKind::TUPLE_EXPR | SyntaxKind::BRACES
     )
+}
+
+/// The value node an argument-list item wraps: the sole child of a positional
+/// `ARG`, or the value of a clean `KEYWORD_ARG` (`name = value`). `None` for a
+/// shape with no single value node. Applied only to items [`item_is_huggable`]
+/// has already vetted, so the clean shape is guaranteed.
+fn item_value(item: &SyntaxNode) -> Option<SyntaxNode> {
+    match item.kind() {
+        SyntaxKind::ARG => {
+            let mut children = item.children();
+            match (children.next(), children.next()) {
+                (Some(only), None) => Some(only),
+                _ => None,
+            }
+        }
+        SyntaxKind::KEYWORD_ARG => item.children().nth(1),
+        _ => None,
+    }
+}
+
+/// Whether `item`'s value is a pair chain (`k => v`, `a => b => v`) whose
+/// innermost hugged construct is a *bare* bracket literal (`[…]`, `(…)`, `{…}`).
+/// Such a trailing pair, when it has sibling items, does **not** hug: hugging one
+/// entry of a homogeneous `key => value` list only relocates the asymmetry, so
+/// the list explodes one entry per line instead (the pair-tail analog of the bare
+/// literal guard in [`item_is_huggable_in_collection`]). A call/index/curly value
+/// (`k => f(…)`) still hugs — only bare literals trigger the guard.
+fn item_is_bare_bracket_pair_tail(item: &SyntaxNode) -> bool {
+    let Some(mut value) = item_value(item) else {
+        return false;
+    };
+    loop {
+        let Some((_, _, rhs)) = pair_operands(&value) else {
+            return false;
+        };
+        if huggable_kind(rhs.kind()) {
+            return is_bare_bracket_literal(rhs.kind());
+        }
+        value = rhs;
+    }
+}
+
+/// Downgrade a computed `last_huggable` to `false` when the trailing item is a
+/// bare-bracket-valued pair (see [`item_is_bare_bracket_pair_tail`]) in a
+/// multi-item list. A sole argument keeps hugging — there is no sibling for the
+/// hug to be asymmetric with.
+fn suppress_bare_bracket_pair_hug(
+    node: &SyntaxNode,
+    item_count: usize,
+    last_huggable: bool,
+) -> bool {
+    if last_huggable
+        && item_count > 1
+        && let Some(last) = last_list_item(node)
+        && item_is_bare_bracket_pair_tail(&last)
+    {
+        return false;
+    }
+    last_huggable
 }
 
 /// Parse a clean two-operand `=>`/`.=>` pair into its left operand, operator
@@ -2611,6 +2671,7 @@ fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
         }
     }
 
+    let last_huggable = suppress_bare_bracket_pair_hug(node, items.len(), last_huggable);
     Some(CollectionParts {
         open: open?,
         close: close?,
