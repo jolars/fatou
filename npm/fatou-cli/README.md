@@ -25,7 +25,7 @@ npx fatou-cli format file.jl
 fatou parse file.jl             # print the CST (stdin if no file)
 fatou format file.jl            # format to stdout (stdin if omitted)
 fatou format --check path/      # check formatting; non-zero exit if any differ
-fatou lint --check path/        # lint
+fatou lint path/                # lint; non-zero exit if any findings
 fatou lsp                       # run the language server on stdio
 ```
 

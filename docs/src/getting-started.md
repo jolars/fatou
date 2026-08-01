@@ -64,10 +64,10 @@ file would change):
 fatou format --check file.jl
 ```
 
-Lint a file (or pipe from stdin):
+Lint a file (or pipe from stdin); exits non-zero if there are any findings:
 
 ```bash
-fatou lint --check file.jl
+fatou lint file.jl
 ```
 
 Run the language server over stdio (for editor integration):

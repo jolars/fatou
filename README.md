@@ -46,7 +46,7 @@ Runs on Linux, macOS, and Windows (x86_64 and arm64).
 fatou parse <file.jl>          # print the CST (stdin if no file)
 fatou format <file.jl>         # format to stdout (stdin if omitted)
 fatou format --check <dir>     # check formatting; non-zero exit if any differ
-fatou lint --check <dir>       # lint
+fatou lint <dir>               # lint; non-zero exit if any findings
 fatou lsp                      # run the language server on stdio
 ```
 

@@ -118,7 +118,7 @@ cargo run -- parse <file.jl>                 # print CST; stdin if no file
 cat file.jl | cargo run -- parse --verify --quiet   # losslessness round-trip
 cargo run -- format <file.jl>                # format to stdout (stdin if omitted)
 cargo run -- format --check <dir>            # check without writing; non-zero if any differ
-cargo run -- lint --check <dir>              # lint
+cargo run -- lint <dir>                      # lint; non-zero if any findings
 cargo run -- lsp                             # run the language server on stdio
 ```
 
