@@ -4680,6 +4680,15 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
 struct BodyLine {
     stmts: Vec<Ir>,
     comment: Option<Ir>,
+    /// Set when a **top-level** statement is written with a trailing `;` output
+    /// suppressor (`x = 1;`) — the last `;` of a `TOPLEVEL_SEMICOLON` wrapper,
+    /// with no statement following it. Unlike an internal `;` separator (a pure
+    /// statement delimiter that reflows to a newline), this `;` is semantically
+    /// meaningful in interactive contexts (REPL, `include`, notebook cells: it
+    /// suppresses the value echo), so it is preserved, glued to the line's last
+    /// statement. Never set inside a block body — there echo suppression has no
+    /// effect, so a block-interior `;` stays a plain separator.
+    trailing_semi: bool,
     /// The source span of the line's significant content — from the first
     /// statement's or comment's start to the last one's end, exclusive of the
     /// surrounding indentation and terminator. `None` for a blank line. Range
@@ -4720,7 +4729,7 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
     // between them, and against a node following a comment on the same line.
     let mut lines: Vec<BodyLine> = vec![BodyLine::default()];
     let mut expect_sep = false;
-    collect_body_elements(node, &mut lines, &mut expect_sep)?;
+    collect_body_elements(node, &mut lines, &mut expect_sep, false)?;
     Some(lines)
 }
 
@@ -4730,19 +4739,25 @@ fn collect_body_lines(node: &SyntaxNode) -> Option<Vec<BodyLine>> {
 /// `a; b; c` into — can be flattened in place: recursing through it feeds its
 /// inner statements and `;` separators to the very same logic, so top-level
 /// `;`-joins reflow one statement per line exactly as a block body's do (Tenet 1).
+///
+/// `top_level` is set only while walking a `TOPLEVEL_SEMICOLON` wrapper's children,
+/// where a trailing `;` (the last one, with no statement after it) is a preserved
+/// output suppressor rather than a dropped separator (see [`BodyLine::trailing_semi`]).
 fn collect_body_elements(
     node: &SyntaxNode,
     lines: &mut Vec<BodyLine>,
     expect_sep: &mut bool,
+    top_level: bool,
 ) -> Option<()> {
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Node(child) => {
                 // The `TOPLEVEL_SEMICOLON` wrapper carries no layout of its own —
                 // its children are statements joined by `;` — so flatten it rather
-                // than lowering it as one opaque statement.
+                // than lowering it as one opaque statement. Its `;` tokens are the
+                // only place a top-level trailing suppressor can appear.
                 if child.kind() == SyntaxKind::TOPLEVEL_SEMICOLON {
-                    collect_body_elements(&child, lines, expect_sep)?;
+                    collect_body_elements(&child, lines, expect_sep, true)?;
                     continue;
                 }
                 if *expect_sep {
@@ -4751,6 +4766,9 @@ fn collect_body_elements(
                 let line = lines.last_mut().unwrap();
                 line.stmts.push(lower_node(&child));
                 line.cover(child.text_range());
+                // A statement follows any earlier `;` on this line, so that `;` was
+                // an internal separator, not a trailing suppressor — clear the mark.
+                line.trailing_semi = false;
                 *expect_sep = true;
             }
             NodeOrToken::Token(tok) => match tok.kind() {
@@ -4760,8 +4778,16 @@ fn collect_body_elements(
                 // to end of line so this never arises there, but an inline block
                 // comment can be followed by `; stmt` on the same line.)
                 SyntaxKind::SEMICOLON => {
-                    if lines.last().unwrap().comment.is_some() {
+                    let line = lines.last_mut().unwrap();
+                    if line.comment.is_some() {
                         return None;
+                    }
+                    // A top-level `;` following a statement is tentatively a trailing
+                    // suppressor; a later statement on the same line clears it above.
+                    // Glue it to the line's span so range formatting replaces it too.
+                    if top_level && !line.stmts.is_empty() {
+                        line.trailing_semi = true;
+                        line.cover(tok.text_range());
                     }
                     *expect_sep = false;
                 }
@@ -4853,11 +4879,14 @@ fn lower_root(root: &SyntaxNode) -> Ir {
             for (j, stmt) in line.stmts.iter().enumerate() {
                 inner.push(Ir::HardLine);
                 inner.push(stmt.clone());
-                if j == last_stmt
-                    && let Some(comment) = &line.comment
-                {
-                    inner.push(Ir::text(" "));
-                    inner.push(comment.clone());
+                if j == last_stmt {
+                    if line.trailing_semi {
+                        inner.push(Ir::text(";"));
+                    }
+                    if let Some(comment) = &line.comment {
+                        inner.push(Ir::text(" "));
+                        inner.push(comment.clone());
+                    }
                 }
             }
         }
@@ -4946,13 +4975,18 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
             for (j, stmt) in line.stmts.iter().enumerate() {
                 inner.push(Ir::HardLine); // framing break / re-indent for this stmt
                 inner.push(stmt.clone());
-                // A trailing comment rides the final statement of the source line,
-                // one canonical space after it.
-                if j == last
-                    && let Some(comment) = &line.comment
-                {
-                    inner.push(Ir::text(" "));
-                    inner.push(comment.clone());
+                if j == last {
+                    // A preserved top-level trailing `;` rides the final statement
+                    // (never set for a block body, so inert here in practice).
+                    if line.trailing_semi {
+                        inner.push(Ir::text(";"));
+                    }
+                    // A trailing comment rides the final statement of the source
+                    // line, one canonical space after it.
+                    if let Some(comment) = &line.comment {
+                        inner.push(Ir::text(" "));
+                        inner.push(comment.clone());
+                    }
                 }
             }
         }
@@ -5024,11 +5058,14 @@ pub(crate) fn lower_body_range(
                     inner.push(Ir::HardLine);
                 }
                 inner.push(stmt.clone());
-                if j == last_stmt
-                    && let Some(comment) = &line.comment
-                {
-                    inner.push(Ir::text(" "));
-                    inner.push(comment.clone());
+                if j == last_stmt {
+                    if line.trailing_semi {
+                        inner.push(Ir::text(";"));
+                    }
+                    if let Some(comment) = &line.comment {
+                        inner.push(Ir::text(" "));
+                        inner.push(comment.clone());
+                    }
                 }
                 emitted = true;
             }
