@@ -733,6 +733,26 @@ fn break_outside_loop_stays_silent_in_quotes_and_macro_calls() {
     assert_eq!(count("break-outside-loop", "@inbounds break\n"), 0);
 }
 
+#[test]
+fn break_outside_loop_ignores_break_in_macro_lambda_argument() {
+    // A macro may rewrite an arrow-shaped argument into a loop body, so a
+    // `break`/`continue` inside it (even nested in a `->`) is not flagged.
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "@nloops N i A d -> begin\n    continue\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "break-outside-loop",
+            "for c in xs\n    @stm c begin\n        pat -> break\n    end\nend\n"
+        ),
+        0
+    );
+}
+
 // --- constant-condition ------------------------------------------------------
 
 #[test]

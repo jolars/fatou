@@ -12,14 +12,15 @@
 //! - **Function boundary** (`function`/`macro` definitions, `->` lambdas,
 //!   do-block bodies, comprehension and generator bodies): `break` cannot
 //!   reach a loop outside the closure, so it is an error even when a loop
-//!   encloses the boundary — flag immediately. Two positions are exempt
-//!   because they evaluate in the *enclosing* scope and the walk continues
-//!   through them: a do-call's call part (`foreach((break; xs)) do x ... end`)
-//!   and a comprehension's iterator spec (`[x for x in (break; xs)]`).
-//! - **Quoted code and macro calls**: stop silently. Quoted code is data, and
-//!   a macro may rewrite its arguments into anything (mirrors the
-//!   `undefined-name` exemptions). A do-block attached to a macro call is
-//!   likewise left alone.
+//!   encloses the boundary. Two positions are exempt because they evaluate in
+//!   the *enclosing* scope and the walk continues through them: a do-call's
+//!   call part (`foreach((break; xs)) do x ... end`) and a comprehension's
+//!   iterator spec (`[x for x in (break; xs)]`).
+//! - **Quoted code and macro calls**: stop silently, and this wins even past a
+//!   function boundary. Quoted code is data, and a macro may rewrite its
+//!   arguments into a loop (`@nloops`/`@stm` pass arrow-shaped arguments that
+//!   are not real closures), so a `break` inside such an argument is left alone
+//!   (mirrors the `undefined-name` exemptions).
 //!
 //! Reaching the file root without a stop is a finding. No fix is offered:
 //! deleting the statement changes behavior, and there is no loop to attach it
@@ -92,13 +93,21 @@ impl Rule for BreakOutsideLoop {
         };
 
         let mut from = node.clone();
+        let mut crossed_boundary = false;
         for ancestor in node.ancestors().skip(1) {
             match ancestor.kind() {
-                SyntaxKind::FOR_EXPR | SyntaxKind::WHILE_EXPR => return,
+                // A loop in the same closure makes the jump legal; a loop
+                // outside a crossed function boundary does not, so keep walking
+                // in case a macro/quote further out reinterprets the code.
+                SyntaxKind::FOR_EXPR | SyntaxKind::WHILE_EXPR if !crossed_boundary => return,
+                // Quoted code is data and a macro may rewrite its arguments into
+                // a loop, so these win even past a function boundary — the
+                // arrow-shaped arguments of `@nloops`/`@stm` are not real
+                // closures.
                 SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM | SyntaxKind::MACRO_CALL => {
                     return;
                 }
-                _ if is_function_boundary(&ancestor, &from) => break,
+                _ if is_function_boundary(&ancestor, &from) => crossed_boundary = true,
                 _ => {}
             }
             from = ancestor;
