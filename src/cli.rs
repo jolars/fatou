@@ -119,6 +119,12 @@ pub enum Commands {
         #[arg(long)]
         force_exclude: bool,
 
+        /// Target Julia version or range for version-compat checks (e.g. `1.10`
+        /// or `1.6 - 1.11`); overrides `[julia] version` and the project's
+        /// `Project.toml` `[compat]`.
+        #[arg(long, value_name = "VERSION")]
+        julia_version: Option<String>,
+
         /// Output format.
         #[arg(long, value_enum, default_value_t = LintOutput::Pretty)]
         output: LintOutput,

@@ -12,6 +12,7 @@ use std::sync::{Arc, OnceLock};
 use crate::config::LintConfig;
 use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
 use crate::index::{PackageIndex, build_system_index};
+use crate::julia_version::VersionRange;
 use rowan::TextRange;
 
 use crate::linter::diagnostic::{Diagnostic, Severity, ViolationData};
@@ -70,17 +71,21 @@ impl std::error::Error for LintError {}
 
 /// Lint every `.jl` file under `paths` with default configuration.
 pub fn check_paths(paths: &[PathBuf]) -> Result<LintResult, LintError> {
-    check_paths_with_config(paths, &LintConfig::default(), &ExcludeFilter::none())
+    check_paths_with_config(paths, &LintConfig::default(), &ExcludeFilter::none(), None)
 }
 
 /// Lint every `.jl` file under `paths`, honoring `config` and `exclude`.
+/// `julia_target` is the project's declared Julia support range (for the
+/// `julia-version-compat` rule); `None` leaves version-gated rules silent.
 pub fn check_paths_with_config(
     paths: &[PathBuf],
     config: &LintConfig,
     exclude: &ExcludeFilter,
+    julia_target: Option<VersionRange>,
 ) -> Result<LintResult, LintError> {
     let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config);
+    let rules = rules.with_julia_target(julia_target);
 
     // Read and parse every file up front (in parallel): the include-graph
     // pre-pass wants all trees before the per-file rule runs, so a file's
@@ -262,6 +267,7 @@ pub fn lint_parsed(
         includes,
         model,
         resolution,
+        julia_target: rules.julia_target(),
     };
     let raw = rules.run(&ctx);
 

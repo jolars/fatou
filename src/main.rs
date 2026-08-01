@@ -59,11 +59,14 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             unsafe_fixes,
             exclude,
             force_exclude,
+            julia_version,
             output,
         } => {
             let (config, config_path) = load_config(&cli.config, cli.no_config)?;
             let filter =
                 resolve_exclude_filter(&config, config_path.as_deref(), &exclude, force_exclude)?;
+            let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
+            let julia_target = resolve_julia_target(julia_version.as_deref(), &config, &anchor);
             run_lint(
                 paths,
                 output,
@@ -72,6 +75,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 cli.color,
                 &config,
                 &filter,
+                julia_target,
             )
         }
         Commands::Lsp => fatou::lsp::run()
@@ -276,6 +280,7 @@ fn run_format(
     Ok(ExitCode::SUCCESS)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_lint(
     paths: Vec<PathBuf>,
     output: LintOutput,
@@ -284,6 +289,7 @@ fn run_lint(
     color: ColorChoice,
     config: &Config,
     exclude: &ExcludeFilter,
+    julia_target: Option<fatou::julia_version::VersionRange>,
 ) -> Result<ExitCode, String> {
     if paths.is_empty() {
         return Err("lint requires at least one path".to_string());
@@ -300,7 +306,7 @@ fn run_lint(
     }
 
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
-    let result = linter::check_paths_with_config(&paths, &config.lint, exclude)
+    let result = linter::check_paths_with_config(&paths, &config.lint, exclude, julia_target)
         .map_err(|e| e.to_string())?;
     warn_unknown_rules(&result.unknown_rules);
 
@@ -408,6 +414,33 @@ fn color_enabled(choice: ColorChoice, is_terminal: bool) -> bool {
         ColorChoice::Never => false,
         ColorChoice::Auto => std::env::var_os("NO_COLOR").is_none() && is_terminal,
     }
+}
+
+/// Resolve the effective Julia target range for version-compat checks, by
+/// precedence: the `--julia-version` flag, then `[julia] version` from
+/// `fatou.toml`, then the project's `Project.toml` `[compat]` / `Manifest.toml`
+/// discovered from `anchor`. `None` (nothing declared) leaves the check silent.
+///
+/// A malformed `--julia-version` is reported as a warning and ignored, matching
+/// how the config layer treats a bad `[julia] version`.
+fn resolve_julia_target(
+    cli: Option<&str>,
+    config: &Config,
+    anchor: &Path,
+) -> Option<fatou::julia_version::VersionRange> {
+    if let Some(spec) = cli {
+        return match fatou::julia_version::parse_compat(spec) {
+            Ok(range) => Some(range),
+            Err(_) => {
+                eprintln!("warning: --julia-version `{spec}` is not a valid Julia version");
+                None
+            }
+        };
+    }
+    if let Some(range) = config.julia.version {
+        return Some(range);
+    }
+    fatou::environment::discover_julia_target(anchor)
 }
 
 fn style_with_overrides(

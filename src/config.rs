@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use crate::file_discovery::{ExcludeError, ExcludeFilter};
 use crate::formatter::LineEnding;
+use crate::julia_version::{VersionRange, parse_compat};
 use crate::linter::Severity;
 
 pub const CONFIG_FILE_NAME: &str = "fatou.toml";
@@ -21,6 +22,9 @@ const DEFAULT_INDENT_WIDTH: u32 = 4;
 pub struct Config {
     pub format: FormatConfig,
     pub lint: LintConfig,
+    /// Julia-language settings (target version, and room to grow into
+    /// environment-resolution overrides).
+    pub julia: JuliaConfig,
     /// Gitignore-style patterns to exclude from file discovery, resolved
     /// relative to the directory containing `fatou.toml`.
     pub exclude: Vec<String>,
@@ -48,6 +52,17 @@ pub struct LintConfig {
     /// Per-rule severity overrides (`[lint.severity]`); rules not listed keep
     /// their default severity.
     pub severity: BTreeMap<String, Severity>,
+}
+
+/// The `[julia]` section: settings tied to the Julia language and environment.
+/// Currently just the target version; reserved as the home for future
+/// environment-resolution overrides (project path, depots).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JuliaConfig {
+    /// The declared target version or support range, used by the
+    /// `julia-version-compat` rule. `None` leaves the version explicit-only,
+    /// falling back to `Project.toml`/`Manifest.toml` discovery at the call site.
+    pub version: Option<VersionRange>,
 }
 
 impl Default for FormatConfig {
@@ -121,6 +136,8 @@ pub(crate) struct RawConfig {
     #[serde(default)]
     lint: RawLint,
     #[serde(default)]
+    julia: RawJulia,
+    #[serde(default)]
     exclude: Vec<String>,
     #[serde(rename = "extend-exclude", default)]
     extend_exclude: Vec<String>,
@@ -183,6 +200,29 @@ struct RawLint {
     ignore: Vec<String>,
     #[serde(default)]
     severity: BTreeMap<String, Severity>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawJulia {
+    version: Option<String>,
+}
+
+impl RawJulia {
+    /// Resolve the target version, recording a warning (and leaving it unset)
+    /// when the spelling does not parse rather than failing the whole run.
+    fn resolve(self, warnings: &mut Vec<String>) -> JuliaConfig {
+        let version = self.version.and_then(|spec| match parse_compat(&spec) {
+            Ok(range) => Some(range),
+            Err(_) => {
+                warnings.push(format!(
+                    "`version` in [julia] is not a valid Julia version: `{spec}`"
+                ));
+                None
+            }
+        });
+        JuliaConfig { version }
+    }
 }
 
 impl Config {
@@ -255,6 +295,7 @@ impl RawConfig {
                 ignore: self.lint.ignore,
                 severity: self.lint.severity,
             },
+            julia: self.julia.resolve(&mut warnings),
             exclude: self.exclude,
             extend_exclude: self.extend_exclude,
         };
@@ -320,6 +361,36 @@ mod tests {
         assert_eq!(config.format.line_width, 100);
         assert_eq!(config.format.indent_width, 4);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn parses_julia_version() {
+        let raw: RawConfig = toml::from_str("[julia]\nversion = \"1.6\"\n").unwrap();
+        let (config, warnings) = raw.into_config();
+        let range = config.julia.version.expect("version parsed");
+        assert_eq!(range.min, crate::julia_version::Version::new(1, 6, 0));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn julia_defaults_to_no_version() {
+        let (config, _) = RawConfig::default().into_config();
+        assert_eq!(config.julia.version, None);
+    }
+
+    #[test]
+    fn invalid_julia_version_warns_and_stays_unset() {
+        let raw: RawConfig = toml::from_str("[julia]\nversion = \"nope\"\n").unwrap();
+        let (config, warnings) = raw.into_config();
+        assert_eq!(config.julia.version, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("[julia]"));
+    }
+
+    #[test]
+    fn rejects_unknown_julia_key() {
+        toml::from_str::<RawConfig>("[julia]\ntarget = \"1.6\"\n")
+            .expect_err("unknown [julia] key should be rejected");
     }
 
     #[test]

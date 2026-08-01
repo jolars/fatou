@@ -105,6 +105,9 @@ Lint `.jl` files
 `--force-exclude`
 :   Apply exclude patterns to files named explicitly on the command line too (they are normally always processed); for runners like pre-commit that pass staged files as arguments
 
+`--julia-version <VERSION>`
+:   Target Julia version or range for version-compat checks (e.g. `1.10` or `1.6 - 1.11`); overrides `[julia] version` and the project's `Project.toml` `[compat]`
+
 `--output <OUTPUT>`
 :   Output format
 

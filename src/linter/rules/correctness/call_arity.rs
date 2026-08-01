@@ -644,6 +644,7 @@ mod tests {
                 workspace: ws.map(|pkg| (pkg, Vec::new())),
             }),
             includes: &[],
+            julia_target: None,
         };
         let mut sink = Vec::new();
         CallArity.check_file(&ctx, &mut sink);
@@ -716,6 +717,7 @@ mod tests {
             model: &model,
             resolution: None,
             includes: &[],
+            julia_target: None,
         };
         let mut sink = Vec::new();
         CallArity.check_file(&ctx, &mut sink);

@@ -26,6 +26,7 @@ use std::sync::Arc;
 
 use crate::config::LintConfig;
 use crate::index::PackageIndex;
+use crate::julia_version::VersionRange;
 use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::include_graph::IncludeProblem;
 use crate::resolve::{ModulePath, PackageSource};
@@ -89,6 +90,11 @@ pub struct RuleContext<'a> {
     /// (`missing-include-file`, `include-cycle`) silent — the language server
     /// passes no problems and keeps publishing its own graph diagnostics.
     pub includes: &'a [IncludeProblem],
+    /// The project's declared Julia support range, when known (from
+    /// `[julia] version`, `Project.toml` `[compat]`, or the CLI). `None` leaves
+    /// version-gated rules (`julia-version-compat`) silent. Constant per run —
+    /// carried on [`ResolvedRules`] and copied here by the driver.
+    pub julia_target: Option<VersionRange>,
 }
 
 /// What a resolution-dependent rule resolves free reads against: a
@@ -169,6 +175,9 @@ pub struct ResolvedRules {
     by_kind: Vec<Vec<usize>>,
     /// Whether any rule subscribes to node dispatch at all.
     any_node_rules: bool,
+    /// The declared Julia support range for this run, constant across files.
+    /// Copied into each [`RuleContext`] so version-gated rules can read it.
+    julia_target: Option<VersionRange>,
 }
 
 impl ResolvedRules {
@@ -233,9 +242,24 @@ impl ResolvedRules {
                 rules,
                 by_kind,
                 any_node_rules,
+                julia_target: None,
             },
             unknown,
         )
+    }
+
+    /// Set the declared Julia support range these rules check against. Off by
+    /// default; the CLI sets it from `[julia] version`/`Project.toml`/the
+    /// `--julia-version` flag, and the docs generator sets it per example.
+    #[must_use]
+    pub fn with_julia_target(mut self, target: Option<VersionRange>) -> Self {
+        self.julia_target = target;
+        self
+    }
+
+    /// The Julia support range these rules check against, if set.
+    pub fn julia_target(&self) -> Option<VersionRange> {
+        self.julia_target
     }
 
     /// Run every configured rule against `ctx` in one shared CST traversal.
