@@ -12,6 +12,7 @@ use rowan::TextRange;
 use smol_str::SmolStr;
 
 use crate::ast::{AstNode, AstToken, Name};
+use crate::parser::{is_ident_continue, is_ident_start};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use super::binding::{Binding, BindingId, BindingKind};
@@ -223,6 +224,15 @@ fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
     Name::cast(node.clone())?
         .ident()
         .map(|ident| ident.syntax().clone())
+}
+
+/// The byte offset ending the identifier that begins at `start` in `text`.
+/// The caller guarantees `text[start..]` opens with an identifier-start char.
+fn ident_end(text: &str, start: usize) -> usize {
+    text[start..]
+        .char_indices()
+        .find(|&(off, c)| off != 0 && !is_ident_continue(c))
+        .map_or(text.len(), |(off, _)| start + off)
 }
 
 /// The token naming a function/macro definition's signature `core`: the `NAME`
@@ -672,6 +682,105 @@ impl Builder {
         }
     }
 
+    /// Count `$name` interpolations in a *prefixed* string or command literal
+    /// as reads. A non-standard literal (`js"..."`, custom `foo"..."`) receives
+    /// its body verbatim: the lexer never splits `$name` into an INTERPOLATION
+    /// node, so `walk_children` cannot see the interpolated identifiers. Many
+    /// such macros nonetheless interpolate at expansion time (`@js_str`, GLSL
+    /// shader strings, ...), and we cannot know a given macro's semantics, so we
+    /// conservatively treat every `$name` (and identifiers inside `$(...)`) in
+    /// the raw body as a read. This only ever suppresses an unused-binding
+    /// warning; it never introduces one. Unprefixed literals get proper
+    /// INTERPOLATION nodes from the parser and are skipped here.
+    fn record_raw_interpolations(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let prefixed = node
+            .children_with_tokens()
+            .any(|e| e.kind() == SyntaxKind::STRING_PREFIX);
+        if !prefixed {
+            return;
+        }
+        for token in node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| t.kind() == SyntaxKind::STRING_CONTENT)
+        {
+            self.scan_raw_interpolations(&token, scope);
+        }
+    }
+
+    /// Scan one raw `STRING_CONTENT` token for `$name` / `$(...)` interpolations,
+    /// marking each interpolated identifier as a read. A field access `a.b`
+    /// inside `$(...)` marks `a` but not `b`.
+    fn scan_raw_interpolations(&mut self, token: &SyntaxToken, scope: ScopeId) {
+        let text = token.text();
+        let base = u32::from(token.text_range().start());
+        let mut idx = 0;
+        while let Some(dollar) = text[idx..].find('$') {
+            let after = idx + dollar + 1;
+            match text[after..].chars().next() {
+                Some('(') => idx = self.scan_paren_interpolation(text, base, after, scope),
+                Some(c) if is_ident_start(c) => {
+                    let end = ident_end(text, after);
+                    self.record_raw_read(&text[after..end], base, after, end, scope);
+                    idx = end;
+                }
+                _ => idx = after,
+            }
+        }
+    }
+
+    /// Scan a `$(...)` interpolation body starting at the `(` at `open`,
+    /// marking every identifier (except one directly after a `.`) as a read.
+    /// Returns the byte offset just past the matching `)`, or the string end.
+    fn scan_paren_interpolation(
+        &mut self,
+        text: &str,
+        base: u32,
+        open: usize,
+        scope: ScopeId,
+    ) -> usize {
+        let mut depth = 0u32;
+        let mut prev_dot = false;
+        let mut pos = open;
+        while let Some(c) = text[pos..].chars().next() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return pos + 1;
+                    }
+                }
+                _ if is_ident_start(c) => {
+                    let end = ident_end(text, pos);
+                    if !prev_dot {
+                        self.record_raw_read(&text[pos..end], base, pos, end, scope);
+                    }
+                    prev_dot = false;
+                    pos = end;
+                    continue;
+                }
+                _ => {}
+            }
+            prev_dot = c == '.';
+            pos += c.len_utf8();
+        }
+        pos
+    }
+
+    /// Mark `name` (spanning bytes `start..end` within a token at absolute
+    /// offset `base`) as reading whatever binding it resolves to.
+    fn record_raw_read(&mut self, name: &str, base: u32, start: usize, end: usize, scope: ScopeId) {
+        if name == "_" {
+            return;
+        }
+        if let Some(b) = self.resolve_read(name, scope) {
+            self.model.bindings[b.0 as usize].read = true;
+            let range = TextRange::new((base + start as u32).into(), (base + end as u32).into());
+            self.push_ident(name, range, scope, Access::Read, false, Some(b));
+        }
+    }
+
     // --- declare phase -----------------------------------------------------
 
     /// Introduce the bindings assigned anywhere in `scope`'s own extent,
@@ -1044,10 +1153,12 @@ impl Builder {
             }
             SyntaxKind::STRING_LITERAL => {
                 self.record_string_macro_read(node, scope, "_str");
+                self.record_raw_interpolations(node, scope);
                 self.walk_children(node, scope);
             }
             SyntaxKind::CMD_LITERAL => {
                 self.record_string_macro_read(node, scope, "_cmd");
+                self.record_raw_interpolations(node, scope);
                 self.walk_children(node, scope);
             }
             SyntaxKind::INTERPOLATION => self.walk_interpolation(node, scope),

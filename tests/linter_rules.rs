@@ -164,6 +164,43 @@ fn unused_binding_ignores_kwdef_field_default() {
     );
 }
 
+#[test]
+fn unused_binding_counts_prefixed_string_macro_interpolation() {
+    // A non-standard string literal (`js"..."`) keeps its body verbatim, so the
+    // lexer never splits `$x` into an INTERPOLATION node. Such macros still
+    // interpolate at expansion time, so `$x`/`$(...)` count as reads.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    x = 1\n    js\"value $x\"\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    a = 1\n    b = 2\n    js\"$(a + b)\"\nend\n"
+        ),
+        0
+    );
+    // Only the interpolated name is spared: `y` is still a dead local.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    x = 1\n    y = 2\n    js\"only $x\"\nend\n"
+        ),
+        1
+    );
+    // Inside `$(...)`, a field access reads the receiver, not the field name.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f(a)\n    b = 1\n    js\"$(a.b)\"\nend\n"
+        ),
+        1
+    );
+}
+
 // --- unused-import ---------------------------------------------------------
 
 #[test]
@@ -255,6 +292,27 @@ fn unused_import_counts_string_macro_use() {
 fn unused_import_still_flags_unused_string_macro() {
     // Imported but never applied as a string macro: still unused.
     assert_eq!(count("unused-import", "using Unitful: @u_str\nx = 1\n"), 1);
+}
+
+#[test]
+fn unused_import_counts_prefixed_string_macro_interpolation() {
+    // An imported name interpolated inside a non-standard string macro
+    // (`js"$median"`) is a use, even though the body lexes verbatim.
+    assert_eq!(
+        count(
+            "unused-import",
+            "using M: @js_str, median\nx = js\"$median\"\n"
+        ),
+        0
+    );
+    // Not interpolated anywhere: still unused.
+    assert_eq!(
+        count(
+            "unused-import",
+            "using M: @js_str, median\nx = js\"nothing\"\n"
+        ),
+        1
+    );
 }
 
 // --- duplicate-argument ----------------------------------------------------

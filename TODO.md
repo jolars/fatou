@@ -98,29 +98,31 @@
   `DocumentedAttributes`, `recipe`, matched on the final name component) while
   still flagging transparent macros. Name-based, so an aliased macro evades it;
   grow the list as new DSLs surface.
-- [ ] `unused-binding` misses interpolation inside non-standard string
-  literals: `$x` in `js"... $x ..."` (WGLMakie, ~16) or a GLSL string is not
-  counted as a use, though `@js_str` does interpolate. Plain `"$x"` is handled;
-  the gap is that `foo"...$x..."` lexes `$x` as raw `STRING_CONTENT`, not an
-  `INTERPOLATION` node. `@u_str`/`@format_str` *application* is now counted
-  (fixed); interpolation *inside* a string macro is the remaining gap. Repro:
-  `printf 'using M: @js_str\nf(rect) = (x, y = rect; js"pick($x, $y)")\n' |
-  lint` flags `x`, `y`.
+- [x] `unused-binding` missed interpolation inside non-standard string
+  literals: `$x` in `js"... $x ..."` (WGLMakie, ~16) or a GLSL string was not
+  counted as a use, though `@js_str` does interpolate. A prefixed literal keeps
+  its body verbatim, so `foo"...$x..."` lexes `$x` as raw `STRING_CONTENT`, not
+  an `INTERPOLATION` node (matching JuliaSyntax; the parser is correct). Fixed
+  in the semantic builder: `record_raw_interpolations` scans a prefixed
+  literal's `STRING_CONTENT` for `$name`/`$(...)` and conservatively marks each
+  interpolated identifier as a read (a field access `a.b` reads `a`, not `b`).
+  This only suppresses false positives; `raw"$x"` is over-counted, which is the
+  safe direction since a macro's interpolation semantics are unknowable.
 - [ ] `unused-binding` on `@show a, b = expr` (GLMakie `GLInfo.jl`, ~4): the
   whole tuple-assignment is the macro's argument, so `@show` uses every name,
   but the walker flags the non-first names (`typ`, `uniform_size`). Same
   macro-argument-opacity root as the DSL-block class.
-- [ ] `unused-import` misses three within-file use forms (spans are otherwise
+- [ ] `unused-import` misses two within-file use forms (spans are otherwise
   exact; ~71% of the 264 Makie findings are the known file-scoped/`include`
   limitation, not these). Verified with `julia`: (1) an imported name used only
   inside `quote ... end` / `:( ... )` (e.g. `benchmark-ttfp.jl` `median` used
   in a `quote` macro body); (2) an imported operator via infix `a == b` or a
   parenthesized method def `(==)(a::S, b::S) = ...` (`GLTypes.jl`) — regular
   `import Base: *` + `*(a,b)=...` is counted, but the `(op)` target and infix
-  tokens are not resolved to the operator's import; (3) interpolation inside a
-  non-standard string macro (same lex gap as the `unused-binding` item). The
-  string/command-macro *application* form (`u"ns"` -> `@u_str`) is now counted
-  (fixed).
+  tokens are not resolved to the operator's import. The string/command-macro
+  *application* form (`u"ns"` -> `@u_str`) and interpolation inside a
+  non-standard string macro (`js"$name"`, via `record_raw_interpolations`) are
+  now both counted (fixed).
 
 ## Language server
 
