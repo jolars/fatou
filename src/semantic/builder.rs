@@ -103,6 +103,18 @@ fn struct_field_form(stmt: &SyntaxNode) -> Option<(SyntaxNode, Vec<SyntaxNode>)>
     }
 }
 
+/// A `name = value` argument directly under a `MACRO_CALL` is a keyword
+/// argument (`@warn msg key=val`, `@test x rtol=eps(T)`), not an assignment that
+/// binds `key` in the surrounding scope.
+fn is_macro_kwarg(node: &SyntaxNode) -> bool {
+    node.kind() == SyntaxKind::ASSIGNMENT_EXPR
+        && assign_op(node) == AssignOp::Plain
+        && node
+            .children()
+            .next()
+            .is_some_and(|lhs| lhs.kind() == SyntaxKind::NAME)
+}
+
 fn is_augmented_assign(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -616,6 +628,7 @@ impl Builder {
             SyntaxKind::IMPORT_STMT | SyntaxKind::USING_STMT => {
                 self.declare_import(node, scope);
             }
+            SyntaxKind::MACRO_CALL => self.declare_macro_call(node, scope),
             kind if creates_scope(kind) => {}
             SyntaxKind::ASSIGNMENT_EXPR => {
                 let mut children = node.children();
@@ -729,6 +742,21 @@ impl Builder {
     /// any enclosing local); `global` routes the names to the innermost
     /// global scope and records the declaration so later assignments in
     /// this scope follow it.
+    /// Declare inside a macro call, but do not bind a `name = value` keyword
+    /// argument's name — it is not a variable in the surrounding scope. The
+    /// value is still scanned for nested definitions.
+    fn declare_macro_call(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        for child in node.children() {
+            if is_macro_kwarg(&child) {
+                for value in child.children().skip(1) {
+                    self.declare_node(&value, scope);
+                }
+            } else {
+                self.declare_node(&child, scope);
+            }
+        }
+    }
+
     fn declare_declaration(&mut self, node: &SyntaxNode, scope: ScopeId, decl: DeclKind) {
         for child in node.children() {
             self.declare_decl_pattern(&child, scope, decl);
@@ -1700,6 +1728,12 @@ impl Builder {
         for child in node.children() {
             if child.kind() == SyntaxKind::MACRO_NAME {
                 self.walk_macro_name(&child, scope);
+            } else if is_macro_kwarg(&child) {
+                // Keyword argument: the name is not a variable; walk only the
+                // value.
+                for value in child.children().skip(1) {
+                    self.walk_node(&value, scope);
+                }
             } else {
                 self.walk_node(&child, scope);
             }

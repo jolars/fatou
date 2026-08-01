@@ -74,6 +74,37 @@ fn unused_binding_ignores_top_level_and_underscore() {
 }
 
 #[test]
+fn unused_binding_ignores_macro_keyword_argument() {
+    // `key=value` arguments to a macro are keyword arguments, not locals.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f(ex)\n    @warn \"failed\" exception=(ex, catch_backtrace())\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function g(x, y)\n    @test x ≈ y rtol=eps(Float64)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unused_binding_flags_dead_local_in_macro_block_argument() {
+    // A real assignment inside a macro's block argument is still a local.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    @testset begin\n        t = 1\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
 fn unused_binding_ignores_kwdef_field_default() {
     // `@kwdef` field defaults are struct fields, not local variables.
     assert_eq!(
