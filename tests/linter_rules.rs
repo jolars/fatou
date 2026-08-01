@@ -1704,6 +1704,24 @@ fn redefined_constant_ignores_const_field_in_constructor() {
     assert_eq!(count("redefined-constant", src), 0);
 }
 
+#[test]
+fn redefined_constant_ignores_assignment_in_macro_block() {
+    // A name assigned inside a macro-call block (`@recipe ... begin x = ... end`)
+    // is the macro's DSL, not a global constant: a later top-level definition of
+    // the same name does not redefine anything the linter can see.
+    let src = "@recipe Foo (a,) begin\n    marker = automatic\nend\nfunction marker(x)\n    x\nend\nmarker(x, y) = y\n";
+    assert_eq!(count("redefined-constant", src), 0);
+}
+
+#[test]
+fn redefined_constant_ignores_name_across_macro_blocks() {
+    // The same local name in two separate macro-call blocks (e.g. two
+    // `@testset`/`@reference_test` bodies) does not collide: each block is its
+    // own scope once the macro expands.
+    let src = "@block begin\n    f = value\nend\n@block begin\n    f(x) = x\nend\n";
+    assert_eq!(count("redefined-constant", src), 0);
+}
+
 // --- julia-version-compat ----------------------------------------------------
 
 use fatou::julia_version::{Version, parse_compat};

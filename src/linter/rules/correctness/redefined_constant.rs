@@ -166,6 +166,34 @@ fn in_disjoint_branches(root: &SyntaxNode, a: TextRange, b: TextRange) -> bool {
     })
 }
 
+/// Whether `range` sits inside the argument of a macro call (`@m ... x ...`).
+///
+/// A macro rewrites its arguments arbitrarily, so an assignment or definition
+/// there says nothing reliable about the surrounding scope: `@recipe Foo begin
+/// x = 1 end` never binds a global `x`, and two `@reference_test begin ... end`
+/// bodies that reuse a name do not collide. Treating either the first
+/// introduction or the redefinition site as a hard constant binding when it
+/// lives in a macro argument produces false positives — the rule claims a
+/// runtime error over code that runs — so such sites are exempt. The macro name
+/// itself is not an argument, so a bare `@m` is not caught.
+fn in_macro_call_arg(root: &SyntaxNode, range: TextRange) -> bool {
+    let mut node = match root.covering_element(range) {
+        rowan::NodeOrToken::Token(t) => t.parent(),
+        rowan::NodeOrToken::Node(n) => Some(n),
+    };
+    while let Some(current) = node {
+        let parent = current.parent();
+        if let Some(parent) = &parent
+            && parent.kind() == SyntaxKind::MACRO_CALL
+            && current.kind() != SyntaxKind::MACRO_NAME
+        {
+            return true;
+        }
+        node = parent;
+    }
+    false
+}
+
 /// Kinds whose first introduction is a plain value a later `function` or
 /// `const` definition cannot overwrite.
 fn holds_value(kind: BindingKind) -> bool {
@@ -252,6 +280,13 @@ impl Rule for RedefinedConstant {
             let Some(id) = ident.binding else { continue };
             let binding = ctx.model.binding(id);
             if ident.range == binding.def_range {
+                continue;
+            }
+            // A macro rewrites its argument block, so an introduction or a
+            // redefinition inside one is not a reliable constant binding.
+            if in_macro_call_arg(ctx.root, binding.def_range)
+                || in_macro_call_arg(ctx.root, ident.range)
+            {
                 continue;
             }
             let global = ctx.model.scope(binding.scope).kind.is_global();
