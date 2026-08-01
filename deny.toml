@@ -1,6 +1,11 @@
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # atomic-polyfill is unmaintained but reached only transitively through
+  # postcard -> heapless, with no safe upgrade available.
+  "RUSTSEC-2023-0089",
+]
 
 [licenses]
 version = 2
@@ -13,6 +18,12 @@ allow = [
   "Zlib",
 ]
 confidence-threshold = 0.8
+
+# option-ext is MPL-2.0 (weak, file-level copyleft) and reached only
+# transitively through dirs -> dirs-sys.
+[[licenses.exceptions]]
+name = "option-ext"
+allow = ["MPL-2.0"]
 
 [bans]
 multiple-versions = "warn"
