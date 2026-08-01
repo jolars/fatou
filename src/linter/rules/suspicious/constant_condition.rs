@@ -20,9 +20,33 @@
 use crate::ast::{AstNode, AstToken, BinaryExpr, Condition, Expr};
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::syntax::{SyntaxElement, SyntaxKind};
+use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 pub struct ConstantCondition;
+
+/// A constant condition is intended inside quoted code (it is data) and inside
+/// `@static`, whose whole purpose is to select a branch on a compile-time
+/// constant. Both are exempt.
+fn in_exempt_context(node: &SyntaxNode) -> bool {
+    node.ancestors().any(|a| match a.kind() {
+        SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => true,
+        SyntaxKind::MACRO_CALL => is_static_macro_call(&a),
+        _ => false,
+    })
+}
+
+/// Whether a `MACRO_CALL`'s macro is `@static` (bare or qualified).
+fn is_static_macro_call(call: &SyntaxNode) -> bool {
+    call.children()
+        .find(|c| c.kind() == SyntaxKind::MACRO_NAME)
+        .is_some_and(|name| {
+            name.descendants_with_tokens()
+                .filter_map(|e| e.into_token())
+                .filter(|t| t.kind() == SyntaxKind::IDENT)
+                .last()
+                .is_some_and(|t| t.text() == "static")
+        })
+}
 
 impl Rule for ConstantCondition {
     fn id(&self) -> &'static str {
@@ -57,6 +81,9 @@ impl Rule for ConstantCondition {
 
     fn check(&self, el: &SyntaxElement, _ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
         let Some(node) = el.as_node() else { return };
+        if in_exempt_context(node) {
+            return;
+        }
         if let Some(cond) = Condition::cast(node.clone()) {
             // The whole test is a bare boolean literal (one paren layer is
             // unwrapped). A literal buried in a larger test expression is the

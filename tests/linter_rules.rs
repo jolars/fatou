@@ -814,6 +814,21 @@ fn constant_condition_ignores_nonliteral_tests_and_eager_operators() {
 }
 
 #[test]
+fn constant_condition_ignores_static_and_quoted_conditions() {
+    // `@static` selects a branch on a compile-time constant by design.
+    assert_eq!(
+        count("constant-condition", "@static if false\n    1\nend\n"),
+        0
+    );
+    assert_eq!(count("constant-condition", "@static true && f()\n"), 0);
+    // Quoted code is data, not an evaluated condition.
+    assert_eq!(
+        count("constant-condition", "ex = :(if true\n    1\nend)\n"),
+        0
+    );
+}
+
+#[test]
 fn constant_condition_ignores_literals_in_value_position() {
     assert_eq!(count("constant-condition", "x = true\n"), 0);
     assert_eq!(count("constant-condition", "f(true)\n"), 0);
