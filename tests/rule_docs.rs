@@ -4,7 +4,7 @@
 //! same `render_rule_doc` output to the mdBook source tree.
 
 use fatou::config::LintConfig;
-use fatou::linter::{all_rules, check_source, render_rule_doc};
+use fatou::linter::{all_rules, check_source_with_target, render_rule_doc};
 
 /// Pin the rendered reference page for every documented rule. Any change to a
 /// rule's diagnostic that alters its page fails here before the docs go stale.
@@ -49,10 +49,11 @@ fn documented_examples_actually_trigger() {
                 select: Some(vec![rule.id().to_string()]),
                 ..Default::default()
             };
-            let report = check_source(
+            let report = check_source_with_target(
                 Some(std::path::Path::new("example.jl")),
                 example.source,
                 &config,
+                rule.example_julia_target(),
             );
             assert!(
                 report.diagnostics.iter().any(|d| d.rule == rule.id()),

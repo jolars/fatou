@@ -57,6 +57,14 @@
 
 ### Rules
 
+- [x] `julia-version-compat` (correctness, syn, Error): flag syntax newer than
+  the project's declared Julia support range. Target resolved by precedence
+  (`--julia-version` > `[julia] version` > `Project.toml` `[compat]` >
+  `Manifest.toml julia_version`), carried on `ResolvedRules` into each
+  `RuleContext`. Seed feature table: `public` (1.11), `import/using ... as`
+  (1.6). Follow-ups: grow the feature table as the parser exposes more
+  version-gated kinds; wire the target into the `--fix` path (`fix_source`) and
+  the LSP (from its resolved `Environment`), both currently `None`.
 - [ ] `index-from-length` (suspicious, syn, opinionated): `for i in
   1:length(x)` where `i` indexes `x` -> suggest `eachindex`/`axes`; also
   iterating a bare numeric literal (`for i in 3.5`). Name-based match on

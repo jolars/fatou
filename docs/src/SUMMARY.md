@@ -28,6 +28,7 @@
   - [`unused-type-parameter`](reference/rules/unused-type-parameter.md)
   - [`missing-include-file`](reference/rules/missing-include-file.md)
   - [`include-cycle`](reference/rules/include-cycle.md)
+  - [`julia-version-compat`](reference/rules/julia-version-compat.md)
   - [`call-arity`](reference/rules/call-arity.md)
   - [`redefined-constant`](reference/rules/redefined-constant.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)

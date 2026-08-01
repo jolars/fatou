@@ -154,7 +154,20 @@ pub fn check_document(text: &str) -> LintFileReport {
 /// Lint `text` under `config`, attributing findings to `path`. Used by the docs
 /// generator (`crate::linter::docs`) to render each example's real diagnostics.
 pub fn check_source(path: Option<&Path>, text: &str, config: &LintConfig) -> LintFileReport {
+    check_source_with_target(path, text, config, None)
+}
+
+/// Like [`check_source`], but with a Julia target range for version-gated rules
+/// (`julia-version-compat`). The docs generator and version-compat tests use
+/// this to make the target-dependent examples fire.
+pub fn check_source_with_target(
+    path: Option<&Path>,
+    text: &str,
+    config: &LintConfig,
+    julia_target: Option<VersionRange>,
+) -> LintFileReport {
     let (rules, _) = ResolvedRules::resolve(config);
+    let rules = rules.with_julia_target(julia_target);
     check_text(path, text, &rules)
 }
 

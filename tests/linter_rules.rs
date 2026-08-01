@@ -1519,3 +1519,90 @@ fn redefined_constant_ignores_struct_redefinition() {
 fn redefined_constant_ignores_imported_name() {
     assert_eq!(count("redefined-constant", "import A\nA = 1\n"), 0);
 }
+
+// --- julia-version-compat ----------------------------------------------------
+
+use fatou::julia_version::{Version, parse_compat};
+
+/// Lint `src` for `julia-version-compat` under a given target floor (a Julia
+/// compat spec), returning the messages produced.
+fn version_findings(target: &str, src: &str) -> Vec<String> {
+    let config = LintConfig {
+        select: Some(vec!["julia-version-compat".to_string()]),
+        ..Default::default()
+    };
+    let report = fatou::linter::check_source_with_target(
+        None,
+        src,
+        &config,
+        Some(parse_compat(target).unwrap()),
+    );
+    report
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.rule == "julia-version-compat")
+        .map(|d| d.message.body)
+        .collect()
+}
+
+#[test]
+fn version_compat_flags_public_below_1_11() {
+    let msgs = version_findings("1.10", "module M\npublic foo\nend\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(
+        msgs[0].contains("public") && msgs[0].contains("1.11"),
+        "{msgs:?}"
+    );
+}
+
+#[test]
+fn version_compat_allows_public_at_1_11() {
+    assert!(version_findings("1.11", "module M\npublic foo\nend\n").is_empty());
+}
+
+#[test]
+fn version_compat_flags_import_as_below_1_6() {
+    let msgs = version_findings("1.5", "import A as B\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(
+        msgs[0].contains("as") && msgs[0].contains("1.6"),
+        "{msgs:?}"
+    );
+}
+
+#[test]
+fn version_compat_flags_using_as_below_1_6() {
+    assert_eq!(version_findings("1.0", "using C: d as e\n").len(), 1);
+}
+
+#[test]
+fn version_compat_allows_import_as_at_1_6() {
+    assert!(version_findings("1.6", "import A as B\n").is_empty());
+}
+
+#[test]
+fn version_compat_flags_both_features_under_old_floor() {
+    let msgs = version_findings("1.0", "module M\npublic foo\nimport A as B\nend\n");
+    assert_eq!(msgs.len(), 2);
+}
+
+#[test]
+fn version_compat_silent_without_a_target() {
+    // No declared target (bare file, no project) -> nothing to check against.
+    let config = LintConfig {
+        select: Some(vec!["julia-version-compat".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, "module M\npublic foo\nend\n", &config);
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn version_compat_uses_range_floor_not_ceiling() {
+    // A "1.6 - 1.11" range must be judged by its floor (1.6), so `public`
+    // (needs 1.11) is still flagged even though the ceiling reaches 1.11.
+    let range = parse_compat("1.6 - 1.11").unwrap();
+    assert_eq!(range.min, Version::new(1, 6, 0));
+    let msgs = version_findings("1.6 - 1.11", "module M\npublic foo\nend\n");
+    assert_eq!(msgs.len(), 1);
+}

@@ -61,6 +61,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UnusedTypeParameter),
         Box::new(correctness::MissingIncludeFile),
         Box::new(correctness::IncludeCycle),
+        Box::new(correctness::JuliaVersionCompat),
         Box::new(correctness::CallArity),
         Box::new(correctness::RedefinedConstant),
         Box::new(suspicious::AssignmentInCondition),
@@ -131,6 +132,14 @@ pub trait Rule: Send + Sync {
     /// examples is skipped by the docs generator.
     fn examples(&self) -> &'static [Example] {
         &[]
+    }
+
+    /// The Julia target range under which this rule's [`examples`](Self::examples)
+    /// are linted for the reference pages. Only version-gated rules
+    /// (`julia-version-compat`) need this; the default `None` matches every
+    /// version-agnostic rule. All of a rule's examples share this target.
+    fn example_julia_target(&self) -> Option<VersionRange> {
+        None
     }
 
     /// The `SyntaxKind`s this rule subscribes to. During [`ResolvedRules::run`]'s single

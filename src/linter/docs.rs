@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::config::LintConfig;
-use crate::linter::check::check_source;
+use crate::linter::check::check_source_with_target;
 use crate::linter::fix::apply_fixes;
 use crate::linter::render::{OutputMode, render_findings};
 use crate::linter::rules::Rule;
@@ -48,7 +48,12 @@ pub fn render_rule_doc(rule: &dyn Rule) -> String {
         }
         fenced(&mut out, "julia", example.source);
 
-        let report = check_source(Some(&path), example.source, &config);
+        let report = check_source_with_target(
+            Some(&path),
+            example.source,
+            &config,
+            rule.example_julia_target(),
+        );
         let source = example.source.to_string();
         let rendered = render_findings(&report.diagnostics, OutputMode::Pretty, false, &|p| {
             (p == Some(path.as_path())).then(|| source.clone())
