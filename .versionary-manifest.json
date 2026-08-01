@@ -1,28 +1,28 @@
 {
   "manifest-version": 1,
-  "baseline-sha": "ffcdc0e7bec0479a6340e5ba1ac96a1a52281f4f",
+  "baseline-sha": "26e061c0713f76e8e65394e234d65bde0ec946a3",
   "release-targets": [
     {
       "path": ".",
-      "version": "0.8.0",
-      "tag": "v0.8.0"
+      "version": "0.9.0",
+      "tag": "v0.9.0"
     },
     {
       "path": "editors/code",
-      "version": "0.8.0",
-      "tag": "fatou-code-v0.8.0"
+      "version": "0.9.0",
+      "tag": "fatou-code-v0.9.0"
     }
   ],
   "pending-release-targets": [
     {
       "path": ".",
-      "version": "0.8.0",
-      "tag": "v0.8.0"
+      "version": "0.9.0",
+      "tag": "v0.9.0"
     },
     {
       "path": "editors/code",
-      "version": "0.8.0",
-      "tag": "fatou-code-v0.8.0"
+      "version": "0.9.0",
+      "tag": "fatou-code-v0.9.0"
     }
   ]
 }

@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.9.0](https://github.com/jolars/fatou/compare/v0.8.0...v0.9.0) (2026-08-01)
+
+### Features
+- **formatter:** stop pair-tail hug in multi-item lists ([`cdd8485`](https://github.com/jolars/fatou/commit/cdd8485867176bbb0df157c10cd8a3cbd8315ba0))
+- **lint:** add julia-version-compat rule ([`e9b55dd`](https://github.com/jolars/fatou/commit/e9b55dd8cafde4db39f0482358d9c7e212255c3d))
+- resolve and thread a Julia target version into the linter ([`cbee3e3`](https://github.com/jolars/fatou/commit/cbee3e3247cbc3bb2b78502a24790a5b15a32c8a))
+- **environment:** read [compat].julia and Manifest julia_version ([`285f211`](https://github.com/jolars/fatou/commit/285f2114445e8ac79fe737b1b8fc3d0d880f2958))
+- add Julia version types and compat parser ([`5d1ef0c`](https://github.com/jolars/fatou/commit/5d1ef0c721774690477a3687108ab9f7d18d388f))
+- **lsp:** on-disk package index cache + parallel harvest ([`26f6688`](https://github.com/jolars/fatou/commit/26f668807b45c4e39f4a98fa78c4e1f0a7430b04))
+- **lsp:** content-derived pull resultId ([`9b8ec30`](https://github.com/jolars/fatou/commit/9b8ec30ff6f5cd48c9cdf897ad0a77ae1e5001b9))
+- **lsp:** work-done progress for the harvester ([`ecaee83`](https://github.com/jolars/fatou/commit/ecaee83defcf0826c96eddabb24a30854a78c72e))
+- **lsp:** request cancellation and stale-read protocol ([`599adbb`](https://github.com/jolars/fatou/commit/599adbb0c24059e204640d7b8cf4f0c4b7f9bb65))
+- **formatter:** break args before a single-param where ([`8d7f4f0`](https://github.com/jolars/fatou/commit/8d7f4f01e3c3d36f3830b8b91be1ad6c941a1502))
+
+### Bug Fixes
+- **lint:** exempt @static and quoted code from constant-condition ([`26e061c`](https://github.com/jolars/fatou/commit/26e061c0713f76e8e65394e234d65bde0ec946a3))
+- **lint:** let macro args suppress break-outside-loop ([`0d2c8c5`](https://github.com/jolars/fatou/commit/0d2c8c54d6714a9b0737d9dba755bd83281dd3ea))
+- **lint:** stop redefined-constant on declarations and callable consts ([`987ed72`](https://github.com/jolars/fatou/commit/987ed72e94d1a6dde21eb30ae8efb61a62baef8b))
+- **semantic:** count method extension as import use ([`19edf76`](https://github.com/jolars/fatou/commit/19edf7672d776e4b58407a7f93bb4de08abeb11f))
+- **semantic:** bind params in operator-named signatures ([`a80e9bd`](https://github.com/jolars/fatou/commit/a80e9bd0da9f62260f87dd4325d5cfc625351f2a))
+- **semantic:** ignore macro keyword arguments as bindings ([`79a9af0`](https://github.com/jolars/fatou/commit/79a9af0eb326668180f3f2401c8577b42662d44d))
+- **semantic:** treat const and @kwdef struct fields as fields ([`79e7981`](https://github.com/jolars/fatou/commit/79e7981b7d6aa1fc82fcdf5f81d7e51bca1efd51))
+- **format:** preserve trailing top-level `;` ([`eef8d62`](https://github.com/jolars/fatou/commit/eef8d628b416cf586c6ccebe3cdb2e98ff63c6bb))
+
 ## [0.8.0](https://github.com/jolars/fatou/compare/v0.7.0...v0.8.0) (2026-07-30)
 
 ### Features
