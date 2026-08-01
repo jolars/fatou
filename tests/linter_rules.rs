@@ -1609,6 +1609,59 @@ fn redefined_constant_ignores_imported_name() {
 }
 
 #[test]
+fn redefined_constant_ignores_global_and_local_declarations() {
+    // A bare `global`/`local` declaration is not a write of the name.
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "length(r::Int) = r\nlet\n    global length\n    length(x::Float64) = x\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "const K = 1\nfunction f()\n    local K\n    K = 2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_method_on_forward_declared_global() {
+    // `global f` forward-declares; the following method definitions are the
+    // first real definition, not a redefinition of a value.
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "function outer()\n    global isaint\n    isaint(a::Int) = true\n    isaint(a) = false\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_ignores_constructor_on_const_type_alias() {
+    // Adding constructors to a `const` that aliases a type is legal.
+    assert_eq!(
+        count(
+            "redefined-constant",
+            "const Tok = Core.Token\nTok(x::Int) = new(x)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn redefined_constant_flags_function_over_const_literal() {
+    // A `const` bound to a non-callable literal still collides with a later
+    // function definition.
+    let msgs = findings("redefined-constant", "const c = 0\nc() = 1\n");
+    assert_eq!(msgs.len(), 1);
+    assert!(msgs[0].contains("cannot define function `c`"), "{msgs:?}");
+}
+
+#[test]
 fn redefined_constant_ignores_const_field_in_constructor() {
     // A `const` struct field is a field, not an assignable constant: an inner
     // constructor's like-named local does not reassign it.

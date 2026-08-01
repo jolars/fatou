@@ -55,6 +55,9 @@ enum WriteSite {
     TypeName,
     /// The target of a `const` declaration's assignment.
     ConstDecl,
+    /// A name in a bare `global x` / `local x` declaration (no assignment):
+    /// a scope declaration, not a write.
+    Declaration,
     /// Any other assignment target.
     Plain,
 }
@@ -113,6 +116,9 @@ fn classify_write(root: &SyntaxNode, range: TextRange) -> WriteSite {
                 };
             }
             SyntaxKind::CONST_STMT => return WriteSite::ConstDecl,
+            // A bare `global x` / `local x` declaration reaches its name
+            // directly (an assignment would interpose an `ASSIGNMENT_EXPR`).
+            SyntaxKind::GLOBAL_STMT | SyntaxKind::LOCAL_STMT => return WriteSite::Declaration,
             _ => return WriteSite::Plain,
         }
         child = parent;
@@ -175,6 +181,38 @@ fn holds_value(kind: BindingKind) -> bool {
     )
 }
 
+/// Whether the `const` whose declaration name sits at `range` binds a value
+/// that may itself be callable — a type or function alias (`const A = B`,
+/// `const A = Mod.B`), a parametric type (`const A = B{T}`), or a constructor
+/// call. Adding methods to such a name is legal (outer constructors, callable
+/// extension), so it must not be flagged. A plain literal RHS is not callable.
+fn const_binds_callable(root: &SyntaxNode, range: TextRange) -> bool {
+    let node = match root.covering_element(range) {
+        rowan::NodeOrToken::Token(t) => t.parent(),
+        rowan::NodeOrToken::Node(n) => Some(n),
+    };
+    let Some(assign) = node.and_then(|n| {
+        n.ancestors().find(|a| {
+            a.kind() == SyntaxKind::ASSIGNMENT_EXPR
+                && a.parent()
+                    .is_some_and(|p| p.kind() == SyntaxKind::CONST_STMT)
+        })
+    }) else {
+        return false;
+    };
+    let Some(rhs) = assign.children().nth(1) else {
+        return false;
+    };
+    match rhs.kind() {
+        SyntaxKind::NAME | SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR => true,
+        // A dotted qualified name (`Mod.Type`) is a field-access `BINARY_EXPR`.
+        SyntaxKind::BINARY_EXPR => rhs
+            .children_with_tokens()
+            .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::DOT)),
+        _ => false,
+    }
+}
+
 impl Rule for RedefinedConstant {
     fn id(&self) -> &'static str {
         "redefined-constant"
@@ -218,9 +256,30 @@ impl Rule for RedefinedConstant {
             }
             let global = ctx.model.scope(binding.scope).kind.is_global();
             let site = classify_write(ctx.root, ident.range);
+            // A bare `global x` / `local x` declaration is a scope declaration,
+            // not a write.
+            if site == WriteSite::Declaration {
+                continue;
+            }
+            // Defining a function over a name whose only introduction was a
+            // bare `global`/`local` declaration is the first real definition,
+            // not a redefinition of a value.
+            if site == WriteSite::FunctionName
+                && classify_write(ctx.root, binding.def_range) == WriteSite::Declaration
+            {
+                continue;
+            }
             let message = match binding.kind {
                 BindingKind::Const => match site {
                     WriteSite::MacroName | WriteSite::TypeName => continue,
+                    // Adding methods to a `const` that aliases a type or
+                    // function (outer constructors, callable extension) is
+                    // legal; only a non-callable literal value collides.
+                    WriteSite::FunctionName
+                        if const_binds_callable(ctx.root, binding.def_range) =>
+                    {
+                        continue;
+                    }
                     WriteSite::FunctionName => {
                         format!(
                             "cannot define function `{}`: it already has a value",
