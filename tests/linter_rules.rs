@@ -150,6 +150,31 @@ fn unused_import_flags_only_the_unused_item() {
     assert!(msgs[0].contains("foo"), "{msgs:?}");
 }
 
+#[test]
+fn unused_import_counts_method_extension_as_use() {
+    // Importing a name to add methods to it (extend it) is a use.
+    assert_eq!(
+        count(
+            "unused-import",
+            "import Base: *\n*(a::Bool, b::Bool) = a & b\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unused-import",
+            "import Base: convert\nconvert(::Type{Int}, x) = 0\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unused_import_still_flags_never_referenced_import() {
+    // No definition or reference of `foo`: still unused.
+    assert_eq!(count("unused-import", "import Base: foo\nbar() = 1\n"), 1);
+}
+
 // --- duplicate-argument ----------------------------------------------------
 
 #[test]

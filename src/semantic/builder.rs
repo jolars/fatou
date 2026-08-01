@@ -209,6 +209,33 @@ fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
         .map(|ident| ident.syntax().clone())
 }
 
+/// The token naming a function/macro definition's signature `core`: the `NAME`
+/// callee of a `CALL_EXPR`, or — for an operator-named definition like
+/// `+(x, y)`, whose callee is a leading operator token — that operator token.
+/// A bare `NAME` core (`function f end`) names itself.
+fn signature_name_token(core: &SyntaxNode) -> Option<SyntaxToken> {
+    match core.kind() {
+        SyntaxKind::CALL_EXPR => match core.children().next() {
+            Some(name) if name.kind() == SyntaxKind::NAME => name_ident(&name),
+            Some(arg_list) if arg_list.kind() == SyntaxKind::ARG_LIST => core
+                .children_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| {
+                    !matches!(
+                        t.kind(),
+                        SyntaxKind::WHITESPACE
+                            | SyntaxKind::NEWLINE
+                            | SyntaxKind::COMMENT
+                            | SyntaxKind::BLOCK_COMMENT
+                    )
+                }),
+            _ => None,
+        },
+        SyntaxKind::NAME => name_ident(core),
+        _ => None,
+    }
+}
+
 /// One `using`/`import` clause (an `IMPORT_PATH`, or the path inside an
 /// `IMPORT_ALIAS`), extracted from the raw token stream the parser leaves in
 /// the tree. Mirrors the sexpr projector's reading of the same shape.
@@ -696,19 +723,51 @@ impl Builder {
     }
 
     fn declare_signature_name(&mut self, start: SyntaxNode, scope: ScopeId, kind: BindingKind) {
-        let (core, _, _) = peel_signature(start);
-        let name = match core {
-            Some(core) if core.kind() == SyntaxKind::CALL_EXPR => core
+        let Some(core) = peel_signature(start).0 else {
+            return;
+        };
+        let Some(token) = signature_name_token(&core) else {
+            return;
+        };
+        // Defining `f(...)` after `import M: f` extends the imported function
+        // rather than shadowing it, so the import is used. Mark it before
+        // declaring the definition's own binding, or the lookup would find the
+        // shadow instead of the import.
+        self.mark_import_extended(token.text(), scope);
+        // Operator-named definitions keep their prior handling (the operator is
+        // not bound as an ordinary name); only a plain `NAME` callee binds.
+        let binds_name = core.kind() == SyntaxKind::NAME
+            || core
                 .children()
                 .next()
-                .filter(|c| c.kind() == SyntaxKind::NAME),
-            Some(core) if core.kind() == SyntaxKind::NAME => Some(core),
-            _ => None,
-        };
-        if let Some(name) = name
-            && let Some(token) = name_ident(&name)
-        {
+                .is_some_and(|c| c.kind() == SyntaxKind::NAME);
+        if binds_name {
             self.declare_name(&token, scope, Some(kind));
+        }
+    }
+
+    /// Find an `import`/`using` binding named `name` reachable from `scope`
+    /// (stopping at the first enclosing global scope, like read resolution).
+    fn find_import(&self, name: &str, scope: ScopeId) -> Option<BindingId> {
+        let mut cursor = Some(scope);
+        while let Some(id) = cursor {
+            let found = self.scope(id).bindings.iter().rev().copied().find(|&b| {
+                let binding = &self.model.bindings[b.0 as usize];
+                binding.name == name && binding.kind == BindingKind::Import
+            });
+            if found.is_some() {
+                return found;
+            }
+            let s = self.scope(id);
+            cursor = if s.kind.is_global() { None } else { s.parent };
+        }
+        None
+    }
+
+    /// Mark an imported name as used when a same-named definition extends it.
+    fn mark_import_extended(&mut self, name: &str, scope: ScopeId) {
+        if let Some(b) = self.find_import(name, scope) {
+            self.model.bindings[b.0 as usize].read = true;
         }
     }
 
