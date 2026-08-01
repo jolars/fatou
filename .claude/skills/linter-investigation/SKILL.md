@@ -39,6 +39,21 @@ suspicious finding into exactly one of:
 - **Parser bug** — valid Julia that fatou fails to parse or mis-parses (surfaces
   as a syntax diagnostic or a wrong CST shape). Confirm validity via the oracle.
 
+**The design-intent trap (check before "fixing" an FP).** An FP class can be a
+*deliberate* decision the maintainer already made and pinned in a test. Before
+touching a rule, grep its behavior tests (`tests/linter_rules.rs`) for the shape
+you're about to change: a test that *asserts* the flag (e.g.
+`unused_binding_flags_dead_local_in_macro_block_argument`, which intentionally
+flags a local inside a scope-transparent `@testset` block) means your "fix"
+would reverse a decision and trade a false positive for a false negative. When a
+counter-decision exists, do **neither** of the silent options—don't quietly fix
+it, and don't quietly file it as an accepted FP. **Raise it to the user
+explicitly** with the tension spelled out (the real-world FP count vs. the false
+negatives a fix would introduce, and the options: exempt broadly, keep a
+scope-transparent-macro allowlist, or leave as-is) and let them decide. Only
+record it in `TODO.md` once they've weighed in, or as an explicitly-flagged
+*open policy question* if they defer—never as a closed "known FP."
+
 ## The oracle (Julia is not installed by default)
 
 Verification is weaker here than for a live-interpreter tool, so lean on layers:
@@ -49,13 +64,21 @@ Verification is weaker here than for a live-interpreter tool, so lean on layers:
   `tests/juliasyntax_oracle.rs` and the `tests/fixtures/oracle/` corpus). This is
   the ground truth for parser outcomes on covered cases.
 - **fatou's own losslessness** — `fatou parse --verify --quiet <file>` proves
-  `reconstruct(text) == text`; `fatou parse --to sexp` prints the s-expression
-  projection for comparing shape.
+  `reconstruct(text) == text`; `fatou parse --to sexpr <file>` prints the
+  s-expression projection and `--to cst <file>` the raw tree, for comparing
+  shape. Note `lint` and `parse` take a **path argument — there is no stdin**;
+  write reproducers to a scratchpad file first.
 - **Live `julia`, if present** — `julia -e 'Meta.parse("...")'` is the direct
-  validity check for a novel snippet. `command -v julia` first; if absent, say so
-  and fall back to careful reasoning from Julia's grammar plus the differential
-  oracle. Suggest the user install `julia` if a parser question needs a
-  definitive answer.
+  validity check for a novel snippet, and `dump(Meta.parse("..."))` shows the
+  expression head (e.g. that `u"ns"` is a `macrocall` to `@u_str`). Crucially,
+  `julia -e` also answers *semantic* questions the parser oracle cannot: whether
+  a construct **errors at runtime**. Many correctness rules claim a runtime
+  error (`redefined-constant`: "already has a value"), so reproduce both the
+  flagged shape and its near-misses (`module M; x = 1; function x() end; end`
+  errors, but two method definitions do not) to fix the guard boundary exactly.
+  `command -v julia` first; if absent, say so and fall back to careful reasoning
+  from Julia's grammar plus the differential oracle. Suggest the user install
+  `julia` if a question needs a definitive answer.
 
 A linter false positive is usually a *language-semantics* judgment (is this
 legitimate Julia the linter wrongly flags?) and can often be settled from
@@ -101,13 +124,20 @@ interpreter.
 
 5. **Triage (the heart of the work).** For each priority rule, pull real findings
    (`grep -B1 -A6 'warning: <rule>' lint.err`), open the cited source line, and
-   **reduce each suspect to a minimal reproducer** piped to the tool:
+   **reduce each suspect to a minimal reproducer**. `lint`/`parse` take a path,
+   not stdin, so write the snippet to a scratchpad file:
 
    ```sh
-   printf '...\n' | target/release/fatou lint
-   printf '...\n' | target/release/fatou parse            # inspect the CST
-   printf '...\n' | target/release/fatou parse --verify --quiet   # losslessness
+   printf '...\n' >"$SCRATCH/mre/case.jl"
+   target/release/fatou lint "$SCRATCH/mre/case.jl"
+   target/release/fatou parse --to cst "$SCRATCH/mre/case.jl"       # inspect the CST
+   target/release/fatou parse --verify --quiet "$SCRATCH/mre/case.jl"  # losslessness
    ```
+
+   Rule selection is config-driven (a `fatou.toml`), **not** a `--select` CLI
+   flag. To count findings, count `warning:`/`-->` lines, not token
+   occurrences—`grep -c '<name>'` over-counts, since one finding spans the path
+   line, the source line, and the message.
 
    When a parse failure looks like a parser bug, **isolate the trigger by
    bisecting context** (which delimiter, comment vs no comment, which operator),
@@ -123,6 +153,12 @@ interpreter.
    and the oracle recipe (including whether `julia` is installed). Each returns
    minimal reproducers, per-category verdicts, and an FP-rate assessment.
 
+   **Subagent findings are leads, not verdicts.** They reliably surface *classes*
+   and counts, but re-verify each one yourself before acting—a plausible
+   "it's used here" can be a use inside a docstring code fence (not real code),
+   an inflated cross-file estimate from a whole-word grep, or a miscounted
+   bucket. Reduce it, run the oracle, then believe it.
+
 8. **Fix or record.** For the cleanest, well-isolated bugs, fix TDD-style,
    honoring fatou's tenets (parser bugs are fixed in the parser, never papered
    over downstream; losslessness is sacred):
@@ -131,6 +167,16 @@ interpreter.
      conventions in fatou's `add-lint-rule` and parser-fixture setup (reduce the
      case from the corpus).
    - Fix at the root cause; re-verify against the oracle.
+   - **Pick the right layer.** "Fix at the root cause, never paper over
+     downstream" is absolute for *parser* bugs. But scope- and macro-driven FPs
+     often share a root the linter genuinely *cannot* resolve—unknowable macro
+     semantics (a consuming DSL like `@recipe`/`@gen_defaults!` vs. a
+     scope-transparent wrapper like `@inbounds`/`@testset` are
+     indistinguishable without expanding the macro). There, prefer the
+     **narrowest layer that removes the FP without introducing a false negative
+     elsewhere**: a conservative rule-level guard (as `redefined-constant` got
+     for macro-argument sites) can be more correct than a blanket
+     semantic-model change that would wrongly suppress the transparent case.
    - Run the gates: `cargo test`, `cargo clippy --all-targets --all-features --
      -D warnings`, `cargo fmt -- --check`; `cargo insta accept` after reviewing
      new snapshots.
