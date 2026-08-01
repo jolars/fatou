@@ -73,6 +73,18 @@ fn unused_binding_ignores_top_level_and_underscore() {
     );
 }
 
+#[test]
+fn unused_binding_ignores_kwdef_field_default() {
+    // `@kwdef` field defaults are struct fields, not local variables.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "Base.@kwdef struct C\n    a::Int = 2\n    name::String = \"x\"\nend\n"
+        ),
+        0
+    );
+}
+
 // --- unused-import ---------------------------------------------------------
 
 #[test]
@@ -1518,6 +1530,14 @@ fn redefined_constant_ignores_struct_redefinition() {
 #[test]
 fn redefined_constant_ignores_imported_name() {
     assert_eq!(count("redefined-constant", "import A\nA = 1\n"), 0);
+}
+
+#[test]
+fn redefined_constant_ignores_const_field_in_constructor() {
+    // A `const` struct field is a field, not an assignable constant: an inner
+    // constructor's like-named local does not reassign it.
+    let src = "mutable struct Foo\n    const edges::Vector{Any}\n    function Foo()\n        edges = Any[]\n        new(edges)\n    end\nend\n";
+    assert_eq!(count("redefined-constant", src), 0);
 }
 
 // --- julia-version-compat ----------------------------------------------------

@@ -64,6 +64,45 @@ fn creates_scope(kind: SyntaxKind) -> bool {
     )
 }
 
+/// If `stmt` (a `struct` body statement) is a field declaration, return the
+/// field's `NAME` pattern and the extra nodes to walk as reads (the field type
+/// and any default value). Recognizes the plain `x`, annotated `x::T`,
+/// defaulted `x = v` / `x::T = v` (as written inside `@kwdef`), and
+/// `const`-wrapped field forms. Returns `None` for anything else — notably inner
+/// constructors, whose left-hand side is a `CALL_EXPR`/`WHERE_EXPR`, not a bare
+/// name — so they keep declaring and walking as ordinary definitions.
+fn struct_field_form(stmt: &SyntaxNode) -> Option<(SyntaxNode, Vec<SyntaxNode>)> {
+    match stmt.kind() {
+        SyntaxKind::NAME => Some((stmt.clone(), Vec::new())),
+        SyntaxKind::TYPE_ANNOTATION => match annotation_parts(stmt) {
+            (Some(pattern), types) if pattern.kind() == SyntaxKind::NAME => Some((pattern, types)),
+            _ => None,
+        },
+        SyntaxKind::ASSIGNMENT_EXPR => {
+            let mut children = stmt.children();
+            let lhs = children.next()?;
+            let defaults: Vec<SyntaxNode> = children.collect();
+            let (pattern, mut extras) = match lhs.kind() {
+                SyntaxKind::NAME => (Some(lhs.clone()), Vec::new()),
+                SyntaxKind::TYPE_ANNOTATION => annotation_parts(&lhs),
+                _ => (None, Vec::new()),
+            };
+            match pattern {
+                Some(pattern) if pattern.kind() == SyntaxKind::NAME => {
+                    extras.extend(defaults);
+                    Some((pattern, extras))
+                }
+                _ => None,
+            }
+        }
+        SyntaxKind::CONST_STMT => stmt
+            .children()
+            .next()
+            .and_then(|inner| struct_field_form(&inner)),
+        _ => None,
+    }
+}
+
 fn is_augmented_assign(kind: SyntaxKind) -> bool {
     matches!(
         kind,
@@ -1140,26 +1179,22 @@ impl Builder {
         }
         if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
             // Fields bind; anything else (inner constructors, docstrings)
-            // declares and walks as usual inside the struct scope.
+            // declares and walks as usual inside the struct scope. Field forms
+            // cover plain, annotated, `@kwdef`-defaulted, and `const` fields —
+            // never a `Local`/`Const` an inner constructor could collide with.
             for stmt in body.children() {
-                match stmt.kind() {
-                    SyntaxKind::NAME | SyntaxKind::TYPE_ANNOTATION => {}
-                    _ => self.declare_node(&stmt, struct_scope),
+                if struct_field_form(&stmt).is_none() {
+                    self.declare_node(&stmt, struct_scope);
                 }
             }
             for stmt in body.children() {
-                match stmt.kind() {
-                    SyntaxKind::NAME => self.bind_field(&stmt, struct_scope),
-                    SyntaxKind::TYPE_ANNOTATION => {
-                        let (pattern, types) = annotation_parts(&stmt);
-                        if let Some(pattern) = pattern {
-                            self.bind_field(&pattern, struct_scope);
-                        }
-                        for ty in types {
-                            self.walk_node(&ty, struct_scope);
-                        }
+                if let Some((pattern, extras)) = struct_field_form(&stmt) {
+                    self.bind_field(&pattern, struct_scope);
+                    for extra in extras {
+                        self.walk_node(&extra, struct_scope);
                     }
-                    _ => self.walk_node(&stmt, struct_scope),
+                } else {
+                    self.walk_node(&stmt, struct_scope);
                 }
             }
         }
