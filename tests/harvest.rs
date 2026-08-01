@@ -46,6 +46,11 @@ fn fn_names(module: &ModuleIndex) -> Vec<&str> {
     module.functions.iter().map(|g| g.name.as_str()).collect()
 }
 
+/// Names the module exports (`export`/`public`), in recorded order.
+fn export_names(module: &ModuleIndex) -> Vec<&str> {
+    module.exports.iter().map(|e| e.name.as_str()).collect()
+}
+
 #[test]
 fn single_file_package() {
     let tmp = TempDir::new();
@@ -56,8 +61,43 @@ fn single_file_package() {
     let index = harvest_package_named(tmp.path(), "Pkg");
     assert_eq!(index.name, "Pkg");
     assert_eq!(fn_names(&index.root), ["f"]);
-    assert_eq!(index.root.exports.len(), 1);
+    // `f` from the `export`, plus the implicit self-name `Pkg`.
+    assert_eq!(export_names(&index.root), ["f", "Pkg"]);
     assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+}
+
+/// Julia binds every module's own name inside it and includes it in `names(M)`,
+/// though no `export <Self>` statement ever appears. The harvest, which reads
+/// `export`/`public` statements, adds the self-name so a qualified read like
+/// `Base.show` resolves against the module's export surface. Base's own name is
+/// the concrete case: `base/exports.jl` exports `Core` but never `Base`, so
+/// without this `undefined-name` flagged `Base` in every `Base.foo` extension.
+#[test]
+fn module_self_name_is_exported() {
+    let tmp = TempDir::new();
+    write(
+        &tmp.path().join("src/Pkg.jl"),
+        "module Pkg\nf(x) = x\nmodule Sub\ng() = 1\nend\nend\n",
+    );
+    let index = harvest_package_named(tmp.path(), "Pkg");
+
+    // The root self-exports even with no `export` statement of its own.
+    assert_eq!(export_names(&index.root), ["Pkg"]);
+    // Nested modules self-export too.
+    assert_eq!(index.root.submodules.len(), 1);
+    assert_eq!(export_names(&index.root.submodules[0]), ["Sub"]);
+}
+
+/// A module that already `export`s its own name gains no duplicate.
+#[test]
+fn explicit_self_export_is_not_duplicated() {
+    let tmp = TempDir::new();
+    write(
+        &tmp.path().join("src/Pkg.jl"),
+        "module Pkg\nexport Pkg, f\nf(x) = x\nend\n",
+    );
+    let index = harvest_package_named(tmp.path(), "Pkg");
+    assert_eq!(export_names(&index.root), ["Pkg", "f"]);
 }
 
 /// The language server's save-time re-harvest dedup compares successive
@@ -99,7 +139,9 @@ fn harvest_entry_enters_non_src_layout() {
     let index = harvest_entry(&base, &base.join("Base.jl"), "Base");
     assert_eq!(index.name, "Base");
     assert_eq!(fn_names(&index.root), ["f"]);
-    assert_eq!(index.root.exports.len(), 1);
+    // `export f`, plus the implicit self-name `Base` — exactly the name that a
+    // real Base never `export`s, so its harvest must synthesize it.
+    assert_eq!(export_names(&index.root), ["f", "Base"]);
     assert_eq!(index.root.exports[0].name, "f");
     // The exported name's location is relative to the root (`exports.jl`).
     assert_eq!(index.root.exports[0].loc.file, PathBuf::from("exports.jl"));

@@ -30,7 +30,7 @@ use super::model::PackageIndex;
 /// entries an older build wrote unreadable or wrong (a new `postcard` layout, a
 /// [`PackageIndex`] field change). Recorded in every entry header and baked into
 /// the cache path, so mismatched entries are ignored rather than mis-decoded.
-const CACHE_FORMAT: u32 = 1;
+const CACHE_FORMAT: u32 = 2;
 
 /// The build identity stamped into every entry: `fatou@<version>`. Two builds at
 /// the same [`CACHE_FORMAT`] can still harvest different shapes (the harvester

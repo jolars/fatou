@@ -88,6 +88,11 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
         }),
     }
 
+    // The package module and every nested `module` implicitly bind their own
+    // name (Julia includes it in `names(M)` with no `export` statement); add it
+    // so `Base.show` resolves `Base` against Base's harvested export surface.
+    root.add_self_name_exports();
+
     PackageIndex {
         name: name.to_string(),
         root,
@@ -132,6 +137,8 @@ pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
     for child in cst.children() {
         harvester.walk_item(&child, Path::new(""), &mut root, false, None);
     }
+    // The anonymous root has no name to add; its nested `module`s each self-bind.
+    root.add_self_name_exports();
     root
 }
 

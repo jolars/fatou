@@ -114,6 +114,28 @@ impl ModuleIndex {
             sub.collect_extension_groups(owner, name, groups);
         }
     }
+
+    /// Add each module's own name to its export surface, recursing into
+    /// submodules. Julia binds a module's name inside itself and lists it in
+    /// `names(M)` without any `export <Self>` statement (the binding is
+    /// implicit), so the export-statement harvest misses it. `Base` is the
+    /// concrete case: `base/exports.jl` exports `Core` but never `Base`, so a
+    /// harvested Base would not resolve `Base` in `Base.show` — a false
+    /// `undefined-name`. A module that already exports its own name (or an
+    /// anonymous root, [`crate::index::harvest::harvest_tree`]'s nameless tree)
+    /// is left untouched.
+    pub fn add_self_name_exports(&mut self) {
+        if !self.name.is_empty() && !self.exports.iter().any(|e| e.name == self.name) {
+            self.exports.push(ExportedName {
+                name: self.name.clone(),
+                visibility: Visibility::Exported,
+                loc: self.loc.clone(),
+            });
+        }
+        for sub in &mut self.submodules {
+            sub.add_self_name_exports();
+        }
+    }
 }
 
 /// An `export`ed or `public` name.

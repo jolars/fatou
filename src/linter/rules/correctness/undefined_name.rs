@@ -309,6 +309,31 @@ mod tests {
     }
 
     #[test]
+    fn qualified_base_extension_resolves_via_self_export() {
+        // `function Base.show(...)` reads `Base` as a module qualifier. The
+        // harvest synthesizes Base's own name into its exports (Julia never
+        // `export`s it), so the read resolves — a real-world `Base.show`
+        // extension must not raise `undefined-name`.
+        let lib = base(&["Base", "IO", "print", "show"]);
+        let src = "function Base.show(io::IO, x)\n    print(io, x)\nend\n";
+        assert_eq!(
+            messages(src, &lib, Some(workspace(&[]))),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn qualified_base_extension_flags_without_self_export() {
+        // Guard on the fix: strip Base's self-name and the same qualifier read
+        // is unresolved — exactly the false positive the harvest self-export
+        // removes.
+        let lib = base(&["IO", "print", "show"]);
+        let src = "function Base.show(io::IO, x)\n    print(io, x)\nend\n";
+        let msgs = messages(src, &lib, Some(workspace(&[])));
+        assert_eq!(msgs, vec!["`Base` is not defined".to_string()], "{msgs:?}");
+    }
+
+    #[test]
     fn workspace_sibling_resolves() {
         // `helper` is defined in a sibling file of the package; with the
         // workspace tier it resolves, while `helprr` stays undefined.
