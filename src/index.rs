@@ -10,6 +10,7 @@
 //! input, which later completion, hover, and go-to-definition read.
 
 pub mod base;
+pub mod cache;
 pub mod harvest;
 pub mod model;
 pub mod typeexpr;
@@ -20,7 +21,8 @@ use std::sync::Arc;
 
 use crate::environment::Environment;
 
-pub use base::{build_system_index, build_system_library};
+pub use base::{build_system_index, build_system_library, build_system_library_cached};
+pub use cache::{CacheKey, IndexCache};
 pub use harvest::{harvest_entry, harvest_package, harvest_package_named, harvest_tree};
 pub use model::{
     ConstDef, DefLocation, Docstring, ExportedName, Field, FunctionGroup, HarvestDiagnostic,
@@ -111,6 +113,90 @@ pub fn harvest_libraries(envs: &[Environment]) -> HarvestedLibrary {
     }
     lib.workspaces.sort();
     lib
+}
+
+/// [`harvest_libraries`], harvested in parallel on `pool` and reading each
+/// package from the on-disk `cache` first. The system library goes through
+/// [`build_system_library_cached`]; registered packages are deduped by name
+/// exactly as the sequential path, then harvested concurrently — each a cache
+/// hit (reload) or miss (harvest and store), keyed by `git-tree-sha1`
+/// ([`CacheKey::for_package`]). Dev packages are never cached (edited live) and
+/// are harvested as before. The name-keyed [`BTreeMap`] makes the result
+/// independent of completion order, so it equals the sequential harvest.
+///
+/// `cache` is `None` when no cache directory could be resolved: harvesting is
+/// then still parallel, just uncached.
+pub fn harvest_libraries_parallel(
+    envs: &[Environment],
+    cache: Option<&IndexCache>,
+    pool: &rayon::ThreadPool,
+) -> HarvestedLibrary {
+    use rayon::prelude::*;
+
+    let install = envs.iter().find_map(|env| env.install.as_ref());
+    let mut lib = build_system_library_cached(install, cache, pool);
+
+    // Registered packages with a resolved source, deduped by name with the first
+    // environment winning — the same claim rule as `harvest_libraries`.
+    let mut claimed = std::collections::BTreeSet::new();
+    let mut work: Vec<(&str, &std::path::Path, &crate::environment::Package)> = Vec::new();
+    for env in envs {
+        for package in &env.packages {
+            let Some(source) = &package.source else {
+                continue;
+            };
+            if !claimed.insert(package.name.clone()) {
+                continue; // First environment wins the name slot.
+            }
+            work.push((&package.name, source, package));
+        }
+    }
+
+    // A registered package harvested here overwrites any same-named system entry,
+    // exactly as the sequential path inserts after the system harvest.
+    let harvested: Vec<(String, Arc<PackageIndex>, PathBuf)> = pool.install(|| {
+        work.par_iter()
+            .map(|&(name, source, package)| {
+                let index = harvest_package_cached(name, source, package, cache);
+                (name.to_string(), index, source.to_path_buf())
+            })
+            .collect()
+    });
+    for (name, index, root) in harvested {
+        lib.packages.insert(name.clone(), index);
+        lib.roots.insert(name, root);
+    }
+
+    for dev in dev_packages(envs) {
+        lib.packages
+            .insert(dev.name.clone(), Arc::new(harvest_workspace(&dev)));
+        lib.roots.insert(dev.name.clone(), dev.root);
+        lib.workspaces.push(dev.name);
+    }
+    lib.workspaces.sort();
+    lib
+}
+
+/// Harvest one registered package, reading it from `cache` when present (keyed by
+/// its content identity) and storing a fresh harvest back. A package with no
+/// cache key ([`CacheKey::for_package`] is `None`) is always harvested live.
+fn harvest_package_cached(
+    name: &str,
+    source: &std::path::Path,
+    package: &crate::environment::Package,
+    cache: Option<&IndexCache>,
+) -> Arc<PackageIndex> {
+    let key = CacheKey::for_package(package);
+    if let (Some(cache), Some(key)) = (cache, key.as_ref())
+        && let Some(index) = cache.load(name, key)
+    {
+        return Arc::new(index);
+    }
+    let index = harvest_package_named(source, name);
+    if let (Some(cache), Some(key)) = (cache, key.as_ref()) {
+        cache.store(name, key, &index);
+    }
+    Arc::new(index)
 }
 
 /// Harvest just the package under development into a fresh [`PackageIndex`].

@@ -12,9 +12,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use crate::environment::JuliaInstall;
 
 use super::HarvestedLibrary;
+use super::cache::{CacheKey, IndexCache};
 use super::harvest::{harvest_entry, harvest_package_named};
 use super::model::{DefLocation, ExportedName, ModuleIndex, PackageIndex, Span, Visibility};
 
@@ -41,37 +44,77 @@ pub fn build_system_index(install: Option<&JuliaInstall>) -> BTreeMap<String, Ar
 
 /// Build the Base/Core/stdlib index for `install` along with each package's
 /// absolute source root (empty for the baked-in fallback, which has no on-disk
-/// sources).
+/// sources). Sequential and uncached; the language server uses
+/// [`build_system_library_cached`] to harvest in parallel off the on-disk cache.
 pub fn build_system_library(install: Option<&JuliaInstall>) -> HarvestedLibrary {
     match install {
-        Some(install) => harvest_system(install),
-        None => HarvestedLibrary {
-            packages: fallback_system(),
-            roots: BTreeMap::new(),
-            workspaces: Vec::new(),
-        },
+        Some(install) => assemble(
+            system_entries(install)
+                .iter()
+                .map(|work| harvest_system_one(work, install, None))
+                .collect(),
+        ),
+        None => fallback_library(),
     }
 }
 
-/// Harvest Base, Core, and every stdlib package from the installation's plain
-/// sources, recording each one's source root. Best-effort: harvesting all of
-/// Base is not cheap, which is what the on-disk cache and parallel harvest (next
-/// phase) address; here it stays simple and correct.
-fn harvest_system(install: &JuliaInstall) -> HarvestedLibrary {
-    let mut packages = BTreeMap::new();
-    let mut roots = BTreeMap::new();
+/// [`build_system_library`], but harvesting each Base/Core/stdlib package in
+/// parallel on `pool` and consulting `cache` first: a warm cache reloads each
+/// index instead of re-parsing (Base and the stdlib are the largest harvest), a
+/// miss harvests and stores. Keyed by the install version
+/// ([`CacheKey::for_system`]), so a Julia upgrade retires the old entries.
+pub fn build_system_library_cached(
+    install: Option<&JuliaInstall>,
+    cache: Option<&IndexCache>,
+    pool: &rayon::ThreadPool,
+) -> HarvestedLibrary {
+    match install {
+        Some(install) => {
+            let work = system_entries(install);
+            let results = pool.install(|| {
+                work.par_iter()
+                    .map(|item| harvest_system_one(item, install, cache))
+                    .collect()
+            });
+            assemble(results)
+        }
+        None => fallback_library(),
+    }
+}
 
-    // Base and Core live directly in `base/`, not under a `src/` directory, so
-    // their `DefLocation`s are relative to `base_dir`.
-    let base = harvest_base(&install.base_dir);
-    packages.insert("Base".to_string(), Arc::new(base));
-    roots.insert("Base".to_string(), install.base_dir.clone());
-    let core = harvest_entry(&install.base_dir, &install.base_dir.join("boot.jl"), "Core");
-    packages.insert("Core".to_string(), Arc::new(core));
-    roots.insert("Core".to_string(), install.base_dir.clone());
+/// How one system package is harvested from the installation's plain sources.
+enum SystemKind {
+    /// Base, merged from every present [`BASE_ENTRIES`] file under `base/`.
+    Base,
+    /// Core, from `base/boot.jl`.
+    Core,
+    /// A stdlib package, through the ordinary `src/<Name>.jl` entry.
+    Stdlib,
+}
 
-    // Every installed stdlib package is `using`-able regardless of the manifest,
-    // so harvest them all through the ordinary `src/<Name>.jl` entry.
+/// One system package to harvest: its name, source root, and how to enter it.
+struct SystemWork {
+    name: String,
+    root: PathBuf,
+    kind: SystemKind,
+}
+
+/// The full list of system packages to harvest for `install`: Base and Core
+/// (rooted at `base/`, since their `DefLocation`s are relative to it), then every
+/// installed stdlib package, each `using`-able regardless of the manifest.
+fn system_entries(install: &JuliaInstall) -> Vec<SystemWork> {
+    let mut work = vec![
+        SystemWork {
+            name: "Base".to_string(),
+            root: install.base_dir.clone(),
+            kind: SystemKind::Base,
+        },
+        SystemWork {
+            name: "Core".to_string(),
+            root: install.base_dir.clone(),
+            kind: SystemKind::Core,
+        },
+    ];
     if let Ok(entries) = std::fs::read_dir(&install.stdlib_dir) {
         for entry in entries.filter_map(Result::ok) {
             let dir = entry.path();
@@ -79,16 +122,59 @@ fn harvest_system(install: &JuliaInstall) -> HarvestedLibrary {
                 continue;
             };
             if dir.join("src").join(format!("{name}.jl")).is_file() {
-                let index = harvest_package_named(&dir, name);
-                packages.insert(name.to_string(), Arc::new(index));
-                roots.insert(name.to_string(), dir);
+                work.push(SystemWork {
+                    name: name.to_string(),
+                    root: dir,
+                    kind: SystemKind::Stdlib,
+                });
             }
         }
     }
+    work
+}
 
+/// Harvest one system package, reading it from `cache` when present and storing a
+/// fresh harvest back. Returns the name, index, and source root for [`assemble`].
+fn harvest_system_one(
+    work: &SystemWork,
+    install: &JuliaInstall,
+    cache: Option<&IndexCache>,
+) -> (String, Arc<PackageIndex>, PathBuf) {
+    let key = CacheKey::for_system(install);
+    if let Some(index) = cache.and_then(|cache| cache.load(&work.name, &key)) {
+        return (work.name.clone(), Arc::new(index), work.root.clone());
+    }
+    let index = match work.kind {
+        SystemKind::Base => harvest_base(&work.root),
+        SystemKind::Core => harvest_entry(&work.root, &work.root.join("boot.jl"), "Core"),
+        SystemKind::Stdlib => harvest_package_named(&work.root, &work.name),
+    };
+    if let Some(cache) = cache {
+        cache.store(&work.name, &key, &index);
+    }
+    (work.name.clone(), Arc::new(index), work.root.clone())
+}
+
+/// Fold harvested `(name, index, root)` triples into a [`HarvestedLibrary`].
+fn assemble(results: Vec<(String, Arc<PackageIndex>, PathBuf)>) -> HarvestedLibrary {
+    let mut packages = BTreeMap::new();
+    let mut roots = BTreeMap::new();
+    for (name, index, root) in results {
+        packages.insert(name.clone(), index);
+        roots.insert(name, root);
+    }
     HarvestedLibrary {
         packages,
         roots,
+        workspaces: Vec::new(),
+    }
+}
+
+/// The baked-in fallback library, used when no installation is located.
+fn fallback_library() -> HarvestedLibrary {
+    HarvestedLibrary {
+        packages: fallback_system(),
+        roots: BTreeMap::new(),
         workspaces: Vec::new(),
     }
 }

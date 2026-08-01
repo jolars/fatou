@@ -21,7 +21,9 @@ use std::sync::Arc;
 
 use crate::environment::EnvContext;
 use crate::incremental::normalize_path;
-use crate::index::{PackageIndex, dev_packages, harvest_libraries, harvest_workspace};
+use crate::index::{
+    IndexCache, PackageIndex, dev_packages, harvest_libraries_parallel, harvest_workspace,
+};
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, LibraryMessage, guard, spawn_analysis_thread};
@@ -29,7 +31,7 @@ use super::progress::HarvestProgress;
 use super::read_jobs::ReadJob;
 use super::semantic_tokens::legend;
 use super::state::{GlobalState, Outbound};
-use super::task_pool::{TaskPool, read_pool_size};
+use super::task_pool::{TaskPool, index_pool_size, read_pool_size};
 use super::uri::to_path;
 
 pub(crate) type DynError = Box<dyn Error + Sync + Send>;
@@ -441,6 +443,27 @@ fn spawn_workspace_harvester(
         .name("fatou-index-loader".to_string())
         .spawn(move || {
             let progress = HarvestProgress::new(progress_sender);
+            // The index pool: a dedicated rayon pool for the parallel harvest,
+            // capped below the read pool (see `index_pool_size`) so a cold-cache
+            // fan-out cannot saturate every core and starve reads. Built once and
+            // reused across every re-resolve.
+            let index_pool = match rayon::ThreadPoolBuilder::new()
+                .num_threads(index_pool_size())
+                .thread_name(|i| format!("fatou-index-{i}"))
+                .build()
+            {
+                Ok(pool) => pool,
+                Err(err) => {
+                    log::error!("failed to build index pool: {err}");
+                    return; // Best-effort: the server runs without a library index.
+                }
+            };
+            // The on-disk index cache, or `None` when no cache directory could be
+            // resolved — harvesting is then still parallel, just uncached.
+            let cache = IndexCache::open();
+            if cache.is_none() {
+                log::debug!("index cache disabled: no cache directory resolved");
+            }
             'resolve: loop {
                 // Report the full pass (initial resolve, and every re-resolve a
                 // `continue 'resolve` restarts) as one begin/report/end cycle.
@@ -464,7 +487,7 @@ fn spawn_workspace_harvester(
                 // resolved is a cheap no-op harvest).
                 let devs = dev_packages(&envs);
                 progress.report("Indexing Base and packages");
-                let library = harvest_libraries(&envs);
+                let library = harvest_libraries_parallel(&envs, cache.as_ref(), &index_pool);
                 let indexed = library.packages.len();
                 if library_tx.send(LibraryMessage::Full(library)).is_err() {
                     return; // The analysis thread is gone; stop harvesting.

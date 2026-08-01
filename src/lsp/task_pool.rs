@@ -95,6 +95,14 @@ pub(crate) fn read_pool_size() -> usize {
         .unwrap_or(1)
 }
 
+/// Worker count for the index pool: half the machine's parallelism, at least
+/// one. Deliberately capped below the read pool so a cold-cache harvest fan-out
+/// (parsing all of Base and the stdlib) cannot saturate every core and starve
+/// latency-sensitive reads.
+pub(crate) fn index_pool_size() -> usize {
+    (read_pool_size() / 2).max(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

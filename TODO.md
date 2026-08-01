@@ -69,12 +69,20 @@
 
 ## Language server
 
-- [ ] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in
+- [x] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in
   parallel (rayon) on the index pool, hot-swapped into the HIGH-durability
-  `LibraryIndex` salsa input (the input itself has landed: a singleton in
-  `src/incremental.rs` holding `BTreeMap<String, Arc<PackageIndex>>`, with
-  `set_library_packages`/`set_package_index`/`library_package` on the db and
-  `tests/library_index.rs`); re-analyze open files on swap.
+  `LibraryIndex` salsa input. `src/index/cache.rs` holds an `IndexCache` of
+  postcard-serialized `PackageIndex` entries at `<cache>/index/v<FORMAT>-<ver>/
+  <name>/<key>.postcard` (atomic temp+rename, header-validated, best-effort),
+  keyed by `git-tree-sha1` for registered packages and the Julia version for
+  Base/stdlib (`CacheKey`). `harvest_libraries_parallel` (`src/index.rs`) and
+  `build_system_library_cached` (`src/index/base.rs`) harvest each package
+  concurrently on a dedicated capped rayon pool (`index_pool_size`,
+  `src/lsp/task_pool.rs`) built in `spawn_workspace_harvester`; a warm cache
+  reloads instead of re-parsing. The swap and open-file re-analysis reuse the
+  existing `set_library` + `refresh_graph_diagnostics`/`DiagnosticsRefresh`
+  path. Covered by `src/index/cache.rs` unit tests and
+  `tests/parallel_harvest.rs`.
 - [ ] Maybe: a `fatou index` CLI subcommand to warm and inspect the cache.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
