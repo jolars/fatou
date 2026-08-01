@@ -1,0 +1,29 @@
+name: Formatting request
+description: Report output you'd like formatted differently
+labels: [enhancement]
+body:
+  - type: textarea
+    id: input
+    attributes:
+      label: Input `.jl`
+      render: julia
+  - type: textarea
+    id: settings
+    attributes:
+      label: "`fatou.toml` settings (if any)"
+      render: toml
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+      render: julia
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      render: julia
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else
+      description: Version (`fatou --version`), rationale, references, etc.

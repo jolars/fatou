@@ -1,0 +1,44 @@
+name: Lint rule request
+description: Suggest a new linter rule (diagnostic)
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What should the rule catch
+      description: One sentence—the pattern to flag and why it's worth flagging.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example that should trigger it
+      render: julia
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix, if any
+      render: julia
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - error
+        - warning
+        - info
+    validations:
+      required: true
+  - type: dropdown
+    id: autofixable
+    attributes:
+      label: Autofixable?
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Style guides, package docs, prior art (e.g. JET.jl, Aqua.jl, JuliaFormatter), related issues.
