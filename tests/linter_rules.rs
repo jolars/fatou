@@ -215,6 +215,18 @@ fn unused_import_counts_method_extension_as_use() {
         ),
         0
     );
+    // Infix operator method definition `a::T + b = ...` extends `+` too.
+    assert_eq!(
+        count(
+            "unused-import",
+            "import Base: +\nstruct MyStruct x::Int end\na::MyStruct + b = a.x + b\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("unused-import", "import Base: ==\na == b = true\n"),
+        0
+    );
 }
 
 #[test]
@@ -571,6 +583,13 @@ fn undefined_name_respects_locals_params_and_globals() {
         ),
         0
     );
+}
+
+#[test]
+fn undefined_name_binds_infix_operator_def_operands_as_params() {
+    // `a::T + b = ...` is an operator method definition: the operands are
+    // parameters, so the body's reads of them resolve rather than dangle.
+    assert_eq!(count("undefined-name", "a::Int + b = a * b\n"), 0);
 }
 
 #[test]

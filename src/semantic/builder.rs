@@ -201,6 +201,22 @@ fn is_field_access(node: &SyntaxNode) -> bool {
             .any(|t| t.kind() == SyntaxKind::DOT)
 }
 
+/// The operator token of an infix operator method definition's left-hand side:
+/// `a OP b = body` (`a::T + b = ...`, `a == b = ...`), where `OP` names the
+/// function the definition introduces or extends. `where` and return-type
+/// layers are peeled first. Field access (`a.b = v`) is a setproperty target,
+/// not a definition, so it is excluded. Chained comparisons (`a < b < c`, a
+/// `COMPARISON_EXPR`) are not valid signatures and are excluded too.
+fn infix_def_operator(lhs: &SyntaxNode) -> Option<SyntaxToken> {
+    let core = peel_signature(lhs.clone()).0?;
+    if core.kind() != SyntaxKind::BINARY_EXPR || is_field_access(&core) {
+        return None;
+    }
+    core.children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find(|t| t.kind().is_operator())
+}
+
 /// The identifier token of a `NAME` node, via the shared [`Name::ident`] typed
 /// accessor.
 fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
@@ -698,6 +714,16 @@ impl Builder {
                     self.declare_signature_name(lhs.clone(), scope, BindingKind::Function);
                     return;
                 }
+                // Infix operator method definition `a OP b = body`: the
+                // operator names the function, extending any same-named import;
+                // the operands are parameters, not targets in this scope.
+                if let Some(lhs) = &lhs
+                    && assign_op(node) == AssignOp::Plain
+                    && let Some(op) = infix_def_operator(lhs)
+                {
+                    self.mark_import_extended(op.text(), scope);
+                    return;
+                }
                 if let Some(lhs) = lhs
                     && assign_op(node) != AssignOp::Broadcast
                 {
@@ -1037,6 +1063,9 @@ impl Builder {
         let Some(lhs) = children.next() else { return };
         if op == AssignOp::Plain && has_call_core(&lhs) {
             return self.handle_short_form(node, scope, lhs);
+        }
+        if op == AssignOp::Plain && infix_def_operator(&lhs).is_some() {
+            return self.handle_infix_op_def(node, scope, lhs);
         }
         if op == AssignOp::Broadcast {
             self.walk_node(&lhs, scope);
@@ -1590,6 +1619,27 @@ impl Builder {
     fn handle_short_form(&mut self, node: &SyntaxNode, scope: ScopeId, lhs: SyntaxNode) {
         let fn_scope = self.push_scope(ScopeKind::Function, Some(scope), node.text_range());
         self.walk_signature(lhs, scope, fn_scope);
+        for rhs in node.children().skip(1) {
+            self.declare_node(&rhs, fn_scope);
+            self.walk_node(&rhs, fn_scope);
+        }
+    }
+
+    /// `a OP b = body`: an infix operator method definition. The operator names
+    /// the function (its import is already marked extended in the declare
+    /// pass); the operands are parameters bound in a fresh function scope,
+    /// where any `where` specs and the body resolve against them.
+    fn handle_infix_op_def(&mut self, node: &SyntaxNode, scope: ScopeId, lhs: SyntaxNode) {
+        let fn_scope = self.push_scope(ScopeKind::Function, Some(scope), node.text_range());
+        let (core, wheres, _) = peel_signature(lhs);
+        for spec in &wheres {
+            self.bind_type_param_spec(spec, fn_scope);
+        }
+        if let Some(core) = core {
+            for operand in core.children() {
+                self.bind_param_pattern(&operand, fn_scope, BindingKind::Param);
+            }
+        }
         for rhs in node.children().skip(1) {
             self.declare_node(&rhs, fn_scope);
             self.walk_node(&rhs, fn_scope);
