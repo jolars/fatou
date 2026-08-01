@@ -261,11 +261,16 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         // Tier 2 (cross-file): a same-module sibling top-level symbol of the
         // module enclosing this read (the file's host module plus any file-internal
         // nested `module`). Ranks above `using`/Base — an `include`-spliced module
-        // global masks them, just as a same-file global would.
+        // global masks them, just as a same-file global would. A module also
+        // binds its *own* name inside itself (`SLOPE.foo()` within module
+        // `SLOPE`), which no `export`/definition records — Julia scopes only the
+        // enclosing module's own name, never an ancestor's, so this matches
+        // exactly `wanted == module.name`.
         if let Some(workspace) = &self.workspace {
             let path = self.full_module_path(workspace, self.model.scope_at(offset));
             if let Some(module) = module_at(&workspace.pkg.root, &path)
-                && module_defines(module, &wanted, namespace)
+                && (module_defines(module, &wanted, namespace)
+                    || (namespace == Namespace::Value && module.name == wanted.as_str()))
             {
                 return Resolution::Workspace {
                     module: path,
@@ -907,6 +912,44 @@ mod tests {
                 module: SmolStr::new("A"),
                 name: SmolStr::new("map"),
             }
+        );
+    }
+
+    #[test]
+    fn module_binds_its_own_name_but_not_an_ancestors() {
+        // Julia scopes a module's own name inside it (`Outer` within module
+        // `Outer`), but a nested submodule does not see its parent's name. The
+        // workspace tier must resolve exactly the enclosing module's own name.
+        let pkg = module_package("Outer", &[], vec![submodule("Inner", &[])]);
+        let lib = library(&[]);
+        let resolve_at = |src: &str, name: &str, host: ModulePath| {
+            let model = model_of(src);
+            let offset = after(src, name);
+            Resolver::new(&model, &lib)
+                .with_workspace(Some((Arc::clone(&pkg), host)))
+                .resolve(name, offset, Namespace::Value)
+        };
+
+        // The root module's own name resolves.
+        assert_eq!(
+            resolve_at("Outer\n", "Outer", Vec::new()),
+            Resolution::Workspace {
+                module: Vec::new(),
+                name: SmolStr::new("Outer"),
+            }
+        );
+        // Inside the nested module, its own name resolves.
+        assert_eq!(
+            resolve_at("Inner\n", "Inner", vec![SmolStr::new("Inner")]),
+            Resolution::Workspace {
+                module: vec![SmolStr::new("Inner")],
+                name: SmolStr::new("Inner"),
+            }
+        );
+        // But the parent's name does not (Julia raises `UndefVarError`).
+        assert_eq!(
+            resolve_at("Outer\n", "Outer", vec![SmolStr::new("Inner")]),
+            Resolution::Unresolved
         );
     }
 

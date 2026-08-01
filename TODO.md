@@ -124,6 +124,39 @@
   non-standard string macro (`js"$name"`, via `record_raw_interpolations`) are
   now both counted (fixed).
 
+### False positives (from the SLOPE.jl linter-investigation sweep)
+
+- [x] `undefined-name` on `Base` in a `Base.foo` method extension (SLOPE.jl
+  `cv.jl`: `Base.show`). The export harvest reads `export` statements, but a
+  module's own name is bound implicitly and never `export`ed (`base/exports.jl`
+  exports `Core`, never `Base`), so a live-harvested Base did not resolve the
+  `Base` qualifier. Fixed in the harvest: `ModuleIndex::add_self_name_exports`
+  (from `harvest_entry`/`harvest_tree`) adds each module's own name to its
+  exports, matching `names(M)`; `CACHE_FORMAT` bumped. The CLI never showed it
+  (its baked-in fallback list, dumped from `names(Base)`, already had `Base`);
+  only the LSP's live harvest hit the gap.
+- [x] `undefined-name` on the dev package's own name as a qualifier inside
+  itself (SLOPE.jl `models.jl`: `SLOPE.fit_slope_dense(...)` within
+  `module SLOPE`). The workspace tier keyed only on `module_defines`
+  (functions/types/consts), never the module's own name. Fixed in `resolve.rs`
+  tier 2: also resolve `wanted == module.name` (Value namespace). Verified with
+  `julia` that a module sees its own name but a nested submodule does *not* see
+  an ancestor's, so the match is exactly the enclosing module's own name.
+- [ ] `undefined-name` on a name imported by a *sibling* file's whole-module
+  `using` (SLOPE.jl `cv.jl`: `SparseMatrixCSC`). `include` splices every member
+  file into one module, so `using SparseArrays` in `models.jl` makes
+  `SparseMatrixCSC` available module-wide, including `cv.jl` — but the rule
+  resolves against the *current file's* `module_loads()` only, missing sibling
+  `using`s. Fixing it soundly needs: the harvest to capture each module's
+  whole-module `using`/`import` clauses (a new `ModuleIndex` field + cache bump),
+  the workspace tier to resolve names against the host module's aggregated
+  `using` exports, and `has_unresolvable_using` to gate on that aggregated set
+  (any unresolvable sibling `using` ⇒ bail, since it could export anything).
+  Confirmed with `julia`: a name from a `using` in one included file is visible
+  in every other file of the same module. Minimal repro: package `M` with
+  `A.jl` = `using SparseArrays` and `B.jl` = `f(::SparseMatrixCSC) = 1`, both
+  `include`d into `module M` — `B.jl` flags `SparseMatrixCSC`.
+
 ## Language server
 
 - [x] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in

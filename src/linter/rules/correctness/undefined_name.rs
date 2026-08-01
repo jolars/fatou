@@ -334,6 +334,17 @@ mod tests {
     }
 
     #[test]
+    fn workspace_package_self_name_resolves() {
+        // A file spliced into the package's root module may qualify a call with
+        // the package's own name (`MyPkg.helper()`); Julia binds a module's own
+        // name inside it, so the qualifier must not raise `undefined-name`.
+        // Regression: SLOPE.jl's `SLOPE.fit_slope_dense(...)` inside module SLOPE.
+        let lib = base(&[]);
+        let msgs = messages("f() = MyPkg.helper()\n", &lib, Some(workspace(&["helper"])));
+        assert_eq!(msgs, Vec::<String>::new(), "{msgs:?}");
+    }
+
+    #[test]
     fn workspace_sibling_resolves() {
         // `helper` is defined in a sibling file of the package; with the
         // workspace tier it resolves, while `helprr` stays undefined.
