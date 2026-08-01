@@ -627,6 +627,35 @@ impl Builder {
         None
     }
 
+    /// Record the macro read implied by a non-standard string/command literal.
+    ///
+    /// `p"..."` desugars to `@p_str` and `` p`...` `` to `@p_cmd`, where `p` is
+    /// the `STRING_PREFIX` token. A plain literal has no prefix and is skipped.
+    /// Only an explicitly imported or locally defined macro is recorded (so an
+    /// otherwise-unused `using M: @p_str` counts as used); an unprefixed or
+    /// Base string macro (`r"..."`) resolves to nothing and is left untouched,
+    /// exactly as before, so no spurious macro read reaches `undefined-name`.
+    fn record_string_macro_read(&mut self, node: &SyntaxNode, scope: ScopeId, suffix: &str) {
+        let Some(prefix) = node.children_with_tokens().find_map(|e| {
+            e.into_token()
+                .filter(|t| t.kind() == SyntaxKind::STRING_PREFIX)
+        }) else {
+            return;
+        };
+        let name = format!("{}{}", prefix.text(), suffix);
+        if let Some(b) = self.resolve_macro_read(&name, scope) {
+            self.model.bindings[b.0 as usize].read = true;
+            self.push_ident(
+                &name,
+                prefix.text_range(),
+                scope,
+                Access::Read,
+                true,
+                Some(b),
+            );
+        }
+    }
+
     // --- declare phase -----------------------------------------------------
 
     /// Introduce the bindings assigned anywhere in `scope`'s own extent,
@@ -986,6 +1015,14 @@ impl Builder {
                 for child in node.children().skip(1) {
                     self.walk_node(&child, scope);
                 }
+            }
+            SyntaxKind::STRING_LITERAL => {
+                self.record_string_macro_read(node, scope, "_str");
+                self.walk_children(node, scope);
+            }
+            SyntaxKind::CMD_LITERAL => {
+                self.record_string_macro_read(node, scope, "_cmd");
+                self.walk_children(node, scope);
             }
             SyntaxKind::INTERPOLATION => self.walk_interpolation(node, scope),
             SyntaxKind::MACRO_CALL => self.walk_macro_call(node, scope),

@@ -175,6 +175,28 @@ fn unused_import_still_flags_never_referenced_import() {
     assert_eq!(count("unused-import", "import Base: foo\nbar() = 1\n"), 1);
 }
 
+#[test]
+fn unused_import_counts_string_macro_use() {
+    // `u"ns"` desugars to `@u_str`, so an explicit import of it is used.
+    assert_eq!(
+        count("unused-import", "using Unitful: @u_str\nx = u\"ns\"\n"),
+        0
+    );
+    // A juxtaposed prefix (`1u"ns"`) is the same string macro.
+    assert_eq!(
+        count("unused-import", "using Unitful: @u_str\nx = 1u\"ns\"\n"),
+        0
+    );
+    // The command form `` p`...` `` desugars to `@p_cmd`.
+    assert_eq!(count("unused-import", "using M: @p_cmd\nx = p`ls`\n"), 0);
+}
+
+#[test]
+fn unused_import_still_flags_unused_string_macro() {
+    // Imported but never applied as a string macro: still unused.
+    assert_eq!(count("unused-import", "using Unitful: @u_str\nx = 1\n"), 1);
+}
+
 // --- duplicate-argument ----------------------------------------------------
 
 #[test]
