@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use crate::julia_version::{VersionRange, parse_compat};
+
 /// A parsed 16-byte package UUID, stored in textual (big-endian) byte order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Uuid([u8; 16]);
@@ -765,6 +767,39 @@ fn parse_sha1(s: &str) -> Option<[u8; 20]> {
     Some(bytes)
 }
 
+// --- Julia version target --------------------------------------------------
+
+/// Discover the project's declared Julia support range for version-compat
+/// linting, without the full [`resolve`] harvest. Walks up from `anchor` for a
+/// project file and reads its `[compat].julia`; when the project declares no
+/// `julia` compat, falls back to the sibling manifest's resolved `julia_version`
+/// (a point version, treated as an exact range). Returns `None` when neither is
+/// present or parses — leaving the `julia-version-compat` rule silent.
+pub fn discover_julia_target(anchor: &Path) -> Option<VersionRange> {
+    let project = walk_up_for_project(anchor)?;
+    if let Some(range) = read_toml(&project).ok().and_then(compat_range_from_table) {
+        return Some(range);
+    }
+    let project_dir = project.parent()?;
+    let manifest = find_manifest(project_dir)?;
+    read_toml(&manifest)
+        .ok()
+        .and_then(manifest_range_from_table)
+}
+
+/// The `[compat].julia` range from a parsed project table, if present and
+/// parseable.
+fn compat_range_from_table(table: toml::Table) -> Option<VersionRange> {
+    let spec = table.get("compat")?.as_table()?.get("julia")?.as_str()?;
+    parse_compat(spec).ok()
+}
+
+/// The manifest's top-level `julia_version` as an exact range, if present.
+fn manifest_range_from_table(table: toml::Table) -> Option<VersionRange> {
+    let version = table.get("julia_version")?.as_str()?.parse().ok()?;
+    Some(VersionRange::exact(version))
+}
+
 // --- Shared helpers --------------------------------------------------------
 
 fn read_toml(path: &Path) -> Result<toml::Table, EnvironmentError> {
@@ -868,6 +903,72 @@ mod tests {
         assert_eq!(local.kind, PackageKind::Dev);
         assert_eq!(local.deps, vec!["Dates"]);
         assert_eq!(local.source, Some(PathBuf::from("/proj/vendor/Local")));
+    }
+
+    #[test]
+    fn reads_julia_compat_range_from_project() {
+        let table: toml::Table = "[compat]\njulia = \"1.6\"\nDataFrames = \"1.5\""
+            .parse()
+            .unwrap();
+        let range = compat_range_from_table(table).unwrap();
+        assert_eq!(range.min, crate::julia_version::Version::new(1, 6, 0));
+    }
+
+    #[test]
+    fn missing_julia_compat_is_none() {
+        let table: toml::Table = "[compat]\nDataFrames = \"1.5\"".parse().unwrap();
+        assert!(compat_range_from_table(table).is_none());
+    }
+
+    #[test]
+    fn reads_manifest_julia_version_as_exact() {
+        let table: toml::Table = "julia_version = \"1.11.7\"\nmanifest_format = \"2.0\""
+            .parse()
+            .unwrap();
+        let range = manifest_range_from_table(table).unwrap();
+        assert_eq!(
+            range,
+            VersionRange::exact(crate::julia_version::Version::new(1, 11, 7))
+        );
+    }
+
+    #[test]
+    fn discover_prefers_compat_over_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("Project.toml"),
+            "name = \"Demo\"\n[compat]\njulia = \"1.10\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("Manifest.toml"),
+            "julia_version = \"1.11.7\"\nmanifest_format = \"2.0\"\n",
+        )
+        .unwrap();
+        let range = discover_julia_target(dir.path()).unwrap();
+        assert_eq!(range.min, crate::julia_version::Version::new(1, 10, 0));
+    }
+
+    #[test]
+    fn discover_falls_back_to_manifest_without_compat() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Project.toml"), "name = \"Demo\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("Manifest.toml"),
+            "julia_version = \"1.9.2\"\nmanifest_format = \"2.0\"\n",
+        )
+        .unwrap();
+        let range = discover_julia_target(dir.path()).unwrap();
+        assert_eq!(
+            range,
+            VersionRange::exact(crate::julia_version::Version::new(1, 9, 2))
+        );
+    }
+
+    #[test]
+    fn discover_returns_none_without_project() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(discover_julia_target(dir.path()).is_none());
     }
 
     #[test]
