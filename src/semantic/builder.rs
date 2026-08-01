@@ -1525,6 +1525,15 @@ impl Builder {
                         SyntaxKind::PAREN_EXPR | SyntaxKind::TUPLE_EXPR => {
                             self.bind_params(&callee, fn_scope, false);
                         }
+                        // Operator-named definition: `+(x::T, y::T)` — the
+                        // callee is a leading operator token, so the first
+                        // child node is the argument list itself. Bind its
+                        // parameters in the function scope like any other, so
+                        // their `::T` annotations resolve to the `where`
+                        // parameters.
+                        SyntaxKind::ARG_LIST => {
+                            self.bind_params(&callee, fn_scope, false);
+                        }
                         // `Foo{T}(x)`: a parametric constructor/method — the
                         // name part is a read in the enclosing scope, but the
                         // curly type arguments read the `where` parameters,

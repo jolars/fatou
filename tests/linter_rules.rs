@@ -1002,6 +1002,26 @@ fn unused_type_parameter_ignores_annotation_use() {
 }
 
 #[test]
+fn unused_type_parameter_ignores_operator_signature() {
+    // Operator-named methods bind their parameters in the function scope too,
+    // so a `::T` annotation counts as a use of the `where` parameter.
+    assert_eq!(
+        count(
+            "unused-type-parameter",
+            "+(x::T, y::T) where {T<:Real} = x\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unused-type-parameter",
+            "==(a::T, b::T) where {T} = a === b\n"
+        ),
+        0
+    );
+}
+
+#[test]
 fn unused_type_parameter_ignores_body_use() {
     assert_eq!(
         count(
