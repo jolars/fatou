@@ -2,7 +2,7 @@
 
 [![Build and
 Test](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml/badge.svg?branch=main)](https://github.com/jolars/fatou/actions/workflows/build-and-test.yml)
-[![Documentation](https://github.com/jolars/fatou/actions/workflows/docs.yml/badge.svg?branch=main)](https://fatou.dev/)
+[![Crates.io](https://img.shields.io/crates/v/fatou.svg?logo=rust)](https://crates.io/crates/fatou)
 [![Open
 VSX](https://img.shields.io/open-vsx/v/jolars/fatou?logo=vsix)](https://open-vsx.org/extension/jolars/fatou)
 [![VS
@@ -63,8 +63,8 @@ alongside formatting (whole-document and range) and diagnostics (push and pull).
 The **Fatou** extension for VS Code/Open VSX (and Positron)
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
 [Open VSX](https://open-vsx.org/extension/jolars/fatou)) bundles the binary and
-starts the server automatically; see [`editors/code`](editors/code).
-For Neovim and other editors, see the [editor setup
+starts the server automatically; see [`editors/code`](editors/code). For Neovim
+and other editors, see the [editor setup
 guide](https://fatou.dev/guide/editors.html).
 
 ## CI integration
