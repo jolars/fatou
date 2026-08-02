@@ -29,16 +29,6 @@
 
 ## Formatter
 
-- [x] Stop a trailing `key => [bracket]` pair from hugging in a multi-item list.
-  A homogeneous mapping like `Dict("a" => [x], "b" => [y], "c" => [z])` used to
-  keep every pair flat on the opening line and explode only the last, relocating
-  the asymmetry. Now `suppress_bare_bracket_pair_hug` downgrades the trailing hug
-  when the tail is a pair whose innermost value is a *bare* bracket literal
-  (`[]`/`()`/`{}`) and the list has >1 item — for both calls and collections. A
-  sole-argument pair still hugs, a call/curly-valued tail still hugs, and a direct
-  bare-literal arg (`map(cb, [a, b])`) still hugs. Gated by `pair_list_no_hug`;
-  updated the `mapping` case in `pair_hug`.
-
 - [ ] Canonicalize the gap before a macro's *attached* argument
   (`lower_macro_call` in `src/formatter/rules.rs`). The gap is preserved
   verbatim because it is meaning-bearing whenever a `[…]`/`(…)` suffix follows
@@ -46,13 +36,6 @@
   `{T}[x]`), so `@m{a}` and `@m {a}` both survive even where no suffix makes
   them differ. Deciding "no suffix follows" needs the parent context, which
   `lower_macro_call` does not have today.
-
-- [x] Prefer breaking a function signature's argument list over exploding a
-  short `where` clause. A single-parameter bound is now atomic: `lower_where`
-  renders `where {T}` (and bare `where T`) as flat, non-breaking `{T}`, so an
-  over-width `f(a, b, c) where {T}` breaks the args and keeps `) where {T}` on
-  the closing line. A multi-parameter bound stays a breakable exploding group
-  (`where_break` unchanged). Gated by `where_bare_signature_break`.
 
 - [ ] Extend the where-bound break-priority to *short multi-parameter* bounds.
   A short but multi-param bound with long args (`f(longargs...) where {T, S}`)
@@ -67,14 +50,6 @@
 
 ### Rules
 
-- [x] `julia-version-compat` (correctness, syn, Error): flag syntax newer than
-  the project's declared Julia support range. Target resolved by precedence
-  (`--julia-version` > `[julia] version` > `Project.toml` `[compat]` >
-  `Manifest.toml julia_version`), carried on `ResolvedRules` into each
-  `RuleContext`. Seed feature table: `public` (1.11), `import/using ... as`
-  (1.6). Follow-ups: grow the feature table as the parser exposes more
-  version-gated kinds; wire the target into the `--fix` path (`fix_source`) and
-  the LSP (from its resolved `Environment`), both currently `None`.
 - [ ] `index-from-length` (suspicious, syn, opinionated): `for i in
   1:length(x)` where `i` indexes `x` -> suggest `eachindex`/`axes`; also
   iterating a bare numeric literal (`for i in 3.5`). Name-based match on
@@ -87,95 +62,9 @@
 
 ## Language server
 
-- [x] On-disk cache keyed by (name, version or `git-tree-sha1`), harvested in
-  parallel (rayon) on the index pool, hot-swapped into the HIGH-durability
-  `LibraryIndex` salsa input. `src/index/cache.rs` holds an `IndexCache` of
-  postcard-serialized `PackageIndex` entries at `<cache>/index/v<FORMAT>-<ver>/
-  <name>/<key>.postcard` (atomic temp+rename, header-validated, best-effort),
-  keyed by `git-tree-sha1` for registered packages and the Julia version for
-  Base/stdlib (`CacheKey`). `harvest_libraries_parallel` (`src/index.rs`) and
-  `build_system_library_cached` (`src/index/base.rs`) harvest each package
-  concurrently on a dedicated capped rayon pool (`index_pool_size`,
-  `src/lsp/task_pool.rs`) built in `spawn_workspace_harvester`; a warm cache
-  reloads instead of re-parsing. The swap and open-file re-analysis reuse the
-  existing `set_library` + `refresh_graph_diagnostics`/`DiagnosticsRefresh`
-  path. Covered by `src/index/cache.rs` unit tests and
-  `tests/parallel_harvest.rs`.
 - [ ] Maybe: a `fatou index` CLI subcommand to warm and inspect the cache.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
-
-### Architecture & robustness audit
-
-Cross-applied from the arity and badness audits (both modeled on
-rust-analyzer). Fatou is already ahead on several axes that are still open there
-— `positionEncoding` negotiation, `didChangeWatchedFiles` watchers, salsa
-durability tiers (HIGH `LibraryIndex`, LOW `SourceFile`/`WorkspaceFiles`),
-firewall queries, an opaque `FileId`/`FileSourceMap`, and read-pool per-job
-panic isolation — so those need no work. The items below are the remaining gaps.
-
-- [x] Analysis-thread + main-loop panic guard. A `guard(label, f)` wraps every
-  analysis-thread `select!` arm (`src/lsp/analysis_thread.rs`) and the main
-  loop's request/notification/outbound dispatch (`src/lsp/server.rs`) in
-  `catch_unwind`, mirroring the read pool's per-job isolation
-  (`src/lsp/task_pool.rs`). A panic mid-write no longer kills the sole db writer
-  and zombies the server. Covered by
-  `guard_contains_a_panic_and_reports_completion`.
-- [x] Mutex-poison recovery. `IncrementalDatabase::source_map` now locks through
-  a helper that recovers via `PoisonError::into_inner` instead of
-  `.expect(...)`, so a panic caught by the guard above leaves the path→input map
-  usable rather than crashing the next access. Covered by
-  `poisoned_source_map_lock_recovers`.
-- [x] Parser stuck-loop guard. `ParserCtx` (`src/parser/context.rs`) carries a
-  step budget ticked by every peek primitive and reset on frontier progress; a
-  non-advancing loop trips `PARSER_STEP_LIMIT` and panics loudly instead of
-  hanging (the LSP read pool and analysis-thread guard recover; the CLI aborts
-  with a diagnosable message). Adapted from badness's `grammar.rs` to fatou's
-  functional index-threaded parser rather than a stateful cursor. Covered by
-  `step_guard_trips_when_wedged` and `step_budget_resets_on_progress`. Directly
-  targets the `timeout` class in the smoke-test corpus.
-
-- [x] **P1 — Request cancellation + stale-read protocol.** Read replies now
-  route back through the main loop (`Outbound::ReadReply`), which tracks live
-  request ids in `GlobalState.inflight_reads`: `$/cancelRequest` →
-  `RequestCancelled` (-32800), and a reply against a superseded buffer →
-  `ContentModified` (-32801). The main loop drains client input ahead of read
-  replies so cancels are prompt and deterministic. Covered by unit tests on the
-  gate/registry (`src/lsp/state.rs`) plus E2E `cancel_request_yields_request_cancelled`
-  and `stale_read_yields_content_modified` (`tests/lsp.rs`). Cancellation is
-  cooperative: the in-flight salsa work runs to completion and its result is
-  discarded. **Follow-up:** true per-request interruption (salsa's
-  `trigger_cancellation()` is storage-global, so it can't target one read
-  without cancelling concurrent siblings).
-- [x] **P2 — Concurrency/scheduler test coverage.** `decide`'s idle branch is
-  unit-tested and the supersede branch has pure-decision tests, but nothing
-  drove the *cancellation signal flow* end to end. Covered now by
-  `coalesces_rapid_didchanges_and_gates_stale_versions` (`tests/lsp.rs`): a burst
-  of `didChange`s over `Connection::memory()` collapses into far fewer publishes
-  than edits (coalescing), versions arrive monotonically with none past the last
-  edit (the main-loop version gate drops stale results), and the final
-  diagnostics reflect the last buffer. The `SupersedeAndStart` →
-  `trigger_cancellation` wiring is driven deterministically by the white-box
-  `try_dispatch_supersedes_inflight_and_triggers_cancellation`
-  (`src/lsp/analysis_thread.rs`), which dispatches v1, leaves it in flight, then
-  dispatches v2 and asserts the slot advances via the cancellation branch.
-- [x] **P2 — Work-done progress for the harvester.** `spawn_workspace_harvester`
-  (`src/lsp/server.rs`) reports its indexing passes via `$/progress`, gated on
-  the client's `window.workDoneProgress` capability: a `HarvestProgress` reporter
-  (`src/lsp/progress.rs`) mints a token, then emits begin/report/end around the
-  full harvest and each single-package re-harvest.
-- [x] **P3 — Content-derived pull `resultId`.** Both pull responses now key off
-  a content hash (`src/lsp/result_id.rs`: hex SipHash of the findings'
-  serialization, seeded deterministically). Pull diagnostics thread the client's
-  `previous_result_id` through the `DocumentDiagnostic` read job and collapse to
-  `Unchanged` on a match, else a `Full` report carrying the new id
-  (`diagnostic_report`, `src/lsp/read_jobs.rs`). Semantic tokens now advertise
-  `full/delta` (`server.rs`) and derive the `resultId` from the encoded token
-  stream; a matching `full/delta` re-pull answers an empty edit list
-  (`semantic_tokens_delta`), else the full set is resent (we recompute rather
-  than diff, so the win is purely the unchanged case). The id keys off token
-  positions/lengths/kinds, not identifier text, so a rename that leaves the
-  layout intact legitimately re-pulls unchanged.
 
 ## Tooling
 
