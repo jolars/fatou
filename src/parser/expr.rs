@@ -4249,9 +4249,19 @@ fn parse_macro_args(
             // bracket or an array/comprehension-element context.
             Some(TokKind::ForKw) if inside_brackets || array_mode => break,
             _ => {
+                // A bare comma after a space-form argument folds it into a
+                // bare-tuple argument rather than separating arguments
+                // (`@show a, b` ⇒ `(macrocall @show (tuple a b))`, `@show a, b =
+                // c` ⇒ `(macrocall @show (= (tuple a b) c))`). The macro grabs
+                // the comma greedily even inside an enclosing list, so it wins
+                // over the container's separator (`[@m a, b]` ⇒ `(vect (macrocall
+                // @m (tuple a b)))`, `f(@m a, b)` ⇒ `(call f (macrocall @m (tuple
+                // a b)))`). `stmt_comma` here drives that; the container never
+                // sees the comma because the argument consumes it.
                 let arg_flags = ExprFlags {
                     inside_brackets,
                     array_mode: true,
+                    stmt_comma: true,
                     ..ExprFlags::default()
                 };
                 match parse_expr_in(ctx.tokens(), next, 0, diagnostics, arg_flags) {

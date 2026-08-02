@@ -1,0 +1,1 @@
+(toplevel (macrocall @show (= (tuple a b) c)) (macrocall @foo a (tuple b c)) (vect (macrocall @m (tuple a b))) (call f (macrocall @m (tuple a b))))

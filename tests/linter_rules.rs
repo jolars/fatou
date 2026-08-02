@@ -106,6 +106,38 @@ fn unused_binding_flags_dead_local_in_macro_block_argument() {
 }
 
 #[test]
+fn unused_binding_exempts_direct_macro_argument_assignment() {
+    // `@show a, b = expr` passes the whole tuple-assignment to the macro as its
+    // argument, so `@show` reads every name (it prints each). The names are not
+    // dead locals even though the surrounding scope never reads them again.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    @show typ, uniform_size = compute()\nend\n"
+        ),
+        0
+    );
+    // A single-name direct argument assignment is likewise a macro read.
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    @show x = compute()\nend\n"
+        ),
+        0
+    );
+    // The exemption is scoped to the direct argument: a dead local nested inside
+    // a block the macro splices unevaluated stays a genuine finding (mirrors the
+    // scope-transparent `@testset` case above).
+    assert_eq!(
+        count(
+            "unused-binding",
+            "function f()\n    @testset begin\n        x = compute()\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
 fn unused_binding_exempts_attribute_dsl_macro_block() {
     // A consuming attribute DSL reads each `name = default` in its block as an
     // attribute, so those names are not dead locals.

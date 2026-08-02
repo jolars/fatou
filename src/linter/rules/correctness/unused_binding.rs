@@ -45,6 +45,31 @@ fn in_attribute_dsl_macro(root: &SyntaxNode, range: TextRange) -> bool {
     false
 }
 
+/// Whether `range` is an assignment target passed *directly* as a macro-call
+/// argument, as opposed to nested inside a block the macro runs as written. A
+/// macro receives its argument as data and can reference every name in it
+/// (`@show a, b = expr` prints and returns each name), so such a target is not a
+/// dead local. The walk stops at the first enclosing [`SyntaxKind::BLOCK`]: a
+/// name inside a macro's `begin ... end` body (or any function/`do`/`let` body
+/// spliced in unevaluated) is reached only after crossing that block, so it
+/// stays a genuine local and is still flagged (matching the scope-transparent
+/// `@testset` case). Only a target reached before any block — a direct argument
+/// expression — is exempt.
+fn is_direct_macro_argument(root: &SyntaxNode, range: TextRange) -> bool {
+    let mut node = match root.covering_element(range) {
+        rowan::NodeOrToken::Token(t) => t.parent(),
+        rowan::NodeOrToken::Node(n) => Some(n),
+    };
+    while let Some(current) = node {
+        match current.kind() {
+            SyntaxKind::BLOCK => return false,
+            SyntaxKind::MACRO_CALL => return true,
+            _ => node = current.parent(),
+        }
+    }
+    false
+}
+
 /// The final name component of a macro call's `@name`: `gen_defaults!` for
 /// `@gen_defaults!`, `recipe` for `Makie.@recipe`.
 fn macro_call_name(call: &SyntaxNode) -> Option<String> {
@@ -92,6 +117,11 @@ impl Rule for UnusedBinding {
             // A consuming attribute DSL reads its block's bindings as
             // attributes, so they are not dead locals.
             if in_attribute_dsl_macro(ctx.root, binding.def_range) {
+                continue;
+            }
+            // An assignment target passed directly as a macro argument
+            // (`@show a, b = expr`) is data the macro reads, not a dead local.
+            if is_direct_macro_argument(ctx.root, binding.def_range) {
                 continue;
             }
             sink.push(Diagnostic::new(

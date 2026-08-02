@@ -108,10 +108,19 @@
   interpolated identifier as a read (a field access `a.b` reads `a`, not `b`).
   This only suppresses false positives; `raw"$x"` is over-counted, which is the
   safe direction since a macro's interpolation semantics are unknowable.
-- [ ] `unused-binding` on `@show a, b = expr` (GLMakie `GLInfo.jl`, ~4): the
+- [x] `unused-binding` on `@show a, b = expr` (GLMakie `GLInfo.jl`, ~4): the
   whole tuple-assignment is the macro's argument, so `@show` uses every name,
-  but the walker flags the non-first names (`typ`, `uniform_size`). Same
-  macro-argument-opacity root as the DSL-block class.
+  but the walker flagged the non-first names (`typ`, `uniform_size`). The root
+  was a parser divergence: a space-form macro folds a trailing comma into a
+  bare-tuple argument (`@show a, b = c` -> `(macrocall @show (= (tuple a b) c))`,
+  greedy even inside an enclosing list), but Fatou stopped the macro at the
+  first comma, spilling the later names into an outer tuple-assignment. Fixed by
+  enabling `stmt_comma` for space-form macro args (`parse_macro_args`), matching
+  JuliaSyntax (oracle fixture `macro_bare_tuple_argument`). With the assignment
+  now correctly inside the macro call, `unused_binding.rs` exempts an assignment
+  target reached directly as a macro argument (`is_direct_macro_argument`,
+  stopping at the first enclosing `BLOCK` so a dead local in a spliced
+  `@testset` body still flags).
 - [ ] `unused-import` misses two within-file use forms (spans are otherwise
   exact; ~71% of the 264 Makie findings are the known file-scoped/`include`
   limitation, not these). Verified with `julia`: (1) an imported name used only
