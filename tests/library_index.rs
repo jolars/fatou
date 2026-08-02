@@ -41,6 +41,8 @@ fn empty_package(name: &str) -> PackageIndex {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         },
         members: Vec::new(),
         member_modules: Default::default(),
@@ -353,6 +355,8 @@ fn nested_module_symbols_do_not_conflate_with_the_root() {
         consts: Vec::new(),
         macros: Vec::new(),
         submodules: Vec::new(),
+        usings: Vec::new(),
+        imported_names: Vec::new(),
     });
     // Membership derives from the include graph: the entry places `a.jl` at
     // the root and `sub.jl` inside `module Sub`.
@@ -430,6 +434,8 @@ fn file_internal_nested_module_symbols_are_attributed_to_that_module() {
         consts: Vec::new(),
         macros: Vec::new(),
         submodules: Vec::new(),
+        usings: Vec::new(),
+        imported_names: Vec::new(),
     });
     // Both files are included at the entry's top level, so each hosts at the
     // *root* module; `sub.jl` opens `Sub` inline, so its `f` belongs to `Sub`

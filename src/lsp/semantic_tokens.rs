@@ -322,7 +322,7 @@ fn classify_free_read<P: PackageSource + ?Sized>(
             library_kind(&packages.package(&module)?.root, &name)
         }
         Resolution::Using { module, name } => using_kind(model, packages, &module, &name),
-        Resolution::Unresolved => None,
+        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
     }
 }
 
@@ -695,6 +695,8 @@ mod tests {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         }
     }
 

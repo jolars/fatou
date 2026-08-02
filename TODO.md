@@ -151,7 +151,7 @@
   tier 2: also resolve `wanted == module.name` (Value namespace). Verified with
   `julia` that a module sees its own name but a nested submodule does *not* see
   an ancestor's, so the match is exactly the enclosing module's own name.
-- [ ] `undefined-name` on a name imported by a *sibling* file's whole-module
+- [x] `undefined-name` on a name imported by a *sibling* file's whole-module
   `using` (SLOPE.jl `cv.jl`: `SparseMatrixCSC`). `include` splices every member
   file into one module, so `using SparseArrays` in `models.jl` makes
   `SparseMatrixCSC` available module-wide, including `cv.jl` — but the rule

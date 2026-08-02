@@ -267,6 +267,8 @@ fn synthetic_index(name: &str, list: &str) -> PackageIndex {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         },
         members: Vec::new(),
         member_modules: Default::default(),

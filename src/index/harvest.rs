@@ -16,6 +16,7 @@ use rowan::TextRange;
 
 use crate::ast::{AstNode, AstToken, CallExpr, Expr, HasArgList};
 use crate::project::{include_target, resolve_target};
+use crate::semantic::collect_import_clauses;
 use crate::semantic::signature::{annotation_parts, has_call_core, peel_signature, type_name_of};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -68,6 +69,8 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
         consts: Vec::new(),
         macros: Vec::new(),
         submodules: Vec::new(),
+        usings: Vec::new(),
+        imported_names: Vec::new(),
     };
 
     match std::fs::read_to_string(entry) {
@@ -133,6 +136,8 @@ pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
         consts: Vec::new(),
         macros: Vec::new(),
         submodules: Vec::new(),
+        usings: Vec::new(),
+        imported_names: Vec::new(),
     };
     for child in cst.children() {
         harvester.walk_item(&child, Path::new(""), &mut root, false, None);
@@ -256,6 +261,7 @@ impl Harvester {
             SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => {
                 self.handle_name_list(node, file, dest);
             }
+            SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => self.handle_load(node, dest),
             SyntaxKind::CONST_STMT => self.handle_const(node, file, dest, pending_doc),
             _ => {}
         }
@@ -379,6 +385,8 @@ impl Harvester {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         };
         self.module_path.push(name);
         if let Some(block) = block {
@@ -646,6 +654,41 @@ impl Harvester {
                 doc: if i == 0 { doc.clone() } else { None },
                 loc: self.loc(file, range),
             });
+        }
+    }
+
+    /// Record a module-level `using`/`import` into the module's load surface.
+    /// Every clause's bound name (module name, item, or `as` alias) joins
+    /// [`ModuleIndex::imported_names`], visible to sibling files as a module
+    /// global. A whole-module `using X` additionally records its path in
+    /// [`ModuleIndex::usings`], since `X`'s exports become free reads
+    /// module-wide. An item list (`using X: a`) binds only its items — the base
+    /// path brings no export surface — and `import` never opens exports.
+    fn handle_load(&self, node: &SyntaxNode, dest: &mut ModuleIndex) {
+        let is_using = node.kind() == SyntaxKind::USING_STMT;
+        let (before, after) = collect_import_clauses(node);
+        match after {
+            Some(items) => {
+                for clause in &items {
+                    if let Some((name, _)) = clause.binding_name() {
+                        dest.imported_names.push(name.to_string());
+                    }
+                }
+            }
+            None => {
+                for clause in &before {
+                    if let Some((name, _)) = clause.binding_name() {
+                        dest.imported_names.push(name.to_string());
+                    }
+                    if is_using {
+                        let path = clause.path();
+                        dest.usings.push(ModuleUsing {
+                            leading_dots: path.leading_dots,
+                            components: path.components.iter().map(|c| c.to_string()).collect(),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -1171,6 +1214,8 @@ mod tests {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         };
         harvester.walk_text(text, Path::new("/pkg/src/Pkg.jl"), &mut root, true);
         root

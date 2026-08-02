@@ -623,7 +623,8 @@ pub(crate) fn outgoing_calls_via_db(
                         library_item(&abs, span, &name, encoding, &mut parsed_files)
                     })
                 }
-                Resolution::Unresolved => None,
+                // A sibling file's module-level import: def site not recorded.
+                Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
             };
             let Some(target) = target else {
                 continue;

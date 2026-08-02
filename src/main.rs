@@ -306,8 +306,24 @@ fn run_lint(
     }
 
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
-    let result = linter::check_paths_with_config(&paths, &config.lint, exclude, julia_target)
-        .map_err(|e| e.to_string())?;
+
+    // A resolution-dependent rule (`undefined-name`, `call-arity`) resolves
+    // names across files: harvest the enclosing project so a sibling file's
+    // `using`/`import` and same-module globals resolve exactly as in the
+    // language server. The default lint selects neither, so it pays no harvest.
+    let library = if wants_project_resolution(&config.lint) {
+        harvest_project(&paths)
+    } else {
+        None
+    };
+    let project = match &library {
+        Some(lib) => linter::ProjectContext::Harvested(lib),
+        None => linter::ProjectContext::SystemOnly,
+    };
+
+    let result =
+        linter::check_paths_with_config(&paths, &config.lint, exclude, julia_target, project)
+            .map_err(|e| e.to_string())?;
     warn_unknown_rules(&result.unknown_rules);
 
     let diagnostics: Vec<_> = result
@@ -330,6 +346,50 @@ fn run_lint(
         eprintln!("checked {} file(s): clean", result.checked_files);
         Ok(ExitCode::SUCCESS)
     }
+}
+
+/// Whether any selected rule needs project-wide name resolution. Both such
+/// rules are default-off (they require project context to be sound), so a plain
+/// `select` check suffices and keeps the harvest off the default `fatou lint`.
+fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
+    const RESOLUTION_RULES: [&str; 2] = ["undefined-name", "call-arity"];
+    RESOLUTION_RULES.iter().any(|id| {
+        config
+            .select
+            .as_deref()
+            .is_some_and(|sel| sel.iter().any(|r| r == id))
+            && !config.ignore.iter().any(|r| r == id)
+    })
+}
+
+/// Harvest the environment enclosing the lint targets — Base/Core/stdlib and
+/// manifest dependencies plus the workspace package — cached and in parallel,
+/// exactly as the language server does. `None` when no environment resolves (a
+/// loose file outside any project), which leaves the lint in single-file mode.
+fn harvest_project(paths: &[PathBuf]) -> Option<fatou::index::HarvestedLibrary> {
+    use fatou::environment::{self, EnvContext};
+    let env = environment::resolve(&EnvContext::from_process(lint_anchor(paths)))
+        .ok()
+        .flatten()?;
+    let pool = rayon::ThreadPoolBuilder::new().build().ok()?;
+    let cache = fatou::index::IndexCache::open();
+    Some(fatou::index::harvest_libraries_parallel(
+        std::slice::from_ref(&env),
+        cache.as_ref(),
+        &pool,
+    ))
+}
+
+/// The directory to resolve the environment from: the first target's directory
+/// (its parent when it is a file), else the current directory.
+fn lint_anchor(paths: &[PathBuf]) -> PathBuf {
+    let first = paths.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+    let anchor = if first.is_file() {
+        first.parent().map(Path::to_path_buf).unwrap_or(first)
+    } else {
+        first
+    };
+    std::path::absolute(&anchor).unwrap_or(anchor)
 }
 
 /// Apply fixes across every discovered file, writing changed files back, then

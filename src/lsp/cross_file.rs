@@ -155,6 +155,8 @@ pub(crate) mod test_support {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         };
         let members: Vec<PathBuf> = files.iter().map(|(rel, _)| member_path(rel)).collect();
         // No include structure: every member's host falls back to the root

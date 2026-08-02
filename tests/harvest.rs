@@ -6,7 +6,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use fatou::index::{HarvestDiagnostic, ModuleIndex, harvest_entry, harvest_package_named};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use fatou::index::{
+    HarvestDiagnostic, HarvestedLibrary, ModuleIndex, harvest_entry, harvest_package_named,
+};
 
 /// A unique temp directory removed on drop. Avoids a `tempfile`
 /// dev-dependency (mirrors `tests/environment.rs`).
@@ -175,6 +180,102 @@ fn include_chain_splices_into_top_module() {
             Path::new("src/a.jl"),
             Path::new("src/b.jl"),
         ],
+    );
+}
+
+#[test]
+fn module_level_loads_are_captured_module_wide() {
+    // `include` splices every file into one module, so a `using`/`import` in
+    // one file is visible in every other. The harvest records the module's
+    // whole-module `using` export surface and every bound name, so a sibling
+    // file's free reads can resolve against them.
+    let tmp = TempDir::new();
+    write(
+        &tmp.path().join("src/M.jl"),
+        "module M\ninclude(\"a.jl\")\ninclude(\"b.jl\")\nend\n",
+    );
+    write(
+        &tmp.path().join("src/a.jl"),
+        "using SparseArrays\nimport Foo\nusing Bar: baz\n",
+    );
+    write(&tmp.path().join("src/b.jl"), "f(x) = 1\n");
+    let index = harvest_package_named(tmp.path(), "M");
+    assert!(index.diagnostics.is_empty(), "{:?}", index.diagnostics);
+
+    // The whole-module `using` opens SparseArrays' export surface; the item
+    // `using Bar: baz` binds only `baz`, so `Bar` is not an export source.
+    let using_paths: Vec<&[String]> = index
+        .root
+        .usings
+        .iter()
+        .map(|u| u.components.as_slice())
+        .collect();
+    assert_eq!(using_paths, [["SparseArrays".to_string()].as_slice()]);
+
+    // Each load's bound name is a module global: `SparseArrays` and `Foo`
+    // (module names of the two whole-module loads) and `baz` (the item); the
+    // item base `Bar` binds nothing.
+    let mut names = index.root.imported_names.clone();
+    names.sort_unstable();
+    assert_eq!(names, ["Foo", "SparseArrays", "baz"]);
+}
+
+#[test]
+fn module_level_load_lands_in_its_own_module() {
+    // A `using` inside a nested `module` belongs to that module, not the root.
+    let tmp = TempDir::new();
+    write(
+        &tmp.path().join("src/Pkg.jl"),
+        "module Pkg\nusing RootDep\nmodule Sub\nusing SubDep\nend\nend\n",
+    );
+    let index = harvest_package_named(tmp.path(), "Pkg");
+    let root_paths: Vec<&[String]> = index
+        .root
+        .usings
+        .iter()
+        .map(|u| u.components.as_slice())
+        .collect();
+    assert_eq!(root_paths, [["RootDep".to_string()].as_slice()]);
+    assert_eq!(index.root.submodules.len(), 1);
+    let sub_paths: Vec<&[String]> = index.root.submodules[0]
+        .usings
+        .iter()
+        .map(|u| u.components.as_slice())
+        .collect();
+    assert_eq!(sub_paths, [["SubDep".to_string()].as_slice()]);
+}
+
+#[test]
+fn workspace_member_maps_files_to_host_modules() {
+    let tmp = TempDir::new();
+    write(
+        &tmp.path().join("src/Pkg.jl"),
+        "module Pkg\ninclude(\"a.jl\")\nmodule Sub\ninclude(\"s.jl\")\nend\nend\n",
+    );
+    write(&tmp.path().join("src/a.jl"), "a() = 1\n");
+    write(&tmp.path().join("src/s.jl"), "s() = 1\n");
+    let index = harvest_package_named(tmp.path(), "Pkg");
+    let lib = HarvestedLibrary {
+        packages: BTreeMap::from([("Pkg".to_string(), Arc::new(index))]),
+        roots: BTreeMap::from([("Pkg".to_string(), tmp.path().to_path_buf())]),
+        workspaces: vec!["Pkg".to_string()],
+    };
+
+    // A root-hosted file: empty host module path.
+    let (_, host) = lib
+        .workspace_member(&tmp.path().join("src/a.jl"))
+        .expect("a.jl is a member");
+    assert!(host.is_empty(), "{host:?}");
+    // A file included inside `module Sub`: hosted there.
+    let (_, sub) = lib
+        .workspace_member(&tmp.path().join("src/s.jl"))
+        .expect("s.jl is a member");
+    let sub: Vec<&str> = sub.iter().map(|s| s.as_str()).collect();
+    assert_eq!(sub, ["Sub"]);
+    // A file outside the include closure is not a member.
+    assert!(
+        lib.workspace_member(&tmp.path().join("src/loose.jl"))
+            .is_none()
     );
 }
 

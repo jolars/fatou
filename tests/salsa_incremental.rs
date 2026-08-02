@@ -244,6 +244,8 @@ fn host_module_of_backdates_across_graph_rederivations() {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         },
         members: Vec::new(),
         member_modules: Default::default(),

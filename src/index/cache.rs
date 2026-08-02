@@ -30,7 +30,7 @@ use super::model::PackageIndex;
 /// entries an older build wrote unreadable or wrong (a new `postcard` layout, a
 /// [`PackageIndex`] field change). Recorded in every entry header and baked into
 /// the cache path, so mismatched entries are ignored rather than mis-decoded.
-const CACHE_FORMAT: u32 = 2;
+const CACHE_FORMAT: u32 = 3;
 
 /// The build identity stamped into every entry: `fatou@<version>`. Two builds at
 /// the same [`CACHE_FORMAT`] can still harvest different shapes (the harvester
@@ -245,6 +245,8 @@ mod tests {
                 consts: Vec::new(),
                 macros: Vec::new(),
                 submodules: Vec::new(),
+                usings: Vec::new(),
+                imported_names: Vec::new(),
             },
             members: vec![PathBuf::from(format!("src/{name}.jl"))],
             member_modules: Default::default(),

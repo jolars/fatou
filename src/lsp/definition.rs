@@ -368,7 +368,9 @@ fn free_read_locations<P: PackageSource>(
         Resolution::Using { module, name } => {
             library_from_using(model, packages, &module, &name, encoding)
         }
-        Resolution::Unresolved => Vec::new(),
+        // A sibling file's module-level import: navigation to the `import` site
+        // is deferred, so no definition location.
+        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => Vec::new(),
     }
 }
 

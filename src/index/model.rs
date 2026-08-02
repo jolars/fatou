@@ -83,6 +83,33 @@ pub struct ModuleIndex {
     pub consts: Vec<ConstDef>,
     pub macros: Vec<MacroDef>,
     pub submodules: Vec<ModuleIndex>,
+    /// Whole-module `using X` clauses written in any file spliced into this
+    /// module, in walk order. An `include` splices every member file into one
+    /// module, so a `using`'s exports are visible in every file of the module;
+    /// this lets a sibling file's free reads resolve against them. Only the
+    /// whole-module form is recorded (an item list `using X: a` binds explicit
+    /// names via [`imported_names`](Self::imported_names) instead).
+    pub usings: Vec<ModuleUsing>,
+    /// Names any module-level `using`/`import` in this module binds: the module
+    /// name of `import X`/`using X`, each item of `using X: a`/`import X: a`,
+    /// and any `as` alias. `@`-prefixed for macros, bare for values, matching
+    /// [`ExportedName`]/resolution's sigil convention. A sibling file sees these
+    /// as module globals. Excludes a `using X`'s export *surface*, which lives
+    /// in [`usings`](Self::usings).
+    pub imported_names: Vec<String>,
+}
+
+/// One whole-module `using X.Y` clause harvested from a module's files. Mirrors
+/// the resolvable-path parts of `semantic::ModulePath` (relative dots and the
+/// dotted components), lowered to owned strings so the index stays serializable
+/// and depot-independent. An empty [`components`](Self::components) marks an
+/// interpolated path (`using $M`); a nonzero [`leading_dots`](Self::leading_dots)
+/// a relative one (`using .M`) — both unresolvable against the library, so the
+/// `has_unresolvable_using` gate bails on them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleUsing {
+    pub leading_dots: u32,
+    pub components: Vec<String>,
 }
 
 impl ModuleIndex {

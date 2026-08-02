@@ -26,7 +26,8 @@ pub use cache::{CacheKey, IndexCache};
 pub use harvest::{harvest_entry, harvest_package, harvest_package_named, harvest_tree};
 pub use model::{
     ConstDef, DefLocation, Docstring, ExportedName, Field, FunctionGroup, HarvestDiagnostic,
-    MacroDef, Method, ModuleIndex, PackageIndex, Param, Span, TypeDef, TypeKind, Visibility,
+    MacroDef, Method, ModuleIndex, ModuleUsing, PackageIndex, Param, Span, TypeDef, TypeKind,
+    Visibility,
 };
 pub use typeexpr::TypeExpr;
 
@@ -46,6 +47,53 @@ pub struct HarvestedLibrary {
     /// enclosing module's globals (see [`Resolver`](crate::resolve::Resolver))
     /// and it is re-harvested on save.
     pub workspaces: Vec<String>,
+}
+
+impl HarvestedLibrary {
+    /// The workspace package and host module path for `path`, when it is a
+    /// source file of one of the dev packages (else `None`). The CLI counterpart
+    /// of the language server's
+    /// [`workspace_member`](crate::incremental::Analysis::workspace_member): the
+    /// longest matching `src/` prefix picks the package, and the host module
+    /// comes from the harvester's own
+    /// [`member_modules`](crate::index::PackageIndex::member_modules) record
+    /// (held in lockstep with the salsa include graph by a parity test), so no
+    /// graph rebuild is needed. Lets `fatou lint` resolve cross-file names
+    /// exactly as the server does.
+    pub fn workspace_member(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<(Arc<PackageIndex>, crate::resolve::ModulePath)> {
+        use crate::incremental::normalize_path;
+        let path = normalize_path(path);
+        // Longest matching `src/` prefix wins, so a nested package folder claims
+        // its own files (mirrors `incremental::workspace_package_for`).
+        let mut best: Option<(usize, &String)> = None;
+        for name in &self.workspaces {
+            let Some(root) = self.roots.get(name) else {
+                continue;
+            };
+            let src = normalize_path(&root.join("src"));
+            if !path.starts_with(&src) {
+                continue;
+            }
+            let depth = src.components().count();
+            if best.is_none_or(|(d, _)| depth > d) {
+                best = Some((depth, name));
+            }
+        }
+        let (_, name) = best?;
+        let pkg = self.packages.get(name)?;
+        let root = normalize_path(self.roots.get(name)?);
+        // The file's package-relative path keys its host module in the harvest.
+        // A file outside the include closure has no entry: not a member.
+        let rel = path.strip_prefix(&root).ok()?;
+        let host = pkg.member_modules.get(rel)?;
+        Some((
+            Arc::clone(pkg),
+            host.iter().map(smol_str::SmolStr::new).collect(),
+        ))
+    }
 }
 
 /// Harvest a whole resolved environment: Base/Core/stdlib from its located

@@ -69,9 +69,43 @@ impl std::fmt::Display for LintError {
 
 impl std::error::Error for LintError {}
 
+/// What the linter resolves free reads against. `SystemOnly` is the built-in
+/// Base/Core snapshot with no workspace (single-file mode: `undefined-name`
+/// stays opt-in and file-local). `Harvested` carries a project's harvested
+/// library and derives each file's workspace membership, so cross-file names —
+/// a sibling file's `using`/`import`, a same-module global — resolve exactly as
+/// they do in the language server.
+#[derive(Clone, Copy)]
+pub enum ProjectContext<'a> {
+    SystemOnly,
+    Harvested(&'a crate::index::HarvestedLibrary),
+}
+
+impl<'a> ProjectContext<'a> {
+    /// The [`ResolutionContext`] for the file at `path`, if any.
+    fn resolution_for(self, path: Option<&Path>) -> Option<ResolutionContext<'a>> {
+        match self {
+            ProjectContext::SystemOnly => Some(ResolutionContext {
+                packages: system_snapshot(),
+                workspace: None,
+            }),
+            ProjectContext::Harvested(lib) => Some(ResolutionContext {
+                packages: &lib.packages,
+                workspace: path.and_then(|p| lib.workspace_member(p)),
+            }),
+        }
+    }
+}
+
 /// Lint every `.jl` file under `paths` with default configuration.
 pub fn check_paths(paths: &[PathBuf]) -> Result<LintResult, LintError> {
-    check_paths_with_config(paths, &LintConfig::default(), &ExcludeFilter::none(), None)
+    check_paths_with_config(
+        paths,
+        &LintConfig::default(),
+        &ExcludeFilter::none(),
+        None,
+        ProjectContext::SystemOnly,
+    )
 }
 
 /// Lint every `.jl` file under `paths`, honoring `config` and `exclude`.
@@ -82,6 +116,7 @@ pub fn check_paths_with_config(
     config: &LintConfig,
     exclude: &ExcludeFilter,
     julia_target: Option<VersionRange>,
+    project: ProjectContext<'_>,
 ) -> Result<LintResult, LintError> {
     let files = collect_julia_files(paths, exclude).map_err(LintError::Discovery)?;
     let (rules, unknown_rules) = ResolvedRules::resolve(config);
@@ -125,7 +160,15 @@ pub fn check_paths_with_config(
                 .get(path)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            check_parsed(Some(path), text, &root, diagnostics, &rules, includes)
+            check_parsed(
+                Some(path),
+                text,
+                &root,
+                diagnostics,
+                &rules,
+                includes,
+                project,
+            )
         })
         .collect();
 
@@ -191,6 +234,7 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
         &parsed.diagnostics,
         rules,
         &include_problems,
+        ProjectContext::SystemOnly,
     )
 }
 
@@ -203,6 +247,7 @@ fn check_parsed(
     parse_diagnostics: &[crate::parser::ParseDiagnostic],
     rules: &ResolvedRules,
     includes: &[IncludeProblem],
+    project: ProjectContext<'_>,
 ) -> LintFileReport {
     if !parse_diagnostics.is_empty() {
         let diagnostics = parse_diagnostics
@@ -226,15 +271,11 @@ fn check_parsed(
     }
 
     let model = SemanticModel::build(root);
-    // The CLI resolves free reads against the built-in Base/Core export
-    // snapshot — deterministic and cheap, where harvesting a real install per
-    // lint run would not be. No workspace context: a bare file may be an
-    // `include`d fragment, which is exactly why `undefined-name` is opt-in
-    // here (the language server, which knows the workspace, enables it).
-    let resolution = Some(ResolutionContext {
-        packages: system_snapshot(),
-        workspace: None,
-    });
+    // The resolution the caller chose: the built-in Base/Core snapshot with no
+    // workspace (single-file mode — deterministic and cheap, and why
+    // `undefined-name` is opt-in there), or a harvested project library plus
+    // this file's workspace membership, which resolves cross-file names.
+    let resolution = project.resolution_for(path);
     let diagnostics = lint_parsed(path, text, root, &model, rules, resolution, includes);
 
     let status = if diagnostics.is_empty() {

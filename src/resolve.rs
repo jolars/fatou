@@ -33,8 +33,10 @@ use std::sync::Arc;
 use rowan::TextSize;
 use smol_str::SmolStr;
 
-use crate::index::{ModuleIndex, PackageIndex, Visibility};
-use crate::semantic::{Access, Binding, BindingId, BindingKind, LoadKind, ScopeId, SemanticModel};
+use crate::index::{ModuleIndex, ModuleUsing, PackageIndex, Visibility};
+use crate::semantic::{
+    Access, Binding, BindingId, BindingKind, LoadKind, ScopeId, ScopeKind, SemanticModel,
+};
 
 /// The namespace a name is resolved in. Julia keeps macros separate: `@time`
 /// and a value `time` never resolve to one another. `Ord` so it can key the
@@ -73,19 +75,74 @@ pub struct OccurrenceKey {
 /// file. (Item lists — `using X: a` — bind their names explicitly and don't
 /// gate the file.) Shared by the resolution-dependent lint rules
 /// (`undefined-name`, `call-arity`).
-pub fn has_unresolvable_using(model: &SemanticModel, packages: &dyn PackageSource) -> bool {
-    model.module_loads().iter().any(|load| {
-        if load.kind != LoadKind::Using || load.items.is_some() {
-            return false;
-        }
-        if load.path.leading_dots != 0 || load.path.components.is_empty() {
-            return true;
-        }
-        let Some(pkg) = packages.package(&load.path.components[0]) else {
-            return true;
-        };
-        module_at(&pkg.root, &load.path.components[1..]).is_none()
+pub fn has_unresolvable_using(
+    model: &SemanticModel,
+    packages: &dyn PackageSource,
+    workspace: Option<&(Arc<PackageIndex>, ModulePath)>,
+) -> bool {
+    // This file's own whole-module `using`s.
+    if model.module_loads().iter().any(|load| {
+        load.kind == LoadKind::Using
+            && load.items.is_none()
+            && module_path_unresolvable(load.path.leading_dots, &load.path.components, packages)
+    }) {
+        return true;
+    }
+    // Sibling files' whole-module `using`s, harvested per module: a `using` in
+    // any file of a module this file also lives in (its host module plus each
+    // nested `module` it opens) is visible module-wide, so an unresolvable one
+    // could export anything. Restricted to the file's own modules, not every
+    // package submodule, to avoid bailing on unrelated submodules' relative
+    // `using`s.
+    let Some((pkg, host)) = workspace else {
+        return false;
+    };
+    file_module_paths(model, host).iter().any(|path| {
+        module_at(&pkg.root, path).is_some_and(|module| {
+            module
+                .usings
+                .iter()
+                .any(|u| module_path_unresolvable(u.leading_dots, &u.components, packages))
+        })
     })
+}
+
+/// Whether a whole-module `using` path — `leading_dots` relative dots and the
+/// dotted `components` — fails to resolve against `packages`: a relative or
+/// interpolated path, an unharvested package, or a missing submodule. Shared by
+/// the model-based and harvested `has_unresolvable_using` scans. `S: AsRef<str>`
+/// so it accepts the model's `SmolStr` components and the index's `String`s.
+fn module_path_unresolvable<S: AsRef<str>>(
+    leading_dots: u32,
+    components: &[S],
+    packages: &dyn PackageSource,
+) -> bool {
+    if leading_dots != 0 || components.is_empty() {
+        return true;
+    }
+    let Some(pkg) = packages.package(components[0].as_ref()) else {
+        return true;
+    };
+    let rest: Vec<SmolStr> = components[1..].iter().map(SmolStr::new).collect();
+    module_at(&pkg.root, &rest).is_none()
+}
+
+/// The distinct module paths (relative to the package root) the file's reads
+/// resolve in: its host module and each nested `module` written in the file. The
+/// set `has_unresolvable_using`'s harvested scan and the resolver's workspace
+/// tiers agree on for this file.
+fn file_module_paths(model: &SemanticModel, host: &ModulePath) -> Vec<ModulePath> {
+    let mut paths = vec![host.clone()];
+    for (i, scope) in model.scopes().iter().enumerate() {
+        if scope.kind == ScopeKind::Module {
+            let mut path = host.clone();
+            path.extend(model.enclosing_module_path(ScopeId(i as u32)));
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
 }
 
 /// The submodule of `root` reached by following `path`, or `None` if any
@@ -115,6 +172,15 @@ pub enum Resolution {
     /// value, `@`-prefixed for a macro. The consumer looks `name` up in
     /// [`module_at`]`(&pkg.root, &module)`.
     Workspace { module: ModulePath, name: SmolStr },
+    /// A name a module-level `using`/`import` binds in a *sibling* file of the
+    /// enclosing workspace module (`import X`→`X`, `using X: a`→`a`, `… as Y`→
+    /// `Y`). An `include` splices every file into one module, so the binding is
+    /// module-wide. Ranks with tier 2 (an explicit module import outranks
+    /// `using`/Base), but stays distinct from [`Workspace`](Self::Workspace) so
+    /// references/rename do not treat it as a navigable definition — navigation
+    /// to the `import` site is deferred. `name` is bare for a value,
+    /// `@`-prefixed for a macro.
+    WorkspaceImport { name: SmolStr },
     /// An `export`ed name brought in by a whole-module `using` (tier 3).
     Using { module: SmolStr, name: SmolStr },
     /// An implicitly available Base/Core name (tier 4).
@@ -268,18 +334,30 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         // exactly `wanted == module.name`.
         if let Some(workspace) = &self.workspace {
             let path = self.full_module_path(workspace, self.model.scope_at(offset));
-            if let Some(module) = module_at(&workspace.pkg.root, &path)
-                && (module_defines(module, &wanted, namespace)
-                    || (namespace == Namespace::Value && module.name == wanted.as_str()))
-            {
-                return Resolution::Workspace {
-                    module: path,
-                    name: wanted,
-                };
+            if let Some(module) = module_at(&workspace.pkg.root, &path) {
+                if module_defines(module, &wanted, namespace)
+                    || (namespace == Namespace::Value && module.name == wanted.as_str())
+                {
+                    return Resolution::Workspace {
+                        module: path,
+                        name: wanted,
+                    };
+                }
+                // A name a sibling file's module-level `using`/`import` binds is
+                // a module global too, ranking with the definitions above.
+                if module_imports(module, &wanted) {
+                    return Resolution::WorkspaceImport { name: wanted };
+                }
             }
         }
-        // Tier 3: a whole-module `using`'s exports, in source order.
+        // Tier 3: a whole-module `using`'s exports, in source order — this
+        // file's, then those a sibling file opened module-wide.
         if let Some((module, name)) = self.using_export(&wanted, offset) {
+            return Resolution::Using { module, name };
+        }
+        if let Some(workspace) = &self.workspace
+            && let Some((module, name)) = self.workspace_using_export(workspace, &wanted, offset)
+        {
             return Resolution::Using { module, name };
         }
         // Tier 4: Base/Core implicit.
@@ -327,7 +405,12 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
                 &self.full_module_path(workspace, self.model.scope_at(offset)),
             )
         {
-            for name in defined_names(module, namespace) {
+            // Same-module top-level definitions, then the names a sibling file's
+            // module-level `using`/`import` binds — both module globals.
+            for name in defined_names(module, namespace)
+                .into_iter()
+                .chain(imported_names(module, namespace))
+            {
                 if seen.insert(name.clone()) {
                     out.push(Candidate {
                         name,
@@ -339,7 +422,8 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
             }
         }
 
-        // Tier 3: whole-module `using`'d exports, in source order.
+        // Tier 3: whole-module `using`'d exports, in source order — this file's,
+        // then those a sibling file opened module-wide.
         let at = self.model.scope_at(offset);
         for load in self.model.module_loads() {
             let Some(module) = self.using_module(load, at) else {
@@ -354,6 +438,29 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
                             module: display.clone(),
                         },
                     });
+                }
+            }
+        }
+        if let Some(workspace) = &self.workspace
+            && let Some(module) = module_at(
+                &workspace.pkg.root,
+                &self.full_module_path(workspace, self.model.scope_at(offset)),
+            )
+        {
+            for using in &module.usings {
+                let Some(target) = self.resolve_using(using) else {
+                    continue;
+                };
+                let display = SmolStr::new(using.components.last().unwrap());
+                for name in exported_names(&target, namespace) {
+                    if seen.insert(name.clone()) {
+                        out.push(Candidate {
+                            name,
+                            source: Source::Using {
+                                module: display.clone(),
+                            },
+                        });
+                    }
                 }
             }
         }
@@ -582,6 +689,47 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         None
     }
 
+    /// Tier 3 across files: the first whole-module `using` opened in any file of
+    /// the module enclosing `offset` (harvested into its
+    /// [`usings`](ModuleIndex::usings)) that exports `wanted`, as `(reporting
+    /// module, exported name)`. Mirrors [`using_export`](Self::using_export) but
+    /// sources the clauses from the workspace index rather than this file's
+    /// model, so a sibling file's module-wide `using` resolves.
+    fn workspace_using_export(
+        &self,
+        workspace: &WorkspaceCtx,
+        wanted: &SmolStr,
+        offset: TextSize,
+    ) -> Option<(SmolStr, SmolStr)> {
+        let path = self.full_module_path(workspace, self.model.scope_at(offset));
+        let module = module_at(&workspace.pkg.root, &path)?;
+        for using in &module.usings {
+            let Some(target) = self.resolve_using(using) else {
+                continue;
+            };
+            if module_exports(&target, wanted) {
+                let display = SmolStr::new(using.components.last().unwrap());
+                return Some((display, wanted.clone()));
+            }
+        }
+        None
+    }
+
+    /// The [`ModuleIndex`] a harvested whole-module `using` clause points at, or
+    /// `None` for a relative/interpolated path or a module the library has not
+    /// harvested. The [`ModuleUsing`] counterpart of
+    /// [`using_module`](Self::using_module); the returned module owns its data
+    /// via the package `Arc`.
+    fn resolve_using(&self, using: &ModuleUsing) -> Option<Arc<ModuleIndexHandle>> {
+        if using.leading_dots != 0 || using.components.is_empty() {
+            return None;
+        }
+        let pkg = self.packages.package(&using.components[0])?;
+        let rest: Vec<SmolStr> = using.components[1..].iter().map(SmolStr::new).collect();
+        resolve_module_path(&pkg.root, &rest)?;
+        Some(Arc::new(ModuleIndexHandle { pkg, rest }))
+    }
+
     /// Tier 4: `wanted` if Base or Core exports it (Base first).
     fn system_export(&self, wanted: &SmolStr) -> Option<(SmolStr, SmolStr)> {
         for module in ["Base", "Core"] {
@@ -701,6 +849,25 @@ fn module_defines(module: &ModuleIndex, wanted: &SmolStr, namespace: Namespace) 
     }
 }
 
+/// Whether a name a module-level `using`/`import` binds is recorded for
+/// `module` (see [`ModuleIndex::imported_names`]). Names are stored as typed —
+/// bare for a value, `@`-prefixed for a macro — matching `wanted`.
+fn module_imports(module: &ModuleIndex, wanted: &SmolStr) -> bool {
+    module.imported_names.iter().any(|n| n == wanted.as_str())
+}
+
+/// The names a module-level `using`/`import` binds in `module`, in the given
+/// namespace, as they would be typed. The completion counterpart of
+/// [`module_imports`].
+fn imported_names(module: &ModuleIndex, namespace: Namespace) -> Vec<SmolStr> {
+    module
+        .imported_names
+        .iter()
+        .filter(|n| in_namespace(n, namespace))
+        .map(SmolStr::new)
+        .collect()
+}
+
 /// Every name `module` defines at top level in `namespace`, as it would be typed
 /// (macros keep `@`), in definition order. The completion counterpart of
 /// [`module_defines`].
@@ -816,6 +983,8 @@ mod tests {
                 consts: Vec::new(),
                 macros: Vec::new(),
                 submodules,
+                usings: Vec::new(),
+                imported_names: Vec::new(),
             },
             members: Vec::new(),
             member_modules: Default::default(),
@@ -841,6 +1010,8 @@ mod tests {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         }
     }
 
@@ -1121,6 +1292,139 @@ mod tests {
         Resolver::new(&model, lib)
             .with_workspace(workspace.map(|w| (w, Vec::new())))
             .resolve(name, offset, Namespace::Value)
+    }
+
+    /// A workspace package whose root module records the whole-module `using`
+    /// paths `usings` and the module-level bound names `imported` — the load
+    /// surface a sibling file's `include` splices into the module.
+    fn workspace_pkg_loads(name: &str, usings: &[&[&str]], imported: &[&str]) -> Arc<PackageIndex> {
+        let mut pkg = (*package(name, &[])).clone();
+        pkg.root.usings = usings
+            .iter()
+            .map(|components| ModuleUsing {
+                leading_dots: 0,
+                components: components.iter().map(|c| c.to_string()).collect(),
+            })
+            .collect();
+        pkg.root.imported_names = imported.iter().map(|n| n.to_string()).collect();
+        Arc::new(pkg)
+    }
+
+    #[test]
+    fn sibling_using_export_resolves() {
+        // A sibling file's `using SparseArrays` opens its exports module-wide,
+        // so `SparseMatrixCSC` resolves here as a `using`'d name (SLOPE.jl's
+        // `cv.jl` reading a symbol a sibling `models.jl` `using`s in).
+        let ws = workspace_pkg_loads("MyPkg", &[&["SparseArrays"]], &[]);
+        let lib = library(&[package("SparseArrays", &["SparseMatrixCSC"])]);
+        assert_eq!(
+            resolve_ws(
+                "f(::SparseMatrixCSC) = 1",
+                "SparseMatrixCSC",
+                &lib,
+                Some(ws)
+            ),
+            Resolution::Using {
+                module: SmolStr::new("SparseArrays"),
+                name: SmolStr::new("SparseMatrixCSC"),
+            }
+        );
+    }
+
+    #[test]
+    fn sibling_imported_name_resolves() {
+        // Names a sibling's `import Foo` / `using Bar: baz` binds are module
+        // globals here, resolving to the workspace-import tier.
+        let ws = workspace_pkg_loads("MyPkg", &[], &["Foo", "baz"]);
+        let lib = library(&[package("Base", &[])]);
+        assert_eq!(
+            resolve_ws("g() = Foo.thing()", "Foo", &lib, Some(ws.clone())),
+            Resolution::WorkspaceImport {
+                name: SmolStr::new("Foo")
+            }
+        );
+        assert_eq!(
+            resolve_ws("g() = baz()", "baz", &lib, Some(ws)),
+            Resolution::WorkspaceImport {
+                name: SmolStr::new("baz")
+            }
+        );
+    }
+
+    #[test]
+    fn unresolvable_sibling_using_does_not_resolve() {
+        // The sibling `using` targets an unharvested package, so no export
+        // surface is known: the name stays unresolved (the file-level gate is
+        // what suppresses a diagnostic, not the resolver).
+        let ws = workspace_pkg_loads("MyPkg", &[&["Unharvested"]], &[]);
+        let lib = library(&[package("Base", &[])]);
+        assert_eq!(
+            resolve_ws("f() = mystery()", "mystery", &lib, Some(ws)),
+            Resolution::Unresolved
+        );
+    }
+
+    #[test]
+    fn sibling_import_is_not_a_workspace_occurrence() {
+        // A workspace-import read must not enter the reverse-occurrence index:
+        // its definition is the sibling's `import` site, not a package symbol.
+        let ws = workspace_pkg_loads("MyPkg", &[], &["Foo"]);
+        let model = model_of("g() = Foo.thing()");
+        let lib = library(&[package("Base", &[])]);
+        let occ = Resolver::new(&model, &lib)
+            .with_workspace(Some((ws, Vec::new())))
+            .workspace_occurrences();
+        assert!(occ.is_empty(), "{occ:?}");
+    }
+
+    #[test]
+    fn nested_module_using_resolves_only_inside_that_module() {
+        // A `using` harvested into a nested `module Sub` opens its exports for
+        // reads inside `Sub`, but not at the package root.
+        let mut pkg = (*package("MyPkg", &[])).clone();
+        pkg.root.submodules.push(submodule("Sub", &[]));
+        pkg.root.submodules[0].usings.push(ModuleUsing {
+            leading_dots: 0,
+            components: vec!["SubDep".to_string()],
+        });
+        let ws = Arc::new(pkg);
+        let lib = library(&[package("SubDep", &["helper"])]);
+
+        // Inside `module Sub`, the read resolves through Sub's `using`.
+        let src = "module Sub\nhelper()\nend";
+        let model = model_of(src);
+        let offset = after(src, "helper");
+        assert_eq!(
+            Resolver::new(&model, &lib)
+                .with_workspace(Some((Arc::clone(&ws), Vec::new())))
+                .resolve("helper", offset, Namespace::Value),
+            Resolution::Using {
+                module: SmolStr::new("SubDep"),
+                name: SmolStr::new("helper"),
+            }
+        );
+        // At the root, Sub's `using` is invisible.
+        assert_eq!(
+            resolve_ws("helper()", "helper", &lib, Some(ws)),
+            Resolution::Unresolved
+        );
+    }
+
+    #[test]
+    fn has_unresolvable_using_gates_on_sibling_usings() {
+        // With no using in this file, an unresolvable whole-module `using` in
+        // the host module (a sibling file's) still bails the file.
+        let model = model_of("f() = 1");
+        let lib: BTreeMap<String, Arc<PackageIndex>> = library(&[package("Base", &[])]);
+        let unresolvable = workspace_pkg_loads("MyPkg", &[&["Unharvested"]], &[]);
+        let ws = (unresolvable, Vec::new());
+        assert!(has_unresolvable_using(&model, &lib, Some(&ws)));
+
+        // A resolvable sibling `using` does not gate.
+        let resolvable = workspace_pkg_loads("MyPkg", &[&["SparseArrays"]], &[]);
+        let lib2 = library(&[package("SparseArrays", &["SparseMatrixCSC"])]);
+        let ws2 = (resolvable, Vec::new());
+        assert!(!has_unresolvable_using(&model, &lib2, Some(&ws2)));
     }
 
     #[test]

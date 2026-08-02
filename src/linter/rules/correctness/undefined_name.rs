@@ -87,7 +87,11 @@ impl Rule for UndefinedName {
         let Some(resolution) = &ctx.resolution else {
             return;
         };
-        if has_unresolvable_using(ctx.model, resolution.packages) {
+        if has_unresolvable_using(
+            ctx.model,
+            resolution.packages,
+            resolution.workspace.as_ref(),
+        ) {
             return;
         }
         let scan = FileScan::collect(ctx.root);
@@ -209,7 +213,8 @@ impl FileScan {
 mod tests {
     use super::*;
     use crate::index::model::{
-        DefLocation, ExportedName, FunctionGroup, ModuleIndex, PackageIndex, Span, Visibility,
+        DefLocation, ExportedName, FunctionGroup, ModuleIndex, ModuleUsing, PackageIndex, Span,
+        Visibility,
     };
     use crate::linter::rules::ResolutionContext;
     use crate::semantic::SemanticModel;
@@ -246,6 +251,8 @@ mod tests {
                 consts: Vec::new(),
                 macros: Vec::new(),
                 submodules: Vec::new(),
+                usings: Vec::new(),
+                imported_names: Vec::new(),
             },
             members: Vec::new(),
             member_modules: Default::default(),
@@ -275,11 +282,40 @@ mod tests {
                 consts: Vec::new(),
                 macros: Vec::new(),
                 submodules: Vec::new(),
+                usings: Vec::new(),
+                imported_names: Vec::new(),
             },
             members: Vec::new(),
             member_modules: Default::default(),
             diagnostics: Vec::new(),
         })
+    }
+
+    /// A workspace package whose root module records whole-module `using` paths
+    /// `usings` and module-level bound names `imported` — a sibling file's load
+    /// surface, spliced into the module by `include`.
+    fn workspace_with_loads(usings: &[&[&str]], imported: &[&str]) -> Arc<PackageIndex> {
+        let mut pkg = (*workspace(&[])).clone();
+        pkg.root.usings = usings
+            .iter()
+            .map(|components| ModuleUsing {
+                leading_dots: 0,
+                components: components.iter().map(|c| c.to_string()).collect(),
+            })
+            .collect();
+        pkg.root.imported_names = imported.iter().map(|n| n.to_string()).collect();
+        Arc::new(pkg)
+    }
+
+    /// `base` plus an extra package `name` exporting `exports`.
+    fn base_plus(name: &str, exports: &[&str]) -> BTreeMap<String, Arc<PackageIndex>> {
+        let mut lib = base(&[]);
+        let extra = base(exports);
+        let mut pkg = (*extra.get("Base").unwrap().clone()).clone();
+        pkg.name = name.to_string();
+        pkg.root.name = name.to_string();
+        lib.insert(name.to_string(), Arc::new(pkg));
+        lib
     }
 
     /// Lint `src` with the rule alone, against `packages` and an optional
@@ -356,6 +392,42 @@ mod tests {
         );
         assert_eq!(msgs.len(), 1, "{msgs:?}");
         assert!(msgs[0].contains("helprr"));
+    }
+
+    #[test]
+    fn sibling_using_export_resolves() {
+        // SLOPE.jl regression: `cv.jl` reads `SparseMatrixCSC`, which a sibling
+        // `models.jl` brings in with `using SparseArrays`. The module-wide
+        // `using` resolves the read, so no false `undefined-name`.
+        let lib = base_plus("SparseArrays", &["SparseMatrixCSC"]);
+        let ws = workspace_with_loads(&[&["SparseArrays"]], &[]);
+        assert_eq!(
+            messages("f(::SparseMatrixCSC) = 1\n", &lib, Some(ws)),
+            Vec::<String>::new(),
+        );
+    }
+
+    #[test]
+    fn sibling_imported_name_resolves() {
+        // A name a sibling file's `import Foo` binds is a module global here.
+        let lib = base(&[]);
+        let ws = workspace_with_loads(&[], &["Foo"]);
+        assert_eq!(
+            messages("g() = Foo.helper()\n", &lib, Some(ws)),
+            Vec::<String>::new(),
+        );
+    }
+
+    #[test]
+    fn unresolvable_sibling_using_bails_the_file() {
+        // A sibling's `using` of an unharvested package could export anything,
+        // so the whole file is skipped — even a genuine typo goes unreported.
+        let lib = base(&[]);
+        let ws = workspace_with_loads(&[&["Unharvested"]], &[]);
+        assert_eq!(
+            messages("f() = mystery()\n", &lib, Some(ws)),
+            Vec::<String>::new(),
+        );
     }
 
     #[test]

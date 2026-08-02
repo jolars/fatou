@@ -426,7 +426,7 @@ pub(crate) fn supertypes_via_db(
             }),
             Resolution::Using { module, name } => using_def_site(model, snapshot, &module, &name)
                 .and_then(|(abs, span)| library_type_item(&abs, span, &name, encoding)),
-            Resolution::Unresolved => None,
+            Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
         };
         Some(target.into_iter().collect())
     }));

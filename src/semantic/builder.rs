@@ -264,8 +264,10 @@ fn signature_name_token(core: &SyntaxNode) -> Option<SyntaxToken> {
 
 /// One `using`/`import` clause (an `IMPORT_PATH`, or the path inside an
 /// `IMPORT_ALIAS`), extracted from the raw token stream the parser leaves in
-/// the tree. Mirrors the sexpr projector's reading of the same shape.
-struct ImportClause {
+/// the tree. Mirrors the sexpr projector's reading of the same shape. Shared
+/// (via [`collect_import_clauses`]) with the harvester, which reads the same
+/// clauses to record a module's `using`/`import` surface.
+pub(crate) struct ImportClause {
     leading_dots: u32,
     components: Vec<(SmolStr, TextRange)>,
     alias: Option<(SmolStr, TextRange)>,
@@ -278,7 +280,7 @@ struct ImportClause {
 impl ImportClause {
     /// The name this clause binds (the alias, else the last component), or
     /// `None` when interpolation makes it unknowable.
-    fn binding_name(&self) -> Option<(&SmolStr, TextRange)> {
+    pub(crate) fn binding_name(&self) -> Option<(&SmolStr, TextRange)> {
         if let Some((name, range)) = &self.alias {
             return Some((name, *range));
         }
@@ -288,7 +290,7 @@ impl ImportClause {
         self.components.last().map(|(name, range)| (name, *range))
     }
 
-    fn path(&self) -> ModulePath {
+    pub(crate) fn path(&self) -> ModulePath {
         ModulePath {
             leading_dots: self.leading_dots,
             components: self
@@ -403,7 +405,9 @@ fn macro_name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
 /// item clauses after it. ERROR-wrapped clauses (invalid `as` positions) are
 /// skipped. A statement-level `$` (the parser leaves `import A.$B` partly
 /// outside the path node) poisons the preceding clause.
-fn collect_import_clauses(stmt: &SyntaxNode) -> (Vec<ImportClause>, Option<Vec<ImportClause>>) {
+pub(crate) fn collect_import_clauses(
+    stmt: &SyntaxNode,
+) -> (Vec<ImportClause>, Option<Vec<ImportClause>>) {
     let mut before: Vec<ImportClause> = Vec::new();
     let mut after: Option<Vec<ImportClause>> = None;
     for element in stmt.children_with_tokens() {

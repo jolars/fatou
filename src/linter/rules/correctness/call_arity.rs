@@ -91,7 +91,11 @@ impl Rule for CallArity {
         let Some(resolution) = &ctx.resolution else {
             return;
         };
-        if has_unresolvable_using(ctx.model, resolution.packages) {
+        if has_unresolvable_using(
+            ctx.model,
+            resolution.packages,
+            resolution.workspace.as_ref(),
+        ) {
             return;
         }
         let scan = FileScan::collect(ctx.root);
@@ -166,6 +170,9 @@ impl Rule for CallArity {
                 Resolution::Using { .. } | Resolution::System { .. } => {
                     roots.extend(library.iter().map(|pkg| &pkg.root));
                 }
+                // A sibling file's module-level import names an external
+                // function whose source module we do not record; skip arity.
+                Resolution::WorkspaceImport { .. } => continue,
                 Resolution::Unresolved => continue, // `undefined-name`'s business
             }
             roots.push(&file_index);
@@ -587,6 +594,8 @@ mod tests {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         }
     }
 

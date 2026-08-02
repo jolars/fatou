@@ -188,7 +188,9 @@ fn render_free_read<P: PackageSource>(
             render_library_symbol(&pkg.root, &name)
         }
         Resolution::Using { module, name } => library_from_using(model, packages, &module, &name),
-        Resolution::Unresolved => None,
+        // A sibling file's module-level import: its source module is not
+        // recorded, so nothing to render.
+        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
     }
 }
 
@@ -443,6 +445,8 @@ mod tests {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         }
     }
 

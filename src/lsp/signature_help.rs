@@ -225,7 +225,7 @@ fn resolve_callee<P: PackageSource>(
         // never reaches here; signature help for workspace functions is a later
         // Phase 5 item.
         Resolution::Workspace { .. } => None,
-        Resolution::Unresolved => None,
+        Resolution::WorkspaceImport { .. } | Resolution::Unresolved => None,
     }
 }
 
@@ -432,6 +432,8 @@ mod tests {
             consts: Vec::new(),
             macros: Vec::new(),
             submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
         }
     }
 
