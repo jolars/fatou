@@ -46,6 +46,25 @@ Fatou is available from several sources:
 
 Runs on Linux, macOS, and Windows (x86_64 and arm64).
 
+If you prefer a one-liner installer that picks the right release artifact for
+your platform, you can use the installer scripts below. These scripts are
+fetched directly from this repository and then download the latest matching
+Fatou release asset for your platform, installing to a user-local directory by
+default. If you prefer, download and inspect the script before running it.
+
+For macOS and Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf \
+    https://raw.githubusercontent.com/jolars/fatou/refs/heads/main/scripts/fatou-installer.sh | sh
+```
+
+For Windows PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/jolars/fatou/refs/heads/main/scripts/fatou-installer.ps1 | iex"
+```
+
 ## Usage
 
 ```sh
