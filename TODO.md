@@ -68,6 +68,4 @@
 
 ## Tooling
 
-- [ ] `build.rs` generating shell completions + man pages
-  (clap_complete/clap_mangen), as arity does.
 - [ ] Benchmarks (`criterion`) for parse + incremental reparse.
