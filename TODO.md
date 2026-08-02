@@ -121,17 +121,18 @@
   target reached directly as a macro argument (`is_direct_macro_argument`,
   stopping at the first enclosing `BLOCK` so a dead local in a spliced
   `@testset` body still flags).
-- [ ] `unused-import` misses two within-file use forms (spans are otherwise
-  exact; ~71% of the 264 Makie findings are the known file-scoped/`include`
-  limitation, not these). Verified with `julia`: (1) an imported name used only
-  inside `quote ... end` / `:( ... )` (e.g. `benchmark-ttfp.jl` `median` used
-  in a `quote` macro body); (2) an imported operator via infix `a == b` or a
-  parenthesized method def `(==)(a::S, b::S) = ...` (`GLTypes.jl`) — regular
-  `import Base: *` + `*(a,b)=...` is counted, but the `(op)` target and infix
-  tokens are not resolved to the operator's import. The string/command-macro
-  *application* form (`u"ns"` -> `@u_str`) and interpolation inside a
-  non-standard string macro (`js"$name"`, via `record_raw_interpolations`) are
-  now both counted (fixed).
+- [x] `unused-import` missed two within-file use forms (now both fixed in
+  `semantic/builder.rs`): (1) an imported name used only inside `quote ... end`
+  / `:( ... )` (e.g. `benchmark-ttfp.jl` `median` in a `quote` macro body) —
+  `walk_quoted` now marks a matching import read for any quoted identifier or
+  operator token, since by macro hygiene the name resolves to the enclosing
+  module's binding; (2) an imported operator via infix `a == b` or a
+  parenthesized method def `(==)(a::S, b::S) = ...` (`GLTypes.jl`) —
+  `mark_operator_imports` marks the import behind operator tokens used infix,
+  prefix, or as a value, and `signature_name_token` now resolves a `(op)`
+  paren callee. The string/command-macro *application* form (`u"ns"` ->
+  `@u_str`) and interpolation inside a non-standard string macro (`js"$name"`,
+  via `record_raw_interpolations`) were already counted.
 
 ### False positives (from the SLOPE.jl linter-investigation sweep)
 

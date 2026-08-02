@@ -255,6 +255,13 @@ fn signature_name_token(core: &SyntaxNode) -> Option<SyntaxToken> {
                             | SyntaxKind::BLOCK_COMMENT
                     )
                 }),
+            // Parenthesized operator target: `(==)(a, b) = ...`. The operator
+            // is a direct token inside the paren or wrapped in an
+            // `OPERATOR_ATOM` (mirrors `paren_operator` in `ast::nodes`).
+            Some(paren) if paren.kind() == SyntaxKind::PAREN_EXPR => paren
+                .descendants_with_tokens()
+                .filter_map(|e| e.into_token())
+                .find(|t| t.kind().is_operator()),
             _ => None,
         },
         SyntaxKind::NAME => name_ident(core),
@@ -939,6 +946,22 @@ impl Builder {
         }
     }
 
+    /// Mark the import behind a used operator token, if any. Operators
+    /// referenced infix (`a == b`), prefix (`-x`), or as a value (`(==)`,
+    /// `reduce(+, xs)`) name their imported definition, but the tokens are
+    /// never `NAME` reads. A no-op when the operator isn't imported.
+    fn mark_operator_imports(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        for token in node
+            .children_with_tokens()
+            .filter_map(|e| e.into_token())
+            .filter(|t| t.kind().is_operator())
+        {
+            if let Some(b) = self.find_import(token.text(), scope) {
+                self.model.bindings[b.0 as usize].read = true;
+            }
+        }
+    }
+
     /// Bind the name of a `struct`/`abstract type`/`primitive type` in its
     /// enclosing scope.
     fn declare_type_name(&mut self, node: &SyntaxNode, scope: ScopeId) {
@@ -1148,6 +1171,17 @@ impl Builder {
                 } else if let Some(base) = node.children().next() {
                     self.walk_node(&base, scope);
                 }
+            }
+            SyntaxKind::BINARY_EXPR
+            | SyntaxKind::COMPARISON_EXPR
+            | SyntaxKind::UNARY_EXPR
+            | SyntaxKind::OPERATOR_ATOM
+            | SyntaxKind::PAREN_EXPR => {
+                // An imported operator used infix (`a == b`), prefix (`-x`), or
+                // as a value (`(==)`, `reduce(+, xs)`) is a use, but its token
+                // is never a `NAME` read.
+                self.mark_operator_imports(node, scope);
+                self.walk_children(node, scope);
             }
             SyntaxKind::KEYWORD_ARG => {
                 // Call-site `f(x = v)`: the keyword name is not a variable.
@@ -2091,11 +2125,24 @@ impl Builder {
     /// Quoted code is data, not evaluated here — except interpolations,
     /// which splice in values from the enclosing scope.
     fn walk_quoted(&mut self, node: &SyntaxNode, scope: ScopeId) {
-        for child in node.children() {
-            if child.kind() == SyntaxKind::INTERPOLATION {
-                self.walk_node(&child, scope);
-            } else {
-                self.walk_quoted(&child, scope);
+        for child in node.children_with_tokens() {
+            match child {
+                rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::INTERPOLATION => {
+                    self.walk_node(&n, scope);
+                }
+                rowan::NodeOrToken::Node(n) => self.walk_quoted(&n, scope),
+                // A name or operator quoted here references, by macro hygiene,
+                // the enclosing module's binding, so mark any matching import
+                // read. Only the import's flag is touched; no ident is recorded,
+                // leaving other resolution untouched.
+                rowan::NodeOrToken::Token(t)
+                    if t.kind() == SyntaxKind::IDENT || t.kind().is_operator() =>
+                {
+                    if let Some(b) = self.find_import(t.text(), scope) {
+                        self.model.bindings[b.0 as usize].read = true;
+                    }
+                }
+                rowan::NodeOrToken::Token(_) => {}
             }
         }
     }

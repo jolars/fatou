@@ -305,6 +305,53 @@ fn unused_import_still_flags_never_referenced_import() {
 }
 
 #[test]
+fn unused_import_counts_quoted_use() {
+    // A name used only inside a quote resolves, by macro hygiene, to the
+    // enclosing module's binding, so the import is used.
+    assert_eq!(
+        count(
+            "unused-import",
+            "using S: median\nf() = quote median(x) end\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("unused-import", "using S: median\nf() = :(median(x))\n"),
+        0
+    );
+    // A bare string is not quoted code: an import only appearing there is
+    // still unused.
+    assert_eq!(
+        count("unused-import", "using S: median\nx = \"median\"\n"),
+        1
+    );
+}
+
+#[test]
+fn unused_import_counts_operator_use() {
+    // Infix use of an imported operator.
+    assert_eq!(
+        count("unused-import", "import Base: ==\nf(a, b) = a == b\n"),
+        0
+    );
+    // Parenthesized operator method definition `(==)(a, b) = ...`.
+    assert_eq!(
+        count(
+            "unused-import",
+            "import Base: ==\n(==)(a::S, b::S) = true\n"
+        ),
+        0
+    );
+    // Operator passed as a value.
+    assert_eq!(
+        count("unused-import", "import Base: +\nf(xs) = reduce(+, xs)\n"),
+        0
+    );
+    // Never referenced: still unused.
+    assert_eq!(count("unused-import", "import Base: ==\nf() = 1\n"), 1);
+}
+
+#[test]
 fn unused_import_counts_string_macro_use() {
     // `u"ns"` desugars to `@u_str`, so an explicit import of it is used.
     assert_eq!(
