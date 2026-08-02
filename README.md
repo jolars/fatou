@@ -13,7 +13,7 @@ version](https://badge.fury.io/py/fatou.svg?icon=si%3Apython)](https://pypi.org/
 version](https://badge.fury.io/js/@fatou-cli%2Ffatou-cli.svg?icon=si%3Anpm)](https://www.npmjs.com/package/fatou-cli)
 
 **Fatou** is a language server, formatter, and linter for
-[Julia](https://julialang.org)—and it never has to run Julia itself.
+[Julia](https://julialang.org) that never has to run Julia itself.
 
 It parses Julia once and serves three tools from that tree:
 
