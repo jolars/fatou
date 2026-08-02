@@ -31,6 +31,7 @@
   - [`julia-version-compat`](reference/rules/julia-version-compat.md)
   - [`call-arity`](reference/rules/call-arity.md)
   - [`redefined-constant`](reference/rules/redefined-constant.md)
+  - [`type-piracy`](reference/rules/type-piracy.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)
   - [`constant-condition`](reference/rules/constant-condition.md)

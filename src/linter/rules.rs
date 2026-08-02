@@ -64,6 +64,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::JuliaVersionCompat),
         Box::new(correctness::CallArity),
         Box::new(correctness::RedefinedConstant),
+        Box::new(correctness::TypePiracy),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::ConstantCondition),

@@ -811,7 +811,7 @@ fn is_definition(kind: SyntaxKind) -> bool {
 
 /// The defined name, owning module path, and name range for a `CALL_EXPR`
 /// signature core. `Base.show` yields `("show", Some(["Base"]), range)`.
-fn callee_name(call: &SyntaxNode) -> Option<(String, Option<Vec<String>>, TextRange)> {
+pub(crate) fn callee_name(call: &SyntaxNode) -> Option<(String, Option<Vec<String>>, TextRange)> {
     let callee = call
         .children_with_tokens()
         .find(|el| !is_trivia(el.kind()))?;

@@ -237,7 +237,7 @@ fn nonstandard_text(node: &SyntaxNode) -> Option<String> {
 
 /// Read a dotted qualified name (`Base.AbstractDict`) as its components, or
 /// `None` if `node` is not a pure dotted chain of names.
-fn dotted_path(node: &SyntaxNode) -> Option<Vec<String>> {
+pub(crate) fn dotted_path(node: &SyntaxNode) -> Option<Vec<String>> {
     let mut reversed: Vec<String> = Vec::new();
     let mut cursor = node.clone();
     loop {

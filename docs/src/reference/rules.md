@@ -15,6 +15,7 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`julia-version-compat`](rules/julia-version-compat.md)
 - [`call-arity`](rules/call-arity.md)
 - [`redefined-constant`](rules/redefined-constant.md)
+- [`type-piracy`](rules/type-piracy.md)
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)
 - [`constant-condition`](rules/constant-condition.md)

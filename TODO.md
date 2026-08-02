@@ -56,9 +56,6 @@
   `length`/`size` (no resolution); StaticLint exempts known `Vector`/`Array`
   bindings, which we cannot without type info -- document as opinionated.
   (IncorrectIterSpec, IndexFromLength)
-- [ ] `type-piracy` (correctness): extending an imported function with no
-  owned argument type. Blocked on cross-file import and ownership
-  resolution. (TypePiracy)
 
 ## Language server
 

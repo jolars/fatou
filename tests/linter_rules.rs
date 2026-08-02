@@ -2034,3 +2034,125 @@ fn version_compat_uses_range_floor_not_ceiling() {
     let msgs = version_findings("1.6 - 1.11", "module M\npublic foo\nend\n");
     assert_eq!(msgs.len(), 1);
 }
+
+// --- type-piracy -------------------------------------------------------------
+// These run in CLI mode (no workspace): a "foreign" name resolves against the
+// built-in Base/Core snapshot, and an "owned" type is one defined in the file.
+
+#[test]
+fn type_piracy_flags_qualified_base_extension() {
+    let msgs = findings("type-piracy", "Base.show(x::Int) = 0\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("Base.show"), "{msgs:?}");
+}
+
+#[test]
+fn type_piracy_flags_long_form_extension() {
+    assert_eq!(count("type-piracy", "function Base.show(x::Int)\nend\n"), 1);
+}
+
+#[test]
+fn type_piracy_flags_bare_imported_operator() {
+    // `import Base: +` makes `+` a foreign (imported) function; `Int` is a
+    // foreign type, so the method pirates.
+    assert_eq!(
+        count("type-piracy", "import Base: +\n+(a::Int, b::Int) = 0\n"),
+        1
+    );
+}
+
+#[test]
+fn type_piracy_flags_bare_imported_name() {
+    assert_eq!(
+        count(
+            "type-piracy",
+            "import Base: getindex\ngetindex(x::Int) = 0\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn type_piracy_untyped_argument_is_any_and_does_not_rescue() {
+    // An untyped positional argument is `Any` (a Base type), so it never makes
+    // an otherwise-pirating method non-pirating.
+    assert_eq!(count("type-piracy", "Base.show(x) = 0\n"), 1);
+}
+
+#[test]
+fn type_piracy_unbounded_type_var_does_not_rescue() {
+    // `T` is a `where` type variable, not a type you own.
+    assert_eq!(
+        count("type-piracy", "Base.show(x::Int, y::T) where {T} = 0\n"),
+        1
+    );
+}
+
+#[test]
+fn type_piracy_owned_argument_type_is_clean() {
+    assert_eq!(
+        count(
+            "type-piracy",
+            "struct MyType end\nBase.show(x::MyType) = 0\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn type_piracy_owned_type_parameter_is_clean() {
+    // `AbstractVector` is foreign, but the type parameter `MyType` is owned.
+    assert_eq!(
+        count(
+            "type-piracy",
+            "struct MyType end\nBase.show(x::AbstractVector{MyType}) = 0\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn type_piracy_owned_where_bound_is_clean() {
+    assert_eq!(
+        count(
+            "type-piracy",
+            "struct MyType end\nBase.show(x::T) where {T <: MyType} = 0\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn type_piracy_own_function_is_clean() {
+    // A fresh function defined here (not imported) is owned.
+    assert_eq!(count("type-piracy", "f(x::Int) = x\n"), 0);
+}
+
+#[test]
+fn type_piracy_withholds_on_unresolved_argument_type() {
+    // `Frobnicator` resolves nowhere: it might be an owned type the resolver
+    // cannot see, so the finding is withheld.
+    assert_eq!(count("type-piracy", "Base.show(x::Frobnicator) = 0\n"), 0);
+}
+
+#[test]
+fn type_piracy_withholds_on_unresolved_qualifier() {
+    assert_eq!(count("type-piracy", "Bad.frob(x::Int) = 0\n"), 0);
+}
+
+#[test]
+fn type_piracy_skips_quoted_definition() {
+    assert_eq!(count("type-piracy", "ex = :(Base.show(x::Int) = 0)\n"), 0);
+}
+
+#[test]
+fn type_piracy_skips_macro_wrapped_definition() {
+    // A macro may rewrite the signature, so its written shape is not trusted.
+    assert_eq!(count("type-piracy", "@inline Base.show(x::Int) = 0\n"), 0);
+}
+
+#[test]
+fn type_piracy_ignores_non_call_assignment() {
+    // A qualified property assignment is not a method definition.
+    assert_eq!(count("type-piracy", "Base.x = 1\n"), 0);
+}
