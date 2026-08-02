@@ -176,11 +176,6 @@ panic isolation — so those need no work. The items below are the remaining gap
   than diff, so the win is purely the unchanged case). The id keys off token
   positions/lengths/kinds, not identifier text, so a rename that leaves the
   layout intact legitimately re-pulls unchanged.
-- [ ] **P3 — Debug open/close balance assertion.** The event parser has
-  balanced-slice helpers (`src/parser/structural.rs`) but no debug-only
-  Start/Finish balance walk over the event stream (badness landed one as a
-  `DropBomb` analog). Add a `debug_assert`-gated check to catch a leaked
-  `open()`/`precede` splice; compiled out of release.
 - [ ] **P3 — Deterministic workspace seed order.** `WorkspaceFiles` is a
   `Vec<SourceFile>` singleton input; if seed order churns between reharvests it
   bumps the input revision needlessly (the value-ordering fragility arity and

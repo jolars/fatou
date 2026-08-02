@@ -6,6 +6,9 @@ use crate::syntax::{SyntaxKind, SyntaxNode};
 
 /// Build a lossless `rowan` CST from the token stream and the event stream.
 pub(crate) fn build_tree(tokens: &[Token], events: &[Event]) -> SyntaxNode {
+    #[cfg(debug_assertions)]
+    debug_assert_balanced(events);
+
     let mut builder = GreenNodeBuilder::new();
     builder.start_node(SyntaxKind::ROOT.into());
 
@@ -24,6 +27,35 @@ pub(crate) fn build_tree(tokens: &[Token], events: &[Event]) -> SyntaxNode {
 
 fn push_token(builder: &mut GreenNodeBuilder<'_>, tok: &Token) {
     builder.token(syntax_kind_for(tok.kind).into(), tok.text.as_str());
+}
+
+/// Debug-only guard that the event stream opens and closes in balance: every
+/// [`Event::Start`] is matched by a later [`Event::Finish`], no `Finish`
+/// underflows past the root, and the stream returns to depth zero. A leaked
+/// `open()`/`precede` splice — an unclosed node or a stray `Finish` — otherwise
+/// only surfaces as an opaque panic deep inside `rowan`'s builder (or, worse, a
+/// silently misshapen tree); this catches it at the source with the offending
+/// index. Compiled out of release builds.
+#[cfg(debug_assertions)]
+fn debug_assert_balanced(events: &[Event]) {
+    let mut depth: i32 = 0;
+    for (i, event) in events.iter().enumerate() {
+        match event {
+            Event::Start(_) => depth += 1,
+            Event::Finish => {
+                depth -= 1;
+                assert!(
+                    depth >= 0,
+                    "unbalanced parser events: `Finish` at index {i} with no open node"
+                );
+            }
+            Event::Tok(_) => {}
+        }
+    }
+    assert_eq!(
+        depth, 0,
+        "unbalanced parser events: {depth} node(s) left open at end of stream"
+    );
 }
 
 /// The `SyntaxKind` a lexed token of `kind` is materialized as in the CST. The
