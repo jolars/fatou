@@ -85,7 +85,7 @@ fatou lsp
 Configuration lives in `fatou.toml`: `[format]` sets line and indent widths,
 `[lint]` selects or ignores rules.
 
-## Editor integration
+## Editor Integration
 
 The language server (`fatou lsp`) runs over stdio and provides a broad set of
 features: completion, hover, go-to-definition, find references and document
