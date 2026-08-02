@@ -926,3 +926,57 @@ fn seed_workspace_members_unions_every_package() {
         );
     }
 }
+
+#[test]
+fn seed_workspace_members_orders_by_path() {
+    // The include walk visits `z.jl` before `a.jl`, so `PackageIndex::members`
+    // is in that (non-alphabetical) order. Seeding must still register the files
+    // in a canonical by-path order, so that an unchanged member set produces an
+    // identical `WorkspaceFiles` `Vec` across reharvests and never churns the
+    // input revision.
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    use fatou::incremental::{SourceFile, WorkspaceFiles};
+
+    let tree = TempTree::new(&[
+        (
+            "src/Pkg.jl",
+            "module Pkg\ninclude(\"z.jl\")\ninclude(\"a.jl\")\nend\n",
+        ),
+        ("src/z.jl", "z() = 1\n"),
+        ("src/a.jl", "a() = 2\n"),
+    ]);
+
+    let index = Arc::new(fatou::index::harvest_package_named(&tree.0, "Pkg"));
+    // Guard the premise: the harvester records members in walk order, so `z.jl`
+    // precedes `a.jl` here — the seed sort has something to reorder.
+    let z_pos = index.members.iter().position(|m| m.ends_with("z.jl"));
+    let a_pos = index.members.iter().position(|m| m.ends_with("a.jl"));
+    assert!(z_pos < a_pos, "premise: walk order visits z.jl before a.jl");
+
+    let mut db = IncrementalDatabase::new();
+    let mut packages = BTreeMap::new();
+    packages.insert("Pkg".to_string(), index);
+    let mut roots = BTreeMap::new();
+    roots.insert("Pkg".to_string(), tree.0.clone());
+    db.set_library(packages, roots, vec!["Pkg".to_string()]);
+    db.seed_workspace_members();
+
+    let files: Vec<SourceFile> = WorkspaceFiles::try_get(&db)
+        .expect("seeding registers the workspace files")
+        .files(&db)
+        .clone();
+    let paths: Vec<PathBuf> = files
+        .iter()
+        .map(|f| f.path(&db).clone().expect("a seeded member has a path"))
+        .collect();
+
+    let mut sorted = paths.clone();
+    sorted.sort();
+    assert_eq!(
+        paths, sorted,
+        "seeded members must be in canonical by-path order"
+    );
+    assert_eq!(paths.len(), 3, "all three members are seeded");
+}

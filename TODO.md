@@ -176,11 +176,6 @@ panic isolation — so those need no work. The items below are the remaining gap
   than diff, so the win is purely the unchanged case). The id keys off token
   positions/lengths/kinds, not identifier text, so a rename that leaves the
   layout intact legitimately re-pulls unchanged.
-- [ ] **P3 — Deterministic workspace seed order.** `WorkspaceFiles` is a
-  `Vec<SourceFile>` singleton input; if seed order churns between reharvests it
-  bumps the input revision needlessly (the value-ordering fragility arity and
-  badness both flag for their interned `Project`). Pin a stable sort at the seed
-  site (`seed_workspace_members`) as an invariant.
 
 ## Tooling
 

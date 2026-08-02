@@ -808,6 +808,14 @@ impl IncrementalDatabase {
                 }
             }
         }
+        // Pin a canonical (by-path) order so an unchanged member set always
+        // seeds an identical `Vec`, independent of the iteration order of
+        // `names`/`members` above. `WorkspaceFiles` is compared by value, so a
+        // reharvest that merely reshuffles that order would otherwise bump the
+        // input revision and force a needless `workspace_reference_index`
+        // recompute. Every seeded member has a path (`seed_disk_file` sets one),
+        // and each path maps to a single handle, so the sort is total and stable.
+        files.sort_by(|a, b| a.path(self).cmp(b.path(self)));
         self.set_workspace_files(files);
     }
 
