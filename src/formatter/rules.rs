@@ -2403,6 +2403,14 @@ fn last_item_absorbs_comma(node: &SyntaxNode) -> bool {
         ) {
             return true;
         }
+        // A space-form macrocall (`@view a[i, :]`) parses its arguments with the
+        // same comma-greedy `parse_eq`, so a trailing comma is drawn into the
+        // macro as a tuple element rather than separating list items. The call
+        // form (`@view(a[i])`) fences the comma behind its `)` and is handled by
+        // the `ends_with_closer` descent below.
+        if cur.kind() == SyntaxKind::MACRO_CALL && macro_call_has_spaced_arg(&cur) {
+            return true;
+        }
         if ends_with_closer(&cur) {
             return false;
         }
@@ -2411,6 +2419,37 @@ fn last_item_absorbs_comma(node: &SyntaxNode) -> bool {
             None => return false,
         }
     }
+}
+
+/// Whether a `MACRO_CALL` is the space form carrying at least one
+/// whitespace-separated argument (`@view a[i]`, `@assert x > 0 "msg"`), as opposed
+/// to the call form (`@view(a[i])`) or a bare name (`@foo`). Only the space form
+/// parses its arguments with the comma-greedy `parse_eq`, so only it absorbs a
+/// following comma into a tuple — `@foo bar,` reparses as `@foo((bar,))`, while
+/// `@foo,` and `@foo(bar),` leave the comma to the enclosing list. Mirrors the
+/// gap detection in [`lower_macro_call`]: a node child seen after the name with an
+/// intervening `WHITESPACE`/`NEWLINE` is a spaced argument.
+fn macro_call_has_spaced_arg(node: &SyntaxNode) -> bool {
+    let mut saw_name = false;
+    let mut had_gap = false;
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => {
+                if matches!(tok.kind(), SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) {
+                    had_gap = true;
+                }
+            }
+            NodeOrToken::Node(child) => {
+                if child.kind() == SyntaxKind::MACRO_NAME && !saw_name {
+                    saw_name = true;
+                } else if saw_name && had_gap {
+                    return true;
+                }
+                had_gap = false;
+            }
+        }
+    }
+    false
 }
 
 /// Whether `node`'s last significant token closes it — `)`, `]`, `}` or `end`.
