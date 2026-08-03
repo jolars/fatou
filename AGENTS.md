@@ -23,7 +23,9 @@ live roadmap for remaining work and records known issues and follow-ups; when in
 doubt about scope or priority, it is the source of truth.
 
 The dev environment is provided via `devenv`/Nix (`devenv.nix`, `devenv.yaml`)
-and includes a Julia toolchain.
+and includes a Julia interpreter; Julia packages (the JuliaSyntax parser oracle
+and formatter-comparison tools) are Pkg-managed via the repo's pinned
+`Project.toml`/`Manifest.toml`, not by Nix (see **Parser oracle**).
 
 Claude Code on the web runs in a container with neither, so a `SessionStart`
 hook (`.claude/hooks/session-start.sh`) provisions them there; it no-ops
@@ -94,11 +96,24 @@ loop (probe → grammar + projector → fixture → re-triage → allowlist) and
 rolling `RECAP.md`. See `TODO.md` for the current standing and backlog.
 
 Regenerating the pinned corpus (`scripts/update-juliasyntax-corpus.sh`) is the
-one task that does need Julia, at the exact versions recorded in
-`tests/fixtures/oracle/.juliasyntax-source` — a different Julia or JuliaSyntax
-rewrites unrelated fixtures and buries the intended change. Re-running the
-script should leave every file it did not target byte-identical; treat any
-other diff as a version mismatch, not a parser change.
+one task that does need Julia. All Julia packages are Pkg-managed via the repo's
+root `Project.toml` + committed `Manifest.toml`; nix (`devenv.nix`) provides only
+the bare `julia-bin` interpreter, and the devenv shell exports `JULIA_PROJECT=@.`
+so every Julia call activates the root project. This replaces nixpkgs'
+`withPackages`, which resolved an old registry snapshot and pinned JuliaSyntax by
+accident, defeating the oracle's exact-version contract. The regen scripts just
+`using JuliaSyntax` from the *active* environment — they must not force-activate
+or instantiate the root project, because the web-container `SessionStart` hook
+provisions JuliaSyntax differently: a pinned git checkout on `JULIA_LOAD_PATH`,
+avoiding the Pkg/registry access that container lacks. JuliaSyntax is pinned
+exactly (`=0.4.10`) in `[compat]`; the regen scripts mirror the resolved versions
+into `tests/fixtures/oracle/.juliasyntax-source`. A different Julia or JuliaSyntax
+rewrites unrelated fixtures and buries the intended change, so re-running the
+script should leave every file it did not target byte-identical; treat any other
+diff as a version mismatch, not a parser change. To bump the oracle: edit the
+`[compat]` bound in the root `Project.toml`, re-resolve
+(`julia --project=. -e 'using Pkg; Pkg.update("JuliaSyntax")'`), then re-run both
+regen scripts and re-triage.
 
 ## Commands
 

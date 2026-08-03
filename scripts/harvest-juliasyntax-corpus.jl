@@ -21,6 +21,11 @@
 # same JuliaSyntax version recorded in `.juliasyntax-source`. Re-run on a
 # version bump (then re-triage `tests/oracle/juliasyntax-blocked.txt`).
 
+# JuliaSyntax comes from the *active* Julia environment, pinned two ways: the
+# repo's root project (devenv exports `JULIA_PROJECT=@.`, resolving the pinned
+# `Manifest.toml`), or a pinned checkout on `JULIA_LOAD_PATH` in the web
+# container (see `.claude/hooks/session-start.sh`, which avoids Pkg/registry
+# access). Run inside devenv, or pass `--project=.` to a bare `julia` yourself.
 using JuliaSyntax
 using SHA
 

@@ -4,6 +4,10 @@
 }:
 
 {
+  # Make every Julia invocation in the repo use the pinned root project
+  # (`Project.toml` + `Manifest.toml`), searching upward from the cwd.
+  env.JULIA_PROJECT = "@.";
+
   packages = [
     pkgs.perf
     pkgs.cargo-flamegraph
@@ -15,8 +19,6 @@
     pkgs.mdbook
     pkgs.llvmPackages.bintools
     pkgs.prettier
-    # JuliaSyntax.jl (the parser oracle, see AGENTS.md) installs via the Julia
-    # environment, not nixpkgs.
     pkgs.ruff
     pkgs.shfmt
     pkgs.wasm-pack
@@ -37,20 +39,14 @@
     julia = {
       enable = true;
 
-      package = (
-        pkgs.julia-bin.withPackages [
-          "CairoMakie"
-          "JET"
-          "JuliaFormatter"
-          "JuliaSyntax"
-          "Makie"
-          "Plots"
-          "Revise"
-          "Runic"
-          "StaticLint"
-          "Test"
-        ]
-      );
+      # nix provides only the bare interpreter. All Julia packages are managed by
+      # Pkg via the repo's root `Project.toml` + committed `Manifest.toml`, which
+      # every Julia invocation activates through `JULIA_PROJECT` (set below).
+      # nixpkgs' `withPackages` is deliberately avoided: it resolves an old
+      # registry snapshot (which pinned JuliaSyntax by accident, defeating the
+      # oracle's exact-version contract) and gives no version control. See
+      # AGENTS.md.
+      package = pkgs.julia-bin;
     };
 
     javascript = {

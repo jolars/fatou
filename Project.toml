@@ -1,0 +1,28 @@
+# The repo's pinned Julia environment. Fully Pkg-managed: nix provides only the
+# bare `julia-bin` interpreter (see devenv.nix), and every Julia invocation in
+# the repo activates this project (via `JULIA_PROJECT=@.` in the devenv shell;
+# the oracle regen scripts also activate it explicitly).
+#
+# The differential parser oracle's JuliaSyntax is pinned exactly (`=0.4.10`); its
+# resolved version is mirrored into `tests/fixtures/oracle/.juliasyntax-source`
+# by the regen scripts. The remaining packages are logo/formatter-comparison
+# tooling and float to whatever the resolver picks (locked in `Manifest.toml`).
+# Bumping the oracle = edit the `[compat]` bound below, re-resolve
+# (`julia --project=. -e 'using Pkg; Pkg.update("JuliaSyntax")'`), then re-run
+# both regen scripts and re-triage (see AGENTS.md).
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
+JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
+JuliaSyntax = "70703baa-626e-46a2-a12c-08ffd08c73b4"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
+Runic = "62bfec6d-59d7-401d-8490-b29ee721c001"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+StaticLint = "b3cc710f-9c33-5bdb-a03d-a94903873e97"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+JuliaSyntax = "=0.4.10"
+julia = "1.12"

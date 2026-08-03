@@ -76,7 +76,8 @@ julia "${julia_args[@]}" "$BENCH/julia_bench.jl" \
 
 if grep -q '"tool":"runic","available":false' "$TMP/julia_single.json"; then
   echo "WARNING: Runic is not loadable in this Julia environment." >&2
-  echo "         Reload the devenv/direnv shell (Runic is in devenv.nix) and re-run." >&2
+  echo "         Run inside the devenv shell (which sets JULIA_PROJECT to the repo's" >&2
+  echo "         pinned project, where Runic lives), or pass --project=., and re-run." >&2
 fi
 
 # --- cold start (fresh-process invocation, single file) ----------------------

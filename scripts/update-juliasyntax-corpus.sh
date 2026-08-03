@@ -2,7 +2,9 @@
 #
 # Regenerate the pinned JuliaSyntax oracle corpus (`expected.sexpr` files plus
 # the `.juliasyntax-source` version sidecar). Thin wrapper around the Julia
-# helper; requires the devenv Julia toolchain (which ships JuliaSyntax) on PATH.
+# helper; run inside the devenv shell, which provides `julia` and sets
+# `JULIA_PROJECT=@.` so the repo's pinned JuliaSyntax (root `Project.toml`)
+# resolves. The script itself just `using JuliaSyntax` from the active env.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

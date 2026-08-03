@@ -11,6 +11,11 @@
 # Run via `scripts/update-juliasyntax-corpus.sh` (which resolves the repo root),
 # or directly: `julia scripts/update-juliasyntax-corpus.jl`.
 
+# JuliaSyntax comes from the *active* Julia environment, pinned two ways: the
+# repo's root project (devenv exports `JULIA_PROJECT=@.`, resolving the pinned
+# `Manifest.toml`), or a pinned checkout on `JULIA_LOAD_PATH` in the web
+# container (see `.claude/hooks/session-start.sh`, which avoids Pkg/registry
+# access). Run inside devenv, or pass `--project=.` to a bare `julia` yourself.
 using JuliaSyntax
 
 const REPO_ROOT = normpath(joinpath(@__DIR__, ".."))

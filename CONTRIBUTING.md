@@ -9,11 +9,11 @@ approach.
 ## Development environment
 
 The repository ships a [devenv](https://devenv.sh) (Nix) environment
-(`devenv.nix`) that provides everything: the pinned Rust toolchain, a Julia
-toolchain (including JuliaSyntax.jl, the parser oracle), `mdbook`,
-[`task`](https://taskfile.dev), and the auxiliary cargo tools. If you use
-[direnv](https://direnv.net), the environment loads automatically; otherwise
-run `devenv shell`.
+(`devenv.nix`) that provides the pinned Rust toolchain, a Julia interpreter,
+`mdbook`, [`task`](https://taskfile.dev), and the auxiliary cargo tools. Enter
+it with `devenv shell`. Julia packages (JuliaSyntax.jl, the parser oracle, plus
+the formatter-comparison tools) are managed by Julia's own package manager via
+the repo's pinned `Project.toml`/`Manifest.toml`, not by Nix.
 
 Nix is not required, though. A stable Rust toolchain (see
 `rust-toolchain.toml`) is enough to build and run the full test suite:
