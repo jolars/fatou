@@ -16,6 +16,12 @@ something_with_a_long_name(first_argument_here, second_argument_here, x for x in
 # `@view((a[i, :],))`) and reflowing must omit it.
 some_wrapper(itr, idx) = eachrow(@view parent_container(itr)[idx isa AbstractVector && !(eltype(idx) <: Bool) ? copy(idx) : idx, :])
 something_with_a_long_name(first_argument_here, second_argument_here, @view arr[some_long_index, :])
+# The macro name may be qualified and the trailing spaced argument may itself be a
+# call: `Mod.@ast Mod.Document()` still parses comma-greedily, so the magic comma
+# must be omitted rather than growing `Document()` into a tuple element.
+let page = Page("source", "build", :build, [], Globals(), MarkdownAST.@ast MarkdownAST.Document()), doc = Document()
+    x = 1
+end
 
 # These tails are self-delimiting, so the trailing comma stays.
 something_with_a_long_name(first_argument_here, second_argument_here, inner_call(return x), y)
