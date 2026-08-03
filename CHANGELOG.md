@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.0](https://github.com/jolars/fatou/compare/v0.9.0...v0.10.0) (2026-08-03)
+
+### Features
+- **formatter:** break args before a short where bound ([`a9b62c1`](https://github.com/jolars/fatou/commit/a9b62c18c87106f1ea6fdf0ac4f0dda9bb3cd093))
+- **formatter:** glue sole brace/bracket macro arg ([`dcf2d87`](https://github.com/jolars/fatou/commit/dcf2d874c9134217ec063828616c44109d2cc06e))
+- **linter:** add `type-piracy` rule ([`7c5d935`](https://github.com/jolars/fatou/commit/7c5d935182b2ca39aac0c184798a93a12f170c95))
+- **parser:** add debug-only event balance check ([`cca89c2`](https://github.com/jolars/fatou/commit/cca89c2b02e7b3a0a9deeceb11de65304ff40a83))
+- **build:** add installation scripts ([`16b941a`](https://github.com/jolars/fatou/commit/16b941ae00b38443c55c406e571d017459930485))
+- **build:** add deb and rpm packages ([`fd823b5`](https://github.com/jolars/fatou/commit/fd823b5f33933bd6b387a31d68998d0319b477ef))
+- **resolve:** resolve sibling `using`/`import` cross-file ([`fd6d0cb`](https://github.com/jolars/fatou/commit/fd6d0cbda681161ff9defcf811f4afef59703440))
+
+### Bug Fixes
+- **formatter:** drop magic comma after space-form macrocall ([`6068f60`](https://github.com/jolars/fatou/commit/6068f600c12762b0d0fb96904a0210edc55d3e94)), closes [#56](https://github.com/jolars/fatou/issues/56)
+- **incremental:** pin workspace seed order by path ([`3a6ad4d`](https://github.com/jolars/fatou/commit/3a6ad4dedc82d82a23515c3ad62423520f4c4687))
+- **resolve:** count quoted and operator import uses ([`239d05b`](https://github.com/jolars/fatou/commit/239d05b49c533139aff3b7bf6414affe55f50c8f))
+- **parser:** fold macro trailing comma into tuple arg ([`e3b0254`](https://github.com/jolars/fatou/commit/e3b0254424cb7e91a09603f9a80575337703449f))
+- **resolve:** resolve a module's own name in workspace tier ([`f2b7fa5`](https://github.com/jolars/fatou/commit/f2b7fa5fec9534b7f76571161fda68cf62fa3f66))
+- **index:** export each module's own name from harvest ([`0d75046`](https://github.com/jolars/fatou/commit/0d750466dd391bcd15283151e10f7a0882db0541))
+- **semantic:** count interpolation in prefixed string macros ([`366b5c1`](https://github.com/jolars/fatou/commit/366b5c166b19ea9a16d6f8fca902e67f0134aa08))
+- **semantic:** treat infix operator defs as method extensions ([`078294e`](https://github.com/jolars/fatou/commit/078294e0d56e0ef341b77f2d3fa256277a8ef8cf)), closes [#53](https://github.com/jolars/fatou/issues/53)
+- **lint:** exempt attribute-DSL macro blocks from unused-binding ([`30370d7`](https://github.com/jolars/fatou/commit/30370d7452221ff117120a31e3a7ad85e636fb7c))
+- **semantic:** bind typed defaulted params instead of flagging them ([`b37811a`](https://github.com/jolars/fatou/commit/b37811adf47971ea65043c0b43cd4c8f418a76a8))
+- **semantic:** count string and command macro use as import use ([`70be463`](https://github.com/jolars/fatou/commit/70be4634ae457df943069451d49f9dd5416b4197))
+- **lint:** exempt macro-call blocks from redefined-constant ([`df4abae`](https://github.com/jolars/fatou/commit/df4abaeacfc4618083fda3b78a43df99944947b0))
+
 ## [0.9.0](https://github.com/jolars/fatou/compare/v0.8.0...v0.9.0) (2026-08-01)
 
 ### Features
