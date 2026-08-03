@@ -34,13 +34,13 @@
 
 ## Formatter
 
-- [ ] Canonicalize the gap before a macro's *attached* argument
-  (`lower_macro_call` in `src/formatter/rules.rs`). The gap is preserved
-  verbatim because it is meaning-bearing whenever a `[…]`/`(…)` suffix follows
-  (`@NamedTuple{T}[x]` indexes the type; `@NamedTuple {T}[x]` hands the macro
-  `{T}[x]`), so `@m{a}` and `@m {a}` both survive even where no suffix makes
-  them differ. Deciding "no suffix follows" needs the parent context, which
-  `lower_macro_call` does not have today.
+- [x] Canonicalize the gap before a macro's *attached* argument
+  (`lower_macro_call` in `src/formatter/rules.rs`). A gap before a bare
+  `{…}`/`[…]` opener that is the sole argument is now dropped and glued to the
+  idiomatic form (`@m {a}` -> `@m{a}`), since the two are the same program. This
+  needs no parent context: a `[…]`/`(…)` suffix would have folded into the child
+  (`@m {a}[x]` parses the arg as a compound `INDEX_EXPR`), so a bare sole opener
+  never carries one. Parens/tuples stay excluded (`@foo(a, b)` != `@foo (a, b)`).
 
 - [ ] Extend the where-bound break-priority to *short multi-parameter* bounds.
   A short but multi-param bound with long args (`f(longargs...) where {T, S}`)

@@ -3031,7 +3031,9 @@ fn lower_comprehension_if(node: &SyntaxNode) -> Option<Ir> {
 ///   (`@assert x > 0 "msg"`, `@inbounds a[i]`), collapses each gap to a single
 ///   space. The presence of that space is semantic — `@foo(a, b)` (two args) and
 ///   `@foo (a, b)` (one tuple arg) parse differently — so it is preserved, but its
-///   width is not.
+///   width is not. The exception is a bare `{…}`/`[…]` opener that is the sole
+///   argument (`@m {a}`, `@NamedTuple {T}`): it is the same program as the glued
+///   form, so the gap is dropped and canonicalized to glued.
 ///
 /// Each argument recurses through [`lower_node`], so it normalizes internally. The
 /// space form never introduces a break: there is no canonical fold point between
@@ -3065,15 +3067,28 @@ fn lower_macro_call(node: &SyntaxNode) -> Ir {
                 _ if saw_name => {
                     // An argument written with no gap before it stays attached —
                     // for *any* opener, not just the `ARG_LIST` of a call form
-                    // (`@eval(expr)`). The gap is meaning-bearing: a following
-                    // `[…]`/`(…)` suffix binds to the macro call when the opener
-                    // is glued but to the argument when it is not, so inserting
-                    // a space rewrites the program. `@NamedTuple{T}[x]` is
-                    // `(ref (macrocall @NamedTuple (braces T)) x)` — indexing the
-                    // named-tuple type — while `@NamedTuple {T}[x]` hands the
-                    // macro `{T}[x]` as one argument. A spaced argument still
-                    // gets its single leading space.
-                    if had_gap {
+                    // (`@eval(expr)`). The gap is otherwise meaning-bearing: a
+                    // following `[…]`/`(…)` suffix binds to the macro call when
+                    // the opener is glued but to the argument when it is not, so
+                    // inserting a space rewrites the program. `@NamedTuple{T}[x]`
+                    // is `(ref (macrocall @NamedTuple (braces T)) x)` — indexing
+                    // the named-tuple type — while `@NamedTuple {T}[x]` hands the
+                    // macro `{T}[x]` as one argument.
+                    //
+                    // The one exception, canonicalized here, is a **bare**
+                    // `{…}`/`[…]` opener that is the **sole** argument: `@m {a}`
+                    // is the same program as `@m{a}` (`(macrocall @m (braces a))`),
+                    // so the gap is dropped and glued to the idiomatic form
+                    // (`@SVector[…]`, `@NamedTuple{…}`). This is safe with no
+                    // parent context — a suffix would have folded into this child
+                    // (`@m {a}[x]` parses the arg as `(ref (braces a) x)`, a
+                    // compound `INDEX_EXPR`, not a bare `BRACES`), so a bare sole
+                    // opener cannot carry one. Parens/tuples are excluded:
+                    // `@foo(a, b)` (call form) differs from `@foo (a, b)` (tuple).
+                    let gluable =
+                        matches!(child.kind(), SyntaxKind::BRACES | SyntaxKind::VECT_EXPR)
+                            && child.next_sibling().is_none();
+                    if had_gap && !gluable {
                         parts.push(Ir::text(" "));
                     }
                     parts.push(lower_node(&child));

@@ -128,7 +128,40 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (bare-bracket-valued pair tail stops hugging in multi-item lists)
+## Latest session (glue a sole brace/bracket macro argument)
+
+`feat(formatter)`. Retired the ranked TODO bullet: `lower_macro_call`
+(`rules.rs`) preserved the gap before a macro's argument verbatim, so `@m {a}`
+and `@m{a}` both survived even though they are the same program
+(`(macrocall @m (braces a))`). Now a gap before a **bare** `{…}`/`[…]` opener
+that is the **sole** argument is dropped and glued to the idiomatic form
+(`@m {a}` → `@m{a}`, `@NamedTuple {T}` → `@NamedTuple{T}`).
+
+**The parent-context worry was a false alarm — for the glue direction.** The
+TODO said deciding "no suffix follows" needs parent context the function lacks.
+True only for the *add-a-space* direction: `@m{a}` (no suffix) and `@m{a}[x]`
+(suffix) have byte-identical inner `MACRO_CALL` nodes, so adding a space needs
+`node.parent()`. But **dropping** the space is safe with purely local info — a
+`[…]`/`(…)` suffix on a spaced arg folds *into* the child (`@m {a}[x]` parses the
+arg as `(ref (braces a) x)`, a compound `INDEX_EXPR`), so a bare sole opener can
+never carry one. Guard: `matches!(child.kind(), BRACES | VECT_EXPR) &&
+child.next_sibling().is_none()`. Parens/tuples excluded (`@foo(a, b)` call form
+≠ `@foo (a, b)` tuple). ~1 line + docs; no `ir.rs`/`printer.rs` change.
+
+**Decision (user):** glue direction (idiomatic — nobody writes `@SVector [..]`),
+both `{}` and `[]` openers. Gated `macro_glued_argument/` (7 cases: brace/bracket
+glue targets; `@foo (a, b)` tuple stays spaced; `@m {a}[x]` suffix stays spaced;
+`@m{a}[x]` already glued; `@assert … "msg"` multi-arg stays spaced). Gate 116→117;
+stability + clippy + fmt + full suite green. No parser/lexer blocker. The existing
+ungated `macro_attached_argument/` stays ungated (blocked on array-literal reflow,
+L1-2).
+
+**Ranked next targets:** (1) Extend the where-bound priority to short multi-param
+bounds via a conditional-layout primitive (the follow-up TODO). (2) **Switch to
+the LSP semantic model** — standing strategic recommendation. (3) Minor: the ~50
+per-rule Runic-rationale doc comments (debt #2).
+
+## Earlier: bare-bracket-valued pair tail stops hugging in multi-item lists
 
 `feat(formatter)`. User-reported bug: a homogeneous mapping
 `Dict{String, Any}("dataset" => ["w1a"], "reg" => [0.05], "strategy" => [:g, :n, :e])`
