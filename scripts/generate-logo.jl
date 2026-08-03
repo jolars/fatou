@@ -50,10 +50,10 @@ const GRADIENT = [
 const NEWTON_COLORS = (JULIA_RED, JULIA_GREEN, JULIA_PURPLE)
 
 const PRESETS = Dict(
-    "rabbit" => complex(-0.093, 0.705),  # Douady rabbit — three-lobed, organic
-    "sanmarco" => complex(-0.85, 0.0),     # San Marco — symmetric, classic
-    "dendrite" => complex(0.0, 1),       # dendrite — thin, branchy
-    "airplane" => complex(-1.7548, 0.0),   # airplane — spiky
+    "rabbit" => complex(-0.093, 0.705), # Douady rabbit — three-lobed, organic
+    "sanmarco" => complex(-0.85, 0.0), # San Marco — symmetric, classic
+    "dendrite" => complex(0.0, 1), # dendrite — thin, branchy
+    "airplane" => complex(-1.7548, 0.0), # airplane — spiky
 )
 
 # --- argument parsing -------------------------------------------------------
@@ -76,7 +76,10 @@ function gradient_color(t)
         p1, c1 = GRADIENT[k + 1]
         if t <= p1
             f = (t - p0) / (p1 - p0)
-            return ntuple(d -> round(UInt8, Float64(c0[d]) + f * (Float64(c1[d]) - Float64(c0[d]))), 3)
+            return ntuple(
+                d -> round(UInt8, Float64(c0[d]) + f * (Float64(c1[d]) - Float64(c0[d]))),
+                3,
+            )
         end
     end
     return GRADIENT[end][2]
@@ -219,8 +222,11 @@ function zlib_stored(data::Vector{UInt8})
     end
     ad = adler32(data)
     push!(
-        out, UInt8((ad >> 24) & 0xff), UInt8((ad >> 16) & 0xff),
-        UInt8((ad >> 8) & 0xff), UInt8(ad & 0xff)
+        out,
+        UInt8((ad >> 24) & 0xff),
+        UInt8((ad >> 16) & 0xff),
+        UInt8((ad >> 8) & 0xff),
+        UInt8(ad & 0xff),
     )
     return out
 end
@@ -241,7 +247,7 @@ function write_png(path, img::Array{UInt8, 3})
     raw = Vector{UInt8}(undef, h * (1 + 4w))
     p = 1
     @inbounds for i in 1:h
-        raw[p] = 0x00  # filter: none
+        raw[p] = 0x00 # filter: none
         p += 1
         for j in 1:w, k in 1:4
             raw[p] = img[i, j, k]
@@ -284,8 +290,10 @@ function render_png(path, c, cx, cy, extent, maxiter, size, ss, smooth)
         end
         cnt == 0 && continue
         alphas[bi, bj] = cnt * inv
-        imin = min(imin, bi); imax = max(imax, bi)
-        jmin = min(jmin, bj); jmax = max(jmax, bj)
+        imin = min(imin, bi)
+        imax = max(imax, bi)
+        jmin = min(jmin, bj)
+        jmax = max(jmax, bj)
     end
     img = zeros(UInt8, size, size, 4)
     di = max(imax - imin, 1)
@@ -293,7 +301,7 @@ function render_png(path, c, cx, cy, extent, maxiter, size, ss, smooth)
     @inbounds for bi in 1:size, bj in 1:size
         alpha = alphas[bi, bj]
         alpha == 0 && continue
-        t = ((bi - imin) / di + (bj - jmin) / dj) / 2  # diagonal across bbox
+        t = ((bi - imin) / di + (bj - jmin) / dj) / 2 # diagonal across bbox
         col = gradient_color(t)
         img[bi, bj, 1] = col[1]
         img[bi, bj, 2] = col[2]
@@ -313,13 +321,13 @@ end
 @inline function newton_basin(z::ComplexF64, roots, maxiter::Int, tol2::Float64)
     @inbounds for k in 1:maxiter
         z2 = z * z
-        abs2(z2) < 1.0e-18 && return (0, k)  # near the pole at 0
+        abs2(z2) < 1.0e-18 && return (0, k) # near the pole at 0
         z = z - (z * z2 - 1) / (3 * z2)
         for r in 1:3
             abs2(z - roots[r]) < tol2 && return (r, k)
         end
     end
-    return (0, maxiter)  # undecided → Julia set
+    return (0, maxiter) # undecided → Julia set
 end
 
 function render_newton_png(path, cx, cy, extent, maxiter, size, ss, whiten, border)
@@ -337,12 +345,19 @@ function render_newton_png(path, cx, cy, extent, maxiter, size, ss, whiten, bord
             for di in 1:ss, dj in 1:ss
                 i = (bi - 1) * ss + di
                 j = (bj - 1) * ss + dj
-                root, k = newton_basin(to_complex(i, j, W, H, cx, cy, extent), roots, maxiter, tol2)
+                root, k = newton_basin(
+                    to_complex(i, j, W, H, cx, cy, extent),
+                    roots,
+                    maxiter,
+                    tol2,
+                )
                 if root == 0
-                    r += 255; g += 255; b += 255  # Julia set: white
+                    r += 255
+                    g += 255
+                    b += 255 # Julia set: white
                 else
                     base = NEWTON_COLORS[root]
-                    f = clamp((k / maxiter)^2.0 * whiten, 0.0, 1.0)  # lighten near boundary
+                    f = clamp((k / maxiter)^2.0 * whiten, 0.0, 1.0) # lighten near boundary
                     r += base[1] + f * (255 - base[1])
                     g += base[2] + f * (255 - base[2])
                     b += base[3] + f * (255 - base[3])
@@ -395,7 +410,9 @@ function contour_loops(mask)
     # Crossing points sit at edge midpoints; key each by the edge it lies on so
     # neighboring cells share endpoints exactly. (:H, i, j) is the midpoint of
     # the horizontal edge from grid point (i,j) to (i,j+1); (:V, i, j) likewise.
-    pt(key) = key[1] === :H ? (key[3] + 0.5, Float64(key[2])) : (Float64(key[3]), key[2] + 0.5)
+    pt(key) = key[1] === :H ?
+        (key[3] + 0.5, Float64(key[2])) :
+        (Float64(key[3]), key[2] + 0.5)
 
     segs = Tuple{NTuple{3, Any}, NTuple{3, Any}}[]
     for i in 1:(g - 1), j in 1:(g - 1)
@@ -473,17 +490,19 @@ function render_svg(path, c, cx, cy, extent, maxiter, g, smooth)
     stops = join(
         [
             "<stop offset=\"$(round(Int, p * 100))%\" stop-color=\"#$(string(col[1], base = 16, pad = 2))$(string(col[2], base = 16, pad = 2))$(string(col[3], base = 16, pad = 2))\"/>"
-                for (p, col) in GRADIENT
-        ], ""
+            for (p, col) in GRADIENT
+        ],
+        "",
     )
     return open(path, "w") do io
         print(
-            io, """
+            io,
+            """
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 $(round(vb, digits = 2)) $(round(vb, digits = 2))">
               <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">$stops</linearGradient></defs>
               <path fill="url(#g)" fill-rule="evenodd" d="$(String(take!(d)))"/>
             </svg>
-            """
+            """,
         )
     end
 end
@@ -513,15 +532,29 @@ function main(args)
 
     if newton
         println("Fatou logo — Newton fractal for z³ - 1")
-        println("  view: center=($cx, $cy) extent=$extent maxiter=$maxiter threads=$(Threads.nthreads())")
+        println(
+            "  view: center=($cx, $cy) extent=$extent maxiter=$maxiter threads=$(Threads.nthreads())",
+        )
         print("  rendering PNG ($(png)×$(png), ss=$ss) … ")
-        t = @elapsed render_newton_png("$out.png", cx, cy, extent, maxiter, png, ss, whiten, border)
+        t = @elapsed render_newton_png(
+            "$out.png",
+            cx,
+            cy,
+            extent,
+            maxiter,
+            png,
+            ss,
+            whiten,
+            border,
+        )
         println("$(round(t, digits = 2))s → $out.png")
-        return  # the basin boundary is infinitely intricate — raster only
+        return # the basin boundary is infinitely intricate — raster only
     end
 
     println("Fatou logo — c = $(real(c)) + $(imag(c))i, preset=$preset")
-    println("  view: center=($cx, $cy) extent=$extent maxiter=$maxiter threads=$(Threads.nthreads())")
+    println(
+        "  view: center=($cx, $cy) extent=$extent maxiter=$maxiter threads=$(Threads.nthreads())",
+    )
 
     print("  rendering PNG ($(png)×$(png), ss=$ss) … ")
     t = @elapsed render_png("$out.png", c, cx, cy, extent, maxiter, png, ss, smooth)
