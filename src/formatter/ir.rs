@@ -45,6 +45,21 @@ pub enum Ir {
         close: Rc<Ir>,
         explode: Rc<Ir>,
     },
+    /// A two-layout choice decided not by the current column but by whether a
+    /// later, re-indented line fits. `primary` is laid out when `probe` — measured
+    /// flat from the group's *base indent* — fits the width; otherwise `fallback`.
+    ///
+    /// The canonical use is a `where` clause `f(args) where {T, S}` whose deciding
+    /// line is the *closing* line `) where {T, S}` (after the argument list breaks),
+    /// not the opening one. `primary` keeps the bound flat so the argument list
+    /// breaks around it; `fallback` keeps the arguments flat and explodes the bound.
+    /// `probe` is the closing line's fixed prefix plus the flat bound, so it fits
+    /// exactly when breaking the arguments would let the bound sit flat.
+    CondGroup {
+        primary: Rc<Ir>,
+        fallback: Rc<Ir>,
+        probe: Rc<Ir>,
+    },
 }
 
 impl Ir {
@@ -74,6 +89,14 @@ impl Ir {
             body: Rc::new(body),
             close: Rc::new(close),
             explode: Rc::new(explode),
+        }
+    }
+
+    pub fn cond_group(primary: Ir, fallback: Ir, probe: Ir) -> Ir {
+        Ir::CondGroup {
+            primary: Rc::new(primary),
+            fallback: Rc::new(fallback),
+            probe: Rc::new(probe),
         }
     }
 }

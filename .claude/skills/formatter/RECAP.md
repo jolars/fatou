@@ -128,7 +128,46 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (glue a sole brace/bracket macro argument)
+## Latest session (short multi-param `where` bound breaks the args)
+
+`feat(formatter)`. Retired the ranked TODO bullet. A short multi-param bound over
+a call signature (`f(longargs...) where {T, S}`) used to explode the two-element
+bound instead of breaking the signature's argument list — the element-count
+heuristic in `lower_where` treated only a *single* param as atomic, so `{T, S}`
+stayed a width-driven exploding group. But "short" (fits on the closing line) is a
+width judgment the element count can't make, and a genuinely wide bound
+(`where_break`) *must* explode. So the choice is a real two-layout decision that
+only the printer can make (it depends on the base indent + trailing content).
+
+**New primitive `Ir::CondGroup { primary, fallback, probe }`** (`ir.rs` +
+`printer.rs`, ~1 print arm + 1 fits arm). Unlike a plain `Group` (decided at the
+current column), a `CondGroup` measures `probe` **flat from the base indent** — the
+re-indented *closing* line, not the opening one. `lower_where`'s multi-param
+CALL-lhs branch builds `primary` = `head where {flat bound}` (bound atomic → the
+arg-list group breaks around it), `fallback` = `head where {exploding bound}`
+(current behavior), and `probe` = `") where " + {flat bound}`. The printer picks
+`primary` when the probe fits (breaking the args lets the bound sit flat on
+`) where {T, S}`), else `fallback` (bound too wide for any line → explode). In
+`fits_stack`/`render_flat` a `CondGroup` measures through `primary` (its all-flat
+form). Single-param bounds keep the atomic `{T}` path unchanged.
+
+**Scope (user, AskUserQuestion):** confirmed the args-break-with-flat-bound form;
+**deferred** the return-type case (`g(x)::T where {T, S}`) — its lhs is a
+`TYPE_ANNOTATION`, so the closing prefix is `)::T where `, not `) where `; the
+probe is scoped to `CALL_EXPR` lhs, and a non-call lhs (`Tuple{T} where {…}`, no
+args to break) keeps the plain exploding group. Follow-up TODO recorded.
+
+Gated `where_short_multiparam_break/` (3 cases: function-form long args break +
+flat bound, assignment-form long args break + flat bound, short sig stays flat).
+`where_break` (wide bound still explodes) unchanged — locks the fallback. Gate
+118→119; stability + clippy + fmt + full suite green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) Return-type `where` signatures (the deferred
+follow-up TODO — extend the `CondGroup` probe to the `)::T where ` prefix). (2)
+**Switch to the LSP semantic model** — standing strategic recommendation. (3)
+Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
+
+## Earlier: glue a sole brace/bracket macro argument
 
 `feat(formatter)`. Retired the ranked TODO bullet: `lower_macro_call`
 (`rules.rs`) preserved the gap before a macro's argument verbatim, so `@m {a}`

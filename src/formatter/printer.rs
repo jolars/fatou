@@ -98,6 +98,22 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
                     stack.push((indent, mode, explode));
                 }
             }
+            Ir::CondGroup {
+                primary,
+                fallback,
+                probe,
+            } => {
+                // The deciding line is the group's re-indented closing line, not the
+                // current one, so measure `probe` (flat) from the *base indent*
+                // rather than `col`. It fits exactly when breaking `primary`'s head
+                // leaves the flat bound sitting on that closing line.
+                let chosen = if fits(width.saturating_sub(indent), probe, &stack) {
+                    primary
+                } else {
+                    fallback
+                };
+                stack.push((indent, mode, chosen));
+            }
         }
     }
 
@@ -223,6 +239,11 @@ fn fits_stack(mut remaining: isize, mut stack: Vec<(bool, Mode, &Ir)>) -> bool {
                     stack.push((in_group, mode, prefix));
                 }
             }
+            // A `CondGroup` is measured through its `primary` (the flat-bound
+            // layout): its flat width is the all-flat rendering, and as trailing
+            // content its head group's first break ends the line, exactly like a
+            // plain trailing `Group`.
+            Ir::CondGroup { primary, .. } => stack.push((in_group, mode, primary)),
         }
     }
     remaining >= 0

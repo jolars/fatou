@@ -42,14 +42,19 @@
   (`@m {a}[x]` parses the arg as a compound `INDEX_EXPR`), so a bare sole opener
   never carries one. Parens/tuples stay excluded (`@foo(a, b)` != `@foo (a, b)`).
 
-- [ ] Extend the where-bound break-priority to *short multi-parameter* bounds.
-  A short but multi-param bound with long args (`f(longargs...) where {T, S}`)
-  still explodes the bound rather than the args, because the element-count
-  heuristic in `lower_where` only treats a single param as atomic. "Short"
-  (fits on the closing line) is a width judgment the heuristic cannot make;
-  handling it needs a conditional-layout primitive (like `HugGroup`) that
-  chooses args-break-with-flat-bound over flat-args-with-broken-bound by
-  measuring which first line fits.
+- [x] Extend the where-bound break-priority to *short multi-parameter* bounds.
+  A short multi-param bound over a call signature (`f(longargs...) where {T, S}`)
+  now breaks the args and keeps the bound flat on the closing line, via the new
+  `Ir::CondGroup` conditional-layout primitive: `primary` keeps the bound flat,
+  `fallback` explodes it, and the printer picks by measuring whether the flat
+  bound fits the re-indented closing line `) where {…}`. A genuinely wide bound
+  (`where_break`) still explodes. Fixture `where_short_multiparam_break`.
+
+- [ ] Extend the short multi-param where-priority to *return-type* signatures
+  (`g(x)::T where {T, S}`). The `where`-lhs is a `TYPE_ANNOTATION`, so the
+  closing-line prefix is `)::T where `, not `) where `; the `CondGroup` probe in
+  `lower_where` is currently scoped to `CALL_EXPR` lhs. Compute the annotated
+  prefix (`)` + `::T` flat text + ` where `) to cover it.
 
 ## Linter
 

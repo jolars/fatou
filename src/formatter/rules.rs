@@ -908,26 +908,67 @@ fn lower_where(node: &SyntaxNode) -> Ir {
     // content so that when the whole `f(args) where {T}` overflows it is the
     // signature's argument list — not the lone bound — that breaks. Exploding a
     // single `{T}` across three lines never helps the width and reads worse than
-    // breaking the args (see `where_bare_signature_break`). A multi-parameter
-    // bound stays a width-driven exploding group (`where_break`).
+    // breaking the args (see `where_bare_signature_break`).
+    //
+    // A short *multi*-parameter bound wants the same priority: `f(longargs...)
+    // where {T, S}` should break the args and keep `{T, S}` flat on the closing
+    // line, not explode the two-element bound. But "short" is a width judgment the
+    // element count cannot make — a wide bound (`where_break`) genuinely must
+    // explode. So a multi-parameter bound over a call signature emits an
+    // [`Ir::cond_group`]: `primary` keeps the bound flat (args break around it),
+    // `fallback` keeps the args flat and explodes the bound, and the printer picks
+    // by measuring whether the flat bound fits on the re-indented closing line
+    // `) where {…}`. A non-call lhs (`Tuple{T} where {…}`) has no argument list to
+    // break, so it keeps the plain exploding group.
     //
     // A bare bound (`where T`) is always single and normalizes to the same flat
     // `{T}`: the two spellings must produce identical IR, or a bare bound that
     // gains braces on the first pass would relayout on the second.
-    let single_braced = rhs.kind() == SyntaxKind::BRACES && rhs.children().count() == 1;
-    let bound = match rhs.kind() {
-        SyntaxKind::BRACES if !single_braced => lower_node(rhs),
-        SyntaxKind::BRACES => {
-            let param = rhs
-                .children()
+    let braces_params: Option<Vec<SyntaxNode>> =
+        (rhs.kind() == SyntaxKind::BRACES).then(|| rhs.children().collect::<Vec<_>>());
+
+    if let Some(params) = braces_params.as_ref().filter(|p| p.len() > 1) {
+        if lhs.kind() == SyntaxKind::CALL_EXPR {
+            let head = lower_node(lhs);
+            let bound_flat = braces_flat(params);
+            let primary = Ir::concat([head.clone(), Ir::text(" where "), bound_flat.clone()]);
+            let fallback = Ir::concat([head, Ir::text(" where "), lower_node(rhs)]);
+            // The closing line's fixed prefix (`) where `) plus the flat bound: it
+            // fits exactly when breaking the argument list lets the bound sit flat.
+            let probe = Ir::concat([Ir::text(") where "), bound_flat]);
+            return Ir::cond_group(primary, fallback, probe);
+        }
+        // Non-call lhs: no argument list to break, keep the exploding bound.
+        return Ir::concat([lower_node(lhs), Ir::text(" where "), lower_node(rhs)]);
+    }
+
+    let bound = match braces_params {
+        Some(params) => {
+            let param = params
+                .into_iter()
                 .next()
                 .expect("single-braced bound has one child");
             Ir::concat([Ir::text("{"), lower_node(&param), Ir::text("}")])
         }
-        _ => Ir::concat([Ir::text("{"), lower_node(rhs), Ir::text("}")]),
+        None => Ir::concat([Ir::text("{"), lower_node(rhs), Ir::text("}")]),
     };
 
     Ir::concat([lower_node(lhs), Ir::text(" where "), bound])
+}
+
+/// Join a `BRACES` bound's parameters into a flat, non-breaking `{a, b, …}`. Used
+/// for the flat-bound layout of a `where` clause, where the printer must be able to
+/// measure the whole bound on one line.
+fn braces_flat(params: &[SyntaxNode]) -> Ir {
+    let mut parts = vec![Ir::text("{")];
+    for (i, param) in params.iter().enumerate() {
+        if i > 0 {
+            parts.push(Ir::text(", "));
+        }
+        parts.push(lower_node(param));
+    }
+    parts.push(Ir::text("}"));
+    Ir::concat(parts)
 }
 
 /// Lay out a keyword statement (`return x`, `const x = 1`, `global y`, `local z`)
@@ -1344,6 +1385,9 @@ fn render_flat_into(ir: &Ir, out: &mut String) -> bool {
                 && render_flat_into(body, out)
                 && render_flat_into(close, out)
         }
+        // Flat, the `primary` layout renders the all-flat form (head flat, bound
+        // flat), which is exactly the flattened `where` clause.
+        Ir::CondGroup { primary, .. } => render_flat_into(primary, out),
     }
 }
 
