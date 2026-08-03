@@ -23,6 +23,14 @@ let page = Page("source", "build", :build, [], Globals(), MarkdownAST.@ast Markd
     x = 1
 end
 
+# The spaced tail may be a bare macrocall over a call (`@inferred f(x)`), a
+# macrocall with several space-separated arguments (`@_lock_ios s ccall(...)`), or
+# a dot macrocall over a binary expression (`@. u0 * exp(t)`); each still absorbs a
+# magic comma, so reflow must omit it.
+tree_hash(root::AbstractString; kwargs...) = bytes2hex(@inferred Pkg.GitTools.tree_hash(root; kwargs...))
+something_with_a_long_name(first_argument_here, second_argument_here, @_lock_ios s ccall(:jl_nb_available, Int32, s.ios))
+prob_dae = DAEFunction(f_dae_linear_with_some_padding; analytic = (du0, u0, p, t) -> @. u0 * exp(t))
+
 # These tails are self-delimiting, so the trailing comma stays.
 something_with_a_long_name(first_argument_here, second_argument_here, inner_call(return x), y)
 something_with_a_long_name(first_argument_here, second_argument_here, [return x], trailing_one)
