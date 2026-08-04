@@ -34,7 +34,7 @@ Fatou, whose Fatou set is the complement of the Julia set.
 Fatou is available from several sources:
 
 - **crates.io**: `cargo install fatou`
-- **Homebrew**: `brew install jolars/fatou/fatou`
+- **Homebrew**: `brew install jolars/tap/fatou`
 - **npm**: `npm install -g fatou-cli` (bundles a prebuilt binary)
 - **PyPI**: `uv tool install fatou`/`pipx install fatou`
 - **Prebuilt binaries**: from the [releases
