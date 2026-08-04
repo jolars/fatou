@@ -34,29 +34,6 @@
 
 ## Formatter
 
-- [x] Canonicalize the gap before a macro's *attached* argument
-  (`lower_macro_call` in `src/formatter/rules.rs`). A gap before a bare
-  `{…}`/`[…]` opener that is the sole argument is now dropped and glued to the
-  idiomatic form (`@m {a}` -> `@m{a}`), since the two are the same program. This
-  needs no parent context: a `[…]`/`(…)` suffix would have folded into the child
-  (`@m {a}[x]` parses the arg as a compound `INDEX_EXPR`), so a bare sole opener
-  never carries one. Parens/tuples stay excluded (`@foo(a, b)` != `@foo (a, b)`).
-
-- [x] Extend the where-bound break-priority to *short multi-parameter* bounds.
-  A short multi-param bound over a call signature (`f(longargs...) where {T, S}`)
-  now breaks the args and keeps the bound flat on the closing line, via the new
-  `Ir::CondGroup` conditional-layout primitive: `primary` keeps the bound flat,
-  `fallback` explodes it, and the printer picks by measuring whether the flat
-  bound fits the re-indented closing line `) where {…}`. A genuinely wide bound
-  (`where_break`) still explodes. Fixture `where_short_multiparam_break`.
-
-- [x] Extend the short multi-param where-priority to *return-type* signatures
-  (`g(x)::T where {T, S}`). The `where`-lhs is a `TYPE_ANNOTATION`, so the
-  `CondGroup` probe now uses the annotated closing-line prefix `)::T where ` (the
-  `::T` flattened via `render_flat`), not `) where `. The new `where_closing_prefix`
-  helper computes it for both a bare call and an annotated call; any other lhs
-  keeps the plain exploding bound. Fixture `where_return_type_multiparam_break`.
-
 ## Linter
 
 ### Rules
