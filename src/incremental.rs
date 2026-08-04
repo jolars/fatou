@@ -6,10 +6,12 @@
 //! [`parsed_tree_root`] — a cheap atomic clone.
 //!
 //! This honors Tenet 2 (incremental parsing is first-class): a text edit
-//! invalidates only [`parsed_document`] and its dependents. The token/block
+//! invalidates only [`parsed_document`] and its dependents. The token/statement
 //! reparse *splicing* that makes a single-keystroke edit cheaper than a full
-//! parse is deferred (see `TODO.md`); today every edit triggers a full parse,
-//! which is still correct.
+//! parse is staged in (see `TODO.md`): [`parsed_document`] already offers each
+//! edit to [`reparse`] via the [`PrevParse`] side-channel, but the strategies
+//! are stubs, so today every edit still triggers a full parse, which is
+//! correct either way.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -18,7 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use salsa::{Durability, Setter};
 
 use crate::index::PackageIndex;
-use crate::parser::{ParseDiagnostic, parse};
+use crate::parser::{ParseDiagnostic, ReparseTier, diff_edit, parse, reparse};
 use crate::project::{self, IncludeEdge};
 use crate::resolve::{
     Candidate, ModulePath, Namespace, OccurrenceKey, OccurrenceRec, PackageSource, Resolution,
@@ -109,18 +111,75 @@ pub struct ParsedDocument {
     pub diagnostics: Vec<ParseDiagnostic>,
 }
 
+/// The previous parse of a file, kept *outside* salsa as the incremental
+/// reparse base. A successful reparse is byte-identical to a full parse
+/// (Tenet 4, enforced in [`crate::parser::reparse`]), so this cache only ever
+/// changes how fast [`parsed_document`] computes, never what it returns —
+/// which is what makes reading and writing it from inside the otherwise-pure
+/// tracked query sound.
+#[derive(Debug, Clone)]
+pub struct PrevParse {
+    pub text: String,
+    pub green: rowan::GreenNode,
+    pub diagnostics: Vec<ParseDiagnostic>,
+}
+
 #[salsa::db]
-pub trait IncrementalDb: salsa::Database {}
+pub trait IncrementalDb: salsa::Database {
+    /// The cached previous parse for `file`, if any (the incremental-reparse
+    /// base). The no-op default keeps bare test databases working without a
+    /// cache — they simply always full-parse.
+    fn reparse_prev(&self, _file: SourceFile) -> Option<Arc<PrevParse>> {
+        None
+    }
+
+    /// Store `prev` as the reparse base for `file`. `tier` records which
+    /// strategy produced this parse (`None` for a full parse); unused until
+    /// the observability hooks land (stage 4, see `TODO.md`).
+    fn reparse_store(&self, _file: SourceFile, _prev: PrevParse, _tier: Option<ReparseTier>) {}
+}
 
 /// Parse `file`'s text into a cached green tree plus diagnostics.
+///
+/// Tries an incremental reparse off the previous parse of this file first: a
+/// text edit is recovered by [`diff_edit`] and offered to [`reparse`]. A miss
+/// (first parse, or an edit no strategy handles) falls back to a full parse.
+/// Every path yields a result identical to `parse(text)` (Tenet 4), so the
+/// side-channel never affects query semantics — salsa only sees text changes.
 #[salsa::tracked(returns(ref), no_eq)]
 pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
     let text = file.text(db);
-    let parsed = parse(text.as_str());
-    ParsedDocument {
-        green: parsed.cst.green().into_owned(),
-        diagnostics: parsed.diagnostics,
-    }
+
+    let reparsed = db
+        .reparse_prev(file)
+        .filter(|prev| prev.text != *text)
+        .and_then(|prev| {
+            let edit = diff_edit(&prev.text, text);
+            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
+        });
+
+    let tier = reparsed.as_ref().map(|r| r.tier);
+    let (green, diagnostics) = match reparsed {
+        Some(r) => (r.green, r.diagnostics),
+        None => {
+            let parsed = parse(text.as_str());
+            (parsed.cst.green().into_owned(), parsed.diagnostics)
+        }
+    };
+
+    // Store last, after all fallible work, so a panic or salsa cancellation
+    // mid-query never leaves a base whose text and tree disagree.
+    db.reparse_store(
+        file,
+        PrevParse {
+            text: text.clone(),
+            green: green.clone(),
+            diagnostics: diagnostics.clone(),
+        },
+        tier,
+    );
+
+    ParsedDocument { green, diagnostics }
 }
 
 /// The parse diagnostics for `file` (empty when it parses cleanly).
@@ -558,6 +617,10 @@ impl FileSourceMap {
 pub struct IncrementalDatabase {
     storage: salsa::Storage<Self>,
     source_map: Arc<Mutex<FileSourceMap>>,
+    /// Per-file incremental-reparse base, outside salsa: a hit changes how fast
+    /// [`parsed_document`] computes, never what it returns (see [`PrevParse`]).
+    /// Shared across clones so snapshots warm the same cache.
+    reparse_cache: Arc<Mutex<HashMap<SourceFile, Arc<PrevParse>>>>,
 }
 
 impl Default for IncrementalDatabase {
@@ -565,6 +628,7 @@ impl Default for IncrementalDatabase {
         Self {
             storage: salsa::Storage::new(None),
             source_map: Arc::new(Mutex::new(FileSourceMap::default())),
+            reparse_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -583,6 +647,7 @@ impl Clone for IncrementalDatabase {
         Self {
             storage: self.storage.clone(),
             source_map: Arc::clone(&self.source_map),
+            reparse_cache: Arc::clone(&self.reparse_cache),
         }
     }
 }
@@ -598,7 +663,22 @@ impl std::fmt::Debug for IncrementalDatabase {
 impl salsa::Database for IncrementalDatabase {}
 
 #[salsa::db]
-impl IncrementalDb for IncrementalDatabase {}
+impl IncrementalDb for IncrementalDatabase {
+    fn reparse_prev(&self, file: SourceFile) -> Option<Arc<PrevParse>> {
+        self.reparse_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&file)
+            .cloned()
+    }
+
+    fn reparse_store(&self, file: SourceFile, prev: PrevParse, _tier: Option<ReparseTier>) {
+        self.reparse_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(file, Arc::new(prev));
+    }
+}
 
 impl IncrementalDatabase {
     pub fn new() -> Self {

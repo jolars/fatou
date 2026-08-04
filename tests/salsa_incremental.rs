@@ -54,6 +54,30 @@ fn edit_rebuilds_the_semantic_model() {
     assert!(model.bindings()[x].read, "the edit's read is picked up");
 }
 
+#[test]
+fn parse_populates_and_refreshes_the_reparse_base() {
+    let mut db = IncrementalDatabase::new();
+    let file = db.add_file("x = 1\n");
+    assert!(
+        db.reparse_prev(file).is_none(),
+        "no parse has run yet, so there is no reparse base"
+    );
+
+    parsed_tree_root(&db, file);
+    let prev = db.reparse_prev(file).expect("first parse stores its base");
+    assert_eq!(prev.text, "x = 1\n");
+    assert_eq!(prev.green.to_string(), "x = 1\n");
+    assert!(prev.diagnostics.is_empty());
+
+    // An edit refreshes the base to the new parse (today via the full-parse
+    // fallback; the strategies of TODO.md stages 2-3 only change how fast).
+    db.set_file_text(file, "x = 1 + 2\n");
+    parsed_tree_root(&db, file);
+    let prev = db.reparse_prev(file).expect("reparse base survives edits");
+    assert_eq!(prev.text, "x = 1 + 2\n");
+    assert_eq!(prev.green.to_string(), "x = 1 + 2\n");
+}
+
 /// A downstream query that counts its own executions, to observe backdating.
 #[salsa::tracked(returns(copy))]
 fn probe_binding_count(db: &dyn IncrementalDb, file: SourceFile) -> usize {
