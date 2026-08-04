@@ -89,7 +89,7 @@ Each stage lands independently with the full suite green.
   (assert the tier fired) and negative tests (ident ⇒ keyword, `2x` ⇒
   `2e10`, newline insertion, string-content edit all fall back).
 
-- [ ] Reparse stage 3 (top-level statement tier, the big win): region =
+- [x] Reparse stage 3 (top-level statement tier, the big win): region =
   contiguous run of `ROOT` child nodes touching the edit, or the empty
   span at the edit point for trivia-gap insertions (covers typing new
   code on a blank line); fragment reparse reuses public `parse()`

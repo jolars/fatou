@@ -177,6 +177,25 @@ fn assert_falls_back(src: &str, range: std::ops::Range<usize>, insert: &str) {
     );
 }
 
+#[track_caller]
+fn assert_toplevel_tier(src: &str, range: std::ops::Range<usize>, insert: &str) {
+    let rep = try_reparse(src, range.clone(), insert).unwrap_or_else(|| {
+        panic!("top-level tier should fire for {range:?} {insert:?} on {src:?}")
+    });
+    assert_eq!(rep.tier, ReparseTier::TopLevel);
+}
+
+#[track_caller]
+fn assert_not_token_tier(src: &str, range: std::ops::Range<usize>, insert: &str) {
+    if let Some(rep) = try_reparse(src, range.clone(), insert) {
+        assert_ne!(
+            rep.tier,
+            ReparseTier::Token,
+            "token tier must not splice {range:?} {insert:?} on {src:?}"
+        );
+    }
+}
+
 /// Stage-2 positive cases: the token tier must handle the classic in-leaf
 /// edits, including the boundary insertion at the end of an identifier (the
 /// most common keystroke) and diagnostic shifting past the edit.
@@ -197,27 +216,123 @@ fn token_tier_fires() {
     assert_token_tier("foo = 1\ng(x))\n", 1..2, "oo");
 }
 
-/// Stage-2 negative cases: each known hazard must fall back to a full parse.
+/// Stage-2 negative cases: each known hazard must escape the token tier.
+/// Since the top-level statement tier landed, most are legally handled there
+/// instead of falling back to a full parse (the Tenet-4 assert inside
+/// `reparse` validates any such splice); the token tier's guards are what
+/// these cases pin.
 #[test]
 fn token_tier_falls_back() {
     // Identifier becomes a keyword or a contextual identifier.
-    assert_falls_back("fo = 1\n", 2..2, "r");
-    assert_falls_back("publik = 1\n", 5..6, "c");
+    assert_not_token_tier("fo = 1\n", 2..2, "r");
+    assert_not_token_tier("publik = 1\n", 5..6, "c");
     // Editing a contextual identifier that currently shapes the tree.
-    assert_falls_back("public a, b\n", 0..1, "q");
+    assert_not_token_tier("public a, b\n", 0..1, "q");
     // Juxtaposition fuses across the backward boundary (`2e10` is one Float).
-    assert_falls_back("y = 2x\n", 5..6, "e10");
+    assert_not_token_tier("y = 2x\n", 5..6, "e10");
     // A newline changes statement structure.
-    assert_falls_back("x  = 1\n", 2..2, "\n");
+    assert_not_token_tier("x  = 1\n", 2..2, "\n");
     // String content lexing depends on the enclosing delimiter mode.
-    assert_falls_back("s = \"abc\"\n", 6..7, "x");
+    assert_not_token_tier("s = \"abc\"\n", 6..7, "x");
     // Numeric leaves are ineligible.
-    assert_falls_back("x = 12\n", 5..5, "3");
+    assert_not_token_tier("x = 12\n", 5..5, "3");
     // `#=` nests, leaving the trailing block comment unterminated at EOF;
     // the sentinel forward probe catches it.
-    assert_falls_back("#= a =#", 3..3, "#=");
+    assert_not_token_tier("#= a =#", 3..3, "#=");
     // A diagnostic touching the edited leaf (trailing junk on `y`).
+    assert_not_token_tier("x y\n", 2..3, "z");
+}
+
+/// Stage-3 positive cases: the top-level statement tier must handle the
+/// classic region edits. Each uses an edit the token tier rejects (multi-token
+/// inserts, digits, string content, newlines), and the in-crate Tenet-4
+/// assert validates every splice against a full parse.
+#[test]
+fn toplevel_tier_fires() {
+    // Edit inside a function body with statement neighbors on both sides.
+    assert_toplevel_tier("a = 1\nfunction f(x)\n    x\nend\nb = 2\n", 25..25, " + 1");
+    // Docstring-content edit: the region is the whole `DOC` child.
+    assert_toplevel_tier(
+        "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x\nend\nx = 1\n",
+        5..5,
+        "s",
+    );
+    // Flag-stream splice: editing a neighbor keeps the `const x` diagnostic
+    // before the region and shifts the one after it.
+    assert_toplevel_tier("const x\ny = 1\nconst z\n", 12..13, "22");
+    // Completing `const x` into an assignment drops the zero-width
+    // `ConstNotAssignment` anchored exactly at the region start.
+    assert_toplevel_tier("const x\ny = 1\n", 7..7, " = 2");
+    // New statement at BOF (the insert spans a newline, so the token tier is
+    // out from the start).
+    assert_toplevel_tier("x = 1\ny = 2\n", 0..0, "a = 0\n");
+    // New statement at EOF.
+    assert_toplevel_tier("x = 1\ny = 2\n", 12..12, "z = 3\n");
+    // Typing a statement on a blank line between two statements.
+    assert_toplevel_tier("a = 1\n\nb = 2\n", 6..6, "c = 3");
+    // A `TOPLEVEL_SEMICOLON` line as the untouched previous sibling.
+    assert_toplevel_tier("a; b\nc = 1\n", 9..10, "2");
+}
+
+/// Stage-3 negative cases: cross-boundary hazards must fall back.
+#[test]
+fn toplevel_tier_falls_back() {
+    // Statement becomes a docstring: deleting the blank line lets
+    // `fold_docstrings` fold the string with the following statement, which
+    // the backward boundary parse sees as a `DOC` node straddling the seam.
+    assert_falls_back("\"note\"\n\nx = 1\n", 7..8, "");
+    // Forward absorption: an unterminated block swallows the next statement.
+    assert_falls_back("x = 1\ny = 2\n", 0..0, "function g()\n");
+    // Trailing-operator continuation across the region's forward boundary.
+    assert_falls_back("x = 1\ny = 2\n", 5..5, " +");
+    // Same-line trailing junk: no decoupling newline before the region.
     assert_falls_back("x y\n", 2..3, "z");
+    // The region covers every `ROOT` child (single statement, no trailing
+    // newline): the fragment reparse would be the full parse.
+    assert_falls_back("x = 1", 4..5, "2");
+}
+
+/// Character-by-character typing of a function into the blank line of an
+/// existing file. Only the meaningful steps are pinned; the in-between steps
+/// are a legal mix of token-tier hits, fallbacks, and broken-to-broken
+/// top-level splices, each oracle-checked by the Tenet-4 `debug_assert`
+/// inside `reparse`.
+#[test]
+fn toplevel_tier_char_by_char_typing() {
+    let typed = "function g(x)\n    x\nend\n";
+    let mut src = "a = 1\n\nb = 2\n".to_string();
+    let insert_at = 6;
+    for (i, ch) in typed.char_indices() {
+        let pos = insert_at + i;
+        let rep = try_reparse(&src, pos..pos, &ch.to_string());
+        match i {
+            // The first typed char is a statement on the blank line.
+            0 => assert_eq!(
+                rep.map(|r| r.tier),
+                Some(ReparseTier::TopLevel),
+                "step {i}: expected top-level splice"
+            ),
+            // The `n` completing the `function` keyword: the token tier sees
+            // a kind flip and the top-level fragment would swallow `b = 2`.
+            7 => assert!(rep.is_none(), "step {i}: expected fallback"),
+            // The `d` completing `end` closes the block mid-line: the broken
+            // `FUNCTION` node had swallowed `b = 2`, so the region is that
+            // whole node and the splice replaces one child with several.
+            22 => assert_eq!(
+                rep.map(|r| r.tier),
+                Some(ReparseTier::TopLevel),
+                "step {i}: expected top-level splice"
+            ),
+            // The final newline: the token tier bans newlines.
+            23 => assert_eq!(
+                rep.map(|r| r.tier),
+                Some(ReparseTier::TopLevel),
+                "step {i}: expected top-level splice"
+            ),
+            _ => {}
+        }
+        src.insert(pos, ch);
+    }
 }
 
 #[test]
