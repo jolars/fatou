@@ -26,11 +26,98 @@
 
 ### Incremental
 
-- [ ] Token/block reparse splicing beneath `parsed_document`
-  (`src/incremental.rs`), à la rust-analyzer `reparsing.rs` and arity's
-  `src/parser/reparse.rs`: recover the edit from old/new text, splice reused
-  green subtrees, fall back to a full parse. Pin correctness with an oracle
-  property test (`reparse == parse(new)` across a corpus).
+Token/statement reparse splicing beneath `parsed_document`
+(`src/incremental.rs`), à la rust-analyzer `reparsing.rs` and arity's
+`src/parser/reparse.rs`. Design notes pinned by investigation (2026-08-04):
+strings are multi-token (`StringDelimOpen`/`StringContent`/…), so there is no
+single-STRING token tier and string-interior edits ride the statement tier;
+juxtaposition (`2` + `e10` ⇒ `Float 2e10`) demands a backward join guard
+arity never needed; Julia blocks are `keyword…end` with `a[end]` ambiguity
+and `parse()` is toplevel-contextual (`public`, bracket `end`), so the
+splice unit is the top-level statement, not a nested block; the drive loop
+consumes across newlines (trailing-operator continuation) and
+`fold_docstrings` is cross-statement, so the statement tier needs boundary
+guards in both directions; the four `flag_invalid_*` passes are
+subtree-local and emission order is per-statement contiguous, so fragment
+`parse()` reproduces them and diagnostics splice as five ordered sequences.
+Each stage lands independently with the full suite green.
+
+- [ ] Reparse stage 0 (infra, no behavior change): new
+  `src/parser/reparse.rs` with `Edit` (byte range + insert text),
+  `diff_edit(old, new)` (common prefix/suffix strip, char-boundary
+  clamped), and a stub `reparse(prev_text, prev_green, prev_diags, edit,
+  new_text) -> Option<Reparsed>` returning `None`; `PrevParse { text,
+  green, diagnostics }` side-channel on `IncrementalDatabase` (an
+  `Arc<Mutex<HashMap<SourceFile, Arc<PrevParse>>>>` beside `source_map`,
+  no-op defaults on the `IncrementalDb` trait so test dbs stay untouched);
+  `parsed_document` fetches text first (salsa dependency), tries the
+  reparse, falls back to full parse, and stores `PrevParse` last
+  (cancellation-safe). Unit tests for `diff_edit` and `apply_edits`
+  (UTF-8 clamps, whole-replace, no-op).
+
+- [ ] Reparse stage 1 (oracle harness first, TDD): new
+  `tests/incremental_reparse.rs` à la arity: tree fingerprint
+  (kind@range + token text of every descendant); for each corpus snippet
+  × ~200 seeded edits (insert alphabet biased toward hazards: `"`, `"""`,
+  `$`, `'`, `#`, `=#`, newline, `;`, `end`, `function`, digits, `e10`,
+  `+`, `α`), if `reparse` returns `Some`, its fingerprint and full
+  diagnostics vector must equal `parse(new)`'s. Hand-written hazard
+  snippets: docstring + function, triple/raw/prefixed strings with
+  interpolation, `a[end-1]`, `x'` vs `'x'`, `2x`, `x = 1 +` continuation,
+  trailing junk `x y`, toplevel `a; b`, stray closers, unterminated
+  literals, `public`/`const` forms. Also a Tenet-4 `debug_assert_eq!`
+  (fingerprint + diagnostics vs full parse) inside `reparse` itself.
+  Trivially green while the stub returns `None`.
+
+- [ ] Reparse stage 2 (token tier): relex-in-isolation splice for `Ident`,
+  `Comment`, `BlockComment`, and `Whitespace` leaves (explicitly not
+  `StringContent`, newlines, chars, or numbers) via
+  `SyntaxToken::replace_with`. Guards, in order: no newline in deleted or
+  inserted text; isolated relex yields exactly one token of the same kind
+  spanning all of it; contextual-identifier blocklist (`public`, `as`,
+  `var`, `outer`, `in`, `isa`, `where`, `doc`; oracle surfaces
+  omissions); forward join (new text + next source char must not extend
+  the token, e.g. `r` + `"…"`); backward join (prev leaf + new text must
+  relex to the same two tokens; catches `2` + `e10` ⇒ `Float`); no
+  existing diagnostic touching the leaf. Shift diagnostics after the leaf
+  by the edit delta. Targeted positive tests (assert the tier fired) and
+  negative tests (ident ⇒ keyword, `2x` ⇒ `2e10`, newline insertion,
+  string-content edit all fall back).
+
+- [ ] Reparse stage 3 (top-level statement tier, the big win): region =
+  contiguous run of `ROOT` child nodes touching the edit, or the empty
+  span at the edit point for trivia-gap insertions (covers typing new
+  code on a blank line); fragment reparse reuses public `parse()`
+  wholesale (reruns `fold_docstrings` and the flag passes). Guards:
+  backward boundary (`parse(prev_sibling + gap + fragment)` must yield a
+  first top-level item ending exactly at the old boundary; catches
+  trailing-operator continuation and backward docstring folds) and
+  forward boundary (`parse(fragment + gap + next_sibling)` likewise;
+  catches forward absorption and forward folds). Splice by rebuilding the
+  `ROOT` green node's child list; splice diagnostics as five ordered
+  sequences (parse-emission order, then the four flag passes): keep
+  before-region, drop overlapping, shift after-region by the delta,
+  rebase fragment diagnostics by the region start. Targeted tests: edits
+  inside a function body, character-by-character typing (fallback while
+  the block is open, tier fires once closed), docstring-content edits,
+  statement-becomes-docstring (fallback), `const x` flag diagnostics,
+  edits at BOF/EOF.
+
+- [ ] Reparse stage 4 (precise LSP edits + benches): `reparse_edits`
+  chaining per-edit reparse, validated up front against the target text
+  (stale slices reject to the `diff_edit` path); return the byte edits
+  `apply_content_changes` (`src/text/edit.rs`) already computes and stage
+  them through the side-channel from `src/lsp/analysis_thread.rs` (a full-
+  replacement change clears pending edits); `parsed_document` tries
+  precise edits, then `diff_edit`, then full parse. Criterion bench
+  `benches/reparse.rs`: full parse of a ~100 KB corpus vs token-tier
+  keystroke vs statement edit vs worst-case fallback.
+
+- [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
+  fragment entry point (`public_context`, bracket `end` markers) — a bare
+  fragment `parse()` misparses those today; a `StringContent` token-tier
+  fast path needs delimiter-derived character guards (triple/raw/
+  prefixed). Both are pure optimizations on top of a sound stage 2–4.
 
 ## Formatter
 
@@ -52,5 +139,3 @@
   qualify a bare name.
 
 ## Tooling
-
-- [ ] Benchmarks (`criterion`) for parse + incremental reparse.
