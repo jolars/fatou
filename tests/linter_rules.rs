@@ -2156,3 +2156,107 @@ fn type_piracy_ignores_non_call_assignment() {
     // A qualified property assignment is not a method definition.
     assert_eq!(count("type-piracy", "Base.x = 1\n"), 0);
 }
+
+// --- index-from-length -------------------------------------------------------
+
+#[test]
+fn index_from_length_flags_length_range_indexing() {
+    // `1:length(x)` used to index `x` -> suggest `eachindex`.
+    assert_eq!(
+        count("index-from-length", "for i in 1:length(x)\n    x[i]\nend\n"),
+        1
+    );
+}
+
+#[test]
+fn index_from_length_flags_size_range_indexing() {
+    // `1:size(x, 1)` used to index `x` -> suggest `axes`.
+    assert_eq!(
+        count(
+            "index-from-length",
+            "for i in 1:size(x, 1)\n    x[i]\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn index_from_length_flags_index_using_the_loop_var_in_an_expression() {
+    // The loop variable need only appear inside the index, not be the whole of it.
+    assert_eq!(
+        count(
+            "index-from-length",
+            "for i in 1:length(x)\n    y = x[i + 1]\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn index_from_length_ignores_range_without_indexing() {
+    // The loop variable is never used to index the collection: not this rule.
+    assert_eq!(
+        count(
+            "index-from-length",
+            "for i in 1:length(x)\n    println(i)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn index_from_length_ignores_indexing_a_different_collection() {
+    assert_eq!(
+        count("index-from-length", "for i in 1:length(x)\n    y[i]\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn index_from_length_ignores_plain_and_nonunit_ranges() {
+    // A plain numeric upper bound is fine, and a lower bound other than `1`
+    // is not `eachindex`-equivalent.
+    assert_eq!(
+        count("index-from-length", "for i in 1:10\n    x[i]\nend\n"),
+        0
+    );
+    assert_eq!(
+        count("index-from-length", "for i in 2:length(x)\n    x[i]\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn index_from_length_ignores_stepped_range() {
+    // `1:2:length(x)` is not equivalent to `eachindex(x)`.
+    assert_eq!(
+        count(
+            "index-from-length",
+            "for i in 1:2:length(x)\n    x[i]\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn index_from_length_ignores_eachindex() {
+    assert_eq!(
+        count(
+            "index-from-length",
+            "for i in eachindex(x)\n    x[i]\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn index_from_length_flags_iterating_a_numeric_literal() {
+    assert_eq!(count("index-from-length", "for i in 3.5\n    i\nend\n"), 1);
+    assert_eq!(count("index-from-length", "for i in 5\n    i\nend\n"), 1);
+}
+
+#[test]
+fn index_from_length_ignores_iterating_a_range_or_collection() {
+    assert_eq!(count("index-from-length", "for i in 1:5\n    i\nend\n"), 0);
+    assert_eq!(count("index-from-length", "for x in xs\n    x\nend\n"), 0);
+}

@@ -338,6 +338,25 @@ impl Literal {
         support::token(&self.0, SyntaxKind::TRUE_KW)
             .or_else(|| support::token(&self.0, SyntaxKind::FALSE_KW))
     }
+
+    /// The numeric value token, when the literal is a number: an integer (any
+    /// base) or a float. `None` for non-numeric literals (booleans, `nothing`).
+    pub fn numeric_token(&self) -> Option<SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|el| el.into_token())
+            .find(|t| {
+                matches!(
+                    t.kind(),
+                    SyntaxKind::INTEGER
+                        | SyntaxKind::BIN_INT
+                        | SyntaxKind::OCT_INT
+                        | SyntaxKind::HEX_INT
+                        | SyntaxKind::FLOAT
+                        | SyntaxKind::FLOAT32
+                )
+            })
+    }
 }
 
 impl NonstandardIdentifier {
@@ -805,6 +824,24 @@ mod tests {
             "false"
         );
         assert!(find::<Literal>("1\n").bool_token().is_none());
+    }
+
+    #[test]
+    fn literal_numeric_token() {
+        assert_eq!(
+            find::<Literal>("42\n").numeric_token().unwrap().text(),
+            "42"
+        );
+        assert_eq!(
+            find::<Literal>("3.5\n").numeric_token().unwrap().text(),
+            "3.5"
+        );
+        assert_eq!(
+            find::<Literal>("0xff\n").numeric_token().unwrap().text(),
+            "0xff"
+        );
+        // Non-numeric literals have no numeric token.
+        assert!(find::<Literal>("true\n").numeric_token().is_none());
     }
 
     #[test]

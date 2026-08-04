@@ -69,6 +69,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::ConstantCondition),
         Box::new(suspicious::ModuleShadowsParent),
+        Box::new(suspicious::IndexFromLength),
     ]
 }
 

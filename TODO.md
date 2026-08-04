@@ -38,11 +38,11 @@
 
 ### Rules
 
-- [ ] `index-from-length` (suspicious, syn, opinionated): `for i in
-  1:length(x)` where `i` indexes `x` -> suggest `eachindex`/`axes`; also
-  iterating a bare numeric literal (`for i in 3.5`). Name-based match on
-  `length`/`size` (no resolution); StaticLint exempts known `Vector`/`Array`
-  bindings, which we cannot without type info -- document as opinionated.
+- [x] `index-from-length` (suspicious, syn, opinionated, warning, no fix):
+  flags `for i in 1:length(x)`/`1:size(x, d)` when `i` indexes `x` (suggest
+  `eachindex`/`axes`) and iterating a bare numeric literal (`for i in 3.5`).
+  Name-based match on `length`/`size`; no type info to exempt `Vector`/`Array`,
+  so gated on the loop var actually indexing the collection. On by default.
   (IncorrectIterSpec, IndexFromLength)
 
 ## Language server

@@ -2,10 +2,12 @@
 
 mod assignment_in_condition;
 mod constant_condition;
+mod index_from_length;
 mod module_shadows_parent;
 mod nothing_comparison;
 
 pub use assignment_in_condition::AssignmentInCondition;
 pub use constant_condition::ConstantCondition;
+pub use index_from_length::IndexFromLength;
 pub use module_shadows_parent::ModuleShadowsParent;
 pub use nothing_comparison::NothingComparison;
