@@ -24,5 +24,5 @@ mod unicode_ops;
 
 pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
 pub(crate) use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
-pub use reparse::{Edit, ReparseTier, Reparsed, apply_edits, diff_edit, reparse};
+pub use reparse::{Edit, ReparseTier, Reparsed, apply_edits, diff_edit, fingerprint, reparse};
 pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
