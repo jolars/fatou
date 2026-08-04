@@ -50,11 +50,12 @@
   bound fits the re-indented closing line `) where {…}`. A genuinely wide bound
   (`where_break`) still explodes. Fixture `where_short_multiparam_break`.
 
-- [ ] Extend the short multi-param where-priority to *return-type* signatures
+- [x] Extend the short multi-param where-priority to *return-type* signatures
   (`g(x)::T where {T, S}`). The `where`-lhs is a `TYPE_ANNOTATION`, so the
-  closing-line prefix is `)::T where `, not `) where `; the `CondGroup` probe in
-  `lower_where` is currently scoped to `CALL_EXPR` lhs. Compute the annotated
-  prefix (`)` + `::T` flat text + ` where `) to cover it.
+  `CondGroup` probe now uses the annotated closing-line prefix `)::T where ` (the
+  `::T` flattened via `render_flat`), not `) where `. The new `where_closing_prefix`
+  helper computes it for both a bare call and an annotated call; any other lhs
+  keeps the plain exploding bound. Fixture `where_return_type_multiparam_break`.
 
 ## Linter
 

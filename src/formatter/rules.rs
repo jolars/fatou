@@ -918,8 +918,10 @@ fn lower_where(node: &SyntaxNode) -> Ir {
     // [`Ir::cond_group`]: `primary` keeps the bound flat (args break around it),
     // `fallback` keeps the args flat and explodes the bound, and the printer picks
     // by measuring whether the flat bound fits on the re-indented closing line
-    // `) where {…}`. A non-call lhs (`Tuple{T} where {…}`) has no argument list to
-    // break, so it keeps the plain exploding group.
+    // `) where {…}`. A return-type signature (`g(x)::T where {…}`) breaks the same
+    // way, only its closing line carries the annotation: `)::T where {…}` (see
+    // [`where_closing_prefix`]). A non-call lhs (`Tuple{T} where {…}`) has no
+    // argument list to break, so it keeps the plain exploding group.
     //
     // A bare bound (`where T`) is always single and normalizes to the same flat
     // `{T}`: the two spellings must produce identical IR, or a bare bound that
@@ -928,17 +930,18 @@ fn lower_where(node: &SyntaxNode) -> Ir {
         (rhs.kind() == SyntaxKind::BRACES).then(|| rhs.children().collect::<Vec<_>>());
 
     if let Some(params) = braces_params.as_ref().filter(|p| p.len() > 1) {
-        if lhs.kind() == SyntaxKind::CALL_EXPR {
+        if let Some(prefix) = where_closing_prefix(lhs) {
             let head = lower_node(lhs);
             let bound_flat = braces_flat(params);
             let primary = Ir::concat([head.clone(), Ir::text(" where "), bound_flat.clone()]);
             let fallback = Ir::concat([head, Ir::text(" where "), lower_node(rhs)]);
-            // The closing line's fixed prefix (`) where `) plus the flat bound: it
-            // fits exactly when breaking the argument list lets the bound sit flat.
-            let probe = Ir::concat([Ir::text(") where "), bound_flat]);
+            // The closing line's fixed prefix (`) where ` for a bare call,
+            // `)::T where ` for an annotated one) plus the flat bound: it fits
+            // exactly when breaking the argument list lets the bound sit flat.
+            let probe = Ir::concat([Ir::text(prefix), bound_flat]);
             return Ir::cond_group(primary, fallback, probe);
         }
-        // Non-call lhs: no argument list to break, keep the exploding bound.
+        // No breakable argument list to break around, keep the exploding bound.
         return Ir::concat([lower_node(lhs), Ir::text(" where "), lower_node(rhs)]);
     }
 
@@ -969,6 +972,31 @@ fn braces_flat(params: &[SyntaxNode]) -> Ir {
     }
     parts.push(Ir::text("}"));
     Ir::concat(parts)
+}
+
+/// The `where` clause's re-indented closing-line prefix up to and including
+/// ` where `, when the lhs has a breakable call argument list. A bare call
+/// `f(args)` yields `") where "`; an annotated call `g(args)::T` yields
+/// `")::T where "` (the `::T` flattened, so `::Vector{T}` and friends carry
+/// through). Any other lhs — a plain name, a bare `x::T` with no call to break,
+/// or an annotation carrying a comment that cannot flatten — yields `None`, so
+/// the caller keeps the plain exploding bound.
+fn where_closing_prefix(lhs: &SyntaxNode) -> Option<String> {
+    match lhs.kind() {
+        SyntaxKind::CALL_EXPR => Some(") where ".to_string()),
+        SyntaxKind::TYPE_ANNOTATION => {
+            // The annotation's first node child must be the breakable call.
+            let call = lhs.children().next()?;
+            if call.kind() != SyntaxKind::CALL_EXPR {
+                return None;
+            }
+            // Flatten `::T`: the whole annotation flat minus the call's flat head.
+            let whole = render_flat(&lower_node(lhs))?;
+            let suffix = whole.strip_prefix(render_flat(&lower_node(&call))?.as_str())?;
+            Some(format!("){suffix} where "))
+        }
+        _ => None,
+    }
 }
 
 /// Lay out a keyword statement (`return x`, `const x = 1`, `global y`, `local z`)
