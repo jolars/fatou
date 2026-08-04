@@ -710,17 +710,18 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Consume one body byte. In non-raw mode a backslash escapes the next byte
-    /// (so `\"`, `\$`, `\n` stay inside the content chunk). A `\`-newline line
-    /// continuation may span a CRLF, so the whole `\r\n` is consumed with the
-    /// backslash — otherwise the trailing `\n` would leak out and terminate a
-    /// single-line string.
+    /// Consume one body character. In non-raw mode a backslash escapes the
+    /// next character (so `\"`, `\$`, `\n` stay inside the content chunk) —
+    /// the whole character, since an invalid escape may name a multi-byte one
+    /// (`"\α"`). A `\`-newline line continuation may span a CRLF, so the
+    /// whole `\r\n` is consumed with the backslash — otherwise the trailing
+    /// `\n` would leak out and terminate a single-line string.
     fn consume_body_byte(&mut self, raw: bool) {
         if !raw && self.peek(0) == Some(b'\\') && self.pos + 1 < self.bytes.len() {
             if self.peek(1) == Some(b'\r') && self.peek(2) == Some(b'\n') {
                 self.pos += 3;
             } else {
-                self.pos += 2;
+                self.pos += 1 + self.char_at(self.pos + 1).len_utf8();
             }
         } else {
             self.pos += self.char_at(self.pos).len_utf8();
@@ -1657,6 +1658,10 @@ mod tests {
             "s = \"$$\"\n",
             "s = \"unterminated\n",
             "s = \"$(g(\"nested\"))\"\n",
+            // An invalid escape of a multi-byte character must not split it
+            // (a byte-wise skip panics on the mid-character boundary).
+            "s = \"a\\αb\"\n",
+            "s = \"\\α",
         ] {
             assert!(roundtrips(input), "did not round-trip: {input:?}");
         }
