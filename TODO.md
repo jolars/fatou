@@ -69,20 +69,25 @@ Each stage lands independently with the full suite green.
   (fingerprint + diagnostics vs full parse) inside `reparse` itself.
   Trivially green while the stub returns `None`.
 
-- [ ] Reparse stage 2 (token tier): relex-in-isolation splice for `Ident`,
+- [x] Reparse stage 2 (token tier): relex-in-isolation splice for `Ident`,
   `Comment`, `BlockComment`, and `Whitespace` leaves (explicitly not
   `StringContent`, newlines, chars, or numbers) via
-  `SyntaxToken::replace_with`. Guards, in order: no newline in deleted or
+  `SyntaxToken::replace_with`; a boundary insertion tries both
+  `token_at_offset` candidates (left first), so typing at the end of an
+  identifier splices. Guards, in order: no newline in deleted or
   inserted text; isolated relex yields exactly one token of the same kind
-  spanning all of it; contextual-identifier blocklist (`public`, `as`,
-  `var`, `outer`, `in`, `isa`, `where`, `doc`; oracle surfaces
-  omissions); forward join (new text + next source char must not extend
-  the token, e.g. `r` + `"…"`); backward join (prev leaf + new text must
-  relex to the same two tokens; catches `2` + `e10` ⇒ `Float`); no
-  existing diagnostic touching the leaf. Shift diagnostics after the leaf
-  by the edit delta. Targeted positive tests (assert the tier fired) and
-  negative tests (ident ⇒ keyword, `2x` ⇒ `2e10`, newline insertion,
-  string-content edit all fall back).
+  spanning all of it; contextual-identifier blocklist (`as`, `abstract`,
+  `primitive`, `type`, `typegroup`, `public`, `var`, `in`, `∈`, `isa`,
+  `doc`, plus `outer` for future `for outer` support — `where` and
+  `mutable` are true keyword kinds, auto-guarded by the same-kind check;
+  oracle surfaces omissions); forward join (new text + next source char,
+  or a `\n` sentinel at EOF, must not extend the token, e.g. `r` + `"…"`
+  or a block comment left unterminated by a nested `#=`); backward join
+  (prev leaf + new text must relex to the same two tokens; catches `2` +
+  `e10` ⇒ `Float`); no existing diagnostic touching the leaf. Shift
+  diagnostics after the leaf by the edit delta. Targeted positive tests
+  (assert the tier fired) and negative tests (ident ⇒ keyword, `2x` ⇒
+  `2e10`, newline insertion, string-content edit all fall back).
 
 - [ ] Reparse stage 3 (top-level statement tier, the big win): region =
   contiguous run of `ROOT` child nodes touching the edit, or the empty
