@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou::parser::{Edit, fingerprint, parse, reparse};
+use fatou::parser::{Edit, ReparseTier, Reparsed, fingerprint, parse, reparse};
 use fatou::syntax::SyntaxNode;
 
 const EDITS_PER_SNIPPET: usize = 200;
@@ -146,6 +146,79 @@ const HAZARD_SNIPPETS: &[&str] = &[
     "",
     "\n",
 ];
+
+/// Run one edit through `reparse` against a fresh parse of `src`. The
+/// Tenet-4 `debug_assert` inside `reparse` already cross-checks any success
+/// against a full parse, so the targeted tests below only assert *whether*
+/// the token tier fired, not correctness.
+fn try_reparse(src: &str, range: std::ops::Range<usize>, insert: &str) -> Option<Reparsed> {
+    let old = parse(src);
+    let green = old.cst.green().into_owned();
+    let edit = Edit {
+        range,
+        insert: insert.to_string(),
+    };
+    let new_text = edit.apply(src);
+    reparse(src, &green, &old.diagnostics, &edit, &new_text)
+}
+
+#[track_caller]
+fn assert_token_tier(src: &str, range: std::ops::Range<usize>, insert: &str) {
+    let rep = try_reparse(src, range.clone(), insert)
+        .unwrap_or_else(|| panic!("token tier should fire for {range:?} {insert:?} on {src:?}"));
+    assert_eq!(rep.tier, ReparseTier::Token);
+}
+
+#[track_caller]
+fn assert_falls_back(src: &str, range: std::ops::Range<usize>, insert: &str) {
+    assert!(
+        try_reparse(src, range.clone(), insert).is_none(),
+        "expected fallback for {range:?} {insert:?} on {src:?}"
+    );
+}
+
+/// Stage-2 positive cases: the token tier must handle the classic in-leaf
+/// edits, including the boundary insertion at the end of an identifier (the
+/// most common keystroke) and diagnostic shifting past the edit.
+#[test]
+fn token_tier_fires() {
+    // Mid-identifier replacement and boundary append (`Between` candidate).
+    assert_token_tier("foo = 1\n", 1..2, "x");
+    assert_token_tier("foo = 1\n", 3..3, "d");
+    // Line-comment and block-comment interiors.
+    assert_token_tier("x = 1 # note\n", 9..9, "o");
+    assert_token_tier("#= a =#\n", 4..4, "b");
+    // Widening a whitespace run.
+    assert_token_tier("x  = 1\n", 2..2, " ");
+    // Multi-byte identifier edit.
+    assert_token_tier("αβ = 1\n", 2..4, "γ");
+    // A diagnostic after the leaf (stray closer) shifts by the delta; the
+    // in-crate Tenet-4 assert validates the shifted positions.
+    assert_token_tier("foo = 1\ng(x))\n", 1..2, "oo");
+}
+
+/// Stage-2 negative cases: each known hazard must fall back to a full parse.
+#[test]
+fn token_tier_falls_back() {
+    // Identifier becomes a keyword or a contextual identifier.
+    assert_falls_back("fo = 1\n", 2..2, "r");
+    assert_falls_back("publik = 1\n", 5..6, "c");
+    // Editing a contextual identifier that currently shapes the tree.
+    assert_falls_back("public a, b\n", 0..1, "q");
+    // Juxtaposition fuses across the backward boundary (`2e10` is one Float).
+    assert_falls_back("y = 2x\n", 5..6, "e10");
+    // A newline changes statement structure.
+    assert_falls_back("x  = 1\n", 2..2, "\n");
+    // String content lexing depends on the enclosing delimiter mode.
+    assert_falls_back("s = \"abc\"\n", 6..7, "x");
+    // Numeric leaves are ineligible.
+    assert_falls_back("x = 12\n", 5..5, "3");
+    // `#=` nests, leaving the trailing block comment unterminated at EOF;
+    // the sentinel forward probe catches it.
+    assert_falls_back("#= a =#", 3..3, "#=");
+    // A diagnostic touching the edited leaf (trailing junk on `y`).
+    assert_falls_back("x y\n", 2..3, "z");
+}
 
 #[test]
 fn hazard_snippets() {

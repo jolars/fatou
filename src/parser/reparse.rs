@@ -4,11 +4,12 @@
 //! Modelled on rust-analyzer's `reparsing.rs` and arity's `reparse.rs`: try
 //! the cheapest strategy first and fall back to progressively more work, with
 //! a full [`parse`](crate::parser::parse) as the always-correct last resort.
-//! The staged plan lives in `TODO.md` (`### Incremental`); stages 0–1 are in:
-//! the edit plumbing, a [`reparse`] stub that always falls back, and the
-//! Tenet-4 oracle (the `debug_assert` below plus
-//! `tests/incremental_reparse.rs`), so behavior is unchanged while the token
-//! and top-level tiers land against the real API.
+//! The staged plan lives in `TODO.md` (`### Incremental`). The token tier
+//! ([`reparse_token`]) is in: an edit confined to a single `Ident`, comment,
+//! or whitespace leaf is relexed in isolation and spliced into the previous
+//! green tree; everything else falls back until the top-level statement tier
+//! lands. The Tenet-4 oracle (the `debug_assert` below plus
+//! `tests/incremental_reparse.rs`) checks every splice against a full parse.
 //!
 //! **Correctness invariant (Tenet 4):** a successful reparse must yield a
 //! green tree *and* diagnostics byte-identical to a full parse of the edited
@@ -17,10 +18,12 @@
 
 use std::ops::Range;
 
-use rowan::GreenNode;
+use rowan::{GreenNode, GreenToken, TextRange, TextSize, TokenAtOffset};
 
 use crate::parser::ParseDiagnostic;
-use crate::syntax::SyntaxNode;
+use crate::parser::lexer::lex;
+use crate::parser::tree_builder::syntax_kind_for;
+use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 /// Structural fingerprint of a tree: one line per descendant element with
 /// `kind@range` plus the token text (empty for nodes). Two trees with equal
@@ -165,15 +168,193 @@ pub fn reparse(
     Some(result)
 }
 
-/// Stage 0 stub: no strategy exists yet, so every call falls back.
+/// Tier dispatch: cheapest first. The top-level statement tier (stage 3) will
+/// slot in after the token tier.
 fn reparse_impl(
-    _prev_text: &str,
-    _prev_green: &GreenNode,
-    _prev_diags: &[ParseDiagnostic],
-    _edit: &Edit,
+    prev_text: &str,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
     _new_text: &str,
 ) -> Option<Reparsed> {
-    None
+    reparse_token(prev_text, prev_green, prev_diags, edit)
+}
+
+/// Leaf kinds the token tier may splice. Their text never spans a newline and
+/// their lexing is local enough for the join guards to prove a splice sound.
+/// Deliberately absent: `STRING_CONTENT` (lexing depends on the enclosing
+/// delimiter's mode), `NEWLINE` (statement structure), `CHAR` and the numeric
+/// kinds (quote-context and juxtaposition traps outweigh the win), and the
+/// string prefix/suffix kinds (glued to their delimiters).
+const TOKEN_REPARSE_KINDS: &[SyntaxKind] = &[
+    SyntaxKind::IDENT,
+    SyntaxKind::COMMENT,
+    SyntaxKind::BLOCK_COMMENT,
+    SyntaxKind::WHITESPACE,
+];
+
+/// Identifier texts the parser treats structurally even though they lex as
+/// plain `Ident`, so a same-kind relex proves nothing about the tree shape.
+/// True keywords (`where`, `mutable`, …) need no entry: they lex as their own
+/// kinds, and the same-kind guard rejects them. The oracle harness surfaces
+/// omissions.
+const CONTEXTUAL_IDENTS: &[&str] = &[
+    "as",        // import alias (structural.rs)
+    "abstract",  // `abstract type` (expr.rs)
+    "primitive", // `primitive type` (expr.rs)
+    "type",      // the `type` in `abstract`/`primitive` type decls (expr.rs)
+    "typegroup", // `typegroup` declaration (expr.rs)
+    "public",    // top-level `public` statement (expr.rs)
+    "var",       // `var"..."` quoting prefix (expr.rs)
+    "in",        // iteration spec / infix operator (expr.rs)
+    "∈",         // Unicode `in` (expr.rs)
+    "isa",       // infix operator (expr.rs)
+    "doc",       // `doc"..."` / `@doc` marker (expr.rs)
+    "outer",     // future `for outer i` support
+];
+
+/// The token tier: when the edit is confined to a single eligible leaf, relex
+/// that leaf in isolation and splice it via [`SyntaxToken::replace_with`].
+///
+/// A pure insertion at a token boundary is ambiguous (it could extend either
+/// neighbor), so both candidates are tried, left first; whichever passes the
+/// guards yields the same new file text, and the guards plus the Tenet-4
+/// oracle arbitrate tree equality. Any guard failure returns `None`, which
+/// the caller answers with a full parse, so every bail here is safe.
+fn reparse_token(
+    prev_text: &str,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+) -> Option<Reparsed> {
+    // Newline ban: the eligible kinds either cannot contain a newline or
+    // (block comments) rarely see one edited; a newline also moves statement
+    // boundaries, so bail early. The single-token relex guard below would
+    // catch most of these anyway; this is the cheap early-out.
+    if edit.insert.contains(['\n', '\r']) || prev_text[edit.range.clone()].contains(['\n', '\r']) {
+        return None;
+    }
+
+    let root = SyntaxNode::new_root(prev_green.clone());
+    let (s, e) = (edit.range.start, edit.range.end);
+    let mut candidates: Vec<SyntaxToken> = Vec::with_capacity(2);
+    if s == e {
+        match root.token_at_offset(TextSize::new(s as u32)) {
+            TokenAtOffset::None => return None,
+            TokenAtOffset::Single(t) => candidates.push(t),
+            TokenAtOffset::Between(l, r) => candidates.extend([l, r]),
+        }
+    } else {
+        // A range spanning a token boundary covers a node, not a token, and
+        // bails here.
+        let range = TextRange::new(TextSize::new(s as u32), TextSize::new(e as u32));
+        candidates.push(root.covering_element(range).into_token()?);
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|token| try_splice_token(prev_text, prev_diags, edit, &token))
+}
+
+/// Run the stage-2 guards against one candidate leaf and splice on success.
+fn try_splice_token(
+    prev_text: &str,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    token: &SyntaxToken,
+) -> Option<Reparsed> {
+    if !TOKEN_REPARSE_KINDS.contains(&token.kind()) {
+        return None;
+    }
+    let tr = token.text_range();
+    let (t0, t1) = (usize::from(tr.start()), usize::from(tr.end()));
+
+    // The leaf's new text, with the edit applied at its relative offset. A
+    // whole-leaf deletion leaves it empty, which the relex guard rejects.
+    let mut new_leaf = token.text().to_string();
+    new_leaf.replace_range((edit.range.start - t0)..(edit.range.end - t0), &edit.insert);
+
+    // Isolated relex: still exactly one token, same kind, spanning all of it.
+    // This alone rejects kind flips (ident ⇒ keyword, whitespace ⇒ newline)
+    // and splits (`=#` typed into a block comment).
+    let relexed = lex(&new_leaf);
+    let [only] = relexed.as_slice() else {
+        return None;
+    };
+    if only.start != 0 || only.end != new_leaf.len() || syntax_kind_for(only.kind) != token.kind() {
+        return None;
+    }
+
+    // Contextual identifiers parse structurally, so text changes into or out
+    // of one can reshape the tree under an unchanged token kind.
+    if token.kind() == SyntaxKind::IDENT
+        && (CONTEXTUAL_IDENTS.contains(&token.text())
+            || CONTEXTUAL_IDENTS.contains(&new_leaf.as_str()))
+    {
+        return None;
+    }
+
+    // Forward join: the next source character must not extend the token
+    // (`r` + `"…"` fusing into a prefixed string, an unterminated block
+    // comment swallowing its neighbor). At EOF probe with `\n`, which no
+    // eligible kind can absorb, so a leaf left unterminated at EOF (`#=` typed
+    // into the last block comment) still fails here.
+    let next_char = prev_text[t1..].chars().next().unwrap_or('\n');
+    let mut probe = new_leaf.clone();
+    probe.push(next_char);
+    let first = lex(&probe).into_iter().next()?;
+    if first.end != new_leaf.len() || syntax_kind_for(first.kind) != token.kind() {
+        return None;
+    }
+
+    // Backward join: the previous leaf plus the new text must relex to the
+    // same two tokens. Catches juxtaposition fusing (`2` + `e10` ⇒ one
+    // `Float`), and conservatively bails whenever the previous leaf's
+    // isolated lex diverges from its in-context one (e.g. a closing string
+    // delimiter reopening as a string).
+    if let Some(prev) = token.prev_token() {
+        let mut probe = prev.text().to_string();
+        let boundary = probe.len();
+        probe.push_str(&new_leaf);
+        let relexed = lex(&probe);
+        let [a, b] = relexed.as_slice() else {
+            return None;
+        };
+        if a.end != boundary
+            || syntax_kind_for(a.kind) != prev.kind()
+            || b.end != probe.len()
+            || syntax_kind_for(b.kind) != token.kind()
+        {
+            return None;
+        }
+    }
+
+    // Keep diagnostic remapping trivial: bail when any diagnostic touches the
+    // leaf, boundaries included. A clean same-kind relex introduces none of
+    // its own, so the rest keep their meaning and only need shifting.
+    if prev_diags.iter().any(|d| d.start <= t1 && d.end >= t0) {
+        return None;
+    }
+    let delta = edit.delta();
+    let shift = |pos: usize| (pos as isize + delta) as usize;
+    let diagnostics = prev_diags
+        .iter()
+        .map(|d| {
+            let mut d = d.clone();
+            if d.start >= t1 {
+                d.start = shift(d.start);
+                d.end = shift(d.end);
+            }
+            d
+        })
+        .collect();
+
+    let green = token.replace_with(GreenToken::new(token.kind().into(), &new_leaf));
+    Some(Reparsed {
+        green,
+        diagnostics,
+        tier: ReparseTier::Token,
+    })
 }
 
 #[cfg(test)]
