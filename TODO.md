@@ -42,7 +42,7 @@ subtree-local and emission order is per-statement contiguous, so fragment
 `parse()` reproduces them and diagnostics splice as five ordered sequences.
 Each stage lands independently with the full suite green.
 
-- [ ] Reparse stage 0 (infra, no behavior change): new
+- [x] Reparse stage 0 (infra, no behavior change): new
   `src/parser/reparse.rs` with `Edit` (byte range + insert text),
   `diff_edit(old, new)` (common prefix/suffix strip, char-boundary
   clamped), and a stub `reparse(prev_text, prev_green, prev_diags, edit,
