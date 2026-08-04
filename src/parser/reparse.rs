@@ -4,10 +4,11 @@
 //! Modelled on rust-analyzer's `reparsing.rs` and arity's `reparse.rs`: try
 //! the cheapest strategy first and fall back to progressively more work, with
 //! a full [`parse`](crate::parser::parse) as the always-correct last resort.
-//! The staged plan lives in `TODO.md` (`### Incremental`); this module is
-//! stage 0 — the edit plumbing plus a [`reparse`] stub that always falls back,
-//! so behavior is unchanged while the salsa side-channel and the oracle
-//! harness land against the real API.
+//! The staged plan lives in `TODO.md` (`### Incremental`); stages 0–1 are in:
+//! the edit plumbing, a [`reparse`] stub that always falls back, and the
+//! Tenet-4 oracle (the `debug_assert` below plus
+//! `tests/incremental_reparse.rs`), so behavior is unchanged while the token
+//! and top-level tiers land against the real API.
 //!
 //! **Correctness invariant (Tenet 4):** a successful reparse must yield a
 //! green tree *and* diagnostics byte-identical to a full parse of the edited
@@ -19,6 +20,26 @@ use std::ops::Range;
 use rowan::GreenNode;
 
 use crate::parser::ParseDiagnostic;
+use crate::syntax::SyntaxNode;
+
+/// Structural fingerprint of a tree: one line per descendant element with
+/// `kind@range` plus the token text (empty for nodes). Two trees with equal
+/// fingerprints are byte-identical. Oracle/debug support: the Tenet-4 assert
+/// in [`reparse`] and the `tests/incremental_reparse.rs` harness share this
+/// definition so they can never diverge.
+pub fn fingerprint(node: &SyntaxNode) -> String {
+    use std::fmt::Write;
+
+    let mut out = String::new();
+    for el in node.descendants_with_tokens() {
+        let text = el
+            .as_token()
+            .map(|t| t.text().to_string())
+            .unwrap_or_default();
+        let _ = writeln!(out, "{:?}@{:?} {:?}", el.kind(), el.text_range(), text);
+    }
+    out
+}
 
 /// A single contiguous text edit: replace `range` (a byte range in the *old*
 /// text) with `insert`.
@@ -113,8 +134,39 @@ pub struct Reparsed {
 /// `prev_text` into `new_text`. Returns `None` when no incremental strategy
 /// applies — the caller must then do a full parse.
 ///
-/// Stage 0 stub: no strategy exists yet, so every call falls back.
+/// In debug builds every successful reparse is checked against a full parse
+/// of `new_text` (Tenet 4): tree fingerprint and diagnostics vector must be
+/// identical.
 pub fn reparse(
+    prev_text: &str,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    new_text: &str,
+) -> Option<Reparsed> {
+    let result = reparse_impl(prev_text, prev_green, prev_diags, edit, new_text)?;
+
+    #[cfg(debug_assertions)]
+    {
+        let full = crate::parser::parse(new_text);
+        debug_assert_eq!(
+            fingerprint(&SyntaxNode::new_root(result.green.clone())),
+            fingerprint(&full.cst),
+            "Tenet 4: reparse ({:?}) tree differs from full parse",
+            result.tier,
+        );
+        debug_assert_eq!(
+            result.diagnostics, full.diagnostics,
+            "Tenet 4: reparse ({:?}) diagnostics differ from full parse",
+            result.tier,
+        );
+    }
+
+    Some(result)
+}
+
+/// Stage 0 stub: no strategy exists yet, so every call falls back.
+fn reparse_impl(
     _prev_text: &str,
     _prev_green: &GreenNode,
     _prev_diags: &[ParseDiagnostic],
@@ -202,6 +254,15 @@ mod tests {
         let edits = vec![edit(0..1, "y"), edit(4..5, "2")];
         assert_eq!(apply_edits("x = 1\n", &edits), "y = 2\n");
         assert_eq!(apply_edits("x = 1\n", &[]), "x = 1\n");
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_discriminating() {
+        let a1 = fingerprint(&crate::parser::parse("x = 1\n").cst);
+        let a2 = fingerprint(&crate::parser::parse("x = 1\n").cst);
+        let b = fingerprint(&crate::parser::parse("x = 2\n").cst);
+        assert_eq!(a1, a2);
+        assert_ne!(a1, b);
     }
 
     #[test]

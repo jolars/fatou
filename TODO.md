@@ -55,7 +55,7 @@ Each stage lands independently with the full suite green.
   (cancellation-safe). Unit tests for `diff_edit` and `apply_edits`
   (UTF-8 clamps, whole-replace, no-op).
 
-- [ ] Reparse stage 1 (oracle harness first, TDD): new
+- [x] Reparse stage 1 (oracle harness first, TDD): new
   `tests/incremental_reparse.rs` à la arity: tree fingerprint
   (kind@range + token text of every descendant); for each corpus snippet
   × ~200 seeded edits (insert alphabet biased toward hazards: `"`, `"""`,
