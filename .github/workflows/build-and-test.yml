@@ -84,3 +84,14 @@ jobs:
     with:
       release-tag: ${{ needs.versionary.outputs.tag_name }}
     secrets: inherit
+
+  publish-aur:
+    name: Publish AUR Package
+    needs: [versionary, build-release-assets]
+    if: ${{ needs.versionary.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/publish-aur.yml
+    with:
+      tag: ${{ needs.versionary.outputs.tag_name }}
+    secrets: inherit
+    permissions:
+      contents: read

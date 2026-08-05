@@ -77,6 +77,11 @@ tasks:
         cargo run --quiet --example sitemap --
         docs/book https://fatou.dev/
 
+  aur:push:
+    desc: "Manually publish fatou-bin to the AUR (CI fallback; args: [version] [pkgrel])"
+    cmds:
+      - ./scripts/aur_push.sh {{.CLI_ARGS}}
+
   logo:
     desc: 'Generate the logo (pass params after --, e.g. `task logo -- mode=newton`)'
     cmds:

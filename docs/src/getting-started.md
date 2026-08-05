@@ -31,6 +31,16 @@ uv tool install fatou
 pipx install fatou
 ```
 
+### AUR
+
+On Arch Linux, install the prebuilt
+[`fatou-bin`](https://aur.archlinux.org/packages/fatou-bin) package with an AUR
+helper:
+
+```bash
+paru -S fatou-bin
+```
+
 ### Prebuilt binaries
 
 Download an archive for your platform from the [releases
