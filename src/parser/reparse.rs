@@ -678,6 +678,40 @@ fn reparse_toplevel(
         }
     }
 
+    // Cross-region coupling: when the fragment carries no significant content,
+    // the two neighbors sit next to each other across it and can couple in a
+    // way neither boundary parse can see, because each concatenation contains
+    // only one of them. Deleting the `]` from `"doc" ]\nf() = 1` is the shape:
+    // the stray closer was all that kept the string from documenting the
+    // statement below it, and once it goes `fold_docstrings` folds the pair
+    // into a `DOC` spanning both seams. Parse the neighbors together, through
+    // the real gap bytes, and require both seams to survive. Only reachable
+    // when the region is reduced to trivia, so the extra parse is rare and
+    // neighbor-sized.
+    if !frag
+        .cst
+        .children_with_tokens()
+        .any(|el| is_significant_child(&el))
+        && let (Some(prev), Some(next)) = (&prev_node, &next_node)
+    {
+        let back_gap = &prev_text[usize::from(prev.text_range().end())..region.start];
+        let fwd_gap = &prev_text[region.end..usize::from(next.text_range().start())];
+        let guard = format!(
+            "{}{}{}{}{}",
+            prev.text(),
+            back_gap,
+            fragment,
+            fwd_gap,
+            next.text()
+        );
+        let back_seam = usize::from(prev.text_range().len()) + back_gap.len();
+        let fwd_seam = back_seam + fragment.len();
+        let parsed = crate::parser::parse(&guard);
+        if !no_straddle(&parsed.cst, back_seam) || !no_straddle(&parsed.cst, fwd_seam) {
+            return None;
+        }
+    }
+
     // A zero-width diagnostic exactly on a guard seam is disambiguated by
     // the fragment's own boundary child, mirroring `splice_diagnostics`: a
     // statement node owns a start-anchored marker at its start and an
