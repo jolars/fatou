@@ -20,9 +20,9 @@ use crossbeam_channel::{Receiver, Sender, select};
 use lsp_types::{Diagnostic, Uri};
 use salsa::Database as _;
 
-use crate::incremental::IncrementalDatabase;
+use crate::incremental::{IncrementalDatabase, IncrementalDb};
 use crate::index::{HarvestedLibrary, PackageIndex};
-use crate::text::PositionEncoding;
+use crate::text::{Edit, PositionEncoding};
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
@@ -65,6 +65,10 @@ pub(crate) struct AnalysisRequest {
     /// The lint rules the main loop resolved for this document (discovered
     /// `fatou.toml` shadowing editor-pushed settings), current at dispatch.
     pub(crate) rules: Arc<ServerRules>,
+    /// The byte edits that produced `text` from the previously sent one, for
+    /// the incremental reparse to replay; `None` when the transform is unknown
+    /// (a `didOpen`, a whole-buffer replacement, a re-analysis for new rules).
+    pub(crate) edits: Option<Vec<Edit>>,
 }
 
 /// A library-index update delivered to the analysis thread by the background
@@ -297,12 +301,35 @@ impl AnalysisWorker {
 
     /// Add `req` to the pending queue, keeping the highest version per URI
     /// (guards against an out-of-order lower version clobbering a newer one).
-    fn enqueue(&mut self, req: AnalysisRequest) {
+    ///
+    /// Coalescing drops the superseded request wholesale, so its edits are
+    /// carried onto the survivor rather than lost: the chain the db eventually
+    /// sees has to describe the transform from the last *analyzed* text, not
+    /// from the last enqueued one.
+    fn enqueue(&mut self, mut req: AnalysisRequest) {
         // Even a stale-version duplicate signals recent activity on this URI.
         self.active = Some(req.uri.clone());
-        match self.pending.get(&req.uri) {
-            Some(existing) if existing.version >= req.version => {}
-            _ => {
+        match self.pending.get_mut(&req.uri) {
+            Some(existing) if existing.version >= req.version => {
+                // Dropping a request whose text differs loses the transform to
+                // it and back, so the chain is no longer a description of how
+                // the pending text was reached. Same text (an `on_config_changed`
+                // re-analysis at the same version, new rules) changes nothing.
+                if existing.text != req.text {
+                    existing.edits = None;
+                }
+            }
+            Some(existing) => {
+                req.edits = match (existing.edits.take(), req.edits.take()) {
+                    (Some(mut kept), Some(fresh)) => {
+                        kept.extend(fresh);
+                        Some(kept)
+                    }
+                    _ => None,
+                };
+                self.pending.insert(req.uri.clone(), req);
+            }
+            None => {
                 self.pending.insert(req.uri.clone(), req);
             }
         }
@@ -340,10 +367,15 @@ impl AnalysisWorker {
     /// read-phase on the read pool holding a db clone. Returning to `select!`
     /// right after spawning keeps reads responsive and lets a fresher edit
     /// cancel the analysis.
-    fn start(&mut self, req: AnalysisRequest) {
+    fn start(&mut self, mut req: AnalysisRequest) {
         // Write-phase: push the live buffer into the persistent db. Cheap —
         // the parse is a lazy salsa query deferred to the read-phase.
         let file = self.db.upsert_file(&req.path, req.text.clone());
+        // Hand the precise edits to the incremental reparse. Staged after the
+        // text so the chain is never ahead of the buffer it describes, and
+        // appended rather than replaced so a chain the previous read never got
+        // to consume (a cancelled analysis) survives to be replayed.
+        self.db.reparse_stage_edits(file, req.edits.take());
 
         // Read-phase on the read pool, holding a db clone. A superseding edit
         // (or any write) trips `salsa::Cancelled`, caught below so a canceled
@@ -359,6 +391,7 @@ impl AnalysisWorker {
             text,
             version,
             rules,
+            edits: _, // already staged on the db above
         } = req;
         self.inflight = Some(InflightAnalyze {
             uri: uri.clone(),
@@ -447,6 +480,30 @@ mod tests {
 
     fn uri_named(name: &str) -> Uri {
         Uri::from_str(&format!("file:///work/{name}")).unwrap()
+    }
+
+    impl AnalysisWorker {
+        /// An idle worker with dead channels and a one-thread read pool that is
+        /// dropped immediately. Fine for the queue-shaping tests, which never
+        /// dispatch; a test that calls `start` must supply its own live pool and
+        /// senders (see `try_dispatch_supersedes_inflight_and_triggers_cancellation`).
+        fn for_test() -> Self {
+            use crate::lsp::task_pool::TaskPool;
+            use crate::text::PositionEncoding;
+
+            Self {
+                db: IncrementalDatabase::default(),
+                out_tx: crossbeam_channel::unbounded().0,
+                done_tx: crossbeam_channel::unbounded().0,
+                inflight: None,
+                pending: HashMap::new(),
+                active: None,
+                read_spawner: TaskPool::new("test-analysis-read", 1).spawner(),
+                encoding: PositionEncoding::Utf16,
+                push_diagnostics: true,
+                published_graph_files: HashSet::new(),
+            }
+        }
     }
 
     #[test]
@@ -572,7 +629,6 @@ mod tests {
 
         use crate::lsp::lint::ServerRules;
         use crate::lsp::task_pool::TaskPool;
-        use crate::text::PositionEncoding;
 
         let a = uri_named("a.jl");
         let rules = ServerRules::defaults();
@@ -582,6 +638,7 @@ mod tests {
             text: "x = 1\n".to_string(),
             version,
             rules: Arc::clone(&rules),
+            edits: None,
         };
 
         // A real read pool so `start` can spawn its read-phase; kept alive for
@@ -590,16 +647,10 @@ mod tests {
         let (out_tx, _out_rx) = crossbeam_channel::unbounded::<Outbound>();
         let (done_tx, done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
         let mut worker = AnalysisWorker {
-            db: IncrementalDatabase::default(),
+            read_spawner: pool.spawner(),
             out_tx,
             done_tx,
-            inflight: None,
-            pending: HashMap::new(),
-            active: None,
-            read_spawner: pool.spawner(),
-            encoding: PositionEncoding::Utf16,
-            push_diagnostics: true,
-            published_graph_files: HashSet::new(),
+            ..AnalysisWorker::for_test()
         };
 
         // Dispatch v1 and leave it "in flight": we never drain `done_rx`, so the
@@ -637,6 +688,55 @@ mod tests {
             }
         }
         assert_eq!(done, 2, "both analyses should have signaled done");
+    }
+
+    /// Coalescing drops the superseded request wholesale, so its edits have to
+    /// ride along on the survivor: what reaches the db must describe the
+    /// transform from the last *analyzed* text, not from the last enqueued one.
+    #[test]
+    fn enqueue_accumulates_the_edits_of_coalesced_requests() {
+        use crate::lsp::lint::ServerRules;
+
+        let a = uri_named("a.jl");
+        let rules = ServerRules::defaults();
+        let req = |version: i32, text: &str, edits: Option<Vec<Edit>>| AnalysisRequest {
+            uri: a.clone(),
+            path: PathBuf::from("/work/a.jl"),
+            text: text.to_string(),
+            version,
+            rules: Arc::clone(&rules),
+            edits,
+        };
+        let edit = |at: usize, insert: &str| Edit {
+            range: at..at,
+            insert: insert.to_string(),
+        };
+        let mut worker = AnalysisWorker::for_test();
+
+        worker.enqueue(req(1, "xy\n", Some(vec![edit(1, "x")])));
+        worker.enqueue(req(2, "xyz\n", Some(vec![edit(2, "y")])));
+        assert_eq!(
+            worker.pending[&a].edits,
+            Some(vec![edit(1, "x"), edit(2, "y")]),
+            "v1's edits must survive its request being dropped"
+        );
+
+        // An unknown transform anywhere in the run poisons the whole chain:
+        // the surviving text can no longer be reached by replaying it.
+        worker.enqueue(req(3, "brand new\n", None));
+        assert_eq!(worker.pending[&a].edits, None);
+
+        // A re-analysis at the same version and text (new lint rules) is
+        // dropped, and must not take a good chain down with it.
+        let mut worker = AnalysisWorker::for_test();
+        worker.enqueue(req(1, "xy\n", Some(vec![edit(1, "x")])));
+        worker.enqueue(req(1, "xy\n", None));
+        assert_eq!(worker.pending[&a].edits, Some(vec![edit(1, "x")]));
+
+        // A dropped request whose text *differs*, though, means the pending
+        // chain no longer describes how the pending text was reached.
+        worker.enqueue(req(1, "different\n", None));
+        assert_eq!(worker.pending[&a].edits, None);
     }
 
     #[test]

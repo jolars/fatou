@@ -11,16 +11,22 @@
 //! reparses the run of `ROOT` children touching the edit with the public
 //! [`parse`](crate::parser::parse) and splices the resulting children and
 //! diagnostics in place, provided the boundary guards prove the region
-//! decoupled from its neighbors. The Tenet-4 oracle (the `debug_assert`
-//! below plus `tests/incremental_reparse.rs`) checks every splice against a
-//! full parse.
+//! decoupled from its neighbors.
+//!
+//! Two entry points sit above those tiers. [`reparse_edits`] takes the precise
+//! chain the language server staged from a `didChange` batch and replays it one
+//! edit at a time; [`reparse`] takes a single edit, which is what
+//! `crate::incremental` recovers with [`diff_edit`] from a pair of whole texts
+//! when no chain is available. The chain is tried first: a collapsed diff of
+//! scattered edits spans everything between them, and a wide span is an
+//! expensive miss, not a cheap one. The Tenet-4 oracle
+//! ([`assert_matches_full_parse`] plus `tests/incremental_reparse.rs`) checks
+//! every splice against a full parse.
 //!
 //! **Correctness invariant (Tenet 4):** a successful reparse must yield a
 //! green tree *and* diagnostics byte-identical to a full parse of the edited
 //! text. A reparse is an output-pure performance hint: the salsa layer only
 //! ever sees text changes, and a miss is a full parse, never an error.
-
-use std::ops::Range;
 
 use rowan::{GreenNode, GreenToken, TextRange, TextSize, TokenAtOffset};
 
@@ -29,6 +35,10 @@ use crate::parser::diagnostics::DiagnosticKind;
 use crate::parser::lexer::lex;
 use crate::parser::tree_builder::syntax_kind_for;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
+
+/// The edit currency, defined in the leaf `crate::text` module and re-exported
+/// here so `crate::parser::Edit` stays the path the parser layer uses.
+pub use crate::text::{Edit, apply_edits, diff_edit, try_apply_edits};
 
 /// Structural fingerprint of a tree: one line per descendant element with
 /// `kind@range` plus the token text (empty for nodes). Two trees with equal
@@ -49,78 +59,10 @@ pub fn fingerprint(node: &SyntaxNode) -> String {
     out
 }
 
-/// A single contiguous text edit: replace `range` (a byte range in the *old*
-/// text) with `insert`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Edit {
-    pub range: Range<usize>,
-    pub insert: String,
-}
-
-impl Edit {
-    /// The signed length change this edit applies to text after `range`.
-    pub fn delta(&self) -> isize {
-        self.insert.len() as isize - (self.range.end - self.range.start) as isize
-    }
-
-    /// Apply the edit to `old`, producing the new text.
-    pub fn apply(&self, old: &str) -> String {
-        let mut out =
-            String::with_capacity(old.len().saturating_sub(self.range.len()) + self.insert.len());
-        out.push_str(&old[..self.range.start]);
-        out.push_str(&self.insert);
-        out.push_str(&old[self.range.end..]);
-        out
-    }
-}
-
-/// Apply `edits` to `old` left-to-right, each expressed against the text its
-/// predecessors produced (the shape LSP `didChange` batches arrive in).
-///
-/// Doubles as an apply-and-verify guard: reconstructing the current buffer
-/// from an old snapshot plus an edit slice proves the slice is the exact
-/// transform between them, so a stale or misaligned sequence can be rejected
-/// in favor of the whole-text [`diff_edit`] fallback.
-pub fn apply_edits(old: &str, edits: &[Edit]) -> String {
-    edits.iter().fold(old.to_string(), |text, e| e.apply(&text))
-}
-
-/// Recover a single contiguous [`Edit`] from a pair of full texts by stripping
-/// the common prefix and suffix. Multiple disjoint edits collapse into one
-/// spanning edit — still a correct transform, just coarser. Boundaries are
-/// clamped to char boundaries of both texts.
-pub fn diff_edit(old: &str, new: &str) -> Edit {
-    let ob = old.as_bytes();
-    let nb = new.as_bytes();
-
-    let mut prefix = 0;
-    let max_prefix = ob.len().min(nb.len());
-    while prefix < max_prefix && ob[prefix] == nb[prefix] {
-        prefix += 1;
-    }
-    while prefix > 0 && !old.is_char_boundary(prefix) {
-        prefix -= 1;
-    }
-
-    let mut suffix = 0;
-    let max_suffix = (ob.len() - prefix).min(nb.len() - prefix);
-    while suffix < max_suffix && ob[ob.len() - 1 - suffix] == nb[nb.len() - 1 - suffix] {
-        suffix += 1;
-    }
-    while suffix > 0
-        && (!old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix))
-    {
-        suffix -= 1;
-    }
-
-    Edit {
-        range: prefix..(old.len() - suffix),
-        insert: new[prefix..(new.len() - suffix)].to_string(),
-    }
-}
-
 /// Which strategy produced a [`Reparsed`]. Surfaced for tests and benchmarks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Ordered cheapest-first, so a chain of reparses can report the most
+/// expensive tier it had to reach with [`Ord::max`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReparseTier {
     /// A single leaf token was relexed in isolation and spliced in place.
     Token,
@@ -153,25 +95,91 @@ pub fn reparse(
     new_text: &str,
 ) -> Option<Reparsed> {
     let result = reparse_impl(prev_text, prev_green, prev_diags, edit, new_text)?;
-
-    #[cfg(debug_assertions)]
-    {
-        let full = crate::parser::parse(new_text);
-        debug_assert_eq!(
-            fingerprint(&SyntaxNode::new_root(result.green.clone())),
-            fingerprint(&full.cst),
-            "Tenet 4: reparse ({:?}) tree differs from full parse",
-            result.tier,
-        );
-        debug_assert_eq!(
-            result.diagnostics, full.diagnostics,
-            "Tenet 4: reparse ({:?}) diagnostics differ from full parse",
-            result.tier,
-        );
-    }
-
+    assert_matches_full_parse(&result, new_text);
     Some(result)
 }
+
+/// Attempt an incremental reparse across a *chain* of edits, each expressed
+/// against the text its predecessors produced — the shape an LSP `didChange`
+/// batch arrives in (see [`crate::text::apply_content_changes`]).
+///
+/// This is for the case [`diff_edit`] cannot express: when the edits are
+/// scattered, collapsing them into one spanning edit covers everything between
+/// the first and the last change and blows both tiers' guards, while replaying
+/// them one at a time keeps each splice small. Try this *before* the collapsed
+/// edit — a wide span is not merely a miss, it is an expensive one, since the
+/// top-level tier answers it with a fragment parse of the region plus both
+/// boundary guards (`benches/reparse.rs`).
+///
+/// Fewer than two edits returns `None` immediately: a single edit's span
+/// always contains [`diff_edit`]'s for the same transform, so there is nothing
+/// to gain over the caller's next step.
+///
+/// `edits` is not trusted: a slice that is not the exact transform from
+/// `prev_text` to `new_text` (a stale chain, a buffer that moved underneath
+/// it) is rejected up front rather than applied at meaningless offsets.
+pub fn reparse_edits(
+    prev_text: &str,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edits: &[Edit],
+    new_text: &str,
+) -> Option<Reparsed> {
+    if edits.len() < 2 {
+        return None;
+    }
+    if try_apply_edits(prev_text, edits)? != new_text {
+        return None;
+    }
+
+    let mut text = prev_text.to_string();
+    let mut green = prev_green.clone();
+    let mut diagnostics = prev_diags.to_vec();
+    let mut tier = ReparseTier::Token;
+
+    for edit in edits {
+        let next = edit.apply(&text);
+        let step = reparse_impl(&text, &green, &diagnostics, edit, &next)?;
+        tier = tier.max(step.tier);
+        text = next;
+        green = step.green;
+        diagnostics = step.diagnostics;
+    }
+
+    let result = Reparsed {
+        green,
+        diagnostics,
+        tier,
+    };
+    assert_matches_full_parse(&result, new_text);
+    Some(result)
+}
+
+/// Tenet 4: a successful reparse yields a green tree *and* diagnostics
+/// byte-identical to a full parse of the edited text.
+///
+/// Debug builds only — this runs a whole `parse` plus two whole-tree
+/// [`fingerprint`] builds, so it is far too expensive to leave on. A chain
+/// asserts once on its composed result rather than once per step, which would
+/// otherwise make a debug-build language server unusable on a large file.
+#[cfg(debug_assertions)]
+fn assert_matches_full_parse(result: &Reparsed, new_text: &str) {
+    let full = crate::parser::parse(new_text);
+    debug_assert_eq!(
+        fingerprint(&SyntaxNode::new_root(result.green.clone())),
+        fingerprint(&full.cst),
+        "Tenet 4: reparse ({:?}) tree differs from full parse",
+        result.tier,
+    );
+    debug_assert_eq!(
+        result.diagnostics, full.diagnostics,
+        "Tenet 4: reparse ({:?}) diagnostics differ from full parse",
+        result.tier,
+    );
+}
+
+#[cfg(not(debug_assertions))]
+fn assert_matches_full_parse(_result: &Reparsed, _new_text: &str) {}
 
 /// Tier dispatch: cheapest first.
 fn reparse_impl(
@@ -813,80 +821,11 @@ fn reparse_toplevel(
 mod tests {
     use super::*;
 
-    fn edit(range: Range<usize>, insert: &str) -> Edit {
+    fn edit(range: std::ops::Range<usize>, insert: &str) -> Edit {
         Edit {
             range,
             insert: insert.to_string(),
         }
-    }
-
-    #[test]
-    fn diff_edit_recovers_a_noop() {
-        assert_eq!(diff_edit("x = 1\n", "x = 1\n"), edit(6..6, ""));
-    }
-
-    #[test]
-    fn diff_edit_recovers_an_insertion() {
-        let e = diff_edit("x = 1\n", "x = 12\n");
-        assert_eq!(e, edit(5..5, "2"));
-        assert_eq!(e.apply("x = 1\n"), "x = 12\n");
-        assert_eq!(e.delta(), 1);
-    }
-
-    #[test]
-    fn diff_edit_recovers_a_deletion() {
-        let e = diff_edit("x = 12\n", "x = 1\n");
-        assert_eq!(e, edit(5..6, ""));
-        assert_eq!(e.apply("x = 12\n"), "x = 1\n");
-        assert_eq!(e.delta(), -1);
-    }
-
-    #[test]
-    fn diff_edit_recovers_a_replacement() {
-        let e = diff_edit("f(a, b)\n", "f(a, c)\n");
-        assert_eq!(e, edit(5..6, "c"));
-        assert_eq!(e.apply("f(a, b)\n"), "f(a, c)\n");
-        assert_eq!(e.delta(), 0);
-    }
-
-    #[test]
-    fn diff_edit_collapses_disjoint_edits_into_one_span() {
-        // Two edits (a→z at 0, c→z at 4) collapse into one spanning edit.
-        let e = diff_edit("a b c\n", "z b z\n");
-        assert_eq!(e, edit(0..5, "z b z"));
-        assert_eq!(e.apply("a b c\n"), "z b z\n");
-    }
-
-    #[test]
-    fn diff_edit_handles_whole_replacement_and_empty_texts() {
-        assert_eq!(diff_edit("", "x = 1\n"), edit(0..0, "x = 1\n"));
-        assert_eq!(diff_edit("x = 1\n", ""), edit(0..6, ""));
-        assert_eq!(diff_edit("abc", "xyz"), edit(0..3, "xyz"));
-    }
-
-    #[test]
-    fn diff_edit_clamps_to_char_boundaries() {
-        // α (0xCE 0xB1) and β (0xCE 0xB2) share their lead byte; a naive byte
-        // prefix would split the code point.
-        let e = diff_edit("α = 1\n", "β = 1\n");
-        assert_eq!(e, edit(0..2, "β"));
-        assert_eq!(e.apply("α = 1\n"), "β = 1\n");
-
-        // Shared trail bytes: ά vs ᾶ end in different code points whose UTF-8
-        // shares a final byte pattern only mid-character.
-        let old = "x\u{3AC}";
-        let new = "x\u{1FB6}";
-        let e = diff_edit(old, new);
-        assert!(old.is_char_boundary(e.range.start));
-        assert!(old.is_char_boundary(e.range.end));
-        assert_eq!(e.apply(old), new);
-    }
-
-    #[test]
-    fn apply_edits_chains_left_to_right() {
-        let edits = vec![edit(0..1, "y"), edit(4..5, "2")];
-        assert_eq!(apply_edits("x = 1\n", &edits), "y = 2\n");
-        assert_eq!(apply_edits("x = 1\n", &[]), "x = 1\n");
     }
 
     #[test]
@@ -898,11 +837,109 @@ mod tests {
         assert_ne!(a1, b);
     }
 
+    /// A numeric literal is deliberately outside `TOKEN_REPARSE_KINDS`, and a
+    /// lone `x = 1` statement is the whole `ROOT`, so the top-level tier finds
+    /// no decoupled region either.
     #[test]
-    fn reparse_stub_always_falls_back() {
+    fn a_number_edit_in_a_lone_statement_falls_back() {
         let parsed = crate::parser::parse("x = 1\n");
         let green = parsed.cst.green().into_owned();
         let e = diff_edit("x = 1\n", "x = 2\n");
         assert!(reparse("x = 1\n", &green, &parsed.diagnostics, &e, "x = 2\n").is_none());
+    }
+
+    /// The shape `reparse_edits` exists for: two identifier edits far apart,
+    /// which `diff_edit` would collapse into one span covering both statements.
+    #[test]
+    fn reparse_edits_chains_scattered_edits() {
+        let old = "alpha = 1\nfiller = 2\nomega = 3\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+        // `alpha` -> `alphaX`, then `omega` -> `omegaX` at its post-first-edit
+        // offset (one byte further along).
+        let edits = vec![edit(5..5, "X"), edit(27..27, "X")];
+        let new = apply_edits(old, &edits);
+        assert_eq!(new, "alphaX = 1\nfiller = 2\nomegaX = 3\n");
+
+        // The collapsed diff spans from `alpha` all the way to `omega`, so the
+        // cheap token tier cannot touch it and the whole run of statements has
+        // to be reparsed. Replaying the chain keeps both splices at the token
+        // tier. On three statements that is a wash; on a real file the
+        // difference is two orders of magnitude (`benches/reparse.rs`), which
+        // is why the chain is tried first.
+        let collapsed = diff_edit(old, &new);
+        assert!(collapsed.range.len() > 20, "{collapsed:?} should be coarse");
+        let via_diff = reparse(old, &green, &parsed.diagnostics, &collapsed, &new)
+            .expect("the whole-file region is still spliceable at this size");
+        assert_eq!(via_diff.tier, ReparseTier::TopLevel);
+
+        let out = reparse_edits(old, &green, &parsed.diagnostics, &edits, &new)
+            .expect("two identifier edits should chain");
+        assert_eq!(out.tier, ReparseTier::Token);
+        assert_eq!(
+            fingerprint(&SyntaxNode::new_root(out.green)),
+            fingerprint(&crate::parser::parse(&new).cst),
+        );
+    }
+
+    /// The chain reports the most expensive tier it had to reach.
+    #[test]
+    fn reparse_edits_reports_the_max_tier() {
+        let old = "alpha = 1\nfiller = 2\nomega = 3\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+        // An ident edit (token tier) plus a whole added statement (top level),
+        // appended at the post-first-edit end of the buffer.
+        let edits = vec![edit(5..5, "X"), edit(32..32, "beta = 4\n")];
+        let new = apply_edits(old, &edits);
+
+        let out = reparse_edits(old, &green, &parsed.diagnostics, &edits, &new)
+            .expect("ident edit plus a new statement should chain");
+        assert_eq!(out.tier, ReparseTier::TopLevel);
+    }
+
+    /// Fewer than two edits is always `diff_edit`'s job: its span for the same
+    /// transform is contained in the single edit's, and the caller tried it.
+    #[test]
+    fn reparse_edits_declines_short_chains() {
+        let old = "alpha = 1\nomega = 3\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+
+        assert!(reparse_edits(old, &green, &parsed.diagnostics, &[], old).is_none());
+        let one = vec![edit(5..5, "X")];
+        let new = apply_edits(old, &one);
+        assert!(reparse_edits(old, &green, &parsed.diagnostics, &one, &new).is_none());
+    }
+
+    /// A chain that is not the exact transform between the two texts is
+    /// rejected before any offset is trusted — both when it simply does not
+    /// reproduce the target, and when it does not fit the source at all.
+    #[test]
+    fn reparse_edits_rejects_a_stale_chain() {
+        let old = "alpha = 1\nfiller = 2\nomega = 3\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+
+        // Applies cleanly, but the buffer moved on underneath it.
+        let edits = vec![edit(5..5, "X"), edit(26..26, "X")];
+        let elsewhere = "alphaX = 1\nfiller = 2\nomegaX = 3\nextra = 4\n";
+        assert!(reparse_edits(old, &green, &parsed.diagnostics, &edits, elsewhere).is_none());
+
+        // Does not even fit the source text.
+        let past_end = vec![edit(500..500, "X"), edit(501..501, "X")];
+        assert!(reparse_edits(old, &green, &parsed.diagnostics, &past_end, old).is_none());
+    }
+
+    /// One unhandleable step aborts the whole chain — the caller full-parses.
+    #[test]
+    fn reparse_edits_aborts_on_an_unhandleable_step() {
+        let old = "alpha = 1\nfiller = 2\nomega = 3\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+        // The second edit opens an unterminated string, which no tier splices.
+        let edits = vec![edit(5..5, "X"), edit(26..26, "\"")];
+        let new = apply_edits(old, &edits);
+        assert!(reparse_edits(old, &green, &parsed.diagnostics, &edits, &new).is_none());
     }
 }

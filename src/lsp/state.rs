@@ -39,7 +39,7 @@ use lsp_types::{
 
 use crate::config::CONFIG_FILE_NAME;
 use crate::environment::is_environment_file;
-use crate::text::{PositionEncoding, apply_content_changes};
+use crate::text::{Edit, PositionEncoding, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
 use super::config::{ConfigStore, ResolvedConfig};
@@ -837,7 +837,7 @@ impl GlobalState {
                     if self.pull_diagnostics && self.graph_diags.contains_key(&uri) {
                         self.publish(uri.clone(), Vec::new(), None);
                     }
-                    self.send_analysis(uri);
+                    self.send_analysis(uri, None);
                 }
             }
             DidChangeTextDocument::METHOD => {
@@ -850,9 +850,10 @@ impl GlobalState {
                     let Some(doc) = self.documents.get_mut(&uri) else {
                         return;
                     };
-                    apply_content_changes(&mut doc.text, params.content_changes, self.encoding);
+                    let edits =
+                        apply_content_changes(&mut doc.text, params.content_changes, self.encoding);
                     doc.version = params.text_document.version;
-                    self.send_analysis(uri);
+                    self.send_analysis(uri, edits);
                 }
             }
             DidSaveTextDocument::METHOD => {
@@ -1112,7 +1113,13 @@ impl GlobalState {
 
     /// Send an analysis request for `uri`'s current buffer to the analysis
     /// thread, carrying the lint rules resolved for the document.
-    fn send_analysis(&mut self, uri: Uri) {
+    ///
+    /// `edits` are the byte edits that produced the buffer from the one the
+    /// previous request carried, for the incremental reparse to replay. `None`
+    /// means the transform is unknown — a fresh `didOpen`, a whole-buffer
+    /// replacement, or a re-analysis of unchanged text under new rules — and
+    /// the reparse falls back to diffing the two texts.
+    fn send_analysis(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
         let rules = Arc::clone(&self.config_for(&uri).rules);
         let Some(doc) = self.documents.get(&uri) else {
             return;
@@ -1122,6 +1129,7 @@ impl GlobalState {
             text: doc.text.clone(),
             version: doc.version,
             rules,
+            edits,
             uri,
         });
     }
@@ -1145,7 +1153,7 @@ impl GlobalState {
         } else {
             let uris: Vec<Uri> = self.documents.keys().cloned().collect();
             for uri in uris {
-                self.send_analysis(uri);
+                self.send_analysis(uri, None);
             }
         }
     }

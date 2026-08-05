@@ -3,9 +3,10 @@
 //!
 //! Losslessness is the core invariant: `reconstruct(text) == text` for all
 //! inputs. The grammar is a walking skeleton over a Julia subset and grows
-//! incrementally (see `TODO.md`); incremental reparse splicing is staged in
-//! via [`reparse`] (today a stub that always falls back, so the salsa layer in
-//! `crate::incremental` still does a full parse per edit).
+//! incrementally (see `TODO.md`). Incremental reparse splicing lives in
+//! [`reparse`] (a single edit) and [`reparse_edits`] (a chain of them); both
+//! return `None` when no strategy applies, and the salsa layer in
+//! `crate::incremental` then does a full parse.
 
 mod context;
 mod core;
@@ -24,5 +25,8 @@ mod unicode_ops;
 
 pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
 pub(crate) use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
-pub use reparse::{Edit, ReparseTier, Reparsed, apply_edits, diff_edit, fingerprint, reparse};
+pub use reparse::{
+    Edit, ReparseTier, Reparsed, apply_edits, diff_edit, fingerprint, reparse, reparse_edits,
+    try_apply_edits,
+};
 pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
