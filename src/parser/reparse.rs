@@ -129,7 +129,17 @@ pub fn reparse(
 ///
 /// `edits` is not trusted: a slice that is not the exact transform from
 /// `prev_text` to `new_text` (a stale chain, a buffer that moved underneath
-/// it) is rejected up front rather than applied at meaningless offsets.
+/// it) is rejected rather than applied at meaningless offsets. Each step is
+/// proven to [`fits`] the text its predecessors produced *before* that text is
+/// sliced, and the composed result is proven to be `new_text` before anything
+/// is returned — so a stale chain costs at most the splices it got through,
+/// bounded by the caller's chain budget (`incremental::MAX_CHAIN_EDITS`).
+///
+/// Validating step by step rather than pre-folding the whole chain with
+/// [`try_apply_edits`] keeps the replay to one application: the fold would have
+/// to redo every `replace_range` the loop below already does, which on a
+/// 131 KB buffer is the same order as the splice it is guarding
+/// (`benches/reparse.rs`, `precise_chain`).
 pub fn reparse_edits(
     prev_text: &str,
     prev_green: &GreenNode,
@@ -140,9 +150,6 @@ pub fn reparse_edits(
     if edits.len() < 2 {
         return None;
     }
-    if try_apply_edits(prev_text, edits)? != new_text {
-        return None;
-    }
 
     let mut text = prev_text.to_string();
     let mut green = prev_green.clone();
@@ -150,12 +157,23 @@ pub fn reparse_edits(
     let mut tier = ReparseTier::Token;
 
     for edit in edits {
+        if !fits(&text, edit) {
+            return None;
+        }
         let next = edit.apply(&text);
         let step = reparse_impl(&text, &green, &diagnostics, edit, &next)?;
         tier = tier.max(step.tier);
         text = next;
         green = step.green;
         diagnostics = step.diagnostics;
+    }
+
+    // The chain applied cleanly, but that alone does not make it the transform
+    // the caller is asking about: a stale chain can fit and still land
+    // somewhere else entirely. This check is what the Tenet-4 assert below
+    // relies on to be comparing the same two texts.
+    if text != new_text {
+        return None;
     }
 
     let result = Reparsed {
@@ -245,8 +263,14 @@ const STRING_LITERAL_KINDS: &[SyntaxKind] = &[
 /// Identifier texts the parser treats structurally even though they lex as
 /// plain `Ident`, so a same-kind relex proves nothing about the tree shape.
 /// True keywords (`where`, `mutable`, …) need no entry: they lex as their own
-/// kinds, and the same-kind guard rejects them. The oracle harness surfaces
-/// omissions.
+/// kinds, and the same-kind guard rejects them.
+///
+/// This list is the one guard here with no compile-time link to what it
+/// describes, and the Tenet-4 oracle only catches an omission if a seeded edit
+/// happens to spell the missing word — so
+/// [`every_contextual_ident_is_listed`](tests::every_contextual_ident_is_listed)
+/// scans the grammar for `Ident`-text comparisons and fails if one names a word
+/// that is not here.
 const CONTEXTUAL_IDENTS: &[&str] = &[
     "as",        // import alias (structural.rs)
     "abstract",  // `abstract type` (expr.rs)
@@ -462,7 +486,12 @@ fn relex_matches(
             Some((from, delta)) if i >= from => delta,
             _ => 0,
         };
-        if syntax_kind_for(got.kind) != kind || got.end != (end as isize + shift) as usize {
+        // A shift that runs an end past zero cannot describe any token, so it
+        // simply fails to match rather than wrapping into a huge `usize`.
+        let Ok(want) = usize::try_from(end as isize + shift) else {
+            return false;
+        };
+        if syntax_kind_for(got.kind) != kind || got.end != want {
             return false;
         }
     }
@@ -753,6 +782,12 @@ fn no_straddle(cst: &SyntaxNode, seam: usize) -> bool {
 /// straddling a boundary aborts the splice (`None`); regions are whole
 /// children and diagnostics never outgrow their statement, so this arm
 /// should be unreachable and is purely defensive.
+///
+/// A stream index outside [`DIAGNOSTIC_STREAMS`] aborts the splice too, rather
+/// than indexing out of bounds. [`DiagnosticKind::stream`] is an exhaustive
+/// match today, so this cannot fire — but a bail returns the caller to a full
+/// parse, whereas a panic here takes down an analysis query, and this module
+/// buys its whole safety argument from every failure being a bail.
 fn splice_diagnostics(
     prev_diags: &[ParseDiagnostic],
     frag_diags: &[ParseDiagnostic],
@@ -795,14 +830,20 @@ fn splice_diagnostics(
     let mut before: [Vec<ParseDiagnostic>; DIAGNOSTIC_STREAMS] = Default::default();
     let mut after: [Vec<ParseDiagnostic>; DIAGNOSTIC_STREAMS] = Default::default();
     for d in prev_diags {
-        match classify(d)? {
-            Class::Before => before[d.kind.stream()].push(d.clone()),
+        let class = classify(d)?;
+        let stream = d.kind.stream();
+        if stream >= DIAGNOSTIC_STREAMS {
+            debug_assert!(false, "diagnostic stream {stream} is out of range");
+            return None;
+        }
+        match class {
+            Class::Before => before[stream].push(d.clone()),
             Class::Drop => {}
             Class::After => {
                 let mut d = d.clone();
                 d.start = (d.start as isize + delta) as usize;
                 d.end = (d.end as isize + delta) as usize;
-                after[d.kind.stream()].push(d);
+                after[stream].push(d);
             }
         }
     }
@@ -1102,6 +1143,75 @@ mod tests {
         Edit {
             range,
             insert: insert.to_string(),
+        }
+    }
+
+    /// The grammar decides some tree shapes by an identifier's *text*, and the
+    /// token tier's same-kind relex cannot see such a change — so every such
+    /// word has to be in [`CONTEXTUAL_IDENTS`]. Nothing in the type system says
+    /// so, and the oracle only surfaces an omission by luck, so scan the
+    /// grammar for the two spellings those comparisons take and check the words
+    /// they name.
+    ///
+    /// The known words are asserted to have been *found*, not just listed: if a
+    /// comparison is ever rewritten into a shape this scan does not recognize,
+    /// the test fails loudly rather than quietly covering nothing.
+    #[test]
+    fn every_contextual_ident_is_listed() {
+        // `t.kind == TokKind::Ident && t.text == "word"` and the `matches!`
+        // form `matches!(t.text.as_ref(), "word" | "other")`. Both are keyed on
+        // `t.text`, which is what makes them text-structural.
+        fn words_after(haystack: &str, marker: &str) -> Vec<String> {
+            let mut out = Vec::new();
+            for tail in haystack.split(marker).skip(1) {
+                // Take the literals in the comparison that follows, stopping at
+                // the first token that ends it.
+                let stop = tail.find([';', '{', '}']).unwrap_or(tail.len());
+                let mut rest = &tail[..stop];
+                while let Some(open) = rest.find('"') {
+                    let Some(close) = rest[open + 1..].find('"') else {
+                        break;
+                    };
+                    out.push(rest[open + 1..open + 1 + close].to_string());
+                    rest = &rest[open + 1 + close + 1..];
+                }
+            }
+            out
+        }
+
+        // The grammar files, read from source: this is a lint over the code,
+        // not over anything the crate exposes at runtime.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/parser");
+        let mut found: Vec<String> = Vec::new();
+        for name in ["expr.rs", "structural.rs", "core.rs", "recovery.rs"] {
+            let src = std::fs::read_to_string(dir.join(name))
+                .unwrap_or_else(|e| panic!("read {name}: {e}"));
+            found.extend(words_after(&src, "t.text =="));
+            found.extend(words_after(&src, "t.text.as_ref(),"));
+            found.extend(words_after(&src, "next.text =="));
+        }
+        assert!(
+            !found.is_empty(),
+            "the scan matched nothing — the grammar's `Ident`-text comparisons \
+             have been rewritten, and this guard is no longer guarding anything"
+        );
+
+        for word in &found {
+            assert!(
+                CONTEXTUAL_IDENTS.contains(&word.as_str()),
+                "the grammar branches on the identifier text {word:?}, so an \
+                 edit into or out of it can reshape the tree under an unchanged \
+                 token kind. Add it to CONTEXTUAL_IDENTS.",
+            );
+        }
+
+        // Every word the scan is known to reach today. A rewrite that hides one
+        // from the scan trips this rather than silently narrowing the guard.
+        for expected in ["as", "abstract", "primitive", "type", "typegroup", "public"] {
+            assert!(
+                found.iter().any(|w| w == expected),
+                "the scan no longer finds the {expected:?} comparison",
+            );
         }
     }
 
