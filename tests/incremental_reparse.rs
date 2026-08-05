@@ -21,7 +21,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou::parser::{Edit, ReparseTier, Reparsed, fingerprint, parse, reparse, reparse_edits};
+use fatou::parser::{
+    Edit, ReparseTier, Reparsed, apply_edits, fingerprint, parse, reparse, reparse_edits,
+};
 use fatou::syntax::SyntaxNode;
 
 const EDITS_PER_SNIPPET: usize = 200;
@@ -336,6 +338,56 @@ fn toplevel_tier_falls_back() {
     // The region covers every `ROOT` child (single statement, no trailing
     // newline): the fragment reparse would be the full parse.
     assert_falls_back("x = 1", 4..5, "2");
+}
+
+/// A region reduced to trivia lets its two neighbors couple across it, which
+/// neither boundary parse can see on its own: each concatenation contains only
+/// one neighbor. Here the stray `]` is all that keeps `"notdoc"` from
+/// documenting the statement below it, so deleting it folds the two into a
+/// `DOC` — a fold spanning the whole region.
+#[test]
+fn toplevel_tier_falls_back_on_cross_region_coupling() {
+    let src = "\"notdoc\" ]\n";
+    let base = parse(src);
+    let green = base.cst.green().into_owned();
+    let edits = vec![
+        Edit {
+            range: 11..11,
+            insert: "α".to_string(),
+        },
+        Edit {
+            range: 13..13,
+            insert: "+".to_string(),
+        },
+        Edit {
+            range: 9..10,
+            insert: String::new(),
+        },
+    ];
+    let new_text = apply_edits(src, &edits);
+    assert_eq!(new_text, "\"notdoc\" \nα+");
+
+    // The chain must not splice a tree that omits the `DOC` fold. A fallback
+    // is fine; a wrong tree is not (the in-crate Tenet-4 assert also fires).
+    if let Some(rep) = reparse_edits(src, &green, &base.diagnostics, &edits, &new_text) {
+        assert_eq!(
+            fingerprint(&SyntaxNode::new_root(rep.green)),
+            fingerprint(&parse(&new_text).cst),
+        );
+    }
+
+    // The same coupling via a single collapsed edit over the `]`.
+    let one = Edit {
+        range: 9..10,
+        insert: String::new(),
+    };
+    let collapsed = one.apply(src);
+    if let Some(rep) = reparse(src, &green, &base.diagnostics, &one, &collapsed) {
+        assert_eq!(
+            fingerprint(&SyntaxNode::new_root(rep.green)),
+            fingerprint(&parse(&collapsed).cst),
+        );
+    }
 }
 
 /// Character-by-character typing of a function into the blank line of an
