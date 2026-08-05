@@ -133,12 +133,16 @@ Each stage lands independently with the full suite green.
   keystroke 15 us, statement edit 542 us, precise chain 59 us, the same
   change via collapsed `diff_edit` 17 ms, rejected attempt 1.0 ms.
 
-- [ ] `didClose` removes the document from `state.documents` but leaves a
+- [x] `didClose` removes the document from `state.documents` but leaves a
   stale entry in the analysis thread's `pending` queue, so a queued
   request can dispatch *after* `revert_file_to_disk` and re-upsert the
   discarded unsaved buffer (`src/lsp/state.rs` `DidCloseTextDocument` →
   `src/lsp/analysis_thread.rs` sync arm). Pre-existing; drop pending
-  entries on the close signal.
+  entries on the close signal. The sync arm is now `on_sync`, which also
+  drains `analysis_rx` first — a request sent before the close can still
+  be unreceived when the `select!` picks the sync arm — and dispatches
+  afterwards, since that drain swallows the `analyze` arm's wake-up for
+  the other URIs it picks up.
 
 - [ ] `path_for` (`src/lsp/state.rs`) collapses every non-`file:` URI onto
   `untitled.jl`, so two `untitled:` buffers share one `SourceFile` and one
