@@ -12,7 +12,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -233,7 +233,7 @@ impl AnalysisWorker {
                     // Guarded so a panic mid-revert can't kill the sole writer.
                     guard("sync", || {
                         if let Ok(path) = path {
-                            self.db.revert_file_to_disk(&path);
+                            self.on_sync(&path, analysis_rx);
                         }
                     });
                 }
@@ -297,6 +297,48 @@ impl AnalysisWorker {
                 }
             }
         }
+    }
+
+    /// Handle a sync signal: a document was closed, or a watched file changed
+    /// with no buffer of its own. Every queued analysis of that path's live
+    /// buffer is discarded before the tracked input is reverted to the on-disk
+    /// text — dispatching one afterwards would re-upsert the very buffer the
+    /// revert discarded.
+    ///
+    /// Clearing `pending` alone isn't enough: the request and the sync signal
+    /// travel on different channels, so a request the main loop sent *before*
+    /// the close can still be sitting unreceived in `analysis_rx` when the
+    /// `select!` picks the sync arm. Draining it here pulls those into the
+    /// queue first, where they're dropped along with the rest.
+    ///
+    /// An analysis already in flight for the path needs no cancellation: its
+    /// write-phase ran before this revert, so the revert wins, and the main
+    /// loop drops its diagnostics for a document it no longer tracks.
+    fn on_sync(&mut self, path: &Path, analysis_rx: &Receiver<AnalysisRequest>) {
+        while let Ok(req) = analysis_rx.try_recv() {
+            self.enqueue(req);
+        }
+        let dropped: Vec<Uri> = self
+            .pending
+            .iter()
+            .filter(|(_, req)| req.path == path)
+            .map(|(uri, _)| uri.clone())
+            .collect();
+        for uri in &dropped {
+            self.pending.remove(uri);
+        }
+        // A closed document is no longer the focus to schedule ahead of others.
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|uri| dropped.contains(uri))
+        {
+            self.active = None;
+        }
+        self.db.revert_file_to_disk(path);
+        // The drain above swallowed the `analyze` arm's wake-up for whatever
+        // else it picked up, so those requests are dispatched from here.
+        self.try_dispatch();
     }
 
     /// Add `req` to the pending queue, keeping the highest version per URI
@@ -737,6 +779,78 @@ mod tests {
         // chain no longer describes how the pending text was reached.
         worker.enqueue(req(1, "different\n", None));
         assert_eq!(worker.pending[&a].edits, None);
+    }
+
+    /// A close signal takes the closed buffer's queued analyses with it —
+    /// including a request still sitting unreceived in `analysis_rx`, which
+    /// races the sync signal in the `select!`. Dispatching one after the revert
+    /// would re-upsert the unsaved buffer the close discarded. Queued work for
+    /// *other* files is untouched.
+    #[test]
+    fn sync_drops_queued_analyses_for_the_closed_path() {
+        use crate::lsp::lint::ServerRules;
+        use crate::lsp::task_pool::TaskPool;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (closed, other) = (dir.path().join("a.jl"), dir.path().join("b.jl"));
+        std::fs::write(&closed, "on_disk = 1\n").unwrap();
+        std::fs::write(&other, "b = 1\n").unwrap();
+        let closed_uri = crate::lsp::uri::from_path(&closed).unwrap();
+        let other_uri = crate::lsp::uri::from_path(&other).unwrap();
+
+        let rules = ServerRules::defaults();
+        let req = |uri: &Uri, path: &PathBuf, text: &str, version: i32| AnalysisRequest {
+            uri: uri.clone(),
+            path: path.clone(),
+            text: text.to_string(),
+            version,
+            rules: Arc::clone(&rules),
+            edits: None,
+        };
+
+        // A real read pool so the surviving request can actually dispatch.
+        let pool = TaskPool::new("test-analysis-read", 1);
+        let (analysis_tx, analysis_rx) = crossbeam_channel::unbounded::<AnalysisRequest>();
+        let mut worker = AnalysisWorker {
+            read_spawner: pool.spawner(),
+            ..AnalysisWorker::for_test()
+        };
+
+        // An earlier analysis already pushed the unsaved buffer into the db.
+        worker.db.upsert_file(&closed, "unsaved = 2\n".to_string());
+        // One later edit is queued, another is still in the channel when the
+        // close lands; a third belongs to a file that stays open.
+        worker.enqueue(req(&closed_uri, &closed, "unsaved = 3\n", 3));
+        analysis_tx
+            .send(req(&closed_uri, &closed, "unsaved = 4\n", 4))
+            .unwrap();
+        analysis_tx
+            .send(req(&other_uri, &other, "b = 2\n", 1))
+            .unwrap();
+
+        worker.on_sync(&closed, &analysis_rx);
+
+        assert!(
+            !worker.pending.contains_key(&closed_uri),
+            "the closed document's queued analyses should be gone"
+        );
+        assert!(
+            matches!(&worker.inflight, Some(f) if f.uri == other_uri),
+            "the still-open document's request should have been dispatched"
+        );
+
+        // The next turn of the `select!` loop: nothing is left to receive for
+        // the closed path, so the reverted disk text stands.
+        while let Ok(more) = analysis_rx.try_recv() {
+            worker.enqueue(more);
+        }
+        worker.try_dispatch();
+        let file = worker.db.lookup_file(&closed).expect("tracked input");
+        assert_eq!(
+            worker.db.file_text(file),
+            "on_disk = 1\n",
+            "a stale queued analysis re-upserted the discarded buffer"
+        );
     }
 
     #[test]
