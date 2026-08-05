@@ -16,12 +16,12 @@
 //! Measured on ~131 KB of JuliaSyntax (2026-08-05, release):
 //!
 //! ```text
-//! full_parse                6.34 ms
-//! token_keystroke          15.5  us     410x
-//! docstring_keystroke      18.2  us     349x
-//! statement_edit          548    us      12x
-//! precise_chain            59.7  us     106x
-//! scattered_via_diff_edit  18.2  ms     0.35x   -- slower than full_parse
+//! full_parse                6.41 ms
+//! token_keystroke          15.7  us     408x
+//! docstring_keystroke      18.3  us     351x
+//! statement_edit          554    us      12x
+//! precise_chain            60.0  us     107x
+//! scattered_via_diff_edit   6.94 ms     0.92x   -- a declined attempt, then a full parse
 //! rejected_attempt          1.05 ms
 //! ```
 //!
@@ -34,14 +34,16 @@
 //! The last three rows are the ones that shaped stage 4.
 //!
 //! `precise_chain` vs `scattered_via_diff_edit` is the argument for keeping
-//! the client's precise edits, and it is stronger than it first looks. A
-//! collapsed diff of scattered edits spans everything between the first and
-//! the last, and the top-level tier does not answer a wide span cheaply — it
-//! fragment-parses the region *and* both boundary guards, so the attempt costs
-//! well over the full parse it then falls back to. A wide diff is not merely a
-//! miss; it is the most expensive thing in this file. That is why
-//! `parsed_document` offers the chain first and only then falls back to
-//! `diff_edit` (`src/incremental.rs`).
+//! the client's precise edits. A collapsed diff of scattered edits spans
+//! everything between the first and the last, and the top-level tier cannot
+//! answer a span that wide cheaply — it would fragment-parse the region *and*
+//! both boundary guards, which on this corpus cost about 12 ms on top of the
+//! 6.4 ms full parse it then fell back to (this row read 18.2 ms before the
+//! guard landed). `region_is_too_wide` (`src/parser/reparse.rs`) now declines
+//! that region on its byte span alone, before any parse, leaving the row at
+//! the full parse plus half a millisecond. But it is still a *miss*, and only
+//! the chain turns it into a hit — which is why `parsed_document` offers the
+//! chain first and only then falls back to `diff_edit` (`src/incremental.rs`).
 //!
 //! `rejected_attempt` is the tax on an edit no tier can splice: ~16% of a full
 //! parse here, paid on top of it. Tolerable, and it bounds how much a new

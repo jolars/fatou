@@ -51,6 +51,8 @@ const NON_FILE_ROOT: &str = "fatou-non-file-uri";
 /// each one's edits would knock the other off.
 pub(crate) fn to_path_or_synthetic(uri: &Uri) -> PathBuf {
     to_path(uri).unwrap_or_else(|| {
+        use std::fmt::Write;
+
         // Percent-escape everything outside the unreserved set, so distinct URIs
         // stay distinct and no separator (or `%`) survives to split the name
         // into components of its own.
@@ -58,7 +60,9 @@ pub(crate) fn to_path_or_synthetic(uri: &Uri) -> PathBuf {
         for &byte in uri.as_str().as_bytes() {
             match byte {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' => name.push(byte as char),
-                _ => name.push_str(&format!("%{byte:02X}")),
+                _ => {
+                    let _ = write!(name, "%{byte:02X}");
+                }
             }
         }
         // Keeps extension-based handling working, and (with `.` escaped above)
@@ -74,10 +78,15 @@ pub(crate) fn to_path_or_synthetic(uri: &Uri) -> PathBuf {
 /// mints, rather than a real filesystem path. Such a path only identifies a
 /// buffer: nothing exists there to read, and no directory of the workspace is
 /// implied, so relative paths must not be resolved against it.
+///
+/// The whole shape is checked, not just the directory name: a real
+/// `./fatou-non-file-uri/x.jl` under someone's workspace is a file like any
+/// other, and only the rooted single-component form is ever minted here.
 pub(crate) fn is_synthetic(path: &Path) -> bool {
-    path.parent()
-        .and_then(Path::file_name)
-        .is_some_and(|dir| dir == NON_FILE_ROOT)
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    dir.has_root() && dir.file_name().is_some_and(|name| name == NON_FILE_ROOT)
 }
 
 /// Build a `file:` URI for the absolute filesystem `path`, percent-encoding
@@ -177,6 +186,28 @@ mod tests {
         // A `file:` URI keeps its real path.
         #[cfg(not(windows))]
         assert_eq!(path("file:///work/a.jl"), PathBuf::from("/work/a.jl"));
+    }
+
+    /// `is_synthetic` recognizes what `to_path_or_synthetic` mints and nothing
+    /// else — a real workspace file that merely happens to sit in a directory
+    /// of that name is a file like any other, and must keep anchoring its
+    /// relative includes.
+    #[test]
+    fn only_the_minted_shape_counts_as_synthetic() {
+        assert!(is_synthetic(&to_path_or_synthetic(
+            &Uri::from_str("untitled:Untitled-1").unwrap()
+        )));
+        assert!(!is_synthetic(Path::new("relative")));
+        assert!(!is_synthetic(
+            &PathBuf::from(NON_FILE_ROOT).join("notes.jl")
+        ));
+        #[cfg(not(windows))]
+        {
+            assert!(!is_synthetic(Path::new("/work/a.jl")));
+            assert!(!is_synthetic(Path::new(
+                "/work/fatou-non-file-uri-notes/a.jl"
+            )));
+        }
     }
 
     #[test]

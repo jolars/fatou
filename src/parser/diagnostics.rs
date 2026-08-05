@@ -192,6 +192,80 @@ pub enum DiagnosticKind {
     IncompleteTernaryIf,
 }
 
+/// How many ordered diagnostic streams a [`parse`](crate::parser::parse)
+/// emits: the drive-loop/`parse_stmt` stream, then one per post-build flag
+/// pass. See [`DiagnosticKind::stream`].
+pub(crate) const DIAGNOSTIC_STREAMS: usize = 5;
+
+impl DiagnosticKind {
+    /// Which of [`parse`](crate::parser::parse)'s ordered diagnostic streams
+    /// pushes this kind: `0` for the drive loop and `parse_stmt`, then one per
+    /// post-build flag pass in the order `core::parse` runs them. A parse's
+    /// diagnostics vector is those streams concatenated in this order.
+    ///
+    /// The incremental reparse splices diagnostics stream by stream
+    /// (`crate::parser::reparse`), so a kind filed under the wrong stream
+    /// silently mis-orders the spliced vector. The match is deliberately
+    /// exhaustive: adding a variant must be a compile error here, not a bug the
+    /// oracle happens to catch.
+    pub(crate) fn stream(self) -> usize {
+        use DiagnosticKind::*;
+        match self {
+            // The four post-build flag passes, in `core::parse` order.
+            ConstNotAssignment => 1,
+            InvalidFunctionSignature => 2,
+            CatchVarNotIdentifier => 3,
+            InvalidExportItem => 4,
+
+            // Everything else is pushed as the drive loop walks the token
+            // stream, so it is already in document order.
+            MissingEnd
+            | MissingTryHandler
+            | StringJuxtapose
+            | DotWhitespace
+            | QuoteColonWhitespace
+            | EmptyQuoteParen
+            | StringSuffixSpace
+            | UnterminatedLiteral
+            | GluedFor
+            | OpenerWhitespace
+            | PrefixOpenerWhitespace
+            | UnterminatedArgList
+            | TernaryQWhitespace
+            | TernaryColonWhitespace
+            | ElseIf
+            | ArraySeparatorMismatch
+            | MatrixKeywordRecovery
+            | InvalidBreakLabel
+            | InvalidMacroName
+            | MacroDotBroadcast
+            | MacroSigilTrailing
+            | MacroSigilLeading
+            | StrayCloser
+            | TrailingJunk
+            | ImportRecoveryColon
+            | ElseWithoutCatch
+            | InvalidPrefixOperator
+            | LoneOperator
+            | InvalidAsAlias
+            | MissingOperand
+            | MissingWhereBound
+            | MissingStruct
+            | MissingCondition
+            | UnclosedParen
+            | UnclosedComprehension
+            | MissingTernaryTrue
+            | MissingTernaryFalse
+            | MissingTernaryColon
+            | InvalidInterpolation
+            | InvalidNameKeyword
+            | StrayKeyword
+            | InvalidGluedOperator
+            | IncompleteTernaryIf => 0,
+        }
+    }
+}
+
 /// A parse-time diagnostic: a classified message anchored to a byte range in the
 /// source.
 #[derive(Debug, Clone, PartialEq, Eq)]

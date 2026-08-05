@@ -117,22 +117,25 @@ Each stage lands independently with the full suite green.
   staged through the side-channel from `src/lsp/analysis_thread.rs`.
   `Edit`/`apply_edits`/`diff_edit` moved to `src/text/edit.rs` (leaf
   module) and are re-exported from `parser::reparse`. The side-channel is
-  one `Mutex<HashMap<SourceFile, FileReparseState>>` holding base +
-  pending chain, so a store advances both atomically: stage appends
-  (a coalesced request's edits must survive), `parsed_document` peeks,
-  and the store drains the peeked *prefix* unconditionally — draining
-  only on success would wedge a file into rejecting forever. The chain is
-  bounded where it is staged (16 edits / 64 KiB), since pull-diagnostics
-  clients stage per keystroke and demand no parse. `revert_file_to_disk`
-  evicts (also fixes the pre-existing unbounded `reparse_cache`).
-  `parsed_document` tries precise edits, then `diff_edit`, then full
-  parse — the opposite of this item's original wording, because
-  `benches/reparse.rs` shows a *failed* wide diff costs 17 ms against a
-  6.3 ms full parse (the top-level tier answers a wide span with a
-  fragment parse plus both boundary guards), while the chain is 59 us.
-  Criterion bench over ~100 KB of JuliaSyntax: full parse 6.3 ms, token
-  keystroke 15 us, statement edit 542 us, precise chain 59 us, the same
-  change via collapsed `diff_edit` 17 ms, rejected attempt 1.0 ms.
+  one `Mutex<ReparseCache>` holding base + pending chain per file, so a
+  store advances both atomically: stage appends (a coalesced request's
+  edits must survive), `parsed_document` peeks, and the store drains the
+  peeked *prefix* unconditionally — draining only on success would wedge
+  a file into rejecting forever. Both sides are bounded: the chain where
+  it is staged (16 edits / 64 KiB), since pull-diagnostics clients stage
+  per keystroke and demand no parse; the bases at 64 files, LRU, since
+  every file the include graph reaches parses but only open buffers ever
+  score a hit. `revert_file_to_disk` evicts too.  `parsed_document` tries
+  precise edits, then `diff_edit`, then full parse — the opposite of this
+  item's original wording, because a collapsed wide diff is the one shape
+  the single-edit path cannot answer: the top-level tier would have to
+  fragment-parse most of the file plus both boundary guards, which cost
+  more than the full parse it avoids, so `region_is_too_wide` declines a
+  region past 1/4 of the file (above a 4 KiB floor) before any parse
+  runs. Criterion bench over ~100 KB of JuliaSyntax: full parse 6.3 ms,
+  token keystroke 15 us, docstring keystroke 18 us, statement edit
+  542 us, precise chain 59 us, the same change via collapsed `diff_edit`
+  a declined attempt plus the full parse, rejected attempt 1.0 ms.
 
 - [x] `didClose` removes the document from `state.documents` but leaves a
   stale entry in the analysis thread's `pending` queue, so a queued
