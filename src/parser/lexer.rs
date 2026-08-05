@@ -622,7 +622,9 @@ impl<'a> Lexer<'a> {
         }
 
         // Accumulate a content chunk until the close delimiter, an interpolation,
-        // EOF, or (for single-quoted strings) an unterminating newline.
+        // or EOF. A newline does *not* stop it, single-quoted strings included
+        // (`"a\nb"` is one content run), which is why an unterminated literal
+        // always runs to the end of the file.
         while self.pos < self.bytes.len() {
             // In a raw (prefixed) string, a backslash run immediately before the
             // closing quote escapes it when the run length is odd (Julia's

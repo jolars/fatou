@@ -37,7 +37,7 @@ const CHAINS_PER_SNIPPET: usize = 30;
 /// text lexes (string modes, comments, juxtaposition, statement boundaries).
 const INSERTS: &[&str] = &[
     "\"", "\"\"\"", "$", "'", "#", "=#", "\n", ";", "end", "function", "1", "0", "e10", "+", "α",
-    " ", "x",
+    " ", "x", "\\", "`",
 ];
 
 /// Minimal deterministic PRNG (MMIX LCG); enough to scatter edits without
@@ -166,6 +166,20 @@ const HAZARD_SNIPPETS: &[&str] = &[
     "p = raw\"a\\\\b$x\"\n",
     "re = r\"^a$\"\n",
     "bs = b\"bytes\"\n",
+    // A literal nested inside another's interpolation: the string-content tier
+    // relexes the inner node, so the outer one must stay untouched.
+    "s = \"$(g(\"nested\"))\"\n",
+    // Command literals, plain and interpolated.
+    "c = `echo $(x) hi`\n",
+    // `var\"…\"` is a NONSTANDARD_IDENTIFIER whose content is an identifier.
+    "v = var\"my name\" + 1\n",
+    // `StringJuxtapose`, anchored exactly at the literal's end.
+    "s = \"a\"b\n",
+    // A digit-led suffix is a macro argument absorbed into the literal node.
+    "m = x\"body\"2\n",
+    // Multi-line triple content, bare and as an indented docstring.
+    "s = \"\"\"a\nb\"\"\"\n",
+    "\"\"\"\n  doc $x\n  \"\"\"\nf() = 1\n",
     // `end` as an index marker inside brackets.
     "a[end-1]\n",
     // Adjoint vs char literal.
@@ -264,6 +278,46 @@ fn token_tier_fires() {
     assert_token_tier("foo = 1\ng(x))\n", 1..2, "oo");
 }
 
+/// Stage-2b positive cases: a `STRING_CONTENT` leaf, proved by the whole-literal
+/// relex rather than the isolated single-token relex plus join probes. The
+/// delimiter travels with the fragment, so triple/raw/prefixed/command forms all
+/// take the same path.
+#[test]
+fn token_tier_fires_on_string_content() {
+    // Mid-content, and both boundary insertions: appending at the content end
+    // (the `Between` left candidate — typing at the end of a string) and
+    // prepending at the content start (the right candidate).
+    assert_token_tier("s = \"abc\"\n", 6..7, "x");
+    assert_token_tier("s = \"abc\"\n", 8..8, "d");
+    assert_token_tier("s = \"abc\"\n", 5..5, "z");
+    // Triple-quoted, and a docstring body — the case this tier exists for,
+    // since `fold_docstrings` otherwise makes the region the whole `DOC` child.
+    assert_token_tier("s = \"\"\"abc\"\"\"\n", 8..8, "z");
+    assert_token_tier(
+        "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x\nend\nx = 1\n",
+        5..5,
+        "s",
+    );
+    // Prefixed literal with a flag suffix, and a raw one whose content carries
+    // a backslash the raw-string rule treats specially.
+    assert_token_tier("re = r\"pat\"ims\n", 8..9, "o");
+    assert_token_tier("p = raw\"a\\b\"\n", 9..9, "c");
+    // Command literal.
+    assert_token_tier("c = `echo hi`\n", 10..10, "o");
+    // `var"…"` is a NONSTANDARD_IDENTIFIER; the content is an identifier name.
+    assert_token_tier("var\"my name\" = 1\n", 7..8, "N");
+    // Content before and after an interpolation. The leaf after one has an
+    // `Ident` before it, which is exactly what the plain path's backward probe
+    // could not handle.
+    assert_token_tier("s = \"a$x b\"\n", 5..6, "q");
+    assert_token_tier("s = \"a$x b\"\n", 10..10, "c");
+    // A `$` that does not open an interpolation stays content (`$$` is not an
+    // interpolation start), so the kinds are unchanged and this still splices.
+    assert_token_tier("s = \"a$x\"\n", 6..6, "$");
+    // A nested literal inside `$( … )`: the *inner* node is the one relexed.
+    assert_token_tier("s = \"$(g(\"nested\"))\"\n", 12..13, "X");
+}
+
 /// Stage-2 negative cases: each known hazard must escape the token tier.
 /// Since the top-level statement tier landed, most are legally handled there
 /// instead of falling back to a full parse (the Tenet-4 assert inside
@@ -280,8 +334,6 @@ fn token_tier_falls_back() {
     assert_not_token_tier("y = 2x\n", 5..6, "e10");
     // A newline changes statement structure.
     assert_not_token_tier("x  = 1\n", 2..2, "\n");
-    // String content lexing depends on the enclosing delimiter mode.
-    assert_not_token_tier("s = \"abc\"\n", 6..7, "x");
     // Numeric leaves are ineligible.
     assert_not_token_tier("x = 12\n", 5..5, "3");
     // `#=` nests, leaving the trailing block comment unterminated at EOF;
@@ -291,19 +343,52 @@ fn token_tier_falls_back() {
     assert_not_token_tier("x y\n", 2..3, "z");
 }
 
+/// Stage-2b negative cases: a string-content edit that changes the literal's
+/// token run, or that touches a literal already carrying a diagnostic, must
+/// escape the token tier. As above, the top-level tier may legally answer these.
+#[test]
+fn token_tier_falls_back_on_string_content() {
+    // A quote splits the run: a plain string closes early and reopens. (A
+    // *single* quote inside a triple-quoted string is ordinary content and
+    // does splice — it takes three to close, which does split the run.)
+    assert_not_token_tier("s = \"abc\"\n", 6..6, "\"");
+    assert_not_token_tier("s = \"\"\"abc\"\"\"\n", 8..8, "\"\"\"");
+    // A `$` that does open an interpolation splits one content token into
+    // content + `$` + ident.
+    assert_not_token_tier("s = \"abc\"\n", 6..6, "$");
+    // Whole-content deletion drops a token; splicing would leave a zero-width
+    // `STRING_CONTENT` a full parse does not have.
+    assert_not_token_tier("s = \"a\"\n", 5..6, "");
+    // Deleting the backslash that was escaping a raw string's close quote lets
+    // the quote close the literal early.
+    assert_not_token_tier("p = raw\"a\\\"b\"\n", 9..10, "");
+    // A newline is banned outright by the token tier, triple-quoted content
+    // included, even though the content run legitimately spans one.
+    assert_not_token_tier("s = \"\"\"a\"\"\"\n", 8..8, "\n");
+    // The three cases the whole-literal diagnostic bail deliberately gives up:
+    // an unterminated literal, a juxtaposed one (`StringJuxtapose` anchored at
+    // the node end), and a `var"…"` with a junk suffix (`StringSuffixSpace`).
+    assert_not_token_tier("x = \"abc", 6..7, "x");
+    assert_not_token_tier("x = \"a\"b\n", 5..6, "z");
+    assert_not_token_tier("v = var\"x\"y\n", 9..10, "z");
+}
+
 /// Stage-3 positive cases: the top-level statement tier must handle the
 /// classic region edits. Each uses an edit the token tier rejects (multi-token
-/// inserts, digits, string content, newlines), and the in-crate Tenet-4
-/// assert validates every splice against a full parse.
+/// inserts, digits, newlines), and the in-crate Tenet-4 assert validates every
+/// splice against a full parse.
 #[test]
 fn toplevel_tier_fires() {
     // Edit inside a function body with statement neighbors on both sides.
     assert_toplevel_tier("a = 1\nfunction f(x)\n    x\nend\nb = 2\n", 25..25, " + 1");
-    // Docstring-content edit: the region is the whole `DOC` child.
+    // Docstring-content edit: the region is the whole `DOC` child. The insert
+    // is a newline, which the token tier bans outright — without it the
+    // `STRING_CONTENT` path answers this first (see
+    // `token_tier_fires_on_string_content`).
     assert_toplevel_tier(
         "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x\nend\nx = 1\n",
         5..5,
-        "s",
+        "\n",
     );
     // Flag-stream splice: editing a neighbor keeps the `const x` diagnostic
     // before the region and shifts the one after it.
