@@ -49,9 +49,12 @@ pub(crate) fn document_links_via_db(
     text: &str,
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
-    // The synthetic fallback path for non-`file` URIs ("untitled.jl") has an
-    // empty parent, which must not anchor relative includes.
-    let base_dir = path.parent().filter(|dir| !dir.as_os_str().is_empty());
+    // A synthetic path stands in for a non-`file` URI (an untitled buffer): its
+    // parent names no real directory, so a relative include has nothing to
+    // anchor to and gets no link.
+    let base_dir = path
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty() && !uri::is_synthetic(path));
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
         if snapshot.file_text(file) != text {
@@ -236,5 +239,35 @@ mod tests {
             expected,
             "untracked path must fall back to the buffer text"
         );
+    }
+
+    /// An untitled buffer is tracked under a synthetic path whose parent is no
+    /// real directory; a relative include there must not link into it. An
+    /// absolute one still resolves.
+    #[test]
+    fn a_synthetic_path_anchors_no_relative_include() {
+        let untitled = <lsp_types::Uri as std::str::FromStr>::from_str("untitled:Untitled-1")
+            .expect("a valid uri");
+        let path = uri::to_path_or_synthetic(&untitled);
+        let buffer = format!(
+            "include(\"sub/b.jl\")\ninclude(\"{}/c.jl\")\n",
+            abs("/work")
+        );
+        let mut db = IncrementalDatabase::default();
+        db.upsert_file(&path, buffer.clone());
+
+        for links in [
+            document_links_via_db(&db.snapshot(), &path, &buffer, PositionEncoding::Utf16),
+            // The fallback (untracked) path decides `base_dir` the same way.
+            document_links_via_db(
+                &IncrementalDatabase::default().snapshot(),
+                &path,
+                &buffer,
+                PositionEncoding::Utf16,
+            ),
+        ] {
+            assert_eq!(links.len(), 1, "only the absolute include should link");
+            assert_eq!(target(&links[0]), file_uri("/work/c.jl"));
+        }
     }
 }

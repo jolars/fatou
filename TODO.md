@@ -144,10 +144,17 @@ Each stage lands independently with the full suite green.
   afterwards, since that drain swallows the `analyze` arm's wake-up for
   the other URIs it picks up.
 
-- [ ] `path_for` (`src/lsp/state.rs`) collapses every non-`file:` URI onto
+- [x] `path_for` (`src/lsp/state.rs`) collapses every non-`file:` URI onto
   `untitled.jl`, so two `untitled:` buffers share one `SourceFile` and one
   reparse base. Harmless (the chain validation rejects the interleaving
-  and falls back to a full parse) but it thrashes.
+  and falls back to a full parse) but it thrashes. Now
+  `uri::to_path_or_synthetic`: the whole URI, percent-escaped into one
+  component under a rooted `fatou-non-file-uri` directory. Also fixes the
+  relative `untitled.jl`, which `normalize_path` absolutized into the
+  server's working directory, where it could alias a real file (and be
+  read from disk by `revert_file_to_disk`). Document links ask
+  `uri::is_synthetic` before anchoring a relative `include` to the
+  document's directory.
 
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
   fragment entry point (`public_context`, bracket `end` markers) — a bare
