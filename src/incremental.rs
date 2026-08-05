@@ -176,16 +176,16 @@ pub trait IncrementalDb: salsa::Database {
 ///    changed by some path carrying no edits at all (a disk revert, the CLI);
 /// 3. failing that, a full parse.
 ///
-/// The chain goes first because a *failed* whole-text diff is not cheap. Where
-/// the edits are scattered, the collapsed edit spans everything between the
-/// first and the last, and the top-level tier answers a wide span by
-/// fragment-parsing the region and both its boundary guards — on a 100 KB file
-/// that costs several times the full parse it then falls back to
-/// (`benches/reparse.rs`, `scattered_via_diff_edit`). Replaying the chain is
-/// two orders of magnitude cheaper and, when it does miss, step 2 is still
-/// there. The reverse order is only better for edits that are *adjacent*,
-/// where it saves a few tens of microseconds — no trade at all against the
-/// milliseconds it costs everywhere else.
+/// The chain goes first because it is the only step that can answer scattered
+/// edits at all. The collapsed edit spans everything between the first change
+/// and the last, and the top-level tier would have to fragment-parse that whole
+/// region plus both its boundary guards — more than the full parse it is
+/// avoiding — so the tier declines a region that wide up front
+/// (`parser::reparse::region_is_too_wide`, `benches/reparse.rs`). Replaying the
+/// chain splices each edit on its own instead, two orders of magnitude cheaper
+/// than the full parse; when it misses, step 2 is still there. The reverse
+/// order is only better for edits that are *adjacent*, where it saves a few
+/// tens of microseconds.
 ///
 /// Every path yields a result identical to `parse(text)` (Tenet 4), so the
 /// side-channel never affects query semantics — salsa only sees text changes.
@@ -193,16 +193,28 @@ pub trait IncrementalDb: salsa::Database {
 pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
     let text = file.text(db);
     let staged = db.reparse_pending_edits(file);
+    let prev = db.reparse_prev(file);
 
-    let reparsed = db
-        .reparse_prev(file)
-        .filter(|prev| prev.text != *text)
-        .and_then(|prev| {
-            reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, text).or_else(|| {
-                let edit = diff_edit(&prev.text, text);
-                reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
-            })
-        });
+    // Text unchanged: the base already holds what a full parse would return, so
+    // hand it back rather than recomputing it. Salsa usually spares us the call
+    // entirely, so this is the cold path — a re-execution after an eviction, or
+    // a write that set the text back to what the base holds. Nothing is stored:
+    // the base has not moved, and the staged chain stays anchored to it (its
+    // net effect is a no-op, so a later edit appended to it still describes the
+    // transform from the base).
+    if let Some(prev) = prev.as_ref().filter(|prev| prev.text == *text) {
+        return ParsedDocument {
+            green: prev.green.clone(),
+            diagnostics: prev.diagnostics.clone(),
+        };
+    }
+
+    let reparsed = prev.and_then(|prev| {
+        reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, text).or_else(|| {
+            let edit = diff_edit(&prev.text, text);
+            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
+        })
+    });
 
     let tier = reparsed.as_ref().map(|r| r.tier);
     let (green, diagnostics) = match reparsed {
@@ -675,7 +687,7 @@ pub struct IncrementalDatabase {
     /// [`IncrementalDb::reparse_store`] has to advance both atomically — it runs
     /// on a read-pool thread while [`IncrementalDb::reparse_stage_edits`] runs on
     /// the analysis thread.
-    reparse_cache: Arc<Mutex<HashMap<SourceFile, FileReparseState>>>,
+    reparse_cache: Arc<Mutex<ReparseCache>>,
 }
 
 /// The incremental-reparse side-channel for one file: the previous parse to
@@ -684,6 +696,53 @@ pub struct IncrementalDatabase {
 struct FileReparseState {
     prev: Option<Arc<PrevParse>>,
     pending: Vec<Edit>,
+    /// When this entry was last touched, for eviction. See [`ReparseCache`].
+    used: u64,
+}
+
+/// How many files keep a reparse base. Every file the include graph reaches
+/// runs [`parsed_document`], but only the handful the editor is actually
+/// touching ever gets a *hit*: the rest would hold a second copy of their text
+/// (salsa already holds one) plus a green tree, for nothing. Comfortably above
+/// any plausible set of open buffers, so eviction never costs a live one.
+const MAX_REPARSE_BASES: usize = 64;
+
+/// The reparse side-channel for all files, bounded by [`MAX_REPARSE_BASES`].
+///
+/// Eviction is least-recently-used, approximated by a monotone counter stamped
+/// on each entry as it is read or written. Dropping an entry only costs its
+/// file a full parse, so the policy needs no more precision than that.
+///
+/// No `Debug`: salsa only formats a `SourceFile` with its database in hand, and
+/// [`IncrementalDatabase`] elides this cache from its own `Debug` anyway.
+#[derive(Default)]
+struct ReparseCache {
+    files: HashMap<SourceFile, FileReparseState>,
+    clock: u64,
+}
+
+impl ReparseCache {
+    /// The entry for `file`, created if absent, stamped as just used.
+    fn touch(&mut self, file: SourceFile) -> &mut FileReparseState {
+        self.clock += 1;
+        let clock = self.clock;
+        let state = self.files.entry(file).or_default();
+        state.used = clock;
+        state
+    }
+
+    /// Drop the least recently used entries until the cache is within budget.
+    fn evict_over_budget(&mut self) {
+        if self.files.len() <= MAX_REPARSE_BASES {
+            return;
+        }
+        let mut stamps: Vec<u64> = self.files.values().map(|state| state.used).collect();
+        // The `len - MAX`th smallest stamp: everything at or below it goes.
+        let cut = self.files.len() - MAX_REPARSE_BASES;
+        stamps.select_nth_unstable(cut - 1);
+        let threshold = stamps[cut - 1];
+        self.files.retain(|_, state| state.used > threshold);
+    }
 }
 
 impl Default for IncrementalDatabase {
@@ -691,7 +750,7 @@ impl Default for IncrementalDatabase {
         Self {
             storage: salsa::Storage::new(None),
             source_map: Arc::new(Mutex::new(FileSourceMap::default())),
-            reparse_cache: Arc::new(Mutex::new(HashMap::new())),
+            reparse_cache: Arc::new(Mutex::new(ReparseCache::default())),
         }
     }
 }
@@ -728,14 +787,17 @@ impl salsa::Database for IncrementalDatabase {}
 #[salsa::db]
 impl IncrementalDb for IncrementalDatabase {
     fn reparse_prev(&self, file: SourceFile) -> Option<Arc<PrevParse>> {
-        self.reparse_state()
-            .get(&file)
-            .and_then(|state| state.prev.clone())
+        let mut cache = self.reparse_state();
+        // Read through `touch` so a file the editor keeps hitting stays hot
+        // even across a long run of parses of other files.
+        let prev = cache.files.get(&file)?.prev.clone();
+        cache.touch(file);
+        prev
     }
 
     fn reparse_stage_edits(&self, file: SourceFile, edits: Option<Vec<Edit>>) {
         let mut cache = self.reparse_state();
-        let state = cache.entry(file).or_default();
+        let state = cache.touch(file);
         let Some(edits) = edits else {
             state.pending.clear();
             return;
@@ -753,10 +815,12 @@ impl IncrementalDb for IncrementalDatabase {
         if state.pending.len() > MAX_CHAIN_EDITS || bytes > MAX_CHAIN_INSERT_BYTES {
             state.pending.clear();
         }
+        cache.evict_over_budget();
     }
 
     fn reparse_pending_edits(&self, file: SourceFile) -> Vec<Edit> {
         self.reparse_state()
+            .files
             .get(&file)
             .map(|state| state.pending.clone())
             .unwrap_or_default()
@@ -778,7 +842,7 @@ impl IncrementalDb for IncrementalDatabase {
             None => log::trace!("reparse: full parse of {} bytes", prev.text.len()),
         }
         let mut cache = self.reparse_state();
-        let state = cache.entry(file).or_default();
+        let state = cache.touch(file);
         state.prev = Some(Arc::new(prev));
         // Drain the *prefix* the caller saw, not the whole chain: a stage can
         // land between the peek and this store (an `upsert_file` that finds the
@@ -789,10 +853,11 @@ impl IncrementalDb for IncrementalDatabase {
         // advanced to the current text either way, so a chain kept back would
         // be stale forever after.
         state.pending.drain(..consumed.min(state.pending.len()));
+        cache.evict_over_budget();
     }
 
     fn reparse_evict(&self, file: SourceFile) {
-        self.reparse_state().remove(&file);
+        self.reparse_state().files.remove(&file);
     }
 }
 
@@ -823,7 +888,7 @@ impl IncrementalDatabase {
     /// Lock the reparse side-channel, recovering from poisoning for the same
     /// reason [`Self::source_map`] does. Losing this cache costs a full parse,
     /// never a wrong answer.
-    fn reparse_state(&self) -> MutexGuard<'_, HashMap<SourceFile, FileReparseState>> {
+    fn reparse_state(&self) -> MutexGuard<'_, ReparseCache> {
         self.reparse_cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

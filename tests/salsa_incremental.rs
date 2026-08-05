@@ -172,6 +172,54 @@ fn an_unread_chain_stays_bounded() {
     assert!(db.reparse_pending_edits(file).is_empty());
 }
 
+/// The base cache is bounded. Every file the include graph reaches parses, but
+/// only the few the editor is touching ever score a hit — without a bound, a
+/// project-wide analysis would pin a second copy of every source file's text
+/// plus its green tree for the life of the session.
+#[test]
+fn the_reparse_base_cache_is_bounded() {
+    let mut db = IncrementalDatabase::new();
+    let files: Vec<_> = (0..200)
+        .map(|i| db.add_file(format!("x{i} = {i}\n")))
+        .collect();
+    for &file in &files {
+        parsed_tree_root(&db, file);
+    }
+
+    let cached = files
+        .iter()
+        .filter(|&&f| db.reparse_prev(f).is_some())
+        .count();
+    assert!(
+        cached <= 64,
+        "the base cache grew to {cached} entries across 200 files"
+    );
+    assert!(
+        db.reparse_prev(*files.last().unwrap()).is_some(),
+        "the most recently parsed file must keep its base"
+    );
+    assert!(
+        db.reparse_prev(files[0]).is_none(),
+        "the least recently used base should have been evicted"
+    );
+
+    // Eviction is a performance decision only. The evicted file's parse is
+    // still memoized, so reading it costs nothing; and once its text changes,
+    // the query reruns, full-parses (no base to splice against), and
+    // repopulates a base for next time.
+    assert_eq!(parsed_tree_root(&db, files[0]).to_string(), "x0 = 0\n");
+    db.set_file_text(files[0], "x0 = 1\n");
+    assert_eq!(parsed_tree_root(&db, files[0]).to_string(), "x0 = 1\n");
+    assert_eq!(
+        parse_diagnostics(&db, files[0]),
+        parse("x0 = 1\n").diagnostics
+    );
+    assert!(
+        db.reparse_prev(files[0]).is_some(),
+        "a reparsed file repopulates its base"
+    );
+}
+
 /// A stage that lands between a parse's peek and its store must survive: the
 /// store drains only the prefix that parse actually saw.
 #[test]

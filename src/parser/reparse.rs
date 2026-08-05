@@ -21,8 +21,9 @@
 //! edit at a time; [`reparse`] takes a single edit, which is what
 //! `crate::incremental` recovers with [`diff_edit`] from a pair of whole texts
 //! when no chain is available. The chain is tried first: a collapsed diff of
-//! scattered edits spans everything between them, and a wide span is an
-//! expensive miss, not a cheap one. The Tenet-4 oracle
+//! scattered edits spans everything between them, and the region that produces
+//! is wide enough that [`region_is_too_wide`] declines it outright, where
+//! replaying the chain splices each edit on its own. The Tenet-4 oracle
 //! ([`assert_matches_full_parse`] plus `tests/incremental_reparse.rs`) checks
 //! every splice against a full parse.
 //!
@@ -34,7 +35,7 @@
 use rowan::{GreenNode, GreenToken, TextRange, TextSize, TokenAtOffset};
 
 use crate::parser::ParseDiagnostic;
-use crate::parser::diagnostics::DiagnosticKind;
+use crate::parser::diagnostics::DIAGNOSTIC_STREAMS;
 use crate::parser::lexer::lex;
 use crate::parser::tree_builder::syntax_kind_for;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
@@ -90,6 +91,11 @@ pub struct Reparsed {
 /// In debug builds every successful reparse is checked against a full parse
 /// of `new_text` (Tenet 4): tree fingerprint and diagnostics vector must be
 /// identical.
+///
+/// `edit` is not trusted, for the same reason [`reparse_edits`]'s chain is
+/// not: one that does not fit `prev_text` — a stale range, a buffer that moved
+/// underneath it — is rejected here rather than applied at offsets that would
+/// panic on a slice.
 pub fn reparse(
     prev_text: &str,
     prev_green: &GreenNode,
@@ -97,6 +103,9 @@ pub fn reparse(
     edit: &Edit,
     new_text: &str,
 ) -> Option<Reparsed> {
+    if !fits(prev_text, edit) {
+        return None;
+    }
     let result = reparse_impl(prev_text, prev_green, prev_diags, edit, new_text)?;
     assert_matches_full_parse(&result, new_text);
     Some(result)
@@ -110,9 +119,9 @@ pub fn reparse(
 /// scattered, collapsing them into one spanning edit covers everything between
 /// the first and the last change and blows both tiers' guards, while replaying
 /// them one at a time keeps each splice small. Try this *before* the collapsed
-/// edit — a wide span is not merely a miss, it is an expensive one, since the
-/// top-level tier answers it with a fragment parse of the region plus both
-/// boundary guards (`benches/reparse.rs`).
+/// edit: a wide span is the one shape the collapsed edit can never answer, so
+/// offering it first is the difference between a hit and a
+/// [`region_is_too_wide`] bail (`benches/reparse.rs`).
 ///
 /// Fewer than two edits returns `None` immediately: a single edit's span
 /// always contains [`diff_edit`]'s for the same transform, so there is nothing
@@ -183,6 +192,16 @@ fn assert_matches_full_parse(result: &Reparsed, new_text: &str) {
 
 #[cfg(not(debug_assertions))]
 fn assert_matches_full_parse(_result: &Reparsed, _new_text: &str) {}
+
+/// Whether `edit`'s range is a well-formed byte range of `text`. Both tiers
+/// slice `prev_text` at the edit's offsets, so an edit that does not fit is a
+/// panic rather than a miss.
+fn fits(text: &str, edit: &Edit) -> bool {
+    edit.range.start <= edit.range.end
+        && edit.range.end <= text.len()
+        && text.is_char_boundary(edit.range.start)
+        && text.is_char_boundary(edit.range.end)
+}
 
 /// Tier dispatch: cheapest first.
 fn reparse_impl(
@@ -604,6 +623,31 @@ fn is_significant_child(el: &crate::syntax::SyntaxElement) -> bool {
     }
 }
 
+/// Below this the tier always tries, whatever fraction of the file the region
+/// is: on a small file every parse in play is small, and the fraction test
+/// alone would refuse the common case of a file with one or two statements.
+const REGION_ALWAYS_TRY_BYTES: usize = 4 * 1024;
+
+/// Above this fraction of the file, a region is wide enough that answering it
+/// costs more than the full parse it is trying to avoid.
+const REGION_MAX_FRACTION: usize = 4;
+
+/// Whether a region is too wide to be worth attempting. The tier answers a
+/// region with a fragment parse of it *plus* up to three neighbor-sized
+/// boundary parses, so the attempt scales with the region — and a miss pays
+/// the full parse on top. A collapsed [`diff_edit`] of scattered edits spans
+/// everything between the first and the last, which is exactly how a region
+/// grows to most of the file; on ~131 KB that attempt cost about 12 ms against
+/// a 6.3 ms full parse (`benches/reparse.rs`, `scattered_via_diff_edit`).
+/// Bailing on the cheap evidence — the region's byte span, known before any
+/// parse — caps the loss at the full parse the caller was going to pay anyway.
+///
+/// This is a performance guard only. Like every other bail here it returns the
+/// caller to a full parse, so it cannot affect what a reparse yields.
+fn region_is_too_wide(region_len: usize, text_len: usize) -> bool {
+    region_len > REGION_ALWAYS_TRY_BYTES && region_len > text_len / REGION_MAX_FRACTION
+}
+
 /// The reparse region at the top-level tier: a contiguous run of `ROOT`
 /// children (statement nodes and loose trivia tokens both), identified by
 /// child index and old-text byte range. The boundary child kinds
@@ -690,23 +734,9 @@ fn no_straddle(cst: &SyntaxNode, seam: usize) -> bool {
     })
 }
 
-/// The five ordered diagnostic streams of a [`parse`](crate::parser::parse):
-/// drive-loop/`parse_stmt` emission (0), then the four flag passes in their
-/// fixed order. Each flag kind is pushed only by its pass, so the stream of
-/// any diagnostic is recoverable from its kind, and the full vector is the
-/// streams concatenated in this order.
-fn stream_of(kind: DiagnosticKind) -> usize {
-    match kind {
-        DiagnosticKind::ConstNotAssignment => 1,
-        DiagnosticKind::InvalidFunctionSignature => 2,
-        DiagnosticKind::CatchVarNotIdentifier => 3,
-        DiagnosticKind::InvalidExportItem => 4,
-        _ => 0,
-    }
-}
-
 /// Splice the fragment's diagnostics into the previous ones, stream by
-/// stream: keep those before the region, drop those the fragment reparse
+/// stream ([`DiagnosticKind::stream`](crate::parser::diagnostics::DiagnosticKind::stream)):
+/// keep those before the region, drop those the fragment reparse
 /// regenerates, and shift those after by the edit delta. Emission order
 /// within a stream is positional across statements (the drive loop is
 /// per-line sequential, the flag passes walk in document order), so
@@ -762,28 +792,28 @@ fn splice_diagnostics(
         None
     };
 
-    let mut before: [Vec<ParseDiagnostic>; 5] = Default::default();
-    let mut after: [Vec<ParseDiagnostic>; 5] = Default::default();
+    let mut before: [Vec<ParseDiagnostic>; DIAGNOSTIC_STREAMS] = Default::default();
+    let mut after: [Vec<ParseDiagnostic>; DIAGNOSTIC_STREAMS] = Default::default();
     for d in prev_diags {
         match classify(d)? {
-            Class::Before => before[stream_of(d.kind)].push(d.clone()),
+            Class::Before => before[d.kind.stream()].push(d.clone()),
             Class::Drop => {}
             Class::After => {
                 let mut d = d.clone();
                 d.start = (d.start as isize + delta) as usize;
                 d.end = (d.end as isize + delta) as usize;
-                after[stream_of(d.kind)].push(d);
+                after[d.kind.stream()].push(d);
             }
         }
     }
 
     let mut out = Vec::with_capacity(prev_diags.len() + frag_diags.len());
-    for stream in 0..5 {
+    for stream in 0..DIAGNOSTIC_STREAMS {
         out.append(&mut before[stream]);
         out.extend(
             frag_diags
                 .iter()
-                .filter(|d| stream_of(d.kind) == stream)
+                .filter(|d| d.kind.stream() == stream)
                 .map(|d| {
                     let mut d = d.clone();
                     d.start += region.start;
@@ -818,6 +848,9 @@ fn reparse_toplevel(
 ) -> Option<Reparsed> {
     let root = SyntaxNode::new_root(prev_green.clone());
     let region = select_region(&root, edit)?;
+    if region_is_too_wide(region.end - region.start, prev_text.len()) {
+        return None;
+    }
     let delta = edit.delta();
     let frag_end = (region.end as isize + delta) as usize;
     let fragment = &new_text[region.start..frag_end];
@@ -1133,6 +1166,85 @@ mod tests {
         // validates that splice); what matters is that the token tier declined.
         let tier = reparse(old, &green, &parsed.diagnostics, &e, &new).map(|r| r.tier);
         assert_ne!(tier, Some(ReparseTier::Token));
+    }
+
+    /// An edit that does not fit `prev_text` is rejected rather than applied at
+    /// offsets that would panic on a slice. `reparse_edits` proves its chain
+    /// with `try_apply_edits`; the single-edit entry point has to check too.
+    #[test]
+    fn reparse_rejects_an_edit_that_does_not_fit() {
+        let old = "α = 1\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+        // `new_text` is deliberately not the edit's result: a misfitting edit
+        // has none, which is the whole point.
+        let run = |e: Edit| reparse(old, &green, &parsed.diagnostics, &e, old);
+
+        // Past the end of the text.
+        assert!(run(edit(99..99, "x")).is_none());
+        // Off a char boundary (α is two bytes).
+        assert!(run(edit(1..1, "x")).is_none());
+        // Inverted range (built by hand: a literal `4..2` is a clippy error).
+        let inverted = Edit {
+            range: std::ops::Range { start: 4, end: 2 },
+            insert: "x".to_string(),
+        };
+        assert!(run(inverted).is_none());
+    }
+
+    /// A region wide enough that answering it costs more than the full parse it
+    /// avoids is declined on the cheap evidence, before any fragment parse. The
+    /// shape is a collapsed `diff_edit` of scattered edits, which spans
+    /// everything between the first and the last.
+    #[test]
+    fn a_region_covering_most_of_a_large_file_is_declined() {
+        let mut old = String::new();
+        for i in 0..2000 {
+            old.push_str(&format!("var_{i} = {i}\n"));
+        }
+        let parsed = crate::parser::parse(&old);
+        let green = parsed.cst.green().into_owned();
+
+        // A narrow edit near the end still splices: the guard keys on the
+        // region, not on the file size.
+        let narrow = edit(old.len()..old.len(), "tail = 1\n");
+        assert!(
+            reparse(
+                &old,
+                &green,
+                &parsed.diagnostics,
+                &narrow,
+                &narrow.apply(&old)
+            )
+            .is_some()
+        );
+
+        // The same net change seen as one collapsed edit spanning most of the
+        // file: `select_region` returns nearly every child, and the tier bails.
+        // Both sites are inside an identifier, and the second is expressed
+        // against the text the first produced (one byte longer), so the chain
+        // below stays at the token tier. The last line is `var_1999 = 1999\n`,
+        // 16 bytes, whose name runs from its start.
+        let scattered = vec![edit(4..4, "X"), edit(old.len() - 11..old.len() - 11, "X")];
+        let new = apply_edits(&old, &scattered);
+        let collapsed = diff_edit(&old, &new);
+        assert!(collapsed.range.len() > old.len() / 2, "{collapsed:?}");
+        assert!(reparse(&old, &green, &parsed.diagnostics, &collapsed, &new).is_none());
+
+        // Replaying the chain still answers it at the token tier — the guard
+        // costs the precise-edit path nothing.
+        let out = reparse_edits(&old, &green, &parsed.diagnostics, &scattered, &new)
+            .expect("the precise chain is unaffected");
+        assert_eq!(out.tier, ReparseTier::Token);
+    }
+
+    /// The width guard is a fraction *and* a floor: a small file's region is
+    /// always worth trying, however much of the file it covers.
+    #[test]
+    fn the_region_width_guard_leaves_small_files_alone() {
+        assert!(!region_is_too_wide(4 * 1024, 4 * 1024));
+        assert!(!region_is_too_wide(64 * 1024, 1024 * 1024));
+        assert!(region_is_too_wide(64 * 1024, 128 * 1024));
     }
 
     /// The shape `reparse_edits` exists for: two identifier edits far apart,
