@@ -178,8 +178,11 @@ Each stage lands independently with the full suite green.
   Unlocks docstring keystrokes at the token tier: 18.2 us against the 548 us
   the statement tier charged, since `fold_docstrings` made the docstring and
   the definition it documents one `ROOT` child (`benches/reparse.rs`,
-  `docstring_keystroke`). The newline ban still routes Enter-in-a-docstring to
-  the statement tier.
+  `docstring_keystroke`). The token tier's newline ban moved from
+  `reparse_token` down into `try_splice_plain_token`, so it no longer applies
+  to string content: a content run spans newlines freely and emits no `NEWLINE`
+  token, so no statement boundary moves and Enter in a docstring lands here
+  too.
 
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
   fragment entry point (`public_context`, bracket `end` markers) — a bare

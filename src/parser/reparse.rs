@@ -257,14 +257,6 @@ fn reparse_token(
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
 ) -> Option<Reparsed> {
-    // Newline ban: the eligible kinds either cannot contain a newline or
-    // (block comments) rarely see one edited; a newline also moves statement
-    // boundaries, so bail early. The single-token relex guard below would
-    // catch most of these anyway; this is the cheap early-out.
-    if edit.insert.contains(['\n', '\r']) || prev_text[edit.range.clone()].contains(['\n', '\r']) {
-        return None;
-    }
-
     let root = SyntaxNode::new_root(prev_green.clone());
     let (s, e) = (edit.range.start, edit.range.end);
     let mut candidates: Vec<SyntaxToken> = Vec::with_capacity(2);
@@ -309,6 +301,16 @@ fn try_splice_plain_token(
     edit: &Edit,
     token: &SyntaxToken,
 ) -> Option<Reparsed> {
+    // Newline ban: these kinds either cannot contain a newline or (block
+    // comments) rarely see one edited, and a newline moves statement
+    // boundaries, so bail early. The single-token relex guard below would
+    // catch most of these anyway; this is the cheap early-out. It does not
+    // apply to `STRING_CONTENT`, whose run legitimately spans newlines and
+    // whose proof does not depend on line structure.
+    if edit.insert.contains(['\n', '\r']) || prev_text[edit.range.clone()].contains(['\n', '\r']) {
+        return None;
+    }
+
     let tr = token.text_range();
     let (t0, t1) = (usize::from(tr.start()), usize::from(tr.end()));
 
@@ -481,6 +483,13 @@ fn relex_matches(
 ///
 /// The second bullet needs the literal to be *terminated*, which gets its own
 /// check rather than leaning on an `UnterminatedLiteral` diagnostic's anchor.
+///
+/// Newlines are allowed here, unlike in [`try_splice_plain_token`]: a content
+/// run spans them freely (a triple-quoted body, and a single-quoted one too —
+/// no newline stops the run, which is why an unterminated literal reaches EOF),
+/// and a newline *inside* one emits no `NEWLINE` token, so no statement
+/// boundary moves. Diagnostics are byte offsets and do not care about lines.
+/// That is what puts Enter in a docstring on this tier.
 ///
 /// The faithfulness relex (the unedited node text must reproduce the node's own
 /// tokens) is what makes the second bullet an induction rather than an
