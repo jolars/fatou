@@ -38,6 +38,7 @@ Fatou is available from several sources:
 - **npm**: `npm install -g fatou-cli` (bundles a prebuilt binary)
 - **PyPI**: `uv tool install fatou`/`pipx install fatou`
 - **AUR** (Arch Linux): `paru -S fatou-bin` (or any other AUR helper)
+- **NixOS**: the `fatou` package is available in the Nixpkgs repository
 - **Prebuilt binaries**: from the [releases
   page](https://github.com/jolars/fatou/releases)
 - **VS Code/Open VSX**: the **Fatou** extension
