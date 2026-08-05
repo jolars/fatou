@@ -81,9 +81,12 @@ Each stage lands independently with the full suite green.
   `primitive`, `type`, `typegroup`, `public`, `var`, `in`, `∈`, `isa`,
   `doc`, plus `outer` for future `for outer` support — `where` and
   `mutable` are true keyword kinds, auto-guarded by the same-kind check;
-  oracle surfaces omissions); forward join (new text + next source char,
-  or a `\n` sentinel at EOF, must not extend the token, e.g. `r` + `"…"`
-  or a block comment left unterminated by a nested `#=`); backward join
+  the oracle surfaces an omission only if a seeded edit happens to spell
+  the missing word, so a guard test scans the grammar for `Ident`-text
+  comparisons and fails on any word not listed); forward join (new text +
+  next source char, or a `\n` sentinel at EOF, must not extend the token,
+  e.g. `r` + `"…"` or a block comment left unterminated by a nested
+  `#=`); backward join
   (prev leaf + new text must relex to the same two tokens; catches `2` +
   `e10` ⇒ `Float`); no existing diagnostic touching the leaf. Shift
   diagnostics after the leaf by the edit delta. Targeted positive tests
@@ -110,9 +113,12 @@ Each stage lands independently with the full suite green.
   edits at BOF/EOF.
 
 - [x] Reparse stage 4 (precise LSP edits + benches): `reparse_edits`
-  chains per-edit reparse, validated up front against the target text
-  (stale slices, and chains under two edits, reject to the `diff_edit`
-  path); `apply_content_changes` (`src/text/edit.rs`) returns the byte
+  chains per-edit reparse, each step proven to fit the text its
+  predecessors produced before that text is sliced and the composed
+  result proven to be the target (stale slices, and chains under two
+  edits, reject to the `diff_edit` path — validating step by step rather
+  than pre-folding the whole chain keeps the replay to one application);
+  `apply_content_changes` (`src/text/edit.rs`) returns the byte
   edits it already computes, `None` on a full replacement, and they are
   staged through the side-channel from `src/lsp/analysis_thread.rs`.
   `Edit`/`apply_edits`/`diff_edit` moved to `src/text/edit.rs` (leaf
@@ -158,7 +164,9 @@ Each stage lands independently with the full suite green.
   server's working directory, where it could alias a real file (and be
   read from disk by `revert_file_to_disk`). Document links ask
   `uri::is_synthetic` before anchoring a relative `include` to the
-  document's directory.
+  document's directory — which matches the exact rooted single-component
+  shape it mints, so a real workspace directory that merely carries that
+  name still anchors its relative includes.
 
 - [x] Reparse stage 2b (`StringContent` token-tier fast path): *not* the
   predicted delimiter-derived character guards. Instead the whole enclosing
@@ -186,6 +194,30 @@ Each stage lands independently with the full suite green.
   to string content: a content run spans newlines freely and emits no `NEWLINE`
   token, so no statement boundary moves and Enter in a docstring lands here
   too.
+
+- [ ] Reparse follow-ups left over from the stage 2-4 review. None is a
+  soundness issue: every one of them degrades to a full parse at worst.
+  - The base cache admits every file `parsed_document` touches, not just
+    the buffers the editor is on, so one `project_graph` /
+    `workspace_reference_index` sweep over more than `MAX_REPARSE_BASES`
+    members evicts every open buffer's base at once and the next keystroke
+    full-parses. Admitting only files that carry a staged chain (or an open
+    buffer) would fix it, but it also stops the CLI and the disk-revert
+    path from ever building a base, so it is a policy call rather than a
+    cleanup.
+  - `crate::parser` re-exports `Edit`, `apply_edits`, `try_apply_edits`,
+    and `diff_edit`, all of which `crate::text` already exports, plus
+    `fingerprint`, which exists only for the oracle. Pick one canonical
+    path per item and `#[doc(hidden)]` what is left.
+  - `REGION_MAX_FRACTION` is used as a divisor (`text_len / 4`), so the
+    name reads backwards.
+  - `tests/incremental_reparse.rs` is now the slowest test binary (~23 s in
+    debug): every successful splice pays the in-crate Tenet-4 full parse on
+    top of the harness's own comparison. Lower `EDITS_PER_SNIPPET`, or put
+    the corpus sweep behind a feature, if CI time starts to matter.
+  - The criterion dev-dependency adds 23 crates, `cc` and `alloca` among
+    them, so `cargo test --all-targets` and `cargo clippy --all-targets`
+    now want a C toolchain.
 
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
   fragment entry point (`public_context`, bracket `end` markers) — a bare
