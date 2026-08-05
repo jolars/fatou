@@ -30,7 +30,8 @@ Token/statement reparse splicing beneath `parsed_document`
 (`src/incremental.rs`), à la rust-analyzer `reparsing.rs` and arity's
 `src/parser/reparse.rs`. Design notes pinned by investigation (2026-08-04):
 strings are multi-token (`StringDelimOpen`/`StringContent`/…), so there is no
-single-STRING token tier and string-interior edits ride the statement tier;
+single-STRING token tier (stage 2b instead relexes the whole enclosing
+literal, which is how string-interior edits reach the token tier);
 juxtaposition (`2` + `e10` ⇒ `Float 2e10`) demands a backward join guard
 arity never needed; Julia blocks are `keyword…end` with `a[end]` ambiguity
 and `parse()` is toplevel-contextual (`public`, bracket `end`), so the
@@ -156,11 +157,34 @@ Each stage lands independently with the full suite green.
   `uri::is_synthetic` before anchoring a relative `include` to the
   document's directory.
 
+- [x] Reparse stage 2b (`StringContent` token-tier fast path): *not* the
+  predicted delimiter-derived character guards. Instead the whole enclosing
+  `STRING_LITERAL`/`CMD_LITERAL`/`NONSTANDARD_IDENTIFIER` node is relexed in
+  isolation twice — once unedited, to prove isolated lexing is context-faithful
+  for that node, and once with the edit applied, which must reproduce the same
+  token kinds with the edited content token's end (and every end after it)
+  moved by the delta. Taking the delimiters along puts the isolated lexer in
+  the right mode for free, so triple/raw/prefixed/command/`var"…"` need no
+  hand-written hazard table that could drift from the lexer. That also
+  *subsumes* both join probes, which the string path skips: the bytes before
+  the node are unchanged (backward), and the proven-identical tail — close
+  delimiter and any suffix — restores the mode stack (forward). Requires a
+  matching close delimiter after the leaf, since an unterminated literal has no
+  such tail. Bails when any diagnostic touches the whole literal, hoisted above
+  both relexes because an unterminated literal's node is the rest of the file.
+  Sound because nothing outside the lexer reads `StringContent` *text*
+  (triple-quoted dedent lives only in the test-only sexpr projector), so an
+  unchanged token-kind sequence is an unchanged tree and unchanged diagnostics.
+  Unlocks docstring keystrokes at the token tier: 18.2 us against the 548 us
+  the statement tier charged, since `fold_docstrings` made the docstring and
+  the definition it documents one `ROOT` child (`benches/reparse.rs`,
+  `docstring_keystroke`). The newline ban still routes Enter-in-a-docstring to
+  the statement tier.
+
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
   fragment entry point (`public_context`, bracket `end` markers) — a bare
-  fragment `parse()` misparses those today; a `StringContent` token-tier
-  fast path needs delimiter-derived character guards (triple/raw/
-  prefixed). Both are pure optimizations on top of a sound stage 2–4.
+  fragment `parse()` misparses those today. A pure optimization on top of a
+  sound stage 2–4.
 
 ## Formatter
 

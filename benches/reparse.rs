@@ -1,12 +1,13 @@
 //! What incremental reparse actually buys, measured against a full parse.
 //!
-//! Six scenarios over one ~100 KB corpus file, all sharing a single base parse
-//! done in setup:
+//! Seven scenarios over one ~100 KB corpus file, all sharing a single base
+//! parse done in setup:
 //!
-//! | bench                     | what it costs                                 |
-//! |---------------------------|-----------------------------------------------|
+//! | bench                     | what it costs                                  |
+//! |---------------------------|------------------------------------------------|
 //! | `full_parse`              | the baseline every other row is judged by      |
 //! | `token_keystroke`         | one char typed into an identifier (token tier) |
+//! | `docstring_keystroke`     | one char typed into a docstring (token tier)   |
 //! | `statement_edit`          | a statement added at the end (top-level tier)  |
 //! | `precise_chain`           | 3 scattered edits replayed one at a time       |
 //! | `scattered_via_diff_edit` | the same net change as one collapsed edit      |
@@ -15,13 +16,20 @@
 //! Measured on ~131 KB of JuliaSyntax (2026-08-05, release):
 //!
 //! ```text
-//! full_parse                6.37 ms
+//! full_parse                6.34 ms
 //! token_keystroke          15.5  us     410x
-//! statement_edit          546    us      12x
-//! precise_chain            59.3  us     107x
-//! scattered_via_diff_edit  17.2  ms     0.37x   -- slower than full_parse
-//! rejected_attempt          1.04 ms
+//! docstring_keystroke      18.2  us     349x
+//! statement_edit          548    us      12x
+//! precise_chain            59.7  us     106x
+//! scattered_via_diff_edit  18.2  ms     0.35x   -- slower than full_parse
+//! rejected_attempt          1.05 ms
 //! ```
+//!
+//! `docstring_keystroke` is what the `STRING_CONTENT` path bought: the same
+//! edit cost 548 us before it, because `fold_docstrings` makes the docstring
+//! and the definition it documents one `ROOT` child, so the statement tier
+//! reparsed both. The small gap to `token_keystroke` is the whole-literal
+//! relex, which scans a docstring rather than an identifier.
 //!
 //! The last three rows are the ones that shaped stage 4.
 //!
@@ -114,6 +122,29 @@ fn ident_site(src: &str, needle: &str, fraction: f64) -> usize {
     sites[((sites.len() - 1) as f64 * fraction) as usize] + needle.len()
 }
 
+/// A byte offset inside a triple-quoted string's *body*: just past the first
+/// letter following the `fraction`-th opening `"""`. Occurrences alternate
+/// open/close, so only the even ones are openers.
+///
+/// This is the site the `STRING_CONTENT` path exists for. `fold_docstrings`
+/// folds a docstring with the definition it documents into one `ROOT` child,
+/// so without that path a keystroke here reparses the docstring *and* the
+/// whole definition under it at the statement tier.
+fn docstring_site(src: &str, fraction: f64) -> usize {
+    let sites: Vec<usize> = src.match_indices("\"\"\"").map(|(at, _)| at).collect();
+    assert!(
+        sites.len() > 50,
+        "corpus has only {} `\"\"\"`; has the checkout changed?",
+        sites.len()
+    );
+    let openers = sites.len() / 2;
+    let open = sites[2 * (((openers - 1) as f64 * fraction) as usize)] + 3;
+    let rel = src[open..]
+        .find(|c: char| c.is_ascii_alphabetic())
+        .expect("a letter in the docstring body");
+    open + rel + 1
+}
+
 fn insert(at: usize, text: &str) -> Edit {
     Edit {
         range: at..at,
@@ -183,6 +214,13 @@ fn bench_reparse(c: &mut Criterion) {
     let keystroke = insert(ident_site(&base.src, "bump", 0.5), "z");
     let run = base.expect_tier(&keystroke, ReparseTier::Token);
     group.bench_function("token_keystroke", |b| b.iter(&run));
+
+    // A char typed into a docstring body. Same tier as `token_keystroke`, but
+    // it is the case with the most to lose: the statement tier would answer it
+    // by reparsing the whole documented definition.
+    let prose = insert(docstring_site(&base.src, 0.5), "z");
+    let run = base.expect_tier(&prose, ReparseTier::Token);
+    group.bench_function("docstring_keystroke", |b| b.iter(&run));
 
     // A whole statement appended at the end of the buffer: a new top-level
     // item, which is the statement tier's bread and butter.

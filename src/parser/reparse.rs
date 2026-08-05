@@ -7,11 +7,14 @@
 //! The staged plan lives in `TODO.md` (`### Incremental`). Two tiers are in:
 //! the token tier ([`reparse_token`]) relexes an edit confined to a single
 //! `Ident`, comment, or whitespace leaf in isolation and splices it into the
-//! previous green tree; the top-level statement tier ([`reparse_toplevel`])
-//! reparses the run of `ROOT` children touching the edit with the public
-//! [`parse`](crate::parser::parse) and splices the resulting children and
-//! diagnostics in place, provided the boundary guards prove the region
-//! decoupled from its neighbors.
+//! previous green tree ([`try_splice_plain_token`]), or — for a `StringContent`
+//! leaf, whose lexing depends on the enclosing delimiter's mode — relexes the
+//! whole enclosing string literal in isolation and requires it to reproduce its
+//! own token run ([`try_splice_string_content`]); the top-level statement tier
+//! ([`reparse_toplevel`]) reparses the run of `ROOT` children touching the edit
+//! with the public [`parse`](crate::parser::parse) and splices the resulting
+//! children and diagnostics in place, provided the boundary guards prove the
+//! region decoupled from its neighbors.
 //!
 //! Two entry points sit above those tiers. [`reparse_edits`] takes the precise
 //! chain the language server staged from a `didChange` batch and replays it one
@@ -193,17 +196,31 @@ fn reparse_impl(
         .or_else(|| reparse_toplevel(prev_text, prev_green, prev_diags, edit, new_text))
 }
 
-/// Leaf kinds the token tier may splice. Their text never spans a newline and
-/// their lexing is local enough for the join guards to prove a splice sound.
-/// Deliberately absent: `STRING_CONTENT` (lexing depends on the enclosing
-/// delimiter's mode), `NEWLINE` (statement structure), `CHAR` and the numeric
-/// kinds (quote-context and juxtaposition traps outweigh the win), and the
-/// string prefix/suffix kinds (glued to their delimiters).
+/// Leaf kinds proved by the isolated single-token relex plus the two join
+/// probes ([`try_splice_plain_token`]). Their text never spans a newline and
+/// their lexing is local enough for those probes to prove a splice sound.
+/// Deliberately absent: `NEWLINE` (statement structure), `CHAR` and the
+/// numeric kinds (quote-context and juxtaposition traps outweigh the win), and
+/// the string prefix/suffix kinds (glued to their delimiters).
+/// `STRING_CONTENT` is handled too, but by a different proof — its lexing
+/// depends on the enclosing delimiter's mode, so it takes the whole-literal
+/// relex in [`try_splice_string_content`] instead.
 const TOKEN_REPARSE_KINDS: &[SyntaxKind] = &[
     SyntaxKind::IDENT,
     SyntaxKind::COMMENT,
     SyntaxKind::BLOCK_COMMENT,
     SyntaxKind::WHITESPACE,
+];
+
+/// Literal node kinds a `STRING_CONTENT` leaf may sit directly under. Error
+/// recovery can leave one under an `ERROR` node instead, which
+/// [`try_splice_string_content`] rejects: the proof needs the delimiters.
+const STRING_LITERAL_KINDS: &[SyntaxKind] = &[
+    SyntaxKind::STRING_LITERAL,
+    SyntaxKind::CMD_LITERAL,
+    // `var"…"`, a non-standard *identifier*. Nothing keys on its content text
+    // either, so a content edit is as safe here as in a plain string.
+    SyntaxKind::NONSTANDARD_IDENTIFIER,
 ];
 
 /// Identifier texts the parser treats structurally even though they lex as
@@ -269,16 +286,29 @@ fn reparse_token(
         .find_map(|token| try_splice_token(prev_text, prev_diags, edit, &token))
 }
 
-/// Run the stage-2 guards against one candidate leaf and splice on success.
+/// Dispatch one candidate leaf to the proof its kind takes.
 fn try_splice_token(
     prev_text: &str,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
     token: &SyntaxToken,
 ) -> Option<Reparsed> {
-    if !TOKEN_REPARSE_KINDS.contains(&token.kind()) {
-        return None;
+    match token.kind() {
+        SyntaxKind::STRING_CONTENT => try_splice_string_content(prev_text, prev_diags, edit, token),
+        kind if TOKEN_REPARSE_KINDS.contains(&kind) => {
+            try_splice_plain_token(prev_text, prev_diags, edit, token)
+        }
+        _ => None,
     }
+}
+
+/// Run the stage-2 guards against one candidate leaf and splice on success.
+fn try_splice_plain_token(
+    prev_text: &str,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    token: &SyntaxToken,
+) -> Option<Reparsed> {
     let tr = token.text_range();
     let (t0, t1) = (usize::from(tr.start()), usize::from(tr.end()));
 
@@ -363,6 +393,178 @@ fn try_splice_token(
         .collect();
 
     let green = token.replace_with(GreenToken::new(token.kind().into(), &new_leaf));
+    Some(Reparsed {
+        green,
+        diagnostics,
+        tier: ReparseTier::Token,
+    })
+}
+
+/// `text` — the slice of the previous buffer starting at absolute offset
+/// `base` — with `edit` applied at its relative offset.
+fn edited_slice(text: &str, base: usize, edit: &Edit) -> String {
+    let mut out = text.to_string();
+    out.replace_range(
+        (edit.range.start - base)..(edit.range.end - base),
+        &edit.insert,
+    );
+    out
+}
+
+/// Every token under `node` as `(kind, end)`, with `end` relative to the node
+/// start. Tokens tile the node's text contiguously from `0` and the tree
+/// synthesizes none of its own (`tree_builder`), so this *is* the lexer's
+/// token run for that span and the ends alone pin every range.
+fn literal_token_ends(node: &SyntaxNode) -> Vec<(SyntaxKind, usize)> {
+    let base = usize::from(node.text_range().start());
+    node.descendants_with_tokens()
+        .filter_map(|el| el.into_token())
+        .map(|t| (t.kind(), usize::from(t.text_range().end()) - base))
+        .collect()
+}
+
+/// Whether an isolated [`lex`] of `text` reproduces `expected`: the same kinds
+/// in the same order, with the same ends, covering all of `text`. `grown`
+/// names the index whose end — and every end after it — is expected to have
+/// moved by that delta.
+fn relex_matches(
+    text: &str,
+    expected: &[(SyntaxKind, usize)],
+    grown: Option<(usize, isize)>,
+) -> bool {
+    let tokens = lex(text);
+    if tokens.len() != expected.len() {
+        return false;
+    }
+    for (i, (got, &(kind, end))) in tokens.iter().zip(expected).enumerate() {
+        let shift = match grown {
+            Some((from, delta)) if i >= from => delta,
+            _ => 0,
+        };
+        if syntax_kind_for(got.kind) != kind || got.end != (end as isize + shift) as usize {
+            return false;
+        }
+    }
+    tokens.last().is_some_and(|t| t.end == text.len())
+}
+
+/// The token tier's `STRING_CONTENT` path: relex the *whole enclosing string
+/// literal* in isolation and require it to reproduce its own token run with
+/// only the edited content leaf resized.
+///
+/// A content leaf cannot take [`try_splice_plain_token`]'s proof, because both
+/// of its probes assume a leaf that lexes the same standing alone: `abc` in
+/// isolation is an `Ident`, never `StringContent`, and a leaf following an
+/// interpolation (`"a$x b"`) has an `Ident` before it, which blows the
+/// two-token backward probe. Taking the delimiters along instead puts the
+/// isolated lexer into the right mode for free, so triple/raw/prefixed need no
+/// hand-written character table.
+///
+/// Why this is sound. Nothing outside the lexer reads `StringContent` *text*:
+/// the parser only pushes the token, docstring eligibility tests the first
+/// token's kind, and the flag passes are kind-based — so preserving the node's
+/// token-kind sequence preserves both the tree and the diagnostics. (Nor does
+/// triple-quoted dedenting intrude: that lives in the test-only JuliaSyntax
+/// projector, which rebuilds the string at projection time.) Given that:
+///
+/// * The bytes before the node are unchanged and the lexer is a deterministic
+///   left-to-right machine, so its mode stack at the node start is identical.
+///   That subsumes the backward join probe.
+/// * The relex proves the kinds are unchanged and that only the edited leaf's
+///   end, and the ends after it, moved by the delta. The bytes after the leaf
+///   *within* the node are therefore byte-identical — including the close
+///   delimiter and any suffix — so the mode stack is back to its starting
+///   depth at the node end and the rest of the file lexes identically, merely
+///   shifted. That subsumes the forward join probe, which could not have
+///   expressed a delimiter-plus-suffix tail with its one probe character
+///   anyway.
+///
+/// The second bullet needs the literal to be *terminated*, which gets its own
+/// check rather than leaning on an `UnterminatedLiteral` diagnostic's anchor.
+///
+/// The faithfulness relex (the unedited node text must reproduce the node's own
+/// tokens) is what makes the second bullet an induction rather than an
+/// assumption: an isolated [`lex`] starts from an empty mode stack and no token
+/// history, while in context the node may sit under a `Str`/`Interp` frame and
+/// `prev_ends_value` consults the preceding token. Proving faithfulness for the
+/// old text, plus an identical kind sequence, carries it to the new text.
+fn try_splice_string_content(
+    prev_text: &str,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    token: &SyntaxToken,
+) -> Option<Reparsed> {
+    let node = token.parent()?;
+    if !STRING_LITERAL_KINDS.contains(&node.kind()) {
+        return None;
+    }
+    let nr = node.text_range();
+    let (n0, n1) = (usize::from(nr.start()), usize::from(nr.end()));
+
+    // Bail when any diagnostic touches the literal, boundaries included. The
+    // relex proves the token sequence unchanged, so the four string-related
+    // kinds would in fact survive a shift — but "no diagnostic may touch the
+    // literal we splice" is an invariant that keeps holding as diagnostics are
+    // added, and what it gives up (`x = "abc`, `"a"b`, `var"x"y`) is the error
+    // path, not the keystroke path.
+    //
+    // This runs *first*, before either relex: an unterminated literal runs to
+    // EOF, so its node is the rest of the file, and every keystroke inside one
+    // would otherwise pay two whole-file lexes to learn what a diagnostic
+    // already says (`benches/reparse.rs`, `rejected_attempt`).
+    if prev_diags.iter().any(|d| d.start <= n1 && d.end >= n0) {
+        return None;
+    }
+
+    let expected = literal_token_ends(&node);
+    let tr = token.text_range();
+    let (t0, t1) = (usize::from(tr.start()), usize::from(tr.end()));
+    // Ends are unique (tokens tile with positive width), so this identifies the
+    // leaf by index — which the edited relex then pins as the one that resized.
+    let leaf = expected
+        .iter()
+        .position(|&(kind, end)| kind == SyntaxKind::STRING_CONTENT && end == t1 - n0)?;
+
+    // Terminated: a matching close delimiter must follow the leaf. A prefixed
+    // literal's suffix is lexed as part of the same node, so nothing but the
+    // close can end the run.
+    let close = if node.kind() == SyntaxKind::CMD_LITERAL {
+        SyntaxKind::CMD_DELIM_CLOSE
+    } else {
+        SyntaxKind::STRING_DELIM_CLOSE
+    };
+    if !expected[leaf + 1..].iter().any(|&(kind, _)| kind == close) {
+        return None;
+    }
+
+    let old_node_text = &prev_text[n0..n1];
+    if !relex_matches(old_node_text, &expected, None) {
+        return None;
+    }
+    let delta = edit.delta();
+    let edited = edited_slice(old_node_text, n0, edit);
+    if !relex_matches(&edited, &expected, Some((leaf, delta))) {
+        return None;
+    }
+
+    let new_leaf = &edited[(t0 - n0)..((t1 - n0) as isize + delta) as usize];
+
+    // Every surviving diagnostic lies wholly outside the literal, so the ones
+    // past it shift and the rest keep their positions.
+    let shift = |pos: usize| (pos as isize + delta) as usize;
+    let diagnostics = prev_diags
+        .iter()
+        .map(|d| {
+            let mut d = d.clone();
+            if d.start >= n1 {
+                d.start = shift(d.start);
+                d.end = shift(d.end);
+            }
+            d
+        })
+        .collect();
+
+    let green = token.replace_with(GreenToken::new(SyntaxKind::STRING_CONTENT.into(), new_leaf));
     Some(Reparsed {
         green,
         diagnostics,
@@ -682,12 +884,11 @@ fn reparse_toplevel(
     // the two neighbors sit next to each other across it and can couple in a
     // way neither boundary parse can see, because each concatenation contains
     // only one of them. Deleting the `]` from `"doc" ]\nf() = 1` is the shape:
-    // the stray closer was all that kept the string from documenting the
-    // statement below it, and once it goes `fold_docstrings` folds the pair
-    // into a `DOC` spanning both seams. Parse the neighbors together, through
-    // the real gap bytes, and require both seams to survive. Only reachable
-    // when the region is reduced to trivia, so the extra parse is rare and
-    // neighbor-sized.
+    // the stray closer was all that kept the string from being the statement
+    // below it, and once it goes `fold_docstrings` folds the pair into a `DOC`
+    // spanning both seams. Parse the neighbors together, through the real gap
+    // bytes, and require both seams to survive. Only reachable when the region
+    // is reduced to trivia, so the extra parse is rare and neighbor-sized.
     if !frag
         .cst
         .children_with_tokens()
@@ -880,6 +1081,49 @@ mod tests {
         let green = parsed.cst.green().into_owned();
         let e = diff_edit("x = 1\n", "x = 2\n");
         assert!(reparse("x = 1\n", &green, &parsed.diagnostics, &e, "x = 2\n").is_none());
+    }
+
+    /// The point of the `STRING_CONTENT` path: a docstring body edit stays at
+    /// the token tier. `fold_docstrings` folds a docstring with the definition
+    /// it documents into one `ROOT` child, so the statement tier would answer
+    /// this by reparsing the docstring *and* the whole function under it.
+    #[test]
+    fn a_docstring_body_edit_stays_at_the_token_tier() {
+        let old = "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x + 1\nend\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+        let e = edit(5..5, "s");
+        let new = e.apply(old);
+
+        let out = reparse(old, &green, &parsed.diagnostics, &e, &new)
+            .expect("a docstring body edit is spliceable");
+        assert_eq!(out.tier, ReparseTier::Token);
+    }
+
+    /// An unterminated literal runs to EOF, so its node is the rest of the
+    /// file. The diagnostic bail must reject a content edit inside one — and
+    /// must do so before either relex, which is why it is hoisted to the top
+    /// of `try_splice_string_content`.
+    #[test]
+    fn a_content_edit_in_an_unterminated_literal_falls_back() {
+        let old = "x = 1\ny = \"abc\nz = 2\n";
+        let parsed = crate::parser::parse(old);
+        let green = parsed.cst.green().into_owned();
+        // Offset 12 is inside the content run, which here swallows the rest of
+        // the file; `UnterminatedLiteral` is anchored at the literal's start.
+        let token = SyntaxNode::new_root(green.clone())
+            .token_at_offset(TextSize::new(12))
+            .right_biased()
+            .expect("a leaf at offset 12");
+        assert_eq!(token.kind(), SyntaxKind::STRING_CONTENT);
+
+        let e = edit(12..13, "X");
+        let new = e.apply(old);
+        assert!(try_splice_string_content(old, &parsed.diagnostics, &e, &token).is_none());
+        // The statement tier may still answer it (the in-crate Tenet-4 assert
+        // validates that splice); what matters is that the token tier declined.
+        let tier = reparse(old, &green, &parsed.diagnostics, &e, &new).map(|r| r.tier);
+        assert_ne!(tier, Some(ReparseTier::Token));
     }
 
     /// The shape `reparse_edits` exists for: two identifier edits far apart,
