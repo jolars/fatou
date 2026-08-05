@@ -211,6 +211,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Attach the platform installer scripts once (they are repo files, not
+      # per-target build outputs) so each release carries the exact installer
+      # that shipped with it.
+      - name: Upload installer scripts to release
+        if: inputs.upload == 'true' && matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          TAG="${{ inputs.tag }}"
+          gh release upload --clobber "$TAG" \
+            scripts/fatou-installer.sh \
+            scripts/fatou-installer.ps1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Publish a SHA256SUMS manifest covering every asset attached to the release.
   # Runs after all per-target build jobs so all assets are already uploaded.
   # Guards against accidental corruption and lets installers verify downloads;
