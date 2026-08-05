@@ -6,12 +6,13 @@
 //! [`parsed_tree_root`] — a cheap atomic clone.
 //!
 //! This honors Tenet 2 (incremental parsing is first-class): a text edit
-//! invalidates only [`parsed_document`] and its dependents. The token/statement
-//! reparse *splicing* that makes a single-keystroke edit cheaper than a full
-//! parse is staged in (see `TODO.md`): [`parsed_document`] already offers each
-//! edit to [`reparse`] via the [`PrevParse`] side-channel, but the strategies
-//! are stubs, so today every edit still triggers a full parse, which is
-//! correct either way.
+//! invalidates only [`parsed_document`] and its dependents, and the query then
+//! splices the previous tree rather than reparsing the file. It works off a
+//! side-channel that lives beside salsa rather than inside it: [`PrevParse`],
+//! the tree to splice against, plus the chain of [`Edit`]s the language server
+//! staged since that tree was built. Both are hints — every route through
+//! [`parsed_document`] returns exactly what `parse(text)` would (Tenet 4), so
+//! a cold, stale, or evicted cache costs a full parse and nothing else.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use salsa::{Durability, Setter};
 
 use crate::index::PackageIndex;
-use crate::parser::{ParseDiagnostic, ReparseTier, diff_edit, parse, reparse};
+use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits};
 use crate::project::{self, IncludeEdge};
 use crate::resolve::{
     Candidate, ModulePath, Namespace, OccurrenceKey, OccurrenceRec, PackageSource, Resolution,
@@ -133,29 +134,74 @@ pub trait IncrementalDb: salsa::Database {
         None
     }
 
-    /// Store `prev` as the reparse base for `file`. `tier` records which
-    /// strategy produced this parse (`None` for a full parse); unused until
-    /// the observability hooks land (stage 4, see `TODO.md`).
-    fn reparse_store(&self, _file: SourceFile, _prev: PrevParse, _tier: Option<ReparseTier>) {}
+    /// Stage the edits that transform `file`'s previous text into its current
+    /// one. `Some` appends to the pending chain (a `didChange` batch that a
+    /// coalesced analysis never got to consume must still be replayed); `None`
+    /// marks the transform unknown and clears it.
+    fn reparse_stage_edits(&self, _file: SourceFile, _edits: Option<Vec<Edit>>) {}
+
+    /// The edit chain staged for `file` since its reparse base was written.
+    /// Peeks — the chain is drained by [`Self::reparse_store`], so a query that
+    /// is cancelled before it stores leaves the chain intact for the next one.
+    fn reparse_pending_edits(&self, _file: SourceFile) -> Vec<Edit> {
+        Vec::new()
+    }
+
+    /// Store `prev` as the reparse base for `file` and drop the first
+    /// `_consumed` staged edits, atomically. `tier` records which strategy
+    /// produced this parse (`None` for a full parse) and is logged.
+    fn reparse_store(
+        &self,
+        _file: SourceFile,
+        _prev: PrevParse,
+        _tier: Option<ReparseTier>,
+        _consumed: usize,
+    ) {
+    }
+
+    /// Drop the base and the pending chain for `file`, after its text changed
+    /// by some route that carries no edits (a disk revert, a closed buffer).
+    fn reparse_evict(&self, _file: SourceFile) {}
 }
 
 /// Parse `file`'s text into a cached green tree plus diagnostics.
 ///
-/// Tries an incremental reparse off the previous parse of this file first: a
-/// text edit is recovered by [`diff_edit`] and offered to [`reparse`]. A miss
-/// (first parse, or an edit no strategy handles) falls back to a full parse.
+/// Tries an incremental reparse off the previous parse of this file:
+///
+/// 1. the precise chain the language server staged from the client's
+///    `didChange` batches, offered to [`reparse_edits`]. Declines below two
+///    edits, where it has nothing to add over the next step;
+/// 2. failing that, a single edit recovered by [`diff_edit`] from the two whole
+///    texts, offered to [`reparse`]. This is the only route for a text that
+///    changed by some path carrying no edits at all (a disk revert, the CLI);
+/// 3. failing that, a full parse.
+///
+/// The chain goes first because a *failed* whole-text diff is not cheap. Where
+/// the edits are scattered, the collapsed edit spans everything between the
+/// first and the last, and the top-level tier answers a wide span by
+/// fragment-parsing the region and both its boundary guards — on a 100 KB file
+/// that costs several times the full parse it then falls back to
+/// (`benches/reparse.rs`, `scattered_via_diff_edit`). Replaying the chain is
+/// two orders of magnitude cheaper and, when it does miss, step 2 is still
+/// there. The reverse order is only better for edits that are *adjacent*,
+/// where it saves a few tens of microseconds — no trade at all against the
+/// milliseconds it costs everywhere else.
+///
 /// Every path yields a result identical to `parse(text)` (Tenet 4), so the
 /// side-channel never affects query semantics — salsa only sees text changes.
 #[salsa::tracked(returns(ref), no_eq)]
 pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
     let text = file.text(db);
+    let staged = db.reparse_pending_edits(file);
 
     let reparsed = db
         .reparse_prev(file)
         .filter(|prev| prev.text != *text)
         .and_then(|prev| {
-            let edit = diff_edit(&prev.text, text);
-            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
+            reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, text).or_else(|| {
+                let edit = diff_edit(&prev.text, text);
+                reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
+            })
         });
 
     let tier = reparsed.as_ref().map(|r| r.tier);
@@ -168,7 +214,10 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     };
 
     // Store last, after all fallible work, so a panic or salsa cancellation
-    // mid-query never leaves a base whose text and tree disagree.
+    // mid-query never leaves a base whose text and tree disagree. The staged
+    // chain is drained here unconditionally — whether or not step 2 used it —
+    // because the base now sits at the current text, so every peeked edit is
+    // behind it either way.
     db.reparse_store(
         file,
         PrevParse {
@@ -177,6 +226,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
             diagnostics: diagnostics.clone(),
         },
         tier,
+        staged.len(),
     );
 
     ParsedDocument { green, diagnostics }
@@ -617,10 +667,23 @@ impl FileSourceMap {
 pub struct IncrementalDatabase {
     storage: salsa::Storage<Self>,
     source_map: Arc<Mutex<FileSourceMap>>,
-    /// Per-file incremental-reparse base, outside salsa: a hit changes how fast
+    /// Per-file incremental-reparse state, outside salsa: a hit changes how fast
     /// [`parsed_document`] computes, never what it returns (see [`PrevParse`]).
     /// Shared across clones so snapshots warm the same cache.
-    reparse_cache: Arc<Mutex<HashMap<SourceFile, Arc<PrevParse>>>>,
+    ///
+    /// The base and the pending chain live under *one* lock because
+    /// [`IncrementalDb::reparse_store`] has to advance both atomically — it runs
+    /// on a read-pool thread while [`IncrementalDb::reparse_stage_edits`] runs on
+    /// the analysis thread.
+    reparse_cache: Arc<Mutex<HashMap<SourceFile, FileReparseState>>>,
+}
+
+/// The incremental-reparse side-channel for one file: the previous parse to
+/// splice against, and the chain of edits staged since that parse.
+#[derive(Debug, Default)]
+struct FileReparseState {
+    prev: Option<Arc<PrevParse>>,
+    pending: Vec<Edit>,
 }
 
 impl Default for IncrementalDatabase {
@@ -665,20 +728,80 @@ impl salsa::Database for IncrementalDatabase {}
 #[salsa::db]
 impl IncrementalDb for IncrementalDatabase {
     fn reparse_prev(&self, file: SourceFile) -> Option<Arc<PrevParse>> {
-        self.reparse_cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        self.reparse_state()
             .get(&file)
-            .cloned()
+            .and_then(|state| state.prev.clone())
     }
 
-    fn reparse_store(&self, file: SourceFile, prev: PrevParse, _tier: Option<ReparseTier>) {
-        self.reparse_cache
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(file, Arc::new(prev));
+    fn reparse_stage_edits(&self, file: SourceFile, edits: Option<Vec<Edit>>) {
+        let mut cache = self.reparse_state();
+        let state = cache.entry(file).or_default();
+        let Some(edits) = edits else {
+            state.pending.clear();
+            return;
+        };
+        state.pending.extend(edits);
+
+        // Bound the chain here rather than where it is read: nothing guarantees
+        // a read happens per stage. Under pull diagnostics the analysis thread
+        // stages on every keystroke but demands no parse (see
+        // `lsp::analysis_thread::start`), so an unbounded chain would grow one
+        // edit per keypress until the client happens to pull. Over budget, the
+        // chain becomes an unknown transform and the next parse falls back to
+        // the whole-text diff — correct, just coarser.
+        let bytes: usize = state.pending.iter().map(|e| e.insert.len()).sum();
+        if state.pending.len() > MAX_CHAIN_EDITS || bytes > MAX_CHAIN_INSERT_BYTES {
+            state.pending.clear();
+        }
+    }
+
+    fn reparse_pending_edits(&self, file: SourceFile) -> Vec<Edit> {
+        self.reparse_state()
+            .get(&file)
+            .map(|state| state.pending.clone())
+            .unwrap_or_default()
+    }
+
+    fn reparse_store(
+        &self,
+        file: SourceFile,
+        prev: PrevParse,
+        tier: Option<ReparseTier>,
+        consumed: usize,
+    ) {
+        match tier {
+            Some(tier) => log::trace!(
+                "reparse: {:?} tier spliced {} bytes ({consumed} staged edits)",
+                tier,
+                prev.text.len()
+            ),
+            None => log::trace!("reparse: full parse of {} bytes", prev.text.len()),
+        }
+        let mut cache = self.reparse_state();
+        let state = cache.entry(file).or_default();
+        state.prev = Some(Arc::new(prev));
+        // Drain the *prefix* the caller saw, not the whole chain: a stage can
+        // land between the peek and this store (an `upsert_file` that finds the
+        // text unchanged takes no `&mut db`, so it neither blocks nor cancels
+        // the read in flight), and that edit still has to be replayed. Draining
+        // unconditionally — even when the chain went unused because it was over
+        // budget or stale — is what keeps this self-healing: the base has
+        // advanced to the current text either way, so a chain kept back would
+        // be stale forever after.
+        state.pending.drain(..consumed.min(state.pending.len()));
+    }
+
+    fn reparse_evict(&self, file: SourceFile) {
+        self.reparse_state().remove(&file);
     }
 }
+
+/// Budget for a staged edit chain, enforced when edits are staged. The byte
+/// bound matters independently of the count: sixteen pasted blocks are sixteen
+/// edits but can be megabytes, and the chain is replayed against a full copy of
+/// the text.
+const MAX_CHAIN_EDITS: usize = 16;
+const MAX_CHAIN_INSERT_BYTES: usize = 64 * 1024;
 
 impl IncrementalDatabase {
     pub fn new() -> Self {
@@ -693,6 +816,15 @@ impl IncrementalDatabase {
     /// could leave half-updated, so proceeding past poison is safe.
     fn source_map(&self) -> MutexGuard<'_, FileSourceMap> {
         self.source_map
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Lock the reparse side-channel, recovering from poisoning for the same
+    /// reason [`Self::source_map`] does. Losing this cache costs a full parse,
+    /// never a wrong answer.
+    fn reparse_state(&self) -> MutexGuard<'_, HashMap<SourceFile, FileReparseState>> {
+        self.reparse_cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
@@ -850,10 +982,16 @@ impl IncrementalDatabase {
     /// reverse-occurrence index, where on-disk content is authoritative once the
     /// document is closed. A no-op for an untracked path, an unreadable or deleted
     /// file, or text already matching disk (so no needless revision bump).
+    ///
+    /// Evicts the file's incremental-reparse state first, before any of those
+    /// early returns: the buffer this path was being edited through is gone, so
+    /// both the base and any chain staged against it are dead weight, and a
+    /// deleted-file revert must not leave them behind.
     pub fn revert_file_to_disk(&mut self, path: &Path) {
         let Some(file) = self.lookup_file(path) else {
             return;
         };
+        self.reparse_evict(file);
         let Ok(text) = std::fs::read_to_string(path) else {
             return;
         };

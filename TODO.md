@@ -108,15 +108,42 @@ Each stage lands independently with the full suite green.
   statement-becomes-docstring (fallback), `const x` flag diagnostics,
   edits at BOF/EOF.
 
-- [ ] Reparse stage 4 (precise LSP edits + benches): `reparse_edits`
-  chaining per-edit reparse, validated up front against the target text
-  (stale slices reject to the `diff_edit` path); return the byte edits
-  `apply_content_changes` (`src/text/edit.rs`) already computes and stage
-  them through the side-channel from `src/lsp/analysis_thread.rs` (a full-
-  replacement change clears pending edits); `parsed_document` tries
-  precise edits, then `diff_edit`, then full parse. Criterion bench
-  `benches/reparse.rs`: full parse of a ~100 KB corpus vs token-tier
-  keystroke vs statement edit vs worst-case fallback.
+- [x] Reparse stage 4 (precise LSP edits + benches): `reparse_edits`
+  chains per-edit reparse, validated up front against the target text
+  (stale slices, and chains under two edits, reject to the `diff_edit`
+  path); `apply_content_changes` (`src/text/edit.rs`) returns the byte
+  edits it already computes, `None` on a full replacement, and they are
+  staged through the side-channel from `src/lsp/analysis_thread.rs`.
+  `Edit`/`apply_edits`/`diff_edit` moved to `src/text/edit.rs` (leaf
+  module) and are re-exported from `parser::reparse`. The side-channel is
+  one `Mutex<HashMap<SourceFile, FileReparseState>>` holding base +
+  pending chain, so a store advances both atomically: stage appends
+  (a coalesced request's edits must survive), `parsed_document` peeks,
+  and the store drains the peeked *prefix* unconditionally — draining
+  only on success would wedge a file into rejecting forever. The chain is
+  bounded where it is staged (16 edits / 64 KiB), since pull-diagnostics
+  clients stage per keystroke and demand no parse. `revert_file_to_disk`
+  evicts (also fixes the pre-existing unbounded `reparse_cache`).
+  `parsed_document` tries precise edits, then `diff_edit`, then full
+  parse — the opposite of this item's original wording, because
+  `benches/reparse.rs` shows a *failed* wide diff costs 17 ms against a
+  6.3 ms full parse (the top-level tier answers a wide span with a
+  fragment parse plus both boundary guards), while the chain is 59 us.
+  Criterion bench over ~100 KB of JuliaSyntax: full parse 6.3 ms, token
+  keystroke 15 us, statement edit 542 us, precise chain 59 us, the same
+  change via collapsed `diff_edit` 17 ms, rejected attempt 1.0 ms.
+
+- [ ] `didClose` removes the document from `state.documents` but leaves a
+  stale entry in the analysis thread's `pending` queue, so a queued
+  request can dispatch *after* `revert_file_to_disk` and re-upsert the
+  discarded unsaved buffer (`src/lsp/state.rs` `DidCloseTextDocument` →
+  `src/lsp/analysis_thread.rs` sync arm). Pre-existing; drop pending
+  entries on the close signal.
+
+- [ ] `path_for` (`src/lsp/state.rs`) collapses every non-`file:` URI onto
+  `untitled.jl`, so two `untitled:` buffers share one `SourceFile` and one
+  reparse base. Harmless (the chain validation rejects the interleaving
+  and falls back to a full parse) but it thrashes.
 
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
   fragment entry point (`public_context`, bracket `end` markers) — a bare

@@ -1,10 +1,18 @@
 //! The salsa layer parses on demand and reparses after a text edit.
 
 use fatou::incremental::{
-    IncrementalDatabase, IncrementalDb, SourceFile, file_exports, file_free_reads,
+    IncrementalDatabase, IncrementalDb, PrevParse, SourceFile, file_exports, file_free_reads,
     file_qualified_reads, host_module_of, include_edges, parse_diagnostics, parsed_tree_root,
     project_graph, semantic_model,
 };
+use fatou::parser::{Edit, apply_edits, parse};
+
+fn edit(range: std::ops::Range<usize>, insert: &str) -> Edit {
+    Edit {
+        range,
+        insert: insert.to_string(),
+    }
+}
 
 #[test]
 fn edit_invalidates_and_reparses() {
@@ -69,13 +77,129 @@ fn parse_populates_and_refreshes_the_reparse_base() {
     assert_eq!(prev.green.to_string(), "x = 1\n");
     assert!(prev.diagnostics.is_empty());
 
-    // An edit refreshes the base to the new parse (today via the full-parse
-    // fallback; the strategies of TODO.md stages 2-3 only change how fast).
+    // An edit refreshes the base to the new parse, whichever strategy got
+    // there — the base always describes the text the tree was built from.
     db.set_file_text(file, "x = 1 + 2\n");
     parsed_tree_root(&db, file);
     let prev = db.reparse_prev(file).expect("reparse base survives edits");
     assert_eq!(prev.text, "x = 1 + 2\n");
     assert_eq!(prev.green.to_string(), "x = 1 + 2\n");
+}
+
+/// Two identifier edits far apart: `diff_edit` would collapse them into one
+/// span covering both statements, so this is the shape only the staged chain
+/// rescues. Whichever route wins, the tree must equal a full parse.
+#[test]
+fn staged_edits_drive_a_scattered_reparse() {
+    let mut db = IncrementalDatabase::new();
+    let old = "alpha = 1\nfiller = 2\nomega = 3\n";
+    let file = db.add_file(old);
+    parsed_tree_root(&db, file);
+
+    let edits = vec![edit(5..5, "X"), edit(27..27, "X")];
+    let new = apply_edits(old, &edits);
+    db.reparse_stage_edits(file, Some(edits));
+    db.set_file_text(file, new.clone());
+
+    assert_eq!(parsed_tree_root(&db, file).to_string(), new);
+    assert_eq!(parse_diagnostics(&db, file), parse(&new).diagnostics);
+    assert!(
+        db.reparse_pending_edits(file).is_empty(),
+        "the chain is drained once the base advances past it"
+    );
+}
+
+/// The drain is unconditional, so a chain that went unused does not wedge the
+/// file into rejecting forever. Without that, one stale chain would sit at the
+/// head of the queue and poison every later parse.
+#[test]
+fn a_stale_chain_is_rejected_and_then_cleared() {
+    let mut db = IncrementalDatabase::new();
+    let old = "alpha = 1\nfiller = 2\nomega = 3\n";
+    let file = db.add_file(old);
+    parsed_tree_root(&db, file);
+
+    // A chain that applies cleanly but does not describe how the buffer got to
+    // its actual text: the reparse must not trust its offsets.
+    db.reparse_stage_edits(file, Some(vec![edit(5..5, "X"), edit(27..27, "X")]));
+    let actual = "alpha = 1\nfiller = 2\nomega = 3\nbeta = 4\n";
+    db.set_file_text(file, actual);
+    assert_eq!(parsed_tree_root(&db, file).to_string(), actual);
+    assert_eq!(parse_diagnostics(&db, file), parse(actual).diagnostics);
+    assert!(
+        db.reparse_pending_edits(file).is_empty(),
+        "a rejected chain is still drained, or it would reject every later parse"
+    );
+
+    // And the next chain, staged against the now-current base, works.
+    let edits = vec![edit(5..5, "Y"), edit(28..28, "Y")];
+    let new = apply_edits(actual, &edits);
+    db.reparse_stage_edits(file, Some(edits));
+    db.set_file_text(file, new.clone());
+    assert_eq!(parsed_tree_root(&db, file).to_string(), new);
+}
+
+/// `None` means "unknown transform" (a full-buffer replacement, a disk revert):
+/// the chain is dropped and the reparse falls back to diffing the two texts.
+#[test]
+fn staging_none_clears_the_chain() {
+    let db = IncrementalDatabase::new();
+    let file = db.add_file("alpha = 1\n");
+    db.reparse_stage_edits(file, Some(vec![edit(5..5, "X")]));
+    assert_eq!(db.reparse_pending_edits(file).len(), 1);
+    db.reparse_stage_edits(file, None);
+    assert!(db.reparse_pending_edits(file).is_empty());
+}
+
+/// Nothing guarantees a parse per stage — under pull diagnostics the analysis
+/// thread stages on every keystroke and demands nothing. The chain must be
+/// bounded where it is staged, not where it is read.
+#[test]
+fn an_unread_chain_stays_bounded() {
+    let db = IncrementalDatabase::new();
+    let file = db.add_file("alpha = 1\n");
+    for i in 0..100 {
+        db.reparse_stage_edits(file, Some(vec![edit(i..i, "x")]));
+        assert!(
+            db.reparse_pending_edits(file).len() <= 16,
+            "chain grew past its budget at keystroke {i}"
+        );
+    }
+
+    // A single oversized paste blows the byte budget on its own.
+    db.reparse_stage_edits(file, None);
+    db.reparse_stage_edits(file, Some(vec![edit(0..0, &"x".repeat(65 * 1024))]));
+    assert!(db.reparse_pending_edits(file).is_empty());
+}
+
+/// A stage that lands between a parse's peek and its store must survive: the
+/// store drains only the prefix that parse actually saw.
+#[test]
+fn a_stage_after_a_peek_survives_the_drain() {
+    let db = IncrementalDatabase::new();
+    let file = db.add_file("alpha = 1\n");
+    db.reparse_stage_edits(file, Some(vec![edit(5..5, "X")]));
+
+    let peeked = db.reparse_pending_edits(file);
+    assert_eq!(peeked.len(), 1);
+    // ... the analysis thread stages another edit here, concurrently ...
+    db.reparse_stage_edits(file, Some(vec![edit(6..6, "Y")]));
+
+    db.reparse_store(
+        file,
+        PrevParse {
+            text: "alphaX = 1\n".to_string(),
+            green: parse("alphaX = 1\n").cst.green().into_owned(),
+            diagnostics: Vec::new(),
+        },
+        None,
+        peeked.len(),
+    );
+    assert_eq!(
+        db.reparse_pending_edits(file),
+        vec![edit(6..6, "Y")],
+        "only the peeked prefix is drained"
+    );
 }
 
 /// A downstream query that counts its own executions, to observe backdating.
