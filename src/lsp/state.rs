@@ -1211,10 +1211,10 @@ impl GlobalState {
     }
 }
 
-/// The filesystem path the db tracks `uri` under. Non-`file` URIs (e.g. an
-/// editor's untitled buffer) share a synthetic fallback path.
+/// The filesystem path the db tracks `uri` under; a non-`file` URI (e.g. an
+/// editor's untitled buffer) gets a synthetic path of its own.
 fn path_for(uri: &Uri) -> PathBuf {
-    uri::to_path(uri).unwrap_or_else(|| PathBuf::from("untitled.jl"))
+    uri::to_path_or_synthetic(uri)
 }
 
 /// Classify a changed path for the harvester: an environment file warrants a
@@ -1397,5 +1397,29 @@ mod tests {
             next_error_code(&rx),
             Some(ErrorCode::RequestCanceled as i32)
         );
+    }
+
+    /// Each non-`file:` buffer needs a tracked path of its own: sharing one
+    /// would put two editor buffers on a single `SourceFile` (and a single
+    /// reparse base), so every edit to one invalidates the other's chain.
+    #[test]
+    fn non_file_uris_get_distinct_tracked_paths() {
+        let (first, second) = (uri("untitled:Untitled-1"), uri("untitled:Untitled-2"));
+        assert_ne!(
+            path_for(&first),
+            path_for(&second),
+            "two untitled buffers must not share one tracked path"
+        );
+        assert_eq!(
+            path_for(&first),
+            path_for(&first),
+            "the same buffer must map to a stable path across requests"
+        );
+        // A `file:` URI is unaffected.
+        assert_eq!(
+            path_for(&uri("file:///work/a.jl")),
+            path_for(&uri("file:///work/a.jl"))
+        );
+        assert_ne!(path_for(&first), path_for(&uri("file:///work/a.jl")));
     }
 }

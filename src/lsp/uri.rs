@@ -38,6 +38,48 @@ fn from_uri_path(p: &str) -> PathBuf {
     PathBuf::from(p)
 }
 
+/// The directory the synthetic paths of non-`file:` URIs live under. Rooted, so
+/// `incremental::normalize_path` resolves it against the filesystem root rather
+/// than the server's working directory, where it could alias a real file the
+/// server would then read from disk.
+const NON_FILE_ROOT: &str = "fatou-non-file-uri";
+
+/// The filesystem path the db tracks `uri` under. A non-`file:` URI (an
+/// editor's `untitled:` buffer, a notebook cell) has no path of its own, so it
+/// gets a synthetic one derived from the whole URI: injective, so two untitled
+/// buffers no longer share a single input — and with it a single reparse base
+/// each one's edits would knock the other off.
+pub(crate) fn to_path_or_synthetic(uri: &Uri) -> PathBuf {
+    to_path(uri).unwrap_or_else(|| {
+        // Percent-escape everything outside the unreserved set, so distinct URIs
+        // stay distinct and no separator (or `%`) survives to split the name
+        // into components of its own.
+        let mut name = String::new();
+        for &byte in uri.as_str().as_bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' => name.push(byte as char),
+                _ => name.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        // Keeps extension-based handling working, and (with `.` escaped above)
+        // leaves the name unable to spell `.` or `..`.
+        name.push_str(".jl");
+        PathBuf::from(std::path::MAIN_SEPARATOR_STR)
+            .join(NON_FILE_ROOT)
+            .join(name)
+    })
+}
+
+/// Whether `path` is one of the synthetic stand-ins [`to_path_or_synthetic`]
+/// mints, rather than a real filesystem path. Such a path only identifies a
+/// buffer: nothing exists there to read, and no directory of the workspace is
+/// implied, so relative paths must not be resolved against it.
+pub(crate) fn is_synthetic(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .is_some_and(|dir| dir == NON_FILE_ROOT)
+}
+
 /// Build a `file:` URI for the absolute filesystem `path`, percent-encoding
 /// characters outside the unreserved set. The inverse of [`to_path`]; used to
 /// point a go-to-definition [`Location`](lsp_types::Location) at a depot source
@@ -98,6 +140,43 @@ mod tests {
     fn non_file_uri_has_no_path() {
         let uri = Uri::from_str("untitled:Untitled-1").unwrap();
         assert_eq!(to_path(&uri), None);
+    }
+
+    #[test]
+    fn non_file_uris_map_to_distinct_rooted_paths() {
+        use crate::incremental::normalize_path;
+
+        let path = |text: &str| to_path_or_synthetic(&Uri::from_str(text).unwrap());
+        let first = path("untitled:Untitled-1");
+
+        assert_ne!(first, path("untitled:Untitled-2"));
+        assert_ne!(first, path("vscode-notebook-cell:Untitled-1"));
+        assert_eq!(first, path("untitled:Untitled-1"), "stable per URI");
+
+        // One component under the reserved root: the URI's `:` and `/` are
+        // escaped rather than carved into directories, and normalization can
+        // neither climb out of the root nor fold the path into the working
+        // directory.
+        assert!(first.has_root(), "{first:?} should be rooted");
+        assert_eq!(first.components().count(), 3, "root, dir, file: {first:?}");
+        assert_eq!(first.extension().and_then(|e| e.to_str()), Some("jl"));
+        let normalized = normalize_path(&first);
+        assert!(
+            normalized.ends_with(
+                first
+                    .strip_prefix(first.components().next().unwrap())
+                    .unwrap()
+            ),
+            "normalization should keep the root's contents: {normalized:?}"
+        );
+        assert!(
+            !normalized.starts_with(std::env::current_dir().expect("a working directory")),
+            "a synthetic path must not land in the workspace: {normalized:?}"
+        );
+
+        // A `file:` URI keeps its real path.
+        #[cfg(not(windows))]
+        assert_eq!(path("file:///work/a.jl"), PathBuf::from("/work/a.jl"));
     }
 
     #[test]
