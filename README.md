@@ -44,6 +44,8 @@ Fatou is available from several sources:
   [Open VSX](https://open-vsx.org/extension/jolars/fatou)); also works in
   Positron
 
+### Install Script
+
 If you prefer a one-liner installer that picks the right release artifact for
 your platform, you can use the installer scripts below. These scripts are
 fetched directly from this repository and then download the latest matching
