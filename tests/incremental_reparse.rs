@@ -316,6 +316,16 @@ fn token_tier_fires_on_string_content() {
     assert_token_tier("s = \"a$x\"\n", 6..6, "$");
     // A nested literal inside `$( … )`: the *inner* node is the one relexed.
     assert_token_tier("s = \"$(g(\"nested\"))\"\n", 12..13, "X");
+    // Newlines are fine inside a content run — pressing Enter in a docstring
+    // is the case this buys — including in a single-quoted string, whose run
+    // no newline terminates. Deleting one works the same way.
+    assert_token_tier("s = \"\"\"a\"\"\"\n", 8..8, "\n");
+    assert_token_tier(
+        "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x\nend\nx = 1\n",
+        8..8,
+        "\nmore",
+    );
+    assert_token_tier("s = \"a\nb\"\n", 7..8, "");
 }
 
 /// Stage-2 negative cases: each known hazard must escape the token tier.
@@ -362,9 +372,6 @@ fn token_tier_falls_back_on_string_content() {
     // Deleting the backslash that was escaping a raw string's close quote lets
     // the quote close the literal early.
     assert_not_token_tier("p = raw\"a\\\"b\"\n", 9..10, "");
-    // A newline is banned outright by the token tier, triple-quoted content
-    // included, even though the content run legitimately spans one.
-    assert_not_token_tier("s = \"\"\"a\"\"\"\n", 8..8, "\n");
     // The three cases the whole-literal diagnostic bail deliberately gives up:
     // an unterminated literal, a juxtaposed one (`StringJuxtapose` anchored at
     // the node end), and a `var"…"` with a junk suffix (`StringSuffixSpace`).
@@ -381,14 +388,15 @@ fn token_tier_falls_back_on_string_content() {
 fn toplevel_tier_fires() {
     // Edit inside a function body with statement neighbors on both sides.
     assert_toplevel_tier("a = 1\nfunction f(x)\n    x\nend\nb = 2\n", 25..25, " + 1");
-    // Docstring-content edit: the region is the whole `DOC` child. The insert
-    // is a newline, which the token tier bans outright — without it the
-    // `STRING_CONTENT` path answers this first (see
-    // `token_tier_fires_on_string_content`).
+    // The region is the whole `DOC` child: a docstring and the definition it
+    // documents fold into one `ROOT` child, so an edit in the body reparses
+    // both. (The edit is in the body, not the docstring — a string-content
+    // edit, newlines included, is the token tier's now; see
+    // `token_tier_fires_on_string_content`.)
     assert_toplevel_tier(
         "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x\nend\nx = 1\n",
-        5..5,
-        "\n",
+        31..31,
+        " + 1",
     );
     // Flag-stream splice: editing a neighbor keeps the `const x` diagnostic
     // before the region and shifts the one after it.
