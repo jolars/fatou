@@ -8,11 +8,43 @@ TAG="${FATOU_TAG:-}"
 os="$(uname -s)"
 arch="$(uname -m)"
 
+# Linux releases ship both glibc and musl builds, so probe the host's libc
+# rather than assuming glibc. On musl `ldd --version` writes to stderr and
+# exits non-zero, hence the 2>&1 and the tolerance for a failing pipeline.
+detect_libc() {
+  if [ -n "${FATOU_LIBC:-}" ]; then
+    case "$FATOU_LIBC" in
+    gnu | musl) printf '%s\n' "$FATOU_LIBC" ;;
+    *)
+      echo "FATOU_LIBC must be 'gnu' or 'musl', got '$FATOU_LIBC'" >&2
+      exit 1
+      ;;
+    esac
+    return 0
+  fi
+
+  if ldd --version 2>&1 | grep -qi musl; then
+    printf 'musl\n'
+    return 0
+  fi
+
+  # Fallback for images with no ldd at all: look for musl's loader.
+  for loader in /lib/ld-musl-*.so.1; do
+    if [ -e "$loader" ]; then
+      printf 'musl\n'
+      return 0
+    fi
+  done
+
+  printf 'gnu\n'
+}
+
 case "$os" in
 Linux)
+  libc="$(detect_libc)"
   case "$arch" in
-  x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
-  aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+  x86_64 | amd64) target="x86_64-unknown-linux-${libc}" ;;
+  aarch64 | arm64) target="aarch64-unknown-linux-${libc}" ;;
   *)
     echo "Unsupported Linux architecture: $arch" >&2
     exit 1
