@@ -17,3 +17,11 @@ updates:
       cargo:
         patterns:
           - "*"
+  - package-ecosystem: "npm"
+    directory: "/editors/code"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm:
+        patterns:
+          - "*"
