@@ -68,10 +68,14 @@ pub(crate) fn to_path_or_synthetic(uri: &Uri) -> PathBuf {
         // Keeps extension-based handling working, and (with `.` escaped above)
         // leaves the name unable to spell `.` or `..`.
         name.push_str(".jl");
-        PathBuf::from(std::path::MAIN_SEPARATOR_STR)
-            .join(NON_FILE_ROOT)
-            .join(name)
+        synthetic_dir().join(name)
     })
+}
+
+/// The one directory [`to_path_or_synthetic`] mints into: [`NON_FILE_ROOT`]
+/// directly under the filesystem root.
+fn synthetic_dir() -> PathBuf {
+    PathBuf::from(std::path::MAIN_SEPARATOR_STR).join(NON_FILE_ROOT)
 }
 
 /// Whether `path` is one of the synthetic stand-ins [`to_path_or_synthetic`]
@@ -80,13 +84,10 @@ pub(crate) fn to_path_or_synthetic(uri: &Uri) -> PathBuf {
 /// implied, so relative paths must not be resolved against it.
 ///
 /// The whole shape is checked, not just the directory name: a real
-/// `./fatou-non-file-uri/x.jl` under someone's workspace is a file like any
+/// `/work/fatou-non-file-uri/x.jl` under someone's workspace is a file like any
 /// other, and only the rooted single-component form is ever minted here.
 pub(crate) fn is_synthetic(path: &Path) -> bool {
-    let Some(dir) = path.parent() else {
-        return false;
-    };
-    dir.has_root() && dir.file_name().is_some_and(|name| name == NON_FILE_ROOT)
+    path.parent() == Some(synthetic_dir().as_path())
 }
 
 /// Build a `file:` URI for the absolute filesystem `path`, percent-encoding
@@ -207,6 +208,14 @@ mod tests {
             assert!(!is_synthetic(Path::new(
                 "/work/fatou-non-file-uri-notes/a.jl"
             )));
+            // A real workspace directory that merely *ends* in the reserved
+            // name is not the rooted single-component form, at any depth.
+            assert!(!is_synthetic(Path::new("/work/fatou-non-file-uri/a.jl")));
+            assert!(!is_synthetic(Path::new(
+                "/work/proj/fatou-non-file-uri/a.jl"
+            )));
+            // Nor is a nested file under the reserved root itself.
+            assert!(!is_synthetic(Path::new("/fatou-non-file-uri/sub/a.jl")));
         }
     }
 
