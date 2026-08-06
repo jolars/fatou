@@ -6,13 +6,8 @@
 
 - [Editor Setup](guide/editors.md)
 - [Configuration](guide/configuration.md)
+- [Comparison](guide/comparison.md)
 - [Performance](performance.md)
-
-# Comparison
-
-- [Language Servers](comparison/language-servers.md)
-- [Formatters](comparison/formatters.md)
-- [Linters](comparison/linters.md)
 
 # Reference
 

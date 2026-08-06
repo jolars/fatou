@@ -24,6 +24,13 @@ additional-css = ["theme/bench-charts.css"]
 [output.html.search]
 enable = true
 
+# The three comparison pages were merged into one guide page; keep the old URLs
+# working.
+[output.html.redirect]
+"/comparison/language-servers.html" = "../guide/comparison.html"
+"/comparison/formatters.html" = "../guide/comparison.html"
+"/comparison/linters.html" = "../guide/comparison.html"
+
 [preprocessor.doc-utils]
 command = "cargo run --quiet --manifest-path doc-utils/Cargo.toml"
 optional = true
