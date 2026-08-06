@@ -5,13 +5,14 @@
 //! inputs. The grammar is a walking skeleton over a Julia subset and grows
 //! incrementally (see `TODO.md`). Incremental reparse splicing lives in
 //! [`reparse`] (a single edit) and [`reparse_edits`] (a chain of them); both
-//! return `None` when no strategy applies, and the salsa layer in
-//! `crate::incremental` then does a full parse.
+//! return `None` when no strategy applies, and the host's salsa layer
+//! (`fatou::incremental`) then does a full parse.
 
 mod context;
 mod core;
 mod cursor;
 mod diagnostics;
+mod edit;
 mod events;
 mod expr;
 mod lexer;
@@ -24,7 +25,9 @@ mod unicode_ident;
 mod unicode_ops;
 
 pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
-pub(crate) use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
+// Semver-loose: exposed for the fatou CLI's completion and semantic layers,
+// not a stable part of this crate's API.
+pub use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
 pub use reparse::{
     Edit, ReparseTier, Reparsed, apply_edits, diff_edit, fingerprint, reparse, reparse_edits,
     try_apply_edits,

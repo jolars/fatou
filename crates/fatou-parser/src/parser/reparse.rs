@@ -18,8 +18,8 @@
 //!
 //! Two entry points sit above those tiers. [`reparse_edits`] takes the precise
 //! chain the language server staged from a `didChange` batch and replays it one
-//! edit at a time; [`reparse`] takes a single edit, which is what
-//! `crate::incremental` recovers with [`diff_edit`] from a pair of whole texts
+//! edit at a time; [`reparse`] takes a single edit, which is what the host's
+//! `fatou::incremental` recovers with [`diff_edit`] from a pair of whole texts
 //! when no chain is available. The chain is tried first: a collapsed diff of
 //! scattered edits spans everything between them, and the region that produces
 //! is wide enough that [`region_is_too_wide`] declines it outright, where
@@ -40,9 +40,9 @@ use crate::parser::lexer::lex;
 use crate::parser::tree_builder::syntax_kind_for;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
-/// The edit currency, defined in the leaf `crate::text` module and re-exported
-/// here so `crate::parser::Edit` stays the path the parser layer uses.
-pub use crate::text::{Edit, apply_edits, diff_edit, try_apply_edits};
+/// The edit currency, defined in the sibling [`edit`](super::edit) module and
+/// re-exported here so `parser::Edit` stays the path the parser layer uses.
+pub use super::edit::{Edit, apply_edits, diff_edit, try_apply_edits};
 
 /// Structural fingerprint of a tree: one line per descendant element with
 /// `kind@range` plus the token text (empty for nodes). Two trees with equal
@@ -113,7 +113,7 @@ pub fn reparse(
 
 /// Attempt an incremental reparse across a *chain* of edits, each expressed
 /// against the text its predecessors produced — the shape an LSP `didChange`
-/// batch arrives in (see [`crate::text::apply_content_changes`]).
+/// batch arrives in (see `fatou::text::apply_content_changes` host-side).
 ///
 /// This is for the case [`diff_edit`] cannot express: when the edits are
 /// scattered, collapsing them into one spanning edit covers everything between

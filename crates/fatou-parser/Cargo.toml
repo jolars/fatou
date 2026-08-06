@@ -1,0 +1,19 @@
+[package]
+name = "fatou-parser"
+version = "0.1.0"
+edition.workspace = true
+readme = "README.md"
+description = "Lossless CST parser, typed AST wrappers, and incremental reparser for the Julia language"
+license.workspace = true
+repository.workspace = true
+homepage = "https://fatou.dev"
+documentation = "https://docs.rs/fatou-parser"
+authors.workspace = true
+include = ["/src/**/*", "/README.md", "/CHANGELOG.md"]
+keywords = ["julia", "parser", "cst", "incremental"]
+categories = ["parsing", "parser-implementations", "text-processing"]
+
+[dependencies]
+rowan = "0.16.1"
+serde = { version = "1.0.228", features = ["derive"] }
+unicode-normalization = "0.1.24"

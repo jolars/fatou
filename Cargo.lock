@@ -535,6 +535,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "env_logger",
+ "fatou-parser",
  "globset",
  "ignore",
  "insta",
@@ -551,6 +552,14 @@ dependencies = [
  "smol_str",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "fatou-parser"
+version = "0.1.0"
+dependencies = [
+ "rowan",
+ "serde",
  "unicode-normalization",
 ]
 

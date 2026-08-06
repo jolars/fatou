@@ -1,4 +1,5 @@
-pub mod ast;
+pub use fatou_parser::{ast, parser, syntax};
+
 pub mod cli;
 pub mod config;
 pub mod debug;
@@ -10,9 +11,7 @@ pub mod index;
 pub mod julia_version;
 pub mod linter;
 pub mod lsp;
-pub mod parser;
 pub mod project;
 pub mod resolve;
 pub mod semantic;
-pub mod syntax;
 pub mod text;

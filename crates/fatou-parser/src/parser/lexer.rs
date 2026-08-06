@@ -1393,7 +1393,7 @@ impl<'a> Lexer<'a> {
 /// keywords, shared by the lexer's [`keyword_kind`] classification and the
 /// language server's keyword completion. A test keeps it in step with
 /// [`keyword_kind`].
-pub(crate) const KEYWORDS: &[&str] = &[
+pub const KEYWORDS: &[&str] = &[
     "function",
     "macro",
     "end",
@@ -1467,7 +1467,7 @@ fn keyword_kind(text: &str) -> Option<TokKind> {
 /// Whether `c` may begin an identifier, mirroring JuliaSyntax's
 /// `is_identifier_start_char` (`Base.is_id_start_char`). ASCII is handled inline;
 /// non-ASCII code points defer to the generated [`super::unicode_ident`] tables.
-pub(crate) fn is_ident_start(c: char) -> bool {
+pub fn is_ident_start(c: char) -> bool {
     if c.is_ascii() {
         c == '_' || c.is_ascii_alphabetic()
     } else {
@@ -1479,7 +1479,7 @@ pub(crate) fn is_ident_start(c: char) -> bool {
 /// `is_identifier_char` (`Base.is_id_char`). ASCII is handled inline; non-ASCII
 /// code points defer to the generated [`super::unicode_ident`] tables. The `!=`
 /// operator split for a trailing `!` is handled by the caller in `scan_ident`.
-pub(crate) fn is_ident_continue(c: char) -> bool {
+pub fn is_ident_continue(c: char) -> bool {
     if c.is_ascii() {
         c == '_' || c == '!' || c.is_ascii_alphanumeric()
     } else {

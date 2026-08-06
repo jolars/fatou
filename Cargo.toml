@@ -1,13 +1,22 @@
-[package]
-name = "fatou"
-version = "0.10.0"
+[workspace]
+members = ["crates/fatou-parser"]
+
+[workspace.package]
 edition = "2024"
-readme = "README.md"
-description = "A language server, formatter, and linter for Julia"
-homepage = "https://fatou.dev"
 license = "MIT"
 repository = "https://github.com/jolars/fatou"
 authors = ["Johan Larsson <johan@jolars.co>"]
+
+[package]
+name = "fatou"
+version = "0.10.0"
+edition.workspace = true
+readme = "README.md"
+description = "A language server, formatter, and linter for Julia"
+homepage = "https://fatou.dev"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 keywords = ["julia", "language-server", "formatter", "linter"]
 categories = [
   "command-line-utilities",
@@ -37,6 +46,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 crossbeam-channel = "0.5"
 dirs = "6"
 env_logger = "0.11.10"
+fatou-parser = { path = "crates/fatou-parser", version = "0.1.0" }
 globset = "0.4.18"
 ignore = "0.4.26"
 log = { version = "0.4.32", features = ["release_max_level_info"] }
@@ -51,7 +61,6 @@ serde_json = "1.0.145"
 similar = { version = "3.1.1", features = ["text"] }
 smol_str = "0.3"
 toml = "1.1.2"
-unicode-normalization = "0.1.24"
 
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = [
