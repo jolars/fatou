@@ -23,10 +23,10 @@ braces = {
     for item in source_items_collection
     if accept(item) && wanted(item)
 }[k]
-hugged = process(configuration, [
-    normalize(record)
-    for record in all_incoming_records
-])[selected]
+hugged = process(
+    configuration,
+    [normalize(record) for record in all_incoming_records],
+)[selected]
 pairhug = lookup(key_prefix => [
     expand(entry)
     for entry in configuration_entries_by_name

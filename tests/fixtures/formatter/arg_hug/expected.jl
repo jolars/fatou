@@ -28,14 +28,10 @@ pair = build((
     element_six,
     seven_xx,
 ))
-map(callback_function, [
-    element_one,
-    element_two,
-    element_three,
-    element_four,
-    element_five,
-    element_six,
-])
+map(
+    callback_function,
+    [element_one, element_two, element_three, element_four, element_five, element_six],
+)
 output = process(
     first_flag,
     transform_data(alpha_value, beta_value, gamma_value, delta_value, epsilon),

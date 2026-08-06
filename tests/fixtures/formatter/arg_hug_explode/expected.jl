@@ -4,10 +4,12 @@ result = assemble_pipeline(
     third_stage_extra,
     [alpha, beta],
 )
-config_bounded = configure_run(alpha_setting_name, beta_setting_name, gamma_setting_names, [
-    delta,
-    epsilon,
-])
+config_bounded = configure_run(
+    alpha_setting_name,
+    beta_setting_name,
+    gamma_setting_names,
+    [delta, epsilon],
+)
 tight_boundary = configure_runs(
     alpha_setting_name,
     beta_setting_name,

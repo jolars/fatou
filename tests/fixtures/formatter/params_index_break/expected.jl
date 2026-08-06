@@ -9,11 +9,10 @@ kwonly = build_solver_registry(;
     default_backend = :dense_lut,
     fallback = :qr_pivot,
 )[backend]
-phug = configure_run(experiment; stages = [
-    warmup_phase,
-    measure_phase,
-    report_ph,
-])[stage_id]
+phug = configure_run(
+    experiment;
+    stages = [warmup_phase, measure_phase, report_ph],
+)[stage_id]
 tail_break = summarize(
     records;
     by = grouping_key,

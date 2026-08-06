@@ -72,11 +72,14 @@ mirror source breaks. Treat them as a starting point, not as correct under
 Tenet 1.
 
 - Spacing/operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`; `&&`/`||`
-  canonicalized spaced), `lower_arrow`, `lower_comparison`, `lower_ternary`,
-  `lower_range`, `lower_type_annotation`, `lower_where`.
+  canonicalized spaced; `rhs_absorbs_break` — assignment *and* a pair arrow whose
+  chain bottoms out in a bracket (`pair_chain_hugs`) bias the break into the RHS
+  instead of breaking at the operator), `lower_arrow`, `lower_comparison`,
+  `lower_ternary`, `lower_range`, `lower_type_annotation`, `lower_where`.
 - Collections/calls: `lower_arg_list` (width-driven, trailing hug — positional or
   kwarg value, incl. the `;` tail, hug-transparent through a clean `=>`/`.=>` pair
-  — + explode fallback),
+  — + explode fallback; **only a sole item hugs**, see
+  `suppress_multi_item_hug`),
   `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
   `collect_collection_items`/`collection_body`, trailing-element hug),
   `lower_index` (collection/matrix/call/curly/chained-index/name-rooted subject
@@ -128,7 +131,74 @@ Tenet 1.
   brackets, and matrices.
 - Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
 
-## Latest session (short multi-param `where` bound breaks the args)
+## Latest session (only a *sole* item hugs; pair arrows bias into their value)
+
+`feat(formatter)`. User-reported: `f(a; kw = g(x))` and a 3-pair `Dict` were
+jamming every leading item flat onto the opening line so the tail could hug,
+stacking `))` on the closing line. Two rules, `rules.rs` only, no engine change.
+
+**1. `suppress_multi_item_hug(item_count, last_huggable)`** — only a *sole* item
+hugs its enclosing bracket. A strict generalization of the
+`suppress_bare_bracket_pair_hug` it replaces (that guard already used
+`item_count > 1`, but only for a bare-bracket-valued pair tail); its two helpers
+`item_value`/`item_is_bare_bracket_pair_tail` are subsumed and deleted. Also
+applied to the `;`-params path, which computes huggability separately via
+`collect_param_items` and was why the reported `basedir =` case survived a first
+pass — positionals + keywords are counted **together** (they explode into one
+shared list).
+
+**2. `is_pair_op`/`pair_chain_hugs` + `rhs_absorbs_break`** (was `is_assignment`)
+in `lower_binary` — a pair arrow joins assignment's "bias the break into the RHS"
+tier, so `k => merge(` breaks inside the value instead of dropping it to a
+continuation line. Gated on `pair_chain_hugs(node)`: the chain must bottom out in
+a `huggable_kind` bracket. **A blanket version regressed two fixtures** —
+`chained_pair_grouped_tail` (grouped non-bracket value `k => a + b + c`, whose
+uniform arrow-tier break is a *recorded decision*, see the entry below) and
+`arrow_pair_chain` (mixed `a => b --> c` broke at some arrows but not others).
+`pair_operands` rejects the mixed spine, so both keep the arrow tier.
+
+**A "does the hug earn it?" printer guard was tried and abandoned.** It rejected
+the hug when the whole item would fit flat at the explode indent (a `probe` field
+on `Ir::HugGroup`). It independently kills the canonical sole-nested case —
+`outer_function(inner_function(…))` explodes because the inner call happens to fit
+on one exploded line. The sole-item rule reaches the same goal without that
+damage. Don't re-derive it.
+
+**JuliaFormatter cross-check** (available: `julia --project=. -e 'using
+JuliaFormatter'`). Default/Blue agree with the new behavior on all three of
+multi-item tail (explodes), sole bracket literal (hugs), and pair value (hugs the
+arrow) — the `job_metadata` case now matches Default/Blue character-for-character.
+**Conscious divergence, now explicit:** a sole nested *call* `f(g(…))`. Every
+JuliaFormatter style staircases it (`level_one(⏎ level_two(⏎ level_three(⏎`);
+`arg_hug` deliberately hugs instead. That is the user's standing decision — don't
+"fix" it toward JuliaFormatter. The corpus run below justifies it: the dominant
+surviving hug in Base is `throw(ArgumentError(⏎ "msg",⏎ ))`, a pervasive Julia
+idiom the hug serves well and the staircase serves badly. A three-deep sole-call
+nest is contrived; real code does not write it.
+
+**Corpus evidence** (all 166 files of Julia Base, `share/julia/base`, formatted
+under both rules): lines ending in stacked closers **450 → 302 (−33%)**, total
+lines +0.23% (118429 → 118705), lines over 92 cols unchanged (1386 → 1385). A
+third of the `))` stacks removed for negligible vertical cost and no width
+regression. Worst old-rule cases found there: a signature broken as
+`function _typed_stack(…, Aax = _iterator_axes(⏎ A,⏎ )) where {T, S}`, and
+`promote_typejoin(V, typeof(⏎ v,⏎ ))` shredding two characters of payload across
+three lines.
+
+11 `expected.jl` regenerated (user-approved, reviewed as a diff): `arg_hug`,
+`arg_hug_explode`, `chained_pair_hug`, `collection_hug`,
+`comprehension_index_break`, `hug_index_break`, `kwarg_hug`, `name_index_break`,
+`pair_hug`, `pair_list_no_hug`, `params_index_break`. Every diff is the same
+shape — a multi-item list stops hugging its tail and explodes one per line; every
+sole-item hug survives. Gate stays 120; stability + clippy + fmt + full suite
+green. No parser/lexer blocker.
+
+**Ranked next targets:** (1) Return-type `where` signatures (the deferred
+follow-up TODO — extend the `CondGroup` probe to the `)::T where ` prefix). (2)
+**Switch to the LSP semantic model** — standing strategic recommendation. (3)
+Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
+
+## Earlier: short multi-param `where` bound breaks the args
 
 `feat(formatter)`. Retired the ranked TODO bullet. A short multi-param bound over
 a call signature (`f(longargs...) where {T, S}`) used to explode the two-element

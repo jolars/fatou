@@ -15,11 +15,10 @@ dotted = config.lookup_table[
     some_extremely_long_key_expression,
     another_long_key_expression,
 ][ky]
-hugged = handlers[event_key_selector, [
-    alpha_handler_entry,
-    beta_handler_entry,
-    gamma_handler_entry,
-]][idx]
+hugged = handlers[
+    event_key_selector,
+    [alpha_handler_entry, beta_handler_entry, gamma_handler_entry],
+][idx]
 both = wide_lookup_table[
     first_quite_long_index_expression,
     second_quite_long_index_expression,

@@ -4,16 +4,15 @@ config = Dict("alpha_setting" => [
     third_component,
     fourth,
 ])
-options = Dict("first" => 1, "second" => 2, "handlers" => Dict(
-    "on_start" => start_fn,
-    "on_stop" => stop_fn,
-))
-register!(registry, "transform_pipeline" => Pipeline(
-    loader,
-    normalizer,
-    tokenizer,
-    encoder,
-))
+options = Dict(
+    "first" => 1,
+    "second" => 2,
+    "handlers" => Dict("on_start" => start_fn, "on_stop" => stop_fn),
+)
+register!(
+    registry,
+    "transform_pipeline" => Pipeline(loader, normalizer, tokenizer, encoder),
+)
 pairs = broadcast_apply(source_keys .=> [
     first_mapped_value,
     second_mapped_value,
@@ -35,10 +34,10 @@ mapping = [
     "alpha_key" => [one_component, two_component],
     "beta_key" => [first_beta, second_beta],
 ]
-fit = optimize(objective; schedule = "warmup_phase" => build_schedule(
-    ramp_step_count,
-    decay_rate,
-))
+fit = optimize(
+    objective;
+    schedule = "warmup_phase" => build_schedule(ramp_step_count, decay_rate),
+)
 chained = Dict("outer_key" => "inner_key" => [
     first_element_value,
     second_element_value,

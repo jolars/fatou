@@ -153,18 +153,42 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
         return ir;
     }
 
-    // Assignment operators (`=`, `+=`, …) never introduce a break; the break is
-    // biased into the right-hand side, so the operator gap is a flat space.
-    let is_assignment = node.kind() == SyntaxKind::ASSIGNMENT_EXPR;
-
     let Some(op_kind) = binary_op_kind(node) else {
         return lower_transparent(node);
     };
+    // Assignment operators (`=`, `+=`, …) never introduce a break; the break is
+    // biased into the right-hand side, so the operator gap is a flat space.
+    //
+    // A pair arrow (`=>`, `.=>`) joins this tier. Its right operand is the
+    // payload and its left a label, so a `k => f(…)` breaks *inside* `f` with
+    // the opener riding the arrow, rather than dropping the value to a
+    // continuation line and costing an indent level:
+    //
+    // ```julia
+    // "job_kwargs" => merge(   # this
+    //     as_dict(config.job_kwargs),
+    // ),
+    // "job_kwargs" =>          # not this
+    //     merge(
+    //         as_dict(config.job_kwargs),
+    //     ),
+    // ```
+    //
+    // This is what `->` already does (see [`lower_arrow`]) and what a keyword
+    // argument's `name = value` does, and it matches every JuliaFormatter style.
+    //
+    // Only when the chain actually bottoms out in a bracket construct, though
+    // (see [`pair_chain_hugs`]): with nothing to hug there is no break to bias
+    // into, and the arrow keeps the uniform arrow-tier break it shares with
+    // `-->`/`<-->` — which is what a grouped non-bracket value
+    // (`k => a + b + c`) and a mixed chain (`a => b --> c`) rely on.
+    let rhs_absorbs_break = node.kind() == SyntaxKind::ASSIGNMENT_EXPR
+        || (is_pair_op(op_kind) && pair_chain_hugs(node));
     // Flatten a same-operator nested chain (`a && b && c`, `a |> b |> c`) into one
     // group so every operator breaks together, matching the parser's own n-ary
     // folding of `+`/`*`. Tight operators and assignment never break, so they gain
     // nothing from flattening and keep their nested lowering.
-    let flatten = !is_assignment && !is_tight_binop(op_kind);
+    let flatten = !rhs_absorbs_break && !is_tight_binop(op_kind);
     let mut items: Vec<SyntaxElement> = Vec::new();
     if !collect_binary_chain(node, op_kind, flatten, &mut items) {
         return lower_transparent(node);
@@ -207,7 +231,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                     return lower_transparent(node);
                 }
                 // An operator. It sits trailing on the line it ends.
-                let tight = !is_assignment
+                let tight = !rhs_absorbs_break
                     && is_tight_binop(tok.kind())
                     // A `.^` after an integer literal would re-lex the operand's
                     // trailing digit(s) plus the operator's leading `.` as a float.
@@ -220,7 +244,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
                     next_sep = None;
                 } else {
                     rest.push(Ir::text(format!(" {}", tok.text())));
-                    next_sep = Some(if is_assignment {
+                    next_sep = Some(if rhs_absorbs_break {
                         Ir::text(" ")
                     } else {
                         Ir::Line
@@ -241,7 +265,7 @@ fn lower_binary(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
-    if is_assignment {
+    if rhs_absorbs_break {
         // No break at the operator; the right-hand side's own group absorbs any
         // break, so this node adds neither a group nor an indent.
         let mut parts = vec![first];
@@ -1835,6 +1859,10 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // positional args — the `;` rides the open bracket (`f(;`).
     if let Some(pnode) = params_node {
         if let Some((pitems, last_param_huggable)) = collect_param_items(&pnode) {
+            // Positionals and keywords explode into one shared list, so the
+            // sole-item hug rule counts them together.
+            let last_param_huggable =
+                suppress_multi_item_hug(items.len() + pitems.len(), last_param_huggable);
             // Trailing-parameter hug (mirrors the positional hug below): the
             // last keyword's bracket value hugs this bracket — everything
             // before it (the positionals, the `; `, the earlier keywords, the
@@ -1989,7 +2017,7 @@ fn collect_arg_list(node: &SyntaxNode) -> Option<ArgListParts> {
         }
     }
 
-    let last_huggable = suppress_bare_bracket_pair_hug(node, items.len(), last_huggable);
+    let last_huggable = suppress_multi_item_hug(items.len(), last_huggable);
     Some(ArgListParts {
         open: open?,
         close: close?,
@@ -2197,63 +2225,40 @@ fn is_bare_bracket_literal(kind: SyntaxKind) -> bool {
     )
 }
 
-/// The value node an argument-list item wraps: the sole child of a positional
-/// `ARG`, or the value of a clean `KEYWORD_ARG` (`name = value`). `None` for a
-/// shape with no single value node. Applied only to items [`item_is_huggable`]
-/// has already vetted, so the clean shape is guaranteed.
-fn item_value(item: &SyntaxNode) -> Option<SyntaxNode> {
-    match item.kind() {
-        SyntaxKind::ARG => {
-            let mut children = item.children();
-            match (children.next(), children.next()) {
-                (Some(only), None) => Some(only),
-                _ => None,
-            }
-        }
-        SyntaxKind::KEYWORD_ARG => item.children().nth(1),
-        _ => None,
-    }
-}
-
-/// Whether `item`'s value is a pair chain (`k => v`, `a => b => v`) whose
-/// innermost hugged construct is a *bare* bracket literal (`[…]`, `(…)`, `{…}`).
-/// Such a trailing pair, when it has sibling items, does **not** hug: hugging one
-/// entry of a homogeneous `key => value` list only relocates the asymmetry, so
-/// the list explodes one entry per line instead (the pair-tail analog of the bare
-/// literal guard in [`item_is_huggable_in_collection`]). A call/index/curly value
-/// (`k => f(…)`) still hugs — only bare literals trigger the guard.
-fn item_is_bare_bracket_pair_tail(item: &SyntaxNode) -> bool {
-    let Some(mut value) = item_value(item) else {
-        return false;
-    };
-    loop {
-        let Some((_, _, rhs)) = pair_operands(&value) else {
-            return false;
-        };
-        if huggable_kind(rhs.kind()) {
-            return is_bare_bracket_literal(rhs.kind());
-        }
-        value = rhs;
-    }
-}
-
-/// Downgrade a computed `last_huggable` to `false` when the trailing item is a
-/// bare-bracket-valued pair (see [`item_is_bare_bracket_pair_tail`]) in a
-/// multi-item list. A sole argument keeps hugging — there is no sibling for the
-/// hug to be asymmetric with.
-fn suppress_bare_bracket_pair_hug(
-    node: &SyntaxNode,
-    item_count: usize,
-    last_huggable: bool,
-) -> bool {
-    if last_huggable
-        && item_count > 1
-        && let Some(last) = last_list_item(node)
-        && item_is_bare_bracket_pair_tail(&last)
-    {
-        return false;
-    }
-    last_huggable
+/// Downgrade a computed `last_huggable` to `false` for any **multi-item** list:
+/// only a *sole* item hugs its enclosing bracket.
+///
+/// Hugging exists for the single-nested-construct shape — `f(g(…))`,
+/// `collect_all([…])` — where the hug saves a whole indent level and a pair of
+/// lines over the explode, and no sibling is treated asymmetrically:
+///
+/// ```julia
+/// outer_function(inner_function(      # hug: one argument, one bracket pair
+///     first_argument_name,
+///     second_argument_name,
+/// ))
+/// ```
+///
+/// With siblings present the hug instead singles the last item out, jamming
+/// every earlier item flat onto the opening line so the tail can break in place
+/// — and stacking one closing bracket per hug level on the last line, which is
+/// where the reader loses the nesting depth:
+///
+/// ```julia
+/// load_samples_recursively(config.data; basedir = dirname(   # not this
+///     config_path,
+/// ))
+/// load_samples_recursively(                                  # this
+///     config.data;
+///     basedir = dirname(config_path),
+/// )
+/// ```
+///
+/// `item_count` is the list's **total** item count — for an argument list with a
+/// `;` tail that is the positionals plus the keywords, since they explode into
+/// one shared list.
+fn suppress_multi_item_hug(item_count: usize, last_huggable: bool) -> bool {
+    last_huggable && item_count == 1
 }
 
 /// Parse a clean two-operand `=>`/`.=>` pair into its left operand, operator
@@ -2782,7 +2787,7 @@ fn collect_collection_items(node: &SyntaxNode) -> Option<CollectionParts> {
         }
     }
 
-    let last_huggable = suppress_bare_bracket_pair_hug(node, items.len(), last_huggable);
+    let last_huggable = suppress_multi_item_hug(items.len(), last_huggable);
     Some(CollectionParts {
         open: open?,
         close: close?,
@@ -2835,6 +2840,10 @@ fn applied_args_body(prefix: Ir, args: &SyntaxNode) -> Option<Ir> {
 
     if let Some(pnode) = params {
         let (pitems, last_param_huggable) = collect_param_items(&pnode)?;
+        // Positionals and keywords explode into one shared list, so the
+        // sole-item hug rule counts them together.
+        let last_param_huggable =
+            suppress_multi_item_hug(items.len() + pitems.len(), last_param_huggable);
         if last_param_huggable {
             let hug_prefix = params_hug_prefix(&open, &items, &pitems);
             let explode =
@@ -5305,6 +5314,30 @@ fn is_tight_binop(kind: SyntaxKind) -> bool {
         kind,
         SyntaxKind::CARET | SyntaxKind::DOT_CARET | SyntaxKind::COLON | SyntaxKind::DOT
     )
+}
+
+/// Whether `kind` is a pair arrow (`=>`, `.=>`) — the operator whose right
+/// operand is the payload, so it biases the break into that operand rather than
+/// breaking at itself (see [`lower_binary`]).
+fn is_pair_op(kind: SyntaxKind) -> bool {
+    matches!(kind, SyntaxKind::FAT_ARROW | SyntaxKind::DOT_FAT_ARROW)
+}
+
+/// Whether the pair chain rooted at `node` bottoms out in a huggable bracket
+/// construct — `k => f(…)`, `a => b => […]`. The structural counterpart of
+/// [`pair_hug_chain`], which peels the same spine but also lowers it.
+///
+/// Only such a chain lets its arrow bias the break into the right operand (see
+/// [`lower_binary`]): there is a bracket there to break inside. A chain ending
+/// in a grouped non-bracket value (`k => a + b + c`) has no such bracket, and a
+/// chain mixing in another arrow-tier operator (`a => b --> c`) must break with
+/// its peers rather than at some arrows but not others — [`pair_operands`]
+/// rejects the mixed spine, so both keep the uniform arrow-tier break.
+fn pair_chain_hugs(node: &SyntaxNode) -> bool {
+    let Some((_, _, rhs)) = pair_operands(node) else {
+        return false;
+    };
+    huggable_kind(rhs.kind()) || pair_chain_hugs(&rhs)
 }
 
 /// True when snugging a following `.^` onto `operand` would retokenize. `2 .^ n`

@@ -18,12 +18,10 @@ elem = [label => alpha => beta => Dict(
     :k3 => v3,
     :k4 => value555555555555555,
 )]
-kwarg = foo(x, opts = alpha => beta => Dict(
-    :k1 => v1,
-    :k2 => v2,
-    :k3 => v3,
-    :k44 => value55555555555,
-))
+kwarg = foo(
+    x,
+    opts = alpha => beta => Dict(:k1 => v1, :k2 => v2, :k3 => v3, :k44 => value55555555555),
+)
 prebroken = foo(alpha => beta => Dict(
     :k1 => v1,
     :k2 => v2,
