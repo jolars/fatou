@@ -30,6 +30,13 @@ pub struct Cli {
     #[arg(long, value_enum, default_value_t = ColorChoice::Auto, global = true)]
     pub color: ColorChoice,
 
+    /// Suppress non-essential output (errors are still shown). Under
+    /// `format --check` this drops the per-file diff, leaving the list of files
+    /// that would be reformatted and the summary; under `parse` it suppresses
+    /// the CST.
+    #[arg(long, short = 'q', global = true)]
+    pub quiet: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -51,10 +58,6 @@ pub enum Commands {
     Parse {
         /// Input file (stdin if not provided).
         file: Option<PathBuf>,
-
-        /// Suppress CST output to stdout.
-        #[arg(long)]
-        quiet: bool,
 
         /// Verify parser losslessness (`reconstruct(text) == text`).
         #[arg(long)]

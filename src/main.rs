@@ -33,12 +33,7 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<ExitCode, String> {
     match cli.command {
-        Commands::Parse {
-            file,
-            quiet,
-            verify,
-            to,
-        } => run_parse(file, quiet, verify, to),
+        Commands::Parse { file, verify, to } => run_parse(file, cli.quiet, verify, to),
         Commands::Format {
             paths,
             check,
@@ -50,7 +45,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             let (config, source) = load_config(&cli.config, cli.no_config)?;
             let style = style_with_overrides(&config, line_width, indent_width);
             let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
-            run_format(paths, check, style, &filter)
+            run_format(paths, check, style, &filter, cli.quiet)
         }
         Commands::Lint {
             paths,
@@ -237,6 +232,7 @@ fn run_format(
     check: bool,
     style: FormatStyle,
     exclude: &ExcludeFilter,
+    quiet: bool,
 ) -> Result<ExitCode, String> {
     // No paths: format stdin to stdout.
     if paths.is_empty() {
@@ -250,7 +246,20 @@ fn run_format(
         let result = formatter::check_paths(&paths, style, exclude).map_err(|e| e.to_string())?;
         for changed in &result.changed {
             println!("would reformat {}", changed.path.display());
-            print!("{}", changed.diff);
+            // `--check` writes nothing, so the diff is normally the only account
+            // of what would change; `--quiet` trades it for the file list plus a
+            // summary, for callers (a CI step over a wholly unformatted project)
+            // that would drown in hunks.
+            if !quiet {
+                print!("{}", changed.diff);
+            }
+        }
+        if quiet && !result.changed.is_empty() {
+            println!(
+                "{} of {} file(s) would be reformatted",
+                result.changed.len(),
+                result.checked
+            );
         }
         return Ok(if result.changed.is_empty() {
             ExitCode::SUCCESS

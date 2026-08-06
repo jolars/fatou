@@ -23,6 +23,9 @@ Fatou: a language server, formatter, and linter for Julia
     - `always`: Always colorize
     - `never`: Never colorize
 
+`-q`, `--quiet`
+:   Suppress non-essential output (errors are still shown). Under `format --check` this drops the per-file diff, leaving the list of files that would be reformatted and the summary; under `parse` it suppresses the CST
+
 ## `fatou parse`
 
 Parse and display the CST for debugging
@@ -35,9 +38,6 @@ Parse and display the CST for debugging
 :   Input file (stdin if not provided)
 
 ### Options
-
-`--quiet`
-:   Suppress CST output to stdout
 
 `--verify`
 :   Verify parser losslessness (`reconstruct(text) == text`)
