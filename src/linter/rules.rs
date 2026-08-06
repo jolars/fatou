@@ -67,6 +67,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::TypePiracy),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
+        Box::new(suspicious::MissingComparison),
         Box::new(suspicious::ConstantCondition),
         Box::new(suspicious::ModuleShadowsParent),
         Box::new(suspicious::IndexFromLength),

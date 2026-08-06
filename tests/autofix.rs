@@ -84,3 +84,31 @@ b = y != nothing
     assert_eq!(outcome.applied, 2);
     assert!(outcome.remaining.is_empty());
 }
+
+/// `missing-comparison` rewrites `==`/`!=` against `missing` the same way, but
+/// only under `--unsafe-fixes`: the rewrite turns a `missing` result into a
+/// `Bool`.
+#[test]
+fn fixes_every_missing_comparison_under_unsafe() {
+    let src = "\
+a = x == missing
+b = y != missing
+";
+    let outcome = fix_source(None, src, &select("missing-comparison"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = x === missing
+    b = y !== missing
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, `missing-comparison` reports but changes nothing.
+#[test]
+fn withholds_missing_comparison_fix_by_default() {
+    let src = "a = x == missing\n";
+    let outcome = fix_source(None, src, &select("missing-comparison"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}

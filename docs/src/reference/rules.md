@@ -18,6 +18,7 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`type-piracy`](rules/type-piracy.md)
 - [`assignment-in-condition`](rules/assignment-in-condition.md)
 - [`nothing-comparison`](rules/nothing-comparison.md)
+- [`missing-comparison`](rules/missing-comparison.md)
 - [`constant-condition`](rules/constant-condition.md)
 - [`module-shadows-parent`](rules/module-shadows-parent.md)
 - [`index-from-length`](rules/index-from-length.md)

@@ -34,6 +34,7 @@
   - [`type-piracy`](reference/rules/type-piracy.md)
   - [`assignment-in-condition`](reference/rules/assignment-in-condition.md)
   - [`nothing-comparison`](reference/rules/nothing-comparison.md)
+  - [`missing-comparison`](reference/rules/missing-comparison.md)
   - [`constant-condition`](reference/rules/constant-condition.md)
   - [`module-shadows-parent`](reference/rules/module-shadows-parent.md)
   - [`index-from-length`](reference/rules/index-from-length.md)

@@ -144,13 +144,23 @@ Ready now (no new infrastructure):
   (`ScopeKind` already distinguishes local from module/top level). Cheap and
   unambiguous.
   (UnsupportedConstLocalVariable)
-- [ ] `missing-comparison` (suspicious, syn, warning, safe fix): `x == missing`
-  / `x != missing`. `1 == missing` is `missing`, never `true`/`false`, and
-  `if 1 == missing` raises `TypeError: non-boolean (Missing) used in boolean
-  context` — so the comparison is either dead or an error. Suggest `ismissing`;
-  safe fix `==` -> `===` and `!=` -> `!==`, mirroring `nothing-comparison`
-  exactly. The best single import from arity: same shape, same fix machinery,
-  and a genuine error rather than a style nit. (arity `equals-na`)
+- [x] `missing-comparison` (suspicious, syn, warning, **unsafe** fix): `x ==
+  missing` / `x != missing`, which is always `missing` and raises `TypeError`
+  in a boolean context. Landed matching `nothing-comparison`'s shape rules
+  (bare `BINARY_EXPR` only, so chains and the broadcast `.==`/`.!=` are out;
+  `missing` matched by identifier text on either side; the `Missing` type left
+  alone). The fix rewrites `==` -> `===` / `!=` -> `!==` but is `Unsafe`, not
+  `Safe` as this entry first assumed: `x == nothing` dispatches `Base.==`,
+  which agrees with `===` for the singleton, whereas `x == missing` evaluates
+  to `missing` and the rewrite makes it a `Bool`. That change is the intent,
+  but it is still a change. **First `Applicability::Unsafe` fix in the tree.**
+  (arity `equals-na`)
+- [ ] Follow-up from the above: `render.rs` renders a fix's `help:` line
+  identically whether it is `Safe` or `Unsafe`, so a reader of the rule
+  reference cannot tell that `missing-comparison`'s fix needs `--unsafe-fixes`
+  (its `description()` says so in prose, which is the only reason the page is
+  honest today). Mark applicability in the rendered help line — it touches
+  every rule snapshot, so it wants its own change.
 - [ ] `unreachable-code` (correctness, syn, warning, no fix): statements after
   an unconditional `return`/`throw`/`error`/`rethrow` in the same block. Fire
   only on the unambiguous shape — a terminator that is a *direct* statement of a

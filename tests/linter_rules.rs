@@ -616,6 +616,67 @@ fn nothing_comparison_carries_a_safe_fix() {
     assert_eq!(&src[fix.start..fix.end], "==");
 }
 
+// --- missing-comparison ----------------------------------------------------
+
+#[test]
+fn missing_comparison_flags_eq_and_ne() {
+    assert_eq!(count("missing-comparison", "x == missing\n"), 1);
+    assert_eq!(count("missing-comparison", "x != missing\n"), 1);
+}
+
+#[test]
+fn missing_comparison_flags_missing_on_either_side() {
+    assert_eq!(count("missing-comparison", "missing == x\n"), 1);
+    assert_eq!(count("missing-comparison", "missing != x\n"), 1);
+}
+
+#[test]
+fn missing_comparison_ignores_identity_operators() {
+    // `===` / `!==` already answer the identity question.
+    assert_eq!(count("missing-comparison", "x === missing\n"), 0);
+    assert_eq!(count("missing-comparison", "x !== missing\n"), 0);
+}
+
+#[test]
+fn missing_comparison_ignores_unrelated_comparisons() {
+    assert_eq!(count("missing-comparison", "x == y\n"), 0);
+    assert_eq!(count("missing-comparison", "ismissing(x)\n"), 0);
+    // The `Missing` *type* is a different, capitalized identifier.
+    assert_eq!(count("missing-comparison", "x == Missing\n"), 0);
+}
+
+#[test]
+fn missing_comparison_ignores_broadcast_comparison() {
+    // `x .== missing` is an elementwise comparison over a container, a
+    // different operator with its own token kind. It is not the scalar
+    // identity question this rule is about.
+    assert_eq!(count("missing-comparison", "x .== missing\n"), 0);
+    assert_eq!(count("missing-comparison", "x .!= missing\n"), 0);
+}
+
+#[test]
+fn missing_comparison_ignores_comparison_chains() {
+    // A chain folds into a COMPARISON_EXPR, not a BINARY_EXPR.
+    assert_eq!(count("missing-comparison", "a < b == missing\n"), 0);
+}
+
+#[test]
+fn missing_comparison_carries_an_unsafe_fix() {
+    let config = LintConfig {
+        select: Some(vec!["missing-comparison".to_string()]),
+        ..Default::default()
+    };
+    let src = "x == missing\n";
+    let report = check_source(None, src, &config);
+    let fix = &report.diagnostics[0].fixes[0];
+    assert_eq!(fix.content, "===");
+    // The replacement spans exactly the `==` operator token.
+    assert_eq!(&src[fix.start..fix.end], "==");
+    // Unlike `nothing-comparison`, the rewrite changes the expression's value
+    // (`missing` becomes a `Bool`), so it needs `--unsafe-fixes`.
+    assert_eq!(fix.applicability, fatou::linter::Applicability::Unsafe);
+}
+
 // --- severity ----------------------------------------------------------------
 
 /// The severity a single finding of `rule` in `src` carries under `config`.
