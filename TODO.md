@@ -70,7 +70,11 @@
 
 ### Rule infrastructure
 
-Shared machinery the roadmap below leans on. arity has all three; we have none.
+Shared machinery the roadmap below leans on, mostly cribbed from arity's own
+`TODO.md`. Note one thing we do **not** need: arity's "Phase A def-use reverse
+index" (binding -> read sites, `IdentRef` -> `BindingId`) is machinery we
+already have — `IdentRef::binding` and `SemanticModel::occurrences` are exactly
+it. We are behind arity only on the CFG and on rule ergonomics.
 
 - [ ] `RuleContext::resolves_to_base(&CallExpr) -> bool` plus a token-level
   `read_resolves_to_base`, after arity's `src/linter/rules.rs:177,215`: one call
@@ -93,6 +97,18 @@ Shared machinery the roadmap below leans on. arity has all three; we have none.
   richer than R's (`return`, `throw`/`error`/`rethrow`, `break`/`continue`, and
   `@goto`/`@label`), and `@goto` is the one shape no structured descent
   handles — that, not `unreachable-code`, is the case that justifies the cost.
+- [ ] Per-rule config: a `[lint.rules.<id>]` TOML table plus a typed per-rule
+  struct in `src/config.rs`, threaded to rules as a `config`/`&RuleConfig` field
+  on `RuleContext` (arity's "§I4", which it records as *blocking* two of its own
+  rules). `src/config.rs` has only `select`/`ignore`/`severity` today, so any
+  rule with a tunable knob — a configurable deny-list of discouraged functions,
+  a project-specific naming convention — is blocked until this lands.
+- [ ] Suppression-map refactor, prerequisite for the meta-rules below (arity's
+  "§I6"): have `suppression.rs` expose the parsed directive list (rule ID,
+  range, has-reason, raw text) on `RuleContext`, and have the driver
+  (`check.rs`) record which suppressions actually matched a diagnostic.
+  `outdated-suppression` needs that last part as a post-pass; it is not a
+  per-rule concern.
 - [ ] Decision, not a task: several candidates below are idiom rewrites rather
   than likely-bug reports, so they want a `performance` and/or `readability`
   category beside `correctness`/`suspicious` (arity ships both). Settle the
@@ -146,6 +162,17 @@ Ready now (no new infrastructure):
   `IncludeProblemKind` beside `Missing`/`Cycle` in
   `src/linter/include_graph.rs`; the graph already has the edges.
   (DuplicateInclude)
+- [ ] `duplicate-method` (correctness, sem, warning, no fix): two method
+  definitions with identical signatures in one file — the second silently
+  overwrites the first, so one of them is dead. Not in StaticLint's catalog;
+  from arity's planned `duplicated-function-definition`. Compare lowered
+  `TypeExpr` signatures, and be careful that differing `where` bounds, differing
+  argument *names*, and `@static`-disjoint branches are all legitimate.
+- [ ] `loop-variable-shadow` (suspicious, sem, warning, no fix): a nested `for`
+  reusing the enclosing loop's index variable (`for i in a; for i in b`), and
+  assigning to the loop variable inside its own body. Both are near-always bugs
+  and both are pure scope questions the model already answers. From arity's
+  planned `for-loop-index`/`for-loop-dup-index`.
 
 Ready once `resolves_to_base` lands (idiom rewrites; see the category decision
 above):
@@ -196,6 +223,23 @@ Needs modest new infrastructure:
   fallback, so `length = 3; length(x)` is a hard error, where R's equivalent is
   benign. Require both a binding and a later call, as arity does. (arity
   `shadowed-builtin`)
+- [ ] `non-public-access` (suspicious, sem + res, warning, no fix): reading
+  `Foo.bar` where `bar` is neither exported nor declared `public` by `Foo` — the
+  Julia analogue of arity's planned `internal-function` (`pkg:::fn`), and a
+  better-defined question here than in R, since 1.11's `public` keyword makes
+  "intended API" an explicit declaration rather than a convention. The model
+  already has `exports()` and `qualified_reads()`; the missing piece is reading
+  `public` declarations out of a resolved package. Name it for the `public`
+  keyword if `non-public-access` reads awkwardly.
+- [ ] The suppression meta-rule family, blocked on the §I6 refactor above and
+  ported wholesale from arity's Phase 4 — this is entirely language-independent
+  and applies to `# fatou-ignore` exactly as it does to `# arity-ignore`:
+  `misnamed-suppression` (names a rule ID not in `all_rule_ids()`; safe fix when
+  there is an unambiguous near-match), `blanket-suppression` (no rule ID at
+  all), `unexplained-suppression` (no reason given; default-off), and
+  `outdated-suppression` (suppressed a diagnostic that no longer fires;
+  safe-delete fix). Cheap, high signal, and they keep the suppression comments
+  honest as the rule set moves under them.
 - [ ] `invalid-type-declaration` (correctness, sem + res, warning, no fix):
   `f(x::g)` where `g` resolves to a function rather than a type. Needs
   "this binding is a function, not a type", which binding kinds answer for
@@ -219,6 +263,13 @@ Deferred, and why:
 - [ ] `unnecessary-nesting`: `if a; if b; body; end; end` -> `if a && b; body;
   end`, when neither `if` has an `else`. Readability category; low risk, low
   urgency. (arity `unnecessary-nesting`)
+- [ ] A `Test`-stdlib rule bundle, as one cohesive change with a shared `@test`
+  matcher — the Julia counterpart of arity's planned `testthat` bundle, which it
+  rates "high value for test-heavy repos" (equally true here): `@test x == true`
+  -> `@test x`, `@test length(x) == 0` -> `@test isempty(x)`, `@test isa(x, T)`
+  -> `@test x isa T`, `@test x == nothing` -> `@test isnothing(x)`, and a
+  `@test` whose argument is not a comparison or predicate at all. Gate on
+  `Test` actually being loaded, as arity gates on the package being attached.
 - [ ] A `documentation` category over docstrings, structurally mirroring
   arity's five roxygen rules: undocumented exported names, `@doc` argument
   lists that disagree with the signature. Larger design question than a single
