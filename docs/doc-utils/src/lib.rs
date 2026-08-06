@@ -1,13 +1,15 @@
 //! mdBook preprocessor for the Fatou docs.
 //!
-//! It substitutes three markers on the performance page with content rendered
+//! It substitutes four markers on the performance page with content rendered
 //! from the committed benchmark artifact `bench/results.json` (produced by
 //! `bench/compare_format.sh`; never regenerated here):
 //!
 //!   `{{ benchmark-meta }}`       -> a bullet list of corpus, versions, and host
-//!   `{{ benchmark-results }}`    -> a Vega-Lite dot plot (warm-loop time relative
-//!                                   to Fatou, one dot per scenario stacked at each
-//!                                   tool, log axis) plus a collapsed fallback table.
+//!   `{{ benchmark-results-single }}`  -> a Vega-Lite dot plot of the warm-loop
+//!   `{{ benchmark-results-project }}`    single-file and project scenarios
+//!                                   respectively (time relative to Fatou, one dot
+//!                                   per scenario stacked at each tool, log axis),
+//!                                   each plus a collapsed fallback table.
 //!   `{{ benchmark-cold-start }}` -> a log-scale dot plot of cold-start
 //!                                   (fresh-process) time relative to Fatou per
 //!                                   tool, plus a collapsed fallback table.
@@ -72,7 +74,8 @@ fn project_root() -> PathBuf {
 // --- Benchmark artifact schema (mirrors bench/merge.py output) ---------------
 
 const BENCH_META_MARKER: &str = "{{ benchmark-meta }}";
-const BENCH_RESULTS_MARKER: &str = "{{ benchmark-results }}";
+const BENCH_RESULTS_SINGLE_MARKER: &str = "{{ benchmark-results-single }}";
+const BENCH_RESULTS_PROJECT_MARKER: &str = "{{ benchmark-results-project }}";
 const BENCH_COLD_MARKER: &str = "{{ benchmark-cold-start }}";
 
 /// Scenario order comes from the artifact's own `scenario_order` list (set by
@@ -94,13 +97,76 @@ struct Benchmarks {
 }
 
 impl Benchmarks {
-    /// The warm-loop scenarios in render order, paired with their display
-    /// labels. `cold_start` is not in `scenario_order`; it has its own marker.
-    fn ordered(&self) -> Vec<(&str, &Scenario)> {
+    /// The warm-loop scenarios of one scope, in render order. `cold_start` is not
+    /// in `scenario_order`; it has its own marker.
+    fn ordered(&self, scope: Scope) -> Vec<(&str, &Scenario)> {
         self.scenario_order
             .iter()
+            .filter(|k| scope.owns(k))
             .filter_map(|k| self.scenarios.get(k.as_str()).map(|sc| (k.as_str(), sc)))
             .collect()
+    }
+}
+
+/// The two warm-loop scopes, each rendered as its own chart: one file through a
+/// tool's pure `String -> String` formatter, and a whole source tree through its
+/// directory entry point. Scenario keys carry the scope as a prefix, the naming
+/// `bench/compare_format.sh` gives them.
+#[derive(Clone, Copy)]
+enum Scope {
+    Single,
+    Project,
+}
+
+impl Scope {
+    /// Whether a scenario key belongs to this scope.
+    fn owns(self, key: &str) -> bool {
+        key.starts_with(self.key_prefix())
+    }
+
+    fn key_prefix(self) -> &'static str {
+        match self {
+            Scope::Single => "single_",
+            Scope::Project => "project_",
+        }
+    }
+
+    /// The redundant part of a scenario's display label inside its own chart:
+    /// with the scope in the surrounding heading, "Single file: kinds.jl" is just
+    /// "kinds.jl".
+    fn label_prefix(self) -> &'static str {
+        match self {
+            Scope::Single => "Single file: ",
+            Scope::Project => "Project: ",
+        }
+    }
+
+    /// What one dot stands for, used as the chart's legend title.
+    fn legend_title(self) -> &'static str {
+        match self {
+            Scope::Single => "File",
+            Scope::Project => "Project",
+        }
+    }
+
+    fn caption(self) -> &'static str {
+        match self {
+            Scope::Single => {
+                "Formatting time relative to Fatou on a log scale (lower is faster). One dot \
+                 per file, grouped at each tool and colored by file; Fatou sits on the dashed \
+                 baseline at 1 and slower tools appear above it. Each file goes through the \
+                 tool's pure <code>String -&gt; String</code> formatter, in the tool's own \
+                 default style. Hover a dot for the exact figures."
+            }
+            Scope::Project => {
+                "Formatting time relative to Fatou on a log scale (lower is faster). One dot \
+                 per project, grouped at each tool and colored by project; Fatou sits on the \
+                 dashed baseline at 1 and slower tools appear above it. Each tool walks the \
+                 whole source tree through its own directory entry point, so file discovery, \
+                 IO, and internal parallelism all count; <code>Runic</code> is absent because \
+                 it has no in-process directory API. Hover a dot for the exact figures."
+            }
+        }
     }
 }
 
@@ -192,13 +258,17 @@ struct ColdPoint {
 /// `bench/results.json`. The JSON is read but never regenerated here, so the
 /// benchmark is only ever run manually (via `task bench`), not at build time.
 fn insert_benchmarks(book: &mut Book) {
+    const MARKERS: &[&str] = &[
+        BENCH_META_MARKER,
+        BENCH_RESULTS_SINGLE_MARKER,
+        BENCH_RESULTS_PROJECT_MARKER,
+        BENCH_COLD_MARKER,
+    ];
+
     let needs_render = {
         let mut found = false;
         book.for_each_chapter_mut(|ch| {
-            if ch.content.contains(BENCH_META_MARKER)
-                || ch.content.contains(BENCH_RESULTS_MARKER)
-                || ch.content.contains(BENCH_COLD_MARKER)
-            {
+            if MARKERS.iter().any(|m| ch.content.contains(m)) {
                 found = true;
             }
         });
@@ -209,45 +279,46 @@ fn insert_benchmarks(book: &mut Book) {
     }
 
     let path = project_root().join("bench/results.json");
-    let (meta, results, cold) = match std::fs::read_to_string(&path)
+    let rendered: Vec<String> = match std::fs::read_to_string(&path)
         .ok()
         .and_then(|s| serde_json::from_str::<Benchmarks>(&s).ok())
     {
-        Some(b) => (
+        Some(b) => vec![
             render_meta(&b.meta),
-            render_results(&b),
+            render_results(&b, Scope::Single),
+            render_results(&b, Scope::Project),
             render_cold_start(&b),
-        ),
+        ],
         None => {
             let note = format!(
                 "_Benchmark data unavailable (`{}` missing or unreadable; run `task bench`)._",
                 path.display()
             );
-            (note.clone(), note.clone(), note)
+            vec![note; MARKERS.len()]
         }
     };
 
     book.for_each_chapter_mut(|ch| {
-        if ch.content.contains(BENCH_META_MARKER) {
-            ch.content = ch.content.replace(BENCH_META_MARKER, &meta);
-        }
-        if ch.content.contains(BENCH_RESULTS_MARKER) {
-            ch.content = ch.content.replace(BENCH_RESULTS_MARKER, &results);
-        }
-        if ch.content.contains(BENCH_COLD_MARKER) {
-            ch.content = ch.content.replace(BENCH_COLD_MARKER, &cold);
+        for (marker, content) in MARKERS.iter().zip(&rendered) {
+            if ch.content.contains(marker) {
+                ch.content = ch.content.replace(marker, content);
+            }
         }
     });
 }
 
-/// A scenario's display name: the label the benchmark artifact recorded, or the
-/// raw key as a fallback for an artifact predating labelled scenarios.
-fn scenario_label(key: &str, sc: &Scenario) -> String {
+/// A scenario's display name within its own scope's chart: the label the
+/// benchmark artifact recorded, minus the scope prefix the heading already
+/// carries, or the raw key as a fallback for an artifact predating labelled
+/// scenarios.
+fn scenario_label(key: &str, sc: &Scenario, scope: Scope) -> String {
     if sc.label.is_empty() {
-        key.to_string()
-    } else {
-        sc.label.clone()
+        return key.to_string();
     }
+    sc.label
+        .strip_prefix(scope.label_prefix())
+        .unwrap_or(&sc.label)
+        .to_string()
 }
 
 /// A Markdown bullet list of corpus pins, tool versions, host, and run settings.
@@ -298,49 +369,49 @@ fn render_meta(meta: &Meta) -> String {
     out
 }
 
-/// The results marker becomes an interactive dot plot (Vega-Lite, driven by
-/// `docs/theme/bench-charts.js` and wired via `book.toml`'s `additional-js`) plus
-/// a collapsed HTML table with the same numbers as a no-JS/print fallback.
-fn render_results(b: &Benchmarks) -> String {
-    let points = chart_points(b);
+/// One scope's results marker becomes an interactive dot plot (Vega-Lite, driven
+/// by `docs/theme/bench-charts.js` and wired via `book.toml`'s `additional-js`)
+/// plus a collapsed HTML table with the same numbers as a no-JS/print fallback.
+/// Single files and projects get a chart each: they measure different work at
+/// different sizes, and a shared axis buries that.
+fn render_results(b: &Benchmarks, scope: Scope) -> String {
+    let points = chart_points(b, scope);
+    if points.is_empty() {
+        return "_No scenarios of this kind in the benchmark artifact (run `task bench`)._"
+            .to_string();
+    }
     let data_json = serde_json::to_string(&points).unwrap_or_else(|_| "[]".to_string());
 
     let mut out = String::new();
     out.push_str("<div class=\"bench-chart-block\">\n");
     out.push_str("<figure class=\"bench-figure\">\n");
-    out.push_str("<div class=\"bench-chart\"></div>\n");
+    out.push_str(&format!(
+        "<div class=\"bench-chart\" data-legend=\"{}\"></div>\n",
+        scope.legend_title()
+    ));
     out.push_str("<script type=\"application/json\" class=\"bench-data\">");
     out.push_str(&data_json);
     out.push_str("</script>\n");
-    out.push_str(
-        "<figcaption>Formatting time relative to Fatou on a log scale (lower is faster). \
-         One dot per scenario, grouped at each tool and colored by scenario; Fatou sits on \
-         the dashed baseline at 1 and slower tools appear above it. Each tool uses its own \
-         default style. The <em>Single file</em> scenarios run one file through each tool's \
-         <code>String -&gt; String</code> formatter; the <em>Project</em> scenarios format a \
-         whole source tree through each tool's directory entry point, where <code>Runic</code> \
-         is absent because it has no in-process directory API. Hover a dot for the exact \
-         figures.</figcaption>\n",
-    );
+    out.push_str(&format!("<figcaption>{}</figcaption>\n", scope.caption()));
     out.push_str("</figure>\n");
     out.push_str(
         "<noscript>Enable JavaScript for the interactive chart; \
          the data table below has the same numbers.</noscript>\n",
     );
     out.push_str("<details class=\"bench-table\">\n<summary>Data table</summary>\n");
-    out.push_str(&render_results_tables_html(b));
+    out.push_str(&render_results_tables_html(b, scope));
     out.push_str("</details>\n");
     out.push_str("</div>\n");
     out
 }
 
-/// One dot per (scenario, tool), in scenario then tool order. The plotted value
-/// is each tool's median time as a multiple of Fatou's in the same scenario
-/// (Fatou = 1); absolute throughput and time ride along in the tooltip.
-fn chart_points(b: &Benchmarks) -> Vec<ChartPoint> {
+/// One dot per (scenario, tool) within a scope, in scenario then tool order. The
+/// plotted value is each tool's median time as a multiple of Fatou's in the same
+/// scenario (Fatou = 1); absolute throughput and time ride along in the tooltip.
+fn chart_points(b: &Benchmarks, scope: Scope) -> Vec<ChartPoint> {
     let mut points = Vec::new();
-    for (key, sc) in b.ordered() {
-        let label = scenario_label(key, sc);
+    for (key, sc) in b.ordered(scope) {
+        let label = scenario_label(key, sc, scope);
         let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
         for &(tool, tool_label) in TOOL_ORDER {
             let Some(agg) = sc.tools.get(tool) else {
@@ -362,17 +433,18 @@ fn chart_points(b: &Benchmarks) -> Vec<ChartPoint> {
     points
 }
 
-/// One `<h3>` + HTML `<table>` per scenario, in scenario order; rows follow tool
-/// order. `Relative` is each tool's median time as a multiple of Fatou's (what the
-/// chart plots), so the table and the dot plot tell the same story.
-fn render_results_tables_html(b: &Benchmarks) -> String {
+/// One `<h4>` + HTML `<table>` per scenario of a scope, in scenario order; rows
+/// follow tool order. `Relative` is each tool's median time as a multiple of
+/// Fatou's (what the chart plots), so the table and the dot plot tell the same
+/// story. The heading level sits one below the scope's own `###` on the page.
+fn render_results_tables_html(b: &Benchmarks, scope: Scope) -> String {
     let mut out = String::new();
-    for (key, sc) in b.ordered() {
+    for (key, sc) in b.ordered(scope) {
         let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
 
         out.push_str(&format!(
-            "<h3>{} (<code>{}</code>)</h3>\n",
-            esc(&scenario_label(key, sc)),
+            "<h4>{} (<code>{}</code>)</h4>\n",
+            esc(&scenario_label(key, sc, scope)),
             esc(&sc.target)
         ));
         out.push_str(

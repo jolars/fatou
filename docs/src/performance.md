@@ -61,7 +61,18 @@ the Julia path). Results are written to `bench/results.json`.
 
 ## Results
 
-{{ benchmark-results }}
+Single files and whole projects get a chart each: they measure different work at
+different sizes, and sharing one axis buries that. In both, Fatou is the baseline
+on the dashed line at 1, and every other tool's time is plotted relative to it, so
+faster tools fall below the line and slower tools rise above it.
+
+### Single files
+
+{{ benchmark-results-single }}
+
+### Projects
+
+{{ benchmark-results-project }}
 
 ## Cold start
 
