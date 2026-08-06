@@ -168,12 +168,14 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   - Still open, now unblocked: `unused-binding`'s `ATTRIBUTE_DSL_MACROS` wants
     an `extend-attribute-dsl-macros` knob, and the throwaway-name convention
     (`_`-prefixed) wants one too.
-- [ ] Suppression-map refactor, prerequisite for the meta-rules below (arity's
-  "§I6"): have `suppression.rs` expose the parsed directive list (rule ID,
-  range, has-reason, raw text) on `RuleContext`, and have the driver
-  (`check.rs`) record which suppressions actually matched a diagnostic.
-  `outdated-suppression` needs that last part as a post-pass; it is not a
-  per-rule concern.
+- [x] Suppression-map refactor, prerequisite for the meta-rules below (arity's
+  "§I6"): `suppression.rs` is a full port of arity's CST-driven design —
+  directives (rule ID with exact range, optional `: <reason>`, raw text) are
+  recorded on `RuleContext::suppressions`, node directives attach to the next
+  non-trivia sibling, filtering happens inside `ResolvedRules::run` (which
+  records a `DirectiveUsage` and feeds the new `Rule::check_suppressions`
+  post-pass), and `ResolvedRules::enabled()` tells stale from dormant.
+  Deviation from arity: a bare `# fatou-ignore-file` stays suppress-all.
 - [ ] Decision, not a task: several candidates below are idiom rewrites rather
   than likely-bug reports, so they want a `performance` and/or `readability`
   category beside `correctness`/`suspicious` (arity ships both). Settle the

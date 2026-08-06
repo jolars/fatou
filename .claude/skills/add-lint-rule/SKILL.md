@@ -79,9 +79,9 @@ Prefer the cheapest tier the rule's correctness actually requires.
 - `src/semantic.rs`—`SemanticModel` for `sem`-tier rules (`bindings()`,
   `occurrences()`, `scopes()`, `enclosing_module_path()`, `module_loads()`,
   `free_reads()`, ...).
-- `src/linter/suppression.rs`—`# fatou-ignore <rule>` /
-  `# fatou-ignore-file <rule>` work for any registered rule automatically;
-  nothing to wire per rule.
+- `src/linter/suppression.rs`—`# fatou-ignore <rule>[: <reason>]` (covers the
+  next non-trivia node) / `# fatou-ignore-file [<rule>][: <reason>]` work for
+  any registered rule automatically; nothing to wire per rule.
 - `tests/linter_rules.rs`—behavior tests + helpers `findings(rule, src)` /
   `count(rule, src)` (lint with only that rule selected). Each rule gets its
   own `// --- <id> ---` block.

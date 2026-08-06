@@ -22,7 +22,6 @@ use crate::linter::suppression::SuppressionMap;
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
-use crate::text::LineIndex;
 
 /// The pseudo-rule id under which parse diagnostics are reported.
 pub const PARSE_ERROR_RULE: &str = "parse-error";
@@ -137,38 +136,25 @@ pub fn check_paths_with_config(
                 message: err.to_string(),
             })?;
             let out = parse(&text);
-            Ok((
-                path.clone(),
-                text,
-                out.cst.green().to_owned(),
-                out.diagnostics,
-            ))
+            Ok((path.clone(), out.cst.green().to_owned(), out.diagnostics))
         })
         .collect::<Result<Vec<_>, LintError>>()?;
 
     let seeds: Vec<(PathBuf, SyntaxNode)> = parsed
         .iter()
-        .map(|(path, _, green, _)| (path.clone(), SyntaxNode::new_root(green.clone())))
+        .map(|(path, green, _)| (path.clone(), SyntaxNode::new_root(green.clone())))
         .collect();
     let include_problems = include_problems(&seeds);
 
     let reports: Vec<LintFileReport> = parsed
         .par_iter()
-        .map(|(path, text, green, diagnostics)| {
+        .map(|(path, green, diagnostics)| {
             let root = SyntaxNode::new_root(green.clone());
             let includes = include_problems
                 .get(path)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            check_parsed(
-                Some(path),
-                text,
-                &root,
-                diagnostics,
-                &rules,
-                includes,
-                project,
-            )
+            check_parsed(Some(path), &root, diagnostics, &rules, includes, project)
         })
         .collect();
 
@@ -229,7 +215,6 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
     };
     check_parsed(
         path,
-        text,
         &parsed.cst,
         &parsed.diagnostics,
         rules,
@@ -238,11 +223,12 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
     )
 }
 
-/// Core per-file pass over an already-parsed file: run rules on a clean tree,
-/// filter suppressed findings.
+/// Core per-file pass over an already-parsed file: run rules on a clean tree
+/// (suppressed findings are dropped inside the rules runner). Parse-error
+/// pseudo-diagnostics short-circuit before rules or suppression run, so
+/// `parse-error` is not suppressible — by design.
 fn check_parsed(
     path: Option<&Path>,
-    text: &str,
     root: &SyntaxNode,
     parse_diagnostics: &[crate::parser::ParseDiagnostic],
     rules: &ResolvedRules,
@@ -276,7 +262,7 @@ fn check_parsed(
     // `undefined-name` is opt-in there), or a harvested project library plus
     // this file's workspace membership, which resolves cross-file names.
     let resolution = project.resolution_for(path);
-    let diagnostics = lint_parsed(path, text, root, &model, rules, resolution, includes);
+    let diagnostics = lint_parsed(path, root, &model, rules, resolution, includes);
 
     let status = if diagnostics.is_empty() {
         LintStatus::Clean
@@ -302,34 +288,30 @@ fn system_snapshot() -> &'static BTreeMap<String, Arc<PackageIndex>> {
 }
 
 /// Run `rules` against an already-parsed *clean* tree (rules need one; the
-/// caller is responsible for gating on parse diagnostics) and filter suppressed
-/// findings. Shared by [`check_text`] and the language server, whose warm path
-/// lints off the salsa-cached tree and model instead of re-parsing (and passes
-/// its own harvested library as the `resolution` context).
+/// caller is responsible for gating on parse diagnostics). The file's
+/// `# fatou-ignore` directives are parsed off the CST here; the suppressed
+/// findings are dropped inside [`ResolvedRules::run`], which needs the
+/// directive list on the [`RuleContext`] anyway. Shared by [`check_text`] and
+/// the language server, whose warm path lints off the salsa-cached tree and
+/// model instead of re-parsing (and passes its own harvested library as the
+/// `resolution` context).
 pub fn lint_parsed(
     path: Option<&Path>,
-    text: &str,
     root: &SyntaxNode,
     model: &SemanticModel,
     rules: &ResolvedRules,
     resolution: Option<ResolutionContext<'_>>,
     includes: &[IncludeProblem],
 ) -> Vec<Diagnostic> {
+    let suppressions = SuppressionMap::build(root);
     let ctx = RuleContext::new(path, root, model)
         .with_resolution(resolution)
         .with_includes(includes)
         .with_julia_target(rules.julia_target())
-        .with_config(rules.rules_config());
-    let raw = rules.run(&ctx);
-
-    let suppressions = SuppressionMap::build(text);
-    let line_index = LineIndex::new(text);
-    raw.into_iter()
-        .filter(|diag| {
-            let line = line_index.byte_to_lc(diag.range.start().into()).line;
-            !suppressions.is_suppressed(diag.rule, line)
-        })
-        .collect()
+        .with_config(rules.rules_config())
+        .with_suppressions(&suppressions)
+        .with_enabled_rules(rules.enabled());
+    rules.run(&ctx)
 }
 
 #[cfg(test)]

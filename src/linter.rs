@@ -4,8 +4,9 @@
 //! The linter is purely *semantic*: any check the formatter's `--check` mode can
 //! perform belongs to the formatter, not here (see `AGENTS.md`). Rules consume a
 //! [`crate::semantic::SemanticModel`] and the CST shape and emit
-//! [`Diagnostic`]s; suppression (`# fatou-ignore`) is applied at the check
-//! layer. Each rule carries a `description` and worked `examples`, from which
+//! [`Diagnostic`]s; suppression (`# fatou-ignore`) is applied by the rules
+//! runner ([`rules::ResolvedRules::run`]), from a per-file directive map built
+//! off the CST. Each rule carries a `description` and worked `examples`, from which
 //! the rule-reference pages are generated (`docs`), so the docs cannot drift
 //! from behavior.
 

@@ -90,7 +90,6 @@ pub(crate) fn lint_findings_via_db(
         // include-graph lint rules stay silent here.
         Some(lint_parsed(
             Some(path),
-            text,
             &root,
             model,
             rules,
@@ -116,7 +115,7 @@ fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
         return Vec::new();
     }
     let model = SemanticModel::build(&parsed.cst);
-    lint_parsed(None, text, &parsed.cst, &model, rules.get(false), None, &[])
+    lint_parsed(None, &parsed.cst, &model, rules.get(false), None, &[])
 }
 
 /// The rules that are sound only with the resolution context a workspace

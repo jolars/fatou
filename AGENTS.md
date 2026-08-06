@@ -231,7 +231,8 @@ Hand-authored fixtures (`crates/fatou-formatter/tests/formatter.rs`) gate the ou
 **Linter** (`src/linter/`): `check_paths` parses each file and reports
 `LintStatus` (`Clean`/`Findings`/`ParseDiagnostics`); parse diagnostics
 block linting a file. The `Rule` trait + registry (`rules.rs`, `all_rules()` is
-the single source of truth), `# fatou-ignore` suppression (`suppression.rs`),
+the single source of truth), `# fatou-ignore <rule>[: <reason>]` suppression
+(`suppression.rs`, next-node attachment; filtered inside `ResolvedRules::run`),
 diagnostics + autofixes (`diagnostic.rs`, `fix.rs`), and rendering
 (`render.rs`) are in place, with the first rules shipped. Shared rule
 machinery lives on `RuleContext` (the memoized `resolver()`/`file_scan()`/

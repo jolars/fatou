@@ -6,6 +6,9 @@
 //! element whose kind a rule subscribed to. Rules that work off the whole file rather than node shape
 //! (semantic-model queries, comment directives) leave `interests` empty and
 //! override [`Rule::check_file`], which runs once per file after the walk.
+//! `# fatou-ignore` suppression is filtered inside [`ResolvedRules::run`] too,
+//! recording which directives fired for the [`Rule::check_suppressions`]
+//! post-pass.
 //!
 //! The linter is purely *semantic*: any check the formatter's `--check` mode can
 //! perform belongs to the formatter, not here (see `AGENTS.md`). Rules consume
@@ -51,6 +54,7 @@ use crate::index::PackageIndex;
 use crate::julia_version::VersionRange;
 use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::include_graph::IncludeProblem;
+use crate::linter::suppression::{DirectiveUsage, SuppressionMap};
 use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, has_unresolvable_using,
 };
@@ -109,6 +113,18 @@ pub fn all_rule_ids() -> Vec<&'static str> {
     all_rules().iter().map(|r| r.id()).collect()
 }
 
+/// The rule IDs running in a pass, after `select`/`ignore`. Lets a rule tell
+/// "this rule ran and found nothing" from "this rule never ran" — the
+/// distinction between a stale suppression and a dormant one.
+#[derive(Debug, Clone, Default)]
+pub struct EnabledRules(Vec<&'static str>);
+
+impl EnabledRules {
+    pub fn contains(&self, id: &str) -> bool {
+        self.0.contains(&id)
+    }
+}
+
 /// What a rule sees when it runs against one file.
 pub struct RuleContext<'a> {
     pub path: Option<&'a Path>,
@@ -134,6 +150,15 @@ pub struct RuleContext<'a> {
     /// configurable rule reads its own field off it
     /// (`ctx.config.discouraged_function`); a rule with no knobs ignores it.
     pub config: &'a RulesConfig,
+    /// The file's parsed `# fatou-ignore` directives. Built once per file by
+    /// the driver and used by [`ResolvedRules::run`] to drop suppressed
+    /// findings; the future `meta/*-suppression` rules read it to lint the
+    /// directives themselves.
+    pub suppressions: &'a SuppressionMap,
+    /// The rule IDs running in this pass, after `select`/`ignore`. A directive
+    /// naming a rule that did not run is dormant, not stale — the distinction
+    /// `outdated-suppression` needs.
+    pub enabled_rules: &'a EnabledRules,
     /// Per-file answers built on first use and shared by every rule in the run
     /// (see [`RuleCache`]). Private: build a context with
     /// [`RuleContext::new`] and the `with_*` chain.
@@ -144,6 +169,14 @@ pub struct RuleContext<'a> {
 /// borrow when the caller attaches no config. Not a `const` because the
 /// built-in deny-lists are populated maps.
 static DEFAULT_RULES_CONFIG: LazyLock<RulesConfig> = LazyLock::new(RulesConfig::default);
+
+/// A directive-less suppression map for [`RuleContext::new`] to borrow when the
+/// caller attaches none. Not a `const` because `HashMap::new` is not.
+static EMPTY_SUPPRESSIONS: LazyLock<SuppressionMap> = LazyLock::new(SuppressionMap::default);
+
+/// An empty rule set for [`RuleContext::new`] to borrow when the caller
+/// attaches none.
+static EMPTY_ENABLED_RULES: EnabledRules = EnabledRules(Vec::new());
 
 /// The per-file work more than one rule needs, computed lazily and at most
 /// once: the name [`Resolver`], the [`FileScan`], the unresolvable-`using`
@@ -168,12 +201,15 @@ struct RuleCache<'a> {
 
 impl<'a> RuleContext<'a> {
     /// A context over `root` with no resolution context, no include problems,
-    /// no Julia target, and the default per-rule options — the floor every rule
-    /// sees. Layer the optional tiers on with
+    /// no Julia target, the default per-rule options, no suppression
+    /// directives, and no enabled-rule set — the floor every rule sees. Layer
+    /// the optional tiers on with
     /// [`with_resolution`](Self::with_resolution),
     /// [`with_includes`](Self::with_includes),
-    /// [`with_julia_target`](Self::with_julia_target), and
-    /// [`with_config`](Self::with_config).
+    /// [`with_julia_target`](Self::with_julia_target),
+    /// [`with_config`](Self::with_config),
+    /// [`with_suppressions`](Self::with_suppressions), and
+    /// [`with_enabled_rules`](Self::with_enabled_rules).
     pub fn new(path: Option<&'a Path>, root: &'a SyntaxNode, model: &'a SemanticModel) -> Self {
         Self {
             path,
@@ -183,6 +219,8 @@ impl<'a> RuleContext<'a> {
             includes: &[],
             julia_target: None,
             config: &DEFAULT_RULES_CONFIG,
+            suppressions: &EMPTY_SUPPRESSIONS,
+            enabled_rules: &EMPTY_ENABLED_RULES,
             cache: RuleCache::default(),
         }
     }
@@ -213,6 +251,21 @@ impl<'a> RuleContext<'a> {
     #[must_use]
     pub fn with_config(mut self, config: &'a RulesConfig) -> Self {
         self.config = config;
+        self
+    }
+
+    /// Attach this file's parsed `# fatou-ignore` directives (see
+    /// [`SuppressionMap::build`]).
+    #[must_use]
+    pub fn with_suppressions(mut self, suppressions: &'a SuppressionMap) -> Self {
+        self.suppressions = suppressions;
+        self
+    }
+
+    /// Attach the rule IDs running in this pass (see [`ResolvedRules::enabled`]).
+    #[must_use]
+    pub fn with_enabled_rules(mut self, enabled_rules: &'a EnabledRules) -> Self {
+        self.enabled_rules = enabled_rules;
         self
     }
 
@@ -467,6 +520,23 @@ pub trait Rule: Send + Sync {
     fn check_file(&self, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
         let _ = (ctx, sink);
     }
+
+    /// Post-suppression pass, run once after the surviving findings have been
+    /// filtered through the file's `# fatou-ignore` directives. `used` records
+    /// which directives actually matched a finding.
+    ///
+    /// Separate from [`Rule::check_file`] because its input is a *driver* fact —
+    /// which suppressions fired — that does not exist until filtering has run.
+    /// No implementors yet; the future `meta/*-suppression` rules
+    /// (`outdated-suppression`) are the consumers. The default is a no-op.
+    fn check_suppressions(
+        &self,
+        ctx: &RuleContext<'_>,
+        used: &DirectiveUsage,
+        sink: &mut Vec<Diagnostic>,
+    ) {
+        let _ = (ctx, used, sink);
+    }
 }
 
 /// One enabled rule plus the severity this run stamps on its findings: the
@@ -495,6 +565,8 @@ pub struct ResolvedRules {
     /// threaded through the per-file entry points, which would widen every
     /// caller for the sake of the few rules that take options.
     rules_config: RulesConfig,
+    /// The surviving rule IDs, for each [`RuleContext`] to borrow.
+    enabled: EnabledRules,
 }
 
 impl ResolvedRules {
@@ -554,6 +626,8 @@ impl ResolvedRules {
             }
         }
 
+        let enabled = EnabledRules(rules.iter().map(|c| c.rule.id()).collect());
+
         (
             Self {
                 rules,
@@ -561,9 +635,40 @@ impl ResolvedRules {
                 any_node_rules,
                 julia_target: None,
                 rules_config: config.rules.clone(),
+                enabled,
             },
             unknown,
         )
+    }
+
+    /// A rule set for tests: the given rules with their default severities and
+    /// the default options, dispatch table included.
+    #[cfg(test)]
+    fn with_rules(rules: Vec<Box<dyn Rule>>) -> Self {
+        let rules: Vec<ConfiguredRule> = rules
+            .into_iter()
+            .map(|rule| {
+                let severity = rule.default_severity();
+                ConfiguredRule { rule, severity }
+            })
+            .collect();
+        let mut by_kind: Vec<Vec<usize>> = vec![Vec::new(); SyntaxKind::COUNT];
+        let mut any_node_rules = false;
+        for (i, configured) in rules.iter().enumerate() {
+            for kind in configured.rule.interests() {
+                by_kind[*kind as usize].push(i);
+                any_node_rules = true;
+            }
+        }
+        let enabled = EnabledRules(rules.iter().map(|c| c.rule.id()).collect());
+        Self {
+            rules,
+            by_kind,
+            any_node_rules,
+            julia_target: None,
+            rules_config: RulesConfig::default(),
+            enabled,
+        }
     }
 
     /// Set the declared Julia support range these rules check against. Off by
@@ -586,9 +691,21 @@ impl ResolvedRules {
         &self.rules_config
     }
 
-    /// Run every configured rule against `ctx` in one shared CST traversal.
-    /// Diagnostics carry `ctx.path` and are stably sorted by `(start, end,
-    /// rule)`.
+    /// The rule IDs running in this pass, for the driver to hand to each
+    /// file's [`RuleContext`].
+    pub fn enabled(&self) -> &EnabledRules {
+        &self.enabled
+    }
+
+    /// Run every configured rule against `ctx` in one shared CST traversal,
+    /// dropping the findings `ctx.suppressions` covers. Diagnostics carry
+    /// `ctx.path` and are stably sorted by `(start, end, rule)`.
+    ///
+    /// Suppression is filtered *here*, not by the caller, for two reasons: the
+    /// directive list has to reach rules on [`RuleContext`], and the
+    /// post-suppression pass ([`Rule::check_suppressions`]) needs the *result*
+    /// of filtering — which directives fired — a fact that does not exist any
+    /// earlier.
     pub fn run(&self, ctx: &RuleContext<'_>) -> Vec<Diagnostic> {
         let mut all = Vec::new();
 
@@ -615,6 +732,24 @@ impl ResolvedRules {
             let before = all.len();
             configured.rule.check_file(ctx, &mut all);
             stamp_severity(&mut all[before..], configured.severity);
+        }
+
+        // Drop the suppressed findings, recording which directives did the
+        // work.
+        let used = ctx.suppressions.filter(&mut all);
+
+        // Post-suppression pass. Its findings are suppressible too, but
+        // against the *frozen* usage record — a directive that only ever
+        // silenced a post-pass finding is not thereby "used".
+        let mut post = Vec::new();
+        for configured in &self.rules {
+            let before = post.len();
+            configured.rule.check_suppressions(ctx, &used, &mut post);
+            stamp_severity(&mut post[before..], configured.severity);
+        }
+        if !post.is_empty() {
+            post.retain(|d| !ctx.suppressions.is_suppressed(d.rule, d.range));
+            all.append(&mut post);
         }
 
         // Stamp the file path onto every finding centrally; rules leave it
@@ -1039,5 +1174,108 @@ mod tests {
         let model = SemanticModel::build(&parsed.cst);
         let ctx = RuleContext::new(None, &parsed.cst, &model);
         assert!(ctx.config.discouraged_function.lookup("exit").is_some());
+    }
+}
+
+#[cfg(test)]
+mod suppression_dispatch_tests {
+    use super::*;
+    use crate::semantic::SemanticModel;
+
+    /// A rule that flags every `CALL_EXPR`, so a fixture can trigger a finding
+    /// with any call and a directive can suppress it.
+    struct FakeError;
+    impl Rule for FakeError {
+        fn id(&self) -> &'static str {
+            "fake-error"
+        }
+        fn interests(&self) -> &'static [SyntaxKind] {
+            &[SyntaxKind::CALL_EXPR]
+        }
+        fn check(&self, el: &SyntaxElement, _ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
+            sink.push(Diagnostic::new("fake-error", el.text_range(), "boom"));
+        }
+    }
+
+    /// A stand-in for `outdated-suppression`: reports every directive the
+    /// filter left unused, from the post-suppression pass.
+    struct FakePost;
+    impl Rule for FakePost {
+        fn id(&self) -> &'static str {
+            "fake-post"
+        }
+        fn check_suppressions(
+            &self,
+            ctx: &RuleContext<'_>,
+            used: &DirectiveUsage,
+            sink: &mut Vec<Diagnostic>,
+        ) {
+            for (i, directive) in ctx.suppressions.directives().iter().enumerate() {
+                if !used.is_used(i) {
+                    sink.push(Diagnostic::new("fake-post", directive.comment, "unused"));
+                }
+            }
+        }
+    }
+
+    fn run_on(src: &str, rules: Vec<Box<dyn Rule>>) -> Vec<Diagnostic> {
+        let parsed = crate::parser::parse(src);
+        assert!(parsed.diagnostics.is_empty(), "fixture must parse clean");
+        let model = SemanticModel::build(&parsed.cst);
+        let suppressions = crate::linter::suppression::SuppressionMap::build(&parsed.cst);
+        let resolved = ResolvedRules::with_rules(rules);
+        let ctx = RuleContext::new(None, &parsed.cst, &model)
+            .with_suppressions(&suppressions)
+            .with_enabled_rules(resolved.enabled());
+        resolved.run(&ctx)
+    }
+
+    /// Suppression filtering lives in `run`, not in `check.rs` — the rules
+    /// need the directive list on `RuleContext`, and the post-suppression pass
+    /// needs the *result* of filtering.
+    #[test]
+    fn run_filters_suppressed_findings() {
+        let diags = run_on(
+            "# fatou-ignore fake-error: quiet\nf(1)\n",
+            vec![Box::new(FakeError)],
+        );
+        assert!(diags.is_empty(), "expected no findings, got {diags:?}");
+    }
+
+    #[test]
+    fn post_pass_reports_directives_that_matched_nothing() {
+        // The directive names a rule that never fires, so the post-pass rule
+        // sees it unused and reports on its comment range.
+        let src = "# fatou-ignore fake-error: stale\nx = 1\n";
+        let diags = run_on(src, vec![Box::new(FakeError), Box::new(FakePost)]);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].rule, "fake-post");
+        assert_eq!(&src[diags[0].range], "# fatou-ignore fake-error: stale");
+    }
+
+    /// Post-pass findings are themselves suppressible, but against the frozen
+    /// usage record — and a directive never covers a finding inside its own
+    /// comment, so the file-wide `fake-post` directive silences the finding
+    /// about the stale directive while staying reportable itself.
+    #[test]
+    fn post_pass_findings_are_refiltered() {
+        let src = "# fatou-ignore-file fake-post: hush\n# fatou-ignore fake-error: stale\nx = 1\n";
+        let diags = run_on(src, vec![Box::new(FakeError), Box::new(FakePost)]);
+        assert_eq!(diags.len(), 1, "got {diags:?}");
+        assert_eq!(&src[diags[0].range], "# fatou-ignore-file fake-post: hush");
+    }
+
+    /// The rule set reaches rules through the context, so a post-suppression
+    /// pass can tell "this rule found nothing" from "this rule never ran".
+    #[test]
+    fn enabled_rules_reflects_the_resolved_set() {
+        let config = LintConfig {
+            select: Some(vec!["unused-binding".to_string()]),
+            ..LintConfig::default()
+        };
+        let (resolved, unknown) = ResolvedRules::resolve(&config);
+        assert!(unknown.is_empty());
+        assert!(resolved.enabled().contains("unused-binding"));
+        assert!(!resolved.enabled().contains("discouraged-function"));
     }
 }
