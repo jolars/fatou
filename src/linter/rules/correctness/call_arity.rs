@@ -514,6 +514,28 @@ mod tests {
     }
 
     #[test]
+    fn a_generator_argument_counts_as_one_positional() {
+        // The lone-generator call carries no argument list, and a generator
+        // sharing one is not wrapped in an `ARG`; either way it is exactly one
+        // positional argument.
+        let lib = base_with("minimum", 1);
+        assert_eq!(
+            messages("minimum(g(x) for x in group)\n", &lib, None),
+            Vec::<String>::new()
+        );
+
+        let lib = base_with("reduce", 2);
+        assert_eq!(
+            messages("reduce(+, x for x in xs)\n", &lib, None),
+            Vec::<String>::new()
+        );
+        // Counted, not waved through: a genuinely wrong count still reports.
+        let msgs = messages("reduce(x for x in xs)\n", &lib, None);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert!(msgs[0].contains("takes 1 positional argument"), "{msgs:?}");
+    }
+
+    #[test]
     fn no_resolution_context_is_silent() {
         let parsed = crate::parser::parse("f(x) = x\nf(1, 2)\n");
         let model = SemanticModel::build(&parsed.cst);

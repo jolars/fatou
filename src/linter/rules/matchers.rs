@@ -5,7 +5,9 @@
 //! surprisingly long line to write: keyword arguments live on both sides of the
 //! `;`, the `;`-block admits a bare-name shorthand (`f(x; verbose)`), splats
 //! open the argument set on either side, a trailing `do` block passes a
-//! function the argument list does not show, and a definition's signature is a
+//! function the argument list does not show, a generator argument
+//! (`sum(x for x in xs)`) is one argument wearing no `ARG` wrapper — and
+//! sometimes no argument list either — and a definition's signature is a
 //! `CALL_EXPR` too. [`CallShape`] answers all of that once, and
 //! [`plain_call`] collapses the whole opening into one call.
 //!
@@ -64,7 +66,7 @@ pub fn plain_call(node: &SyntaxNode, name: &str, arity: usize) -> Option<(CallEx
     if !shape.is_plain(arity) {
         return None;
     }
-    Some((call, shape.positional_exprs()?))
+    Some((call, shape.positional))
 }
 
 // --- argument shape --------------------------------------------------------
@@ -77,13 +79,15 @@ pub fn plain_call(node: &SyntaxNode, name: &str, arity: usize) -> Option<(CallEx
 /// recognize, could be passing anything). A rule that reasons about arity must
 /// check the matching `*_open` flag before trusting a count.
 pub struct CallShape {
-    /// The positional arguments, in source order. Splats are **not** included:
-    /// they set [`positional_open`](Self::positional_open) instead, since they
-    /// pass an unknown number of arguments.
-    pub positional: Vec<Arg>,
+    /// The positional arguments' expressions, in source order. Splats are
+    /// **not** included: they set [`positional_open`](Self::positional_open)
+    /// instead, since they pass an unknown number of arguments.
+    pub positional: Vec<Expr>,
     /// The keyword arguments, in source order, from both sides of the `;`.
     pub keywords: Vec<KeywordMatch>,
-    /// A positional splat (`f(xs...)`) leaves the positional count unknown.
+    /// A positional splat (`f(xs...)`), an argument whose expression is
+    /// unreadable, or an unrecognized argument-list entry leaves the positional
+    /// count unknown.
     pub positional_open: bool,
     /// A keyword splat (`f(; kw...)`), an unreadable keyword name, or an
     /// unrecognized `;`-block entry leaves the keyword set unknown.
@@ -114,11 +118,22 @@ impl CallShape {
             do_block: has_do_block(call),
         };
         let Some(args) = call.arg_list() else {
+            // The lone-generator call `f(x for x in xs)` has no argument list
+            // at all: the parser hangs the `GENERATOR` straight off the
+            // `CALL_EXPR`, the call's own parentheses serving as its
+            // delimiters. Julia passes it as one positional argument.
+            shape.push_positional(lone_generator(call));
             return shape;
         };
         for child in args.syntax().children() {
             match child.kind() {
-                SyntaxKind::ARG => shape.push_positional(&child),
+                SyntaxKind::ARG => {
+                    shape.push_positional(Arg::cast(child.clone()).and_then(|arg| arg.expr()));
+                }
+                // A generator sharing the argument list with other arguments
+                // (`f(a, x for x in xs)`, `sum(x for x in xs; init = 0)`) is
+                // not wrapped in an `ARG`, but it is one positional argument.
+                SyntaxKind::GENERATOR => shape.push_positional(Expr::cast(child.clone())),
                 SyntaxKind::KEYWORD_ARG => shape.push_keyword(&child),
                 // After the `;`: keyword arguments, the bare-name shorthand
                 // `f(; verbose)`, and the keyword splat `f(; kw...)`.
@@ -131,7 +146,9 @@ impl CallShape {
                         }
                     }
                 }
-                _ => {}
+                // Error recovery (an `ERROR` node for `f(x,,y)`) or a shape
+                // this module does not know: either way the count is unknown.
+                _ => shape.positional_open = true,
             }
         }
         shape
@@ -147,21 +164,13 @@ impl CallShape {
             && !self.do_block
     }
 
-    /// The positional arguments' expressions, or `None` if any argument has
-    /// none — which only error recovery produces, and which no rule should
-    /// reason about.
-    pub fn positional_exprs(&self) -> Option<Vec<Expr>> {
-        self.positional.iter().map(Arg::expr).collect()
-    }
-
-    fn push_positional(&mut self, arg: &SyntaxNode) {
-        let Some(arg) = Arg::cast(arg.clone()) else {
-            return;
-        };
-        if matches!(arg.expr(), Some(Expr::SplatExpr(_))) {
-            self.positional_open = true;
-        } else {
-            self.positional.push(arg);
+    /// Record one positional argument's expression. `None` — an argument the
+    /// parser left without an expression, which only error recovery produces —
+    /// opens the set rather than being counted or dropped.
+    fn push_positional(&mut self, expr: Option<Expr>) {
+        match expr {
+            None | Some(Expr::SplatExpr(_)) => self.positional_open = true,
+            Some(expr) => self.positional.push(expr),
         }
     }
 
@@ -192,6 +201,17 @@ impl CallShape {
             Some(name) => self.keywords.push(KeywordMatch { name, value: None }),
         }
     }
+}
+
+/// The `GENERATOR` a lone-generator call (`f(x for x in xs)`) carries in place
+/// of an argument list. The callee is the first child, so the search starts
+/// past it: a generator *callee* (`(x for x in xs)(y)`) is not an argument.
+fn lone_generator(call: &CallExpr) -> Option<Expr> {
+    call.syntax()
+        .children()
+        .skip(1)
+        .find(|child| child.kind() == SyntaxKind::GENERATOR)
+        .and_then(Expr::cast)
 }
 
 // --- call-position policy --------------------------------------------------
@@ -325,10 +345,7 @@ mod tests {
     fn call_shape_splits_positional_and_keyword_arguments() {
         let shape = shape("f(a, b, c = 1; d = 2, e)\n");
         assert_eq!(shape.positional.len(), 2);
-        assert_eq!(
-            texts(&shape.positional_exprs().expect("all args have expressions")),
-            ["a", "b"]
-        );
+        assert_eq!(texts(&shape.positional), ["a", "b"]);
         let names: Vec<&str> = shape.keywords.iter().map(|k| k.name.text()).collect();
         // `c = 1` before the `;` is a keyword argument too, as Julia lowers it.
         assert_eq!(names, ["c", "d", "e"]);
@@ -358,6 +375,38 @@ mod tests {
         assert!(!kw_splat.positional_open);
         assert!(kw_splat.keyword_open);
         assert!(kw_splat.keywords.is_empty());
+    }
+
+    #[test]
+    fn call_shape_counts_a_generator_as_one_positional_argument() {
+        // A lone generator has no argument list at all: the parser hangs the
+        // `GENERATOR` off the call, the call's parentheses serving as its
+        // delimiters (hence the parentheses in its text).
+        let lone = shape("minimum(f(x) for x in xs)\n");
+        assert_eq!(texts(&lone.positional), ["(f(x) for x in xs)"]);
+        assert!(!lone.positional_open);
+        assert!(lone.is_plain(1));
+
+        // Sharing the argument list, it is a bare `GENERATOR` sibling of the
+        // other arguments rather than an `ARG`.
+        let with_arg = shape("f(a, x for x in xs)\n");
+        assert_eq!(texts(&with_arg.positional), ["a", "x for x in xs"]);
+        assert!(with_arg.is_plain(2));
+
+        // Keyword parameters after the `;` put the generator in a list too.
+        let with_kw = shape("sum(x for x in xs; init = 0)\n");
+        assert_eq!(texts(&with_kw.positional), ["x for x in xs"]);
+        assert_eq!(with_kw.keywords.len(), 1);
+        assert!(!with_kw.positional_open);
+    }
+
+    #[test]
+    fn call_shape_opens_the_count_on_an_unrecognized_entry() {
+        // `f(x,,y)` recovers as an `ERROR` node covering the junk: an entry
+        // this module cannot read must open the count, not be skipped.
+        let broken = shape("f(x,,y)\n");
+        assert!(broken.positional_open);
+        assert!(!broken.is_plain(1));
     }
 
     #[test]

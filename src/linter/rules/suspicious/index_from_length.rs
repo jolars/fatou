@@ -170,8 +170,7 @@ impl LengthFn {
 /// The `size` call's dimension argument as source text, if it fits on one line
 /// (a multi-line expression would mangle the one-line message).
 fn dimension_text(shape: &CallShape) -> Option<String> {
-    let dim = shape.positional_exprs()?.into_iter().nth(1)?;
-    let text = dim.syntax().text().to_string();
+    let text = shape.positional.get(1)?.syntax().text().to_string();
     (!text.contains('\n')).then_some(text)
 }
 
