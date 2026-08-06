@@ -130,9 +130,13 @@ it. We are behind arity only on the CFG and on rule ergonomics.
     67740 blocks): 7 unreachable blocks, every one hand-checked as real dead
     code (`return ex; return` in StructUtils, a `while true` with no `break`
     in an HTTP example), no false positives.
-- [ ] Follow-up, once a rule consumes the CFG: `is_unreachable` is a linear
-  scan over every block of every region, so a rule asking per statement is
-  quadratic. Index by range if a rule ever needs it per node rather than once.
+- [x] `is_unreachable` was a linear scan over every block of every region, so a
+  rule asking per statement would have been quadratic. `FileControlFlow::build`
+  now collects the statement ranges of the unreachable blocks into a
+  `HashSet<TextRange>` as the graphs are built, and the predicate is a hash
+  lookup into it. The index costs nothing in practice: unreachable code is rare,
+  so the set is empty for nearly every file. `tests/cfg.rs` pins it against the
+  old scan, statement by statement, over the whole parser fixture corpus.
 - [ ] Per-rule config: a `[lint.rules.<id>]` TOML table plus a typed per-rule
   struct in `src/config.rs`, threaded to rules as a `config`/`&RuleConfig` field
   on `RuleContext` (arity's "§I4", which it records as *blocking* two of its own

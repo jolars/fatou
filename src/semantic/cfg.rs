@@ -27,7 +27,10 @@
 //! [`FileControlFlow::is_unreachable`] answers for the tail after an
 //! unconditional divergence, for an `if`/`else` that exits in *both* arms, for
 //! a `while true` with no `break`, and for a `@label` nothing jumps to — the
-//! signal a reachability-sensitive lint needs.
+//! signal a reachability-sensitive lint needs. The statements of the
+//! unreachable blocks are indexed by range at the same time, so that predicate
+//! is a hash lookup: a rule may ask it once per statement of the file without
+//! the walk turning quadratic.
 //!
 //! The one place that syntactic reading has to give ground is the **macro**: an
 //! expansion is code this graph never sees, and real Julia hides jumps in one
@@ -194,19 +197,38 @@ impl ControlFlowGraph {
 pub struct FileControlFlow {
     toplevel: ControlFlowGraph,
     regions: Vec<(NodePtr, ControlFlowGraph)>,
+    /// The range of every statement in an unreachable block, over all regions —
+    /// the index [`Self::is_unreachable`] answers from, so a rule may ask per
+    /// statement without rescanning the file's blocks each time. A pure
+    /// function of the graphs, so it does not affect `Eq`. Unreachable code is
+    /// rare, so this is empty for nearly every file.
+    unreachable: HashSet<TextRange>,
 }
 
 impl FileControlFlow {
     /// Build every region's CFG from a parsed file root.
     pub fn build(root: &SyntaxNode) -> Self {
         let toplevel = build_region_of(root);
-        let regions = root
+        let regions: Vec<_> = root
             .descendants()
             .filter(|node| is_region_owner(node.kind()))
             .filter(|node| body_block(node).is_some())
             .map(|node| (NodePtr::new(&node), build_region_of(&node)))
             .collect();
-        Self { toplevel, regions }
+        let mut this = Self {
+            toplevel,
+            regions,
+            unreachable: HashSet::new(),
+        };
+        this.unreachable = this
+            .graphs()
+            .flat_map(|cfg| {
+                cfg.iter()
+                    .filter(|(id, _)| !cfg.is_reachable(*id))
+                    .flat_map(|(_, block)| block.stmts.iter().copied())
+            })
+            .collect();
+        this
     }
 
     /// The file top-level region's CFG.
@@ -241,11 +263,11 @@ impl FileControlFlow {
     ///
     /// `false` for a range that is not a statement of any region, so a caller
     /// asking about an arbitrary node gets the conservative answer.
+    ///
+    /// A hash lookup into the index built with the graphs, so a rule may ask
+    /// once per statement of the file without the walk turning quadratic.
     pub fn is_unreachable(&self, range: TextRange) -> bool {
-        self.graphs().any(|cfg| {
-            cfg.iter()
-                .any(|(id, block)| !cfg.is_reachable(id) && block.stmts.contains(&range))
-        })
+        self.unreachable.contains(&range)
     }
 
     /// Render the graph textually (region by region) for snapshot tests. `src`

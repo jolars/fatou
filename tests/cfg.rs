@@ -316,14 +316,34 @@ fn a_finally_body_is_reachable_when_both_arms_diverge() {
     assert!(!unreachable(src, "cleanup()"));
 }
 
+// --- the unreachable index -------------------------------------------------
+
+/// The reference implementation of [`FileControlFlow::is_unreachable`]: the
+/// linear scan over every block of every region that the index replaces.
+fn scan_unreachable(cfg: &FileControlFlow, range: rowan::TextRange) -> bool {
+    std::iter::once(cfg.toplevel())
+        .chain(cfg.regions().iter().map(|(_, graph)| graph))
+        .any(|graph| {
+            graph
+                .iter()
+                .any(|(id, block)| !graph.is_reachable(id) && block.stmts.contains(&range))
+        })
+}
+
+#[test]
+fn a_range_that_is_not_a_statement_is_never_unreachable() {
+    // `dead` alone is a token inside the dead statement, not a statement of any
+    // block, so the answer is the conservative one.
+    let src = "function f()\n    return 1\n    dead()\nend\n";
+    assert!(unreachable(src, "dead()"));
+    assert!(!unreachable(src, "dead"));
+    assert!(!unreachable(src, "function f()"));
+}
+
 // --- corpus ----------------------------------------------------------------
 
-/// Every parser fixture — error-recovery trees included — must build a
-/// well-formed graph: no panic, every edge in range, and the entry reachable.
-/// The CFG runs on whatever the parser produced, so a malformed tree is a shape
-/// it has to survive, not one it may assume away.
-#[test]
-fn every_parser_fixture_builds_a_well_formed_graph() {
+/// Every parser fixture as `(case name, source)`, in name order.
+fn parser_fixtures() -> Vec<(String, String)> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parser");
     let mut cases: Vec<_> = std::fs::read_dir(&dir)
         .expect("read parser fixtures dir")
@@ -333,10 +353,45 @@ fn every_parser_fixture_builds_a_well_formed_graph() {
         .collect();
     cases.sort();
     assert!(!cases.is_empty(), "fixture corpus must not be empty");
+    cases
+        .into_iter()
+        .map(|case| {
+            let name = case.file_name().unwrap().to_string_lossy().to_string();
+            let src = std::fs::read_to_string(case.join("input.jl")).expect("read input.jl");
+            (name, src)
+        })
+        .collect()
+}
 
-    for case in cases {
-        let name = case.file_name().unwrap().to_string_lossy().to_string();
-        let src = std::fs::read_to_string(case.join("input.jl")).expect("read input.jl");
+/// The index must answer exactly what the linear scan would, statement by
+/// statement, over every parser fixture.
+#[test]
+fn the_index_agrees_with_a_scan_over_every_fixture() {
+    for (name, src) in parser_fixtures() {
+        let cfg = FileControlFlow::build(&parse(&src).cst);
+        let graphs =
+            std::iter::once(cfg.toplevel()).chain(cfg.regions().iter().map(|(_, graph)| graph));
+        for graph in graphs {
+            for block in graph.blocks() {
+                for range in &block.stmts {
+                    assert_eq!(
+                        cfg.is_unreachable(*range),
+                        scan_unreachable(&cfg, *range),
+                        "`{name}`: index disagrees with the scan at {range:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Every parser fixture — error-recovery trees included — must build a
+/// well-formed graph: no panic, every edge in range, and the entry reachable.
+/// The CFG runs on whatever the parser produced, so a malformed tree is a shape
+/// it has to survive, not one it may assume away.
+#[test]
+fn every_parser_fixture_builds_a_well_formed_graph() {
+    for (name, src) in parser_fixtures() {
         let cfg = FileControlFlow::build(&parse(&src).cst);
         let graphs =
             std::iter::once(cfg.toplevel()).chain(cfg.regions().iter().map(|(_, graph)| graph));
