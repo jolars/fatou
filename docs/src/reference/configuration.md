@@ -9,6 +9,14 @@ typo never silently falls back to a default.
 For a given file, Fatou looks for `fatou.toml` by walking up from the file's
 directory through its ancestors, stopping at the first `fatou.toml` it finds.
 
+The walk also stops at the repository root, so a `fatou.toml` above the
+repository never governs the project inside it. The root itself is searched, so
+the usual layout (`fatou.toml` beside `.git`) still applies, and a worktree or
+submodule checkout, whose `.git` is a file, bounds the walk the same way. A
+directory with no `.git` ancestor keeps walking to the filesystem root. For
+user-wide defaults, use the global config below rather than a file parked above
+your repositories.
+
 If no project `fatou.toml` is found, Fatou consults the `FATOU_CONFIG`
 environment variable, which names the file to use instead of the global user
 config below. This is handy for keeping one config on a synced drive and

@@ -346,14 +346,29 @@ impl RawConfig {
     }
 }
 
-/// Walk up from `anchor` looking for a `fatou.toml`. The env and global
-/// configs are *not* consulted here; those fallbacks live in
-/// [`Config::resolve`].
+/// Walk up from `anchor` looking for a `fatou.toml`. Stops at the first match
+/// or at the repository root, whichever comes first; the root itself is
+/// searched, so a `fatou.toml` beside `.git` still applies. Returns `None` if
+/// neither is found before the filesystem root.
+///
+/// The boundary keeps a project from silently inheriting a `fatou.toml` that
+/// sits above its repository — a stray file in `~` or `~/projects` would
+/// otherwise govern every repo under it. User-wide defaults belong in the
+/// [global user config](global_config_path) instead, which is consulted (with
+/// [`$FATOU_CONFIG`](CONFIG_ENV_VAR)) by [`Config::resolve`] when this walk
+/// comes up empty. A tree with no `.git` ancestor at all keeps the unbounded
+/// walk.
 fn discover(anchor: &Path) -> Option<PathBuf> {
     for dir in anchor.ancestors() {
         let candidate = dir.join(CONFIG_FILE_NAME);
         if candidate.is_file() {
             return Some(candidate);
+        }
+        // `.exists()` rather than `.is_dir()`: a worktree or submodule checkout
+        // has a `.git` *file* pointing at the real git directory, and it bounds
+        // the walk just the same.
+        if dir.join(".git").exists() {
+            return None;
         }
     }
     None
@@ -658,6 +673,101 @@ mod tests {
             .unwrap()
             .with_force_exclude(true);
         assert!(filter.force_excludes(Path::new("/project/vendor/a.jl")));
+    }
+
+    #[test]
+    fn discovery_walks_up_to_a_config_in_an_ancestor() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("src/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        let config = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&config, "[format]\nline-width = 70\n").unwrap();
+
+        assert_eq!(discover(&nested), Some(config));
+    }
+
+    #[test]
+    fn discovery_stops_at_the_repository_root() {
+        let dir = tempfile::tempdir().unwrap();
+        // A stray config above the repo must not govern the project inside it.
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "[format]\nline-width = 70\n",
+        )
+        .unwrap();
+        let repo = dir.path().join("repo");
+        let nested = repo.join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+
+        assert_eq!(discover(&nested), None);
+    }
+
+    /// The boundary directory is searched before the walk stops, so the usual
+    /// layout (`fatou.toml` beside `.git`) still resolves.
+    #[test]
+    fn discovery_finds_a_config_at_the_repository_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        let config = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&config, "[format]\nline-width = 70\n").unwrap();
+
+        assert_eq!(discover(&nested), Some(config));
+    }
+
+    /// A worktree or submodule checkout has a `.git` file, not a directory; it
+    /// bounds the walk just the same.
+    #[test]
+    fn a_dot_git_file_bounds_the_walk() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "[format]\nline-width = 70\n",
+        )
+        .unwrap();
+        let worktree = dir.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(worktree.join(".git"), "gitdir: ../repo/.git/worktrees/w\n").unwrap();
+
+        assert_eq!(discover(&worktree), None);
+    }
+
+    /// A tree with no `.git` ancestor keeps the unbounded walk, so a plain
+    /// directory of scripts still picks up a config above it.
+    #[test]
+    fn discovery_is_unbounded_outside_a_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).unwrap();
+        let config = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&config, "[format]\nline-width = 70\n").unwrap();
+
+        assert_eq!(discover(&nested), Some(config));
+    }
+
+    /// The repo boundary stops project discovery, not resolution: the global
+    /// config still applies below it.
+    #[test]
+    fn global_config_applies_below_the_repository_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "[format]\nline-width = 70\n",
+        )
+        .unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(&global, "[format]\nline-width = 60\n").unwrap();
+
+        let (config, source, _) =
+            Config::resolve_with_fallbacks(None, false, &repo, None, Some(&global)).unwrap();
+
+        assert_eq!(config.format.line_width, 60);
+        assert_eq!(source, ConfigSource::Global(global));
     }
 
     #[test]

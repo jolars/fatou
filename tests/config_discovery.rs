@@ -39,14 +39,26 @@ impl Sandbox {
         path
     }
 
-    /// Run `fatou format --check input.jl` with the sandboxed environment,
-    /// plus any extra env vars and arguments.
-    fn format_check(&self, env: &[(&str, &str)], args: &[&str]) -> Output {
+    /// Create a git repository at `relative` holding its own `input.jl`, and
+    /// return its path. Only the `.git` marker matters, so no real repository
+    /// is initialized.
+    fn write_repo(&self, relative: &str) -> std::path::PathBuf {
+        let repo = self.path().join(relative);
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::write(repo.join("input.jl"), WIDE_CALL).unwrap();
+        repo
+    }
+
+    /// Run fatou in `cwd` with the sandboxed environment, plus any extra env
+    /// vars, and the given arguments.
+    fn run(&self, cwd: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fatou"));
         command
             .args(args)
-            .args(["format", "--check", "input.jl"])
-            .current_dir(self.path())
+            .current_dir(cwd)
+            // Sandbox every candidate global-config location inside the temp
+            // dir (`$XDG_CONFIG_HOME`, `$HOME/.config`, and the platform config
+            // dir, which derives from `$HOME`/`%APPDATA%`).
             .env("XDG_CONFIG_HOME", self.path().join("xdg-config"))
             .env("HOME", self.path())
             .env("APPDATA", self.path())
@@ -55,6 +67,21 @@ impl Sandbox {
             command.env(key, value);
         }
         command.output().expect("run fatou")
+    }
+
+    /// Run `fatou format --check input.jl` at the sandbox root, with `args`
+    /// passed ahead of the subcommand as global flags.
+    fn format_check(&self, env: &[(&str, &str)], args: &[&str]) -> Output {
+        self.format_check_in(self.path(), env, args)
+    }
+
+    /// [`format_check`](Self::format_check) from a chosen working directory.
+    fn format_check_in(&self, cwd: &Path, env: &[(&str, &str)], args: &[&str]) -> Output {
+        self.run(
+            cwd,
+            env,
+            &[args, &["format", "--check", "input.jl"]].concat(),
+        )
     }
 }
 
@@ -172,6 +199,58 @@ fn dangling_env_config_is_an_error() {
     );
 }
 
+/// A `fatou.toml` above a repository belongs to an unrelated tree, so the walk
+/// stops at the repository root rather than inheriting it.
+#[test]
+fn discovery_stops_at_the_repository_root() {
+    let sandbox = Sandbox::new();
+    sandbox.write_config("fatou.toml", 40);
+    let repo = sandbox.write_repo("repo");
+
+    let output = sandbox.format_check_in(&repo, &[], &[]);
+
+    assert!(
+        !would_reformat(&output),
+        "the config above the repo should not apply; stderr: {}",
+        stderr(&output)
+    );
+}
+
+/// The boundary directory is searched before the walk stops, so the usual
+/// layout (`fatou.toml` beside `.git`) still resolves.
+#[test]
+fn config_at_the_repository_root_applies() {
+    let sandbox = Sandbox::new();
+    let repo = sandbox.write_repo("repo");
+    sandbox.write_config("repo/fatou.toml", 40);
+
+    let output = sandbox.format_check_in(&repo, &[], &[]);
+
+    assert!(
+        would_reformat(&output),
+        "a config beside `.git` should apply; stderr: {}",
+        stderr(&output)
+    );
+}
+
+/// The boundary stops project discovery, not resolution: the global config is
+/// still the fallback inside a repository. This is the intended replacement for
+/// a config parked above the repo.
+#[test]
+fn global_config_applies_inside_a_repository() {
+    let sandbox = Sandbox::new();
+    sandbox.write_config("xdg-config/fatou/fatou.toml", 40);
+    let repo = sandbox.write_repo("repo");
+
+    let output = sandbox.format_check_in(&repo, &[], &[]);
+
+    assert!(
+        would_reformat(&output),
+        "the global width of 40 should apply inside the repo; stderr: {}",
+        stderr(&output)
+    );
+}
+
 /// Relative excludes in a global config have no project directory to anchor at,
 /// so they resolve against the working directory instead.
 #[test]
@@ -183,16 +262,7 @@ fn global_config_excludes_resolve_against_the_working_directory() {
     std::fs::create_dir_all(sandbox.path().join("vendor")).unwrap();
     std::fs::write(sandbox.path().join("vendor/bad.jl"), "x=1\n").unwrap();
 
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fatou"));
-    let output = command
-        .args(["format", "--check", "."])
-        .current_dir(sandbox.path())
-        .env("XDG_CONFIG_HOME", sandbox.path().join("xdg-config"))
-        .env("HOME", sandbox.path())
-        .env("APPDATA", sandbox.path())
-        .env_remove("FATOU_CONFIG")
-        .output()
-        .expect("run fatou");
+    let output = sandbox.run(sandbox.path(), &[], &["format", "--check", "."]);
 
     assert!(
         output.status.success(),
