@@ -16,6 +16,13 @@
 //!
 //! The crate is `wasm32-unknown-unknown`-compatible: no filesystem, process,
 //! thread, or clock use.
+//!
+//! # Features
+//!
+//! - `serde` — `Serialize`/`Deserialize` for [`FormatStyle`] and
+//!   [`LineEnding`], spelled like their `fatou.toml` counterparts.
+//! - `schema` — additionally derives `schemars::JsonSchema`, so an embedder
+//!   (e.g. a dprint plugin) can generate a config schema.
 
 pub mod formatter;
 

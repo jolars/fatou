@@ -16,3 +16,13 @@ categories = ["development-tools", "text-processing"]
 [dependencies]
 fatou-parser = { path = "../fatou-parser", version = "0.1.0" }
 rowan = "0.16.1"
+schemars = { version = "1.2.1", optional = true }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+schema = ["serde", "dep:schemars"]
+
+[package.metadata.docs.rs]
+all-features = true

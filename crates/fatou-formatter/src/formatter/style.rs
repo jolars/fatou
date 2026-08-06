@@ -1,6 +1,16 @@
 /// The knobs that govern layout: the target line width, the indent step, and the
 /// newline style emitted at the end of each line.
+///
+/// With the `serde` feature the keys spell like their `fatou.toml`
+/// counterparts (`line-width`, `indent-width`, `line-ending`), and every field
+/// defaults, so an embedder's partial config deserializes directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(default, rename_all = "kebab-case")
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FormatStyle {
     pub line_width: u32,
     pub indent_width: u32,
@@ -23,6 +33,12 @@ impl Default for FormatStyle {
 /// the sole authority on *where* breaks go); this only selects the byte sequence
 /// those breaks render as in the final string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "kebab-case")
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub enum LineEnding {
     /// Detect the newline style per file from the first line ending in the
     /// source, defaulting to `\n` when the source has none. The default.
