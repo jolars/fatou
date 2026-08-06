@@ -88,30 +88,14 @@ fn fenced(out: &mut String, lang: &str, body: &str) {
     let _ = writeln!(out, "```");
 }
 
-/// The full `rules.md` reference page: a static preamble, an index linking every
-/// documented rule to its section (and marking the ones that are off by
-/// default), then one section per documented rule, all in registry order. A rule
-/// with no examples is skipped, so it appears in neither the index nor the body.
+/// The full `rules.md` reference page: a static preamble followed by one section
+/// per documented rule (one carrying at least one example), in registry order.
 pub fn render_reference_page() -> String {
-    let rules = crate::linter::rules::all_rules();
-    let documented = || rules.iter().filter(|rule| !rule.examples().is_empty());
-
     let mut out = String::from(PREAMBLE);
-
-    let _ = writeln!(out);
-    let _ = out.write_str(INDEX_INTRO);
-    let _ = writeln!(out);
-    for rule in documented() {
-        let id = rule.id();
-        let note = if rule.default_enabled() {
-            ""
-        } else {
-            " (off by default)"
-        };
-        let _ = writeln!(out, "- [`{id}`](#{id}){note}");
-    }
-
-    for rule in documented() {
+    for rule in crate::linter::rules::all_rules() {
+        if rule.examples().is_empty() {
+            continue;
+        }
         out.push('\n');
         out.push_str(&render_rule_doc(rule.as_ref()));
     }
@@ -131,6 +115,9 @@ keyed by its stable **rule ID**. That ID is what appears in a diagnostic, what
 `[lint.severity]` re-grades, and what a `# fatou-ignore <id>` comment
 suppresses.
 
+Most rules are on by default. The few that are opt-in say so in their
+description; name one in `select` to run it.
+
 Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
 (shown below as \"After applying the fix\") is applied by `fatou lint --fix`; an
 *unsafe* fix, one that may change behavior, is applied only with
@@ -138,11 +125,4 @@ Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
 
 Each example below is linted live to produce its diagnostics and fixed output,
 so this page never drifts from the rules' actual behavior.
-";
-
-const INDEX_INTRO: &str = "\
-Most rules are on by default. The ones marked *off by default* run only when you
-name them in `select`, either because they need project context to be sound (the
-language server enables those for workspace member files) or because they are
-noisy in idiomatic Julia.
 ";

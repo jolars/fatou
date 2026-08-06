@@ -9,6 +9,9 @@ keyed by its stable **rule ID**. That ID is what appears in a diagnostic, what
 `[lint.severity]` re-grades, and what a `# fatou-ignore <id>` comment
 suppresses.
 
+Most rules are on by default. The few that are opt-in say so in their
+description; name one in `select` to run it.
+
 Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
 (shown below as "After applying the fix") is applied by `fatou lint --fix`; an
 *unsafe* fix, one that may change behavior, is applied only with
@@ -16,34 +19,6 @@ Where a rewrite is unambiguous a rule carries an **autofix**: a *safe* fix
 
 Each example below is linted live to produce its diagnostics and fixed output,
 so this page never drifts from the rules' actual behavior.
-
-Most rules are on by default. The ones marked *off by default* run only when you
-name them in `select`, either because they need project context to be sound (the
-language server enables those for workspace member files) or because they are
-noisy in idiomatic Julia.
-
-- [`unused-binding`](#unused-binding)
-- [`unused-import`](#unused-import)
-- [`duplicate-argument`](#duplicate-argument)
-- [`unused-argument`](#unused-argument) (off by default)
-- [`undefined-name`](#undefined-name) (off by default)
-- [`break-outside-loop`](#break-outside-loop)
-- [`noteq-definition`](#noteq-definition)
-- [`unused-type-parameter`](#unused-type-parameter)
-- [`missing-include-file`](#missing-include-file)
-- [`include-cycle`](#include-cycle)
-- [`duplicate-include`](#duplicate-include)
-- [`julia-version-compat`](#julia-version-compat)
-- [`call-arity`](#call-arity) (off by default)
-- [`redefined-constant`](#redefined-constant)
-- [`type-piracy`](#type-piracy) (off by default)
-- [`assignment-in-condition`](#assignment-in-condition)
-- [`nothing-comparison`](#nothing-comparison)
-- [`missing-comparison`](#missing-comparison)
-- [`constant-condition`](#constant-condition)
-- [`module-shadows-parent`](#module-shadows-parent)
-- [`index-from-length`](#index-from-length)
-- [`discouraged-function`](#discouraged-function)
 
 ## `unused-binding`
 
