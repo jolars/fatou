@@ -4,17 +4,17 @@ tasks:
   lint:
     desc: Run clippy with warnings as errors
     cmds:
-      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   format:
     desc: Format the code with rustfmt
     cmds:
-      - cargo fmt --
+      - cargo fmt --all --
 
   format-check:
     desc: Check rustfmt formatting
     cmds:
-      - cargo fmt -- --check
+      - cargo fmt --all -- --check
 
   build-release:
     desc: Build the release binary
@@ -24,12 +24,12 @@ tasks:
   test:
     desc: Run the test suite
     cmds:
-      - cargo test
+      - cargo test --workspace
 
   test-debug:
     desc: Run tests with debug logging
     cmds:
-      - RUST_LOG=debug cargo test
+      - RUST_LOG=debug cargo test --workspace
 
   audit:
     desc: Run a security audit of dependencies

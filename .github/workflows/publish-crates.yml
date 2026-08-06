@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     tags:
+      # The member tags are included so a library-only release publishes
+      # immediately; `--skip-published` makes overlapping runs idempotent.
       - "v*"
+      - "fatou-parser-v*"
+      - "fatou-formatter-v*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,8 +19,9 @@ env:
 
 jobs:
   publish:
+    name: Publish to crates.io
     runs-on: ubuntu-latest
-    environment: release # Optional: for enhanced security
+    environment: release
     permissions:
       id-token: write # Required for OIDC token exchange
     steps:
@@ -29,20 +34,13 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Publish to crates.io
+      - name: Install cargo-workspaces
+        run: cargo install cargo-workspaces --locked
+
+      # Publishes in dependency order (fatou-parser, fatou-formatter, fatou);
+      # `--from-git` takes the versions at this commit and `--skip-published`
+      # silently skips crates already on crates.io.
+      - name: Publish workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          name=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].name')
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          # crates.io requires a descriptive User-Agent; 200 means the exact
-          # version already exists, so skip instead of failing the run.
-          status=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -A "fatou-release-ci (https://github.com/jolars/fatou)" \
-            "https://crates.io/api/v1/crates/$name/$version")
-          if [ "$status" = "200" ]; then
-            echo "$name@$version already on crates.io — skipping."
-            exit 0
-          fi
-          cargo publish --no-verify
+        run: cargo workspaces publish --from-git --skip-published --no-verify --yes

@@ -1,2 +1,6 @@
 [toolchain]
 channel = "stable"
+# `fatou-parser` and `fatou-formatter` are meant for wasm embedding (e.g. a
+# dprint plugin builds only for wasm32-unknown-unknown), so the target has to
+# build.
+targets = ["wasm32-unknown-unknown"]

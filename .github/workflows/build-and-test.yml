@@ -21,9 +21,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --workspace --verbose
       - name: Test
-        run: cargo test --verbose
+        run: cargo test --workspace --verbose
+
+  wasm:
+    name: wasm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm
+      # `fatou-parser` and `fatou-formatter` are meant to be embeddable in a
+      # dprint Wasm plugin, which builds only for wasm32-unknown-unknown.
+      # Nothing else in the workspace targets wasm, so this job is the only
+      # thing keeping the member crates free of filesystem/thread/time
+      # dependencies.
+      - name: Build fatou-parser for wasm
+        run: >
+          cargo build -p fatou-parser --release
+          --target wasm32-unknown-unknown
+      - name: Build fatou-formatter for wasm
+        run: >
+          cargo build -p fatou-formatter --release
+          --target wasm32-unknown-unknown --features schema
 
   supply-chain:
     name: audit & deny
@@ -41,7 +66,7 @@ jobs:
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, supply-chain]
+    needs: [test, wasm, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,7 +91,9 @@ jobs:
   build-release-assets:
     name: Build & Upload Release Assets
     needs: versionary
-    if: ${{ needs.versionary.outputs.release_created == 'true' }}
+    # `startsWith(…, 'v')` keeps member-crate releases (`fatou-parser-v*`,
+    # `fatou-formatter-v*`) from triggering CLI asset builds.
+    if: ${{ needs.versionary.outputs.release_created == 'true' && startsWith(needs.versionary.outputs.tag_name, 'v') }}
     uses: ./.github/workflows/packages.yml
     with:
       upload: "true"
@@ -79,7 +106,7 @@ jobs:
   publish-extensions:
     name: Publish Editor Extensions
     needs: [versionary, build-release-assets]
-    if: ${{ needs.versionary.outputs.release_created == 'true' }}
+    if: ${{ needs.versionary.outputs.release_created == 'true' && startsWith(needs.versionary.outputs.tag_name, 'v') }}
     uses: ./.github/workflows/publish-code-extensions.yml
     with:
       release-tag: ${{ needs.versionary.outputs.tag_name }}
@@ -88,7 +115,7 @@ jobs:
   publish-aur:
     name: Publish AUR Package
     needs: [versionary, build-release-assets]
-    if: ${{ needs.versionary.outputs.release_created == 'true' }}
+    if: ${{ needs.versionary.outputs.release_created == 'true' && startsWith(needs.versionary.outputs.tag_name, 'v') }}
     uses: ./.github/workflows/publish-aur.yml
     with:
       tag: ${{ needs.versionary.outputs.tag_name }}
