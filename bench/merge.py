@@ -53,13 +53,27 @@ def aggregate(files):
         for f in files
         if not f.get("ok")
     ]
+    # A directory measurement can succeed overall while individual files inside
+    # it were processed but left unrewritten (the tool's own output failed its
+    # parse check). That work happened before the check, so those bytes stay in
+    # the throughput denominator -- but the file did not come out formatted, so
+    # it does not count towards `files_ok` and is named in `skipped`.
+    file_errors = [p for f in ok for p in f.get("file_errors", [])]
+    skipped += [
+        {
+            "file": Path(p).name,
+            "reason": "processed, but the tool's own output failed its parse "
+            "check, so the file was left unchanged",
+        }
+        for p in file_errors
+    ]
     total_bytes = sum(f["bytes"] for f in ok)
     median_total_ns = sum(f["median_ns"] for f in ok)
     min_total_ns = sum(f["min_ns"] for f in ok)
     mbps = (total_bytes / (median_total_ns * 1e-9) / 1e6) if median_total_ns else 0.0
     # A directory measurement is one record covering many files; it reports its
     # own count via `n_files`. Per-file records omit it and count as one.
-    files_ok = sum(f.get("n_files", 1) for f in ok)
+    files_ok = sum(f.get("n_files", 1) for f in ok) - len(file_errors)
     return {
         "files_ok": files_ok,
         "total_bytes": total_bytes,

@@ -16,6 +16,44 @@
 # line), or "dir" and <target> is a directory. In "dir" mode only JuliaFormatter
 # is measured, via its recursive `format(dir; overwrite=false)`; Runic has no
 # in-process directory API and is reported unavailable.
+#
+# In "dir" mode a tool may process a file and then refuse to rewrite it (as
+# JuliaFormatter does for JuliaSyntax's parser.jl, whose formatted output fails
+# JuliaFormatter's own parse check). Those paths are collected into the record's
+# `file_errors` so the merged results never present the run as clean; the
+# formatting work happens before the check, so the timing and byte total stand.
+
+import Logging
+
+# --- per-file failure capture -------------------------------------------------
+# JuliaFormatter's recursive directory mode emits a `@warn` pair for every file
+# whose formatted output fails its own parse check, once per call -- so a
+# 20-iteration loop buries the run in identical warnings. This logger swallows
+# that pair and records the affected paths instead, so the failure is reported
+# once, as data, rather than dozens of times as console noise. Anything else is
+# forwarded to the parent logger untouched.
+struct FailureLogger <: Logging.AbstractLogger
+    failures::Set{String}
+    parent::Logging.AbstractLogger
+end
+
+const FAILED_FILE_RE = r"^Failed to format file (.*) due to a parsing error"
+const UNPARSABLE_RE = r"^Formatted text is not parsable"
+
+Logging.min_enabled_level(l::FailureLogger) = Logging.min_enabled_level(l.parent)
+Logging.shouldlog(l::FailureLogger, args...) = true
+Logging.catch_exceptions(l::FailureLogger) = Logging.catch_exceptions(l.parent)
+
+function Logging.handle_message(l::FailureLogger, level, message, _mod, group, id, file, line; kwargs...)
+    text = string(message)
+    m = match(FAILED_FILE_RE, text)
+    if m !== nothing
+        push!(l.failures, m.captures[1])
+        return nothing
+    end
+    occursin(UNPARSABLE_RE, text) && return nothing
+    Logging.handle_message(l.parent, level, message, _mod, group, id, file, line; kwargs...)
+end
 
 # --- minimal JSON writer (no JSON.jl dependency in the pinned env) -----------
 
@@ -82,7 +120,7 @@ end
 # Project scenario: time a tool's whole-directory formatting entry point as a
 # single unit (discover + format every file, read-only), mirroring the Rust
 # harness's directory mode. `fmt` takes the directory path.
-function bench_dir(fmt, path::AbstractString, iterations::Int, warmup::Int)
+function bench_dir(fmt, path::AbstractString, iterations::Int, warmup::Int, failures::Set{String})
     bytes, n_files = jl_stats(path)
 
     try
@@ -106,9 +144,14 @@ function bench_dir(fmt, path::AbstractString, iterations::Int, warmup::Int)
     end
 
     mn, med, mean, sd = stats(samples)
+    # Files the tool processed but refused to rewrite (its own output failed its
+    # parse check). The formatting work still happened before the check, so the
+    # timing and byte total stand; `file_errors` records that the run was not
+    # clean over the whole tree.
     Dict(
         "path" => path, "bytes" => bytes, "n_files" => n_files, "ok" => true,
         "min_ns" => mn, "median_ns" => med, "mean_ns" => mean, "stddev_ns" => sd,
+        "file_errors" => sort(collect(failures)),
     )
 end
 
@@ -185,36 +228,47 @@ function main()
     outpath = length(ARGS) >= 4 ? ARGS[4] : nothing
     mode = length(ARGS) >= 5 ? ARGS[5] : "files"
 
-    tools = if mode == "dir"
+    failures = Set{String}()
+    logger = FailureLogger(failures, Logging.current_logger())
+
+    tools = Logging.with_logger(logger) do
+        if mode == "dir"
         # Folder scenario: JuliaFormatter's recursive, read-only directory mode.
         # Runic has no in-process directory API, so it is excluded by design.
-        jlfmt_dir = HAVE_JLFMT ? (p -> JuliaFormatter.format(p; overwrite = false)) : identity
-        jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
-        jlfmt = if HAVE_JLFMT
-            Dict(
-                "tool" => "juliaformatter", "available" => true,
-                "version" => string(jlfmt_ver),
-                "files" => [bench_dir(jlfmt_dir, target, iterations, warmup)],
-            )
+            jlfmt_dir = HAVE_JLFMT ? (p -> JuliaFormatter.format(p; overwrite = false)) : identity
+            jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
+            jlfmt = if HAVE_JLFMT
+                Dict(
+                    "tool" => "juliaformatter", "available" => true,
+                    "version" => string(jlfmt_ver),
+                    "files" => [bench_dir(jlfmt_dir, target, iterations, warmup, failures)],
+                )
+            else
+                Dict("tool" => "juliaformatter", "available" => false, "version" => nothing, "files" => [])
+            end
+            [
+                Dict("tool" => "runic", "available" => false, "version" => nothing, "files" => []),
+                jlfmt,
+            ]
         else
-            Dict("tool" => "juliaformatter", "available" => false, "version" => nothing, "files" => [])
+            files = filter(!isempty, strip.(readlines(target)))
+
+            runic_fmt = HAVE_RUNIC ? (s -> Runic.format_string(s)) : identity
+            runic_ver = HAVE_RUNIC ? pkgversion(Runic) : nothing
+            jlfmt_fmt = HAVE_JLFMT ? (s -> JuliaFormatter.format_text(s)) : identity
+            jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
+
+            [
+                run_tool("runic", HAVE_RUNIC, runic_fmt, runic_ver, files, iterations, warmup),
+                run_tool("juliaformatter", HAVE_JLFMT, jlfmt_fmt, jlfmt_ver, files, iterations, warmup),
+            ]
         end
-        [
-            Dict("tool" => "runic", "available" => false, "version" => nothing, "files" => []),
-            jlfmt,
-        ]
-    else
-        files = filter(!isempty, strip.(readlines(target)))
+    end
 
-        runic_fmt = HAVE_RUNIC ? (s -> Runic.format_string(s)) : identity
-        runic_ver = HAVE_RUNIC ? pkgversion(Runic) : nothing
-        jlfmt_fmt = HAVE_JLFMT ? (s -> JuliaFormatter.format_text(s)) : identity
-        jlfmt_ver = HAVE_JLFMT ? pkgversion(JuliaFormatter) : nothing
-
-        [
-            run_tool("runic", HAVE_RUNIC, runic_fmt, runic_ver, files, iterations, warmup),
-            run_tool("juliaformatter", HAVE_JLFMT, jlfmt_fmt, jlfmt_ver, files, iterations, warmup),
-        ]
+    # One line instead of the suppressed per-call warning storm.
+    for f in sort(collect(failures))
+        println(stderr, "note: JuliaFormatter could not rewrite $f (its own output ",
+            "failed its parse check); formatting work still counted, file left unchanged")
     end
 
     report = Dict(
