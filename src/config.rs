@@ -453,8 +453,8 @@ fn global_config_path() -> Option<PathBuf> {
     }
     // Windows `%APPDATA%`, macOS `~/Library/Application Support`, Linux
     // `~/.config`.
-    let native = dirs::config_dir();
-    let dotfile = dirs::home_dir().map(|home| home.join(".config"));
+    let native = native_config_dir();
+    let dotfile = home_dir().map(|home| home.join(".config"));
     if cfg!(windows) {
         candidates.extend(native);
         candidates.extend(dotfile);
@@ -466,6 +466,36 @@ fn global_config_path() -> Option<PathBuf> {
         .into_iter()
         .map(|dir| dir.join("fatou").join(CONFIG_FILE_NAME))
         .find(|path| path.is_file())
+}
+
+/// The native config directory: `%APPDATA%` on Windows, and otherwise whatever
+/// [`dirs::config_dir`] reports.
+///
+/// On Windows `dirs::config_dir()` asks the known-folder API and ignores
+/// `%APPDATA%`, so the environment is consulted first: a user (or a test
+/// harness) who sets it means it.
+fn native_config_dir() -> Option<PathBuf> {
+    if cfg!(windows)
+        && let Some(appdata) = std::env::var_os("APPDATA")
+        && !appdata.is_empty()
+    {
+        return Some(PathBuf::from(appdata));
+    }
+    dirs::config_dir()
+}
+
+/// The user's home directory, preferring `$HOME` on every platform.
+///
+/// Same rationale as [`native_config_dir`]: on Windows `dirs::home_dir()` reads
+/// the known-folder profile path and ignores `$HOME`, which would leave the
+/// `~/.config` candidate unredirectable there.
+fn home_dir() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME")
+        && !home.is_empty()
+    {
+        return Some(PathBuf::from(home));
+    }
+    dirs::home_dir()
 }
 
 #[cfg(test)]
