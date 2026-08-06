@@ -1,0 +1,12 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [function f() while true step() end dead(…] -> return
+region: function f() while true step() end dead(…
+  bb0: [while true step() end] -> bb1
+  bb1: [] -> bb3
+  bb2 (dead): [] -> unreachable
+  bb3: [step()] -> bb1
+  bb4 (dead): [dead()] -> unreachable

@@ -1,0 +1,12 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [module M function f() 1 end g() do x ret…] -> return
+region: module M function f() 1 end g() do x ret…
+  bb0: [function f() 1 end; g() do x return x end] -> return
+region: function f() 1 end
+  bb0: [1] -> return
+region: g() do x return x end
+  bb0: [return x] -> diverge

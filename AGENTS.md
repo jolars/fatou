@@ -220,8 +220,9 @@ the single source of truth), `# fatou-ignore` suppression (`suppression.rs`),
 diagnostics + autofixes (`diagnostic.rs`, `fix.rs`), and rendering
 (`render.rs`) are in place, with the first rules shipped. Shared rule
 machinery lives on `RuleContext` (the memoized `resolver()`/`file_scan()`/
-`resolves_to_base()` answers) and in `rules/matchers.rs` (call-shape matching:
-`plain_call`, `CallShape`) — reach for those rather than hand-rolling. The rule roadmap
+`resolves_to_base()`/`control_flow()` answers) and in `rules/matchers.rs`
+(call-shape matching: `plain_call`, `CallShape`) — reach for those rather than
+hand-rolling. The rule roadmap
 lives in `TODO.md` ("Rule roadmap"); **to add a rule, use the `add-lint-rule`
 skill** (`.claude/skills/add-lint-rule/`).
 

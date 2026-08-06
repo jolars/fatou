@@ -1,0 +1,11 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [function f(a) if a return 1 else return …] -> return
+region: function f(a) if a return 1 else return …
+  bb0: [if a return 1 else return 2 end] -> then bb1, else bb2
+  bb1: [return 1] -> diverge
+  bb2: [return 2] -> diverge
+  bb3 (dead): [dead()] -> unreachable

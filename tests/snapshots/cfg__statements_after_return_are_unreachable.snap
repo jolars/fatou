@@ -1,0 +1,9 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [function f() return 1 dead() end] -> return
+region: function f() return 1 dead() end
+  bb0: [return 1] -> diverge
+  bb1 (dead): [dead()] -> unreachable

@@ -34,7 +34,9 @@
 //! [`RuleContext::read_resolves_to_base`] for the one question most idiom
 //! rules open with — is this callee really the Base/Core function, or a local
 //! shadow, a qualified name, or a masked import? Each is computed once per
-//! file and memoized, so asking is cheap no matter how many rules do.
+//! file and memoized, so asking is cheap no matter how many rules do. A rule
+//! that asks whether code can *run* goes through
+//! [`RuleContext::control_flow`], the same way.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -52,7 +54,7 @@ use crate::linter::include_graph::IncludeProblem;
 use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, has_unresolvable_using,
 };
-use crate::semantic::{IdentRef, SemanticModel};
+use crate::semantic::{FileControlFlow, IdentRef, SemanticModel};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod correctness;
@@ -144,6 +146,7 @@ pub struct RuleContext<'a> {
 struct RuleCache<'a> {
     resolver: OnceCell<Option<Resolver<'a, dyn PackageSource + 'a>>>,
     scan: OnceCell<FileScan>,
+    cfg: OnceCell<FileControlFlow>,
     unresolvable_using: OnceCell<bool>,
     /// `model.idents()` keyed by range, so a rule holding a token can ask what
     /// the model made of it without a linear scan per token.
@@ -229,6 +232,19 @@ impl<'a> RuleContext<'a> {
     /// The shared per-file soundness scan (see [`FileScan`]).
     pub(crate) fn file_scan(&self) -> &FileScan {
         self.cache.scan.get_or_init(|| FileScan::collect(self.root))
+    }
+
+    /// The file's control-flow graph (see [`FileControlFlow`]), for a rule that
+    /// reasons about reachability rather than shape.
+    ///
+    /// Built on first use and shared by the run. The lint entry points take a
+    /// tree and a model rather than a database, so this is the linter's own
+    /// build; the language server's incremental path memoizes the same value
+    /// per file as [`crate::incremental::control_flow`].
+    pub fn control_flow(&self) -> &FileControlFlow {
+        self.cache
+            .cfg
+            .get_or_init(|| FileControlFlow::build(self.root))
     }
 
     /// Whether `call`'s callee is confirmed to be the Base/Core function of
@@ -868,6 +884,24 @@ mod tests {
         };
         let (_rules, unknown) = ResolvedRules::resolve(&config);
         assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn control_flow_is_built_once_and_shared() {
+        let src = "function f()\n    return 1\n    dead()\nend\n";
+        let parsed = crate::parser::parse(src);
+        let model = SemanticModel::build(&parsed.cst);
+        let ctx = RuleContext::new(None, &parsed.cst, &model);
+
+        let first = ctx.control_flow();
+        assert!(std::ptr::eq(first, ctx.control_flow()), "memoized per file");
+
+        let start = src.find("dead()").unwrap();
+        let range = TextRange::new(
+            u32::try_from(start).unwrap().into(),
+            u32::try_from(start + "dead()".len()).unwrap().into(),
+        );
+        assert!(first.is_unreachable(range));
     }
 
     #[test]

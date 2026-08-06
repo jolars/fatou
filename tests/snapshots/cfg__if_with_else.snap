@@ -1,0 +1,9 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"if c\\n    a()\\nelse\\n    b()\\nend\\nafter()\\n\")"
+---
+region: <toplevel>
+  bb0: [if c a() else b() end] -> then bb1, else bb2
+  bb1: [a()] -> bb3
+  bb2: [b()] -> bb3
+  bb3: [after()] -> return

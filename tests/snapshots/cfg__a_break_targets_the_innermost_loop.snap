@@ -1,0 +1,12 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"for i in xs\\n    for j in ys\\n        break\\n    end\\n    outer()\\nend\\n\")"
+---
+region: <toplevel>
+  bb0: [for i in xs for j in ys break end outer(…] -> bb1
+  bb1: [] -> then bb3, else bb2
+  bb2: [] -> return
+  bb3: [for j in ys break end] -> bb4
+  bb4: [] -> then bb6, else bb5
+  bb5: [outer()] -> bb1
+  bb6: [break] -> bb5

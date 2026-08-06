@@ -1,0 +1,11 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"for i in xs\\n    i == 2 && continue\\n    use(i)\\nend\\n\")"
+---
+region: <toplevel>
+  bb0: [for i in xs i == 2 && continue use(i) en…] -> bb1
+  bb1: [] -> then bb3, else bb2
+  bb2: [] -> return
+  bb3: [i == 2 && continue] -> then bb4, else bb5
+  bb4: [continue] -> bb1
+  bb5: [use(i)] -> bb1

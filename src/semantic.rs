@@ -21,6 +21,7 @@
 
 pub mod binding;
 pub mod builder;
+pub mod cfg;
 pub mod import;
 pub mod scope;
 pub mod signature;
@@ -34,6 +35,7 @@ pub use binding::{Binding, BindingId, BindingKind};
 /// The `using`/`import` clause parser, shared with the harvester so it reads a
 /// module's load surface exactly as the semantic builder does.
 pub(crate) use builder::collect_import_clauses;
+pub use cfg::{BasicBlock, BlockId, ControlFlowGraph, FileControlFlow, Terminator};
 pub use import::{
     ExportEntry, ImportItem, LoadKind, ModuleLoad, ModulePath, QualifiedRead, Visibility,
 };

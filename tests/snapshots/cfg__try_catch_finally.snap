@@ -1,0 +1,11 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"try\\n    risky()\\ncatch e\\n    handle(e)\\nfinally\\n    cleanup()\\nend\\nafter()\\n\")"
+---
+region: <toplevel>
+  bb0: [try risky() catch e handle(e) finally cl…] -> then bb1, else bb4
+  bb1: [risky()] -> bb3
+  bb2: [handle(e)] -> bb3
+  bb3: [cleanup()] -> bb5
+  bb4: [] -> then bb2, else bb3
+  bb5: [after()] -> return

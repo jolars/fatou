@@ -1,0 +1,13 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"for i in xs\\n    if i > 1\\n        break\\n    end\\n    if i < 0\\n        continue\\n    end\\n    use(i)\\nend\\ndone()\\n\")"
+---
+region: <toplevel>
+  bb0: [for i in xs if i > 1 break end if i < 0 …] -> bb1
+  bb1: [] -> then bb3, else bb2
+  bb2: [done()] -> return
+  bb3: [if i > 1 break end] -> then bb4, else bb5
+  bb4: [break] -> bb2
+  bb5: [if i < 0 continue end] -> then bb6, else bb7
+  bb6: [continue] -> bb1
+  bb7: [use(i)] -> bb1

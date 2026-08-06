@@ -101,16 +101,38 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   layer where they belong (`CallExpr::callee_ident`, `Expr::name_ident`), and
   `index-from-length`, `nothing-comparison`, `missing-comparison`, and
   `file_scan` were rewritten onto them.
-- [ ] Maybe: a per-region control-flow graph (arity's `src/semantic/cfg.rs`,
-  ~590 lines: basic blocks, a `Goto`/`Branch`/`Return`/`Diverge`/`Unreachable`
-  terminator enum, memoized per file, built by structured recursive descent
-  with no fixpoint). Note that `unreachable-code` does **not** need it — arity's
-  own rule fires only on the shallow "terminator is a direct statement of a
-  block" shape. The CFG buys the nested cases (`if a; return; else; return;
-  end; dead()`) and future definite-assignment work. Julia's terminator set is
-  richer than R's (`return`, `throw`/`error`/`rethrow`, `break`/`continue`, and
-  `@goto`/`@label`), and `@goto` is the one shape no structured descent
-  handles — that, not `unreachable-code`, is the case that justifies the cost.
+- [x] A per-region control-flow graph, after arity's `src/semantic/cfg.rs`.
+  Landed as `src/semantic/cfg.rs`: basic blocks, the
+  `Goto`/`Branch`/`Return`/`Diverge`/`Unreachable` terminator enum, structured
+  recursive descent with no fixpoint, memoized per file by the
+  `incremental::control_flow` salsa query (`Eq`, so it backdates) and exposed to
+  rules as the lazily-built `RuleContext::control_flow()`. Regions are the file
+  top level, each `module` body, and each function-like body with a `BLOCK`
+  (`function`, `macro`, `do`), keyed by the new `syntax::NodePtr`. Julia's
+  richer terminator set is all in: `return`, `throw`/`error`/`rethrow` (by
+  name, as arity does — the consumer confirms with `resolves_to_base`),
+  `break`/`continue`, and `@goto`/`@label`, which is handled by allocating a
+  block per label so a forward `@goto` and a backward one agree and lowering
+  *resumes* at a label after a divergence. Two Julia-specific additions beyond
+  arity's shape: the idiomatic `cond && return x` short-circuit is a real
+  conditional divergence, and `try`/`catch`/`finally` gets an exceptional edge
+  out of the *header* (not the try body's exit), which is what keeps a `catch`
+  and a `finally` reachable when the `try` body always diverges.
+  Reachability is a BFS from the entry once the graph is built rather than
+  arity's construction-time marking — `@goto` needs it, and it subsumes the
+  `while true`-with-no-`break` case for free.
+  - The one concession to Julia's macros: an expansion is code the graph never
+    sees, and real code hides jumps in one (JSON3's `@eof` expands to `@goto
+    invalid`), so a region containing any macro call keeps its `@label` blocks
+    reachable and a `while true` whose body has one is not claimed to never
+    exit. The dead tail after an unconditional `return` is unaffected.
+    Validated by sweeping 6000 files of `~/.julia/packages` (22280 regions,
+    67740 blocks): 7 unreachable blocks, every one hand-checked as real dead
+    code (`return ex; return` in StructUtils, a `while true` with no `break`
+    in an HTTP example), no false positives.
+- [ ] Follow-up, once a rule consumes the CFG: `is_unreachable` is a linear
+  scan over every block of every region, so a rule asking per statement is
+  quadratic. Index by range if a rule ever needs it per node rather than once.
 - [ ] Per-rule config: a `[lint.rules.<id>]` TOML table plus a typed per-rule
   struct in `src/config.rs`, threaded to rules as a `config`/`&RuleConfig` field
   on `RuleContext` (arity's "§I4", which it records as *blocking* two of its own
@@ -176,11 +198,13 @@ Ready now (no new infrastructure):
   honest today). Mark applicability in the rendered help line — it touches
   every rule snapshot, so it wants its own change.
 - [ ] `unreachable-code` (correctness, syn, warning, no fix): statements after
-  an unconditional `return`/`throw`/`error`/`rethrow` in the same block. Fire
-  only on the unambiguous shape — a terminator that is a *direct* statement of a
-  block with at least one statement after it — which needs no CFG (see above).
-  A terminator nested inside an `if` leaves the tail reachable. (arity
-  `unreachable-code`)
+  an unconditional `return`/`throw`/`error`/`rethrow` in the same block. The CFG
+  above has landed, so this can go straight to `RuleContext::control_flow()` and
+  `FileControlFlow::is_unreachable` rather than the shallow "terminator is a
+  direct statement of a block" shape, which also picks up the nested cases
+  (`if a; return; else; return; end; dead()`). Still confirm the callee with
+  `resolves_to_base` before reporting a `throw`/`error`/`rethrow` divergence —
+  the graph matches those by name. (arity `unreachable-code`)
 - [ ] `duplicate-include` (correctness, sem, warning, no fix): the same file
   `include`d twice, which silently re-runs its definitions. A third
   `IncludeProblemKind` beside `Missing`/`Cycle` in

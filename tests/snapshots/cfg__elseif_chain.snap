@@ -1,0 +1,12 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"if a\\n    x()\\nelseif b\\n    y()\\nelse\\n    z()\\nend\\nafter()\\n\")"
+---
+region: <toplevel>
+  bb0: [if a x() elseif b y() else z() end] -> then bb1, else bb2
+  bb1: [x()] -> bb6
+  bb2: [] -> then bb3, else bb4
+  bb3: [y()] -> bb5
+  bb4: [z()] -> bb5
+  bb5: [] -> bb6
+  bb6: [after()] -> return

@@ -1,0 +1,9 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"function f()\\n    @label top\\n    step()\\n    @goto top\\nend\\n\")"
+---
+region: <toplevel>
+  bb0: [function f() @label top step() @goto top…] -> return
+region: function f() @label top step() @goto top…
+  bb0: [] -> bb1
+  bb1: [@label top; step(); @goto top] -> bb1

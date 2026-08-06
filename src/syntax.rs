@@ -502,6 +502,11 @@ impl Language for JuliaLanguage {
 pub type SyntaxNode = rowan::SyntaxNode<JuliaLanguage>;
 pub type SyntaxToken = rowan::SyntaxToken<JuliaLanguage>;
 pub type SyntaxElement = rowan::SyntaxElement<JuliaLanguage>;
+/// A node's identity without the tree: its kind plus its text range, resolvable
+/// back to a [`SyntaxNode`] against the root it came from. The key a per-file
+/// analysis uses to name a node it does not hold ([`rowan`]'s cursors are `Rc`
+/// based, so keeping one alive keeps the whole tree alive).
+pub type NodePtr = rowan::ast::SyntaxNodePtr<JuliaLanguage>;
 
 #[cfg(test)]
 mod tests {

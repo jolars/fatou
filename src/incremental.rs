@@ -27,7 +27,7 @@ use crate::resolve::{
     Candidate, ModulePath, Namespace, OccurrenceKey, OccurrenceRec, PackageSource, Resolution,
     Resolver,
 };
-use crate::semantic::SemanticModel;
+use crate::semantic::{FileControlFlow, SemanticModel};
 use crate::syntax::SyntaxNode;
 
 use rowan::TextSize;
@@ -264,6 +264,16 @@ pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode 
 #[salsa::tracked(returns(ref))]
 pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel {
     SemanticModel::build(&parsed_tree_root(db, file))
+}
+
+/// The per-file control-flow graph: one region per function-like body and
+/// `module` body, plus the file top level (see [`FileControlFlow`]). Built on
+/// the cached parse. Like [`semantic_model`] it keeps structural `Eq`, so an
+/// edit that leaves the graph unchanged is backdated and CFG-dependent work is
+/// not re-run.
+#[salsa::tracked(returns(ref))]
+pub fn control_flow(db: &dyn IncrementalDb, file: SourceFile) -> FileControlFlow {
+    FileControlFlow::build(&parsed_tree_root(db, file))
 }
 
 // The firewall queries: range-free projections of [`semantic_model`] (or, for
@@ -947,6 +957,11 @@ impl IncrementalDatabase {
         parsed_tree_root(self, file)
     }
 
+    /// The cached control-flow graph for `file` (the [`control_flow`] query).
+    pub fn control_flow(&self, file: SourceFile) -> &FileControlFlow {
+        control_flow(self, file)
+    }
+
     /// Replace the whole harvested library index, its source roots, and the
     /// workspace-package names, at HIGH durability. Creates the singleton input
     /// on first call. Re-analyze open files after a swap: dependents of the
@@ -1196,6 +1211,11 @@ impl Analysis {
     /// The cached semantic model for `file`.
     pub fn semantic_model(&self, file: SourceFile) -> &SemanticModel {
         semantic_model(&self.0, file)
+    }
+
+    /// The cached control-flow graph for `file` (the [`control_flow`] query).
+    pub fn control_flow(&self, file: SourceFile) -> &FileControlFlow {
+        self.0.control_flow(file)
     }
 
     /// The file's top-level definitions (the [`file_exports`] firewall query).

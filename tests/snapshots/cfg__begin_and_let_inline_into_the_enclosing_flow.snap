@@ -1,0 +1,6 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"begin\\n    a()\\nend\\nlet x = 1\\n    b(x)\\nend\\nc()\\n\")"
+---
+region: <toplevel>
+  bb0: [a(); b(x); c()] -> return

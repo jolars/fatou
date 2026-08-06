@@ -1,9 +1,9 @@
 //! The salsa layer parses on demand and reparses after a text edit.
 
 use fatou::incremental::{
-    IncrementalDatabase, IncrementalDb, PrevParse, SourceFile, file_exports, file_free_reads,
-    file_qualified_reads, host_module_of, include_edges, parse_diagnostics, parsed_tree_root,
-    project_graph, semantic_model,
+    IncrementalDatabase, IncrementalDb, PrevParse, SourceFile, control_flow, file_exports,
+    file_free_reads, file_qualified_reads, host_module_of, include_edges, parse_diagnostics,
+    parsed_tree_root, project_graph, semantic_model,
 };
 use fatou::parser::{Edit, apply_edits, parse};
 
@@ -60,6 +60,32 @@ fn edit_rebuilds_the_semantic_model() {
     assert_eq!(model.bindings().len(), 2);
     let x = model.bindings().iter().position(|b| b.name == "x").unwrap();
     assert!(model.bindings()[x].read, "the edit's read is picked up");
+}
+
+#[test]
+fn control_flow_is_reused_when_input_is_unchanged() {
+    let db = IncrementalDatabase::new();
+    let file = db.add_file("function f()\n    return 1\nend\n");
+    let first = control_flow(&db, file);
+    let second = control_flow(&db, file);
+    assert!(
+        std::ptr::eq(first, second),
+        "same revision must return the same memoized graph"
+    );
+    assert_eq!(first.regions().len(), 1);
+}
+
+#[test]
+fn edit_rebuilds_the_control_flow_graph() {
+    let mut db = IncrementalDatabase::new();
+    let file = db.add_file("function f()\n    return 1\nend\n");
+    assert_eq!(control_flow(&db, file).regions().len(), 1);
+
+    db.set_file_text(
+        file,
+        "function f()\n    return 1\nend\nfunction g()\n    2\nend\n",
+    );
+    assert_eq!(control_flow(&db, file).regions().len(), 2);
 }
 
 #[test]

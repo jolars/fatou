@@ -1,0 +1,10 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [function f() @goto done dead() @label do…] -> return
+region: function f() @goto done dead() @label do…
+  bb0: [@goto done] -> bb1
+  bb1: [@label done; tail()] -> return
+  bb2 (dead): [dead()] -> unreachable

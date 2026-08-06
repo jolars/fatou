@@ -1,0 +1,9 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [function f() throw(ArgumentError("x")) d…] -> return
+region: function f() throw(ArgumentError("x")) d…
+  bb0: [throw(ArgumentError("x"))] -> diverge
+  bb1 (dead): [dead()] -> unreachable

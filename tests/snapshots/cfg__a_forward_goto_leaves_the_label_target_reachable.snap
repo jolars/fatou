@@ -1,0 +1,11 @@
+---
+source: tests/cfg.rs
+expression: cfg_dump(src)
+---
+region: <toplevel>
+  bb0: [function f(c) c && @goto done middle() @…] -> return
+region: function f(c) c && @goto done middle() @…
+  bb0: [c && @goto done] -> then bb2, else bb3
+  bb1: [@label done; tail()] -> return
+  bb2: [@goto done] -> bb1
+  bb3: [middle()] -> bb1

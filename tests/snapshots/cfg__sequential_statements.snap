@@ -1,0 +1,6 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"a = 1\\nb = 2\\nf(a, b)\\n\")"
+---
+region: <toplevel>
+  bb0: [a = 1; b = 2; f(a, b)] -> return

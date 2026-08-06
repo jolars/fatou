@@ -1,0 +1,8 @@
+---
+source: tests/cfg.rs
+expression: "cfg_dump(\"function f(x)\\n    return x\\nend\\nf(1)\\n\")"
+---
+region: <toplevel>
+  bb0: [function f(x) return x end; f(1)] -> return
+region: function f(x) return x end
+  bb0: [return x] -> diverge
