@@ -181,7 +181,7 @@ pub trait IncrementalDb: salsa::Database {
 /// and the last, and the top-level tier would have to fragment-parse that whole
 /// region plus both its boundary guards — more than the full parse it is
 /// avoiding — so the tier declines a region that wide up front
-/// (`parser::reparse::region_is_too_wide`, `benches/reparse.rs`). Replaying the
+/// (`parser::reparse::region_is_too_wide`, `crates/fatou-parser/benches/reparse.rs`). Replaying the
 /// chain splices each edit on its own instead, two orders of magnitude cheaper
 /// than the full parse; when it misses, step 2 is still there. The reverse
 /// order is only better for edits that are *adjacent*, where it saves a few

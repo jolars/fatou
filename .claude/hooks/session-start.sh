@@ -44,7 +44,7 @@ cargo fetch --manifest-path "$REPO/Cargo.toml"
 # --- Julia (optional) -------------------------------------------------------
 # Versions come from the corpus sidecar so this cannot silently drift away from
 # what the committed `expected.sexpr` files were generated with.
-SOURCE_FILE="$REPO/tests/fixtures/oracle/.juliasyntax-source"
+SOURCE_FILE="$REPO/crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source"
 JULIA_WANT="$(sed -n 's/^julia_version=//p' "$SOURCE_FILE" 2>/dev/null || true)"
 JS_WANT="$(sed -n 's/^juliasyntax_version=//p' "$SOURCE_FILE" 2>/dev/null || true)"
 

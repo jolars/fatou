@@ -23,9 +23,9 @@ entry explicitly sanctions one (e.g. `index-from-length`'s name-based match).
   doc of `src/linter/rules.rs`).
 - **Parsing is the parser's job.** Do not paper over parser mistakes in a
   rule. If the CST does not expose what you need, extend the typed AST
-  wrappers in `src/ast/` (see "AST wrappers" in `AGENTS.md`: `ast_node!`/
+  wrappers in `crates/fatou-parser/src/ast/` (see "AST wrappers" in `AGENTS.md`: `ast_node!`/
   `ast_token!` entry, `support::*` accessors, `Has*` trait impls, re-export
-  from `src/ast.rs`, accessor unit test) rather than re-lexing or kind-matching
+  from `crates/fatou-parser/src/ast.rs`, accessor unit test) rather than re-lexing or kind-matching
   raw CST inside the rule.
 - **A lint fix is a textual edit, never a formatter.** Applying the fix must
   leave code that still **parses** and stays **lossless** (no misbinding, no
@@ -56,8 +56,8 @@ Prefer the cheapest tier the rule's correctness actually requires.
 - `src/linter/rules/<category>/<id>.rs`—one file per rule: a unit
   `pub struct` implementing `Rule`, with a module doc comment. (File names are
   snake_case; the public id stays kebab-case.)
-- `src/ast/` (`nodes.rs`, `tokens.rs`, `traits.rs`, re-exported from
-  `src/ast.rs`)—typed wrappers (`CallExpr`, `IfExpr`, `Condition`,
+- `crates/fatou-parser/src/ast/` (`nodes.rs`, `tokens.rs`, `traits.rs`, re-exported from
+  `crates/fatou-parser/src/ast.rs`)—typed wrappers (`CallExpr`, `IfExpr`, `Condition`,
   `BinaryExpr`, the `Expr` sum, `Ident`/`Operator` tokens, `Has*` traits).
   **Prefer these over raw `children()`/`kind()` matching**; grow them when a
   shape is missing.
@@ -193,14 +193,14 @@ Prefer the cheapest tier the rule's correctness actually requires.
 8. **Validate** in order:
    - Targeted: `cargo test --test linter_rules`, `cargo test --test autofix`
      (if fixable), `cargo test --test rule_docs`.
-   - Full gates (CI parity): `cargo test`,
-     `cargo clippy --all-targets --all-features -- -D warnings`,
-     `cargo fmt -- --check`. (`task <name>` wraps these.)
+   - Full gates (CI parity): `cargo test --workspace`,
+     `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
+     `cargo fmt --all -- --check`. (`task <name>` wraps these.)
 
 ## Dos and don'ts
 
 - **Do** reach for the typed AST wrappers before raw CST walking; grow
-  `src/ast/` when a shape is missing (with its own accessor test).
+  `crates/fatou-parser/src/ast/` when a shape is missing (with its own accessor test).
 - **Do** keep spans tight and fixes parse-clean/lossless by construction, or
   withhold the fix and still report.
 - **Do** make `examples()` snippets that genuinely trigger the rule—the docs
@@ -231,4 +231,4 @@ When done, report:
    `TODO.md`).
 4. Targeted test names, including the false-positive guards and (if fixable)
    the `fix_source` case.
-5. Full-gate results: `cargo test`, clippy `-D warnings`, `cargo fmt --check`.
+5. Full-gate results: `cargo test --workspace`, clippy `-D warnings`, `cargo fmt --check`.

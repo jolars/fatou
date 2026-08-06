@@ -6,8 +6,21 @@ repository.
 ## Project
 
 Fatou is a Rust CLI providing a language server, formatter, and linter for the
-Julia language. Single-crate Cargo package (binary and library crate both named
-`fatou`, edition 2024), not a workspace.
+Julia language. Cargo workspace (edition 2024) with the CLI as the root
+package (binary and library crate both named `fatou`) and two published
+library crates under `crates/`:
+
+- `fatou-parser` — the lossless CST parser, typed AST wrappers, and
+  incremental reparser (`syntax`, `ast`, `parser` modules; the root re-exports
+  them, so `fatou::parser::…` paths keep working).
+- `fatou-formatter` — the formatting engine; the root's `src/formatter.rs` is
+  the CLI bridge that re-exports it and hosts the batch `check` API.
+
+Both library crates must stay `wasm32-unknown-unknown`-clean (no filesystem,
+process, thread, or clock use) — a dprint plugin embeds the formatter as a
+Wasm module. A dedicated CI job enforces this. Release streams are versioned
+independently by versionary: the CLI keeps plain `vX.Y.Z` tags; member crates
+tag as `fatou-parser-vX.Y.Z`/`fatou-formatter-vX.Y.Z`.
 
 The design follows rust-analyzer (and the author's R tool, `arity`, on which
 this is modeled directly):
@@ -67,8 +80,8 @@ that. Run `format` afterward if canonical output is wanted.
 
 Fatou owns its formatting style; there is **no external reference formatter**.
 (We used to track Runic.jl as a soft oracle; that target has been removed.) The
-gate is **hand-authored fixtures**: `tests/fixtures/formatter/<slug>/` holds an
-`input.jl` and a hand-written `expected.jl`, and `tests/formatter.rs` asserts
+gate is **hand-authored fixtures**: `crates/fatou-formatter/tests/fixtures/formatter/<slug>/` holds an
+`input.jl` and a hand-written `expected.jl`, and `crates/fatou-formatter/tests/formatter.rs` asserts
 `format(input.jl) == expected.jl`. **Presence of `expected.jl` is gate
 membership** — a fixture with only `input.jl` is a construct still being authored.
 There is no allowlist or blocked list. A second test
@@ -85,11 +98,11 @@ rolling `RECAP.md`.
 
 The differential oracle for the parser is **JuliaSyntax.jl** (the official Julia
 parser, itself a lossless green-tree design). A *projector*
-(`src/parser/sexpr.rs`, also `fatou parse --to sexpr`) walks the CST and emits
-JuliaSyntax's s-expression shape; the harness (`tests/juliasyntax_oracle.rs`)
+(`crates/fatou-parser/src/parser/sexpr.rs`, also `fatou parse --to sexpr`) walks the CST and emits
+JuliaSyntax's s-expression shape; the harness (`crates/fatou-parser/tests/juliasyntax_oracle.rs`)
 diffs each fixture against a pinned `expected.sexpr` and gates regressions via
 allowlists (no Julia needed at test time → CI-safe). A curated dir corpus
-(`tests/fixtures/oracle/`) and a harvested JuliaSyntax sub-corpus
+(`crates/fatou-parser/tests/fixtures/oracle/`) and a harvested JuliaSyntax sub-corpus
 (`juliasyntax.jsonl`) feed it. **To grow parser parity against the oracle, use
 the `parser-parity` skill** (`.claude/skills/parser-parity/`). It documents the
 loop (probe → grammar + projector → fixture → re-triage → allowlist) and keeps a
@@ -107,7 +120,7 @@ or instantiate the root project, because the web-container `SessionStart` hook
 provisions JuliaSyntax differently: a pinned git checkout on `JULIA_LOAD_PATH`,
 avoiding the Pkg/registry access that container lacks. JuliaSyntax is pinned
 exactly (`=0.4.10`) in `[compat]`; the regen scripts mirror the resolved versions
-into `tests/fixtures/oracle/.juliasyntax-source`. A different Julia or JuliaSyntax
+into `crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source`. A different Julia or JuliaSyntax
 rewrites unrelated fixtures and buries the intended change, so re-running the
 script should leave every file it did not target byte-identical; treat any other
 diff as a version mismatch, not a parser change. To bump the oracle: edit the
@@ -118,12 +131,12 @@ regen scripts and re-triage.
 ## Commands
 
 ```sh
-cargo build                       # dev build
-cargo test                        # all tests
-cargo test <substring>            # tests matching a name
-cargo test --test parser_snapshots   # one integration test file
-cargo clippy --all-targets --all-features -- -D warnings   # warnings are errors
-cargo fmt -- --check              # keep changes rustfmt-clean
+cargo build --workspace           # dev build
+cargo test --workspace            # all tests
+cargo test <substring>            # tests matching a name (root crate)
+cargo test -p fatou-parser --test parser_snapshots   # one integration test file
+cargo clippy --workspace --all-targets --all-features -- -D warnings   # warnings are errors
+cargo fmt --all -- --check        # keep changes rustfmt-clean
 ```
 
 CLI usage:
@@ -144,8 +157,8 @@ common workflows.
 
 ## Architecture
 
-**Parse pipeline** (`src/parser/`, public API `parse`/`reconstruct` re-exported
-from `src/parser.rs`): a lossless `rowan` CST built via an event-based pipeline.
+**Parse pipeline** (`crates/fatou-parser/src/parser/`, public API `parse`/`reconstruct` re-exported
+from `crates/fatou-parser/src/parser.rs`): a lossless `rowan` CST built via an event-based pipeline.
 
 ```
 lex (lexer.rs) → Vec<Token>
@@ -155,7 +168,7 @@ build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
 
 - `core.rs` drives the loop; `events.rs` defines `Event` (start node/token/finish
   node); `cursor.rs`, `context.rs`, `diagnostics.rs`, `recovery.rs`
-  support the parser. `src/syntax.rs` defines `SyntaxKind` (rowan-style
+  support the parser. `crates/fatou-parser/src/syntax.rs` defines `SyntaxKind` (rowan-style
   `SCREAMING_SNAKE_CASE`) and the `JuliaLanguage` binding.
 - **Losslessness is the core invariant:** all whitespace, newlines, and comments
   (including nested `#= =#`) are preserved; `reconstruct(text) == text`. The
@@ -163,13 +176,13 @@ build_tree (tree_builder.rs) → rowan SyntaxNode (CST)
   Julia precedence, calls, indexing, and the `function`/`if`/`begin` block
   forms) and grows incrementally (`TODO.md`). Unlike R, Julia has no `[[`/`]]`
   bracket ambiguity, so there is no bracket-rebalancer pass.
-- `src/ast/` is the typed AST interface over the CST (see **AST wrappers**
+- `crates/fatou-parser/src/ast/` is the typed AST interface over the CST (see **AST wrappers**
   below).
 - `src/incremental.rs` models file text → CST as a `salsa` query
   (`parsed_document`). The token/block reparse *splicing* is deferred; today a
   text edit triggers a full parse (still correct).
 
-**AST wrappers** (`src/ast/`, re-exported from `src/ast.rs`): the typed interface
+**AST wrappers** (`crates/fatou-parser/src/ast/`, re-exported from `crates/fatou-parser/src/ast.rs`): the typed interface
 over the rowan CST, modeled on rust-analyzer's `ast` module. Three layers, all
 zero-cost newtypes that only cast when a kind matches:
 
@@ -200,17 +213,19 @@ remove it.
 
 **To grow it:** add the `ast_node!`/`ast_token!` entry, add accessors via
 `support::child`/`support::children`/`support::token`/`child_token`, impl any
-relevant `Has*` trait, re-export from `src/ast.rs`, and add an accessor unit test.
+relevant `Has*` trait, re-export from `crates/fatou-parser/src/ast.rs`, and add an accessor unit test.
 
-**Formatter** (`src/formatter/`, public API in `src/formatter.rs`): consumes the
-CST and uses a Wadler/Prettier-style document IR (`ir.rs`) printed by a single
+**Formatter** (engine in `crates/fatou-formatter/src/formatter/`; the root's
+`src/formatter.rs` is the CLI bridge re-exporting it): consumes the CST and
+uses a Wadler/Prettier-style document IR (`ir.rs`) printed by a single
 best-fit layout engine (`printer.rs`) that makes all line-break decisions.
-`style.rs` is `FormatStyle`; `check.rs` exposes `check_paths`. Fatou owns its
+`style.rs` is `FormatStyle`; the bridge-side `src/formatter/check.rs` exposes
+`check_paths` (file walking and rayon stay out of the engine). Fatou owns its
 style (no external reference formatter). `rules::lower` (`rules.rs`) walks the CST
 into IR; constructs with a rule are reshaped and everything else is lowered
 *transparently* (verbatim tokens, recurse into children), so unhandled syntax
 stays byte-identical and the pass stays idempotent while rules land incrementally.
-Hand-authored fixtures (`tests/formatter.rs`) gate the output; grow them with the
+Hand-authored fixtures (`crates/fatou-formatter/tests/formatter.rs`) gate the output; grow them with the
 `formatter` skill.
 
 **Linter** (`src/linter/`): `check_paths` parses each file and reports
@@ -271,12 +286,15 @@ conventions (width 92, indent 4).
 
 ## Testing layout
 
-- Integration tests in `tests/*.rs`; fixtures in
-  `tests/fixtures/{parser,formatter}/<case>/`. Parser fixtures hold `input.jl`
-  (snapshot the CST + diagnostics, assert losslessness); formatter fixtures hold
-  `input.jl` + a hand-authored `expected.jl` (the gate in `tests/formatter.rs`,
-  which also guards idempotence + clean reparse over all fixtures).
-- `insta` snapshots live in `tests/snapshots/`.
+- Integration tests live with their crate: parser suites and fixtures in
+  `crates/fatou-parser/tests/` (`fixtures/parser/<case>/` holds `input.jl`;
+  snapshot the CST + diagnostics, assert losslessness), the formatter gate in
+  `crates/fatou-formatter/tests/` (`fixtures/formatter/<case>/` holds
+  `input.jl` + a hand-authored `expected.jl`; the gate also guards idempotence
+  + clean reparse over all fixtures), and CLI/LSP/linter/semantic suites in the
+  root `tests/*.rs`.
+- `insta` snapshots live in each crate's `tests/snapshots/` (parser snapshots
+  with `fatou-parser`, `cfg`/`rule_docs` snapshots at the root).
 - `tests/lsp.rs` drives the language server over an in-memory connection.
 - **CI tests on Windows too.** Unix-style absolute paths (`/work`, `/abs/c.jl`)
   are **not absolute on Windows**: `is_absolute()` is false without a drive

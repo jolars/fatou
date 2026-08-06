@@ -54,7 +54,7 @@ especially idempotency and losslessness regressions.
    formatter-side fix**:
    - **Losslessness failure ⇒ always a parser bug** (tenet: losslessness is
      the parser's job, `reconstruct(text) == text` byte-for-byte). Fix in
-     `src/parser/`, never by compensating in the formatter.
+     `crates/fatou-parser/src/parser/`, never by compensating in the formatter.
    - **Idempotency failure ⇒ find which pass diverges and why.** Use the
      `--dump-dir` artifacts to compare input vs `once` vs `twice`, then
      inspect `fatou parse` on the input and on the first-pass output. If
@@ -63,7 +63,7 @@ especially idempotency and losslessness regressions.
      wrong node — **the bug is parser-side, no matter which pass shows the
      symptom**. Idempotency drift is a downstream symptom of upstream shape
      divergence. The JuliaSyntax differential oracle (`fatou parse --to
-     sexpr`, `tests/juliasyntax_oracle.rs`, the `parser-parity` skill) is
+     sexpr`, `crates/fatou-parser/tests/juliasyntax_oracle.rs`, the `parser-parity` skill) is
      the structural reference for suspicious parses.
    - **Anti-pattern: fixing in the formatter because the symptom lives
      there.** If you find yourself reaching for a formatter helper to make
@@ -95,14 +95,14 @@ especially idempotency and losslessness regressions.
 
 5. Add regression fixture(s):
    - Parser bugs (losslessness, mis-parse): add an oracle fixture
-     `tests/fixtures/oracle/<slug>/{input.jl, expected.sexpr}` and add the
-     slug to `tests/oracle/allowlist.txt` (see the `parser-parity` skill;
+     `crates/fatou-parser/tests/fixtures/oracle/<slug>/{input.jl, expected.sexpr}` and add the
+     slug to `crates/fatou-parser/tests/oracle/allowlist.txt` (see the `parser-parity` skill;
      mint `expected.sexpr` with `scripts/update-juliasyntax-corpus.sh`,
      which needs the devenv Julia). Pure-losslessness bugs also get a case
-     in the `lossless_corpus` test in `src/parser/core.rs`.
+     in the `lossless_corpus` test in `crates/fatou-parser/src/parser/core.rs`.
    - Formatter bugs (idempotency, layout): add a fixture
-     `tests/fixtures/formatter/<slug>/input.jl`. The
-     `formatter_is_idempotent_and_stable` test in `tests/formatter.rs` runs
+     `crates/fatou-formatter/tests/fixtures/formatter/<slug>/input.jl`. The
+     `formatter_is_idempotent_and_stable` test in `crates/fatou-formatter/tests/formatter.rs` runs
      over **every** `input.jl`, gated or not, so this alone pins the
      invariant. Only add `expected.jl` through the `formatter` skill's
      human-in-the-loop flow — `expected.jl` is hand-authored by the user
@@ -111,22 +111,22 @@ especially idempotency and losslessness regressions.
      per-fixture attributes work is needed.
 
 6. Fix implementation at root cause:
-   - parser lossless/CST bugs → `src/parser/`
-   - formatting/idempotency bugs → `src/formatter/`
+   - parser lossless/CST bugs → `crates/fatou-parser/src/parser/`
+   - formatting/idempotency bugs → `crates/fatou-formatter/src/formatter/`
    - avoid papering over by changing expected outputs only
    - preserve existing behavior for unrelated fixtures
 
 7. Validate:
    - targeted first:
-     - the new test (`cargo test --test formatter` or
-       `cargo test --test juliasyntax_oracle`)
+     - the new test (`cargo test -p fatou-formatter --test formatter` or
+       `cargo test -p fatou-parser --test juliasyntax_oracle`)
      - `fatou debug format --checks all --report <fixture-or-sample-file>`
    - then full validation:
-     - `cargo test`
-     - `cargo clippy --all-targets --all-features -- -D warnings`
+     - `cargo test --workspace`
+     - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
      - `cargo fmt`
    - for parser/CST changes, regenerate the oracle report
-     (`cargo test --test juliasyntax_oracle -- --ignored oracle_full_report`)
+     (`cargo test -p fatou-parser --test juliasyntax_oracle -- --ignored oracle_full_report`)
      and triage any new divergence per the `parser-parity` skill
 
 ## Fatou-specific guidance

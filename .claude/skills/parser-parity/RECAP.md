@@ -10,7 +10,7 @@ earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in 
 `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`, plus the
 sibling operands `f(2...)` and `f("a"...)`, all parse as `SPLAT_EXPR` ⇒
 `(... operand)`, byte-identical to JuliaSyntax. The formatter can now drop the
-`ends_in_bracket` guard in `lower_splat` (`src/formatter/rules.rs` ~line 651) and
+`ends_in_bracket` guard in `lower_splat` (`crates/fatou-formatter/src/formatter/rules.rs` ~line 651) and
 widen `splat_spacing/` to cover call/index/paren/curly/collection operands.
 
 **Handoff to formatter (2026-07-06b): multi-binding `let` now wraps every

@@ -19,8 +19,8 @@ Nix is not required, though. A stable Rust toolchain (see
 `rust-toolchain.toml`) is enough to build and run the full test suite:
 
 ```sh
-cargo build
-cargo test
+cargo build --workspace
+cargo test --workspace
 ```
 
 ## Quality gates
@@ -29,9 +29,9 @@ CI is the source of truth for quality gates. Before opening a pull request,
 make sure these pass locally:
 
 ```sh
-cargo test                                                 # all tests
-cargo clippy --all-targets --all-features -- -D warnings   # warnings are errors
-cargo fmt -- --check                                       # rustfmt-clean
+cargo test --workspace                                                 # all tests
+cargo clippy --workspace --all-targets --all-features -- -D warnings   # warnings are errors
+cargo fmt --all -- --check                                             # rustfmt-clean
 ```
 
 Or via `task`: `task test`, `task lint`, `task format-check`. CI additionally
@@ -48,16 +48,16 @@ Fatou is developed test-first: write a failing test, watch it fail, then make
 it pass. For a bug, add a failing fixture or snapshot that reproduces it
 before the fix.
 
-- **Parser fixtures** live in `tests/fixtures/parser/<case>/` with an
+- **Parser fixtures** live in `crates/fatou-parser/tests/fixtures/parser/<case>/` with an
   `input.jl`; the harness snapshots the CST and diagnostics and asserts
   losslessness (`reconstruct(text) == text`).
-- **Formatter fixtures** live in `tests/fixtures/formatter/<case>/` with an
+- **Formatter fixtures** live in `crates/fatou-formatter/tests/fixtures/formatter/<case>/` with an
   `input.jl` and a hand-authored `expected.jl`. Fatou owns its formatting
   style; `expected.jl` is written by hand, never captured from a formatter.
   The suite also checks idempotence (`format(format(x)) == format(x)`) and
   clean reparse of the output.
 - **Parser parity** is measured against JuliaSyntax.jl via a differential
-  oracle (`tests/juliasyntax_oracle.rs`) that needs no Julia at test time.
+  oracle (`crates/fatou-parser/tests/juliasyntax_oracle.rs`) that needs no Julia at test time.
 
 ## Architecture and roadmap
 

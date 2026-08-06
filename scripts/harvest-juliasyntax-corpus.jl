@@ -2,7 +2,7 @@
 #
 # Harvest parser test inputs from JuliaSyntax.jl's own `test/parser.jl` into a
 # pinned JSONL corpus for the differential parser oracle (track 1; see
-# `AGENTS.md` and `tests/juliasyntax_oracle.rs`).
+# `AGENTS.md` and `crates/fatou-parser/tests/juliasyntax_oracle.rs`).
 #
 # JuliaSyntax's `test/parser.jl` holds ~690 hand-curated `"source" => "(sexpr)"`
 # pairs, organized per *production rule*. We cannot reuse their expected strings
@@ -16,10 +16,10 @@
 # shapes are now in scope (Fatou emits in-tree typed error nodes), so cases whose
 # `parseall` output contains `(error …)` are kept and projected like any other.
 #
-# Output: `tests/fixtures/oracle/juliasyntax.jsonl`, one
+# Output: `crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl`, one
 # `{"slug","input","expected"}` object per line, sorted by slug. Pinned to the
 # same JuliaSyntax version recorded in `.juliasyntax-source`. Re-run on a
-# version bump (then re-triage `tests/oracle/juliasyntax-blocked.txt`).
+# version bump (then re-triage `crates/fatou-parser/tests/oracle/juliasyntax-blocked.txt`).
 
 # JuliaSyntax comes from the *active* Julia environment, pinned two ways: the
 # repo's root project (devenv exports `JULIA_PROJECT=@.`, resolving the pinned

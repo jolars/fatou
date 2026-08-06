@@ -60,8 +60,8 @@ Verification is weaker here than for a live-interpreter tool, so lean on layers:
 
 - **JuliaSyntax differential oracle** — fatou's parser is measured against
   JuliaSyntax.jl (ported as a dev-dependency; no Julia install needed). Run it
-  with `cargo test --test juliasyntax_oracle` (see
-  `tests/juliasyntax_oracle.rs` and the `tests/fixtures/oracle/` corpus). This is
+  with `cargo test -p fatou-parser --test juliasyntax_oracle` (see
+  `crates/fatou-parser/tests/juliasyntax_oracle.rs` and the `crates/fatou-parser/tests/fixtures/oracle/` corpus). This is
   the ground truth for parser outcomes on covered cases.
 - **fatou's own losslessness** — `fatou parse --verify --quiet <file>` proves
   `reconstruct(text) == text`; `fatou parse --to sexpr <file>` prints the
@@ -177,8 +177,8 @@ interpreter.
      elsewhere**: a conservative rule-level guard (as `redefined-constant` got
      for macro-argument sites) can be more correct than a blanket
      semantic-model change that would wrongly suppress the transparent case.
-   - Run the gates: `cargo test`, `cargo clippy --all-targets --all-features --
-     -D warnings`, `cargo fmt -- --check`; `cargo insta accept` after reviewing
+   - Run the gates: `cargo test --workspace`, `cargo clippy --workspace --all-targets --all-features --
+     -D warnings`, `cargo fmt --all -- --check`; `cargo insta accept` after reviewing
      new snapshots.
 
    Record everything you don't fix as follow-ups in `TODO.md` in the house style,

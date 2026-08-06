@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 
-# Generate `src/parser/unicode_ident.rs`: the code-point ranges Julia accepts as
+# Generate `crates/fatou-parser/src/parser/unicode_ident.rs`: the code-point ranges Julia accepts as
 # identifier start and continuation characters.
 #
 # JuliaSyntax's tokenizer classifies identifier characters with
@@ -63,7 +63,7 @@ start = ranges(Base.is_id_start_char)
 cont = ranges(Base.is_id_char)
 jsver = juliasyntax_version()
 
-open(joinpath(@__DIR__, "..", "src", "parser", "unicode_ident.rs"), "w") do io
+open(joinpath(@__DIR__, "..", "crates", "fatou-parser", "src", "parser", "unicode_ident.rs"), "w") do io
     println(io, "//! Non-ASCII identifier start and continuation code points.")
     println(io, "//!")
     println(io, "//! Generated from `Base.is_id_start_char` / `Base.is_id_char` ",
@@ -106,4 +106,4 @@ open(joinpath(@__DIR__, "..", "src", "parser", "unicode_ident.rs"), "w") do io
     emit(io, "ID_CONTINUE", "Non-ASCII identifier-continuation ranges, sorted ascending by code point.", cont)
 end
 
-println("wrote src/parser/unicode_ident.rs (start=", length(start), " ranges, cont=", length(cont), " ranges)")
+println("wrote crates/fatou-parser/src/parser/unicode_ident.rs (start=", length(start), " ranges, cont=", length(cont), " ranges)")

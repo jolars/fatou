@@ -1,9 +1,9 @@
 #!/usr/bin/env julia
 #
 # Regenerate the pinned `expected.sexpr` files for the JuliaSyntax differential
-# parser oracle (see `tests/juliasyntax_oracle.rs` and `AGENTS.md`).
+# parser oracle (see `crates/fatou-parser/tests/juliasyntax_oracle.rs` and `AGENTS.md`).
 #
-# For every `tests/fixtures/oracle/<slug>/input.jl`, parse it with JuliaSyntax
+# For every `crates/fatou-parser/tests/fixtures/oracle/<slug>/input.jl`, parse it with JuliaSyntax
 # and write the s-expression rendering to a sibling `expected.sexpr`. A single
 # Julia process handles the whole corpus so the interpreter startup cost is paid
 # once. The pinned tool versions are recorded in `.juliasyntax-source`.

@@ -3,7 +3,7 @@
 ## Parser
 
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
-  augmented forms `.+%= .-%= .*%=`) in `src/parser/lexer.rs`. The undotted
+  augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
   mis-parses rather than erroring. No code in the smoke-test corpus uses them
   (only JuliaSyntax's own tests do). Deferred: the whole wrapping-operator family
@@ -14,7 +14,7 @@
   hand-authored parser fixture, not the differential oracle.
 
 - [ ] Two error-recovery gaps left over from labeled `break`/`continue`
-  (`src/parser/structural.rs`). Junk after a complete labeled keyword drops
+  (`crates/fatou-parser/src/parser/structural.rs`). Junk after a complete labeled keyword drops
   JuliaSyntax's trailing zero-width marker (`break l x y` ⇒ `(break l x)
   (error-t y)`, not `(error-t y (error-t))`), and a bare comma after one does not
   fold into a tuple (`break l, y` ⇒ `(break l) (error-t ✘ y)`, not
@@ -42,7 +42,7 @@
     path per item and `#[doc(hidden)]` what is left.
   - `REGION_MAX_FRACTION` is used as a divisor (`text_len / 4`), so the
     name reads backwards.
-  - `tests/incremental_reparse.rs` is now the slowest test binary (~23 s in
+  - `crates/fatou-parser/tests/incremental_reparse.rs` is now the slowest test binary (~23 s in
     debug): every successful splice pays the in-crate Tenet-4 full parse on
     top of the harness's own comparison. Lower `EDITS_PER_SNIPPET`, or put
     the corpus sweep behind a feature, if CI time starts to matter.

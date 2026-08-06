@@ -130,6 +130,16 @@ repos:
       - id: fatou-format
 ```
 
+## Library Crates
+
+The parser and formatter are published as standalone, wasm-compatible crates
+for embedding in other tools:
+
+- [fatou-parser](https://crates.io/crates/fatou-parser): lossless CST parser,
+  typed AST wrappers, and incremental reparser.
+- [fatou-formatter](https://crates.io/crates/fatou-formatter): the formatting
+  engine, with optional `serde`/`schema` features.
+
 ## Documentation
 
 See <https://fatou.dev/> for the full documentation.

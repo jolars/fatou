@@ -2,8 +2,8 @@
 name: formatter
 description: >-
   Grow Fatou's own Julia formatter, one construct at a time, against
-  hand-authored fixtures. rules::lower (src/formatter/rules.rs) lowers the CST
-  into the layout IR (ir.rs) printed by printer.rs; the gate in tests/formatter.rs
+  hand-authored fixtures. rules::lower (crates/fatou-formatter/src/formatter/rules.rs) lowers the CST
+  into the layout IR (ir.rs) printed by printer.rs; the gate in crates/fatou-formatter/tests/formatter.rs
   diffs each fixture's format(input.jl) against a hand-written expected.jl. There
   is no external reference formatter: you propose a formatting, the user edits
   expected.jl to the desired form, you push back if it breaks a tenet or conflicts
@@ -18,16 +18,16 @@ the traps.
 ## The formatter in one paragraph
 
 `format(text)` parses to the lossless rowan CST, lowers it via `rules::lower`
-(`src/formatter/rules.rs`) into the Wadler/Prettier `Ir` (`src/formatter/ir.rs`),
-and prints it with the best-fit engine (`src/formatter/printer.rs`). Fatou owns
+(`crates/fatou-formatter/src/formatter/rules.rs`) into the Wadler/Prettier `Ir` (`crates/fatou-formatter/src/formatter/ir.rs`),
+and prints it with the best-fit engine (`crates/fatou-formatter/src/formatter/printer.rs`). Fatou owns
 its style — there is **no external reference formatter** (we used to track
 Runic.jl; that target is gone). The gate is hand-authored fixtures:
-`tests/fixtures/formatter/<slug>/` holds `input.jl` plus a hand-written
-`expected.jl`, and `tests/formatter.rs` asserts `format(input.jl) == expected.jl`.
+`crates/fatou-formatter/tests/fixtures/formatter/<slug>/` holds `input.jl` plus a hand-written
+`expected.jl`, and `crates/fatou-formatter/tests/formatter.rs` asserts `format(input.jl) == expected.jl`.
 **Presence of `expected.jl` is gate membership** — a fixture with only `input.jl`
 is a construct still being authored, not yet gated. No allowlist, no blocked list.
 
-## The two invariants (`tests/formatter.rs`)
+## The two invariants (`crates/fatou-formatter/tests/formatter.rs`)
 
 - **Gate** (`formatter_fixtures_match_expected`): every fixture with an
   `expected.jl` must format to it exactly.
@@ -41,7 +41,7 @@ This is a **human-in-the-loop** loop. You do not invent the canonical form alone
 you propose, the user decides, you implement.
 
 1. **Read `RECAP.md`** (traps, latest session, rule inventory, ranked targets).
-   Prefer a user-named target. Baseline: `cargo test` is green.
+   Prefer a user-named target. Baseline: `cargo test --workspace` is green.
 2. **Surface candidate inputs and propose a formatting.** Pick a small set of
    representative `input.jl` snippets for the construct. Inspect the CST
    (`cargo run -q -- parse <file>`) and current output
@@ -58,12 +58,12 @@ you propose, the user decides, you implement.
    `rules.rs`; touch `ir.rs`/`printer.rs` only if the layout genuinely needs a new
    primitive. Preserve the **bail-to-transparent** discipline.
 6. **Lock it.** Commit the agreed `input.jl` + `expected.jl` under
-   `tests/fixtures/formatter/<slug>/`. The gate goes green for that slug.
+   `crates/fatou-formatter/tests/fixtures/formatter/<slug>/`. The gate goes green for that slug.
 7. **Guardrails:**
    ```sh
-   cargo test
-   cargo clippy --all-targets --all-features -- -D warnings
-   cargo fmt -- --check
+   cargo test --workspace
+   cargo clippy --workspace --all-targets --all-features -- -D warnings
+   cargo fmt --all -- --check
    ```
    Stability (idempotence + clean reparse) must hold.
 8. **Parser/lexer blocker => STOP and hand off.** (See below.)
@@ -75,7 +75,7 @@ you propose, the user decides, you implement.
 
 ## The rule recipe
 
-A construct touches just `src/formatter/rules.rs`:
+A construct touches just `crates/fatou-formatter/src/formatter/rules.rs`:
 
 1. Add a `match` arm in `lower_node` for the node `SyntaxKind`, dispatching to a
    `lower_<construct>` helper (split into a `rules/<construct>.rs` submodule once
@@ -128,13 +128,13 @@ and record the gap where the fixer will look:
 
 ## Key files
 
-- `src/formatter/rules.rs`: `lower`/`lower_node`/`lower_transparent`, the
+- `crates/fatou-formatter/src/formatter/rules.rs`: `lower`/`lower_node`/`lower_transparent`, the
   per-construct rules. The growth surface.
-- `src/formatter/ir.rs`: the `Ir` primitives (`Text`/`Concat`/`Line`/`SoftLine`/
+- `crates/fatou-formatter/src/formatter/ir.rs`: the `Ir` primitives (`Text`/`Concat`/`Line`/`SoftLine`/
   `HardLine`/`BlankLine`/`Indent`/`Group`).
-- `src/formatter/printer.rs`: best-fit layout engine (group flat-vs-break).
-- `src/formatter/core.rs`: `format`/`format_with_style` entry points.
-- `tests/formatter.rs`: the gate + stability invariants.
+- `crates/fatou-formatter/src/formatter/printer.rs`: best-fit layout engine (group flat-vs-break).
+- `crates/fatou-formatter/src/formatter/core.rs`: `format`/`format_with_style` entry points.
+- `crates/fatou-formatter/tests/formatter.rs`: the gate + stability invariants.
 
 ## Traps
 
