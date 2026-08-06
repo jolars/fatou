@@ -1,0 +1,18 @@
+# `duplicate-include`
+
+Flag a static `include("path")` that pulls in a file an earlier `include` in the same file already did. Julia has no include guard, so the repeat evaluates the file a second time, redefining its methods and re-running its top-level code. Paths are compared after resolution, so `"a.jl"` and `"./a.jl"` count as the same file. Including one file into two different `module` blocks is not flagged — that runs its definitions into two separate namespaces — and neither is a file reached twice along different include chains.
+
+The same file included twice, so its definitions run again:
+
+```julia
+include("util.jl")
+include("util.jl")
+```
+
+```text
+warning: duplicate-include
+ --> example.jl:2:9
+  |
+2 | include("util.jl")
+  |         ^^^^^^^^^ duplicate include: "util.jl" is already included earlier in this file
+```

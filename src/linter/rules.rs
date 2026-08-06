@@ -93,6 +93,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UnusedTypeParameter),
         Box::new(correctness::MissingIncludeFile),
         Box::new(correctness::IncludeCycle),
+        Box::new(correctness::DuplicateInclude),
         Box::new(correctness::JuliaVersionCompat),
         Box::new(correctness::CallArity),
         Box::new(correctness::RedefinedConstant),

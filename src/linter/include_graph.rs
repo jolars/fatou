@@ -1,5 +1,6 @@
 //! CLI-side include following: the per-file include problems the
-//! include-graph rules (`missing-include-file`, `include-cycle`) report.
+//! include-graph rules (`missing-include-file`, `include-cycle`,
+//! `duplicate-include`) report.
 //!
 //! The language server derives the same problems incrementally from its seeded
 //! workspace (see [`crate::incremental::project_graph`] and
@@ -18,6 +19,11 @@
 //!   never names a file).
 //! - **Cycle**: the target transitively includes the seed again, the
 //!   self-include being the smallest case.
+//! - **Duplicate**: an earlier `include` of the seed, from the same host
+//!   module, already pulled the same target in. Unlike the other two this is a
+//!   property of the seed's own text, so it is reported *alongside* them rather
+//!   than instead of them: a repeated `include` of a missing file is both
+//!   missing and repeated.
 //!
 //! Only statically resolvable includes participate, exactly the edge set of
 //! [`crate::project::include_edges`]; dynamic, interpolated, qualified, and
@@ -32,12 +38,19 @@ use crate::project::include_edges;
 use crate::syntax::SyntaxNode;
 
 /// What is wrong with one static `include("raw")` site of a linted file. The
-/// rules match a problem back to its call site by the `raw` literal (range-free
-/// like [`crate::project::IncludeEdge`], so the graph walk never tracks spans).
+/// problem is range-free like [`crate::project::IncludeEdge`], so the graph walk
+/// never tracks spans: a rule matches it back to a call site either by the `raw`
+/// literal (every site spelled that way is equally at fault) or, when one repeat
+/// has to be told from another, by [`edge`](Self::edge).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncludeProblem {
     /// The literal string passed to `include`, exactly as written.
     pub raw: String,
+    /// Which of the seed's static includes this is: an index into
+    /// [`crate::project::include_edges`]'s source-ordered list, which a rule
+    /// reproduces by enumerating the file's `include("literal")` call sites in
+    /// the same order.
+    pub edge: usize,
     pub kind: IncludeProblemKind,
 }
 
@@ -47,6 +60,9 @@ pub enum IncludeProblemKind {
     Missing,
     /// The target transitively `include`s the seed file again.
     Cycle,
+    /// An earlier `include` in the same file and the same host module already
+    /// pulled this target in.
+    Duplicate,
 }
 
 /// The memoized edge store: normalized path -> that file's resolved include
@@ -105,19 +121,33 @@ pub fn include_problems(seeds: &[(PathBuf, SyntaxNode)]) -> BTreeMap<PathBuf, Ve
     for (path, root) in seeds {
         let norm = normalize_path(path);
         let mut problems = Vec::new();
-        for edge in include_edges(root, norm.parent()) {
+        // The targets this seed has already pulled in, per host module: the
+        // same file included into two different modules runs into two
+        // namespaces and is not a repeat.
+        let mut included: HashSet<(PathBuf, Vec<String>)> = HashSet::new();
+        for (index, edge) in include_edges(root, norm.parent()).into_iter().enumerate() {
             let Some(target) = edge.target.as_deref().map(normalize_path) else {
                 continue;
             };
+            let repeated = !included.insert((target.clone(), edge.host_suffix));
             if !store.exists(&target) {
                 problems.push(IncludeProblem {
-                    raw: edge.raw,
+                    raw: edge.raw.clone(),
+                    edge: index,
                     kind: IncludeProblemKind::Missing,
                 });
             } else if reaches(&mut store, &target, &norm) {
                 problems.push(IncludeProblem {
-                    raw: edge.raw,
+                    raw: edge.raw.clone(),
+                    edge: index,
                     kind: IncludeProblemKind::Cycle,
+                });
+            }
+            if repeated {
+                problems.push(IncludeProblem {
+                    raw: edge.raw,
+                    edge: index,
+                    kind: IncludeProblemKind::Duplicate,
                 });
             }
         }
@@ -164,6 +194,7 @@ mod tests {
             problems[&main],
             [IncludeProblem {
                 raw: "gone.jl".to_string(),
+                edge: 0,
                 kind: IncludeProblemKind::Missing,
             }]
         );
@@ -209,6 +240,49 @@ mod tests {
         ]);
         assert_eq!(problems[&a][0].kind, IncludeProblemKind::Cycle);
         assert_eq!(problems[&b][0].kind, IncludeProblemKind::Cycle);
+    }
+
+    #[test]
+    fn a_repeated_target_is_reported_on_the_later_edge() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+        let main = dir.path().join("main.jl");
+        // Spelled differently, so only path resolution can tell they match.
+        let problems = include_problems(&[seed(&main, "include(\"a.jl\")\ninclude(\"./a.jl\")\n")]);
+        assert_eq!(
+            problems[&main],
+            [IncludeProblem {
+                raw: "./a.jl".to_string(),
+                edge: 1,
+                kind: IncludeProblemKind::Duplicate,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_repeat_into_another_module_is_not_a_duplicate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+        let main = dir.path().join("main.jl");
+        let src = "module A\ninclude(\"a.jl\")\nend\nmodule B\ninclude(\"a.jl\")\nend\n";
+        assert!(include_problems(&[seed(&main, src)]).is_empty());
+    }
+
+    #[test]
+    fn a_repeat_of_a_missing_file_is_both_problems() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.jl");
+        let problems =
+            include_problems(&[seed(&main, "include(\"gone.jl\")\ninclude(\"gone.jl\")\n")]);
+        let kinds: Vec<_> = problems[&main].iter().map(|p| (p.edge, p.kind)).collect();
+        assert_eq!(
+            kinds,
+            [
+                (0, IncludeProblemKind::Missing),
+                (1, IncludeProblemKind::Missing),
+                (1, IncludeProblemKind::Duplicate),
+            ]
+        );
     }
 
     #[test]

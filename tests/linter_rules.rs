@@ -1578,6 +1578,181 @@ fn include_cycle_does_not_flag_the_missing_rule_and_vice_versa() {
     );
 }
 
+// --- duplicate-include -----------------------------------------------------
+
+#[test]
+fn duplicate_include_flags_a_repeated_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"a.jl\")\ninclude(\"a.jl\")\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_include_flags_every_repeat_after_the_first() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"a.jl\")\ninclude(\"a.jl\")\ninclude(\"a.jl\")\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn duplicate_include_flags_the_repeat_not_the_first_include() {
+    // The finding lands on the second call's literal, the one that re-runs the
+    // file — not on the include that legitimately brought it in.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    let src = "include(\"a.jl\")\ninclude(\"a.jl\")\n";
+    let config = LintConfig {
+        select: Some(vec!["duplicate-include".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(Some(&main), src, &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(
+        usize::from(report.diagnostics[0].range.start()),
+        src.rfind("\"a.jl\"").unwrap()
+    );
+}
+
+#[test]
+fn duplicate_include_sees_through_a_differently_spelled_path() {
+    // Both literals resolve to the same file, so the second one is a repeat.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"a.jl\")\ninclude(\"./a.jl\")\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_include_flags_a_repeat_of_a_missing_file() {
+    // Repetition is a property of the source text: whether the target exists is
+    // `missing-include-file`'s business.
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"gone.jl\")\ninclude(\"gone.jl\")\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_include_ignores_distinct_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    std::fs::write(dir.path().join("b.jl"), "y = 2\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"a.jl\")\ninclude(\"b.jl\")\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn duplicate_include_ignores_repeats_in_distinct_modules() {
+    // Including the same file into two modules runs its definitions into two
+    // separate namespaces, which is the point.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    let src = "module A\ninclude(\"a.jl\")\nend\nmodule B\ninclude(\"a.jl\")\nend\n";
+    assert_eq!(count_at("duplicate-include", &main, src), 0);
+}
+
+#[test]
+fn duplicate_include_flags_repeats_within_one_module() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    let src = "module A\ninclude(\"a.jl\")\ninclude(\"a.jl\")\nend\n";
+    assert_eq!(count_at("duplicate-include", &main, src), 1);
+}
+
+#[test]
+fn duplicate_include_ignores_a_diamond() {
+    // Two included files that both include a third are not a repeat *here*:
+    // the rule only reports a file this file includes twice itself.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "include(\"c.jl\")\n").unwrap();
+    std::fs::write(dir.path().join("b.jl"), "include(\"c.jl\")\n").unwrap();
+    std::fs::write(dir.path().join("c.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"a.jl\")\ninclude(\"b.jl\")\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn duplicate_include_ignores_dynamic_includes() {
+    // Repeated but not statically resolvable: the paths are unknown.
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    let src = "include(x)\ninclude(x)\ninclude(\"$d/a.jl\")\ninclude(\"$d/a.jl\")\n";
+    assert_eq!(count_at("duplicate-include", &main, src), 0);
+}
+
+#[test]
+fn duplicate_include_stays_silent_without_a_path() {
+    // A pathless document (stdin) has no base directory to resolve against.
+    assert_eq!(
+        count(
+            "duplicate-include",
+            "include(\"a.jl\")\ninclude(\"a.jl\")\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn duplicate_include_is_suppressible() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at(
+            "duplicate-include",
+            &main,
+            "include(\"a.jl\")\n# fatou-ignore duplicate-include\ninclude(\"a.jl\")\n"
+        ),
+        0
+    );
+}
+
 // --- call-arity -------------------------------------------------------------
 
 #[test]

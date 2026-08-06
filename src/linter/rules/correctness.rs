@@ -3,6 +3,7 @@
 mod break_outside_loop;
 mod call_arity;
 mod duplicate_argument;
+mod duplicate_include;
 mod include_cycle;
 mod julia_version_compat;
 mod missing_include_file;
@@ -18,6 +19,7 @@ mod unused_type_parameter;
 pub use break_outside_loop::BreakOutsideLoop;
 pub use call_arity::CallArity;
 pub use duplicate_argument::DuplicateArgument;
+pub use duplicate_include::DuplicateInclude;
 pub use include_cycle::IncludeCycle;
 pub use julia_version_compat::JuliaVersionCompat;
 pub use missing_include_file::MissingIncludeFile;

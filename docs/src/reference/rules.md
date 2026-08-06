@@ -12,6 +12,7 @@ Each rule is documented with a description and a worked example whose diagnostic
 - [`unused-type-parameter`](rules/unused-type-parameter.md)
 - [`missing-include-file`](rules/missing-include-file.md)
 - [`include-cycle`](rules/include-cycle.md)
+- [`duplicate-include`](rules/duplicate-include.md)
 - [`julia-version-compat`](rules/julia-version-compat.md)
 - [`call-arity`](rules/call-arity.md)
 - [`redefined-constant`](rules/redefined-constant.md)

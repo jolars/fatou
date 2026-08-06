@@ -236,10 +236,18 @@ Ready now (no new infrastructure):
   (`if a; return; else; return; end; dead()`). Still confirm the callee with
   `resolves_to_base` before reporting a `throw`/`error`/`rethrow` divergence —
   the graph matches those by name. (arity `unreachable-code`)
-- [ ] `duplicate-include` (correctness, sem, warning, no fix): the same file
+- [x] `duplicate-include` (correctness, sem, warning, no fix): the same file
   `include`d twice, which silently re-runs its definitions. A third
   `IncludeProblemKind` beside `Missing`/`Cycle` in
-  `src/linter/include_graph.rs`; the graph already has the edges.
+  `src/linter/include_graph.rs`; the graph already has the edges. Landed as a
+  whole-file pass flagging the second and later `include`s: repetition is keyed
+  on the *resolved* target (so `"a.jl"` and `"./a.jl"` match) paired with the
+  call's host module (so the same file included into two `module` blocks is
+  not a repeat), and a diamond stays out as it does for `include-cycle`.
+  `Duplicate` is reported *beside* `Missing`/`Cycle` rather than instead of
+  them — repetition is a property of the file's own text — which is also why
+  `IncludeProblem` gained an `edge` index: matching problems back by the raw
+  literal cannot tell one repeat of a literal from another.
   (DuplicateInclude)
 - [ ] `duplicate-method` (correctness, sem, warning, no fix): two method
   definitions with identical signatures in one file — the second silently
