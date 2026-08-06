@@ -13,7 +13,7 @@
 
 use rowan::TextRange;
 
-use crate::ast::{AstNode, AstToken, CallExpr, Expr, MacroCall};
+use crate::ast::{AstNode, AstToken, CallExpr, MacroCall};
 use crate::project::include_target;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
@@ -63,12 +63,12 @@ impl FileScan {
                     let Some(call) = CallExpr::cast(node) else {
                         continue;
                     };
-                    let Some(Expr::Name(callee)) = call.callee() else {
+                    let Some(callee) = call.callee_ident() else {
                         continue;
                     };
-                    match callee.ident().map(|ident| ident.text().to_string()) {
-                        Some(name) if name == "eval" => scan.calls_eval = true,
-                        Some(name) if name == "include" => {
+                    match callee.text() {
+                        "eval" => scan.calls_eval = true,
+                        "include" => {
                             if include_target(&call).is_some() {
                                 scan.literal_include = true;
                             } else {

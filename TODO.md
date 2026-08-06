@@ -87,9 +87,20 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   `trusts_resolution()` for the shared soundness floor. `RuleContext` is now
   built with `new(..).with_resolution(..)` and friends rather than a struct
   literal, so the cache stays private.
-- [ ] A shared call-shape matcher module (arity's
+- [x] A shared call-shape matcher module (arity's
   `src/linter/rules/matchers.rs`): "call to *name* with exactly *n* positional
-  arguments and no named ones" is the opening line of most idiom rules.
+  arguments and no named ones" is the opening line of most idiom rules. Landed
+  as `src/linter/rules/matchers.rs`: `plain_call(node, name, arity)` is that
+  whole opening, over `CallShape`, which splits a call site into positional
+  arguments, keyword arguments (both sides of the `;`, including the
+  `f(; verbose)` shorthand), and the two *open* flags a splat sets — the
+  distinction a rule reasoning about arity has to respect. `call_expr` /
+  `call_named` exclude a definition's signature, which is a `CALL_EXPR` too.
+  `call-arity` now runs on `CallShape` instead of its private copy, which is
+  what proved the API. Two pure-navigation accessors moved down to the AST
+  layer where they belong (`CallExpr::callee_ident`, `Expr::name_ident`), and
+  `index-from-length`, `nothing-comparison`, `missing-comparison`, and
+  `file_scan` were rewritten onto them.
 - [ ] Maybe: a per-region control-flow graph (arity's `src/semantic/cfg.rs`,
   ~590 lines: basic blocks, a `Goto`/`Branch`/`Return`/`Diverge`/`Unreachable`
   terminator enum, memoized per file, built by structured recursive descent

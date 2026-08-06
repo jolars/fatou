@@ -325,6 +325,18 @@ impl AstNode for Expr {
     }
 }
 
+impl Expr {
+    /// The identifier token, when this expression is a bare name (`x`). `None`
+    /// for every compound shape, including a qualified path (`M.x`), which is a
+    /// `BINARY_EXPR`, and a `var"..."` identifier, which has no `IDENT` token.
+    pub fn name_ident(&self) -> Option<Ident> {
+        match self {
+            Expr::Name(name) => name.ident(),
+            _ => None,
+        }
+    }
+}
+
 impl Name {
     /// The identifier token.
     pub fn ident(&self) -> Option<Ident> {
@@ -497,6 +509,17 @@ impl CallExpr {
     /// The callee (the expression being called).
     pub fn callee(&self) -> Option<Expr> {
         support::child(&self.0)
+    }
+
+    /// The identifier naming the callee, when the callee is a bare name
+    /// (`f(x)`). `None` for every compound callee: a qualified path
+    /// (`Base.f(x)`), an operator ([`Self::callee_operator`]), a `var"..."`
+    /// name, and a computed one (`g()(x)`).
+    pub fn callee_ident(&self) -> Option<Ident> {
+        match self.callee()? {
+            Expr::Name(name) => name.ident(),
+            _ => None,
+        }
     }
 
     /// The operator token naming the callee, when the callee is an operator
@@ -783,6 +806,31 @@ mod tests {
             .map(|a| a.expr().unwrap().syntax().text().to_string())
             .collect();
         assert_eq!(texts, ["a", "b"]);
+    }
+
+    #[test]
+    fn call_callee_ident_is_bare_names_only() {
+        assert_eq!(
+            find::<CallExpr>("g(a)\n").callee_ident().unwrap().text(),
+            "g"
+        );
+        // A qualified, operator, computed, or `var\"...\"` callee has no bare
+        // identifier to report.
+        assert!(find::<CallExpr>("Base.g(a)\n").callee_ident().is_none());
+        assert!(find::<CallExpr>("(!=)(a, b)\n").callee_ident().is_none());
+        assert!(find::<CallExpr>("(h())(a)\n").callee_ident().is_none());
+        assert!(find::<CallExpr>("var\"q\"(1)\n").callee_ident().is_none());
+    }
+
+    #[test]
+    fn expr_name_ident_reads_bare_name_operands() {
+        let bin: BinaryExpr = find("x == missing\n");
+        assert_eq!(bin.lhs().unwrap().name_ident().unwrap().text(), "x");
+        assert_eq!(bin.rhs().unwrap().name_ident().unwrap().text(), "missing");
+        // Anything that is not a bare `NAME` answers `None`.
+        let bin: BinaryExpr = find("f(x) == 1\n");
+        assert!(bin.lhs().unwrap().name_ident().is_none());
+        assert!(bin.rhs().unwrap().name_ident().is_none());
     }
 
     #[test]

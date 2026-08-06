@@ -61,6 +61,16 @@ Prefer the cheapest tier the rule's correctness actually requires.
   `BinaryExpr`, the `Expr` sum, `Ident`/`Operator` tokens, `Has*` traits).
   **Prefer these over raw `children()`/`kind()` matching**; grow them when a
   shape is missing.
+- `src/linter/rules/matchers.rs`—shared **call-shape** matching, one tier above
+  the AST wrappers. `plain_call(node, name, arity)` is the whole "a call to
+  *name* with exactly *n* positional arguments and nothing else" opening most
+  idiom rules need; `CallShape::of(&call)` is the full split when the rule
+  needs keyword arguments (both sides of the `;`, plus the `f(; verbose)`
+  shorthand) or has to know that a splat left the positional or keyword set
+  *open*. `call_named`/`call_expr` exclude a definition's signature, which is a
+  `CALL_EXPR` too. **Do not re-derive Julia's argument grammar in a rule**—grow
+  this module instead. Shape matching is only half the job: follow it with
+  `ctx.resolves_to_base(&call)` before claiming the callee is Base's.
 - `src/linter/diagnostic.rs`—`Diagnostic`, `Fix`, `Applicability`,
   `Severity`. Build findings with **`Diagnostic::new(id, start, end, message)`**
   and push `Fix { description, content, start, end, applicability }` onto

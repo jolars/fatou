@@ -21,6 +21,12 @@
 //!    valid rule IDs ([`all_rule_ids`]) is derived from it, so there is no
 //!    second list to keep in sync.
 //!
+//! A rule that asks about a *call's shape* goes through [`matchers`] rather
+//! than re-deriving Julia's argument grammar: [`matchers::plain_call`] is the
+//! whole "a call to *name* with exactly *n* positional arguments and nothing
+//! else" opening, and [`matchers::CallShape`] the full split when a rule needs
+//! keywords or has to know which set a splat left open.
+//!
 //! A rule that asks what a *name* means goes through [`RuleContext`] rather
 //! than assembling its own machinery: [`RuleContext::resolver`] for the shared
 //! [`Resolver`], [`RuleContext::trusts_resolution`] for the soundness floor,
@@ -51,6 +57,7 @@ use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod correctness;
 mod file_scan;
+pub mod matchers;
 pub mod suspicious;
 
 pub(crate) use file_scan::FileScan;

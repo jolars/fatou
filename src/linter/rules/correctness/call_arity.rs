@@ -32,16 +32,15 @@
 //! for workspace member files; on the CLI it is opt-in via `--select`, sound
 //! for self-contained scripts.
 
-use rowan::TextRange;
-
-use crate::ast::{Arg, AstNode, AstToken, CallExpr, Expr, HasArgList, KeywordArg};
+use crate::ast::AstToken;
 use crate::index::harvest_tree;
 use crate::index::model::{Method, ModuleIndex, PackageIndex};
 use crate::linter::diagnostic::Diagnostic;
+use crate::linter::rules::matchers::{self, CallShape};
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::resolve::{Namespace, Resolution};
 use crate::semantic::{BindingKind, LoadKind};
-use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::syntax::SyntaxKind;
 use std::sync::Arc;
 
 pub struct CallArity;
@@ -106,38 +105,27 @@ impl Rule for CallArity {
             if node.kind() != SyntaxKind::CALL_EXPR {
                 continue;
             }
-            // The `do` block passes a leading function argument the arg list
-            // does not show.
-            if node
-                .parent()
-                .is_some_and(|p| p.kind() == SyntaxKind::DO_EXPR)
-            {
-                continue;
-            }
             if scan.in_skipped(node.text_range()) {
                 continue;
             }
             // A definition's signature is a `CALL_EXPR` too — declaring
             // parameters, not passing arguments.
-            if in_signature_position(&node) {
-                continue;
-            }
-            let Some(call) = CallExpr::cast(node.clone()) else {
+            let Some(call) = matchers::call_expr(&node) else {
                 continue;
             };
-            let Some(Expr::Name(callee)) = call.callee() else {
-                continue;
-            };
-            let Some(ident) = callee.ident() else {
+            let Some(ident) = call.callee_ident() else {
                 continue;
             };
             let name = ident.text();
             if MODULE_IMPLICIT.contains(&name) {
                 continue;
             }
-            let Some(site) = CallSite::collect(&call) else {
+            let site = CallShape::of(&call);
+            // A positional splat leaves the count unknown; a `do` block passes
+            // a leading function argument the argument list does not show.
+            if site.positional_open || site.do_block {
                 continue;
-            };
+            }
 
             // The trees whose same-name groups may hold methods of this call's
             // target, per resolution tier. A masked library function stays out
@@ -182,10 +170,10 @@ impl Rule for CallArity {
             let arities: Vec<Arity> = table.methods.iter().map(Arity::of).collect();
             let matching: Vec<&Arity> = arities
                 .iter()
-                .filter(|a| a.admits(site.positional))
+                .filter(|a| a.admits(site.positional.len()))
                 .collect();
             if matching.is_empty() {
-                let count = site.positional;
+                let count = site.positional.len();
                 let plural = if count == 1 { "" } else { "s" };
                 let accepted = render_accepted(&arities);
                 sink.push(Diagnostic::new(
@@ -198,17 +186,18 @@ impl Rule for CallArity {
                 ));
                 continue;
             }
-            if site.kw_open {
+            if site.keyword_open {
                 continue;
             }
-            for (kw, range) in &site.keywords {
+            for keyword in &site.keywords {
+                let kw = keyword.name.text();
                 let unknown = matching
                     .iter()
                     .all(|a| !a.kw_open && !a.kws.iter().any(|k| k == kw));
                 if unknown {
                     sink.push(Diagnostic::new(
                         self.id(),
-                        *range,
+                        keyword.name.syntax().text_range(),
                         format!(
                             "no matching method of `{name}` accepts the keyword argument `{kw}`"
                         ),
@@ -355,112 +344,6 @@ fn render_accepted(arities: &[Arity]) -> String {
         })
         .collect();
     parts.join(", ")
-}
-
-/// One call site's argument shape, or `None` when it cannot be counted
-/// (a positional splat).
-struct CallSite {
-    positional: usize,
-    /// Keyword names passed, each with the range of its name (the finding
-    /// span for an unknown keyword).
-    keywords: Vec<(String, TextRange)>,
-    /// The keyword set is open (`kwargs...` or an unrecognized shape after
-    /// `;`): skip the keyword check, the positional one still holds.
-    kw_open: bool,
-}
-
-impl CallSite {
-    fn collect(call: &CallExpr) -> Option<Self> {
-        let mut site = CallSite {
-            positional: 0,
-            keywords: Vec::new(),
-            kw_open: false,
-        };
-        let Some(args) = call.arg_list() else {
-            return Some(site);
-        };
-        for child in args.syntax().children() {
-            match child.kind() {
-                SyntaxKind::ARG => {
-                    if is_splat(&child) {
-                        return None;
-                    }
-                    site.positional += 1;
-                }
-                SyntaxKind::KEYWORD_ARG => site.push_keyword(&child),
-                SyntaxKind::PARAMETERS => {
-                    for param in child.children() {
-                        match param.kind() {
-                            SyntaxKind::KEYWORD_ARG => site.push_keyword(&param),
-                            // After `;`: `f(1; a)` passes the binding `a` as
-                            // the keyword `a`; a splat opens the set.
-                            SyntaxKind::ARG => match shorthand_keyword(&param) {
-                                Some(entry) => site.keywords.push(entry),
-                                None => site.kw_open = true,
-                            },
-                            _ => site.kw_open = true,
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        Some(site)
-    }
-
-    fn push_keyword(&mut self, node: &SyntaxNode) {
-        let name = KeywordArg::cast(node.clone())
-            .and_then(|kw| kw.name())
-            .and_then(|name| name.ident());
-        match name {
-            Some(ident) => self
-                .keywords
-                .push((ident.text().to_string(), ident.syntax().text_range())),
-            None => self.kw_open = true,
-        }
-    }
-}
-
-/// Whether `node` is a definition's signature rather than a call: directly
-/// under a `SIGNATURE` (long-form `function`/`macro` definitions), or the
-/// left-hand side of a short-form `f(x) = ...`, in both cases possibly
-/// through a return-type annotation or `where` clause.
-fn in_signature_position(node: &SyntaxNode) -> bool {
-    let mut current = node.clone();
-    loop {
-        let Some(parent) = current.parent() else {
-            return false;
-        };
-        match parent.kind() {
-            SyntaxKind::SIGNATURE => return true,
-            SyntaxKind::TYPE_ANNOTATION | SyntaxKind::WHERE_EXPR => current = parent,
-            SyntaxKind::ASSIGNMENT_EXPR => {
-                return parent
-                    .children()
-                    .next()
-                    .is_some_and(|first| first == current);
-            }
-            _ => return false,
-        }
-    }
-}
-
-/// Whether an `ARG` wraps a splat (`xs...`).
-fn is_splat(arg: &SyntaxNode) -> bool {
-    Arg::cast(arg.clone())
-        .and_then(|arg| arg.expr())
-        .is_some_and(|expr| matches!(expr, Expr::SplatExpr(_)))
-}
-
-/// The keyword an after-`;` bare `ARG` shorthand passes: `f(1; a)` is the
-/// keyword `a`. Anything else (a splat, a field access) is unrecognized.
-fn shorthand_keyword(arg: &SyntaxNode) -> Option<(String, TextRange)> {
-    let expr = Arg::cast(arg.clone())?.expr()?;
-    let Expr::Name(name) = expr else {
-        return None;
-    };
-    let ident = name.ident()?;
-    Some((ident.text().to_string(), ident.syntax().text_range()))
 }
 
 #[cfg(test)]

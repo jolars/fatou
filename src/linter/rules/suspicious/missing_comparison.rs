@@ -30,6 +30,7 @@
 
 use crate::ast::{AstNode, AstToken, BinaryExpr, Expr};
 use crate::linter::diagnostic::{Applicability, Diagnostic, Fix};
+use crate::linter::rules::matchers;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::syntax::{SyntaxElement, SyntaxKind};
 
@@ -77,10 +78,8 @@ impl Rule for MissingComparison {
         // Match `missing` on either operand by identifier text. It is a `Core`
         // constant that is practically never shadowed, so this is sound; the
         // capitalized `Missing` type is a distinct identifier.
-        let is_missing = |operand: Option<Expr>| {
-            matches!(operand, Some(Expr::Name(name))
-                if name.ident().is_some_and(|id| id.text() == "missing"))
-        };
+        let is_missing =
+            |operand: Option<Expr>| operand.is_some_and(|expr| matchers::is_name(&expr, "missing"));
         if !is_missing(bin.lhs()) && !is_missing(bin.rhs()) {
             return;
         }

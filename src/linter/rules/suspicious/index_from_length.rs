@@ -85,13 +85,14 @@ impl Rule for IndexFromLength {
         }
 
         // `1:length(x)` / `1:size(x, d)` where the loop variable indexes `x`.
-        let Some(loop_var) = binding.pattern().and_then(simple_name) else {
+        let Some(loop_var) = binding.pattern().and_then(|pat| pat.name_ident()) else {
             return;
         };
+        let loop_var = loop_var.text();
         let Some((coll, func)) = one_based_length_range(&iterable) else {
             return;
         };
-        if !indexes_collection(&binding, &coll, &loop_var) {
+        if !indexes_collection(&binding, &coll, loop_var) {
             return;
         }
 
@@ -117,15 +118,6 @@ enum LengthFn {
     Size,
 }
 
-/// The identifier text of a bare-name expression (`x`), or `None` for any
-/// compound target.
-fn simple_name(expr: Expr) -> Option<String> {
-    match expr {
-        Expr::Name(name) => Some(name.ident()?.text().to_string()),
-        _ => None,
-    }
-}
-
 /// If `expr` is a one-based, unit-step range `1:length(c)` / `1:size(c, ...)`,
 /// the collection name `c` and which builtin bounds it. A stepped range parses
 /// as a `RANGE_EXPR`, not a `BINARY_EXPR`, so it never matches here.
@@ -146,19 +138,14 @@ fn one_based_length_range(expr: &Expr) -> Option<(String, LengthFn)> {
         return None;
     };
     let func = length_fn(&call)?;
-    let coll = call
-        .arg_list()?
-        .args()
-        .next()?
-        .expr()
-        .and_then(simple_name)?;
-    Some((coll, func))
+    let coll = call.arg_list()?.args().next()?.expr()?.name_ident()?;
+    Some((coll.text().to_string(), func))
 }
 
 /// The length-like builtin a call names, matched purely on the callee's simple
 /// name (`length`/`size`); a qualified callee (`Base.length`) does not match.
 fn length_fn(call: &CallExpr) -> Option<LengthFn> {
-    match simple_name(call.callee()?)?.as_str() {
+    match call.callee_ident()?.text() {
         "length" => Some(LengthFn::Length),
         "size" => Some(LengthFn::Size),
         _ => None,
@@ -174,14 +161,18 @@ fn indexes_collection(binding: &ForBinding, coll: &str, loop_var: &str) -> bool 
     scope
         .descendants()
         .filter_map(IndexExpr::cast)
-        .filter(|idx| idx.base().and_then(simple_name).as_deref() == Some(coll))
+        .filter(|idx| {
+            idx.base()
+                .and_then(|base| base.name_ident())
+                .is_some_and(|name| name.text() == coll)
+        })
         .any(|idx| {
             idx.arg_list().is_some_and(|args| {
                 args.syntax()
                     .descendants()
                     .filter_map(Name::cast)
-                    .filter_map(|n| n.ident().map(|i| i.text().to_string()))
-                    .any(|n| n == loop_var)
+                    .filter_map(|n| n.ident())
+                    .any(|n| n.text() == loop_var)
             })
         })
 }
