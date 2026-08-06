@@ -1,5 +1,8 @@
 [workspace]
 members = ["crates/fatou-parser", "crates/fatou-formatter"]
+# The mdBook preprocessor builds and runs from its own directory, so it must not
+# be pulled into this workspace.
+exclude = ["docs/doc-utils"]
 
 [workspace.package]
 edition = "2024"
