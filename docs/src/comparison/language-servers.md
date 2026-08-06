@@ -8,25 +8,26 @@ long-standing backend of the official VS Code extension, and
 server. This page explains how Fatou differs from them and when you might reach
 for one over another.
 
-The short version: **Fatou is the only one of the three that does not run
-Julia.** That single design choice explains almost every other difference below.
+The largest divisor is that Fatou is the only one of the three that does not run
+Julia, which explains the differences in startup, dependency handling, and type
+awareness.
 
-## At a glance
+## At a Glance
 
-| | **Fatou** | **LanguageServer.jl** | **JETLS.jl** |
-|---|---|---|---|
-| Implementation language | Rust | Julia | Julia |
-| Requires a Julia install | No | Yes | Yes |
-| Runs your code / packages | No | Loads dependency symbols in a Julia subprocess | Yes (compiler-driven) |
-| Analysis model | Static: syntax + name/scope resolution | Static analysis + runtime symbol indexing | Type inference via the Julia compiler (JET.jl) |
-| Type-aware diagnostics | No | Best-effort; deeper via optional JET | Yes, core feature |
-| Formatter | Built in (own engine) | Delegates to JuliaFormatter / Runic | Delegates to Runic / JuliaFormatter |
-| Linter | Built in | Built in (StaticLint) | Built in (lowering + type checks) |
-| First-run cost | None (single binary) | Precompilation + package indexing (minutes) | Precompilation (one-time) |
-| Maturity | Young, focused | Mature, de-facto default | Experimental, actively developed |
-| License | MIT | MIT | MIT |
+  |                          | **Fatou**                              | **LanguageServer.jl**                          | **JETLS.jl**                                   |
+  | ------------------------ | -------------------------------------- | ---------------------------------------------- | ---------------------------------------------- |
+  | Implementation language  | Rust                                   | Julia                                          | Julia                                          |
+  | Requires a Julia install | No                                     | Yes                                            | Yes                                            |
+  | Runs your code           | No                                     | Loads dependency symbols in a Julia subprocess | Yes (compiler-driven)                          |
+  | Analysis model           | Static: syntax + name/scope resolution | Static analysis + runtime symbol indexing      | Type inference via the Julia compiler (JET.jl) |
+  | Type-aware diagnostics   | No                                     | Best-effort; deeper via optional JET           | Yes, core feature                              |
+  | Formatter                | Built in (own engine)                  | Delegates to JuliaFormatter / Runic            | Delegates to Runic / JuliaFormatter            |
+  | Linter                   | Built in                               | Built in (StaticLint)                          | Built in (lowering + type checks)              |
+  | First-run cost           | None (single binary)                   | Precompilation + package indexing (minutes)    | Precompilation (one-time)                      |
+  | Maturity                 | Young, focused                         | Mature, de-facto default                       | Experimental, actively developed               |
+  | License                  | MIT                                    | MIT                                            | MIT                                            |
 
-## The core distinction: running Julia or not
+## The Core Distinction: Running Julia or Not
 
 Both LanguageServer.jl and JETLS.jl are themselves Julia packages. They start a
 Julia process and analyze your code from inside a live runtime. That gives them
@@ -73,9 +74,9 @@ anywhere, that is exactly what Fatou is for.
 ## LanguageServer.jl
 
 [LanguageServer.jl](https://github.com/julia-vscode/LanguageServer.jl) is the
-mature, de-facto standard. It is the backend of the official
-[Julia VS Code extension](https://www.julia-vscode.org) and is reused by many
-other editors over LSP.
+mature, de-facto standard. It is the backend of the official [Julia VS Code
+extension](https://www.julia-vscode.org) and is reused by many other editors
+over LSP.
 
 Interestingly, its modern architecture is a close cousin of Fatou's. As of its
 v5 rewrite, the analysis engine is
