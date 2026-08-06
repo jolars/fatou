@@ -1,0 +1,3 @@
+flavor = "mdbook"
+
+extends = "../panache.toml"
