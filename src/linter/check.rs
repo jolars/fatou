@@ -318,7 +318,8 @@ pub fn lint_parsed(
     let ctx = RuleContext::new(path, root, model)
         .with_resolution(resolution)
         .with_includes(includes)
-        .with_julia_target(rules.julia_target());
+        .with_julia_target(rules.julia_target())
+        .with_config(rules.rules_config());
     let raw = rules.run(&ctx);
 
     let suppressions = SuppressionMap::build(text);

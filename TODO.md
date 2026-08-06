@@ -67,6 +67,16 @@
   Name-based match on `length`/`size`; no type info to exempt `Vector`/`Array`,
   so gated on the loop var actually indexing the collection. On by default.
   (IncorrectIterSpec, IndexFromLength)
+- [x] `discouraged-function` (suspicious, sem, warning, no fix): flags a call to
+  a function on the `[lint.rules.discouraged-function]` deny-list. `functions`
+  replaces the built-in set, `extend-functions` adds to it, `functions = {}`
+  silences the rule. Built-ins are Base functions with process-wide or
+  memory-unsafe effects (`exit`, `cd`, `redirect_std*`, the `unsafe_*`/pointer
+  conversions). A `do`-block call is skipped, since for `cd`/`redirect_*` that
+  form is the suggested alternative. Two-tier namespace gate: a built-in name
+  needs `resolves_to_base`, a project-configured one only needs to survive
+  `read_is_shadowed_locally` — demanding Base confirmation for a name the
+  project added would make its config inert. On by default.
 
 ### Rule infrastructure
 
@@ -137,12 +147,24 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   lookup into it. The index costs nothing in practice: unreachable code is rare,
   so the set is empty for nearly every file. `tests/cfg.rs` pins it against the
   old scan, statement by statement, over the whole parser fixture corpus.
-- [ ] Per-rule config: a `[lint.rules.<id>]` TOML table plus a typed per-rule
-  struct in `src/config.rs`, threaded to rules as a `config`/`&RuleConfig` field
-  on `RuleContext` (arity's "§I4", which it records as *blocking* two of its own
-  rules). `src/config.rs` has only `select`/`ignore`/`severity` today, so any
-  rule with a tunable knob — a configurable deny-list of discouraged functions,
-  a project-specific naming convention — is blocked until this lands.
+- [x] Per-rule config: a `[lint.rules.<id>]` TOML table plus a typed per-rule
+  struct in `src/config.rs` (`RulesConfig`, one field per *configurable* rule;
+  `rename_all = "kebab-case"` is what makes the field name the table name).
+  Threaded to rules as `ctx.config: &RulesConfig` — the whole table, not one
+  rule's slice, so `Rule` stays a plain trait object and `all_rules()` keeps its
+  empty signature. Carried on `ResolvedRules` and borrowed per file by the
+  driver, exactly as `julia_target` already was, so no per-file entry point
+  widened. Landed with `discouraged-function` as its first consumer.
+  - Strictness is deliberately asymmetric: a typo in `select`/`ignore`/
+    `severity` stays a warning (those are *data*), while an unknown rule ID
+    under `[lint.rules]` — or an unknown key inside a rule's table — is a config
+    parse error via `deny_unknown_fields` (that is *schema*).
+  - Per-rule *severity* stays at `[lint.severity]` rather than moving into the
+    rule table; the stamping loop in `ResolvedRules::run` is the seam if that
+    ever changes.
+  - Still open, now unblocked: `unused-binding`'s `ATTRIBUTE_DSL_MACROS` wants
+    an `extend-attribute-dsl-macros` knob, and the throwaway-name convention
+    (`_`-prefixed) wants one too.
 - [ ] Suppression-map refactor, prerequisite for the meta-rules below (arity's
   "§I6"): have `suppression.rs` expose the parsed directive list (rule ID,
   range, has-reason, raw text) on `RuleContext`, and have the driver

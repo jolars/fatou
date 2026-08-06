@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use serde::Deserialize;
 
@@ -59,7 +60,153 @@ pub struct LintConfig {
     /// Per-rule severity overrides (`[lint.severity]`); rules not listed keep
     /// their default severity.
     pub severity: BTreeMap<String, Severity>,
+    /// Per-rule option tables (`[lint.rules.<id>]`). See [`RulesConfig`].
+    pub rules: RulesConfig,
 }
+
+/// The `[lint.rules]` section: one field per *configurable* rule.
+///
+/// `rename_all = "kebab-case"` is what turns the field `discouraged_function`
+/// into the table `[lint.rules.discouraged-function]`, so the TOML spelling
+/// always matches the rule's public ID. A rule with no tunable knob has no
+/// field here.
+///
+/// Strictness is deliberately asymmetric with `select`/`ignore`/`severity`,
+/// where an unrecognized rule ID is only a warning: those are *data* (a list of
+/// IDs the user typed), while this is *schema* (a typed table). So
+/// `deny_unknown_fields` makes both an unknown rule ID under `[lint.rules]` and
+/// an unknown key inside a rule's table a config parse error.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct RulesConfig {
+    #[serde(default)]
+    pub discouraged_function: DiscouragedFunctionConfig,
+}
+
+/// The `[lint.rules.discouraged-function]` table: the deny-list the
+/// `discouraged-function` rule matches call names against.
+///
+/// `functions` **replaces** the built-in set and `extend-functions` **adds** to
+/// it, the same idiom as top-level [`exclude`](Config::exclude) /
+/// [`extend-exclude`](Config::extend_exclude). Setting `functions = {}`
+/// silences the rule without having to `ignore` it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct DiscouragedFunctionConfig {
+    /// Function name -> the suggestion rendered in the diagnostic. Defaults to
+    /// [`default_discouraged_functions`]; setting it replaces that set wholesale.
+    #[serde(default = "default_discouraged_functions")]
+    pub functions: BTreeMap<String, String>,
+    /// Entries added on top of [`functions`](Self::functions). An entry here
+    /// with the same name wins, so a project can reword a built-in suggestion
+    /// without restating the whole map.
+    #[serde(default)]
+    pub extend_functions: BTreeMap<String, String>,
+}
+
+impl Default for DiscouragedFunctionConfig {
+    /// Seeded from [`default_discouraged_functions`]. Written out rather than
+    /// derived: `#[derive(Default)]` would hand back an empty map, and
+    /// [`RulesConfig`] *does* derive `Default`, so the derive would silently
+    /// disable the rule whenever the table is absent.
+    fn default() -> Self {
+        Self {
+            functions: default_discouraged_functions(),
+            extend_functions: BTreeMap::new(),
+        }
+    }
+}
+
+impl DiscouragedFunctionConfig {
+    /// The suggestion for `name`, or `None` if it is not discouraged.
+    /// `extend-functions` is consulted first so it can override a built-in
+    /// entry. Allocation-free: this runs once per call expression, so it is the
+    /// rule's hot path (see [`resolved`](Self::resolved) for the same answer as
+    /// a map).
+    pub fn lookup(&self, name: &str) -> Option<&str> {
+        self.extend_functions
+            .get(name)
+            .or_else(|| self.functions.get(name))
+            .map(String::as_str)
+    }
+
+    /// The effective deny-list, `functions` with `extend-functions` layered on
+    /// top. Materializes what [`lookup`](Self::lookup) answers one name at a
+    /// time; used by tests and documentation rather than the hot path.
+    pub fn resolved(&self) -> BTreeMap<&str, &str> {
+        self.functions
+            .iter()
+            .chain(&self.extend_functions)
+            .map(|(name, suggestion)| (name.as_str(), suggestion.as_str()))
+            .collect()
+    }
+
+    /// Whether `name` is one of the built-in Base/Core entries rather than a
+    /// name the project added.
+    ///
+    /// The rule uses this to pick its namespace gate: a built-in name is
+    /// confirmed against Base before being reported, while a user-configured
+    /// name only has to survive a shadow check. Demanding Base confirmation for
+    /// a name the project added would make that configuration silently inert,
+    /// since such a name is by definition not one Base could confirm.
+    ///
+    /// Membership follows the *built-in table*, not the resolved deny-list, so
+    /// rewording a built-in through `extend-functions` does not downgrade its
+    /// gate.
+    pub fn is_builtin(name: &str) -> bool {
+        DEFAULT_DISCOURAGED_FUNCTIONS.contains_key(name)
+    }
+}
+
+/// The built-in deny-list: Base/Core functions with process-wide or
+/// memory-unsafe effects, each paired with the alternative to reach for.
+///
+/// Every entry must be a name the Base/Core snapshot exports, since the rule
+/// only fires once [`resolves_to_base`](crate::linter::RuleContext::resolves_to_base)
+/// confirms the callee. Deliberately excluded:
+///
+/// - `eval` — unreachable by construction. A file that calls it fails
+///   [`trusts_resolution`](crate::linter::RuleContext::trusts_resolution), so
+///   no call in it can ever be confirmed as Base's.
+/// - `include` — essential to the Julia file model.
+/// - Macros (`@eval`, `Base.@pure`) — a `MACRO_CALL`, not a `CALL_EXPR`, and so
+///   outside a call-shape rule's reach.
+fn default_discouraged_functions() -> BTreeMap<String, String> {
+    DEFAULT_DISCOURAGED_FUNCTIONS.clone()
+}
+
+/// The built-in table itself, built once. Kept behind
+/// [`default_discouraged_functions`] (which clones it, since the config struct
+/// owns its map and a project may replace it) and queried directly by
+/// [`DiscouragedFunctionConfig::is_builtin`].
+static DEFAULT_DISCOURAGED_FUNCTIONS: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
+    const UNSAFE_POINTER: &str =
+        "prefer a safe alternative; the caller must guarantee the pointer stays valid";
+    [
+        ("exit", "let the caller decide when the process ends"),
+        (
+            "cd",
+            "use the `cd(f, dir)` do-block form so the working directory is restored",
+        ),
+        (
+            "redirect_stdout",
+            "use the `redirect_stdout(f, io)` do-block form",
+        ),
+        (
+            "redirect_stderr",
+            "use the `redirect_stderr(f, io)` do-block form",
+        ),
+        ("unsafe_load", UNSAFE_POINTER),
+        ("unsafe_store!", UNSAFE_POINTER),
+        ("unsafe_wrap", UNSAFE_POINTER),
+        ("unsafe_string", UNSAFE_POINTER),
+        ("pointer_from_objref", UNSAFE_POINTER),
+        ("unsafe_pointer_to_objref", UNSAFE_POINTER),
+    ]
+    .into_iter()
+    .map(|(name, suggestion)| (name.to_string(), suggestion.to_string()))
+    .collect()
+});
 
 /// The `[julia]` section: settings tied to the Julia language and environment.
 /// Currently just the target version; reserved as the home for future
@@ -207,6 +354,10 @@ struct RawLint {
     ignore: Vec<String>,
     #[serde(default)]
     severity: BTreeMap<String, Severity>,
+    /// `[lint.rules]`. The on-disk and resolved shapes coincide here, so this
+    /// is [`RulesConfig`] itself rather than a `Raw` twin.
+    #[serde(default)]
+    rules: RulesConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -337,6 +488,7 @@ impl RawConfig {
                 select: self.lint.select,
                 ignore: self.lint.ignore,
                 severity: self.lint.severity,
+                rules: self.lint.rules,
             },
             julia: self.julia.resolve(&mut warnings),
             exclude: self.exclude,
@@ -624,6 +776,112 @@ mod tests {
     fn rejects_unknown_severity_value() {
         toml::from_str::<RawConfig>("[lint.severity]\nunused-binding = \"fatal\"\n")
             .expect_err("unknown severity should be rejected");
+    }
+
+    /// The per-rule tables under `[lint.rules]`.
+    fn lint_rules(toml_text: &str) -> RulesConfig {
+        let raw: RawConfig = toml::from_str(toml_text).unwrap();
+        raw.into_config().0.lint.rules
+    }
+
+    #[test]
+    fn absent_lint_rules_section_keeps_the_builtin_deny_list() {
+        let rules = lint_rules("");
+        assert_eq!(
+            rules.discouraged_function.lookup("exit"),
+            Some("let the caller decide when the process ends")
+        );
+    }
+
+    #[test]
+    fn accepts_empty_lint_rules_section() {
+        let rules = lint_rules("[lint.rules]\n");
+        assert_eq!(rules, RulesConfig::default());
+    }
+
+    #[test]
+    fn accepts_empty_discouraged_function_table() {
+        let rules = lint_rules("[lint.rules.discouraged-function]\n");
+        assert_eq!(
+            rules.discouraged_function,
+            DiscouragedFunctionConfig::default()
+        );
+    }
+
+    #[test]
+    fn discouraged_function_functions_replaces_the_builtin_set() {
+        let rules = lint_rules(
+            "[lint.rules.discouraged-function]\nfunctions = { sleep = \"use a timer\" }\n",
+        );
+        let cfg = &rules.discouraged_function;
+        assert_eq!(cfg.lookup("sleep"), Some("use a timer"));
+        assert_eq!(cfg.lookup("exit"), None, "the built-ins are replaced");
+    }
+
+    #[test]
+    fn discouraged_function_extend_functions_adds_to_the_builtin_set() {
+        let rules = lint_rules(
+            "[lint.rules.discouraged-function]\nextend-functions = { sleep = \"use a timer\" }\n",
+        );
+        let cfg = &rules.discouraged_function;
+        assert_eq!(cfg.lookup("sleep"), Some("use a timer"));
+        assert!(cfg.lookup("exit").is_some(), "the built-ins survive");
+    }
+
+    #[test]
+    fn discouraged_function_extend_overrides_a_default_entry() {
+        let rules = lint_rules(
+            "[lint.rules.discouraged-function]\nextend-functions = { exit = \"say why\" }\n",
+        );
+        assert_eq!(rules.discouraged_function.lookup("exit"), Some("say why"));
+    }
+
+    #[test]
+    fn discouraged_function_empty_functions_table_disables_the_rule() {
+        let rules = lint_rules("[lint.rules.discouraged-function]\nfunctions = {}\n");
+        let cfg = &rules.discouraged_function;
+        assert_eq!(cfg.lookup("exit"), None);
+        assert!(cfg.resolved().is_empty());
+    }
+
+    #[test]
+    fn discouraged_function_lookup_agrees_with_resolved() {
+        let rules = lint_rules(
+            "[lint.rules.discouraged-function]\n\
+             functions = { sleep = \"use a timer\" }\n\
+             extend-functions = { sleep = \"reworded\", exit = \"say why\" }\n",
+        );
+        let cfg = &rules.discouraged_function;
+        let resolved = cfg.resolved();
+        assert_eq!(
+            resolved,
+            BTreeMap::from([("sleep", "reworded"), ("exit", "say why")])
+        );
+        for (name, suggestion) in &resolved {
+            assert_eq!(cfg.lookup(name), Some(*suggestion));
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_rule_id_table() {
+        let err = toml::from_str::<RawConfig>("[lint.rules.discouraged-funktion]\n")
+            .expect_err("an unknown rule table should be rejected");
+        assert!(
+            err.to_string().contains("discouraged-funktion"),
+            "the typo should be named: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_field_in_discouraged_function() {
+        toml::from_str::<RawConfig>("[lint.rules.discouraged-function]\nfuncs = {}\n")
+            .expect_err("an unknown key in a rule table should be rejected");
+    }
+
+    #[test]
+    fn rejects_snake_case_in_discouraged_function() {
+        toml::from_str::<RawConfig>("[lint.rules.discouraged-function]\nextend_functions = {}\n")
+            .expect_err("rule-table keys are kebab-case only");
     }
 
     #[test]

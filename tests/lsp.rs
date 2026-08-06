@@ -5741,6 +5741,52 @@ fn did_change_configuration_reconfigures_lint() {
     server_thread.join().unwrap();
 }
 
+/// Per-rule option tables reach the server the same way the rest of the
+/// configuration does, so a `[lint.rules.<id>]` table pushed as client settings
+/// changes what the server publishes. This is what catches the rule config
+/// failing to be forwarded onto the server's own rule sets.
+#[test]
+fn client_settings_carry_per_rule_options() {
+    let dir = TempDir::new("fatou-lsp-rule-options");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::Value::Null);
+
+    let uri = file_uri(&dir.path.join("lint.jl"));
+    open_document(&client, &uri, "function f()\n    sleep(1)\nend\n");
+    let published = recv_publish_for(&client, &uri);
+    assert_eq!(
+        published.diagnostics,
+        Vec::new(),
+        "`sleep` is not on the built-in deny-list"
+    );
+
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "workspace/didChangeConfiguration".to_string(),
+            params: serde_json::json!({
+                "settings": {"fatou": {"lint": {"rules": {
+                    "discouraged-function": {"extend-functions": {"sleep": "use a timer"}}
+                }}}}
+            }),
+        }))
+        .unwrap();
+    let republished = recv_publish_for(&client, &uri);
+    assert_eq!(republished.diagnostics.len(), 1);
+    assert_eq!(
+        republished.diagnostics[0].code,
+        Some(lsp_types::NumberOrString::String(
+            "discouraged-function".to_string()
+        ))
+    );
+
+    drop(client);
+    server_thread.join().unwrap();
+}
+
 /// A discovered `fatou.toml` fully shadows conflicting client settings
 /// (arity's rule): the file's `indent-width` wins over the
 /// `initializationOptions` one.

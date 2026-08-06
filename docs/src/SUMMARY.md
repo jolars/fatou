@@ -38,6 +38,7 @@
   - [`constant-condition`](reference/rules/constant-condition.md)
   - [`module-shadows-parent`](reference/rules/module-shadows-parent.md)
   - [`index-from-length`](reference/rules/index-from-length.md)
+  - [`discouraged-function`](reference/rules/discouraged-function.md)
 
 # Development
 

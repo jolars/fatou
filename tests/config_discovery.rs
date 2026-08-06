@@ -270,3 +270,76 @@ fn global_config_excludes_resolve_against_the_working_directory() {
         stderr(&output)
     );
 }
+
+// --- per-rule config (`[lint.rules.<id>]`) ----------------------------------
+
+/// Write `fatou.toml` and a Julia file at the sandbox root, then
+/// `fatou lint` that file.
+fn lint_with_config(sandbox: &Sandbox, config: &str, source: &str) -> Output {
+    std::fs::write(sandbox.path().join("fatou.toml"), config).unwrap();
+    std::fs::write(sandbox.path().join("lint.jl"), source).unwrap();
+    sandbox.run(sandbox.path(), &[], &["lint", "lint.jl"])
+}
+
+const EXITS: &str = "function cleanup()\n    exit(1)\nend\n";
+
+#[test]
+fn cli_reports_a_builtin_discouraged_function_by_default() {
+    let sandbox = Sandbox::new();
+
+    let output = lint_with_config(&sandbox, "", EXITS);
+
+    assert!(
+        stderr(&output).contains("`exit` is discouraged"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn cli_lint_rules_table_extends_the_deny_list() {
+    let sandbox = Sandbox::new();
+
+    let output = lint_with_config(
+        &sandbox,
+        "[lint.rules.discouraged-function]\nextend-functions = { sleep = \"use a timer\" }\n",
+        "function f()\n    sleep(1)\n    exit(1)\nend\n",
+    );
+
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("`sleep` is discouraged: use a timer"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("`exit` is discouraged"),
+        "extend keeps the built-ins: {stderr}"
+    );
+}
+
+#[test]
+fn cli_lint_rules_empty_functions_table_silences_the_rule() {
+    let sandbox = Sandbox::new();
+
+    let output = lint_with_config(
+        &sandbox,
+        "[lint.rules.discouraged-function]\nfunctions = {}\n",
+        EXITS,
+    );
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+}
+
+#[test]
+fn cli_unknown_rule_table_is_a_config_parse_error() {
+    let sandbox = Sandbox::new();
+
+    let output = lint_with_config(&sandbox, "[lint.rules.discouraged-funktion]\n", EXITS);
+
+    assert!(!output.status.success());
+    let stderr = stderr(&output);
+    assert!(
+        stderr.contains("discouraged-funktion"),
+        "the typo should be named: {stderr}"
+    );
+}

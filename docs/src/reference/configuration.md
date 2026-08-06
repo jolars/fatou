@@ -108,6 +108,7 @@ line-ending = "auto"
   | `select`   | array of strings | unset   | If set, only these rule IDs run. |
   | `ignore`   | array of strings | `[]`    | Rule IDs to disable.             |
   | `severity` | table            | `{}`    | Per-rule severity overrides.     |
+  | `rules`    | table            | `{}`    | Per-rule option tables.          |
 
 See the [rule reference](rules.md) for the available rule IDs.
 
@@ -122,4 +123,44 @@ ignore = ["another-rule"]
 
 [lint.severity]
 some-rule = "error"
+```
+
+### `[lint.rules.<id>]`
+
+A rule with a tunable knob reads it from its own table, named after the rule ID.
+Rules without options have no table.
+
+Strictness here is deliberately different from `select`/`ignore`/`severity`.
+Those are lists of IDs you typed, so an unrecognized entry is only a warning and
+the run continues. A `[lint.rules.<id>]` table is a *schema*, so a misspelled
+rule ID — or a misspelled key inside one — is a configuration parse error and
+the run stops. Keys are kebab-case, matching the rest of the file.
+
+Per-rule *severity* is not set here; use [`[lint.severity]`](#lint) for that.
+
+#### `[lint.rules.discouraged-function]`
+
+Options for [`discouraged-function`](rules/discouraged-function.md). Both keys
+are tables mapping a function name to the suggestion shown in the diagnostic.
+
+  | Key                | Type  | Default          | Description                                    |
+  | ------------------ | ----- | ---------------- | ---------------------------------------------- |
+  | `functions`        | table | the built-in set | Replaces the built-in deny-list.                |
+  | `extend-functions` | table | `{}`             | Adds to `functions`; an entry here also wins over a built-in of the same name. |
+
+The built-in set covers Base functions with process-wide or memory-unsafe
+effects: `exit`, `cd`, `redirect_stdout`, `redirect_stderr`, `unsafe_load`,
+`unsafe_store!`, `unsafe_wrap`, `unsafe_string`, `pointer_from_objref`, and
+`unsafe_pointer_to_objref`.
+
+Setting `functions = {}` silences the rule without having to `ignore` it, which
+is the way to keep the rule available for a future project-specific list.
+
+```toml
+# Keep the built-ins and add a project rule of your own.
+[lint.rules.discouraged-function]
+extend-functions = { sleep = "use a timer instead of blocking the task" }
+
+# Or replace the built-ins outright.
+# functions = { my_legacy_helper = "call `new_helper` instead" }
 ```

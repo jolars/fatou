@@ -160,6 +160,7 @@ impl ServerRules {
             select: Some(select),
             ignore: lint.ignore.clone(),
             severity: lint.severity.clone(),
+            rules: lint.rules.clone(),
         };
         // Unknown IDs are reported off the plain resolve only: the member
         // config repeats the user's IDs, so its unknowns are duplicates.

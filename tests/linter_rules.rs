@@ -1,7 +1,7 @@
 //! Behavioral coverage for the first lint rules: each rule's triggering cases,
 //! and the non-triggering cases that guard against false positives.
 
-use fatou::config::LintConfig;
+use fatou::config::{DiscouragedFunctionConfig, LintConfig, RulesConfig};
 use fatou::linter::{Severity, check_source};
 
 /// Lint `src` with only `rule` enabled and return the messages it produced, in
@@ -2320,4 +2320,197 @@ fn index_from_length_flags_iterating_a_numeric_literal() {
 fn index_from_length_ignores_iterating_a_range_or_collection() {
     assert_eq!(count("index-from-length", "for i in 1:5\n    i\nend\n"), 0);
     assert_eq!(count("index-from-length", "for x in xs\n    x\nend\n"), 0);
+}
+
+// --- discouraged-function ----------------------------------------------------
+
+/// Lint `src` with only `discouraged-function` enabled, under `rules`.
+fn discouraged(rules: DiscouragedFunctionConfig, src: &str) -> Vec<String> {
+    let config = LintConfig {
+        select: Some(vec!["discouraged-function".to_string()]),
+        rules: RulesConfig {
+            discouraged_function: rules,
+        },
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.rule == "discouraged-function")
+        .map(|d| d.message.body)
+        .collect()
+}
+
+/// A deny-list table: `functions` replacing the built-ins, `extend` added on top.
+fn deny_list(functions: &[(&str, &str)], extend: &[(&str, &str)]) -> DiscouragedFunctionConfig {
+    let owned = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(n, s)| (n.to_string(), s.to_string()))
+            .collect()
+    };
+    DiscouragedFunctionConfig {
+        functions: owned(functions),
+        extend_functions: owned(extend),
+    }
+}
+
+#[test]
+fn discouraged_function_flags_a_builtin_entry() {
+    let found = discouraged(
+        DiscouragedFunctionConfig::default(),
+        "function f()\n    exit(1)\nend\n",
+    );
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].starts_with("`exit` is discouraged:"),
+        "unexpected message: {}",
+        found[0]
+    );
+}
+
+#[test]
+fn discouraged_function_spans_the_callee_only() {
+    let src = "function f()\n    exit(1)\nend\n";
+    let config = LintConfig {
+        select: Some(vec!["discouraged-function".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.rule == "discouraged-function")
+        .expect("expected a finding");
+    assert_eq!(&src[diag.range], "exit");
+}
+
+#[test]
+fn discouraged_function_ignores_the_do_block_form() {
+    // `cd(dir) do ... end` is the alternative the built-in entry recommends.
+    assert!(
+        discouraged(
+            DiscouragedFunctionConfig::default(),
+            "cd(\"/tmp\") do\n    rm(\"x\")\nend\n",
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn discouraged_function_ignores_a_qualified_callee() {
+    assert!(
+        discouraged(
+            DiscouragedFunctionConfig::default(),
+            "function f()\n    Base.exit(1)\nend\n",
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn discouraged_function_ignores_a_local_shadowing_a_builtin() {
+    assert!(
+        discouraged(
+            DiscouragedFunctionConfig::default(),
+            "function f()\n    exit = x -> x\n    exit(1)\nend\n",
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn discouraged_function_ignores_a_value_read_that_is_not_a_call() {
+    assert!(
+        discouraged(
+            DiscouragedFunctionConfig::default(),
+            "function f(xs)\n    map(exit, xs)\nend\n",
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn discouraged_function_ignores_a_definition_signature() {
+    // A signature is a `CALL_EXPR` too, but it declares rather than calls.
+    assert!(
+        discouraged(
+            DiscouragedFunctionConfig::default(),
+            "function exit(code)\n    code\nend\n",
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn discouraged_function_functions_replaces_the_builtin_set() {
+    let cfg = deny_list(&[("sleep", "use a timer")], &[]);
+    assert_eq!(
+        discouraged(cfg.clone(), "function f()\n    sleep(1)\nend\n").len(),
+        1
+    );
+    assert!(
+        discouraged(cfg, "function f()\n    exit(1)\nend\n").is_empty(),
+        "the built-ins are replaced, not extended"
+    );
+}
+
+#[test]
+fn discouraged_function_extend_functions_keeps_the_builtin_set() {
+    let cfg = DiscouragedFunctionConfig {
+        extend_functions: deny_list(&[], &[("sleep", "use a timer")]).extend_functions,
+        ..Default::default()
+    };
+    assert_eq!(
+        discouraged(cfg.clone(), "function f()\n    sleep(1)\nend\n").len(),
+        1
+    );
+    assert_eq!(
+        discouraged(cfg, "function f()\n    exit(1)\nend\n").len(),
+        1
+    );
+}
+
+#[test]
+fn discouraged_function_empty_table_silences_the_rule() {
+    assert!(discouraged(deny_list(&[], &[]), "function f()\n    exit(1)\nend\n").is_empty());
+}
+
+#[test]
+fn discouraged_function_flags_a_user_added_non_base_name() {
+    // A project-configured name cannot be confirmed against Base, so it is
+    // reported on the weaker shadow check alone.
+    assert_eq!(
+        discouraged(
+            deny_list(&[("helper", "inline it")], &[]),
+            "function f()\n    helper(1)\nend\n",
+        )
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn discouraged_function_ignores_a_shadowed_user_added_name() {
+    assert!(
+        discouraged(
+            deny_list(&[("helper", "inline it")], &[]),
+            "function f()\n    helper = x -> x\n    helper(1)\nend\n",
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn discouraged_function_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["discouraged-function".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "function f()\n    # fatou-ignore discouraged-function\n    exit(1)\nend\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
 }

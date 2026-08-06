@@ -41,12 +41,12 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use rowan::TextRange;
 
 use crate::ast::{AstToken, CallExpr, Expr};
-use crate::config::LintConfig;
+use crate::config::{LintConfig, RulesConfig};
 use crate::index::PackageIndex;
 use crate::julia_version::VersionRange;
 use crate::linter::diagnostic::{Diagnostic, Severity};
@@ -54,7 +54,7 @@ use crate::linter::include_graph::IncludeProblem;
 use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, has_unresolvable_using,
 };
-use crate::semantic::{FileControlFlow, IdentRef, SemanticModel};
+use crate::semantic::{BindingKind, FileControlFlow, IdentRef, SemanticModel};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod correctness;
@@ -99,6 +99,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::ConstantCondition),
         Box::new(suspicious::ModuleShadowsParent),
         Box::new(suspicious::IndexFromLength),
+        Box::new(suspicious::DiscouragedFunction),
     ]
 }
 
@@ -127,11 +128,22 @@ pub struct RuleContext<'a> {
     /// version-gated rules (`julia-version-compat`) silent. Constant per run —
     /// carried on [`ResolvedRules`] and copied here by the driver.
     pub julia_target: Option<VersionRange>,
+    /// The per-rule option tables from `[lint.rules.<id>]`. Like
+    /// [`julia_target`](Self::julia_target) this is constant per run: it is
+    /// resolved once onto [`ResolvedRules`] and borrowed here by the driver. A
+    /// configurable rule reads its own field off it
+    /// (`ctx.config.discouraged_function`); a rule with no knobs ignores it.
+    pub config: &'a RulesConfig,
     /// Per-file answers built on first use and shared by every rule in the run
     /// (see [`RuleCache`]). Private: build a context with
     /// [`RuleContext::new`] and the `with_*` chain.
     cache: RuleCache<'a>,
 }
+
+/// The default `[lint.rules]` tables, so [`RuleContext::new`] has something to
+/// borrow when the caller attaches no config. Not a `const` because the
+/// built-in deny-lists are populated maps.
+static DEFAULT_RULES_CONFIG: LazyLock<RulesConfig> = LazyLock::new(RulesConfig::default);
 
 /// The per-file work more than one rule needs, computed lazily and at most
 /// once: the name [`Resolver`], the [`FileScan`], the unresolvable-`using`
@@ -156,10 +168,12 @@ struct RuleCache<'a> {
 
 impl<'a> RuleContext<'a> {
     /// A context over `root` with no resolution context, no include problems,
-    /// and no Julia target — the floor every rule sees. Layer the optional
-    /// tiers on with [`with_resolution`](Self::with_resolution),
-    /// [`with_includes`](Self::with_includes), and
-    /// [`with_julia_target`](Self::with_julia_target).
+    /// no Julia target, and the default per-rule options — the floor every rule
+    /// sees. Layer the optional tiers on with
+    /// [`with_resolution`](Self::with_resolution),
+    /// [`with_includes`](Self::with_includes),
+    /// [`with_julia_target`](Self::with_julia_target), and
+    /// [`with_config`](Self::with_config).
     pub fn new(path: Option<&'a Path>, root: &'a SyntaxNode, model: &'a SemanticModel) -> Self {
         Self {
             path,
@@ -168,6 +182,7 @@ impl<'a> RuleContext<'a> {
             resolution: None,
             includes: &[],
             julia_target: None,
+            config: &DEFAULT_RULES_CONFIG,
             cache: RuleCache::default(),
         }
     }
@@ -190,6 +205,14 @@ impl<'a> RuleContext<'a> {
     #[must_use]
     pub fn with_julia_target(mut self, julia_target: Option<VersionRange>) -> Self {
         self.julia_target = julia_target;
+        self
+    }
+
+    /// Attach the run's per-rule option tables (see
+    /// [`ResolvedRules::rules_config`]).
+    #[must_use]
+    pub fn with_config(mut self, config: &'a RulesConfig) -> Self {
+        self.config = config;
         self
     }
 
@@ -299,6 +322,43 @@ impl<'a> RuleContext<'a> {
             resolver.resolve(&ident.name, range.start(), Namespace::Value),
             Resolution::System { .. }
         )
+    }
+
+    /// Whether a bare value read is shadowed by a definition *in this file* — a
+    /// local, a parameter, a `for`/`let`/`catch` variable, or a same-name
+    /// definition — as opposed to naming something a `using`/`import` brought
+    /// in or a name no tier provides.
+    ///
+    /// The weaker namespace gate, for a rule matching a name the built-in
+    /// tables do not know (a project-configured deny-list entry). Such a name
+    /// can never satisfy [`resolves_to_base`](Self::resolves_to_base) — it is
+    /// by definition not Base's — so demanding that would make the project's
+    /// configuration silently inert. Asking "is it shadowed?" instead keeps the
+    /// obvious false positive out while still honoring the configuration.
+    ///
+    /// An [`Import`](crate::semantic::BindingKind::Import) binding deliberately
+    /// answers `false`: `import Foo: bar` followed by `bar()` really is the
+    /// call the project named, not a shadow of it. A token the model did not
+    /// record as a value read (a field name, a keyword-argument name) answers
+    /// `false` too, matching [`read_resolves_to_base`](Self::read_resolves_to_base).
+    pub fn read_is_shadowed_locally(&self, token: &SyntaxToken) -> bool {
+        if token.kind() != SyntaxKind::IDENT {
+            return false;
+        }
+        let Some(resolver) = self.resolver() else {
+            return false;
+        };
+        let range = token.text_range();
+        let Some(ident) = self.ident_at(range) else {
+            return false;
+        };
+        if ident.is_macro || self.file_scan().in_skipped(range) {
+            return false;
+        }
+        match resolver.resolve(&ident.name, range.start(), Namespace::Value) {
+            Resolution::Binding(id) => self.model.binding(id).kind != BindingKind::Import,
+            _ => false,
+        }
     }
 
     /// Whether a "which tier provides this name?" answer can be trusted for
@@ -430,6 +490,11 @@ pub struct ResolvedRules {
     /// The declared Julia support range for this run, constant across files.
     /// Copied into each [`RuleContext`] so version-gated rules can read it.
     julia_target: Option<VersionRange>,
+    /// The `[lint.rules.<id>]` option tables for this run, likewise constant
+    /// across files and borrowed by each [`RuleContext`]. Held here rather than
+    /// threaded through the per-file entry points, which would widen every
+    /// caller for the sake of the few rules that take options.
+    rules_config: RulesConfig,
 }
 
 impl ResolvedRules {
@@ -495,6 +560,7 @@ impl ResolvedRules {
                 by_kind,
                 any_node_rules,
                 julia_target: None,
+                rules_config: config.rules.clone(),
             },
             unknown,
         )
@@ -512,6 +578,12 @@ impl ResolvedRules {
     /// The Julia support range these rules check against, if set.
     pub fn julia_target(&self) -> Option<VersionRange> {
         self.julia_target
+    }
+
+    /// The per-rule option tables resolved for this run, for the driver to hand
+    /// to each file's [`RuleContext`].
+    pub fn rules_config(&self) -> &RulesConfig {
+        &self.rules_config
     }
 
     /// Run every configured rule against `ctx` in one shared CST traversal.
@@ -944,5 +1016,28 @@ mod tests {
         // No override: the rule's own default wins.
         assert_eq!(severity_of("duplicate-argument"), Severity::Error);
         assert_eq!(severity_of("unused-import"), Severity::Warning);
+    }
+
+    #[test]
+    fn resolve_carries_the_per_rule_option_tables() {
+        let mut config = LintConfig::default();
+        config
+            .rules
+            .discouraged_function
+            .extend_functions
+            .insert("sleep".to_string(), "use a timer".to_string());
+        let (rules, _) = ResolvedRules::resolve(&config);
+        assert_eq!(
+            rules.rules_config().discouraged_function.lookup("sleep"),
+            Some("use a timer")
+        );
+    }
+
+    #[test]
+    fn a_context_with_no_config_sees_the_defaults() {
+        let parsed = crate::parser::parse("x = 1\n");
+        let model = SemanticModel::build(&parsed.cst);
+        let ctx = RuleContext::new(None, &parsed.cst, &model);
+        assert!(ctx.config.discouraged_function.lookup("exit").is_some());
     }
 }
