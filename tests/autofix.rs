@@ -112,3 +112,39 @@ fn withholds_missing_comparison_fix_by_default() {
     assert_eq!(outcome.applied, 0);
     assert_eq!(outcome.remaining.len(), 1);
 }
+
+/// `index-from-length` rewrites the `1:length`/`1:size` prefix to
+/// `eachindex`/`axes`, but only under `--unsafe-fixes`: the rewrite is only
+/// value-equivalent when the collection's indices are one-based and dense.
+#[test]
+fn fixes_every_index_from_length_range_under_unsafe() {
+    let src = "\
+for i in 1:length(xs)
+    println(xs[i])
+end
+for j in 1:size(A, 2)
+    println(A[1, j])
+end
+";
+    let outcome = fix_source(None, src, &select("index-from-length"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    for i in eachindex(xs)
+        println(xs[i])
+    end
+    for j in axes(A, 2)
+        println(A[1, j])
+    end
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, `index-from-length` reports but changes nothing.
+#[test]
+fn withholds_index_from_length_fix_by_default() {
+    let src = "for i in 1:length(xs)\n    println(xs[i])\nend\n";
+    let outcome = fix_source(None, src, &select("index-from-length"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}

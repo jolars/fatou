@@ -61,11 +61,14 @@
 
 ### Rules
 
-- [x] `index-from-length` (suspicious, syn, opinionated, warning, no fix):
+- [x] `index-from-length` (suspicious, syn, opinionated, warning, unsafe fix):
   flags `for i in 1:length(x)`/`1:size(x, d)` when `i` indexes `x` (suggest
   `eachindex`/`axes`) and iterating a bare numeric literal (`for i in 3.5`).
   Name-based match on `length`/`size`; no type info to exempt `Vector`/`Array`,
-  so gated on the loop var actually indexing the collection. On by default.
+  so gated on the loop var actually indexing the collection. The first shape
+  ships an unsafe fix rewriting the `1:length`/`1:size` prefix (value-equivalent
+  only for one-based dense indices, unprovable without types), withheld off
+  Base's plain arity or over a comment. On by default.
   (IncorrectIterSpec, IndexFromLength)
 - [x] `discouraged-function` (suspicious, sem, warning, no fix): flags a call to
   a function on the `[lint.rules.discouraged-function]` deny-list. `functions`

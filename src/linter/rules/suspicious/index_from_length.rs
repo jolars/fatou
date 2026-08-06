@@ -15,14 +15,26 @@
 //! attempt to resolve the callee. Where StaticLint exempts collections it can
 //! prove are `Vector`/`Array` (for which `1:length` is fine), we have no type
 //! information, so this rule is **opinionated** and reports those too — hence the
-//! usage guard above to keep it honest. No fix is offered: `eachindex`/`axes` are
-//! only equivalent for one-based, unit-step ranges, and the rewrite is a
-//! judgment call, so the finding is reported without an edit.
+//! usage guard above to keep it honest.
+//!
+//! The first shape carries an **unsafe** fix rewriting the `1:length`/`1:size`
+//! prefix to `eachindex`/`axes`, leaving the argument list untouched. The edit
+//! is value-equivalent whenever the collection's indices are one-based and
+//! dense — every case where the original loop was correct on an `Array` — but
+//! without type information that cannot be proven: `eachindex` falls back to
+//! `keys` for a dictionary (an integer-keyed `Dict` loses its 1..n iteration
+//! order), a shadowed `length`/`size` breaks the equivalence, and for an offset
+//! array the rewrite deliberately changes which indices run. Hence
+//! `--unsafe-fixes`. The fix is withheld when the call is not the plain Base
+//! arity (`length(x)`/`size(x, d)` exactly, no keywords or splats) or when a
+//! comment sits inside the replaced prefix; the numeric-literal shape never has
+//! a fix, since the intended range is unknowable.
 
 use crate::ast::{
     AstNode, AstToken, BinaryExpr, CallExpr, Expr, ForBinding, HasArgList, IndexExpr, Name,
 };
-use crate::linter::diagnostic::Diagnostic;
+use crate::linter::diagnostic::{Applicability, Diagnostic, Fix};
+use crate::linter::rules::matchers::CallShape;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::syntax::{SyntaxElement, SyntaxKind};
 
@@ -41,9 +53,13 @@ impl Rule for IndexFromLength {
          any `length`/`size` call counts — and, lacking type information to \
          exempt collections that really are one-based like `Vector`, the rule is \
          opinionated, so it only fires when the loop variable actually indexes \
-         the collection. Second, `for i in 3.5`: iterating a bare numeric \
-         literal runs the loop body once and is almost always a mistaken range. \
-         No fix is offered, since the rewrites are not always equivalent."
+         the collection. The first shape carries an unsafe fix rewriting the \
+         `1:length`/`1:size` prefix to `eachindex`/`axes`: the rewrite is only \
+         value-equivalent when the collection's indices are one-based and \
+         dense, which cannot be proven without type information, so it needs \
+         `--unsafe-fixes`. Second, `for i in 3.5`: iterating a bare numeric \
+         literal runs the loop body once and is almost always a mistaken \
+         range; no fix, since the intended range is unknowable."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -89,39 +105,106 @@ impl Rule for IndexFromLength {
             return;
         };
         let loop_var = loop_var.text();
-        let Some((coll, func)) = one_based_length_range(&iterable) else {
+        let Some((call, coll, func)) = one_based_length_range(&iterable) else {
             return;
         };
         if !indexes_collection(&binding, &coll, loop_var) {
             return;
         }
 
+        // A plain call at Base's arity is the only shape the fix (and the
+        // message's concrete dimension) may trust.
+        let shape = CallShape::of(&call);
+        let plain = shape.is_plain(func.arity());
         let message = match func {
             LengthFn::Length => {
                 format!("iterate `eachindex({coll})` instead of `1:length({coll})`")
             }
-            LengthFn::Size => {
-                format!("iterate `axes({coll}, d)` instead of `1:size({coll}, d)`")
-            }
+            LengthFn::Size => match plain.then(|| dimension_text(&shape)).flatten() {
+                Some(dim) => {
+                    format!("iterate `axes({coll}, {dim})` instead of `1:size({coll}, {dim})`")
+                }
+                None => format!("iterate `axes({coll}, d)` instead of `1:size({coll}, d)`"),
+            },
         };
-        sink.push(Diagnostic::new(
-            self.id(),
-            iterable.syntax().text_range(),
-            message,
-        ));
+        let mut diag = Diagnostic::new(self.id(), iterable.syntax().text_range(), message);
+        if plain && let Some(fix) = prefix_rewrite(&iterable, &call, func) {
+            diag.fixes.push(fix);
+        }
+        sink.push(diag);
     }
 }
 
 /// Which length-like builtin bounds the range.
+#[derive(Clone, Copy)]
 enum LengthFn {
     Length,
     Size,
 }
 
+impl LengthFn {
+    /// The builtin's Base arity: `length(x)` / `size(x, d)`.
+    fn arity(self) -> usize {
+        match self {
+            LengthFn::Length => 1,
+            LengthFn::Size => 2,
+        }
+    }
+
+    /// The iteration builtin the fix rewrites to.
+    fn replacement(self) -> &'static str {
+        match self {
+            LengthFn::Length => "eachindex",
+            LengthFn::Size => "axes",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            LengthFn::Length => "length",
+            LengthFn::Size => "size",
+        }
+    }
+}
+
+/// The `size` call's dimension argument as source text, if it fits on one line
+/// (a multi-line expression would mangle the one-line message).
+fn dimension_text(shape: &CallShape) -> Option<String> {
+    let dim = shape.positional_exprs()?.into_iter().nth(1)?;
+    let text = dim.syntax().text().to_string();
+    (!text.contains('\n')).then_some(text)
+}
+
+/// The unsafe fix rewriting the `1:length`/`1:size` prefix to
+/// `eachindex`/`axes`. The edit stops at the argument list, which stays
+/// byte-for-byte intact; it is withheld if a comment sits inside the replaced
+/// prefix (`1:#= dim =#length(x)`), which the rewrite would drop.
+fn prefix_rewrite(iterable: &Expr, call: &CallExpr, func: LengthFn) -> Option<Fix> {
+    let args = call.arg_list()?;
+    let start = iterable.syntax().text_range().start();
+    let end = args.syntax().text_range().start();
+    let prefix = iterable
+        .syntax()
+        .text()
+        .slice(rowan::TextRange::new(0.into(), end - start))
+        .to_string();
+    if prefix.contains('#') {
+        return None;
+    }
+    Some(Fix {
+        description: format!("Replace `1:{}` with `{}`", func.name(), func.replacement()),
+        content: func.replacement().to_string(),
+        start: start.into(),
+        end: end.into(),
+        applicability: Applicability::Unsafe,
+    })
+}
+
 /// If `expr` is a one-based, unit-step range `1:length(c)` / `1:size(c, ...)`,
-/// the collection name `c` and which builtin bounds it. A stepped range parses
-/// as a `RANGE_EXPR`, not a `BINARY_EXPR`, so it never matches here.
-fn one_based_length_range(expr: &Expr) -> Option<(String, LengthFn)> {
+/// the bounding call, the collection name `c`, and which builtin bounds it. A
+/// stepped range parses as a `RANGE_EXPR`, not a `BINARY_EXPR`, so it never
+/// matches here.
+fn one_based_length_range(expr: &Expr) -> Option<(CallExpr, String, LengthFn)> {
     let Expr::BinaryExpr(range) = expr else {
         return None;
     };
@@ -139,7 +222,8 @@ fn one_based_length_range(expr: &Expr) -> Option<(String, LengthFn)> {
     };
     let func = length_fn(&call)?;
     let coll = call.arg_list()?.args().next()?.expr()?.name_ident()?;
-    Some((coll.text().to_string(), func))
+    let coll = coll.text().to_string();
+    Some((call, coll, func))
 }
 
 /// The length-like builtin a call names, matched purely on the callee's simple

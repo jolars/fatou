@@ -2311,6 +2311,85 @@ fn index_from_length_ignores_eachindex() {
 }
 
 #[test]
+fn index_from_length_carries_an_unsafe_eachindex_fix() {
+    let config = LintConfig {
+        select: Some(vec!["index-from-length".to_string()]),
+        ..Default::default()
+    };
+    let src = "for i in 1:length(x)\n    x[i]\nend\n";
+    let report = check_source(None, src, &config);
+    let fix = &report.diagnostics[0].fixes[0];
+    assert_eq!(fix.content, "eachindex");
+    // The replacement spans exactly the `1:length` prefix, leaving the
+    // argument list untouched.
+    assert_eq!(&src[fix.start..fix.end], "1:length");
+    // `eachindex` is only value-equivalent when the collection's indices are
+    // one-based and dense, which we cannot know, so it needs `--unsafe-fixes`.
+    assert_eq!(fix.applicability, fatou::linter::Applicability::Unsafe);
+}
+
+#[test]
+fn index_from_length_carries_an_unsafe_axes_fix() {
+    let config = LintConfig {
+        select: Some(vec!["index-from-length".to_string()]),
+        ..Default::default()
+    };
+    let src = "for j in 1:size(x, 2)\n    x[1, j]\nend\n";
+    let report = check_source(None, src, &config);
+    let fix = &report.diagnostics[0].fixes[0];
+    assert_eq!(fix.content, "axes");
+    assert_eq!(&src[fix.start..fix.end], "1:size");
+    assert_eq!(fix.applicability, fatou::linter::Applicability::Unsafe);
+}
+
+#[test]
+fn index_from_length_names_the_actual_dimension() {
+    // With a plain two-argument `size` call, the message shows the real
+    // dimension argument rather than the `d` placeholder.
+    assert_eq!(
+        findings(
+            "index-from-length",
+            "for j in 1:size(x, 2)\n    x[1, j]\nend\n"
+        ),
+        ["iterate `axes(x, 2)` instead of `1:size(x, 2)`"]
+    );
+}
+
+#[test]
+fn index_from_length_withholds_the_fix_for_odd_arities() {
+    let config = LintConfig {
+        select: Some(vec!["index-from-length".to_string()]),
+        ..Default::default()
+    };
+    // `1:size(x)` has no dimension argument: `axes(x)` is a tuple of ranges,
+    // not a range, so the rewrite would change what is iterated.
+    let report = check_source(None, "for i in 1:size(x)\n    x[i]\nend\n", &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    assert!(report.diagnostics[0].fixes.is_empty());
+    // A two-argument `length` is not Base's `length`.
+    let report = check_source(None, "for i in 1:length(x, y)\n    x[i]\nend\n", &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    assert!(report.diagnostics[0].fixes.is_empty());
+}
+
+#[test]
+fn index_from_length_withholds_the_fix_when_the_prefix_holds_a_comment() {
+    let config = LintConfig {
+        select: Some(vec!["index-from-length".to_string()]),
+        ..Default::default()
+    };
+    // The edit replaces the `1:length` prefix; a comment in there would be
+    // dropped, so the fix is withheld and only the finding reported.
+    let report = check_source(
+        None,
+        "for i in 1:#= dim =#length(x)\n    x[i]\nend\n",
+        &config,
+    );
+    assert_eq!(report.diagnostics.len(), 1);
+    assert!(report.diagnostics[0].fixes.is_empty());
+}
+
+#[test]
 fn index_from_length_flags_iterating_a_numeric_literal() {
     assert_eq!(count("index-from-length", "for i in 3.5\n    i\nend\n"), 1);
     assert_eq!(count("index-from-length", "for i in 5\n    i\nend\n"), 1);
