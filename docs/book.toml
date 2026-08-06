@@ -11,8 +11,6 @@ git-repository-url = "https://github.com/jolars/fatou"
 edit-url-template = "https://github.com/jolars/fatou/edit/main/docs/{path}"
 default-theme = "light"
 preferred-dark-theme = "navy"
-# Vendored Vega runtime + the benchmark chart renderer (theme/bench-charts.js).
-# Load order matters: vega, then vega-lite, then vega-embed, then our script.
 additional-js = [
     "theme/vendor/vega.min.js",
     "theme/vendor/vega-lite.min.js",
@@ -24,7 +22,6 @@ additional-css = ["theme/bench-charts.css"]
 [output.html.search]
 enable = true
 
-# Pages that moved into the guide; keep the old URLs working.
 [output.html.redirect]
 "/comparison/language-servers.html" = "../guide/comparison.html"
 "/comparison/formatters.html" = "../guide/comparison.html"

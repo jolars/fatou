@@ -1,7 +1,7 @@
 # Configuration Reference
 
-Every key accepted in `fatou.toml`. All keys are optional. Omitting a key uses
-its default. Unknown keys are rejected with an error.
+This page lists key accepted in `fatou.toml`. All keys are optional and
+omitting a key uses its default. Unknown keys are rejected with an error.
 
 `FATOU_CONFIG` and global config files use this same schema. For a task-oriented
 walkthrough, see the [configuration guide](../guide/configuration.md).
