@@ -1,74 +1,30 @@
-# Configuration
+# Configuration Reference
 
-Fatou is configured with a TOML file named `fatou.toml`. All keys are optional;
-omitting a key uses its default. Unknown keys are rejected with an error, so a
-typo never silently falls back to a default.
+Every key accepted in `fatou.toml`. All keys are optional. Omitting a key uses
+its default. Unknown keys are rejected with an error.
 
-## Discovery
-
-For a given file, Fatou looks for `fatou.toml` by walking up from the file's
-directory through its ancestors, stopping at the first `fatou.toml` it finds.
-
-The walk also stops at the repository root, so a `fatou.toml` above the
-repository never governs the project inside it. The root itself is searched, so
-the usual layout (`fatou.toml` beside `.git`) still applies, and a worktree or
-submodule checkout, whose `.git` is a file, bounds the walk the same way. A
-directory with no `.git` ancestor keeps walking to the filesystem root. For
-user-wide defaults, use the global config below rather than a file parked above
-your repositories.
-
-If no project `fatou.toml` is found, Fatou consults the `FATOU_CONFIG`
-environment variable, which names the file to use instead of the global user
-config below. This is handy for keeping one config on a synced drive and
-pointing every machine at it. A set `FATOU_CONFIG` shadows the global config
-entirely, and a missing or malformed file is a hard error rather than a silent
-fall-through, so a typo'd path cannot go unnoticed.
-
-If `FATOU_CONFIG` is unset, Fatou falls back to a global user config: the first
-existing file among
-
-1. `$XDG_CONFIG_HOME/fatou/fatou.toml`, when that variable is set
-2. `~/.config/fatou/fatou.toml`
-3. the platform config directory, on macOS
-   `~/Library/Application Support/fatou/fatou.toml`
-
-The `FATOU_CONFIG` and global files use the same schema as a project
-`fatou.toml` and are whole-file fallbacks, never merged with a project config.
-Relative `exclude` patterns in them resolve against the working directory (CLI)
-or the document's directory (language server) rather than the config's own
-directory. The language server uses the same resolution, so both are easy ways
-to set editor-wide defaults; an edit to either is picked up when the server
-restarts, since only project files are watched. If none of these files is found,
-the built-in defaults apply.
-
-On the command line:
-
-- `--config <PATH>` loads an explicit file and skips discovery.
-- `--no-config` ignores any file (project, `FATOU_CONFIG`, or global) and uses
-  the built-in defaults.
+`FATOU_CONFIG` and global config files use this same schema. For a task-oriented
+walkthrough, see the [configuration guide](../guide/configuration.md).
 
 ## Top-level keys
 
-  | Key              | Type             | Default | Description                                    |
-  | ---------------- | ---------------- | ------- | ---------------------------------------------- |
-  | `exclude`        | array of strings | `[]`    | Patterns to exclude from file discovery.       |
-  | `extend-exclude` | array of strings | `[]`    | Additional patterns, appended to `exclude`.    |
+  | Key              | Type             | Default | Description                                 |
+  | ---------------- | ---------------- | ------- | ------------------------------------------- |
+  | `exclude`        | array of strings | `[]`    | Patterns to exclude from file discovery.    |
+  | `extend-exclude` | array of strings | `[]`    | Additional patterns, appended to `exclude`. |
 
 Both keys take gitignore-style patterns, resolved relative to the directory
 containing `fatou.toml` (or, for a `FATOU_CONFIG` or global config, the working
-directory). Excluded directories are pruned during discovery, so `fatou format
-src` and `fatou lint src` never descend into them.
+directory). Excluded directories are pruned during discovery.
+
+Files named explicitly on the command line are processed even when they match a
+pattern, unless `--force-exclude` is passed. Extra patterns can be added per run
+with `--exclude` on `fatou format` and `fatou lint`.
 
 ```toml
 exclude = ["vendored/"]
 extend-exclude = ["generated.jl"]
 ```
-
-A file named explicitly on the command line is always processed, even if it
-matches an exclude pattern. Pass `--force-exclude` to apply the patterns to
-explicitly named files too; this is meant for runners like pre-commit that
-invoke Fatou with the staged files as arguments. Extra patterns can also be
-supplied per run with `--exclude` on `fatou format` and `fatou lint`.
 
 ## `[format]`
 
@@ -78,8 +34,8 @@ supplied per run with `--exclude` on `fatou format` and `fatou lint`.
   | `indent-width` | integer | `4`      | Number of spaces per indentation level.             |
   | `line-ending`  | string  | `"auto"` | The newline style emitted at the end of each line.  |
 
-Defaults follow common Julia conventions. The width keys can be overridden per
-run with the `--line-width`/`--indent-width` flags on `fatou format`.
+`line-width` and `indent-width` can be overridden per run with the
+`--line-width` and `--indent-width` flags on `fatou format`.
 
 `line-ending` accepts:
 
@@ -110,7 +66,8 @@ line-ending = "auto"
   | `severity` | table            | `{}`    | Per-rule severity overrides.     |
   | `rules`    | table            | `{}`    | Per-rule option tables.          |
 
-See the [rule reference](rules.md) for the available rule IDs.
+See the [rule reference](rules.md) for the available rule IDs. An unrecognized
+ID in `select`, `ignore`, or `severity` is a warning, not an error.
 
 `[lint.severity]` maps a rule ID to the severity its findings report, one of
 `"error"`, `"warning"`, `"info"`, or `"hint"`. Rules not listed keep their
@@ -125,27 +82,26 @@ ignore = ["another-rule"]
 some-rule = "error"
 ```
 
-### `[lint.rules.<id>]`
+## `[lint.rules.<id>]`
 
 A rule with a tunable knob reads it from its own table, named after the rule ID.
-Rules without options have no table.
+Rules without options have no table. Keys are kebab-case, matching the rest of
+the file.
 
-Strictness here is deliberately different from `select`/`ignore`/`severity`.
-Those are lists of IDs you typed, so an unrecognized entry is only a warning and
-the run continues. A `[lint.rules.<id>]` table is a *schema*, so a misspelled
-rule ID — or a misspelled key inside one — is a configuration parse error and
-the run stops. Keys are kebab-case, matching the rest of the file.
+Unlike `select`, `ignore`, and `severity`, these tables are a *schema*: a
+misspelled rule ID, or a misspelled key inside one, is a configuration parse
+error and the run stops.
 
 Per-rule *severity* is not set here; use [`[lint.severity]`](#lint) for that.
 
-#### `[lint.rules.discouraged-function]`
+### `[lint.rules.discouraged-function]`
 
 Options for [`discouraged-function`](rules/discouraged-function.md). Both keys
 are tables mapping a function name to the suggestion shown in the diagnostic.
 
-  | Key                | Type  | Default          | Description                                    |
-  | ------------------ | ----- | ---------------- | ---------------------------------------------- |
-  | `functions`        | table | the built-in set | Replaces the built-in deny-list.                |
+  | Key                | Type  | Default          | Description                                                                    |
+  | ------------------ | ----- | ---------------- | ------------------------------------------------------------------------------ |
+  | `functions`        | table | the built-in set | Replaces the built-in deny-list.                                               |
   | `extend-functions` | table | `{}`             | Adds to `functions`; an entry here also wins over a built-in of the same name. |
 
 The built-in set covers Base functions with process-wide or memory-unsafe

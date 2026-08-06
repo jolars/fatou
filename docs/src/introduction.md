@@ -31,5 +31,6 @@ see [Getting Started](getting-started.md).
 - [Getting Started](getting-started.md): complete installation and first-run
   walkthrough.
 - [Editor Setup](guide/editors.md): connect the language server to your editor.
-- [Configuration](reference/configuration.md): every `fatou.toml` key.
+- [Configuration](guide/configuration.md): set up `fatou.toml` for your project.
+- [Configuration Reference](reference/configuration.md): every `fatou.toml` key.
 - [CLI Reference](reference/cli.md): every command and option.

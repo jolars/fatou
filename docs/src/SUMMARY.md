@@ -5,6 +5,7 @@
 # Guide
 
 - [Editor Setup](guide/editors.md)
+- [Configuration](guide/configuration.md)
 - [Performance](performance.md)
 
 # Comparison
@@ -15,7 +16,7 @@
 
 # Reference
 
-- [Configuration](reference/configuration.md)
+- [Configuration Reference](reference/configuration.md)
 - [CLI Reference](reference/cli.md)
 - [Lint Rules](reference/rules.md)
   - [`unused-binding`](reference/rules/unused-binding.md)
