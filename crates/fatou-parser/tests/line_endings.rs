@@ -1,6 +1,6 @@
 //! Losslessness must hold regardless of line-ending style.
 
-use fatou::parser::reconstruct;
+use fatou_parser::parser::reconstruct;
 
 #[test]
 fn crlf_lf_and_cr_round_trip() {

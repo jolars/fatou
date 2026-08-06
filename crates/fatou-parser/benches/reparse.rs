@@ -64,7 +64,9 @@ use std::path::{Path, PathBuf};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use fatou::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits};
+use fatou_parser::parser::{
+    Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits,
+};
 use rowan::GreenNode;
 
 /// Roughly the size the TODO calls for: big enough that a full parse is a
@@ -72,7 +74,9 @@ use rowan::GreenNode;
 const TARGET_BYTES: usize = 100 * 1024;
 
 fn corpus_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("bench/corpus/JuliaSyntax/src")
+    // The shared corpus lives at the repo root (fetched by
+    // `bench/corpus/download.sh`), two levels up from this member crate.
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bench/corpus/JuliaSyntax/src")
 }
 
 /// The corpus as one buffer: `parser.jl` first (the largest single file, and
@@ -239,7 +243,7 @@ fn bench_reparse(c: &mut Criterion) {
         insert(ident_site(&base.src, "bump", 0.5) + 1, "z"),
         insert(ident_site(&base.src, "bump", 0.9) + 2, "z"),
     ];
-    let scattered_text = fatou::parser::apply_edits(&base.src, &scattered);
+    let scattered_text = fatou_parser::parser::apply_edits(&base.src, &scattered);
     assert!(
         reparse_edits(
             &base.src,

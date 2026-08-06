@@ -74,10 +74,6 @@ tempfile = "3.27.0"
 name = "format_compare"
 harness = false
 
-[[bench]]
-name = "reparse"
-harness = false
-
 [profile.release]
 strip = "symbols"
 

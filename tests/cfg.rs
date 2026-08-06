@@ -344,7 +344,10 @@ fn a_range_that_is_not_a_statement_is_never_unreachable() {
 
 /// Every parser fixture as `(case name, source)`, in name order.
 fn parser_fixtures() -> Vec<(String, String)> {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parser");
+    // The corpus lives with the parser crate; this suite reuses it as a body
+    // of real-world shapes for the control-flow graph.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/fatou-parser/tests/fixtures/parser");
     let mut cases: Vec<_> = std::fs::read_dir(&dir)
         .expect("read parser fixtures dir")
         .filter_map(Result::ok)

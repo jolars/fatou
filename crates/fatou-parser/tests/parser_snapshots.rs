@@ -4,7 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou::parser::{parse, reconstruct};
+use fatou_parser::parser::{parse, reconstruct};
 
 fn fixture_cases() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parser");

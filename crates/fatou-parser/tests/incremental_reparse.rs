@@ -1,7 +1,7 @@
 //! Oracle harness for incremental reparse (Tenet 4).
 //!
 //! For every snippet and ~200 seeded edits, any `Some(Reparsed)` from
-//! [`fatou::parser::reparse`] must be byte-identical to a full parse of the
+//! [`fatou_parser::parser::reparse`] must be byte-identical to a full parse of the
 //! edited text: same tree fingerprint (kind@range + token text of every
 //! descendant, shared with the in-crate Tenet-4 `debug_assert`) and the same
 //! diagnostics vector, order included. A `None` is always correct — the
@@ -9,7 +9,7 @@
 //! while the stage-0 stub fell back on everything, and is the safety net the
 //! token and top-level tiers were developed against.
 //!
-//! [`fatou::parser::reparse_edits`] is held to the same contract over chained
+//! [`fatou_parser::parser::reparse_edits`] is held to the same contract over chained
 //! batches of two to four edits, each expressed against the text its
 //! predecessors produced.
 //!
@@ -21,10 +21,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou::parser::{
+use fatou_parser::parser::{
     Edit, ReparseTier, Reparsed, apply_edits, fingerprint, parse, reparse, reparse_edits,
 };
-use fatou::syntax::SyntaxNode;
+use fatou_parser::syntax::SyntaxNode;
 
 const EDITS_PER_SNIPPET: usize = 200;
 
@@ -119,7 +119,7 @@ fn check_snippet(src: &str, seed: u64) {
     }
 }
 
-/// The same contract for [`fatou::parser::reparse_edits`], over batches of
+/// The same contract for [`fatou_parser::parser::reparse_edits`], over batches of
 /// two to four edits each expressed against the text its predecessors
 /// produced — the shape an LSP `didChange` batch arrives in. Every batch is
 /// generated fresh from `src`, so the base parse is reused throughout.

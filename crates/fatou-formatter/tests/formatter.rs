@@ -20,8 +20,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou::formatter::format;
-use fatou::parser::parse;
+use fatou_formatter::format;
+use fatou_parser::parser::parse;
 
 fn fixture_dirs() -> Vec<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formatter");

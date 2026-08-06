@@ -1,7 +1,7 @@
 //! JuliaSyntax.jl differential parser oracle.
 //!
 //! Projects each fixture's Fatou CST into a JuliaSyntax-native s-expression
-//! (via [`fatou::parser::to_juliasyntax_sexpr`]) and diffs it, whitespace-
+//! (via [`fatou_parser::parser::to_juliasyntax_sexpr`]) and diffs it, whitespace-
 //! normalized, against the pinned `expected.sexpr` captured from JuliaSyntax.
 //!
 //! Layout:
@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fatou::parser::{normalize_sexpr, parse, to_juliasyntax_sexpr};
+use fatou_parser::parser::{normalize_sexpr, parse, to_juliasyntax_sexpr};
 
 const CORPUS_REL: &str = "tests/fixtures/oracle";
 const ALLOWLIST_REL: &str = "tests/oracle/allowlist.txt";

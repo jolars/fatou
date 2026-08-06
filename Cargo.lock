@@ -567,8 +567,11 @@ dependencies = [
 name = "fatou-parser"
 version = "0.1.0"
 dependencies = [
+ "criterion",
+ "insta",
  "rowan",
  "serde",
+ "serde_json",
  "unicode-normalization",
 ]
 
