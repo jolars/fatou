@@ -8,7 +8,7 @@
 //!
 //! # Main entry points
 //!
-//! - [`format`] / [`format_with_style`] — format a source string.
+//! - [`format()`] / [`format_with_style`] — format a source string.
 //! - [`format_node`] / [`format_range`] — format an already-parsed
 //!   [`fatou_parser::syntax::SyntaxNode`], whole or a byte range of it.
 //! - [`FormatStyle`] — the layout knobs, with [`Default`] matching the fatou

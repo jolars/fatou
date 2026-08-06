@@ -1,6 +1,6 @@
 //! Formatter entry points.
 //!
-//! Walking-skeleton stage: [`format`] parses to the lossless CST, lowers it to
+//! Walking-skeleton stage: [`format()`] parses to the lossless CST, lowers it to
 //! the layout IR via [`rules::lower`](crate::formatter::rules::lower), and prints
 //! it. Constructs with a rule are reshaped to Fatou's deterministic style;
 //! everything else is lowered transparently, so it stays byte-identical and the

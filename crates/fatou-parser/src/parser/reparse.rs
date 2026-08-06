@@ -40,8 +40,8 @@ use crate::parser::lexer::lex;
 use crate::parser::tree_builder::syntax_kind_for;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
-/// The edit currency, defined in the sibling [`edit`](super::edit) module and
-/// re-exported here so `parser::Edit` stays the path the parser layer uses.
+/// The edit currency, defined in the sibling `edit` module and re-exported
+/// here so `parser::Edit` stays the path the parser layer uses.
 pub use super::edit::{Edit, apply_edits, diff_edit, try_apply_edits};
 
 /// Structural fingerprint of a tree: one line per descendant element with
@@ -121,7 +121,7 @@ pub fn reparse(
 /// them one at a time keeps each splice small. Try this *before* the collapsed
 /// edit: a wide span is the one shape the collapsed edit can never answer, so
 /// offering it first is the difference between a hit and a
-/// [`region_is_too_wide`] bail (`benches/reparse.rs`).
+/// `region_is_too_wide` bail (`benches/reparse.rs`).
 ///
 /// Fewer than two edits returns `None` immediately: a single edit's span
 /// always contains [`diff_edit`]'s for the same transform, so there is nothing
@@ -130,7 +130,7 @@ pub fn reparse(
 /// `edits` is not trusted: a slice that is not the exact transform from
 /// `prev_text` to `new_text` (a stale chain, a buffer that moved underneath
 /// it) is rejected rather than applied at meaningless offsets. Each step is
-/// proven to [`fits`] the text its predecessors produced *before* that text is
+/// proven to `fits` the text its predecessors produced *before* that text is
 /// sliced, and the composed result is proven to be `new_text` before anything
 /// is returned — so a stale chain costs at most the splices it got through,
 /// bounded by the caller's chain budget (`incremental::MAX_CHAIN_EDITS`).

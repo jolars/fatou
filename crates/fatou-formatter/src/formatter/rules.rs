@@ -1,5 +1,5 @@
 //! Per-construct formatting rules: lower the lossless CST into the layout
-//! [`Ir`](crate::formatter::ir::Ir) the [`printer`](crate::formatter::printer)
+//! [`Ir`] the [`printer`](crate::formatter::printer)
 //! renders. The walk is a **walking skeleton**: only the constructs with a rule
 //! reshape their layout; every other node is lowered *transparently* (children
 //! emitted in order, tokens verbatim), so unhandled syntax stays byte-identical

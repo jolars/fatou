@@ -1390,9 +1390,9 @@ impl<'a> Lexer<'a> {
 }
 
 /// Every Julia keyword, as written. The single source of truth for the set of
-/// keywords, shared by the lexer's [`keyword_kind`] classification and the
+/// keywords, shared by the lexer's `keyword_kind` classification and the
 /// language server's keyword completion. A test keeps it in step with
-/// [`keyword_kind`].
+/// `keyword_kind`.
 pub const KEYWORDS: &[&str] = &[
     "function",
     "macro",
@@ -1466,7 +1466,7 @@ fn keyword_kind(text: &str) -> Option<TokKind> {
 
 /// Whether `c` may begin an identifier, mirroring JuliaSyntax's
 /// `is_identifier_start_char` (`Base.is_id_start_char`). ASCII is handled inline;
-/// non-ASCII code points defer to the generated [`super::unicode_ident`] tables.
+/// non-ASCII code points defer to the generated `unicode_ident` tables.
 pub fn is_ident_start(c: char) -> bool {
     if c.is_ascii() {
         c == '_' || c.is_ascii_alphabetic()
@@ -1477,7 +1477,7 @@ pub fn is_ident_start(c: char) -> bool {
 
 /// Whether `c` may continue an identifier, mirroring JuliaSyntax's
 /// `is_identifier_char` (`Base.is_id_char`). ASCII is handled inline; non-ASCII
-/// code points defer to the generated [`super::unicode_ident`] tables. The `!=`
+/// code points defer to the generated `unicode_ident` tables. The `!=`
 /// operator split for a trailing `!` is handled by the caller in `scan_ident`.
 pub fn is_ident_continue(c: char) -> bool {
     if c.is_ascii() {
