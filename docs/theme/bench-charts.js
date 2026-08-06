@@ -11,8 +11,8 @@
 // points sit cleanly at their value regardless of scale. Both plot time relative
 // to Fatou (Fatou = 1) on a log axis, with a single dashed reference line at 1 in
 // place of gridlines; lower is faster.
-//   default ("throughput"): x = tool, one dot per scenario stacked at the same x
-//                           (colored by scenario).
+//   default ("throughput"): x = tool, one dot per scenario dodged within the
+//                           tool's group (colored by scenario).
 //   "cold": x = tool, one dot per tool.
 (() => {
 	// mdBook keeps the active theme as a class on <html>; these three are dark.
@@ -81,8 +81,9 @@
 		return out;
 	}
 
-	// Warm-loop dot plot: x = tool, one dot per scenario stacked at the same x,
-	// colored by scenario, y = time relative to Fatou on a log axis (Fatou = 1).
+	// Warm-loop dot plot: x = tool, one dot per scenario dodged within the tool's
+	// group, colored by scenario, y = time relative to Fatou on a log axis
+	// (Fatou = 1).
 	function spec(points) {
 		var dark = isDark();
 		var scenarios = orderedUnique(points, "scenario");
@@ -93,8 +94,8 @@
 			description:
 				"Dot plot of formatting time relative to Fatou on a logarithmic scale; for " +
 				"each tool one dot per scenario, with Fatou on a dashed baseline at 1 and " +
-				"slower tools above. Runic is absent from the project scenario because it has " +
-				"no in-process directory API. See the data table for the underlying numbers.",
+				"slower tools above. Runic is absent from the project scenarios because it " +
+				"has no in-process directory API. See the data table for the underlying numbers.",
 			width: "container",
 			height: 340,
 			data: { values: points },
@@ -109,6 +110,14 @@
 							title: "Tool",
 							sort: tools,
 							axis: { labelAngle: 0 },
+						},
+						// Dodge the scenarios within each tool group; with several
+						// scenarios per tool they otherwise collide wherever their
+						// relative times are close.
+						xOffset: {
+							field: "scenario",
+							type: "nominal",
+							sort: scenarios,
 						},
 						y: {
 							field: "relative_time",

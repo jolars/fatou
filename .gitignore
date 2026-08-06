@@ -52,4 +52,6 @@ target
 # Benchmark corpus (fetched by bench/corpus/download.sh, pinned but not vendored)
 # and per-tool intermediate outputs. bench/results.json is committed.
 /bench/corpus/JuliaSyntax
+/bench/corpus/DataFrames
+/bench/corpus/manifest.json
 /bench/*.tmp.json

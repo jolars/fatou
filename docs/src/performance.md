@@ -21,21 +21,36 @@ different files. Each tool formats with **its own default style**; we are
 measuring speed, not comparing output. A file counts for a tool only if that
 tool formats it without error, and any skips are reported.
 
-The corpus is [JuliaSyntax.jl](https://github.com/JuliaLang/JuliaSyntax.jl) (the
-parser Fatou targets for parity), pinned to a tag. Two scenarios:
+### Corpora
 
-- **Single file**: one substantial source file all three tools handle, through
-  each tool's pure `String -> String` formatter (`fatou::formatter::format`,
-  `Runic.format_string`, `JuliaFormatter.format_text`).
-- **Project**: the whole `src/` tree, driven through each tool's own **directory
-  entry point**, so file discovery, IO, and the tool's internal parallel
-  scheduling all count. This is the "format my whole project" path. Fatou uses
-  `fatou::formatter::check_paths` (glob/directory discovery plus rayon-parallel
-  formatting, read-only); JuliaFormatter uses `format(dir; overwrite = false)`
-  (recursive, thread-parallel, read-only). **Runic is excluded from this
-  scenario by design**: it has no in-process directory API (its `format_file` is
-  single-file only, and directory walking lives solely in its CLI), so there is
-  nothing to measure on the same terms.
+Two real-world projects, both pinned to a tag, picked to pull in opposite
+directions:
+
+- [**JuliaSyntax.jl**](https://github.com/JuliaLang/JuliaSyntax.jl), the parser
+  Fatou targets for parity: dense branching, large token tables, and the code
+  Fatou is best equipped to handle. Home turf.
+- [**DataFrames.jl**](https://github.com/JuliaData/DataFrames.jl), ordinary
+  library code of the kind users actually format: docstring-heavy, macro-heavy,
+  built around a large indexing DSL, and roughly 2.6x the size of the
+  JuliaSyntax tree.
+
+### Scenarios
+
+- **Single file** (three of them), through each tool's pure `String -> String`
+  formatter (`fatou::formatter::format`, `Runic.format_string`,
+  `JuliaFormatter.format_text`). The three targets span both size and shape:
+  `parse_stream.jl` (42 KB of dense parser internals), `kinds.jl` (24 KB that is
+  almost entirely one flat macro/data table), and `abstractdataframe.jl` (100 KB
+  of docstring- and macro-heavy application code).
+- **Project** (one per corpus): the whole `src/` tree, driven through each tool's
+  own **directory entry point**, so file discovery, IO, and the tool's internal
+  parallel scheduling all count. This is the "format my whole project" path.
+  Fatou uses `fatou::formatter::check_paths` (glob/directory discovery plus
+  rayon-parallel formatting, read-only); JuliaFormatter uses
+  `format(dir; overwrite = false)` (recursive, thread-parallel, read-only).
+  **Runic is excluded from these scenarios by design**: it has no in-process
+  directory API (its `format_file` is single-file only, and directory walking
+  lives solely in its CLI), so there is nothing to measure on the same terms.
 
 Reproduce with `task bench` (after reloading the devenv shell so `Runic` is on
 the Julia path). Results are written to `bench/results.json`.
@@ -57,7 +72,7 @@ a fresh process that starts up, formats the single file once, and exits. For the
 Julia tools that means paying Julia's startup, package loading, and first-call
 JIT compilation every time, through the same `julia -e 'using ...'` path a shell
 user would take; Fatou, a compiled binary, pays only process startup through
-`fatou format`. Only the single-file scenario is measured, and the numbers are
-dominated by fixed startup and compilation cost, not by the file's size.
+`fatou format`. Only one file (`parse_stream.jl`) is measured, since the numbers
+are dominated by fixed startup and compilation cost, not by the file's size.
 
 {{ benchmark-cold-start }}

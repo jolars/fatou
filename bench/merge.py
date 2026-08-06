@@ -3,12 +3,17 @@
 artifact the docs `doc-utils` mdBook preprocessor reads to render the benchmark
 chart and fallback tables.
 
+Scenarios are supplied by `compare_format.sh`, one `--scenario` group per
+measurement, and their command-line order becomes `scenario_order` in the output
+so the docs render them in a deliberate sequence rather than a map's iteration
+order. Each scenario carries its own display label and target.
+
 Throughput (MB/s) is computed per tool over the files that tool formatted
 successfully, so a tool is never credited for files it could not parse, and the
 skipped files are reported explicitly. MB/s normalizes for byte count, so the
 numbers remain directly comparable even when tools cover different file sets.
 
-The `project` scenario is a single whole-directory measurement per tool (one
+A `project_*` scenario is a single whole-directory measurement per tool (one
 record covering the entire tree, produced by the harnesses' directory mode),
 which `aggregate()` handles as a degenerate one-file case.
 """
@@ -84,13 +89,14 @@ def aggregate(files):
     }
 
 
-def scenario(target, fatou_report, julia_report):
+def scenario(label, target, fatou_report, julia_report):
     tools = {}
     tools.update(fatou_files(fatou_report))
     tools.update(julia_tools(julia_report))
     # Deterministic order: fatou first, then the Julia tools.
     order = ["fatou", "runic", "juliaformatter"]
     return {
+        "label": label,
         "target": target,
         "tools": {t: aggregate(tools[t]) for t in order if t in tools},
     }
@@ -105,6 +111,7 @@ def cold_scenario(report):
     tools = julia_tools(report)
     order = ["fatou", "runic", "juliaformatter"]
     return {
+        "label": "Cold start",
         "target": report.get("target", ""),
         "tools": {t: aggregate(tools[t]) for t in order if t in tools},
     }
@@ -123,32 +130,45 @@ def version_of(fatou_report, julia_report):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fatou-single", required=True)
-    ap.add_argument("--julia-single", required=True)
-    ap.add_argument("--fatou-project", required=True)
-    ap.add_argument("--julia-project", required=True)
+    ap.add_argument(
+        "--scenario",
+        nargs=5,
+        action="append",
+        required=True,
+        metavar=("KEY", "LABEL", "TARGET", "FATOU_JSON", "JULIA_JSON"),
+        help="one measured scenario; repeat per scenario, in display order",
+    )
     ap.add_argument("--cold", help="path to bench/cold_start.py's report (optional)")
     ap.add_argument("--meta", required=True, help="path to a JSON meta file")
     ap.add_argument("--out", required=True, help="results.json output path")
     args = ap.parse_args()
 
-    fs, js = load(args.fatou_single), load(args.julia_single)
-    fp, jp = load(args.fatou_project), load(args.julia_project)
-    cold = load(args.cold) if args.cold else None
     meta = json.loads(Path(args.meta).read_text())
-    meta["versions"] = version_of(fs or fp, js or jp)
 
-    scenarios = {
-        "single_file": scenario(meta.get("single_target", ""), fs, js),
-        "project": scenario(meta.get("project_target", ""), fp, jp),
-    }
-    cold_sc = cold_scenario(cold)
+    scenarios = {}
+    order = []
+    # Versions come from whichever harness outputs are present; every scenario
+    # runs the same binaries, so the first readable pair settles it.
+    fatou_v, julia_v = None, None
+    for key, label, target, fatou_json, julia_json in args.scenario:
+        fr, jr = load(fatou_json), load(julia_json)
+        fatou_v = fatou_v or fr
+        julia_v = julia_v or jr
+        scenarios[key] = scenario(label, target, fr, jr)
+        order.append(key)
+
+    meta["versions"] = version_of(fatou_v, julia_v)
+
+    cold_sc = cold_scenario(load(args.cold) if args.cold else None)
     if cold_sc is not None:
         scenarios["cold_start"] = cold_sc
 
     results = {
-        "schema_version": 1,
+        "schema_version": 2,
         "meta": meta,
+        # Explicit render order; `cold_start` is deliberately absent, since the
+        # docs render it under its own marker.
+        "scenario_order": order,
         "scenarios": scenarios,
     }
 

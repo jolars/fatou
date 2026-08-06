@@ -75,10 +75,10 @@ const BENCH_META_MARKER: &str = "{{ benchmark-meta }}";
 const BENCH_RESULTS_MARKER: &str = "{{ benchmark-results }}";
 const BENCH_COLD_MARKER: &str = "{{ benchmark-cold-start }}";
 
-/// Scenarios and tools are rendered in this fixed order regardless of the map
-/// order in the JSON, so the page reads single -> project and, within each,
-/// Fatou -> Runic -> JuliaFormatter.
-const SCENARIO_ORDER: &[(&str, &str)] = &[("single_file", "Single file"), ("project", "Project")];
+/// Scenario order comes from the artifact's own `scenario_order` list (set by
+/// `bench/compare_format.sh`), so adding a corpus or a single-file target needs
+/// no change here. Tools are rendered in this fixed order within each scenario,
+/// so every table reads Fatou -> Runic -> JuliaFormatter.
 const TOOL_ORDER: &[(&str, &str)] = &[
     ("fatou", "Fatou"),
     ("runic", "Runic"),
@@ -88,7 +88,20 @@ const TOOL_ORDER: &[(&str, &str)] = &[
 #[derive(Deserialize)]
 struct Benchmarks {
     meta: Meta,
+    #[serde(default)]
+    scenario_order: Vec<String>,
     scenarios: HashMap<String, Scenario>,
+}
+
+impl Benchmarks {
+    /// The warm-loop scenarios in render order, paired with their display
+    /// labels. `cold_start` is not in `scenario_order`; it has its own marker.
+    fn ordered(&self) -> Vec<(&str, &Scenario)> {
+        self.scenario_order
+            .iter()
+            .filter_map(|k| self.scenarios.get(k.as_str()).map(|sc| (k.as_str(), sc)))
+            .collect()
+    }
 }
 
 #[derive(Deserialize)]
@@ -103,12 +116,14 @@ struct Meta {
     iterations_project: Option<u64>,
     #[serde(default)]
     iterations_cold: Option<u64>,
-    corpus: Corpus,
+    #[serde(default)]
+    corpora: Vec<Corpus>,
     versions: Versions,
 }
 
 #[derive(Deserialize)]
 struct Corpus {
+    name: String,
     repo: String,
     tag: String,
     commit: String,
@@ -124,6 +139,9 @@ struct Versions {
 
 #[derive(Deserialize)]
 struct Scenario {
+    /// Display name from the artifact, e.g. "Single file: kinds.jl".
+    #[serde(default)]
+    label: String,
     target: String,
     tools: HashMap<String, Agg>,
 }
@@ -222,9 +240,18 @@ fn insert_benchmarks(book: &mut Book) {
     });
 }
 
-/// A Markdown bullet list of corpus pin, tool versions, host, and run settings.
+/// A scenario's display name: the label the benchmark artifact recorded, or the
+/// raw key as a fallback for an artifact predating labelled scenarios.
+fn scenario_label(key: &str, sc: &Scenario) -> String {
+    if sc.label.is_empty() {
+        key.to_string()
+    } else {
+        sc.label.clone()
+    }
+}
+
+/// A Markdown bullet list of corpus pins, tool versions, host, and run settings.
 fn render_meta(meta: &Meta) -> String {
-    let c = &meta.corpus;
     let v = &meta.versions;
 
     let mut versions = Vec::new();
@@ -246,10 +273,14 @@ fn render_meta(meta: &Meta) -> String {
     let iters = |n: Option<u64>| n.map(|n| n.to_string()).unwrap_or_else(|| "?".to_string());
 
     let mut out = String::new();
-    out.push_str(&format!(
-        "- **Corpus**: [JuliaSyntax.jl]({}) `{}` ({})\n",
-        c.repo, c.tag, c.commit
-    ));
+    let corpora: Vec<String> = meta
+        .corpora
+        .iter()
+        .map(|c| format!("[{}.jl]({}) `{}` ({})", c.name, c.repo, c.tag, c.commit))
+        .collect();
+    if !corpora.is_empty() {
+        out.push_str(&format!("- **Corpora**: {}\n", corpora.join(", ")));
+    }
     out.push_str(&format!("- **Versions**: {}\n", versions.join(", ")));
     out.push_str(&format!("- **Host**: {} ({})\n", meta.cpu, meta.os));
     out.push_str(&format!("- **Machine**: `{}`\n", meta.host));
@@ -283,11 +314,13 @@ fn render_results(b: &Benchmarks) -> String {
     out.push_str("</script>\n");
     out.push_str(
         "<figcaption>Formatting time relative to Fatou on a log scale (lower is faster). \
-         One dot per scenario, stacked at each tool and colored by scenario; Fatou sits on \
+         One dot per scenario, grouped at each tool and colored by scenario; Fatou sits on \
          the dashed baseline at 1 and slower tools appear above it. Each tool uses its own \
-         default style. The <em>Project</em> scenario formats the whole source tree through \
-         each tool's directory entry point; <code>Runic</code> has no in-process directory \
-         API, so it is absent there. Hover a dot for the exact figures.</figcaption>\n",
+         default style. The <em>Single file</em> scenarios run one file through each tool's \
+         <code>String -&gt; String</code> formatter; the <em>Project</em> scenarios format a \
+         whole source tree through each tool's directory entry point, where <code>Runic</code> \
+         is absent because it has no in-process directory API. Hover a dot for the exact \
+         figures.</figcaption>\n",
     );
     out.push_str("</figure>\n");
     out.push_str(
@@ -306,10 +339,8 @@ fn render_results(b: &Benchmarks) -> String {
 /// (Fatou = 1); absolute throughput and time ride along in the tooltip.
 fn chart_points(b: &Benchmarks) -> Vec<ChartPoint> {
     let mut points = Vec::new();
-    for &(key, label) in SCENARIO_ORDER {
-        let Some(sc) = b.scenarios.get(key) else {
-            continue;
-        };
+    for (key, sc) in b.ordered() {
+        let label = scenario_label(key, sc);
         let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
         for &(tool, tool_label) in TOOL_ORDER {
             let Some(agg) = sc.tools.get(tool) else {
@@ -317,7 +348,7 @@ fn chart_points(b: &Benchmarks) -> Vec<ChartPoint> {
             };
             let (relative_time, relative) = relative_time(tool, agg.median_total_ns, base);
             points.push(ChartPoint {
-                scenario: label.to_string(),
+                scenario: label.clone(),
                 tool: tool_label.to_string(),
                 relative_time,
                 throughput_mbps: agg.throughput_mbps,
@@ -336,15 +367,12 @@ fn chart_points(b: &Benchmarks) -> Vec<ChartPoint> {
 /// chart plots), so the table and the dot plot tell the same story.
 fn render_results_tables_html(b: &Benchmarks) -> String {
     let mut out = String::new();
-    for &(key, label) in SCENARIO_ORDER {
-        let Some(sc) = b.scenarios.get(key) else {
-            continue;
-        };
+    for (key, sc) in b.ordered() {
         let base = sc.tools.get("fatou").map(|a| a.median_total_ns);
 
         out.push_str(&format!(
             "<h3>{} (<code>{}</code>)</h3>\n",
-            label,
+            esc(&scenario_label(key, sc)),
             esc(&sc.target)
         ));
         out.push_str(
