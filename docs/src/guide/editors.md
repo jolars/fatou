@@ -1,17 +1,94 @@
 # Editor Setup
 
-Fatou ships a language server (`fatou lsp`, stdio JSON-RPC) that already
-advertises **document formatting** and pushes **parse diagnostics**. This guide
-wires it into your editor so you can format Julia buffers and see parse errors
-inline.
-
-> Coverage is growing construct by construct; constructs without a formatting
-> rule yet are left byte-identical, so formatting is always safe to run.
+Fatou includes a language server (`fatou lsp`, stdio JSON-RPC) that any LSP
+client can drive. It provides formatting (whole document and range), lint and
+parse diagnostics with quick fixes, completion, hover, signature help, go-to
+definition, references, rename, document and workspace symbols, call and type
+hierarchy, folding ranges, document links, selection ranges, and semantic
+tokens.
 
 ## Prerequisites
 
-Install Fatou (see [Getting Started](../getting-started.md)) and make sure the
-`fatou` binary is on your `PATH`, or note its absolute path.
+Except in the VS Code family, where the extension bundles a binary, install
+Fatou (see [Getting Started](../getting-started.md)) and make sure the `fatou`
+binary is on your `PATH`, or note its absolute path.
+
+## VS Code
+
+Install the [Fatou
+extension](https://marketplace.visualstudio.com/items?itemName=jolars.fatou)
+(`jolars.fatou`) from the Marketplace, or from the command line:
+
+```bash
+code --install-extension jolars.fatou
+```
+
+The extension activates on Julia files, starts `fatou lsp` for you, and
+registers itself as the default formatter for `[julia]`. Each platform-specific
+build bundles a matching `fatou` binary, so nothing else is needed; on a
+platform without one, it downloads a binary from GitHub releases.
+
+To format on save, add to `settings.json`:
+
+```json
+{
+  "[julia]": {
+    "editor.defaultFormatter": "jolars.fatou",
+    "editor.formatOnSave": true
+  }
+}
+```
+
+To use a `fatou` you installed yourself instead of the bundled one:
+
+```json
+{
+  "fatou.executableStrategy": "environment"
+}
+```
+
+or point at an exact binary:
+
+```json
+{
+  "fatou.executableStrategy": "path",
+  "fatou.executablePath": "/usr/local/bin/fatou"
+}
+```
+
+The extension's
+[README](https://github.com/jolars/fatou/blob/main/editors/code/README.md)
+documents the available settings and their defaults.
+
+## VSCodium and Other Code OSS Editors
+
+The same extension is published to the [Open VSX
+Registry](https://open-vsx.org/extension/jolars/fatou), which VSCodium and most
+Code OSS builds use by default:
+
+```bash
+codium --install-extension jolars.fatou
+```
+
+If your build ships a different registry, download the VSIX matching your OS and
+architecture from the Open VSX page and install it with **Extensions: Install
+from VSIX…**, or from the command line:
+
+```bash
+codium --install-extension fatou-linux-x64.vsix
+```
+
+Settings are identical to VS Code's.
+
+## Cursor
+
+Search for **Fatou** in the Extensions view and install it. If your Cursor build
+does not list it, download the VSIX for your platform from [Open
+VSX](https://open-vsx.org/extension/jolars/fatou) and install it with
+**Extensions: Install from VSIX…** from the command palette.
+
+Cursor reads the same `settings.json` keys as VS Code, so the format-on-save and
+binary-selection snippets above apply unchanged.
 
 ## Neovim
 
@@ -52,15 +129,79 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 ```
 
-### Try it
+## Helix
 
-Open a `.jl` file containing `x=1`, then run `:lua vim.lsp.buf.format()` (or
-just save with the autocmd above). It becomes `x = 1`. Parse errors, if any,
-appear as diagnostics (`:lua vim.diagnostic.open_float()`).
+Add to `~/.config/helix/languages.toml`:
+
+```toml
+[language-server.fatou]
+command = "fatou"
+args = ["lsp"]
+
+[[language]]
+name = "julia"
+language-servers = ["fatou"]
+auto-format = true
+```
+
+Listing `language-servers` replaces Helix's default for Julia, which is
+LanguageServer.jl. To keep it for the features Fatou does not cover yet while
+Fatou handles formatting, list both and take formatting away from the other
+server:
+
+```toml
+[[language]]
+name = "julia"
+language-servers = [{ name = "julia", except-features = ["format"] }, "fatou"]
+auto-format = true
+```
+
+`hx --health julia` shows which servers Helix resolved for the language.
+
+## Other LSP clients
+
+Any client that speaks LSP over stdio works: launch `fatou lsp` with no
+arguments for `*.jl` files, rooted at `Project.toml`, `JuliaProject.toml`, or
+`.git`. Nothing else is required, because Fatou discovers its own configuration
+from the file's directory upward.
+
+## Configuration
+
+Fatou reads its settings from a `fatou.toml` next to your project (see the
+[Configuration guide](configuration.md)), which is the recommended way to
+configure it in any editor, since the whole team gets the same behavior.
+
+A client can also push settings over LSP, as `initializationOptions` or
+`workspace/didChangeConfiguration`, using the same schema as the file, either
+bare or wrapped in a `"fatou"` key the way VS Code namespaces settings. In
+Helix, for example:
+
+```toml
+[language-server.fatou.config.format]
+line-width = 100
+
+[language-server.fatou.config.lint]
+ignore = ["unused-binding"]
+```
+
+A discovered `fatou.toml` shadows editor-pushed settings entirely rather than
+merging with them, so a project file always wins.
+
+## Check It Works
+
+Open a `.jl` file containing `x=1` and format the buffer: it becomes `x = 1`. In
+Neovim that is `:lua vim.lsp.buf.format()`, in Helix `:format`, and in the VS
+Code family **Format Document**. Diagnostics appear inline, and a lint finding
+with a fix offers it as a quick fix (`:lua vim.lsp.buf.code_action()`,
+`<space>a` in Helix, or the lightbulb in VS Code).
 
 ## Notes
 
-- The server uses **full-document sync** and full-document formatting today;
-  range formatting (`textDocument/rangeFormatting`) is on the roadmap.
-- Multiple formatters? `vim.lsp.buf.format({ name = "fatou" })` forces Fatou
-  even if another Julia LSP is attached.
+- Document sync is incremental, and both whole-document and range formatting are
+  supported.
+- Multiple formatters attached? In Neovim, pass `{ name = "fatou" }` to
+  `vim.lsp.buf.format()`; in Helix, strip `format` from the other server as
+  shown above; in VS Code, set `editor.defaultFormatter` for `[julia]`.
+- `undefined-name` and `call-arity` need project context, so the language server
+  enables them for workspace member files even though the command line leaves
+  them opt-in. An `ignore` entry still turns them off.
