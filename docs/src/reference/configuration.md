@@ -24,13 +24,6 @@ existing file among
 3. the platform config directory, on macOS
    `~/Library/Application Support/fatou/fatou.toml`
 
-`~/.config` is checked on every platform, so the usual CLI-dotfile location
-works on macOS and Windows too. On Windows the order of the last two is
-reversed: `%APPDATA%\fatou\fatou.toml` is checked before
-`%USERPROFILE%\.config\fatou\fatou.toml`, since a `~/.config` tree there is
-often incidental (synced dotfiles, WSL interop) and should not shadow the
-native location. On Linux the two are the same directory.
-
 The `FATOU_CONFIG` and global files use the same schema as a project
 `fatou.toml` and are whole-file fallbacks, never merged with a project config.
 Relative `exclude` patterns in them resolve against the working directory (CLI)
