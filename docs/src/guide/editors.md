@@ -60,6 +60,33 @@ The extension's
 [README](https://github.com/jolars/fatou/blob/main/editors/code/README.md)
 documents the available settings and their defaults.
 
+### Using Only Some Features
+
+The formatter, linter, and language features share one server but can be turned
+off independently, so you can adopt just the parts you want:
+
+- `fatou.formatting.enable` — use Fatou as a formatter.
+- `fatou.diagnostics.enable` — show Fatou diagnostics (the linter).
+- `fatou.languageFeatures.enable` — hover, completion, navigation, symbols,
+  rename, code actions, and the rest.
+
+All three default to `true`. They are client-side gates, so the server keeps
+running and the toggles take effect without a restart. For a formatter-only
+setup, turn off the other two:
+
+```json
+{
+  "fatou.diagnostics.enable": false,
+  "fatou.languageFeatures.enable": false
+}
+```
+
+Turning off `fatou.diagnostics.enable` suppresses **every** diagnostic,
+including the parse errors that a `fatou.toml` [`[lint]`
+selection](../reference/configuration.md#lint) cannot silence. The `fatou.toml`
+route stays the right tool when you want to keep parse errors but mute specific
+lint rules across every editor and the CLI.
+
 ## VSCodium and Other Code OSS Editors
 
 The same extension is published to the [Open VSX

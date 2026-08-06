@@ -53,6 +53,21 @@
 		"configuration": {
 			"title": "Fatou",
 			"properties": {
+				"fatou.formatting.enable": {
+					"type": "boolean",
+					"default": true,
+					"markdownDescription": "Enable Fatou as a formatter. When `false`, Fatou contributes no formatting edits (document and range formatting), so another formatter can own Julia without disabling the extension. The language server keeps running for diagnostics and language features."
+				},
+				"fatou.diagnostics.enable": {
+					"type": "boolean",
+					"default": true,
+					"markdownDescription": "Show Fatou diagnostics (the linter) in the editor. When `false`, all diagnostics are suppressed, including the parse errors that a `fatou.toml` `[lint]` selection cannot silence. Formatting and language features are unaffected."
+				},
+				"fatou.languageFeatures.enable": {
+					"type": "boolean",
+					"default": true,
+					"markdownDescription": "Enable Fatou language features: hover, completion, signature help, go-to-definition, references, document/workspace symbols, rename, code actions, call and type hierarchy, semantic tokens, folding, selection ranges, and document links. When `false`, these are suppressed. Formatting and diagnostics are unaffected."
+				},
 				"fatou.executableStrategy": {
 					"type": "string",
 					"enum": [

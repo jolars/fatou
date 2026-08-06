@@ -93,10 +93,41 @@ Use `fatou.releaseTag` only if you need an exact tag override:
 - If a download fall-through fails, the extension shows a warning and falls back
   to looking up `fatou` on the system `PATH`.
 
+## Using only some features
+
+The formatter, linter, and language features share one server but can be turned
+off independently, so you can adopt just the parts you want:
+
+- `fatou.formatting.enable`: use Fatou as a formatter.
+- `fatou.diagnostics.enable`: show Fatou diagnostics (the linter).
+- `fatou.languageFeatures.enable`: hover, completion, navigation, symbols,
+  rename, code actions, and the rest.
+
+All three default to `true`. They are client-side gates, so the server keeps
+running and the toggles take effect without a restart. For a formatter-only
+setup, turn off the other two:
+
+```json
+{
+  "fatou.diagnostics.enable": false,
+  "fatou.languageFeatures.enable": false
+}
+```
+
+Turning off `fatou.diagnostics.enable` suppresses **every** diagnostic,
+including the parse errors that a `fatou.toml` `[lint]` selection cannot
+silence. Use `fatou.toml` instead when you want to keep parse errors but mute
+specific lint rules across every editor and the CLI.
+
 ## Settings
 
 Fatou registers itself as the default formatter for `[julia]` files.
 
+- `fatou.formatting.enable`: contribute formatting edits (default: `true`).
+- `fatou.diagnostics.enable`: show diagnostics from the linter (default:
+  `true`).
+- `fatou.languageFeatures.enable`: hover, completion, navigation, symbols,
+  rename, code actions, and the rest (default: `true`).
 - `fatou.executableStrategy`: how to locate the `fatou` binary: `bundled`
   (default), `environment`, or `path`.
 - `fatou.executablePath`: path to the binary, used only when
