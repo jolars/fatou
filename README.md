@@ -79,7 +79,7 @@ fatou format file.jl
 # Verify formatting without writing—exits non-zero if anything would change
 fatou format --check src/
 
-# Lint—exits non-zero if there are any findings
+# Lint (exits non-zero if there are any findings)
 fatou lint src/
 
 # Run the language server over stdio
