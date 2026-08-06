@@ -4,16 +4,20 @@ Fatou overlaps with several Julia tools: the language servers
 [LanguageServer.jl](https://github.com/julia-vscode/LanguageServer.jl) and
 [JETLS.jl](https://github.com/aviatesk/JETLS.jl), and the formatters
 [Runic.jl](https://github.com/fredrikekre/Runic.jl) and
-[JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl). The two
-servers also carry linters; there is no standalone Julia linter to compare
-against.
+[JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl).
 
-One difference runs through all of it: Fatou is a compiled Rust binary that
-never starts Julia. It reads your code the way rust-analyzer reads Rust, rather
-than loading it into a running session. Everything below follows from that. All
-of these tools are MIT-licensed.
+The two servers also carry linters,
+[JuliaWorkspaces.jl](https://github.com/julia-vscode/JuliaWorkspaces.jl) in the
+case of LanguageServer.jl and [JET.jl](https://github.com/aviatesk/JET.jl) in
+the case of JETLS.jl. Although some of the linting is done inside the servers in
+both cases.
 
-## Language servers
+The primary difference with respect to the tools above is that Fatou is a
+compiled Rust binary that never starts Julia. It reads your code the way
+rust-analyzer reads Rust, rather than loading it into a running session.
+Everything below follows from that. All of these tools are MIT-licensed.
+
+## Language Servers
 
   |                          | Fatou                 | LanguageServer.jl                      | JETLS.jl                             |
   | ------------------------ | --------------------- | -------------------------------------- | ------------------------------------ |
@@ -36,7 +40,7 @@ learn their exported symbols, methods, and docstrings.
 
 ### LanguageServer.jl
 
-The mature default, and the backend of the official [Julia VS Code
+The mature default, and the backend of the [Julia VS Code
 extension](https://www.julia-vscode.org). Its architecture is closer to Fatou's
 than you might expect: since the v5 rewrite the analysis engine is
 [JuliaWorkspaces.jl](https://github.com/julia-vscode/JuliaWorkspaces.jl) on top
@@ -53,11 +57,12 @@ is also why the first run on a large project can take minutes.
 
 ### JETLS.jl
 
-By Shuhei Kadowaki, author of [JET.jl](https://github.com/aviatesk/JET.jl), and
-built on the actual compiler: type inference through JET.jl, macro-aware
-navigation through [JuliaLowering.jl](https://github.com/c42f/JuliaLowering.jl).
-It offers what the others cannot, including types on hover, inlay type hints,
-and diagnostics for non-existent field access or out-of-bounds indexing.
+A language server made by the author of
+[JET.jl](https://github.com/aviatesk/JET.jl), and built on the actual compiler:
+type inference through JET.jl, macro-aware navigation through
+[JuliaLowering.jl](https://github.com/c42f/JuliaLowering.jl). It offers what the
+others cannot, including types on hover, inlay type hints, and diagnostics for
+non-existent field access or out-of-bounds indexing.
 
 It is also the furthest from Fatou. As of 2026 its README calls it experimental
 and not production-ready, it needs Julia 1.12 or newer, and it is under heavy
@@ -105,15 +110,15 @@ and leaves `bar` alone because it has no width limit. JuliaFormatter's defaults
 behave like Fatou's here.
 
 Equivalent code formats identically under Fatou no matter how it was laid out.
-There is no magic comma, and no way to hand-arrange your source into a different
-result. Formatting is also idempotent, and the test suite checks
-`format(format(x)) == format(x)` over every fixture.
+There is no way to hand-arrange your source into a different result. Formatting
+is also idempotent, and the test suite checks `format(format(x)) == format(x)`
+over every fixture.
 
 ### Runic.jl
 
-Fredrik Ekre's formatter, modeled on `gofmt`, with no configuration at all:
-indentation is four spaces and there are no style knobs. Fatou and Runic agree
-that formatting should not be re-litigated per project.
+Modeled on `gofmt`, with no configuration at all: indentation is four spaces and
+there are no style knobs. Fatou and Runic agree that formatting should not be
+re-litigated per project.
 
 They disagree about reflow. Runic has no line-width limit and never breaks or
 joins lines for width; its own docs say "Line width limit: No. Use your Enter
@@ -192,7 +197,7 @@ rule IDs in categories, `select`/`ignore` and per-rule severity in `[lint]`,
 `concise`, or `json` output from the CLI. See the [rule
 reference](../reference/rules.md) for the catalogue.
 
-## Running them together
+## Running Them Together
 
 Fatou and a Julia-native server coexist happily: Fatou formats and runs its
 static checks instantly and everywhere, including CI via
