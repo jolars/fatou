@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 use serde::Deserialize;
 
 use crate::file_discovery::{ExcludeError, ExcludeFilter};
-use crate::formatter::LineEnding;
+use crate::formatter::{FormatStyle, LineEnding};
 use crate::julia_version::{VersionRange, parse_compat};
 use crate::linter::Severity;
 
@@ -49,6 +49,18 @@ pub struct FormatConfig {
     pub indent_width: u32,
     /// The newline style the formatter emits. See [`LineEndingConfig`].
     pub line_ending: LineEnding,
+}
+
+// Lives here rather than beside `FormatStyle`: the engine crate must not know
+// about `fatou.toml`.
+impl From<&FormatConfig> for FormatStyle {
+    fn from(config: &FormatConfig) -> Self {
+        FormatStyle {
+            line_width: config.line_width,
+            indent_width: config.indent_width,
+            line_ending: config.line_ending,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

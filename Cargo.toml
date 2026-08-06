@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fatou-parser"]
+members = ["crates/fatou-parser", "crates/fatou-formatter"]
 
 [workspace.package]
 edition = "2024"
@@ -46,6 +46,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 crossbeam-channel = "0.5"
 dirs = "6"
 env_logger = "0.11.10"
+fatou-formatter = { path = "crates/fatou-formatter", version = "0.1.0" }
 fatou-parser = { path = "crates/fatou-parser", version = "0.1.0" }
 globset = "0.4.18"
 ignore = "0.4.26"

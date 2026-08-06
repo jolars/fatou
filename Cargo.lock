@@ -535,6 +535,7 @@ dependencies = [
  "crossbeam-channel",
  "dirs",
  "env_logger",
+ "fatou-formatter",
  "fatou-parser",
  "globset",
  "ignore",
@@ -552,6 +553,14 @@ dependencies = [
  "smol_str",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "fatou-formatter"
+version = "0.1.0"
+dependencies = [
+ "fatou-parser",
+ "rowan",
 ]
 
 [[package]]

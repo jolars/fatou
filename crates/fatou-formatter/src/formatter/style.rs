@@ -1,5 +1,3 @@
-use crate::config::FormatConfig;
-
 /// The knobs that govern layout: the target line width, the indent step, and the
 /// newline style emitted at the end of each line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,16 +13,6 @@ impl Default for FormatStyle {
             line_width: 92,
             indent_width: 4,
             line_ending: LineEnding::default(),
-        }
-    }
-}
-
-impl From<&FormatConfig> for FormatStyle {
-    fn from(config: &FormatConfig) -> Self {
-        FormatStyle {
-            line_width: config.line_width,
-            indent_width: config.indent_width,
-            line_ending: config.line_ending,
         }
     }
 }
