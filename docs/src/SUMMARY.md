@@ -1,13 +1,14 @@
 # Summary
 
-[Introduction](introduction.md) [Getting Started](getting-started.md)
+[Introduction](introduction.md)
 
 # Guide
 
+- [Getting Started](guide/getting-started.md)
 - [Editor Setup](guide/editors.md)
 - [Configuration](guide/configuration.md)
 - [Comparison](guide/comparison.md)
-- [Performance](performance.md)
+- [Performance](guide/performance.md)
 
 # Reference
 

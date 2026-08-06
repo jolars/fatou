@@ -24,12 +24,12 @@ fatou format file.jl
 ```
 
 For full installation options (npm, PyPI, prebuilt binaries, and source builds),
-see [Getting Started](getting-started.md).
+see [Getting Started](guide/getting-started.md).
 
 ## Where to Go Next
 
-- [Getting Started](getting-started.md): complete installation and first-run
-  walkthrough.
+- [Getting Started](guide/getting-started.md): complete installation and
+  first-run walkthrough.
 - [Editor Setup](guide/editors.md): connect the language server to your editor.
 - [Configuration](guide/configuration.md): set up `fatou.toml` for your project.
 - [Configuration Reference](reference/configuration.md): every `fatou.toml` key.

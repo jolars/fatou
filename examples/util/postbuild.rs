@@ -30,8 +30,10 @@ pub fn normalize_base(base_url: &str) -> String {
 
 /// Recursively collect every public HTML content page under `book_dir`, sorted
 /// by URL path for deterministic output. mdBook's helper pages (`404.html`,
-/// `print.html`, the `toc.html` sidebar fragment) are skipped: they are not
-/// standalone content and want neither a sitemap entry nor a canonical URL.
+/// `print.html`, the `toc.html` sidebar fragment) are skipped, as are the
+/// redirect stubs `[output.html.redirect]` leaves behind for moved pages: none
+/// of them are standalone content, so they want neither a sitemap entry nor a
+/// canonical URL.
 pub fn collect_pages(book_dir: &Path) -> Vec<Page> {
     let mut pages = Vec::new();
     collect_html(book_dir, book_dir, &mut pages);
@@ -57,10 +59,19 @@ fn collect_html(root: &Path, dir: &Path, pages: &mut Vec<Page>) {
         if matches!(rel.as_str(), "404.html" | "print.html" | "toc.html") {
             continue;
         }
+        if is_redirect_stub(&path) {
+            continue;
+        }
         let loc = match rel.strip_suffix("index.html") {
             Some(prefix) => prefix.to_string(),
             None => rel,
         };
         pages.push(Page { path, loc });
     }
+}
+
+/// Whether `path` is one of mdBook's redirect stubs: a page whose whole job is
+/// the `<meta http-equiv="refresh">` that bounces to the moved page.
+fn is_redirect_stub(path: &Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|html| html.contains("<meta http-equiv=\"refresh\""))
 }

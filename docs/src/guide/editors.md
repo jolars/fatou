@@ -10,7 +10,7 @@ tokens.
 ## Prerequisites
 
 Except in the VS Code family, where the extension bundles a binary, install
-Fatou (see [Getting Started](../getting-started.md)) and make sure the `fatou`
+Fatou (see [Getting Started](getting-started.md)) and make sure the `fatou`
 binary is on your `PATH`, or note its absolute path.
 
 ## VS Code

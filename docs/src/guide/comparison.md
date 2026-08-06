@@ -203,4 +203,4 @@ Setup](editors.md) shows how to give Fatou formatting while another server keeps
 the rest.
 
 For formatting throughput and cold-start numbers against Runic and
-JuliaFormatter, see [Performance](../performance.md).
+JuliaFormatter, see [Performance](performance.md).
