@@ -7,5 +7,5 @@ extend-exclude = [
   "CHANGELOG.md",
   "editors/code/CHANGELOG.md",
   "docs/src/reference/cli.md",
-  "docs/src/reference/rules/*.md",
+  "docs/src/reference/rules.md",
 ]

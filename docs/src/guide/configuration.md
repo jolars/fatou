@@ -134,8 +134,9 @@ to follow the platform Fatou runs on.
 
 ## Choosing lint rules
 
-By default every rule runs. `ignore` turns individual rules off, and `select`,
-when set, restricts the run to exactly the rules you list:
+By default most rules run; the [rule reference](../reference/rules.md) lists the
+few that are opt-in. `ignore` turns individual rules off, and `select`, when
+set, restricts the run to exactly the rules you list:
 
 ```toml
 [lint]
@@ -157,7 +158,7 @@ undefined-name = "error"
 ## Tuning a rule
 
 A rule with a tunable knob reads it from its own table, named after the rule ID.
-For example, [`discouraged-function`](../reference/rules/discouraged-function.md)
+For example, [`discouraged-function`](../reference/rules.md#discouraged-function)
 ships a deny-list of Base functions with process-wide or memory-unsafe effects,
 and you can add your own entries to it:
 

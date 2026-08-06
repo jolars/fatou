@@ -1,39 +1,24 @@
-//! Generate the mdBook rule-reference pages from rule metadata.
+//! Generate the mdBook lint-rule reference from rule metadata.
 //!
-//! Run with `cargo run --example docgen`. For each rule that carries examples,
-//! this renders the same markdown the snapshot test pins
-//! ([`fatou::linter::render_rule_doc`]) and writes it under the mdBook source
-//! tree, plus an index page linking them.
+//! Run with `cargo run --example docgen`. It renders the same markdown the
+//! snapshot test pins ([`fatou::linter::docs::render_reference_page`]) and
+//! writes it to the mdBook source tree as a single page, one section per rule.
 //!
 //! Living as an `examples/` target (not a `[[bin]]`) keeps `fatou` a single,
 //! publishable crate: `examples/` is outside the Cargo `include` whitelist, so
 //! this never ships to crates.io.
 
-use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::Path;
 
-use fatou::linter::docs::documented_pages;
+use fatou::linter::docs::render_reference_page;
 
 fn main() -> io::Result<()> {
-    let reference_dir = Path::new("docs/src/reference");
-    let rules_dir = reference_dir.join("rules");
-    fs::create_dir_all(&rules_dir)?;
-
-    let mut index = String::from(
-        "# Lint Rules\n\nEach rule is documented with a description and a worked example whose \
-diagnostics are rendered by running the linter itself, so the reference can \
-never drift from behavior.\n\n",
-    );
-
-    for (id, page) in documented_pages() {
-        write_if_changed(&rules_dir.join(format!("{id}.md")), &page)?;
-        let _ = writeln!(index, "- [`{id}`](rules/{id}.md)");
-    }
-
-    write_if_changed(&reference_dir.join("rules.md"), &index)?;
-    Ok(())
+    write_if_changed(
+        Path::new("docs/src/reference/rules.md"),
+        &render_reference_page(),
+    )
 }
 
 /// Write `content` to `path` only when it differs from what's already there, so

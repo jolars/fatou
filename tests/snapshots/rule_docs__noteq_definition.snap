@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `noteq-definition`
+## `noteq-definition`
 
 Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.
 

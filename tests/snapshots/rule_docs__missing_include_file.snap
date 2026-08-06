@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `missing-include-file`
+## `missing-include-file`
 
 Flag a static `include("path")` whose target does not exist on disk (relative paths resolve against the including file's directory). Running the file would throw a `SystemError`. Only statically resolvable includes are checked: dynamic (`include(f)`), interpolated (`include("$dir/a.jl")`), qualified (`M.include(...)`), and two-argument forms cannot be resolved without running the code and are never flagged.
 

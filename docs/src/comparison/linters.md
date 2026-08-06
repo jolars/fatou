@@ -57,14 +57,14 @@ Julia-native static linter: StaticLint's `MissingReference` check has a
 long-standing reputation for false positives on valid `using`/import code,
 flagging names that are in fact perfectly defined.
 
-Fatou's [`undefined-name`](../reference/rules/undefined-name.md) rule is built to
+Fatou's [`undefined-name`](../reference/rules.md#undefined-name) rule is built to
 avoid exactly this. It resolves a name against a series of tiers—locals, file
 bindings, workspace siblings, whole-module `using` exports, and a Base/Core
 snapshot—and flags an identifier only when *no* tier provides it. Whenever the
 file does something that could make any name valid (an `eval`, an `include`
 outside a known workspace, or a `using` of a module Fatou cannot resolve), the
 rule skips the file entirely rather than risk a false positive. The
-[`call-arity`](../reference/rules/call-arity.md) rule is equally cautious: an
+[`call-arity`](../reference/rules.md#call-arity) rule is equally cautious: an
 unknown method always *silences* the check rather than triggering it.
 
 Because these rules need project context to be sound, they are **off by default

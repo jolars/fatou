@@ -24,7 +24,7 @@ pub use check::{
     check_paths_with_config, check_source, check_source_with_target, lint_parsed,
 };
 pub use diagnostic::{Applicability, Diagnostic, Fix, Severity, ViolationData};
-pub use docs::render_rule_doc;
+pub use docs::{render_reference_page, render_rule_doc};
 pub use fix::{Applied, FixOutcome, apply_fixes, fix_source};
 pub use include_graph::{IncludeProblem, IncludeProblemKind, include_problems};
 pub use render::{OutputMode, render_findings};

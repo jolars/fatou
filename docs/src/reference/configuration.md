@@ -96,7 +96,7 @@ Per-rule *severity* is not set here; use [`[lint.severity]`](#lint) for that.
 
 ### `[lint.rules.discouraged-function]`
 
-Options for [`discouraged-function`](rules/discouraged-function.md). Both keys
+Options for [`discouraged-function`](rules.md#discouraged-function). Both keys
 are tables mapping a function name to the suggestion shown in the diagnostic.
 
   | Key                | Type  | Default          | Description                                                                    |

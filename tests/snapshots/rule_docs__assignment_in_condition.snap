@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `assignment-in-condition`
+## `assignment-in-condition`
 
 Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. It is valid Julia but almost always a typo for `==`, so it is reported with a safe fix that rewrites `=` to `==`.
 

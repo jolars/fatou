@@ -3,8 +3,7 @@ name: add-lint-rule
 description: Add a new built-in lint rule to the fatou linter—implement it
   against the single-walk dispatch, register it in the one source of truth, add
   TDD behavior tests (plus autofix coverage when the rule ships a fix), and
-  wire up the snapshot-pinned generated docs and the hand-maintained SUMMARY.md
-  index.
+  wire up the snapshot-pinned generated rule reference.
 ---
 
 Use this skill when asked to add a new built-in lint rule (correctness,
@@ -87,16 +86,19 @@ Prefer the cheapest tier the rule's correctness actually requires.
   own `// --- <id> ---` block.
 - `tests/autofix.rs`—fix-engine coverage; fixable rules add a `fix_source`
   case here (see workflow step 3).
-- `tests/rule_docs.rs`—pins each rule's rendered page via an **`insta`
-  snapshot** (`rule_docs_render`), and asserts every rule has a non-empty
+- `tests/rule_docs.rs`—pins each rule's rendered section via an **`insta`
+  snapshot** (`rule_docs_render`), asserts the committed
+  `docs/src/reference/rules.md` matches what docgen would write
+  (`reference_page_is_committed`), and asserts every rule has a non-empty
   `description()` + at least one `examples()` entry, **and that each example
   actually triggers its own rule**. Accept new snapshots with
   `cargo insta accept`.
-- `examples/docgen.rs`—generates `docs/src/reference/rules/<id>.md` **and
-  the `docs/src/reference/rules.md` index** from `render_rule_doc`. Run with
-  `cargo run --example docgen`. Do not hand-edit either.
-- `docs/src/SUMMARY.md`—**hand-maintained**. Add the new rule's line under
-  "Lint Rules", matching `all_rules()` order.
+- `examples/docgen.rs`—generates the single-page reference
+  `docs/src/reference/rules.md` (one `## \`<id>\`` section per rule, registry
+  order) from `render_reference_page`. Run with `cargo run --example docgen`.
+  Do not hand-edit the page.
+- `docs/src/SUMMARY.md`—no per-rule entries; the reference is one page, so a
+  new rule needs no `SUMMARY.md` change.
 - `TODO.md`—the live roadmap ("Rule roadmap" under "Linter"). Check off the
   rule's item with a one-line scope/severity note mirroring the landed
   entries above it.
@@ -179,13 +181,11 @@ Prefer the cheapest tier the rule's correctness actually requires.
      derive from this list.
 
 6. **Generate and pin the docs:**
-   - `cargo run --example docgen` → writes
-     `docs/src/reference/rules/<id>.md` and regenerates the `rules.md` index.
+   - `cargo run --example docgen` → regenerates
+     `docs/src/reference/rules.md` with the new rule's section.
    - `cargo test --test rule_docs` will fail on the new snapshot; eyeball the
      `.snap.new` (the example must show the finding and, if fixable, the
      after-fix block), then `cargo insta accept`.
-   - **Manually** add the rule's line to `docs/src/SUMMARY.md`—docgen does
-     not touch it.
 
 7. **Update `TODO.md`**—check off the roadmap item and add a one-line
    scope/severity note matching the landed entries.
@@ -214,9 +214,7 @@ Prefer the cheapest tier the rule's correctness actually requires.
   extend the AST wrappers instead.
 - **Don't** run the formatter inside a fix, or ship a fix that produces broken
   or lossy code. A fix needn't satisfy line width—that's the formatter's job.
-- **Don't** hand-edit `docs/src/reference/rules/<id>.md` or
-  `docs/src/reference/rules.md`—regenerate via docgen. (But `SUMMARY.md`
-  *is* hand-edited.)
+- **Don't** hand-edit `docs/src/reference/rules.md`—regenerate via docgen.
 
 ## Report-back format
 
@@ -227,8 +225,7 @@ When done, report:
 2. Cost tier (`syn`/`sem`) and `default_enabled`.
 3. New files (rule module) and updated files (`<category>.rs`, `rules.rs`
    `all_rules()`, `tests/linter_rules.rs`, `tests/autofix.rs` if fixable, the
-   generated `rules/<id>.md` + `rules.md` + accepted snapshot, `SUMMARY.md`,
-   `TODO.md`).
+   regenerated `docs/src/reference/rules.md` + accepted snapshot, `TODO.md`).
 4. Targeted test names, including the false-positive guards and (if fixable)
    the `fix_source` case.
 5. Full-gate results: `cargo test --workspace`, clippy `-D warnings`, `cargo fmt --check`.

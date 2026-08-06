@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `include-cycle`
+## `include-cycle`
 
 Flag a static `include("path")` whose target transitively `include`s this file again — including a file that includes itself. Running such a file recurses without end. Every linted file on the cycle is flagged at its own `include` call; a file merely included twice along different paths (a diamond) is not a cycle.
 

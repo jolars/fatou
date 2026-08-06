@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `break-outside-loop`
+## `break-outside-loop`
 
 Flag a `break` or `continue` with no enclosing `for` or `while` loop. The code parses but always fails at lowering with "break or continue outside loop" — including inside a closure, do-block, or comprehension body defined within a loop, since `break` cannot cross a function boundary.
 

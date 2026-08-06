@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `redefined-constant`
+## `redefined-constant`
 
 Flag a write that redefines a constant name, or defines over a name that already holds a value: reassigning a `const` binding, assigning to a global function, type, or module name (those bind implicit constants), defining a function over a plain value, or declaring a value `const` after the fact. All of these error at runtime when both sites execute. A definition and a write in disjoint branches of the same `if` are exempt — only one branch runs. Adding a method to a function and defining an outer constructor on a type are legal and stay silent. No fix: the rule cannot know which of the two definitions the author meant to keep.
 

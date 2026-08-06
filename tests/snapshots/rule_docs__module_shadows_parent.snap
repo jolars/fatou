@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `module-shadows-parent`
+## `module-shadows-parent`
 
 Flag a nested `module` with the same name as its direct parent module. A module binds its own name inside itself, so the child rebinds that self-reference: `A` in the parent body then refers to the child, and qualified names like `A.x` resolve against the wrong module. The usual cause is a file `include`d into the module it already defines. No fix: renaming a module means updating every reference to it.
 

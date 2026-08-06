@@ -2,7 +2,7 @@
 source: tests/rule_docs.rs
 expression: render_rule_doc(rule.as_ref())
 ---
-# `discouraged-function`
+## `discouraged-function`
 
 Flag a call to a function on a configurable deny-list. The built-in set covers Base functions with process-wide or memory-unsafe effects — `exit`, `cd`, `redirect_stdout`, `redirect_stderr`, and the `unsafe_*`/pointer conversions — each reported with the alternative to reach for.
 
