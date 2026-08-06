@@ -21,7 +21,8 @@ pub struct Cli {
     #[arg(long, value_name = "PATH", global = true, conflicts_with = "no_config")]
     pub config: Option<PathBuf>,
 
-    /// Ignore any discovered `fatou.toml` and use built-in defaults.
+    /// Ignore any `fatou.toml` (project, `FATOU_CONFIG`, or global) and use
+    /// built-in defaults.
     #[arg(long, global = true)]
     pub no_config: bool,
 

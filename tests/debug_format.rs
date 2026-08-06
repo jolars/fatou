@@ -5,7 +5,8 @@
 //! failure labels, the report header, and the sanitized dump-file names — by
 //! running the real binary (`CARGO_BIN_EXE_fatou`). Every invocation passes
 //! `--no-config` (except the config test) so a developer's own `fatou.toml`
-//! cannot leak in.
+//! cannot leak in, and points the home and config directories at the test's own
+//! temp dir so the global user config cannot either.
 
 use std::path::Path;
 use std::process::{Command, Output};
@@ -13,12 +14,7 @@ use std::process::{Command, Output};
 use tempfile::TempDir;
 
 fn fatou(dir: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fatou"))
-        .arg("--no-config")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("run fatou")
+    fatou_with_config(dir, &[&["--no-config"], args].concat())
 }
 
 /// Like [`fatou`] but without `--no-config`, for the config-discovery test.
@@ -26,6 +22,13 @@ fn fatou_with_config(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fatou"))
         .args(args)
         .current_dir(dir)
+        // Sandbox every candidate global-config location inside the temp dir
+        // (`$XDG_CONFIG_HOME`, `$HOME/.config`, and the platform config dir,
+        // which derive from `$HOME`/`%APPDATA%`).
+        .env("XDG_CONFIG_HOME", dir.join("xdg-config"))
+        .env("HOME", dir)
+        .env("APPDATA", dir)
+        .env_remove("FATOU_CONFIG")
         .output()
         .expect("run fatou")
 }

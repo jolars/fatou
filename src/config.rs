@@ -1,7 +1,9 @@
 //! `fatou.toml` configuration: schema, defaults, and discovery.
 //!
 //! Defaults follow common Julia conventions (line width 92, 4-space indent).
-//! Discovery walks up from an anchor directory looking for a `fatou.toml`.
+//! Discovery walks up from an anchor directory looking for a `fatou.toml`,
+//! then falls back to [`$FATOU_CONFIG`](CONFIG_ENV_VAR) and the
+//! [global user config](global_config_path).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,6 +17,11 @@ use crate::linter::Severity;
 
 pub const CONFIG_FILE_NAME: &str = "fatou.toml";
 
+/// Environment variable naming a config file to use when the ancestor walk
+/// finds no project `fatou.toml`. Checked before the
+/// [global user config](global_config_path) in [`Config::resolve`].
+pub const CONFIG_ENV_VAR: &str = "FATOU_CONFIG";
+
 const DEFAULT_LINE_WIDTH: u32 = 92;
 const DEFAULT_INDENT_WIDTH: u32 = 4;
 
@@ -26,7 +33,7 @@ pub struct Config {
     /// environment-resolution overrides).
     pub julia: JuliaConfig,
     /// Gitignore-style patterns to exclude from file discovery, resolved
-    /// relative to the directory containing `fatou.toml`.
+    /// relative to [`ConfigSource::exclude_root`].
     pub exclude: Vec<String>,
     /// Gitignore-style patterns to exclude *in addition to*
     /// [`exclude`](Self::exclude). Kept separate for forward compatibility: if
@@ -226,45 +233,81 @@ impl RawJulia {
 }
 
 impl Config {
-    /// Resolve configuration. With `no_config`, return defaults. With an
-    /// explicit path, load exactly that file. Otherwise discover the nearest
-    /// `fatou.toml` walking up from `anchor`. Returns the config and the path it
-    /// was loaded from (if any).
+    /// Resolve configuration for the CLI and the language server. Precedence:
+    /// an explicit `--config` path, then a project `fatou.toml` discovered by
+    /// walking up from `anchor`, then a file named by
+    /// [`$FATOU_CONFIG`](CONFIG_ENV_VAR), then the
+    /// [global user config](global_config_path), then built-in defaults.
+    /// Whole-file fallback, never a merge. `no_config` skips every file
+    /// (project, env, and global).
     ///
-    /// Along with the config and its source path, returns any deprecation
-    /// warnings raised while parsing (e.g. snake_case `[format]` keys).
+    /// Along with the config and [where it came from](ConfigSource), returns any
+    /// deprecation warnings raised while parsing (e.g. snake_case `[format]`
+    /// keys).
     pub fn resolve(
         explicit: Option<&Path>,
         no_config: bool,
         anchor: &Path,
-    ) -> Result<(Self, Option<PathBuf>, Vec<String>), ConfigError> {
+    ) -> Result<(Self, ConfigSource, Vec<String>), ConfigError> {
+        Self::resolve_with_fallbacks(
+            explicit,
+            no_config,
+            anchor,
+            env_config_path().as_deref(),
+            global_config_path().as_deref(),
+        )
+    }
+
+    /// [`resolve`](Self::resolve) with the env and global fallback paths
+    /// injected, so tests can exercise them without touching the real
+    /// environment or home directory.
+    fn resolve_with_fallbacks(
+        explicit: Option<&Path>,
+        no_config: bool,
+        anchor: &Path,
+        env: Option<&Path>,
+        global: Option<&Path>,
+    ) -> Result<(Self, ConfigSource, Vec<String>), ConfigError> {
         if no_config {
-            return Ok((Self::default(), None, Vec::new()));
+            return Ok((Self::default(), ConfigSource::None, Vec::new()));
         }
         if let Some(path) = explicit {
             let (config, warnings) = Self::load(path)?;
-            return Ok((config, Some(path.to_path_buf()), warnings));
+            return Ok((config, ConfigSource::Explicit(path.to_path_buf()), warnings));
         }
-        match discover(anchor) {
-            Some(path) => {
-                let (config, warnings) = Self::load(&path)?;
-                Ok((config, Some(path), warnings))
-            }
-            None => Ok((Self::default(), None, Vec::new())),
+        if let Some(path) = discover(anchor) {
+            let (config, warnings) = Self::load(&path)?;
+            return Ok((config, ConfigSource::Discovered(path), warnings));
         }
+        // A set `$FATOU_CONFIG` shadows the global config entirely, and a
+        // missing or broken file is a hard error rather than a fall-through:
+        // it is the config that would apply, and silently ignoring it would
+        // hide a typo'd path indefinitely.
+        if let Some(path) = env {
+            let (config, warnings) = Self::load(path)?;
+            return Ok((config, ConfigSource::Env(path.to_path_buf()), warnings));
+        }
+        // Same rationale: a broken global config is a hard error, not a silent
+        // fall-through to built-in defaults.
+        if let Some(path) = global {
+            let (config, warnings) = Self::load(path)?;
+            return Ok((config, ConfigSource::Global(path.to_path_buf()), warnings));
+        }
+        Ok((Self::default(), ConfigSource::None, Vec::new()))
     }
 
     /// Build the file-discovery [`ExcludeFilter`] from this config's `exclude`
     /// and `extend-exclude` plus any `extra` patterns (e.g. CLI `--exclude`).
-    /// Patterns are rooted at the directory containing the loaded config file
-    /// (`config_path`), falling back to `anchor` when no config was found.
+    /// Patterns are rooted at [`ConfigSource::exclude_root`]: the directory
+    /// containing a project-local config file, or `anchor` for the env and
+    /// global configs and the no-config case.
     pub fn exclude_filter(
         &self,
-        config_path: Option<&Path>,
+        source: &ConfigSource,
         anchor: &Path,
         extra: &[String],
     ) -> Result<ExcludeFilter, ExcludeError> {
-        let root = config_path.and_then(Path::parent).unwrap_or(anchor);
+        let root = source.exclude_root(anchor);
         let mut patterns = self.exclude.clone();
         patterns.extend(self.extend_exclude.iter().cloned());
         patterns.extend(extra.iter().cloned());
@@ -303,7 +346,9 @@ impl RawConfig {
     }
 }
 
-/// Walk up from `anchor` looking for a `fatou.toml`.
+/// Walk up from `anchor` looking for a `fatou.toml`. The env and global
+/// configs are *not* consulted here; those fallbacks live in
+/// [`Config::resolve`].
 fn discover(anchor: &Path) -> Option<PathBuf> {
     for dir in anchor.ancestors() {
         let candidate = dir.join(CONFIG_FILE_NAME);
@@ -312,6 +357,100 @@ fn discover(anchor: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Which configuration source [`Config::resolve`] loaded, carrying its path.
+///
+/// The distinction matters for relative exclude patterns: a project-local file
+/// anchors them at its own directory, while the env and global configs have no
+/// project location and anchor at the caller's directory instead (see
+/// [`exclude_root`](Self::exclude_root)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSource {
+    /// Loaded from an explicit `--config <path>`.
+    Explicit(PathBuf),
+    /// Discovered by the ancestor walk from the anchor directory.
+    Discovered(PathBuf),
+    /// Named by the [`$FATOU_CONFIG`](CONFIG_ENV_VAR) environment variable,
+    /// used when no project config is discovered.
+    Env(PathBuf),
+    /// The global user config (e.g. `~/.config/fatou/fatou.toml`), used when no
+    /// project config is discovered and `$FATOU_CONFIG` is unset.
+    Global(PathBuf),
+    /// No config file found; built-in defaults are in use.
+    None,
+}
+
+impl ConfigSource {
+    /// Path of the resolved config file, if any.
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Explicit(p) | Self::Discovered(p) | Self::Env(p) | Self::Global(p) => Some(p),
+            Self::None => None,
+        }
+    }
+
+    /// The directory relative exclude patterns resolve against: the config
+    /// file's own directory for a project-local file, or `anchor` (the CLI
+    /// working directory, or the document's directory in the LSP) for the env
+    /// and global configs and the no-config case, which have no project
+    /// location.
+    pub fn exclude_root<'a>(&'a self, anchor: &'a Path) -> &'a Path {
+        match self {
+            Self::Explicit(p) | Self::Discovered(p) => p.parent().unwrap_or(anchor),
+            Self::Env(_) | Self::Global(_) | Self::None => anchor,
+        }
+    }
+}
+
+/// Path named by the [`$FATOU_CONFIG`](CONFIG_ENV_VAR) environment variable, or
+/// `None` when unset or empty (an empty value counts as unset, the usual shell
+/// convention).
+fn env_config_path() -> Option<PathBuf> {
+    let value = std::env::var_os(CONFIG_ENV_VAR)?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(value))
+}
+
+/// Path to the global user config, the fallback when no project `fatou.toml` is
+/// discovered and `$FATOU_CONFIG` is unset: the first existing
+/// `<dir>/fatou/fatou.toml` among the candidate directories below.
+///
+/// `$XDG_CONFIG_HOME` comes first everywhere — setting it is an explicit
+/// opt-in. After it, `~/.config` is checked on every platform so the
+/// CLI-dotfile convention works on macOS and Windows too, but it is checked
+/// *after* the platform config dir on Windows: there a `~/.config` tree is
+/// usually incidental (synced dotfiles, WSL interop) while `%APPDATA%` is where
+/// a Windows user deliberately puts a config, so the incidental location must
+/// not shadow the deliberate one. On macOS the order is reversed for the same
+/// reason read the other way: `~/Library/Application Support` is a GUI-app
+/// convention, and a CLI user who writes `~/.config/fatou/fatou.toml` expects it
+/// to win. On Linux the two coincide (`dirs::config_dir()` is `~/.config` when
+/// `$XDG_CONFIG_HOME` is unset), so the order is moot.
+fn global_config_path() -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME")
+        && !xdg.is_empty()
+    {
+        candidates.push(PathBuf::from(xdg));
+    }
+    // Windows `%APPDATA%`, macOS `~/Library/Application Support`, Linux
+    // `~/.config`.
+    let native = dirs::config_dir();
+    let dotfile = dirs::home_dir().map(|home| home.join(".config"));
+    if cfg!(windows) {
+        candidates.extend(native);
+        candidates.extend(dotfile);
+    } else {
+        candidates.extend(dotfile);
+        candidates.extend(native);
+    }
+    candidates
+        .into_iter()
+        .map(|dir| dir.join("fatou").join(CONFIG_FILE_NAME))
+        .find(|path| path.is_file())
 }
 
 #[cfg(test)]
@@ -467,7 +606,11 @@ mod tests {
             ..Config::default()
         };
         let filter = config
-            .exclude_filter(None, Path::new("/tmp"), &["cli/".to_string()])
+            .exclude_filter(
+                &ConfigSource::None,
+                Path::new("/tmp"),
+                &["cli/".to_string()],
+            )
             .unwrap()
             .with_force_exclude(true);
         for dir in ["vendor", "generated", "cli"] {
@@ -487,7 +630,7 @@ mod tests {
         };
         let filter = config
             .exclude_filter(
-                Some(Path::new("/project/fatou.toml")),
+                &ConfigSource::Discovered(PathBuf::from("/project/fatou.toml")),
                 Path::new("/elsewhere"),
                 &[],
             )
@@ -499,11 +642,122 @@ mod tests {
     }
 
     #[test]
+    fn exclude_filter_roots_global_config_at_anchor() {
+        let config = Config {
+            exclude: vec!["vendor/".to_string()],
+            ..Config::default()
+        };
+        // The global config has no project location, so its patterns apply
+        // relative to the caller's directory, not `~/.config/fatou`.
+        let filter = config
+            .exclude_filter(
+                &ConfigSource::Global(PathBuf::from("/home/u/.config/fatou/fatou.toml")),
+                Path::new("/project"),
+                &[],
+            )
+            .unwrap()
+            .with_force_exclude(true);
+        assert!(filter.force_excludes(Path::new("/project/vendor/a.jl")));
+    }
+
+    #[test]
     fn no_config_returns_defaults() {
-        let (config, path, warnings) =
+        let (config, source, warnings) =
             Config::resolve(None, true, Path::new("/nonexistent")).unwrap();
         assert_eq!(config, Config::default());
-        assert!(path.is_none());
+        assert_eq!(source, ConfigSource::None);
         assert!(warnings.is_empty());
+    }
+
+    /// `--no-config` must skip the env and global fallbacks too, not just
+    /// project discovery.
+    #[test]
+    fn no_config_skips_env_and_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = dir.path().join("env.toml");
+        let global = dir.path().join("global.toml");
+        std::fs::write(&env, "[format]\nline-width = 50\n").unwrap();
+        std::fs::write(&global, "[format]\nline-width = 60\n").unwrap();
+        let (config, source, _) =
+            Config::resolve_with_fallbacks(None, true, dir.path(), Some(&env), Some(&global))
+                .unwrap();
+        assert_eq!(config, Config::default());
+        assert_eq!(source, ConfigSource::None);
+    }
+
+    #[test]
+    fn discovered_config_wins_over_env_and_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join(CONFIG_FILE_NAME);
+        let global = dir.path().join("global.toml");
+        std::fs::write(&project, "[format]\nline-width = 70\n").unwrap();
+        std::fs::write(&global, "[format]\nline-width = 60\n").unwrap();
+        let (config, source, _) =
+            Config::resolve_with_fallbacks(None, false, dir.path(), None, Some(&global)).unwrap();
+        assert_eq!(config.format.line_width, 70);
+        assert_eq!(source, ConfigSource::Discovered(project));
+    }
+
+    #[test]
+    fn env_config_wins_over_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = dir.path().join("env.toml");
+        let global = dir.path().join("global.toml");
+        std::fs::write(&env, "[format]\nline-width = 50\n").unwrap();
+        std::fs::write(&global, "[format]\nline-width = 60\n").unwrap();
+        let (config, source, _) =
+            Config::resolve_with_fallbacks(None, false, dir.path(), Some(&env), Some(&global))
+                .unwrap();
+        assert_eq!(config.format.line_width, 50);
+        assert_eq!(source, ConfigSource::Env(env));
+    }
+
+    #[test]
+    fn global_config_applies_without_a_project_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(&global, "[format]\nline-width = 60\n").unwrap();
+        let (config, source, _) =
+            Config::resolve_with_fallbacks(None, false, dir.path(), None, Some(&global)).unwrap();
+        assert_eq!(config.format.line_width, 60);
+        assert_eq!(source, ConfigSource::Global(global));
+    }
+
+    /// A set but dangling `$FATOU_CONFIG` (or an unparsable one) is a hard
+    /// error, not a silent fall-through that would hide a typo indefinitely.
+    #[test]
+    fn broken_env_config_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope.toml");
+        Config::resolve_with_fallbacks(None, false, dir.path(), Some(&missing), None)
+            .expect_err("a dangling $FATOU_CONFIG must not be silently ignored");
+
+        let broken = dir.path().join("broken.toml");
+        std::fs::write(&broken, "[format\n").unwrap();
+        Config::resolve_with_fallbacks(None, false, dir.path(), Some(&broken), None)
+            .expect_err("an unparsable $FATOU_CONFIG must not be silently ignored");
+    }
+
+    #[test]
+    fn broken_global_config_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken = dir.path().join("global.toml");
+        std::fs::write(&broken, "line-width = 60\n").unwrap();
+        Config::resolve_with_fallbacks(None, false, dir.path(), None, Some(&broken))
+            .expect_err("an invalid global config must not be silently ignored");
+    }
+
+    #[test]
+    fn empty_env_var_counts_as_unset() {
+        // SAFETY: single-threaded test process section; no other thread reads
+        // the environment concurrently here.
+        unsafe {
+            std::env::set_var(CONFIG_ENV_VAR, "");
+        }
+        let path = env_config_path();
+        unsafe {
+            std::env::remove_var(CONFIG_ENV_VAR);
+        }
+        assert!(path.is_none());
     }
 }

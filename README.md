@@ -87,7 +87,9 @@ fatou lsp
 ```
 
 Configuration lives in `fatou.toml`: `[format]` sets line and indent widths,
-`[lint]` selects or ignores rules.
+`[lint]` selects or ignores rules. Fatou walks up from the file's directory to
+find one, falling back to `$FATOU_CONFIG` and then to a global user config at
+`~/.config/fatou/fatou.toml`.
 
 ## Editor Integration
 

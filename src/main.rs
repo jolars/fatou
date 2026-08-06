@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use fatou::cli::{
     Cli, ColorChoice, Commands, DebugChecksArg, DebugCommand, LintOutput, ParseFormat,
 };
-use fatou::config::Config;
+use fatou::config::{Config, ConfigSource};
 use fatou::debug::{
     CheckKind, DebugArtifacts, DebugFailure, build_debug_report, checks_label,
     run_debug_checks_for_file, sanitize_path_for_filename, write_debug_artifacts,
@@ -47,10 +47,9 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             exclude,
             force_exclude,
         } => {
-            let (config, config_path) = load_config(&cli.config, cli.no_config)?;
+            let (config, source) = load_config(&cli.config, cli.no_config)?;
             let style = style_with_overrides(&config, line_width, indent_width);
-            let filter =
-                resolve_exclude_filter(&config, config_path.as_deref(), &exclude, force_exclude)?;
+            let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
             run_format(paths, check, style, &filter)
         }
         Commands::Lint {
@@ -62,9 +61,8 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             julia_version,
             output,
         } => {
-            let (config, config_path) = load_config(&cli.config, cli.no_config)?;
-            let filter =
-                resolve_exclude_filter(&config, config_path.as_deref(), &exclude, force_exclude)?;
+            let (config, source) = load_config(&cli.config, cli.no_config)?;
+            let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
             let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
             let julia_target = resolve_julia_target(julia_version.as_deref(), &config, &anchor);
             run_lint(
@@ -91,14 +89,9 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
                 exclude,
                 force_exclude,
             } => {
-                let (config, config_path) = load_config(&cli.config, cli.no_config)?;
+                let (config, source) = load_config(&cli.config, cli.no_config)?;
                 let style = style_with_overrides(&config, None, None);
-                let filter = resolve_exclude_filter(
-                    &config,
-                    config_path.as_deref(),
-                    &exclude,
-                    force_exclude,
-                )?;
+                let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
                 run_debug_format(
                     &paths,
                     checks,
@@ -520,35 +513,35 @@ fn style_with_overrides(
 
 /// Build the file-discovery exclude filter from the resolved config plus any
 /// `--exclude` CLI patterns, applying `--force-exclude`. Patterns resolve
-/// relative to the directory holding `fatou.toml` (or the working directory
-/// when there is no config file).
+/// relative to the directory holding a project `fatou.toml`, or the working
+/// directory for the env and global configs and the no-config case.
 fn resolve_exclude_filter(
     config: &Config,
-    config_path: Option<&Path>,
+    source: &ConfigSource,
     cli_patterns: &[String],
     force: bool,
 ) -> Result<ExcludeFilter, String> {
     let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
     let filter = config
-        .exclude_filter(config_path, &anchor, cli_patterns)
+        .exclude_filter(source, &anchor, cli_patterns)
         .map_err(|e| e.to_string())?;
     Ok(filter.with_force_exclude(force))
 }
 
-/// Resolve the config, returning it alongside the loaded file's path (if any),
-/// needed to root exclude patterns relative to the directory containing
-/// `fatou.toml`.
+/// Resolve the config, returning it alongside the source it came from, needed
+/// to root exclude patterns relative to the right directory.
 fn load_config(
     explicit_config: &Option<PathBuf>,
     no_config: bool,
-) -> Result<(Config, Option<PathBuf>), String> {
+) -> Result<(Config, ConfigSource), String> {
     let anchor = std::env::current_dir().map_err(|e| e.to_string())?;
-    let (config, path, warnings) = Config::resolve(explicit_config.as_deref(), no_config, &anchor)
-        .map_err(|e| e.to_string())?;
+    let (config, source, warnings) =
+        Config::resolve(explicit_config.as_deref(), no_config, &anchor)
+            .map_err(|e| e.to_string())?;
     for warning in &warnings {
         eprintln!("warning: {warning}");
     }
-    Ok((config, path))
+    Ok((config, source))
 }
 
 fn read_source(path: Option<&Path>) -> Result<String, String> {

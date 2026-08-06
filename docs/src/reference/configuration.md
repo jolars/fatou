@@ -9,10 +9,42 @@ typo never silently falls back to a default.
 For a given file, Fatou looks for `fatou.toml` by walking up from the file's
 directory through its ancestors, stopping at the first `fatou.toml` it finds.
 
+If no project `fatou.toml` is found, Fatou consults the `FATOU_CONFIG`
+environment variable, which names the file to use instead of the global user
+config below. This is handy for keeping one config on a synced drive and
+pointing every machine at it. A set `FATOU_CONFIG` shadows the global config
+entirely, and a missing or malformed file is a hard error rather than a silent
+fall-through, so a typo'd path cannot go unnoticed.
+
+If `FATOU_CONFIG` is unset, Fatou falls back to a global user config: the first
+existing file among
+
+1. `$XDG_CONFIG_HOME/fatou/fatou.toml`, when that variable is set
+2. `~/.config/fatou/fatou.toml`
+3. the platform config directory, on macOS
+   `~/Library/Application Support/fatou/fatou.toml`
+
+`~/.config` is checked on every platform, so the usual CLI-dotfile location
+works on macOS and Windows too. On Windows the order of the last two is
+reversed: `%APPDATA%\fatou\fatou.toml` is checked before
+`%USERPROFILE%\.config\fatou\fatou.toml`, since a `~/.config` tree there is
+often incidental (synced dotfiles, WSL interop) and should not shadow the
+native location. On Linux the two are the same directory.
+
+The `FATOU_CONFIG` and global files use the same schema as a project
+`fatou.toml` and are whole-file fallbacks, never merged with a project config.
+Relative `exclude` patterns in them resolve against the working directory (CLI)
+or the document's directory (language server) rather than the config's own
+directory. The language server uses the same resolution, so both are easy ways
+to set editor-wide defaults; an edit to either is picked up when the server
+restarts, since only project files are watched. If none of these files is found,
+the built-in defaults apply.
+
 On the command line:
 
 - `--config <PATH>` loads an explicit file and skips discovery.
-- `--no-config` ignores any discovered file and uses the built-in defaults.
+- `--no-config` ignores any file (project, `FATOU_CONFIG`, or global) and uses
+  the built-in defaults.
 
 ## Top-level keys
 
@@ -22,8 +54,9 @@ On the command line:
   | `extend-exclude` | array of strings | `[]`    | Additional patterns, appended to `exclude`.    |
 
 Both keys take gitignore-style patterns, resolved relative to the directory
-containing `fatou.toml`. Excluded directories are pruned during discovery, so
-`fatou format src` and `fatou lint src` never descend into them.
+containing `fatou.toml` (or, for a `FATOU_CONFIG` or global config, the working
+directory). Excluded directories are pruned during discovery, so `fatou format
+src` and `fatou lint src` never descend into them.
 
 ```toml
 exclude = ["vendored/"]

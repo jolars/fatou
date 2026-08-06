@@ -4,10 +4,12 @@
 //! The main loop owns a [`ConfigStore`] and resolves configuration at each
 //! dispatch site (formatting, linting, code actions), so the resolved style
 //! and rules travel with the request and no other thread shares config state.
-//! Precedence is full shadowing, the rule ruff and air follow: a discovered
+//! Precedence is full shadowing, the rule ruff and air follow: a resolved
 //! `fatou.toml` (merged over built-in defaults) is the document's config and
 //! editor-pushed settings are ignored entirely; without one, the client
-//! settings (merged over defaults) apply; without those, the defaults.
+//! settings (merged over defaults) apply; without those, the defaults. That
+//! holds for every config source, so a `$FATOU_CONFIG` or global user config
+//! also shadows editor settings.
 //!
 //! Client settings arrive as JSON from `initializationOptions` and
 //! `workspace/didChangeConfiguration`, parsed through the same [`RawConfig`]
@@ -113,10 +115,15 @@ impl ConfigStore {
         self.by_dir.clear();
     }
 
-    /// Resolve the configuration for a document. Warnings are non-empty only
-    /// when a cache miss loaded a `fatou.toml` (so each load logs once, not
-    /// per request). A non-`file:` URI (an untitled buffer) has no directory
-    /// to anchor discovery and gets the client config.
+    /// Resolve the configuration for a document: discover a `fatou.toml` from
+    /// the document's directory, falling back to `$FATOU_CONFIG` and the global
+    /// user config (`~/.config/fatou/fatou.toml`), then to the client settings
+    /// when none is found. An edit to the env or global file is picked up when
+    /// the server restarts; only project files are watched.
+    ///
+    /// Warnings are non-empty only when a cache miss loaded a `fatou.toml` (so
+    /// each load logs once, not per request). A non-`file:` URI (an untitled
+    /// buffer) has no directory to anchor discovery and gets the client config.
     pub(crate) fn for_uri(&mut self, uri: &Uri) -> (Arc<ResolvedConfig>, Vec<String>) {
         let Some(dir) = uri::to_path(uri).and_then(|path| path.parent().map(PathBuf::from)) else {
             return (Arc::clone(&self.client), Vec::new());
@@ -126,16 +133,17 @@ impl ConfigStore {
         }
         let mut warnings = Vec::new();
         let resolved = match Config::resolve(None, false, &dir) {
-            Ok((config, Some(source), deprecations)) => {
+            Ok((config, source, deprecations)) if source.path().is_some() => {
+                let path = source.path().expect("source has a path");
                 warnings.extend(
                     deprecations
                         .into_iter()
-                        .map(|warning| format!("{}: {warning}", source.display())),
+                        .map(|warning| format!("{}: {warning}", path.display())),
                 );
                 ResolvedConfig::resolve(&config, &mut warnings)
             }
-            // No `fatou.toml` above the directory: the client settings apply.
-            Ok((_, None, _)) => Arc::clone(&self.client),
+            // No config file at all: the client settings apply.
+            Ok(_) => Arc::clone(&self.client),
             // Unreadable or unparsable file: warn once and keep the server
             // working on the client settings until the file is fixed (its
             // change event drops this cached fallback).

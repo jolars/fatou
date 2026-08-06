@@ -10,7 +10,7 @@ Fatou: a language server, formatter, and linter for Julia
 :   Path to an explicit `fatou.toml` (skips discovery)
 
 `--no-config`
-:   Ignore any discovered `fatou.toml` and use built-in defaults
+:   Ignore any `fatou.toml` (project, `FATOU_CONFIG`, or global) and use built-in defaults
 
 `--color <COLOR>`
 :   When to colorize human-readable output
