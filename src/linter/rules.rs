@@ -20,21 +20,40 @@
 //! 3. Add it to [`all_rules`] below — the single source of truth. The set of
 //!    valid rule IDs ([`all_rule_ids`]) is derived from it, so there is no
 //!    second list to keep in sync.
+//!
+//! A rule that asks what a *name* means goes through [`RuleContext`] rather
+//! than assembling its own machinery: [`RuleContext::resolver`] for the shared
+//! [`Resolver`], [`RuleContext::trusts_resolution`] for the soundness floor,
+//! and [`RuleContext::resolves_to_base`] /
+//! [`RuleContext::read_resolves_to_base`] for the one question most idiom
+//! rules open with — is this callee really the Base/Core function, or a local
+//! shadow, a qualified name, or a masked import? Each is computed once per
+//! file and memoized, so asking is cheap no matter how many rules do.
 
+use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use rowan::TextRange;
+
+use crate::ast::{AstToken, CallExpr, Expr};
 use crate::config::LintConfig;
 use crate::index::PackageIndex;
 use crate::julia_version::VersionRange;
 use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::include_graph::IncludeProblem;
-use crate::resolve::{ModulePath, PackageSource};
-use crate::semantic::SemanticModel;
-use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
+use crate::resolve::{
+    ModulePath, Namespace, PackageSource, Resolution, Resolver, has_unresolvable_using,
+};
+use crate::semantic::{IdentRef, SemanticModel};
+use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod correctness;
+mod file_scan;
 pub mod suspicious;
+
+pub(crate) use file_scan::FileScan;
 
 /// A documented example for a rule: a snippet of Julia that triggers the rule.
 ///
@@ -99,6 +118,204 @@ pub struct RuleContext<'a> {
     /// version-gated rules (`julia-version-compat`) silent. Constant per run —
     /// carried on [`ResolvedRules`] and copied here by the driver.
     pub julia_target: Option<VersionRange>,
+    /// Per-file answers built on first use and shared by every rule in the run
+    /// (see [`RuleCache`]). Private: build a context with
+    /// [`RuleContext::new`] and the `with_*` chain.
+    cache: RuleCache<'a>,
+}
+
+/// The per-file work more than one rule needs, computed lazily and at most
+/// once: the name [`Resolver`], the [`FileScan`], the unresolvable-`using`
+/// verdict, and a range index over the model's reads. Every entry is derived
+/// purely from the context's own fields, so caching is invisible to rules —
+/// they just ask.
+///
+/// A [`RuleContext`] lives on one thread for one file ([`SyntaxNode`] is
+/// `Rc`-based and not `Send`, so the lint driver parallelizes across files
+/// only), which is why a plain [`OnceCell`] suffices.
+#[derive(Default)]
+struct RuleCache<'a> {
+    resolver: OnceCell<Option<Resolver<'a, dyn PackageSource + 'a>>>,
+    scan: OnceCell<FileScan>,
+    unresolvable_using: OnceCell<bool>,
+    /// `model.idents()` keyed by range, so a rule holding a token can ask what
+    /// the model made of it without a linear scan per token.
+    idents_by_range: OnceCell<HashMap<TextRange, usize>>,
+    trusts_resolution: OnceCell<bool>,
+}
+
+impl<'a> RuleContext<'a> {
+    /// A context over `root` with no resolution context, no include problems,
+    /// and no Julia target — the floor every rule sees. Layer the optional
+    /// tiers on with [`with_resolution`](Self::with_resolution),
+    /// [`with_includes`](Self::with_includes), and
+    /// [`with_julia_target`](Self::with_julia_target).
+    pub fn new(path: Option<&'a Path>, root: &'a SyntaxNode, model: &'a SemanticModel) -> Self {
+        Self {
+            path,
+            root,
+            model,
+            resolution: None,
+            includes: &[],
+            julia_target: None,
+            cache: RuleCache::default(),
+        }
+    }
+
+    /// Attach the name-resolution context (see [`ResolutionContext`]).
+    #[must_use]
+    pub fn with_resolution(mut self, resolution: Option<ResolutionContext<'a>>) -> Self {
+        self.resolution = resolution;
+        self
+    }
+
+    /// Attach this file's precomputed include-graph problems.
+    #[must_use]
+    pub fn with_includes(mut self, includes: &'a [IncludeProblem]) -> Self {
+        self.includes = includes;
+        self
+    }
+
+    /// Attach the project's declared Julia support range.
+    #[must_use]
+    pub fn with_julia_target(mut self, julia_target: Option<VersionRange>) -> Self {
+        self.julia_target = julia_target;
+        self
+    }
+
+    /// The name resolver for this file: [`Resolver::new`] over the model and
+    /// the caller's [`ResolutionContext`], with the workspace tier attached.
+    /// `None` when the caller provided no resolution context, which is every
+    /// resolution-dependent rule's cue to stay silent.
+    ///
+    /// Built once per file and shared, so a rule should ask for it rather than
+    /// assembling its own.
+    pub fn resolver(&self) -> Option<&Resolver<'a, dyn PackageSource + 'a>> {
+        self.cache
+            .resolver
+            .get_or_init(|| {
+                let resolution = self.resolution.as_ref()?;
+                Some(
+                    Resolver::new(self.model, resolution.packages)
+                        .with_workspace(resolution.workspace.clone()),
+                )
+            })
+            .as_ref()
+    }
+
+    /// Whether any whole-module `using` visible in this file fails to resolve
+    /// (see [`has_unresolvable_using`]). Such a `using` may export anything, so
+    /// no conclusion about what a free name means is sound for the file.
+    /// `false` without a resolution context, where the question does not arise.
+    pub fn has_unresolvable_using(&self) -> bool {
+        *self.cache.unresolvable_using.get_or_init(|| {
+            self.resolution.as_ref().is_some_and(|resolution| {
+                has_unresolvable_using(
+                    self.model,
+                    resolution.packages,
+                    resolution.workspace.as_ref(),
+                )
+            })
+        })
+    }
+
+    /// The shared per-file soundness scan (see [`FileScan`]).
+    pub(crate) fn file_scan(&self) -> &FileScan {
+        self.cache.scan.get_or_init(|| FileScan::collect(self.root))
+    }
+
+    /// Whether `call`'s callee is confirmed to be the Base/Core function of
+    /// that name: a bare identifier that the shared masking order resolves to
+    /// tier 4 ([`Resolution::System`]) and nothing else. A local shadow, a
+    /// workspace sibling, an explicit `import`, a `using`'d export of another
+    /// module, a qualified callee (`M.length(x)`), and a computed one
+    /// (`f()(x)`) all answer `false`, as does anything in a file whose
+    /// resolution answers are not trustworthy (see
+    /// [`trusts_resolution`](Self::trusts_resolution)).
+    ///
+    /// This is the namespace-confirmation gate an idiom rule opens with: match
+    /// the call shape, then ask this before claiming the call means what its
+    /// name suggests. It is deliberately one-sided — `false` means
+    /// *unconfirmed*, not *proven foreign* — so a rule that rewrites on `true`
+    /// stays conservative when the answer is unknown.
+    pub fn resolves_to_base(&self, call: &CallExpr) -> bool {
+        let Some(Expr::Name(callee)) = call.callee() else {
+            return false;
+        };
+        let Some(ident) = callee.ident() else {
+            return false;
+        };
+        self.read_resolves_to_base(ident.syntax())
+    }
+
+    /// Whether a bare value read — an `IDENT` token used as a value, such as a
+    /// function passed as an argument (`map(length, xs)`) — is confirmed to be
+    /// the Base/Core name. The value-position counterpart of
+    /// [`resolves_to_base`](Self::resolves_to_base), sharing its conservative
+    /// stance and its gates.
+    ///
+    /// Only a token the semantic model recorded as a value read qualifies, so
+    /// a field name (`x.length`), a keyword-argument name (`f(length = 1)`), a
+    /// definition site, and a macro read all answer `false` without the
+    /// resolver being consulted.
+    pub fn read_resolves_to_base(&self, token: &SyntaxToken) -> bool {
+        if token.kind() != SyntaxKind::IDENT || !self.trusts_resolution() {
+            return false;
+        }
+        let Some(resolver) = self.resolver() else {
+            return false;
+        };
+        let range = token.text_range();
+        let Some(ident) = self.ident_at(range) else {
+            return false;
+        };
+        if ident.is_macro || self.file_scan().in_skipped(range) {
+            return false;
+        }
+        matches!(
+            resolver.resolve(&ident.name, range.start(), Namespace::Value),
+            Resolution::System { .. }
+        )
+    }
+
+    /// Whether a "which tier provides this name?" answer can be trusted for
+    /// this file at all: there is a resolution context, every whole-module
+    /// `using` resolves, and no `eval`/`include` can be splicing in
+    /// definitions the model never saw. The same soundness floor
+    /// `undefined-name` and `call-arity` bail on, hoisted here because every
+    /// caller of [`resolves_to_base`](Self::resolves_to_base) needs it.
+    pub fn trusts_resolution(&self) -> bool {
+        *self.cache.trusts_resolution.get_or_init(|| {
+            let Some(resolution) = &self.resolution else {
+                return false;
+            };
+            if self.has_unresolvable_using() {
+                return false;
+            }
+            let scan = self.file_scan();
+            // With a workspace, a literal `include` is followed by the harvest,
+            // so what it splices in resolves via the workspace tier; a computed
+            // path (or any include without a workspace) brings in unknowable
+            // names.
+            !scan.calls_eval
+                && !scan.dynamic_include
+                && (resolution.workspace.is_some() || !scan.literal_include)
+        })
+    }
+
+    /// The model's record of the identifier occupying exactly `range`, if the
+    /// model made one. Absent for a token that is not a read at all: a field
+    /// name, a keyword-argument name, an operator.
+    fn ident_at(&self, range: TextRange) -> Option<&IdentRef> {
+        let index = self.cache.idents_by_range.get_or_init(|| {
+            let mut map = HashMap::with_capacity(self.model.idents().len());
+            for (i, ident) in self.model.idents().iter().enumerate() {
+                map.entry(ident.range).or_insert(i);
+            }
+            map
+        });
+        index.get(&range).map(|&i| &self.model.idents()[i])
+    }
 }
 
 /// What a resolution-dependent rule resolves free reads against: a
@@ -329,6 +546,291 @@ impl ResolvedRules {
 fn stamp_severity(diags: &mut [Diagnostic], severity: Severity) {
     for diag in diags {
         diag.severity = severity;
+    }
+}
+
+#[cfg(test)]
+mod base_resolution_tests {
+    use super::*;
+    use crate::ast::AstNode;
+    use crate::index::harvest_tree;
+    use crate::index::model::ModuleIndex;
+    use crate::semantic::SemanticModel;
+    use std::collections::BTreeMap;
+
+    type Library = BTreeMap<String, Arc<PackageIndex>>;
+
+    /// A package named `name` harvested from `src` — its `export`s are the
+    /// surface resolution sees.
+    fn pkg(name: &str, src: &str) -> Arc<PackageIndex> {
+        let parsed = crate::parser::parse(src);
+        assert!(parsed.diagnostics.is_empty(), "fixture must parse clean");
+        Arc::new(PackageIndex {
+            name: name.to_string(),
+            root: ModuleIndex {
+                name: name.to_string(),
+                ..harvest_tree(&parsed.cst)
+            },
+            members: Vec::new(),
+            member_modules: Default::default(),
+            diagnostics: Vec::new(),
+        })
+    }
+
+    /// Base exporting `length`, a bare Core (so the tier-4 walk reaches both),
+    /// and any extra packages.
+    fn library(extra: &[(&str, &str)]) -> Library {
+        let mut lib = Library::from([
+            ("Base".to_string(), pkg("Base", "export length\n")),
+            ("Core".to_string(), pkg("Core", "")),
+        ]);
+        for (name, src) in extra {
+            lib.insert(name.to_string(), pkg(name, src));
+        }
+        lib
+    }
+
+    /// Run `ask` against a context over `src` resolving against `lib` (and an
+    /// optional workspace package whose host module is its root).
+    fn ask(
+        src: &str,
+        lib: Option<&Library>,
+        ws: Option<Arc<PackageIndex>>,
+        ask: impl Fn(&RuleContext<'_>, &SyntaxNode) -> bool,
+    ) -> bool {
+        let parsed = crate::parser::parse(src);
+        assert!(parsed.diagnostics.is_empty(), "fixture must parse clean");
+        let model = SemanticModel::build(&parsed.cst);
+        let ctx =
+            RuleContext::new(None, &parsed.cst, &model).with_resolution(lib.map(|packages| {
+                ResolutionContext {
+                    packages,
+                    workspace: ws.map(|pkg| (pkg, Vec::new())),
+                }
+            }));
+        ask(&ctx, &parsed.cst)
+    }
+
+    /// Whether the *last* call in `src` whose source text starts with `prefix`
+    /// is confirmed Base/Core. Last, so a fixture can shadow a name with a
+    /// definition and still ask about the use below it.
+    fn call_is_base(
+        src: &str,
+        prefix: &str,
+        lib: Option<&Library>,
+        ws: Option<Arc<PackageIndex>>,
+    ) -> bool {
+        ask(src, lib, ws, |ctx, root| {
+            let call = root
+                .descendants()
+                .filter_map(CallExpr::cast)
+                .filter(|call| call.syntax().text().to_string().starts_with(prefix))
+                .last()
+                .expect("fixture must contain the call");
+            ctx.resolves_to_base(&call)
+        })
+    }
+
+    /// Whether the last `IDENT` token spelled `name` is confirmed Base/Core.
+    fn read_is_base(src: &str, name: &str, lib: Option<&Library>) -> bool {
+        ask(src, lib, None, |ctx, root| {
+            let token = root
+                .descendants_with_tokens()
+                .filter_map(|el| el.into_token())
+                .filter(|t| t.kind() == SyntaxKind::IDENT && t.text() == name)
+                .last()
+                .expect("fixture must contain the read");
+            ctx.read_resolves_to_base(&token)
+        })
+    }
+
+    #[test]
+    fn bare_base_call_is_confirmed() {
+        assert!(call_is_base(
+            "length(x)\n",
+            "length",
+            Some(&library(&[])),
+            None
+        ));
+    }
+
+    #[test]
+    fn local_shadow_is_not_base() {
+        // A same-file definition masks Base, so the call below is not Base's.
+        assert!(!call_is_base(
+            "length(x) = 1\nlength(y)\n",
+            "length(y)",
+            Some(&library(&[])),
+            None
+        ));
+        // So does a binding in an enclosing local scope.
+        assert!(!call_is_base(
+            "function f(length, x)\n    length(x)\nend\n",
+            "length(x)",
+            Some(&library(&[])),
+            None
+        ));
+    }
+
+    #[test]
+    fn definition_site_is_not_a_base_call() {
+        // The signature of `length(x) = 1` is a `CALL_EXPR` too — a definition,
+        // not a call to Base.
+        assert!(!call_is_base(
+            "length(x) = 1\n",
+            "length",
+            Some(&library(&[])),
+            None
+        ));
+    }
+
+    #[test]
+    fn qualified_callee_is_not_confirmed() {
+        // Sound but conservative: `Base.length` *is* Base's, yet it is not the
+        // bare-name shape the gate exists to confirm.
+        assert!(!call_is_base(
+            "Base.length(x)\n",
+            "Base.length",
+            Some(&library(&[])),
+            None
+        ));
+    }
+
+    #[test]
+    fn computed_callee_is_not_confirmed() {
+        assert!(!call_is_base("f()(x)\n", "f()(", Some(&library(&[])), None));
+    }
+
+    #[test]
+    fn using_masked_export_is_not_base() {
+        let lib = library(&[("A", "export length\n")]);
+        assert!(!call_is_base(
+            "using A\nlength(x)\n",
+            "length",
+            Some(&lib),
+            None
+        ));
+    }
+
+    #[test]
+    fn explicit_import_is_not_confirmed() {
+        // `import A: length` binds the name in this file, so the call is A's.
+        let lib = library(&[("A", "export length\n")]);
+        assert!(!call_is_base(
+            "import A: length\nlength(x)\n",
+            "length(x)",
+            Some(&lib),
+            None
+        ));
+    }
+
+    #[test]
+    fn workspace_sibling_is_not_base() {
+        let ws = pkg("MyPkg", "length(x) = 1\n");
+        assert!(!call_is_base(
+            "length(x)\n",
+            "length",
+            Some(&library(&[])),
+            Some(ws)
+        ));
+    }
+
+    #[test]
+    fn unresolvable_using_bails_the_file() {
+        // The unharvested module may export anything, `length` included.
+        assert!(!call_is_base(
+            "using Unharvested\nlength(x)\n",
+            "length",
+            Some(&library(&[])),
+            None
+        ));
+    }
+
+    #[test]
+    fn eval_or_unfollowable_include_bails_the_file() {
+        assert!(!call_is_base(
+            "eval(ex)\nlength(x)\n",
+            "length(x)",
+            Some(&library(&[])),
+            None
+        ));
+        assert!(!call_is_base(
+            "@eval f() = 1\nlength(x)\n",
+            "length(x)",
+            Some(&library(&[])),
+            None
+        ));
+        // No workspace: nothing harvested what the `include` splices in.
+        assert!(!call_is_base(
+            "include(\"other.jl\")\nlength(x)\n",
+            "length(x)",
+            Some(&library(&[])),
+            None
+        ));
+        // With one, a literal include is followed by the harvest.
+        assert!(call_is_base(
+            "include(\"other.jl\")\nlength(x)\n",
+            "length(x)",
+            Some(&library(&[])),
+            Some(pkg("MyPkg", ""))
+        ));
+    }
+
+    #[test]
+    fn macro_call_and_quoted_code_are_not_confirmed() {
+        // A macro receives unevaluated expressions and may rewrite them.
+        assert!(!call_is_base(
+            "@assert length(x) > 0\n",
+            "length",
+            Some(&library(&[])),
+            None
+        ));
+        // Quoted code is data, not a call.
+        assert!(!call_is_base(
+            "ex = :(length(x))\n",
+            "length",
+            Some(&library(&[])),
+            None
+        ));
+    }
+
+    #[test]
+    fn no_resolution_context_is_not_confirmed() {
+        assert!(!call_is_base("length(x)\n", "length", None, None));
+    }
+
+    #[test]
+    fn bare_read_is_confirmed() {
+        assert!(read_is_base(
+            "map(length, xs)\n",
+            "length",
+            Some(&library(&[]))
+        ));
+    }
+
+    #[test]
+    fn non_reads_spelled_like_a_base_name_are_not_confirmed() {
+        // A field name is not a read of `length`.
+        assert!(!read_is_base(
+            "f(x.length)\n",
+            "length",
+            Some(&library(&[]))
+        ));
+        // Nor is a keyword-argument name.
+        assert!(!read_is_base(
+            "f(length = 1)\n",
+            "length",
+            Some(&library(&[]))
+        ));
+    }
+
+    #[test]
+    fn shadowed_read_is_not_confirmed() {
+        assert!(!read_is_base(
+            "length = 3\nmap(length, xs)\n",
+            "length",
+            Some(&library(&[]))
+        ));
     }
 }
 

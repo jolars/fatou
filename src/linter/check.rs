@@ -315,14 +315,10 @@ pub fn lint_parsed(
     resolution: Option<ResolutionContext<'_>>,
     includes: &[IncludeProblem],
 ) -> Vec<Diagnostic> {
-    let ctx = RuleContext {
-        path,
-        root,
-        includes,
-        model,
-        resolution,
-        julia_target: rules.julia_target(),
-    };
+    let ctx = RuleContext::new(path, root, model)
+        .with_resolution(resolution)
+        .with_includes(includes)
+        .with_julia_target(rules.julia_target());
     let raw = rules.run(&ctx);
 
     let suppressions = SuppressionMap::build(text);

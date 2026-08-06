@@ -50,7 +50,7 @@ use crate::index::harvest::callee_name;
 use crate::index::typeexpr::dotted_path;
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, has_unresolvable_using};
+use crate::resolve::{Namespace, PackageSource, Resolution, Resolver};
 use crate::semantic::signature::{annotation_parts, peel_signature};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
@@ -122,20 +122,14 @@ impl Rule for TypePiracy {
     }
 
     fn check_file(&self, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
-        let Some(resolution) = &ctx.resolution else {
+        let Some(resolver) = ctx.resolver() else {
             return;
         };
         // A whole-module `using` the library cannot resolve may re-export an
         // owned name, which would make a "foreign" verdict unsound.
-        if has_unresolvable_using(
-            ctx.model,
-            resolution.packages,
-            resolution.workspace.as_ref(),
-        ) {
+        if ctx.has_unresolvable_using() {
             return;
         }
-        let resolver = Resolver::new(ctx.model, resolution.packages)
-            .with_workspace(resolution.workspace.clone());
         for node in ctx.root.descendants() {
             let signature = match node.kind() {
                 SyntaxKind::FUNCTION_DEF => FunctionDef::cast(node.clone())
@@ -168,7 +162,7 @@ impl Rule for TypePiracy {
             }) {
                 continue;
             }
-            self.check_definition(&signature, &resolver, ctx.model, sink);
+            self.check_definition(&signature, resolver, ctx.model, sink);
         }
     }
 }
@@ -486,17 +480,11 @@ mod tests {
         let parsed = crate::parser::parse(src);
         assert!(parsed.diagnostics.is_empty(), "fixture must parse clean");
         let model = SemanticModel::build(&parsed.cst);
-        let ctx = RuleContext {
-            path: None,
-            root: &parsed.cst,
-            model: &model,
-            resolution: Some(ResolutionContext {
+        let ctx =
+            RuleContext::new(None, &parsed.cst, &model).with_resolution(Some(ResolutionContext {
                 packages,
                 workspace: ws.map(|pkg| (pkg, Vec::new())),
-            }),
-            includes: &[],
-            julia_target: None,
-        };
+            }));
         let mut sink = Vec::new();
         TypePiracy.check_file(&ctx, &mut sink);
         sink.into_iter().map(|d| d.message.body).collect()

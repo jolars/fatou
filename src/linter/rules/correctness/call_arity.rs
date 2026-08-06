@@ -34,13 +34,12 @@
 
 use rowan::TextRange;
 
-use crate::ast::{Arg, AstNode, AstToken, CallExpr, Expr, HasArgList, KeywordArg, MacroCall};
+use crate::ast::{Arg, AstNode, AstToken, CallExpr, Expr, HasArgList, KeywordArg};
 use crate::index::harvest_tree;
 use crate::index::model::{Method, ModuleIndex, PackageIndex};
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::project::include_target;
-use crate::resolve::{Namespace, Resolution, Resolver, has_unresolvable_using};
+use crate::resolve::{Namespace, Resolution};
 use crate::semantic::{BindingKind, LoadKind};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use std::sync::Arc;
@@ -88,29 +87,20 @@ impl Rule for CallArity {
     }
 
     fn check_file(&self, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
-        let Some(resolution) = &ctx.resolution else {
+        // No resolution context, an unresolvable whole-module `using`, `eval`,
+        // or an unfollowable `include`: all four leave the file unanswerable
+        // (see `RuleContext::trusts_resolution`).
+        if !ctx.trusts_resolution() {
+            return;
+        }
+        let (Some(resolution), Some(resolver)) = (&ctx.resolution, ctx.resolver()) else {
             return;
         };
-        if has_unresolvable_using(
-            ctx.model,
-            resolution.packages,
-            resolution.workspace.as_ref(),
-        ) {
-            return;
-        }
-        let scan = FileScan::collect(ctx.root);
-        if scan.calls_eval {
-            return;
-        }
-        if scan.dynamic_include || (resolution.workspace.is_none() && scan.literal_include) {
-            return;
-        }
 
+        let scan = ctx.file_scan();
         let file_index = harvest_tree(ctx.root);
         let workspace_root = resolution.workspace.as_ref().map(|(pkg, _)| &pkg.root);
         let library = library_packages(ctx, resolution.packages);
-        let resolver = Resolver::new(ctx.model, resolution.packages)
-            .with_workspace(resolution.workspace.clone());
 
         for node in ctx.root.descendants() {
             if node.kind() != SyntaxKind::CALL_EXPR {
@@ -473,76 +463,6 @@ fn shorthand_keyword(arg: &SyntaxNode) -> Option<(String, TextRange)> {
     Some((ident.text().to_string(), ident.syntax().text_range()))
 }
 
-/// One pass over the CST collecting everything the rule skips or bails on:
-/// macro-call and quote extents, and the `eval`/`include` call shapes. The
-/// same soundness scan `undefined-name` runs.
-struct FileScan {
-    /// `MACRO_CALL` extents: a macro rewrites its arguments, so a call inside
-    /// one may not be the call that runs.
-    macro_calls: Vec<TextRange>,
-    /// `QUOTE_EXPR` extents: quoted code is data, not calls.
-    quotes: Vec<TextRange>,
-    calls_eval: bool,
-    literal_include: bool,
-    dynamic_include: bool,
-}
-
-impl FileScan {
-    fn collect(root: &SyntaxNode) -> Self {
-        let mut scan = FileScan {
-            macro_calls: Vec::new(),
-            quotes: Vec::new(),
-            calls_eval: false,
-            literal_include: false,
-            dynamic_include: false,
-        };
-        for node in root.descendants() {
-            match node.kind() {
-                SyntaxKind::MACRO_CALL => {
-                    scan.macro_calls.push(node.text_range());
-                    let name = MacroCall::cast(node)
-                        .and_then(|call| call.name())
-                        .and_then(|name| name.macro_token());
-                    if name.is_some_and(|token| token.text() == "eval") {
-                        scan.calls_eval = true;
-                    }
-                }
-                SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => {
-                    scan.quotes.push(node.text_range());
-                }
-                SyntaxKind::CALL_EXPR => {
-                    let Some(call) = CallExpr::cast(node) else {
-                        continue;
-                    };
-                    let Some(Expr::Name(callee)) = call.callee() else {
-                        continue;
-                    };
-                    match callee.ident().map(|ident| ident.text().to_string()) {
-                        Some(name) if name == "eval" => scan.calls_eval = true,
-                        Some(name) if name == "include" => {
-                            if include_target(&call).is_some() {
-                                scan.literal_include = true;
-                            } else {
-                                scan.dynamic_include = true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            }
-        }
-        scan
-    }
-
-    /// Whether the call at `range` is exempt: inside quoted code or a macro
-    /// call.
-    fn in_skipped(&self, range: TextRange) -> bool {
-        let within = |extents: &[TextRange]| extents.iter().any(|e| e.contains_range(range));
-        within(&self.quotes) || within(&self.macro_calls)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -644,17 +564,11 @@ mod tests {
         let parsed = crate::parser::parse(src);
         assert!(parsed.diagnostics.is_empty(), "fixture must parse clean");
         let model = SemanticModel::build(&parsed.cst);
-        let ctx = RuleContext {
-            path: None,
-            root: &parsed.cst,
-            model: &model,
-            resolution: Some(ResolutionContext {
+        let ctx =
+            RuleContext::new(None, &parsed.cst, &model).with_resolution(Some(ResolutionContext {
                 packages,
                 workspace: ws.map(|pkg| (pkg, Vec::new())),
-            }),
-            includes: &[],
-            julia_target: None,
-        };
+            }));
         let mut sink = Vec::new();
         CallArity.check_file(&ctx, &mut sink);
         sink.into_iter().map(|d| d.message.body).collect()
@@ -720,14 +634,7 @@ mod tests {
     fn no_resolution_context_is_silent() {
         let parsed = crate::parser::parse("f(x) = x\nf(1, 2)\n");
         let model = SemanticModel::build(&parsed.cst);
-        let ctx = RuleContext {
-            path: None,
-            root: &parsed.cst,
-            model: &model,
-            resolution: None,
-            includes: &[],
-            julia_target: None,
-        };
+        let ctx = RuleContext::new(None, &parsed.cst, &model);
         let mut sink = Vec::new();
         CallArity.check_file(&ctx, &mut sink);
         assert!(sink.is_empty());

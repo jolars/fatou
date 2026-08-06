@@ -76,14 +76,17 @@ index" (binding -> read sites, `IdentRef` -> `BindingId`) is machinery we
 already have — `IdentRef::binding` and `SemanticModel::occurrences` are exactly
 it. We are behind arity only on the CFG and on rule ergonomics.
 
-- [ ] `RuleContext::resolves_to_base(&CallExpr) -> bool` plus a token-level
+- [x] `RuleContext::resolves_to_base(&CallExpr) -> bool` plus a token-level
   `read_resolves_to_base`, after arity's `src/linter/rules.rs:177,215`: one call
   that confirms a callee really is the Base/Core function and not a local
-  shadow, a namespace-qualified name, or a `using`-masked import. Today
-  `call-arity` and `type-piracy` each hand-roll
-  `Resolver::new(...).with_workspace(...)`. Every idiom rule below opens with
-  this question, so **land the helper before writing any of them** or the
-  boilerplate gets copied a dozen times. Highest-leverage item here.
+  shadow, a namespace-qualified name, or a `using`-masked import. Landed with
+  the rest of the per-file machinery the three resolution-dependent rules were
+  hand-rolling, all memoized on `RuleContext`: `resolver()`,
+  `has_unresolvable_using()`, `file_scan()` (one shared `FileScan`, previously
+  copy-pasted between `undefined-name` and `call-arity`), and
+  `trusts_resolution()` for the shared soundness floor. `RuleContext` is now
+  built with `new(..).with_resolution(..)` and friends rather than a struct
+  literal, so the cache stays private.
 - [ ] A shared call-shape matcher module (arity's
   `src/linter/rules/matchers.rs`): "call to *name* with exactly *n* positional
   arguments and no named ones" is the opening line of most idiom rules.
