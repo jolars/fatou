@@ -221,7 +221,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
         Some(r) => (r.green, r.diagnostics),
         None => {
             let parsed = parse(text.as_str());
-            (parsed.cst.green().into_owned(), parsed.diagnostics)
+            (parsed.cst.green().to_owned(), parsed.diagnostics)
         }
     };
 

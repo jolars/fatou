@@ -140,7 +140,7 @@ pub fn check_paths_with_config(
             Ok((
                 path.clone(),
                 text,
-                out.cst.green().into_owned(),
+                out.cst.green().to_owned(),
                 out.diagnostics,
             ))
         })

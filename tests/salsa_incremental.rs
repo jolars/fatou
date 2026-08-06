@@ -263,7 +263,7 @@ fn a_stage_after_a_peek_survives_the_drain() {
         file,
         PrevParse {
             text: "alphaX = 1\n".to_string(),
-            green: parse("alphaX = 1\n").cst.green().into_owned(),
+            green: parse("alphaX = 1\n").cst.green().to_owned(),
             diagnostics: Vec::new(),
         },
         None,

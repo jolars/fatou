@@ -98,7 +98,7 @@ fn seeded_edits(src: &str, seed: u64) -> Vec<Edit> {
 /// must match a full parse of the edited text exactly.
 fn check_snippet(src: &str, seed: u64) {
     let old = parse(src);
-    let old_green = old.cst.green().into_owned();
+    let old_green = old.cst.green().to_owned();
     for edit in seeded_edits(src, seed) {
         let new_text = edit.apply(src);
         let Some(rep) = reparse(src, &old_green, &old.diagnostics, &edit, &new_text) else {
@@ -126,7 +126,7 @@ fn check_snippet(src: &str, seed: u64) {
 fn check_snippet_chains(src: &str, seed: u64) {
     let mut rng = Lcg(seed ^ 0x2545_F491_4F6C_DD1D);
     let base = parse(src);
-    let base_green = base.cst.green().into_owned();
+    let base_green = base.cst.green().to_owned();
 
     for _ in 0..CHAINS_PER_SNIPPET {
         let mut text = src.to_string();
@@ -215,7 +215,7 @@ const HAZARD_SNIPPETS: &[&str] = &[
 /// the token tier fired, not correctness.
 fn try_reparse(src: &str, range: std::ops::Range<usize>, insert: &str) -> Option<Reparsed> {
     let old = parse(src);
-    let green = old.cst.green().into_owned();
+    let green = old.cst.green().to_owned();
     let edit = Edit {
         range,
         insert: insert.to_string(),
@@ -442,7 +442,7 @@ fn toplevel_tier_falls_back() {
 fn toplevel_tier_falls_back_on_cross_region_coupling() {
     let src = "\"notdoc\" ]\n";
     let base = parse(src);
-    let green = base.cst.green().into_owned();
+    let green = base.cst.green().to_owned();
     let edits = vec![
         Edit {
             range: 11..11,

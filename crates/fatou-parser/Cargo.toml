@@ -14,7 +14,7 @@ keywords = ["julia", "parser", "cst", "incremental"]
 categories = ["parsing", "parser-implementations", "text-processing"]
 
 [dependencies]
-rowan = "0.16.1"
+rowan = "0.17.0"
 serde = { version = "1.0.228", features = ["derive"] }
 unicode-normalization = "0.1.24"
 

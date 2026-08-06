@@ -169,7 +169,7 @@ impl Base {
     fn new(src: String) -> Self {
         let parsed = parse(&src);
         Self {
-            green: parsed.cst.green().into_owned(),
+            green: parsed.cst.green().to_owned(),
             diagnostics: parsed.diagnostics,
             src,
         }
@@ -282,7 +282,7 @@ fn bench_reparse(c: &mut Criterion) {
             );
             match spliced {
                 Some(r) => black_box(r.green),
-                None => black_box(parse(&scattered_text).cst.green().into_owned()),
+                None => black_box(parse(&scattered_text).cst.green().to_owned()),
             }
         });
     });

@@ -1230,7 +1230,7 @@ mod tests {
     #[test]
     fn a_number_edit_in_a_lone_statement_falls_back() {
         let parsed = crate::parser::parse("x = 1\n");
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         let e = diff_edit("x = 1\n", "x = 2\n");
         assert!(reparse("x = 1\n", &green, &parsed.diagnostics, &e, "x = 2\n").is_none());
     }
@@ -1243,7 +1243,7 @@ mod tests {
     fn a_docstring_body_edit_stays_at_the_token_tier() {
         let old = "\"\"\"\ndoc\n\"\"\"\nfunction f(x)\n    x + 1\nend\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         let e = edit(5..5, "s");
         let new = e.apply(old);
 
@@ -1260,7 +1260,7 @@ mod tests {
     fn a_content_edit_in_an_unterminated_literal_falls_back() {
         let old = "x = 1\ny = \"abc\nz = 2\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         // Offset 12 is inside the content run, which here swallows the rest of
         // the file; `UnterminatedLiteral` is anchored at the literal's start.
         let token = SyntaxNode::new_root(green.clone())
@@ -1285,7 +1285,7 @@ mod tests {
     fn reparse_rejects_an_edit_that_does_not_fit() {
         let old = "α = 1\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         // `new_text` is deliberately not the edit's result: a misfitting edit
         // has none, which is the whole point.
         let run = |e: Edit| reparse(old, &green, &parsed.diagnostics, &e, old);
@@ -1313,7 +1313,7 @@ mod tests {
             old.push_str(&format!("var_{i} = {i}\n"));
         }
         let parsed = crate::parser::parse(&old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
 
         // A narrow edit near the end still splices: the guard keys on the
         // region, not on the file size.
@@ -1363,7 +1363,7 @@ mod tests {
     fn reparse_edits_chains_scattered_edits() {
         let old = "alpha = 1\nfiller = 2\nomega = 3\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         // `alpha` -> `alphaX`, then `omega` -> `omegaX` at its post-first-edit
         // offset (one byte further along).
         let edits = vec![edit(5..5, "X"), edit(27..27, "X")];
@@ -1396,7 +1396,7 @@ mod tests {
     fn reparse_edits_reports_the_max_tier() {
         let old = "alpha = 1\nfiller = 2\nomega = 3\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         // An ident edit (token tier) plus a whole added statement (top level),
         // appended at the post-first-edit end of the buffer.
         let edits = vec![edit(5..5, "X"), edit(32..32, "beta = 4\n")];
@@ -1413,7 +1413,7 @@ mod tests {
     fn reparse_edits_declines_short_chains() {
         let old = "alpha = 1\nomega = 3\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
 
         assert!(reparse_edits(old, &green, &parsed.diagnostics, &[], old).is_none());
         let one = vec![edit(5..5, "X")];
@@ -1428,7 +1428,7 @@ mod tests {
     fn reparse_edits_rejects_a_stale_chain() {
         let old = "alpha = 1\nfiller = 2\nomega = 3\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
 
         // Applies cleanly, but the buffer moved on underneath it.
         let edits = vec![edit(5..5, "X"), edit(26..26, "X")];
@@ -1445,7 +1445,7 @@ mod tests {
     fn reparse_edits_aborts_on_an_unhandleable_step() {
         let old = "alpha = 1\nfiller = 2\nomega = 3\n";
         let parsed = crate::parser::parse(old);
-        let green = parsed.cst.green().into_owned();
+        let green = parsed.cst.green().to_owned();
         // The second edit opens an unterminated string, which no tier splices.
         let edits = vec![edit(5..5, "X"), edit(26..26, "\"")];
         let new = apply_edits(old, &edits);
