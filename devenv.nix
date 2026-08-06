@@ -24,6 +24,7 @@
     pkgs.wasm-pack
     pkgs.stylua
     pkgs.hyperfine
+    pkgs.imagemagick
     pkgs.yamlfmt
     pkgs.vsce
     pkgs.air-formatter

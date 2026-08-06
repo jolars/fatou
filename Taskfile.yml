@@ -94,3 +94,15 @@ tasks:
       - scripts/generate-logo.jl
     cmds:
       - julia -t auto scripts/generate-logo.jl {{.CLI_ARGS}}
+
+  icons:
+    desc: Derive the site icons (favicon, apple-touch-icon) from assets/logo.png
+    sources:
+      - assets/logo.png
+      - scripts/generate-icons.sh
+    generates:
+      - docs/theme/favicon.png
+      - docs/theme/favicon.svg
+      - docs/src/apple-touch-icon.png
+    cmds:
+      - ./scripts/generate-icons.sh
