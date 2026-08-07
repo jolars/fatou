@@ -1,9 +1,11 @@
 //! Completion (`textDocument/completion` and `completionItem/resolve`).
 //!
-//! Three contexts, decided by a lexical backward scan from the cursor (robust to
+//! Four contexts, decided by a lexical backward scan from the cursor (robust to
 //! the parser's error recovery on the partial input completion always sees, like
 //! `Foo.` or `@t`):
 //!
+//! - **LaTeX** — the run follows a backslash (`\alpha`, `\_1`, `\:smile:`): the
+//!   REPL's tab-substitution sequences, inserting the character they expand to;
 //! - **value** — a bare identifier: every name visible at the cursor in the
 //!   shared masking order ([`Resolver::visible`]), plus Julia's keywords;
 //! - **macro** — the run starts with `@`: the visible names in the macro
@@ -26,7 +28,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lsp_types::{
-    CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Position,
+    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, MarkupContent,
+    MarkupKind, Position, TextEdit,
 };
 use rowan::TextSize;
 use serde::{Deserialize, Serialize};
@@ -38,9 +41,12 @@ use crate::resolve::{
     Candidate, ModulePath, Namespace, PackageSource, Resolver, Source, resolve_submodule,
 };
 use crate::semantic::{BindingKind, SemanticModel};
+use crate::syntax::{SyntaxKind, SyntaxNode};
 use crate::text::{LineIndex, PositionEncoding};
 
+use super::latex_symbols::{EMOJI_SYMBOLS, LATEX_SYMBOLS};
 use super::render::{binding_detail, function_detail, type_detail};
+use super::symbols::token_at;
 
 /// The lazy-resolve payload stashed on each library-sourced item: the module it
 /// came from (package name first, then any submodule chain) and the name to look
@@ -62,10 +68,19 @@ pub fn compute_completions<P: PackageSource>(
     packages: &P,
 ) -> Vec<CompletionItem> {
     let offset = LineIndex::new(text).position_to_byte(position, encoding);
-    let model = SemanticModel::build(&parse(text).cst);
+    let root = parse(text).cst;
+    let model = SemanticModel::build(&root);
     // The pure path has no file path to key workspace membership on; the live
     // server passes the workspace module through `completion_via_db`.
-    completions_for(&model, packages, None, text, TextSize::new(offset as u32))
+    completions_for(
+        &model,
+        &root,
+        packages,
+        None,
+        text,
+        TextSize::new(offset as u32),
+        encoding,
+    )
 }
 
 /// Compute completions off the snapshot's cached parse when the db's tracked
@@ -86,9 +101,12 @@ pub(crate) fn completion_via_db(
             // The tracked input lags the live buffer; the cached model is stale.
             return None;
         }
+        let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
-        Some(completions_for(model, snapshot, workspace, text, offset))
+        Some(completions_for(
+            model, &root, snapshot, workspace, text, offset, encoding,
+        ))
     }));
     match cached {
         Ok(Some(items)) => items,
@@ -110,12 +128,33 @@ pub(crate) fn resolve_completion(snapshot: &Analysis, item: CompletionItem) -> C
 /// The masking-order candidate set for `text` at `offset`, mapped to LSP items.
 fn completions_for<P: PackageSource>(
     model: &SemanticModel,
+    root: &SyntaxNode,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     text: &str,
     offset: TextSize,
+    encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
-    match context_at(text, offset.into()) {
+    let offset_bytes: usize = offset.into();
+    match context_at(text, offset_bytes) {
+        // A sequence is an input method, not code, so it wins over the
+        // identifier run it would otherwise look like. Where the backslash is
+        // more likely the literal's own than an input sequence, nothing is
+        // offered at all rather than falling back to another context: a popup
+        // of names over a regex escape would be just as much in the way.
+        Context::Latex { start } => {
+            let typed = &text[start..offset_bytes];
+            let suppressed = match string_context_at(root, offset) {
+                StringContext::Verbatim => true,
+                StringContext::Plain => is_lone_escape(&typed[1..]),
+                StringContext::Code => false,
+            };
+            if suppressed {
+                Vec::new()
+            } else {
+                latex_items(text, start, offset_bytes, encoding)
+            }
+        }
         Context::Member {
             receiver,
             macro_member,
@@ -152,12 +191,20 @@ enum Context {
         receiver: Vec<String>,
         macro_member: bool,
     },
+    /// Inside a LaTeX or emoji input sequence: `start` is the byte offset of the
+    /// opening backslash, so the sequence typed so far is `text[start..offset]`.
+    Latex {
+        start: usize,
+    },
 }
 
 /// Classify the cursor at byte `offset` by scanning the identifier run and the
 /// punctuation just before it.
 fn context_at(text: &str, offset: usize) -> Context {
     let prefix = &text[..offset.min(text.len())];
+    if let Some(start) = sequence_start(prefix) {
+        return Context::Latex { start };
+    }
     let (_word, rest) = take_ident_back(prefix);
     let (macro_sigil, rest) = match rest.strip_suffix('@') {
         Some(r) => (true, r),
@@ -217,6 +264,162 @@ fn scan_dotted(s: &str) -> Vec<String> {
 /// to delimit the completion context, not to lex.
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '!'
+}
+
+// --- LaTeX and emoji sequences ---------------------------------------------
+
+/// The longest key in either table, capping the backward scan so a stray
+/// backslash far up the line cannot pull in an unbounded run. Pinned by
+/// [`tables_fit_the_scanner`](tests::tables_fit_the_scanner).
+const MAX_SEQUENCE_LEN: usize = 43;
+
+/// The byte offset of the backslash opening the input sequence `prefix` ends
+/// in, or `None` when it does not end in one.
+///
+/// The scan stops at anything a key cannot contain, so a backslash is only
+/// found across sequence characters. Note that a backslash directly after an
+/// operand is *not* excluded: `A\b` is left division, but `x\_1` is how one
+/// types `x₁`, and the second is far and away the common case.
+fn sequence_start(prefix: &str) -> Option<usize> {
+    for (i, c) in prefix.char_indices().rev() {
+        if prefix.len() - i > MAX_SEQUENCE_LEN {
+            return None;
+        }
+        if c == '\\' {
+            return Some(i);
+        }
+        if !is_sequence_char(c) {
+            return None;
+        }
+    }
+    None
+}
+
+/// Whether `c` can appear in a sequence key after its backslash. Every key is
+/// ASCII: letters and digits, plus the punctuation the sub/superscript,
+/// fraction, and emoji keys use (`\^2`, `\_1`, `\1/2`, `\:+1:`).
+fn is_sequence_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "_^/+-()!=<>:".contains(c)
+}
+
+/// The items for the sequence `text[start..offset]`, each replacing the whole
+/// sequence (backslash included) with the character it expands to.
+fn latex_items(
+    text: &str,
+    start: usize,
+    offset: usize,
+    encoding: PositionEncoding,
+) -> Vec<CompletionItem> {
+    let typed = &text[start..offset];
+    let line_index = LineIndex::new(text);
+    let range = lsp_types::Range {
+        start: line_index.byte_to_position(start, encoding),
+        end: line_index.byte_to_position(offset, encoding),
+    };
+    // The REPL only reaches for emoji once the `:` is there, so a bare `\` does
+    // not bury 2549 LaTeX sequences under 1242 emoji.
+    let emoji: &[(&str, &str)] = if typed.starts_with("\\:") {
+        prefixed(EMOJI_SYMBOLS, typed)
+    } else {
+        &[]
+    };
+    prefixed(LATEX_SYMBOLS, typed)
+        .iter()
+        .chain(emoji)
+        .map(|&(sequence, expansion)| latex_item(sequence, expansion, range))
+        .collect()
+}
+
+/// The run of entries whose key starts with `prefix`, found by binary search on
+/// the sorted table.
+fn prefixed<'a>(table: &'a [(&'a str, &'a str)], prefix: &str) -> &'a [(&'a str, &'a str)] {
+    let start = table.partition_point(|(key, _)| *key < prefix);
+    let len = table[start..].partition_point(|(key, _)| key.starts_with(prefix));
+    &table[start..start + len]
+}
+
+/// An item offering `sequence`, inserting `expansion` over `range`. The label
+/// keeps the backslash so the client filters against what was actually typed.
+fn latex_item(sequence: &str, expansion: &str, range: lsp_types::Range) -> CompletionItem {
+    CompletionItem {
+        label: sequence.to_string(),
+        kind: Some(CompletionItemKind::TEXT),
+        detail: Some(expansion.to_string()),
+        documentation: Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: format!("`{expansion}` {}", codepoints(expansion)),
+        })),
+        filter_text: Some(sequence.to_string()),
+        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            range,
+            new_text: expansion.to_string(),
+        })),
+        ..Default::default()
+    }
+}
+
+/// The `U+` code points of `s`, space-separated (a couple of dozen expansions
+/// are a base character plus a combining mark).
+fn codepoints(s: &str) -> String {
+    s.chars()
+        .map(|c| format!("U+{:04X}", c as u32))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What kind of literal the cursor sits in, which decides how much of a
+/// backslash run is the string's own text.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum StringContext {
+    /// Ordinary code, where a backslash is never an escape.
+    Code,
+    /// A plain string or docstring: prose, where writing `α` is exactly what
+    /// the sequences are for, but where `\n` is also a newline.
+    Plain,
+    /// A prefixed string macro (`r"\d"`, `raw"\n"`) or a command literal, where
+    /// every backslash is the literal's own and a popup over each regex escape
+    /// would be pure noise.
+    Verbatim,
+}
+
+fn string_context_at(root: &SyntaxNode, offset: TextSize) -> StringContext {
+    let Some(token) = token_at(root, offset) else {
+        return StringContext::Code;
+    };
+    token
+        .parent_ancestors()
+        .find_map(|node| match node.kind() {
+            SyntaxKind::CMD_LITERAL => Some(StringContext::Verbatim),
+            SyntaxKind::STRING_LITERAL => Some(
+                if node
+                    .children_with_tokens()
+                    .any(|c| c.kind() == SyntaxKind::STRING_PREFIX)
+                {
+                    StringContext::Verbatim
+                } else {
+                    StringContext::Plain
+                },
+            ),
+            _ => None,
+        })
+        .unwrap_or(StringContext::Code)
+}
+
+/// Whether `sequence` is a lone backslash-escape the Julia lexer would read as
+/// one, like `\n` or `\u`.
+///
+/// Only consulted inside a plain string, and only for a one-character run: a
+/// popup headed by `\nabla` the instant someone types `"\n` would be in the way
+/// far more often than it helps. One more character disambiguates (`\na` is
+/// nobody's escape), so `\nu` and `\alpha` are still one keystroke behind.
+fn is_lone_escape(sequence: &str) -> bool {
+    let mut chars = sequence.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return false;
+    };
+    // The escapes Julia's lexer accepts after a backslash, per `read_escaped`
+    // in JuliaSyntax's tokenizer.
+    c.is_ascii_digit() || "abefnrtv\\'\"?xuU".contains(c)
 }
 
 // --- item construction -----------------------------------------------------
@@ -521,9 +724,39 @@ mod tests {
         lib: &BTreeMap<String, Arc<PackageIndex>>,
         workspace: Arc<PackageIndex>,
     ) -> Vec<CompletionItem> {
-        let model = SemanticModel::build(&parse(src).cst);
+        let root = parse(src).cst;
+        let model = SemanticModel::build(&root);
         let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
-        completions_for(&model, lib, Some((workspace, Vec::new())), src, offset)
+        completions_for(
+            &model,
+            &root,
+            lib,
+            Some((workspace, Vec::new())),
+            src,
+            offset,
+            PositionEncoding::Utf16,
+        )
+    }
+
+    /// Completions at the position just past `needle`, with no library at all.
+    fn completions_bare(src: &str, needle: &str) -> Vec<CompletionItem> {
+        completions_at(src, needle, &library(vec![]))
+    }
+
+    /// The item labelled `label`, panicking when it was not offered.
+    fn item<'a>(items: &'a [CompletionItem], label: &str) -> &'a CompletionItem {
+        items
+            .iter()
+            .find(|i| i.label == label)
+            .unwrap_or_else(|| panic!("no {label:?} in {:?}", labels(items)))
+    }
+
+    /// The text an item inserts and the range it replaces.
+    fn edit(item: &CompletionItem) -> (&str, lsp_types::Range) {
+        match item.text_edit.as_ref().expect("a text edit") {
+            CompletionTextEdit::Edit(e) => (e.new_text.as_str(), e.range),
+            other => panic!("expected a plain edit, got {other:?}"),
+        }
     }
 
     #[test]
@@ -688,9 +921,198 @@ mod tests {
         }
     }
 
+    // --- LaTeX and emoji sequences -----------------------------------------
+
+    /// The generated tables and the backward scanner have to agree: every key
+    /// must be reachable by a scan, and both tables must be sorted for
+    /// [`prefixed`]. Regenerating on a Julia bump re-checks this.
+    #[test]
+    fn tables_fit_the_scanner() {
+        for table in [LATEX_SYMBOLS, EMOJI_SYMBOLS] {
+            assert!(!table.is_empty());
+            for window in table.windows(2) {
+                assert!(window[0].0 < window[1].0, "unsorted at {:?}", window[0].0);
+            }
+            for &(key, expansion) in table {
+                let rest = key
+                    .strip_prefix('\\')
+                    .unwrap_or_else(|| panic!("{key:?} lacks a backslash"));
+                assert!(!rest.is_empty(), "{key:?} is a bare backslash");
+                assert!(
+                    rest.chars().all(is_sequence_char),
+                    "{key:?} has a character the scanner stops at"
+                );
+                assert!(
+                    key.len() <= MAX_SEQUENCE_LEN,
+                    "{key:?} outruns the scan cap"
+                );
+                assert!(!expansion.is_empty(), "{key:?} expands to nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn latex_sequence_offers_expansions_and_replaces_the_backslash() {
+        let items = completions_bare("x = \\alph", "\\alph");
+        let alpha = item(&items, "\\alpha");
+        assert_eq!(alpha.detail.as_deref(), Some("α"));
+        assert_eq!(alpha.kind, Some(CompletionItemKind::TEXT));
+        let (new_text, range) = edit(alpha);
+        assert_eq!(new_text, "α");
+        // The edit swallows the backslash, so accepting leaves `x = α`.
+        assert_eq!(range.start.character, 4);
+        assert_eq!(range.end.character, 9);
+        // Only the matching prefix is offered.
+        assert!(!labels(&items).contains(&"\\beta".to_string()));
+    }
+
+    /// The REPL way to type `x₁` puts the backslash straight after an operand,
+    /// which is also how left division (`A\b`) is written. The subscript wins:
+    /// a completion only inserts when accepted, and this is the common case.
+    #[test]
+    fn sequence_directly_after_an_identifier_is_offered() {
+        let items = completions_bare("x\\_1", "\\_1");
+        let (new_text, range) = edit(item(&items, "\\_1"));
+        assert_eq!(new_text, "₁");
+        // The edit starts at the backslash, leaving the `x` alone.
+        assert_eq!(range.start.character, 1);
+    }
+
+    #[test]
+    fn emoji_sequences_are_offered() {
+        let items = completions_bare("\\:smi", "\\:smi");
+        assert_eq!(edit(item(&items, "\\:smile:")).0, "😄");
+    }
+
+    /// `REPL.REPLCompletions.completions` answers a bare `\` with the LaTeX
+    /// table alone and only reaches the emoji once the `:` is typed. Matching
+    /// that keeps the first list the muscle-memory one.
+    #[test]
+    fn a_bare_backslash_offers_latex_only() {
+        let names = labels(&completions_bare("\\", "\\"));
+        assert!(names.contains(&"\\alpha".to_string()));
+        assert!(!names.contains(&"\\:smile:".to_string()));
+        assert_eq!(names.len(), LATEX_SYMBOLS.len());
+    }
+
+    #[test]
+    fn a_colon_opens_the_emoji_table() {
+        let names = labels(&completions_bare("\\:", "\\:"));
+        assert_eq!(names.len(), EMOJI_SYMBOLS.len());
+        assert!(names.contains(&"\\:smile:".to_string()));
+    }
+
+    /// In `r"\d"` or `raw"\n"` the backslash is the string's own, so a popup of
+    /// `\delta`/`\nabla` over every regex would be pure noise.
+    #[test]
+    fn verbatim_strings_offer_nothing() {
+        for src in [
+            "m = r\"\\d",
+            "p = raw\"\\n",
+            "c = `ls \\d",
+            "m = match(r\"\\s", // still unterminated, mid-typing
+        ] {
+            let needle = &src[src.len() - 2..];
+            assert!(
+                completions_bare(src, needle).is_empty(),
+                "expected nothing in {src:?}"
+            );
+        }
+    }
+
+    /// A plain string and a docstring are prose, where `α` is exactly what the
+    /// author wants; only the string macros are verbatim.
+    #[test]
+    fn plain_strings_and_docstrings_still_offer_sequences() {
+        for src in ["s = \"\\alph", "\"\"\"\n\\alph"] {
+            let names = labels(&completions_bare(src, "\\alph"));
+            assert!(
+                names.contains(&"\\alpha".to_string()),
+                "expected sequences in {src:?}, got {names:?}"
+            );
+        }
+    }
+
+    /// In a plain string `\n` is a newline, so a one-character escape run stays
+    /// quiet; the second character resolves the ambiguity and the sequences
+    /// come back. In code there is no escape to collide with.
+    #[test]
+    fn a_lone_escape_stays_quiet_only_inside_a_plain_string() {
+        assert!(completions_bare("s = \"\\n", "\\n").is_empty());
+        assert!(completions_bare("s = \"\\u", "\\u").is_empty());
+        // One more character and `\nu` is offered again.
+        let names = labels(&completions_bare("s = \"\\nu", "\\nu"));
+        assert!(names.contains(&"\\nu".to_string()), "{names:?}");
+        // A non-escape character is never ambiguous, even at one character.
+        assert!(!completions_bare("s = \"\\^", "\\^").is_empty());
+        // The same run in code is not an escape at all.
+        assert!(!completions_bare("x = \\n", "\\n").is_empty());
+    }
+
+    #[test]
+    fn lone_escape_recognition() {
+        for escape in ["n", "t", "u", "x", "0", "\\", "\""] {
+            assert!(is_lone_escape(escape), "{escape:?} is an escape");
+        }
+        for other in ["^", "_", ":", "alpha", "nu", "", "nn"] {
+            assert!(!is_lone_escape(other), "{other:?} is not a lone escape");
+        }
+    }
+
+    /// Candidate sets taken from `REPL.REPLCompletions.completions` on Julia
+    /// 1.12, so the two agree on what a partial sequence offers.
+    #[test]
+    fn candidate_counts_match_the_repl() {
+        for (typed, expected) in [
+            ("\\alph", 1),
+            ("\\:smi", 9),
+            ("\\:smile", 4),
+            ("\\:smile:", 1),
+            ("\\:+1:", 1),
+        ] {
+            let src = format!("x = {typed}");
+            let items = completions_bare(&src, typed);
+            assert_eq!(
+                items.len(),
+                expected,
+                "{typed:?} offered {:?}",
+                labels(&items)
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_sequence_offers_nothing() {
+        assert!(completions_bare("\\notasymbol", "\\notasymbol").is_empty());
+    }
+
+    #[test]
+    fn prefix_search_takes_exactly_the_matching_run() {
+        let table: &[(&str, &str)] = &[("\\a", "1"), ("\\ab", "2"), ("\\abc", "3"), ("\\b", "4")];
+        assert_eq!(prefixed(table, "\\ab").len(), 2);
+        assert_eq!(prefixed(table, "\\").len(), 4);
+        assert_eq!(prefixed(table, "\\abcd").len(), 0);
+        assert_eq!(prefixed(table, "\\z").len(), 0);
+    }
+
+    #[test]
+    fn codepoints_names_combining_expansions() {
+        assert_eq!(codepoints("α"), "U+03B1");
+        // `\nleqslant` is a base character plus a combining solidus.
+        assert_eq!(codepoints("⩽̸"), "U+2A7D U+0338");
+    }
+
     #[test]
     fn context_detection() {
         assert_eq!(context_at("foo", 3), Context::Value);
+        assert_eq!(context_at("\\alph", 5), Context::Latex { start: 0 });
+        assert_eq!(context_at("x = \\_1", 7), Context::Latex { start: 4 });
+        assert_eq!(context_at("\\", 1), Context::Latex { start: 0 });
+        // A spaced left division is not a sequence: the scan stops at the space.
+        assert_eq!(context_at("A \\ b", 5), Context::Value);
+        // Nor is a run longer than the longest key.
+        let long = format!("\\{}", "a".repeat(MAX_SEQUENCE_LEN));
+        assert_eq!(context_at(&long, long.len()), Context::Value);
         assert_eq!(context_at("@ti", 3), Context::Macro);
         assert_eq!(
             context_at("Base.", 5),

@@ -204,8 +204,9 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
-            // `.` opens member completion, `@` opens macro completion.
-            trigger_characters: Some(vec![".".to_string(), "@".to_string()]),
+            // `.` opens member completion, `@` opens macro completion, and `\`
+            // opens the LaTeX/emoji input sequences.
+            trigger_characters: Some(vec![".".to_string(), "@".to_string(), "\\".to_string()]),
             resolve_provider: Some(true),
             ..Default::default()
         }),

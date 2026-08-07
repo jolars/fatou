@@ -2267,7 +2267,7 @@ fn serves_completion_and_resolve() {
             );
             assert_eq!(
                 result["capabilities"]["completionProvider"]["triggerCharacters"],
-                serde_json::json!([".", "@"]),
+                serde_json::json!([".", "@", "\\"]),
             );
         }
         other => panic!("expected an InitializeResult, got {other:?}"),
@@ -2334,6 +2334,60 @@ fn serves_completion_and_resolve() {
         other => panic!("expected a completion response, got {other:?}"),
     }
 
+    // --- a LaTeX sequence completes through the same live-buffer path ---
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::json!({
+                "textDocument": { "uri": uri, "version": 2 },
+                "contentChanges": [{ "text": "function f(alpha)\n    x = \\alph\nend\n" }],
+            }),
+        }))
+        .unwrap();
+    let _diag = client.receiver.recv().unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "textDocument/completion".to_string(),
+            params: serde_json::to_value(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    // Just past `\alph` on the body line.
+                    position: Position::new(1, 13),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+                context: None,
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let items = match serde_json::from_value(resp.result().unwrap()).unwrap() {
+                CompletionResponse::Array(items) => items,
+                CompletionResponse::List(list) => list.items,
+            };
+            let alpha = items
+                .iter()
+                .find(|i| i.label == "\\alpha")
+                .unwrap_or_else(|| panic!("no LaTeX sequence in {items:?}"));
+            assert_eq!(alpha.detail.as_deref(), Some("α"));
+            // The edit replaces the backslash too, so `x = \alph` becomes `x = α`.
+            match alpha.text_edit.as_ref().expect("a text edit") {
+                lsp_types::CompletionTextEdit::Edit(edit) => {
+                    assert_eq!(edit.new_text, "α");
+                    assert_eq!(edit.range.start, Position::new(1, 8));
+                    assert_eq!(edit.range.end, Position::new(1, 13));
+                }
+                other => panic!("expected a plain edit, got {other:?}"),
+            }
+        }
+        other => panic!("expected a completion response, got {other:?}"),
+    }
+
     // --- resolve round-trips an item (no library loaded, so unchanged) ---
     let item = CompletionItem {
         label: "alpha".to_string(),
@@ -2342,7 +2396,7 @@ fn serves_completion_and_resolve() {
     client
         .sender
         .send(Message::Request(Request {
-            id: RequestId::from(3),
+            id: RequestId::from(4),
             method: "completionItem/resolve".to_string(),
             params: serde_json::to_value(&item).unwrap(),
         }))
@@ -2359,7 +2413,7 @@ fn serves_completion_and_resolve() {
     client
         .sender
         .send(Message::Request(Request {
-            id: RequestId::from(4),
+            id: RequestId::from(5),
             method: "shutdown".to_string(),
             params: serde_json::Value::Null,
         }))

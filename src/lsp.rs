@@ -56,6 +56,7 @@ mod folding;
 mod format;
 mod graph_diagnostics;
 mod hover;
+mod latex_symbols;
 mod lint;
 mod progress;
 mod pull_diagnostics;

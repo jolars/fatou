@@ -94,7 +94,8 @@ and to a global user config at `~/.config/fatou/fatou.toml`.
 ## Editor Integration
 
 The language server (`fatou lsp`) runs over stdio and provides a broad set of
-features: completion, hover, go-to-definition, find references and document
+features: completion (including the REPL's LaTeX and emoji input sequences, so
+`\alpha` inserts `α`), hover, go-to-definition, find references and document
 highlights, rename, document and workspace symbols, call and type hierarchy,
 signature help, code actions, folding and selection ranges, document links, and
 semantic tokens, alongside formatting (whole-document and range) and diagnostics

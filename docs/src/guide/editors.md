@@ -214,6 +214,23 @@ ignore = ["unused-binding"]
 A discovered `fatou.toml` shadows editor-pushed settings entirely rather than
 merging with them, so a project file always wins.
 
+## Unicode Symbol Input
+
+Completion also offers the LaTeX and emoji sequences the Julia REPL substitutes
+on tab, so `\alpha` inserts `α`, `\_1` inserts `₁`, and `\:smile:` inserts 😄.
+Type the backslash to open the list, keep typing to narrow it, and accepting an
+entry replaces the whole sequence, backslash included. As in the REPL, a bare
+`\` lists the LaTeX sequences and `\:` opens the emoji. The table comes from the
+running Julia's `REPL.REPLCompletions`, so it matches what your REPL does.
+
+Two places stay quiet, so the list does not get in the way:
+
+- inside a string macro or command literal (`r"\d"`, `raw"\n"`, `` `ls \d` ``),
+  where every backslash belongs to the literal itself;
+- on a lone escape in a plain string, so typing `"\n` does not offer `\nabla`.
+  A second character brings the sequences back, so `\nu` and `\alpha` still
+  work in strings and docstrings.
+
 ## Check It Works
 
 Open a `.jl` file containing `x=1` and format the buffer: it becomes `x = 1`. In
