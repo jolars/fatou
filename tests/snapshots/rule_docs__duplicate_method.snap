@@ -1,0 +1,22 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `duplicate-method`
+
+Flag a method definition whose dispatch signature an earlier definition in the same file already used. Julia holds one method per signature, so the later definition silently replaces the earlier one and the earlier body becomes dead. Signatures are compared on what dispatch actually sees: the positional argument types (an unannotated argument is `Any`) and the `where` specs. Argument names, default values, keyword arguments, and the declared return type are not part of a method's identity, so definitions differing only in those still collide. Definitions with different `where` bounds are separate methods and are not flagged, and neither are definitions inside a macro call or a conditional branch, where the written signature is not evidence of what gets defined.
+
+The second definition replaces the first, so `1` is unreachable:
+
+```julia
+f(x::Int) = 1
+f(y::Int) = 2
+```
+
+```text
+warning: duplicate-method
+ --> example.jl:2:1
+  |
+2 | f(y::Int) = 2
+  | ^ `f` is already defined with this signature earlier in this file; the later definition replaces the earlier one
+```

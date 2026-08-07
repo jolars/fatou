@@ -3594,3 +3594,236 @@ fn unreachable_code_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- duplicate-method ------------------------------------------------------
+
+#[test]
+fn duplicate_method_flags_an_identical_signature() {
+    assert_eq!(
+        count("duplicate-method", "f(x::Int) = 1\nf(x::Int) = 2\n"),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_flags_the_later_definitions_only() {
+    // Three identical signatures: the first is the one being overwritten, so
+    // the second and third are reported.
+    let src = "f(x::Int) = 1\nf(x::Int) = 2\nf(x::Int) = 3\n";
+    assert_eq!(count("duplicate-method", src), 2);
+}
+
+#[test]
+fn duplicate_method_ignores_argument_names() {
+    // Dispatch is on types, not names, so these are the same method.
+    assert_eq!(
+        count("duplicate-method", "f(x::Int) = 1\nf(y::Int) = 2\n"),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_flags_the_long_and_short_forms_alike() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "function f(x::Int)\n    1\nend\nf(x::Int) = 2\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_flags_untyped_arguments() {
+    // An unannotated argument is `Any`, so both methods are `f(::Any)`.
+    assert_eq!(count("duplicate-method", "f(x) = 1\nf(y) = 2\n"), 1);
+}
+
+#[test]
+fn duplicate_method_ignores_keyword_arguments() {
+    // Keyword arguments take no part in dispatch: the second definition
+    // replaces the first, and calling `f(1; a = 1)` then fails.
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "f(x::Int; a = 1) = a\nf(x::Int; b = 2) = b\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_ignores_default_values() {
+    // `f(x::Int = 0)` defines `f(::Int)` (and `f()`), so it collides with the
+    // plain `f(x::Int)` above it.
+    assert_eq!(
+        count("duplicate-method", "f(x::Int) = 1\nf(x::Int = 0) = 2\n"),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_ignores_the_return_type() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "f(x::Int)::Int = 1\nf(x::Int)::Float64 = 2.0\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_flags_matching_where_clauses() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "f(x::T) where {T <: Real} = 1\nf(x::T) where T <: Real = 2\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_flags_qualified_extensions() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "Base.show(io::IO, x::Int) = 1\nBase.show(io::IO, x::Int) = 2\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_flags_operator_definitions() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "+(a::Foo, b::Foo) = 1\n+(a::Foo, b::Foo) = 2\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_names_the_function() {
+    let msgs = findings("duplicate-method", "f(x::Int) = 1\nf(x::Int) = 2\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("`f`"), "{msgs:?}");
+}
+
+#[test]
+fn duplicate_method_ignores_differing_signatures() {
+    for src in [
+        // Different argument types.
+        "f(x::Int) = 1\nf(x::Float64) = 2\n",
+        // Different arity.
+        "f(x::Int) = 1\nf(x::Int, y::Int) = 2\n",
+        // Different `where` bounds.
+        "f(x::T) where {T <: Real} = 1\nf(x::T) where {T <: Integer} = 2\n",
+        // A bound versus none.
+        "f(x::T) where {T} = 1\nf(x::T) where {T <: Real} = 2\n",
+        // A vararg versus a single argument.
+        "f(x::Int) = 1\nf(x::Int...) = 2\n",
+        // An annotated argument versus a bare one.
+        "f(x::Int) = 1\nf(x) = 2\n",
+        // A qualified extension versus a bare definition of the same name.
+        "show(x::Int) = 1\nBase.show(x::Int) = 2\n",
+        // Different type applications.
+        "f(x::Vector{Int}) = 1\nf(x::Vector{Float64}) = 2\n",
+        // Different functions entirely.
+        "f(x::Int) = 1\ng(x::Int) = 2\n",
+    ] {
+        assert_eq!(
+            count("duplicate-method", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn duplicate_method_ignores_definitions_in_separate_modules() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "module A\nf(x::Int) = 1\nend\nmodule B\nf(x::Int) = 2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn duplicate_method_flags_definitions_within_one_module() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "module A\nf(x::Int) = 1\nf(x::Int) = 2\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn duplicate_method_ignores_local_definitions() {
+    // Two closures in two different function bodies are separate locals.
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "function g()\n    h(x::Int) = 1\n    h\nend\nfunction k()\n    h(x::Int) = 2\n    h\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn duplicate_method_ignores_conditional_branches() {
+    for src in [
+        // `@static` picks exactly one branch at parse time.
+        "@static if Sys.iswindows()\n    f(x::Int) = 1\nelse\n    f(x::Int) = 2\nend\n",
+        // A plain `if` runs one branch too.
+        "if VERSION >= v\"1.9\"\n    f(x::Int) = 1\nelse\n    f(x::Int) = 2\nend\n",
+    ] {
+        assert_eq!(
+            count("duplicate-method", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn duplicate_method_ignores_macro_wrapped_definitions() {
+    // A macro may reshape the signature it is handed, so the written form is
+    // not evidence of what gets defined.
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "@inline f(x::Int) = 1\n@inline f(x::Int) = 2\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn duplicate_method_ignores_bodyless_declarations() {
+    assert_eq!(
+        count("duplicate-method", "function f end\nfunction f end\n"),
+        0
+    );
+}
+
+#[test]
+fn duplicate_method_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["duplicate-method".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "f(x::Int) = 1\n# fatou-ignore duplicate-method\nf(x::Int) = 2\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

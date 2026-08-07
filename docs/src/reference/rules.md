@@ -384,6 +384,25 @@ warning: duplicate-include
   |         ^^^^^^^^^ duplicate include: "util.jl" is already included earlier in this file
 ```
 
+## `duplicate-method`
+
+Flag a method definition whose dispatch signature an earlier definition in the same file already used. Julia holds one method per signature, so the later definition silently replaces the earlier one and the earlier body becomes dead. Signatures are compared on what dispatch actually sees: the positional argument types (an unannotated argument is `Any`) and the `where` specs. Argument names, default values, keyword arguments, and the declared return type are not part of a method's identity, so definitions differing only in those still collide. Definitions with different `where` bounds are separate methods and are not flagged, and neither are definitions inside a macro call or a conditional branch, where the written signature is not evidence of what gets defined.
+
+The second definition replaces the first, so `1` is unreachable:
+
+```julia
+f(x::Int) = 1
+f(y::Int) = 2
+```
+
+```text
+warning: duplicate-method
+ --> example.jl:2:1
+  |
+2 | f(y::Int) = 2
+  | ^ `f` is already defined with this signature earlier in this file; the later definition replaces the earlier one
+```
+
 ## `julia-version-compat`
 
 Flag syntax newer than the project's declared Julia support range. Fatou parses the full superset of Julia syntax, so a construct from a newer release parses cleanly even when the project targets an older version; this rule reports when a supported version predates the construct (e.g. `public` needs 1.11, `import ... as` needs 1.6). The target range is taken from `--julia-version`, `[julia] version`, or the project's `Project.toml` `[compat]` / `Manifest.toml`; with no target known the rule stays silent.

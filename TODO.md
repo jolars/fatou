@@ -321,12 +321,23 @@ Ready now (no new infrastructure):
   `IncludeProblem` gained an `edge` index: matching problems back by the raw
   literal cannot tell one repeat of a literal from another.
   (DuplicateInclude)
-- [ ] `duplicate-method` (correctness, sem, warning, no fix): two method
+- [x] `duplicate-method` (correctness, sem, warning, no fix): two method
   definitions with identical signatures in one file — the second silently
   overwrites the first, so one of them is dead. Not in StaticLint's catalog;
-  from arity's planned `duplicated-function-definition`. Compare lowered
-  `TypeExpr` signatures, and be careful that differing `where` bounds, differing
-  argument *names*, and `@static`-disjoint branches are all legitimate.
+  from arity's planned `duplicated-function-definition`. Landed as a whole-file
+  pass over `harvest_tree`, the same lowered-`TypeExpr` method table
+  `call-arity` reads, so the two agree on what a file defines. The key is what
+  dispatch sees: module, `(name, owner)` group, positional parameter types
+  (unannotated is `Any`) with vararg flags, and the `where` specs. Argument
+  names, defaults, keyword arguments, and the return type are deliberately
+  *out* of the key — Julia dispatches on none of them, so `f(x::Int; a = 1)`
+  really is replaced by `f(x::Int; b = 2)`. `where` bounds *are* in the key,
+  and the comparison is structural rather than alpha-converting, so a renamed
+  type variable reads as a difference (a miss, never a false positive).
+  `@static`-disjoint branches stay out for free — the harvest walk enters
+  neither a conditional's branches nor a function body — and definitions under
+  a macro call are skipped outright, since a macro may rewrite the signature it
+  is handed. Only the second and later definitions are reported.
 - [ ] `loop-variable-shadow` (suspicious, sem, warning, no fix): a nested `for`
   reusing the enclosing loop's index variable (`for i in a; for i in b`), and
   assigning to the loop variable inside its own body. Both are near-always bugs
