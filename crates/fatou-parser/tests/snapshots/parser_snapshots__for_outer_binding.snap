@@ -1,0 +1,617 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..659
+  FOR_EXPR@0..22
+    FOR_KW@0..3 "for"
+    WHITESPACE@3..4 " "
+    FOR_BINDING@4..18
+      OUTER_BINDING@4..11
+        IDENT@4..9 "outer"
+        WHITESPACE@9..10 " "
+        NAME@10..11
+          IDENT@10..11 "i"
+      WHITESPACE@11..12 " "
+      IDENT@12..14 "in"
+      WHITESPACE@14..15 " "
+      BINARY_EXPR@15..18
+        LITERAL@15..16
+          INTEGER@15..16 "1"
+        COLON@16..17 ":"
+        LITERAL@17..18
+          INTEGER@17..18 "3"
+    BLOCK@18..19
+      WHITESPACE@18..19 " "
+    END_KW@19..22 "end"
+  NEWLINE@22..23 "\n"
+  FOR_EXPR@23..44
+    FOR_KW@23..26 "for"
+    WHITESPACE@26..27 " "
+    FOR_BINDING@27..40
+      OUTER_BINDING@27..34
+        IDENT@27..32 "outer"
+        WHITESPACE@32..33 " "
+        NAME@33..34
+          IDENT@33..34 "i"
+      WHITESPACE@34..35 " "
+      EQ@35..36 "="
+      WHITESPACE@36..37 " "
+      BINARY_EXPR@37..40
+        LITERAL@37..38
+          INTEGER@37..38 "1"
+        COLON@38..39 ":"
+        LITERAL@39..40
+          INTEGER@39..40 "3"
+    BLOCK@40..41
+      WHITESPACE@40..41 " "
+    END_KW@41..44 "end"
+  NEWLINE@44..45 "\n"
+  FOR_EXPR@45..83
+    FOR_KW@45..48 "for"
+    WHITESPACE@48..49 " "
+    FOR_BINDING@49..79
+      OUTER_BINDING@49..56
+        IDENT@49..54 "outer"
+        WHITESPACE@54..55 " "
+        NAME@55..56
+          IDENT@55..56 "i"
+      WHITESPACE@56..57 " "
+      IDENT@57..59 "in"
+      WHITESPACE@59..60 " "
+      BINARY_EXPR@60..63
+        LITERAL@60..61
+          INTEGER@60..61 "1"
+        COLON@61..62 ":"
+        LITERAL@62..63
+          INTEGER@62..63 "3"
+      COMMA@63..64 ","
+      WHITESPACE@64..65 " "
+      OUTER_BINDING@65..72
+        IDENT@65..70 "outer"
+        WHITESPACE@70..71 " "
+        NAME@71..72
+          IDENT@71..72 "j"
+      WHITESPACE@72..73 " "
+      IDENT@73..75 "in"
+      WHITESPACE@75..76 " "
+      BINARY_EXPR@76..79
+        LITERAL@76..77
+          INTEGER@76..77 "1"
+        COLON@77..78 ":"
+        LITERAL@78..79
+          INTEGER@78..79 "4"
+    BLOCK@79..80
+      WHITESPACE@79..80 " "
+    END_KW@80..83 "end"
+  NEWLINE@83..84 "\n"
+  FOR_EXPR@84..116
+    FOR_KW@84..87 "for"
+    WHITESPACE@87..88 " "
+    FOR_BINDING@88..112
+      NAME@88..89
+        IDENT@88..89 "i"
+      WHITESPACE@89..90 " "
+      IDENT@90..92 "in"
+      WHITESPACE@92..93 " "
+      BINARY_EXPR@93..96
+        LITERAL@93..94
+          INTEGER@93..94 "1"
+        COLON@94..95 ":"
+        LITERAL@95..96
+          INTEGER@95..96 "3"
+      COMMA@96..97 ","
+      WHITESPACE@97..98 " "
+      OUTER_BINDING@98..105
+        IDENT@98..103 "outer"
+        WHITESPACE@103..104 " "
+        NAME@104..105
+          IDENT@104..105 "j"
+      WHITESPACE@105..106 " "
+      IDENT@106..108 "in"
+      WHITESPACE@108..109 " "
+      BINARY_EXPR@109..112
+        LITERAL@109..110
+          INTEGER@109..110 "1"
+        COLON@110..111 ":"
+        LITERAL@111..112
+          INTEGER@111..112 "4"
+    BLOCK@112..113
+      WHITESPACE@112..113 " "
+    END_KW@113..116 "end"
+  NEWLINE@116..117 "\n"
+  FOR_EXPR@117..143
+    FOR_KW@117..120 "for"
+    WHITESPACE@120..121 " "
+    FOR_BINDING@121..139
+      OUTER_BINDING@121..133
+        IDENT@121..126 "outer"
+        WHITESPACE@126..127 " "
+        TUPLE_EXPR@127..133
+          LPAREN@127..128 "("
+          ARG@128..129
+            NAME@128..129
+              IDENT@128..129 "i"
+          COMMA@129..130 ","
+          WHITESPACE@130..131 " "
+          ARG@131..132
+            NAME@131..132
+              IDENT@131..132 "j"
+          RPAREN@132..133 ")"
+      WHITESPACE@133..134 " "
+      IDENT@134..136 "in"
+      WHITESPACE@136..137 " "
+      NAME@137..139
+        IDENT@137..139 "xs"
+    BLOCK@139..140
+      WHITESPACE@139..140 " "
+    END_KW@140..143 "end"
+  NEWLINE@143..144 "\n"
+  FOR_EXPR@144..167
+    FOR_KW@144..147 "for"
+    WHITESPACE@147..148 " "
+    FOR_BINDING@148..163
+      OUTER_BINDING@148..157
+        IDENT@148..153 "outer"
+        WHITESPACE@153..154 " "
+        VECT_EXPR@154..157
+          LBRACKET@154..155 "["
+          ARG@155..156
+            NAME@155..156
+              IDENT@155..156 "i"
+          RBRACKET@156..157 "]"
+      WHITESPACE@157..158 " "
+      IDENT@158..160 "in"
+      WHITESPACE@160..161 " "
+      NAME@161..163
+        IDENT@161..163 "xs"
+    BLOCK@163..164
+      WHITESPACE@163..164 " "
+    END_KW@164..167 "end"
+  NEWLINE@167..168 "\n"
+  FOR_EXPR@168..194
+    FOR_KW@168..171 "for"
+    WHITESPACE@171..172 " "
+    FOR_BINDING@172..190
+      OUTER_BINDING@172..184
+        IDENT@172..177 "outer"
+        WHITESPACE@177..178 " "
+        TYPE_ANNOTATION@178..184
+          NAME@178..179
+            IDENT@178..179 "i"
+          COLON_COLON@179..181 "::"
+          NAME@181..184
+            IDENT@181..184 "Int"
+      WHITESPACE@184..185 " "
+      IDENT@185..187 "in"
+      WHITESPACE@187..188 " "
+      NAME@188..190
+        IDENT@188..190 "xs"
+    BLOCK@190..191
+      WHITESPACE@190..191 " "
+    END_KW@191..194 "end"
+  NEWLINE@194..195 "\n"
+  FOR_EXPR@195..219
+    FOR_KW@195..198 "for"
+    WHITESPACE@198..199 " "
+    FOR_BINDING@199..215
+      OUTER_BINDING@199..209
+        IDENT@199..204 "outer"
+        WHITESPACE@204..205 " "
+        INDEX_EXPR@205..209
+          NAME@205..206
+            IDENT@205..206 "i"
+          ARG_LIST@206..209
+            LBRACKET@206..207 "["
+            ARG@207..208
+              LITERAL@207..208
+                INTEGER@207..208 "1"
+            RBRACKET@208..209 "]"
+      WHITESPACE@209..210 " "
+      IDENT@210..212 "in"
+      WHITESPACE@212..213 " "
+      NAME@213..215
+        IDENT@213..215 "xs"
+    BLOCK@215..216
+      WHITESPACE@215..216 " "
+    END_KW@216..219 "end"
+  NEWLINE@219..220 "\n"
+  FOR_EXPR@220..249
+    FOR_KW@220..223 "for"
+    WHITESPACE@223..224 " "
+    FOR_BINDING@224..238
+      OUTER_BINDING@224..231
+        IDENT@224..229 "outer"
+        WHITESPACE@229..230 " "
+        NAME@230..231
+          IDENT@230..231 "i"
+      WHITESPACE@231..232 " "
+      IDENT@232..234 "in"
+      WHITESPACE@234..235 " "
+      BINARY_EXPR@235..238
+        LITERAL@235..236
+          INTEGER@235..236 "1"
+        COLON@236..237 ":"
+        LITERAL@237..238
+          INTEGER@237..238 "3"
+    BLOCK@238..246
+      WHITESPACE@238..239 " "
+      ASSIGNMENT_EXPR@239..245
+        NAME@239..240
+          IDENT@239..240 "x"
+        WHITESPACE@240..241 " "
+        PLUS_EQ@241..243 "+="
+        WHITESPACE@243..244 " "
+        NAME@244..245
+          IDENT@244..245 "i"
+      WHITESPACE@245..246 " "
+    END_KW@246..249 "end"
+  NEWLINE@249..250 "\n"
+  COMPREHENSION@250..272
+    LBRACKET@250..251 "["
+    NAME@251..252
+      IDENT@251..252 "x"
+    WHITESPACE@252..253 " "
+    FOR_BINDING@253..271
+      FOR_KW@253..256 "for"
+      WHITESPACE@256..257 " "
+      OUTER_BINDING@257..264
+        IDENT@257..262 "outer"
+        WHITESPACE@262..263 " "
+        NAME@263..264
+          IDENT@263..264 "i"
+      WHITESPACE@264..265 " "
+      IDENT@265..267 "in"
+      WHITESPACE@267..268 " "
+      BINARY_EXPR@268..271
+        LITERAL@268..269
+          INTEGER@268..269 "1"
+        COLON@269..270 ":"
+        LITERAL@270..271
+          INTEGER@270..271 "3"
+    RBRACKET@271..272 "]"
+  NEWLINE@272..273 "\n"
+  GENERATOR@273..295
+    LPAREN@273..274 "("
+    NAME@274..275
+      IDENT@274..275 "x"
+    WHITESPACE@275..276 " "
+    FOR_BINDING@276..294
+      FOR_KW@276..279 "for"
+      WHITESPACE@279..280 " "
+      OUTER_BINDING@280..287
+        IDENT@280..285 "outer"
+        WHITESPACE@285..286 " "
+        NAME@286..287
+          IDENT@286..287 "i"
+      WHITESPACE@287..288 " "
+      IDENT@288..290 "in"
+      WHITESPACE@290..291 " "
+      BINARY_EXPR@291..294
+        LITERAL@291..292
+          INTEGER@291..292 "1"
+        COLON@292..293 ":"
+        LITERAL@293..294
+          INTEGER@293..294 "3"
+    RPAREN@294..295 ")"
+  NEWLINE@295..296 "\n"
+  FOR_EXPR@296..316
+    FOR_KW@296..299 "for"
+    WHITESPACE@299..300 " "
+    FOR_BINDING@300..312
+      NAME@300..305
+        IDENT@300..305 "outer"
+      WHITESPACE@305..306 " "
+      IDENT@306..308 "in"
+      WHITESPACE@308..309 " "
+      BINARY_EXPR@309..312
+        LITERAL@309..310
+          INTEGER@309..310 "1"
+        COLON@310..311 ":"
+        LITERAL@311..312
+          INTEGER@311..312 "3"
+    BLOCK@312..313
+      WHITESPACE@312..313 " "
+    END_KW@313..316 "end"
+  NEWLINE@316..317 "\n"
+  FOR_EXPR@317..336
+    FOR_KW@317..320 "for"
+    WHITESPACE@320..321 " "
+    FOR_BINDING@321..332
+      ASSIGNMENT_EXPR@321..332
+        NAME@321..326
+          IDENT@321..326 "outer"
+        WHITESPACE@326..327 " "
+        EQ@327..328 "="
+        WHITESPACE@328..329 " "
+        BINARY_EXPR@329..332
+          LITERAL@329..330
+            INTEGER@329..330 "1"
+          COLON@330..331 ":"
+          LITERAL@331..332
+            INTEGER@331..332 "3"
+    BLOCK@332..333
+      WHITESPACE@332..333 " "
+    END_KW@333..336 "end"
+  NEWLINE@336..337 "\n"
+  FOR_EXPR@337..359
+    FOR_KW@337..340 "for"
+    WHITESPACE@340..341 " "
+    FOR_BINDING@341..355
+      NAME@341..346
+        IDENT@341..346 "outer"
+      WHITESPACE@346..347 " "
+      IDENT@347..349 "in"
+      WHITESPACE@349..350 " "
+      NAME@350..355
+        IDENT@350..355 "outer"
+    BLOCK@355..356
+      WHITESPACE@355..356 " "
+    END_KW@356..359 "end"
+  NEWLINE@359..360 "\n"
+  ASSIGNMENT_EXPR@360..369
+    NAME@360..365
+      IDENT@360..365 "outer"
+    WHITESPACE@365..366 " "
+    EQ@366..367 "="
+    WHITESPACE@367..368 " "
+    LITERAL@368..369
+      INTEGER@368..369 "1"
+  NEWLINE@369..370 "\n"
+  CALL_EXPR@370..378
+    NAME@370..375
+      IDENT@370..375 "outer"
+    ARG_LIST@375..378
+      LPAREN@375..376 "("
+      ARG@376..377
+        NAME@376..377
+          IDENT@376..377 "x"
+      RPAREN@377..378 ")"
+  NEWLINE@378..379 "\n"
+  ASSIGNMENT_EXPR@379..388
+    NAME@379..380
+      IDENT@379..380 "x"
+    WHITESPACE@380..381 " "
+    EQ@381..382 "="
+    WHITESPACE@382..383 " "
+    NAME@383..388
+      IDENT@383..388 "outer"
+  NEWLINE@388..389 "\n"
+  FOR_EXPR@389..414
+    FOR_KW@389..392 "for"
+    WHITESPACE@392..393 " "
+    FOR_BINDING@393..410
+      OUTER_BINDING@393..404
+        IDENT@393..398 "outer"
+        WHITESPACE@398..399 " "
+        NAME@399..404
+          IDENT@399..404 "outer"
+      WHITESPACE@404..405 " "
+      IDENT@405..407 "in"
+      WHITESPACE@407..408 " "
+      NAME@408..410
+        IDENT@408..410 "xs"
+    BLOCK@410..411
+      WHITESPACE@410..411 " "
+    END_KW@411..414 "end"
+  NEWLINE@414..415 "\n"
+  FOR_EXPR@415..445
+    FOR_KW@415..418 "for"
+    WHITESPACE@418..419 " "
+    FOR_BINDING@419..441
+      OUTER_BINDING@419..426
+        IDENT@419..424 "outer"
+        WHITESPACE@424..425 " "
+        NAME@425..426
+          IDENT@425..426 "x"
+      WHITESPACE@426..427 " "
+      IDENT@427..429 "in"
+      WHITESPACE@429..430 " "
+      NAME@430..432
+        IDENT@430..432 "xs"
+      COMMA@432..433 ","
+      WHITESPACE@433..434 " "
+      NAME@434..435
+        IDENT@434..435 "y"
+      WHITESPACE@435..436 " "
+      IDENT@436..438 "in"
+      WHITESPACE@438..439 " "
+      NAME@439..441
+        IDENT@439..441 "ys"
+    BLOCK@441..442
+      WHITESPACE@441..442 " "
+    END_KW@442..445 "end"
+  NEWLINE@445..446 "\n"
+  FOR_EXPR@446..469
+    FOR_KW@446..449 "for"
+    WHITESPACE@449..450 " "
+    FOR_BINDING@450..465
+      ASSIGNMENT_EXPR@450..465
+        BINARY_EXPR@450..459
+          NAME@450..455
+            IDENT@450..455 "outer"
+          WHITESPACE@455..456 " "
+          DOLLAR@456..457 "$"
+          WHITESPACE@457..458 " "
+          NAME@458..459
+            IDENT@458..459 "i"
+        WHITESPACE@459..460 " "
+        EQ@460..461 "="
+        WHITESPACE@461..462 " "
+        BINARY_EXPR@462..465
+          LITERAL@462..463
+            INTEGER@462..463 "1"
+          COLON@463..464 ":"
+          LITERAL@464..465
+            INTEGER@464..465 "3"
+    BLOCK@465..466
+      WHITESPACE@465..466 " "
+    END_KW@466..469 "end"
+  NEWLINE@469..470 "\n"
+  FOR_EXPR@470..493
+    FOR_KW@470..473 "for"
+    WHITESPACE@473..474 " "
+    FOR_BINDING@474..489
+      ASSIGNMENT_EXPR@474..489
+        BINARY_EXPR@474..483
+          NAME@474..479
+            IDENT@474..479 "outer"
+          WHITESPACE@479..480 " "
+          PLUS@480..481 "+"
+          WHITESPACE@481..482 " "
+          NAME@482..483
+            IDENT@482..483 "i"
+        WHITESPACE@483..484 " "
+        EQ@484..485 "="
+        WHITESPACE@485..486 " "
+        BINARY_EXPR@486..489
+          LITERAL@486..487
+            INTEGER@486..487 "1"
+          COLON@487..488 ":"
+          LITERAL@488..489
+            INTEGER@488..489 "3"
+    BLOCK@489..490
+      WHITESPACE@489..490 " "
+    END_KW@490..493 "end"
+  NEWLINE@493..494 "\n"
+  FOR_EXPR@494..515
+    FOR_KW@494..497 "for"
+    WHITESPACE@497..498 " "
+    FOR_BINDING@498..511
+      BINARY_EXPR@498..505
+        NAME@498..503
+          IDENT@498..503 "outer"
+        DOT@503..504 "."
+        NAME@504..505
+          IDENT@504..505 "x"
+      WHITESPACE@505..506 " "
+      IDENT@506..508 "in"
+      WHITESPACE@508..509 " "
+      NAME@509..511
+        IDENT@509..511 "xs"
+    BLOCK@511..512
+      WHITESPACE@511..512 " "
+    END_KW@512..515 "end"
+  NEWLINE@515..516 "\n"
+  FOR_EXPR@516..538
+    FOR_KW@516..519 "for"
+    WHITESPACE@519..520 " "
+    FOR_BINDING@520..534
+      INDEX_EXPR@520..528
+        NAME@520..525
+          IDENT@520..525 "outer"
+        ARG_LIST@525..528
+          LBRACKET@525..526 "["
+          ARG@526..527
+            LITERAL@526..527
+              INTEGER@526..527 "1"
+          RBRACKET@527..528 "]"
+      WHITESPACE@528..529 " "
+      IDENT@529..531 "in"
+      WHITESPACE@531..532 " "
+      NAME@532..534
+        IDENT@532..534 "xs"
+    BLOCK@534..535
+      WHITESPACE@534..535 " "
+    END_KW@535..538 "end"
+  NEWLINE@538..539 "\n"
+  FOR_EXPR@539..561
+    FOR_KW@539..542 "for"
+    WHITESPACE@542..543 " "
+    FOR_BINDING@543..557
+      CALL_EXPR@543..551
+        NAME@543..548
+          IDENT@543..548 "outer"
+        ARG_LIST@548..551
+          LPAREN@548..549 "("
+          ARG@549..550
+            LITERAL@549..550
+              INTEGER@549..550 "1"
+          RPAREN@550..551 ")"
+      WHITESPACE@551..552 " "
+      IDENT@552..554 "in"
+      WHITESPACE@554..555 " "
+      NAME@555..557
+        IDENT@555..557 "xs"
+    BLOCK@557..558
+      WHITESPACE@557..558 " "
+    END_KW@558..561 "end"
+  NEWLINE@561..562 "\n"
+  FOR_EXPR@562..586
+    FOR_KW@562..565 "for"
+    WHITESPACE@565..566 " "
+    FOR_BINDING@566..582
+      TYPE_ANNOTATION@566..576
+        NAME@566..571
+          IDENT@566..571 "outer"
+        COLON_COLON@571..573 "::"
+        NAME@573..576
+          IDENT@573..576 "Int"
+      WHITESPACE@576..577 " "
+      IDENT@577..579 "in"
+      WHITESPACE@579..580 " "
+      NAME@580..582
+        IDENT@580..582 "xs"
+    BLOCK@582..583
+      WHITESPACE@582..583 " "
+    END_KW@583..586 "end"
+  NEWLINE@586..587 "\n"
+  FOR_EXPR@587..608
+    FOR_KW@587..590 "for"
+    WHITESPACE@590..591 " "
+    FOR_BINDING@591..604
+      OUTER_BINDING@591..598
+        IDENT@591..596 "outer"
+        WHITESPACE@596..597 " "
+        LITERAL@597..598
+          INTEGER@597..598 "1"
+      WHITESPACE@598..599 " "
+      IDENT@599..601 "in"
+      WHITESPACE@601..602 " "
+      NAME@602..604
+        IDENT@602..604 "xs"
+    BLOCK@604..605
+      WHITESPACE@604..605 " "
+    END_KW@605..608 "end"
+  NEWLINE@608..609 "\n"
+  FOR_EXPR@609..631
+    FOR_KW@609..612 "for"
+    WHITESPACE@612..613 " "
+    FOR_BINDING@613..627
+      OUTER_BINDING@613..621
+        IDENT@613..618 "outer"
+        WHITESPACE@618..619 " "
+        QUOTE_SYM@619..621
+          COLON@619..620 ":"
+          NAME@620..621
+            IDENT@620..621 "x"
+      WHITESPACE@621..622 " "
+      IDENT@622..624 "in"
+      WHITESPACE@624..625 " "
+      NAME@625..627
+        IDENT@625..627 "xs"
+    BLOCK@627..628
+      WHITESPACE@627..628 " "
+    END_KW@628..631 "end"
+  NEWLINE@631..632 "\n"
+  FOR_EXPR@632..658
+    FOR_KW@632..635 "for"
+    WHITESPACE@635..636 " "
+    FOR_BINDING@636..654
+      OUTER_BINDING@636..648
+        IDENT@636..641 "outer"
+        WHITESPACE@641..642 " "
+        NONSTANDARD_IDENTIFIER@642..648
+          STRING_PREFIX@642..645 "var"
+          STRING_DELIM_OPEN@645..646 "\""
+          STRING_CONTENT@646..647 "x"
+          STRING_DELIM_CLOSE@647..648 "\""
+      WHITESPACE@648..649 " "
+      IDENT@649..651 "in"
+      WHITESPACE@651..652 " "
+      NAME@652..654
+        IDENT@652..654 "xs"
+    BLOCK@654..655
+      WHITESPACE@654..655 " "
+    END_KW@655..658 "end"
+  NEWLINE@658..659 "\n"

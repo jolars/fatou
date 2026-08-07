@@ -3926,6 +3926,36 @@ fn loop_variable_shadow_reports_both_defects_independently() {
 }
 
 #[test]
+fn loop_variable_shadow_ignores_outer_rebinding() {
+    // `for outer i` is the sanctioned way to reuse an enclosing loop's index:
+    // it assigns to that variable instead of binding a fresh one, so there is
+    // no shadowing to report.
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    for outer i in 1:2\n        f(i)\n    end\nend\n"
+        ),
+        0
+    );
+    // The `=` spelling of the same spec, and a variable that merely happens to
+    // be named `outer`, which does shadow.
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    for outer i = 1:2\n        f(i)\n    end\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for outer in 1:3\n    for outer in 1:2\n        f(outer)\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
 fn loop_variable_shadow_ignores_distinct_names() {
     assert_eq!(
         count(

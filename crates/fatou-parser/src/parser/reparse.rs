@@ -283,7 +283,7 @@ const CONTEXTUAL_IDENTS: &[&str] = &[
     "∈",         // Unicode `in` (expr.rs)
     "isa",       // infix operator (expr.rs)
     "doc",       // `doc"..."` / `@doc` marker (expr.rs)
-    "outer",     // future `for outer i` support
+    "outer",     // `for outer i in xs` iteration spec (expr.rs)
 ];
 
 /// The token tier: when the edit is confined to a single eligible leaf, relex

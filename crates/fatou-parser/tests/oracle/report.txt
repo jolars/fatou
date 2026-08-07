@@ -78,6 +78,7 @@ PASS                     field_access_keyword [allow]
 PASS                     field_access_space [allow]
 PASS                     field_access_suffix [allow]
 PASS                     for_oneline_body [allow]
+PASS                     for_outer_binding [untriaged]
 PASS                     function_bare_name_signature [allow]
 PASS                     function_forward_decl [allow]
 PASS                     function_signature_newline [allow]
@@ -246,4 +247,4 @@ PASS                     where_as_identifier [allow]
 PASS                     where_precedence [allow]
 PASS                     word_operators [allow]
 
-247 cases: 246 pass, 1 fail, 0 skipped
+248 cases: 247 pass, 1 fail, 0 skipped

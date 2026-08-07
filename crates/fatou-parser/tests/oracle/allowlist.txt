@@ -82,6 +82,7 @@ field_access_keyword
 field_access_space
 field_access_suffix
 for_oneline_body
+for_outer_binding
 function_bare_name_signature
 function_forward_decl
 function_signature_newline

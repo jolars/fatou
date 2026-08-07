@@ -73,6 +73,9 @@ pub enum SyntaxKind {
     WHILE_EXPR,
     FOR_EXPR,
     FOR_BINDING,
+    /// The `outer i` pattern of an iteration spec: the contextual `outer`
+    /// keyword plus the loop variable it rebinds from the enclosing scope.
+    OUTER_BINDING,
     LET_EXPR,
     LET_BINDINGS,
     QUOTE_EXPR,

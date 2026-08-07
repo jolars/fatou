@@ -282,6 +282,12 @@ fn project(node: &SyntaxNode) -> String {
             push_trailing_errors(node, &mut parts);
             sexp("for", parts)
         }
+        // `outer i` — the `outer` token itself is dropped as a keyword by
+        // `project_flat`, so the pattern is the node's lone child.
+        OUTER_BINDING => sexp(
+            "outer",
+            child_nodes(node).iter().map(project).collect::<Vec<_>>(),
+        ),
         FUNCTION_DEF => project_function_like("function", node),
         MACRO_DEF => project_function_like("macro", node),
         LET_EXPR => project_let(node),
@@ -1512,10 +1518,12 @@ fn project_for_spec(elems: &[SyntaxElement]) -> String {
     {
         return project(n);
     }
-    // Otherwise the loose `var in iter` form: split on the `in`/`∈` token.
-    let split = elems
-        .iter()
-        .position(|el| matches!(el, NodeOrToken::Token(t) if t.text() == "in" || t.text() == "∈"));
+    // Otherwise the loose `var in iter` form: split on the `in`/`∈` token. An
+    // `outer` spec also reaches here in its `=` form (`for outer i = xs`), where
+    // the separator is a loose `EQ` rather than a whole ASSIGNMENT_EXPR.
+    let split = elems.iter().position(
+        |el| matches!(el, NodeOrToken::Token(t) if t.text() == "in" || t.text() == "∈" || t.kind() == EQ),
+    );
     match split {
         Some(idx) => {
             let var = project_flat(elems[..idx].to_vec());

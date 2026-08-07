@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus (**247 cases**): **246 allowlisted**,
+8 divergence, 0 unsupported. Dir corpus (**248 cases**): **247 allowlisted**,
 1 blocked (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,7 +134,60 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-08-07—keyword statement as a comprehension/generator body)
+## Latest session (2026-08-07b—`for outer i` iteration spec)
+
+User-named target (the `TODO.md` bullet left by the `loop-variable-shadow`
+linter work). `for outer i in 1:3` was not parsed: `FOR_BINDING` took `outer` as
+the whole pattern and dropped `i in 1:3` into the body block ⇒
+`(for outer (block (call-i i in (call-i 1 : 3)) …))`.
+
+**The TODO's expected shape was wrong**, worth noting for anyone reading it:
+JuliaSyntax wraps the *variable*, **inside** the `=` — `(= (outer i) (call-i 1 :
+3))`, not `(outer (= i …))`. So `outer` cannot wrap the whole spec.
+
+- **New node** `SyntaxKind::OUTER_BINDING` (`syntax.rs`), holding the `outer`
+  IDENT (loose, dropped by `project_flat` as a keyword) plus the pattern node.
+  Projects via one `sexp("outer", child_nodes)` arm.
+- **`parse_for_specs`** (`expr.rs`): under `outer` the pattern parses at
+  `COMMA_ITEM_BP` so a spec `=` stays *out* of it, and the `=` is then consumed
+  as a loose separator exactly like `in`/`∈`. That is what yields `(= (outer i)
+  …)` instead of `(outer (= i …))`; without it the `=` form would swallow the
+  iterable into an `ASSIGNMENT_EXPR` under `outer`.
+- **`project_for_spec`** (`sexpr.rs`) gained `EQ` in its split predicate — the
+  `outer` `=` form is the only spec whose separator is a loose `EQ` rather than
+  a whole `ASSIGNMENT_EXPR`.
+- **The contextual-keyword test is a speculative parse, not a token whitelist**
+  (`is_outer_marker`). `outer` is the keyword only when a whole second pattern
+  follows, and what "follows" means needs the precedence table: `outer $ i`,
+  `outer + i`, `outer.x`, `outer[1]`, `outer(1)`, `outer::Int` are all plain
+  loop variables, while the **space-separated** `outer (i, j)` / `outer [i]` are
+  the keyword plus a destructuring pattern. So it probes with `array_mode: true`
+  (which supplies exactly the spaced-opener boundary) and requires `outer` to
+  parse as a complete expression on its own, then requires a pattern to parse
+  after it. **A token whitelist regressed the allowlisted `dollar_infix_operator`
+  fixture** (`for outer $ i = 1:3`) — that fixture is the guard here.
+- **Recovery deliberately untouched**: no pattern after `outer` (`for outer
+  end`, `for outer, j in xs`) falls back to the plain reading rather than
+  inventing an error shape, so those keep their pre-existing output.
+- **Linter needed no change**: `bind_param_pattern`'s `_` arm *walks* an
+  `OUTER_BINDING`, so `i` becomes a reference resolved in the enclosing scope
+  instead of a fresh `ForVar` — which is precisely `outer`'s semantics. Added
+  `loop_variable_shadow_ignores_outer_rebinding` (both spellings clean; a loop
+  variable actually *named* `outer` still shadows).
+- **Verified**: 28 probe cases byte-identical to JuliaSyntax. Formatter output
+  on the fixture is idempotent and preserves spacing.
+- **Fixtures**: parser snapshot + oracle dir slug `for_outer_binding` (28 lines).
+- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
+  dir 247 → **248** (247 PASS + the 1 blocked `numeric_literals`).
+- **Next**: the closest sibling is now **`for i ∈ xs` projecting `(call-i i ∈
+  xs)` instead of `(= i xs)`** — `∈` lexes as `UNICODE_OP`, so
+  `parse_for_specs`'s separator check (`t.kind == Ident && text == "∈"`) never
+  matches and the operator loop swallows it into a `BINARY_EXPR`. Pre-existing,
+  affects plain and `outer` specs alike, and already flagged as a caveat in the
+  2026-06-29b handoff; deliberately left out of this fixture. Small and
+  well-scoped — good next target.
+
+## Earlier session (2026-08-07—keyword statement as a comprehension/generator body)
 
 User-named target (the `TODO.md` bullet left by the `local-const` linter work).
 An unparenthesized `const`/`global`/`local`/`return` as a comprehension or

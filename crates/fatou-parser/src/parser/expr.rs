@@ -3460,6 +3460,61 @@ fn parse_comprehension(
     }
 }
 
+/// Whether the token at `idx` is the contextual `outer` keyword of an iteration
+/// spec rather than the loop variable itself. It is the keyword only when a
+/// whole second pattern follows it — `for outer i in xs` rebinds the enclosing
+/// `i`, while `for outer in xs` loops over a variable named `outer`.
+///
+/// Deciding that needs the precedence table, not a token whitelist, because an
+/// operator or a *glued* opener continues the `outer` expression instead of
+/// starting a new one: `outer $ i`, `outer[1]`, `outer(1)`, `outer.x` and
+/// `outer::Int` are all plain loop variables, whereas the space-separated
+/// `outer (i, j)` and `outer [i]` are the keyword plus a destructuring pattern.
+/// So probe by parsing: `outer` is the keyword exactly when it parses as a
+/// complete expression on its own (`array_mode` supplies the spaced-opener
+/// boundary) and a pattern parses after it.
+///
+/// Returns the index the pattern starts at.
+fn is_outer_marker(ctx: &ParserCtx<'_>, idx: usize, flags: ExprFlags) -> Option<usize> {
+    if !ctx
+        .token(idx)
+        .is_some_and(|t| t.kind == TokKind::Ident && t.text == "outer")
+    {
+        return None;
+    }
+    // A separator right after is the plain form (`for outer in xs`, `for outer
+    // = xs`); checked first so the probe below never sees the iterable.
+    let next = ctx.skip_trivia(idx + 1);
+    if ctx.token(next).is_some_and(|t| {
+        t.kind == TokKind::Eq || (t.kind == TokKind::Ident && (t.text == "in" || t.text == "∈"))
+    }) {
+        return None;
+    }
+    // Speculative parses: their diagnostics belong to the caller's real parse of
+    // whichever reading wins, so they are discarded here.
+    let mut probe = Vec::new();
+    let probe_flags = ExprFlags {
+        array_mode: true,
+        ..flags
+    };
+    if parse_expr_in(ctx.tokens(), idx, COMMA_ITEM_BP, &mut probe, probe_flags)
+        .is_none_or(|lone| lone.end != idx + 1)
+    {
+        return None;
+    }
+    // No pattern after it (`for outer end`, `for outer, j in xs`) is recovery;
+    // leave those to the plain reading rather than invent an error shape.
+    let pattern_start = ctx.skip_trivia(idx + 1);
+    parse_expr_in(
+        ctx.tokens(),
+        pattern_start,
+        COMMA_ITEM_BP,
+        &mut probe,
+        flags,
+    )?;
+    Some(pattern_start)
+}
+
 /// Parse the comma-separated iteration specs of one `for` clause, starting just
 /// past the `for` keyword. Each spec is `var in iter`/`var ∈ iter` (the `in`
 /// matched as a bare identifier) or the assignment form `var = iter` (parsed
@@ -3481,30 +3536,50 @@ pub(crate) fn parse_for_specs(
 ) -> usize {
     let tokens = ctx.tokens();
     loop {
-        // The loop variable (or, for the `=` form, the whole spec assignment).
-        // `no_word_op` keeps a following `in`/`isa` as the iteration separator
-        // (handled below) rather than swallowing it as a comparison operator.
         let var_start = ctx.skip_trivia(pos);
         push_range(events, pos, var_start);
+        // `no_word_op` keeps a following `in`/`isa` as the iteration separator
+        // (handled below) rather than swallowing it as a comparison operator.
         let var_flags = ExprFlags {
             inside_brackets: bracketed,
             no_word_op: true,
             ..ExprFlags::default()
         };
-        if let Some(var) = parse_expr_in(tokens, var_start, 0, diagnostics, var_flags) {
+        // `outer` is contextual: it marks the spec as rebinding an enclosing
+        // scope's variable only when a whole pattern follows it.
+        let outer = is_outer_marker(ctx, var_start, var_flags);
+        // The loop variable (or, absent `outer`, the whole `=`-form spec as one
+        // assignment). Under `outer` the pattern parses at `COMMA_ITEM_BP` so a
+        // spec `=` stays out of it and is consumed as a separator below, giving
+        // `outer` the variable alone — JuliaSyntax nests `(= (outer i) xs)`, not
+        // `(outer (= i xs))`.
+        let (var_bp, pattern_start) = match outer {
+            Some(after_kw) => {
+                events.push(Event::Start(SyntaxKind::OUTER_BINDING));
+                events.push(Event::Tok(var_start));
+                push_range(events, var_start + 1, after_kw);
+                (COMMA_ITEM_BP, after_kw)
+            }
+            None => (0, var_start),
+        };
+        if let Some(var) = parse_expr_in(tokens, pattern_start, var_bp, diagnostics, var_flags) {
             events.extend(var.events);
             pos = var.end;
         } else {
-            pos = var_start;
+            pos = pattern_start;
+        }
+        if outer.is_some() {
+            events.push(Event::Finish); // OUTER_BINDING
         }
 
-        // `in`/`∈` form needs an explicit iterator; the `=` form is already
-        // complete (consumed above as an assignment).
+        // `in`/`∈` (and, under `outer`, `=`) separate the variable from the
+        // iterator; without `outer` the `=` form is already complete, consumed
+        // above as an assignment.
         let in_idx = ctx.skip_trivia(pos);
-        if ctx
-            .token(in_idx)
-            .is_some_and(|t| t.kind == TokKind::Ident && (t.text == "in" || t.text == "∈"))
-        {
+        if ctx.token(in_idx).is_some_and(|t| {
+            (t.kind == TokKind::Ident && (t.text == "in" || t.text == "∈"))
+                || (outer.is_some() && t.kind == TokKind::Eq)
+        }) {
             push_range(events, pos, in_idx);
             events.push(Event::Tok(in_idx));
             pos = in_idx + 1;

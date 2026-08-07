@@ -359,14 +359,20 @@ Ready now (no new infrastructure):
   iteration, is a working idiom and is reported too, because it is
   indistinguishable from `i += 1` — the attempt to steer the iteration the
   check exists for.
-- [ ] Parser gap found while landing the above: `for outer i in 1:3` is not
-  parsed. `outer` is already in `CONTEXTUAL_IDENTS` (flagged "future `for outer
-  i` support"), but the `FOR_BINDING` today takes `outer` as the whole pattern
-  and drops `i in 1:3` into the body block, where JuliaSyntax builds `(for
-  (outer (= i (call-i 1 : 3))) ...)`. Harmless for `loop-variable-shadow` as it
-  stands — the misparse binds `outer`, not `i`, so the deliberate reuse is not
-  reported — but `outer` is *the* sanctioned way to reuse an enclosing loop's
-  index, so the rule must exempt it the moment the grammar lands.
+- [x] Parser gap found while landing the above: `for outer i in 1:3` was not
+  parsed — the `FOR_BINDING` took `outer` as the whole pattern and dropped `i in
+  1:3` into the body block. A new `OUTER_BINDING` node now wraps the contextual
+  keyword and the pattern it marks, projecting `(= (outer i) (call-i 1 : 3))`
+  (JuliaSyntax nests `outer` around the *variable*, inside the `=`, not around
+  the whole spec). `outer` is the keyword only when a whole second pattern
+  follows it, which needs the precedence table rather than a token whitelist:
+  `outer $ i`, `outer.x`, `outer[1]`, `outer(1)` and `outer::Int` are plain loop
+  variables, while the space-separated `outer (i, j)` and `outer [i]` are the
+  keyword plus a destructuring pattern. `loop-variable-shadow` needed no change
+  — the binder walks `OUTER_BINDING` as an expression, so `i` resolves to the
+  enclosing loop's binding instead of declaring a fresh one, which is exactly
+  what `outer` means; covered by
+  `loop_variable_shadow_ignores_outer_rebinding`.
 
 Ready once `resolves_to_base` lands (idiom rewrites; categories per the decision
 above):
