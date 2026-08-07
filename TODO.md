@@ -282,6 +282,18 @@ Ready now (no new infrastructure):
   `(safe fix)` or `(unsafe fix, requires `--unsafe-fixes`)`. Marking *both*
   rather than only the unsafe case, since "no marker" is not something a reader
   can read as "safe". Only the four fix-carrying rule snapshots moved.
+- [x] Same vein, borrowed from `panache`: every finding now ends with `= help:
+  for further information visit https://fatou.dev/reference/rules.html#<id>`.
+  The anchor is mdBook's slug for the `## `<id>`` heading `render_rule_doc`
+  writes, so `every_rule_is_documented` is what keeps the link from 404ing.
+  Gated on `rules::is_shipped_rule` (a `LazyLock` set over `all_rule_ids`, since
+  rebuilding the boxed registry per diagnostic is not free): the `parse-error`
+  pseudo-rule rides the same channel without a reference section. Rendering
+  grew a `RenderOptions` struct rather than a fourth positional argument,
+  because `docs.rs` needs `without_rule_links` — the reference page would
+  otherwise link every example to the page it is printed on. The LSP was
+  missing the equivalent entirely: `finding_to_lsp` now sets
+  `code_description`, so clients linkify the rule code.
 - [x] `unreachable-code` (correctness, syn, warning, no fix): statements after
   an unconditional `return`/`throw`/`error`/`rethrow` in the same block. Landed
   as a whole-file pass over `RuleContext::control_flow()`, reporting the *head

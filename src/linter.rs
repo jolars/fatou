@@ -27,5 +27,5 @@ pub use diagnostic::{Applicability, Diagnostic, Fix, Severity, ViolationData};
 pub use docs::{render_reference_page, render_rule_doc};
 pub use fix::{Applied, FixOutcome, apply_fixes, fix_source};
 pub use include_graph::{IncludeProblem, IncludeProblemKind, include_problems};
-pub use render::{OutputMode, render_findings};
+pub use render::{OutputMode, RenderOptions, render_findings};
 pub use rules::{Example, ResolvedRules, Rule, RuleContext, all_rule_ids, all_rules};

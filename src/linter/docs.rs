@@ -13,13 +13,26 @@ use std::path::PathBuf;
 use crate::config::LintConfig;
 use crate::linter::check::check_source_with_target;
 use crate::linter::fix::apply_fixes;
-use crate::linter::render::{OutputMode, render_findings};
+use crate::linter::render::{OutputMode, RenderOptions, render_findings};
 use crate::linter::rules::Rule;
 
 /// The synthetic path used when linting an example snippet. The same value keys
 /// both the lint run and the `render_findings` source lookup.
 fn example_path() -> PathBuf {
     PathBuf::from("example.jl")
+}
+
+/// The published rule reference. [`render_reference_page`] writes
+/// `docs/src/reference/rules.md`, which mdBook serves from here.
+pub const RULE_REFERENCE_URL: &str = "https://fatou.dev/reference/rules.html";
+
+/// The deep link to `rule`'s section of the published reference. The anchor is
+/// mdBook's slug for the `## `<id>`` heading [`render_rule_doc`] writes, which
+/// is the ID verbatim. Only meaningful for a registry rule
+/// ([`crate::linter::rules::is_shipped_rule`]) — every one of those has a
+/// section, guaranteed by the `every_rule_is_documented` test.
+pub fn rule_doc_url(rule: &str) -> String {
+    format!("{RULE_REFERENCE_URL}#{rule}")
 }
 
 /// Render the reference *section* for a single rule: an `## `id`` heading, the
@@ -58,7 +71,8 @@ pub fn render_rule_doc(rule: &dyn Rule) -> String {
             rule.example_julia_target(),
         );
         let source = example.source.to_string();
-        let rendered = render_findings(&report.diagnostics, OutputMode::Pretty, false, &|p| {
+        let options = RenderOptions::new(OutputMode::Pretty, false).without_rule_links();
+        let rendered = render_findings(&report.diagnostics, options, &|p| {
             (p == Some(path.as_path())).then(|| source.clone())
         });
         let _ = writeln!(out);

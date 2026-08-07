@@ -52,7 +52,7 @@
 //! [`RuleContext::control_flow`], the same way.
 
 use std::cell::OnceCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
@@ -127,6 +127,19 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
 /// Used to validate `LintConfig::select` / `ignore` / `severity`.
 pub fn all_rule_ids() -> Vec<&'static str> {
     all_rules().iter().map(|r| r.id()).collect()
+}
+
+/// [`all_rule_ids`] as a set, built once. `is_shipped_rule` is on the hot path
+/// of rendering a large run's findings, so it cannot rebuild the registry (and
+/// its boxed rules) per diagnostic.
+static SHIPPED_RULE_IDS: LazyLock<BTreeSet<&'static str>> =
+    LazyLock::new(|| all_rule_ids().into_iter().collect());
+
+/// Whether `id` names a rule in the registry. False for the pseudo-rules that
+/// ride the same diagnostic channel without being registry entries — notably
+/// `parse-error`, which has no section in the generated rule reference.
+pub fn is_shipped_rule(id: &str) -> bool {
+    SHIPPED_RULE_IDS.contains(id)
 }
 
 /// The rule IDs running in a pass, after `select`/`ignore`. Lets a rule tell

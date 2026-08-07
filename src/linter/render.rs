@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 
 use crate::linter::diagnostic::{Applicability, Diagnostic, Severity};
+use crate::linter::docs::rule_doc_url;
+use crate::linter::rules::is_shipped_rule;
 use crate::text::LineIndex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,22 +23,49 @@ pub enum OutputMode {
     Json,
 }
 
-/// Render `diagnostics` in the requested mode. `source_for` returns the source
-/// text for a path so byte offsets can be turned into line/column positions
-/// (`Concise`) or drawn as source-context snippets (`Pretty`). `use_color`
-/// selects ANSI-styled versus plain snippet rendering.
+/// How to render a run's findings. `use_color` selects ANSI-styled versus plain
+/// snippet rendering; `rule_links` appends the rule's reference URL under each
+/// finding. Both only bear on `Pretty`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOptions {
+    pub mode: OutputMode,
+    pub use_color: bool,
+    pub rule_links: bool,
+}
+
+impl RenderOptions {
+    /// The CLI's rendering: rule links on, since a reader of a finding in a
+    /// terminal has nowhere else to look the rule up.
+    pub fn new(mode: OutputMode, use_color: bool) -> Self {
+        Self {
+            mode,
+            use_color,
+            rule_links: true,
+        }
+    }
+
+    /// Drop the reference URLs. For the generated rule reference itself, whose
+    /// every example would otherwise link to the page it is printed on.
+    pub fn without_rule_links(mut self) -> Self {
+        self.rule_links = false;
+        self
+    }
+}
+
+/// Render `diagnostics` per `options`. `source_for` returns the source text for
+/// a path so byte offsets can be turned into line/column positions (`Concise`)
+/// or drawn as source-context snippets (`Pretty`).
 pub fn render_findings(
     diagnostics: &[Diagnostic],
-    mode: OutputMode,
-    use_color: bool,
+    options: RenderOptions,
     source_for: &dyn Fn(Option<&Path>) -> Option<String>,
 ) -> String {
-    match mode {
+    match options.mode {
         OutputMode::Json => {
             serde_json::to_string_pretty(diagnostics).unwrap_or_else(|_| "[]".to_string())
         }
         OutputMode::Concise => render_concise(diagnostics, source_for),
-        OutputMode::Pretty => render_pretty(diagnostics, use_color, source_for),
+        OutputMode::Pretty => render_pretty(diagnostics, options, source_for),
     }
 }
 
@@ -70,10 +99,10 @@ fn render_concise(
 
 fn render_pretty(
     diagnostics: &[Diagnostic],
-    use_color: bool,
+    options: RenderOptions,
     source_for: &dyn Fn(Option<&Path>) -> Option<String>,
 ) -> String {
-    let renderer = if use_color {
+    let renderer = if options.use_color {
         Renderer::styled()
     } else {
         Renderer::plain()
@@ -125,6 +154,16 @@ fn render_pretty(
                     fix_note(fix.applicability)
                 );
             }
+            // Skipped for `parse-error` and any other pseudo-rule: the
+            // reference has a section per *registry* rule, so a link for
+            // anything else would point at an anchor that does not exist.
+            if options.rule_links && is_shipped_rule(d.rule) {
+                let _ = writeln!(
+                    out,
+                    "  = help: for further information visit {}",
+                    rule_doc_url(d.rule)
+                );
+            }
         }
     }
     out
@@ -155,6 +194,11 @@ mod tests {
     use crate::linter::diagnostic::Fix;
     use rowan::TextRange;
 
+    /// Plain `Pretty` rendering, the shape most of these tests want.
+    fn pretty() -> RenderOptions {
+        RenderOptions::new(OutputMode::Pretty, false)
+    }
+
     fn warning(start: u32, end: u32, rule: &'static str, message: &str) -> Diagnostic {
         Diagnostic::new(rule, TextRange::new(start.into(), end.into()), message)
     }
@@ -163,9 +207,7 @@ mod tests {
     fn pretty_draws_snippet_with_rule_and_source() {
         let src = "x = 1\ny = 2\n";
         let diag = warning(0, 1, "unused-binding", "`x` is never used");
-        let out = render_findings(&[diag], OutputMode::Pretty, false, &|_| {
-            Some(src.to_string())
-        });
+        let out = render_findings(&[diag], pretty(), &|_| Some(src.to_string()));
         assert!(out.contains("unused-binding"), "missing rule title:\n{out}");
         assert!(out.contains("x = 1"), "missing source line:\n{out}");
         assert!(out.contains('^'), "missing caret underline:\n{out}");
@@ -177,9 +219,7 @@ mod tests {
         let src = "a\nbb\nccc\n";
         let later = warning(5, 8, "later", "later finding");
         let earlier = warning(0, 1, "earlier", "earlier finding");
-        let out = render_findings(&[later, earlier], OutputMode::Pretty, false, &|_| {
-            Some(src.to_string())
-        });
+        let out = render_findings(&[later, earlier], pretty(), &|_| Some(src.to_string()));
         let e = out.find("earlier").expect("earlier rendered");
         let l = out.find("later").expect("later rendered");
         assert!(e < l, "diagnostics not sorted by offset:\n{out}");
@@ -191,16 +231,12 @@ mod tests {
         let diag = warning(0, 1, "rule", "msg");
         let styled = render_findings(
             std::slice::from_ref(&diag),
-            OutputMode::Pretty,
-            true,
+            RenderOptions::new(OutputMode::Pretty, true),
             &|_| Some(src.to_string()),
         );
-        let plain = render_findings(
-            std::slice::from_ref(&diag),
-            OutputMode::Pretty,
-            false,
-            &|_| Some(src.to_string()),
-        );
+        let plain = render_findings(std::slice::from_ref(&diag), pretty(), &|_| {
+            Some(src.to_string())
+        });
         assert!(
             styled.contains('\u{1b}'),
             "styled output lacks ANSI:\n{styled}"
@@ -223,12 +259,9 @@ mod tests {
     #[test]
     fn pretty_shows_fix_as_help_note() {
         let src = "x = 1\n";
-        let out = render_findings(
-            &[diag_with_fix(Applicability::Safe)],
-            OutputMode::Pretty,
-            false,
-            &|_| Some(src.to_string()),
-        );
+        let out = render_findings(&[diag_with_fix(Applicability::Safe)], pretty(), &|_| {
+            Some(src.to_string())
+        });
         assert!(
             out.contains("= help: Change `=` to `==` (safe fix)"),
             "missing fix help note:\n{out}"
@@ -238,12 +271,9 @@ mod tests {
     #[test]
     fn pretty_marks_unsafe_fix_in_help_note() {
         let src = "x = 1\n";
-        let out = render_findings(
-            &[diag_with_fix(Applicability::Unsafe)],
-            OutputMode::Pretty,
-            false,
-            &|_| Some(src.to_string()),
-        );
+        let out = render_findings(&[diag_with_fix(Applicability::Unsafe)], pretty(), &|_| {
+            Some(src.to_string())
+        });
         assert!(
             out.contains("= help: Change `=` to `==` (unsafe fix, requires `--unsafe-fixes`)"),
             "unsafe fix not marked in help note:\n{out}"
@@ -251,9 +281,51 @@ mod tests {
     }
 
     #[test]
+    fn pretty_links_a_shipped_rule_to_its_reference_section() {
+        let src = "x = 1\n";
+        let diag = warning(0, 1, "unused-binding", "`x` is never used");
+        let out = render_findings(&[diag], pretty(), &|_| Some(src.to_string()));
+        assert!(
+            out.contains(
+                "= help: for further information visit \
+                 https://fatou.dev/reference/rules.html#unused-binding"
+            ),
+            "missing rule reference link:\n{out}"
+        );
+    }
+
+    #[test]
+    fn pretty_does_not_link_a_pseudo_rule() {
+        let src = "x = 1\n";
+        let diag = warning(0, 1, crate::linter::check::PARSE_ERROR_RULE, "boom");
+        let out = render_findings(&[diag], pretty(), &|_| Some(src.to_string()));
+        assert!(
+            !out.contains("for further information"),
+            "`parse-error` has no reference section to link:\n{out}"
+        );
+    }
+
+    #[test]
+    fn without_rule_links_drops_the_reference_link() {
+        let src = "x = 1\n";
+        let diag = warning(0, 1, "unused-binding", "`x` is never used");
+        let out = render_findings(&[diag], pretty().without_rule_links(), &|_| {
+            Some(src.to_string())
+        });
+        assert!(
+            out.contains("unused-binding"),
+            "finding not rendered:\n{out}"
+        );
+        assert!(
+            !out.contains("for further information"),
+            "rule link not suppressed:\n{out}"
+        );
+    }
+
+    #[test]
     fn pretty_falls_back_when_source_missing() {
         let diag = warning(0, 1, "some-rule", "some message");
-        let out = render_findings(&[diag], OutputMode::Pretty, false, &|_| None);
+        let out = render_findings(&[diag], pretty(), &|_| None);
         assert_eq!(out, "<stdin>: warning[some-rule] some message\n");
     }
 
@@ -261,9 +333,11 @@ mod tests {
     fn concise_format_is_stable() {
         let src = "x = 1\n";
         let diag = warning(0, 1, "unused-binding", "`x` is never used");
-        let out = render_findings(&[diag], OutputMode::Concise, false, &|_| {
-            Some(src.to_string())
-        });
+        let out = render_findings(
+            &[diag],
+            RenderOptions::new(OutputMode::Concise, false),
+            &|_| Some(src.to_string()),
+        );
         assert_eq!(
             out,
             "<stdin>:1:1: warning[unused-binding] `x` is never used\n"

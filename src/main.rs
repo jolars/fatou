@@ -15,7 +15,7 @@ use fatou::debug::{
 };
 use fatou::file_discovery::ExcludeFilter;
 use fatou::formatter::{self, FormatStyle};
-use fatou::linter::{self, LintStatus, OutputMode};
+use fatou::linter::{self, LintStatus, OutputMode, RenderOptions};
 use fatou::parser::{parse, reconstruct, to_juliasyntax_sexpr};
 
 fn main() -> ExitCode {
@@ -333,9 +333,10 @@ fn run_lint(
         .iter()
         .flat_map(|report| report.diagnostics.clone())
         .collect();
-    let rendered = linter::render_findings(&diagnostics, mode, use_color, &|path| {
-        path.and_then(|p| std::fs::read_to_string(p).ok())
-    });
+    let rendered =
+        linter::render_findings(&diagnostics, RenderOptions::new(mode, use_color), &|path| {
+            path.and_then(|p| std::fs::read_to_string(p).ok())
+        });
     emit(mode, &rendered);
 
     let has_parse_errors = result
@@ -436,9 +437,10 @@ fn run_lint_fix(
         remaining.extend(file_remaining);
     }
 
-    let rendered = linter::render_findings(&remaining, mode, use_color, &|path| {
-        path.and_then(|p| std::fs::read_to_string(p).ok())
-    });
+    let rendered =
+        linter::render_findings(&remaining, RenderOptions::new(mode, use_color), &|path| {
+            path.and_then(|p| std::fs::read_to_string(p).ok())
+        });
     emit(mode, &rendered);
 
     if applied > 0 {

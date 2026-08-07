@@ -10,13 +10,17 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
-use lsp_types::{Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range};
+use lsp_types::{
+    CodeDescription, Diagnostic, DiagnosticSeverity, DiagnosticTag, NumberOrString, Range, Uri,
+};
 
 use crate::config::LintConfig;
 use crate::incremental::Analysis;
-use crate::linter::rules::ResolutionContext;
+use crate::linter::docs::rule_doc_url;
+use crate::linter::rules::{ResolutionContext, is_shipped_rule};
 use crate::linter::{self, ResolvedRules, Severity, all_rules, lint_parsed};
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
@@ -216,6 +220,13 @@ pub(crate) fn finding_to_lsp(
         ),
         severity: Some(severity_to_lsp(finding.severity)),
         code: Some(NumberOrString::String(finding.rule.to_string())),
+        // Turns the rule code into a link to its reference section in clients
+        // that support it. Only for registry rules: `parse-error` and friends
+        // have no section to point at.
+        code_description: is_shipped_rule(finding.rule)
+            .then(|| Uri::from_str(&rule_doc_url(finding.rule)).ok())
+            .flatten()
+            .map(|href| CodeDescription { href }),
         source: Some("fatou".to_string()),
         message: finding.message.body.clone(),
         tags,
@@ -258,6 +269,22 @@ mod tests {
             "the diagnostic must cover `tmp`"
         );
         assert!(diag.message.contains("tmp"));
+    }
+
+    #[test]
+    fn a_finding_carries_a_link_to_its_reference_section() {
+        let diags = compute_lint_diagnostics(UNUSED_LOCAL, PositionEncoding::Utf16);
+        let href = diags[0]
+            .code_description
+            .as_ref()
+            .expect("finding should carry a code description")
+            .href
+            .as_str()
+            .to_string();
+        assert_eq!(
+            href,
+            "https://fatou.dev/reference/rules.html#unused-binding"
+        );
     }
 
     #[test]
