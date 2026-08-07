@@ -2,7 +2,7 @@
 //! and the non-triggering cases that guard against false positives.
 
 use fatou::config::{DiscouragedFunctionConfig, LintConfig, RulesConfig};
-use fatou::linter::{Severity, check_source};
+use fatou::linter::{Applicability, Severity, check_source};
 
 /// Lint `src` with only `rule` enabled and return the messages it produced, in
 /// source order.
@@ -4048,6 +4048,147 @@ fn loop_variable_shadow_honors_suppression() {
     let report = check_source(
         None,
         "for i in 1:3\n    # fatou-ignore loop-variable-shadow\n    for i in 1:2\n        f(i)\n    end\nend\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}
+
+// --- typeof-comparison -----------------------------------------------------
+
+/// The single diagnostic `typeof-comparison` reports for `src`, or `None`.
+fn typeof_diag(src: &str) -> Option<fatou::linter::Diagnostic> {
+    let config = LintConfig {
+        select: Some(vec!["typeof-comparison".to_string()]),
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.rule == "typeof-comparison")
+}
+
+#[test]
+fn typeof_comparison_flags_both_operators_and_both_orders() {
+    for src in [
+        "typeof(x) == Int\n",
+        "typeof(x) != Int\n",
+        "Int == typeof(x)\n",
+        "Int != typeof(x)\n",
+    ] {
+        assert_eq!(count("typeof-comparison", src), 1, "no finding for {src:?}");
+    }
+}
+
+#[test]
+fn typeof_comparison_spans_the_whole_comparison() {
+    let src = "if typeof(x) == Int\n    1\nend\n";
+    let diag = typeof_diag(src).expect("expected a finding");
+    assert_eq!(&src[diag.range], "typeof(x) == Int");
+}
+
+#[test]
+fn typeof_comparison_ignores_the_deliberate_exact_tests() {
+    for src in [
+        // `===`/`!==` are the spelling for exact-type identity.
+        "typeof(x) === Int\n",
+        "typeof(x) !== Int\n",
+        // Broadcast comparison over a container is a different question.
+        "typeof(x) .== Int\n",
+        // Comparing two dynamic types has no `isa` spelling at all.
+        "typeof(a) == typeof(b)\n",
+        // A chain folds into a `COMPARISON_EXPR`, not a `BINARY_EXPR`.
+        "a < typeof(x) == Int\n",
+        // Already idiomatic.
+        "x isa Int\n",
+        // Not a comparison against a `typeof` call.
+        "sizeof(x) == 8\n",
+    ] {
+        assert_eq!(
+            count("typeof-comparison", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn typeof_comparison_ignores_an_unconfirmed_typeof() {
+    for src in [
+        // A local shadow: the callee is not Base's `typeof`.
+        "function f(typeof)\n    typeof(x) == Int\nend\n",
+        // A qualified callee spells a different name.
+        "Base.typeof(x) == Int\n",
+        // A file whose `using` cannot be resolved answers nothing about names.
+        "using NotAPackageAnyoneHas\ntypeof(x) == Int\n",
+    ] {
+        assert_eq!(
+            count("typeof-comparison", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn typeof_comparison_ignores_a_call_that_is_not_base_arity() {
+    for src in [
+        "typeof(xs...) == Int\n",
+        "typeof(x; y = 1) == Int\n",
+        "typeof() == Int\n",
+    ] {
+        assert_eq!(
+            count("typeof-comparison", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn typeof_comparison_offers_an_unsafe_isa_rewrite() {
+    let diag = typeof_diag("typeof(x) == Int\n").expect("expected a finding");
+    assert_eq!(diag.fixes.len(), 1);
+    assert_eq!(diag.fixes[0].content, "x isa Int");
+    assert_eq!(diag.fixes[0].applicability, Applicability::Unsafe);
+
+    let diag = typeof_diag("typeof(x) != Int\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "!(x isa Int)");
+}
+
+#[test]
+fn typeof_comparison_withholds_the_fix_on_a_loose_binding_operand() {
+    // Splicing `a ? b : c` in as `isa`'s left operand would rebind the `:`
+    // arm, so the finding ships without a fix.
+    let diag = typeof_diag("typeof(a ? b : c) == Int\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+    // A macro call slurps the rest of the line.
+    let diag = typeof_diag("typeof(@f x) == Int\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+}
+
+#[test]
+fn typeof_comparison_withholds_the_fix_around_a_comment() {
+    let diag = typeof_diag("typeof(x) == #= t =# Int\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+}
+
+#[test]
+fn typeof_comparison_fixes_a_field_access_and_a_nested_call() {
+    let diag = typeof_diag("typeof(a.b) == Int\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "a.b isa Int");
+    let diag = typeof_diag("typeof(f(y)) == Union{Int, Float64}\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "f(y) isa Union{Int, Float64}");
+}
+
+#[test]
+fn typeof_comparison_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["typeof-comparison".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "# fatou-ignore typeof-comparison\ntypeof(x) == Int\n",
         &config,
     );
     assert!(report.diagnostics.is_empty());

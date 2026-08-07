@@ -122,6 +122,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::LoopVariableShadow),
         Box::new(suspicious::IndexFromLength),
         Box::new(suspicious::DiscouragedFunction),
+        Box::new(suspicious::TypeofComparison),
     ]
 }
 

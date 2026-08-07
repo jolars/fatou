@@ -388,12 +388,26 @@ Ready now (no new infrastructure):
 Ready once `resolves_to_base` lands (idiom rewrites; categories per the decision
 above):
 
-- [ ] `typeof-comparison` (suspicious, syn + res, warning, unsafe fix):
+- [x] `typeof-comparison` (suspicious, syn + res, warning, unsafe fix):
   `typeof(x) == Int` should be `x isa Int` — the `==` form silently misses
   subtypes, which is a likely bug rather than an idiom, so this one stays
   `suspicious`. Also `typeof(x) != T` and the mirrored literal-first spellings.
   Unsafe because a caller may genuinely want exact-type identity. (arity
-  `class-equals`)
+  `class-equals`) Landed as a `BINARY_EXPR` rule spanning the whole comparison,
+  matching `plain_call(_, "typeof", 1)` on either operand and gating on
+  `resolves_to_base`. Four shapes are left alone: `===`/`!==` (the deliberate
+  exact-type spelling), the broadcast `.==`/`.!=`, a comparison chain (which
+  folds into a `COMPARISON_EXPR`, so it never reaches the check), and
+  `typeof(a) == typeof(b)`, which compares two runtime types and has no `isa`
+  rewrite. The fix replaces the whole comparison with `x isa T` (`!(x isa T)`
+  for `!=`), built from the operands' own source text; it is withheld — the
+  finding still stands — when a comment sits in the replaced span, or when
+  `typeof`'s argument binds more loosely than `isa` (`typeof(a ? b : c)`,
+  `typeof(@f x)`), since splicing it in as `isa`'s left operand would rebind.
+  The whitelist of splice-safe operands accepts `BINARY_EXPR` only for field
+  access (`a.b`): deciding the rest needs the parser's precedence table, which
+  the CST does not expose. The *other* operand needs no such check, being
+  already an operand of a comparison-tier `==`.
 - [ ] `length-zero` (readability, syn + res, warning, safe fix): `length(x) ==
   0` is `isempty(x)`, `length(x) > 0` is `!isempty(x)`; the `>= 1`/`!= 0`/
   `<= 0`/`< 1` spellings collapse the same way. **First `readability` rule —

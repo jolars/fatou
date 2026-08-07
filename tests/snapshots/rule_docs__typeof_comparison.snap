@@ -1,0 +1,28 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `typeof-comparison`
+
+Flag `typeof(x) == T` / `typeof(x) != T` (in either operand order), which tests for the *exact* type and so answers `false` for every subtype of `T` — `typeof(x) == Integer` is `false` for every integer, since `typeof` returns the concrete `Int64`. Use `x isa T`, the subtype test.
+
+The already-correct `===` / `!==`, the broadcast `.==` / `.!=`, and a comparison chain are left alone, as is `typeof(a) == typeof(b)`, which compares two runtime types and has no `isa` spelling. The callee must be confirmed to be Base's `typeof`, so a local shadow, a qualified `Base.typeof`, or a file whose imports cannot be resolved reports nothing.
+
+The rule reports an unsafe fix rewriting the comparison to `x isa T` (`!(x isa T)` for `!=`): widening the exact-type test to the subtype tree is the intent, but it is still a change in behavior, and a caller may genuinely want exact-type identity. The fix is withheld — the finding still stands — when a comment sits inside the rewritten span, or when `typeof`'s argument binds more loosely than `isa` and so cannot be spliced in without parentheses.
+
+`typeof(x) == Integer` is `false` for every integer:
+
+```julia
+if typeof(x) == Integer
+    1
+end
+```
+
+```text
+warning: typeof-comparison
+ --> example.jl:1:4
+  |
+1 | if typeof(x) == Integer
+  |    ^^^^^^^^^^^^^^^^^^^^ `typeof(x) == T` matches only the exact type; use `x isa T`, which includes subtypes
+  = help: Rewrite as an `isa` test (unsafe fix, requires `--unsafe-fixes`)
+```

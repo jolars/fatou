@@ -148,3 +148,33 @@ fn withholds_index_from_length_fix_by_default() {
     assert_eq!(outcome.applied, 0);
     assert_eq!(outcome.remaining.len(), 1);
 }
+
+/// `typeof-comparison` rewrites the whole comparison to an `isa` test, but only
+/// under `--unsafe-fixes`: it widens an exact-type test to the subtype tree.
+/// Both operand orders and both operators converge in one pass.
+#[test]
+fn fixes_every_typeof_comparison_under_unsafe() {
+    let src = "\
+a = typeof(x) == Int
+b = typeof(y.field) != Union{Int, Float64}
+c = String == typeof(f(z))
+";
+    let outcome = fix_source(None, src, &select("typeof-comparison"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = x isa Int
+    b = !(y.field isa Union{Int, Float64})
+    c = f(z) isa String
+    ");
+    assert_eq!(outcome.applied, 3);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, `typeof-comparison` reports but changes nothing.
+#[test]
+fn withholds_typeof_comparison_fix_by_default() {
+    let src = "a = typeof(x) == Int\n";
+    let outcome = fix_source(None, src, &select("typeof-comparison"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}
