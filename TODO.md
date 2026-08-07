@@ -338,11 +338,35 @@ Ready now (no new infrastructure):
   neither a conditional's branches nor a function body — and definitions under
   a macro call are skipped outright, since a macro may rewrite the signature it
   is handed. Only the second and later definitions are reported.
-- [ ] `loop-variable-shadow` (suspicious, sem, warning, no fix): a nested `for`
+- [x] `loop-variable-shadow` (suspicious, sem, warning, no fix): a nested `for`
   reusing the enclosing loop's index variable (`for i in a; for i in b`), and
   assigning to the loop variable inside its own body. Both are near-always bugs
   and both are pure scope questions the model already answers. From arity's
-  planned `for-loop-index`/`for-loop-dup-index`.
+  planned `for-loop-index`/`for-loop-dup-index`. Landed as a whole-file pass
+  over the bindings: every `ForVar` in a `ScopeKind::For` scope is asked whether
+  an enclosing loop scope binds the same name, and whether any of its
+  occurrences writes it. Both loops must be statement `for`s — a comprehension
+  or generator clause is left alone in either position, since reusing a short
+  name there is idiomatic — and the walk up the scope chain stops at a function
+  body and at a global scope, so a nested definition, a closure, and a `do`
+  block are separate units of code. Every other intervening scope (`while`,
+  `try`/`catch`/`finally`, `let`, another `for`) is straight-line control flow
+  inside the outer loop, so the walk passes through it; `for i in a, i in b`
+  falls out of the same walk, since a clause list chains loop scopes. Only an
+  enclosing *loop* variable counts: shadowing a plain local or a parameter is
+  what `for` always does. Known noise on the assignment half: `for x in xs; x =
+  strip(x)`, rebinding the element to a normalized form for the rest of the
+  iteration, is a working idiom and is reported too, because it is
+  indistinguishable from `i += 1` — the attempt to steer the iteration the
+  check exists for.
+- [ ] Parser gap found while landing the above: `for outer i in 1:3` is not
+  parsed. `outer` is already in `CONTEXTUAL_IDENTS` (flagged "future `for outer
+  i` support"), but the `FOR_BINDING` today takes `outer` as the whole pattern
+  and drops `i in 1:3` into the body block, where JuliaSyntax builds `(for
+  (outer (= i (call-i 1 : 3))) ...)`. Harmless for `loop-variable-shadow` as it
+  stands — the misparse binds `outer`, not `i`, so the deliberate reuse is not
+  reported — but `outer` is *the* sanctioned way to reuse an enclosing loop's
+  index, so the rule must exempt it the moment the grammar lands.
 
 Ready once `resolves_to_base` lands (idiom rewrites; categories per the decision
 above):

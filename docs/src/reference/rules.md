@@ -679,6 +679,47 @@ warning: module-shadows-parent
   |        ^ module `A` has the same name as its parent module
 ```
 
+## `loop-variable-shadow`
+
+Flag a `for` loop whose index variable is already an enclosing `for` loop's index, and an assignment to a loop variable inside its own loop. The nested `for` binds a fresh variable, so the outer index is unreachable inside it — usually a copy-pasted inner loop whose index was never renamed. An assignment to a loop variable is discarded at the next iteration, since `for` rebinds the variable from the iterator on every pass, so it can never steer the iteration. Comprehension and generator clauses are left alone, as is reuse across a function body, a closure, or a `do` block. No fix: renaming an index or dropping an assignment changes what the body computes.
+
+A nested loop reusing the enclosing loop's index:
+
+```julia
+for i in 1:3
+    for i in 1:2
+        println(i)
+    end
+end
+```
+
+```text
+warning: loop-variable-shadow
+ --> example.jl:2:9
+  |
+2 |     for i in 1:2
+  |         ^ loop variable `i` shadows the enclosing loop's variable
+```
+
+An assignment the next iteration discards:
+
+```julia
+for i in 1:10
+    if isodd(i)
+        i += 1
+    end
+    println(i)
+end
+```
+
+```text
+warning: loop-variable-shadow
+ --> example.jl:3:9
+  |
+3 |         i += 1
+  |         ^ assignment to loop variable `i` is discarded at the next iteration
+```
+
 ## `index-from-length`
 
 Flag two suspect `for`-loop iteration specs. First, `for i in 1:length(x)` (or `1:size(x, d)`) where the loop variable then indexes `x`: prefer `eachindex(x)` (or `axes(x, d)`), which stays correct for collections whose indices are not one-based. The match is name-based — any `length`/`size` call counts — and, lacking type information to exempt collections that really are one-based like `Vector`, the rule is opinionated, so it only fires when the loop variable actually indexes the collection. The first shape carries an unsafe fix rewriting the `1:length`/`1:size` prefix to `eachindex`/`axes`: the rewrite is only value-equivalent when the collection's indices are one-based and dense, which cannot be proven without type information, so it needs `--unsafe-fixes`. Second, `for i in 3.5`: iterating a bare numeric literal runs the loop body once and is almost always a mistaken range; no fix, since the intended range is unknowable.

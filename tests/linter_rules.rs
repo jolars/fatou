@@ -3827,3 +3827,198 @@ fn duplicate_method_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- loop-variable-shadow --------------------------------------------------
+
+#[test]
+fn loop_variable_shadow_flags_nested_reuse() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    for i in 1:2\n        f(i)\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn loop_variable_shadow_flags_reuse_through_soft_scopes() {
+    // `while`/`try` scope but do not separate the two loops.
+    for src in [
+        "for i in 1:3\n    while c\n        for i in 1:2\n            f(i)\n        end\n    end\nend\n",
+        "for i in 1:3\n    try\n        for i in 1:2\n            f(i)\n        end\n    catch\n    end\nend\n",
+        "for i in 1:3\n    let t = 1\n        for i in 1:2\n            f(i, t)\n        end\n    end\nend\n",
+    ] {
+        assert_eq!(
+            count("loop-variable-shadow", src),
+            1,
+            "expected a finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn loop_variable_shadow_flags_repeated_clause_in_one_for() {
+    // `for i in a, i in b` chains two loop scopes, the second shadowing the
+    // first, so the outer index is unreachable in the body.
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in a, i in b\n    f(i)\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn loop_variable_shadow_flags_destructured_reuse() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for (k, v) in d\n    for (k, w) in e\n        f(k, v, w)\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn loop_variable_shadow_flags_assignment_to_the_loop_variable() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    i = 0\n    f(i)\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn loop_variable_shadow_flags_augmented_assignment() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    i += 1\n    f(i)\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn loop_variable_shadow_flags_assignment_to_a_destructured_variable() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for (k, v) in d\n    v = 0\n    f(k, v)\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn loop_variable_shadow_reports_both_defects_independently() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    for i in 1:2\n        i = 0\n        f(i)\n    end\nend\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn loop_variable_shadow_ignores_distinct_names() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    for j in 1:2\n        f(i, j)\n    end\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn loop_variable_shadow_ignores_sibling_loops() {
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    f(i)\nend\nfor i in 1:2\n    g(i)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn loop_variable_shadow_ignores_reuse_across_a_function_body() {
+    // A nested definition, a closure, and a `do` block are separate units of
+    // code; their textual nesting inside the loop is incidental.
+    for src in [
+        "for i in 1:3\n    function g()\n        for i in 1:2\n            f(i)\n        end\n    end\n    g()\nend\n",
+        "for i in 1:3\n    h = () -> begin\n        for i in 1:2\n            f(i)\n        end\n    end\n    h()\nend\n",
+        "for i in 1:3\n    map(xs) do x\n        for i in 1:2\n            f(i, x)\n        end\n    end\nend\n",
+    ] {
+        assert_eq!(
+            count("loop-variable-shadow", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn loop_variable_shadow_ignores_non_loop_outer_bindings() {
+    // Shadowing a plain local or a parameter is `for`'s normal behavior, not
+    // the nested-index bug this rule is about.
+    for src in [
+        "function f(i)\n    for i in 1:3\n        g(i)\n    end\nend\n",
+        "function f()\n    i = 0\n    for i in 1:3\n        g(i)\n    end\nend\n",
+        "for i in [x for i in 1:2]\n    f(i)\nend\n",
+    ] {
+        assert_eq!(
+            count("loop-variable-shadow", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn loop_variable_shadow_ignores_comprehension_variables() {
+    // A comprehension's clause variable is scoped to the comprehension and
+    // reusing a name there is idiomatic; only statement `for`s are in scope.
+    assert_eq!(
+        count(
+            "loop-variable-shadow",
+            "for i in 1:3\n    xs = [i for i in 1:2]\n    f(xs)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn loop_variable_shadow_ignores_reads_and_other_writes() {
+    for src in [
+        "for i in 1:3\n    j = i\n    f(j)\nend\n",
+        "for i in 1:3\n    xs[i] = 0\nend\n",
+        "for i in 1:3\n    f(i = 1)\nend\n",
+    ] {
+        assert_eq!(
+            count("loop-variable-shadow", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn loop_variable_shadow_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["loop-variable-shadow".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "for i in 1:3\n    # fatou-ignore loop-variable-shadow\n    for i in 1:2\n        f(i)\n    end\nend\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}
