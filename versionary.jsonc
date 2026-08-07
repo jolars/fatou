@@ -16,12 +16,12 @@
         {
           "type": "json",
           "path": "npm/fatou-cli/package.json",
-          "jsonpath": "$.version"
+          "field-path": "$.version"
         },
         {
           "type": "json",
           "path": "npm/fatou-cli/package.json",
-          "jsonpath": "$.optionalDependencies.*"
+          "field-path": "$.optionalDependencies.*"
         }
       ]
     },
