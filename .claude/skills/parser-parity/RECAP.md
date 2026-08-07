@@ -1,140 +1,131 @@
 # parser-parity recap
 
-Rolling log. Read top-to-bottom: persistent traps → progress → latest session →
-earlier log. Keep ≤ ~300 lines; demote the "Latest session" to a one-liner in the
-"Earlier sessions" list each new session.
+Rolling log. Read top-to-bottom: handovers → traps → progress → deferred ledger →
+latest session → earlier sessions. **Cap: ~300 lines.** Each session adds one
+full "Latest session" section, demotes the previous one to a one-liner under
+"Earlier sessions", and trims the tail to stay under the cap. Detail below the
+one-liner level lives in `git log` and `TODO.md`, not here.
 
-## Queued next targets
+## Queued handovers
 
-**Handoff to formatter (2026-07-07): splat after a closing bracket is fixed.**
-`f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`, plus the
-sibling operands `f(2...)` and `f("a"...)`, all parse as `SPLAT_EXPR` ⇒
-`(... operand)`, byte-identical to JuliaSyntax. The formatter can now drop the
-`ends_in_bracket` guard in `lower_splat` (`crates/fatou-formatter/src/formatter/rules.rs` ~line 651) and
-widen `splat_spacing/` to cover call/index/paren/curly/collection operands.
+**To the formatter skill** (parser side landed; formatter may not have consumed
+them yet):
 
-**Handoff to formatter (2026-07-06b): multi-binding `let` now wraps every
-binding.** `let a = 1, b = 2, c = 3` used to leave `b = 2`/`c = 3` as flat
-unwrapped `IDENT`/`EQ`/`INTEGER` tokens under `LET_BINDINGS` (only the first was
-an `ASSIGNMENT_EXPR`); now **each** comma-separated binding is its own node
-(`ASSIGNMENT_EXPR`, or a bare `NAME`, or a destructuring tuple), with the `,`
-separators kept loose. The formatter's width-driven let-binding-list reflow can
-now iterate `LET_BINDINGS.children()` cleanly instead of routing around flat-token
-soup. `let x = 1 end` trailing whitespace now attaches to the block, not the
-binding list (benign trivia move).
+- **2026-07-07** — splat after a closing bracket works (`f(g(x)...)`, `f(a[i]...)`,
+  `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`, `f(2...)`, `f("a"...)` all
+  `SPLAT_EXPR` ⇒ `(... operand)`). Drop `lower_splat`'s `ends_in_bracket` guard
+  and widen `splat_spacing/`.
+- **2026-07-06b** — multi-binding `let` wraps every binding in its own node, so
+  the width-driven reflow can iterate `LET_BINDINGS.children()` instead of flat
+  tokens.
+- **2026-07-05** — braces comprehension `{a\nfor b in c}` parses, so the exploded
+  too-wide form reparses cleanly; widen the braces case of
+  `comprehension_index_break/`.
+- **2026-07-05b** — `<--`/`.<--`/`.<-->` lex as arrow-tier tokens;
+  `arrow_pair_chain/` may include `<--` (`binary_prec_class` already updated).
+- **2026-06-26** — left-division `\` is a normal spaced binop (`A\b` → `A \ b`,
+  no `is_tight_binop` entry); spacing fixture available.
+- **2026-06-29** — `global a, b = 1, 2` nests properly, so the existing
+  keyword-stmt → `lower_binary` path should format it for free.
 
-**Handoff to formatter (2026-07-05): the braces-comprehension parser gap is
-fixed** — `{a\nfor b in c}` now parses as `BRACES_COMPREHENSION` ⇒
-`(braces (generator a (= b c)))`, so the formatter's exploded output for a
-too-wide braces comprehension reparses cleanly (the latent stability violation
-is gone). Widen the braces case of the formatter's `comprehension_index_break/`
-fixture so it explodes like the `[…]` cases (it was kept narrow to stay flat,
-with a comment pointing at this gap).
-
-**Handoff to formatter (2026-07-05b): the `<--` lexer gap is fixed** — `a <-- b`
-now lexes as one arrow-tier token (`(call-i a <-- b)`), with broadcast
-`.<--`/`.<-->` (`dotcall-i`). `binary_prec_class`'s arrow tier already gained
-the three new kinds (done in this session, formatter tests green), so
-`arrow_pair_chain/` can stop routing around `<--` and include it in the mixed
-arrow-tier chain fixture if desired.
-
-**No specific parser target queued** beyond the above. The formerly-queued whitespace-before-arglist
-item (`f (a)`/`a [1]`/`A {T}`/`f(a) (b)`) was **already resolved** by the 2026-06-22r
-machinery: Fatou splices a zero-width `(error-t)` between base and `ARG_LIST`, projecting
-`(call f (error-t) a)` etc.—byte-identical to JuliaSyntax on all four (verified 2026-07-03;
-the `postfix_space_error` fixture already covers `f (a)`/`a [i]`/`S {a}`/`f. (x)`). The
-RECAP's "too permissive, parses cleanly" premise was stale. Next parser work is
-real-world-value constructs not in either corpus (batch-probe common Julia against the
-JuliaSyntax oracle to surface a divergence, as 2026-07-03 did).
-
-**Handoff to formatter (2026-06-29b):** one-line space-separated `for`
-bodies now parse into the loop `BLOCK` (`for i in 1:3 x += i end` ⇒ `(for (= i
-(call-i 1 : 3)) (block (+= x i)))`), so the one-line `for` body explodes just
-like the one-line `while` body. Formatter's `lower_loop` no longer needs
-to route around it; the same-line-body for-loop is now safe to use as a fixture
-(`in`/`=`/comma/cartesian all work). Caveat: `for i ∈ xs …` still projects the
-binding as `(call-i i ∈ xs)` not `(= i xs)` (pre-existing; `∈` is a symbol
-operator, not normalized to `=` in the for-binding—same divergence in generators
-and multi-line, unrelated to body separation).
-
-**Handoff to formatter (2026-06-29):** `global`/`local` + multiple
-assignment now nests properly (`global a, b = 1, 2` ⇒ `(global (= (tuple a b)
-(tuple 1 2)))`, `local a, b = f(x), g(y)` wraps the calls, `global a, b::Int` ⇒
-`(global a (::-i b Int))`). The formatter's *existing* rules (keyword-stmt
-single-operand arm → `lower_binary` `=` → recursed `BARE_TUPLE_EXPR`/`CALL_EXPR`)
-should now handle `global a,b=1,2` → `global a, b = 1, 2` for free—formatter
-ranked target #0 is unblocked.
-
-**Handoff to formatter (2026-06-26):** left-division `\` now parses as a
-normal infix binop (`a \ b` ⇒ `(call-i a \ b)`), so formatter can add the
-spacing fixture (`A\b` → `A \ b`; `\` is a normal spaced binop, no `is_tight_binop`
-entry). Broadcast `.\` and assignment `\=`/`.\=` also landed.
-
-**No specific parser target queued.** The JS harvested backlog is exhausted of
-fixable cases (8 remaining FAILs all permanent/out-of-scope: float display ×6,
-`(2)(3)x` juxtaposition, `x 'y` char-lexer). Next parser work is real-world-value
-constructs not in the corpus, or the float-display `show` problem. *Deferred
-sibling of the 2026-06-26b fix:* the **suffixed**-unary-operator prefix arm
-(`+₁ x`, `parse_prefix` ~line 1518) still consumes its operand across a newline;
-same `newline_significant` gate would fix it, but it's a far rarer construct (not
-in either corpus).
+**Parser targets**: none queued. Per `SKILL.md`, find one by probing real Julia,
+or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Persistent traps & invariants
 
 - **Projector is faithful, never compensating.** Translate encoding (wrappers,
-  delimiters, trivia) only; let modeling divergences surface. Diffs that live
-  mostly in `sexpr.rs` are a smell. **Amended (2026-06-23i):** the projector now
-  also *reconstructs error shapes* (`(error)`/`(error-t)`/`✘`) from the
-  **diagnostics side-channel** (`ParseOutput.diagnostics`, keyed by byte
-  position)—we adopted the rust-analyzer model (missing = absence + diagnostic,
-  no zero-width CST marker nodes). The bright line is narrower now: reading
-  *recorded* diagnostics to replay an error shape is OK; inventing structure to
-  paper over a wrong CST topology is still forbidden. A non-error divergence that
-  lives mostly in `sexpr.rs` is still a smell.
+  delimiters, trivia) only; let modeling divergences surface. **Amended
+  (2026-06-23i):** the projector also *reconstructs error shapes*
+  (`(error)`/`(error-t)`/`✘`) from the **diagnostics side-channel**
+  (`ParseOutput.diagnostics`, keyed by byte position) — the rust-analyzer model
+  (missing = absence + diagnostic, no zero-width CST marker nodes). Replaying a
+  *recorded* diagnostic is OK; inventing structure to paper over a wrong CST
+  topology is not. A non-error divergence living mostly in `sexpr.rs` is a smell.
 - **Error recovery is a side-channel, not a tree node.** `DiagnosticKind`
-  (`diagnostics.rs`) classifies every recovery; the projector's
-  `diag_at`/`diag_count_from`/`is_recovery_error` helpers (in `sexpr.rs`) look
-  diagnostics
-  up by byte anchor. Zero-width markers carry **no** node (anchor = a byte point or
-  the construct's opening keyword); byte-bearing recovery (`StrayCloser`,
-  `TrailingJunk`, `ImportRecoveryColon`) is a real `ERROR` node the projector
-  renders with the `(error-t …)` head via `is_recovery_error`. The only CST error
-  kind is `ERROR` (`ERROR_TRIVIA` is **deleted**).
+  (`diagnostics.rs`) classifies every recovery; `diag_at`/`diag_count_from`/
+  `is_recovery_error` (in `sexpr.rs`) look them up by byte anchor. Zero-width
+  markers carry **no** node (anchor = a byte point or the construct's opening
+  keyword); byte-bearing recovery (`StrayCloser`, `TrailingJunk`,
+  `ImportRecoveryColon`) is a real `ERROR` node rendered with the `(error-t …)`
+  head. The only CST error kind is `ERROR` (`ERROR_TRIVIA` is **deleted**).
 - **5-file operator recipe**: lexer `TokKind`+lex → `syntax.rs` kind →
   `tree_builder.rs` map → `expr.rs` `infix_binding_power` → `sexpr.rs`
   `infix_head` + `is_operator`. Probe Julia for tier/associativity first.
+- **A shape change can break the formatter** with every parser test green — run
+  `cargo test --workspace`, and move the formatter rule to the new shape rather
+  than reverting the parser.
+- **A contextual keyword needs a speculative parse, not a token whitelist.**
+  `outer` is the keyword only when a whole pattern follows; a whitelist regressed
+  the allowlisted `dollar_infix_operator` fixture (`for outer $ i = 1:3`).
 - **Probe whitespace-sensitive siblings** before scoping (`a[begin]` vs
-  `[begin x end]`; `:foo` vs `a[:]`). Scope narrowly to avoid regressing one.
+  `[begin x end]`; `:foo` vs `a[:]`; `A'` vs `A '`; `[1 +2]` vs `[1 + 2]`).
+- **A/B before calling a diff a regression.** Stash and re-run: most surprising
+  diffs on real code are pre-existing error shapes.
 - **Reseed allowlists with the `grep -E '^#|^$'` header-preserving recipe.**
-- **Reports are gitignored; `expected.sexpr` is generated**—never hand-edit.
-- **Shell `raw"""…"""` Julia probes break on `"`/`$`**—use a temp file.
+- **Reports are gitignored and untracked** (force-added once, untracked again in
+  2026-08-07c); `expected.sexpr` is generated — never hand-edit.
+- **Shell `raw"""…"""` Julia probes break on `"`/`$`** — use a temp file.
 - **Corpus pinned** to JuliaSyntax in `.juliasyntax-source` (currently
   0.4.10/Julia 1.12.6). Bump ⇒ re-run both `scripts/*.jl`, re-triage.
 
 ## Progress
 
-JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
+JS corpus (**685 cases**, error shapes included): **677 allowlisted**,
 8 divergence, 0 unsupported. Dir corpus (**249 cases**): **248 allowlisted**,
-1 blocked (numeric_literals; FAIL not skip since `render` is total).
-Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
-marker nodes** (2026-06-23i refactor)—same projected output, so counts
-unchanged. `TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA`
-mechanism (historical log); the *output shapes* they cite are still correct.
+1 blocked (`numeric_literals`; FAIL not skip since `render` is total). Both are
+exhausted of fixable cases — a green report means "no regression", not "nothing
+to do". Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`;
+its error-shape bullets still describe the pre-2026-06-23i `ERROR_TRIVIA`
+mechanism (historical), though the output shapes they cite remain correct.
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
-fix" list was mostly mislabeled for a linter/LSP. All three correctable items are
-now fixed: `&&`/`||` associativity was a *bug* (C1); comparison chains were a
-faithfulness gap (C3); arithmetic `+`/`*` flattening (C2). The ledger now
-collapses to essentially **float**-literal display normalization (`2.`/`1f0`/hex
-floats/`1.0e-1000`; needs Julia's `show`)—the lone genuinely permanent
-divergence. Still recorded/deferred (not "deliberate modeling", just unimplemented
-or out of scope): n-ary juxtaposition `(2)(3)x` (the `(2)(3)`→`(call 2 3)`
-misparse, out of scope); `end`/`[1 +2]`/unterminated-string error shapes; word-op
-chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
-stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
-executed.
+fix" list was mostly mislabeled for a linter/LSP. All three correctable items
+were fixed — `&&`/`||` associativity (a *bug*, C1), comparison chains (C3),
+arithmetic `+`/`*` flattening (C2). What remains genuinely permanent is float
+display. Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully executed.
 
-## Latest session (2026-08-07c—`∈` as the iteration separator)
+## Deferred ledger
+
+Permanent (never "fix"): **float-literal display** (`2.`/`1f0`/hex floats/
+`1.0e-1000`/`x.3` — needs Julia's `show`); **n-ary juxtaposition** `(2)(3)x`;
+**`x 'y`** char lexing (needs bracket-depth-aware `'`). These are the 8 remaining
+JS FAILs.
+
+Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
+mixed `a < b isa c` stay nested (separate `word_operator` branch).
+
+Unimplemented, ranked roughly by real-world value:
+
+- `x.function` — a reserved keyword as a field name after `)`.
+- `end` inside a nested `[…]` within an index (`df[[1; 2; end:-1:3], :]`).
+- `primitive type T (18 * 8) end` — the size expr is a spaced group, not a call.
+- `function ⊑ end` — bare method declaration named by a Unicode operator.
+- Spaced non-unary operator: `* (a, b)`/`≠ (a, b)` ⇒ `(call-pre (error *) …)` vs
+  Julia's `(call op (error-t) a b)`. Dotted unary `.±`; suffixed `±₁ x`.
+- Suffixed-unary prefix arm still consumes its operand across a newline (the
+  2026-06-26b fix's sibling; rarer, in neither corpus).
+- `$=`; bare broadcast shifts `.<<`/`.>>`/`.>>>`.
+- Matrix continuation whose establishing space lives in an *outer* group
+  (`[a b ;;; c ;; \n d]`) — projection-only, low priority.
+- One formatter idempotency drift in DataFrames' `src/dataframe/dataframe.jl`.
+
+Error shapes, deferred (in scope, just low-value — see `SKILL.md`'s ranking):
+`for i ∈ a ∈ b`/`for i in a in b` (Julia parses the iterable below comparison
+precedence); toplevel `const x = 1 for i in 1:1`; `@m const x = 1 for … end`
+macro space-arg; `else #= c =# if x`; trailing comma at EOF (`x = a,`);
+`2macro` trailing-junk glyph drop; `@M.(x) y` (macro args after a broadcast);
+leading empty comma slot `[,x]`; for/let/module/struct/try/do block junk (sibling
+`ERROR` is in the CST but those projectors don't emit it); `outer x=1`
+stop-at-`=`; bare `struct` keyword; `begin`/`while` empty body (`while end`
+recovers differently: `(while (error end) (block (error)) (error-t))`); truncated
+`function f` ⇒ `(error f)`; toplevel EOF-terminated incomplete ternary;
+`::`/`->`/word-op/`where` missing-rhs still take `error_expr_to_line_end` rather
+than the shared `(error)` synthesis; `;` or nested brackets inside a junk run;
+`try x finally z else y end` (else after finally); `;`-segment double-`✘`; prefix
+`**a`/`--a` (`call-pre`, in neither corpus); trailing block-body junk
+(`function f g h end`).
+
+## Latest session (2026-08-07c — `∈` as the iteration separator)
 
 Took the target ranked by the previous session. `for i ∈ xs` projected
 `(for (call-i i ∈ xs) …)` where JuliaSyntax gives `(for (= i xs) …)`: the whole
@@ -149,985 +140,139 @@ text == "∈"`) could therefore never fire — that condition was unsatisfiable.
 - **Parser only** (`expr.rs`); **no projector change** — `project_for_spec`
   already split on a loose `∈` token, i.e. it was written for the shape the
   parser never produced.
-- Renamed `ExprFlags::no_word_op` → **`for_spec_var`** (it is set at exactly one
-  site, the `for`/generator loop variable, and now suppresses more than word
+- Renamed `ExprFlags::no_word_op` → **`for_spec_var`** (set at exactly one site,
+  the `for`/generator loop variable, and now suppressing more than word
   operators). Added a `break` in the operator loop, right after `next_operator`,
   when `for_spec_var && is_element_of_tok(op)`.
-- New helpers `is_element_of_tok` / `is_for_separator_tok`; the two separator
-  checks (`is_outer_marker`'s early bail, `parse_for_specs`' consume) now share
-  the latter.
-- **Only `∈` joins `in`/`=`.** `∉` is an ordinary operator that Julia
-  error-recovers in that position (`for i ∉ xs` ⇒ `(= i (error ∉ xs))`), so it
-  stays out — Fatou's `(call-i i ∉ xs)` is unchanged and still divergent
-  (error shape, deferred).
-- **Formatter followed the shape change**: `comprehension_for_in` went red
-  because `lower_for_spec` normalized `∈` → `in` only in its wrapped-node arm
+- New helpers `is_element_of_tok`/`is_for_separator_tok`; the two separator checks
+  (`is_outer_marker`'s early bail, `parse_for_specs`' consume) share the latter.
+- **Only `∈` joins `in`/`=`.** `∉` is an ordinary operator Julia error-recovers in
+  that position (`for i ∉ xs` ⇒ `(= i (error ∉ xs))`), so it stays out.
+- **Formatter followed the shape change**: `comprehension_for_in` went red because
+  `lower_for_spec` normalized `∈` → `in` only in its wrapped-node arm
   (`BINARY_EXPR` via `for_iteration_operands`). Moved to the flat arm alongside
   `in`; `for_iteration_operands` is now `=`/`ASSIGNMENT_EXPR` only. Normalization
-  now covers the loop form and `outer` too (`for outer i ∈ xs` → `for outer i in
-  xs`), and value-position `∈` is untouched (`a ∈ b`, `filter(x -> x ∈ s, xs)`).
-- **Verified**: 28 probe cases byte-identical to JuliaSyntax; the 4 remaining
-  diffs are all error shapes and all pre-existing under A/B (`for i ∉ xs`,
-  `for ∈ xs`, `for i isa T ∈ xs`, and `for i ∈ a ∈ b` — the last *moved closer*
-  to Julia). Formatter output on the fixture is idempotent.
-- **Fixtures**: parser snapshot + oracle dir slug `for_element_of_binding`
-  (23 lines, byte-identical to JuliaSyntax).
+  now covers the loop form and `outer` too, and value-position `∈` is untouched.
+- **Verified**: 28 probe cases byte-identical; the 4 remaining diffs are error
+  shapes, all pre-existing under A/B (`for i ∉ xs`, `for ∈ xs`,
+  `for i isa T ∈ xs`, `for i ∈ a ∈ b` — the last *moved closer* to Julia).
+  Formatter output on the fixture is idempotent.
+- **Fixtures**: parser snapshot + oracle dir slug `for_element_of_binding`.
 - **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
-  dir 248 → **249** (248 PASS + the 1 blocked `numeric_literals`).
-- **Next**: no queued target. Nearest sibling is `for i ∈ a ∈ b` /
-  `for i in a in b` — Julia parses the *iterable* below comparison precedence so
-  a second separator cannot appear there (`(= i a)` + a junk statement), while
-  Fatou parses it at bp 0. Small, but it is an error shape nobody writes by
-  accident; rank it below anything found by probing real Julia.
-- **Follow-up doc pass (same session, separate commit)**: `SKILL.md` had gone
-  stale in four ways and was rewritten. It claimed error shapes were out of scope
-  — they have been in scope since the June harvest (**110 of the 685** JS cases
-  carry an error node, all passing; none of the 8 remaining FAILs is one), so
-  error shape is now a normal bucket ranked on cluster size and real-world
-  frequency. It sent each session to the corpus report for a target, which is a
-  dead end (0 unsupported, 8 permanent FAILs); target selection is now built
-  around probing real Julia, RECAP handovers, and direct asks. It said nothing
-  about **formatter coupling**, which bit this very session. And it claimed the
-  reports were gitignored while they were also tracked — resolved by untracking
-  `report.txt`/`juliasyntax-report.txt` (they stay gitignored; don't re-add
-  them). Also fixed `harvest-juliasyntax-corpus.jl`'s comment, which justified
-  harvesting error shapes by "Fatou emits in-tree typed error nodes" — a
-  mechanism the 2026-06-23i refactor replaced with the diagnostics side-channel.
-
-## Earlier session (2026-08-07b—`for outer i` iteration spec)
-
-User-named target (the `TODO.md` bullet left by the `loop-variable-shadow`
-linter work). `for outer i in 1:3` was not parsed: `FOR_BINDING` took `outer` as
-the whole pattern and dropped `i in 1:3` into the body block ⇒
-`(for outer (block (call-i i in (call-i 1 : 3)) …))`.
-
-**The TODO's expected shape was wrong**, worth noting for anyone reading it:
-JuliaSyntax wraps the *variable*, **inside** the `=` — `(= (outer i) (call-i 1 :
-3))`, not `(outer (= i …))`. So `outer` cannot wrap the whole spec.
-
-- **New node** `SyntaxKind::OUTER_BINDING` (`syntax.rs`), holding the `outer`
-  IDENT (loose, dropped by `project_flat` as a keyword) plus the pattern node.
-  Projects via one `sexp("outer", child_nodes)` arm.
-- **`parse_for_specs`** (`expr.rs`): under `outer` the pattern parses at
-  `COMMA_ITEM_BP` so a spec `=` stays *out* of it, and the `=` is then consumed
-  as a loose separator exactly like `in`/`∈`. That is what yields `(= (outer i)
-  …)` instead of `(outer (= i …))`; without it the `=` form would swallow the
-  iterable into an `ASSIGNMENT_EXPR` under `outer`.
-- **`project_for_spec`** (`sexpr.rs`) gained `EQ` in its split predicate — the
-  `outer` `=` form is the only spec whose separator is a loose `EQ` rather than
-  a whole `ASSIGNMENT_EXPR`.
-- **The contextual-keyword test is a speculative parse, not a token whitelist**
-  (`is_outer_marker`). `outer` is the keyword only when a whole second pattern
-  follows, and what "follows" means needs the precedence table: `outer $ i`,
-  `outer + i`, `outer.x`, `outer[1]`, `outer(1)`, `outer::Int` are all plain
-  loop variables, while the **space-separated** `outer (i, j)` / `outer [i]` are
-  the keyword plus a destructuring pattern. So it probes with `array_mode: true`
-  (which supplies exactly the spaced-opener boundary) and requires `outer` to
-  parse as a complete expression on its own, then requires a pattern to parse
-  after it. **A token whitelist regressed the allowlisted `dollar_infix_operator`
-  fixture** (`for outer $ i = 1:3`) — that fixture is the guard here.
-- **Recovery deliberately untouched**: no pattern after `outer` (`for outer
-  end`, `for outer, j in xs`) falls back to the plain reading rather than
-  inventing an error shape, so those keep their pre-existing output.
-- **Linter needed no change**: `bind_param_pattern`'s `_` arm *walks* an
-  `OUTER_BINDING`, so `i` becomes a reference resolved in the enclosing scope
-  instead of a fresh `ForVar` — which is precisely `outer`'s semantics. Added
-  `loop_variable_shadow_ignores_outer_rebinding` (both spellings clean; a loop
-  variable actually *named* `outer` still shadows).
-- **Verified**: 28 probe cases byte-identical to JuliaSyntax. Formatter output
-  on the fixture is idempotent and preserves spacing.
-- **Fixtures**: parser snapshot + oracle dir slug `for_outer_binding` (28 lines).
-- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
-  dir 247 → **248** (247 PASS + the 1 blocked `numeric_literals`).
-- **Next**: the closest sibling is now **`for i ∈ xs` projecting `(call-i i ∈
-  xs)` instead of `(= i xs)`** — `∈` lexes as `UNICODE_OP`, so
-  `parse_for_specs`'s separator check (`t.kind == Ident && text == "∈"`) never
-  matches and the operator loop swallows it into a `BINARY_EXPR`. Pre-existing,
-  affects plain and `outer` specs alike, and already flagged as a caveat in the
-  2026-06-29b handoff; deliberately left out of this fixture. Small and
-  well-scoped — good next target.
-
-## Earlier session (2026-08-07—keyword statement as a comprehension/generator body)
-
-User-named target (the `TODO.md` bullet left by the `local-const` linter work).
-An unparenthesized `const`/`global`/`local`/`return` as a comprehension or
-generator body swallowed the `for` clause as loose tokens:
-`[const x = 1 for i in 1:1]` ⇒ `(vect (const (= x 1) i in))` where JuliaSyntax
-builds `(comprehension (generator (const (= x 1)) (= i (call-i 1 : 1))))`. The
-parenthesized `[(const x = 1) for i in 1:1]` was already correct.
-
-Root cause: `parse_keyword_stmt`'s trailing "carry same-line tokens through
-verbatim" loop is gated only by `header_ends`, which does not list `for`.
-
-- **Fix** (`structural.rs` + `expr.rs`, no projector change): `KwStmt::ExprTuple`
-  became a struct variant carrying `optional_value` (moved off the parameter
-  list) and a new `for_ends`. When set, a local `stmt_ends` closure ends the
-  statement at a same-line `for` — checked *past* horizontal whitespace, so the
-  space before `for` stays outside the keyword node (otherwise the bracket parser
-  raised a spurious `expected whitespace before \`for\``).
-- **Where it's set**: `kw_for_ends = !stmt_comma || kw_generator_body` in
-  `parse_expr_in`. `!stmt_comma` covers every non-statement position at once
-  (bracket elements, arg lists, parens, braces) — keying on `inside_brackets`
-  would have missed `[…]`, whose elements parse with `inside_brackets: false`
-  because newlines there are significant row separators. The new `ExprFlags`
-  field `kw_generator_body` is set only by the new `parse_kw_stmt_operand`, so a
-  *nested* keyword statement inherits the boundary
-  (`[global const x = 1 for i in 1:1]`); its operand still keeps `stmt_comma`.
-- **Operand position is deliberately not gated**: a `for` directly after the
-  keyword is the operand, not a generator clause — `[return for i in 1:1]` ⇒
-  `(vect (return (for …)))`, `[const for i in 1:1]` ⇒ `(vect (error (const (for
-  …))))` (both A/B-verified unchanged; they still differ from JuliaSyntax only in
-  a pre-existing doubled `(error-t)` missing-`end` recovery).
-- **Verified**: 33 probe cases; 29 byte-identical to JuliaSyntax, the 4 remaining
-  diffs all pre-existing and unchanged under A/B (`@m const x = 1 for … end`
-  macro space-arg gap; `[const x = 1 for i in 1:1;]` and toplevel `const x = 1
-  for …` error shapes). Formatter output on the fixture is idempotent.
-- **Linter payoff**: `const-local` and `global-const-in-function` now report the
-  construct with the right span (`global const x = 1` instead of the whole
-  `global const x = 1 for i in 1:1`).
-- **Drive-by**: `scripts/update-juliasyntax-corpus.jl`'s `CORPUS_DIR` still
-  pointed at the pre-crate-split `tests/fixtures/oracle`, so the refresh script
-  errored out. Fixed; regenerating rewrote all 247 `expected.sexpr` byte-identical
-  (only the new slug is new). The tracked `report.txt` was correspondingly stale
-  (215 cases) and is now regenerated — note both reports *are* tracked here,
-  contrary to this file's older "reports are gitignored" claim.
-- **Fixtures**: parser snapshot + oracle dir slug `keyword_stmt_generator_body`
-  (14 lines, byte-identical to JuliaSyntax).
-- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
-  dir 246 → **247** (report was stale at 215; allowlist 249 → 247 entries after
-  the header-preserving reseed).
-- **Next**: no queued parser target. Nearest siblings, both error shapes and so
-  deferred: toplevel `const x = 1 for i in 1:1` ⇒ `(const (= x 1)) (error-t for
-  i in 1 : 1)`, and the `@m const x = 1 for i in 1:2 end` macro space-arg case
-  (statement-level macro should take the `for` loop as a second argument).
-  Otherwise keep batch-probing real-world Julia.
-
-## Earlier session (2026-07-30—prefix-operator space-arg then whitespace opener)
-
-Closed the queued `TODO.md` bullet (issue #24's `whitespace before opener`
-bucket, surfaced by the vendored `JuliaLowering/src/` tree). Target:
-`@jl_assert !is_leaf(st) (st, "msg")` bound the whitespace-separated `(st, "msg")`
-as a *spaced call* on `is_leaf(st)` (with a `whitespace before opener` error)
-instead of starting the macro's second argument
-(`(macrocall @jl_assert (call-pre ! (call is_leaf st)) (tuple-p st (string "msg")))`).
-
-Root cause was one line: `parse_prefix`'s unary-operator arm parsed its operand
-with `array_mode: false` hard-coded (`expr.rs` ~line 1631), on the stale premise
-that "the array-element boundary only matters at low binding powers." It doesn't —
-the space-form boundary (a whitespace-preceded `(`/`[`/`{` opens a new element)
-lives in `parse_postfix_chain` (~line 3515) and fires at *every* binding power. So
-the operand's postfix chain never saw the boundary and chained the spaced call.
-
-- **Fix**: `array_mode: flags.array_mode` (inherit, don't force `false`); `no_range`
-  stays cleared (PREFIX_BP is above the range colon). One-line change + rewritten
-  comment. No projector change — this is a pure parser (CST-topology) fix.
-- **Whitespace-sensitivity preserved**: statement-scope `-a (b)`/`!a (b)`
-  (array_mode off) still bind the spaced call with the `(error-t)` opener error;
-  only array/macro contexts (array_mode on) split. Verified against JuliaSyntax on
-  all four: `@jl_assert !is_leaf(st) (…)`, `@m -a(b) (c, d)`, `[!f(x) (a, b)]`,
-  `[!a (b)]` byte-identical; `-a (b)` unchanged.
-- **Fixtures**: extended `macro_space_args` (+3 lines) and `array_space_call`
-  (+2 lines), parser snapshots + oracle slugs both regenerated byte-identical.
-- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions); dir 244
-  (held — both slugs already allowlisted, coverage widened not count).
-- **Next**: no queued parser target. From issue #24's remaining table:
-  `primitive type T (18 * 8) end` (the other `whitespace before opener` shape —
-  the size expr is a spaced group, not a call) and `function ⊑ end` (bare method
-  declaration named by a Unicode operator, 3 files). Otherwise keep batch-probing
-  real-world Julia.
-
-## Earlier session (2026-07-28b—quoted syntactic operators `:(.=)`, `:(.)`, `:(...)`)
-
-Issue #24 (`JuliaLang/julia` `debug format` scan), continuing the backlog left by
-the wrapping-arithmetic commit. Target was the two adjacent buckets in that
-triage: 12 files on `operator is not a valid value` and 6 on `expected
-right-hand side for operator`, both from quoted operator forms inside
-`Expr(...)` constructors.
-
-`parse_quote_sym`'s `:(op)` arm was gated on `is_paren_quotable_op`, which
-listed only *undotted* operator names and undotted assignments. The dotted
-syntactic operators fell through to the general `:(expr)` path, where they are
-not values — `:(.=)` ⇒ `(quote-: (error (. =)))`, `:(.)` ⇒ a broken field access,
-`:(...)` ⇒ `(quote-: (error ...))`. Note the *already-working* set: `:(.+)`,
-`:(.≤)`, `:(..)`, `:(√)` reach `parse_paren` and build an `OPERATOR_ATOM`, which
-is exactly the right shape. So the gap was only the operators that are not
-values in the first place.
-
-- **`is_paren_quotable_op`** (`expr.rs`) now also accepts `is_assignment_op`
-  (which pulls in every broadcast augmented form `.= .+= .÷= …`), plus `Dot`,
-  `DotDotDot`, `DotAndAnd`, `DotOrOr`. Deliberately *not* added: `?`, which
-  JuliaSyntax error-wraps even under a quote (`:(?)` ⇒ `(quote-: (error ?))`,
-  which Fatou already matched), and the dotted value ops that already route
-  through `parse_paren`.
-- **The `:(op)` arm now wraps the operator token in an `OPERATOR_ATOM`** inside
-  the `PAREN_EXPR` — the same node the non-paren `:.=` form builds — so
-  `project_operator_atom` splits the broadcast dot (`(. =)`) and renders `.`/`...`
-  verbatim. Nothing added to `sexpr.rs`; the old `PAREN_EXPR` loose-token
-  fallback would have emitted the raw `.=` text.
-- **`paren_operator`** (`ast/nodes.rs`) had to learn to descend one level into an
-  `OPERATOR_ATOM` child; it read only direct tokens, so `Base.:(==)(a, b)` lost
-  its `callee_operator`. Caught by `call_callee_operator_shapes`.
-- **Verified**: 25 probe cases match JuliaSyntax byte-for-byte, including the
-  ones that already passed (no regression in the `?`/`.+`/`..` siblings).
-- **Fixtures**: `operator_symbol_quote_paren` (parser + oracle) extended 8 → 16
-  lines. Six unrelated snapshots re-accepted for the `OPERATOR_ATOM` wrapping.
-- **Counts**: JS 677 (held, same 8 permanent FAILs); dir 219 (held — the slug
-  already existed; coverage widened, not count). Zero regressions.
-- **`JuliaLang/julia` scan** (928 files, A/B on the same checkout):
-  **69 → 58 failures**.
-- **Next**: from issue #24's table, the biggest remaining bucket is 31 on
-  `trailing tokens after statement` — but most of that is Julia *master*'s
-  labeled `break <label> [value]`, which the pinned oracle (0.4.10) predates, so
-  it would land like the wrapping operators did (snapshot-only, no oracle
-  fixture). The cleanly oracle-checkable slice is the `#=…=#` block comment in
-  *argument* position (`@test #=T=# f(x)`, `#=ephemeral_cache=#true`) — the
-  sibling of 2026-07-28's header fix, one bucket down. After that: 7 on
-  `whitespace before opener` (`@jl_assert !is_leaf(st) (st, "…")`,
-  `primitive type T (18 * 8) end`) and 3 on `function ⊑ end` (a bare method
-  declaration named by a Unicode operator).
-
-## Earlier session (2026-07-28—a block comment after a block keyword swallowed the header)
-
-Issue #42. `skip_ws` does not cross comments, so every "header starts after the
-keyword" site landed on a `#= … =#` token instead of the header. `header_ends`
-correctly does *not* list `BlockComment` (a real header can follow one — that is
-the opposite of #26's line-comment fix), so the header opened anyway, `parse_expr`
-returned `None` at the comment, and the header expression fell through into the
-body block. `let` did this **silently** (a binding moved out of `LET_BINDINGS` —
-a scoping change); `if`/`while`/`elseif` also raised a spurious
-`expected a condition`, so those files failed `debug format` with `format-error`.
-
-Root cause is one cursor helper, so the fix is one helper + swaps at the header
-sites; nothing in `sexpr.rs`.
-
-- **`cursor::skip_ws_and_block_comments`** (+ `ParserCtx` method): whitespace and
-  `BlockComment` only. A block comment's own newlines ride along — Julia does not
-  end the header at a multi-line `#= … =#` either (`let #=\nc\n=# x = 1` ⇒
-  `(let (block (= x 1)) (block))`). A **line** comment stays a terminator.
-- **Swapped in** at every header-start site: `parse_header` (let/for),
-  `parse_condition` (if/elseif/while), `parse_signature` (struct/module),
-  `parse_do_params` (do), the `catch` exception variable, and
-  `parse_keyword_stmt`'s operand (return/const/global/local) — plus the two
-  comma lookaheads that continue a header list (`let x = 1 #= c =#, y = 2`,
-  `f() do x #= c =#, y`).
-- **`parse_function_like`** already crossed newlines (`function\n f() end`), so it
-  moved from `skip_ws_and_newlines` to the full `skip_trivia`: the signature is
-  never empty, so no comment there can end it. That also fixes the line-comment
-  sibling `function # c\n f() end` ⇒ `(function (call f) (block))`.
-- **Trivia placement**: the comment is emitted before the `Start(node)` event, so
-  it sits as a sibling of the header node, exactly like the whitespace around it.
-  `for` was already correct via `parse_for_specs`; its comment just moves out of
-  `FOR_BINDING`. Formatter output is unchanged and `debug format` stays green.
-- **Verified**: 33 probe cases (10 keyword forms × comment positions) now match
-  JuliaSyntax byte-for-byte, all lossless.
-- **Fixtures**: parser snapshot + oracle dir slug `keyword_header_block_comment`.
-- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
-  dir 218 → **219**.
-- **Next**: no queued parser target. `else #= c =# if x` still takes the plain
-  `else` path rather than the `else if` recovery — left alone deliberately, error
-  shapes are a separate phase. Keep batch-probing real-world Julia.
-
-## Earlier session (2026-07-27b—lambda arrow `->` precedence)
-
-Batch-probed real-world Julia against the oracle (no queued target; the two
-2026-07-27 deferred items—`x.function` field name, `end` in a nested `[…]` within
-an index—both already pass, no regression). Surfaced one genuine
-precedence/associativity bug: **the lambda arrow `->` bound far too loosely**.
-`x |> y -> y + 1` parsed as `(-> (call-i x |> y) …)` but Julia gives
-`(call-i x |> (-> y (call-i y + 1)))`.
-
-Julia's `->` is *not* an ordinary arrow-tier operator: it has a **high left
-binding power and a very low right one** (asymmetric, right-associative). It binds
-a tight left operand but sweeps everything looser into its body:
-`1 + 2 -> 3` ⇒ `(call-i 1 + (-> 2 3))`, `a -> b = c` ⇒ `(-> a (= b c))`,
-`a -> b ? c : d` ⇒ `(-> a (? …))`, `2 ^ 3 -> 4` ⇒ `2 ^ (3 -> 4)`; only `::`/`.`/
-postfix `'` bind tighter on the left (`a::b -> c` ⇒ `(-> (::-i a b) c)`).
-
-- **Fix** (`expr.rs`, one line + comment): split `TokKind::Arrow` out of the
-  shared `(4,3)` arrow group into its own tier `(35, 1)`—lbp just below `::`(36)
-  and above `^`(33), rbp below assignment(2)/ternary(`TERNARY_L`=3). No new node
-  kind, no projector change (still `ARROW_EXPR` ⇒ `(-> …)`). Verified the other
-  arrows (`-->`, `→`, `<--`, `=>`) stay ordinary loose arrow-tier ops (probed:
-  `a + b --> c` ⇒ `((a+b) --> c)`).
-- **Fixtures**: parser snapshot + oracle dir slug `arrow_precedence` (7 lines,
-  byte-identical to JuliaSyntax).
-- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
-  dir 212 → **213**.
-- **Next**: no queued parser target. Remaining batch-probe diffs are all
-  known/blocked (float display `.5`/`1e10`/`100_000.5`; bare-`where` toplevel
-  error shape). Keep batch-probing real-world Julia for the next divergence.
-
-## Earlier session (2026-07-27—broadcast/ternary/macro-generator gaps from a DataFrames smoke-test)
-
-Triage of debug-format issue #19 (`JuliaData/DataFrames.jl`, `format-error`). The
-issue's sample (`docs/make.jl`) was already fixed by `a810624`; the other sampled
-files exposed four distinct parser gaps that all rejected valid Julia. Fixed all
-four (each byte-identical to JuliaSyntax now):
-
-- **`.!` broadcast unary-not** (`z = .!y` ⇒ `(= z (dotcall-pre ! y))`). New
-  `TokKind::DotBang` (2-char table, after the `.!=`/`.!==` longest-match arms) →
-  `SyntaxKind::DOT_BANG`; added to `is_unary_prefix_op`, the `is_operator` token
-  set, and `project_unary` (`DOT_BANG => (dotcall-pre ! …)`, mirroring `.~`).
-- **`.|=`/`.&=` broadcast bitwise augmented assign** (`.+=` worked; these fell to
-  the 2-char `.&`/`.|` + a stray `=`). New `DotAmpEq`/`DotPipeEq` in the 3-char
-  dotted table + `is_assignment_op`; `project_assignment` already keys off text.
-- **Assignment as a ternary branch** (`a ? b = c : d` ⇒ `(? a (= b c) d)`). Julia
-  parses branches with `parse_eq*`; branches now parse at `TERNARY_BRANCH_BP`
-  (`= COMMA_BP`, below assignment) with `stmt_comma: false` so a bare comma still
-  errors instead of tupling (`a ? b, c : d`). `TERNARY_R` retired (only the
-  `TERNARY_L` fire gate remains).
-- **Macro space-args swallowing a generator `for`** (`[@inbounds f(x) for x in
-  xs]`). `parse_macro_args` now ends the space-arg loop at `for` when
-  `inside_brackets || array_mode` (threaded `array_mode` through
-  `parse_macro`/`parse_qualified_macro`); statement-level `@time for … end` still
-  takes the for-loop as an argument.
-
-- **Fixtures**: four oracle dir slugs (`broadcast_not`,
-  `broadcast_bitwise_assign`, `ternary_assignment_branch`,
-  `macro_comprehension_generator`), all byte-identical to JuliaSyntax; lexer
-  longest-match unit assertions for `.!`/`.&=`/`.|=`.
-- **Counts**: JS 677 (held, zero regressions); dir 202 → **206**.
-- **Deferred** (found in the broader DataFrames scan, out of this issue's scope):
-  `x.function` (reserved keyword as a field name after `)`); `end` inside a nested
-  `[…]` array within an index (`df[[1; 2; end:-1:3], :]`, "misplaced `end` in
-  array"); one formatter idempotency drift in `src/dataframe/dataframe.jl`.
-
-## Earlier session (2026-07-20—unicode operators as call names and value atoms)
-
-User-named target (TODO's `noteq-definition` bullet): the prefix `≠(a, b) = ...`
-definition form was dormant because `is_operator_call_name` lacked the Unicode
-tiers — `≠(a, b)` left `≠` as a *silently dropped* loose toplevel token
-(`(toplevel (tuple-p a b))`). Probed Julia: every Unicode infix op glued to `(`
-is a plain call even single-arg (`≠(a)` ⇒ `(call ≠ a)`, unlike ASCII `+(x)`),
-**except** the unary-capable `± ∓ ⋆`, which follow the `+`-style paren-call
-heuristic (`±(a)` ⇒ `(call-pre ± a)`, `±(a, b)` ⇒ `(call ± a b)`).
-
-- **Parser** (`expr.rs`): `is_operator_call_name` gained all six Unicode infix
-  tiers (`UniArrow|UniComparison|UniColon|UniPlus|UniTimes|UniPower`; dotted
-  `.≠(a,b)` and suffixed `≠₁(a,b)` forms share the tier `TokKind` and come along).
-  The unary-prefix arm's or-pattern became a guard (`is_unary_prefix_op(kind,
-  text)`) so exact-text `± ∓ ⋆` (and the radicals) route there first;
-  `is_unary_paren_op` gained `UniRadical|UniPlus|UniTimes`, fixing a latent
-  divergence: `√(a, b)` was `(call-pre √ (tuple-p a b))`, now `(call √ a b)`
-  (likewise `¬`). `is_value_operator` gained the six tiers: `a[≤]` ⇒ `(ref a ≤)`,
-  `≥ = 1` ⇒ `(= ≥ 1)`, `sort(xs, lt=≥)`, and error-prefix `≠a` ⇒
-  `(call-pre (error ≠) a)` all work now. `≤{T}` ⇒ `(curly ≤ T)` came free via
-  `is_curly_operator_name`.
-- **Projector** (`sexpr.rs`): one new `project_call` callee arm — a
-  `UNICODE_OP`/`UNICODE_RADICAL` callee token renders by *text* (dot-stripped
-  `(. ≠)` for broadcast); `operator_func_repr` is kind-keyed and would have
-  emitted its `?` fallback. Genuine new-node mapping, not compensation.
-- **Linter**: the dormant NotEqDef prefix form now fires; added
-  `noteq_definition_flags_unicode_prefix_form` (short + long form flagged, `≤`
-  definition not flagged). Rule code untouched — it was already wired for a
-  `UNICODE_OP` callee.
-- **Fixtures**: parser snapshot + oracle dir slug `unicode_operator_call`
-  (20 lines, byte-identical to JuliaSyntax; includes `filter(≥(3), xs)` — the
-  common `Base.Fix2` idiom).
-- **Counts**: JS 677 (held, same 8 permanent FAILs); dir 198 → **199**.
-- **Deferred**: spaced `≠ (a, b)` joins the existing non-unary spaced-operator
-  bucket (`* (a, b)` ⇒ `(call-pre (error *) (tuple-p a b))` vs Julia's
-  `(call op (error-t) a b)`, deferral of 2026-06-24g); dotted unary `.±`;
-  suffixed-op prefix without parens (`±₁ x`, joins the 2026-06-26b sibling).
-- **Next**: no queued parser target — batch-probe real-world Julia against the
-  oracle for the next divergence.
+  dir 248 → **249**.
+- **Follow-up doc pass (separate commit)**: `SKILL.md` was stale in four ways and
+  was rewritten. It called error shapes out of scope — they have been in scope
+  since the June harvest (**110 of the 685** JS cases carry an error node, all
+  passing, none among the 8 FAILs), so error shape is now a normal bucket ranked
+  on cluster size and real-world frequency. It sent each session to the corpus
+  report for a target, a dead end; selection is now built around probing real
+  Julia, RECAP handovers, and direct asks. It said nothing about formatter
+  coupling, which bit this session. And it called the reports gitignored while
+  they were also tracked — resolved by untracking them. Also fixed
+  `harvest-juliasyntax-corpus.jl`'s rationale (it cited in-tree error nodes,
+  replaced by the diagnostics side-channel) and the harness's stale corpus size.
 
 ## Earlier sessions
 
-- **2026-07-09**—name-list comment continuation. `export Core,\n #c\n Any` was
-  truncated at the comment (`parse_name_list_stmt` skipped gaps with
-  `skip_ws_and_newlines`, which crosses newlines but not comments); two call
-  sites switched to `skip_trivia`. Bare newline without a comma still
-  terminates. Fixture `name_list_comment_continuation`. JS 677 (held);
-  dir 197 → 198.
+Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
-- **2026-07-07b**—space-sensitive macro space-form arguments. `@foo f (x)` fused
-  a whitespace-preceded opener into a call with a spurious `(error-t)`; set
-  `array_mode: true` at both `parse_macro_args` sites so a spaced opener starts a
-  new argument (`(macrocall @foo f x)`). Fixture `macro_space_args`. JS 677
-  (held); dir 196 → 197.
-
-- **2026-07-07**—splat after a closing bracket. `f(g(x)...)`/`f(a[i]...)`/
-  `f(2...)`/`f("a"...)` juxtaposed instead of splatting; excluded
-  `TokKind::DotDotDot` in `should_juxtapose`/`should_juxtapose_string_error` so
-  the splat arm takes it. Fixture `splat_bracket_operand`. JS 677 (held);
-  dir 195 → 196.
-
-- **2026-07-06b**—multi-binding `let` per-binding nodes. `let a = 1, b = 2` kept
-  only the first binding as a node, dumping the rest as flat tokens the projector
-  compensated for (`project_flat`). `parse_header`'s general path became a loop
-  (`parse_expr` bp 0 per binding, `,` loose); `project_let_bindings` collapsed to
-  `children().map(project)`. Fixture `let_multi_binding`. JS 677 (held);
-  dir 194 → 195.
-
-- **2026-07-05b**—left-arrow operator `<--` family. Closed the queued `<--` lexer
-  gap via the 5-file operator recipe (`a <-- b` was `a` `<` `--`); now `<--`,
-  `.<--`, `.<-->` are single arrow-tier tokens (tier `(4,3)` right-assoc,
-  `(call-i a <-- b)`, broadcast `dotcall-i`). Fixture `left_arrow_operator`.
-  JS 677 (held); dir 193 → 194.
-
-- **2026-07-05**—newline-broken braces comprehension. `parse_braces`'s
-  first-separator match gained the two newline-lookahead arms
-  `parse_bracket_literal` already had (`{a\nfor b in c}` ⇒
-  `(braces (generator a (= b c)))`, `{a\n, b}` ⇒ `(braces a b)`;
-  `{a\nb}`/`{a\n;b}` stay `bracescat`). Killed the formatter's latent
-  stability violation for exploded braces comprehensions. Fixture
-  `braces_newline_comprehension`. JS 677 (held); dir 192 → 193.
-
-- **2026-07-03**—`@macro` keyword as a macro name. `macro` was missing from *both*
-  `is_keyword` matchers (`TokKind::is_keyword` in `lexer.rs`, the `SyntaxKind` free
-  fn in `sexpr.rs`), so `@macro a b c` fell through to a bogus juxtaposed
-  `MACRO_DEF` with a fake empty `@.` name. Two one-line fixes; whole family now
-  byte-identical (`@macro a b c`, `@macro(x)`, `Base.@macro x`, `:macro`,
-  `struct macro end`, `function macro() end`). Fixture `macro_keyword_name`.
-  JS 677 (held); dir 191 → 192. Deferred: `2macro` trailing-junk glyph drop.
-
-- **2026-07-02d**—newline-after-comma continuation cluster. A trailing comma (or the
-  `import` `:`/keyword) now suppresses the statement-terminating newline so a comma list
-  continues on the next line: bare tuple (`parse_comma_tuple`), `let` bindings
-  (`LET_BINDINGS`-scoped), and `import`/`using` paths all switched their post-separator
-  lookup from `skip_ws` to `skip_trivia`. `x = a,\nb,\nc` ⇒ `(= x (tuple a b c))`;
-  `import A:\nb,\nc` ⇒ one `(import (: A b c))`. Whitespace-sensitive (only *after* a
-  separator; `a\n,b` still terminates). Fixtures `bare_tuple_newline`,
-  `let_bindings_newline`, `import_newline_continuation`. JS 677 (held); dir 188 → 191.
-  Deferred: trailing-comma-at-EOF error shape (`x = a,` ⇒ JS `(= x (tuple a (error)))`).
-- **2026-07-02c**—compound shift/Unicode augmented assignments. `<<=`, `>>=`,
-  `>>>=`, `÷=`, `⊻=` + broadcast forms `.<<=`/`.>>=`/`.>>>=`/`.÷=`/`.⊻=` now lex as
-  one augmented-assignment token (5-file recipe ×10; all right-assoc, tier `(2,1)`,
-  `ASSIGNMENT_EXPR`, text-based projection). ASCII longest-match (`>>>=` 4-char
-  beats `>>>`); Unicode `÷=`/`⊻=` are the only two Unicode ops with an augmented
-  form (special-cased by fusing a trailing `=`). Project `(<<= a b)` … `(.⊻= a b)`;
-  `:(<<=)`⇒`(quote-: <<=)`. Fixtures `compound_shift_assignment`. JS 677 (held);
-  dir 187 → 188. Deferred: `$=`; bare broadcast shifts `.<<`/`.>>`/`.>>>`.
-- **2026-06-29b**—one-line space-separated `for` body. `for i in 1:3 x += i end`
-  swallowed the same-line body into the `FOR_BINDING`; parametrized
-  `parse_for_specs` with `bracketed: bool` (`expr.rs`) and had `parse_header`
-  (`structural.rs`) call it with `bracketed=false` + `return` (skipping the greedy
-  bump loop); removed the now-unused `parse_for_binding`. `for i in 1:3 x += i end`
-  ⇒ `(for (= i (call-i 1 : 3)) (block (+= x i)))`. Fixtures `for_oneline_body`
-  (`∈` excluded—still a divergence). JS 677 (held); dir 186 → 187.
-- **2026-06-29**—`global`/`local` + multiple-assignment nesting. Switched
-  `global`/`local` from `KwStmt::Expr` to `KwStmt::ExprTuple` (`expr.rs`; the
-  `Expr` variant removed), so statement-level comma folds to a tuple and handles
-  assignment; `project_decl` (`sexpr.rs`) splices a bare `BARE_TUPLE_EXPR`'s
-  elements directly. `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1
-  2)))`, `local a, b = f(x), g(y)` wraps the calls, `global a, b::Int` ⇒
-  `(global a (::-i b Int))`. Bonus: `const a, b` ⇒ `(error (const a b))`.
-  Fixtures `global_local_assignment`. JS 677 (held); dir 185 → 186.
-- **2026-06-26b**—Prefix operators stop at significant newline (correctness fix +
-  false-positive diagnostic removal). Binary-only ops in prefix position reached
-  across a newline for their operand; gated the `is_value_operator(k) || k ==
-  Question` arm of `parse_prefix` with the range-colon `newline_significant`
-  formula. Fixtures parser + dir `prefix_operator_newline`. JS 677 (held); dir
-  184 → 185. Deferred sibling: suffixed-unary arm still crosses newlines.
-- **2026-06-26a**—Left-division `\` family (`\`, `\=`, `.\`, `.\=`). Four tokens
-  mirroring the slash family via the 5-file recipe (times tier `(24,25)`,
-  left-assoc); longest-match forced the whole family (a lone `\` would mis-lex
-  `a\=b`). `a\b`⇒`(call-i a \ b)`, `a .\ b`⇒`(dotcall-i a \ b)`, `a\=b`⇒`(\= a b)`
-  (assignment projector is text-based, no per-kind arm). Fixtures `left_division`
-  (parser + oracle) + lexer unit test. JS 677 (held); dir 183 → 184. Surfaced the
-  prefix-newline bug fixed in 2026-06-26b. Formatter handoff: `\` spacing.
-- **2026-06-25l**—Broadcast identity ops `.===`/`.!==`. Two tokens `DotEqEqEq`/
-  `DotNotEqEq`, 4-char dotted lex (beat `.==`/`.!=`); single ⇒ `(dotcall-i a === b)`,
-  runs fold to `(comparison a (. ===) b …)`. Also fixed `ast/nodes.rs::is_operator_kind`
-  missing `EQ_EQ_EQ`/`NOT_EQ_EQ`. Fixture `broadcast_identity_operators`. JS 677
-  (held); dir 182 → 183. Frontier note: JS harvested backlog exhausted of fixable
-  cases (8 remaining FAILs all permanent/out-of-scope).
-- **2026-06-25k**—Identity/inequality operators `===`/`!==`/`!=`. Two tokens
-  `EqEqEq`/`NotEqEq` (3-char ASCII block, longest-match beats `==`/`!=`); the
-  crux was the `!` munch—`scan_ident` now stops at `!` immediately followed by
-  `=` so `a!=b`⇒`a !=  b` while `f!`/`push!`/`a!b` stay identifiers. Single op ⇒
-  `(call-i a === b)`; runs fold into `(comparison …)`. Fixture
-  `identity_operators`. JS 677 (held); dir 181 → 182.
-
-- **2026-06-25j**—Projector faithfulness audit (no parser change), de-risking the
-  formatter: classified every non-trivial valid-code `sexpr.rs` arm by what it reads
-  and probed each non-local one against JS. **Zero latent CST bugs**—every
-  high-value arm is faithful; only non-local reads are matrix `group_dimension` order
-  (projection-only, no formatter impact) and diagnostics-replay error shapes
-  (sanctioned). Flat `COMPARISON_EXPR`/same-op `BINARY_EXPR` rewrites are well-formed
-  trees safe to build on. One queued parser item: matrix-continuation outer-group fix
-  (low priority, projection-only). JS 677, dir 181 unchanged.
-
-- **2026-06-25i**—Misplaced `.'` prime → trailing-junk recovery (flips
-  js-128bdd20 `f.'`). A `'` abutting a field-access `.` lexes as the removed
-  transpose op, recovered as trailing junk (`f.'` ⇒ `f (error-t ')`). 3-file fix:
-  lexer `prev_is_dot()` (lex `'` as `Transpose` after `Dot`; spaced `f. '` stays a
-  char), operator-loop ends the value at `.`+`Transpose` (reuses `TrailingJunk`),
-  projector renders the `'` glyph + drops the bundled `DOT`. Fixture
-  `dot_prime_recovery`. JS 676 → 677; dir 180 → 181. Remaining 8 JS divergences all
-  permanent/out-of-scope: float-display (6), the `x 'y` char-lexer sibling (needs
-  bracket-depth-aware `'` lexing), `(2)(3)x` juxtaposition.
-
-- **2026-06-25h**—Misplaced `end` keyword in space-separated array (flips
-  js-557adcf4 `a[:(end)]`). `end` is a valid index marker only as the sole/leading
-  bracket element; once another element precedes it the array ends, a zero-width
-  `(error-t)` splices after the last real element, and `end <closers>` bumps up as
-  trailing junk: `a[1 end]` ⇒ `(typed_hcat a 1 (error-t)) (error-t end ✘)`. New
-  `EndKw` arm in `parse_matrix` + `MatrixKeywordRecovery` diag; projector splices
-  via `project_cat_children`/`project_args`. JS 675 → 676; dir 179 → 180.
-
-- **2026-06-25g**—Leading-`@` dotted macro `$`/inner-`@` reflow (flips
-  js-704830e1 `@A.$x a`, js-fe911108 `@A.B.@x a`; closes the macro dotted-name
-  cluster). A leading-`@` macro whose dotted path carries an interpolation or a
-  second sigil relocates the sigil onto the **final** component and recovers the
-  excess with zero-width markers (final `$x` ⇒ `(inert (error x))`; doubled sigil ⇒
-  `(quote (error-t) @x)`); a non-final `$x` is a valid `(inert ($ x))`.
-  `parse_macro_name_body` consumes the full `.ident`/`.$ident`/`.@ident` chain +
-  `MacroSigilLeading` diag; `project_leading_macro_path` replays. Fixture
-  `macro_sigil_leading`. JS 673 → 675; dir 178 → 179.
-- **2026-06-25f**—Misplaced macro sigil `A.@B.x` (trailing form; flips
-  js-27604c64). A `@` on a non-final component with a `.ident` continuation
-  relocates the sigil to the final component, splicing `(error-t)` at every dotted
-  step after the `@`-named one (`A.@B.x` ⇒ `(. (. A (quote B)) (error-t) (quote
-  @x))`). Projector replay from a `MacroSigilTrailing` diag (`parse_qualified_macro`).
-  Fixture `macro_sigil_trailing`. JS 672 → 673; dir 177 → 178.
-- **2026-06-25e**—Broadcast call on a macro name `@M.(x)` (first clean slice of
-  the macro dotted-name cluster, flips js-2516c70f). A broadcast `.(…)` on a macro
-  is invalid; JuliaSyntax wraps the dotcall in a macrocall and splices a zero-width
-  `(error-t)` after the name (`@M.(x)` ⇒ `(macrocall (dotcall @M (error-t) x))`).
-  CST unchanged; projector replay from a new `MacroDotBroadcast` diag at the
-  broadcast `(` (recorded in `parse_postfix_chain`, gated on lhs `MACRO_CALL`);
-  new `project_dot_call` re-heads. Fixture `macro_broadcast_call`. JS 671 → 672;
-  dir 176 → 177. Deferred: macro args after the broadcast (`@M.(x) y`).
-- **2026-06-25d**—Bare block keyword `function`/`macro` empty-recovery shape
-  (flips js-78f9ac01, the `function` slice of backlog item g). `function` ⇒
-  `(function (error (error)) (block (error)) (error-t))`, likewise `macro`. Two
-  zero-width pieces, pure projector from the recorded `MissingEnd` diag:
-  `project_block_child` appends `(error)` to an empty body block carrying a
-  `MissingEnd` (also corrects latent `function f()`/`for x in y`);
-  `project_function_like` emits `(error (error))` when no `SIGNATURE` node.
-  Fixture `bare_function_keyword`. JS 670 → 671; dir 175 → 176. Deferred: `struct`
-  bare keyword (signature `(error)`, single), `begin`/`while` empty-body, bare-name
-  truncated `function f` ⇒ `(error f)`.
-- **2026-06-25c**—Incomplete ternary recovered as `if` (flips
-  js-434fcafd/810e177c/74a9b301/471d5c84). A ternary whose missing `:`/false
-  branch is terminated by a closing block keyword (`end`/`elseif`/`else`/`catch`/
-  `finally`) re-heads `?` → `if` with one zero-width `(error-t)` per missing piece
-  (no colon ⇒ `(if x true (error-t) (error-t))`, false missing ⇒ `(if x true
-  (error-t))`). The flip is decided *locally* by the terminator, not the enclosing
-  block (even toplevel `x ? true end` re-heads). Both missing-branch arms of
-  `parse_ternary` peek `is_closing_block_keyword`, build `TERNARY_EXPR` + one
-  `IncompleteTernaryIf` diag per marker at the `?`'s end; `project_ternary` keys
-  the `if` head and count off it. Fixture `ternary_incomplete_if`. JS 666 → 670;
-  dir 174 → 175. Deferred: toplevel EOF/newline-terminated incomplete ternary
-  (stays `?`-head, not in corpus).
-- **2026-06-25b**—Array `;;` line continuation → `hcat` (flips js-82572497
-  `[a b ;; \n c]` ⇒ `(hcat a b c)`; deferred root (c)). A `;;` (exactly two)
-  immediately followed by a newline (`;; \n`, *not* `\n ;;`) in an *already*
-  row-major array behaves like a space separator (dim 0, folds into the row);
-  a column-major `[a ;; \n b]` stays `(ncat-2 a b)`. **No diagnostic—valid
-  syntax.** `parse_matrix` (`expr.rs`) tracks `SepRun.newline_after_semis` +
-  `continuation` (set in the global `ArrayOrder` loop; `dim` returns 0);
-  `group_dimension` (`sexpr.rs`) re-derives row-major order *locally* and counts
-  a continuation `;;`-run as 0. Fixture `array_line_continuation`. JS 665 → 666;
-  dir 173 → 174. Deferred: a continuation whose establishing space lives in an
-  *outer* group (`[a b ;;; c ;; \n d]`)—local order can't see it; not in corpus.
-- **2026-06-25a**—Invalid bracketed macro name `@[x]` (one macro-cluster slice,
-  flips js-b2e95475 `@[x] y z`). A `[`/`{` directly after `@` is parsed as the
-  bracketed expression and error-wrapped as the macro name with space-form args
-  following (`@[x] y z` ⇒ `(macrocall (error (vect x)) y z)`, `@{x} y` ⇒
-  `(macrocall (error (braces x)) y)`); `@m[a]` (name before bracket) untouched.
-  New `LBracket`/`LBrace` arm in `parse_macro_name_body` + `InvalidMacroName` diag
-  + `project_macro_name` error-wrap. Fixture `macro_name_brackets`. JS 664 → 665;
-  dir 172 → 173. Remaining macro-cluster siblings are each a distinct error head:
-  `@(x+y)` ⇒ `(error-i x + y)`, `@(f(x))` ⇒ `(error f x)`, `@:foo` ⇒
-  `(error (quote-: foo))`, `@M.(x)` ⇒ `(dotcall @M (error-t) x)`, `A.@B.x`/
-  `@A.$x a`/`@A.B.@x a` (dotted-name `@` reflow)—none cluster cleanly.
-
-- **2026-06-24p**—Parenthesized `export` item (backlog item h, `export (x::T)`,
-  flips js-62113d6b). A paren wrapping a lone symbol unwraps (`export (x)` ⇒ `x`,
-  `export (+)` ⇒ `+`); any other parenthesized form error-wraps (`export (x::T)`
-  ⇒ `(error (::-i x T))`, `export (x, y)` ⇒ `(error (tuple-p x y))`). New `LParen`
-  arm in `parse_name_list_stmt` (export-only) parses a real `PAREN_EXPR`/
-  `TUPLE_EXPR`; `flag_invalid_export_items` walk records `InvalidExportItem`;
-  `project_export` unwraps/error-wraps. JS 663 → 664; dir 171 → 172.
-
-- **2026-06-24o**—Empty quote-paren `:(end)`: a `:(…)` whose body opens with a
-  closing block keyword can't start an expression; JuliaSyntax makes the quoted
-  form a zero-width `(error-t)` (`:(end)` ⇒ `(quote-: (error-t)) (error-t end ✘)`,
-  flips js-b1ac400e). New branch in `parse_quote_sym`'s `:(` arm + `EmptyQuoteParen`
-  diag + `project_quote_sym` arm. Fixture `quote_paren_empty`. JS 662 → 663; dir
-  170 → 171.
-
-- **2026-06-24n**—Glued colon operator `:<`/`:>` (two-token sibling of `**`/`--`).
-  A range colon glued to a single `<`/`>` is one invalid op at the colon tier
-  `(14,15)`: `a :< b` ⇒ `(call-i a (error : <) b)` (flips js-147fac91). Glue is
-  whitespace-sensitive on the colon's right only; `:<=`/`:>:` keep the range
-  reading; prefix `:<` stays a quote. Consumes one op, no chaining (`glued_colon_done`
-  flag). New `InvalidGluedOperator` diag + operator-loop branch (`expr.rs`) +
-  `project_binary` arm joining both loose op tokens. Fixture `glued_colon_operator`.
-  JS 661 → 662; dir 169 → 170.
-
-- **2026-06-24m**—Docstring + stray closer: a doc-eligible string is a docstring
-  only when a *real* statement follows (flips js-c74994ac `"notdoc" ]`, js-f9c36919
-  `"notdoc"\n]`). Two coupled `core.rs` bugs: speculative `first_is_doc_string`
-  suppressed trailing-junk recovery; `fold_docstrings` folded an error node as the
-  doc target. Fixed via `doc_no_target`/`leftover_starts_with_subtree` +
-  `doc_target` returning `None` on `ERROR`. Fixture `docstring_stray_closer`. JS
-  659 → 661; dir 168 → 169.
-- **2026-06-24l**—Unterminated char literals (flips js-265fda17 `'` ⇒ `(char
-  (error))`, js-6808df30 `'a` ⇒ `(char 'a' (error-t))`). `lex_char_literal`
-  (`lexer.rs`) always emits a `Char` token; a newline is char *content* (scan stops
-  at the next `'` or EOF), an unterminated token spans `start..idx` with no close.
-  The split-out `TokKind::Char` arm (`expr.rs`) records `UnterminatedLiteral` at the
-  quote; `project_char` gates on it (empty ⇒ `(char (error))`, else decode body +
-  `(error-t)`). JS 657 → 659; dir 167 → 168. Deferred siblings: `f.'`, `x 'y`,
-  prime-suffixed float overflow `10.0e1000'`/`10.0f100'`.
-- **2026-06-24k**—C2 flat arithmetic chains for `+`/`*` (final commit of the
-  divergence-ledger campaign; flips js-81be47a1 `a + b + c`, js-2cdf798a `a * b * c`,
-  js-99360f4e `[x+y+z]`, js-516f4fd7). A run of ≥2 of the *same* plain `+`/`*` folds
-  into one flat variadic `BINARY_EXPR` via collect-then-choose
-  `parse_flat_arith_chain` (mirrors C3); `is_flat_arith_op(&Token)` rejects suffixed
-  ops; `project_flat_arith` renders ≥3 operands or a 2-operand missing-rhs. Excluded:
-  dotted `.+`/`.*`, left-assoc `-`, suffixed. JS 653 → 657; dir 166 → 167.
-
-## Earlier sessions
-
-- **2026-06-24j**—C3 flat comparison chains (flips js-c32f9f82 `x<y<z` etc.). A
-  run of ≥2 comparison-tier ops folds into one flat `COMPARISON_EXPR` (`a < b <= c`
-  ⇒ `(comparison a < b <= c)`); lone comparison unchanged. New `COMPARISON_EXPR`
-  kind + collect-then-choose `parse_comparison_chain` + arity-general `build_flat`/
-  `build_flat_missing_rhs` (`expr.rs`); `project_comparison` renders dotted ops as
-  `(. op)` and a dangling op as `(error)`. Fixture `comparison_chains`. JS 649 →
-  653; dir 165 → 166. Deferred: word-op chains `a isa b isa c` stay nested.
-
-- **2026-06-24i**—`&&`/`||` right-associativity (C1 of the ledger campaign;
-  flips js-5d39e3d6 `x && y && z`, js-3fcc48ca `x || y || z`). The binding powers
-  were left-assoc (`||`=(5,6), `&&`=(7,8)) despite a doc comment claiming
-  right-assoc; flipped to `(6,5)`/`(8,7)` in `infix_binding_power`. Band and the
-  missing-rhs path (`a &&` ⇒ `(&& a (error))`) intact; projector untouched.
-  Fixture `short_circuit_assoc`. JS 647 → 649; dir 164 → 165.
-
-- **2026-06-24h**—`end`/`begin` index marker scoped to genuine `ref` indexing
-  + misplaced-`end` recovery (unblocks dir `end_index`). The marker is enabled
-  *only* by genuine indexing (single-element/comma/empty `[…]` after a value) and
-  *inherited* by everything nested inside; a bare `end` elsewhere recovers via
-  `UnterminatedArgList` + a toplevel junk run. `inherited_end_marker` threads
-  through the postfix/bracket/matrix parsers. Fixtures `end_index` +
-  `end_marker_propagation`. dir 162 → 164.
-
-**Backlog survey** (carried from 2026-06-24h; the comparison/flatten "deliberate"
-items (a) are now the active campaign—see Progress): (b) **float display
-(blocked)**—`x.3`, hex floats, `1.0e-1000`, prime+float: needs JuliaSyntax's
-full Float32/64 `show`; (c) **char/prime lexer (partly done 2026-06-24l)**—bare
-unterminated chars `'`/`'a` landed; *still deferred:* `f.'` (removed `.'`
-operator), `x 'y` (space-before-`'` junk split), prime-suffixed float overflow
-`10.0e1000'`/`10.0f100'` (entangled with float display); (d) **invalid-operator**
-— `a :< b`⇒`(call-i a (error : <) b)` (two-token
-glued op, needs a paired error token + 2-token error head); (e) **macro
-dotted-name error shapes**—`A.@B.x`, `@A.B.@x a`, `@A.$x a`, `@M.(x)`, `@[x] y
-z`—each a *distinct, deep* parser gap, NOT a clean cluster; (f)
-**ternary-in-block** (`if true; x ? true end`)—fragile, the recovered ternary
-head flips between `?` and `if` by context; (g) **bare block keyword** —
-`function`/`macro`/`struct`/`while x`/`begin` with no signature/body/`end`
-(js-78f9ac01). Most real-world-relevant (incomplete-editor states) but *intricate*
-(two interacting sub-features; signature recovery can consume the `end`); ~2
-sessions; (h) **misc error shapes**—`:(end)`, `a[:(end)]`, `export (x::T)`,
-`"notdoc"]`, each a distinct narrow path.
-
-- **2026-06-24g**—Prefix-operator spaced call-form paren → zero-width `(error)`
-  (flips js-4f46be13 `+ (a,b)`). A unary-prefix-capable operator (`+ - ~ ! .+ .-
-  .~ <: >:`) separated by horizontal whitespace from a *call-form* `(` (the
-  `unary_op_paren_is_call` predicate) heads a call with a zero-width `(error)`
-  flagging the disallowed space (`+ (a,b)` ⇒ `(call + (error) a b)`); a single
-  operand/block paren stays `call-pre` and the glued form is unchanged. New
-  `PrefixOpenerWhitespace` diag spliced by `project_call`. Fixture
-  `prefix_operator_spaced_call`. JS 646 → 647; dir 161 → 162. Deferred: suffixed/
-  non-unary spaced operators (`+₁ (a)`/`* (a,b)`) project like an identifier
-  callee (`(error-t)`).
-- **2026-06-24f**—Colon-space-before-closing-keyword → bare `:` Colon atom
-  (flips js-4a2410ee `: end`). A value-position prefix `:` then a *space* then a
-  closing block keyword (`end`/`else`/`elseif`/`catch`/`finally`) is the bare
-  Colon value atom with the keyword spilled as junk (`: end` ⇒ `(toplevel :
-  (error-t end))`); whitespace-sensitive (`:end` ⇒ `(quote-: end)`) and
-  context-sensitive (`a[: end]`/`A.: end` keep the quote). `parse_quote_sym` gains
-  `value_position`/`end_marker` params + declines for the spaced-closer case;
-  `project_error` renders the closer verbatim (also fixes `x end` ⇒ `x (error-t
-  end)`). Fixture `colon_space_closer_keyword`. JS 645 → 646; dir 160 → 161.
-- **2026-06-24e**—Invalid doubled operators `**`/`--` (and broadcast `.**`/
-  `.--`), the operator-recipe slice of the invalid-operator backlog (flips
-  js-90827a2e `a--b`). Julia has no `**`/`--`, so JuliaSyntax lexes each as a
-  *single* error operator at a fixed low tier (looser than `+`, tighter than
-  `:`/`==`, left-assoc) heading the infix call with the error token: `a**b` ⇒
-  `(call-i a (Error**) b)`, `a--b` ⇒ `(call-i a (ErrorInvalidOperator) b)`; dotted
-  forms `dotcall-i`. New `StarStar`/`MinusMinus`/`DotStarStar`/`DotMinusMinus`
-  `TokKind`s, tier `(18, 19)`, `infix_head`/`is_operator` arms. Fixture
-  `invalid_doubled_operators`. JS 644 → 645; dir 159 → 160. Deferred: prefix
-  `**a`/`--a` (call-pre, not in corpus); `:<`-style two-token invalid op.
-
-- **2026-06-24d**—Stray middle/closing block keyword error-wrap (`@doc x\nend`,
-  js-bc08a2b0). A block keyword that only closes/continues an enclosing block
-  (`end`/`else`/`elseif`/`catch`/`finally`) where a statement is expected is not a
-  block opener; JuliaSyntax wraps it alone in `(error <kw>)` and bumps the rest of
-  the line as a separate trailing-junk run (`end y z`⇒`(error end) (error-t y z)`).
-  The `parse` driver (`core.rs`) wraps the kw in `ERROR`, records `StrayKeyword`,
-  sets `leftover_mark`; `project`'s `ERROR` arm renders it via `stray_keyword_text`.
-  Fixture `stray_block_keyword`. JS 643 → 644; dir 158 → 159.
-- **2026-06-24c**—Non-identifier `catch` variable error-wrap (post-build walk
-  `flag_invalid_catch_vars` + `project_try` `CATCH_CLAUSE` wrap; sibling of
-  const-not-assignment and bare-name-function). A `catch` var must be a plain
-  identifier, `$`-interpolation, or `var"…"`; anything else (`catch e+3`/`e.f`/
-  `f(e)`/`3`) is `(error …)`. Fixture `catch_var_error`. JS 642 → 643; dir
-  157 → 158.
-- **2026-06-24b**—String-literal escape error classification (the `Char`
-  sibling of the 2026-06-23f char-error work). A single-quoted `"…"` whose
-  `STRING_CONTENT` holds a malformed backslash escape projects as one
-  `(ErrorInvalidEscapeSequence)` *per content token*, dropping valid surrounding
-  text (`"\xqqq"`/`"ok\xqq"`/`"\400"` ⇒ `(string (ErrorInvalidEscapeSequence))`,
-  `"a\xq$b"` keeps the interpolation); valid-but-non-UTF-8 bytes (`"\xff"`) stay a
-  *valid* `(string "\xff")`. Pure projector: `decode_string_chunks` now returns
-  `Result<_, StringDecodeError>` distinguishing `BadEscape` (→ error part) from
-  `BadUtf8` (→ raw fallback). Fixture `string_escape_error`. JS 641 → 642; dir
-  156 → 157.
-- **2026-06-24a**—Bare-name `function`/`macro` signature with a body →
-  `(error <name>)`. A bare-identifier signature is the valid forward-declaration
-  form only while the body is empty (`function f end` ⇒ `(function f)`); once a
-  body statement appears or the block is explicitly opened with `;`, JuliaSyntax
-  error-wraps the name (`function f body end` ⇒ `(function (error f) (block
-  body))`). Post-build walk `flag_invalid_function_signatures` (`core.rs`) +
-  `project_function_like` wrap. Fixture `function_bare_name_signature`. JS
-  640 → 641; dir 155 → 156. Deferred: trailing block-body junk
-  (`function f g h end`) not projected (shared for/let/module/struct/try/do gap).
-
-- **2026-06-23z**—Newline between `function`/`macro` and its signature (a real
-  parser bug). A newline after the opening keyword is insignificant, so the
-  signature may begin on the next line (`function\n f() end` ⇒ `(function (call f)
-  (block))`); `parse_function_like` now skips newlines (not just horizontal ws)
-  for `sig_start`. Fixture `function_signature_newline`. JS 639 → 640; dir
-  154 → 155. Side effect: `function\n end` now error-wraps `end` as a name (an
-  error shape either way, not in the passing corpus).
-
-- **2026-06-23y**—Reserved keyword as a signature name → `(error <kw>)`. A hard
-  reserved keyword used as a `struct`/`module`/`function`/`macro` name is a misused
-  name, not a block opener; JuliaSyntax error-wraps it (`struct try end` ⇒
-  `(struct (error try) (block))`, `function begin() end` ⇒ `(function (call (error
-  begin)) (block))`). New `name_context` `ExprFlag` builds an `ERROR > NAME > <kw>`
-  atom; projector's `name_text` falls back to a keyword token. Contextual words
-  (`mutable`/`where`/`true`/`outer`/…) excluded. Fixture `keyword_name_error`. JS
-  635 → 639; dir 153 → 154. Sibling not done: `function f body end` ⇒ `(function
-  (error f) (block body))` is a *different* divergence (a bare-identifier signature
-  with trailing tokens, not a keyword name).
-
-- **2026-06-23x**—Suffixed operator in prefix position → `(error op)`: a
-  sub/superscript- or prime-suffixed arithmetic operator (`+₁`, `.+₁`) is not a
-  valid unary prefix; error-wrapped and applied as a prefix call (`+₁ x` ⇒
-  `(call-pre (error +₁) x)`), reusing the 2026-06-23n machinery. Glued `(` forces a
-  plain call. Fixture `suffixed_prefix_operator`. JS 634 → 635; dir 152 → 153.
-- **2026-06-23w**—Range-colon newline stop + unified missing-rhs `(error)`: the
-  range `:` is the lone binary op that drops its right operand across a newline at
-  statement scope or in array brackets (`1:\n2` ⇒ `(call-i 1 : (error)) 2`), a
-  paren keeps it (`(1:\n2)` ⇒ `(call-i 1 : 2)`); also moved `:`'s missing-rhs onto
-  the shared `(error)` synthesis. `parse_colon_range` computes `newline_significant`.
-  Fixture `colon_range_newline`. JS 633 → 634; dir 151 → 152.
-- **2026-06-23v**—Empty comma-list slot → flat `(error-t ✘ …)`: an empty element
-  slot *after a real element* in any comma list bails, bumping the comma and the
-  rest up to the closer as one trailing-junk run (`[x,,]` ⇒ `(vect x (error-t ✘))`,
-  `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`); a trailing comma stays clean and `,;`
-  is a normal parameters split. `parse_arg_list` tracks `slot_empty`/
-  `parsed_element` and reuses the `@`-junk machinery (`ERROR` over `[comma, close)`
-  + `TrailingJunk` diag), no new node/projector arm. Fixture `list_empty_comma`.
-  JS 631 → 633; dir 150 → 151. Deferred: leading empty slot (`[,x]`), nested
-  brackets in the junk run.
-
-- **2026-06-23u**—`else if` → `elseif` recovery → zero-width `(error-t)`:
-  `else if` on one line (`if a … else if b … end`) is recovered as an `elseif`
-  clause consuming both keywords, splicing a zero-width `(error-t)` into the
-  missing else position (`if a xx else if b yy end` ⇒
-  `(if a (block xx) (error-t) (elseif b (block yy)))`); a newline between the
-  keywords keeps the genuine else-block-`if` reading. `parse_if_expr`'s `ElseKw`
-  arm peeks past horizontal ws, opens an `ELSEIF_CLAUSE` over both keywords,
-  records an `ElseIf` diagnostic at the opening `if`. Fixture `else_if_recovery`.
-  JS 630 → 631; dir 149 → 150.
-
-- **2026-06-23t**—Array space/`;;` separator mismatch → zero-width `(error-t)`:
-  JuliaSyntax establishes a row-/column-major order from the first space/`;;`
-  separator and flags a later conflicting one (`[a b ;; c]` ⇒
-  `(ncat-2 (row a b (error-t)) c)`); only `;` runs of exactly two participate.
-  `parse_matrix` walks separator runs tracking `ArrayOrder`, records
-  `ArraySeparatorMismatch` at the offending element's end; `project_cat_children`
-  reconstructs after the bare `ARG` it anchors. Fixture `array_separator_mismatch`.
-  JS 627 → 630; dir 148 → 149. Deferred: `;;\n` line continuation → `hcat`.
-
-- **2026-06-23s**—Missing operator right-operand → zero-width `(error)`: an
-  infix/assignment operator with an absent right operand keeps its node and
-  synthesizes `(error)` there (`x =` ⇒ `(= x (error))`, `a +` ⇒
-  `(call-i a + (error))`) rather than error-wrapping `lhs op` to line end;
-  `build_binary_missing_rhs`+`operator_node_kind` build the LHS-only node,
-  `project_binary`/`project_assignment` reconstruct via `operator_missing_rhs`.
-  Paired with a prefix value-fallback (`<: =` ⇒ `(= <: (error))`). Fixture
-  `operator_missing_rhs`. JS 624 → 627; dir 147 → 148. Deferred: `::`/`->`
-  projectors, word ops, `where` still use `error_expr_to_line_end`.
-- **2026-06-23r**—Missing `if`/`elseif` condition → zero-width `(error)`: an
-  empty condition slot (`if end`, `if; end`, `if true; elseif; end`) is recovery;
-  JuliaSyntax synthesizes `(error)` there. Pure projector win—Fatou already had
-  an absent `CONDITION` + `MissingCondition` diagnostic; re-anchored that diag at
-  the opening keyword (mirroring `MissingEnd`) and added `missing_condition`
-  (`diag_count_from(keyword_start, …)`) wired into `project_if`/`project_if_tail`.
-  Fixture `if_missing_condition`. JS 622 → 624; dir 146 → 147. Deferred: `while
-  end` recovers differently (`(while (error end) (block (error)) (error-t))`).
-- **2026-06-23q**—Multi-value `$(…)` interpolation → `(error …)`: a `$(…)` holds
-  a single expression, so a multi-value parenthesized form is invalid (`"$(x;y)"`,
-  `"$(x,y)"`, `"$(x for y in z)"`). `parse_interpolation` reuses `parse_paren` +
-  records `InvalidInterpolation`; `project_interpolation` reconstructs the error
-  from the inner node kind. Fixture `string_interp_error`. JS 619 → 622; dir
-  145 → 146.
-- **2026-06-23p**—Lone syntactic operator → `(error op)`: a syntactic operator
-  with no value meaning where an atom is expected is `(error op)` (`=`, `+=`,
-  `&&`, `->`, `...`, `?`/`?x`); the trailing operand falls to the junk driver.
-  `is_lone_error_operator` + `error_operator_atom` (`expr.rs`). Fixture
-  `lone_operator_error`. JS 614 → 619; dir 144 → 145.
-- **2026-06-23o**—Array-internal trailing junk: a macro `@` glued to a preceding
-  array element bumps the rest of the array to `]`/EOF as one flat trailing-junk
-  run (`[x@y]` ⇒ `(hcat x (error-t ✘ y))`); one arm in `parse_matrix` collects it
-  via existing `emit_cat_child`/`ARG`, no projector change. Fixture
-  `array_trailing_junk`. JS 612 → 614; dir 143 → 144. Deferred: `;`/nested
-  brackets in the junk.
-- **2026-06-23n**—Binary-only operator in prefix position → error-wrapped prefix
-  call. `/x` ⇒ `(call-pre (error /) x)`, `.*x` ⇒ `(dotcall-pre (error (. *)) x)`;
-  operand binds at `PREFIX_BP` (tighter than arithmetic, below `^`); bare `*` stays
-  a value atom. Fix in the `is_value_operator` arm of `parse_prefix` (`expr.rs`):
-  emits `UNARY_EXPR > ERROR > OPERATOR_ATOM > op` + operand, new
-  `InvalidPrefixOperator` diagnostic; `project_unary` renders the prefix-call head.
-  Fixture `prefix_operator_error`. JS 609 → 612; dir 142 → 143.
-- **2026-06-23m**—`public` stops at the first non-comma after a name (a
-  names-only shim, `parse_public`); leftover floats to the toplevel junk driver
-  (`public x=1, y` ⇒ `(public x) (error-t = 1 ✘ y)`). `export` differs (re-enters
-  the operator parser), so the stop is `PUBLIC_STMT`-gated. Fixture
-  `public_stop_at_equals`. JS 607 → 609; dir 141 → 142.
-- **2026-06-23l**—Block-body trailing junk: a separator-less glued statement
-  inside a block ends it; `bump_closing_token` bumps the run as flat error tokens
-  up to the closing keyword. Uniform CST (junk `ERROR` always a `BLOCK` sibling);
-  the projector places it—`begin`/`quote` fold it inside (`begin\n x y\n end` ⇒
-  `(block x (error-t y))`), `if`/`while` keep it a sibling. Fixture
-  `block_trailing_junk`. JS 605 → 607; dir 140 → 141. Deferred:
-  for/let/module/struct/try/do junk (sibling `ERROR` in CST, not yet projected).
-
-**Older deferred roots** (not in this session's survey): (a) **`outer`
-stop-at-`=`**—`outer x=1` ⇒ `outer (error-t x = 1)` (`outer` is the bare value,
-the whole `x = 1` is junk, unlike `public`); (b) **for/let/module/struct/try/do
-block junk**—sibling `ERROR` is in the CST but their explicit projectors don't
-emit it (only `if`/`while`/`begin`/`quote` do). (Root (c), `;;\n`
-line-continuation, was done 2026-06-25b.)
-
-- **2026-06-23k**—Flat trailing-junk runs (toplevel): a separator-less line's
-  leftover bumps as *flat error tokens* (`x y, z` ⇒ `x (error-t y ✘ z)`,
-  `x@y` ⇒ `x (error-t ✘ y)`); `core.rs` driver + `is_error_glyph`. Fixture
-  `toplevel_leftover_error`. JS 603 → 605.
-- **2026-06-23j**—`const`-not-assignment error-wrap (first diagnostics-model
-  error shape): `const x`⇒`(error (const x))`, struct-field `const` exempt;
-  post-build `flag_invalid_const_decls` + `CONST_STMT` projector wrap. Fixture
-  `const_not_assignment`. JS 599 → 603; dir 139 → 140.
-- **2026-06-23i**—Architecture reversal: error handling → the rust-analyzer
-  model. Deleted `SyntaxKind::ERROR_TRIVIA`; the zero-width in-tree markers grown
-  over the 2026-06-22o…2026-06-23h lineage became **diagnostics-only** (no node),
-  reconstructed by the projector from the side-channel; the 3 byte-bearing
-  recoveries (`StrayCloser`/`TrailingJunk`/`ImportRecoveryColon`) stay real
-  `ERROR` nodes. New `DiagnosticKind` enum + `push_diagnostic(kind, …)`; projector
-  gained `diag_at`/`diag_count_from`/`is_recovery_error`/`keyword_start` reading a
-  thread-local `PROJ_DIAGS`; `to_juliasyntax_sexpr` takes `&[ParseDiagnostic]`.
-  Same projected output ⇒ zero allowlist movement (599/139). Gotcha: `keyword_start`
-  special-cases `DO_EXPR` (callee precedes `do`). Plan:
-  `~/.claude/plans/yeah-we-re-heading-the-swift-blossom.md`.
-- **2026-06-23h**—`import`/`as` colon error shapes: a top-level `:` is the
-  base/names split only as the *first* separator (`import A, B: y` ⇒ recovery); a
-  second names-list colon is recovery; a base alias before a valid `:` is invalid
-  and a `using` base alias stacks both. `parse_import_stmt` passes an error-wrap
-  depth (0/1/2) to `parse_import_clause`. Fixture `import_as_colon_error`. JS
-  597 → 599; dir 138 → 139.
-- **2026-06-23g**—`using`-base `as` rename error-wrap (`using A as B` ⇒
-  `(error (as …))`, invalid in a `using` base path); fixture `using_as_error`.
-  JS 595 → 597; dir 137 → 138. (Superseded: the bool became an error-wrap depth.)
-
-- **2026-06-23f**—Char-literal error classification (closed-but-invalid bodies):
-  empty `''`⇒`(char (error))`, malformed escape `'\xq'`⇒`(char
-  (ErrorInvalidEscapeSequence))`, other multi-codepoint `'ab'`⇒`(char
-  (ErrorOverLongCharacter))`; a lone non-UTF-8 byte `'\xff'` stays a valid `Char`.
-  Pure projector: `project_char`'s `None` arm delegates to `classify_char_error`.
-  Fixture `char_errors`. JS 592 → 595; dir 136 → 137. Deferred: unterminated chars
-  (lexer work, entangled with transpose siblings `f.'`/`x 'y`).
-- **2026-06-23e**—`else`-without-`catch` error-wrap (last try-family
-  divergence): an `else` *before* any `catch` is recovery, so JuliaSyntax wraps
-  its block in `(error …)` (`try x else y end`⇒`(try (block x) (else (error
-  (block y))) (error-t))`); an `else` after a `catch` stays plain.
-  `parse_try_expr` tracks `saw_catch` and wraps the else `run_block` in `ERROR`;
-  the `ELSE_CLAUSE` arm of `project_try` projects it. Fixture
-  `try_else_without_catch`. JS 591 → 592; dir 135 → 136. Deferred: `try x finally
-  z else y end` (else after finally spills to a separate toplevel `(error-t …)`).
-- **2026-06-23d**—Incomplete-`try` truncation `(error-t)`: a `try` with no
-  `catch`/`finally` splices a missing-handler marker, and `expect_end` adds a
-  missing-`end` one (`try x`⇒`(try (block x) (error-t) (error-t))`, `try x end`⇒
-  `(try (block x) (error-t))`). `parse_try_expr` tracks `saw_handler` (catch/finally,
-  not else); `project_try` renders `ERROR_TRIVIA` children in order. JS 590 → 591;
-  dir 134 → 135.
-- **2026-06-23c**—Missing-`end` truncation `(error-t)`: a block form cut off
-  before its `end` (EOF/unconsumable closer) gets a zero-width `ERROR_TRIVIA` last
-  child (`if c\n x`⇒`(if c (block x) (error-t))`); `begin`/`quote` fold it inside.
-  `expect_end` (`structural.rs`) splices it; `push_trailing_errors` renders.
-  Unblocked dir `do_blocks`; fixtures `incomplete_block`/`incomplete_begin`. Dir
-  131 → 134.
-- **2026-06-23b**—Generator/comprehension whitespace-error `(error-t)`: a `for`
-  glued to the preceding element (`[(x)for x in xs]`) splices one zero-width
-  `ERROR_TRIVIA` between body and first clause ⇒ `(generator x (error-t) (= x
-  xs))`, also through a filter; spaced forms stay marker-free. `parse_comprehension`
-  emits the marker when `for_idx == pos`; `project_generator` renders it. Fixture
-  `generator_whitespace_error`. JS allow 589 → 590; dir 130 → 131.
-- **2026-06-23a**—Ternary whitespace-error `(error-t)`: missing ws on either
-  side of `?`/`:` splices a zero-width marker (`a? b : c`⇒`(? a (error-t) b c)`,
-  `a ? b: c`⇒`(? a b (error-t) c)`, `a?b:c` doubles each); a missing `:` is itself
-  one marker with the false-branch parsed greedily (`a ? b c`⇒`(? a b (error-t)
-  c)`). Pure `expr.rs` `parse_ternary`; projector untouched. Fixture
-  `ternary_whitespace_error`. JS 584 → 589; dir 129 → 130.
-- **2026-06-22z**—Lone-closer leading-`(error)` `✘`: a stray *closing* delimiter
-  at statement start is JuliaSyntax's synthesized empty `(error)` plus an
-  `(error-t ✘ …)` swallowing the rest of the line (`)` ⇒ `(error) (error-t ✘)`,
-  `) x` ⇒ `(error) (error-t ✘ x)`, `)))`, `] x`, `}`). Fix in the `parse` driver
-  (`core.rs`): on `parse_stmt`-None with no leftover mark, a close-delimiter token,
-  and no `;`, push empty `ERROR` then an `ERROR_TRIVIA` over the run. Projector
-  untouched. Fixture `stray_closer_start`. JS 583 → 584; dir 128 → 129. Deferred:
-  `;`-segment double-`✘`.
-
-- **2026-06-22y**—Optional-value-keyword stray-closer `✘`: `return` followed by
-  a stray closer ends the empty form right after the keyword, leaving the closer
-  for the toplevel-leftover driver (`return)`⇒`(return) (error-t ✘)`, `return) x`).
-  New `optional_value` flag on `parse_keyword_stmt` (`structural.rs`); only `return`
-  passes `true`. Pure `expr.rs`+`structural.rs`. JS 582 → 583.
-- **2026-06-22x**—Bare `:` colon value atom: a prefix `:` not quotable is the
-  Colon *value* atom (`parse_quote_sym` declines → `parse_prefix` `.or_else`s to
-  `OPERATOR_ATOM`), `a[:]`⇒`(ref a :)`, `[:]`⇒`(vect :)`, lone `:`⇒`:`; also
-  unblocked `:)`⇒`(toplevel : (error-t ✘))`. Pure `expr.rs`. JS 581 → 582.
-- **2026-06-22w**—Stray-closing-delimiter `✘` leftover: a leftover *closing*
-  delimiter at toplevel is JuliaSyntax's `✘` glyph (`var"x")`⇒`(var x) (error-t
-  ✘)`, `&)`⇒`& (error-t ✘)`, `a)`/`1)`/`x]`/`f(x))`). Pure `sexpr.rs`:
-  `project_error` walks `children_with_tokens` and renders a close-delimiter token
-  (`is_close_delimiter`) as `✘`. JS 576 → 581.
-
-The **error-shape lineage** (the current frontier; entries share the
-`ERROR_TRIVIA`/`project_error`/leftover-driver machinery, condensed—see git for
-detail):
-
-- **2026-06-22v**—Paren-block juxtapose-error (`(begin end)x`⇒`(block)
-  (error-t x)`); `lhs_is_paren_block` suppresses both juxtapose checks. JS 575 → 576.
-- **2026-06-22u**—String-juxtapose-error (`"a"x`⇒`(juxtapose (string "a")
-  (error-t) x)`); `should_juxtapose_string_error` before the numeric case. JS 571 → 575.
-- **2026-06-22t**—Separate-toplevel trailing-junk (`x y`⇒`x (error-t y)`); the
-  `core.rs` driver records `leftover_mark` + one `ERROR_TRIVIA` sibling. JS 568 → 571.
-- **2026-06-22s**—Field-access/colon-quote space (`x .y`⇒`(. x (error-t)
-  (quote y))`, `: foo`⇒`(quote-: (error-t) foo)`); broadcast `.+` untouched. JS 564 → 568.
-- **2026-06-22r**—Whitespace-before-postfix-opener (`f (a)`⇒`(call f (error-t)
-  a)`); `parse_postfix` splices when `open_idx > lhs.end`. JS 559 → 564.
-- **2026-06-22q**—`var"…"` glued-suffix (`var"x"y`⇒`(var x (error-t))`). JS 556 → 559.
-- **2026-06-22p**—Unterminated-string (`"str`⇒`(string "str" (error-t))`);
-  `with_error_trivia` appends the marker. JS 555 → 556.
-- **2026-06-22o**—Typed error-node taxonomy (Phase 0): new `ERROR_TRIVIA`,
-  `project_error(head, node)`, total `render()`; harvest kept `(error …)` cases →
-  JS corpus 575 → 685 (the visible backlog). First slice `f(a`⇒`(call f a
-  (error-t))`. JS 553 → 555.
-
-**Pre-error-shape feature work** (2026-06-17a through 2026-06-22n, JS allow
-251 → 553—the oracle build-out, then operators, literals, strings, char/escape
-decoding, macros, imports/`using`, comprehensions/generators, matrices/`ncat`,
-block forms, `where`, do-blocks, splat precedence, integer-display
-normalization, …) is fully recorded as `[x]` bullets in `TODO.md` and in git
-history. Trimmed from this log to honor the ≤300-line cap; consult `git log
---oneline` or `TODO.md` for any specific construct.
+- **2026-08-07b** — `for outer i` iteration spec. New `OUTER_BINDING` node;
+  JuliaSyntax nests `outer` around the *variable*, inside the `=`
+  (`(= (outer i) …)`), so the pattern parses at `COMMA_ITEM_BP` and the spec `=`
+  is consumed as a loose separator. `outer` is contextual, detected by a
+  speculative parse. Linter needed no change. Fixture `for_outer_binding`.
+  677 / 248.
+- **2026-08-07** — keyword statement as a comprehension/generator body.
+  `[const x = 1 for i in 1:1]` swallowed the `for` as loose tokens;
+  `KwStmt::ExprTuple` gained `for_ends`, set via `!stmt_comma ||
+  kw_generator_body` (keying on `inside_brackets` would have missed `[…]`).
+  Operand position deliberately not gated. Fixture
+  `keyword_stmt_generator_body`. Drive-by: fixed `update-juliasyntax-corpus.jl`'s
+  stale pre-crate-split `CORPUS_DIR`. 677 / 247.
+- **2026-07-30** — prefix-operator space-arg then whitespace opener
+  (`@jl_assert !is_leaf(st) (st, "msg")`). `parse_prefix`'s unary arm hard-coded
+  `array_mode: false`; inherit instead. Fixtures `macro_space_args`,
+  `array_space_call`. 677 / 244.
+- **2026-07-28b** — quoted syntactic operators `:(.=)`, `:(.)`, `:(...)`.
+  `is_paren_quotable_op` gained the assignment/dotted forms and the arm now wraps
+  in `OPERATOR_ATOM`; `paren_operator` descends one level. `JuliaLang/julia`
+  scan 69 → 58 failures. 677 / 219.
+- **2026-07-28** — a block comment after a block keyword swallowed the header
+  (issue #42). New `skip_ws_and_block_comments` swapped in at every header-start
+  site; `let` had been moving a binding out of `LET_BINDINGS` silently. Fixture
+  `keyword_header_block_comment`. 677 / 219.
+- **2026-07-27b** — lambda arrow `->` precedence. Not an ordinary arrow-tier op:
+  asymmetric tier `(35, 1)` — binds a tight left operand, sweeps everything
+  looser into its body. Fixture `arrow_precedence`. 677 / 213.
+- **2026-07-27** — four DataFrames gaps (issue #19): `.!` broadcast unary-not;
+  `.|=`/`.&=`; assignment as a ternary branch (`TERNARY_BRANCH_BP`); macro
+  space-args swallowing a generator `for`. 677 / 206.
+- **2026-07-20** — Unicode operators as call names and value atoms
+  (`≠(a, b) = …`, `a[≤]`, `filter(≥(3), xs)`); `± ∓ ⋆` follow the `+`-style
+  paren-call heuristic. Fixture `unicode_operator_call`. 677 / 199.
+- **2026-07-09** — name-list comment continuation (`export Core,\n #c\n Any`);
+  two call sites moved to `skip_trivia`. 677 / 198.
+- **2026-07-07b** — space-sensitive macro space-form args (`@foo f (x)`);
+  `array_mode: true` at both `parse_macro_args` sites. 677 / 197.
+- **2026-07-07** — splat after a closing bracket; excluded `DotDotDot` in
+  `should_juxtapose`. 677 / 196.
+- **2026-07-06b** — multi-binding `let` per-binding nodes; `parse_header`'s
+  general path became a loop, `project_let_bindings` collapsed to `children()`.
+  677 / 195.
+- **2026-07-05b** — left-arrow `<--` family via the 5-file recipe. 677 / 194.
+- **2026-07-05** — newline-broken braces comprehension; `parse_braces` gained the
+  two newline-lookahead arms `parse_bracket_literal` had. 677 / 193.
+- **2026-07-03** — `@macro` as a macro name; `macro` was missing from *both*
+  `is_keyword` matchers. 677 / 192.
+- **2026-07-02d** — newline-after-comma continuation (bare tuple, `let` bindings,
+  `import`/`using` paths); post-separator lookup moved to `skip_trivia`. 677 / 191.
+- **2026-07-02c** — compound shift/Unicode augmented assignments (`<<=`, `>>=`,
+  `>>>=`, `÷=`, `⊻=` + broadcast forms), 5-file recipe ×10. 677 / 188.
+- **2026-06-29b** — one-line space-separated `for` body; `parse_for_specs` gained
+  `bracketed`. 677 / 187.
+- **2026-06-29** — `global`/`local` + multiple assignment; switched to
+  `KwStmt::ExprTuple`, `project_decl` splices a bare tuple. 677 / 186.
+- **2026-06-26b** — prefix operators stop at a significant newline (correctness
+  fix + false-positive diagnostic removal). 677 / 185.
+- **2026-06-26a** — left-division `\` family (`\`, `\=`, `.\`, `.\=`);
+  longest-match forced the whole family. 677 / 184.
+- **2026-06-25l** — broadcast identity ops `.===`/`.!==`; also fixed
+  `is_operator_kind` missing `EQ_EQ_EQ`/`NOT_EQ_EQ`. 677 / 183.
+- **2026-06-25k** — `===`/`!==`/`!=`; the crux was `scan_ident` stopping at `!`
+  immediately followed by `=` (so `f!`/`push!` still lex). 677 / 182.
+- **2026-06-25j** — projector faithfulness audit, no parser change: classified
+  every non-trivial arm, probed each non-local one. **Zero latent CST bugs.**
+- **2026-06-25i** — `.'` → trailing-junk recovery; lexer `prev_is_dot()`. 677 / 181.
+- **2026-06-25h** — misplaced `end` in a space-separated array. 676 / 180.
+- **2026-06-25g** — leading-`@` dotted macro `$`/inner-`@` sigil reflow. 675 / 179.
+- **2026-06-25f** — misplaced macro sigil `A.@B.x` (trailing form). 673 / 178.
+- **2026-06-25e** — broadcast call on a macro name `@M.(x)`. 672 / 177.
+- **2026-06-25d** — bare block keyword `function`/`macro` empty recovery. 671 / 176.
+- **2026-06-25c** — incomplete ternary recovered as `if`, decided *locally* by the
+  terminator. 670 / 175.
+- **2026-06-25b** — array `;;` line continuation → `hcat` (valid syntax, no
+  diagnostic). 666 / 174.
+- **2026-06-25a** — invalid bracketed macro name `@[x]`. 665 / 173.
+- **2026-06-24a…p** — the error-shape campaign's second half: parenthesized
+  `export` item; `:(end)`; glued colon `:<`/`:>`; docstring + stray closer;
+  unterminated char literals; C2 flat arithmetic chains; C3 flat comparison
+  chains; `&&`/`||` right-associativity (C1); `end`/`begin` marker scoped to
+  genuine `ref`; prefix-op spaced call-form paren; `: end` bare Colon atom;
+  doubled operators `**`/`--`; stray middle/closing block keyword; non-identifier
+  `catch` var; string-escape error classification; bare-name `function` signature.
+  JS 640 → 665, dir 155 → 173.
+- **2026-06-23a…z** — the error-shape lineage proper, including the **2026-06-23i
+  architecture reversal** to the rust-analyzer model (deleted `ERROR_TRIVIA`; the
+  zero-width markers became diagnostics-only, reconstructed by the projector).
+  Covers missing operand/condition `(error)`, `else if` recovery, array separator
+  mismatch, trailing-junk runs, lone syntactic operators, char/string error
+  classification, `import`/`as` colon shapes, incomplete `try`, missing `end`.
+  JS 553 → 640, dir 128 → 155.
+- **2026-06-22o…v** — Phase 0 of the error-shape work: typed error-node taxonomy,
+  total `render()`, and the harvest that kept `(error …)` cases (JS corpus
+  575 → 685). JS 553 → 576.
+- **2026-06-17a…2026-06-22n** — pre-error-shape feature work, JS allowlist
+  251 → 553: the oracle build-out, then operators, literals, strings, char/escape
+  decoding, macros, imports/`using`, comprehensions/generators, matrices/`ncat`,
+  block forms, `where`, do-blocks, splat precedence, integer-display
+  normalization. Fully recorded as `[x]` bullets in `TODO.md` and in git history.
