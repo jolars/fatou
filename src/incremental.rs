@@ -708,13 +708,16 @@ struct FileReparseState {
     pending: Vec<Edit>,
     /// When this entry was last touched, for eviction. See [`ReparseCache`].
     used: u64,
+    /// Whether this file has shown it benefits from a base: an editor staged a
+    /// real edit chain against it, or a splice actually landed. See
+    /// [`ReparseCache`] for what the flag buys.
+    hot: bool,
 }
 
 /// How many files keep a reparse base. Every file the include graph reaches
 /// runs [`parsed_document`], but only the handful the editor is actually
 /// touching ever gets a *hit*: the rest would hold a second copy of their text
-/// (salsa already holds one) plus a green tree, for nothing. Comfortably above
-/// any plausible set of open buffers, so eviction never costs a live one.
+/// (salsa already holds one) plus a green tree, for nothing.
 const MAX_REPARSE_BASES: usize = 64;
 
 /// The reparse side-channel for all files, bounded by [`MAX_REPARSE_BASES`].
@@ -722,6 +725,15 @@ const MAX_REPARSE_BASES: usize = 64;
 /// Eviction is least-recently-used, approximated by a monotone counter stamped
 /// on each entry as it is read or written. Dropping an entry only costs its
 /// file a full parse, so the policy needs no more precision than that.
+///
+/// Recency alone is not enough, though, because the two populations are not
+/// comparable. A [`project_graph`] or [`workspace_reference_index`] sweep
+/// parses every member of the workspace, and each one stores a base it can
+/// never hit — a sweep past the budget would fill every slot *and* stamp
+/// itself more recent than every open buffer, so one find-references would
+/// cost every buffer its base. So entries are two classes: an entry is *hot*
+/// once it has shown it benefits from a base, and eviction drops cold entries
+/// first, reaching hot ones only if the hot set alone is over budget.
 ///
 /// No `Debug`: salsa only formats a `SourceFile` with its database in hand, and
 /// [`IncrementalDatabase`] elides this cache from its own `Debug` anyway.
@@ -741,17 +753,44 @@ impl ReparseCache {
         state
     }
 
-    /// Drop the least recently used entries until the cache is within budget.
+    /// Drop the least recently used entries until the cache is within budget,
+    /// cold ones first. Stamps are unique — `touch` bumps a monotone clock — so
+    /// "everything at or below the `n`th smallest" drops exactly `n` entries.
     fn evict_over_budget(&mut self) {
         if self.files.len() <= MAX_REPARSE_BASES {
             return;
         }
-        let mut stamps: Vec<u64> = self.files.values().map(|state| state.used).collect();
-        // The `len - MAX`th smallest stamp: everything at or below it goes.
-        let cut = self.files.len() - MAX_REPARSE_BASES;
-        stamps.select_nth_unstable(cut - 1);
-        let threshold = stamps[cut - 1];
-        self.files.retain(|_, state| state.used > threshold);
+        let hot = self.files.values().filter(|state| state.hot).count();
+
+        if hot <= MAX_REPARSE_BASES {
+            // The ordinary case: enough cold entries to absorb the overflow, so
+            // no file the editor is in loses its base.
+            let over = self.files.len() - MAX_REPARSE_BASES;
+            let mut cold: Vec<u64> = self
+                .files
+                .values()
+                .filter(|state| !state.hot)
+                .map(|state| state.used)
+                .collect();
+            cold.select_nth_unstable(over - 1);
+            let threshold = cold[over - 1];
+            self.files
+                .retain(|_, state| state.hot || state.used > threshold);
+        } else {
+            // More hot files than the budget: plain LRU across them, and every
+            // cold entry goes.
+            let cut = hot - MAX_REPARSE_BASES;
+            let mut stamps: Vec<u64> = self
+                .files
+                .values()
+                .filter(|state| state.hot)
+                .map(|state| state.used)
+                .collect();
+            stamps.select_nth_unstable(cut - 1);
+            let threshold = stamps[cut - 1];
+            self.files
+                .retain(|_, state| state.hot && state.used > threshold);
+        }
     }
 }
 
@@ -809,9 +848,12 @@ impl IncrementalDb for IncrementalDatabase {
         let mut cache = self.reparse_state();
         let state = cache.touch(file);
         let Some(edits) = edits else {
+            // `None` is an unknown transform, which is also what a sweep and a
+            // disk revert look like, so it must not promote the entry.
             state.pending.clear();
             return;
         };
+        state.hot = true;
         state.pending.extend(edits);
 
         // Bound the chain here rather than where it is read: nothing guarantees
@@ -853,6 +895,9 @@ impl IncrementalDb for IncrementalDatabase {
         }
         let mut cache = self.reparse_state();
         let state = cache.touch(file);
+        // A splice that landed is proof this file's base earns its slot, which
+        // is the signal a client on full-buffer sync gives instead of a chain.
+        state.hot |= tier.is_some();
         state.prev = Some(Arc::new(prev));
         // Drain the *prefix* the caller saw, not the whole chain: a stage can
         // land between the peek and this store (an `upsert_file` that finds the

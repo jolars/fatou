@@ -246,6 +246,72 @@ fn the_reparse_base_cache_is_bounded() {
     );
 }
 
+/// A `project_graph` or `workspace_reference_index` sweep parses far more files
+/// than the cache holds, and none of them will ever score a hit. Under a plain
+/// LRU it would evict every open buffer's base in one pass, and the next
+/// keystroke would full-parse.
+#[test]
+fn a_sweep_does_not_evict_an_edited_buffer() {
+    let mut db = IncrementalDatabase::new();
+    let old = "alpha = 1\n";
+    let buffer = db.add_file(old);
+
+    // Typing into the buffer is what marks it hot.
+    let edits = vec![edit(5..5, "X")];
+    let new = apply_edits(old, &edits);
+    db.reparse_stage_edits(buffer, Some(edits));
+    db.set_file_text(buffer, new);
+    parsed_tree_root(&db, buffer);
+    assert!(db.reparse_prev(buffer).is_some(), "the buffer has a base");
+
+    // Now a project-wide sweep, well past the budget.
+    let swept: Vec<_> = (0..200)
+        .map(|i| db.add_file(format!("x{i} = {i}\n")))
+        .collect();
+    for &file in &swept {
+        parsed_tree_root(&db, file);
+    }
+
+    assert!(
+        db.reparse_prev(buffer).is_some(),
+        "a sweep of files that can never hit must not cost the buffer its base"
+    );
+}
+
+/// Preferring cold entries is a tie-break, not an exemption: past
+/// `MAX_REPARSE_BASES` *hot* files the budget still binds, and the oldest of
+/// them goes. No editor holds that many buffers, but the bound is what keeps
+/// the cache bounded at all.
+#[test]
+fn the_bound_still_holds_when_every_file_is_hot() {
+    let db = IncrementalDatabase::new();
+    let files: Vec<_> = (0..200)
+        .map(|i| db.add_file(format!("x{i} = {i}\n")))
+        .collect();
+    // Staging is enough to make a file hot; no parse is needed to fill the
+    // cache, and the surviving chain is what marks an entry as still resident.
+    for &file in &files {
+        db.reparse_stage_edits(file, Some(vec![edit(0..0, " ")]));
+    }
+
+    let resident = files
+        .iter()
+        .filter(|&&f| !db.reparse_pending_edits(f).is_empty())
+        .count();
+    assert!(
+        resident <= 64,
+        "the cache grew to {resident} entries across 200 hot files"
+    );
+    assert!(
+        !db.reparse_pending_edits(*files.last().unwrap()).is_empty(),
+        "the most recently staged file must survive"
+    );
+    assert!(
+        db.reparse_pending_edits(files[0]).is_empty(),
+        "the least recently used hot entry should have been evicted"
+    );
+}
+
 /// A stage that lands between a parse's peek and its store must survive: the
 /// store drains only the prefix that parse actually saw.
 #[test]
