@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/jolars/fatou/compare/fatou-code-v0.10.0...fatou-code-v0.11.0) (2026-08-07)
+
+### Features
+- **code:** add feature toggles for the extension ([`c63f731`](https://github.com/jolars/fatou/commit/c63f7312edf0105d38f376d0160d64d4967ad503))
+
+### Dependencies
+- updated fatou to v0.11.0
+
 ## [0.10.0](https://github.com/jolars/fatou/compare/fatou-code-v0.9.0...fatou-code-v0.10.0) (2026-08-03)
 
 ### Dependencies
