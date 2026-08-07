@@ -30,10 +30,12 @@ const BLOCKED_REL: &str = "tests/oracle/blocked.txt";
 const REPORT_REL: &str = "tests/oracle/report.txt";
 
 /// The harvested JuliaSyntax sub-corpus (`scripts/harvest-juliasyntax-corpus.jl`):
-/// ~575 micro-cases from JuliaSyntax's own `test/parser.jl`, one JSON object per
-/// line. Gated **opt-in** (like the dir corpus): every allowlisted slug must
-/// match Julia, guarding against regression. The full report's divergence and
-/// unsupported buckets are the prioritizable backlog for growing parser parity.
+/// 685 micro-cases from JuliaSyntax's own `test/parser.jl` (error shapes
+/// included), one JSON object per line. Gated **opt-in** (like the dir corpus):
+/// every allowlisted slug must match Julia, guarding against regression. The
+/// corpus is exhausted of fixable cases — the remaining divergences are permanent
+/// (float display, `(2)(3)x`, the `x 'y` char lexer), so treat the full report as
+/// a regression gate rather than a backlog to work through.
 const JS_CORPUS_REL: &str = "tests/fixtures/oracle/juliasyntax.jsonl";
 const JS_ALLOWLIST_REL: &str = "tests/oracle/juliasyntax-allowlist.txt";
 const JS_REPORT_REL: &str = "tests/oracle/juliasyntax-report.txt";

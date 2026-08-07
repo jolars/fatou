@@ -13,8 +13,9 @@
 # source of truth.
 #
 # Empty/whitespace inputs and non-UTF-8 inputs/renderings are skipped. Error
-# shapes are now in scope (Fatou emits in-tree typed error nodes), so cases whose
-# `parseall` output contains `(error …)` are kept and projected like any other.
+# shapes are in scope (the projector reconstructs `(error …)`/`(error-t …)` from
+# the recorded diagnostics), so cases whose `parseall` output contains `(error …)`
+# are kept and projected like any other.
 #
 # Output: `crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl`, one
 # `{"slug","input","expected"}` object per line, sorted by slug. Pinned to the
@@ -128,10 +129,10 @@ function main()
             skipped_throw += 1
             continue
         end
-        # Error shapes are in scope: Fatou now emits in-tree typed error nodes
-        # (`(error)`/`(error-t)`/named kinds), so `(error …)`-bearing cases are
-        # kept and projected like any other. Only drop a rendering that itself is
-        # not valid UTF-8 (it cannot be JSON-encoded for the corpus).
+        # Error shapes are in scope: the projector replays the recorded
+        # diagnostics as `(error …)`/`(error-t …)`, so `(error …)`-bearing cases
+        # are kept and projected like any other. Only drop a rendering that itself
+        # is not valid UTF-8 (it cannot be JSON-encoded for the corpus).
         if !isvalid(sexpr)
             skipped_invalid += 1
             continue

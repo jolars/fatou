@@ -4,16 +4,40 @@ description: >-
   Grow Fatou's Julia parser toward JuliaSyntax.jl using the differential oracle.
   The projector at crates/fatou-parser/src/parser/sexpr.rs walks the CST and emits JuliaSyntax's
   s-expression shape; the harness in crates/fatou-parser/tests/juliasyntax_oracle.rs diffs each
-  fixture against pinned expected.sexpr. Use this skill to pick the next gap from
-  the corpus, add the grammar plus projector support, lock it with a fixture, and
-  ratchet the now-passing cases into the allowlists. The projector is a test-only
-  diagnostic: a divergence means the CST (or the projector's encoding translation)
-  is wrong, never patch it in the projector to make the test pass.
+  fixture against pinned expected.sexpr. Use this skill to take a parser target —
+  a divergence found by probing real Julia, a handover recorded in RECAP.md, or
+  one named directly by an issue, a code snippet, or a prompt — then add the
+  grammar plus projector support, lock it with a fixture, and ratchet the
+  now-passing cases into the allowlists. The projector is a test-only diagnostic:
+  a divergence means the CST (or the projector's encoding translation) is wrong,
+  never patch it in the projector to make the test pass.
 ---
 
-Use this skill when asked to advance Fatou's parser parity, work the
-JuliaSyntax-oracle backlog, or "take the next gap." Read `RECAP.md` first for
-the latest session, ranked next targets, and traps.
+Use this skill when asked to advance Fatou's parser parity, chase a suspected
+parser bug, or take a named construct. Read `RECAP.md` first for the latest
+session, queued handovers, and traps.
+
+## Where targets come from
+
+The corpora are a **regression gate, not a queue**. Both are effectively
+exhausted: the harvested corpus is 677/685 with the remaining 8 permanent (float
+display, `(2)(3)x` juxtaposition, the `x 'y` char lexer), and the curated corpus
+is fully allowlisted but for one blocked case. Regenerating the reports and
+looking for something to do will come up empty. Real targets arrive three ways:
+
+- **Probing real Julia.** The default when nothing else is queued. Take real code
+  — a vendored tree, a cloned package, a `debug format` smoke-test failure — and
+  diff Fatou's projection against the oracle in bulk (the recipe in step 3).
+  Most recent sessions found their target this way.
+- **A handover in `RECAP.md`.** The "Queued next targets" block at the top holds
+  both parser targets left by an earlier session and items handed over from the
+  formatter or linter skills. Prefer these over a cold probe.
+- **Named directly.** An issue, a code snippet, a construct the user names, or a
+  gap another skill hit and handed off mid-task. A user-named target always wins.
+
+A target is worth taking when it is a **cluster** (one root cause unlocking
+several shapes) or a **construct real code actually contains**. Both criteria
+apply to error shapes exactly as they do to valid code — see the buckets below.
 
 ## The oracle in one paragraph
 
@@ -28,14 +52,14 @@ time → CI-safe):
   `expected.sexpr`), gated by `oracle_allowlist`; every case is accounted for in
   `allowlist.txt` **or** `blocked.txt` (the latter with a one-line rationale).
 - **Harvested JuliaSyntax corpus** `crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl`
-  (~575 micro-cases extracted from JuliaSyntax's own `test/parser.jl` by
+  (685 micro-cases extracted from JuliaSyntax's own `test/parser.jl` by
   `scripts/harvest-juliasyntax-corpus.jl`), gated **opt-in** by
-  `oracle_juliasyntax` against `juliasyntax-allowlist.txt`. The full report's
-  divergence + unsupported buckets are the backlog.
+  `oracle_juliasyntax` against `juliasyntax-allowlist.txt`.
 
 Both pinned to the JuliaSyntax version in
 `crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source`. Reports
-(`crates/fatou-parser/tests/oracle/*report.txt`) are gitignored and regenerated.
+(`crates/fatou-parser/tests/oracle/*report.txt`) are gitignored and regenerated
+on demand.
 
 ## What this skill is NOT
 
@@ -48,23 +72,47 @@ Both pinned to the JuliaSyntax version in
   `a*b*c` stays nested binary; numeric-literal display). Those are **recorded**
   (dir corpus → `blocked.txt`; JS corpus → just left out of the allowlist), not
   "fixed."
-- **Not error-shape work.** Cases where Julia emits `(error …)` recovery are
-  skipped at harvest and deferred; the harness skips dir cases that produce Fatou
-  diagnostics. Error-shape parity is a separate future phase.
+- **Not parser-only.** The formatter lowers the same CST, so a shape change can
+  turn a formatter fixture red even when every parser test passes — see
+  "Formatter coupling" below.
 
 ## Failure buckets (classify before fixing)
 
 - **Projector gap**: Fatou parses fine, but the projector emits the wrong shape
   (missing node-kind arm, wrong head, encoding not unwrapped). Fix `sexpr.rs`.
 - **Parser gap**: Fatou can't parse it (diagnostics → UNSUPPORTED) or parses it
-  loosely (header passthrough as loose tokens). Fix `lexer.rs`/`expr.rs`. This is
-  the bulk of the backlog and the main growth work.
+  loosely (header passthrough as loose tokens). Fix `lexer.rs`/`expr.rs`. The
+  main growth work.
+- **Error shape**: Julia recovers and records the damage as `(error …)`/
+  `(error-t …)`; Fatou's recovery differs in placement, nesting, or marker count.
+  **In scope, and worked like any other bucket** — 110 of the 685 harvested cases
+  carry an error node, and the 2026-06-25 run landed a dozen of them. Ranked on
+  the same two criteria as everything else (cluster size, real-world frequency),
+  which in practice favors what half-typed code looks like — an unterminated
+  ternary, a missing `end`, a stray sigil — over shapes you have to construct on
+  purpose. Recovery is a **diagnostics side-channel**, never a tree node: record a
+  `DiagnosticKind` at the right byte anchor and let the projector replay it.
 - **Modeling divergence**: Fatou intentionally differs (associative flattening,
   comparison chains). Record, don't fix: dir → `blocked.txt` with rationale; JS →
   leave un-allowlisted.
 - **Display normalization**: numeric literals (oct/bin→hex, `1_000`→`1000`,
   float canonicalization). Permanent divergence; blocked.
-- **Error-shape**: recovery nodes. Deferred.
+
+## Formatter coupling
+
+`crates/fatou-formatter/src/formatter/rules.rs` lowers the same CST, matching on
+node kinds and loose tokens. Changing a construct's **shape** — a wrapped node
+becoming a loose token, a new node kind appearing, a child moving — can therefore
+break a formatter fixture that the parser suite says nothing about. Two rules:
+
+- Run `cargo test --workspace`, not just `-p fatou-parser`, before believing a
+  change is clean.
+- When a formatter fixture goes red, the fix is to **move the rule to the new
+  shape**, not to revert the parser. Worked example (2026-08-07c): making `∈` a
+  loose for-spec separator moved the `∈` → `in` normalization from
+  `lower_for_spec`'s wrapped-node arm to its flat one, which also made it cover
+  the loop and `outer` forms for free. Check the fixture's `expected.jl` is still
+  the desired output, and confirm idempotency on the new parser fixture.
 
 ## The operator recipe (5 files)
 
@@ -88,18 +136,35 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
 
 ## Workflow (per session)
 
-1. **Read `RECAP.md`** (traps, latest session, ranked next targets). Prefer a
-   user-named target.
+1. **Read `RECAP.md`** (traps, latest session, queued handovers). A user-named
+   target wins; otherwise take a queued handover; otherwise probe (step 3).
 2. **Baseline**: `cargo test --workspace`—note it's green. "No regression" = still green at
    the end.
-3. **Regenerate the report**:
+3. **Find a target** (skip if you already have one). Probe real Julia in bulk:
+   point Fatou and the oracle at the same files and diff. For a corpus of whole
+   files, loop; for a set of snippets, split one delimited file:
    ```sh
-   cargo test -p fatou-parser --test juliasyntax_oracle -- --ignored juliasyntax_full_report
+   # per file: byte-identical or a divergence to triage
+   diff <(julia --startup-file=no -e 'using JuliaSyntax;
+            print(JuliaSyntax.parseall(JuliaSyntax.SyntaxNode, read(ARGS[1], String);
+                                       ignore_errors=true))' "$f") \
+        <(cargo run -q -- parse --to sexpr "$f")
    ```
-   Read `crates/fatou-parser/tests/oracle/juliasyntax-report.txt` (FAIL = divergence, UNSUPPORTED =
-   Fatou can't parse it = the frontier). `-- --ignored` alone runs both reports.
-4. **Pick a target**: a cluster of FAIL/UNSUPPORTED sharing one likely root cause
-   (one fix unlocks several), or a small, high-real-world-value construct.
+   Sources that have paid off: a vendored/cloned real package, the files behind a
+   `debug format` smoke-test issue, and the sibling constructs of whatever the
+   last session touched. Triage the diffs into buckets and pick a **cluster**
+   (one root cause, several shapes) or a construct real code contains.
+   The corpus reports are a *regression gate*, not a source of targets, but
+   regenerate them if you want the current picture:
+   ```sh
+   cargo test -p fatou-parser --test juliasyntax_oracle -- --ignored
+   ```
+   (`crates/fatou-parser/tests/oracle/{report,juliasyntax-report}.txt`; FAIL =
+   divergence, UNSUPPORTED = Fatou can't parse it.)
+4. **A/B every candidate divergence before calling it a bug.** Stash the working
+   tree and re-run the same input, so you know whether a diff is new or
+   pre-existing — a pre-existing error shape is not a regression you introduced,
+   and mistaking one for a regression burns the session.
 5. **Probe Julia for the exact target shape**:
    ```sh
    julia --startup-file=no -e 'using JuliaSyntax;
@@ -150,8 +215,15 @@ Non-operator features (markers, quotes, literals) are usually just `parse_prefix
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo fmt --all -- --check
     ```
+    `--workspace`, not `-p fatou-parser`: a shape change can break a formatter
+    fixture (see "Formatter coupling"). Also format the new parser fixture and
+    re-format the output, confirming idempotency.
 11. **Update `TODO.md`** (mark a grammar bullet `[x]` mirroring the existing
-    style; trim the construct from the oracle backlog list) and **`RECAP.md`**.
+    style) and **`RECAP.md`**: add the new session section, demote the previous
+    "Latest session" heading to "Earlier session", and update the Progress counts.
+    Keep the file to its stated cap by collapsing the oldest full section into a
+    one-liner in "Earlier sessions" — it has drifted well past 300 lines because
+    sessions add without trimming.
 12. **Commit.** Conventional Commits; subject ≤ 60 chars. New parsing
     capability/public API = `feat(parser)`; test-infra-only = `test(parser)`. The
     pre-commit hook runs clippy + rustfmt—never `--no-verify`. Don't push unless
@@ -185,6 +257,10 @@ precisely so you don't have to.
 - `crates/fatou-parser/src/parser/lexer.rs`: `TokKind` + tokenization (operator tables ~line 757).
 - `crates/fatou-parser/src/syntax.rs`: `SyntaxKind` (`ERROR` must stay last).
 - `crates/fatou-parser/src/parser/tree_builder.rs`: `TokKind` → `SyntaxKind` mapping.
+- `crates/fatou-parser/src/parser/diagnostics.rs`: `DiagnosticKind` — the recovery
+  side-channel the projector replays as `(error …)`/`(error-t …)`.
+- `crates/fatou-formatter/src/formatter/rules.rs`: consumes the same CST; the
+  thing a shape change breaks (see "Formatter coupling").
 - `crates/fatou-parser/tests/juliasyntax_oracle.rs`: harness (allowlist gates + ignored reports).
 - `scripts/update-juliasyntax-corpus.{sh,jl}`: regen pinned `expected.sexpr`.
 - `scripts/harvest-juliasyntax-corpus.jl`: re-extract the JS corpus (run on a
@@ -194,9 +270,13 @@ precisely so you don't have to.
 
 - **Reseeding must preserve the allowlist header.** Use the `grep -E '^#|^$'`
   recipe above; don't clobber the comment block.
-- **Reports are gitignored.** `crates/fatou-parser/tests/oracle/{report,juliasyntax-report}.txt`
-  regenerate from the ignored tests; never commit them, never hand-edit
-  `expected.sexpr` (regenerate via the refresh script).
+- **Reports are gitignored and untracked.** `crates/fatou-parser/tests/oracle/{report,juliasyntax-report}.txt`
+  regenerate from the ignored tests; never commit them (they were force-added
+  once and untracked again in 2026-08-07c), never hand-edit `expected.sexpr`
+  (regenerate via the refresh script).
+- **The corpora do not hold the frontier.** Both are exhausted of fixable cases;
+  a green report means "no regression", not "nothing to do". Targets come from
+  probing real code, a RECAP handover, or a direct ask.
 - **Shell `raw"""…"""` probes break on `"`/`$`.** Use a temp file.
 - **Whitespace-sensitive disambiguation.** Julia distinguishes `a[begin]` (marker)
   from `[begin x end]` (block), `:foo` (quote) from `a[:]` (Colon), `A'`

@@ -174,11 +174,25 @@ text == "∈"`) could therefore never fire — that condition was unsatisfiable.
   (23 lines, byte-identical to JuliaSyntax).
 - **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
   dir 248 → **249** (248 PASS + the 1 blocked `numeric_literals`).
-- **Next**: no queued target. Nearest sibling is the deferred error shape
-  `for i ∈ a ∈ b` / `for i in a in b` — Julia parses the *iterable* below
-  comparison precedence so a second separator cannot appear there
-  (`(= i a)` + a junk statement), while Fatou parses it at bp 0. Small, but it is
-  error-shape work. Otherwise keep batch-probing real-world Julia.
+- **Next**: no queued target. Nearest sibling is `for i ∈ a ∈ b` /
+  `for i in a in b` — Julia parses the *iterable* below comparison precedence so
+  a second separator cannot appear there (`(= i a)` + a junk statement), while
+  Fatou parses it at bp 0. Small, but it is an error shape nobody writes by
+  accident; rank it below anything found by probing real Julia.
+- **Follow-up doc pass (same session, separate commit)**: `SKILL.md` had gone
+  stale in four ways and was rewritten. It claimed error shapes were out of scope
+  — they have been in scope since the June harvest (**110 of the 685** JS cases
+  carry an error node, all passing; none of the 8 remaining FAILs is one), so
+  error shape is now a normal bucket ranked on cluster size and real-world
+  frequency. It sent each session to the corpus report for a target, which is a
+  dead end (0 unsupported, 8 permanent FAILs); target selection is now built
+  around probing real Julia, RECAP handovers, and direct asks. It said nothing
+  about **formatter coupling**, which bit this very session. And it claimed the
+  reports were gitignored while they were also tracked — resolved by untracking
+  `report.txt`/`juliasyntax-report.txt` (they stay gitignored; don't re-add
+  them). Also fixed `harvest-juliasyntax-corpus.jl`'s comment, which justified
+  harvesting error shapes by "Fatou emits in-tree typed error nodes" — a
+  mechanism the 2026-06-23i refactor replaced with the diagnostics side-channel.
 
 ## Earlier session (2026-08-07b—`for outer i` iteration spec)
 
