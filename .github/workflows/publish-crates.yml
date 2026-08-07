@@ -39,8 +39,11 @@ jobs:
 
       # Publishes in dependency order (fatou-parser, fatou-formatter, fatou);
       # `--from-git` takes the versions at this commit and `--skip-published`
-      # silently skips crates already on crates.io.
+      # silently skips crates already on crates.io. Verification is deliberately
+      # left on: it builds each crate against its *registry* dependencies, which
+      # is the only place a stale published manifest (path deps mask it locally)
+      # shows up before users hit it with `cargo install`.
       - name: Publish workspace
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo workspaces publish --from-git --skip-published --no-verify --yes
+        run: cargo workspaces publish --from-git --skip-published --yes
