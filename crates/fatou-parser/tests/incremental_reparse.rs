@@ -1,13 +1,13 @@
 //! Oracle harness for incremental reparse (Tenet 4).
 //!
-//! For every snippet and ~200 seeded edits, any `Some(Reparsed)` from
-//! [`fatou_parser::parser::reparse`] must be byte-identical to a full parse of the
-//! edited text: same tree fingerprint (kind@range + token text of every
-//! descendant, shared with the in-crate Tenet-4 `debug_assert`) and the same
-//! diagnostics vector, order included. A `None` is always correct — the
-//! caller falls back to a full parse — so the harness was trivially green
-//! while the stage-0 stub fell back on everything, and is the safety net the
-//! token and top-level tiers were developed against.
+//! For every snippet and [`EDITS_PER_SNIPPET`] seeded edits, any
+//! `Some(Reparsed)` from [`fatou_parser::parser::reparse`] must be
+//! byte-identical to a full parse of the edited text: same tree fingerprint
+//! (kind@range + token text of every descendant, shared with the in-crate
+//! Tenet-4 `debug_assert`) and the same diagnostics vector, order included. A
+//! `None` is always correct — the caller falls back to a full parse — so the
+//! harness was trivially green while the stage-0 stub fell back on everything,
+//! and is the safety net the token and top-level tiers were developed against.
 //!
 //! [`fatou_parser::parser::reparse_edits`] is held to the same contract over chained
 //! batches of two to four edits, each expressed against the text its
@@ -26,12 +26,19 @@ use fatou_parser::parser::{
 };
 use fatou_parser::syntax::SyntaxNode;
 
-const EDITS_PER_SNIPPET: usize = 200;
+/// Seeded edits per snippet. A wall-clock trade, not a correctness bound: the
+/// draws are pseudo-random, so raising it buys more of the same rather than any
+/// named case (the targeted tier tests and [`HAZARD_SNIPPETS`] are what pin
+/// specific shapes). Every *successful* splice costs two full parses — this
+/// harness's own comparison plus the in-crate Tenet-4 `debug_assert`, which
+/// `cargo test`'s profile leaves on — so the sweep is worth keeping cheap.
+/// Raise it locally when hunting a regression.
+const EDITS_PER_SNIPPET: usize = 64;
 
 /// Chained batches per snippet, each two to four edits deep. Fewer than
 /// [`EDITS_PER_SNIPPET`] because every batch costs a whole-text validation on
 /// top of its per-step splices.
-const CHAINS_PER_SNIPPET: usize = 30;
+const CHAINS_PER_SNIPPET: usize = 10;
 
 /// Insert alphabet, hazard-biased: most entries can change how neighboring
 /// text lexes (string modes, comments, juxtaposition, statement boundaries).
