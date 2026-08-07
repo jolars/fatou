@@ -433,11 +433,34 @@ above):
   ? true : false` is `c`, `c ? false : true` is `!c`. Distinct from
   `constant-condition`, which owns the literal-*as*-test case. (arity
   `redundant-equals`, `redundant-ifelse`)
-- [ ] `comparison-negation` (readability, syn, warning, safe fix): `!(a == b)`
+- [x] `comparison-negation` (readability, syn, warning, safe fix): `!(a == b)`
   is `a != b`, `!(x < y)` is `x >= y`. Safer in Julia than in R: `!=` is
   *defined* as `!(==)`, so the rewrite is exactly equivalent by construction.
   Watch the broadcast forms (`.==`, `.!`), which are values rather than a
-  scalar test and must not fire. (arity `comparison-negation`)
+  scalar test and must not fire. (arity `comparison-negation`) Landed as a
+  `UNARY_EXPR` rule spanning the whole negation, matching `!` on a `PAREN_EXPR`
+  wrapping a `BINARY_EXPR`. **Scoped to the equality family only** — `==`/`!=`/
+  `===`/`!==` plus the Unicode `≠`/`≡`/`≢`. The ordering half of the entry
+  above is *not* exact after all, and was dropped: `<` and `>=` are independent
+  methods rather than negations of each other, so they disagree wherever a
+  partial order is partial — `!(NaN < 1)` is `true` while `NaN >= 1` is
+  `false`. Only the equality operators carry Base's defining identity
+  (`!=(x, y) = !(x == y)`), which is what the entry's soundness argument
+  actually rests on. `in` is left alone too: `∉` really is `!∈`, but the only
+  negated spelling is Unicode. Both broadcast positions (`.==` and `.!`) carry
+  their own kinds and never match, and a comparison chain folds into a
+  `COMPARISON_EXPR`. No namespace gate: the rewrite introduces an operator, not
+  a name. The fix is the comparison's own source text with the operator's bytes
+  swapped, so spacing and any comment *between* the operands survive
+  (`!(a==b)` stays tight as `a!=b`); it is withheld — the finding still stands
+  — when a comment sits in the deleted `!(` or `)`. The rule's one real hazard
+  is rebinding: `!(...)` binds like a unary operator on a paren while the
+  replacement binds at the comparison tier, so `x + !(a == b)` would become
+  `(x + a) != b`. Deciding that in general needs the parser's precedence table,
+  which the CST does not expose, so the fix is offered only from an allow-list
+  of provably sealed positions (statement, delimited slot, condition, and the
+  operand of `=`/`&&`/`||`/`?:`/`->`/`return`); a macro argument qualifies only
+  when nothing follows it.
 
 Needs modest new infrastructure:
 

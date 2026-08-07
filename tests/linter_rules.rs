@@ -4366,3 +4366,184 @@ fn length_zero_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- comparison-negation ---------------------------------------------------
+
+/// The single diagnostic `comparison-negation` reports for `src`, or `None`.
+fn comparison_negation_diag(src: &str) -> Option<fatou::linter::Diagnostic> {
+    let config = LintConfig {
+        select: Some(vec!["comparison-negation".to_string()]),
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.rule == "comparison-negation")
+}
+
+#[test]
+fn comparison_negation_flags_every_equality_spelling() {
+    for (src, rewrite) in [
+        ("!(a == b)\n", "a != b"),
+        ("!(a != b)\n", "a == b"),
+        ("!(a === b)\n", "a !== b"),
+        ("!(a !== b)\n", "a === b"),
+        ("!(a ≠ b)\n", "a == b"),
+        ("!(a ≡ b)\n", "a ≢ b"),
+        ("!(a ≢ b)\n", "a ≡ b"),
+    ] {
+        assert_eq!(
+            count("comparison-negation", src),
+            1,
+            "no finding for {src:?}"
+        );
+        let diag = comparison_negation_diag(src).expect("expected a finding");
+        assert_eq!(diag.fixes[0].content, rewrite, "wrong rewrite for {src:?}");
+    }
+}
+
+#[test]
+fn comparison_negation_spans_the_whole_negation() {
+    let src = "if !(x.status == :ok)\n    1\nend\n";
+    let diag = comparison_negation_diag(src).expect("expected a finding");
+    assert_eq!(&src[diag.range], "!(x.status == :ok)");
+}
+
+#[test]
+fn comparison_negation_ignores_orderings_and_other_operators() {
+    for src in [
+        // Not equivalent for a partial order: `!(NaN < 1)` is `true` while
+        // `NaN >= 1` is `false`.
+        "!(x < y)\n",
+        "!(x <= y)\n",
+        "!(x > y)\n",
+        "!(x >= y)\n",
+        // No ASCII negated spelling, and injecting `∉` is not this rule's call.
+        "!(a in b)\n",
+        "!(a ∈ b)\n",
+        // Not a comparison at all.
+        "!(a + b)\n",
+        "!(a && b)\n",
+        "!(a = b)\n",
+        "!(f(x))\n",
+        "!x\n",
+        // Already direct.
+        "a != b\n",
+    ] {
+        assert_eq!(
+            count("comparison-negation", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn comparison_negation_ignores_broadcast_forms() {
+    for src in [
+        // An elementwise comparison is a container of values, not a test.
+        "!(a .== b)\n",
+        "!(a .!= b)\n",
+        "!(a .=== b)\n",
+        // `.!` negates elementwise; the result is a container either way.
+        ".!(a == b)\n",
+        ".!(a .== b)\n",
+    ] {
+        assert_eq!(
+            count("comparison-negation", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn comparison_negation_ignores_a_comparison_chain() {
+    // A chain folds into a `COMPARISON_EXPR`, and `!(a == b == c)` has no
+    // two-operand rewrite.
+    assert_eq!(count("comparison-negation", "!(a == b == c)\n"), 0);
+}
+
+#[test]
+fn comparison_negation_fixes_in_positions_that_cannot_rebind() {
+    for (src, rewrite) in [
+        ("!(a == b)\n", "a != b"),
+        ("x = !(a == b)\n", "a != b"),
+        ("if !(a == b)\n    1\nend\n", "a != b"),
+        ("while !(a == b)\n    1\nend\n", "a != b"),
+        ("f(!(a == b))\n", "a != b"),
+        ("f(k = !(a == b))\n", "a != b"),
+        ("[!(a == b), c]\n", "a != b"),
+        ("(!(a == b))\n", "a != b"),
+        ("!(a == b) && c\n", "a != b"),
+        ("c || !(a == b)\n", "a != b"),
+        ("c ? !(a == b) : y\n", "a != b"),
+        ("function f()\n    return !(a == b)\nend\n", "a != b"),
+        ("x -> !(a == b)\n", "a != b"),
+        ("@assert !(a == b)\n", "a != b"),
+        ("[x for x in v if !(a == b)]\n", "a != b"),
+    ] {
+        let diag = comparison_negation_diag(src).unwrap_or_else(|| panic!("no finding: {src:?}"));
+        assert_eq!(diag.fixes.len(), 1, "no fix for {src:?}");
+        assert_eq!(diag.fixes[0].content, rewrite, "wrong rewrite for {src:?}");
+        assert_eq!(diag.fixes[0].applicability, Applicability::Safe);
+    }
+}
+
+#[test]
+fn comparison_negation_withholds_the_fix_where_the_comparison_would_rebind() {
+    for src in [
+        // A tighter operator would capture an operand: `x + a != b` is
+        // `(x + a) != b`.
+        "x + !(a == b)\n",
+        "!(a == b) * y\n",
+        "x .+ !(a == b)\n",
+        // `!a != b` is `(!a) != b`.
+        "!!(a == b)\n",
+        // Splicing a comparison beside another one builds a chain.
+        "!(a == b) == c\n",
+        // A space-separated matrix row: `[a != b c]` is not two elements.
+        "[!(a == b) c]\n",
+        // Another macro argument follows, and nothing bounds the comparison.
+        "@assert !(a == b) \"msg\"\n",
+    ] {
+        let diag = comparison_negation_diag(src).unwrap_or_else(|| panic!("no finding: {src:?}"));
+        assert!(diag.fixes.is_empty(), "unexpected fix for {src:?}");
+    }
+}
+
+#[test]
+fn comparison_negation_preserves_the_operands_own_text() {
+    // Spacing around the operator, and anything between the operands, is the
+    // author's and survives byte for byte.
+    let diag = comparison_negation_diag("!(a==b)\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "a!=b");
+    let diag = comparison_negation_diag("!(f(#= c =# y) == g(z))\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "f(#= c =# y) != g(z)");
+    let diag = comparison_negation_diag("!(a #= c =# == b)\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "a #= c =# != b");
+}
+
+#[test]
+fn comparison_negation_withholds_the_fix_around_a_dropped_comment() {
+    // A comment outside the operands sits in the deleted `!(` / `)` and would
+    // be lost.
+    let diag = comparison_negation_diag("!(#= c =# a == b)\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+    let diag = comparison_negation_diag("!(a == b #= c =#)\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+}
+
+#[test]
+fn comparison_negation_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["comparison-negation".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "# fatou-ignore comparison-negation\n!(a == b)\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

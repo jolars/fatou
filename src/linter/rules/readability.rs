@@ -7,6 +7,8 @@
 //! it. That is why the rewrites here can be safe fixes: the two spellings agree
 //! on every input.
 
+mod comparison_negation;
 mod length_zero;
 
+pub use comparison_negation::ComparisonNegation;
 pub use length_zero::LengthZero;

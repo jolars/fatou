@@ -812,6 +812,62 @@ warning: typeof-comparison
   = help: Rewrite as an `isa` test (unsafe fix, requires `--unsafe-fixes`)
 ```
 
+## `comparison-negation`
+
+Flag `!` applied to a parenthesized equality test, which Julia spells with a single operator: `!(a == b)` is `a != b`, `!(a === b)` is `a !== b`, and both read back the other way. The Unicode spellings `≠`, `≡`, and `≢` collapse the same way.
+
+The rewrite is exact rather than merely equivalent-in-practice: Base defines `!=(x, y) = !(x == y)` and `!==(x, y) = !(x === y)`, so the two spellings agree on every input by construction.
+
+Only the equality family is reported. The orderings are left alone because `<` and `>=` are independent methods rather than negations of each other, and they disagree on exactly the inputs a partial order is partial about: `!(NaN < 1)` is `true` while `NaN >= 1` is `false`. The broadcast forms `a .== b` and `.!x` are containers of values rather than tests, and a comparison chain (`a == b == c`) has no two-operand rewrite, so none of them is flagged.
+
+The rule reports a safe fix that reuses the comparison's own source text with the operator swapped, so spacing and any comment between the operands survive. The fix is withheld — the finding still stands — when a comment sits in the deleted `!(` or `)`, and when the negation sits somewhere a bare comparison would rebind, as in `x + !(a == b)`.
+
+Negating an equality test spells the inequality:
+
+```julia
+if !(status == :ok)
+    retry()
+end
+```
+
+```text
+warning: comparison-negation
+ --> example.jl:1:4
+  |
+1 | if !(status == :ok)
+  |    ^^^^^^^^^^^^^^^^ write the comparison directly: `!(a == b)` is `a != b`
+  = help: Rewrite as `!=` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+if status != :ok
+    retry()
+end
+```
+
+The identity comparison negates the same way:
+
+```julia
+found = !(lookup(key) === nothing)
+```
+
+```text
+warning: comparison-negation
+ --> example.jl:1:9
+  |
+1 | found = !(lookup(key) === nothing)
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^ write the comparison directly: `!(a === b)` is `a !== b`
+  = help: Rewrite as `!==` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+found = lookup(key) !== nothing
+```
+
 ## `length-zero`
 
 Flag a comparison of `length(x)` against `0` or `1` that asks whether `x` is empty. A length is a non-negative integer, so `length(x) == 0`, `length(x) <= 0`, and `length(x) < 1` all spell `isempty(x)`, while `length(x) != 0`, `length(x) > 0`, and `length(x) >= 1` spell `!isempty(x)`; each mirrored spelling with the literal first (`0 < length(x)`) collapses the same way. `isempty` is the test collections actually implement, and it need not count what it throws away.

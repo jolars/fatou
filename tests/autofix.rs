@@ -199,3 +199,26 @@ d = length(w) < 1
     assert_eq!(outcome.applied, 4);
     assert!(outcome.remaining.is_empty());
 }
+
+/// `comparison-negation` collapses each negated equality to its direct
+/// spelling in one safe pass, leaving no findings behind.
+#[test]
+fn fixes_every_comparison_negation() {
+    let src = "\
+a = !(x == y)
+b = !(p.kind !== Symbol)
+if !(n ≠ 0) && !(s == \"\")
+    g()
+end
+";
+    let outcome = fix_source(None, src, &select("comparison-negation"), false);
+    insta::assert_snapshot!(outcome.output, @r#"
+    a = x != y
+    b = p.kind === Symbol
+    if n == 0 && s != ""
+        g()
+    end
+    "#);
+    assert_eq!(outcome.applied, 4);
+    assert!(outcome.remaining.is_empty());
+}
