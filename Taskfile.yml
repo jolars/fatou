@@ -46,6 +46,11 @@ tasks:
     cmds:
       - ./bench/compare_format.sh
 
+  bench-reparse:
+    desc: Benchmark incremental reparse against a full parse (needs bench-corpus)
+    cmds:
+      - cargo bench -p fatou-parser --features bench --bench reparse
+
   bench-corpus:
     desc: Fetch the pinned JuliaSyntax.jl corpus for the formatter benchmark
     cmds:

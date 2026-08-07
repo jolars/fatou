@@ -50,6 +50,15 @@
 //! guard may cost before rejecting — but it is not free, so a guard should
 //! bail on cheap evidence rather than after a fragment parse.
 //!
+//! Run it with `task bench-reparse`, or:
+//!
+//! ```sh
+//! cargo bench -p fatou-parser --features bench --bench reparse
+//! ```
+//!
+//! The feature is what keeps criterion — and the C toolchain its `alloca`
+//! dependency needs — out of a plain `cargo test --all-targets`.
+//!
 //! `cargo bench` builds with the release profile, so `debug_assertions` is off
 //! and the Tenet-4 check inside `reparse` (a whole extra parse plus two
 //! fingerprint builds per call) does not run. Do not read anything into a

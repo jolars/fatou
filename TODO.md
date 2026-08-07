@@ -26,30 +26,6 @@
 
 ### Incremental
 
-- [ ] Reparse follow-ups left over from the stage 2-4 review. None is a
-  soundness issue: every one of them degrades to a full parse at worst.
-  - The base cache admits every file `parsed_document` touches, not just
-    the buffers the editor is on, so one `project_graph` /
-    `workspace_reference_index` sweep over more than `MAX_REPARSE_BASES`
-    members evicts every open buffer's base at once and the next keystroke
-    full-parses. Admitting only files that carry a staged chain (or an open
-    buffer) would fix it, but it also stops the CLI and the disk-revert
-    path from ever building a base, so it is a policy call rather than a
-    cleanup.
-  - `crate::parser` re-exports `Edit`, `apply_edits`, `try_apply_edits`,
-    and `diff_edit`, all of which `crate::text` already exports, plus
-    `fingerprint`, which exists only for the oracle. Pick one canonical
-    path per item and `#[doc(hidden)]` what is left.
-  - `REGION_MAX_FRACTION` is used as a divisor (`text_len / 4`), so the
-    name reads backwards.
-  - `crates/fatou-parser/tests/incremental_reparse.rs` is now the slowest test binary (~23 s in
-    debug): every successful splice pays the in-crate Tenet-4 full parse on
-    top of the harness's own comparison. Lower `EDITS_PER_SNIPPET`, or put
-    the corpus sweep behind a feature, if CI time starts to matter.
-  - The criterion dev-dependency adds 23 crates, `cc` and `alloca` among
-    them, so `cargo test --all-targets` and `cargo clippy --all-targets`
-    now want a C toolchain.
-
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
   fragment entry point (`public_context`, bracket `end` markers) — a bare
   fragment `parse()` misparses those today. A pure optimization on top of a

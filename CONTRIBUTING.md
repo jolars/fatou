@@ -38,6 +38,11 @@ Or via `task`: `task test`, `task lint`, `task format-check`. CI additionally
 runs `cargo-audit` and `cargo-deny`, and builds and tests on Linux, macOS, and
 Windows.
 
+The `fatou-parser` reparse benchmark sits behind a `bench` feature, so a plain
+`--all-targets` build never pulls in criterion, whose `alloca` dependency wants
+a C toolchain. Run it with `task bench-reparse`. The clippy line above passes
+`--all-features`, so the bench is still linted.
+
 Snapshot tests use [insta](https://insta.rs): review changed snapshots with
 `cargo insta review` and accept them with `cargo insta accept`. Logging in
 tests honors `RUST_LOG` (e.g., `RUST_LOG=debug cargo test`).
