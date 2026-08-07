@@ -657,9 +657,10 @@ fn is_significant_child(el: &crate::syntax::SyntaxElement) -> bool {
 /// alone would refuse the common case of a file with one or two statements.
 const REGION_ALWAYS_TRY_BYTES: usize = 4 * 1024;
 
-/// Above this fraction of the file, a region is wide enough that answering it
-/// costs more than the full parse it is trying to avoid.
-const REGION_MAX_FRACTION: usize = 4;
+/// A region wider than `1 / REGION_MAX_FILE_DIVISOR` of the file is wide enough
+/// that answering it costs more than the full parse it is trying to avoid. A
+/// divisor rather than a fraction, so `4` here means a quarter.
+const REGION_MAX_FILE_DIVISOR: usize = 4;
 
 /// Whether a region is too wide to be worth attempting. The tier answers a
 /// region with a fragment parse of it *plus* up to three neighbor-sized
@@ -674,7 +675,7 @@ const REGION_MAX_FRACTION: usize = 4;
 /// This is a performance guard only. Like every other bail here it returns the
 /// caller to a full parse, so it cannot affect what a reparse yields.
 fn region_is_too_wide(region_len: usize, text_len: usize) -> bool {
-    region_len > REGION_ALWAYS_TRY_BYTES && region_len > text_len / REGION_MAX_FRACTION
+    region_len > REGION_ALWAYS_TRY_BYTES && region_len > text_len / REGION_MAX_FILE_DIVISOR
 }
 
 /// The reparse region at the top-level tier: a contiguous run of `ROOT`
