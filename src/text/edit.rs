@@ -3,12 +3,14 @@
 //! The edit currency itself ([`Edit`] plus `apply_edits`/`try_apply_edits`/
 //! `diff_edit`) lives in `fatou-parser` (`parser::edit`), because the
 //! incremental reparser is its busiest consumer and the operations are pure
-//! text manipulation. This module owns the one LSP-shaped entry point: turning
-//! a `didChange` batch into byte [`Edit`]s.
+//! text manipulation; `crate::parser` is the one path to it. This module owns
+//! the one LSP-shaped entry point: turning a `didChange` batch into byte
+//! [`Edit`]s.
 
 use lsp_types::TextDocumentContentChangeEvent;
 
-use super::{Edit, LineIndex, PositionEncoding};
+use super::{LineIndex, PositionEncoding};
+use crate::parser::Edit;
 
 /// Apply a `didChange` batch to `text` in place, interpreting range positions
 /// in the negotiated `encoding`, and return the byte [`Edit`]s that describe
@@ -64,8 +66,8 @@ pub fn apply_content_changes(
 mod tests {
     use lsp_types::{Position, Range};
 
-    use super::super::apply_edits;
     use super::*;
+    use crate::parser::apply_edits;
 
     fn ranged(start: (u32, u32), end: (u32, u32), text: &str) -> TextDocumentContentChangeEvent {
         TextDocumentContentChangeEvent {

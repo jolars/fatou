@@ -29,7 +29,11 @@ pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
 // not a stable part of this crate's API.
 pub use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
 pub use reparse::{
-    Edit, ReparseTier, Reparsed, apply_edits, diff_edit, fingerprint, reparse, reparse_edits,
-    try_apply_edits,
+    Edit, ReparseTier, Reparsed, apply_edits, diff_edit, reparse, reparse_edits, try_apply_edits,
 };
+// Test support, not API: the in-crate Tenet-4 assert and the
+// `tests/incremental_reparse.rs` oracle harness share this one definition so
+// they can never diverge, which is the only reason it is `pub` at all.
+#[doc(hidden)]
+pub use reparse::fingerprint;
 pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};

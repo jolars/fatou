@@ -22,7 +22,8 @@ use salsa::Database as _;
 
 use crate::incremental::{IncrementalDatabase, IncrementalDb};
 use crate::index::{HarvestedLibrary, PackageIndex};
-use crate::text::{Edit, PositionEncoding};
+use crate::parser::Edit;
+use crate::text::PositionEncoding;
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;

@@ -39,7 +39,8 @@ use lsp_types::{
 
 use crate::config::CONFIG_FILE_NAME;
 use crate::environment::is_environment_file;
-use crate::text::{Edit, PositionEncoding, apply_content_changes};
+use crate::parser::Edit;
+use crate::text::{PositionEncoding, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
 use super::config::{ConfigStore, ResolvedConfig};
