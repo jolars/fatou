@@ -2,10 +2,12 @@
 
 mod break_outside_loop;
 mod call_arity;
+mod const_decl;
 mod const_local;
 mod duplicate_argument;
 mod duplicate_include;
 mod duplicate_keyword_argument;
+mod global_const_in_function;
 mod include_cycle;
 mod julia_version_compat;
 mod missing_include_file;
@@ -24,6 +26,7 @@ pub use const_local::ConstLocal;
 pub use duplicate_argument::DuplicateArgument;
 pub use duplicate_include::DuplicateInclude;
 pub use duplicate_keyword_argument::DuplicateKeywordArgument;
+pub use global_const_in_function::GlobalConstInFunction;
 pub use include_cycle::IncludeCycle;
 pub use julia_version_compat::JuliaVersionCompat;
 pub use missing_include_file::MissingIncludeFile;

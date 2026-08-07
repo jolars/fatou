@@ -218,6 +218,44 @@ error: const-local
   |     ^^^^^^^^^^^^^^^^ `const` declaration on a local variable
 ```
 
+## `global-const-in-function`
+
+Flag a `global const` declaration inside a function — a `function` or `macro` body, a short-form definition, a closure, a do block, or a comprehension. Julia allows `global const` at global scope and in a soft local scope such as a `let`, a loop body, or a `try`, but inside a function the code parses and then always fails at lowering with "`global const` declaration not allowed inside function". A soft scope nested inside a function does not help. Both spellings of the modifier are flagged, and a declaration inside quoted code or a macro argument is left alone, since it may never be lowered as written. An unmodified `const` in a local scope is `const-local`'s finding.
+
+`global const` inside a function body:
+
+```julia
+function setup()
+    global const LIMIT = 10
+end
+```
+
+```text
+error: global-const-in-function
+ --> example.jl:2:5
+  |
+2 |     global const LIMIT = 10
+  |     ^^^^^^^^^^^^^^^^^^^^^^^ `global const` declaration inside a function
+```
+
+A nested soft scope does not rescue it — the enclosing function still owns the declaration:
+
+```julia
+function setup()
+    for i in 1:3
+        global const LIMIT = i
+    end
+end
+```
+
+```text
+error: global-const-in-function
+ --> example.jl:3:9
+  |
+3 |         global const LIMIT = i
+  |         ^^^^^^^^^^^^^^^^^^^^^^ `global const` declaration inside a function
+```
+
 ## `noteq-definition`
 
 Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.

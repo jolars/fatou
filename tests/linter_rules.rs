@@ -3113,3 +3113,253 @@ fn const_local_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- global-const-in-function ----------------------------------------------
+
+#[test]
+fn global_const_in_function_flags_a_function_body() {
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f()\n    global const x = 1\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn global_const_in_function_flags_both_modifier_orders() {
+    // `global const x = 1` nests the `const` under the modifier; `const global
+    // x = 1` the other way round. Julia rejects both the same way.
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f()\n    const global x = 1\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn global_const_in_function_flags_every_function_like_body() {
+    for src in [
+        "macro m()\n    global const x = 1\nend\n",
+        "f = () -> (global const x = 1)\n",
+        "foreach(xs) do y\n    global const x = 1\nend\n",
+        "[(global const x = 1) for i in 1:1]\n",
+        "((global const x = 1) for i in 1:1)\n",
+        "Int[(global const x = 1) for i in 1:1]\n",
+        "[i for i in 1:1 if (global const x = 1; true)]\n",
+    ] {
+        assert_eq!(
+            count("global-const-in-function", src),
+            1,
+            "expected a finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn global_const_in_function_flags_a_short_form_definition_body() {
+    assert_eq!(
+        count("global-const-in-function", "f() = (global const x = 1)\n"),
+        1
+    );
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "f(x)::Int = (global const y = 1)\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn global_const_in_function_flags_a_default_argument() {
+    // A default value is evaluated inside the function's own scope.
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f(x = (global const y = 1))\n    x\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn global_const_in_function_flags_a_soft_scope_nested_in_a_function() {
+    // A `let`/`for`/`while`/`try` opens no *function*, so the enclosing
+    // function still owns the declaration.
+    for src in [
+        "function f()\n    let\n        global const x = 1\n    end\nend\n",
+        "function f()\n    for i in 1:3\n        global const x = 1\n    end\nend\n",
+        "function f()\n    while false\n        global const x = 1\n    end\nend\n",
+        "function f()\n    try\n        global const x = 1\n    catch\n    end\nend\n",
+        "function f()\n    if true\n        global const x = 1\n    end\nend\n",
+        "function f()\n    begin\n        global const x = 1\n    end\nend\n",
+    ] {
+        assert_eq!(
+            count("global-const-in-function", src),
+            1,
+            "expected a finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn global_const_in_function_flags_a_function_inside_a_module() {
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "module M\n    function g()\n        global const x = 1\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn global_const_in_function_flags_an_inner_constructor() {
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "struct S\n    x::Int\n    S() = (global const y = 1; new(1))\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn global_const_in_function_points_at_the_whole_declaration() {
+    let src = "function f()\n    global const x = 1\nend\n";
+    let config = LintConfig {
+        select: Some(vec!["global-const-in-function".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    // The `global` modifier is part of the offending construct.
+    assert_eq!(&src[report.diagnostics[0].range], "global const x = 1");
+    assert_eq!(report.diagnostics[0].severity, Severity::Error);
+}
+
+#[test]
+fn global_const_in_function_ignores_soft_local_scopes() {
+    // Outside a function, `global const` is legal — including in each soft
+    // local scope.
+    for src in [
+        "global const x = 1\n",
+        "const global x = 1\n",
+        "begin\n    global const x = 1\nend\n",
+        "if true\n    global const x = 1\nend\n",
+        "let\n    global const x = 1\nend\n",
+        "for i in 1:3\n    global const x = 1\nend\n",
+        "while false\n    global const x = 1\nend\n",
+        "try\n    global const x = 1\ncatch\nend\n",
+        "module M\n    global const x = 1\nend\n",
+        "struct S\n    x::Int\nend\n",
+    ] {
+        assert_eq!(
+            count("global-const-in-function", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn global_const_in_function_ignores_positions_that_evaluate_outside_the_closure() {
+    // A comprehension's iterator spec, a `while` condition, a `for` iterator
+    // and a `do`-call's call part are evaluated in the enclosing scope.
+    for src in [
+        "[i for i in (global const x = 1; 1:3)]\n",
+        "(i for i in (global const x = 1; 1:3))\n",
+        "while (global const x = 1; false)\nend\n",
+        "for i in (global const x = 1; 1:3)\nend\n",
+        "foreach((global const x = 1; xs)) do y\n    y\nend\n",
+        "let x = (global const y = 1; 2)\n    x\nend\n",
+    ] {
+        assert_eq!(
+            count("global-const-in-function", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn global_const_in_function_ignores_a_plain_const() {
+    // A `const` with no `global` modifier is `const-local`'s finding.
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f()\n    const x = 1\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f()\n    global x = 1\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn global_const_in_function_ignores_a_local_const() {
+    // `local const` is `local-const`'s finding, with a different Julia error.
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f()\n    local const x = 1\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn global_const_in_function_ignores_quoted_code() {
+    for src in [
+        "function f()\n    :(global const x = 1)\nend\n",
+        "function f()\n    quote\n        global const x = 1\n    end\nend\n",
+        ":(function f()\n    global const x = 1\nend)\n",
+    ] {
+        assert_eq!(
+            count("global-const-in-function", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn global_const_in_function_ignores_macro_arguments() {
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "@eval function f()\n    global const x = 1\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "global-const-in-function",
+            "function f()\n    @eval global const x = 1\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn global_const_in_function_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["global-const-in-function".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "function f()\n    # fatou-ignore global-const-in-function\n    global const x = 1\nend\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

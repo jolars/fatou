@@ -45,6 +45,7 @@
 //! and hoisting it out of the scope changes where the name lives.
 
 use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::linter::rules::correctness::const_decl;
 use crate::linter::rules::{Example, Rule, RuleContext, matchers};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
@@ -76,15 +77,6 @@ fn opens_local_scope(node: &SyntaxNode, from: &SyntaxNode) -> bool {
         SyntaxKind::ASSIGNMENT_EXPR => matchers::is_short_form_def(node),
         _ => false,
     }
-}
-
-/// Whether a `CONST_STMT` carries a `global`/`local` modifier, in either order
-/// (`global const x = 1` nests the `const` under the modifier, `const global
-/// x = 1` the other way round). Both spellings raise errors of their own.
-fn has_scope_modifier(node: &SyntaxNode) -> bool {
-    let modifier = |kind| matches!(kind, SyntaxKind::GLOBAL_STMT | SyntaxKind::LOCAL_STMT);
-    node.parent().is_some_and(|parent| modifier(parent.kind()))
-        || node.children().any(|child| modifier(child.kind()))
 }
 
 impl Rule for ConstLocal {
@@ -128,7 +120,7 @@ impl Rule for ConstLocal {
         let Some(node) = el.as_node() else {
             return;
         };
-        if has_scope_modifier(node) {
+        if const_decl::scope_modifier(node).is_some() {
             return;
         }
 
@@ -138,10 +130,7 @@ impl Rule for ConstLocal {
         let mut from = node.clone();
         let mut local = None;
         for ancestor in node.ancestors().skip(1) {
-            if matches!(
-                ancestor.kind(),
-                SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM | SyntaxKind::MACRO_CALL
-            ) {
+            if const_decl::is_unlowered_context(&ancestor) {
                 return;
             }
             // Only the innermost verdict counts; the walk continues purely to
