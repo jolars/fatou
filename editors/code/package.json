@@ -2,7 +2,7 @@
   "name": "fatou",
   "displayName": "Fatou",
   "description": "Julia language server, formatter, and linter",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "publisher": "jolars",
   "license": "MIT",
   "icon": "icon.png",

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/jolars/fatou/compare/v0.11.0...v0.11.1) (2026-08-07)
+
+### Bug Fixes
+- **deps:** require `fatou-parser` 0.1.1 ([`2f6a764`](https://github.com/jolars/fatou/commit/2f6a764f2d21185f8d73677a82b65500e973a6d3))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.2.1
+
 ## [0.11.0](https://github.com/jolars/fatou/compare/v0.10.0...v0.11.0) (2026-08-07)
 
 ### Breaking changes
