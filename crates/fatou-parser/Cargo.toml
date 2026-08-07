@@ -1,6 +1,6 @@
 [package]
 name = "fatou-parser"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 readme = "README.md"
 description = "Lossless CST parser, typed AST wrappers, and incremental reparser for the Julia language"
