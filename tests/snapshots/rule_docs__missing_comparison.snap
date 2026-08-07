@@ -20,5 +20,5 @@ warning: missing-comparison
   |
 1 | if x == missing
   |    ^^^^^^^^^^^^ comparison against `missing` by value is always `missing`; use `ismissing` or `===`
-  = help: Replace `==` with `===`
+  = help: Replace `==` with `===` (unsafe fix, requires `--unsafe-fixes`)
 ```

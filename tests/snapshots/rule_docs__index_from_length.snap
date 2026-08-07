@@ -20,7 +20,7 @@ warning: index-from-length
   |
 1 | for i in 1:length(x)
   |          ^^^^^^^^^^^ iterate `eachindex(x)` instead of `1:length(x)`
-  = help: Replace `1:length` with `eachindex`
+  = help: Replace `1:length` with `eachindex` (unsafe fix, requires `--unsafe-fixes`)
 ```
 
 Iterating a bare number loops once:

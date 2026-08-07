@@ -542,7 +542,7 @@ warning: assignment-in-condition
   |
 1 | if x = 5
   |    ^^^^^ assignment used as a condition; did you mean `==`?
-  = help: Replace `=` with `==`
+  = help: Replace `=` with `==` (safe fix)
 ```
 
 After applying the fix:
@@ -571,7 +571,7 @@ warning: nothing-comparison
   |
 1 | if x == nothing
   |    ^^^^^^^^^^^^ comparison against `nothing` by value; use `===` or `isnothing`
-  = help: Replace `==` with `===`
+  = help: Replace `==` with `===` (safe fix)
 ```
 
 After applying the fix:
@@ -600,7 +600,7 @@ warning: missing-comparison
   |
 1 | if x == missing
   |    ^^^^^^^^^^^^ comparison against `missing` by value is always `missing`; use `ismissing` or `===`
-  = help: Replace `==` with `===`
+  = help: Replace `==` with `===` (unsafe fix, requires `--unsafe-fixes`)
 ```
 
 ## `constant-condition`
@@ -678,7 +678,7 @@ warning: index-from-length
   |
 1 | for i in 1:length(x)
   |          ^^^^^^^^^^^ iterate `eachindex(x)` instead of `1:length(x)`
-  = help: Replace `1:length` with `eachindex`
+  = help: Replace `1:length` with `eachindex` (unsafe fix, requires `--unsafe-fixes`)
 ```
 
 Iterating a bare number loops once:

@@ -274,12 +274,14 @@ Ready now (no new infrastructure):
   to `missing` and the rewrite makes it a `Bool`. That change is the intent,
   but it is still a change. **First `Applicability::Unsafe` fix in the tree.**
   (arity `equals-na`)
-- [ ] Follow-up from the above: `render.rs` renders a fix's `help:` line
+- [x] Follow-up from the above: `render.rs` rendered a fix's `help:` line
   identically whether it is `Safe` or `Unsafe`, so a reader of the rule
-  reference cannot tell that `missing-comparison`'s fix needs `--unsafe-fixes`
-  (its `description()` says so in prose, which is the only reason the page is
-  honest today). Mark applicability in the rendered help line — it touches
-  every rule snapshot, so it wants its own change.
+  reference could not tell that `missing-comparison`'s fix needs
+  `--unsafe-fixes` (its `description()` says so in prose, which was the only
+  reason the page was honest). Landed as a parenthetical on the help line:
+  `(safe fix)` or `(unsafe fix, requires `--unsafe-fixes`)`. Marking *both*
+  rather than only the unsafe case, since "no marker" is not something a reader
+  can read as "safe". Only the four fix-carrying rule snapshots moved.
 - [x] `unreachable-code` (correctness, syn, warning, no fix): statements after
   an unconditional `return`/`throw`/`error`/`rethrow` in the same block. Landed
   as a whole-file pass over `RuleContext::control_flow()`, reporting the *head

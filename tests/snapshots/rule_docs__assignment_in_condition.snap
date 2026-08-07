@@ -20,7 +20,7 @@ warning: assignment-in-condition
   |
 1 | if x = 5
   |    ^^^^^ assignment used as a condition; did you mean `==`?
-  = help: Replace `=` with `==`
+  = help: Replace `=` with `==` (safe fix)
 ```
 
 After applying the fix:

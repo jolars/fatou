@@ -20,7 +20,7 @@ warning: nothing-comparison
   |
 1 | if x == nothing
   |    ^^^^^^^^^^^^ comparison against `nothing` by value; use `===` or `isnothing`
-  = help: Replace `==` with `===`
+  = help: Replace `==` with `===` (safe fix)
 ```
 
 After applying the fix:

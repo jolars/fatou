@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 
-use crate::linter::diagnostic::{Diagnostic, Severity};
+use crate::linter::diagnostic::{Applicability, Diagnostic, Severity};
 use crate::text::LineIndex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,11 +118,26 @@ fn render_pretty(
                 let _ = writeln!(out, "  = help: {suggestion}");
             }
             for fix in &d.fixes {
-                let _ = writeln!(out, "  = help: {}", fix.description);
+                let _ = writeln!(
+                    out,
+                    "  = help: {} ({})",
+                    fix.description,
+                    fix_note(fix.applicability)
+                );
             }
         }
     }
     out
+}
+
+/// The parenthetical appended to a fix's `help:` line. Without it a `Safe` and
+/// an `Unsafe` fix read identically, hiding that the latter is skipped by
+/// `--fix` and only applied with `--unsafe-fixes`.
+fn fix_note(applicability: Applicability) -> &'static str {
+    match applicability {
+        Applicability::Safe => "safe fix",
+        Applicability::Unsafe => "unsafe fix, requires `--unsafe-fixes`",
+    }
 }
 
 fn severity_level(s: Severity) -> Level<'static> {
@@ -137,7 +152,7 @@ fn severity_level(s: Severity) -> Level<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::linter::diagnostic::{Applicability, Fix};
+    use crate::linter::diagnostic::Fix;
     use rowan::TextRange;
 
     fn warning(start: u32, end: u32, rule: &'static str, message: &str) -> Diagnostic {
@@ -193,23 +208,45 @@ mod tests {
         assert!(!plain.contains('\u{1b}'), "plain output has ANSI:\n{plain}");
     }
 
-    #[test]
-    fn pretty_shows_fix_as_help_note() {
-        let src = "x = 1\n";
+    fn diag_with_fix(applicability: Applicability) -> Diagnostic {
         let mut diag = warning(2, 3, "assign-in-cond", "use `==`");
         diag.fixes.push(Fix {
             description: "Change `=` to `==`".to_string(),
             content: "==".to_string(),
             start: 2,
             end: 3,
-            applicability: Applicability::Safe,
+            applicability,
         });
-        let out = render_findings(&[diag], OutputMode::Pretty, false, &|_| {
-            Some(src.to_string())
-        });
+        diag
+    }
+
+    #[test]
+    fn pretty_shows_fix_as_help_note() {
+        let src = "x = 1\n";
+        let out = render_findings(
+            &[diag_with_fix(Applicability::Safe)],
+            OutputMode::Pretty,
+            false,
+            &|_| Some(src.to_string()),
+        );
         assert!(
-            out.contains("= help: Change `=` to `==`"),
+            out.contains("= help: Change `=` to `==` (safe fix)"),
             "missing fix help note:\n{out}"
+        );
+    }
+
+    #[test]
+    fn pretty_marks_unsafe_fix_in_help_note() {
+        let src = "x = 1\n";
+        let out = render_findings(
+            &[diag_with_fix(Applicability::Unsafe)],
+            OutputMode::Pretty,
+            false,
+            &|_| Some(src.to_string()),
+        );
+        assert!(
+            out.contains("= help: Change `=` to `==` (unsafe fix, requires `--unsafe-fixes`)"),
+            "unsafe fix not marked in help note:\n{out}"
         );
     }
 
