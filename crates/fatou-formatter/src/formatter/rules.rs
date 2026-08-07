@@ -3498,38 +3498,37 @@ fn lower_for_binding(node: &SyntaxNode) -> Ir {
 
 /// Lower one `for`-binding group (`<target> <op> <iterable>`) to `<target> in
 /// <iterable>`, normalizing the iteration operator to `in`. Two CST shapes occur:
-/// a wrapped `=`/`∈` binding is a single `ASSIGNMENT_EXPR`/`BINARY_EXPR` node,
-/// while an already-`in` binding is the flat triple `target`, `in`, `iterable`.
-/// Returns `None` (the caller bails to transparent) on any other shape.
+/// an `=` binding is a single wrapped `ASSIGNMENT_EXPR` node, while the `in` and
+/// `∈` spellings keep the separator loose, as the flat triple `target`, `in`/`∈`,
+/// `iterable`. Returns `None` (the caller bails to transparent) on any other shape.
 fn lower_for_spec(group: &[SyntaxElement]) -> Option<Ir> {
     match group {
-        // Wrapped `=` (`ASSIGNMENT_EXPR`) or `∈` (`BINARY_EXPR`) binding.
-        [NodeOrToken::Node(node)]
-            if matches!(
-                node.kind(),
-                SyntaxKind::ASSIGNMENT_EXPR | SyntaxKind::BINARY_EXPR
-            ) =>
-        {
+        // Wrapped `=` binding (`ASSIGNMENT_EXPR`).
+        [NodeOrToken::Node(node)] if node.kind() == SyntaxKind::ASSIGNMENT_EXPR => {
             let (lhs, rhs) = for_iteration_operands(node)?;
             Some(Ir::concat([lhs, Ir::text(" in "), rhs]))
         }
-        // Flat `in` binding: target, the `in` keyword, iterable.
+        // Flat binding: target, the loose `in`/`∈` separator, iterable.
         [
             NodeOrToken::Node(target),
-            NodeOrToken::Token(kw),
+            NodeOrToken::Token(sep),
             NodeOrToken::Node(iterable),
-        ] if kw.kind() == SyntaxKind::IDENT && kw.text() == "in" => Some(Ir::concat([
-            lower_node(target),
-            Ir::text(" in "),
-            lower_node(iterable),
-        ])),
+        ] if (sep.kind() == SyntaxKind::IDENT && sep.text() == "in")
+            || (sep.kind() == SyntaxKind::UNICODE_OP && sep.text() == "∈") =>
+        {
+            Some(Ir::concat([
+                lower_node(target),
+                Ir::text(" in "),
+                lower_node(iterable),
+            ]))
+        }
         _ => None,
     }
 }
 
-/// Split a wrapped `for`-binding node (`i = 1:3` or `i ∈ s`) into its lowered
-/// target and iterable, accepting only the `=` and `∈` iteration operators.
-/// Returns `None` on any other operator, a stray comment, or an operand count ≠ 2.
+/// Split a wrapped `for`-binding node (`i = 1:3`) into its lowered target and
+/// iterable, accepting only the `=` iteration operator. Returns `None` on any
+/// other operator, a stray comment, or an operand count ≠ 2.
 fn for_iteration_operands(node: &SyntaxNode) -> Option<(Ir, Ir)> {
     let mut operands: Vec<SyntaxNode> = Vec::new();
     let mut op_count = 0usize;
@@ -3540,7 +3539,6 @@ fn for_iteration_operands(node: &SyntaxNode) -> Option<(Ir, Ir)> {
             NodeOrToken::Token(tok) => match tok.kind() {
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
                 SyntaxKind::EQ => op_count += 1,
-                SyntaxKind::UNICODE_OP if tok.text() == "∈" => op_count += 1,
                 _ => return None,
             },
         }

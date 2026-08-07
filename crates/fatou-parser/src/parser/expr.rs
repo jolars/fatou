@@ -56,11 +56,12 @@ struct ExprFlags {
     /// (`a, b` ⇒ `(tuple a b)`). Off inside brackets and sub-expressions, where
     /// commas are argument/element separators handled by the container parsers.
     stmt_comma: bool,
-    /// Suppress the word operators `in`/`isa` (lexed as identifiers, comparison
-    /// precedence). Set only while parsing a `for`/generator loop variable, where
-    /// a following `in` is the iteration separator rather than a comparison
-    /// operator (`for i in xs` keeps `i` the loop variable, not `(i in xs)`).
-    no_word_op: bool,
+    /// Parsing a `for`/generator loop variable, where the iteration separator must
+    /// not be taken as an infix operator. Suppresses the word operators `in`/`isa`
+    /// (lexed as identifiers, comparison precedence) and the Unicode `∈` (an
+    /// ordinary comparison-tier operator token), so `for i in xs` and `for i ∈ xs`
+    /// both keep `i` the loop variable rather than building `(i in xs)`.
+    for_spec_var: bool,
     /// Suppress the `where` clause. Set only while parsing a `where` bound, so a
     /// chain stays left-nested (`A where B where C` ⇒ `(where (where A B) C)`,
     /// not right-nested) and the bound captures only comparison-and-tighter
@@ -318,7 +319,7 @@ fn parse_expr_in(
         begin_marker,
         public_context,
         stmt_comma,
-        no_word_op,
+        for_spec_var,
         no_where,
         no_decl_where,
         name_context,
@@ -625,7 +626,7 @@ fn parse_expr_in(
         // divergence). Suppressed while parsing a loop variable, where `in` is the
         // for-spec separator. Checked after juxtaposition (so an adjacent `2in`
         // still juxtaposes) and before the symbolic operators.
-        if !no_word_op && let Some(op_idx) = word_operator(&ctx, lhs.end, inside_brackets) {
+        if !for_spec_var && let Some(op_idx) = word_operator(&ctx, lhs.end, inside_brackets) {
             if WORD_OP_L < min_bp {
                 break;
             }
@@ -649,6 +650,14 @@ fn parse_expr_in(
         let Some((op_idx, op_kind)) = next_operator(&ctx, lhs.end, inside_brackets) else {
             break;
         };
+
+        // `∈` is the Unicode spelling of the `in` iteration separator, but unlike
+        // `in` it is a real operator token, so the word-operator suppression above
+        // does not cover it. End the loop variable here and let `parse_for_specs`
+        // consume it as the separator (`for i ∈ xs` ⇒ `(for (= i xs) …)`).
+        if for_spec_var && is_element_of_tok(&tokens[op_idx]) {
+            break;
+        }
 
         // Inside an array literal, an operator glued to the start of the next
         // operand (space before, none after) is that operand's prefix, marking a
@@ -3485,9 +3494,10 @@ fn is_outer_marker(ctx: &ParserCtx<'_>, idx: usize, flags: ExprFlags) -> Option<
     // A separator right after is the plain form (`for outer in xs`, `for outer
     // = xs`); checked first so the probe below never sees the iterable.
     let next = ctx.skip_trivia(idx + 1);
-    if ctx.token(next).is_some_and(|t| {
-        t.kind == TokKind::Eq || (t.kind == TokKind::Ident && (t.text == "in" || t.text == "∈"))
-    }) {
+    if ctx
+        .token(next)
+        .is_some_and(|t| t.kind == TokKind::Eq || is_for_separator_tok(t))
+    {
         return None;
     }
     // Speculative parses: their diagnostics belong to the caller's real parse of
@@ -3538,11 +3548,11 @@ pub(crate) fn parse_for_specs(
     loop {
         let var_start = ctx.skip_trivia(pos);
         push_range(events, pos, var_start);
-        // `no_word_op` keeps a following `in`/`isa` as the iteration separator
-        // (handled below) rather than swallowing it as a comparison operator.
+        // `for_spec_var` keeps a following `in`/`∈`/`isa` as the iteration
+        // separator (handled below) rather than swallowing it as an operator.
         let var_flags = ExprFlags {
             inside_brackets: bracketed,
-            no_word_op: true,
+            for_spec_var: true,
             ..ExprFlags::default()
         };
         // `outer` is contextual: it marks the spec as rebinding an enclosing
@@ -3576,10 +3586,10 @@ pub(crate) fn parse_for_specs(
         // iterator; without `outer` the `=` form is already complete, consumed
         // above as an assignment.
         let in_idx = ctx.skip_trivia(pos);
-        if ctx.token(in_idx).is_some_and(|t| {
-            (t.kind == TokKind::Ident && (t.text == "in" || t.text == "∈"))
-                || (outer.is_some() && t.kind == TokKind::Eq)
-        }) {
+        if ctx
+            .token(in_idx)
+            .is_some_and(|t| is_for_separator_tok(t) || (outer.is_some() && t.kind == TokKind::Eq))
+        {
             push_range(events, pos, in_idx);
             events.push(Event::Tok(in_idx));
             pos = in_idx + 1;
@@ -5117,6 +5127,23 @@ fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u
 /// picks up by text.
 fn is_word_operator_tok(tok: &Token) -> bool {
     tok.kind == TokKind::Ident && (tok.text == "in" || tok.text == "isa")
+}
+
+/// Whether `tok` is the Unicode set-membership operator `∈`, the alternate
+/// spelling of the `in` iteration separator. Only `∈` is accepted there — the
+/// sibling `∉` is an ordinary operator that Julia error-recovers in that position
+/// (`for i ∉ xs` ⇒ `(= i (error ∉ xs))`), so it stays out.
+fn is_element_of_tok(tok: &Token) -> bool {
+    tok.kind == TokKind::UniComparison && tok.text == "∈"
+}
+
+/// Whether `tok` separates the loop variable from the iterable in a `for`
+/// iteration spec: the word operator `in` or its Unicode spelling `∈`. The third
+/// spelling, `=`, is context-dependent (only the `outer` form leaves it loose,
+/// since a plain `i = xs` spec is parsed whole as an assignment) and is checked at
+/// the call sites.
+fn is_for_separator_tok(tok: &Token) -> bool {
+    (tok.kind == TokKind::Ident && tok.text == "in") || is_element_of_tok(tok)
 }
 
 fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {

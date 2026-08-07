@@ -114,7 +114,7 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus (**248 cases**): **247 allowlisted**,
+8 divergence, 0 unsupported. Dir corpus (**249 cases**): **248 allowlisted**,
 1 blocked (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
@@ -134,7 +134,53 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-08-07b—`for outer i` iteration spec)
+## Latest session (2026-08-07c—`∈` as the iteration separator)
+
+Took the target ranked by the previous session. `for i ∈ xs` projected
+`(for (call-i i ∈ xs) …)` where JuliaSyntax gives `(for (= i xs) …)`: the whole
+spec was swallowed into a `BINARY_EXPR`.
+
+Root cause: `in` is lexed as an *identifier* and picked up by text in a separate
+`word_operator` branch, which the loop-variable flag suppressed; `∈` is a real
+`UniComparison` operator token, so it went through `next_operator` and the flag
+never applied. The separator checks in `parse_for_specs` (`t.kind == Ident &&
+text == "∈"`) could therefore never fire — that condition was unsatisfiable.
+
+- **Parser only** (`expr.rs`); **no projector change** — `project_for_spec`
+  already split on a loose `∈` token, i.e. it was written for the shape the
+  parser never produced.
+- Renamed `ExprFlags::no_word_op` → **`for_spec_var`** (it is set at exactly one
+  site, the `for`/generator loop variable, and now suppresses more than word
+  operators). Added a `break` in the operator loop, right after `next_operator`,
+  when `for_spec_var && is_element_of_tok(op)`.
+- New helpers `is_element_of_tok` / `is_for_separator_tok`; the two separator
+  checks (`is_outer_marker`'s early bail, `parse_for_specs`' consume) now share
+  the latter.
+- **Only `∈` joins `in`/`=`.** `∉` is an ordinary operator that Julia
+  error-recovers in that position (`for i ∉ xs` ⇒ `(= i (error ∉ xs))`), so it
+  stays out — Fatou's `(call-i i ∉ xs)` is unchanged and still divergent
+  (error shape, deferred).
+- **Formatter followed the shape change**: `comprehension_for_in` went red
+  because `lower_for_spec` normalized `∈` → `in` only in its wrapped-node arm
+  (`BINARY_EXPR` via `for_iteration_operands`). Moved to the flat arm alongside
+  `in`; `for_iteration_operands` is now `=`/`ASSIGNMENT_EXPR` only. Normalization
+  now covers the loop form and `outer` too (`for outer i ∈ xs` → `for outer i in
+  xs`), and value-position `∈` is untouched (`a ∈ b`, `filter(x -> x ∈ s, xs)`).
+- **Verified**: 28 probe cases byte-identical to JuliaSyntax; the 4 remaining
+  diffs are all error shapes and all pre-existing under A/B (`for i ∉ xs`,
+  `for ∈ xs`, `for i isa T ∈ xs`, and `for i ∈ a ∈ b` — the last *moved closer*
+  to Julia). Formatter output on the fixture is idempotent.
+- **Fixtures**: parser snapshot + oracle dir slug `for_element_of_binding`
+  (23 lines, byte-identical to JuliaSyntax).
+- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
+  dir 248 → **249** (248 PASS + the 1 blocked `numeric_literals`).
+- **Next**: no queued target. Nearest sibling is the deferred error shape
+  `for i ∈ a ∈ b` / `for i in a in b` — Julia parses the *iterable* below
+  comparison precedence so a second separator cannot appear there
+  (`(= i a)` + a junk statement), while Fatou parses it at bp 0. Small, but it is
+  error-shape work. Otherwise keep batch-probing real-world Julia.
+
+## Earlier session (2026-08-07b—`for outer i` iteration spec)
 
 User-named target (the `TODO.md` bullet left by the `loop-variable-shadow`
 linter work). `for outer i in 1:3` was not parsed: `FOR_BINDING` took `outer` as

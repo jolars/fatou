@@ -81,6 +81,7 @@ export_paren_item
 field_access_keyword
 field_access_space
 field_access_suffix
+for_element_of_binding
 for_oneline_body
 for_outer_binding
 function_bare_name_signature

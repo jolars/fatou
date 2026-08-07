@@ -373,6 +373,17 @@ Ready now (no new infrastructure):
   enclosing loop's binding instead of declaring a fresh one, which is exactly
   what `outer` means; covered by
   `loop_variable_shadow_ignores_outer_rebinding`.
+- [x] Sibling of the above: `for i ∈ xs` projected `(call-i i ∈ xs)` instead of
+  `(= i xs)`. `∈` is the Unicode spelling of the `in` iteration separator, but
+  unlike `in` (an identifier the operator loop picks up by text) it is a real
+  comparison-tier operator token, so the loop-variable suppression that keeps
+  `in` a separator did not cover it and the operator loop swallowed the whole
+  spec into a `BINARY_EXPR`. The flag (now `for_spec_var`) suppresses `∈` too, so
+  the separator stays a loose token in the `FOR_BINDING` exactly like `in` — the
+  shape `project_for_spec` already expected. Only `∈` joins `in`/`=`: `∉` is an
+  ordinary operator Julia error-recovers in that position. The formatter's
+  `∈` → `in` normalization moved with the shape, from the wrapped-node arm of
+  `lower_for_spec` to the flat one.
 
 Ready once `resolves_to_base` lands (idiom rewrites; categories per the decision
 above):
