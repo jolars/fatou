@@ -424,6 +424,123 @@ fn duplicate_argument_does_not_confuse_separate_signatures() {
     assert_eq!(count("duplicate-argument", "f(x) = x\ng(x) = x\n"), 0);
 }
 
+// --- duplicate-keyword-argument --------------------------------------------
+
+#[test]
+fn duplicate_keyword_argument_flags_a_repeat_before_the_semicolon() {
+    assert_eq!(count("duplicate-keyword-argument", "h(a = 1, a = 2)\n"), 1);
+}
+
+#[test]
+fn duplicate_keyword_argument_spans_the_semicolon() {
+    // Keywords on both sides of the `;` share one namespace.
+    assert_eq!(count("duplicate-keyword-argument", "h(a = 1; a = 2)\n"), 1);
+    assert_eq!(
+        count("duplicate-keyword-argument", "h(; a = 1, a = 2)\n"),
+        1
+    );
+}
+
+#[test]
+fn duplicate_keyword_argument_sees_the_shorthand() {
+    // `h(; a)` passes the binding `a` under its own name.
+    assert_eq!(count("duplicate-keyword-argument", "h(; a, a)\n"), 1);
+    assert_eq!(count("duplicate-keyword-argument", "h(a = 1; a)\n"), 1);
+}
+
+#[test]
+fn duplicate_keyword_argument_reports_every_repeat() {
+    assert_eq!(
+        count("duplicate-keyword-argument", "h(a = 1, a = 2, a = 3)\n"),
+        2
+    );
+}
+
+#[test]
+fn duplicate_keyword_argument_points_at_the_repeated_name() {
+    let src = "h(alpha = 1, alpha = 2)\n";
+    let config = LintConfig {
+        select: Some(vec!["duplicate-keyword-argument".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    // The second `alpha`, not the whole call.
+    assert_eq!(&src[report.diagnostics[0].range], "alpha");
+    assert_eq!(
+        usize::from(report.diagnostics[0].range.start()),
+        src.rfind("alpha").unwrap()
+    );
+}
+
+#[test]
+fn duplicate_keyword_argument_ignores_distinct_keywords() {
+    assert_eq!(count("duplicate-keyword-argument", "h(a = 1, b = 2)\n"), 0);
+    assert_eq!(count("duplicate-keyword-argument", "h(x, y; a = 1)\n"), 0);
+}
+
+#[test]
+fn duplicate_keyword_argument_ignores_repeated_positionals() {
+    // Passing the same value twice positionally is legal.
+    assert_eq!(count("duplicate-keyword-argument", "h(x, x)\n"), 0);
+}
+
+#[test]
+fn duplicate_keyword_argument_ignores_splatted_keywords() {
+    // What `kw...` carries is unknowable, so a splat alone never fires.
+    assert_eq!(count("duplicate-keyword-argument", "h(; kw...)\n"), 0);
+    assert_eq!(count("duplicate-keyword-argument", "h(a = 1; kw...)\n"), 0);
+}
+
+#[test]
+fn duplicate_keyword_argument_still_fires_alongside_a_splat() {
+    // Julia rejects the repeat regardless of what the splat carries.
+    assert_eq!(
+        count("duplicate-keyword-argument", "h(a = 1; kw..., a = 2)\n"),
+        1
+    );
+}
+
+#[test]
+fn duplicate_keyword_argument_ignores_definition_signatures() {
+    // A signature declares parameters; the repeat there is
+    // `duplicate-argument`'s finding, not this rule's.
+    assert_eq!(
+        count(
+            "duplicate-keyword-argument",
+            "function f(; a = 1, a = 2)\n    a\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("duplicate-keyword-argument", "f(a = 1, a = 2) = a\n"),
+        0
+    );
+}
+
+#[test]
+fn duplicate_keyword_argument_does_not_merge_separate_calls() {
+    assert_eq!(
+        count("duplicate-keyword-argument", "h(a = 1)\ng(a = 2)\n"),
+        0
+    );
+    // A nested call has its own keyword namespace.
+    assert_eq!(count("duplicate-keyword-argument", "h(a = g(a = 2))\n"), 0);
+}
+
+#[test]
+fn duplicate_keyword_argument_skips_quoted_and_macro_code() {
+    // Quoted code is data, and a macro may rewrite what it receives.
+    assert_eq!(
+        count("duplicate-keyword-argument", "ex = :(h(a = 1, a = 2))\n"),
+        0
+    );
+    assert_eq!(
+        count("duplicate-keyword-argument", "@m h(a = 1, a = 2)\n"),
+        0
+    );
+}
+
 // --- unused-argument -------------------------------------------------------
 
 #[test]

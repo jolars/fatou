@@ -174,13 +174,19 @@ existing rule.
 
 Ready now (no new infrastructure):
 
-- [ ] `duplicate-keyword-argument` (correctness, syn, error, no fix): the same
+- [x] `duplicate-keyword-argument` (correctness, syn, error, no fix): the same
   keyword supplied twice at a *call* site, `h(a = 1, a = 2)`. Julia rejects it
   at lowering (`syntax: keyword argument "a" repeated in call to "h"`), so it
   parses clean here and in JuliaSyntax and is always a bug. The exact call-side
   sibling of the existing definition-side `duplicate-argument`; positional and
-  `;`-block keywords share one namespace, as they do there. Splatted keywords
-  (`f(; kw...)`) are unknowable and must not fire.
+  `;`-block keywords share one namespace, as they do there. Landed as a
+  `CALL_EXPR` rule over `CallShape::keywords`, spanning the repeated name token
+  only. A keyword splat contributes no name and so never fires on its own, but
+  it does not silence the check either: `julia` rejects
+  `h(a = 1; kw..., a = 2)` all the same. Definition signatures stay
+  `duplicate-argument`'s (via `matchers::call_expr`), and quoted code and macro
+  calls are exempt as they are for `call-arity` — neither is lowered as
+  written.
 - [ ] `const-local` (correctness, syn, error, no fix): `const` on a local
   binding — `function k(); const z = 1; end` is `syntax: unsupported const
   declaration on local variable`. Pure syntax plus a scope-kind test

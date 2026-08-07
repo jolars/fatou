@@ -1,0 +1,21 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `duplicate-keyword-argument`
+
+Flag the same keyword argument supplied more than once at a call site. Julia rejects such a call at lowering (`keyword argument "a" repeated in call to "h"`), so it parses but cannot run. Keywords before and after the `;` share one namespace, and the `;`-block shorthand `h(; a)` counts as passing `a`. A keyword splat (`h(; kw...)`) names nothing the rule can read, so it neither triggers the finding nor silences it for the keywords written out. Calls inside quoted code or a macro call are exempt, since neither is lowered as written.
+
+`label` is supplied twice in one call:
+
+```julia
+plot(xs, ys, label = "before", label = "after")
+```
+
+```text
+error: duplicate-keyword-argument
+ --> example.jl:1:32
+  |
+1 | plot(xs, ys, label = "before", label = "after")
+  |                                ^^^^^ keyword argument `label` is passed more than once
+```

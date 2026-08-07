@@ -81,6 +81,24 @@ error: duplicate-argument
   |                     ^ argument name `x` is used more than once
 ```
 
+## `duplicate-keyword-argument`
+
+Flag the same keyword argument supplied more than once at a call site. Julia rejects such a call at lowering (`keyword argument "a" repeated in call to "h"`), so it parses but cannot run. Keywords before and after the `;` share one namespace, and the `;`-block shorthand `h(; a)` counts as passing `a`. A keyword splat (`h(; kw...)`) names nothing the rule can read, so it neither triggers the finding nor silences it for the keywords written out. Calls inside quoted code or a macro call are exempt, since neither is lowered as written.
+
+`label` is supplied twice in one call:
+
+```julia
+plot(xs, ys, label = "before", label = "after")
+```
+
+```text
+error: duplicate-keyword-argument
+ --> example.jl:1:32
+  |
+1 | plot(xs, ys, label = "before", label = "after")
+  |                                ^^^^^ keyword argument `label` is passed more than once
+```
+
 ## `unused-argument`
 
 Flag a function parameter that is never read in its body. Every signature form is covered — long, short (`f(x) = ...`), anonymous, and `do`. All-underscore names (`_`, `__`) follow Julia's throwaway convention and are skipped, and stub methods whose body is a single placeholder expression — a literal (`f(x) = 0`), `nothing`, or an `error(...)`/`throw(...)` call — are exempt. Because methods that dispatch on an argument's type without reading its value are common, this rule is disabled by default; enable it with `--select unused-argument`.
