@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.11.0](https://github.com/jolars/fatou/compare/v0.10.0...v0.11.0) (2026-08-07)
+
+### Breaking changes
+- **config:** stop discovery at the repository root ([`19b5289`](https://github.com/jolars/fatou/commit/19b5289c878d5179130d8fdb93d4846c6b840ffa))
+
+### Features
+- **lsp:** complete LaTeX and emoji sequences ([`501624d`](https://github.com/jolars/fatou/commit/501624d153495e2de5f8a7e5c8bdbc14a5627c4b)), closes [#70](https://github.com/jolars/fatou/issues/70)
+- **code:** add feature toggles for the extension ([`c63f731`](https://github.com/jolars/fatou/commit/c63f7312edf0105d38f376d0160d64d4967ad503))
+- **bench:** add DataFrames corpus and two single-file targets ([`74eb785`](https://github.com/jolars/fatou/commit/74eb7858743ad8706b69b9ec97e6905467b7ac6c))
+- **lint:** add `duplicate-include` rule ([`f95e44c`](https://github.com/jolars/fatou/commit/f95e44c9645e195c292717adc226ff28880ed4b4))
+- **lint:** add unsafe fix for `index-from-length` ([`2c126ea`](https://github.com/jolars/fatou/commit/2c126ea98ef7261bade3693d4b9584693772132c))
+- **formatter:** add `serde` and `schema` features ([`010f07c`](https://github.com/jolars/fatou/commit/010f07cde08ab22b02932512fecb74188e994182))
+- **cli:** add global `--quiet` to trim `format --check` ([`06ffd50`](https://github.com/jolars/fatou/commit/06ffd503ce26c92ed74b551ab037281636fe6507))
+- **linter:** add per-rule config and `discouraged-function` ([`c46a9c8`](https://github.com/jolars/fatou/commit/c46a9c8eecd5ebbdca1f14ca8c02569b07519b47))
+- **semantic:** add per-region control-flow graph ([`75c14ac`](https://github.com/jolars/fatou/commit/75c14aca5022fb0e5b2320fd0f0fb8ee1c1d5835))
+- **linter:** add shared call-shape matcher module ([`cb66218`](https://github.com/jolars/fatou/commit/cb66218d7e7aeb6aa1bd613f7885d560dd7f616e))
+- **linter:** add base-resolution helpers to RuleContext ([`c4b92fd`](https://github.com/jolars/fatou/commit/c4b92fd9f1b73179e7df6ea22d9cb2016f640d21))
+- **linter:** add missing-comparison rule ([`e69da85`](https://github.com/jolars/fatou/commit/e69da85490c008ab605777c1796d7728c14cce1d))
+- **config:** stop discovery at the repository root ([`19b5289`](https://github.com/jolars/fatou/commit/19b5289c878d5179130d8fdb93d4846c6b840ffa))
+- **config:** support a global user config ([`223c96f`](https://github.com/jolars/fatou/commit/223c96fa19a8d0b64c5906609c4e83ef7f2c12f8)), closes [#69](https://github.com/jolars/fatou/issues/69)
+- **formatter:** hug only a sole trailing item ([`bc23056`](https://github.com/jolars/fatou/commit/bc23056ea6c004e7a6d0e26d1f545f0f8730078d))
+- **parser:** let string-content reparse span newlines ([`30e983d`](https://github.com/jolars/fatou/commit/30e983d0e17b5163c4fbd5bac2141a904b600656))
+- **parser:** reparse string content at the token tier ([`70e6c9f`](https://github.com/jolars/fatou/commit/70e6c9feda5e9a68a740b9cb95461ab41c9eef46))
+- **parser:** add precise LSP edit reparse tier ([`f105b39`](https://github.com/jolars/fatou/commit/f105b3914570bd141e07dfbd2d16c21362877fbd))
+- **parser:** add top-level statement reparse tier ([`52dd6d9`](https://github.com/jolars/fatou/commit/52dd6d97998e66ebe8541641fe530aec6f128d76))
+- **parser:** add token-tier reparse splice ([`58365d6`](https://github.com/jolars/fatou/commit/58365d6d43f43e202f99689523541992841d7179))
+- **parser:** reparse infra and salsa side-channel ([`6ea9a6d`](https://github.com/jolars/fatou/commit/6ea9a6dab640dbb647a345a9bf005ef34438d350))
+- **linter:** add index-from-length rule ([`812413c`](https://github.com/jolars/fatou/commit/812413c0de5a1629f719fd32f1a259251ba9fcfe))
+- **formatter:** where-priority for return-type sigs ([`f4b423c`](https://github.com/jolars/fatou/commit/f4b423c970dff916b14ad16c5aa8f96376bb8f74))
+
+### Bug Fixes
+- **lint:** count a generator as one positional argument ([`2d9ec6b`](https://github.com/jolars/fatou/commit/2d9ec6b3eaf40a46d1fa417e6ec43b4e171539a0))
+- **bench:** report files JuliaFormatter cannot rewrite ([`70f70b9`](https://github.com/jolars/fatou/commit/70f70b9b00580409298df8d02fa178dd974fa026))
+- **docs:** exclude `doc-utils` from the cargo workspace ([`150917f`](https://github.com/jolars/fatou/commit/150917f35b07199c50a364c46648ea9b9e703ffc))
+- **config:** honor `$HOME` and `%APPDATA%` on Windows ([`b376c0c`](https://github.com/jolars/fatou/commit/b376c0c3aa8ec65fe08a94fbb09a7ddc5d391a11))
+- **parser:** close three gaps in the reparse guards ([`50eb35a`](https://github.com/jolars/fatou/commit/50eb35a0e775471ca23da2223a444bf404187489))
+- **lsp:** match only the minted synthetic path shape ([`6d615ed`](https://github.com/jolars/fatou/commit/6d615ede10760339867037b38626a3327f5bb82e))
+- **parser:** bound reparse cost and cache growth ([`fa1cae0`](https://github.com/jolars/fatou/commit/fa1cae0aee5219d1fe4a02b2c9c69d97d3e86e52))
+- **parser:** guard neighbor coupling across a trivia region ([`3bbc075`](https://github.com/jolars/fatou/commit/3bbc07548e80cf4709491680185f7068d7432767))
+- **lsp:** give each non-file URI its own tracked path ([`81e0fcc`](https://github.com/jolars/fatou/commit/81e0fcc30fcfb014cc1154b8a6db8d3b99868b5b))
+- **lsp:** drop queued analyses on document close ([`0f207d5`](https://github.com/jolars/fatou/commit/0f207d51211945047873ae1480a15b99149dc7de))
+- **lexer:** keep multi-byte chars whole in string escapes ([`065a69a`](https://github.com/jolars/fatou/commit/065a69a87d067c95b3c6f9eed2a944a4ec92de99))
+- **installer:** detect musl/glibc in oneline installer ([`6d460fd`](https://github.com/jolars/fatou/commit/6d460fd8f33163f9fb784cab9e6b23b925b1c80f))
+- **npm:** fall back to musl when glibc build fails ([`4897836`](https://github.com/jolars/fatou/commit/48978367e8dcda0895c42e60c6d39c18a744c115))
+
+### Performance Improvements
+- **semantic:** index unreachable statements by range ([`0662c8d`](https://github.com/jolars/fatou/commit/0662c8d3a0e5e504c45109ae21c9cade643cb85d))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.2.0
+
 ## [0.10.0](https://github.com/jolars/fatou/compare/v0.9.0...v0.10.0) (2026-08-03)
 
 ### Features
