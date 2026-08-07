@@ -152,11 +152,27 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   records a `DirectiveUsage` and feeds the new `Rule::check_suppressions`
   post-pass), and `ResolvedRules::enabled()` tells stale from dormant.
   Deviation from arity: a bare `# fatou-ignore-file` stays suppress-all.
-- [ ] Decision, not a task: several candidates below are idiom rewrites rather
-  than likely-bug reports, so they want a `performance` and/or `readability`
-  category beside `correctness`/`suspicious` (arity ships both). Settle the
-  category question before landing the first one, since the rule ID's docs path
-  bakes it in.
+- [x] Settled, not a task: the rule categories are `correctness`, `suspicious`,
+  `performance`, and `readability`. Several candidates below are idiom rewrites
+  rather than likely-bug reports, and `suspicious` means "legal Julia but very
+  likely not intended" — which `length-zero` and `comparison-negation` plainly
+  are not — so the two extra categories (both of which arity ships) earn their
+  keep. Each directory is created when its *first* rule lands; no empty modules
+  ahead of time. Assignments are recorded on the entries below.
+  - The original entry claimed this blocked the first idiom rewrite because
+    "the rule ID's docs path bakes it in". It does not: a category appears in
+    no public surface. The ID is bare kebab-case with no prefix, the reference
+    is one generated page (`docs/src/reference/rules.md`, one `##` section per
+    rule ID in `all_rules()` order) rather than a page per category,
+    `SUMMARY.md` has no per-rule entries, and `select`/`ignore`/
+    `[lint.severity]`/`# fatou-ignore` all key on the bare ID. A category is
+    the directory under `src/linter/rules/` and the re-export module, nothing
+    more, so moving a rule between categories is a free internal refactor —
+    pick the fitting one and move on.
+  - No landed rule moves. `index-from-length` and `discouraged-function` are
+    the two that sit closest to the line, and both stay `suspicious`: the
+    `1:length(x)` shape is a real hazard for offset arrays, and a deny-listed
+    call is flagged for its effects, not its style.
 
 ### Rule roadmap
 
@@ -265,26 +281,30 @@ Ready now (no new infrastructure):
   and both are pure scope questions the model already answers. From arity's
   planned `for-loop-index`/`for-loop-dup-index`.
 
-Ready once `resolves_to_base` lands (idiom rewrites; see the category decision
+Ready once `resolves_to_base` lands (idiom rewrites; categories per the decision
 above):
 
-- [ ] `typeof-comparison` (syn + res, warning, unsafe fix): `typeof(x) == Int`
-  should be `x isa Int` — the `==` form silently misses subtypes. Also
-  `typeof(x) != T` and the mirrored literal-first spellings. Unsafe because a
-  caller may genuinely want exact-type identity. (arity `class-equals`)
-- [ ] `length-zero` (syn + res, warning, safe fix): `length(x) == 0` is
-  `isempty(x)`, `length(x) > 0` is `!isempty(x)`; the `>= 1`/`!= 0`/`<= 0`/`< 1`
-  spellings collapse the same way. (arity `nzchar`)
-- [ ] `redundant-boolean` (syn, warning, safe fix): comparing to or branching on
-  a boolean literal — `x == true` is `x`, `x == false` is `!x`, `c ? true :
-  false` is `c`, `c ? false : true` is `!c`. Distinct from
+- [ ] `typeof-comparison` (suspicious, syn + res, warning, unsafe fix):
+  `typeof(x) == Int` should be `x isa Int` — the `==` form silently misses
+  subtypes, which is a likely bug rather than an idiom, so this one stays
+  `suspicious`. Also `typeof(x) != T` and the mirrored literal-first spellings.
+  Unsafe because a caller may genuinely want exact-type identity. (arity
+  `class-equals`)
+- [ ] `length-zero` (readability, syn + res, warning, safe fix): `length(x) ==
+  0` is `isempty(x)`, `length(x) > 0` is `!isempty(x)`; the `>= 1`/`!= 0`/
+  `<= 0`/`< 1` spellings collapse the same way. **First `readability` rule —
+  creates `src/linter/rules/readability.rs` and its directory.** (arity
+  `nzchar`)
+- [ ] `redundant-boolean` (readability, syn, warning, safe fix): comparing to or
+  branching on a boolean literal — `x == true` is `x`, `x == false` is `!x`, `c
+  ? true : false` is `c`, `c ? false : true` is `!c`. Distinct from
   `constant-condition`, which owns the literal-*as*-test case. (arity
   `redundant-equals`, `redundant-ifelse`)
-- [ ] `comparison-negation` (syn, warning, safe fix): `!(a == b)` is `a != b`,
-  `!(x < y)` is `x >= y`. Safer in Julia than in R: `!=` is *defined* as
-  `!(==)`, so the rewrite is exactly equivalent by construction. Watch the
-  broadcast forms (`.==`, `.!`), which are values rather than a scalar test and
-  must not fire. (arity `comparison-negation`)
+- [ ] `comparison-negation` (readability, syn, warning, safe fix): `!(a == b)`
+  is `a != b`, `!(x < y)` is `x >= y`. Safer in Julia than in R: `!=` is
+  *defined* as `!(==)`, so the rewrite is exactly equivalent by construction.
+  Watch the broadcast forms (`.==`, `.!`), which are values rather than a
+  scalar test and must not fire. (arity `comparison-negation`)
 
 Needs modest new infrastructure:
 
@@ -339,21 +359,23 @@ Needs modest new infrastructure:
 
 Deferred, and why:
 
-- [ ] The eager-broadcast performance family — `any(f.(x))` -> `any(f, x)`,
+- [ ] The eager-broadcast family (performance) — `any(f.(x))` -> `any(f, x)`,
   `all(f.(x))` -> `all(f, x)`, `sum(f.(x))` -> `sum(f, x)`, `sort(x)[1]` ->
   `minimum(x)`, `length(findall(p, x))` -> `count(p, x)` — all of which avoid
   materializing an intermediate array. This has no StaticLint or arity
   counterpart (it is the Julia analogue of arity's `performance` category) and
-  is arguably higher-value than anything ported directly, but it wants the
-  matcher module and the category decision first.
+  is arguably higher-value than anything ported directly. The category question
+  is settled and `matchers` has landed, so what remains is scheduling: whichever
+  of these lands first creates `src/linter/rules/performance.rs` and its
+  directory.
 - [ ] `occursin`-with-a-regex-literal rules: `occursin(r"abc", s)` ->
   `occursin("abc", s)` when the pattern has no metacharacter, and
   `occursin(r"^abc", s)` -> `startswith(s, "abc")`. Blocked on a Julia
   regex-literal analyzer (arity has `src/linter/regex.rs` for exactly this).
   (arity `fixed-regex`, `string-boundary`)
-- [ ] `unnecessary-nesting`: `if a; if b; body; end; end` -> `if a && b; body;
-  end`, when neither `if` has an `else`. Readability category; low risk, low
-  urgency. (arity `unnecessary-nesting`)
+- [ ] `unnecessary-nesting` (readability): `if a; if b; body; end; end` -> `if a
+  && b; body; end`, when neither `if` has an `else`. Low risk, low urgency.
+  (arity `unnecessary-nesting`)
 - [ ] A `Test`-stdlib rule bundle, as one cohesive change with a shared `@test`
   matcher — the Julia counterpart of arity's planned `testthat` bundle, which it
   rates "high value for test-heavy repos" (equally true here): `@test x == true`
@@ -364,7 +386,9 @@ Deferred, and why:
 - [ ] A `documentation` category over docstrings, structurally mirroring
   arity's five roxygen rules: undocumented exported names, `@doc` argument
   lists that disagree with the signature. Larger design question than a single
-  rule.
+  rule. Would be a fifth category beyond the settled four, which is cheap on
+  its own — the taxonomy note above applies — but the bundle is what needs
+  designing, not the directory.
 - [ ] Not a lint rule, but noted while reading JuliaWorkspaces: its
   `layer_diagnostics.jl` publishes **TOML syntax diagnostics** for
   `Project.toml`/`Manifest.toml`. Cheap LSP diagnostic source; we already parse

@@ -49,9 +49,10 @@ Prefer the cheapest tier the rule's correctness actually requires.
   **`all_rules()`, the single source of truth**. `all_rule_ids()` derives from
   it, so there is no second list to sync. Every new rule is added here exactly
   once.
-- `src/linter/rules/<category>.rs`—the category module
-  (`correctness`/`suspicious`; add new categories per the roadmap when first
-  needed). Holds `mod <id>;` + `pub use <id>::<Name>;`.
+- `src/linter/rules/<category>.rs`—the category module. The settled vocabulary
+  is `correctness`/`suspicious`/`performance`/`readability`; only the first two
+  exist so far, and the directory plus this module are created by the first
+  rule to need them. Holds `mod <id>;` + `pub use <id>::<Name>;`.
 - `src/linter/rules/<category>/<id>.rs`—one file per rule: a unit
   `pub struct` implementing `Rule`, with a module doc comment. (File names are
   snake_case; the public id stays kebab-case.)
@@ -112,8 +113,13 @@ Prefer the cheapest tier the rule's correctness actually requires.
    fixes the id already.
 
 2. **Decide gating and safety before writing code:**
-   - **Category** = directory (`correctness`/`suspicious`/...); it does not
-     appear in the id.
+   - **Category** = directory only: `correctness` (the code cannot do what it
+     says), `suspicious` (legal Julia, very likely not intended), `performance`
+     (a rewrite that avoids real work), `readability` (an idiom rewrite that is
+     behavior-preserving). It appears in no public surface—not the id, not the
+     `--select`/`--ignore`/`[lint.severity]`/`# fatou-ignore` key, and not the
+     reference, which is one page keyed by id—so it is a free refactor later.
+     Pick the fitting one and move on.
    - **Severity**—override `default_severity()` (the default is `Warning`;
      `Error` only for code that cannot run, e.g. `duplicate-argument`). Never
      set severity on the `Diagnostic`—the engine stamps it, honoring the

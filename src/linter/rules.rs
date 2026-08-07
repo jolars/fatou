@@ -14,6 +14,16 @@
 //! perform belongs to the formatter, not here (see `AGENTS.md`). Rules consume
 //! the [`SemanticModel`] and the CST shape; style is never their concern.
 //!
+//! A rule's *category* is its directory and nothing else: it appears in no
+//! public surface — not the ID, not the `select`/`ignore`/`[lint.severity]`/
+//! `# fatou-ignore` key, and not the generated reference, which is one page
+//! keyed by ID (see [`crate::linter::docs`]). Recategorizing a rule is
+//! therefore a free refactor. The vocabulary is `correctness` (the code cannot
+//! do what it says), `suspicious` (legal Julia, very likely not intended),
+//! `performance` (a rewrite that avoids real work), and `readability` (a
+//! behavior-preserving idiom rewrite); the last two have no rules yet, so
+//! their modules are created by the first rule that needs them.
+//!
 //! New rules:
 //! 1. Create a module under `src/linter/rules/<category>/<id>.rs`.
 //! 2. Define a unit `pub struct` that implements [`Rule`] — subscribe to node
