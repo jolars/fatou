@@ -222,3 +222,58 @@ end
     assert_eq!(outcome.applied, 4);
     assert!(outcome.remaining.is_empty());
 }
+
+/// `redundant-boolean` collapses both conditional spellings in one safe pass,
+/// leaving no findings behind.
+#[test]
+fn fixes_every_redundant_boolean_conditional() {
+    let src = "\
+a = ready ? true : false
+b = (n > 0) ? false : true
+if valid(x) ? true : false
+    g()
+end
+";
+    let outcome = fix_source(None, src, &select("redundant-boolean"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = ready
+    b = !(n > 0)
+    if valid(x)
+        g()
+    end
+    ");
+    assert_eq!(outcome.applied, 3);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// The comparison half rewrites to the operand alone, but only under
+/// `--unsafe-fixes`: `==` is not identity, so the two spellings part ways for a
+/// non-`Bool` operand. Both operand orders converge in one pass.
+#[test]
+fn fixes_every_redundant_boolean_comparison_under_unsafe() {
+    let src = "\
+a = flag == true
+b = x.ready != true
+c = false == done(y)
+d = a + b == false
+";
+    let outcome = fix_source(None, src, &select("redundant-boolean"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = flag
+    b = !x.ready
+    c = !done(y)
+    d = !(a + b)
+    ");
+    assert_eq!(outcome.applied, 4);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, the comparison half reports but changes nothing.
+#[test]
+fn withholds_redundant_boolean_comparison_fix_by_default() {
+    let src = "a = flag == true\n";
+    let outcome = fix_source(None, src, &select("redundant-boolean"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}

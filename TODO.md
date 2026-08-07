@@ -428,11 +428,36 @@ above):
   sits in the replaced span *outside* the argument (one inside travels with it);
   outside the argument only `length`, the parens, the operator, and the literal
   can appear, so a `#` there is always a comment.
-- [ ] `redundant-boolean` (readability, syn, warning, safe fix): comparing to or
-  branching on a boolean literal — `x == true` is `x`, `x == false` is `!x`, `c
-  ? true : false` is `c`, `c ? false : true` is `!c`. Distinct from
-  `constant-condition`, which owns the literal-*as*-test case. (arity
-  `redundant-equals`, `redundant-ifelse`)
+- [x] `redundant-boolean` (readability, syn, warning, safe + unsafe fix):
+  comparing to or branching on a boolean literal — `x == true` is `x`, `x ==
+  false` is `!x`, `c ? true : false` is `c`, `c ? false : true` is `!c`.
+  Distinct from `constant-condition`, which owns the literal-*as*-test case.
+  (arity `redundant-equals`, `redundant-ifelse`) Landed as one rule over
+  `BINARY_EXPR` + `TERNARY_EXPR`, spanning the whole expression, with new
+  `TernaryExpr::condition`/`then_branch`/`else_branch` accessors. `==`/`!=` are
+  symmetric, so the mirrored spellings (`true == x`) go through the same table.
+  **The two halves do not ship the same applicability, and the entry's "safe
+  fix" was half wrong.** The conditional rewrite *is* safe: `?:` requires a
+  `Bool` test, so on every input that does not throw, `c ? true : false` hands
+  back that very `Bool`. The comparison rewrite is `Unsafe`, because `==` is not
+  identity — it promotes across the numeric tower (`1 == true` is `true`),
+  answers `missing` for `missing`, and is overloadable — so `x == true` and `x`
+  agree only when `x` is already a `Bool`, which is the redundancy worth
+  reporting and exactly why rewriting it changes behavior. Same shape of
+  correction as `comparison-negation` dropping the orderings. Left alone:
+  `===`/`!==` (the deliberate identity spelling, `false` for every non-`Bool`),
+  the broadcast `.==`/`.!=`, a comparison chain (a `COMPARISON_EXPR`), a
+  comparison of two boolean literals (no operand survives it), and a conditional
+  whose arms agree (constant, not redundant). No namespace gate: the rewrite
+  introduces an operator, not a name. The positive rewrite needs no rebinding
+  reasoning — the mirror image of `comparison-negation`'s hazard, since the
+  survivor is already an operand of a comparison-tier `==` (or a `?:` test) and
+  so binds at least as tightly as what it replaces. The negated rewrite splices
+  bare only from the allow-list of shapes binding at least as tightly as a
+  prefix `!`, and parenthesizes otherwise (`a + b == false` becomes
+  `!(a + b)`). The fix is withheld — the finding still stands — when a comment
+  sits in the replaced span outside the surviving operand; only the operator and
+  the literals live there, so a `#` is always a comment.
 - [x] `comparison-negation` (readability, syn, warning, safe fix): `!(a == b)`
   is `a != b`, `!(x < y)` is `x >= y`. Safer in Julia than in R: `!=` is
   *defined* as `!(==)`, so the rewrite is exactly equivalent by construction.

@@ -1,0 +1,53 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `redundant-boolean`
+
+Flag a test compared against a boolean literal, or a conditional whose two arms are the literals themselves. `x == true` and `x != false` are `x`; `x == false` and `x != true` are `!x`; `c ? true : false` is `c` and `c ? false : true` is `!c`. Because `==` and `!=` are symmetric, the mirrored spellings (`true == x`) collapse the same way.
+
+This is distinct from `constant-condition`, which owns the literal-*as*-test case (`if true`), where the branch is decided before the code runs.
+
+The two halves do not ship the same fix. The conditional rewrite is reported as a safe fix: `?:` requires a `Bool` test, so on every input that does not throw, `c ? true : false` hands back that very `Bool`. The comparison rewrite is reported as an unsafe fix, because `==` is not identity — it promotes across the numeric tower (`1 == true` is `true`), answers `missing` for `missing`, and is overloadable — so the two spellings agree only when the operand is already a `Bool`.
+
+The deliberate `===` / `!==`, the broadcast `.==` / `.!=`, and a comparison chain are left alone, as are a comparison of two boolean literals (no operand survives it) and a conditional whose arms agree (constant rather than redundant).
+
+The fix reuses the surviving operand's own source text, parenthesizing it when a bare `!` would rebind (`a + b == false` becomes `!(a + b)`). It is withheld — the finding still stands — when a comment sits in the replaced span outside that operand.
+
+A conditional over the two literals is its own test:
+
+```julia
+ready = queue_started(q) ? true : false
+```
+
+```text
+warning: redundant-boolean
+ --> example.jl:1:9
+  |
+1 | ready = queue_started(q) ? true : false
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this conditional just yields `queue_started(q)`
+  = help: Replace the conditional with its test (safe fix)
+```
+
+After applying the fix:
+
+```julia
+ready = queue_started(q)
+```
+
+Comparing a test to a boolean literal restates it:
+
+```julia
+if x.valid == false
+    reject(x)
+end
+```
+
+```text
+warning: redundant-boolean
+ --> example.jl:1:4
+  |
+1 | if x.valid == false
+  |    ^^^^^^^^^^^^^^^^ comparing to `false` is redundant: write `!x.valid`
+  = help: Drop the comparison to `false` (unsafe fix, requires `--unsafe-fixes`)
+```

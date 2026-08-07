@@ -4547,3 +4547,180 @@ fn comparison_negation_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- redundant-boolean -----------------------------------------------------
+
+/// The single diagnostic `redundant-boolean` reports for `src`, or `None`.
+fn redundant_boolean_diag(src: &str) -> Option<fatou::linter::Diagnostic> {
+    let config = LintConfig {
+        select: Some(vec!["redundant-boolean".to_string()]),
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.rule == "redundant-boolean")
+}
+
+#[test]
+fn redundant_boolean_flags_every_comparison_spelling() {
+    for (src, rewrite) in [
+        ("x == true\n", "x"),
+        ("x != false\n", "x"),
+        ("x == false\n", "!x"),
+        ("x != true\n", "!x"),
+        // Mirrored: `==` and `!=` are symmetric, so the literal may come first.
+        ("true == x\n", "x"),
+        ("false != x\n", "x"),
+        ("false == x\n", "!x"),
+        ("true != x\n", "!x"),
+    ] {
+        assert_eq!(count("redundant-boolean", src), 1, "no finding for {src:?}");
+        let diag = redundant_boolean_diag(src).expect("expected a finding");
+        assert_eq!(diag.fixes[0].content, rewrite, "wrong rewrite for {src:?}");
+        assert_eq!(diag.fixes[0].applicability, Applicability::Unsafe);
+    }
+}
+
+#[test]
+fn redundant_boolean_flags_both_conditional_spellings() {
+    for (src, rewrite) in [("c ? true : false\n", "c"), ("c ? false : true\n", "!c")] {
+        assert_eq!(count("redundant-boolean", src), 1, "no finding for {src:?}");
+        let diag = redundant_boolean_diag(src).expect("expected a finding");
+        assert_eq!(diag.fixes[0].content, rewrite, "wrong rewrite for {src:?}");
+        assert_eq!(diag.fixes[0].applicability, Applicability::Safe);
+    }
+}
+
+#[test]
+fn redundant_boolean_spans_the_whole_expression() {
+    let src = "if x.ready == true\n    1\nend\n";
+    let diag = redundant_boolean_diag(src).expect("expected a finding");
+    assert_eq!(&src[diag.range], "x.ready == true");
+
+    let src = "y = check(v) ? false : true\n";
+    let diag = redundant_boolean_diag(src).expect("expected a finding");
+    assert_eq!(&src[diag.range], "check(v) ? false : true");
+}
+
+#[test]
+fn redundant_boolean_ignores_identity_and_broadcast_comparisons() {
+    for src in [
+        // `===` is the deliberate identity spelling: it is `false` for every
+        // non-`Bool`, which is exactly what its author asked for.
+        "x === true\n",
+        "x !== false\n",
+        // The broadcast forms are containers of values, not tests.
+        "x .== true\n",
+        "x .!= false\n",
+        // Not a comparison to a boolean literal at all.
+        "x == 1\n",
+        "x == nothing\n",
+        "x == \"true\"\n",
+        "x < true\n",
+        "x && true\n",
+    ] {
+        assert_eq!(
+            count("redundant-boolean", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn redundant_boolean_ignores_a_comparison_between_two_boolean_literals() {
+    // Neither operand is the value being tested, so there is nothing to keep.
+    for src in ["true == false\n", "true == true\n", "false != true\n"] {
+        assert_eq!(
+            count("redundant-boolean", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn redundant_boolean_ignores_a_comparison_chain() {
+    // A chain folds into a `COMPARISON_EXPR`, and `a == true == b` has no
+    // two-operand rewrite.
+    assert_eq!(count("redundant-boolean", "a == true == b\n"), 0);
+}
+
+#[test]
+fn redundant_boolean_ignores_a_conditional_without_two_opposed_literals() {
+    for src in [
+        "c ? true : x\n",
+        "c ? x : false\n",
+        // Constant either way: a different rule's question, not an idiom.
+        "c ? true : true\n",
+        "c ? false : false\n",
+        "c ? 1 : 0\n",
+        "c ? \"yes\" : \"no\"\n",
+    ] {
+        assert_eq!(
+            count("redundant-boolean", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn redundant_boolean_parenthesizes_an_operand_that_would_rebind_under_negation() {
+    for (src, rewrite) in [
+        // `!` binds tighter than every infix operator but `.`, so a loose
+        // operand needs the parentheses.
+        ("a + b == false\n", "!(a + b)"),
+        ("a || b ? false : true\n", "!(a || b)"),
+        ("-x == false\n", "!(-x)"),
+        // These already bind at least as tightly as `!`.
+        ("f(x) == false\n", "!f(x)"),
+        ("x.ready == false\n", "!x.ready"),
+        ("v[i] == false\n", "!v[i]"),
+        ("(a + b) == false\n", "!(a + b)"),
+    ] {
+        let diag = redundant_boolean_diag(src).unwrap_or_else(|| panic!("no finding: {src:?}"));
+        assert_eq!(diag.fixes[0].content, rewrite, "wrong rewrite for {src:?}");
+    }
+}
+
+#[test]
+fn redundant_boolean_preserves_the_kept_operands_own_text() {
+    // Whatever the surviving operand contains travels with it byte for byte.
+    let diag = redundant_boolean_diag("x==true\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "x");
+    let diag = redundant_boolean_diag("f(#= c =# y) == true\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "f(#= c =# y)");
+}
+
+#[test]
+fn redundant_boolean_withholds_the_fix_around_a_dropped_comment() {
+    // A comment outside the surviving operand sits in the deleted text and
+    // would be lost; the finding still stands.
+    for src in [
+        "x == #= c =# true\n",
+        "x #= c =# == true\n",
+        // Julia requires real whitespace around a ternary's `:`, so the only
+        // comment slots are around the test and inside the arms.
+        "c #= c =# ? true : false\n",
+        "c ? #= c =# true : false\n",
+    ] {
+        let diag = redundant_boolean_diag(src).unwrap_or_else(|| panic!("no finding: {src:?}"));
+        assert!(diag.fixes.is_empty(), "unexpected fix for {src:?}");
+    }
+}
+
+#[test]
+fn redundant_boolean_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["redundant-boolean".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "# fatou-ignore redundant-boolean\nx == true\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

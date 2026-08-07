@@ -479,6 +479,24 @@ impl ArrowExpr {
     }
 }
 
+impl TernaryExpr {
+    /// The test (left of `?`).
+    pub fn condition(&self) -> Option<Expr> {
+        support::child(&self.0)
+    }
+
+    /// The arm taken when the test holds (between `?` and `:`).
+    pub fn then_branch(&self) -> Option<Expr> {
+        support::children(&self.0).nth(1)
+    }
+
+    /// The arm taken otherwise (right of `:`). `None` for an incomplete
+    /// ternary, which the parser still shapes as a `TERNARY_EXPR`.
+    pub fn else_branch(&self) -> Option<Expr> {
+        support::children(&self.0).nth(2)
+    }
+}
+
 impl UnaryExpr {
     /// The operator token.
     pub fn op(&self) -> Option<Operator> {
@@ -786,6 +804,19 @@ mod tests {
         assert_eq!(expr_text(bin.lhs()), "a");
         assert_eq!(expr_text(bin.rhs()), "b");
         assert_eq!(bin.op().unwrap().text(), "+");
+    }
+
+    #[test]
+    fn ternary_expr_test_and_arms() {
+        let ternary: TernaryExpr = find("c ? f(1) : g(2)\n");
+        assert_eq!(expr_text(ternary.condition()), "c");
+        assert_eq!(expr_text(ternary.then_branch()), "f(1)");
+        assert_eq!(expr_text(ternary.else_branch()), "g(2)");
+        // An incomplete ternary is still a `TERNARY_EXPR`; the missing arm is
+        // simply absent.
+        let ternary: TernaryExpr = find("c ? a\n");
+        assert_eq!(expr_text(ternary.then_branch()), "a");
+        assert!(ternary.else_branch().is_none());
     }
 
     #[test]
