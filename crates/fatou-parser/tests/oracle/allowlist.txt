@@ -26,10 +26,10 @@ block_comment_infix
 block_docstring
 block_form_operand
 block_trailing_junk
-broadcast_bitshift
 bracescat
 braces_generator
 braces_newline_comprehension
+broadcast_bitshift
 broadcast_bitwise_assign
 broadcast_bitwise_operators
 broadcast_identity_operators
@@ -119,6 +119,7 @@ keyword_args
 keyword_header_block_comment
 keyword_name_error
 keyword_statements
+keyword_stmt_generator_body
 left_arrow_operator
 left_division
 let_bindings_newline
@@ -179,12 +180,12 @@ prefix_operator_spaced_call
 primitive_type_paren_size
 public_statement
 public_stop_at_equals
-quote_paren_empty
 quoted_assignment_operators
 quoted_dollar_symbol
 quoted_literal
 quoted_macro_name
 quoted_var_identifier
+quote_paren_empty
 range_operator
 range_operator_name
 raw_string

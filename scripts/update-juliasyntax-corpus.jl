@@ -19,7 +19,8 @@
 using JuliaSyntax
 
 const REPO_ROOT = normpath(joinpath(@__DIR__, ".."))
-const CORPUS_DIR = joinpath(REPO_ROOT, "tests", "fixtures", "oracle")
+const CORPUS_DIR =
+    joinpath(REPO_ROOT, "crates", "fatou-parser", "tests", "fixtures", "oracle")
 
 function render(src::AbstractString)
     # `ignore_errors=true` lets us pin output for inputs Fatou parses but Julia

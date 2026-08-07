@@ -247,15 +247,22 @@ Ready now (no new infrastructure):
     the rule's whole subject; the id names that construct instead of Julia's
     misleading message. No scope test, as the entry said.
     (expected assignment after `const`)
-- [ ] Parser gap found while landing the above: an unparenthesized keyword
-  statement as a comprehension or generator body swallows the `for` clause as
+- [x] Parser gap found while landing the above: an unparenthesized keyword
+  statement as a comprehension or generator body swallowed the `for` clause as
   raw tokens instead of closing the body and opening a `FOR_BINDING`. `[const x
-  = 1 for i in 1:1]` parses as `COMPREHENSION > CONST_STMT` with the `FOR_KW`
+  = 1 for i in 1:1]` parsed as `COMPREHENSION > CONST_STMT` with the `FOR_KW`
   *inside* the `CONST_STMT`, where JuliaSyntax builds a generator; the
-  parenthesized `[(const x = 1) for i in 1:1]` is fine. `KwStmt::ExprTuple`
-  (`const`/`global`/`local`) needs to stop at a `for` in comprehension position.
-  Low priority — the construct is an error in Julia either way — but it silently
-  costs `const-local` and `global-const-in-function` a finding.
+  parenthesized `[(const x = 1) for i in 1:1]` was already fine. Fixed:
+  `KwStmt::ExprTuple` (`const`/`global`/`local`/`return`) now carries a
+  `for_ends` flag, set in every non-statement position, that ends the statement
+  at a same-line `for` (and at the whitespace before it, which the generator's
+  layout owns). A nested keyword statement inherits the boundary through
+  `parse_kw_stmt_operand`, so `[global const x = 1 for i in 1:1]` nests too.
+  The operand position itself is *not* gated: a `for` directly after the keyword
+  is its operand (`[return for i in 1:1]` ⇒ `(vect (return (for …)))`).
+  `const-local` and `global-const-in-function` now report the right spans.
+  Toplevel `const x = 1 for i in 1:1` still keeps the loose tokens rather than
+  JuliaSyntax's `(error-t for …)` recovery — error shapes are a separate phase.
 - [x] `missing-comparison` (suspicious, syn, warning, **unsafe** fix): `x ==
   missing` / `x != missing`, which is always `missing` and raises `TypeError`
   in a boolean context. Landed matching `nothing-comparison`'s shape rules

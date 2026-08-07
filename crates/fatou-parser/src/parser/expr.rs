@@ -87,6 +87,13 @@ struct ExprFlags {
     /// `: end` falls back to a bare `:` Colon atom (`is_closing_block_keyword`),
     /// so the colon-quote parser only applies that fallback when this is off.
     field_access_rhs: bool,
+    /// Force generator position for a `const`/`global`/`local`/`return` statement
+    /// even though this is statement position. Set only while parsing the operand
+    /// of such a keyword that is *itself* in generator position, so a nested one
+    /// inherits the boundary (`[global const x = 1 for i in 1:1]` — the inner
+    /// `const` must stop at the `for` too). Everywhere else the boundary is
+    /// derived from `stmt_comma`; see [`KwStmt::ExprTuple`]'s `for_ends`.
+    kw_generator_body: bool,
 }
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
@@ -200,6 +207,24 @@ pub(crate) fn parse_block_stmt(
     parse_expr_in(tokens, start, 0, diagnostics, flags)
 }
 
+/// Parse the operand of a `const`/`global`/`local`/`return` statement. Like
+/// [`parse_block_stmt`] (a top-level comma folds into a bare tuple), but
+/// `for_ends` propagates the enclosing generator boundary so a nested keyword
+/// statement stops at the same `for` (`[global const x = 1 for i in 1:1]`).
+pub(crate) fn parse_kw_stmt_operand(
+    tokens: &[Token],
+    start: usize,
+    for_ends: bool,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<ExprParse> {
+    let flags = ExprFlags {
+        stmt_comma: true,
+        kw_generator_body: for_ends,
+        ..ExprFlags::default()
+    };
+    parse_expr_in(tokens, start, 0, diagnostics, flags)
+}
+
 /// Parse one expression inside brackets (`(...)`, `[...]`), where newlines are
 /// insignificant and an operator may continue onto the next line. Note: this does
 /// *not* enable the `end` index marker — that is specific to square brackets and
@@ -298,7 +323,15 @@ fn parse_expr_in(
         no_decl_where,
         name_context,
         field_access_rhs: _,
+        kw_generator_body,
     } = flags;
+    // A `const`/`global`/`local`/`return` in generator position must stop at the
+    // `for` that opens the iteration clause instead of carrying it through as
+    // loose tokens (`[const x = 1 for i in 1:1]` ⇒
+    // `(comprehension (generator (const (= x 1)) (= i (call-i 1 : 1))))`). That is
+    // every non-statement position — bracket elements, arguments, parenthesized
+    // expressions — plus a nested keyword operand that inherits it.
+    let kw_for_ends = !stmt_comma || kw_generator_body;
     let ctx = ParserCtx::new(tokens);
 
     // The contextual keyword `public` (a plain identifier elsewhere) opens a
@@ -387,8 +420,10 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::RETURN_EXPR,
-                    KwStmt::ExprTuple,
-                    true,
+                    KwStmt::ExprTuple {
+                        optional_value: true,
+                        for_ends: kw_for_ends,
+                    },
                     diagnostics,
                 );
             }
@@ -401,7 +436,6 @@ fn parse_expr_in(
                         takes_value: true,
                         colon_ends: no_range,
                     },
-                    false,
                     diagnostics,
                 );
             }
@@ -414,7 +448,6 @@ fn parse_expr_in(
                         takes_value: false,
                         colon_ends: no_range,
                     },
-                    false,
                     diagnostics,
                 );
             }
@@ -423,8 +456,10 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::CONST_STMT,
-                    KwStmt::ExprTuple,
-                    false,
+                    KwStmt::ExprTuple {
+                        optional_value: false,
+                        for_ends: kw_for_ends,
+                    },
                     diagnostics,
                 );
             }
@@ -433,8 +468,10 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::GLOBAL_STMT,
-                    KwStmt::ExprTuple,
-                    false,
+                    KwStmt::ExprTuple {
+                        optional_value: false,
+                        for_ends: kw_for_ends,
+                    },
                     diagnostics,
                 );
             }
@@ -443,8 +480,10 @@ fn parse_expr_in(
                     tokens,
                     start,
                     SyntaxKind::LOCAL_STMT,
-                    KwStmt::ExprTuple,
-                    false,
+                    KwStmt::ExprTuple {
+                        optional_value: false,
+                        for_ends: kw_for_ends,
+                    },
                     diagnostics,
                 );
             }

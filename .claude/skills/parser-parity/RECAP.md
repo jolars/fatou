@@ -114,8 +114,8 @@ in either corpus).
 ## Progress
 
 JS corpus (**685 cases**—error shapes now harvested): **677 allowlisted**,
-8 divergence, 0 unsupported. Dir corpus: **219 allowlisted**, 1 blocked
-(numeric_literals; FAIL not skip since `render` is total).
+8 divergence, 0 unsupported. Dir corpus (**247 cases**): **246 allowlisted**,
+1 blocked (numeric_literals; FAIL not skip since `render` is total).
 Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`. **Error shapes are now reconstructed from diagnostics, not in-tree
 marker nodes** (2026-06-23i refactor)—same projected output, so counts
 unchanged. `TODO.md`'s error-shape bullets still describe the old `ERROR_TRIVIA`
@@ -134,7 +134,62 @@ chains `a isa b isa c`/mixed `a < b isa c` (separate `word_operator` branch,
 stay nested). Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully
 executed.
 
-## Latest session (2026-07-30—prefix-operator space-arg then whitespace opener)
+## Latest session (2026-08-07—keyword statement as a comprehension/generator body)
+
+User-named target (the `TODO.md` bullet left by the `local-const` linter work).
+An unparenthesized `const`/`global`/`local`/`return` as a comprehension or
+generator body swallowed the `for` clause as loose tokens:
+`[const x = 1 for i in 1:1]` ⇒ `(vect (const (= x 1) i in))` where JuliaSyntax
+builds `(comprehension (generator (const (= x 1)) (= i (call-i 1 : 1))))`. The
+parenthesized `[(const x = 1) for i in 1:1]` was already correct.
+
+Root cause: `parse_keyword_stmt`'s trailing "carry same-line tokens through
+verbatim" loop is gated only by `header_ends`, which does not list `for`.
+
+- **Fix** (`structural.rs` + `expr.rs`, no projector change): `KwStmt::ExprTuple`
+  became a struct variant carrying `optional_value` (moved off the parameter
+  list) and a new `for_ends`. When set, a local `stmt_ends` closure ends the
+  statement at a same-line `for` — checked *past* horizontal whitespace, so the
+  space before `for` stays outside the keyword node (otherwise the bracket parser
+  raised a spurious `expected whitespace before \`for\``).
+- **Where it's set**: `kw_for_ends = !stmt_comma || kw_generator_body` in
+  `parse_expr_in`. `!stmt_comma` covers every non-statement position at once
+  (bracket elements, arg lists, parens, braces) — keying on `inside_brackets`
+  would have missed `[…]`, whose elements parse with `inside_brackets: false`
+  because newlines there are significant row separators. The new `ExprFlags`
+  field `kw_generator_body` is set only by the new `parse_kw_stmt_operand`, so a
+  *nested* keyword statement inherits the boundary
+  (`[global const x = 1 for i in 1:1]`); its operand still keeps `stmt_comma`.
+- **Operand position is deliberately not gated**: a `for` directly after the
+  keyword is the operand, not a generator clause — `[return for i in 1:1]` ⇒
+  `(vect (return (for …)))`, `[const for i in 1:1]` ⇒ `(vect (error (const (for
+  …))))` (both A/B-verified unchanged; they still differ from JuliaSyntax only in
+  a pre-existing doubled `(error-t)` missing-`end` recovery).
+- **Verified**: 33 probe cases; 29 byte-identical to JuliaSyntax, the 4 remaining
+  diffs all pre-existing and unchanged under A/B (`@m const x = 1 for … end`
+  macro space-arg gap; `[const x = 1 for i in 1:1;]` and toplevel `const x = 1
+  for …` error shapes). Formatter output on the fixture is idempotent.
+- **Linter payoff**: `const-local` and `global-const-in-function` now report the
+  construct with the right span (`global const x = 1` instead of the whole
+  `global const x = 1 for i in 1:1`).
+- **Drive-by**: `scripts/update-juliasyntax-corpus.jl`'s `CORPUS_DIR` still
+  pointed at the pre-crate-split `tests/fixtures/oracle`, so the refresh script
+  errored out. Fixed; regenerating rewrote all 247 `expected.sexpr` byte-identical
+  (only the new slug is new). The tracked `report.txt` was correspondingly stale
+  (215 cases) and is now regenerated — note both reports *are* tracked here,
+  contrary to this file's older "reports are gitignored" claim.
+- **Fixtures**: parser snapshot + oracle dir slug `keyword_stmt_generator_body`
+  (14 lines, byte-identical to JuliaSyntax).
+- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions);
+  dir 246 → **247** (report was stale at 215; allowlist 249 → 247 entries after
+  the header-preserving reseed).
+- **Next**: no queued parser target. Nearest siblings, both error shapes and so
+  deferred: toplevel `const x = 1 for i in 1:1` ⇒ `(const (= x 1)) (error-t for
+  i in 1 : 1)`, and the `@m const x = 1 for i in 1:2 end` macro space-arg case
+  (statement-level macro should take the `for` loop as a second argument).
+  Otherwise keep batch-probing real-world Julia.
+
+## Earlier session (2026-07-30—prefix-operator space-arg then whitespace opener)
 
 Closed the queued `TODO.md` bullet (issue #24's `whitespace before opener`
 bucket, surfaced by the vendored `JuliaLowering/src/` tree). Target:

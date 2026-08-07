@@ -17,7 +17,7 @@ use crate::parser::core::stmt_is_doc_string;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
 use crate::parser::events::{Event, ExprParse, push_range};
 use crate::parser::expr::{
-    is_var_identifier_start, parse_block_stmt, parse_expr, parse_for_specs,
+    is_var_identifier_start, parse_block_stmt, parse_expr, parse_for_specs, parse_kw_stmt_operand,
     parse_name_signature_expr, parse_paren, parse_prefix_interpolation, parse_quote_sym,
     parse_signature_expr, parse_type_spec_expr, push_var_macro_name,
 };
@@ -577,7 +577,18 @@ pub(crate) enum KwStmt {
     /// `const x, y = 1, 2` ⇒ `(const (= (tuple x y) (tuple 1 2)))`,
     /// `global a, b = 1, 2` ⇒ `(global (= (tuple a b) (tuple 1 2)))`). Any
     /// remaining same-line tokens are carried through verbatim.
-    ExprTuple,
+    ///
+    /// `optional_value` marks a keyword that may stand alone (`return`), so a
+    /// stray closing delimiter in operand position ends it instead of forcing an
+    /// inner `(error)`. `for_ends` marks comprehension/generator position (inside
+    /// `(…)`/`[…]`/`{…}`), where a same-line `for` opens the generator's iteration
+    /// clause rather than belonging to the keyword statement
+    /// (`[const x = 1 for i in 1:1]` ⇒
+    /// `(comprehension (generator (const (= x 1)) (= i (call-i 1 : 1))))`).
+    ExprTuple {
+        optional_value: bool,
+        for_ends: bool,
+    },
     /// An optional block label, as `break`/`continue` take one in Julia 1.14
     /// (`break outer` ⇒ `(break outer)`). `takes_value` additionally admits a
     /// value after the label, which only `break` accepts (`break outer i * 2` ⇒
@@ -596,27 +607,40 @@ pub(crate) fn parse_keyword_stmt(
     start: usize,
     node_kind: SyntaxKind,
     body: KwStmt,
-    optional_value: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let ctx = ParserCtx::new(tokens);
     let mut events = vec![Event::Start(node_kind), Event::Tok(start)];
 
     let mut i = start + 1;
-    if let KwStmt::Label {
-        takes_value,
-        colon_ends,
-    } = body
-    {
-        i = parse_break_label(&ctx, &mut events, i, takes_value, colon_ends, diagnostics);
-        events.push(Event::Finish);
-        return Some(ExprParse {
-            start,
-            end: i,
-            events,
-        });
-    }
+    let (optional_value, for_ends) = match body {
+        KwStmt::ExprTuple {
+            optional_value,
+            for_ends,
+        } => (optional_value, for_ends),
+        KwStmt::Label {
+            takes_value,
+            colon_ends,
+        } => {
+            i = parse_break_label(&ctx, &mut events, i, takes_value, colon_ends, diagnostics);
+            events.push(Event::Finish);
+            return Some(ExprParse {
+                start,
+                end: i,
+                events,
+            });
+        }
+    };
     // Everything below is `KwStmt::ExprTuple`, the only other body shape.
+    // In comprehension position the `for` (and the whitespace before it, which
+    // the generator's own layout owns) is left for the bracket parser.
+    let stmt_ends = |i: usize| {
+        header_ends(&ctx, i)
+            || (for_ends
+                && ctx
+                    .token(ctx.skip_ws(i))
+                    .is_some_and(|t| t.kind == TokKind::ForKw))
+    };
     let operand_start = ctx.skip_ws_and_block_comments(i);
     // A keyword whose value is optional (`return`) ends right after the
     // keyword when its operand position is a stray closing delimiter
@@ -639,8 +663,11 @@ pub(crate) fn parse_keyword_stmt(
     push_range(&mut events, i, operand_start);
     i = operand_start;
 
+    // `stmt_ends` deliberately does not gate the *operand*: a `for` directly in
+    // operand position is the keyword's operand, not a generator clause
+    // (`[return for i in 1:1]` ⇒ `(vect (return (for …)))`).
     if !header_ends(&ctx, i)
-        && let Some(expr) = parse_block_stmt(tokens, i, false, diagnostics)
+        && let Some(expr) = parse_kw_stmt_operand(tokens, i, for_ends, diagnostics)
     {
         events.extend(expr.events);
         i = expr.end;
@@ -651,7 +678,7 @@ pub(crate) fn parse_keyword_stmt(
     // interpolated name (`export $a, $(a*b)`) and a `MACRO_NAME` for a macro
     // name (`export @a`), so the projector reads them as `($ …)`/`@a` rather
     // than a loose `$`/`@` + operand.
-    while !header_ends(&ctx, i) {
+    while !stmt_ends(i) {
         match ctx.token(i).map(|t| t.kind) {
             Some(TokKind::Dollar) => {
                 let interp = parse_prefix_interpolation(&ctx, i, diagnostics);
