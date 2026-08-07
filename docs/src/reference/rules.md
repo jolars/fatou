@@ -256,6 +256,41 @@ error: global-const-in-function
   |         ^^^^^^^^^^^^^^^^^^^^^^ `global const` declaration inside a function
 ```
 
+## `local-const`
+
+Flag a `const` declaration carrying a `local` modifier, in either order. Julia has no `local const` construct: the code parses but always fails at lowering with "expected assignment after `const`", everywhere — the file top level, a `module` or `struct` body, a loop or `let`, and inside a function alike. Write `local z = 1` for a local binding or `const z = 1` for a constant. A declaration inside quoted code or a macro argument is left alone, since it may never be lowered as written.
+
+`local` and `const` cannot be combined:
+
+```julia
+local const LIMIT = 10
+```
+
+```text
+error: local-const
+ --> example.jl:1:1
+  |
+1 | local const LIMIT = 10
+  | ^^^^^^^^^^^^^^^^^^^^^^ `local const` declaration is not supported
+```
+
+The other order is the same construct, and a function body is no different from the top level:
+
+```julia
+function scale(x)
+    const local factor = 2
+    factor * x
+end
+```
+
+```text
+error: local-const
+ --> example.jl:2:5
+  |
+2 |     const local factor = 2
+  |     ^^^^^^^^^^^^^^^^^^^^^^ `local const` declaration is not supported
+```
+
 ## `noteq-definition`
 
 Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.

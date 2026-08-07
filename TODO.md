@@ -222,15 +222,40 @@ Ready now (no new infrastructure):
   below). Short-form definitions go through the new
   `matchers::is_short_form_def`.
   (UnsupportedConstLocalVariable)
-- [ ] Follow-up from the above: two neighboring `const` errors this rule
-  deliberately leaves alone, each cheap and unambiguous once someone wants
-  them. `global-const-in-function` (correctness, syn, error): `global const x =
-  1` is legal in a *soft* local scope but inside a function raises
-  "`global const` declaration not allowed inside function" — so it needs an
-  innermost-*function* test, not `const-local`'s innermost-*local* one.
-  `const-without-assignment` (correctness, syn, error): `local const z = 1` and
-  bare `const z` raise "expected assignment after `const`" everywhere, top
-  level included, so this one needs no scope test at all.
+- [x] Follow-up from the above: the two neighboring `const` errors `const-local`
+  deliberately leaves alone. Both landed (correctness, syn, error, no fix), and
+  the three rules now share `correctness::const_decl` for reading the
+  `global`/`local` modifier (either order — `global const x = 1` nests the
+  `const` under the modifier, `const global x = 1` the other way round) and the
+  quote/macro-call exemption.
+  - `global-const-in-function`: as this entry assumed, an innermost-*function*
+    test rather than `const-local`'s innermost-*local* one. The function
+    boundaries are `function`/`macro`, `->`, do bodies, short-form definitions
+    (default arguments included), and comprehension/generator bodies, which
+    lower to closures; `let`, `for`, `while`, `try`, `begin`/`if`, `module`, and
+    `struct` are *not* boundaries, so a soft scope nested in a function is still
+    a finding. Iterator specs and a do-call's call part stay exempt, as in
+    `const-local`. Verified case by case against Julia 1.12.
+    (`global const` declaration not allowed inside function)
+  - `local-const`, **not** `const-without-assignment`: half of that entry's
+    premise was already covered. Bare `const z`, `const z::Int`, and `const x
+    += 1` are rejected by JuliaSyntax at *parse* time, so
+    `parser::core::flag_invalid_const_decls` already reports them under
+    `parse-error` — and a file with a parse diagnostic never reaches the rules,
+    so a lint rule for them would be dead code. `local const z = 1` (and `const
+    local z = 1`) parses clean and fails only at lowering, which leaves it as
+    the rule's whole subject; the id names that construct instead of Julia's
+    misleading message. No scope test, as the entry said.
+    (expected assignment after `const`)
+- [ ] Parser gap found while landing the above: an unparenthesized keyword
+  statement as a comprehension or generator body swallows the `for` clause as
+  raw tokens instead of closing the body and opening a `FOR_BINDING`. `[const x
+  = 1 for i in 1:1]` parses as `COMPREHENSION > CONST_STMT` with the `FOR_KW`
+  *inside* the `CONST_STMT`, where JuliaSyntax builds a generator; the
+  parenthesized `[(const x = 1) for i in 1:1]` is fine. `KwStmt::ExprTuple`
+  (`const`/`global`/`local`) needs to stop at a `for` in comprehension position.
+  Low priority — the construct is an error in Julia either way — but it silently
+  costs `const-local` and `global-const-in-function` a finding.
 - [x] `missing-comparison` (suspicious, syn, warning, **unsafe** fix): `x ==
   missing` / `x != missing`, which is always `missing` and raises `TypeError`
   in a boolean context. Landed matching `nothing-comparison`'s shape rules

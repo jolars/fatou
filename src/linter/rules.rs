@@ -102,6 +102,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::BreakOutsideLoop),
         Box::new(correctness::ConstLocal),
         Box::new(correctness::GlobalConstInFunction),
+        Box::new(correctness::LocalConst),
         Box::new(correctness::NotEqDefinition),
         Box::new(correctness::UnusedTypeParameter),
         Box::new(correctness::MissingIncludeFile),

@@ -3363,3 +3363,105 @@ fn global_const_in_function_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- local-const -----------------------------------------------------------
+
+#[test]
+fn local_const_flags_a_local_const_declaration() {
+    assert_eq!(count("local-const", "local const z = 1\n"), 1);
+}
+
+#[test]
+fn local_const_flags_both_modifier_orders() {
+    assert_eq!(count("local-const", "const local z = 1\n"), 1);
+}
+
+#[test]
+fn local_const_flags_every_scope_including_the_top_level() {
+    // Unlike `const-local`, this one needs no scope test: Julia rejects it
+    // everywhere.
+    for src in [
+        "local const z = 1\n",
+        "function f()\n    local const z = 1\nend\n",
+        "macro m()\n    local const z = 1\nend\n",
+        "let\n    local const z = 1\nend\n",
+        "for i in 1:3\n    local const z = 1\nend\n",
+        "while false\n    local const z = 1\nend\n",
+        "try\n    local const z = 1\ncatch\nend\n",
+        "module M\n    local const z = 1\nend\n",
+        "begin\n    local const z = 1\nend\n",
+        "f() = (local const z = 1)\n",
+        "struct S\n    local const z = 1\nend\n",
+    ] {
+        assert_eq!(
+            count("local-const", src),
+            1,
+            "expected a finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn local_const_points_at_the_whole_declaration() {
+    let src = "local const z = 1\n";
+    let config = LintConfig {
+        select: Some(vec!["local-const".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(&src[report.diagnostics[0].range], "local const z = 1");
+    assert_eq!(report.diagnostics[0].severity, Severity::Error);
+}
+
+#[test]
+fn local_const_ignores_a_plain_or_global_const() {
+    for src in [
+        "const z = 1\n",
+        "global const z = 1\n",
+        "const global z = 1\n",
+        "function f()\n    const z = 1\nend\n",
+        "function f()\n    local z = 1\n    z\nend\n",
+        "mutable struct S\n    const x::Int\nend\n",
+    ] {
+        assert_eq!(
+            count("local-const", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn local_const_ignores_quoted_code() {
+    for src in [
+        "quote\n    local const z = 1\nend\n",
+        ":(local const z = 1)\n",
+        "function f()\n    :(local const z = 1)\nend\n",
+    ] {
+        assert_eq!(
+            count("local-const", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn local_const_ignores_macro_arguments() {
+    assert_eq!(count("local-const", "@eval local const z = 1\n"), 0);
+}
+
+#[test]
+fn local_const_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["local-const".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "# fatou-ignore local-const\nlocal const z = 1\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}
