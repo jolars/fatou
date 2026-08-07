@@ -56,7 +56,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use rowan::TextRange;
+use rowan::{TextRange, TextSize};
 
 use crate::ast::{AstToken, CallExpr, Expr};
 use crate::config::{LintConfig, RulesConfig};
@@ -74,6 +74,7 @@ use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 pub mod correctness;
 mod file_scan;
 pub mod matchers;
+pub mod readability;
 pub mod suspicious;
 
 pub(crate) use file_scan::FileScan;
@@ -123,6 +124,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::IndexFromLength),
         Box::new(suspicious::DiscouragedFunction),
         Box::new(suspicious::TypeofComparison),
+        Box::new(readability::LengthZero),
     ]
 }
 
@@ -405,6 +407,30 @@ impl<'a> RuleContext<'a> {
         }
         matches!(
             resolver.resolve(&ident.name, range.start(), Namespace::Value),
+            Resolution::System { .. }
+        )
+    }
+
+    /// Whether the bare name `name`, were it *written* at `at`, would mean the
+    /// Base/Core function of that name. The question a fix asks before
+    /// splicing in a name the source does not contain yet: rewriting
+    /// `length(x) == 0` to `isempty(x)` is only equivalent if `isempty` is
+    /// Base's there, and not a local definition, an import, or another
+    /// module's export.
+    ///
+    /// The counterpart of [`read_resolves_to_base`](Self::read_resolves_to_base)
+    /// for a name with no token behind it, sharing its masking order and its
+    /// one-sided stance: `false` means *unconfirmed*, so a fix gated on `true`
+    /// stays conservative when the answer is unknown.
+    pub fn name_resolves_to_base(&self, name: &str, at: TextSize) -> bool {
+        if !self.trusts_resolution() {
+            return false;
+        }
+        let Some(resolver) = self.resolver() else {
+            return false;
+        };
+        matches!(
+            resolver.resolve(name, at, Namespace::Value),
             Resolution::System { .. }
         )
     }

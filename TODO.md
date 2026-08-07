@@ -408,11 +408,26 @@ above):
   access (`a.b`): deciding the rest needs the parser's precedence table, which
   the CST does not expose. The *other* operand needs no such check, being
   already an operand of a comparison-tier `==`.
-- [ ] `length-zero` (readability, syn + res, warning, safe fix): `length(x) ==
+- [x] `length-zero` (readability, syn + res, warning, safe fix): `length(x) ==
   0` is `isempty(x)`, `length(x) > 0` is `!isempty(x)`; the `>= 1`/`!= 0`/
   `<= 0`/`< 1` spellings collapse the same way. **First `readability` rule —
   creates `src/linter/rules/readability.rs` and its directory.** (arity
-  `nzchar`)
+  `nzchar`) Landed as a `BINARY_EXPR` rule spanning the whole comparison. The
+  comparison is oriented to `length(x) <op> <literal>` by mirroring the operator
+  when the bound comes first, so one table decides all twelve spellings. The
+  bound must be the integer literal `0`/`1` written as such: `0.0`, `0x0`, and
+  any non-literal are left alone, as are the constant-by-construction
+  `>= 0`/`< 0`, the different question `== 1`, `===`, the broadcast forms, and a
+  comparison chain (which folds into a `COMPARISON_EXPR`). Two namespace gates:
+  `resolves_to_base` for the `length` callee, plus a new
+  `RuleContext::name_resolves_to_base(name, at)` for `isempty`, the name the fix
+  *introduces* — a file with its own `isempty` keeps the finding and loses the
+  fix. The fix needs no parenthesization reasoning: the argument lands back
+  inside a call's parentheses, and both `isempty(x)` and `!isempty(x)` bind at
+  least as tightly as the comparison they replace. It is withheld when a comment
+  sits in the replaced span *outside* the argument (one inside travels with it);
+  outside the argument only `length`, the parens, the operator, and the literal
+  can appear, so a `#` there is always a comment.
 - [ ] `redundant-boolean` (readability, syn, warning, safe fix): comparing to or
   branching on a boolean literal — `x == true` is `x`, `x == false` is `!x`, `c
   ? true : false` is `c`, `c ? false : true` is `!c`. Distinct from

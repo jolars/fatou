@@ -1,0 +1,61 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `length-zero`
+
+Flag a comparison of `length(x)` against `0` or `1` that asks whether `x` is empty. A length is a non-negative integer, so `length(x) == 0`, `length(x) <= 0`, and `length(x) < 1` all spell `isempty(x)`, while `length(x) != 0`, `length(x) > 0`, and `length(x) >= 1` spell `!isempty(x)`; each mirrored spelling with the literal first (`0 < length(x)`) collapses the same way. `isempty` is the test collections actually implement, and it need not count what it throws away.
+
+The already-deliberate `===`, the broadcast `.==` / `.<`, and a comparison chain are left alone, as are the bounds that ask a different question (`length(x) == 1`) or none at all (`length(x) >= 0`, which is always true). The callee must be confirmed to be Base's `length`, so a local shadow, a qualified `Base.length`, or a file whose imports cannot be resolved reports nothing.
+
+The rule reports a safe fix replacing the comparison with `isempty(x)` or `!isempty(x)`, reusing the argument's own source text. The fix is withheld — the finding still stands — when the file's `isempty` is not Base's, or when a comment sits in the rewritten span outside the argument.
+
+Comparing a length against zero is an emptiness test:
+
+```julia
+if length(xs) == 0
+    println("nothing to do")
+end
+```
+
+```text
+warning: length-zero
+ --> example.jl:1:4
+  |
+1 | if length(xs) == 0
+  |    ^^^^^^^^^^^^^^^ test `isempty(xs)` instead of comparing `length(xs)` to `0`
+  = help: Rewrite as an `isempty` test (safe fix)
+```
+
+After applying the fix:
+
+```julia
+if isempty(xs)
+    println("nothing to do")
+end
+```
+
+The non-emptiness spellings, including the mirrored ones:
+
+```julia
+while 0 < length(queue)
+    pop!(queue)
+end
+```
+
+```text
+warning: length-zero
+ --> example.jl:1:7
+  |
+1 | while 0 < length(queue)
+  |       ^^^^^^^^^^^^^^^^^ test `!isempty(queue)` instead of comparing `length(queue)` to `0`
+  = help: Rewrite as an `isempty` test (safe fix)
+```
+
+After applying the fix:
+
+```julia
+while !isempty(queue)
+    pop!(queue)
+end
+```

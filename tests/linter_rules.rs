@@ -4193,3 +4193,176 @@ fn typeof_comparison_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- length-zero -----------------------------------------------------------
+
+/// The single diagnostic `length-zero` reports for `src`, or `None`.
+fn length_zero_diag(src: &str) -> Option<fatou::linter::Diagnostic> {
+    let config = LintConfig {
+        select: Some(vec!["length-zero".to_string()]),
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.rule == "length-zero")
+}
+
+#[test]
+fn length_zero_flags_every_emptiness_spelling() {
+    for src in [
+        "length(x) == 0\n",
+        "length(x) <= 0\n",
+        "length(x) < 1\n",
+        "0 == length(x)\n",
+        "0 >= length(x)\n",
+        "1 > length(x)\n",
+    ] {
+        assert_eq!(count("length-zero", src), 1, "no finding for {src:?}");
+        let diag = length_zero_diag(src).expect("expected a finding");
+        assert!(
+            diag.message.body.contains("`isempty(x)`") && !diag.message.body.contains("!isempty"),
+            "wrong direction for {src:?}: {}",
+            diag.message.body
+        );
+    }
+}
+
+#[test]
+fn length_zero_flags_every_nonemptiness_spelling() {
+    for src in [
+        "length(x) != 0\n",
+        "length(x) > 0\n",
+        "length(x) >= 1\n",
+        "0 != length(x)\n",
+        "0 < length(x)\n",
+        "1 <= length(x)\n",
+    ] {
+        assert_eq!(count("length-zero", src), 1, "no finding for {src:?}");
+        let diag = length_zero_diag(src).expect("expected a finding");
+        assert!(
+            diag.message.body.contains("`!isempty(x)`"),
+            "wrong direction for {src:?}: {}",
+            diag.message.body
+        );
+    }
+}
+
+#[test]
+fn length_zero_spans_the_whole_comparison() {
+    let src = "if length(xs) == 0\n    1\nend\n";
+    let diag = length_zero_diag(src).expect("expected a finding");
+    assert_eq!(&src[diag.range], "length(xs) == 0");
+}
+
+#[test]
+fn length_zero_ignores_comparisons_that_are_not_emptiness_tests() {
+    for src in [
+        // A different question entirely.
+        "length(x) == 1\n",
+        "length(x) > 1\n",
+        "length(x) < 2\n",
+        // Constant by construction, and `constant-condition`'s territory at
+        // most -- never an emptiness test.
+        "length(x) >= 0\n",
+        "length(x) < 0\n",
+        // Broadcast comparison over a container is a different question.
+        "length(x) .== 0\n",
+        // `===` is the deliberate identity spelling.
+        "length(x) === 0\n",
+        // A chain folds into a `COMPARISON_EXPR`, not a `BINARY_EXPR`.
+        "0 < length(x) < 3\n",
+        // Not an integer-literal bound.
+        "length(x) == 0.0\n",
+        "length(x) == n\n",
+        // Already idiomatic.
+        "isempty(x)\n",
+        // A different builtin.
+        "size(x) == 0\n",
+    ] {
+        assert_eq!(
+            count("length-zero", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn length_zero_ignores_an_unconfirmed_length() {
+    for src in [
+        // A local shadow: the callee is not Base's `length`.
+        "function f(length)\n    length(x) == 0\nend\n",
+        // A qualified callee spells a different name.
+        "Base.length(x) == 0\n",
+        // A file whose `using` cannot be resolved answers nothing about names.
+        "using NotAPackageAnyoneHas\nlength(x) == 0\n",
+    ] {
+        assert_eq!(
+            count("length-zero", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn length_zero_ignores_a_call_that_is_not_base_arity() {
+    for src in [
+        "length(x, 2) == 0\n",
+        "length(xs...) == 0\n",
+        "length() == 0\n",
+        "length(x; dims = 1) == 0\n",
+    ] {
+        assert_eq!(
+            count("length-zero", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn length_zero_offers_a_safe_isempty_rewrite() {
+    let diag = length_zero_diag("length(x) == 0\n").expect("expected a finding");
+    assert_eq!(diag.fixes.len(), 1);
+    assert_eq!(diag.fixes[0].content, "isempty(x)");
+    assert_eq!(diag.fixes[0].applicability, Applicability::Safe);
+
+    let diag = length_zero_diag("0 < length(f(y).items)\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "!isempty(f(y).items)");
+}
+
+#[test]
+fn length_zero_withholds_the_fix_when_isempty_is_shadowed() {
+    // Splicing in `isempty` would call the file's own definition, not Base's.
+    let diag =
+        length_zero_diag("isempty(v) = false\nlength(x) == 0\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+}
+
+#[test]
+fn length_zero_withholds_the_fix_around_a_comment() {
+    let diag = length_zero_diag("length(x) == #= n =# 0\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+    // A comment in the argument list but outside the argument goes too.
+    let diag = length_zero_diag("length(#= c =# x) == 0\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+    // One *inside* the argument is carried over with it, so the fix stands.
+    let diag = length_zero_diag("length(f(#= c =# y)) == 0\n").expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "isempty(f(#= c =# y))");
+}
+
+#[test]
+fn length_zero_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["length-zero".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "# fatou-ignore length-zero\nlength(x) == 0\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

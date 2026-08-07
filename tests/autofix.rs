@@ -178,3 +178,24 @@ fn withholds_typeof_comparison_fix_by_default() {
     assert_eq!(outcome.applied, 0);
     assert_eq!(outcome.remaining.len(), 1);
 }
+
+/// `length-zero` collapses every emptiness spelling to `isempty` in one safe
+/// pass, both operand orders included, leaving no findings behind.
+#[test]
+fn fixes_every_length_zero() {
+    let src = "\
+a = length(x) == 0
+b = length(y.items) > 0
+c = 1 <= length(f(z))
+d = length(w) < 1
+";
+    let outcome = fix_source(None, src, &select("length-zero"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = isempty(x)
+    b = !isempty(y.items)
+    c = !isempty(f(z))
+    d = isempty(w)
+    ");
+    assert_eq!(outcome.applied, 4);
+    assert!(outcome.remaining.is_empty());
+}
