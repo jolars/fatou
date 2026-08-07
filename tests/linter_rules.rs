@@ -3465,3 +3465,132 @@ fn local_const_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- unreachable-code ------------------------------------------------------
+
+#[test]
+fn unreachable_code_flags_tail_after_return() {
+    assert_eq!(
+        count(
+            "unreachable-code",
+            "function f()\n    return 1\n    dead()\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unreachable_code_reports_a_dead_run_once() {
+    // Three dead statements are one dead block, so one finding at its head.
+    assert_eq!(
+        findings(
+            "unreachable-code",
+            "function f()\n    return 1\n    a()\n    b()\n    c()\nend\n"
+        )
+        .len(),
+        1
+    );
+}
+
+#[test]
+fn unreachable_code_flags_tail_after_throw_and_error() {
+    for src in [
+        "function f()\n    throw(ArgumentError(\"x\"))\n    dead()\nend\n",
+        "function f()\n    error(\"boom\")\n    dead()\nend\n",
+        "function f()\n    rethrow()\n    dead()\nend\n",
+    ] {
+        assert_eq!(count("unreachable-code", src), 1, "no finding for {src:?}");
+    }
+}
+
+#[test]
+fn unreachable_code_flags_tail_when_both_if_arms_diverge() {
+    assert_eq!(
+        count(
+            "unreachable-code",
+            "function f(a)\n    if a\n        return 1\n    else\n        return 2\n    end\n    dead()\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unreachable_code_flags_tail_after_while_true_without_break() {
+    assert_eq!(
+        count(
+            "unreachable-code",
+            "function f()\n    while true\n        work()\n    end\n    dead()\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unreachable_code_flags_top_level_tail() {
+    assert_eq!(count("unreachable-code", "error(\"boom\")\ndead()\n"), 1);
+}
+
+#[test]
+fn unreachable_code_ignores_a_shadowed_terminator_name() {
+    // The CFG matches `throw`/`error`/`rethrow` by name; a local shadow means
+    // the divergence is unconfirmed, so the region stays silent.
+    for src in [
+        "function f(throw)\n    throw(1)\n    tail()\nend\n",
+        "function f()\n    error = identity\n    error(\"x\")\n    tail()\nend\n",
+    ] {
+        assert_eq!(
+            count("unreachable-code", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn unreachable_code_ignores_live_tails() {
+    for src in [
+        // A `for` may run zero times.
+        "function f(xs)\n    for x in xs\n        return x\n    end\n    alive()\nend\n",
+        // An `if` with no `else` falls through.
+        "function f(a)\n    if a\n        return 1\n    end\n    alive()\nend\n",
+        // A `catch` runs when the `try` body throws.
+        "function f()\n    try\n        return 1\n    catch\n        alive()\n    end\nend\n",
+        // `break` exits the infinite loop.
+        "function f()\n    while true\n        break\n    end\n    alive()\nend\n",
+        // A short-circuit `return` is conditional.
+        "function f(a)\n    a && return 1\n    alive()\nend\n",
+        // Nothing follows the divergence at all.
+        "function f()\n    return 1\nend\n",
+    ] {
+        assert_eq!(
+            count("unreachable-code", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn unreachable_code_ignores_a_label_a_goto_reaches() {
+    assert_eq!(
+        count(
+            "unreachable-code",
+            "function f(a)\n    a && @goto done\n    return 1\n    @label done\n    alive()\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unreachable_code_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["unreachable-code".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "function f()\n    return 1\n    # fatou-ignore unreachable-code\n    dead()\nend\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

@@ -482,6 +482,48 @@ warning: type-piracy
   |      ^^^^ `Base.show` commits type piracy: it extends a function this module does not own, and no argument type is owned here either
 ```
 
+## `unreachable-code`
+
+Flag a statement no path of execution can reach: the tail after an unconditional `return`, `throw`, `error`, or `rethrow`, after an `if`/`else` that diverges in every arm, or after a `while true` with no `break`. The code runs, but the flagged statement never does, so it is either dead weight or a sign that the divergence above it is misplaced. Reachability comes from the file's control-flow graph, so a `for` that may run zero times, an `if` with no `else`, a `catch` clause, and a conditional `a && return` all keep their tails live. No fix is offered: deleting the statement is a judgment call, and keeping it may be the point when the divergence is the bug.
+
+Nothing after an unconditional `return` can run:
+
+```julia
+function f(x)
+    return x + 1
+    println("never")
+end
+```
+
+```text
+warning: unreachable-code
+ --> example.jl:3:5
+  |
+3 |     println("never")
+  |     ^^^^^^^^^^^^^^^^ unreachable code: no path of execution reaches this statement
+```
+
+Both arms diverge, so the tail is dead too:
+
+```julia
+function classify(x)
+    if x > 0
+        return :pos
+    else
+        throw(DomainError(x))
+    end
+    return :unknown
+end
+```
+
+```text
+warning: unreachable-code
+ --> example.jl:7:5
+  |
+7 |     return :unknown
+  |     ^^^^^^^^^^^^^^^ unreachable code: no path of execution reaches this statement
+```
+
 ## `assignment-in-condition`
 
 Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. It is valid Julia but almost always a typo for `==`, so it is reported with a safe fix that rewrites `=` to `==`.

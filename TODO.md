@@ -280,14 +280,20 @@ Ready now (no new infrastructure):
   (its `description()` says so in prose, which is the only reason the page is
   honest today). Mark applicability in the rendered help line — it touches
   every rule snapshot, so it wants its own change.
-- [ ] `unreachable-code` (correctness, syn, warning, no fix): statements after
-  an unconditional `return`/`throw`/`error`/`rethrow` in the same block. The CFG
-  above has landed, so this can go straight to `RuleContext::control_flow()` and
-  `FileControlFlow::is_unreachable` rather than the shallow "terminator is a
-  direct statement of a block" shape, which also picks up the nested cases
-  (`if a; return; else; return; end; dead()`). Still confirm the callee with
-  `resolves_to_base` before reporting a `throw`/`error`/`rethrow` divergence —
-  the graph matches those by name. (arity `unreachable-code`)
+- [x] `unreachable-code` (correctness, syn, warning, no fix): statements after
+  an unconditional `return`/`throw`/`error`/`rethrow` in the same block. Landed
+  as a whole-file pass over `RuleContext::control_flow()`, reporting the *head
+  statement* of each unreachable block rather than every dead statement — a
+  dead run has one cause. Iterating the region graphs directly (rather than
+  asking `FileControlFlow::is_unreachable` per statement) is what gives that
+  per-block granularity, and it picks up the nested cases for free (`if a;
+  return; else; return; end; dead()`, `while true` with no `break`, a `@label`
+  nothing jumps to). Namespace confirmation is *region-wide*, not per
+  divergence: the graph never says which divergence killed a given block, so a
+  region holding any `throw`/`error`/`rethrow` call that `resolves_to_base`
+  cannot confirm is skipped entirely. A region with no throw-like call at all
+  is unaffected, since `return` is matched by node kind and cannot be shadowed.
+  (arity `unreachable-code`)
 - [x] `duplicate-include` (correctness, sem, warning, no fix): the same file
   `include`d twice, which silently re-runs its definitions. A third
   `IncludeProblemKind` beside `Missing`/`Cycle` in
