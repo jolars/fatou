@@ -187,12 +187,34 @@ Ready now (no new infrastructure):
   `duplicate-argument`'s (via `matchers::call_expr`), and quoted code and macro
   calls are exempt as they are for `call-arity` — neither is lowered as
   written.
-- [ ] `const-local` (correctness, syn, error, no fix): `const` on a local
+- [x] `const-local` (correctness, syn, error, no fix): `const` on a local
   binding — `function k(); const z = 1; end` is `syntax: unsupported const
-  declaration on local variable`. Pure syntax plus a scope-kind test
-  (`ScopeKind` already distinguishes local from module/top level). Cheap and
-  unambiguous.
+  declaration on local variable`. Landed as an ancestor walk from `CONST_STMT`
+  (`break-outside-loop`'s shape), *not* the `ScopeKind` test this entry
+  assumed: the model's `While`/`For` scope ranges cover the condition and the
+  iterator spec, which evaluate in the *enclosing* scope, so a scope-kind
+  lookup would false-positive on `while (const z = 1; false)`. The walk stops
+  local on function/macro bodies (long and short form, default arguments
+  included), `->`, do bodies, `let` bodies, `for`/`while` bodies, every part of
+  a `try`, and comprehension/generator bodies; global on `module` and the file
+  root; and legal on a `struct` body, where `const` is a mutable-struct field
+  attribute. Quoted code and macro calls stay silent and win even past a local
+  boundary, so the walk continues rather than reporting on the spot. A `let`'s
+  binding list is conservatively exempt: the first binding is enclosing but the
+  later ones are local, and missing those beats guessing. `global const` and
+  `local const` are exempt too — each raises a *different* Julia error (see
+  below). Short-form definitions go through the new
+  `matchers::is_short_form_def`.
   (UnsupportedConstLocalVariable)
+- [ ] Follow-up from the above: two neighboring `const` errors this rule
+  deliberately leaves alone, each cheap and unambiguous once someone wants
+  them. `global-const-in-function` (correctness, syn, error): `global const x =
+  1` is legal in a *soft* local scope but inside a function raises
+  "`global const` declaration not allowed inside function" — so it needs an
+  innermost-*function* test, not `const-local`'s innermost-*local* one.
+  `const-without-assignment` (correctness, syn, error): `local const z = 1` and
+  bare `const z` raise "expected assignment after `const`" everywhere, top
+  level included, so this one needs no scope test at all.
 - [x] `missing-comparison` (suspicious, syn, warning, **unsafe** fix): `x ==
   missing` / `x != missing`, which is always `missing` and raises `TypeError`
   in a boolean context. Landed matching `nothing-comparison`'s shape rules

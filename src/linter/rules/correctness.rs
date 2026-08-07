@@ -2,6 +2,7 @@
 
 mod break_outside_loop;
 mod call_arity;
+mod const_local;
 mod duplicate_argument;
 mod duplicate_include;
 mod duplicate_keyword_argument;
@@ -19,6 +20,7 @@ mod unused_type_parameter;
 
 pub use break_outside_loop::BreakOutsideLoop;
 pub use call_arity::CallArity;
+pub use const_local::ConstLocal;
 pub use duplicate_argument::DuplicateArgument;
 pub use duplicate_include::DuplicateInclude;
 pub use duplicate_keyword_argument::DuplicateKeywordArgument;

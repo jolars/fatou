@@ -2885,3 +2885,231 @@ fn discouraged_function_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- const-local -----------------------------------------------------------
+
+#[test]
+fn const_local_flags_a_function_body() {
+    assert_eq!(
+        count("const-local", "function k()\n    const z = 1\nend\n"),
+        1
+    );
+}
+
+#[test]
+fn const_local_flags_every_local_scope_kind() {
+    // Julia rejects `const` in each of these: hard scopes (`let`, function
+    // bodies) and soft ones (`for`/`while`/`try`) alike.
+    for src in [
+        "let\n    const z = 1\nend\n",
+        "for i in 1:3\n    const z = 1\nend\n",
+        "while false\n    const z = 1\nend\n",
+        "try\n    const z = 1\ncatch\nend\n",
+        "try\ncatch e\n    const z = 1\nend\n",
+        "try\nfinally\n    const z = 1\nend\n",
+        "macro m()\n    const z = 1\nend\n",
+        "f = () -> (const z = 1)\n",
+        "foreach(xs) do x\n    const z = 1\nend\n",
+        "[begin\n    const z = 1\nend for i in 1:1]\n",
+    ] {
+        assert_eq!(
+            count("const-local", src),
+            1,
+            "expected a finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn const_local_flags_a_short_form_definition_body() {
+    // `f() = ...` is a function body just as much as a `function` block.
+    assert_eq!(count("const-local", "f() = (const z = 1)\n"), 1);
+    assert_eq!(count("const-local", "f(x)::Int = (const z = 1)\n"), 1);
+    assert_eq!(count("const-local", "f(x) where {T} = (const z = 1)\n"), 1);
+}
+
+#[test]
+fn const_local_flags_an_inner_constructor() {
+    // The `struct` body is not a local scope, but the constructor inside it is.
+    assert_eq!(
+        count(
+            "const-local",
+            "struct S\n    x::Int\n    S() = (const z = 1; new(1))\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn const_local_flags_a_nested_scope_inside_a_module() {
+    // The enclosing `module` is global, but the function inside it is not.
+    assert_eq!(
+        count(
+            "const-local",
+            "module M\n    function g()\n        const z = 1\n    end\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn const_local_flags_a_default_argument() {
+    // A default value is evaluated inside the function's own scope.
+    assert_eq!(
+        count("const-local", "function f(x = (const z = 1))\n    x\nend\n"),
+        1
+    );
+}
+
+#[test]
+fn const_local_flags_a_comprehension_filter() {
+    assert_eq!(
+        count("const-local", "[x for x in 1:1 if (const z = 1; true)]\n"),
+        1
+    );
+}
+
+#[test]
+fn const_local_points_at_the_const_statement() {
+    let src = "function k()\n    const z = 1\nend\n";
+    let config = LintConfig {
+        select: Some(vec!["const-local".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
+    assert_eq!(report.diagnostics.len(), 1);
+    // The statement, not the whole function.
+    assert_eq!(&src[report.diagnostics[0].range], "const z = 1");
+    assert_eq!(report.diagnostics[0].severity, Severity::Error);
+}
+
+#[test]
+fn const_local_ignores_global_scopes() {
+    for src in [
+        "const z = 1\n",
+        "begin\n    const z = 1\nend\n",
+        "if true\n    const z = 1\nend\n",
+        "module M\n    const z = 1\nend\n",
+        "baremodule B\n    const z = 1\nend\n",
+    ] {
+        assert_eq!(
+            count("const-local", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn const_local_ignores_a_const_struct_field() {
+    // `const` fields of a mutable struct are legal since Julia 1.8.
+    assert_eq!(
+        count("const-local", "mutable struct S\n    const x::Int\nend\n"),
+        0
+    );
+    assert_eq!(
+        count(
+            "const-local",
+            "module M\n    mutable struct S\n        const x::Int\n    end\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn const_local_ignores_positions_that_evaluate_in_the_enclosing_scope() {
+    // The iterator spec, the `while` condition, a `let`'s first binding and a
+    // `do`-call's call part are all evaluated outside the scope they open.
+    for src in [
+        "for i in (const z = 1; 1:3)\nend\n",
+        "while (const z = 1; false)\nend\n",
+        "let x = (const z = 1; 2)\n    x\nend\n",
+        "foreach((const z = 1; xs)) do x\n    x\nend\n",
+        "[i for i in (const z = 1; 1:3)]\n",
+    ] {
+        assert_eq!(
+            count("const-local", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn const_local_ignores_quoted_code() {
+    // Quoted code is data; it is never lowered where it is written.
+    for src in [
+        "quote\n    const z = 1\nend\n",
+        "function f()\n    :(const z = 1)\nend\n",
+        ":(function f()\n    const z = 1\nend)\n",
+    ] {
+        assert_eq!(
+            count("const-local", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn const_local_ignores_macro_arguments() {
+    // A macro may rewrite what it is handed, so the code as written may never
+    // be lowered — the same exemption `break-outside-loop` makes.
+    assert_eq!(
+        count("const-local", "@eval function f()\n    const z = 1\nend\n"),
+        0
+    );
+    assert_eq!(
+        count("const-local", "@foo xs do x\n    const z = 1\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn const_local_ignores_a_global_const_declaration() {
+    // `global const` is legal in a soft local scope, and inside a function it
+    // is a different error ("`global const` declaration not allowed inside
+    // function") — not this rule's finding either way.
+    for src in [
+        "let\n    global const z = 1\nend\n",
+        "for i in 1:3\n    global const z = 1\nend\n",
+        "function f()\n    global const z = 1\nend\n",
+        "function f()\n    const global z = 1\nend\n",
+    ] {
+        assert_eq!(
+            count("const-local", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn const_local_ignores_a_local_const_declaration() {
+    // `local const z = 1` is rejected everywhere, top level included, with a
+    // different message ("expected assignment after \"const\"").
+    assert_eq!(
+        count("const-local", "function f()\n    local const z = 1\nend\n"),
+        0
+    );
+}
+
+#[test]
+fn const_local_ignores_an_ordinary_assignment_body() {
+    // `x = (...)` is not a definition, so its right-hand side is not a body.
+    assert_eq!(count("const-local", "x = (const z = 1)\n"), 0);
+}
+
+#[test]
+fn const_local_honors_suppression() {
+    let config = LintConfig {
+        select: Some(vec!["const-local".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(
+        None,
+        "function k()\n    # fatou-ignore const-local\n    const z = 1\nend\n",
+        &config,
+    );
+    assert!(report.diagnostics.is_empty());
+}

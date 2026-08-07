@@ -180,6 +180,44 @@ error: break-outside-loop
   |         ^^^^^^^^ `continue` outside of a `for` or `while` loop
 ```
 
+## `const-local`
+
+Flag a `const` declaration inside a local scope — a function or macro body, a `let`, a `for`/`while` body, a `try`, a closure, or a comprehension. `const` is only meaningful at global scope (the file top level and each `module` body); anywhere else the code parses but always fails at lowering with "unsupported `const` declaration on local variable". A `const` field of a mutable struct is a different construct and is left alone, as is a `const` inside quoted code or a macro argument, which may never be lowered as written.
+
+`const` inside a function body:
+
+```julia
+function scale(x)
+    const factor = 2
+    factor * x
+end
+```
+
+```text
+error: const-local
+ --> example.jl:2:5
+  |
+2 |     const factor = 2
+  |     ^^^^^^^^^^^^^^^^ `const` declaration on a local variable
+```
+
+A `let` body is local too — the declaration belongs at top level:
+
+```julia
+let
+    const limit = 10
+    limit
+end
+```
+
+```text
+error: const-local
+ --> example.jl:2:5
+  |
+2 |     const limit = 10
+  |     ^^^^^^^^^^^^^^^^ `const` declaration on a local variable
+```
+
 ## `noteq-definition`
 
 Flag a method definition for `!=` (or `≠`). Julia defines `!=` as `const != = !(==)`, so it is not meant to be overloaded: define `==` instead, and `!=` follows automatically.

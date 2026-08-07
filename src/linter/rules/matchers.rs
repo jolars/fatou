@@ -240,6 +240,28 @@ pub fn in_signature_position(node: &SyntaxNode) -> bool {
     }
 }
 
+/// Whether an `ASSIGNMENT_EXPR` is a short-form function definition
+/// (`f(x) = ...`, `f(x)::T = ...`, `f(x) where {T} = ...`) rather than an
+/// ordinary assignment — the same shape [`in_signature_position`] recognizes,
+/// asked from the assignment rather than from its signature.
+///
+/// The distinction a rule needs this for is that a short-form definition's
+/// right-hand side is a *function body*: it opens a local scope the way a
+/// `function` block does, where a plain `x = ...` opens nothing. Only a plain
+/// `=` defines; an augmented or broadcast assignment to a call is not a
+/// definition. An infix operator definition (`a::T + b::T = ...`) has no call
+/// on the left and so answers `false`.
+pub fn is_short_form_def(node: &SyntaxNode) -> bool {
+    node.kind() == SyntaxKind::ASSIGNMENT_EXPR
+        && node
+            .children_with_tokens()
+            .any(|el| el.kind() == SyntaxKind::EQ)
+        && node
+            .children()
+            .next()
+            .is_some_and(|lhs| crate::semantic::signature::has_call_core(&lhs))
+}
+
 /// Whether `call` carries a trailing `do` block (`map(xs) do y ... end`), which
 /// passes a function as a leading argument the argument list does not show.
 pub fn has_do_block(call: &CallExpr) -> bool {
@@ -443,6 +465,30 @@ mod tests {
         assert!(in_signature_position(&call_node("f(x::T) where {T} = 1\n")));
         assert!(!in_signature_position(&call_node("y = f(x)\n")));
         assert!(!in_signature_position(&call_node("f(x)\n")));
+    }
+
+    #[test]
+    fn is_short_form_def_recognizes_definitions_not_assignments() {
+        /// The first `ASSIGNMENT_EXPR` in the parse of `src`.
+        fn assign(src: &str) -> SyntaxNode {
+            parse(src)
+                .cst
+                .descendants()
+                .find(|n| n.kind() == SyntaxKind::ASSIGNMENT_EXPR)
+                .expect("an assignment")
+        }
+
+        assert!(is_short_form_def(&assign("f(x) = 1\n")));
+        assert!(is_short_form_def(&assign("f(x)::Int = 1\n")));
+        assert!(is_short_form_def(&assign("f(x::T) where {T} = 1\n")));
+        // A plain assignment, even to a call's result or from one.
+        assert!(!is_short_form_def(&assign("y = f(x)\n")));
+        assert!(!is_short_form_def(&assign("x = 1\n")));
+        // Only a plain `=` defines.
+        assert!(!is_short_form_def(&assign("f(x) += 1\n")));
+        assert!(!is_short_form_def(&assign("f(x) .= 1\n")));
+        // An infix operator definition carries no call on the left.
+        assert!(!is_short_form_def(&assign("a::T + b::T = 1\n")));
     }
 
     #[test]
