@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.12.0](https://github.com/jolars/fatou/compare/v0.11.1...v0.12.0) (2026-08-07)
+
+### Features
+- **linter:** add `redundant-boolean` ([`66fd6bc`](https://github.com/jolars/fatou/commit/66fd6bc6b8022875d34f66c98d651aae82fff513))
+- **linter:** add `comparison-negation` ([`a7d62bc`](https://github.com/jolars/fatou/commit/a7d62bc8bd9e4c1f1f55a24385c5450577b1f9ed))
+- **linter:** add `length-zero` ([`ec32b98`](https://github.com/jolars/fatou/commit/ec32b98d765fb2766477c854f0d562c99b23dbbf))
+- **linter:** add `typeof-comparison` ([`9226fda`](https://github.com/jolars/fatou/commit/9226fda6a7db289dc2b481a0c22811434a30ac73))
+- **parser:** accept `∈` as iteration separator ([`1f5d8d9`](https://github.com/jolars/fatou/commit/1f5d8d90bf9e7dd55d73e1b71a567870145adde7))
+- **parser:** add `for outer i` iteration spec ([`69c7e2a`](https://github.com/jolars/fatou/commit/69c7e2ac09c64f526726f8148c422c33ac8218ef))
+- **linter:** add `loop-variable-shadow` ([`ba42f66`](https://github.com/jolars/fatou/commit/ba42f66cbf4294a582550e556c2f9d04b8f89fed))
+- **linter:** add `duplicate-method` ([`692ae0e`](https://github.com/jolars/fatou/commit/692ae0e5bbc6b7c9553351ddcba508e4f2f1d004))
+- **linter:** link findings to the rule reference ([`8b5bf31`](https://github.com/jolars/fatou/commit/8b5bf3113194cb431cda3433b052a310c664a61c))
+- **linter:** mark fix applicability in help line ([`deb1b9b`](https://github.com/jolars/fatou/commit/deb1b9b1049f793240dd86dfb88749e3b69003da))
+- **linter:** add `unreachable-code` ([`7495714`](https://github.com/jolars/fatou/commit/74957141cf0006d7f1e6d39af3d8e06353edfa6a))
+- **parser:** end keyword stmt at a generator `for` ([`215ecaf`](https://github.com/jolars/fatou/commit/215ecafeefc507f196ad6729c5ba8be393da252a))
+- **linter:** add `local-const` ([`644a5dd`](https://github.com/jolars/fatou/commit/644a5ddb151d4ee1602b4e96745ebf9856dd845c))
+- **linter:** add `global-const-in-function` ([`c6c2b0a`](https://github.com/jolars/fatou/commit/c6c2b0a35c96cc80a0459b191431349532ddf694))
+- **linter:** add `const-local` ([`2b14b32`](https://github.com/jolars/fatou/commit/2b14b3271d40d76a6ab5bb47121abd28eaa1df0b))
+- **linter:** add `duplicate-keyword-argument` ([`4de42e5`](https://github.com/jolars/fatou/commit/4de42e5c042fa07306466eb051c206b775081b28))
+
+### Bug Fixes
+- **incremental:** shield edited buffers from a sweep ([`94ac7a5`](https://github.com/jolars/fatou/commit/94ac7a5f2dc71d5e1cd6252bbf263c411de3cd43))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.3.0
+- updated crates/fatou-parser to v0.2.0
+
 ## [0.11.1](https://github.com/jolars/fatou/compare/v0.11.0...v0.11.1) (2026-08-07)
 
 ### Bug Fixes
