@@ -4,6 +4,7 @@ extend-exclude = [
   ".claude/**/*",
   "TODO.md",
   "AGENTS.md",
+  "CLAUDE.md",
   "CHANGELOG.md",
   "editors/code/CHANGELOG.md",
   "docs/src/reference/cli.md",

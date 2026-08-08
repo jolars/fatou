@@ -22,7 +22,8 @@ entry explicitly sanctions one (e.g. `index-from-length`'s name-based match).
   doc of `src/linter/rules.rs`).
 - **Parsing is the parser's job.** Do not paper over parser mistakes in a
   rule. If the CST does not expose what you need, extend the typed AST
-  wrappers in `crates/fatou-parser/src/ast/` (see "AST wrappers" in `AGENTS.md`: `ast_node!`/
+  wrappers in `crates/fatou-parser/src/ast/` (see "Typed AST wrappers" in
+  `.claude/rules/parser.md`: `ast_node!`/
   `ast_token!` entry, `support::*` accessors, `Has*` trait impls, re-export
   from `crates/fatou-parser/src/ast.rs`, accessor unit test) rather than re-lexing or kind-matching
   raw CST inside the rule.

@@ -1,0 +1,69 @@
+---
+paths:
+  - "src/index.rs"
+  - "src/index/**/*"
+  - "src/environment.rs"
+  - "tests/base_index.rs"
+  - "tests/harvest.rs"
+  - "tests/library_index.rs"
+  - "tests/parallel_harvest.rs"
+  - "tests/environment.rs"
+---
+
+# Package index and environment rules
+
+`src/index/` harvests a structured, serializable view of a Julia package's
+public API **with fatou's own parser**; `src/environment.rs` locates the active
+project and resolves each package to an on-disk source directory. Together they
+feed the `LibraryIndex` salsa input that completion, hover, go-to-definition,
+and the import lints read.
+
+## Hard invariants
+
+- **No Julia runtime, ever.** `environment.rs` mirrors Julia's loader using only
+  the filesystem, and the harvester parses `.jl` sources. Shelling out to
+  `julia` to answer a question here is not an option — it is the thing this
+  module exists to avoid.
+- **A malformed, truncated, or missing on-disk file is input, not a bug report.**
+  Degrade to "no symbols for this package" rather than panicking; these files
+  come from whatever the user happens to have installed.
+- **The index is a cache.** A stale or missing entry must only cost precision
+  (fewer known symbols), never the correctness of a lint or a format.
+- `PackageIndex` is deliberately **depot-independent** and serializable: source
+  roots live beside it in `HarvestedLibrary`, not inside the model.
+
+## Environment discovery
+
+Follows Julia's own precedence: `JULIA_PROJECT`, then a walk up from the
+workspace root, then the newest default environment under
+`~/.julia/environments/`. Package sources are at
+`<depot>/packages/<Name>/<slug>/`, where the slug is **computed** from the UUID
+and `git-tree-sha1` (`version_slug`) rather than scanned, because several
+versions of a package may be installed.
+
+## The Base/Core floor
+
+`base.rs` harvests Base (`base/Base.jl`), Core (`base/boot.jl`), and every
+stdlib (`stdlib/vX.Y/<Name>`) from a located install, exactly like a depot
+package — Julia 1.12 split the Base opener into `Base_compiler.jl`, so both
+layouts are harvested and merged.
+
+With **no installation found**, minimal `Base`/`Core` indexes are synthesized
+from `index/fallback/{base,core}_exports.txt` so name resolution still has a
+floor instead of flagging every builtin. Those lists are **generated snapshots**
+— regenerate by dumping `sort(names(Base))`/`sort(names(Core))` from a real
+install (dropping gensym names containing `#`); never hand-edit.
+
+## Declared dependencies
+
+`HarvestedLibrary::declared_deps` is read from each workspace package's
+`Project.toml` `[deps]` and is deliberately **not derived from the harvest**: a
+project that was never instantiated, or one whose Julia install fatou could not
+locate, still declares its dependencies. That is what `unresolved-import` reads.
+
+## Testing
+
+Suites live at the root: `harvest.rs`, `base_index.rs`, `library_index.rs`,
+`parallel_harvest.rs`, `environment.rs`. **Add a fixture for each new on-disk
+shape** rather than asserting against whatever happens to be installed on the
+machine — CI has no Julia depot.
