@@ -13,12 +13,10 @@ use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
 use lsp_types::{DocumentLink, Range};
-use rowan::ast::AstNode;
 
-use crate::ast::CallExpr;
 use crate::incremental::{Analysis, normalize_path};
 use crate::parser::parse;
-use crate::project::{include_literal, resolve_target};
+use crate::project::{include_sites, resolve_target};
 use crate::syntax::SyntaxNode;
 use crate::text::{LineIndex, PositionEncoding};
 
@@ -82,23 +80,17 @@ fn links_for_tree(
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
     let line_index = LineIndex::new(text);
-    root.descendants()
-        .filter_map(CallExpr::cast)
-        .filter_map(|call| {
-            let literal = include_literal(&call)?;
-            let raw: String = literal
-                .content_tokens()
-                .map(|token| token.text().to_string())
-                .collect();
-            let target = resolve_target(&raw, base_dir)?;
-            let target = uri::from_path(&normalize_path(&target))?;
+    include_sites(root)
+        .into_iter()
+        .filter_map(|site| {
             // The link covers the path text between the quotes; an empty
-            // string (`include("")`) has no content tokens and no link.
-            let first = literal.content_tokens().next()?;
-            let last = literal.content_tokens().last()?;
+            // string (`include("")`) has no content span and no link.
+            let content = site.content?;
+            let target = resolve_target(&site.raw, base_dir)?;
+            let target = uri::from_path(&normalize_path(&target))?;
             let range = Range::new(
-                line_index.byte_to_position(first.text_range().start().into(), encoding),
-                line_index.byte_to_position(last.text_range().end().into(), encoding),
+                line_index.byte_to_position(content.start().into(), encoding),
+                line_index.byte_to_position(content.end().into(), encoding),
             );
             Some(DocumentLink {
                 range,

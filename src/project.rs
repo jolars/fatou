@@ -138,14 +138,57 @@ fn module_def_name(module: &SyntaxNode) -> Option<String> {
     Some(Name::cast(name)?.ident()?.text().to_string())
 }
 
-/// The static `include("literal")` call sites in `root`: each `(raw, range)`
-/// where `range` covers the whole `include(...)` call. Recovers the spans the
-/// range-free [`include_edges`] deliberately drops, for attaching a diagnostic
-/// (unresolved include, include cycle) to the offending call.
-pub fn include_call_sites(root: &SyntaxNode) -> Vec<(String, rowan::TextRange)> {
+/// One static `include("literal")` call site with the spans a rewrite or a
+/// diagnostic needs. Recovers what the range-free [`include_edges`]
+/// deliberately drops.
+///
+/// Enumerated in the same order, through the same staticness test
+/// ([`include_literal`]), as [`include_edges`] — so index `i` of one lines up
+/// with index `i` of the other, and two identical literals in one file stay
+/// distinguishable. A unit test guards that correspondence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeSite {
+    /// The literal path exactly as written — the same raw (undecoded) source
+    /// bytes [`IncludeEdge::raw`] carries.
+    pub raw: String,
+    /// The span of the path text *between the quotes*: what a rewrite
+    /// replaces. `None` for `include("")`, which has no content token at all.
+    pub content: Option<rowan::TextRange>,
+    /// The span of the whole `include(...)` call: what a diagnostic marks.
+    pub call: rowan::TextRange,
+}
+
+/// The static `include("literal")` call sites in `root`, in source order.
+pub fn include_sites(root: &SyntaxNode) -> Vec<IncludeSite> {
     root.descendants()
         .filter_map(CallExpr::cast)
-        .filter_map(|call| Some((include_target(&call)?, call.syntax().text_range())))
+        .filter_map(|call| {
+            let literal = include_literal(&call)?;
+            let tokens: Vec<_> = literal.content_tokens().collect();
+            let raw = tokens.iter().map(|token| token.text()).collect();
+            let content = match (tokens.first(), tokens.last()) {
+                (Some(first), Some(last)) => Some(rowan::TextRange::new(
+                    first.text_range().start(),
+                    last.text_range().end(),
+                )),
+                _ => None,
+            };
+            Some(IncludeSite {
+                raw,
+                content,
+                call: call.syntax().text_range(),
+            })
+        })
+        .collect()
+}
+
+/// The static `include("literal")` call sites in `root`: each `(raw, range)`
+/// where `range` covers the whole `include(...)` call, for attaching a
+/// diagnostic (unresolved include, include cycle) to the offending call.
+pub fn include_call_sites(root: &SyntaxNode) -> Vec<(String, rowan::TextRange)> {
+    include_sites(root)
+        .into_iter()
+        .map(|site| (site.raw, site.call))
         .collect()
 }
 
@@ -295,5 +338,64 @@ mod tests {
             None,
         );
         assert!(edges.is_empty(), "only static bare `include(\"…\")` counts");
+    }
+
+    /// A source mixing every form: two static includes around the dynamic,
+    /// interpolated, prefixed, qualified, and two-argument spellings that the
+    /// staticness test rejects.
+    const MIXED: &str = concat!(
+        "include(\"a.jl\")\n",
+        "include(x)\n",
+        "include(\"$d/a.jl\")\n",
+        "include(raw\"a.jl\")\n",
+        "M.include(\"a.jl\")\n",
+        "include(f, \"a.jl\")\n",
+        "module A\ninclude(\"sub/b.jl\")\nend\n",
+    );
+
+    #[test]
+    fn include_sites_line_up_with_include_edges() {
+        let root = parse(MIXED).cst;
+        let sites = include_sites(&root);
+        let edges = include_edges(&root, None);
+        assert_eq!(
+            sites.len(),
+            edges.len(),
+            "both walks must accept exactly the same call sites"
+        );
+        for (site, edge) in sites.iter().zip(&edges) {
+            assert_eq!(site.raw, edge.raw);
+        }
+        let raws: Vec<_> = sites.iter().map(|site| site.raw.as_str()).collect();
+        assert_eq!(raws, ["a.jl", "sub/b.jl"]);
+    }
+
+    #[test]
+    fn include_site_content_span_covers_the_path_text_between_the_quotes() {
+        let src = "include(\"sub/b.jl\")\n";
+        let sites = include_sites(&parse(src).cst);
+        let content = sites[0].content.expect("a non-empty literal has content");
+        assert_eq!(&src[content], "sub/b.jl");
+        assert_eq!(&src[sites[0].call], "include(\"sub/b.jl\")");
+    }
+
+    #[test]
+    fn an_empty_literal_has_no_content_span_but_still_has_a_call_span() {
+        let src = "include(\"\")\n";
+        let sites = include_sites(&parse(src).cst);
+        assert_eq!(sites.len(), 1);
+        assert!(sites[0].content.is_none());
+        assert_eq!(sites[0].raw, "");
+        assert_eq!(&src[sites[0].call], "include(\"\")");
+    }
+
+    #[test]
+    fn call_sites_stay_the_projection_of_include_sites() {
+        let root = parse(MIXED).cst;
+        let expected: Vec<_> = include_sites(&root)
+            .into_iter()
+            .map(|site| (site.raw, site.call))
+            .collect();
+        assert_eq!(include_call_sites(&root), expected);
     }
 }
