@@ -116,6 +116,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::TypePiracy),
         Box::new(correctness::UnreachableCode),
         Box::new(correctness::UnresolvedImport),
+        Box::new(correctness::KwargDefaultMismatch),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::MissingComparison),

@@ -4743,3 +4743,220 @@ fn unresolved_import_needs_project_context() {
         0,
     );
 }
+
+// --- kwarg-default-mismatch ------------------------------------------------
+
+#[test]
+fn kwarg_default_mismatch_flags_float_default_for_int() {
+    assert_eq!(
+        count(
+            "kwarg-default-mismatch",
+            "function g(; y::Int = 1.0)\n    y\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_flags_short_form_definition() {
+    assert_eq!(
+        count("kwarg-default-mismatch", "h(; s::String = 3) = s\n"),
+        1
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_flags_each_mismatched_keyword() {
+    assert_eq!(
+        count(
+            "kwarg-default-mismatch",
+            "q(; y::Int = 1.0, z::String = 2) = y\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_flags_the_whole_literal_vocabulary() {
+    for src in [
+        "f(; b::Bool = 1) = b\n",
+        "f(; c::Char = \"a\") = c\n",
+        "f(; s::Symbol = \"a\") = s\n",
+        "f(; s::String = :a) = s\n",
+        "f(; y::Int = true) = y\n",
+        "f(; y::Float64 = 1.0f0) = y\n",
+        "f(; y::Float32 = 1.0) = y\n",
+        "f(; y::Float16 = 1.0) = y\n",
+        // A sized integer type is a different type from the machine `Int` a
+        // decimal literal has, on every platform.
+        "f(; y::Int8 = 1) = y\n",
+        "f(; y::Int128 = 1) = y\n",
+        "f(; y::UInt = 1) = y\n",
+        "f(; y::UInt8 = 1) = y\n",
+    ] {
+        assert_eq!(
+            count("kwarg-default-mismatch", src),
+            1,
+            "expected a finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn kwarg_default_mismatch_flags_a_signed_literal() {
+    // The parser folds the sign into the literal, and `-1.0` is a `Float64`
+    // just as `1.0` is.
+    assert_eq!(
+        count("kwarg-default-mismatch", "f(; y::Int = -1.0) = y\n"),
+        1
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_a_matching_default() {
+    for src in [
+        "f(; y::Int = 1) = y\n",
+        "f(; y::Int = -1) = y\n",
+        "f(; y::Float64 = 1.0) = y\n",
+        "f(; y::Float64 = 1e3) = y\n",
+        "f(; y::Float32 = 1.0f0) = y\n",
+        "f(; s::String = \"a\") = s\n",
+        "f(; c::Char = 'a') = c\n",
+        "f(; s::Symbol = :a) = s\n",
+        "f(; b::Bool = true) = b\n",
+        "f(; b::Bool = false) = b\n",
+    ] {
+        assert_eq!(
+            count("kwarg-default-mismatch", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_an_abstract_or_parametric_annotation() {
+    // A default only has to be an instance of the declared type, and an
+    // abstract or parametric type is not one the rule reasons about.
+    for src in [
+        "f(; y::Real = 1.0) = y\n",
+        "f(; y::Integer = 1) = y\n",
+        "f(; y::Number = 1.0) = y\n",
+        "f(; y::Any = 1.0) = y\n",
+        "f(; y::AbstractString = \"a\") = y\n",
+        "f(; y::Union{Int,Float64} = 1.0) = y\n",
+        "f(; y::Vector{Int} = 1.0) = y\n",
+        "f(; y::T = 1.0) where {T} = y\n",
+    ] {
+        assert_eq!(
+            count("kwarg-default-mismatch", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_a_qualified_annotation() {
+    // `Core.Int` is Base's `Int`, but the resolution gate the rule opens with
+    // confirms a bare name only.
+    assert_eq!(
+        count("kwarg-default-mismatch", "f(; y::Core.Int = 1.0) = y\n"),
+        0
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_a_shadowed_type_name() {
+    // `Int` here is a local binding, not Base's type.
+    assert_eq!(
+        count(
+            "kwarg-default-mismatch",
+            "Int = Float64\nf(; y::Int = 1.0) = y\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_a_non_literal_default() {
+    for src in [
+        "f(; y::Int = zero(Int)) = y\n",
+        "f(; y::Int = n) = y\n",
+        "f(; y::Int = 1 + 1) = y\n",
+        "f(; y::String = \"a\" * b) = y\n",
+    ] {
+        assert_eq!(
+            count("kwarg-default-mismatch", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_literals_whose_type_is_not_pinned_down() {
+    for src in [
+        // A hexadecimal, octal, or binary literal's width — and so its type —
+        // depends on how many digits it has.
+        "f(; y::Int = 0x01) = y\n",
+        "f(; y::Int = 0b1) = y\n",
+        "f(; y::Int = 0o7) = y\n",
+        // Too big for an `Int64`, so Julia widens it.
+        "f(; y::Float64 = 99999999999999999999999) = y\n",
+        // `1im` is a `Complex`, not the integer its token suggests.
+        "f(; y::Int = 1im) = y\n",
+        // A non-standard string literal is whatever its macro returns.
+        "f(; y::Int = r\"a\") = y\n",
+        // An interpolated string is a `String`, but its parts are not literals.
+        "f(; y::Int = \"a$(b)\") = y\n",
+        // `Int32` is the machine `Int` on a 32-bit platform.
+        "f(; y::Int32 = 1) = y\n",
+    ] {
+        assert_eq!(
+            count("kwarg-default-mismatch", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_a_positional_optional_argument() {
+    // Out of scope: this rule is about the keyword parameters after the `;`.
+    assert_eq!(count("kwarg-default-mismatch", "f(y::Int = 1.0) = y\n"), 0);
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_an_unannotated_keyword() {
+    assert_eq!(count("kwarg-default-mismatch", "f(; y = 1.0) = y\n"), 0);
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_a_call_site() {
+    // `g(; y::Int = 1.0)` passes an annotated expression as a keyword value; it
+    // declares no parameter, so nothing is lowered into a dispatch constraint.
+    assert_eq!(count("kwarg-default-mismatch", "g(; y::Int = 1.0)\n"), 0);
+}
+
+#[test]
+fn kwarg_default_mismatch_ignores_quoted_and_macro_spans() {
+    // Quoted code is data, and a macro may rewrite what it is handed.
+    assert_eq!(
+        count("kwarg-default-mismatch", "ex = :(f(; y::Int = 1.0) = y)\n"),
+        0
+    );
+    assert_eq!(
+        count("kwarg-default-mismatch", "@mac f(; y::Int = 1.0) = y\n"),
+        0
+    );
+}
+
+#[test]
+fn kwarg_default_mismatch_names_both_types() {
+    let found = findings("kwarg-default-mismatch", "f(; y::Int = 1.0) = y\n");
+    assert_eq!(found.len(), 1);
+    assert!(found[0].contains('y'), "{found:?}");
+    assert!(found[0].contains("Int"), "{found:?}");
+    assert!(found[0].contains("Float64"), "{found:?}");
+}

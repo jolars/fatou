@@ -687,6 +687,53 @@ impl TypeAnnotation {
     pub fn op(&self) -> Option<SyntaxToken> {
         support::token(&self.0, SyntaxKind::COLON_COLON)
     }
+
+    /// The annotated pattern — what stands *left* of the `::`. Absent for the
+    /// unnamed-argument form `::Int`, where the `::` precedes the only child.
+    pub fn pattern(&self) -> Option<Expr> {
+        let op = self.op()?;
+        support::children::<Expr>(&self.0)
+            .find(|expr| expr.syntax().text_range().end() <= op.text_range().start())
+    }
+
+    /// The declared type — what stands *right* of the `::`.
+    pub fn ty(&self) -> Option<Expr> {
+        let op = self.op()?;
+        support::children::<Expr>(&self.0)
+            .find(|expr| expr.syntax().text_range().start() >= op.text_range().end())
+    }
+}
+
+impl QuoteSym {
+    /// The quoted expression: `x` in `:x`, `(x + 1)` in `:(x + 1)`. Absent for
+    /// a quoted operator or keyword (`:+`, `:if`), which the parser carries as
+    /// a bare token rather than a node.
+    ///
+    /// Note that a `QUOTE_SYM` is not always a `Symbol` at runtime: `:x` is,
+    /// but `:(x + 1)` evaluates to an `Expr`.
+    pub fn expr(&self) -> Option<Expr> {
+        support::child(&self.0)
+    }
+}
+
+impl Parameters {
+    /// The keyword parameters written without a `::` annotation (`y = 1`), in
+    /// source order.
+    ///
+    /// The `;`-block splits by shape rather than by role: a *plain* keyword is
+    /// a `KEYWORD_ARG`, while an annotated parameter (`y::Int = 1`) and the
+    /// call-site shorthand (`f(; verbose)`) both arrive as [`Arg`]s — see
+    /// [`Self::args`].
+    pub fn keyword_args(&self) -> AstChildren<KeywordArg> {
+        support::children(&self.0)
+    }
+
+    /// The `;`-block entries that are not plain `KEYWORD_ARG`s, in source
+    /// order: an annotated keyword parameter (`y::Int = 1`), the call-site
+    /// shorthand (`f(; verbose)`), and a keyword splat (`f(; kw...)`).
+    pub fn args(&self) -> AstChildren<Arg> {
+        support::children(&self.0)
+    }
 }
 
 impl IfExpr {
@@ -837,6 +884,53 @@ mod tests {
             .map(|a| a.expr().unwrap().syntax().text().to_string())
             .collect();
         assert_eq!(texts, ["a", "b"]);
+    }
+
+    #[test]
+    fn type_annotation_splits_at_the_colons() {
+        let ann: TypeAnnotation = find("x::Int\n");
+        assert_eq!(expr_text(ann.pattern()), "x");
+        assert_eq!(expr_text(ann.ty()), "Int");
+        // The unnamed-argument form has no pattern.
+        let ann: TypeAnnotation = find("f(::Int) = 1\n");
+        assert!(ann.pattern().is_none());
+        assert_eq!(expr_text(ann.ty()), "Int");
+        // The type may be any expression, not just a name.
+        let ann: TypeAnnotation = find("x::Union{Int,Nothing}\n");
+        assert_eq!(expr_text(ann.ty()), "Union{Int,Nothing}");
+    }
+
+    #[test]
+    fn quote_sym_expr_is_the_quoted_node() {
+        assert_eq!(expr_text(find::<QuoteSym>(":x\n").expr()), "x");
+        assert_eq!(expr_text(find::<QuoteSym>(":(x + 1)\n").expr()), "(x + 1)");
+        // A quoted operator or keyword is a bare token, not a node.
+        assert!(find::<QuoteSym>(":+\n").expr().is_none());
+        assert!(find::<QuoteSym>(":if\n").expr().is_none());
+    }
+
+    #[test]
+    fn parameters_split_plain_keywords_from_the_rest() {
+        // A definition's annotated keyword parameter is an `ARG`, not a
+        // `KEYWORD_ARG`.
+        let params: Parameters = find("f(; y::Int = 1, z = 2) = y\n");
+        let args: Vec<String> = params
+            .args()
+            .map(|a| a.syntax().text().to_string())
+            .collect();
+        assert_eq!(args, ["y::Int = 1"]);
+        let kwargs: Vec<String> = params
+            .keyword_args()
+            .map(|k| k.syntax().text().to_string())
+            .collect();
+        assert_eq!(kwargs, ["z = 2"]);
+        // At a call site, the shorthand and a splat are the `ARG`s.
+        let params: Parameters = find("f(; verbose, kw...)\n");
+        let args: Vec<String> = params
+            .args()
+            .map(|a| a.syntax().text().to_string())
+            .collect();
+        assert_eq!(args, ["verbose", "kw..."]);
     }
 
     #[test]

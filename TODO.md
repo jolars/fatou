@@ -519,15 +519,36 @@ Needs modest new infrastructure:
   `example_julia_target`) so the example renders. Left alone: relative paths
   (`using .Sub`), interpolated ones (`using $M`), `Base`/`Core`/`Main`, and
   loads inside a macro call.
-- [ ] `kwarg-default-mismatch` (correctness, syn + `TypeExpr` + res, error, no
-  fix): a keyword argument whose literal default cannot match its declared type,
+- [x] `kwarg-default-mismatch` (correctness, syn + res, error, no fix): a
+  keyword argument whose literal default cannot match its declared type,
   `g(; y::Int = 1.0)`. Verified: this is **not** an implicit `convert` — a
   keyword's `::T` becomes a dispatch constraint on the lowered inner function,
   so `g()` raises a `MethodError` unconditionally. (I assumed the opposite at
   first; the check is sound.) Restrict to a literal RHS plus an annotation that
   resolves to a concrete `Core` type (`String`, `Symbol`, `Bool`, `Char`, the
   sized ints, `Float32`/`Float64`); `index/typeexpr.rs` already lowers the
-  annotation. (KwDefaultMismatch)
+  annotation. (KwDefaultMismatch) Landed as a `PARAMETERS` rule spanning the
+  whole parameter (`y::Int = 1.0`), gated on the `;`-block belonging to a
+  *definition* — `matchers::in_signature_position` — so a call site's
+  `g(; y::Int = 1.0)`, which passes an annotated value, stays quiet. Because
+  dispatch is exact, so is the check: `y::Float64 = 1` and `y::Int8 = 1` are
+  findings too. The annotation must be a bare name from a fixed concrete-`Core`
+  table *and* clear `read_resolves_to_base`, which also buys the macro/quote
+  exemption; the default must be a literal whose own spelling pins its type
+  down. `TypeExpr` was **not** used after all: the only annotation shape that
+  survives the namespace gate is the bare name whose *token* that gate needs, so
+  lowering would have bought nothing. Deliberate false negatives, both about
+  types the spelling does not fix: a hex/octal/binary literal takes its width
+  from its digit count (`0x01` is a `UInt8`), and a decimal literal is the
+  *machine* `Int`, so `y::Int32 = 1` is accepted rather than risk a finding that
+  is wrong on a 32-bit target. Also left alone: `1im` (a `Complex` wearing an
+  `INTEGER` token), a decimal too big for `Int64`, a non-standard or
+  interpolated string, `:(x + 1)` (an `Expr`, not a `Symbol`), a qualified
+  annotation (`Core.Int`), and the positional optional argument `f(y::Int = 1.0)`
+  — the same lowering hazard, but a different rule's scope. The AST wrappers grew
+  `TypeAnnotation::pattern`/`ty`, `QuoteSym::expr`, and
+  `Parameters::args`/`keyword_args` for it. No fix: nothing in the source says
+  whether the annotation or the default is the half that is wrong.
 - [ ] `function-has-no-methods` (correctness, res, warning, no fix): calling `f`
   where every visible definition is a bare forward declaration
   (`function f end`), so the call can only raise a `MethodError`. Natural
