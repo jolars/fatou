@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.2.0...fatou-parser-v0.3.0) (2026-08-08)
+
+### Features
+- **linter:** add `kwarg-default-mismatch` ([`d395287`](https://github.com/jolars/fatou/commit/d395287312b79f57a77a4895d207bd3ee4a8e252))
+
 ## [0.2.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.1.1...fatou-parser-v0.2.0) (2026-08-07)
 
 ### Features

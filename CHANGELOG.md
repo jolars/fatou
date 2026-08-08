@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.13.0](https://github.com/jolars/fatou/compare/v0.12.0...v0.13.0) (2026-08-08)
+
+### Features
+- **linter:** add `kwarg-default-mismatch` ([`d395287`](https://github.com/jolars/fatou/commit/d395287312b79f57a77a4895d207bd3ee4a8e252))
+- **lsp:** rename files and folders ([`427427e`](https://github.com/jolars/fatou/commit/427427e0d346ec99526730998e8b33f9d5b06db2))
+- **linter:** add `unresolved-import` ([`7c6bd5b`](https://github.com/jolars/fatou/commit/7c6bd5b717040e775d51f58d3fe91160f09d6232))
+
+### Dependencies
+- updated crates/fatou-parser to v0.3.0
+
 ## [0.12.0](https://github.com/jolars/fatou/compare/v0.11.1...v0.12.0) (2026-08-07)
 
 ### Features
