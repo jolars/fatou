@@ -730,6 +730,16 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         Some(Arc::new(ModuleIndexHandle { pkg, rest }))
     }
 
+    /// The Base/Core module exporting `name` (tier 4), asked *independently of*
+    /// the masking order — the one question [`resolve`](Self::resolve) cannot
+    /// answer for a name the file binds, since the binding is precisely what
+    /// masks the tier. `shadowed-base-name` needs both halves: what the name
+    /// means here, and what it would have meant.
+    pub fn system_module_exporting(&self, name: &str, namespace: Namespace) -> Option<SmolStr> {
+        self.system_export(&wanted_name(name, namespace))
+            .map(|(module, _)| module)
+    }
+
     /// Tier 4: `wanted` if Base or Core exports it (Base first).
     fn system_export(&self, wanted: &SmolStr) -> Option<(SmolStr, SmolStr)> {
         for module in ["Base", "Core"] {

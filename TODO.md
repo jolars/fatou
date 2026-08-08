@@ -574,12 +574,22 @@ Needs modest new infrastructure:
   definition-shaped argument (`@inline f(x) = x`) is harvested, and the
   `@eval`-in-a-loop factory trips the file-wide `eval` bail-out, but a bespoke
   DSL macro does not.
-- [ ] `shadowed-base-name` (suspicious, sem + res, warning, no fix): binding a
-  name exported by Base and then using it in call position. Stronger in Julia
-  than the R rule it comes from — Julia has one namespace and no call-position
-  fallback, so `length = 3; length(x)` is a hard error, where R's equivalent is
-  benign. Require both a binding and a later call, as arity does. (arity
-  `shadowed-builtin`)
+- [x] `shadowed-base-name` (suspicious, sem + res, warning, no fix): a call to a
+  name the file binds to a value while Base/Core exports it as a function.
+  Stronger in Julia than the R rule it comes from — Julia has one namespace and
+  no call-position fallback, so `length = 3; length(x)` is a hard error, where
+  R's equivalent is benign; the reverse order is broken too (`cannot assign a
+  value to imported variable Base.length`), so no ordering is imposed. Both a
+  binding and a call are required, as arity does. Tier 4 is asked directly
+  (`Resolver::system_module_exporting`, `RuleContext::base_export_module`),
+  since the binding is precisely what masks it. Exempt: definitions
+  (function/macro/type/module) and `import`s, **parameters** (every one matched
+  over a 467-package depot was the higher-order idiom, none a bug — a `catch`
+  variable stays in), a binding visibly assigned something callable (lambda,
+  `function`, another builtin, any qualified path), and anything defined or
+  called inside a quote or macro call (Makie's `@Block` spells `length = 32`).
+  Reports at each call, no fix. That sweep left 6 findings, all real
+  `MethodError`s. (arity `shadowed-builtin`)
 - [ ] `non-public-access` (suspicious, sem + res, warning, no fix): reading
   `Foo.bar` where `bar` is neither exported nor declared `public` by `Foo` — the
   Julia analogue of arity's planned `internal-function` (`pkg:::fn`), and a

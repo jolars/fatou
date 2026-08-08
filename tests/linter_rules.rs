@@ -4194,6 +4194,169 @@ fn typeof_comparison_honors_suppression() {
     assert!(report.diagnostics.is_empty());
 }
 
+// --- shadowed-base-name ----------------------------------------------------
+
+#[test]
+fn shadowed_base_name_flags_a_global_shadow_that_is_called() {
+    let msgs = findings("shadowed-base-name", "length = 3\nn = length(xs)\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("`length`"), "{msgs:?}");
+    assert!(msgs[0].contains("Base"), "{msgs:?}");
+}
+
+#[test]
+fn shadowed_base_name_flags_a_local_shadow_that_is_called() {
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "function f(xs)\n    sum = 0\n    return sum(xs)\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn shadowed_base_name_flags_a_catch_variable() {
+    // A `catch` variable holds the thrown exception, never a function.
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "try\n    risky()\ncatch error\n    error(\"failed\")\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_parameters() {
+    // Passing a function in under a Base name is the higher-order idiom; every
+    // parameter this rule matched across a 467-package depot was one.
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "function f(x, size)\n    size(x, 1)\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "function f(xs; skip = Sys.isbsd)\n    skip(xs)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_a_binding_a_macro_declares() {
+    // Makie's `@Block` blocks spell an attribute `length = 32` while the rest
+    // of the file goes on calling Base's `length`.
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "@Block Toggle begin\n    length = 32\nend\nn = length(xs)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_reports_every_call_site() {
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "count = 0\na = count(xs)\nb = count(ys)\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_a_binding_that_is_never_called() {
+    // The binding alone is ordinary Julia; only the call makes it a mistake.
+    assert_eq!(
+        count("shadowed-base-name", "length = 3\nprintln(length)\n"),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_method_definitions() {
+    // Defining a method of the name is not a value shadow.
+    assert_eq!(
+        count("shadowed-base-name", "length(x::MyType) = 1\nlength(y)\n"),
+        0
+    );
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "function show(x)\n    1\nend\nshow(2)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_imports() {
+    assert_eq!(
+        count("shadowed-base-name", "import Base: length\nlength(x)\n"),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_a_visibly_function_valued_binding() {
+    // Assigning a function and calling it is the whole point of the binding.
+    assert_eq!(
+        count("shadowed-base-name", "show = () -> nothing\nshow()\n"),
+        0
+    );
+    assert_eq!(
+        count("shadowed-base-name", "size = Base.size\nsize(A, 1)\n"),
+        0
+    );
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "let sort = identity\n    sort(x)\nend\n"
+        ),
+        0
+    );
+    // A qualified path is never taken as proof the binding holds data: aliasing
+    // a method (`exit = t.__exit__`) reads just like aliasing a field.
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "function f(t, o)\n    exit = t.__exit__\n    return exit(o)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_non_base_names_and_qualified_calls() {
+    assert_eq!(count("shadowed-base-name", "mylen = 3\nmylen(x)\n"), 0);
+    assert_eq!(
+        count("shadowed-base-name", "length = 3\nBase.length(x)\n"),
+        0
+    );
+}
+
+#[test]
+fn shadowed_base_name_ignores_quoted_and_macro_code() {
+    assert_eq!(
+        count(
+            "shadowed-base-name",
+            "ex = quote\n    length = 3\n    length(x)\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("shadowed-base-name", "length = 3\n@show length(x)\n"),
+        0
+    );
+}
+
 // --- length-zero -----------------------------------------------------------
 
 /// The single diagnostic `length-zero` reports for `src`, or `None`.

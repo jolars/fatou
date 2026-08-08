@@ -8,6 +8,7 @@ mod loop_variable_shadow;
 mod missing_comparison;
 mod module_shadows_parent;
 mod nothing_comparison;
+mod shadowed_base_name;
 mod typeof_comparison;
 
 pub use assignment_in_condition::AssignmentInCondition;
@@ -18,4 +19,5 @@ pub use loop_variable_shadow::LoopVariableShadow;
 pub use missing_comparison::MissingComparison;
 pub use module_shadows_parent::ModuleShadowsParent;
 pub use nothing_comparison::NothingComparison;
+pub use shadowed_base_name::ShadowedBaseName;
 pub use typeof_comparison::TypeofComparison;

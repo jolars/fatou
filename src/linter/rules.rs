@@ -57,6 +57,7 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
 use rowan::{TextRange, TextSize};
+use smol_str::SmolStr;
 
 use crate::ast::{AstToken, CallExpr, Expr};
 use crate::config::{LintConfig, RulesConfig};
@@ -127,6 +128,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::IndexFromLength),
         Box::new(suspicious::DiscouragedFunction),
         Box::new(suspicious::TypeofComparison),
+        Box::new(suspicious::ShadowedBaseName),
         Box::new(readability::ComparisonNegation),
         Box::new(readability::LengthZero),
         Box::new(readability::RedundantBoolean),
@@ -438,6 +440,17 @@ impl<'a> RuleContext<'a> {
             resolver.resolve(name, at, Namespace::Value),
             Resolution::System { .. }
         )
+    }
+
+    /// The Base/Core module implicitly exporting `name`, ignoring what the
+    /// masking order actually resolves the name to here. The mirror of
+    /// [`name_resolves_to_base`](Self::name_resolves_to_base): that one asks
+    /// what a name *would* mean, this one what a name *would have* meant, which
+    /// is the only way to see a tier-4 name a file's own binding has masked.
+    /// `None` without a resolution context, where the question does not arise.
+    pub fn base_export_module(&self, name: &str) -> Option<SmolStr> {
+        self.resolver()?
+            .system_module_exporting(name, Namespace::Value)
     }
 
     /// Whether a bare value read is shadowed by a definition *in this file* — a
