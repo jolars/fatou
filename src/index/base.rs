@@ -167,6 +167,7 @@ fn assemble(results: Vec<(String, Arc<PackageIndex>, PathBuf)>) -> HarvestedLibr
         packages,
         roots,
         workspaces: Vec::new(),
+        declared_deps: BTreeMap::new(),
     }
 }
 
@@ -176,6 +177,7 @@ fn fallback_library() -> HarvestedLibrary {
         packages: fallback_system(),
         roots: BTreeMap::new(),
         workspaces: Vec::new(),
+        declared_deps: BTreeMap::new(),
     }
 }
 

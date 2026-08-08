@@ -57,6 +57,12 @@ pub struct ModuleLoad {
     pub items: Option<Vec<ImportItem>>,
     /// The clause's range (the whole statement for the item-list form).
     pub range: TextRange,
+    /// The range of the path's *first* component — `Foo` in `using Foo.Bar: x`
+    /// or `import Foo as F`. That component is the name Julia's loader looks up
+    /// in the environment, so it is the span a finding about the load target
+    /// belongs on, and [`range`](Self::range) is too wide for it. `None` when
+    /// interpolation (`using $M`) left no leading component.
+    pub root_range: Option<TextRange>,
     /// The scope the statement appears in (each `module` body is its own).
     pub scope: ScopeId,
 }

@@ -543,6 +543,25 @@ warning: unreachable-code
   |     ^^^^^^^^^^^^^^^ unreachable code: no path of execution reaches this statement
 ```
 
+## `unresolved-import`
+
+Flag a `using`/`import` of a module the enclosing project cannot load: a name that is neither in its `Project.toml` `[deps]` nor provided by the harvested environment (the standard library included). Julia resolves a bare `using Foo` against the active project, so an undeclared name raises `ArgumentError: Package Foo not found in current path` when the module loads. Relative paths (`using .Sub`), interpolated paths, and loads inside quoted code or macro calls are exempt, and a name the harvest resolved is always accepted — so a transitive dependency goes unreported rather than risking a false positive. Off by default: the rule needs the project context that only a package source file carries, so the language server enables it for workspace member files while the CLI leaves it opt-in.
+
+The project declares `LinearAlgebra` in `[deps]`, but not `Frobnicate`:
+
+```julia
+using LinearAlgebra
+using Frobnicate
+```
+
+```text
+warning: unresolved-import
+ --> example.jl:2:7
+  |
+2 | using Frobnicate
+  |       ^^^^^^^^^^ `Frobnicate` is not a dependency of this project
+```
+
 ## `assignment-in-condition`
 
 Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. It is valid Julia but almost always a typo for `==`, so it is reported with a safe fix that rewrites `=` to `==`.

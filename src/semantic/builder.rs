@@ -297,6 +297,13 @@ impl ImportClause {
         self.components.last().map(|(name, range)| (name, *range))
     }
 
+    /// The range of the clause's first component — the name Julia's loader
+    /// resolves in the environment. `None` when interpolation left the clause
+    /// with no leading component (`using $M`).
+    pub(crate) fn root_range(&self) -> Option<TextRange> {
+        self.components.first().map(|(_, range)| *range)
+    }
+
     pub(crate) fn path(&self) -> ModulePath {
         ModulePath {
             leading_dots: self.leading_dots,
@@ -1333,9 +1340,10 @@ impl Builder {
                 self.model.module_loads.push(ModuleLoad {
                     kind,
                     path: base.path(),
-                    alias: base.alias.map(|(name, _)| name),
+                    alias: base.alias.as_ref().map(|(name, _)| name.clone()),
                     items: Some(items.iter().filter_map(ImportClause::as_item).collect()),
                     range: node.text_range(),
+                    root_range: base.root_range(),
                     scope,
                 });
             }
@@ -1347,9 +1355,10 @@ impl Builder {
                 self.model.module_loads.push(ModuleLoad {
                     kind,
                     path: clause.path(),
-                    alias: clause.alias.map(|(name, _)| name),
+                    alias: clause.alias.as_ref().map(|(name, _)| name.clone()),
                     items: None,
                     range: clause.range,
+                    root_range: clause.root_range(),
                     scope,
                 });
             }

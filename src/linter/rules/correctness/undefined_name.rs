@@ -250,6 +250,7 @@ mod tests {
             RuleContext::new(None, &parsed.cst, &model).with_resolution(Some(ResolutionContext {
                 packages,
                 workspace: ws.map(|pkg| (pkg, Vec::new())),
+                declared_deps: None,
             }));
         let mut sink = Vec::new();
         UndefinedName.check_file(&ctx, &mut sink);

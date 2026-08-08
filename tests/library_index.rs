@@ -93,6 +93,32 @@ fn set_library_packages_replaces_whole_map() {
 }
 
 #[test]
+fn declared_deps_round_trip_and_survive_a_reharvest() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut db = IncrementalDatabase::new();
+    assert!(
+        db.declared_deps("Foo").is_none(),
+        "no declared deps before any set"
+    );
+
+    let deps: BTreeSet<String> = ["LinearAlgebra".to_string(), "JSON3".to_string()].into();
+    db.set_declared_deps(BTreeMap::from([("Foo".to_string(), Arc::new(deps))]));
+
+    let read = db.declared_deps("Foo").expect("Foo declares deps");
+    assert!(read.contains("LinearAlgebra") && read.contains("JSON3"));
+    // Visible through a read-only snapshot, which is what the linter holds.
+    assert!(db.snapshot().declared_deps("Foo").is_some());
+    // A package with no declared set reads back `None`.
+    assert!(db.declared_deps("Bar").is_none());
+
+    // The deps track the project files, not the harvest: re-harvesting a
+    // package must not clear them.
+    db.set_package_index("Foo", Arc::new(empty_package("Foo")));
+    assert!(db.declared_deps("Foo").is_some(), "survives a re-harvest");
+}
+
+#[test]
 fn snapshot_reads_the_library() {
     let mut db = IncrementalDatabase::new();
     db.set_package_index("Foo", Arc::new(empty_package("Foo")));

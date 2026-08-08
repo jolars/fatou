@@ -259,6 +259,7 @@ fn workspace_member_maps_files_to_host_modules() {
         packages: BTreeMap::from([("Pkg".to_string(), Arc::new(index))]),
         roots: BTreeMap::from([("Pkg".to_string(), tmp.path().to_path_buf())]),
         workspaces: vec!["Pkg".to_string()],
+        declared_deps: Default::default(),
     };
 
     // A root-hosted file: empty host module path.
@@ -539,4 +540,30 @@ fn harvest_libraries_merges_dev_packages_sorted() {
     assert_eq!(lib.roots["PkgB"], b.path());
     assert_eq!(lib.packages["PkgB"].root.functions[0].name, "bee");
     assert_eq!(lib.packages["PkgA"].root.functions[0].name, "ay");
+}
+
+#[test]
+fn harvest_libraries_records_each_dev_packages_declared_deps() {
+    use fatou::environment::Uuid;
+    use fatou::index::harvest_libraries;
+    use std::collections::BTreeMap;
+
+    let a = TempDir::new();
+    let b = TempDir::new();
+    write(&a.path().join("src/PkgA.jl"), "module PkgA\nend\n");
+    write(&b.path().join("src/PkgB.jl"), "module PkgB\nend\n");
+
+    let uuid: Uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e".parse().unwrap();
+    let mut env_a = package_env(a.path(), "PkgA");
+    env_a.direct_deps = BTreeMap::from([("LinearAlgebra".to_string(), uuid)]);
+    // A folder with no declared dependencies still gets an (empty) entry: it
+    // declares nothing, which is different from "we do not know".
+    let env_b = package_env(b.path(), "PkgB");
+
+    let lib = harvest_libraries(&[env_a, env_b]);
+    assert_eq!(
+        lib.declared_deps["PkgA"].iter().collect::<Vec<_>>(),
+        ["LinearAlgebra"]
+    );
+    assert!(lib.declared_deps["PkgB"].is_empty());
 }

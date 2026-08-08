@@ -85,9 +85,16 @@ pub(crate) fn lint_findings_via_db(
         // whose host we cannot know.
         let workspace = snapshot.workspace_member(path);
         let rules = rules.get(workspace.is_some());
+        // Only a member file loads against the package's own project, so the
+        // declared dependency set (and with it `unresolved-import`) rides along
+        // exactly there.
+        let declared_deps = workspace
+            .as_ref()
+            .and_then(|(pkg, _)| snapshot.declared_deps(&pkg.name));
         let resolution = Some(ResolutionContext {
             packages: snapshot,
             workspace,
+            declared_deps,
         });
         // No include problems: the server publishes its own include-graph
         // diagnostics (see `crate::lsp::graph_diagnostics`), so the
@@ -125,7 +132,7 @@ fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
 /// The rules that are sound only with the resolution context a workspace
 /// member file carries: the server adds them to the member rule set, while
 /// the CLI leaves them opt-in via `--select`.
-const WORKSPACE_MEMBER_RULES: &[&str] = &["undefined-name", "call-arity"];
+const WORKSPACE_MEMBER_RULES: &[&str] = &["undefined-name", "call-arity", "unresolved-import"];
 
 /// The rule sets the server lints with, resolved once per configuration (the
 /// dispatch table included) rather than per lint run: the configured set

@@ -351,11 +351,11 @@ fn run_lint(
     }
 }
 
-/// Whether any selected rule needs project-wide name resolution. Both such
-/// rules are default-off (they require project context to be sound), so a plain
+/// Whether any selected rule needs project-wide name resolution. Every such
+/// rule is default-off (they require project context to be sound), so a plain
 /// `select` check suffices and keeps the harvest off the default `fatou lint`.
 fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
-    const RESOLUTION_RULES: [&str; 2] = ["undefined-name", "call-arity"];
+    const RESOLUTION_RULES: [&str; 3] = ["undefined-name", "call-arity", "unresolved-import"];
     RESOLUTION_RULES.iter().any(|id| {
         config
             .select

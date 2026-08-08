@@ -489,12 +489,36 @@ above):
 
 Needs modest new infrastructure:
 
-- [ ] `unresolved-import` (correctness, res, warning, no fix): `using Foo` /
+- [x] `unresolved-import` (correctness, res, warning, no fix): `using Foo` /
   `import Foo` where `Foo` is neither a stdlib nor in the project's
   `Project.toml` `[deps]`. We are better placed for this than StaticLint — the
   `Project.toml` parse and `PackageIndex` already exist. Gate on having a real
   workspace, like `undefined-name`, and stay silent otherwise.
-  (UnresolvedImport)
+  (UnresolvedImport) Landed as a `check_file` pass over
+  `SemanticModel::module_loads`, off by default and spanning the path's *first*
+  component alone — the name the loader looks up — for which `ModuleLoad` gained
+  a `root_range`. A load is cleared by **either** source: the project's declared
+  `[deps]`, or the harvested library. The declared set is the new
+  infrastructure: `Environment::direct_deps` now rides on
+  `HarvestedLibrary::declared_deps` (keyed by dev package), reaches the server
+  through its own HIGH-durability `ProjectDeps` salsa input (separate from
+  `LibraryIndex`, since a `Project.toml` edit changes it without a re-harvest),
+  and lands on `ResolutionContext::declared_deps`. Consulting it *as well as*
+  the harvest is what keeps the rule quiet in the two states the harvest alone
+  gets wrong: an un-instantiated project (no `Manifest.toml`) and a machine
+  where no Julia install was located, whose fallback library carries no stdlib
+  at all. Accepting any harvested package also exempts a transitive manifest
+  dependency — a deliberate false negative, since the harvest cannot tell direct
+  from indirect. **The workspace gate lives in the driver, not the rule**:
+  `ProjectContext::resolution_for` attaches the declared set only for a file the
+  harvest placed inside a workspace package, so a `test/`, `docs/`, or
+  `benchmark/` file — which resolves against its own environment, `[extras]`
+  included — carries `None` and the rule stays silent. That also let the docs
+  generator supply a synthetic project (`Rule::example_declared_deps` +
+  `check_source_in_project`, the project-tier counterpart of
+  `example_julia_target`) so the example renders. Left alone: relative paths
+  (`using .Sub`), interpolated ones (`using $M`), `Base`/`Core`/`Main`, and
+  loads inside a macro call.
 - [ ] `kwarg-default-mismatch` (correctness, syn + `TypeExpr` + res, error, no
   fix): a keyword argument whose literal default cannot match its declared type,
   `g(; y::Int = 1.0)`. Verified: this is **not** an implicit `convert` — a

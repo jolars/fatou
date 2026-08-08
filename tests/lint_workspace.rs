@@ -1,6 +1,8 @@
 //! End-to-end: the CLI lint pipeline resolves cross-file names when handed a
 //! harvested project via [`ProjectContext::Harvested`], so `undefined-name`
-//! stops flagging a name a sibling file's `using` brings in module-wide.
+//! stops flagging a name a sibling file's `using` brings in module-wide — and
+//! the project tier it derives per file, which decides whether
+//! `unresolved-import` may speak at all.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -71,6 +73,7 @@ fn project(b_contents: &str) -> (TempDir, TempDir, HarvestedLibrary) {
         ]),
         roots: BTreeMap::from([("M".to_string(), pkg.path().to_path_buf())]),
         workspaces: vec!["M".to_string()],
+        declared_deps: Default::default(),
     };
     (dep, pkg, library)
 }
@@ -113,4 +116,79 @@ fn cli_still_flags_a_genuine_typo() {
     let findings = undefined_in_b(&pkg, &library);
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert!(findings[0].contains("SparseMatrixCSX"), "{findings:?}");
+}
+
+/// A workspace package `M` declaring `SparseArrays` in its `Project.toml`
+/// `[deps]`, with a `src/b.jl` member and a `test/runtests.jl` non-member.
+fn project_with_deps() -> (TempDir, HarvestedLibrary) {
+    let pkg = TempDir::new();
+    write(
+        &pkg.path().join("src/M.jl"),
+        "module M\ninclude(\"b.jl\")\nend\n",
+    );
+    write(
+        &pkg.path().join("src/b.jl"),
+        "using SparseArrays\nusing Frobnicate\n",
+    );
+    write(
+        &pkg.path().join("test/runtests.jl"),
+        "using Test\nusing Frobnicate\n",
+    );
+    let pkg_index = harvest_package_named(pkg.path(), "M");
+
+    let library = HarvestedLibrary {
+        packages: BTreeMap::from([("M".to_string(), Arc::new(pkg_index))]),
+        roots: BTreeMap::from([("M".to_string(), pkg.path().to_path_buf())]),
+        workspaces: vec!["M".to_string()],
+        declared_deps: BTreeMap::from([(
+            "M".to_string(),
+            Arc::new(["SparseArrays".to_string()].into_iter().collect()),
+        )]),
+    };
+    (pkg, library)
+}
+
+/// `unresolved-import` findings for `file`, linted against `library`.
+fn unresolved_imports_in(file: PathBuf, library: &HarvestedLibrary) -> Vec<String> {
+    let config = LintConfig {
+        select: Some(vec!["unresolved-import".to_string()]),
+        ..Default::default()
+    };
+    let result = check_paths_with_config(
+        &[file],
+        &config,
+        &ExcludeFilter::none(),
+        None,
+        ProjectContext::Harvested(library),
+    )
+    .expect("lint succeeds");
+    result
+        .reports
+        .into_iter()
+        .flat_map(|r| r.diagnostics)
+        .filter(|d| d.rule == "unresolved-import")
+        .map(|d| d.message.body)
+        .collect()
+}
+
+#[test]
+fn cli_flags_an_undeclared_import_in_a_package_source_file() {
+    // `SparseArrays` is declared, `Frobnicate` is not — and the declared set
+    // answers even though nothing was harvested for either.
+    let (pkg, library) = project_with_deps();
+    let findings = unresolved_imports_in(pkg.path().join("src/b.jl"), &library);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(findings[0].contains("Frobnicate"), "{findings:?}");
+}
+
+#[test]
+fn cli_leaves_a_test_file_alone() {
+    // `test/runtests.jl` is no workspace member: its `using` clauses resolve
+    // against the test environment, so the package's `[deps]` say nothing about
+    // them and the driver attaches no declared set.
+    let (pkg, library) = project_with_deps();
+    assert_eq!(
+        unresolved_imports_in(pkg.path().join("test/runtests.jl"), &library),
+        Vec::<String>::new(),
+    );
 }

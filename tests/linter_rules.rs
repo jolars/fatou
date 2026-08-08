@@ -4724,3 +4724,22 @@ fn redundant_boolean_honors_suppression() {
     );
     assert!(report.diagnostics.is_empty());
 }
+
+// --- unresolved-import -----------------------------------------------------
+
+/// The rule is silent for a file the driver gave no project context: a loose
+/// buffer, a script, or a `test/` file resolves its `using` clauses against
+/// another environment entirely, so `check_source`'s single-file mode must
+/// report nothing however exotic the import. (The rule's own behavior is
+/// covered by unit tests in `src/linter/rules/correctness/unresolved_import.rs`,
+/// which can attach a declared dependency set.)
+#[test]
+fn unresolved_import_needs_project_context() {
+    assert_eq!(
+        count(
+            "unresolved-import",
+            "using Frobnicate\nimport Whatsit: thing\n",
+        ),
+        0,
+    );
+}

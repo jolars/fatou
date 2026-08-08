@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::config::LintConfig;
-use crate::linter::check::check_source_with_target;
+use crate::linter::check::check_source_in_project;
 use crate::linter::fix::apply_fixes;
 use crate::linter::render::{OutputMode, RenderOptions, render_findings};
 use crate::linter::rules::Rule;
@@ -64,11 +64,12 @@ pub fn render_rule_doc(rule: &dyn Rule) -> String {
         }
         fenced(&mut out, "julia", example.source);
 
-        let report = check_source_with_target(
+        let report = check_source_in_project(
             Some(&path),
             example.source,
             &config,
             rule.example_julia_target(),
+            rule.example_declared_deps(),
         );
         let source = example.source.to_string();
         let options = RenderOptions::new(OutputMode::Pretty, false).without_rule_links();

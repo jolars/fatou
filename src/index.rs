@@ -47,7 +47,24 @@ pub struct HarvestedLibrary {
     /// enclosing module's globals (see [`Resolver`](crate::resolve::Resolver))
     /// and it is re-harvested on save.
     pub workspaces: Vec<String>,
+    /// Each workspace package's declared direct dependencies — the names in its
+    /// project's `Project.toml` `[deps]` — keyed by the package's name (an entry
+    /// of [`workspaces`](Self::workspaces)).
+    ///
+    /// This is what a package's own `using`/`import` clauses may name, and it is
+    /// deliberately *not* derived from the harvest: a project that has never
+    /// been instantiated (no `Manifest.toml`), or one whose Julia installation
+    /// fatou could not locate, still declares its dependencies here. The
+    /// linter's `unresolved-import` reads it; a folder that is not a package
+    /// project contributes no entry.
+    pub declared_deps: BTreeMap<String, Arc<DeclaredDeps>>,
 }
+
+/// The module names a package's own source files may `using`/`import`: its
+/// project's `Project.toml` `[deps]`. Stdlib and Base/Core names are *not*
+/// folded in — a consumer answers those from the harvested library, which knows
+/// what the located installation actually ships.
+pub type DeclaredDeps = std::collections::BTreeSet<String>;
 
 impl HarvestedLibrary {
     /// The workspace package and host module path for `path`, when it is a
@@ -123,6 +140,22 @@ pub fn dev_packages(envs: &[Environment]) -> Vec<crate::environment::DevPackage>
     out
 }
 
+/// Each workspace package's declared direct dependencies (its project's
+/// `Project.toml` `[deps]`), keyed by package name. Deduped by name with the
+/// first folder winning, exactly like [`dev_packages`], so the map and the
+/// workspace list agree on which environment owns a name.
+fn declared_deps(envs: &[Environment]) -> BTreeMap<String, Arc<DeclaredDeps>> {
+    let mut out: BTreeMap<String, Arc<DeclaredDeps>> = BTreeMap::new();
+    for env in envs {
+        let Some(dev) = env.dev_package() else {
+            continue;
+        };
+        out.entry(dev.name)
+            .or_insert_with(|| Arc::new(env.direct_deps.keys().cloned().collect()));
+    }
+    out
+}
+
 /// Harvest several resolved environments (one per workspace folder) into one
 /// merged library. The system index is harvested once, from the first
 /// environment with a located installation; depot packages merge by name with
@@ -160,6 +193,7 @@ pub fn harvest_libraries(envs: &[Environment]) -> HarvestedLibrary {
         lib.workspaces.push(dev.name);
     }
     lib.workspaces.sort();
+    lib.declared_deps = declared_deps(envs);
     lib
 }
 
@@ -222,6 +256,7 @@ pub fn harvest_libraries_parallel(
         lib.workspaces.push(dev.name);
     }
     lib.workspaces.sort();
+    lib.declared_deps = declared_deps(envs);
     lib
 }
 

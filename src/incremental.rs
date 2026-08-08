@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use salsa::{Durability, Setter};
 
-use crate::index::PackageIndex;
+use crate::index::{DeclaredDeps, PackageIndex};
 use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits};
 use crate::project::{self, IncludeEdge};
 use crate::resolve::{
@@ -67,6 +67,24 @@ pub struct LibraryPackages(pub BTreeMap<String, Arc<PackageIndex>>);
 /// go-to-definition joins a root with a relative path to reach the real file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LibraryRoots(pub BTreeMap<String, PathBuf>);
+
+/// Each workspace package's declared direct dependencies (its project's
+/// `Project.toml` `[deps]`), keyed by package name — see
+/// [`HarvestedLibrary::declared_deps`](crate::index::HarvestedLibrary::declared_deps).
+/// Its own salsa input rather than a [`LibraryIndex`] field: it comes from the
+/// project files, not the harvest, and changes on a `Project.toml` edit rather
+/// than a re-harvest.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LibraryDeclaredDeps(pub BTreeMap<String, Arc<DeclaredDeps>>);
+
+/// The workspace packages' declared dependency sets, as a HIGH-durability
+/// singleton input (see [`LibraryDeclaredDeps`]). Absent until the environment
+/// resolves, which leaves `unresolved-import` silent.
+#[salsa::input(singleton)]
+pub struct ProjectDeps {
+    #[returns(ref)]
+    pub declared: LibraryDeclaredDeps,
+}
 
 /// The whole harvested library, as a single HIGH-durability salsa input. One
 /// input holds every package (rather than one input per package): the library
@@ -1054,6 +1072,37 @@ impl IncrementalDatabase {
         self.set_library(packages, roots, workspaces);
     }
 
+    /// Replace the workspace packages' declared dependency sets, at HIGH
+    /// durability. Kept apart from [`set_library`](Self::set_library) because it
+    /// tracks the project files rather than the harvest: a `Project.toml` edit
+    /// changes it without a re-harvest, and a re-harvest leaves it alone.
+    pub fn set_declared_deps(&mut self, declared: BTreeMap<String, Arc<DeclaredDeps>>) {
+        let declared = LibraryDeclaredDeps(declared);
+        match ProjectDeps::try_get(self) {
+            Some(input) => {
+                input
+                    .set_declared(self)
+                    .with_durability(Durability::HIGH)
+                    .to(declared);
+            }
+            None => {
+                let _ = ProjectDeps::builder(declared)
+                    .durability(Durability::HIGH)
+                    .new(self);
+            }
+        }
+    }
+
+    /// The declared direct dependencies of the workspace package `name`, when
+    /// the environment has resolved and that package is one under development.
+    pub fn declared_deps(&self, name: &str) -> Option<Arc<DeclaredDeps>> {
+        ProjectDeps::try_get(self)?
+            .declared(self)
+            .0
+            .get(name)
+            .cloned()
+    }
+
     /// Insert or replace a single package's index, keeping the rest (and the
     /// roots and workspace names). Cheap: the map's other entries are `Arc`
     /// pointer clones. This is the on-save re-harvest path for a workspace
@@ -1324,6 +1373,12 @@ impl Analysis {
     /// The names of the packages under development, empty when none.
     pub fn workspace_packages(&self) -> Vec<String> {
         self.0.workspace_packages()
+    }
+
+    /// The declared direct dependencies of the workspace package `name`. See
+    /// [`IncrementalDatabase::declared_deps`].
+    pub fn declared_deps(&self, name: &str) -> Option<Arc<DeclaredDeps>> {
+        self.0.declared_deps(name)
     }
 
     /// The workspace package and host module path of `path`, when `path` is one

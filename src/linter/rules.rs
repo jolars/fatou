@@ -60,7 +60,7 @@ use rowan::{TextRange, TextSize};
 
 use crate::ast::{AstToken, CallExpr, Expr};
 use crate::config::{LintConfig, RulesConfig};
-use crate::index::PackageIndex;
+use crate::index::{DeclaredDeps, PackageIndex};
 use crate::julia_version::VersionRange;
 use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::include_graph::IncludeProblem;
@@ -115,6 +115,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::RedefinedConstant),
         Box::new(correctness::TypePiracy),
         Box::new(correctness::UnreachableCode),
+        Box::new(correctness::UnresolvedImport),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::MissingComparison),
@@ -523,6 +524,16 @@ impl<'a> RuleContext<'a> {
 pub struct ResolutionContext<'a> {
     pub packages: &'a dyn PackageSource,
     pub workspace: Option<(Arc<PackageIndex>, ModulePath)>,
+    /// The `Project.toml` `[deps]` of the project this file belongs to — what
+    /// its `using`/`import` clauses may name — when the file is a *source file
+    /// of a package under development* and the caller knows its project.
+    ///
+    /// The soundness gate for `unresolved-import` lives here rather than in the
+    /// rule: only the driver knows whether a file loads against the package's
+    /// own project at all. A script, a `test/` file (which resolves against its
+    /// own environment, `[extras]` included), or a loose buffer therefore
+    /// carries `None`, and the rule stays silent.
+    pub declared_deps: Option<Arc<DeclaredDeps>>,
 }
 
 pub trait Rule: Send + Sync {
@@ -555,6 +566,16 @@ pub trait Rule: Send + Sync {
     /// (`julia-version-compat`) need this; the default `None` matches every
     /// version-agnostic rule. All of a rule's examples share this target.
     fn example_julia_target(&self) -> Option<VersionRange> {
+        None
+    }
+
+    /// The project the rule's [`examples`](Self::examples) are linted inside:
+    /// the `Project.toml` `[deps]` names a package source file could load. The
+    /// counterpart of [`example_julia_target`](Self::example_julia_target) for
+    /// the project tier, and needed only by `unresolved-import`, whose findings
+    /// exist only relative to a declared dependency set. `None` — the default —
+    /// lints the examples as a loose file, exactly as the CLI does.
+    fn example_declared_deps(&self) -> Option<&'static [&'static str]> {
         None
     }
 
@@ -896,6 +917,7 @@ mod base_resolution_tests {
                 ResolutionContext {
                     packages,
                     workspace: ws.map(|pkg| (pkg, Vec::new())),
+                    declared_deps: None,
                 }
             }));
         ask(&ctx, &parsed.cst)

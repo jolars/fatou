@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::config::LintConfig;
 use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
-use crate::index::{PackageIndex, build_system_index};
+use crate::index::{DeclaredDeps, PackageIndex, build_system_index};
 use crate::julia_version::VersionRange;
 use rowan::TextRange;
 
@@ -78,20 +78,46 @@ impl std::error::Error for LintError {}
 pub enum ProjectContext<'a> {
     SystemOnly,
     Harvested(&'a crate::index::HarvestedLibrary),
+    /// The built-in snapshot plus a declared dependency set, as if the file were
+    /// a source file of a package whose `Project.toml` `[deps]` list those
+    /// names. The docs generator's stand-in for a real project, so
+    /// `unresolved-import`'s examples render (see
+    /// [`Rule::example_declared_deps`](crate::linter::rules::Rule::example_declared_deps));
+    /// no discovery path produces it.
+    SystemInProject(&'a DeclaredDeps),
 }
 
 impl<'a> ProjectContext<'a> {
     /// The [`ResolutionContext`] for the file at `path`, if any.
+    ///
+    /// The declared dependency set rides along only for a *package source
+    /// file*: a file the harvest placed inside a workspace package, whose
+    /// `using`/`import` clauses really do load against that package's own
+    /// project. Everything else — a script, a `test/` file, a loose buffer —
+    /// gets `None` and leaves `unresolved-import` silent.
     fn resolution_for(self, path: Option<&Path>) -> Option<ResolutionContext<'a>> {
         match self {
             ProjectContext::SystemOnly => Some(ResolutionContext {
                 packages: system_snapshot(),
                 workspace: None,
+                declared_deps: None,
             }),
-            ProjectContext::Harvested(lib) => Some(ResolutionContext {
-                packages: &lib.packages,
-                workspace: path.and_then(|p| lib.workspace_member(p)),
+            ProjectContext::SystemInProject(deps) => Some(ResolutionContext {
+                packages: system_snapshot(),
+                workspace: None,
+                declared_deps: Some(Arc::new(deps.clone())),
             }),
+            ProjectContext::Harvested(lib) => {
+                let workspace = path.and_then(|p| lib.workspace_member(p));
+                let declared_deps = workspace
+                    .as_ref()
+                    .and_then(|(pkg, _)| lib.declared_deps.get(&pkg.name).cloned());
+                Some(ResolutionContext {
+                    packages: &lib.packages,
+                    workspace,
+                    declared_deps,
+                })
+            }
         }
     }
 }
@@ -177,7 +203,7 @@ pub fn check_paths_with_config(
 /// Lint an in-memory document with no path (e.g. stdin).
 pub fn check_document(text: &str) -> LintFileReport {
     let (rules, _) = ResolvedRules::resolve(&LintConfig::default());
-    check_text(None, text, &rules)
+    check_text(None, text, &rules, ProjectContext::SystemOnly)
 }
 
 /// Lint `text` under `config`, attributing findings to `path`. Used by the docs
@@ -195,14 +221,40 @@ pub fn check_source_with_target(
     config: &LintConfig,
     julia_target: Option<VersionRange>,
 ) -> LintFileReport {
+    check_source_in_project(path, text, config, julia_target, None)
+}
+
+/// Like [`check_source_with_target`], but linting `text` as a source file of a
+/// package whose `Project.toml` `[deps]` are `declared_deps`. `None` keeps the
+/// loose-file reading of [`check_source_with_target`]. The docs generator uses
+/// this to render the examples of the project-gated rules
+/// (`unresolved-import`), which have no findings outside a project.
+pub fn check_source_in_project(
+    path: Option<&Path>,
+    text: &str,
+    config: &LintConfig,
+    julia_target: Option<VersionRange>,
+    declared_deps: Option<&[&str]>,
+) -> LintFileReport {
     let (rules, _) = ResolvedRules::resolve(config);
     let rules = rules.with_julia_target(julia_target);
-    check_text(path, text, &rules)
+    let deps: Option<DeclaredDeps> =
+        declared_deps.map(|names| names.iter().map(|n| (*n).to_string()).collect());
+    let project = match &deps {
+        Some(deps) => ProjectContext::SystemInProject(deps),
+        None => ProjectContext::SystemOnly,
+    };
+    check_text(path, text, &rules, project)
 }
 
 /// Single-file entry: parse, follow the file's own include chains (no lint-set
 /// siblings to seed — used for stdin, docs examples, and tests), then lint.
-fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFileReport {
+fn check_text(
+    path: Option<&Path>,
+    text: &str,
+    rules: &ResolvedRules,
+    project: ProjectContext<'_>,
+) -> LintFileReport {
     let parsed = parse(text);
     let include_problems = match path {
         // A pathless document has no base directory to resolve includes
@@ -219,7 +271,7 @@ fn check_text(path: Option<&Path>, text: &str, rules: &ResolvedRules) -> LintFil
         &parsed.diagnostics,
         rules,
         &include_problems,
-        ProjectContext::SystemOnly,
+        project,
     )
 }
 
