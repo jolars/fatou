@@ -132,7 +132,12 @@ fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
 /// The rules that are sound only with the resolution context a workspace
 /// member file carries: the server adds them to the member rule set, while
 /// the CLI leaves them opt-in via `--select`.
-const WORKSPACE_MEMBER_RULES: &[&str] = &["undefined-name", "call-arity", "unresolved-import"];
+const WORKSPACE_MEMBER_RULES: &[&str] = &[
+    "undefined-name",
+    "call-arity",
+    "unresolved-import",
+    "function-has-no-methods",
+];
 
 /// The rule sets the server lints with, resolved once per configuration (the
 /// dispatch table included) rather than per lint run: the configured set

@@ -138,7 +138,7 @@ matching `.claude/rules/` file.
   project/depot the way Julia's loader does. Falls back to a baked-in Base/Core
   export list when no install is found.
 - **Linter** (`src/linter/`) — **purely semantic**; anything `format --check`
-  catches belongs to the formatter. 35 rules across `correctness`, `suspicious`,
+  catches belongs to the formatter. 36 rules across `correctness`, `suspicious`,
   and `readability`, with autofixes, `# fatou-ignore` suppression, and a
   generated rule reference.
 - **Language server** (`src/lsp.rs` + `src/lsp/`) — stdio JSON-RPC on

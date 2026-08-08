@@ -549,11 +549,31 @@ Needs modest new infrastructure:
   `TypeAnnotation::pattern`/`ty`, `QuoteSym::expr`, and
   `Parameters::args`/`keyword_args` for it. No fix: nothing in the source says
   whether the annotation or the default is the half that is wrong.
-- [ ] `function-has-no-methods` (correctness, res, warning, no fix): calling `f`
+- [x] `function-has-no-methods` (correctness, res, warning, no fix): calling `f`
   where every visible definition is a bare forward declaration
   (`function f end`), so the call can only raise a `MethodError`. Natural
   extension of `call-arity`'s callee resolution; gate on workspace resolution,
-  since an external package may add the method. (FunctionHasNoMethods)
+  since an external package may add the method. (FunctionHasNoMethods) Landed as
+  a `check_file` pass sharing `call-arity`'s tiers — the file's own
+  `harvest_tree` plus the workspace package's index — and inverting its
+  placeholder guard: where `call-arity` bails on a group holding a bodyless
+  method, this rule fires when the union holds *nothing but* placeholders. The
+  span is the callee token, and there is no fix: nothing in the source says
+  which method was meant. **The closed world is the gate**: only a
+  `Resolution::Binding` (a global `BindingKind::Function`) or
+  `Resolution::Workspace` name is checked, so a `using`'d or Base/Core name —
+  whose owner may define methods in a file no harvest here covers — is never
+  flagged. Two shapes stay exempt inside the workspace as well: a name the
+  package `export`s or declares `public`, since a bare declaration is most often
+  an interface hook for a package extension (`ext/` sits outside the harvest's
+  include closure) or a downstream package to fill in, and a name that also
+  names a type, whose constructors the harvest does not record. Off by default
+  and wired into `WORKSPACE_MEMBER_RULES`/`RESOLUTION_RULES` alongside
+  `call-arity`. Known false positive, inherited from the harvest: a method a
+  macro *generates* from non-definition arguments is invisible — a
+  definition-shaped argument (`@inline f(x) = x`) is harvested, and the
+  `@eval`-in-a-loop factory trips the file-wide `eval` bail-out, but a bespoke
+  DSL macro does not.
 - [ ] `shadowed-base-name` (suspicious, sem + res, warning, no fix): binding a
   name exported by Base and then using it in call position. Stronger in Julia
   than the R rule it comes from — Julia has one namespace and no call-position

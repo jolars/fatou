@@ -112,6 +112,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::DuplicateMethod),
         Box::new(correctness::JuliaVersionCompat),
         Box::new(correctness::CallArity),
+        Box::new(correctness::FunctionHasNoMethods),
         Box::new(correctness::RedefinedConstant),
         Box::new(correctness::TypePiracy),
         Box::new(correctness::UnreachableCode),

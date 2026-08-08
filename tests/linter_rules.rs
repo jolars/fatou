@@ -4960,3 +4960,117 @@ fn kwarg_default_mismatch_names_both_types() {
     assert!(found[0].contains("Int"), "{found:?}");
     assert!(found[0].contains("Float64"), "{found:?}");
 }
+
+// --- function-has-no-methods -----------------------------------------------
+
+#[test]
+fn function_has_no_methods_flags_a_call_to_a_bare_declaration() {
+    let msgs = findings(
+        "function-has-no-methods",
+        "function process end\n\nprocess(1)\n",
+    );
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("process"), "{msgs:?}");
+}
+
+#[test]
+fn function_has_no_methods_accepts_a_declaration_with_a_method() {
+    // The declaration is a forward reference; the method makes the call fine,
+    // whichever order the two are written in.
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "function process end\nprocess(x) = x\nprocess(1)\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "function process end\nfunction process(x)\n    x\nend\nprocess(1)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn function_has_no_methods_sees_a_method_under_a_wrapper_macro() {
+    // `@inline f(x) = x` still defines a method: the harvest recurses into a
+    // macro call's definition-shaped arguments.
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "function process end\n@inline process(x) = x\nprocess(1)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn function_has_no_methods_ignores_library_names() {
+    assert_eq!(count("function-has-no-methods", "sqrt(2)\nprintln(1)\n"), 0);
+}
+
+#[test]
+fn function_has_no_methods_exempts_a_declared_api_hook() {
+    // An `export`ed or `public` bare declaration is an interface hook a
+    // package extension or a downstream package fills in.
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "module M\nexport process\n\nfunction process end\n\nprocess(1)\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "module M\npublic process\n\nfunction process end\n\nprocess(1)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn function_has_no_methods_ignores_a_same_named_type() {
+    // `Foo` is a type in one module and a bare declaration in another: the
+    // union cannot tell which the call reaches, so it stays quiet.
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "module A\nstruct Foo end\nend\n\nmodule B\nfunction Foo end\n\nFoo(1)\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn function_has_no_methods_is_silent_when_the_file_evals() {
+    // `@eval` can define the missing method at runtime.
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "function process end\nfor T in (Int, Float64)\n    @eval process(x::$T) = x\nend\nprocess(1)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn function_has_no_methods_skips_quoted_and_macro_call_sites() {
+    // Quoted code is data, and a macro may rewrite what it is handed.
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "function process end\nex = :(process(1))\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "function-has-no-methods",
+            "function process end\n@mac process(1)\n"
+        ),
+        0
+    );
+}

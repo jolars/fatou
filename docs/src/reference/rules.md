@@ -449,6 +449,26 @@ warning: call-arity
   | ^^^^^^^^^^ no method of `half` takes 2 positional arguments (methods accept 1)
 ```
 
+## `function-has-no-methods`
+
+Flag a call to a function whose every visible definition is a bodyless `function f end` declaration. Such a function has an empty method table, so the call raises `MethodError` whatever it passes. Only a name the closed world defines is checked — one belonging to this file or to the enclosing workspace package — since the owner of a `using`'d or Base/Core name may add methods elsewhere. A declaration the package `export`s or declares `public` is exempt as an interface hook for a package extension or a downstream package to implement, as is a name that also names a type. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and call sites in macro calls or quoted code are exempt. Off by default: like `call-arity` the rule needs project context to be sound, so the language server enables it for workspace member files while the CLI leaves it opt-in.
+
+`normalize` is declared but never given a method:
+
+```julia
+function normalize end
+
+normalize("data")
+```
+
+```text
+warning: function-has-no-methods
+ --> example.jl:3:1
+  |
+3 | normalize("data")
+  | ^^^^^^^^^ `normalize` has no methods: every definition is a bodyless `function normalize end`
+```
+
 ## `redefined-constant`
 
 Flag a write that redefines a constant name, or defines over a name that already holds a value: reassigning a `const` binding, assigning to a global function, type, or module name (those bind implicit constants), defining a function over a plain value, or declaring a value `const` after the fact. All of these error at runtime when both sites execute. A definition and a write in disjoint branches of the same `if` are exempt — only one branch runs. Adding a method to a function and defining an outer constructor on a type are legal and stay silent. No fix: the rule cannot know which of the two definitions the author meant to keep.
