@@ -19,16 +19,16 @@ use lsp_types::{
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
     DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams, DocumentLink,
     DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
-    FileChangeType, FileEvent, FoldingRange, FoldingRangeKind, FoldingRangeParams,
+    FileChangeType, FileEvent, FileRename, FoldingRange, FoldingRangeKind, FoldingRangeParams,
     FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
     PartialResultParams, Position, PositionEncodingKind, ProgressParams, ProgressParamsValue,
     PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RegistrationParams,
-    RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensDeltaParams,
-    SemanticTokensFullDeltaResult, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
-    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
-    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
+    RenameFilesParams, RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens,
+    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams, SignatureHelp,
+    SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, TextEdit, TypeHierarchyItem,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
     VersionedTextDocumentIdentifier, WindowClientCapabilities, WorkDoneProgress,
     WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
@@ -3760,6 +3760,211 @@ fn poll_references_spanning(
         }
         std::thread::sleep(Duration::from_millis(25));
     }
+}
+
+/// Resend `workspace/willRenameFiles` until it answers with edits — before the
+/// harvest lands, no file is a seeded member and the honest answer is `null` —
+/// and while it is landing, only the members seeded so far can contribute, so
+/// this waits for the edit to span exactly `spanning` files rather than taking
+/// the first non-null answer.
+fn poll_will_rename(
+    client: &Connection,
+    files: Vec<FileRename>,
+    spanning: usize,
+    deadline: Duration,
+) -> WorkspaceEdit {
+    static POLL_ID: AtomicU64 = AtomicU64::new(400);
+    let start = Instant::now();
+    loop {
+        let id = i32::try_from(POLL_ID.fetch_add(1, Ordering::Relaxed)).unwrap();
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "workspace/willRenameFiles".to_string(),
+                params: serde_json::to_value(RenameFilesParams {
+                    files: files.clone(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        let value = recv_response(client, RequestId::from(id)).result().unwrap();
+        let edit: Option<WorkspaceEdit> = serde_json::from_value(value).unwrap();
+        let covered = edit
+            .as_ref()
+            .and_then(|edit| edit.changes.as_ref())
+            .map_or(0, |changes| changes.len());
+        if covered == spanning {
+            return edit.expect("a non-empty edit spans at least one file");
+        }
+        assert!(
+            start.elapsed() < deadline,
+            "willRenameFiles never spanned {spanning} file(s) within {deadline:?}: \
+             got {covered} — the harvest or member seeding likely failed"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// The replacement texts `edit` carries for `path`, in position order.
+fn new_texts(edit: &WorkspaceEdit, path: &Path) -> Vec<String> {
+    let uri = file_uri(path);
+    edit.changes
+        .as_ref()
+        .expect("changes")
+        .get(&uri)
+        .map(|edits| edits.iter().map(|e| e.new_text.clone()).collect())
+        .unwrap_or_default()
+}
+
+fn file_rename(old: &Path, new: &Path) -> FileRename {
+    FileRename {
+        old_uri: file_uri(old).as_str().to_string(),
+        new_uri: file_uri(new).as_str().to_string(),
+    }
+}
+
+/// The rename file operations reach the wire, so an explorer move actually
+/// asks the server for edits. Both filters must survive serialization: a client
+/// only sends folder renames if the `folder` pattern kind is advertised.
+#[test]
+fn advertises_rename_file_operations() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    match client.receiver.recv().unwrap() {
+        Message::Response(resp) => {
+            let operations =
+                resp.result().unwrap()["capabilities"]["workspace"]["fileOperations"].clone();
+            for kind in ["willRename", "didRename"] {
+                let kinds: Vec<serde_json::Value> = operations[kind]["filters"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{kind} filters"))
+                    .iter()
+                    .map(|filter| filter["pattern"]["matches"].clone())
+                    .collect();
+                assert_eq!(
+                    kinds,
+                    [serde_json::json!("file"), serde_json::json!("folder")],
+                    "{kind}"
+                );
+            }
+        }
+        other => panic!("expected an InitializeResult, got {other:?}"),
+    }
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(2),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(2));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// Moving a member file, then a whole folder, rewrites the `include` literals
+/// that name what moved *and* rebases the moved files' own relative includes.
+/// One server for both phases: the `JULIA_*` env is process-global, so a second
+/// env-setting test would race this one's detached harvester.
+#[test]
+fn serves_will_rename_files() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-will-rename");
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\ninclude(\"a.jl\")\ninclude(\"sub/c.jl\")\nend\n",
+    );
+    write_file(&pkg.path.join("src/a.jl"), "greet(a) = a\n");
+    write_file(&pkg.path.join("src/sub/c.jl"), "include(\"../a.jl\")\n");
+
+    let depot = TempDir::new("fatou-lsp-will-rename-depot");
+    let _guard = isolate_env(&pkg, &depot);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_root(&client, &file_uri(&pkg.path));
+
+    let entry = pkg.path.join("src/MyPkg.jl");
+    let nested = pkg.path.join("src/sub/c.jl");
+
+    // Renaming `src/a.jl` re-spells it for both of its includers, each against
+    // its own directory.
+    let edit = poll_will_rename(
+        &client,
+        vec![file_rename(
+            &pkg.path.join("src/a.jl"),
+            &pkg.path.join("src/moved.jl"),
+        )],
+        2,
+        Duration::from_secs(10),
+    );
+    assert_eq!(new_texts(&edit, &entry), ["moved.jl"]);
+    assert_eq!(new_texts(&edit, &nested), ["../moved.jl"]);
+
+    // Renaming the `src/sub` *folder* moves `c.jl` with it: its includer's
+    // literal grows a segment, and its own include walks up one more level.
+    let edit = poll_will_rename(
+        &client,
+        vec![file_rename(
+            &pkg.path.join("src/sub"),
+            &pkg.path.join("src/deep/sub"),
+        )],
+        2,
+        Duration::from_secs(10),
+    );
+    assert_eq!(new_texts(&edit, &entry), ["deep/sub/c.jl"]);
+    assert_eq!(new_texts(&edit, &nested), ["../../a.jl"]);
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(90),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(90));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
 }
 
 /// A single test covers both features against one initialized, harvested server:

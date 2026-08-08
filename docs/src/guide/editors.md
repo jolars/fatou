@@ -3,9 +3,10 @@
 Fatou includes a language server (`fatou lsp`, stdio JSON-RPC) that any LSP
 client can drive. It provides formatting (whole document and range), lint and
 parse diagnostics with quick fixes, completion, hover, signature help, go-to
-definition, references, rename, document and workspace symbols, call and type
-hierarchy, folding ranges, document links, selection ranges, and semantic
-tokens.
+definition, references, rename (of symbols, and of files and folders — moving a
+file rewrites the `include` paths that name it), document and workspace symbols,
+call and type hierarchy, folding ranges, document links, selection ranges, and
+semantic tokens.
 
 ## Prerequisites
 

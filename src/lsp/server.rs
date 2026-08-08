@@ -9,11 +9,13 @@ use lsp_server::{Connection, Message};
 use lsp_types::{
     CallHierarchyServerCapability, ClientCapabilities, CodeActionKind, CodeActionOptions,
     CodeActionProviderCapability, CompletionOptions, DiagnosticOptions,
-    DiagnosticServerCapabilities, DocumentLinkOptions, FoldingRangeProviderCapability,
+    DiagnosticServerCapabilities, DocumentLinkOptions, FileOperationFilter, FileOperationPattern,
+    FileOperationPatternKind, FileOperationRegistrationOptions, FoldingRangeProviderCapability,
     HoverProviderCapability, InitializeParams, OneOf, PositionEncodingKind, RenameOptions,
     SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
     ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, WorkspaceFoldersServerCapabilities,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
+    WorkspaceFileOperationsServerCapabilities, WorkspaceFoldersServerCapabilities,
     WorkspaceServerCapabilities,
 };
 
@@ -253,9 +255,38 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
                 supported: Some(true),
                 change_notifications: None,
             }),
-            file_operations: None,
+            file_operations: Some(WorkspaceFileOperationsServerCapabilities {
+                // `willRename` returns the edits that keep the `include` graph
+                // intact; `didRename` refreshes membership for a client that
+                // cannot register file watchers dynamically. Advertised
+                // unconditionally: a server capability the client does not
+                // implement is simply ignored, unlike a registration.
+                will_rename: Some(rename_file_operations()),
+                did_rename: Some(rename_file_operations()),
+                ..Default::default()
+            }),
         }),
         ..Default::default()
+    }
+}
+
+/// The file-operation filters both rename capabilities register: `.jl` sources,
+/// plus any folder (a folder rename moves every source under it, and the
+/// client reports only the folder).
+fn rename_file_operations() -> FileOperationRegistrationOptions {
+    let filter = |glob: &str, matches| FileOperationFilter {
+        scheme: Some("file".to_string()),
+        pattern: FileOperationPattern {
+            glob: glob.to_string(),
+            matches: Some(matches),
+            options: None,
+        },
+    };
+    FileOperationRegistrationOptions {
+        filters: vec![
+            filter("**/*.jl", FileOperationPatternKind::File),
+            filter("**", FileOperationPatternKind::Folder),
+        ],
     }
 }
 
@@ -408,6 +439,7 @@ fn main_loop(
 }
 
 /// A signal from the main loop to the workspace harvester thread.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum HarvestSignal {
     /// A source file changed on disk (a save, or a watched create, change, or
     /// delete): re-harvest the workspace package owning it, if any.
@@ -578,6 +610,28 @@ mod tests {
                 ..Default::default()
             }),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn advertises_file_operation_rename_filters() {
+        let caps = capabilities_json(PositionEncoding::Utf16, false);
+        let operations = &caps["workspace"]["fileOperations"];
+        for kind in ["willRename", "didRename"] {
+            let filters = operations[kind]["filters"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{kind} filters"));
+            let described: Vec<(&str, &str)> = filters
+                .iter()
+                .map(|filter| {
+                    (
+                        filter["pattern"]["glob"].as_str().expect("a glob"),
+                        filter["pattern"]["matches"].as_str().expect("a kind"),
+                    )
+                })
+                .collect();
+            assert_eq!(described, [("**/*.jl", "file"), ("**", "folder")]);
+            assert!(filters.iter().all(|filter| filter["scheme"] == "file"));
         }
     }
 

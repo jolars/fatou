@@ -7,7 +7,7 @@ use lsp_server::{ErrorCode, Message, RequestId, Response};
 
 use lsp_types::{
     CallHierarchyItem, CodeActionOrCommand, CompletionItem, CompletionResponse,
-    DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse,
+    DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse, FileRename,
     FullDocumentDiagnosticReport, GotoDefinitionResponse, Position, Range,
     RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
     TypeHierarchyItem, UnchangedDocumentDiagnosticReport, Uri, WorkspaceSymbolResponse,
@@ -33,6 +33,7 @@ use super::lint::ServerRules;
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
+use super::rename_files::will_rename_files_via_db;
 use super::result_id::content_hash;
 use super::selection::selection_ranges_via_db;
 use super::semantic_tokens::{semantic_tokens_delta, semantic_tokens_via_db};
@@ -217,6 +218,16 @@ pub(crate) enum ReadJob {
         new_name: String,
         sender: ReadReply,
     },
+    /// Document-less: a rename batch names files the editor is about to move,
+    /// most of which have no open buffer, so the worker reads every scanned
+    /// file's text off the snapshot. `open_docs` widens the scan past the
+    /// seeded members to whatever the client currently has open.
+    WillRenameFiles {
+        id: RequestId,
+        files: Vec<FileRename>,
+        open_docs: Vec<PathBuf>,
+        sender: ReadReply,
+    },
     PrepareCallHierarchy {
         id: RequestId,
         uri: Uri,
@@ -284,6 +295,7 @@ impl ReadJob {
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
             ReadJob::PrepareRename { id, sender, .. } => (id, sender),
             ReadJob::Rename { id, sender, .. } => (id, sender),
+            ReadJob::WillRenameFiles { id, sender, .. } => (id, sender),
             ReadJob::PrepareCallHierarchy { id, sender, .. } => (id, sender),
             ReadJob::CallHierarchyIncoming { id, sender, .. } => (id, sender),
             ReadJob::CallHierarchyOutgoing { id, sender, .. } => (id, sender),
@@ -567,6 +579,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
                     Err(message) => Response::new_err(id, ErrorCode::InvalidParams as i32, message),
                 };
             let _ = sender.send(Message::Response(response));
+        }
+        ReadJob::WillRenameFiles {
+            id,
+            files,
+            open_docs,
+            sender,
+        } => {
+            let edit = will_rename_files_via_db(&snapshot, &files, &open_docs, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, edit)));
         }
         ReadJob::PrepareCallHierarchy {
             id,

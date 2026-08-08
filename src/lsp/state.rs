@@ -3,13 +3,14 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use lsp_server::{ErrorCode, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
     Cancel, DidChangeConfiguration, DidChangeTextDocument, DidChangeWatchedFiles,
-    DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, LogMessage,
+    DidCloseTextDocument, DidOpenTextDocument, DidRenameFiles, DidSaveTextDocument, LogMessage,
     Notification as NotificationTrait, PublishDiagnostics,
 };
 use lsp_types::request::{
@@ -19,7 +20,7 @@ use lsp_types::request::{
     HoverRequest, PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
     Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
     SemanticTokensFullDeltaRequest, SemanticTokensFullRequest, SignatureHelpRequest,
-    TypeHierarchyPrepare, TypeHierarchySubtypes, TypeHierarchySupertypes,
+    TypeHierarchyPrepare, TypeHierarchySubtypes, TypeHierarchySupertypes, WillRenameFiles,
     WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
 };
 use lsp_types::{
@@ -31,10 +32,10 @@ use lsp_types::{
     DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
     GlobPattern, GotoDefinitionParams, HoverParams, LogMessageParams, MessageType, NumberOrString,
-    PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameParams,
-    SelectionRangeParams, SemanticTokensDeltaParams, SemanticTokensParams, SignatureHelpParams,
-    TextDocumentPositionParams, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
+    PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameFilesParams,
+    RenameParams, SelectionRangeParams, SemanticTokensDeltaParams, SemanticTokensParams,
+    SignatureHelpParams, TextDocumentPositionParams, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
 };
 
 use crate::config::CONFIG_FILE_NAME;
@@ -209,6 +210,7 @@ impl GlobalState {
             DocumentHighlightRequest::METHOD => self.on_document_highlight(req),
             PrepareRenameRequest::METHOD => self.on_prepare_rename(req),
             Rename::METHOD => self.on_rename(req),
+            WillRenameFiles::METHOD => self.on_will_rename_files(req),
             CallHierarchyPrepare::METHOD => self.on_prepare_call_hierarchy(req),
             CallHierarchyIncomingCalls::METHOD => self.on_call_hierarchy_incoming(req),
             CallHierarchyOutgoingCalls::METHOD => self.on_call_hierarchy_outgoing(req),
@@ -648,6 +650,30 @@ impl GlobalState {
         });
     }
 
+    /// `workspace/willRenameFiles` is not tied to a text document: it names
+    /// files the editor is about to move, most of them closed. The scan runs
+    /// off the snapshot's seeded members, widened by the open buffers so a
+    /// non-member the harvest never reached still gets its includes fixed.
+    fn on_will_rename_files(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<RenameFilesParams>(WillRenameFiles::METHOD) else {
+            self.respond_err(id, "invalid willRenameFiles params");
+            return;
+        };
+        let open_docs = self
+            .documents
+            .keys()
+            .filter_map(uri::to_path)
+            .collect::<Vec<_>>();
+        let reply = self.read_reply(id.clone(), None);
+        self.dispatch_read(ReadJob::WillRenameFiles {
+            id,
+            files: params.files,
+            open_docs,
+            sender: reply,
+        });
+    }
+
     fn on_prepare_call_hierarchy(&mut self, req: Request) {
         let id = req.id.clone();
         let Ok((_, params)) =
@@ -878,6 +904,11 @@ impl GlobalState {
                     self.on_watched_files(params);
                 }
             }
+            DidRenameFiles::METHOD => {
+                if let Ok(params) = note.extract::<RenameFilesParams>(DidRenameFiles::METHOD) {
+                    self.on_did_rename_files(params);
+                }
+            }
             DidChangeConfiguration::METHOD => {
                 if let Ok(params) =
                     note.extract::<DidChangeConfigurationParams>(DidChangeConfiguration::METHOD)
@@ -952,6 +983,66 @@ impl GlobalState {
                 continue;
             }
             if !self.documents.contains_key(&event.uri) {
+                let _ = self.sync_tx.send(path.clone());
+            }
+            if !environment_changed {
+                let _ = self.harvest_tx.send(HarvestSignal::Source(path));
+            }
+        }
+        if environment_changed {
+            let _ = self.harvest_tx.send(HarvestSignal::Environment);
+        }
+    }
+
+    /// Handle a `workspace/didRenameFiles` batch: refresh what the move
+    /// invalidated, the way [`on_watched_files`](Self::on_watched_files) does
+    /// for a delete/create pair. Largely redundant with the watched-file
+    /// events an explorer rename also produces — its point is the client that
+    /// cannot register watchers dynamically and so never sends them.
+    ///
+    /// A renamed *folder* names no file in particular, and walking it would put
+    /// directory I/O on the main loop, so it escalates to one environment
+    /// re-resolve (which subsumes every per-package re-harvest) plus a
+    /// configuration re-derive — the folder may have carried a `fatou.toml` or
+    /// a project file along. Folder renames are rare enough for that to be the
+    /// cheap choice.
+    fn on_did_rename_files(&mut self, params: RenameFilesParams) {
+        let mut config_changed = false;
+        let mut environment_changed = false;
+        let mut sources: Vec<PathBuf> = Vec::new();
+        for rename in &params.files {
+            let paths: Vec<PathBuf> = [&rename.old_uri, &rename.new_uri]
+                .into_iter()
+                .filter_map(|text| Uri::from_str(text).ok())
+                .filter_map(|uri| uri::to_path(&uri))
+                .collect();
+            // Only the new path can be stat'd — the old one no longer exists.
+            if paths.iter().any(|path| path.is_dir()) {
+                config_changed = true;
+                environment_changed = true;
+                continue;
+            }
+            for path in paths {
+                if path
+                    .file_name()
+                    .is_some_and(|name| name == CONFIG_FILE_NAME)
+                {
+                    config_changed = true;
+                } else if is_environment_file(&path) {
+                    environment_changed = true;
+                } else if path.extension().is_some_and(|ext| ext == "jl") {
+                    sources.push(path);
+                }
+            }
+        }
+        if config_changed {
+            self.config.invalidate_discovered();
+            self.on_config_changed();
+        }
+        for path in sources {
+            // The moved-from path is gone and the moved-to one is not tracked
+            // yet; both sync as no-ops until the re-harvest settles membership.
+            if uri::from_path(&path).is_none_or(|uri| !self.documents.contains_key(&uri)) {
                 let _ = self.sync_tx.send(path.clone());
             }
             if !environment_changed {
@@ -1239,12 +1330,30 @@ mod tests {
     /// registry, version gate, and cancel paths are exercised here — those
     /// touch nothing but `documents`, `inflight_reads`, and the client sender.
     fn test_state() -> (GlobalState, Receiver<Message>) {
+        let (state, channels) = test_state_with_channels();
+        // The auxiliary receivers drop here; the methods under test only touch
+        // `documents`, `inflight_reads`, and the client sender, so a
+        // disconnected analysis/out channel is harmless.
+        (state, channels.client)
+    }
+
+    /// The receivers a dispatch test asserts on: what the state hands to the
+    /// read pool, the harvester, and the disk-sync worker.
+    struct TestChannels {
+        client: Receiver<Message>,
+        read: Receiver<ReadJob>,
+        harvest: Receiver<HarvestSignal>,
+        sync: Receiver<PathBuf>,
+    }
+
+    /// [`test_state`], keeping every auxiliary receiver alive.
+    fn test_state_with_channels() -> (GlobalState, TestChannels) {
         let (client_tx, client_rx) = unbounded();
         let (out_tx, _out_rx) = unbounded();
         let (analysis_tx, _analysis_rx) = unbounded();
-        let (read_tx, _read_rx) = unbounded();
-        let (harvest_tx, _harvest_rx) = unbounded();
-        let (sync_tx, _sync_rx) = unbounded();
+        let (read_tx, read_rx) = unbounded();
+        let (harvest_tx, harvest_rx) = unbounded();
+        let (sync_tx, sync_rx) = unbounded();
         let state = GlobalState::new(
             client_tx,
             out_tx,
@@ -1257,11 +1366,17 @@ mod tests {
             false,
             None,
         );
-        // The auxiliary receivers drop here; the methods under test only touch
-        // `documents`, `inflight_reads`, and the client sender, so a
-        // disconnected analysis/out channel is harmless. Discard any startup log.
+        // Discard any startup log.
         while client_rx.try_recv().is_ok() {}
-        (state, client_rx)
+        (
+            state,
+            TestChannels {
+                client: client_rx,
+                read: read_rx,
+                harvest: harvest_rx,
+                sync: sync_rx,
+            },
+        )
     }
 
     fn uri(path: &str) -> Uri {
@@ -1376,6 +1491,116 @@ mod tests {
             rx.try_recv().is_err(),
             "an already-answered or unknown id draws no response"
         );
+    }
+
+    /// The `.jl` path `name` under a platform-native absolute directory, plus
+    /// its `file:` URI. Unix-style `/work` is not absolute on Windows.
+    fn native(name: &str) -> (PathBuf, String) {
+        let path = if cfg!(windows) {
+            PathBuf::from(format!("C:/work/{name}"))
+        } else {
+            PathBuf::from(format!("/work/{name}"))
+        };
+        let uri = uri::from_path(&path)
+            .expect("a file URI")
+            .as_str()
+            .to_string();
+        (path, uri)
+    }
+
+    fn will_rename_request(id: i32, params: serde_json::Value) -> Request {
+        Request {
+            id: RequestId::from(id),
+            method: WillRenameFiles::METHOD.to_string(),
+            params,
+        }
+    }
+
+    #[test]
+    fn will_rename_files_dispatches_a_document_less_read_job() {
+        let (mut state, channels) = test_state_with_channels();
+        let (open_path, open_uri) = native("open.jl");
+        open(&mut state, &uri(&open_uri), 1);
+        let (_, old_uri) = native("a.jl");
+        let (_, new_uri) = native("sub/a.jl");
+
+        state.on_request(will_rename_request(
+            7,
+            serde_json::json!({ "files": [{ "oldUri": old_uri, "newUri": new_uri }] }),
+        ));
+
+        match channels.read.try_recv().expect("a read job") {
+            ReadJob::WillRenameFiles {
+                id,
+                files,
+                open_docs,
+                ..
+            } => {
+                assert_eq!(id, RequestId::from(7));
+                assert_eq!(files.len(), 1);
+                assert_eq!(files[0].old_uri, old_uri);
+                assert_eq!(open_docs, vec![open_path], "open buffers widen the scan");
+            }
+            _ => panic!("expected a WillRenameFiles job"),
+        }
+        assert!(
+            channels.client.try_recv().is_err(),
+            "the read pool answers, not the dispatch"
+        );
+
+        // Document-less, so no version can supersede it.
+        state.on_read_reply(ok_reply(7));
+        assert_eq!(next_error_code(&channels.client), None);
+    }
+
+    #[test]
+    fn malformed_will_rename_params_answer_an_error() {
+        let (mut state, channels) = test_state_with_channels();
+
+        state.on_request(will_rename_request(8, serde_json::json!({ "files": 3 })));
+
+        assert_eq!(
+            next_error_code(&channels.client),
+            Some(ErrorCode::InvalidParams as i32)
+        );
+        assert!(channels.read.try_recv().is_err(), "nothing is dispatched");
+    }
+
+    #[test]
+    fn did_rename_files_syncs_and_reharvests_both_paths() {
+        let (mut state, channels) = test_state_with_channels();
+        let (old_path, old_uri) = native("src/a.jl");
+        let (new_path, new_uri) = native("src/sub/a.jl");
+
+        state.on_did_rename_files(RenameFilesParams {
+            files: vec![lsp_types::FileRename { old_uri, new_uri }],
+        });
+
+        let synced: Vec<PathBuf> = channels.sync.try_iter().collect();
+        assert_eq!(synced, vec![old_path.clone(), new_path.clone()]);
+        let signals: Vec<HarvestSignal> = channels.harvest.try_iter().collect();
+        assert_eq!(
+            signals,
+            vec![
+                HarvestSignal::Source(old_path),
+                HarvestSignal::Source(new_path),
+            ],
+            "the vacated and the occupied path each re-harvest their package"
+        );
+    }
+
+    #[test]
+    fn a_renamed_project_file_escalates_to_an_environment_resolve() {
+        let (mut state, channels) = test_state_with_channels();
+        let (_, old_uri) = native("Project.toml");
+        let (_, new_uri) = native("JuliaProject.toml");
+
+        state.on_did_rename_files(RenameFilesParams {
+            files: vec![lsp_types::FileRename { old_uri, new_uri }],
+        });
+
+        let signals: Vec<HarvestSignal> = channels.harvest.try_iter().collect();
+        assert_eq!(signals, vec![HarvestSignal::Environment]);
     }
 
     #[test]

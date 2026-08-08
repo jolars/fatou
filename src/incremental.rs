@@ -1341,6 +1341,16 @@ impl Analysis {
         workspace_reference_index(&self.0)
     }
 
+    /// The seeded workspace member files (the [`WorkspaceFiles`] input), for a
+    /// consumer that must fan out over exactly the package's source set without
+    /// going through a query. Owned rather than borrowed: the handles are
+    /// `Copy`, matching [`workspace_packages`](Self::workspace_packages).
+    pub fn workspace_files(&self) -> Vec<SourceFile> {
+        WorkspaceFiles::try_get(&self.0)
+            .map(|files| files.files(&self.0).clone())
+            .unwrap_or_default()
+    }
+
     /// The package's transitive `include` graph (see [`project_graph`]): closure,
     /// forward/reverse edges, host modules, cycles, and unresolved includes.
     pub fn project_graph(&self) -> &ProjectGraph {

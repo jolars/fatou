@@ -96,10 +96,11 @@ and to a global user config at `~/.config/fatou/fatou.toml`.
 The language server (`fatou lsp`) runs over stdio and provides a broad set of
 features: completion (including the REPL's LaTeX and emoji input sequences, so
 `\alpha` inserts `α`), hover, go-to-definition, find references and document
-highlights, rename, document and workspace symbols, call and type hierarchy,
-signature help, code actions, folding and selection ranges, document links, and
-semantic tokens, alongside formatting (whole-document and range) and diagnostics
-(push and pull).
+highlights, rename (of symbols, and of files and folders — moving a file
+rewrites the `include` paths that name it), document and workspace symbols, call
+and type hierarchy, signature help, code actions, folding and selection ranges,
+document links, and semantic tokens, alongside formatting (whole-document and
+range) and diagnostics (push and pull).
 
 The **Fatou** extension for VS Code and Open VSX
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
