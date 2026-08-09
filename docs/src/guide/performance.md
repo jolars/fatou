@@ -1,9 +1,18 @@
 # Performance
 
-Fatou is a compiled Rust formatter competing with two Julia-native tools,
+Fatou is a compiled Rust tool where the alternatives are Julia programs running
+in a Julia runtime. This page measures the two things that difference shows up
+in: **how fast it formats**, against
 [Runic](https://github.com/fredrikekre/Runic.jl) and
-[JuliaFormatter](https://github.com/domluna/JuliaFormatter.jl). This page
-compares their formatting throughput.
+[JuliaFormatter](https://github.com/domluna/JuliaFormatter.jl), and **how much
+memory it holds**, against the Julia language servers
+[LanguageServer.jl](https://github.com/julia-vscode/LanguageServer.jl) and
+[JETLS](https://github.com/aviatesk/JETLS.jl).
+
+Every number here comes from a benchmark you can re-run: `task bench` for
+throughput and `task bench-memory` for memory. Both write a committed artifact
+that this page renders; nothing is measured at site-build time, so a figure that
+moves has to be re-measured and committed deliberately.
 
 ## Methodology
 
@@ -87,3 +96,88 @@ user would take; Fatou, a compiled binary, pays only process startup through
 are dominated by fixed startup and compilation cost, not by the file's size.
 
 {{ benchmark-cold-start }}
+
+## Memory
+
+Speed is only half of what a compiled tool buys. The other half is what stays
+resident while you edit, and there the comparison is not against the formatters
+but against the Julia language servers: **LanguageServer.jl**, which runs a Julia
+runtime and indexes the whole environment through a SymbolServer child process,
+and **JETLS**, which runs a Julia runtime and performs real type inference
+through JET.
+
+**This is not like-for-like work, and the numbers should not be read as if it
+were.** Those two servers know things Fatou cannot: JETLS can tell you a method
+call will not resolve at the types it actually gets, because it ran the
+inference. Fatou's semantics are static, with no Julia runtime anywhere in the
+pipeline, so it never pays for one. What follows measures **what an editor
+session costs**, not the price of equivalent analysis.
+
+### Methodology
+
+Every server opens the same workspace and is driven through the same scripted
+session over stdio, the boring one an editor produces on open:
+
+```text
+initialize -> initialized -> wait for the server to go quiet
+  -> didOpen the largest files in the tree -> diagnostics
+  -> documentSymbol and hover -> wait for it to go quiet again
+```
+
+What ends each phase is **quiescence, not a fixed wait**: a phase is over once
+aggregate CPU across the process tree stays under 5% of one core for five
+seconds. The servers here differ by two orders of magnitude in how long they
+take to finish thinking, and any fixed sleep would flatter one end of that range.
+
+Sampling covers the **whole process tree** every 150 ms, so a server that fans
+work out to a helper process is charged for it — which is exactly what
+LanguageServer.jl's SymbolServer pass is. Three milestones come out of each run:
+
+- **Baseline** — the handshake is done and nothing is open yet. This is the floor
+  a server costs for existing.
+- **Settled** — files open, diagnostics in, the tree quiet again. This is the
+  figure that matters: what the session holds while you work.
+- **Peak** — the maximum over every sample. For a server with a short-lived
+  helper this is the only milestone that ever sees it, which is why
+  LanguageServer.jl peaks well above where it settles.
+
+Resident set size is what the tables report. The harness also records
+proportional set size, which splits shared pages between the processes mapping
+them; at settle the two agree within a few megabytes for all three servers, so
+nothing here is an artifact of double-counted shared memory.
+
+### Setup
+
+{{ memory-meta }}
+
+### Language servers
+
+{{ memory-servers }}
+
+Two caveats worth carrying away from that table. Julia's resident memory includes
+garbage the collector has not returned yet, and there is no way to ask a server
+to collect through the protocol — these are the numbers the operating system
+sees, which is also the number your laptop feels, but a forced collection would
+hand some of it back. And every server is measured once per run rather than
+averaged over many, since each Julia server takes the better part of a minute to
+settle; Fatou's figure moves by a few megabytes between runs, and the Julia
+servers' by a few tens. The gap is two orders of magnitude wider than either, so
+neither caveat threatens the conclusion.
+
+Fatou's own footprint decomposes roughly into a fixed engine cost, the package
+index for the workspace's dependency closure, and the open files themselves. The
+index is the dominant term, and it scales with how many packages the environment
+resolves to — not with how much code you are editing.
+
+### One-shot runs
+
+The language server stays resident; `fatou format`, `fatou lint`, and `fatou
+parse` do not. For a CI job or a pre-commit hook what matters is the high-water
+mark of a process that lives for a few milliseconds.
+
+{{ memory-cli }}
+
+The whole-tree cases run the files in parallel, so their peak holds several
+syntax trees at once. That peak is a function of how many files are in flight
+together, not of how long the file list is: pointing Fatou at ten times the code
+does not cost ten times the memory.

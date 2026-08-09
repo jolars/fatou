@@ -16,6 +16,11 @@
 //!
 //! The chart itself is drawn client-side by `docs/theme/bench-charts.js` from an
 //! inline JSON payload; this crate only shapes the data and the fallback.
+//!
+//! The same page's memory markers come from a second artifact and live in
+//! [`memory`].
+
+mod memory;
 
 use mdbook_preprocessor::book::Book;
 use mdbook_preprocessor::errors::Result;
@@ -57,6 +62,7 @@ impl Preprocessor for DocUtils {
 
     fn run(&self, _ctx: &PreprocessorContext, mut book: Book) -> Result<Book> {
         insert_benchmarks(&mut book);
+        memory::insert(&mut book, project_root());
         Ok(book)
     }
 }
