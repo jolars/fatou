@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/jolars/fatou/compare/v0.12.0...v0.13.0) (2026-08-09)
+
+### Features
+- **bench:** add a language-server memory benchmark ([`599e8e5`](https://github.com/jolars/fatou/commit/599e8e5e338918785ba5895f6df5dac3c2b99ec4))
+- **linter:** add `shadowed-base-name` ([`edd3170`](https://github.com/jolars/fatou/commit/edd31706eec851264f15646042f93e325b2800c5))
+- **linter:** add `function-has-no-methods` ([`f756c7c`](https://github.com/jolars/fatou/commit/f756c7c3dd6d64373bbc87c58e3b8bfdc09f5ef9))
+- **linter:** add `kwarg-default-mismatch` ([`d395287`](https://github.com/jolars/fatou/commit/d395287312b79f57a77a4895d207bd3ee4a8e252))
+- **lsp:** rename files and folders ([`427427e`](https://github.com/jolars/fatou/commit/427427e0d346ec99526730998e8b33f9d5b06db2))
+- **linter:** add `unresolved-import` ([`7c6bd5b`](https://github.com/jolars/fatou/commit/7c6bd5b717040e775d51f58d3fe91160f09d6232))
+
+### Bug Fixes
+- **linter:** keep type args in duplicate-method identity ([`02c3f6d`](https://github.com/jolars/fatou/commit/02c3f6de70fabd0b45f18438ede9d1161b468964)), closes [#75](https://github.com/jolars/fatou/issues/75)
+
+### Dependencies
+- updated crates/fatou-parser to v0.3.0
+
 ## [0.12.0](https://github.com/jolars/fatou/compare/v0.11.1...v0.12.0) (2026-08-07)
 
 ### Features
