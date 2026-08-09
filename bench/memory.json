@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "meta": {
+    "host": "terra",
+    "os": "Linux x86_64",
+    "cpu": "AMD Ryzen 9 7900 12-Core Processor",
+    "memory_gb": 61,
+    "settle_timeout": 300,
+    "quiet_seconds": 5,
+    "cli_runs": 5,
+    "corpora": [
+      {
+        "name": "JuliaSyntax",
+        "repo": "https://github.com/JuliaLang/JuliaSyntax.jl",
+        "tag": "v0.4.10",
+        "commit": "09576ca"
+      },
+      {
+        "name": "DataFrames",
+        "repo": "https://github.com/JuliaData/DataFrames.jl",
+        "tag": "v1.8.2",
+        "commit": "946c72a"
+      }
+    ],
+    "servers": {
+      "languageserver": {
+        "version": "5.0.0",
+        "project": "/home/jola/projects/fatou/bench/lsenv/languageserver"
+      },
+      "jetls": {
+        "repo": "https://github.com/aviatesk/JETLS.jl",
+        "commit": "7e01ca58",
+        "date": "2026-08-08",
+        "project": "/home/jola/projects/fatou/bench/lsenv/jetls"
+      }
+    },
+    "versions": {
+      "fatou": "0.12.0",
+      "julia": "1.12.6"
+    }
+  },
+  "session": {
+    "project": "DataFrames",
+    "files": [
+      "abstractdataframe.jl",
+      "selection.jl",
+      "composer.jl",
+      "dataframe.jl",
+      "groupeddataframe.jl"
+    ],
+    "file_count": 5,
+    "total_bytes": 351116
+  },
+  "servers": [
+    {
+      "key": "fatou",
+      "label": "Fatou",
+      "doing": "static analysis, no Julia runtime",
+      "baseline_rss_mb": 96.6,
+      "settled_rss_mb": 100.8,
+      "settled_pss_mb": 99.4,
+      "peak_rss_mb": 100.8,
+      "processes_at_settle": 1,
+      "init_seconds": 0.02,
+      "settled_seconds": 6.56,
+      "diagnostics_published": 1,
+      "diagnostic_requests": 5,
+      "notes": [],
+      "relative_to_fatou": 1.0
+    },
+    {
+      "key": "languageserver",
+      "label": "LanguageServer.jl",
+      "doing": "Julia runtime plus a SymbolServer pass over the environment",
+      "baseline_rss_mb": 955.3,
+      "settled_rss_mb": 1127.9,
+      "settled_pss_mb": 1125.5,
+      "peak_rss_mb": 1567.1,
+      "processes_at_settle": 1,
+      "init_seconds": 4.15,
+      "settled_seconds": 35.84,
+      "diagnostics_published": 178,
+      "diagnostic_requests": 0,
+      "notes": [],
+      "relative_to_fatou": 11.2
+    },
+    {
+      "key": "jetls",
+      "label": "JETLS",
+      "doing": "Julia runtime plus type inference through JET",
+      "baseline_rss_mb": 797.2,
+      "settled_rss_mb": 1976.0,
+      "settled_pss_mb": 1973.6,
+      "peak_rss_mb": 2076.2,
+      "processes_at_settle": 1,
+      "init_seconds": 5.93,
+      "settled_seconds": 33.96,
+      "diagnostics_published": 35,
+      "diagnostic_requests": 0,
+      "notes": [],
+      "relative_to_fatou": 19.6
+    }
+  ],
+  "cli": {
+    "tree_files": 36,
+    "tree_bytes": 870581,
+    "runs": 5,
+    "cases": [
+      {
+        "key": "format_tree",
+        "command": "fatou format --check",
+        "target": "src tree",
+        "peak_rss_mb": 39.1,
+        "seconds": 0.02,
+        "input_bytes": 870581,
+        "exit_code": 1
+      },
+      {
+        "key": "lint_tree",
+        "command": "fatou lint",
+        "target": "src tree",
+        "peak_rss_mb": 37.0,
+        "seconds": 0.03,
+        "input_bytes": 870581,
+        "exit_code": 1
+      },
+      {
+        "key": "format_file",
+        "command": "fatou format --check",
+        "target": "one file",
+        "peak_rss_mb": 9.1,
+        "seconds": 0.01,
+        "input_bytes": 100388,
+        "exit_code": 1
+      },
+      {
+        "key": "lint_file",
+        "command": "fatou lint",
+        "target": "one file",
+        "peak_rss_mb": 9.3,
+        "seconds": 0.01,
+        "input_bytes": 100388,
+        "exit_code": 1
+      },
+      {
+        "key": "parse_file",
+        "command": "fatou parse",
+        "target": "one file",
+        "peak_rss_mb": 7.9,
+        "seconds": 0.02,
+        "input_bytes": 100388,
+        "exit_code": 0
+      },
+      {
+        "key": "version",
+        "command": "fatou --version",
+        "target": "process floor",
+        "peak_rss_mb": 4.5,
+        "seconds": 0.0,
+        "input_bytes": 0,
+        "exit_code": 0
+      },
+      {
+        "key": "true",
+        "command": "true",
+        "target": "harness floor",
+        "peak_rss_mb": 2.1,
+        "seconds": 0.0,
+        "input_bytes": 0,
+        "exit_code": 0
+      }
+    ]
+  }
+}

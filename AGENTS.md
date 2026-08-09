@@ -106,8 +106,8 @@ cargo run -- debug format <path>          # the smoke test's per-file invariant 
 
 All commands honor a `fatou.toml` found by an ancestor walk. `task <name>`
 (`Taskfile.yml`, `task --list`) wraps the workflows: `lint`, `format`, `test`,
-`audit`, `deny`, `docs-build`, `docs-preview`, `bench`, `bench-corpus`,
-`bench-reparse`, and the logo/icon generators. `insta` snapshots are reviewed
+`audit`, `deny`, `docs-build`, `docs-preview`, `bench`, `bench-memory`,
+`bench-corpus`, `bench-lsenv`, `bench-reparse`, and the logo/icon generators. `insta` snapshots are reviewed
 with `cargo insta review`; logging honors `RUST_LOG` via `env_logger`.
 
 ## Architecture map

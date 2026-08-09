@@ -55,3 +55,11 @@ target
 /bench/corpus/DataFrames
 /bench/corpus/manifest.json
 /bench/*.tmp.json
+
+# Julia language-server environments for the memory benchmark, provisioned by
+# bench/lsenv/setup.sh. Pinned in that script, not vendored. bench/memory.json
+# is committed.
+/bench/lsenv/languageserver
+/bench/lsenv/jetls
+/bench/lsenv/manifest.json
+/bench/lsenv/*.log

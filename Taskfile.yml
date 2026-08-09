@@ -46,6 +46,11 @@ tasks:
     cmds:
       - ./bench/compare_format.sh
 
+  bench-memory:
+    desc: Measure language-server and CLI memory vs LanguageServer.jl and JETLS (writes bench/memory.json)
+    cmds:
+      - ./bench/memory_compare.sh
+
   bench-reparse:
     desc: Benchmark incremental reparse against a full parse (needs bench-corpus)
     cmds:
@@ -55,6 +60,11 @@ tasks:
     desc: Fetch the pinned JuliaSyntax.jl corpus for the formatter benchmark
     cmds:
       - ./bench/corpus/download.sh
+
+  bench-lsenv:
+    desc: Provision the pinned LanguageServer.jl and JETLS environments the memory benchmark needs
+    cmds:
+      - ./bench/lsenv/setup.sh
 
   docs-preview:
     desc: Serve the docs site locally with live reload

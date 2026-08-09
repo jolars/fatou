@@ -24,6 +24,10 @@
     pkgs.wasm-pack
     pkgs.stylua
     pkgs.hyperfine
+    # GNU time, for the peak-RSS readings in bench/cli_memory.py. The shell
+    # builtin cannot report ru_maxrss, and measuring from the Python harness
+    # charges the forked interpreter's own resident set to the child.
+    pkgs.time
     pkgs.imagemagick
     pkgs.yamlfmt
     pkgs.vsce

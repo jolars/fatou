@@ -57,12 +57,21 @@ and never ship to crates.io. Add new tooling there the same way.
   JuliaFormatter; `task bench-corpus` fetches the pinned JuliaSyntax.jl corpus it
   needs first. `task bench-reparse` (criterion) is the right tool for
   parser-level work.
-- It rewrites the **tracked** artifact `bench/results.json`, which is the *sole*
-  source of the published performance page — numbers are never re-measured at
-  site-build time. Moving performance and wanting the docs to show it means
-  re-running `task bench` and committing the artifact.
+- `task bench-memory` (`bench/memory_compare.sh`) measures resident memory —
+  the language server against LanguageServer.jl and JETLS, plus Fatou's one-shot
+  CLI runs. `task bench-lsenv` provisions the two pinned Julia servers it needs
+  (`bench/lsenv/setup.sh`; JETLS is unregistered, so it is pinned by commit).
+- Each rewrites a **tracked** artifact — `bench/results.json` and
+  `bench/memory.json` — which is the *sole* source of the published performance
+  page; numbers are never re-measured at site-build time. Moving performance and
+  wanting the docs to show it means re-running the benchmark and committing the
+  artifact. `docs/doc-utils/src/memory.rs` re-declares the memory schema that
+  `bench/memory_merge.py` writes, and its tests are what keep the two in step.
 - **Report ratios, not milliseconds.** The tools do different work behind
-  different startup floors (both comparisons are Julia processes).
+  different startup floors (both comparisons are Julia processes). Memory is the
+  exception that proves it: absolute megabytes are what a user feels, so the
+  memory tables print both, and the page says plainly that the servers are not
+  doing like-for-like work.
 
 ## Assets
 
