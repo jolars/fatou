@@ -21,7 +21,7 @@ use crate::semantic::signature::{annotation_parts, has_call_core, peel_signature
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use super::model::*;
-use super::typeexpr::{TypeExpr, lower_type, lower_type_params, normalized_text};
+use super::typeexpr::{TypeExpr, lower_type, lower_type_args, lower_type_params, normalized_text};
 
 /// Harvest the package rooted at `source_root` (the directory containing
 /// `src/`), taking the package name from the directory's file name.
@@ -442,6 +442,7 @@ impl Harvester {
         let where_clauses = lower_type_params(wheres.iter());
         let return_type = return_ty.as_ref().map(lower_type);
 
+        let type_args = signature_type_args(&core);
         let (name, owner, name_range, params, keyword_params, has_body) = match core.kind() {
             SyntaxKind::CALL_EXPR => {
                 let Some((name, owner, name_range)) = callee_name(&core) else {
@@ -463,6 +464,7 @@ impl Harvester {
         let method = Method {
             params,
             keyword_params,
+            type_args,
             where_clauses,
             return_type,
             has_body,
@@ -841,6 +843,25 @@ pub(crate) fn callee_name(call: &SyntaxNode) -> Option<(String, Option<Vec<Strin
             _ => None,
         },
     }
+}
+
+/// The type arguments a signature applies to its own name: `{Float64}` for
+/// `MyStruct{Float64}(x) = ...`, which defines a method of
+/// `Type{MyStruct{Float64}}`. Empty for every other shape, the plain
+/// `f(x) = ...` included.
+fn signature_type_args(core: &SyntaxNode) -> Vec<TypeExpr> {
+    if core.kind() != SyntaxKind::CALL_EXPR {
+        return Vec::new();
+    }
+    let Some(rowan::NodeOrToken::Node(callee)) =
+        core.children_with_tokens().find(|el| !is_trivia(el.kind()))
+    else {
+        return Vec::new();
+    };
+    if callee.kind() != SyntaxKind::CURLY_EXPR {
+        return Vec::new();
+    }
+    lower_type_args(&callee)
 }
 
 /// Read a dotted `A.B.c` chain as its components plus the final `NAME` node
@@ -1265,6 +1286,22 @@ mod tests {
             &method.where_clauses[0],
             TypeExpr::TypeVar { name, upper: Some(_), .. } if name == "T"
         ));
+    }
+
+    #[test]
+    fn parameterized_constructor_keeps_its_type_arguments() {
+        let m = harvest_str("MyStruct{Float64}() = 1\nMyStruct() = 2\n", "Pkg");
+        let methods = &m.functions[0].methods;
+        assert_eq!(methods.len(), 2);
+        assert_eq!(
+            name_of(&Some(methods[0].type_args[0].clone())),
+            Some(vec!["Float64"]),
+            "the `{{Float64}}` instantiation is part of the method"
+        );
+        assert!(
+            methods[1].type_args.is_empty(),
+            "a plain definition applies no type arguments"
+        );
     }
 
     #[test]

@@ -23,6 +23,10 @@
 //! - **the declared return type** — `f(x::Int)::Int` and `f(x::Int)::Float64`
 //!   are the same method with the second body winning.
 //!
+//! The type arguments a definition applies to its own name *are* part of it:
+//! `MyStruct{Float64}()` is a method of `Type{MyStruct{Float64}}`, so it lives
+//! beside `MyStruct()` rather than replacing it.
+//!
 //! `where` bounds, by contrast, *are* part of the identity: `f(x::T) where {T
 //! <: Real}` and `f(x::T) where {T <: Integer}` are two methods. The comparison
 //! is structural but not alpha-converting, so renaming a type variable
@@ -65,6 +69,7 @@ pub struct DuplicateMethod;
 /// design — see the module docs.
 #[derive(PartialEq, Eq)]
 struct SignatureKey {
+    type_args: Vec<TypeExpr>,
     params: Vec<(Option<TypeExpr>, bool)>,
     where_clauses: Vec<TypeExpr>,
 }
@@ -72,6 +77,7 @@ struct SignatureKey {
 impl SignatureKey {
     fn of(method: &Method) -> Self {
         Self {
+            type_args: method.type_args.clone(),
             params: method
                 .params
                 .iter()
@@ -93,7 +99,9 @@ impl Rule for DuplicateMethod {
          signature, so the later definition silently replaces the earlier one \
          and the earlier body becomes dead. Signatures are compared on what \
          dispatch actually sees: the positional argument types (an unannotated \
-         argument is `Any`) and the `where` specs. Argument names, default \
+         argument is `Any`), the `where` specs, and any type arguments the \
+         definition applies to its own name, as a parameterized constructor \
+         does. Argument names, default \
          values, keyword arguments, and the declared return type are not part \
          of a method's identity, so definitions differing only in those still \
          collide. Definitions with different `where` bounds are separate \

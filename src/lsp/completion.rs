@@ -900,6 +900,7 @@ mod tests {
                 is_vararg: false,
             }],
             keyword_params: Vec::new(),
+            type_args: Vec::new(),
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,

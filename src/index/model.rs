@@ -199,6 +199,11 @@ pub struct FunctionGroup {
 pub struct Method {
     pub params: Vec<Param>,
     pub keyword_params: Vec<Param>,
+    /// The type arguments applied to the defined name itself, as in the
+    /// constructor `MyStruct{Float64}(...)`, which is a method of
+    /// `Type{MyStruct{Float64}}` rather than of `Type{MyStruct}`. Empty for the
+    /// usual `f(...)` definition.
+    pub type_args: Vec<TypeExpr>,
     /// The `where` specs, each a [`TypeExpr::TypeVar`] (or [`TypeExpr::Raw`]).
     pub where_clauses: Vec<TypeExpr>,
     /// The declared return type of `f()::T`, if any.

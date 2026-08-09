@@ -220,6 +220,7 @@ mod tests {
         Method {
             params: Vec::new(),
             keyword_params: Vec::new(),
+            type_args: Vec::new(),
             where_clauses: Vec::new(),
             return_type: None,
             has_body,

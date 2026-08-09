@@ -174,27 +174,31 @@ fn bound_op(node: &SyntaxNode) -> Option<SyntaxKind> {
         .find(|k| matches!(k, SyntaxKind::SUBTYPE | SyntaxKind::SUPERTYPE))
 }
 
-fn lower_curly(node: &SyntaxNode) -> TypeExpr {
-    let Some(base) = node.children().next() else {
-        return raw(node);
-    };
-    let args: Vec<SyntaxNode> = node
+/// The lowered arguments of a type application `Foo{A, B}`, read off the
+/// `CURLY_EXPR` itself. Each is a type, not a type *variable*: a bare `Float64`
+/// here names a concrete type, unlike the same token in a `where` spec.
+pub(crate) fn lower_type_args(curly: &SyntaxNode) -> Vec<TypeExpr> {
+    curly
         .children()
         .filter(|c| c.kind() == SyntaxKind::ARG_LIST)
         .flat_map(|list| list.children().collect::<Vec<_>>())
         .map(unwrap_arg)
-        .collect();
+        .map(|arg| lower_type(&arg))
+        .collect()
+}
+
+fn lower_curly(node: &SyntaxNode) -> TypeExpr {
+    let Some(base) = node.children().next() else {
+        return raw(node);
+    };
+    let args = lower_type_args(node);
     let base_name = ident_text(&base);
     match base_name.as_deref() {
-        Some("Union") => TypeExpr::Union {
-            members: args.iter().map(lower_type).collect(),
-        },
-        Some("Tuple") => TypeExpr::Tuple {
-            elems: args.iter().map(lower_type).collect(),
-        },
+        Some("Union") => TypeExpr::Union { members: args },
+        Some("Tuple") => TypeExpr::Tuple { elems: args },
         _ => TypeExpr::Applied {
             base: Box::new(lower_type(&base)),
-            args: args.iter().map(lower_type).collect(),
+            args,
         },
     }
 }

@@ -268,6 +268,7 @@ fn local_callee(root: &SyntaxNode, def_start: TextSize, name: &str) -> Option<Ca
     let method = Method {
         params,
         keyword_params,
+        type_args: Vec::new(),
         where_clauses: Vec::new(),
         return_type: None,
         has_body: true,
@@ -471,6 +472,7 @@ mod tests {
         Method {
             params: params.to_vec(),
             keyword_params: keyword_params.to_vec(),
+            type_args: Vec::new(),
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,

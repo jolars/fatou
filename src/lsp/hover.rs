@@ -476,6 +476,7 @@ mod tests {
                 })
                 .collect(),
             keyword_params: Vec::new(),
+            type_args: Vec::new(),
             where_clauses: Vec::new(),
             return_type: None,
             has_body: true,

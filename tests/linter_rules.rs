@@ -3734,6 +3734,13 @@ fn duplicate_method_ignores_differing_signatures() {
         "f(x::Vector{Int}) = 1\nf(x::Vector{Float64}) = 2\n",
         // Different functions entirely.
         "f(x::Int) = 1\ng(x::Int) = 2\n",
+        // A parameterized constructor is a method of `Type{MyStruct{Float64}}`,
+        // not of `Type{MyStruct}`.
+        "struct MyStruct{T} end\nMyStruct() = 1\nMyStruct{Float64}() = 2\n",
+        // Two different parameterizations.
+        "MyStruct{Float64}() = 1\nMyStruct{Int}() = 2\n",
+        // A type variable bound by `where` versus a concrete instantiation.
+        "MyStruct{T}() where {T} = 1\nMyStruct{Float64}() = 2\n",
     ] {
         assert_eq!(
             count("duplicate-method", src),
@@ -3741,6 +3748,17 @@ fn duplicate_method_ignores_differing_signatures() {
             "unexpected finding for {src:?}"
         );
     }
+}
+
+#[test]
+fn duplicate_method_flags_matching_type_arguments() {
+    assert_eq!(
+        count(
+            "duplicate-method",
+            "MyStruct{Float64}() = 1\nMyStruct{Float64}() = 2\n"
+        ),
+        1
+    );
 }
 
 #[test]
