@@ -546,7 +546,7 @@ mod tests {
             new_uri: "file:///D:/elsewhere/a.jl".to_string(),
         }])
         .expect("a rename map");
-        let edit = rewritten_raw(
+        let edit = rewritten_literal(
             "a.jl",
             Path::new("C:\\work\\src"),
             Path::new("C:\\work\\src"),
