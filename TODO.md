@@ -716,5 +716,17 @@ Rejected after probing (do not revisit without new evidence):
   matching its entry. `willRenameFiles` deliberately does not touch
   `Project.toml` — a `WorkspaceEdit` into a manifest is a bigger promise than
   the include rewrite — but the pair could at least be diagnosed.
+- [ ] Maybe (deferred): a rope (`ropey`) for the live buffer, raised in #76.
+  It would make locating a line O(log n) and retire `LineStarts` outright, but
+  the win only arrives if the *parser* reads chunks rather than `&str`: the
+  lexer, rowan's token text, the formatter, and the linter all want a contiguous
+  slice today, and `analysis_thread` hands salsa an owned `String` per analysis
+  — so a rope would pay a `Rope::to_string` per keystroke, the one direction
+  ropes are slow in. With the table patched per edit (`src/text/buffer.rs`),
+  what a rope would still remove is a memmove plus one add per line after the
+  edit site, off a base the reparse already dominates (`benches/line_index.rs`).
+  Note rust-analyzer stores its documents as a plain `String` and applies edits
+  with `replace_range` for the same reasons. Revisit only if the parser's input
+  layer goes chunk-based.
 
 ## Tooling
