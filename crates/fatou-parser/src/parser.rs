@@ -21,6 +21,7 @@ mod reparse;
 mod sexpr;
 mod structural;
 mod tree_builder;
+mod unescape;
 mod unicode_ident;
 mod unicode_ops;
 
@@ -37,3 +38,6 @@ pub use reparse::{
 #[doc(hidden)]
 pub use reparse::fingerprint;
 pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
+// A lossless CST hands out a literal's *source*; a consumer reading it as data
+// (the `include` path resolver) needs the value it denotes.
+pub use unescape::{StringDecodeError, string_value};
