@@ -1599,6 +1599,53 @@ fn missing_include_file_flags_directory_target() {
 }
 
 #[test]
+fn missing_include_file_decodes_escapes_before_resolving() {
+    // `"\x61.jl"` denotes `a.jl`, which exists: resolving the undecoded source
+    // bytes would flag a file that is right there.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.jl"), "x = 1\n").unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"\\x61.jl\")\n"),
+        0
+    );
+}
+
+#[test]
+fn missing_include_file_reports_the_decoded_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        findings_at("missing-include-file", &main, "include(\"\\x62.jl\")\n"),
+        ["included file \"b.jl\" does not exist"]
+    );
+}
+
+#[test]
+fn missing_include_file_flags_a_nul_in_the_path() {
+    // A decoded NUL byte can never name a file, so StaticLint's
+    // `IncludePathContainsNULL` falls out of the existence check.
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"a\\0.jl\")\n"),
+        1
+    );
+}
+
+#[test]
+fn missing_include_file_skips_a_literal_denoting_no_path() {
+    // A malformed escape names nothing knowable, so the include is as
+    // unresolvable as a dynamic one and is never flagged.
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path().join("main.jl");
+    assert_eq!(
+        count_at("missing-include-file", &main, "include(\"a\\q.jl\")\n"),
+        0
+    );
+}
+
+#[test]
 fn missing_include_file_ignores_dynamic_includes() {
     // Dynamic, interpolated, qualified, and two-argument includes cannot be
     // resolved statically and are skipped.

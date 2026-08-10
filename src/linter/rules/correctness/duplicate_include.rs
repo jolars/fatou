@@ -16,7 +16,7 @@
 //! Repetition is decided on the *resolved* target, so two spellings of one file
 //! (`"a.jl"` and `"./a.jl"`) still count as a repeat — which is why the rule
 //! matches problems back to their call sites by edge index rather than by the
-//! raw literal, and why it enumerates the file's include sites in one
+//! path they name, and why it enumerates the file's include sites in one
 //! whole-file pass. Two guards keep the honest patterns out: the same file
 //! included into two different `module` blocks runs into two namespaces and is
 //! not flagged, and one file reached along two different include *paths* (a
@@ -33,7 +33,7 @@ use crate::ast::CallExpr;
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::include_graph::IncludeProblemKind;
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::project::include_literal;
+use crate::project::{include_literal, literal_path};
 
 pub struct DuplicateInclude;
 
@@ -72,24 +72,22 @@ impl Rule for DuplicateInclude {
         }
 
         // The same enumeration `include_edges` performs, through the same
-        // staticness test, so the indices line up.
+        // staticness test *and* the same decode (a literal denoting no path is
+        // no edge), so the indices line up.
         let sites = ctx
             .root
             .descendants()
             .filter_map(CallExpr::cast)
-            .filter_map(|call| include_literal(&call));
-        for (index, literal) in sites.enumerate() {
+            .filter_map(|call| include_literal(&call))
+            .filter_map(|literal| Some((literal_path(&literal)?, literal)));
+        for (index, (path, literal)) in sites.enumerate() {
             if !repeats.contains(&index) {
                 continue;
             }
-            let raw: String = literal
-                .content_tokens()
-                .map(|token| token.text().to_string())
-                .collect();
             sink.push(Diagnostic::new(
                 self.id(),
                 literal.syntax().text_range(),
-                format!("duplicate include: \"{raw}\" is already included earlier in this file"),
+                format!("duplicate include: \"{path}\" is already included earlier in this file"),
             ));
         }
     }

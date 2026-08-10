@@ -86,7 +86,7 @@ fn links_for_tree(
             // The link covers the path text between the quotes; an empty
             // string (`include("")`) has no content span and no link.
             let content = site.content?;
-            let target = resolve_target(&site.raw, base_dir)?;
+            let target = resolve_target(&site.path, base_dir)?;
             let target = uri::from_path(&normalize_path(&target))?;
             let range = Range::new(
                 line_index.byte_to_position(content.start().into(), encoding),

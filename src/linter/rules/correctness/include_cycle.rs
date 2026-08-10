@@ -5,7 +5,7 @@
 //!
 //! Like `missing-include-file`, the rule only matches the driver-precomputed
 //! include problems (see [`crate::linter::include_graph`]) back to their call
-//! sites by the raw literal; the include following — which may read files
+//! sites by the literal's decoded path; the include following — which may read files
 //! outside the lint set from disk, so a cycle closing through an unlinted file
 //! is still caught — happens in the pre-pass. Every linted file on a cycle
 //! blames its own `include` call, so the finding lands where the user is
@@ -18,7 +18,7 @@ use crate::ast::CallExpr;
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::include_graph::IncludeProblemKind;
 use crate::linter::rules::{Example, Rule, RuleContext};
-use crate::project::include_literal;
+use crate::project::{include_literal, literal_path};
 use crate::syntax::{SyntaxElement, SyntaxKind};
 
 pub struct IncludeCycle;
@@ -54,19 +54,18 @@ impl Rule for IncludeCycle {
         let Some(literal) = include_literal(&call) else {
             return;
         };
-        let raw: String = literal
-            .content_tokens()
-            .map(|token| token.text().to_string())
-            .collect();
+        let Some(path) = literal_path(&literal) else {
+            return;
+        };
         let cycles = ctx
             .includes
             .iter()
-            .any(|problem| problem.kind == IncludeProblemKind::Cycle && problem.raw == raw);
+            .any(|problem| problem.kind == IncludeProblemKind::Cycle && problem.path == path);
         if cycles {
             sink.push(Diagnostic::new(
                 self.id(),
                 literal.syntax().text_range(),
-                format!("include cycle: \"{raw}\" transitively includes this file"),
+                format!("include cycle: \"{path}\" transitively includes this file"),
             ));
         }
     }

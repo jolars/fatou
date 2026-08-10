@@ -37,15 +37,16 @@ use crate::parser::parse;
 use crate::project::include_edges;
 use crate::syntax::SyntaxNode;
 
-/// What is wrong with one static `include("raw")` site of a linted file. The
+/// What is wrong with one static `include("path")` site of a linted file. The
 /// problem is range-free like [`crate::project::IncludeEdge`], so the graph walk
-/// never tracks spans: a rule matches it back to a call site either by the `raw`
-/// literal (every site spelled that way is equally at fault) or, when one repeat
+/// never tracks spans: a rule matches it back to a call site either by the
+/// decoded path (every site denoting it is equally at fault) or, when one repeat
 /// has to be told from another, by [`edge`](Self::edge).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncludeProblem {
-    /// The literal string passed to `include`, exactly as written.
-    pub raw: String,
+    /// The path the `include` literal denotes, decoded
+    /// ([`crate::project::IncludeEdge::path`]).
+    pub path: String,
     /// Which of the seed's static includes this is: an index into
     /// [`crate::project::include_edges`]'s source-ordered list, which a rule
     /// reproduces by enumerating the file's `include("literal")` call sites in
@@ -132,20 +133,20 @@ pub fn include_problems(seeds: &[(PathBuf, SyntaxNode)]) -> BTreeMap<PathBuf, Ve
             let repeated = !included.insert((target.clone(), edge.host_suffix));
             if !store.exists(&target) {
                 problems.push(IncludeProblem {
-                    raw: edge.raw.clone(),
+                    path: edge.path.clone(),
                     edge: index,
                     kind: IncludeProblemKind::Missing,
                 });
             } else if reaches(&mut store, &target, &norm) {
                 problems.push(IncludeProblem {
-                    raw: edge.raw.clone(),
+                    path: edge.path.clone(),
                     edge: index,
                     kind: IncludeProblemKind::Cycle,
                 });
             }
             if repeated {
                 problems.push(IncludeProblem {
-                    raw: edge.raw,
+                    path: edge.path,
                     edge: index,
                     kind: IncludeProblemKind::Duplicate,
                 });
@@ -193,7 +194,7 @@ mod tests {
         assert_eq!(
             problems[&main],
             [IncludeProblem {
-                raw: "gone.jl".to_string(),
+                path: "gone.jl".to_string(),
                 edge: 0,
                 kind: IncludeProblemKind::Missing,
             }]
@@ -252,7 +253,7 @@ mod tests {
         assert_eq!(
             problems[&main],
             [IncludeProblem {
-                raw: "./a.jl".to_string(),
+                path: "./a.jl".to_string(),
                 edge: 1,
                 kind: IncludeProblemKind::Duplicate,
             }]

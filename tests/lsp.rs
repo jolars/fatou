@@ -3906,7 +3906,10 @@ fn serves_will_rename_files() {
         "module MyPkg\ninclude(\"a.jl\")\ninclude(\"sub/c.jl\")\nend\n",
     );
     write_file(&pkg.path.join("src/a.jl"), "greet(a) = a\n");
-    write_file(&pkg.path.join("src/sub/c.jl"), "include(\"../a.jl\")\n");
+    // `c.jl` spells its own include with an escape (`\x2f` is `/`): the rewrite
+    // resolves the literal's *decoded* path, so an escaped literal is rewritten
+    // like any other rather than skipped.
+    write_file(&pkg.path.join("src/sub/c.jl"), "include(\"..\\x2fa.jl\")\n");
 
     let depot = TempDir::new("fatou-lsp-will-rename-depot");
     let _guard = isolate_env(&pkg, &depot);

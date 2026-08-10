@@ -14,11 +14,11 @@
 //!
 //! Deliberately conservative. A literal is rewritten only when the rename
 //! actually moved its target or the directory it is spelled from — a
-//! non-canonical spelling of an untouched target (`include("sub/../a.jl")`) is
-//! left exactly as written rather than silently canonicalized. A literal
-//! holding a backslash escape is skipped entirely: [`resolve_target`] reads raw
-//! source bytes without decoding escapes, so where such an include points is
-//! not knowable here.
+//! non-canonical spelling of an untouched target (`include("sub/../a.jl")`), or
+//! a roundabout escaping of one (`include("\\x61.jl")`), is left exactly as
+//! written rather than silently canonicalized. The comparison is between
+//! *decoded* paths ([`crate::project::IncludeSite::path`]) and the replacement is re-escaped on
+//! the way out, so an escape in the literal is no obstacle.
 //!
 //! Package *identity* is not repaired: renaming a package's entry file
 //! (`src/MyPkg.jl`) rebases its own includes but leaves `Project.toml`'s `name`
@@ -125,7 +125,7 @@ fn collect_edits(
             .into_iter()
             .filter_map(|site| {
                 let content = site.content?;
-                let new_text = rewritten_raw(&site.raw, old_dir, new_dir, map)?;
+                let new_text = rewritten_literal(&site.path, old_dir, new_dir, map)?;
                 Some(TextEdit {
                     range: Range::new(
                         line_index.byte_to_position(content.start().into(), encoding),
@@ -193,19 +193,23 @@ fn path_of(text: &str) -> Option<PathBuf> {
     Some(normalize_path(&path))
 }
 
-/// What the include literal `raw` should become once the batch is applied, or
-/// `None` to leave the site untouched. `old_dir`/`new_dir` are the *including*
-/// file's directory before and after the batch.
-fn rewritten_raw(raw: &str, old_dir: &Path, new_dir: &Path, map: &RenameMap) -> Option<String> {
-    // An empty literal names nothing. A backslash escape makes the literal's
-    // meaning undecidable here (see the module doc), so it is never touched.
-    if raw.is_empty() || raw.contains('\\') {
+/// The source text the include literal denoting `path` should become once the
+/// batch is applied, or `None` to leave the site untouched. `old_dir`/`new_dir`
+/// are the *including* file's directory before and after the batch.
+fn rewritten_literal(
+    path: &str,
+    old_dir: &Path,
+    new_dir: &Path,
+    map: &RenameMap,
+) -> Option<String> {
+    // An empty literal names nothing.
+    if path.is_empty() {
         return None;
     }
-    let was_absolute = Path::new(raw).is_absolute();
-    let dotted = raw.starts_with("./");
+    let was_absolute = Path::new(path).is_absolute();
+    let dotted = path.starts_with("./");
 
-    let old_target = normalize_path(&resolve_target(raw, Some(old_dir))?);
+    let old_target = normalize_path(&resolve_target(path, Some(old_dir))?);
     let new_target = map.map(&old_target);
 
     // Neither the target nor the directory it is spelled from moved: never
@@ -229,8 +233,9 @@ fn rewritten_raw(raw: &str, old_dir: &Path, new_dir: &Path, map: &RenameMap) -> 
             relative
         }
     };
-    let new_raw = escape_literal(&spelling);
-    (new_raw != raw).then_some(new_raw)
+    // Compare decoded against decoded: a literal that already denotes the new
+    // path stays as written, however it spells it.
+    (spelling != path).then(|| escape_literal(&spelling))
 }
 
 /// `target` spelled relative to `from_dir`, with `/` separators (Julia accepts
@@ -328,13 +333,14 @@ mod tests {
         RenameMap::from_files(renames).expect("a non-empty rename map")
     }
 
-    /// `raw` rewritten for an includer that itself sits at `includer`.
-    fn rewrite(raw: &str, includer: &str, renames: &[FileRename]) -> Option<String> {
+    /// The literal denoting `path` rewritten for an includer sitting at
+    /// `includer`. Returns the replacement *source* text (escapes and all).
+    fn rewrite(path: &str, includer: &str, renames: &[FileRename]) -> Option<String> {
         let map = map_of(renames);
         let old_path = normalize_path(Path::new(&abs(includer)));
         let new_path = map.map(&old_path);
-        rewritten_raw(
-            raw,
+        rewritten_literal(
+            path,
             old_path.parent().unwrap(),
             new_path.parent().unwrap(),
             &map,
@@ -506,14 +512,20 @@ mod tests {
         );
     }
 
+    /// The decode's other half: what comes back out is source text again, so a
+    /// path holding a character the literal must escape is re-escaped. Unix
+    /// only — a backslash is an ordinary filename character there, while on
+    /// Windows it is a separator and can never reach the name.
     #[test]
-    fn a_literal_containing_an_escape_is_left_alone() {
-        let edit = rewrite(
-            "sub\\\\a.jl",
-            "/work/src/MyPkg.jl",
-            &[rename("/work/src/sub", "/work/src/nested")],
-        );
-        assert_eq!(edit, None, "an escaped literal's target is not knowable");
+    #[cfg(unix)]
+    fn a_backslash_in_a_name_is_re_escaped_on_the_way_out() {
+        let map = RenameMap::from_files(&[FileRename {
+            old_uri: "file:///work/src/a.jl".to_string(),
+            new_uri: "file:///work/src/o%5Cd.jl".to_string(),
+        }])
+        .expect("a rename map");
+        let edit = rewritten_literal("a.jl", Path::new("/work/src"), Path::new("/work/src"), &map);
+        assert_eq!(edit.as_deref(), Some("o\\\\d.jl"));
     }
 
     #[test]

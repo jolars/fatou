@@ -72,11 +72,12 @@ pub fn file_qualified_reads(model: &SemanticModel) -> BTreeSet<String> {
 /// a consumer recovers the call's span from the fresh parse tree per request.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IncludeEdge {
-    /// The literal string passed to `include`, exactly as written
-    /// (`include("sub/a.jl")` → `"sub/a.jl"`).
-    pub raw: String,
-    /// `raw` resolved against the including file's directory, when that
-    /// directory is known. An absolute `raw` is taken as-is.
+    /// The path the literal denotes — its source text with Julia's backslash
+    /// escapes decoded, so `include("sub\\a.jl")` yields the one-character
+    /// separator the call actually reads, not the two source bytes.
+    pub path: String,
+    /// `path` resolved against the including file's directory, when that
+    /// directory is known. An absolute `path` is taken as-is.
     pub target: Option<PathBuf>,
     /// The intra-file nested-`module` path (outermost first) the `include` call
     /// lexically sits in; empty at the file top level. Range-free (just names),
@@ -97,16 +98,16 @@ pub struct IncludeEdge {
 /// forms are skipped — they cannot be resolved without evaluation.
 ///
 /// `base_dir` is the including file's directory (`path.parent()`); a relative
-/// `raw` is joined onto it to produce [`IncludeEdge::target`].
+/// [`IncludeEdge::path`] is joined onto it to produce [`IncludeEdge::target`].
 pub fn include_edges(root: &SyntaxNode, base_dir: Option<&Path>) -> Vec<IncludeEdge> {
     root.descendants()
         .filter_map(CallExpr::cast)
         .filter_map(|call| {
-            let raw = include_target(&call)?;
-            let target = resolve_target(&raw, base_dir);
+            let path = include_target(&call)?;
+            let target = resolve_target(&path, base_dir);
             let host_suffix = enclosing_module_names(call.syntax());
             Some(IncludeEdge {
-                raw,
+                path,
                 target,
                 host_suffix,
             })
@@ -143,14 +144,15 @@ fn module_def_name(module: &SyntaxNode) -> Option<String> {
 /// deliberately drops.
 ///
 /// Enumerated in the same order, through the same staticness test
-/// ([`include_literal`]), as [`include_edges`] — so index `i` of one lines up
-/// with index `i` of the other, and two identical literals in one file stay
-/// distinguishable. A unit test guards that correspondence.
+/// ([`include_literal`]) and the same decode ([`literal_path`]), as
+/// [`include_edges`] — so index `i` of one lines up with index `i` of the
+/// other, and two identical literals in one file stay distinguishable. A unit
+/// test guards that correspondence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncludeSite {
-    /// The literal path exactly as written — the same raw (undecoded) source
-    /// bytes [`IncludeEdge::raw`] carries.
-    pub raw: String,
+    /// The path the literal denotes, decoded — the same value
+    /// [`IncludeEdge::path`] carries.
+    pub path: String,
     /// The span of the path text *between the quotes*: what a rewrite
     /// replaces. `None` for `include("")`, which has no content token at all.
     pub content: Option<rowan::TextRange>,
@@ -164,8 +166,8 @@ pub fn include_sites(root: &SyntaxNode) -> Vec<IncludeSite> {
         .filter_map(CallExpr::cast)
         .filter_map(|call| {
             let literal = include_literal(&call)?;
+            let path = literal_path(&literal)?;
             let tokens: Vec<_> = literal.content_tokens().collect();
-            let raw = tokens.iter().map(|token| token.text()).collect();
             let content = match (tokens.first(), tokens.last()) {
                 (Some(first), Some(last)) => Some(rowan::TextRange::new(
                     first.text_range().start(),
@@ -174,7 +176,7 @@ pub fn include_sites(root: &SyntaxNode) -> Vec<IncludeSite> {
                 _ => None,
             };
             Some(IncludeSite {
-                raw,
+                path,
                 content,
                 call: call.syntax().text_range(),
             })
@@ -182,25 +184,40 @@ pub fn include_sites(root: &SyntaxNode) -> Vec<IncludeSite> {
         .collect()
 }
 
-/// The static `include("literal")` call sites in `root`: each `(raw, range)`
+/// The static `include("literal")` call sites in `root`: each `(path, range)`
 /// where `range` covers the whole `include(...)` call, for attaching a
 /// diagnostic (unresolved include, include cycle) to the offending call.
 pub fn include_call_sites(root: &SyntaxNode) -> Vec<(String, rowan::TextRange)> {
     include_sites(root)
         .into_iter()
-        .map(|site| (site.raw, site.call))
+        .map(|site| (site.path, site.call))
         .collect()
 }
 
-/// The literal path of `call` if it is a static `include("literal")`, else
-/// `None`.
+/// The path `call` includes if it is a static `include("literal")`, else `None`.
 pub(crate) fn include_target(call: &CallExpr) -> Option<String> {
-    Some(
-        include_literal(call)?
-            .content_tokens()
-            .map(|token| token.text().to_string())
-            .collect(),
-    )
+    literal_path(&include_literal(call)?)
+}
+
+/// The path a string literal denotes: its content tokens' source text with
+/// Julia's backslash escapes decoded, so `include("sub\\a.jl")` resolves against
+/// the one separator character it denotes rather than the two source bytes.
+///
+/// `None` when the source denotes no path at all — a malformed escape
+/// (`"a\q.jl"`), or bytes that are not UTF-8 (`"\xff.jl"`), which Julia's
+/// `String` holds and Rust's cannot. Both are treated exactly like a dynamic
+/// include: not statically resolvable, so every walk skips the site rather than
+/// guessing. The literal's *source* is still reachable through
+/// [`IncludeSite::content`] for a consumer that rewrites it.
+///
+/// The one decode every `include` consumer shares — matching the one staticness
+/// test in [`include_literal`].
+pub(crate) fn literal_path(literal: &StringLiteral) -> Option<String> {
+    let source: String = literal
+        .content_tokens()
+        .map(|token| token.text().to_string())
+        .collect();
+    crate::parser::string_value(&source).ok()
 }
 
 /// The string-literal argument of `call` if it is a static
@@ -234,10 +251,11 @@ pub(crate) fn include_literal(call: &CallExpr) -> Option<StringLiteral> {
     Some(string)
 }
 
-/// Resolve an include's literal path against the including file's directory.
-/// Absolute paths are taken as-is; a relative path needs a known `base_dir`.
-pub(crate) fn resolve_target(raw: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
-    let path = Path::new(raw);
+/// Resolve an include's decoded path ([`literal_path`]) against the including
+/// file's directory. Absolute paths are taken as-is; a relative path needs a
+/// known `base_dir`.
+pub(crate) fn resolve_target(path: &str, base_dir: Option<&Path>) -> Option<PathBuf> {
+    let path = Path::new(path);
     if path.is_absolute() {
         Some(path.to_path_buf())
     } else {
@@ -296,9 +314,34 @@ mod tests {
     #[test]
     fn collects_static_includes_in_source_order() {
         let edges = edges_of("include(\"a.jl\")\ninclude(\"sub/b.jl\")\n", None);
-        let raws: Vec<_> = edges.iter().map(|edge| edge.raw.as_str()).collect();
-        assert_eq!(raws, ["a.jl", "sub/b.jl"]);
+        let paths: Vec<_> = edges.iter().map(|edge| edge.path.as_str()).collect();
+        assert_eq!(paths, ["a.jl", "sub/b.jl"]);
         assert!(edges.iter().all(|edge| edge.target.is_none()));
+    }
+
+    #[test]
+    fn include_path_decodes_string_escapes() {
+        // `"sub\\a.jl"` in source is the eight-character `sub\a.jl`.
+        let edges = edges_of("include(\"sub\\\\a.jl\")\n", None);
+        assert_eq!(edges[0].path, "sub\\a.jl");
+    }
+
+    #[test]
+    fn a_decoded_escape_is_what_resolves_against_base_dir() {
+        let edges = edges_of("include(\"sub\\\\a.jl\")\n", Some(Path::new("/proj/src")));
+        assert_eq!(
+            edges[0].target,
+            Some(PathBuf::from("/proj/src").join("sub\\a.jl"))
+        );
+    }
+
+    #[test]
+    fn skips_an_include_whose_literal_denotes_no_path() {
+        // A malformed escape and non-UTF-8 bytes are as unresolvable as a
+        // dynamic include: neither walk may guess where they point.
+        let src = "include(\"a\\q.jl\")\ninclude(\"\\xff.jl\")\n";
+        assert!(edges_of(src, None).is_empty());
+        assert!(include_sites(&parse(src).cst).is_empty());
     }
 
     #[test]
@@ -364,10 +407,10 @@ mod tests {
             "both walks must accept exactly the same call sites"
         );
         for (site, edge) in sites.iter().zip(&edges) {
-            assert_eq!(site.raw, edge.raw);
+            assert_eq!(site.path, edge.path);
         }
-        let raws: Vec<_> = sites.iter().map(|site| site.raw.as_str()).collect();
-        assert_eq!(raws, ["a.jl", "sub/b.jl"]);
+        let paths: Vec<_> = sites.iter().map(|site| site.path.as_str()).collect();
+        assert_eq!(paths, ["a.jl", "sub/b.jl"]);
     }
 
     #[test]
@@ -385,7 +428,7 @@ mod tests {
         let sites = include_sites(&parse(src).cst);
         assert_eq!(sites.len(), 1);
         assert!(sites[0].content.is_none());
-        assert_eq!(sites[0].raw, "");
+        assert_eq!(sites[0].path, "");
         assert_eq!(&src[sites[0].call], "include(\"\")");
     }
 
@@ -394,7 +437,7 @@ mod tests {
         let root = parse(MIXED).cst;
         let expected: Vec<_> = include_sites(&root)
             .into_iter()
-            .map(|site| (site.raw, site.call))
+            .map(|site| (site.path, site.call))
             .collect();
         assert_eq!(include_call_sites(&root), expected);
     }

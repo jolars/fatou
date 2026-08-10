@@ -328,11 +328,11 @@ impl Harvester {
         let Some(call) = CallExpr::cast(node.clone()) else {
             return;
         };
-        if let Some(raw) = include_target(&call) {
-            match resolve_target(&raw, file.parent()) {
+        if let Some(path) = include_target(&call) {
+            match resolve_target(&path, file.parent()) {
                 Some(target) if target.is_file() => self.walk_file(&target, dest, at_root),
                 _ => self.diagnostics.push(HarvestDiagnostic::UnresolvedInclude {
-                    raw,
+                    raw: path,
                     from: file.to_path_buf(),
                 }),
             }

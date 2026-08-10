@@ -645,11 +645,11 @@ fn project_graph_reports_cycles_and_unresolved() {
     let cycle = &g.cycles[0];
     assert_eq!(cycle.from, src("b.jl"));
     assert_eq!(cycle.to, src("a.jl"));
-    assert_eq!(cycle.raw, "a.jl");
+    assert_eq!(cycle.path, "a.jl");
 
     assert_eq!(g.unresolved.len(), 1, "missing.jl is unresolved");
     assert_eq!(g.unresolved[0].from, src("MyPkg.jl"));
-    assert_eq!(g.unresolved[0].raw, "missing.jl");
+    assert_eq!(g.unresolved[0].path, "missing.jl");
 }
 
 #[test]

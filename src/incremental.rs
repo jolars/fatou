@@ -335,24 +335,24 @@ pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> Vec<IncludeEdg
     project::include_edges(&root, base_dir)
 }
 
-/// One unresolvable static `include("literal")` site: the `raw` literal written
+/// One unresolvable static `include("literal")` site: the decoded `path` written
 /// in `from` whose target is not a package member (the file does not exist or
 /// was not reached). Range-free — the include call's span is recovered from a
 /// fresh parse of `from` when the diagnostic is published.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnresolvedInclude {
     pub from: PathBuf,
-    pub raw: String,
+    pub path: String,
 }
 
 /// One `include` back-edge that closes a cycle: `from` statically includes `to`,
 /// which transitively includes `from` again. The diagnostic attaches to the
-/// `include("raw")` call in `from`. Only true cycles are recorded; a file
+/// `include("path")` call in `from`. Only true cycles are recorded; a file
 /// included twice along disjoint paths (a diamond) is not a cycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CycleEdge {
     pub from: PathBuf,
-    pub raw: String,
+    pub path: String,
     pub to: PathBuf,
 }
 
@@ -472,7 +472,7 @@ fn walk_include_graph(
             None => {
                 graph.unresolved.push(UnresolvedInclude {
                     from: path.clone(),
-                    raw: edge.raw.clone(),
+                    path: edge.path.clone(),
                 });
                 continue;
             }
@@ -480,7 +480,7 @@ fn walk_include_graph(
         let Some(&child_file) = by_path.get(&target) else {
             graph.unresolved.push(UnresolvedInclude {
                 from: path.clone(),
-                raw: edge.raw.clone(),
+                path: edge.path.clone(),
             });
             continue;
         };
@@ -507,7 +507,7 @@ fn walk_include_graph(
         match color.get(&target) {
             Some(IncludeColor::Gray) => graph.cycles.push(CycleEdge {
                 from: path.clone(),
-                raw: edge.raw.clone(),
+                path: edge.path.clone(),
                 to: target,
             }),
             Some(IncludeColor::Black) => {}

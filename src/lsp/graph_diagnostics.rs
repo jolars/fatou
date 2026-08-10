@@ -18,10 +18,10 @@ use crate::project::include_call_sites;
 use crate::syntax::SyntaxNode;
 use crate::text::{LineIndex, PositionEncoding};
 
-/// One include-graph problem attached to a `from` file: the `raw` literal whose
+/// One include-graph problem attached to a `from` file: the decoded `path` whose
 /// `include(...)` call it marks, plus the rendered message and severity.
 struct Problem {
-    raw: String,
+    path: String,
     message: String,
     severity: DiagnosticSeverity,
 }
@@ -29,7 +29,7 @@ struct Problem {
 /// Build the include-graph diagnostics, grouped by the member file they attach
 /// to. `source(path)` yields the file's `(text, parse tree)` so each `include`
 /// call's span is recovered; a file that cannot be sourced is skipped. Every
-/// static `include("raw")` site matching a problem's literal is marked (there is
+/// static `include("path")` site matching a problem's literal is marked (there is
 /// rarely more than one).
 pub(crate) fn graph_diagnostics(
     graph: &ProjectGraph,
@@ -42,10 +42,10 @@ pub(crate) fn graph_diagnostics(
             .entry(unresolved.from.clone())
             .or_default()
             .push(Problem {
-                raw: unresolved.raw.clone(),
+                path: unresolved.path.clone(),
                 message: format!(
                     "cannot resolve include: \"{}\" was not found",
-                    unresolved.raw
+                    unresolved.path
                 ),
                 severity: DiagnosticSeverity::ERROR,
             });
@@ -55,10 +55,10 @@ pub(crate) fn graph_diagnostics(
             .entry(cycle.from.clone())
             .or_default()
             .push(Problem {
-                raw: cycle.raw.clone(),
+                path: cycle.path.clone(),
                 message: format!(
                     "include cycle: \"{}\" transitively includes this file",
-                    cycle.raw
+                    cycle.path
                 ),
                 severity: DiagnosticSeverity::WARNING,
             });
@@ -73,8 +73,8 @@ pub(crate) fn graph_diagnostics(
         let sites = include_call_sites(&tree);
         let mut diagnostics = Vec::new();
         for problem in &problems {
-            for (raw, range) in &sites {
-                if *raw == problem.raw {
+            for (path, range) in &sites {
+                if *path == problem.path {
                     diagnostics.push(Diagnostic {
                         range: Range::new(
                             line_index.byte_to_position(range.start().into(), encoding),
@@ -110,7 +110,7 @@ mod tests {
         let graph = ProjectGraph {
             unresolved: vec![UnresolvedInclude {
                 from: PathBuf::from("/pkg/src/Pkg.jl"),
-                raw: "missing.jl".to_string(),
+                path: "missing.jl".to_string(),
             }],
             ..Default::default()
         };
@@ -130,7 +130,7 @@ mod tests {
         let graph = ProjectGraph {
             cycles: vec![CycleEdge {
                 from: PathBuf::from("/pkg/src/b.jl"),
-                raw: "a.jl".to_string(),
+                path: "a.jl".to_string(),
                 to: PathBuf::from("/pkg/src/a.jl"),
             }],
             ..Default::default()
@@ -149,7 +149,7 @@ mod tests {
         let graph = ProjectGraph {
             unresolved: vec![UnresolvedInclude {
                 from: PathBuf::from("/pkg/src/gone.jl"),
-                raw: "x.jl".to_string(),
+                path: "x.jl".to_string(),
             }],
             ..Default::default()
         };

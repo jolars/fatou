@@ -698,13 +698,6 @@ Rejected after probing (do not revisit without new evidence):
 - [ ] Maybe: a `fatou index` CLI subcommand to warm and inspect the cache.
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
-- [ ] `project::resolve_target` does not decode string escapes: `include_target`
-  joins the raw `STRING_CONTENT` bytes, so `include("sub\\a.jl")` resolves
-  against the two-character `\\` rather than the one character it denotes. It
-  affects everything reading that path — the include graph, `missing-include-file`,
-  document links — and it is why `lsp::rename_files` skips any literal holding a
-  backslash outright: where such an include points is not knowable, so rewriting
-  it would be a guess. Fixing the decode lets that skip go.
 - [ ] `workspace/willCreateFiles` and `workspace/willDeleteFiles`, the siblings
   of the rename handlers. The `RenameMap` machinery in `src/lsp/rename_files.rs`
   is most of what a delete needs; the open question is what a delete *should*
