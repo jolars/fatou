@@ -355,11 +355,12 @@ fn run_lint(
 /// rule is default-off (they require project context to be sound), so a plain
 /// `select` check suffices and keeps the harvest off the default `fatou lint`.
 fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
-    const RESOLUTION_RULES: [&str; 4] = [
+    const RESOLUTION_RULES: [&str; 5] = [
         "undefined-name",
         "call-arity",
         "unresolved-import",
         "function-has-no-methods",
+        "non-public-access",
     ];
     RESOLUTION_RULES.iter().any(|id| {
         config

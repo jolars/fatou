@@ -590,14 +590,37 @@ Needs modest new infrastructure:
   called inside a quote or macro call (Makie's `@Block` spells `length = 32`).
   Reports at each call, no fix. That sweep left 6 findings, all real
   `MethodError`s. (arity `shadowed-builtin`)
-- [ ] `non-public-access` (suspicious, sem + res, warning, no fix): reading
+- [x] `non-public-access` (suspicious, sem + res, warning, no fix): reading
   `Foo.bar` where `bar` is neither exported nor declared `public` by `Foo` — the
   Julia analogue of arity's planned `internal-function` (`pkg:::fn`), and a
   better-defined question here than in R, since 1.11's `public` keyword makes
-  "intended API" an explicit declaration rather than a convention. The model
-  already has `exports()` and `qualified_reads()`; the missing piece is reading
-  `public` declarations out of a resolved package. Name it for the `public`
-  keyword if `non-public-access` reads awkwardly.
+  "intended API" an explicit declaration rather than a convention.
+  (NonPublicAccess) Landed as a `check_file` pass over
+  `SemanticModel::qualified_reads`, spanning the whole chain and needing no new
+  infrastructure: `ExportedName::visibility` already distinguishes `export` from
+  `public`, and both count. The qualifier is taken to name a module only when
+  this file's own whole-module `using`/`import` binds it (aliases and dotted
+  paths included), when Base/Core provide it, or when no tier binds it and a
+  package of that name exists — so a local, a parameter, an item-list name
+  (`import Foo: Bar`), and any plain field access are out by construction, as
+  are relative loads (`using .Sub`). What kept the noise down over a 431-package
+  depot were four exemptions, each a real Julia rule rather than a heuristic: a
+  module that declares **no** public API has not drawn the line (`JSON3.read`);
+  one that loads **`Reexport.jl`** drew it inside a macro call the harvest
+  cannot follow (`@reexport using ColorTypes` is why `Colors.alpha` is API); a
+  **Base/Core export** reaches through any non-`baremodule`, which is Julia's
+  implicit `using Base` (`Threads.ReentrantLock`); and `eval`/`include` are
+  bound by every module without any statement saying so. Definition sites stay
+  out — `Base.show(io, x) = …` is `type-piracy`'s question and `Foo.bar = 1` is
+  a write — and a qualified *macro* read is kept where the shared macro-call
+  exemption would drop it, since `Foo.@bar` **is** the call's own name.
+  Off by default and wired into `WORKSPACE_MEMBER_RULES`/`RESOLUTION_RULES`.
+  Accepted limitation, and the reason it stays opt-in: the rule reports what a
+  module *declared*, so a package whose documented interface is qualified and
+  unexported (`Tables.getcolumn`, `Parsers.xparse`) is reported too — `public`
+  is precisely the statement that would separate the two, and adoption is still
+  thin. A per-module allowlist (`[lint.rules.non-public-access]`) is the obvious
+  escape hatch if that proves annoying in practice.
 - [ ] The suppression meta-rule family, blocked on the §I6 refactor above and
   ported wholesale from arity's Phase 4 — this is entirely language-independent
   and applies to `# fatou-ignore` exactly as it does to `# arity-ignore`:

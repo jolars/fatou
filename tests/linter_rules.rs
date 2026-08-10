@@ -4375,6 +4375,45 @@ fn shadowed_base_name_ignores_quoted_and_macro_code() {
     );
 }
 
+// --- non-public-access -----------------------------------------------------
+
+#[test]
+fn non_public_access_flags_a_base_internal() {
+    // The built-in Base/Core snapshot is the export surface here: `names(Base)`
+    // has `summarysize` but not `unwrap_unionall`.
+    let msgs = findings("non-public-access", "Base.unwrap_unionall(T)\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("unwrap_unionall"), "{msgs:?}");
+    assert_eq!(count("non-public-access", "Base.summarysize(x)\n"), 0);
+}
+
+#[test]
+fn non_public_access_ignores_field_accesses_and_unknown_modules() {
+    // `df.name` is a field access, and a module the library never harvested
+    // has no export surface to check against.
+    assert_eq!(count("non-public-access", "df = load()\nx = df.name\n"), 0);
+    assert_eq!(
+        count(
+            "non-public-access",
+            "using Frobnicate\nFrobnicate.thing()\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn non_public_access_is_opt_in() {
+    // The rule needs the harvested library that only project context provides,
+    // so the CLI leaves it off unless selected; the language server enables it
+    // for workspace member files.
+    let report = check_source(None, "Base.unwrap_unionall(T)\n", &LintConfig::default());
+    assert!(
+        report.diagnostics.is_empty(),
+        "non-public-access must be off by default, got {:?}",
+        report.diagnostics
+    );
+}
+
 // --- length-zero -----------------------------------------------------------
 
 /// The single diagnostic `length-zero` reports for `src`, or `None`.

@@ -137,6 +137,7 @@ const WORKSPACE_MEMBER_RULES: &[&str] = &[
     "call-arity",
     "unresolved-import",
     "function-has-no-methods",
+    "non-public-access",
 ];
 
 /// The rule sets the server lints with, resolved once per configuration (the

@@ -129,6 +129,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::DiscouragedFunction),
         Box::new(suspicious::TypeofComparison),
         Box::new(suspicious::ShadowedBaseName),
+        Box::new(suspicious::NonPublicAccess),
         Box::new(readability::ComparisonNegation),
         Box::new(readability::LengthZero),
         Box::new(readability::RedundantBoolean),

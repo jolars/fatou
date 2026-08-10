@@ -924,6 +924,39 @@ warning: shadowed-base-name
   |     ^^^^^ `error` here is this file's own binding, not Base's `error`
 ```
 
+## `non-public-access`
+
+Flag a qualified read of a name the target module neither `export`s nor declares `public`. Those two statements are how a Julia module says what its API is — `public` (1.11) declares intent without attaching the name to a `using` — so everything else is internal and free to change in a patch release. Only a qualifier that really names a module is checked: a local, a parameter, a name an item list bound (`import Foo: Bar`), and any plain field access are values, not modules. Two kinds of module are left alone: one that declares no public API at all, whose whole surface is reached qualified by design, and one that re-exports with `Reexport.jl`, whose `@reexport using Bar` is a macro call the index cannot follow. So is the package under development, whose own internals its files may use. A Base/Core export reaches through any module, since every module but a `baremodule` implicitly does `using Base` — `Threads.ReentrantLock` is Base's type — and so do the `eval` and `include` every module binds for itself. Definition sites are not reads: `Base.show(io, x) = …` extends a function and `Foo.bar = 1` writes one, and code inside a quote or a macro call is exempt as everywhere else. Off by default: the rule needs the harvested library that only project context provides, and it reports what a module *declared*, so a package whose documented interface is qualified and unexported is reported too. No fix — the caller cannot make someone else's name public.
+
+`summarysize` is part of Base's public API; `unwrap_unionall` is not:
+
+```julia
+Base.summarysize(x)
+Base.unwrap_unionall(T)
+```
+
+```text
+warning: non-public-access
+ --> example.jl:2:1
+  |
+2 | Base.unwrap_unionall(T)
+  | ^^^^^^^^^^^^^^^^^^^^ `Base` does not export `unwrap_unionall` or declare it `public`
+```
+
+Macros are checked in their own namespace:
+
+```julia
+Base.@_inline_meta
+```
+
+```text
+warning: non-public-access
+ --> example.jl:1:1
+  |
+1 | Base.@_inline_meta
+  | ^^^^^^^^^^^^^^^^^^ `Base` does not export `@_inline_meta` or declare it `public`
+```
+
 ## `comparison-negation`
 
 Flag `!` applied to a parenthesized equality test, which Julia spells with a single operator: `!(a == b)` is `a != b`, `!(a === b)` is `a !== b`, and both read back the other way. The Unicode spellings `≠`, `≡`, and `≢` collapse the same way.
