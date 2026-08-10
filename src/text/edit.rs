@@ -9,19 +9,22 @@
 
 use lsp_types::TextDocumentContentChangeEvent;
 
-use super::{LineIndex, PositionEncoding};
+use super::{PositionEncoding, TextBuffer};
 use crate::parser::Edit;
 
-/// Apply a `didChange` batch to `text` in place, interpreting range positions
-/// in the negotiated `encoding`, and return the byte [`Edit`]s that describe
-/// the transform.
+/// Apply a `didChange` batch to `buffer` in place, interpreting range
+/// positions in the negotiated `encoding`, and return the byte [`Edit`]s that
+/// describe the transform.
 ///
 /// Changes apply sequentially: each range is interpreted against the text as
-/// it stands after the previous change, so the line table is rebuilt per
-/// ranged change. A change without a range replaces the whole buffer (legal
-/// from clients even under incremental sync), so application starts at the
-/// last such change and everything before it is skipped. Out-of-range
-/// positions clamp to the end of the line or buffer.
+/// it stands after the previous change. That is what makes the buffer's
+/// maintained line table load-bearing rather than a convenience — every change
+/// in the batch needs an up-to-date table, and patching one costs an add per
+/// line after the edit where rescanning costs a pass over the whole document.
+/// A change without a range replaces the whole buffer (legal from clients even
+/// under incremental sync), so application starts at the last such change and
+/// everything before it is skipped. Out-of-range positions clamp to the end of
+/// the line or buffer.
 ///
 /// The returned edits share that left-to-right convention, so
 /// `apply_edits(old_text, &edits)` reproduces the new buffer exactly — which
@@ -30,7 +33,7 @@ use crate::parser::Edit;
 /// [`None`]: the transform from the previous buffer is then unknown, and the
 /// reparse layer must fall back to a whole-text diff.
 pub fn apply_content_changes(
-    text: &mut String,
+    buffer: &mut TextBuffer,
     changes: Vec<TextDocumentContentChangeEvent>,
     encoding: PositionEncoding,
 ) -> Option<Vec<Edit>> {
@@ -40,21 +43,20 @@ pub fn apply_content_changes(
         .unwrap_or(0);
     let mut edits = Vec::with_capacity(changes.len() - start);
     let mut replaced = false;
-    for change in &changes[start..] {
+    for change in changes.into_iter().skip(start) {
         match change.range {
             Some(range) => {
-                let index = LineIndex::new(text);
+                let index = buffer.line_index();
                 let start = index.position_to_byte(range.start, encoding);
                 let end = index.position_to_byte(range.end, encoding);
-                text.replace_range(start..end, &change.text);
+                buffer.replace_range(start..end, &change.text);
                 edits.push(Edit {
                     range: start..end,
-                    insert: change.text.clone(),
+                    insert: change.text,
                 });
             }
             None => {
-                text.clear();
-                text.push_str(&change.text);
+                buffer.set_text(change.text);
                 replaced = true;
             }
         }
@@ -88,18 +90,29 @@ mod tests {
         }
     }
 
+    /// Apply `changes` and return the resulting text.
+    ///
+    /// Every case below goes through here, so every case also checks the two
+    /// standing invariants: the reported edits reproduce the batch, and the
+    /// buffer's patched line table still matches a rescan (the `debug_assert`
+    /// inside `TextBuffer::replace_range`, live because tests build in debug).
     fn apply(initial: &str, changes: Vec<TextDocumentContentChangeEvent>) -> String {
-        let mut text = initial.to_string();
-        let edits = apply_content_changes(&mut text, changes, PositionEncoding::Utf16);
+        let mut buffer = TextBuffer::from(initial);
+        let edits = apply_content_changes(&mut buffer, changes, PositionEncoding::Utf16);
         // Whatever the batch was, the edits it reports must reproduce it.
         if let Some(edits) = edits {
             assert_eq!(
                 apply_edits(initial, &edits),
-                text,
+                buffer.text(),
                 "reported edits: {edits:?}"
             );
         }
-        text
+        assert_eq!(
+            buffer.line_starts(),
+            &crate::text::LineStarts::new(&buffer),
+            "line table drifted"
+        );
+        buffer.into_string()
     }
 
     fn edit(range: std::ops::Range<usize>, insert: &str) -> Edit {
@@ -150,13 +163,13 @@ mod tests {
     fn utf8_offsets_after_surrogate_pair() {
         // Under the negotiated utf-8 encoding, U+1F600 is 4 units (bytes), so
         // character 4 is just past the emoji.
-        let mut text = "\u{1F600}x".to_string();
+        let mut buffer = TextBuffer::from("\u{1F600}x");
         apply_content_changes(
-            &mut text,
+            &mut buffer,
             vec![ranged((0, 4), (0, 5), "y")],
             PositionEncoding::Utf8,
         );
-        assert_eq!(text, "\u{1F600}y");
+        assert_eq!(&*buffer, "\u{1F600}y");
     }
 
     #[test]
@@ -166,40 +179,40 @@ mod tests {
 
     #[test]
     fn ranged_changes_report_their_byte_edits() {
-        let mut text = "ab\ncd".to_string();
+        let mut buffer = TextBuffer::from("ab\ncd");
         let edits = apply_content_changes(
-            &mut text,
+            &mut buffer,
             vec![ranged((0, 1), (0, 1), "x"), ranged((1, 1), (1, 1), "y")],
             PositionEncoding::Utf16,
         );
         // The second edit's offset is against the post-first-change text, where
         // line 1 starts one byte later than it did in the original buffer.
         assert_eq!(edits, Some(vec![edit(1..1, "x"), edit(5..5, "y")]));
-        assert_eq!(text, "axb\ncyd");
+        assert_eq!(&*buffer, "axb\ncyd");
     }
 
     #[test]
     fn a_full_replacement_reports_no_edits() {
-        let mut text = "old".to_string();
+        let mut buffer = TextBuffer::from("old");
         assert_eq!(
             apply_content_changes(
-                &mut text,
+                &mut buffer,
                 vec![full("base\n"), ranged((0, 4), (0, 4), "!")],
                 PositionEncoding::Utf16,
             ),
             None,
         );
-        assert_eq!(text, "base!\n");
+        assert_eq!(&*buffer, "base!\n");
     }
 
     #[test]
     fn an_empty_batch_reports_an_empty_edit_slice() {
-        let mut text = "x = 1\n".to_string();
+        let mut buffer = TextBuffer::from("x = 1\n");
         assert_eq!(
-            apply_content_changes(&mut text, vec![], PositionEncoding::Utf16),
+            apply_content_changes(&mut buffer, vec![], PositionEncoding::Utf16),
             Some(vec![]),
         );
-        assert_eq!(text, "x = 1\n");
+        assert_eq!(&*buffer, "x = 1\n");
     }
 
     #[test]

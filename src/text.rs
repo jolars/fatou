@@ -6,8 +6,10 @@
 //! one path to it, so a reader never has to ask which of two spellings of
 //! `Edit` a given import means.
 
+pub mod buffer;
 pub mod edit;
 pub mod line_index;
 
+pub use buffer::TextBuffer;
 pub use edit::apply_content_changes;
-pub use line_index::{LineCol, LineIndex, PositionEncoding};
+pub use line_index::{LineCol, LineIndex, LineStarts, PositionEncoding};

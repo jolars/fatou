@@ -41,7 +41,7 @@ use lsp_types::{
 use crate::config::CONFIG_FILE_NAME;
 use crate::environment::is_environment_file;
 use crate::parser::Edit;
-use crate::text::{PositionEncoding, apply_content_changes};
+use crate::text::{PositionEncoding, TextBuffer, apply_content_changes};
 
 use super::analysis_thread::AnalysisRequest;
 use super::config::{ConfigStore, ResolvedConfig};
@@ -52,7 +52,7 @@ use super::uri;
 /// An open document's live buffer and client-reported version.
 #[derive(Debug, Clone)]
 struct Document {
-    text: String,
+    text: TextBuffer,
     version: i32,
 }
 
@@ -237,7 +237,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             // The spec wants a report, not null; an unknown document has none.
             let empty = serde_json::to_value(super::read_jobs::full_report(Vec::new()))
                 .expect("empty diagnostic report serializes");
@@ -263,7 +263,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -287,7 +287,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -310,7 +310,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -334,7 +334,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -372,7 +372,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -392,7 +392,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -413,7 +413,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -436,7 +436,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -458,7 +458,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -479,7 +479,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -500,7 +500,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -522,7 +522,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -543,7 +543,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -565,7 +565,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -590,7 +590,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -613,7 +613,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -634,7 +634,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -683,7 +683,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -743,7 +743,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.clone()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -853,7 +853,7 @@ impl GlobalState {
                     self.documents.insert(
                         uri.clone(),
                         Document {
-                            text: params.text_document.text,
+                            text: TextBuffer::new(params.text_document.text),
                             version: params.text_document.version,
                         },
                     );
@@ -1218,7 +1218,7 @@ impl GlobalState {
         };
         let _ = self.analysis_tx.send(AnalysisRequest {
             path: path_for(&uri),
-            text: doc.text.clone(),
+            text: doc.text.text().to_string(),
             version: doc.version,
             rules,
             edits,
@@ -1387,7 +1387,7 @@ mod tests {
         state.documents.insert(
             uri.clone(),
             Document {
-                text: String::new(),
+                text: TextBuffer::default(),
                 version,
             },
         );
