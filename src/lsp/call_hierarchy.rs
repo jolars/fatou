@@ -46,7 +46,7 @@ use crate::parser::parse;
 use crate::resolve::{Namespace, OccurrenceKey, PackageSource, Resolution, Resolver};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::cross_file;
 use super::definition::{library_def_site, using_def_site};
@@ -339,11 +339,11 @@ pub(crate) fn prepare_call_hierarchy_via_db(
     snapshot: &Analysis,
     uri: &Uri,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<Vec<CallHierarchyItem>> {
-    let line_index = LineIndex::new(text);
+    let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -755,9 +755,15 @@ mod tests {
         let path = Path::new("/work/s.jl");
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, src.clone());
-        let items =
-            prepare_call_hierarchy_via_db(&db.snapshot(), &doc_uri(), path, &src, position, Utf16)
-                .expect("the marker names a function");
+        let items = prepare_call_hierarchy_via_db(
+            &db.snapshot(),
+            &doc_uri(),
+            path,
+            &TextBuffer::new(src.to_string()),
+            position,
+            Utf16,
+        )
+        .expect("the marker names a function");
         (db, src, items.into_iter().next().unwrap())
     }
 
@@ -819,7 +825,14 @@ mod tests {
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, src.clone());
         assert_eq!(
-            prepare_call_hierarchy_via_db(&db.snapshot(), &doc_uri(), path, &src, position, Utf16),
+            prepare_call_hierarchy_via_db(
+                &db.snapshot(),
+                &doc_uri(),
+                path,
+                &TextBuffer::new(src.to_string()),
+                position,
+                Utf16
+            ),
             expected,
             "cached-tree prepare must match the re-parse path"
         );
@@ -831,7 +844,7 @@ mod tests {
                 &stale.snapshot(),
                 &doc_uri(),
                 path,
-                &src,
+                &TextBuffer::new(src.to_string()),
                 position,
                 Utf16
             ),
@@ -980,10 +993,16 @@ mod tests {
         db.upsert_file(path, src.clone());
         db.set_library(packages, roots, Vec::new());
         let snapshot = db.snapshot();
-        let item =
-            prepare_call_hierarchy_via_db(&snapshot, &doc_uri(), path, &src, position, Utf16)
-                .unwrap()
-                .remove(0);
+        let item = prepare_call_hierarchy_via_db(
+            &snapshot,
+            &doc_uri(),
+            path,
+            &TextBuffer::new(src.to_string()),
+            position,
+            Utf16,
+        )
+        .unwrap()
+        .remove(0);
 
         let calls = outgoing_calls_via_db(&snapshot, &item, Utf16).unwrap();
         assert_eq!(calls.len(), 1, "{calls:#?}");
@@ -1016,7 +1035,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            b_text,
+            &TextBuffer::new(b_text.to_string()),
             Position::new(0, 11),
             Utf16,
         )
@@ -1043,7 +1062,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            a_text,
+            &TextBuffer::new(a_text.to_string()),
             Position::new(0, 0),
             Utf16,
         )
@@ -1073,7 +1092,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            b_text,
+            &TextBuffer::new(b_text.to_string()),
             Position::new(0, 1),
             Utf16,
         )

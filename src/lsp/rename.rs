@@ -30,7 +30,7 @@ use rowan::{TextRange, TextSize};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::semantic::{BindingId, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::cross_file;
 
@@ -80,11 +80,11 @@ pub fn compute_rename(
 pub(crate) fn prepare_rename_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<PrepareRenameResponse> {
-    let line_index = LineIndex::new(text);
+    let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -119,13 +119,13 @@ pub(crate) fn rename_via_db(
     snapshot: &Analysis,
     uri: &Uri,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     new_name: &str,
     encoding: PositionEncoding,
 ) -> Result<Option<WorkspaceEdit>, String> {
     validate_new_name(new_name)?;
-    let line_index = LineIndex::new(text);
+    let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -455,7 +455,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            a_text,
+            &TextBuffer::new(a_text.to_string()),
             Position::new(0, 0),
             "hello",
             Utf16,
@@ -486,9 +486,14 @@ mod tests {
         let snapshot = db.snapshot();
         let b_path = member_path("b.jl");
 
-        let response =
-            prepare_rename_via_db(&snapshot, &b_path, b_text, Position::new(0, 11), Utf16)
-                .expect("the workspace free read is renameable");
+        let response = prepare_rename_via_db(
+            &snapshot,
+            &b_path,
+            &TextBuffer::new(b_text.to_string()),
+            Position::new(0, 11),
+            Utf16,
+        )
+        .expect("the workspace free read is renameable");
         match response {
             PrepareRenameResponse::Range(range) => {
                 // The `greet` token spans columns 11..16 on line 0.

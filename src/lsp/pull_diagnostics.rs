@@ -18,7 +18,7 @@ use lsp_types::Diagnostic;
 
 use crate::incremental::{Analysis, normalize_path};
 use crate::parser::parse;
-use crate::text::PositionEncoding;
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
@@ -31,7 +31,7 @@ use super::lint::{ServerRules, lint_diagnostics_via_db};
 pub(crate) fn document_diagnostics_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     encoding: PositionEncoding,
     rules: &ServerRules,
 ) -> Vec<Diagnostic> {
@@ -101,7 +101,7 @@ mod tests {
         document_diagnostics_via_db(
             &db.snapshot(),
             &path,
-            text,
+            &TextBuffer::new(text.to_string()),
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
         )
@@ -143,7 +143,7 @@ mod tests {
         let diags = document_diagnostics_via_db(
             &db.snapshot(),
             Path::new("/work/never-seen.jl"),
-            text,
+            &TextBuffer::new(text.to_string()),
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
         );

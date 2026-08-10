@@ -52,7 +52,7 @@ use super::uri;
 /// An open document's live buffer and client-reported version.
 #[derive(Debug, Clone)]
 struct Document {
-    text: TextBuffer,
+    text: Arc<TextBuffer>,
     version: i32,
 }
 
@@ -237,7 +237,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             // The spec wants a report, not null; an unknown document has none.
             let empty = serde_json::to_value(super::read_jobs::full_report(Vec::new()))
                 .expect("empty diagnostic report serializes");
@@ -263,7 +263,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -287,7 +287,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -310,7 +310,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -334,7 +334,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -372,7 +372,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -392,7 +392,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -413,7 +413,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -436,7 +436,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -458,7 +458,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -479,7 +479,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -500,7 +500,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -522,7 +522,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -543,7 +543,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -565,7 +565,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -590,7 +590,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -613,7 +613,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -634,7 +634,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -683,7 +683,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -743,7 +743,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| d.text.text().to_string()) else {
+        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -853,7 +853,7 @@ impl GlobalState {
                     self.documents.insert(
                         uri.clone(),
                         Document {
-                            text: TextBuffer::new(params.text_document.text),
+                            text: Arc::new(TextBuffer::new(params.text_document.text)),
                             version: params.text_document.version,
                         },
                     );
@@ -877,8 +877,11 @@ impl GlobalState {
                     let Some(doc) = self.documents.get_mut(&uri) else {
                         return;
                     };
-                    let edits =
-                        apply_content_changes(&mut doc.text, params.content_changes, self.encoding);
+                    let edits = apply_content_changes(
+                        Arc::make_mut(&mut doc.text),
+                        params.content_changes,
+                        self.encoding,
+                    );
                     doc.version = params.text_document.version;
                     self.send_analysis(uri, edits);
                 }
@@ -1218,7 +1221,7 @@ impl GlobalState {
         };
         let _ = self.analysis_tx.send(AnalysisRequest {
             path: path_for(&uri),
-            text: doc.text.text().to_string(),
+            text: Arc::clone(&doc.text),
             version: doc.version,
             rules,
             edits,
@@ -1387,7 +1390,7 @@ mod tests {
         state.documents.insert(
             uri.clone(),
             Document {
-                text: TextBuffer::default(),
+                text: Arc::default(),
                 version,
             },
         );
@@ -1405,6 +1408,53 @@ mod tests {
         match rx.try_recv().expect("a response") {
             Message::Response(resp) => resp.response_result.err().map(|e| e.code),
             other => panic!("expected a response, got {other:?}"),
+        }
+    }
+
+    /// A dispatched read job carries an `Arc` clone of the live buffer rather
+    /// than a copy of its text, so it shares the line table the main loop
+    /// maintains. The edit that lands underneath a running job must therefore
+    /// copy on write: the job keeps answering against the buffer it was
+    /// dispatched for, and both buffers keep a table matching their own text.
+    #[test]
+    fn an_edit_under_an_inflight_read_copies_on_write() {
+        let (mut state, _rx) = test_state();
+        let doc = uri("file:///a.jl");
+        let encoding = state.encoding;
+        state.documents.insert(
+            doc.clone(),
+            Document {
+                text: Arc::new(TextBuffer::from("x = 1\n")),
+                version: 1,
+            },
+        );
+        // What the analysis thread and any read job hold onto.
+        let inflight = Arc::clone(&state.documents[&doc].text);
+
+        let entry = state.documents.get_mut(&doc).unwrap();
+        apply_content_changes(
+            Arc::make_mut(&mut entry.text),
+            vec![lsp_types::TextDocumentContentChangeEvent {
+                range: Some(lsp_types::Range::new(
+                    lsp_types::Position::new(0, 5),
+                    lsp_types::Position::new(0, 5),
+                )),
+                range_length: None,
+                text: "\ny = 2".to_string(),
+            }],
+            encoding,
+        );
+
+        let live = Arc::clone(&state.documents[&doc].text);
+        assert_eq!(&*inflight, "x = 1\n", "the in-flight read keeps its text");
+        assert_eq!(&*live, "x = 1\ny = 2\n", "the document took the edit");
+        for buffer in [&inflight, &live] {
+            assert_eq!(
+                buffer.line_starts(),
+                &crate::text::LineStarts::new(buffer),
+                "line table drifted from {:?}",
+                buffer.text()
+            );
         }
     }
 

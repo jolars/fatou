@@ -19,7 +19,7 @@ use lsp_types::{
 
 use crate::incremental::Analysis;
 use crate::linter::{self, Applicability};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::format::lsp_range_to_text_range;
 use super::lint::{ServerRules, finding_to_lsp, lint_findings_via_db};
@@ -31,7 +31,7 @@ pub(crate) fn code_actions_via_db(
     snapshot: &Analysis,
     uri: &Uri,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     range: Range,
     encoding: PositionEncoding,
     rules: &ServerRules,
@@ -127,7 +127,7 @@ mod tests {
             &db.snapshot(),
             &test_uri(),
             path,
-            text,
+            &TextBuffer::new(text.to_string()),
             range,
             PositionEncoding::Utf16,
             &ServerRules::defaults(),

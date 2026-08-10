@@ -20,7 +20,7 @@ use rowan::{TextRange, TextSize, TokenAtOffset};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// The selection-range chain for each of `positions` in `text`, re-parsing it.
 /// Pure and unit-testable; single-file by nature.
@@ -43,7 +43,7 @@ pub fn compute_selection_ranges(
 pub(crate) fn selection_ranges_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     positions: &[Position],
     encoding: PositionEncoding,
 ) -> Vec<SelectionRange> {
@@ -169,7 +169,7 @@ mod tests {
             selection_ranges_via_db(
                 &db.snapshot(),
                 path,
-                buffer,
+                &TextBuffer::new(buffer.to_string()),
                 &positions,
                 PositionEncoding::Utf8
             ),
@@ -184,7 +184,7 @@ mod tests {
             selection_ranges_via_db(
                 &stale.snapshot(),
                 path,
-                buffer,
+                &TextBuffer::new(buffer.to_string()),
                 &positions,
                 PositionEncoding::Utf8
             ),
@@ -198,7 +198,7 @@ mod tests {
             selection_ranges_via_db(
                 &empty.snapshot(),
                 path,
-                buffer,
+                &TextBuffer::new(buffer.to_string()),
                 &positions,
                 PositionEncoding::Utf8
             ),

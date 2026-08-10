@@ -42,7 +42,7 @@ use crate::resolve::{
 };
 use crate::semantic::{BindingKind, LoadKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// The token classes this server emits; the discriminant is the index into
 /// [`legend`]'s `token_types`.
@@ -100,7 +100,7 @@ pub fn compute_semantic_tokens<P: PackageSource>(
 pub(crate) fn semantic_tokens_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     encoding: PositionEncoding,
 ) -> SemanticTokens {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
@@ -1023,7 +1023,12 @@ mod tests {
         db.set_library_packages(lib.clone());
         db.upsert_file(path, buffer.to_string());
         assert_eq!(
-            semantic_tokens_via_db(&db.snapshot(), path, buffer, PositionEncoding::Utf8),
+            semantic_tokens_via_db(
+                &db.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf8
+            ),
             expected,
             "cached-tree tokens must match the re-parse path"
         );
@@ -1033,7 +1038,12 @@ mod tests {
         stale.set_library_packages(lib.clone());
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            semantic_tokens_via_db(&stale.snapshot(), path, buffer, PositionEncoding::Utf8),
+            semantic_tokens_via_db(
+                &stale.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf8
+            ),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -1042,7 +1052,12 @@ mod tests {
         let mut empty = IncrementalDatabase::default();
         empty.set_library_packages(lib);
         assert_eq!(
-            semantic_tokens_via_db(&empty.snapshot(), path, buffer, PositionEncoding::Utf8),
+            semantic_tokens_via_db(
+                &empty.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf8
+            ),
             expected,
             "untracked path must fall back to the buffer text"
         );

@@ -9,15 +9,19 @@
 //!
 //! This bench is the evidence for that shape, and the guard against a change
 //! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-10
-//! (release), the two rows that matter:
+//! (release, otherwise-idle machine — every row here scales with load, so read
+//! the ratios, not the absolutes):
 //!
 //! ```text
 //!                                   134 KB     1073 KB
 //! rescan (LineIndex::new)            26 us      316 us
 //! reuse the maintained table          1 ns        1 ns
-//! didChange, one keystroke          0.4 us      4.4 us
+//! didChange (edit plus undo)        0.9 us      8.8 us
 //! reparse, token tier                33 us      257 us
 //! ```
+//!
+//! The `didChange` row applies a keystroke and then undoes it, so one
+//! keystroke is about half of what it prints.
 //!
 //! A keystroke used to pay that rescan on the main loop before dispatching
 //! anything, and pay it again in every handler that answered against the

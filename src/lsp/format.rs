@@ -9,7 +9,7 @@ use rowan::TextRange;
 use crate::formatter::{FormatStyle, RangeFormatted, format_node, format_range, format_with_style};
 use crate::incremental::Analysis;
 use crate::parser::{ParseDiagnostic, parse};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
 /// for `path` still matches it; otherwise re-parse. A write racing the read
@@ -20,7 +20,7 @@ use crate::text::{LineIndex, PositionEncoding};
 pub(crate) fn format_edits_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     style: FormatStyle,
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
@@ -84,7 +84,7 @@ pub(crate) fn edits_for_formatted(
 pub(crate) fn format_range_edits_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     range: Range,
     style: FormatStyle,
     encoding: PositionEncoding,
@@ -221,7 +221,13 @@ mod tests {
         db.upsert_file(path, buffer.to_string());
         let snapshot = db.snapshot();
         assert_eq!(
-            format_edits_via_db(&snapshot, path, buffer, style, encoding),
+            format_edits_via_db(
+                &snapshot,
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                style,
+                encoding
+            ),
             expected,
             "cached-tree format must match the re-parse path"
         );
@@ -230,7 +236,13 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            format_edits_via_db(&stale.snapshot(), path, buffer, style, encoding),
+            format_edits_via_db(
+                &stale.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                style,
+                encoding
+            ),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -238,7 +250,13 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            format_edits_via_db(&empty.snapshot(), path, buffer, style, encoding),
+            format_edits_via_db(
+                &empty.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                style,
+                encoding
+            ),
             expected,
             "untracked path must fall back to the buffer text"
         );
@@ -266,7 +284,14 @@ mod tests {
         db.upsert_file(path, buffer.to_string());
         let snapshot = db.snapshot();
         assert_eq!(
-            format_range_edits_via_db(&snapshot, path, buffer, range, style, encoding),
+            format_range_edits_via_db(
+                &snapshot,
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                range,
+                style,
+                encoding
+            ),
             expected,
             "cached-tree range format must match the re-parse path"
         );
@@ -275,7 +300,14 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            format_range_edits_via_db(&stale.snapshot(), path, buffer, range, style, encoding),
+            format_range_edits_via_db(
+                &stale.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                range,
+                style,
+                encoding
+            ),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -283,7 +315,14 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            format_range_edits_via_db(&empty.snapshot(), path, buffer, range, style, encoding),
+            format_range_edits_via_db(
+                &empty.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                range,
+                style,
+                encoding
+            ),
             expected,
             "untracked path must fall back to the buffer text"
         );

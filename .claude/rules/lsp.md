@@ -55,6 +55,16 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
 - Offsets go through `src/text/line_index.rs`; `didChange` conversion is
   `src/text/edit.rs`. The pure edit machinery lives in `fatou-parser` and is
   **not** mirrored in `src/text` — `crate::parser` is the one path to `Edit`.
+- **A live buffer is a `TextBuffer` (`src/text/buffer.rs`), never a bare
+  `String`**: it carries the line-start table and patches it per edit. An open
+  document is an `Arc<TextBuffer>` shared with the analysis thread and every
+  read job, so a handler resolving positions against the live buffer takes
+  `&TextBuffer` and calls `text.line_index()`. `LineIndex::new` **rescans the
+  whole document** — reserve it for text with no maintained table, which means
+  text resolved off the db (`snapshot.file_text*`) and the `compute_*` fallback
+  paths, where a full parse dwarfs the scan anyway. Reintroducing a rescan on
+  the live-buffer path is a silent regression: it type-checks, because
+  `&TextBuffer` derefs to `&str`. `benches/line_index.rs` is what measures it.
 
 ## Conventions
 

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use crate::formatter::FormatStyle;
 use crate::incremental::Analysis;
-use crate::text::PositionEncoding;
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::call_hierarchy::{
     incoming_calls_via_db, outgoing_calls_via_db, prepare_call_hierarchy_via_db,
@@ -71,12 +71,16 @@ impl ReadReply {
 /// and running the work off-thread on the read pool. Each variant carries the
 /// live buffer `text` and the [`ReadReply`] channel so the worker can reply;
 /// the analysis thread only adds the db snapshot. See [`run_read`].
+///
+/// `text` is the shared [`TextBuffer`], not a copy: the buffer carries the
+/// line-start table the main loop already maintains, so a handler resolves
+/// positions against it instead of rescanning the document (`src/text/buffer.rs`).
 pub(crate) enum ReadJob {
     CodeAction {
         id: RequestId,
         uri: Uri,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         range: Range,
         rules: Arc<ServerRules>,
         sender: ReadReply,
@@ -84,7 +88,7 @@ pub(crate) enum ReadJob {
     DocumentDiagnostic {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         rules: Arc<ServerRules>,
         /// The `resultId` the client last held for this document, if any; a
         /// match against the freshly computed id collapses the report to
@@ -95,14 +99,14 @@ pub(crate) enum ReadJob {
     Format {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         style: FormatStyle,
         sender: ReadReply,
     },
     FormatRange {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         range: Range,
         style: FormatStyle,
         sender: ReadReply,
@@ -110,7 +114,7 @@ pub(crate) enum ReadJob {
     DocumentSymbols {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         sender: ReadReply,
     },
     WorkspaceSymbols {
@@ -121,32 +125,32 @@ pub(crate) enum ReadJob {
     FoldingRanges {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         sender: ReadReply,
     },
     DocumentLinks {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         sender: ReadReply,
     },
     SelectionRanges {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         positions: Vec<Position>,
         sender: ReadReply,
     },
     SemanticTokensFull {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         sender: ReadReply,
     },
     SemanticTokensDelta {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         /// The `resultId` from the client's last full or delta response; a
         /// match against the freshly computed id answers an empty delta.
         previous_result_id: String,
@@ -155,7 +159,7 @@ pub(crate) enum ReadJob {
     Completion {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
@@ -167,14 +171,14 @@ pub(crate) enum ReadJob {
     Hover {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
     SignatureHelp {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
@@ -182,7 +186,7 @@ pub(crate) enum ReadJob {
         id: RequestId,
         uri: Uri,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
@@ -190,7 +194,7 @@ pub(crate) enum ReadJob {
         id: RequestId,
         uri: Uri,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         include_declaration: bool,
         sender: ReadReply,
@@ -198,14 +202,14 @@ pub(crate) enum ReadJob {
     DocumentHighlight {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
     PrepareRename {
         id: RequestId,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
@@ -213,7 +217,7 @@ pub(crate) enum ReadJob {
         id: RequestId,
         uri: Uri,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         new_name: String,
         sender: ReadReply,
@@ -232,7 +236,7 @@ pub(crate) enum ReadJob {
         id: RequestId,
         uri: Uri,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },
@@ -252,7 +256,7 @@ pub(crate) enum ReadJob {
         id: RequestId,
         uri: Uri,
         path: PathBuf,
-        text: String,
+        text: Arc<TextBuffer>,
         position: Position,
         sender: ReadReply,
     },

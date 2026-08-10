@@ -28,7 +28,7 @@ use rowan::{TextRange, TextSize};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::semantic::{Access, BindingId, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::cross_file;
 
@@ -75,12 +75,12 @@ pub(crate) fn references_via_db(
     snapshot: &Analysis,
     uri: &Uri,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     encoding: PositionEncoding,
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
-    let line_index = LineIndex::new(text);
+    let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -138,11 +138,11 @@ fn cross_file_references(
 pub(crate) fn document_highlights_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<Vec<DocumentHighlight>> {
-    let line_index = LineIndex::new(text);
+    let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -351,7 +351,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            a_text,
+            &TextBuffer::new(a_text.to_string()),
             Position::new(0, 0),
             Utf16,
             true,
@@ -378,7 +378,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            a_text,
+            &TextBuffer::new(a_text.to_string()),
             Position::new(0, 0),
             Utf16,
             false,
@@ -407,7 +407,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            b_text,
+            &TextBuffer::new(b_text.to_string()),
             Position::new(0, 11),
             Utf16,
             true,

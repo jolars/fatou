@@ -17,7 +17,7 @@ use lsp_types::{FoldingRange, FoldingRangeKind};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// The folding ranges for `text`, re-parsing it. Pure and unit-testable;
 /// single-file by nature.
@@ -36,7 +36,7 @@ pub fn compute_folding_ranges(text: &str) -> Vec<FoldingRange> {
 pub(crate) fn folding_ranges_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
 ) -> Vec<FoldingRange> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -268,7 +268,7 @@ mod tests {
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, buffer.to_string());
         assert_eq!(
-            folding_ranges_via_db(&db.snapshot(), path, buffer),
+            folding_ranges_via_db(&db.snapshot(), path, &TextBuffer::new(buffer.to_string())),
             expected,
             "cached-tree folds must match the re-parse path"
         );
@@ -277,7 +277,11 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            folding_ranges_via_db(&stale.snapshot(), path, buffer),
+            folding_ranges_via_db(
+                &stale.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string())
+            ),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -285,7 +289,11 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            folding_ranges_via_db(&empty.snapshot(), path, buffer),
+            folding_ranges_via_db(
+                &empty.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string())
+            ),
             expected,
             "untracked path must fall back to the buffer text"
         );

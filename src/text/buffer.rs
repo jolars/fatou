@@ -19,10 +19,20 @@ use super::line_index::{LineIndex, LineStarts};
 ///
 /// Derefs to `str`, so anything that just wants the text — `parse`, the
 /// formatter, the linter — takes it unchanged.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Eq)]
 pub struct TextBuffer {
     text: String,
     line_starts: LineStarts,
+}
+
+/// Two buffers are equal when their text is. Deriving this would also walk the
+/// line tables, which the type's whole invariant says are a function of the
+/// text — so that comparison could only ever agree, at a cost linear in the
+/// number of lines.
+impl PartialEq for TextBuffer {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+    }
 }
 
 impl TextBuffer {
@@ -86,6 +96,22 @@ impl Deref for TextBuffer {
 
     fn deref(&self) -> &str {
         &self.text
+    }
+}
+
+/// Compare against plain text, so the language server's "does the db's tracked
+/// input still match the live buffer" check reads exactly as it did when a
+/// document was a `String`. Only the text is compared: the table is a function
+/// of it, and [`TextBuffer`] is the thing keeping that true.
+impl PartialEq<str> for TextBuffer {
+    fn eq(&self, other: &str) -> bool {
+        self.text == other
+    }
+}
+
+impl PartialEq<TextBuffer> for str {
+    fn eq(&self, other: &TextBuffer) -> bool {
+        self == other.text.as_str()
     }
 }
 

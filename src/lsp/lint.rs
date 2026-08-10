@@ -24,7 +24,7 @@ use crate::linter::rules::{ResolutionContext, is_shipped_rule};
 use crate::linter::{self, ResolvedRules, Severity, all_rules, lint_parsed};
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// Lint `text` off the snapshot's cached parse and semantic model when the
 /// db's tracked buffer for `path` still matches it; otherwise re-parse. A
@@ -34,7 +34,7 @@ use crate::text::{LineIndex, PositionEncoding};
 pub(crate) fn lint_diagnostics_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     encoding: PositionEncoding,
     rules: &ServerRules,
 ) -> Vec<Diagnostic> {
@@ -63,7 +63,7 @@ pub fn compute_lint_diagnostics(text: &str, encoding: PositionEncoding) -> Vec<D
 pub(crate) fn lint_findings_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     rules: &ServerRules,
 ) -> Vec<linter::Diagnostic> {
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
@@ -345,7 +345,7 @@ mod tests {
         let diags = lint_diagnostics_via_db(
             &db.snapshot(),
             &member_path("a.jl"),
-            src,
+            &TextBuffer::new(src.to_string()),
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
         );
@@ -364,7 +364,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &plain.snapshot(),
                 path,
-                src,
+                &TextBuffer::new(src.to_string()),
                 PositionEncoding::Utf16,
                 &ServerRules::defaults()
             ),
@@ -389,7 +389,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &db.snapshot(),
                 path,
-                UNUSED_LOCAL,
+                &TextBuffer::new(UNUSED_LOCAL.to_string()),
                 encoding,
                 &ServerRules::defaults()
             ),
@@ -404,7 +404,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &stale.snapshot(),
                 path,
-                UNUSED_LOCAL,
+                &TextBuffer::new(UNUSED_LOCAL.to_string()),
                 encoding,
                 &ServerRules::defaults()
             ),
@@ -418,7 +418,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &empty.snapshot(),
                 path,
-                UNUSED_LOCAL,
+                &TextBuffer::new(UNUSED_LOCAL.to_string()),
                 encoding,
                 &ServerRules::defaults()
             ),

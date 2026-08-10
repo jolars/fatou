@@ -30,7 +30,7 @@ use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_submodule,
 };
 use crate::semantic::{BindingId, BindingKind, LoadKind, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::render::{binding_detail, render_method, render_param, type_detail};
 
@@ -61,11 +61,11 @@ pub fn compute_hover<P: PackageSource>(
 pub(crate) fn hover_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     encoding: PositionEncoding,
 ) -> Option<Hover> {
-    let line_index = LineIndex::new(text);
+    let line_index = text.line_index();
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
@@ -741,7 +741,7 @@ mod tests {
             hover_via_db(
                 &db.snapshot(),
                 path,
-                buffer,
+                &TextBuffer::new(buffer.to_string()),
                 position,
                 PositionEncoding::Utf8
             ),
@@ -753,7 +753,7 @@ mod tests {
             hover_via_db(
                 &db.snapshot(),
                 path,
-                other,
+                &TextBuffer::new(other.to_string()),
                 position,
                 PositionEncoding::Utf8
             ),

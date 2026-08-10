@@ -18,7 +18,7 @@ use crate::incremental::{Analysis, normalize_path};
 use crate::parser::parse;
 use crate::project::{include_sites, resolve_target};
 use crate::syntax::SyntaxNode;
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::uri;
 
@@ -44,7 +44,7 @@ pub fn compute_document_links(
 pub(crate) fn document_links_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
     // A synthetic path stands in for a non-`file` URI (an untitled buffer): its
@@ -212,7 +212,12 @@ mod tests {
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, buffer.to_string());
         assert_eq!(
-            document_links_via_db(&db.snapshot(), path, buffer, PositionEncoding::Utf16),
+            document_links_via_db(
+                &db.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf16
+            ),
             expected,
             "cached-tree links must match the re-parse path"
         );
@@ -221,7 +226,12 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            document_links_via_db(&stale.snapshot(), path, buffer, PositionEncoding::Utf16),
+            document_links_via_db(
+                &stale.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf16
+            ),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -229,7 +239,12 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            document_links_via_db(&empty.snapshot(), path, buffer, PositionEncoding::Utf16),
+            document_links_via_db(
+                &empty.snapshot(),
+                path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf16
+            ),
             expected,
             "untracked path must fall back to the buffer text"
         );
@@ -251,12 +266,17 @@ mod tests {
         db.upsert_file(&path, buffer.clone());
 
         for links in [
-            document_links_via_db(&db.snapshot(), &path, &buffer, PositionEncoding::Utf16),
+            document_links_via_db(
+                &db.snapshot(),
+                &path,
+                &TextBuffer::new(buffer.to_string()),
+                PositionEncoding::Utf16,
+            ),
             // The fallback (untracked) path decides `base_dir` the same way.
             document_links_via_db(
                 &IncrementalDatabase::default().snapshot(),
                 &path,
-                &buffer,
+                &TextBuffer::new(buffer.to_string()),
                 PositionEncoding::Utf16,
             ),
         ] {

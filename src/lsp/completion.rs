@@ -42,7 +42,7 @@ use crate::resolve::{
 };
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::latex_symbols::{EMOJI_SYMBOLS, LATEX_SYMBOLS};
 use super::render::{binding_detail, function_detail, type_detail};
@@ -90,11 +90,11 @@ pub fn compute_completions<P: PackageSource>(
 pub(crate) fn completion_via_db(
     snapshot: &Analysis,
     path: &Path,
-    text: &str,
+    text: &TextBuffer,
     position: Position,
     encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
-    let offset = TextSize::new(LineIndex::new(text).position_to_byte(position, encoding) as u32);
+    let offset = TextSize::new(text.line_index().position_to_byte(position, encoding) as u32);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
         if snapshot.file_text(file) != text {

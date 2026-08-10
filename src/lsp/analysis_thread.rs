@@ -23,7 +23,7 @@ use salsa::Database as _;
 use crate::incremental::{IncrementalDatabase, IncrementalDb};
 use crate::index::{HarvestedLibrary, PackageIndex};
 use crate::parser::Edit;
-use crate::text::PositionEncoding;
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
@@ -61,7 +61,7 @@ pub(crate) fn guard(label: &str, f: impl FnOnce()) -> bool {
 pub(crate) struct AnalysisRequest {
     pub(crate) uri: Uri,
     pub(crate) path: PathBuf,
-    pub(crate) text: String,
+    pub(crate) text: Arc<TextBuffer>,
     pub(crate) version: i32,
     /// The lint rules the main loop resolved for this document (discovered
     /// `fatou.toml` shadowing editor-pushed settings), current at dispatch.
@@ -414,7 +414,7 @@ impl AnalysisWorker {
     fn start(&mut self, mut req: AnalysisRequest) {
         // Write-phase: push the live buffer into the persistent db. Cheap —
         // the parse is a lazy salsa query deferred to the read-phase.
-        let file = self.db.upsert_file(&req.path, req.text.clone());
+        let file = self.db.upsert_file(&req.path, req.text.text().to_string());
         // Hand the precise edits to the incremental reparse. Staged after the
         // text so the chain is never ahead of the buffer it describes, and
         // appended rather than replaced so a chain the previous read never got
@@ -679,7 +679,7 @@ mod tests {
         let req = |version: i32| AnalysisRequest {
             uri: a.clone(),
             path: PathBuf::from("/work/a.jl"),
-            text: "x = 1\n".to_string(),
+            text: Arc::new(TextBuffer::from("x = 1\n")),
             version,
             rules: Arc::clone(&rules),
             edits: None,
@@ -746,7 +746,7 @@ mod tests {
         let req = |version: i32, text: &str, edits: Option<Vec<Edit>>| AnalysisRequest {
             uri: a.clone(),
             path: PathBuf::from("/work/a.jl"),
-            text: text.to_string(),
+            text: Arc::new(TextBuffer::from(text)),
             version,
             rules: Arc::clone(&rules),
             edits,
@@ -804,7 +804,7 @@ mod tests {
         let req = |uri: &Uri, path: &PathBuf, text: &str, version: i32| AnalysisRequest {
             uri: uri.clone(),
             path: path.clone(),
-            text: text.to_string(),
+            text: Arc::new(TextBuffer::from(text)),
             version,
             rules: Arc::clone(&rules),
             edits: None,
