@@ -47,6 +47,9 @@ roadmap is in `TODO.md` ("Rule roadmap").
   `control_flow()`. Each is computed once per file and memoized, so asking is
   cheap no matter how many rules do.
 - Cross-file `include()` structure → `include_graph.rs`.
+- Which rules need a project-wide resolution context → `RESOLUTION_RULES` in
+  `rules.rs`; the CLI's harvest gate and the server's member rule set read that
+  one list.
 
 ## Rule identity and categories
 
@@ -58,7 +61,8 @@ roadmap is in `TODO.md` ("Rule roadmap").
   which is one page keyed by ID. Recategorizing is therefore a free refactor.
   Vocabulary: `correctness` (the code cannot do what it says), `suspicious`
   (legal Julia, very likely not intended), `performance` (a rewrite that avoids
-  real work), `readability` (a behavior-preserving idiom rewrite).
+  real work), `readability` (a behavior-preserving idiom rewrite), `meta` (a
+  finding about a `# fatou-ignore` directive rather than about the Julia).
 - Every rule needs a description and `examples()`. The examples are run through
   the **real linter** to render the docs page, so they are behavior, not prose.
 

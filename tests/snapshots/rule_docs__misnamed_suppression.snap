@@ -1,0 +1,36 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `misnamed-suppression`
+
+Flag a `# fatou-ignore` directive that names a rule the linter does not ship. Suppression matches a rule by its exact ID, so a misspelled, renamed, or foreign ID silences nothing while reading as though it does. When exactly one shipped rule is a near match, the finding carries a safe fix that rewrites the ID and leaves the reason untouched.
+
+A directive naming a rule that does not exist:
+
+```julia
+# fatou-ignore unused-bindings: set up by the C library
+function f()
+    handle = open_device()
+    1
+end
+```
+
+```text
+warning: misnamed-suppression
+ --> example.jl:1:16
+  |
+1 | # fatou-ignore unused-bindings: set up by the C library
+  |                ^^^^^^^^^^^^^^^ `unused-bindings` is not a fatou rule; this suppresses nothing
+  = help: Replace with `unused-binding` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+# fatou-ignore unused-binding: set up by the C library
+function f()
+    handle = open_device()
+    1
+end
+```

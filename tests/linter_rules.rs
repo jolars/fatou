@@ -5341,3 +5341,405 @@ fn function_has_no_methods_skips_quoted_and_macro_call_sites() {
         0
     );
 }
+
+// --- suppression meta rules -------------------------------------------------
+
+/// Lint `src` with `rule` *and* `also` selected, returning only `rule`'s
+/// messages. The suppression meta rules need the rule a directive names to be
+/// running before they can judge it, which the single-rule `findings` helper
+/// cannot express.
+fn meta_findings(rule: &str, also: &[&str], src: &str) -> Vec<String> {
+    let mut select = vec![rule.to_string()];
+    select.extend(also.iter().map(|id| id.to_string()));
+    let config = LintConfig {
+        select: Some(select),
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.rule == rule)
+        .map(|d| d.message.body)
+        .collect()
+}
+
+fn meta_count(rule: &str, also: &[&str], src: &str) -> usize {
+    meta_findings(rule, also, src).len()
+}
+
+/// The one finding `rule` reports for `src`, with `also` selected too, for
+/// inspecting its fix.
+fn only_finding(rule: &str, also: &[&str], src: &str) -> fatou::linter::Diagnostic {
+    let mut select = vec![rule.to_string()];
+    select.extend(also.iter().map(|id| id.to_string()));
+    let config = LintConfig {
+        select: Some(select),
+        ..Default::default()
+    };
+    let mut diagnostics = check_source(None, src, &config).diagnostics;
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "expected one finding: {diagnostics:?}"
+    );
+    diagnostics.remove(0)
+}
+
+// --- misnamed-suppression ---------------------------------------------------
+
+#[test]
+fn misnamed_suppression_flags_a_rule_the_linter_does_not_ship() {
+    assert_eq!(
+        count(
+            "misnamed-suppression",
+            "# fatou-ignore unused-bindings: t\nx = 1\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "misnamed-suppression",
+            "# fatou-ignore-file unusedbinding: t\nx = 1\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn misnamed_suppression_accepts_a_shipped_rule_id() {
+    assert_eq!(
+        count(
+            "misnamed-suppression",
+            "# fatou-ignore unused-binding: t\nx = 1\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "misnamed-suppression",
+            "# fatou-ignore-file unused-binding: t\nx = 1\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn misnamed_suppression_ignores_directives_that_name_no_rule() {
+    // A blanket directive is `blanket-suppression`'s business, not this one's.
+    assert_eq!(
+        count(
+            "misnamed-suppression",
+            "# fatou-ignore-file: generated\nx = 1\n"
+        ),
+        0
+    );
+    assert_eq!(count("misnamed-suppression", "# fatou-ignore\nx = 1\n"), 0);
+}
+
+#[test]
+fn misnamed_suppression_ignores_ordinary_comments() {
+    assert_eq!(
+        count(
+            "misnamed-suppression",
+            "# unused-bindings is not a rule\nx = 1\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn misnamed_suppression_spans_and_fixes_the_written_id() {
+    let src = "# fatou-ignore unused-bindings: t\nx = 1\n";
+    let diag = only_finding("misnamed-suppression", &[], src);
+    assert_eq!(&src[diag.range], "unused-bindings");
+    let fix = &diag.fixes[0];
+    assert_eq!(fix.content, "unused-binding");
+    assert_eq!(fix.applicability, Applicability::Safe);
+    assert_eq!(&src[fix.start..fix.end], "unused-bindings");
+}
+
+#[test]
+fn misnamed_suppression_fixes_a_snake_case_spelling() {
+    let diag = only_finding(
+        "misnamed-suppression",
+        &[],
+        "# fatou-ignore unused_binding: t\nx = 1\n",
+    );
+    assert_eq!(diag.fixes[0].content, "unused-binding");
+}
+
+#[test]
+fn misnamed_suppression_withholds_a_fix_without_a_near_match() {
+    let diag = only_finding(
+        "misnamed-suppression",
+        &[],
+        "# fatou-ignore banana: t\nx = 1\n",
+    );
+    assert!(diag.fixes.is_empty(), "no plausible rewrite: {diag:?}");
+}
+
+#[test]
+fn misnamed_suppression_withholds_a_fix_for_a_rule_list() {
+    // `parse_rule` stops at whitespace, so the comma rides along and the
+    // directive suppresses nothing. Rewriting to the first rule would silently
+    // drop the second, so the finding carries no fix.
+    let diag = only_finding(
+        "misnamed-suppression",
+        &[],
+        "# fatou-ignore unused-binding, undefined-name: t\nx = 1\n",
+    );
+    assert!(diag.fixes.is_empty(), "{diag:?}");
+}
+
+// --- blanket-suppression ----------------------------------------------------
+
+#[test]
+fn blanket_suppression_flags_a_file_wide_directive_naming_no_rule() {
+    assert_eq!(
+        count(
+            "blanket-suppression",
+            "# fatou-ignore-file: generated\nx = 1\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count("blanket-suppression", "# fatou-ignore-file\nx = 1\n"),
+        1
+    );
+}
+
+#[test]
+fn blanket_suppression_flags_a_node_directive_naming_no_rule() {
+    assert_eq!(count("blanket-suppression", "# fatou-ignore\nx = 1\n"), 1);
+}
+
+#[test]
+fn blanket_suppression_accepts_a_directive_that_names_a_rule() {
+    assert_eq!(
+        count(
+            "blanket-suppression",
+            "# fatou-ignore unused-binding: t\nx = 1\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "blanket-suppression",
+            "# fatou-ignore-file unused-binding: t\nx = 1\n"
+        ),
+        0
+    );
+    // An unknown rule ID is still a named rule — `misnamed-suppression`'s job.
+    assert_eq!(
+        count("blanket-suppression", "# fatou-ignore nonesuch: t\nx = 1\n"),
+        0
+    );
+}
+
+#[test]
+fn blanket_suppression_is_silenced_by_a_file_scoped_directive() {
+    // The escape hatch: a *named* file-wide directive covers the blanket one
+    // below it, while a directive never suppresses a finding inside itself.
+    assert_eq!(
+        count(
+            "blanket-suppression",
+            "# fatou-ignore-file blanket-suppression: vendored\n# fatou-ignore-file: generated\nx = 1\n"
+        ),
+        0
+    );
+}
+
+// --- unexplained-suppression ------------------------------------------------
+
+#[test]
+fn unexplained_suppression_flags_a_directive_with_no_reason() {
+    assert_eq!(
+        count(
+            "unexplained-suppression",
+            "# fatou-ignore unused-binding\nx = 1\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "unexplained-suppression",
+            "# fatou-ignore-file unused-binding\nx = 1\n"
+        ),
+        1
+    );
+    // A colon with nothing after it is no reason either.
+    assert_eq!(
+        count(
+            "unexplained-suppression",
+            "# fatou-ignore unused-binding:   \nx = 1\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn unexplained_suppression_accepts_a_stated_reason() {
+    assert_eq!(
+        count(
+            "unexplained-suppression",
+            "# fatou-ignore unused-binding: kept for the C API\nx = 1\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unexplained_suppression_is_disabled_by_default() {
+    let report = check_source(
+        None,
+        "# fatou-ignore unused-binding\nx = 1\n",
+        &LintConfig::default(),
+    );
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|d| d.rule != "unexplained-suppression")
+    );
+}
+
+// --- outdated-suppression ---------------------------------------------------
+
+#[test]
+fn outdated_suppression_flags_a_directive_whose_rule_found_nothing() {
+    assert_eq!(
+        meta_count(
+            "outdated-suppression",
+            &["unused-binding"],
+            "# fatou-ignore unused-binding: stale\nfunction f()\n    1\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn outdated_suppression_flags_a_directive_with_nothing_after_it() {
+    // Dead regardless of which rules ran: nothing follows it to suppress.
+    assert_eq!(
+        count(
+            "outdated-suppression",
+            "x = 1\n# fatou-ignore unused-binding: stale\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn outdated_suppression_accepts_a_directive_that_fired() {
+    assert_eq!(
+        meta_count(
+            "outdated-suppression",
+            &["unused-binding"],
+            "function f()\n    # fatou-ignore unused-binding: kept\n    t = 1\n    2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn outdated_suppression_accepts_a_file_wide_directive_that_fired() {
+    assert_eq!(
+        meta_count(
+            "outdated-suppression",
+            &["unused-binding"],
+            "# fatou-ignore-file unused-binding: generated\nfunction f()\n    t = 1\n    2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn outdated_suppression_is_silent_for_a_rule_that_did_not_run() {
+    // Dormant, not stale: `unused-binding` is not in this run's rule set, so
+    // its silence says nothing about the directive.
+    assert_eq!(
+        meta_count(
+            "outdated-suppression",
+            &[],
+            "# fatou-ignore unused-binding: kept\nfunction f()\n    t = 1\n    2\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn outdated_suppression_is_silent_for_an_unknown_rule_id() {
+    // `misnamed-suppression` reports this one; reporting it twice helps nobody.
+    assert_eq!(
+        count(
+            "outdated-suppression",
+            "# fatou-ignore nonesuch: t\nx = 1\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn outdated_suppression_is_silent_for_a_directive_naming_no_rule() {
+    assert_eq!(
+        count(
+            "outdated-suppression",
+            "# fatou-ignore-file: generated\nx = 1\n"
+        ),
+        0
+    );
+    assert_eq!(count("outdated-suppression", "# fatou-ignore\nx = 1\n"), 0);
+}
+
+#[test]
+fn outdated_suppression_is_silent_when_the_file_resolves_no_names() {
+    // Nothing harvested `Widgets`, so it may export anything and every rule
+    // that asks what a name means goes quiet — for reasons that say nothing
+    // about the directive.
+    assert_eq!(
+        meta_count(
+            "outdated-suppression",
+            &["length-zero"],
+            "using Widgets\n# fatou-ignore length-zero: intentional\nx = 1\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn outdated_suppression_is_silent_when_the_named_rule_is_structurally_silent() {
+    // `undefined-name` bails on a file that `eval`s, so its silence here is no
+    // evidence that the suppression is stale.
+    assert_eq!(
+        meta_count(
+            "outdated-suppression",
+            &["undefined-name"],
+            "# fatou-ignore undefined-name: dynamic\neval(ex)\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn outdated_suppression_deletes_the_whole_comment_line() {
+    let src = "function f()\n    # fatou-ignore unused-binding: stale\n    1\nend\n";
+    let diag = only_finding("outdated-suppression", &["unused-binding"], src);
+    let fix = &diag.fixes[0];
+    assert_eq!(fix.applicability, Applicability::Safe);
+    assert_eq!(
+        &src[fix.start..fix.end],
+        "    # fatou-ignore unused-binding: stale\n"
+    );
+    assert!(fix.content.is_empty());
+}
+
+#[test]
+fn outdated_suppression_keeps_the_code_on_a_trailing_comment_line() {
+    let src = "x = 1  # fatou-ignore unused-binding: stale\n";
+    let diag = only_finding("outdated-suppression", &[], src);
+    let fix = &diag.fixes[0];
+    assert_eq!(
+        &src[fix.start..fix.end],
+        "  # fatou-ignore unused-binding: stale"
+    );
+}

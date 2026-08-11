@@ -1,0 +1,34 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `outdated-suppression`
+
+Flag a `# fatou-ignore` directive that suppressed nothing: either the rule it names ran and reported nothing it covers, or the directive has no code after it to apply to. A rule that this run did not enable, and any rule in a file whose names cannot be resolved (one that `eval`s, or `using`s a module the run did not harvest), is dormant rather than stale and is never reported. The safe fix deletes the directive.
+
+A directive at the end of a file, with nothing left to suppress:
+
+```julia
+function f(x)
+    x + 1
+end
+# fatou-ignore unused-binding: the scratch value below
+```
+
+```text
+warning: outdated-suppression
+ --> example.jl:4:1
+  |
+4 | # fatou-ignore unused-binding: the scratch value below
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ suppression has nothing after it to apply to
+  = help: delete the directive
+  = help: Delete the suppression (safe fix)
+```
+
+After applying the fix:
+
+```julia
+function f(x)
+    x + 1
+end
+```

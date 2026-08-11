@@ -1120,3 +1120,113 @@ warning: redundant-boolean
   |    ^^^^^^^^^^^^^^^^ comparing to `false` is redundant: write `!x.valid`
   = help: Drop the comparison to `false` (unsafe fix, requires `--unsafe-fixes`)
 ```
+
+## `misnamed-suppression`
+
+Flag a `# fatou-ignore` directive that names a rule the linter does not ship. Suppression matches a rule by its exact ID, so a misspelled, renamed, or foreign ID silences nothing while reading as though it does. When exactly one shipped rule is a near match, the finding carries a safe fix that rewrites the ID and leaves the reason untouched.
+
+A directive naming a rule that does not exist:
+
+```julia
+# fatou-ignore unused-bindings: set up by the C library
+function f()
+    handle = open_device()
+    1
+end
+```
+
+```text
+warning: misnamed-suppression
+ --> example.jl:1:16
+  |
+1 | # fatou-ignore unused-bindings: set up by the C library
+  |                ^^^^^^^^^^^^^^^ `unused-bindings` is not a fatou rule; this suppresses nothing
+  = help: Replace with `unused-binding` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+# fatou-ignore unused-binding: set up by the C library
+function f()
+    handle = open_device()
+    1
+end
+```
+
+## `blanket-suppression`
+
+Flag a `# fatou-ignore` directive that names no rule. A bare `# fatou-ignore-file` silences every rule in the file, including rules added later; a bare `# fatou-ignore` silences nothing at all, because the node-level form requires a rule ID. Name the rule the directive is meant to suppress. There is no fix: nothing in the source says which rule that is.
+
+A file-wide directive naming no rule turns the linter off for the whole file:
+
+```julia
+# fatou-ignore-file: generated code
+
+struct Point
+    x::Float64
+end
+```
+
+```text
+warning: blanket-suppression
+ --> example.jl:1:1
+  |
+1 | # fatou-ignore-file: generated code
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ suppression names no rule; it silences every rule in this file
+  = help: name the rule: `# fatou-ignore <rule>: <reason>`
+```
+
+## `unexplained-suppression`
+
+Flag a `# fatou-ignore` directive that states no reason. The `: <reason>` part is optional, so this rule is **off by default**; select it in a project that wants every suppression to record why the finding was accepted. There is no fix: the reason is the part only the author can supply.
+
+A suppression with nothing to say for itself:
+
+```julia
+# fatou-ignore unused-binding
+function f()
+    handle = open_device()
+    1
+end
+```
+
+```text
+warning: unexplained-suppression
+ --> example.jl:1:1
+  |
+1 | # fatou-ignore unused-binding
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ suppression states no reason
+  = help: add one: `# fatou-ignore <rule>: <reason>`
+```
+
+## `outdated-suppression`
+
+Flag a `# fatou-ignore` directive that suppressed nothing: either the rule it names ran and reported nothing it covers, or the directive has no code after it to apply to. A rule that this run did not enable, and any rule in a file whose names cannot be resolved (one that `eval`s, or `using`s a module the run did not harvest), is dormant rather than stale and is never reported. The safe fix deletes the directive.
+
+A directive at the end of a file, with nothing left to suppress:
+
+```julia
+function f(x)
+    x + 1
+end
+# fatou-ignore unused-binding: the scratch value below
+```
+
+```text
+warning: outdated-suppression
+ --> example.jl:4:1
+  |
+4 | # fatou-ignore unused-binding: the scratch value below
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ suppression has nothing after it to apply to
+  = help: delete the directive
+  = help: Delete the suppression (safe fix)
+```
+
+After applying the fix:
+
+```julia
+function f(x)
+    x + 1
+end
+```

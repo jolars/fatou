@@ -1,0 +1,26 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `unexplained-suppression`
+
+Flag a `# fatou-ignore` directive that states no reason. The `: <reason>` part is optional, so this rule is **off by default**; select it in a project that wants every suppression to record why the finding was accepted. There is no fix: the reason is the part only the author can supply.
+
+A suppression with nothing to say for itself:
+
+```julia
+# fatou-ignore unused-binding
+function f()
+    handle = open_device()
+    1
+end
+```
+
+```text
+warning: unexplained-suppression
+ --> example.jl:1:1
+  |
+1 | # fatou-ignore unused-binding
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ suppression states no reason
+  = help: add one: `# fatou-ignore <rule>: <reason>`
+```

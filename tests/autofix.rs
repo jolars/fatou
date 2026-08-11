@@ -277,3 +277,78 @@ fn withholds_redundant_boolean_comparison_fix_by_default() {
     assert_eq!(outcome.applied, 0);
     assert_eq!(outcome.remaining.len(), 1);
 }
+
+/// Several rule sets at once, for the suppression meta rules: they can only
+/// judge a directive when the rule it names is in the run.
+fn select_many(rules: &[&str]) -> LintConfig {
+    LintConfig {
+        select: Some(rules.iter().map(|id| id.to_string()).collect()),
+        ..Default::default()
+    }
+}
+
+/// `misnamed-suppression` rewrites each unknown rule ID to the one shipped rule
+/// it plainly meant, leaving the reason prose alone.
+#[test]
+fn fixes_every_misnamed_suppression() {
+    let src = "\
+# fatou-ignore-file unused_import: vendored
+# fatou-ignore unused-bindings: set up by the C library
+handle = open_device()
+";
+    let outcome = fix_source(None, src, &select("misnamed-suppression"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    # fatou-ignore-file unused-import: vendored
+    # fatou-ignore unused-binding: set up by the C library
+    handle = open_device()
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// A directive with nothing after it takes its whole line with it.
+#[test]
+fn fixes_a_dangling_outdated_suppression() {
+    let src = "\
+function f(x)
+    x + 1
+end
+
+# fatou-ignore unused-binding: the scratch value below
+";
+    let outcome = fix_source(None, src, &select("outdated-suppression"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    function f(x)
+        x + 1
+    end
+    ");
+    assert_eq!(outcome.applied, 1);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// A stale directive on its own line takes its indentation and line break; one
+/// trailing code keeps the code on its line.
+#[test]
+fn fixes_stale_suppressions_in_both_placements() {
+    let src = "\
+function f()
+    # fatou-ignore unused-binding: was needed once
+    1
+end
+y = 2  # fatou-ignore unused-import: likewise
+";
+    let outcome = fix_source(
+        None,
+        src,
+        &select_many(&["outdated-suppression", "unused-binding", "unused-import"]),
+        false,
+    );
+    insta::assert_snapshot!(outcome.output, @r"
+    function f()
+        1
+    end
+    y = 2
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}

@@ -621,15 +621,40 @@ Needs modest new infrastructure:
   is precisely the statement that would separate the two, and adoption is still
   thin. A per-module allowlist (`[lint.rules.non-public-access]`) is the obvious
   escape hatch if that proves annoying in practice.
-- [ ] The suppression meta-rule family, blocked on the §I6 refactor above and
-  ported wholesale from arity's Phase 4 — this is entirely language-independent
-  and applies to `# fatou-ignore` exactly as it does to `# arity-ignore`:
-  `misnamed-suppression` (names a rule ID not in `all_rule_ids()`; safe fix when
-  there is an unambiguous near-match), `blanket-suppression` (no rule ID at
-  all), `unexplained-suppression` (no reason given; default-off), and
-  `outdated-suppression` (suppressed a diagnostic that no longer fires;
-  safe-delete fix). Cheap, high signal, and they keep the suppression comments
-  honest as the rule set moves under them.
+- [x] The suppression meta-rule family, ported wholesale from arity's Phase 4 —
+  entirely language-independent, and applying to `# fatou-ignore` exactly as it
+  does to `# arity-ignore`. Landed as the first `meta` category (a finding about
+  the directives rather than about the Julia), all four `check_file`/post-pass
+  rules over `SuppressionMap::directives`, warning severity:
+  `misnamed-suppression` (a rule ID not in `all_rule_ids()`; safe fix to the
+  single nearest shipped rule, at edit distance ≤ 2 with no tie, over a
+  normalized spelling so `unused_binding` rewrites — withheld for a comma'd
+  rule *list*, where rewriting to the first would silently drop the rest),
+  `blanket-suppression` (no rule ID at all: a file-wide form that silences
+  every rule including future ones, or a bare node form that silences nothing;
+  no fix, since nothing says which rule was meant), `unexplained-suppression`
+  (no reason; default-off, because the reason is optional by design), and
+  `outdated-suppression` (a directive that suppressed nothing, judged from the
+  `Rule::check_suppressions` post-pass, with a safe delete that takes the whole
+  line for an own-line comment and only the preceding gap for a trailing one).
+  What keeps `outdated-suppression` honest is that **silence is only evidence
+  when the rule could speak**: it reports only for a shipped rule that is in
+  this run's `EnabledRules` (a `select`ed-out rule is dormant, not stale) and
+  is not structurally silent for the file. That last gate is deliberately one
+  question and not a list of rules: *any* rule may open by asking what a name
+  means, and every one of them goes quiet when `trusts_resolution()` is false,
+  which is most real files when the CLI lints against the built-in Base/Core
+  snapshot alone — so such a file keeps all of its suppressions, and the rule
+  earns its keep where the environment is harvested (the server, or a CLI run
+  that selected a resolution rule). Only `julia-version-compat` without a
+  target and the include-graph rules without a graph need an arm of their own.
+  A *dangling* directive (nothing follows it) skips every gate, since no rule's
+  verdict is involved. Fell out of the §I6 refactor with no new infrastructure;
+  `RESOLUTION_RULES` moved to `rules.rs` along the way, as the one list the CLI
+  harvest gate and the server's member rule set share. Known wart, pre-existing
+  and now visible: a node directive attaches to the next non-trivia sibling and
+  a comment is trivia, so only `# fatou-ignore-file <rule>` can silence a meta
+  finding.
 - [ ] `invalid-type-declaration` (correctness, sem + res, warning, no fix):
   `f(x::g)` where `g` resolves to a function rather than a type. Needs
   "this binding is a function, not a type", which binding kinds answer for

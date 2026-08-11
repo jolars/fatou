@@ -20,7 +20,7 @@ use lsp_types::{
 use crate::config::LintConfig;
 use crate::incremental::Analysis;
 use crate::linter::docs::rule_doc_url;
-use crate::linter::rules::{ResolutionContext, is_shipped_rule};
+use crate::linter::rules::{RESOLUTION_RULES, ResolutionContext, is_shipped_rule};
 use crate::linter::{self, ResolvedRules, Severity, all_rules, lint_parsed};
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
@@ -131,14 +131,9 @@ fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
 
 /// The rules that are sound only with the resolution context a workspace
 /// member file carries: the server adds them to the member rule set, while
-/// the CLI leaves them opt-in via `--select`.
-const WORKSPACE_MEMBER_RULES: &[&str] = &[
-    "undefined-name",
-    "call-arity",
-    "unresolved-import",
-    "function-has-no-methods",
-    "non-public-access",
-];
+/// the CLI leaves them opt-in via `--select`. Aliases the registry's
+/// [`RESOLUTION_RULES`], which is the single list.
+const WORKSPACE_MEMBER_RULES: &[&str] = RESOLUTION_RULES;
 
 /// The rule sets the server lints with, resolved once per configuration (the
 /// dispatch table included) rather than per lint run: the configured set

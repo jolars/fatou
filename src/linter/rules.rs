@@ -20,9 +20,11 @@
 //! keyed by ID (see [`crate::linter::docs`]). Recategorizing a rule is
 //! therefore a free refactor. The vocabulary is `correctness` (the code cannot
 //! do what it says), `suspicious` (legal Julia, very likely not intended),
-//! `performance` (a rewrite that avoids real work), and `readability` (a
-//! behavior-preserving idiom rewrite); the last two have no rules yet, so
-//! their modules are created by the first rule that needs them.
+//! `performance` (a rewrite that avoids real work), `readability` (a
+//! behavior-preserving idiom rewrite), and `meta` (a finding about fatou's own
+//! `# fatou-ignore` directives rather than about the Julia around them);
+//! `performance` has no rules yet, so its module is created by the first rule
+//! that needs it.
 //!
 //! New rules:
 //! 1. Create a module under `src/linter/rules/<category>/<id>.rs`.
@@ -75,6 +77,7 @@ use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 pub mod correctness;
 mod file_scan;
 pub mod matchers;
+pub mod meta;
 pub mod readability;
 pub mod suspicious;
 
@@ -133,8 +136,28 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(readability::ComparisonNegation),
         Box::new(readability::LengthZero),
         Box::new(readability::RedundantBoolean),
+        Box::new(meta::MisnamedSuppression),
+        Box::new(meta::BlanketSuppression),
+        Box::new(meta::UnexplainedSuppression),
+        Box::new(meta::OutdatedSuppression),
     ]
 }
+
+/// The rules that need a project-wide name-resolution context to be sound, and
+/// report nothing without one. All of them are default-off for that reason: the
+/// CLI leaves them to an explicit `select` (and harvests the environment when it
+/// sees one), the language server adds them for workspace member files, where it
+/// carries the context, and `outdated-suppression` declines to call a directive
+/// naming one of them stale when the context is missing.
+///
+/// The single list — every consumer reads it rather than repeating it.
+pub const RESOLUTION_RULES: &[&str] = &[
+    "undefined-name",
+    "call-arity",
+    "unresolved-import",
+    "function-has-no-methods",
+    "non-public-access",
+];
 
 /// Every shipped rule's ID, derived from [`all_rules`] so the two never drift.
 /// Used to validate `LintConfig::select` / `ignore` / `severity`.
@@ -624,8 +647,8 @@ pub trait Rule: Send + Sync {
     ///
     /// Separate from [`Rule::check_file`] because its input is a *driver* fact —
     /// which suppressions fired — that does not exist until filtering has run.
-    /// No implementors yet; the future `meta/*-suppression` rules
-    /// (`outdated-suppression`) are the consumers. The default is a no-op.
+    /// [`meta::OutdatedSuppression`] is the implementor. The default is a
+    /// no-op.
     fn check_suppressions(
         &self,
         ctx: &RuleContext<'_>,

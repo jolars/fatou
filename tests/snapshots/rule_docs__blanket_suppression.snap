@@ -1,0 +1,26 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `blanket-suppression`
+
+Flag a `# fatou-ignore` directive that names no rule. A bare `# fatou-ignore-file` silences every rule in the file, including rules added later; a bare `# fatou-ignore` silences nothing at all, because the node-level form requires a rule ID. Name the rule the directive is meant to suppress. There is no fix: nothing in the source says which rule that is.
+
+A file-wide directive naming no rule turns the linter off for the whole file:
+
+```julia
+# fatou-ignore-file: generated code
+
+struct Point
+    x::Float64
+end
+```
+
+```text
+warning: blanket-suppression
+ --> example.jl:1:1
+  |
+1 | # fatou-ignore-file: generated code
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ suppression names no rule; it silences every rule in this file
+  = help: name the rule: `# fatou-ignore <rule>: <reason>`
+```
