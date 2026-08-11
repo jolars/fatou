@@ -190,13 +190,114 @@ fn run_debug_format(
     })
 }
 
+/// Where a subcommand's positional arguments say to read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Inputs<'a> {
+    /// Read the one buffer on stdin.
+    Stdin,
+    /// Read the named files and directories (never empty).
+    Paths(&'a [PathBuf]),
+}
+
+/// A positional-argument mistake, rendered as a clap usage error by
+/// [`inputs_or_exit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputError {
+    /// `-` was mixed with file paths; there is no sane order to read them in.
+    StdinWithPaths,
+    /// Nothing to read: no paths, and stdin is an interactive terminal.
+    NoInput,
+}
+
+/// `-` is the conventional spelling for "the stdin buffer" (black, ruff), and
+/// is never a real file we would format.
+fn is_stdin_path(path: &Path) -> bool {
+    path.as_os_str() == "-"
+}
+
+/// Decide what the positional paths point at.
+///
+/// Bare `fatou format` reads stdin, matching rustfmt/gofmt/clang-format. That
+/// default is right behind a pipe and a trap at a prompt: a new user runs it
+/// expecting the current directory to be formatted and instead sees the process
+/// hang on a terminal it is quietly reading. So no paths *and* an interactive
+/// stdin is a usage error instead.
+///
+/// The terminal check is the whole gate, and it is deliberately narrow: it can
+/// only fire where a human is typing, never behind a pipe, a redirect, a
+/// heredoc, or a CI runner, so no scripted invocation changes behavior. Taking
+/// `stdin_is_terminal` as an argument (as [`color_enabled`] does) keeps the
+/// decision testable without a pty.
+fn resolve_inputs(paths: &[PathBuf], stdin_is_terminal: bool) -> Result<Inputs<'_>, InputError> {
+    if paths.iter().any(|path| is_stdin_path(path)) {
+        if paths.len() > 1 {
+            return Err(InputError::StdinWithPaths);
+        }
+        return Ok(Inputs::Stdin);
+    }
+    if paths.is_empty() {
+        if stdin_is_terminal {
+            return Err(InputError::NoInput);
+        }
+        return Ok(Inputs::Stdin);
+    }
+    Ok(Inputs::Paths(paths))
+}
+
+/// Exit with a clap-rendered usage error for `subcommand` (its own `Usage:`
+/// line, the `--help` pointer, and clap's exit code 2), so an argument mistake
+/// we diagnose ourselves is spelled exactly like one clap caught.
+fn usage_error(subcommand: &str, kind: clap::error::ErrorKind, message: &str) -> ! {
+    let mut cli = <Cli as clap::CommandFactory>::command();
+    let Some(sub) = cli.find_subcommand_mut(subcommand) else {
+        <Cli as clap::CommandFactory>::command()
+            .error(kind, message)
+            .exit()
+    };
+    // Fetched off a freshly built `Command`, the subcommand has no bin name yet,
+    // so name it or the usage line reads `Usage: format …`.
+    sub.clone()
+        .bin_name(format!("fatou {subcommand}"))
+        .error(kind, message)
+        .exit()
+}
+
+/// The "nothing to read" usage errors, one per subcommand. Each names `-` so the
+/// way out of the trap rides in the message that reports it.
+const FORMAT_MISSING_INPUT: &str =
+    "no input paths; pass files or directories to format, or `-` to read from stdin";
+const PARSE_MISSING_INPUT: &str = "no input path; pass a file to parse, or `-` to read from stdin";
+
+/// [`resolve_inputs`] against the real stdin, exiting on a usage mistake.
+/// `missing` spells the "nothing to read" case in the subcommand's own terms.
+fn inputs_or_exit<'a>(paths: &'a [PathBuf], subcommand: &str, missing: &str) -> Inputs<'a> {
+    match resolve_inputs(paths, std::io::stdin().is_terminal()) {
+        Ok(inputs) => inputs,
+        Err(InputError::StdinWithPaths) => usage_error(
+            subcommand,
+            clap::error::ErrorKind::ArgumentConflict,
+            "`-` reads from stdin and cannot be combined with other paths",
+        ),
+        Err(InputError::NoInput) => usage_error(
+            subcommand,
+            clap::error::ErrorKind::MissingRequiredArgument,
+            missing,
+        ),
+    }
+}
+
 fn run_parse(
     file: Option<PathBuf>,
     quiet: bool,
     verify: bool,
     to: ParseFormat,
 ) -> Result<ExitCode, String> {
-    let text = read_source(file.as_deref())?;
+    // Clap caps `parse` at one positional, so the slice holds at most one path.
+    let file = match inputs_or_exit(file.as_slice(), "parse", PARSE_MISSING_INPUT) {
+        Inputs::Stdin => None,
+        Inputs::Paths(paths) => Some(paths[0].as_path()),
+    };
+    let text = read_source(file)?;
     let output = parse(&text);
 
     if !quiet {
@@ -234,16 +335,30 @@ fn run_format(
     exclude: &ExcludeFilter,
     quiet: bool,
 ) -> Result<ExitCode, String> {
-    // No paths: format stdin to stdout.
-    if paths.is_empty() {
-        let text = read_source(None)?;
-        let formatted = formatter::format_with_style(&text, style).map_err(|e| e.to_string())?;
-        print!("{formatted}");
-        return Ok(ExitCode::SUCCESS);
+    // `--check` reports on files it leaves on disk, so stdin is not an input
+    // here: a diff has nowhere to point and there is nothing to reformat later.
+    if check && (paths.is_empty() || paths.iter().any(|path| is_stdin_path(path))) {
+        usage_error(
+            "format",
+            clap::error::ErrorKind::ArgumentConflict,
+            "`--check` reports on files and cannot read from stdin; pass files or directories",
+        );
     }
 
+    // No paths (or `-`): format stdin to stdout.
+    let paths = match inputs_or_exit(&paths, "format", FORMAT_MISSING_INPUT) {
+        Inputs::Stdin => {
+            let text = read_source(None)?;
+            let formatted =
+                formatter::format_with_style(&text, style).map_err(|e| e.to_string())?;
+            print!("{formatted}");
+            return Ok(ExitCode::SUCCESS);
+        }
+        Inputs::Paths(paths) => paths,
+    };
+
     if check {
-        let result = formatter::check_paths(&paths, style, exclude).map_err(|e| e.to_string())?;
+        let result = formatter::check_paths(paths, style, exclude).map_err(|e| e.to_string())?;
         for changed in &result.changed {
             println!("would reformat {}", changed.path.display());
             // `--check` writes nothing, so the diff is normally the only account
@@ -269,7 +384,7 @@ fn run_format(
     }
 
     let files =
-        fatou::file_discovery::collect_julia_files(&paths, exclude).map_err(|e| e.to_string())?;
+        fatou::file_discovery::collect_julia_files(paths, exclude).map_err(|e| e.to_string())?;
     files.par_iter().try_for_each(|path| {
         let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let formatted =
@@ -293,6 +408,15 @@ fn run_lint(
     exclude: &ExcludeFilter,
     julia_target: Option<fatou::julia_version::VersionRange>,
 ) -> Result<ExitCode, String> {
+    // `lint` has no stdin pipeline (findings are reported against a path), so
+    // `-` is rejected by name rather than walked into "path does not exist".
+    if paths.iter().any(|path| is_stdin_path(path)) {
+        usage_error(
+            "lint",
+            clap::error::ErrorKind::ArgumentConflict,
+            "`lint` cannot read from stdin; pass files or directories",
+        );
+    }
     if paths.is_empty() {
         return Err("lint requires at least one path".to_string());
     }
@@ -571,5 +695,50 @@ fn read_source(path: Option<&Path>) -> Result<String, String> {
                 .map_err(|e| e.to_string())?;
             Ok(buffer)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paths(entries: &[&str]) -> Vec<PathBuf> {
+        entries.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn no_paths_reads_stdin_unless_it_is_a_terminal() {
+        // Behind a pipe, a redirect, or a CI runner, bare `fatou format` keeps
+        // reading stdin exactly as rustfmt/gofmt do — the gate cannot reach any
+        // scripted invocation.
+        assert_eq!(resolve_inputs(&[], false), Ok(Inputs::Stdin));
+        // At a prompt there is nothing to read, so it is a usage error instead of
+        // a silent wait on the terminal.
+        assert_eq!(resolve_inputs(&[], true), Err(InputError::NoInput));
+    }
+
+    #[test]
+    fn dash_names_stdin_even_at_a_terminal() {
+        let dash = paths(&["-"]);
+        assert_eq!(resolve_inputs(&dash, true), Ok(Inputs::Stdin));
+        assert_eq!(resolve_inputs(&dash, false), Ok(Inputs::Stdin));
+    }
+
+    #[test]
+    fn dash_cannot_be_mixed_with_file_paths() {
+        assert_eq!(
+            resolve_inputs(&paths(&["-", "a.jl"]), false),
+            Err(InputError::StdinWithPaths)
+        );
+        assert_eq!(
+            resolve_inputs(&paths(&["a.jl", "-"]), false),
+            Err(InputError::StdinWithPaths)
+        );
+    }
+
+    #[test]
+    fn named_paths_are_passed_through() {
+        let named = paths(&["a.jl", "src"]);
+        assert_eq!(resolve_inputs(&named, true), Ok(Inputs::Paths(&named)));
     }
 }

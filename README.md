@@ -70,10 +70,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/j
 ## Usage
 
 ```sh
-# Print the CST (reads stdin if no file)
+# Print the CST (`fatou parse -` reads stdin)
 fatou parse file.jl
 
-# Format to stdout (reads stdin if omitted)
+# Format to stdout (`fatou format -` reads stdin)
 fatou format file.jl
 
 # Verify formatting without writing—exits non-zero if anything would change

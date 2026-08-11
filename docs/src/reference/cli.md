@@ -35,7 +35,7 @@ Parse and display the CST for debugging
 ### Arguments
 
 `<FILE>`
-:   Input file (stdin if not provided)
+:   Input file. Pass `-` for stdin, also read when the path is omitted and stdin is not a terminal
 
 ### Options
 
@@ -61,12 +61,12 @@ Format `.jl` files
 ### Arguments
 
 `<PATH>...`
-:   Input file(s) or path(s) (stdin if omitted)
+:   Input file(s) or director(ies). Pass `-` for stdin, also read when paths are omitted and stdin is not a terminal
 
 ### Options
 
 `--check`
-:   Check formatting without writing; prints a diff and exits non-zero if any file would change
+:   Check formatting without writing; prints a diff and exits non-zero if any file would change. Requires path arguments: there is no file on disk to report on when reading stdin
 
 `--line-width <N>`
 :   Override the target line width

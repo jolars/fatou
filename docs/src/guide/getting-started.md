@@ -74,7 +74,7 @@ file would change):
 fatou format --check file.jl
 ```
 
-Lint a file (or pipe from stdin); exits non-zero if there are any findings:
+Lint a file; exits non-zero if there are any findings:
 
 ```bash
 fatou lint file.jl

@@ -56,7 +56,8 @@ pub enum ColorChoice {
 pub enum Commands {
     /// Parse and display the CST for debugging.
     Parse {
-        /// Input file (stdin if not provided).
+        /// Input file. Pass `-` for stdin, also read when the path is omitted
+        /// and stdin is not a terminal.
         file: Option<PathBuf>,
 
         /// Verify parser losslessness (`reconstruct(text) == text`).
@@ -70,12 +71,14 @@ pub enum Commands {
     },
     /// Format `.jl` files.
     Format {
-        /// Input file(s) or path(s) (stdin if omitted).
+        /// Input file(s) or director(ies). Pass `-` for stdin, also read when
+        /// paths are omitted and stdin is not a terminal.
         #[arg(value_name = "PATH")]
         paths: Vec<PathBuf>,
 
         /// Check formatting without writing; prints a diff and exits non-zero if
-        /// any file would change.
+        /// any file would change. Requires path arguments: there is no file on
+        /// disk to report on when reading stdin.
         #[arg(long)]
         check: bool,
 
