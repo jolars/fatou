@@ -68,11 +68,13 @@ fn generate_cli_markdown() -> Result<()> {
         return Ok(());
     }
 
-    let markdown = clapdown::Options::new()
-        .title("Command-Line Help for `fatou`")
-        .footer(false)
-        .table_of_contents(false)
-        .render(&cmd);
+    let markdown = clapdown::render(
+        &cmd,
+        &clapdown::Options::new()
+            .title("Command-Line Help for `fatou`")
+            .footer(false)
+            .table_of_contents(false),
+    );
 
     let output_path = docs_dir.join("cli.md");
     fs::write(&output_path, &markdown)?;
