@@ -710,16 +710,28 @@ Rejected after probing (do not revisit without new evidence):
   `Project.toml` — a `WorkspaceEdit` into a manifest is a bigger promise than
   the include rewrite — but the pair could at least be diagnosed.
 - [ ] Maybe (deferred): a rope (`ropey`) for the live buffer, raised in #76.
-  It would make locating a line O(log n) and retire `LineStarts` outright, but
-  the win only arrives if the *parser* reads chunks rather than `&str`: the
-  lexer, rowan's token text, the formatter, and the linter all want a contiguous
-  slice today, and `analysis_thread` hands salsa an owned `String` per analysis
-  — so a rope would pay a `Rope::to_string` per keystroke, the one direction
-  ropes are slow in. With the table patched per edit (`src/text/buffer.rs`),
-  what a rope would still remove is a memmove plus one add per line after the
-  edit site, off a base the reparse already dominates (`benches/line_index.rs`).
-  Note rust-analyzer stores its documents as a plain `String` and applies edits
-  with `replace_range` for the same reasons. Revisit only if the parser's input
-  layer goes chunk-based.
+  It would make locating a line O(log n) and retire `LineStarts` outright. What
+  blocks it is narrower than #76's first reading, and it is *not* the lexer:
+  `Token` owns its `text: String` (`parser/lexer.rs`), so nothing borrows the
+  input and a chunk-based lexer is a local refactor. Nor the tree, formatter, or
+  linter — rowan's green tokens own their text and `SyntaxText` is already
+  chunked, and the warm LSP paths go through the CST (`format_node`,
+  `check_parsed`), never the source. The three real `&str` demands are
+  `parse(text: &str)`, `SourceFile.text: String` (`src/incremental.rs`), and
+  above all `reparse`/`reparse_edits`, whose token- and toplevel-tier guards
+  prove a splice sound by slicing and relexing regions of `prev_text`/
+  `new_text`. That last one is the wall: a rewrite of the most delicate code in
+  the parser crate.
+  Note also that the "a rope pays a `Rope::to_string` per keystroke" objection
+  is weaker than it looks — a keystroke already pays two full `String` copies
+  (`analysis_thread`'s `upsert_file`, and `PrevParse { text: text.clone() }`),
+  which a rope in salsa would replace with an O(1) CoW clone. The case for
+  deferring rests on the size of the prize instead: with the table patched per
+  edit (`src/text/buffer.rs`) a keystroke costs ~2% of the reparse it triggers,
+  so what is left to win is a memmove plus one add per line after the edit site,
+  against point queries the bench measured ~7x slower on a rope
+  (`benches/line_index.rs`). rust-analyzer keeps documents as a plain `String`
+  and applies edits with `replace_range` for the same reasons. Revisit only if
+  the reparse guards go chunk-based.
 
 ## Tooling
