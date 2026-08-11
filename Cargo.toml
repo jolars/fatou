@@ -84,7 +84,7 @@ strip = "symbols"
 
 [build-dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
-clapdown = "0.1.0"
+clapdown = "0.2.0"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
