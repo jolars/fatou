@@ -100,6 +100,30 @@ pub struct Package {
     pub source: Option<PathBuf>,
 }
 
+impl Package {
+    /// The facts about this package that survive the harvest: what a consumer
+    /// with no [`Environment`] in hand — the language server, whose database
+    /// holds the harvest and not the resolve — can still report about it.
+    ///
+    /// [`source`](Package::source) is deliberately absent: the harvest already
+    /// records the root of every package it indexed, and a package it did not
+    /// index has nothing to point at.
+    pub fn meta(&self) -> PackageMeta {
+        PackageMeta {
+            version: self.version.clone(),
+            kind: self.kind,
+        }
+    }
+}
+
+/// A pinned package's version and kind, keyed by name away from the
+/// [`Environment`] it was resolved from. See [`Package::meta`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageMeta {
+    pub version: Option<String>,
+    pub kind: PackageKind,
+}
+
 /// Which discovery strategy located the environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnvSource {

@@ -194,6 +194,54 @@ fn source_roots_round_trip_through_set_library() {
     assert!(db.package_root("Bar").is_none());
 }
 
+/// What the manifest pinned rides beside what the harvest found, and is set
+/// separately: either write may come first, and neither clears the other.
+/// A name the manifest pins but the harvest never indexed keeps its entry —
+/// that asymmetry is the reason the two maps are apart.
+#[test]
+fn dep_metadata_rides_beside_the_harvest() {
+    use fatou::environment::{PackageKind, PackageMeta};
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    let mut db = IncrementalDatabase::new();
+    assert!(db.package_meta("Foo").is_none(), "nothing before any set");
+
+    db.set_library_deps(BTreeMap::from([
+        (
+            "Foo".to_string(),
+            PackageMeta {
+                version: Some("0.4.5".to_string()),
+                kind: PackageKind::Registered,
+            },
+        ),
+        (
+            "Unfound".to_string(),
+            PackageMeta {
+                version: None,
+                kind: PackageKind::Stdlib,
+            },
+        ),
+    ]));
+
+    let mut packages = BTreeMap::new();
+    packages.insert("Foo".to_string(), Arc::new(empty_package("Foo")));
+    let mut roots = BTreeMap::new();
+    roots.insert("Foo".to_string(), PathBuf::from("/depot/Foo/abcde"));
+    db.set_library(packages, roots, Vec::new());
+
+    let meta = db.package_meta("Foo").expect("Foo's manifest entry");
+    assert_eq!(meta.version.as_deref(), Some("0.4.5"));
+    assert_eq!(meta.kind, PackageKind::Registered);
+    // A later harvest does not clear what the manifest pinned.
+    assert!(db.package_root("Foo").is_some());
+    // Pinned but never harvested: an entry here, none in the roots.
+    assert!(db.package_meta("Unfound").is_some());
+    assert!(db.package_root("Unfound").is_none());
+    // And visible through a read-only snapshot.
+    assert!(db.snapshot().package_meta("Foo").is_some());
+}
+
 #[test]
 fn set_library_packages_preserves_existing_roots() {
     use std::collections::BTreeMap;

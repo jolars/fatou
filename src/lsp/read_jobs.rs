@@ -30,7 +30,7 @@ use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
 use super::lint::ServerRules;
-use super::project_navigation::project_definition_via_db;
+use super::project_navigation::{project_definition_via_db, project_hover_via_db};
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
@@ -201,6 +201,15 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: ReadReply,
     },
+    /// Hover in an open *project file*: a `[deps]` name reports the version,
+    /// kind, and resolved path the environment gave it. Pathless for the same
+    /// reason as [`ProjectDefinition`](Self::ProjectDefinition).
+    ProjectHover {
+        id: RequestId,
+        text: Arc<TextBuffer>,
+        position: Position,
+        sender: ReadReply,
+    },
     References {
         id: RequestId,
         uri: Uri,
@@ -307,6 +316,7 @@ impl ReadJob {
             ReadJob::SignatureHelp { id, sender, .. } => (id, sender),
             ReadJob::Definition { id, sender, .. } => (id, sender),
             ReadJob::ProjectDefinition { id, sender, .. } => (id, sender),
+            ReadJob::ProjectHover { id, sender, .. } => (id, sender),
             ReadJob::References { id, sender, .. } => (id, sender),
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
             ReadJob::PrepareRename { id, sender, .. } => (id, sender),
@@ -545,6 +555,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
                 id,
                 goto_response(locations),
             )));
+        }
+        ReadJob::ProjectHover {
+            id,
+            text,
+            position,
+            sender,
+        } => {
+            let hover = project_hover_via_db(&snapshot, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, hover)));
         }
         ReadJob::References {
             id,

@@ -5348,12 +5348,12 @@ fn poll_definition(
     }
 }
 
-/// Go-to-definition on a `[deps]` name in an open `Project.toml` lands on the
-/// dependency's entry file. The whole point of stage 4: the environment files
-/// are in the client's document selector, so a request arrives for one, and a
-/// dependency name is something the server can resolve.
+/// Go-to-definition and hover on a `[deps]` name in an open `Project.toml`:
+/// the jump lands on the dependency's entry file, the hover reports what the
+/// environment resolved it to. Both ride the same route, so one initialized
+/// server covers them — and the `JULIA_*` env is process-global anyway.
 #[test]
-fn serves_go_to_definition_on_a_dependency_name() {
+fn serves_navigation_on_a_dependency_name() {
     let _env = ENV_LOCK.lock().unwrap();
 
     let root = write_pkg_with_path_dep("fatou-lsp-depdef");
@@ -5408,6 +5408,39 @@ fn serves_go_to_definition_on_a_dependency_name() {
     assert_eq!(
         location.range,
         Range::new(Position::new(0, 7), Position::new(0, 16)),
+    );
+
+    // Hover on the same name reports what the environment resolved it to. It
+    // rides the same route, so one initialized server covers both.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(619),
+            method: "textDocument/hover".to_string(),
+            params: serde_json::to_value(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: project_uri.clone(),
+                    },
+                    position: Position::new(line, 2),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(619));
+    let hover: Hover = serde_json::from_value(resp.result().unwrap()).unwrap();
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("expected markdown hover contents");
+    };
+    let dep_root = root.path.join("Greetings");
+    assert_eq!(
+        markup.value,
+        format!(
+            "**Greetings**\n\nDevelopment dependency\n\n`{}`",
+            dep_root.display()
+        ),
     );
 
     // Nothing else in the file jumps: a `[compat]` key names a dependency too,

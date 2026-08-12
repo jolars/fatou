@@ -261,6 +261,7 @@ fn workspace_member_maps_files_to_host_modules() {
         workspaces: vec!["Pkg".to_string()],
         declared_deps: Default::default(),
         project_files: Default::default(),
+        deps: Default::default(),
     };
 
     // A root-hosted file: empty host module path.

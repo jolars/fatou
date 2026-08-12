@@ -24,15 +24,34 @@
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 
-use lsp_types::{Location, Position};
+use lsp_types::{Hover, HoverContents, Location, MarkupContent, MarkupKind, Position, Range};
+use rowan::TextRange;
 
+use crate::environment::{PackageKind, PackageMeta};
 use crate::incremental::{Analysis, normalize_path};
 use crate::index::Span;
 use crate::project_files::dep_at;
 use crate::resolve::PackageSource;
-use crate::text::{PositionEncoding, TextBuffer};
+use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::definition::site_locations;
+
+/// What a project file's features need to know about a dependency: where its
+/// source is, and what the manifest pinned for it.
+///
+/// The second half is not on [`PackageSource`] because that trait is
+/// resolution's contract — the masking order every consumer of a *name* shares
+/// — and a version has no part in resolving one. This is the project file's own
+/// view, so it lives with the project file's own features.
+pub(crate) trait ProjectLibrary: PackageSource {
+    fn package_meta(&self, name: &str) -> Option<PackageMeta>;
+}
+
+impl ProjectLibrary for Analysis {
+    fn package_meta(&self, name: &str) -> Option<PackageMeta> {
+        Analysis::package_meta(self, name)
+    }
+}
 
 /// Where package `name`'s source begins: its entry file, and the range of the
 /// `module <Name>` token inside it.
@@ -89,6 +108,77 @@ pub(crate) fn project_definition_via_db(
     .unwrap_or_default()
 }
 
+/// Hover in a project file: a dependency name reports what the environment
+/// resolved it to. Any other position answers nothing.
+pub(crate) fn project_hover<L: ProjectLibrary>(
+    text: &TextBuffer,
+    position: Position,
+    encoding: PositionEncoding,
+    library: &L,
+) -> Option<Hover> {
+    let line_index = text.line_index();
+    let offset = line_index.position_to_byte(position, encoding);
+    let dep = dep_at(text, offset)?;
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: dep_markdown(&dep.name, library)?,
+        }),
+        range: Some(to_range(dep.name_range, &line_index, encoding)),
+    })
+}
+
+/// [`project_hover`] against a database snapshot.
+pub(crate) fn project_hover_via_db(
+    snapshot: &Analysis,
+    text: &TextBuffer,
+    position: Position,
+    encoding: PositionEncoding,
+) -> Option<Hover> {
+    salsa::Cancelled::catch(AssertUnwindSafe(|| {
+        project_hover(text, position, encoding, snapshot)
+    }))
+    .unwrap_or_default()
+}
+
+/// What is known about the dependency `name`: its version, how it was pinned,
+/// and where its source landed. Each line is dropped when unknown, and a name
+/// nothing is known about hovers to nothing at all — that it is missing from
+/// the manifest is `missing-from-manifest`'s report to make, not this one's.
+fn dep_markdown<L: ProjectLibrary>(name: &str, library: &L) -> Option<String> {
+    let meta = library.package_meta(name);
+    let root = library.package_root(name);
+    if meta.is_none() && root.is_none() {
+        return None;
+    }
+    let mut out = format!("**{name}**");
+    if let Some(version) = meta.as_ref().and_then(|meta| meta.version.as_deref()) {
+        out.push_str(" v");
+        out.push_str(version);
+    }
+    if let Some(meta) = &meta {
+        out.push_str("\n\n");
+        out.push_str(match meta.kind {
+            PackageKind::Registered => "Registered package",
+            PackageKind::Dev => "Development dependency",
+            PackageKind::Stdlib => "Standard library",
+        });
+    }
+    if let Some(root) = root {
+        // Normalized for the same reason the jump target is: a `dev`'d root
+        // keeps the manifest's `../` spelling, which is not a path to show.
+        out.push_str(&format!("\n\n`{}`", normalize_path(&root).display()));
+    }
+    Some(out)
+}
+
+fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+    Range {
+        start: line_index.byte_to_position(range.start().into(), encoding),
+        end: line_index.byte_to_position(range.end().into(), encoding),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -130,6 +220,7 @@ mod tests {
     struct TestLib {
         packages: BTreeMap<String, Arc<PackageIndex>>,
         roots: BTreeMap<String, PathBuf>,
+        deps: BTreeMap<String, PackageMeta>,
     }
 
     impl PackageSource for TestLib {
@@ -141,6 +232,19 @@ mod tests {
         }
         fn workspace_member(&self, _path: &Path) -> Option<(Arc<PackageIndex>, ModulePath)> {
             None
+        }
+    }
+
+    impl ProjectLibrary for TestLib {
+        fn package_meta(&self, name: &str) -> Option<PackageMeta> {
+            self.deps.get(name).cloned()
+        }
+    }
+
+    fn meta(version: Option<&str>, kind: PackageKind) -> PackageMeta {
+        PackageMeta {
+            version: version.map(str::to_string),
+            kind,
         }
     }
 
@@ -223,5 +327,98 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
         let (_tmp, lib, _entry) = greetings();
         let marked = "[deps\nGreet|ings = \"1520ce14\"\n";
         assert!(def_at(marked, &lib).is_empty());
+    }
+
+    // --- Hover --------------------------------------------------------------
+
+    /// Hover at the position marked by `|`, as markdown.
+    fn hover_at(marked: &str, lib: &TestLib) -> Option<String> {
+        let offset = marked.find('|').expect("a cursor marker");
+        let text = TextBuffer::new(marked.replacen('|', "", 1));
+        let position = text
+            .line_index()
+            .byte_to_position(offset, PositionEncoding::Utf16);
+        let hover = project_hover(&text, position, PositionEncoding::Utf16, lib)?;
+        // The hover covers exactly the dependency name it reports on.
+        assert_eq!(
+            hover.range,
+            Some(Range::new(Position::new(3, 0), Position::new(3, 9))),
+        );
+        match hover.contents {
+            HoverContents::Markup(markup) => Some(markup.value),
+            other => panic!("expected markdown, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_dependency_hover_reports_version_kind_and_path() {
+        let (tmp, mut lib, _entry) = greetings();
+        lib.deps.insert(
+            "Greetings".to_string(),
+            meta(Some("0.4.5"), PackageKind::Registered),
+        );
+
+        let marked = PROJECT.replace("Greetings =", "Greet|ings =");
+        assert_eq!(
+            hover_at(&marked, &lib),
+            Some(format!(
+                "**Greetings** v0.4.5\n\nRegistered package\n\n`{}`",
+                tmp.path.display()
+            )),
+        );
+    }
+
+    /// Each line is dropped when unknown: an uninstantiated project pins no
+    /// version, and a package whose source was not found has no path.
+    #[test]
+    fn an_unknown_version_or_path_is_simply_omitted() {
+        let marked = PROJECT.replace("Greetings =", "Greet|ings =");
+
+        let mut lib = TestLib::default();
+        lib.deps
+            .insert("Greetings".to_string(), meta(None, PackageKind::Stdlib));
+        assert_eq!(
+            hover_at(&marked, &lib),
+            Some("**Greetings**\n\nStandard library".to_string()),
+        );
+
+        lib.deps
+            .insert("Greetings".to_string(), meta(None, PackageKind::Dev));
+        assert_eq!(
+            hover_at(&marked, &lib),
+            Some("**Greetings**\n\nDevelopment dependency".to_string()),
+        );
+    }
+
+    /// A name the environment knows nothing about hovers to nothing. That it is
+    /// absent from the manifest is `missing-from-manifest`'s report to make.
+    #[test]
+    fn a_dependency_nothing_is_known_about_has_no_hover() {
+        let marked = PROJECT.replace("Greetings =", "Greet|ings =");
+        assert_eq!(hover_at(&marked, &TestLib::default()), None);
+    }
+
+    #[test]
+    fn nothing_else_in_the_file_hovers() {
+        let (_tmp, mut lib, _entry) = greetings();
+        lib.deps.insert(
+            "Greetings".to_string(),
+            meta(Some("0.4.5"), PackageKind::Registered),
+        );
+        for marked in [
+            PROJECT.replace("name =", "na|me ="),
+            PROJECT.replace("[deps]", "[de|ps]"),
+            PROJECT.replace("\"1520ce14", "\"1520|ce14"),
+        ] {
+            let offset = marked.find('|').expect("a cursor marker");
+            let text = TextBuffer::new(marked.replacen('|', "", 1));
+            let position = text
+                .line_index()
+                .byte_to_position(offset, PositionEncoding::Utf16);
+            assert!(
+                project_hover(&text, position, PositionEncoding::Utf16, &lib).is_none(),
+                "for {marked:?}"
+            );
+        }
     }
 }
