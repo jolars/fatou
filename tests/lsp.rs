@@ -4956,12 +4956,45 @@ fn publishes_and_clears_project_file_syntax_diagnostics() {
     // The `uuid = ` line, second in the file.
     assert_eq!(diag.range.start.line, 1);
 
-    // Fixed on disk and announced as a watched change: the re-resolve succeeds,
-    // so the file is cleared — exactly once, which the unit test in `server.rs`
-    // pins separately.
+    // The syntax error fixed, but the package still declares no Julia support
+    // range: the environment now resolves, so the *semantic* checks take over
+    // on the same file. This is the harvester's success branch, which the
+    // failure branch above does not reach.
     write_file(
         &pkg.path.join("Project.toml"),
         "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    did_change_watched_files(
+        &client,
+        vec![FileEvent::new(
+            file_uri(&pkg.path.join("Project.toml")),
+            FileChangeType::CHANGED,
+        )],
+    );
+
+    let diags = poll_publish_where(&client, "Project.toml", Duration::from_secs(10), |diags| {
+        diags
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("missing-julia-compat".to_string())))
+    });
+    let compat = diags
+        .iter()
+        .find(|d| d.code == Some(NumberOrString::String("missing-julia-compat".to_string())))
+        .expect("polled for it");
+    assert_eq!(compat.severity, Some(DiagnosticSeverity::WARNING));
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("toml-syntax".to_string()))),
+        "the syntax finding is gone: {diags:?}"
+    );
+
+    // Both satisfied: the file clears — exactly once, which the unit test in
+    // `server.rs` pins separately.
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n\n\
+         [compat]\njulia = \"1.10\"\n",
     );
     did_change_watched_files(
         &client,
