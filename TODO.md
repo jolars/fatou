@@ -222,14 +222,27 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   (`occursin(r"abc$", "abc\n")` is `true`, `endswith("abc\n", "abc")` is not).
   Both open with `resolves_to_base` on `occursin`; the boundary fix gates the
   name it splices in separately.
-  - Both read the needle wherever Base's spellings of the search put it, which
-    is `regex::PatternCall`'s whole job: `occursin(r"a", s)`, the flipped
-    `contains(s, r"a")`, and the curried `contains(r"a")` — but not the curried
-    `occursin(s)`, which fixes the *haystack*. `string-boundary` answers the
-    curried form with a curried predicate (`startswith("a")`). The remaining
-    follow-up is the other fixed-pattern consumers (`replace`, `split`,
-    `startswith`/`endswith` with a regex), which the analyzer already covers
-    and only the call matcher would have to grow for.
+  - Which argument holds the pattern is `regex::PatternCall`'s whole job, and
+    it differs per function: `occursin(r"a", s)` against `contains(s, r"a")`,
+    the second argument of `startswith`/`endswith`/`split`/`eachsplit`, the
+    left of each `=>` pair of a `replace`, and a curried form that fixes the
+    pattern (`contains(r"a")`) against one that fixes the *haystack*
+    (`occursin(s)`, which carries no pattern and is matched by nothing).
+    `rsplit` is deliberately absent: it has no `Regex` method at all, so a
+    regex there is an error, not an idiom. `fixed-regex` covers the whole
+    table; `string-boundary` takes only the searches, since only they have a
+    haystack a boundary predicate can take over, and it answers a curried
+    search with a curried predicate (`startswith("a")`).
+  - Two things the pair still declines, both recorded by a test:
+    - A keyword-carrying call (`replace(s, p => r; count = 1)`,
+      `split(s, d; limit = 2)`) is skipped, since every rule here goes through
+      `plain_call`. Sound but a real miss; a `positional_call` matcher that
+      ignores keywords the pattern question does not depend on would close it.
+    - An anchored pattern under a predicate that anchors on its own
+      (`startswith(s, r"^abc")`) is left alone by both. The anchor is redundant
+      there and could be a finding of its own, but reading it as a boundary is
+      wrong for the mismatched `startswith(s, r"abc$")`, which tests that `s`
+      *is* `abc`.
 
 Deferred, and why:
 

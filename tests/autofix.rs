@@ -384,6 +384,27 @@ b = occursin(r\"\"\"x\"y\"\"\", s)
     assert!(outcome.remaining.is_empty());
 }
 
+/// The other pattern consumers take the same one-token fix, each pattern of a
+/// multi-pair `replace` included.
+#[test]
+fn fixes_every_fixed_pattern_consumer() {
+    let src = "\
+parts = split(line, r\"::\")
+head = startswith(line, r\"julia\")
+tail = filter(endswith(r\"jl\"), names)
+out = replace(line, r\"tab\" => \"    \", r\"nl\" => \"\")
+";
+    let outcome = fix_source(None, src, &select("fixed-regex"), false);
+    insta::assert_snapshot!(outcome.output, @r#"
+    parts = split(line, "::")
+    head = startswith(line, "julia")
+    tail = filter(endswith("jl"), names)
+    out = replace(line, "tab" => "    ", "nl" => "")
+    "#);
+    assert_eq!(outcome.applied, 5);
+    assert!(outcome.remaining.is_empty());
+}
+
 /// Both rules read `contains`'s flipped argument order, and its curried form,
 /// as the same two questions.
 #[test]

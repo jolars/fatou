@@ -6,7 +6,7 @@ expression: render_rule_doc(rule.as_ref())
 
 Flag `occursin(r"abc", s)`, whose regex literal carries no metacharacter and so matches one fixed substring. `occursin("abc", s)` asks the same question of the same values and answers it with a substring search instead of the regex engine.
 
-The needle is read wherever Base's spellings of this search put it: `occursin(r"abc", s)`, the flipped `contains(s, r"abc")`, and the curried `contains(r"abc")`, which fixes the needle. The curried `occursin(s)` fixes the *haystack* instead, so its argument is no pattern and is left alone.
+Every Base function that takes a pattern is read the same way, each at the argument that holds it: `occursin(r"abc", s)`, the flipped `contains(s, r"abc")`, `startswith`/`endswith`, `split`/`eachsplit`, each `=>` pair of a `replace`, and the curried forms that fix the pattern (`contains(r"abc")`). The curried `occursin(s)` fixes the *haystack* instead, so its argument is no pattern and is left alone, and `rsplit` takes no regex at all.
 
 The pattern must be a plain `r"..."` — no flag suffix, since a flag changes what the pattern means, and no interpolation — and it must be non-empty and free of every PCRE metacharacter and backslash escape. The callee must be confirmed to be Base's, so a local shadow, a qualified `Base.occursin`, or a file whose imports cannot be resolved reports nothing.
 
@@ -25,7 +25,7 @@ warning: fixed-regex
  --> example.jl:1:13
   |
 1 | if occursin(r"error", line)
-  |             ^^^^^^^^ search for the substring `"error"` instead of matching the regex `r"error"`, whose pattern has no metacharacter
+  |             ^^^^^^^^ use the plain string `"error"` instead of the regex `r"error"`, whose pattern has no metacharacter
   = help: Drop the `r` prefix and match the substring (safe fix)
 ```
 
@@ -48,7 +48,7 @@ warning: fixed-regex
  --> example.jl:1:28
   |
 1 | failures = filter(contains(r"error"), lines)
-  |                            ^^^^^^^^ search for the substring `"error"` instead of matching the regex `r"error"`, whose pattern has no metacharacter
+  |                            ^^^^^^^^ use the plain string `"error"` instead of the regex `r"error"`, whose pattern has no metacharacter
   = help: Drop the `r` prefix and match the substring (safe fix)
 ```
 
@@ -56,4 +56,25 @@ After applying the fix:
 
 ```julia
 failures = filter(contains("error"), lines)
+```
+
+Every other pattern position reads the same way:
+
+```julia
+fields = split(line, r"::")
+```
+
+```text
+warning: fixed-regex
+ --> example.jl:1:22
+  |
+1 | fields = split(line, r"::")
+  |                      ^^^^^ use the plain string `"::"` instead of the regex `r"::"`, whose pattern has no metacharacter
+  = help: Drop the `r` prefix and match the substring (safe fix)
+```
+
+After applying the fix:
+
+```julia
+fields = split(line, "::")
 ```

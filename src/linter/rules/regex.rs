@@ -13,9 +13,10 @@
 //! [`PatternCall`] answers the other half, which is not about the literal but
 //! about Base's argument order: `occursin(needle, haystack)` and
 //! `contains(haystack, needle)` are the same search written the two ways
-//! round, and only one of their curried forms fixes the *needle*. Getting that
-//! backwards would make a rule rewrite the wrong argument, so both rules ask
-//! once here.
+//! round, only one of their curried forms fixes the *needle*, and the rest of
+//! the family (`startswith`, `split`, `replace`, ...) each keeps its pattern
+//! somewhere else again. Getting that backwards would make a rule rewrite the
+//! wrong argument, so both rules ask once here.
 //!
 //! The metacharacter set is PCRE's, which is what Julia's `Regex` compiles.
 //! Every character that could mean something other than itself is excluded, so
@@ -24,18 +25,111 @@
 //! flag) included, since a literal admitted here carries neither a class nor a
 //! flag.
 
-use crate::ast::{CallExpr, Expr, StringLiteral};
-use crate::linter::rules::matchers;
-use crate::syntax::SyntaxNode;
+use crate::ast::{AstToken, CallExpr, Expr, StringLiteral};
+use crate::linter::rules::matchers::{self, CallShape};
+use crate::syntax::{SyntaxKind, SyntaxNode};
 
-/// A Base substring search whose needle is written as a plain regex literal,
-/// with the haystack it searches.
+/// What a call does with the pattern it takes, as far as these rules care.
+#[derive(Clone, Copy)]
+enum Role {
+    /// A search for the pattern *anywhere* in a string, which a boundary
+    /// predicate can replace outright — carrying the searched string's
+    /// argument index, or `None` for the curried form, which has none.
+    Search(Option<usize>),
+    /// Every other consumer: the pattern can become a plain string in place,
+    /// but the call keeps its shape.
+    Other,
+}
+
+/// One Base function's pattern position: the callee, the positional arity it
+/// is matched at, where the pattern sits, and what the call does with it.
 ///
-/// The three shapes are the same question: `occursin(r"a", s)`,
-/// `contains(s, r"a")`, and the curried `contains(r"a")`, which is
-/// `Base.Fix2(contains, r"a")` and so fixes the *needle*. The curried
-/// `occursin(s)` is deliberately not among them: it fixes the *haystack*, so
-/// its argument is not a pattern at all.
+/// Arity is part of the key because a curried form is a different position:
+/// `contains(needle)` fixes the needle, while `occursin(haystack)` fixes the
+/// haystack and so appears here not at all.
+struct Shape {
+    name: &'static str,
+    arity: usize,
+    pattern: usize,
+    role: Role,
+}
+
+/// Every call position where a Julia regex literal means the same thing a
+/// plain string would.
+///
+/// `rsplit` is absent on purpose: it has no `Regex` method at all (it would
+/// need `findprev`), so a regex there is an error rather than an idiom.
+/// `replace` is absent because its pattern hides inside a `=>` pair, which
+/// [`PatternCall::all`] handles separately.
+const SHAPES: &[Shape] = &[
+    Shape {
+        name: "occursin",
+        arity: 2,
+        pattern: 0,
+        role: Role::Search(Some(1)),
+    },
+    // `contains` is `occursin` the other way round, and its curried form fixes
+    // the needle rather than the haystack.
+    Shape {
+        name: "contains",
+        arity: 2,
+        pattern: 1,
+        role: Role::Search(Some(0)),
+    },
+    Shape {
+        name: "contains",
+        arity: 1,
+        pattern: 0,
+        role: Role::Search(None),
+    },
+    // A regex prefix/suffix is anchored by the predicate itself, so a fixed
+    // one means exactly the string it spells.
+    Shape {
+        name: "startswith",
+        arity: 2,
+        pattern: 1,
+        role: Role::Other,
+    },
+    Shape {
+        name: "startswith",
+        arity: 1,
+        pattern: 0,
+        role: Role::Other,
+    },
+    Shape {
+        name: "endswith",
+        arity: 2,
+        pattern: 1,
+        role: Role::Other,
+    },
+    Shape {
+        name: "endswith",
+        arity: 1,
+        pattern: 0,
+        role: Role::Other,
+    },
+    Shape {
+        name: "split",
+        arity: 2,
+        pattern: 1,
+        role: Role::Other,
+    },
+    Shape {
+        name: "eachsplit",
+        arity: 2,
+        pattern: 1,
+        role: Role::Other,
+    },
+];
+
+/// A Base call whose pattern is written as a plain regex literal.
+///
+/// The point of going through this is that every function in the family keeps
+/// its pattern somewhere else: `occursin(r"a", s)` and `contains(s, r"a")` are
+/// the same search written both ways round, `split`/`startswith`/`endswith`
+/// take theirs second, the curried `contains(r"a")`/`startswith(r"a")` fix the
+/// pattern while the curried `occursin(s)` fixes the *haystack* (and so carries
+/// no pattern at all), and `replace`'s hides inside a `=>` pair.
 ///
 /// Matching the shape is half the job — the callee still has to be confirmed
 /// Base's with
@@ -43,45 +137,94 @@ use crate::syntax::SyntaxNode;
 pub struct PatternCall {
     /// The whole call, for the namespace gate and for a rewrite's span.
     pub call: CallExpr,
-    /// The needle's literal, whose prefix a fix may drop.
+    /// The pattern's literal, whose prefix a fix may drop.
     pub literal: StringLiteral,
-    /// The needle's raw pattern text (see [`regex_pattern`]).
+    /// The raw pattern text (see [`regex_pattern`]).
     pub pattern: String,
-    /// The searched string, or `None` for the curried form, which has none.
+    /// Whether the call searches for the pattern anywhere in a string, the one
+    /// shape a boundary predicate can take over.
+    pub search: bool,
+    /// The searched string, for a [`search`](Self::search) call that has one.
     pub haystack: Option<Expr>,
 }
 
 impl PatternCall {
-    /// `node` as a search call carrying a plain regex literal, or `None`.
-    pub fn of(node: &SyntaxNode) -> Option<Self> {
-        // `occursin(needle, haystack)`, and `contains` the other way round.
-        if let Some((call, args)) = matchers::plain_call(node, "occursin", 2) {
-            return Self::build(call, &args, 0, Some(1));
+    /// Every plain regex literal `node` passes as a pattern, in source order.
+    /// Empty for anything else; more than one only for a multi-pair `replace`.
+    pub fn all(node: &SyntaxNode) -> Vec<Self> {
+        for shape in SHAPES {
+            let Some((call, args)) = matchers::plain_call(node, shape.name, shape.arity) else {
+                continue;
+            };
+            let haystack = match shape.role {
+                Role::Search(at) => at.and_then(|at| args.get(at)).cloned(),
+                Role::Other => None,
+            };
+            let search = matches!(shape.role, Role::Search(_));
+            return Self::build(&call, args.get(shape.pattern).cloned(), search, haystack)
+                .into_iter()
+                .collect();
         }
-        if let Some((call, args)) = matchers::plain_call(node, "contains", 2) {
-            return Self::build(call, &args, 1, Some(0));
+        Self::replace_pairs(node)
+    }
+
+    /// The one search call `node` may be, for a rule that rewrites the search
+    /// itself rather than its pattern.
+    pub fn search(node: &SyntaxNode) -> Option<Self> {
+        Self::all(node).into_iter().find(|found| found.search)
+    }
+
+    /// `replace(s, r"a" => x, ...)`, whose patterns sit on the left of each
+    /// `=>` pair. The subject is the first argument and is never a pattern; an
+    /// argument that is no pair at all (a function, a splatted collection)
+    /// simply contributes none.
+    fn replace_pairs(node: &SyntaxNode) -> Vec<Self> {
+        let Some(call) = matchers::call_named(node, "replace") else {
+            return Vec::new();
+        };
+        let shape = CallShape::of(&call);
+        if shape.positional.len() < 2
+            || !shape.keywords.is_empty()
+            || shape.positional_open
+            || shape.keyword_open
+            || shape.do_block
+        {
+            return Vec::new();
         }
-        let (call, args) = matchers::plain_call(node, "contains", 1)?;
-        Self::build(call, &args, 0, None)
+        shape.positional[1..]
+            .iter()
+            .filter_map(|arg| Self::build(&call, pair_pattern(arg), false, None))
+            .collect()
     }
 
     fn build(
-        call: CallExpr,
-        args: &[Expr],
-        needle: usize,
-        haystack: Option<usize>,
+        call: &CallExpr,
+        pattern: Option<Expr>,
+        search: bool,
+        haystack: Option<Expr>,
     ) -> Option<Self> {
-        let Expr::StringLiteral(literal) = args.get(needle)? else {
+        let Expr::StringLiteral(literal) = pattern? else {
             return None;
         };
-        let pattern = regex_pattern(literal)?;
         Some(Self {
-            call,
-            literal: literal.clone(),
-            pattern,
-            haystack: haystack.and_then(|at| args.get(at)).cloned(),
+            call: call.clone(),
+            pattern: regex_pattern(&literal)?,
+            literal,
+            search,
+            haystack,
         })
     }
+}
+
+/// The left-hand side of a `=>` pair, which is where `replace` keeps a pattern.
+fn pair_pattern(arg: &Expr) -> Option<Expr> {
+    let Expr::BinaryExpr(pair) = arg else {
+        return None;
+    };
+    if pair.op()?.syntax().kind() != SyntaxKind::FAT_ARROW {
+        return None;
+    }
+    pair.lhs()
 }
 
 /// The raw pattern text of `literal` when it is a plain regex literal: the `r`
@@ -235,7 +378,7 @@ mod tests {
     /// `src`, as source text.
     fn search_call(src: &str) -> Option<(String, Option<String>)> {
         parse(src).cst.descendants().find_map(|node| {
-            let found = PatternCall::of(&node)?;
+            let found = PatternCall::search(&node)?;
             Some((
                 found.pattern,
                 found
@@ -243,6 +386,37 @@ mod tests {
                     .map(|haystack| haystack.syntax().text().to_string()),
             ))
         })
+    }
+
+    /// Every pattern the first pattern-carrying call in `src` passes.
+    fn patterns(src: &str) -> Vec<String> {
+        parse(src)
+            .cst
+            .descendants()
+            .map(|node| PatternCall::all(&node))
+            .find(|found| !found.is_empty())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|found| found.pattern)
+            .collect()
+    }
+
+    #[test]
+    fn pattern_call_reads_the_whole_family() {
+        assert_eq!(patterns("split(line, r\"::\")\n"), ["::"]);
+        assert_eq!(patterns("eachsplit(line, r\"::\")\n"), ["::"]);
+        assert_eq!(patterns("startswith(name, r\"Test\")\n"), ["Test"]);
+        assert_eq!(patterns("filter(endswith(r\"jl\"), names)\n"), ["jl"]);
+        // Each pair of a `replace` carries its own pattern; the subject and the
+        // replacement sides carry none.
+        assert_eq!(
+            patterns("replace(s, r\"a\" => \"1\", r\"b\" => \"2\")\n"),
+            ["a", "b"]
+        );
+        assert!(patterns("replace(s, \"a\" => r\"b\")\n").is_empty());
+        assert!(patterns("replace(s, x, r\"a\")\n").is_empty());
+        // `rsplit` takes no `Regex` at all, so a regex there is an error.
+        assert!(patterns("rsplit(line, r\"::\")\n").is_empty());
     }
 
     #[test]

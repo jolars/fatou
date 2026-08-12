@@ -92,7 +92,7 @@ impl Rule for StringBoundary {
 
     fn check(&self, el: &SyntaxElement, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
         let Some(node) = el.as_node() else { return };
-        let Some(found) = regex::PatternCall::of(node) else {
+        let Some(found) = regex::PatternCall::search(node) else {
             return;
         };
         let Some((anchor, rest)) = regex::single_anchor(&found.pattern) else {

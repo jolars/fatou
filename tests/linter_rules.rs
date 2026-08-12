@@ -5752,8 +5752,8 @@ fn fixed_regex_flags_a_metacharacter_free_pattern() {
     assert_eq!(
         findings("fixed-regex", "if occursin(r\"abc\", s)\n    1\nend\n"),
         [
-            "search for the substring `\"abc\"` instead of matching the regex \
-             `r\"abc\"`, whose pattern has no metacharacter"
+            "use the plain string `\"abc\"` instead of the regex `r\"abc\"`, \
+             whose pattern has no metacharacter"
         ]
     );
 }
@@ -5815,8 +5815,8 @@ fn fixed_regex_flags_the_contains_forms() {
     assert_eq!(
         findings("fixed-regex", "hit = contains(s, r\"abc\")\n"),
         [
-            "search for the substring `\"abc\"` instead of matching the regex \
-             `r\"abc\"`, whose pattern has no metacharacter"
+            "use the plain string `\"abc\"` instead of the regex `r\"abc\"`, \
+             whose pattern has no metacharacter"
         ]
     );
     // Its curried form fixes the *needle*, so its lone argument is a pattern.
@@ -5824,6 +5824,60 @@ fn fixed_regex_flags_the_contains_forms() {
     let diag = only_finding("fixed-regex", &[], src);
     assert_eq!(&src[diag.range], "r\"abc\"");
     assert_eq!(&src[diag.fixes[0].start..diag.fixes[0].end], "r");
+}
+
+#[test]
+fn fixed_regex_flags_the_other_pattern_consumers() {
+    for src in [
+        "parts = split(line, r\"::\")\n",
+        "parts = eachsplit(line, r\"::\")\n",
+        "hit = startswith(name, r\"Test\")\n",
+        "hit = endswith(name, r\"jl\")\n",
+        "hits = filter(startswith(r\"Test\"), names)\n",
+        "hits = filter(endswith(r\"jl\"), names)\n",
+        "out = replace(line, r\"tab\" => \"    \")\n",
+        "out = replace(line, r\"tab\" => uppercase)\n",
+    ] {
+        assert_eq!(count("fixed-regex", src), 1, "{src}");
+    }
+}
+
+#[test]
+fn fixed_regex_flags_each_pattern_of_a_multi_pair_replace() {
+    assert_eq!(
+        count(
+            "fixed-regex",
+            "out = replace(s, r\"a\" => \"1\", r\"b\" => \"2\")\n"
+        ),
+        2
+    );
+}
+
+#[test]
+fn fixed_regex_ignores_positions_that_take_no_pattern() {
+    // `rsplit` has no `Regex` method at all — it would need `findprev` — so a
+    // regex there is already an error, not an idiom to rewrite.
+    assert_eq!(count("fixed-regex", "parts = rsplit(line, r\"::\")\n"), 0);
+    // The replacement side of a pair is not a pattern, and neither is a
+    // `replace` argument that is no pair at all.
+    assert_eq!(
+        count("fixed-regex", "out = replace(s, \"a\" => r\"b\")\n"),
+        0
+    );
+    assert_eq!(count("fixed-regex", "out = replace(s, x, r\"a\")\n"), 0);
+}
+
+/// The trap the two rules stay clear of: an anchored pattern under a predicate
+/// that anchors on its own. Dropping the `r` would make the caret literal, and
+/// reading the anchor as a boundary would be a no-op here and plainly wrong for
+/// the mismatched `startswith(s, r"abc$")`, which tests that `s` *is* `abc`.
+#[test]
+fn the_regex_rules_leave_an_anchored_predicate_pattern_alone() {
+    for rule in ["fixed-regex", "string-boundary"] {
+        assert_eq!(count(rule, "hit = startswith(s, r\"^abc\")\n"), 0);
+        assert_eq!(count(rule, "hit = startswith(s, r\"abc$\")\n"), 0);
+        assert_eq!(count(rule, "hit = endswith(s, r\"abc$\")\n"), 0);
+    }
 }
 
 #[test]
@@ -5982,6 +6036,13 @@ fn string_boundary_withholds_the_contains_fix_over_a_comment() {
 fn string_boundary_ignores_other_shapes() {
     assert_eq!(count("string-boundary", "hit = occursin(\"^abc\", s)\n"), 0);
     assert_eq!(count("string-boundary", "p = occursin(r\"^abc\")\n"), 0);
+    // Only a search has a haystack a boundary predicate could take over; the
+    // other pattern consumers keep their own shape.
+    assert_eq!(count("string-boundary", "parts = split(s, r\"^abc\")\n"), 0);
+    assert_eq!(
+        count("string-boundary", "out = replace(s, r\"^abc\" => \"x\")\n"),
+        0
+    );
     assert_eq!(count("string-boundary", "m = match(r\"^abc\", s)\n"), 0);
     assert_eq!(
         count("string-boundary", "hit = occursin(r\"^abc\", s; kw = 1)\n"),
