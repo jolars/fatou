@@ -56,6 +56,7 @@ fn env_with(packages: Vec<Package>) -> Environment {
         name: None,
         uuid: None,
         direct_deps: BTreeMap::new(),
+        declared_deps: Default::default(),
         packages,
         depots: Vec::new(),
         source: EnvSource::DefaultEnv,
