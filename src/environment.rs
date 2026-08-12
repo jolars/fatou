@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use toml::Spanned;
+
 use crate::julia_version::{VersionRange, parse_compat};
 
 /// A parsed 16-byte package UUID, stored in textual (big-endian) byte order.
@@ -144,19 +146,26 @@ impl Environment {
     /// environment that merely carries a `name`; only the former has a module
     /// tree to harvest.
     pub fn dev_package(&self) -> Option<DevPackage> {
+        self.entry_file().filter(|entry| entry.is_file())?;
+        Some(DevPackage {
+            name: self.name.clone()?,
+            root: self.project_dir.clone(),
+        })
+    }
+
+    /// The `src/<Name>.jl` entry file this project's package *would* have,
+    /// whether or not it exists. `None` when the project is not a package
+    /// candidate at all: a shared default environment, or one with no `name`.
+    ///
+    /// Split out of [`dev_package`](Self::dev_package) so a consumer can tell
+    /// "not a package" from "a package whose entry file is missing" — the
+    /// latter is a defect worth reporting, the former is not.
+    pub fn entry_file(&self) -> Option<PathBuf> {
         if self.source == EnvSource::DefaultEnv {
             return None;
         }
         let name = self.name.as_ref()?;
-        let entry = self.project_dir.join("src").join(format!("{name}.jl"));
-        if entry.is_file() {
-            Some(DevPackage {
-                name: name.clone(),
-                root: self.project_dir.clone(),
-            })
-        } else {
-            None
-        }
+        Some(self.project_dir.join("src").join(format!("{name}.jl")))
     }
 }
 
@@ -191,8 +200,19 @@ impl EnvContext {
 
 #[derive(Debug)]
 pub enum EnvironmentError {
-    Read { path: PathBuf, message: String },
-    Parse { path: PathBuf, message: String },
+    Read {
+        path: PathBuf,
+        message: String,
+    },
+    Parse {
+        path: PathBuf,
+        message: String,
+        /// The byte range in the file's text that the failure points at, when
+        /// the parser could locate one. `None` for a failure with no position
+        /// (an unexpected end of input, typically), which a consumer reporting
+        /// a range must fall back for.
+        span: Option<std::ops::Range<usize>>,
+    },
 }
 
 impl std::fmt::Display for EnvironmentError {
@@ -201,7 +221,7 @@ impl std::fmt::Display for EnvironmentError {
             EnvironmentError::Read { path, message } => {
                 write!(f, "failed to read {}: {message}", path.display())
             }
-            EnvironmentError::Parse { path, message } => {
+            EnvironmentError::Parse { path, message, .. } => {
                 write!(f, "failed to parse {}: {message}", path.display())
             }
         }
@@ -219,16 +239,31 @@ const MANIFEST_NAMES: [&str; 2] = ["JuliaManifest.toml", "Manifest.toml"];
 /// uses this to escalate a watched-file change to a full environment
 /// re-resolve instead of a workspace re-harvest.
 pub fn is_environment_file(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    PROJECT_NAMES.contains(&name)
-        || MANIFEST_NAMES.contains(&name)
-        || name
-            .strip_prefix("Manifest-v")
-            .and_then(|rest| rest.strip_suffix(".toml"))
-            .and_then(parse_version)
-            .is_some()
+    is_project_file(path) || is_manifest_file(path)
+}
+
+/// Whether `path` names a project file (`Project.toml`/`JuliaProject.toml`).
+/// Distinguished from a manifest because the two carry different schemas: only
+/// the project file is read against a typed one.
+pub fn is_project_file(path: &Path) -> bool {
+    file_name(path).is_some_and(|name| PROJECT_NAMES.contains(&name))
+}
+
+/// Whether `path` names a manifest (`Manifest.toml`/`JuliaManifest.toml`, or a
+/// version-specific `Manifest-vX.Y.toml`).
+pub fn is_manifest_file(path: &Path) -> bool {
+    file_name(path).is_some_and(|name| {
+        MANIFEST_NAMES.contains(&name)
+            || name
+                .strip_prefix("Manifest-v")
+                .and_then(|rest| rest.strip_suffix(".toml"))
+                .and_then(parse_version)
+                .is_some()
+    })
+}
+
+fn file_name(path: &Path) -> Option<&str> {
+    path.file_name().and_then(|name| name.to_str())
 }
 
 /// Resolve the active Julia environment for `ctx`. Returns `Ok(None)` when no
@@ -562,27 +597,69 @@ fn resolve_stdlib_sources(packages: &mut [Package], install: &JuliaInstall) {
 
 // --- Project.toml ----------------------------------------------------------
 
+/// A `name = "value"` table whose keys *and* values carry their byte span: the
+/// shape of `[deps]` and `[compat]` (and of `[extras]`/`[weakdeps]`, which the
+/// project-file checks add to the schema when they need them).
+pub(crate) type SpannedMap = BTreeMap<Spanned<String>, Spanned<String>>;
+
+/// The `Project.toml` schema, with a span on everything a diagnostic anchors
+/// on. Spans are byte offsets into the text the parse saw; the parse does not
+/// retain that text, so a consumer reporting ranges holds its own copy (see
+/// [`parse_project_text`]).
+///
+/// **Unknown keys are ignored, deliberately.** This is *Julia's* schema, not
+/// fatou's: it already carries `authors`, `version`, `targets`, `workspace`,
+/// `apps`, `extensions`, and it grows faster than fatou does.
+/// `deny_unknown_fields` — the right policy for fatou's own `fatou.toml`
+/// (`crate::config::RawConfig`) — would turn each future Julia key into a hard
+/// resolve failure, and [`resolve`]'s callers swallow `Err`, so the failure
+/// would surface as a silently missing index rather than as an error.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct ProjectFile {
+    pub name: Option<Spanned<String>>,
+    /// Kept textual rather than a parsed [`Uuid`]: a malformed UUID must stay a
+    /// dropped value (this module's "a malformed on-disk file is input"
+    /// invariant), not a parse failure, and a diagnostic about one wants the
+    /// spelling as written.
+    pub uuid: Option<Spanned<String>>,
+    #[serde(default)]
+    pub deps: SpannedMap,
+    #[serde(default)]
+    pub compat: SpannedMap,
+}
+
+impl ProjectFile {
+    /// Drop the spans, yielding what [`resolve`] stores on [`Environment`]. A
+    /// `uuid` that does not parse is dropped rather than raised.
+    fn into_meta(self) -> ProjectMeta {
+        let direct_deps = self
+            .deps
+            .into_iter()
+            .filter_map(|(name, uuid)| Some((name.into_inner(), uuid.into_inner().parse().ok()?)))
+            .collect();
+        (
+            self.name.map(Spanned::into_inner),
+            self.uuid.and_then(|uuid| uuid.into_inner().parse().ok()),
+            direct_deps,
+        )
+    }
+
+    /// The `[compat].julia` range, if present and parseable.
+    pub(crate) fn julia_compat(&self) -> Option<VersionRange> {
+        parse_compat(self.compat.get("julia")?.as_ref()).ok()
+    }
+}
+
 type ProjectMeta = (Option<String>, Option<Uuid>, BTreeMap<String, Uuid>);
 
 fn parse_project(path: &Path) -> Result<ProjectMeta, EnvironmentError> {
-    let table = read_toml(path)?;
-    let name = table
-        .get("name")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let uuid = table
-        .get("uuid")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse().ok());
-    let mut direct_deps = BTreeMap::new();
-    if let Some(deps) = table.get("deps").and_then(|v| v.as_table()) {
-        for (dep_name, value) in deps {
-            if let Some(uuid) = value.as_str().and_then(|s| s.parse().ok()) {
-                direct_deps.insert(dep_name.clone(), uuid);
-            }
-        }
-    }
-    Ok((name, uuid, direct_deps))
+    Ok(parse_project_text(path, &read_text(path)?)?.into_meta())
+}
+
+/// Parse a project file's text against [`ProjectFile`]. The one project-file
+/// parse in the crate; `path` is carried only for the error.
+pub(crate) fn parse_project_text(path: &Path, text: &str) -> Result<ProjectFile, EnvironmentError> {
+    parse_toml(path, text)
 }
 
 // --- Manifest.toml ---------------------------------------------------------
@@ -777,7 +854,11 @@ fn parse_sha1(s: &str) -> Option<[u8; 20]> {
 /// present or parses — leaving the `julia-version-compat` rule silent.
 pub fn discover_julia_target(anchor: &Path) -> Option<VersionRange> {
     let project = walk_up_for_project(anchor)?;
-    if let Some(range) = read_toml(&project).ok().and_then(compat_range_from_table) {
+    if let Some(range) = read_text(&project)
+        .and_then(|text| parse_project_text(&project, &text))
+        .ok()
+        .and_then(|project| project.julia_compat())
+    {
         return Some(range);
     }
     let project_dir = project.parent()?;
@@ -785,13 +866,6 @@ pub fn discover_julia_target(anchor: &Path) -> Option<VersionRange> {
     read_toml(&manifest)
         .ok()
         .and_then(manifest_range_from_table)
-}
-
-/// The `[compat].julia` range from a parsed project table, if present and
-/// parseable.
-fn compat_range_from_table(table: toml::Table) -> Option<VersionRange> {
-    let spec = table.get("compat")?.as_table()?.get("julia")?.as_str()?;
-    parse_compat(spec).ok()
 }
 
 /// The manifest's top-level `julia_version` as an exact range, if present.
@@ -802,16 +876,37 @@ fn manifest_range_from_table(table: toml::Table) -> Option<VersionRange> {
 
 // --- Shared helpers --------------------------------------------------------
 
-fn read_toml(path: &Path) -> Result<toml::Table, EnvironmentError> {
-    let text = std::fs::read_to_string(path).map_err(|err| EnvironmentError::Read {
+/// Read a TOML file, keeping the source text: spans are byte offsets into it,
+/// so a consumer that reports ranges needs the same string the parse saw.
+pub(crate) fn read_text(path: &Path) -> Result<String, EnvironmentError> {
+    std::fs::read_to_string(path).map_err(|err| EnvironmentError::Read {
         path: path.to_path_buf(),
         message: err.to_string(),
-    })?;
-    text.parse::<toml::Table>()
-        .map_err(|err| EnvironmentError::Parse {
-            path: path.to_path_buf(),
-            message: err.to_string(),
-        })
+    })
+}
+
+/// Deserialize `text` into `T`, turning a TOML syntax or schema failure into a
+/// span-carrying [`EnvironmentError::Parse`].
+fn parse_toml<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    text: &str,
+) -> Result<T, EnvironmentError> {
+    toml::from_str(text).map_err(|err| EnvironmentError::Parse {
+        path: path.to_path_buf(),
+        // `to_string` renders a multi-line snippet with a caret diagram, which
+        // is right for a terminal and wrong for a one-line diagnostic; `span`
+        // now carries the location the caret was drawing.
+        message: err.message().to_string(),
+        span: err.span(),
+    })
+}
+
+/// Read and parse a file as an untyped table. The manifest's reader: nothing
+/// anchors a diagnostic inside a manifest beyond its syntax, so it needs no
+/// schema of its own — which also sidesteps its two incompatible layouts (see
+/// [`parse_manifest`]).
+fn read_toml(path: &Path) -> Result<toml::Table, EnvironmentError> {
+    parse_toml(path, &read_text(path)?)
 }
 
 #[cfg(test)]
@@ -907,17 +1002,101 @@ mod tests {
 
     #[test]
     fn reads_julia_compat_range_from_project() {
-        let table: toml::Table = "[compat]\njulia = \"1.6\"\nDataFrames = \"1.5\""
-            .parse()
-            .unwrap();
-        let range = compat_range_from_table(table).unwrap();
+        let project = parse_project_text(
+            Path::new("Project.toml"),
+            "[compat]\njulia = \"1.6\"\nDataFrames = \"1.5\"",
+        )
+        .unwrap();
+        let range = project.julia_compat().unwrap();
         assert_eq!(range.min, crate::julia_version::Version::new(1, 6, 0));
     }
 
     #[test]
     fn missing_julia_compat_is_none() {
-        let table: toml::Table = "[compat]\nDataFrames = \"1.5\"".parse().unwrap();
-        assert!(compat_range_from_table(table).is_none());
+        let project =
+            parse_project_text(Path::new("Project.toml"), "[compat]\nDataFrames = \"1.5\"")
+                .unwrap();
+        assert!(project.julia_compat().is_none());
+    }
+
+    /// `Project.toml` is *Julia's* schema, not fatou's: it already carries keys
+    /// fatou has no interest in, and it grows faster than fatou does. An
+    /// unknown key must be ignored, never a parse failure — `resolve`'s callers
+    /// swallow `Err`, so rejecting one would show up as a silently missing
+    /// index rather than as an error.
+    #[test]
+    fn unknown_julia_keys_still_resolve() {
+        let text = r#"
+name = "Demo"
+uuid = "11111111-2222-3333-4444-555555555555"
+version = "0.1.0"
+authors = ["Someone <someone@example.com>"]
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[weakdeps]
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[extensions]
+DemoPlotsExt = "Plots"
+
+[targets]
+test = ["Test"]
+
+[sources]
+Local = { path = "vendor/Local" }
+
+[workspace]
+projects = ["sub"]
+"#;
+        let project = parse_project_text(Path::new("Project.toml"), text).unwrap();
+        assert_eq!(
+            project.name.as_ref().map(Spanned::get_ref),
+            Some(&"Demo".to_string())
+        );
+        assert!(project.deps.contains_key("Dates"));
+        assert_eq!(
+            project.julia_compat().map(|range| range.min),
+            Some(crate::julia_version::Version::new(1, 10, 0)),
+            "the keys fatou does know survive alongside the ones it does not"
+        );
+    }
+
+    /// The span a semantic finding points at is a byte offset into the text the
+    /// parse saw, for keys as well as values.
+    #[test]
+    fn spans_locate_keys_and_values() {
+        let text = "name = \"Demo\"\n\n[deps]\nDates = \"ade2ca70-3891-5945-98fb-dc099432e06a\"\n";
+        let project = parse_project_text(Path::new("Project.toml"), text).unwrap();
+
+        let name = project.name.as_ref().unwrap();
+        assert_eq!(&text[name.span()], "\"Demo\"");
+
+        let (dep, uuid) = project.deps.iter().next().unwrap();
+        assert_eq!(&text[dep.span()], "Dates");
+        assert_eq!(
+            &text[uuid.span()],
+            "\"ade2ca70-3891-5945-98fb-dc099432e06a\""
+        );
+    }
+
+    /// A syntax error carries the offset that a diagnostic anchors on.
+    #[test]
+    fn a_syntax_error_carries_its_span() {
+        let text = "name = \"Demo\"\nuuid = \n";
+        let err = parse_project_text(Path::new("Project.toml"), text).unwrap_err();
+        let EnvironmentError::Parse { span, .. } = err else {
+            panic!("expected a parse error, got {err:?}");
+        };
+        let span = span.expect("a span for a mid-file syntax error");
+        assert!(span.start >= text.find("uuid").unwrap(), "{span:?}");
     }
 
     #[test]

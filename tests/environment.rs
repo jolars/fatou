@@ -116,6 +116,81 @@ fn resolves_project_manifest_and_source() {
     assert_eq!(pkg.source, Some(depot.join("packages/AbstractTrees/Ftf8W")));
 }
 
+/// A real `Project.toml` carries keys fatou has no schema for, and Julia keeps
+/// adding more. Every one of them must pass through resolution untouched: a
+/// rejected key would leave the whole environment — and so the package index —
+/// silently missing, because `resolve`'s callers swallow the error.
+#[test]
+fn unknown_julia_keys_do_not_break_resolution() {
+    let tmp = TempDir::new();
+    let ws = tmp.path().join("ws");
+    write(
+        &ws.join("Project.toml"),
+        r#"name = "Demo"
+uuid = "11111111-2222-3333-4444-555555555555"
+version = "0.1.0"
+authors = ["Someone <someone@example.com>"]
+readme = "README.md"
+
+[deps]
+AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[weakdeps]
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+
+[extensions]
+DemoPlotsExt = "Plots"
+
+[targets]
+test = ["Test"]
+
+[workspace]
+projects = ["sub"]
+
+[apps.demo]
+"#,
+    );
+    write(&ws.join("src/Demo.jl"), "module Demo\nend\n");
+
+    let env = environment::resolve(&bare_ctx(ws.clone()))
+        .unwrap()
+        .expect("environment");
+
+    assert_eq!(env.name.as_deref(), Some("Demo"));
+    assert!(env.direct_deps.contains_key("AbstractTrees"));
+    assert_eq!(
+        env.dev_package().map(|dev| dev.name),
+        Some("Demo".to_string()),
+        "the package is still detected through the unknown keys"
+    );
+}
+
+/// The entry file a package *would* have, whether or not it exists — the split
+/// that lets a missing one be reported rather than silently demoting the
+/// project to a non-package.
+#[test]
+fn entry_file_is_named_even_when_absent() {
+    let tmp = TempDir::new();
+    let ws = tmp.path().join("ws");
+    write(&ws.join("Project.toml"), "name = \"Demo\"\n");
+
+    let env = environment::resolve(&bare_ctx(ws.clone()))
+        .unwrap()
+        .expect("environment");
+
+    assert_eq!(env.entry_file(), Some(ws.join("src").join("Demo.jl")));
+    assert!(
+        env.dev_package().is_none(),
+        "an absent entry file is still not a dev package"
+    );
+}
+
 #[test]
 fn source_is_none_when_slug_missing_from_depot() {
     let tmp = TempDir::new();
