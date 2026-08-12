@@ -16,13 +16,13 @@
 //! map, which is HIGH durability and always current. What remains is the
 //! `salsa::Cancelled` guard, since a write may still race the read.
 //!
-//! A `Manifest.toml` answers none of this. It is not written to the database at
-//! all (nothing reads one without an environment resolve), and its `path`
-//! entries carry no spans — the manifest is deliberately parsed against a plain
-//! table, since its 1.0 and 2.0 layouts differ.
+//! A `Manifest.toml` answers exactly one of them, [`manifest_document_links`],
+//! and it rides no database at all: a manifest is never written to one (nothing
+//! reads a manifest without an environment resolve), and a link on a `path`
+//! entry is decided by the buffer and the filesystem alone.
 
 use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use lsp_types::{
     DocumentLink, Hover, HoverContents, InlayHint, InlayHintLabel, InlayHintTooltip, Location,
@@ -30,10 +30,10 @@ use lsp_types::{
 };
 use rowan::TextRange;
 
-use crate::environment::{PackageKind, PackageMeta};
+use crate::environment::{PackageKind, PackageMeta, project_file_in, resolve_dev_path};
 use crate::incremental::{Analysis, normalize_path};
 use crate::index::Span;
-use crate::project_files::{dep_at, dep_entries};
+use crate::project_files::{dep_at, dep_entries, manifest_paths};
 use crate::resolve::PackageSource;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
@@ -213,6 +213,55 @@ pub(crate) fn project_document_links_via_db(
         project_document_links(text, encoding, snapshot)
     }))
     .unwrap_or_default()
+}
+
+/// Document links in an open *manifest*: every `path = "..."` entry links to
+/// the `dev`'d package it pins.
+///
+/// The only feature a manifest answers, and the only thing in one that anchors
+/// anywhere: `path` is the sole entry field naming something outside the file.
+/// It needs no library and no database — the path is resolved exactly as
+/// [`resolve_dev_path`] resolves it during a harvest, so the link and the
+/// environment cannot disagree about where the package is.
+///
+/// The target is the root's *project file*, not the root itself: a `dev`'d root
+/// is a package, what identifies a package is its `Project.toml`, and a client
+/// cannot open a directory. A root with neither spelling of one is linked
+/// as-is rather than not at all — that it is not a package is a fact worth
+/// walking into, and the `path` may simply be a typo.
+pub(crate) fn manifest_document_links(
+    text: &TextBuffer,
+    path: &Path,
+    encoding: PositionEncoding,
+) -> Vec<DocumentLink> {
+    // A manifest sits beside its project file, so its own directory is the
+    // project directory `resolve_dev_path` resolves against.
+    let Some(base_dir) = uri::anchor_dir(path) else {
+        return Vec::new();
+    };
+    let line_index = text.line_index();
+    manifest_paths(text)
+        .into_iter()
+        .filter_map(|entry| {
+            // An empty path resolves to the manifest's own directory, which is
+            // no package and no link.
+            if entry.path.is_empty() {
+                return None;
+            }
+            // Normalized for the reason the jump targets are: a `path` entry
+            // keeps its `../` spelling, which the filesystem resolves and a URI
+            // does not, and a client comparing URIs textually would open a
+            // second tab onto a file it already has.
+            let root = normalize_path(&resolve_dev_path(base_dir, &entry.path));
+            let target = project_file_in(&root).unwrap_or(root);
+            Some(DocumentLink {
+                range: to_range(entry.range, &line_index, encoding),
+                target: Some(uri::from_path(&target)?),
+                tooltip: None,
+                data: None,
+            })
+        })
+        .collect()
 }
 
 /// Inlay hints in a project file: each dependency's resolved version, after its
@@ -555,6 +604,117 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
         let (_tmp, lib, _entry) = greetings();
         let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n".to_string());
         assert!(project_document_links(&text, PositionEncoding::Utf16, &lib).is_empty());
+    }
+
+    // --- Manifest document links --------------------------------------------
+
+    /// A manifest naming `dev`'d `path` entries: one package with a project
+    /// file of its own, one directory without.
+    fn manifest(dir: &Path) -> String {
+        format!(
+            "manifest_format = \"2.0\"\n\n\
+             [[deps.Greetings]]\npath = \"Greetings\"\n\n\
+             [[deps.Bare]]\npath = \"{}\"\n\n\
+             [[deps.AbstractTrees]]\ngit-tree-sha1 = \"deadbeef\"\n",
+            dir.join("Bare").display().to_string().replace('\\', "/"),
+        )
+    }
+
+    fn manifest_links(text: &str, path: &Path) -> Vec<(Range, String)> {
+        manifest_document_links(
+            &TextBuffer::new(text.to_string()),
+            path,
+            PositionEncoding::Utf16,
+        )
+        .into_iter()
+        .map(|link| (link.range, link.target.expect("a link target").to_string()))
+        .collect()
+    }
+
+    /// The link covers the path text, and lands on the root's project file —
+    /// the thing that makes the root a package, and a file a client can open.
+    /// A root with no project file is linked as-is; a registered entry pins no
+    /// path and links nowhere.
+    #[test]
+    fn every_manifest_path_links_to_the_package_it_pins() {
+        let tmp = TempDir::new();
+        fs::create_dir_all(tmp.path.join("Greetings")).unwrap();
+        fs::write(
+            tmp.path.join("Greetings/JuliaProject.toml"),
+            "name = \"Greetings\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(tmp.path.join("Bare")).unwrap();
+
+        let text = manifest(&tmp.path);
+        let links = manifest_links(&text, &tmp.path.join("Manifest.toml"));
+        assert_eq!(
+            links,
+            vec![
+                (
+                    Range::new(Position::new(3, 8), Position::new(3, 17)),
+                    uri::from_path(&tmp.path.join("Greetings/JuliaProject.toml"))
+                        .unwrap()
+                        .to_string(),
+                ),
+                (
+                    Range::new(
+                        Position::new(6, 8),
+                        Position::new(
+                            6,
+                            u32::try_from(tmp.path.join("Bare").display().to_string().len() + 8)
+                                .unwrap(),
+                        ),
+                    ),
+                    uri::from_path(&tmp.path.join("Bare")).unwrap().to_string(),
+                ),
+            ],
+        );
+    }
+
+    /// The path is resolved the way the environment resolves a `dev`'d root:
+    /// against the manifest's own directory, `../` spellings collapsed rather
+    /// than carried into the URI.
+    #[test]
+    fn a_relative_manifest_path_normalizes_against_the_manifest() {
+        let tmp = TempDir::new();
+        let nested = tmp.path.join("MyPkg");
+        fs::create_dir_all(&nested).unwrap();
+        let text = "[[deps.Greetings]]\npath = \"../Greetings\"\n";
+
+        let links = manifest_links(text, &nested.join("Manifest.toml"));
+        assert_eq!(
+            links,
+            vec![(
+                Range::new(Position::new(1, 8), Position::new(1, 20)),
+                uri::from_path(&tmp.path.join("Greetings"))
+                    .unwrap()
+                    .to_string(),
+            )],
+            "the link names `<tmp>/Greetings`, not `<tmp>/MyPkg/../Greetings`"
+        );
+    }
+
+    /// A synthetic path stands in for a non-`file` URI and anchors no relative
+    /// path, exactly as it does for a Julia document's includes. An empty path
+    /// names the manifest's own directory, which is no package.
+    #[test]
+    fn a_manifest_with_nothing_to_anchor_to_has_no_links() {
+        let untitled = <lsp_types::Uri as std::str::FromStr>::from_str("untitled:Untitled-1")
+            .expect("a valid uri");
+        let text = "[[deps.Greetings]]\npath = \"../Greetings\"\n";
+        assert!(manifest_links(text, &uri::to_path_or_synthetic(&untitled)).is_empty());
+
+        let tmp = TempDir::new();
+        let empty = "[[deps.Greetings]]\npath = \"\"\n";
+        assert!(manifest_links(empty, &tmp.path.join("Manifest.toml")).is_empty());
+    }
+
+    #[test]
+    fn a_broken_manifest_has_no_links() {
+        let tmp = TempDir::new();
+        let text = "[[deps.Greetings\npath = \"../Greetings\"\n";
+        assert!(manifest_links(text, &tmp.path.join("Manifest.toml")).is_empty());
     }
 
     // --- Inlay hints --------------------------------------------------------

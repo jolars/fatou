@@ -501,12 +501,32 @@ tenet the linter is purely semantic over Julia.
     spelling — the filesystem resolves it and a URI does not, and a client
     comparing URIs textually opens a second tab onto a file it already has.
 
+- [x] **Stage 4b, first half: document links on manifest `path` entries.** The
+  one feature a manifest answers, and the only thing in one that anchors
+  anywhere — `path` is the sole entry field naming something outside the file.
+  - **The spans, which were the cost.** A manifest is parsed against a plain
+    table (its 1.0 and 2.0 layouts differ) and a `toml::Value` carries none, so
+    `manifest_path_entries` adds a typed schema over the one field that needs
+    one. It is two parse attempts, as expected: one schema cannot cover both
+    layouts, since `serde(flatten)`/`untagged` buffer through serde's `Content`
+    and drop the span hook silently. 2.0 is tried first, and 1.0 only when it
+    comes up empty — a 2.0 manifest's `julia_version` is a string where the 1.0
+    schema wants an array of entries.
+  - **The target is the root's project file**, not the root: a `dev`'d root is a
+    package, what identifies a package is its `Project.toml`, and a client
+    cannot open a directory URI. A root with neither spelling is linked as-is —
+    that it is not a package is worth walking into, and the `path` may be a typo.
+  - **No library, no database.** The path resolves through `resolve_dev_path`,
+    the same join the harvest makes, so the link and the environment cannot
+    disagree about where the package is; `normalize_path` collapses the `../`
+    for the reason stage 4a's jump targets do. That makes it the one project-file
+    feature with no snapshot in its handler, and `manifest_text` the third and
+    narrowest door into the read pool.
+  - Landed alongside: `uri::anchor_dir`, one definition of "the directory a
+    relative path in this document resolves against", shared with the Julia
+    document's `include` links.
+
 - [ ] **Stage 4b: the rest**, deferred with stage 4a's route already in place.
-  - Document links on manifest `path` entries. The costly half of that bullet:
-    a manifest is deliberately parsed against a plain table (its 1.0 and 2.0
-    layouts differ), so it carries no spans, and typing it means two parse
-    attempts against two spanned schemas — `serde(flatten)`/`untagged` silently
-    drop the span hook.
   - Completion of dependency names, the expensive one. On a default depot the
     registry is a `General.tar.gz`, so the full version needs gzip and tar to
     reach `Registry.toml`. Scope the first pass to packages already installed in

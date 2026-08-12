@@ -90,6 +90,20 @@ pub(crate) fn is_synthetic(path: &Path) -> bool {
     path.parent() == Some(synthetic_dir().as_path())
 }
 
+/// The directory a relative path *inside* the document at `path` resolves
+/// against: its parent. `None` when there is no such directory — a
+/// [synthetic](is_synthetic) stand-in for a non-`file` URI names no real one,
+/// and a parentless path names none either.
+///
+/// One definition, because two features ask it: a Julia document's `include`
+/// paths and a manifest's `path` entries.
+pub(crate) fn anchor_dir(path: &Path) -> Option<&Path> {
+    if is_synthetic(path) {
+        return None;
+    }
+    path.parent().filter(|dir| !dir.as_os_str().is_empty())
+}
+
 /// Build a `file:` URI for the absolute filesystem `path`, percent-encoding
 /// characters outside the unreserved set. The inverse of [`to_path`]; used to
 /// point a go-to-definition [`Location`](lsp_types::Location) at a depot source

@@ -31,8 +31,8 @@ use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
 use super::lint::ServerRules;
 use super::project_navigation::{
-    project_definition_via_db, project_document_links_via_db, project_hover_via_db,
-    project_inlay_hints_via_db,
+    manifest_document_links, project_definition_via_db, project_document_links_via_db,
+    project_hover_via_db, project_inlay_hints_via_db,
 };
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
@@ -221,6 +221,16 @@ pub(crate) enum ReadJob {
         text: Arc<TextBuffer>,
         sender: ReadReply,
     },
+    /// Document links in an open *manifest*: each `path` entry links to the
+    /// `dev`'d package it pins. The one feature a manifest answers, and the one
+    /// project-file job that carries a `path`: the entry is a path itself, and
+    /// it resolves against the manifest's own directory.
+    ManifestDocumentLinks {
+        id: RequestId,
+        path: PathBuf,
+        text: Arc<TextBuffer>,
+        sender: ReadReply,
+    },
     /// Inlay hints in an open *project file*: each dependency's resolved
     /// version. `range` is the client's viewport, which it re-sends on every
     /// scroll, so hints outside it are never built.
@@ -338,6 +348,7 @@ impl ReadJob {
             ReadJob::ProjectDefinition { id, sender, .. } => (id, sender),
             ReadJob::ProjectHover { id, sender, .. } => (id, sender),
             ReadJob::ProjectDocumentLinks { id, sender, .. } => (id, sender),
+            ReadJob::ManifestDocumentLinks { id, sender, .. } => (id, sender),
             ReadJob::ProjectInlayHints { id, sender, .. } => (id, sender),
             ReadJob::References { id, sender, .. } => (id, sender),
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
@@ -589,6 +600,17 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         }
         ReadJob::ProjectDocumentLinks { id, text, sender } => {
             let links = project_document_links_via_db(&snapshot, &text, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, links)));
+        }
+        // No snapshot in sight: a manifest's links are decided by its buffer
+        // and the filesystem, and its text never reaches the database.
+        ReadJob::ManifestDocumentLinks {
+            id,
+            path,
+            text,
+            sender,
+        } => {
+            let links = manifest_document_links(&text, &path, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, links)));
         }
         ReadJob::ProjectInlayHints {

@@ -50,11 +50,7 @@ pub(crate) fn document_links_via_db(
     // A synthetic path stands in for a non-`file` URI (an untitled buffer): its
     // parent names no real directory, so a relative include has nothing to
     // anchor to and gets no link.
-    let base_dir = if uri::is_synthetic(path) {
-        None
-    } else {
-        path.parent().filter(|dir| !dir.as_os_str().is_empty())
-    };
+    let base_dir = uri::anchor_dir(path);
     let cached = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(path)?;
         if snapshot.file_text(file) != text {

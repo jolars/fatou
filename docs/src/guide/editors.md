@@ -7,8 +7,9 @@ definition, references, rename (of symbols, and of files and folders — moving 
 file rewrites the `include` paths that name it), document and workspace symbols,
 call and type hierarchy, folding ranges, document links, selection ranges, and
 semantic tokens. It also checks your `Project.toml` and `Manifest.toml`
-themselves, and navigates an open `Project.toml`'s dependency names, with inlay
-hints for their resolved versions.
+themselves, navigates an open `Project.toml`'s dependency names with inlay hints
+for their resolved versions, and links an open `Manifest.toml`'s `path` entries
+to the packages they pin.
 
 ## Prerequisites
 
@@ -204,8 +205,10 @@ An open `Project.toml` also answers on its dependency names: go-to-definition
 and a document link take you to the package's entry file, hovering reports the
 version, kind, and resolved path the environment gave it, and an inlay hint puts
 each resolved version beside its UUID, so you can read off what you are actually
-on without opening the `Manifest.toml`. Everything else stays off for these
-files — formatting a `Project.toml` would mean parsing TOML as Julia.
+on without opening the `Manifest.toml`. In an open `Manifest.toml`, each `path`
+entry — a package you have `dev`'d — is a link to that package's `Project.toml`.
+Everything else stays off for these files — formatting a `Project.toml` would
+mean parsing TOML as Julia.
 
 ## Configuration
 

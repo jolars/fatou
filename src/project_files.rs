@@ -33,7 +33,7 @@ use toml::Spanned;
 
 use crate::environment::{
     Environment, EnvironmentError, PackageKind, ProjectFile, Uuid, is_project_file,
-    parse_project_str, parse_project_text,
+    manifest_path_entries, parse_project_str, parse_project_text,
 };
 use crate::linter::Severity;
 
@@ -372,6 +372,59 @@ pub fn dep_at(text: &str, offset: usize) -> Option<DepEntry> {
         .find(|entry| entry.name_range.contains_inclusive(offset))
 }
 
+// --- Manifest path entries -------------------------------------------------
+
+/// One `path = "..."` entry of a manifest: the package it pins, the path as
+/// written, and where that path's text sits.
+///
+/// The manifest's counterpart to [`DepEntry`], and the only thing inside a
+/// manifest that anchors anywhere — every other field either names the package
+/// (the key), or names nothing outside the file at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestPath {
+    pub name: String,
+    /// The path as written, decoded: relative to the manifest's directory
+    /// unless absolute, exactly as the environment resolves a `dev`'d root.
+    pub path: String,
+    /// The path text with its quotes trimmed, unlike [`DepEntry::uuid_range`]:
+    /// this range is what a client underlines as a link, and the quotes are not
+    /// part of the path.
+    pub range: TextRange,
+}
+
+/// Every `path = "..."` entry in a manifest's text, in source order. Empty when
+/// the text does not parse, on the same terms as [`dep_entries`].
+pub fn manifest_paths(text: &str) -> Vec<ManifestPath> {
+    let mut entries: Vec<ManifestPath> = manifest_path_entries(text)
+        .into_iter()
+        .map(|(name, path)| ManifestPath {
+            name,
+            range: unquoted(text, span(&path)),
+            path: path.into_inner(),
+        })
+        .collect();
+    // The schema's map is name-keyed; source order is what a caller enumerating
+    // a document wants, as in [`dep_entries`].
+    entries.sort_by_key(|entry| entry.range.start());
+    entries
+}
+
+/// A string value's span with its delimiters trimmed. A multi-line string
+/// (`"""..."""`) keeps its span whole rather than shedding two of six
+/// delimiters — no path is spelled that way, and a wrong range is worse than a
+/// wide one.
+fn unquoted(text: &str, range: TextRange) -> TextRange {
+    let mut chars = text[range].chars();
+    let (Some(open), Some(close)) = (chars.next(), chars.next_back()) else {
+        return range;
+    };
+    if open != close || !matches!(open, '"' | '\'') || chars.as_str().starts_with(open) {
+        return range;
+    }
+    let quote = TextSize::of(open);
+    TextRange::new(range.start() + quote, range.end() - quote)
+}
+
 /// A spanned value's byte range.
 fn span<T>(spanned: &Spanned<T>) -> TextRange {
     let span = spanned.span();
@@ -545,6 +598,91 @@ Test = \"8dfed614-e22c-5e08-85e1-65c5234f0b40\"
     #[test]
     fn a_project_file_with_no_dependencies_has_no_entries() {
         assert!(dep_entries("name = \"Demo\"\n\n[deps]\n").is_empty());
+    }
+
+    // --- Manifest path entries ----------------------------------------------
+
+    /// Format 2.0: every entry under a top-level `deps` table, beside the
+    /// scalar metadata keys that make the 1.0 schema reject the same text.
+    const MANIFEST_V2: &str = "\
+julia_version = \"1.11.7\"
+manifest_format = \"2.0\"
+
+[[deps.AbstractTrees]]
+uuid = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
+version = \"0.4.5\"
+
+[[deps.Greetings]]
+uuid = \"682c06a0-de6a-54ab-a142-c8b1cf79cde6\"
+path = \"../Greetings\"
+
+[[deps.Neighbor]]
+uuid = \"8dfed614-e22c-5e08-85e1-65c5234f0b40\"
+path = \"/abs/Neighbor\"
+";
+
+    /// Format 1.0: each package's array at the top level, no metadata at all.
+    const MANIFEST_V1: &str = "\
+[[Greetings]]
+uuid = \"682c06a0-de6a-54ab-a142-c8b1cf79cde6\"
+path = \"../Greetings\"
+
+[[AbstractTrees]]
+uuid = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
+version = \"0.4.5\"
+";
+
+    /// Both layouts answer, and only the `dev`'d entries do: a registered
+    /// package pins a `git-tree-sha1`, not a path, and names nothing to open.
+    #[test]
+    fn manifest_paths_read_both_layouts() {
+        let v2: Vec<(String, String)> = manifest_paths(MANIFEST_V2)
+            .into_iter()
+            .map(|entry| (entry.name, entry.path))
+            .collect();
+        assert_eq!(
+            v2,
+            vec![
+                ("Greetings".to_string(), "../Greetings".to_string()),
+                ("Neighbor".to_string(), "/abs/Neighbor".to_string()),
+            ],
+            "in source order, and no entry without a path"
+        );
+
+        let v1: Vec<(String, String)> = manifest_paths(MANIFEST_V1)
+            .into_iter()
+            .map(|entry| (entry.name, entry.path))
+            .collect();
+        assert_eq!(
+            v1,
+            vec![("Greetings".to_string(), "../Greetings".to_string())]
+        );
+    }
+
+    /// The range is what a client underlines, so it covers the path and not the
+    /// quotes around it — unlike [`DepEntry::uuid_range`], which is a
+    /// diagnostic's anchor.
+    #[test]
+    fn a_manifest_path_spans_the_path_text_without_its_quotes() {
+        let entries = manifest_paths(MANIFEST_V2);
+        let greetings = entries.first().expect("the first entry");
+        assert_eq!(&MANIFEST_V2[greetings.range], "../Greetings");
+
+        // A literal string is delimited too, and an empty one trims to nothing
+        // rather than underflowing.
+        let literal = "[[deps.Greetings]]\npath = '../Greetings'\n";
+        assert_eq!(&literal[manifest_paths(literal)[0].range], "../Greetings");
+        let empty = "[[deps.Greetings]]\npath = \"\"\n";
+        assert!(manifest_paths(empty)[0].range.is_empty());
+    }
+
+    /// Half-typed TOML anchors nothing, and neither does a project file: the
+    /// two schemas are disjoint, so a `Project.toml` read as a manifest must
+    /// not manufacture entries from `[deps]`.
+    #[test]
+    fn a_manifest_that_does_not_parse_has_no_paths() {
+        assert!(manifest_paths("[[deps.Greetings\npath = \"x\"\n").is_empty());
+        assert!(manifest_paths(TABLES).is_empty());
     }
 
     // --- The semantic checks ------------------------------------------------
