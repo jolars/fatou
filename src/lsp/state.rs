@@ -17,11 +17,11 @@ use lsp_types::request::{
     CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
     CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentHighlightRequest,
     DocumentLinkRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition,
-    HoverRequest, PrepareRenameRequest, RangeFormatting, References, RegisterCapability, Rename,
-    Request as RequestTrait, ResolveCompletionItem, SelectionRangeRequest,
-    SemanticTokensFullDeltaRequest, SemanticTokensFullRequest, SignatureHelpRequest,
-    TypeHierarchyPrepare, TypeHierarchySubtypes, TypeHierarchySupertypes, WillRenameFiles,
-    WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
+    HoverRequest, InlayHintRequest, PrepareRenameRequest, RangeFormatting, References,
+    RegisterCapability, Rename, Request as RequestTrait, ResolveCompletionItem,
+    SelectionRangeRequest, SemanticTokensFullDeltaRequest, SemanticTokensFullRequest,
+    SignatureHelpRequest, TypeHierarchyPrepare, TypeHierarchySubtypes, TypeHierarchySupertypes,
+    WillRenameFiles, WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
 };
 use lsp_types::{
     CallHierarchyIncomingCallsParams, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
@@ -31,11 +31,12 @@ use lsp_types::{
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentDiagnosticParams,
     DocumentFormattingParams, DocumentHighlightParams, DocumentLinkParams,
     DocumentRangeFormattingParams, DocumentSymbolParams, FileSystemWatcher, FoldingRangeParams,
-    GlobPattern, GotoDefinitionParams, HoverParams, LogMessageParams, MessageType, NumberOrString,
-    PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams, RenameFilesParams,
-    RenameParams, SelectionRangeParams, SemanticTokensDeltaParams, SemanticTokensParams,
-    SignatureHelpParams, TextDocumentPositionParams, TypeHierarchyPrepareParams,
-    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri, WorkspaceSymbolParams,
+    GlobPattern, GotoDefinitionParams, HoverParams, InlayHintParams, LogMessageParams, MessageType,
+    NumberOrString, PublishDiagnosticsParams, ReferenceParams, Registration, RegistrationParams,
+    RenameFilesParams, RenameParams, SelectionRangeParams, SemanticTokensDeltaParams,
+    SemanticTokensParams, SignatureHelpParams, TextDocumentPositionParams,
+    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
+    WorkspaceSymbolParams,
 };
 
 use crate::config::CONFIG_FILE_NAME;
@@ -266,6 +267,7 @@ impl GlobalState {
             WorkspaceSymbolRequest::METHOD => self.on_workspace_symbols(req),
             FoldingRangeRequest::METHOD => self.on_folding_ranges(req),
             DocumentLinkRequest::METHOD => self.on_document_links(req),
+            InlayHintRequest::METHOD => self.on_inlay_hints(req),
             SelectionRangeRequest::METHOD => self.on_selection_ranges(req),
             SemanticTokensFullRequest::METHOD => self.on_semantic_tokens_full(req),
             SemanticTokensFullDeltaRequest::METHOD => self.on_semantic_tokens_full_delta(req),
@@ -486,6 +488,30 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
+            sender: reply,
+        });
+    }
+
+    /// Inlay hints are a project file's alone: a dependency's resolved version
+    /// beside its UUID. A Julia document answers an empty list rather than
+    /// `null` — the capability is advertised globally, and an empty list is the
+    /// honest answer to "what hints does this file have".
+    fn on_inlay_hints(&mut self, req: Request) {
+        let id = req.id.clone();
+        let Ok((_, params)) = req.extract::<InlayHintParams>(InlayHintRequest::METHOD) else {
+            self.respond_err(id, "invalid inlayHint params");
+            return;
+        };
+        let uri = params.text_document.uri;
+        let Some(text) = self.project_text(&uri) else {
+            self.respond_ok(id, serde_json::json!([]));
+            return;
+        };
+        let reply = self.read_reply(id.clone(), Some(&uri));
+        self.dispatch_read(ReadJob::ProjectInlayHints {
+            id,
+            text,
+            range: params.range,
             sender: reply,
         });
     }
@@ -2480,6 +2506,59 @@ mod tests {
             other => panic!("expected a response, got {other:?}"),
         }
         assert!(channels.read.try_recv().is_err(), "and no read job");
+    }
+
+    /// Inlay hints are a project file's alone, but unlike the other three a
+    /// Julia document answers an **empty list** rather than `null`: the
+    /// capability is advertised globally, and "this file has no hints" is the
+    /// honest answer, not "I do not do hints".
+    #[test]
+    fn inlay_hints_answer_empty_for_a_julia_document() {
+        let (mut state, channels) = test_state_with_channels();
+        let source = uri("file:///work/a.jl");
+        did_open(&mut state, &source, "x = 1\n");
+        // Drain the analysis the open dispatched.
+        let _ = channels.analysis.try_recv();
+
+        state.on_request(inlay_hint_request(1, &source));
+
+        match channels.client.try_recv().expect("a response") {
+            Message::Response(resp) => {
+                assert_eq!(resp.response_result.ok(), Some(serde_json::json!([])));
+            }
+            other => panic!("expected a response, got {other:?}"),
+        }
+        assert!(channels.read.try_recv().is_err(), "and no read job");
+    }
+
+    #[test]
+    fn a_project_buffer_reaches_the_read_pool_for_inlay_hints() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+        did_open(&mut state, &project, "[deps]\nA = \"x\"\n");
+
+        state.on_request(inlay_hint_request(1, &project));
+
+        match channels.read.try_recv().expect("a read job") {
+            ReadJob::ProjectInlayHints { id, range, .. } => {
+                assert_eq!(id, RequestId::from(1));
+                assert_eq!(range.end, Position::new(2, 0));
+            }
+            _ => panic!("expected a ProjectInlayHints read job"),
+        }
+    }
+
+    /// A `textDocument/inlayHint` over the first two lines of `uri`.
+    fn inlay_hint_request(id: i32, uri: &Uri) -> Request {
+        Request::new(
+            RequestId::from(id),
+            InlayHintRequest::METHOD.to_string(),
+            InlayHintParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+                range: lsp_types::Range::new(Position::new(0, 0), Position::new(2, 0)),
+                work_done_progress_params: Default::default(),
+            },
+        )
     }
 
     /// A `textDocument/definition` at line 1, column 0 of `uri`.
