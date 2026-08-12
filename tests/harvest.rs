@@ -490,6 +490,7 @@ fn package_env(dir: &Path, name: &str) -> fatou::environment::Environment {
         name: Some(name.to_string()),
         uuid: None,
         direct_deps: BTreeMap::new(),
+        declared_deps: Default::default(),
         packages: Vec::new(),
         depots: Vec::new(),
         source: fatou::environment::EnvSource::WorkspaceWalkUp,
@@ -544,18 +545,16 @@ fn harvest_libraries_merges_dev_packages_sorted() {
 
 #[test]
 fn harvest_libraries_records_each_dev_packages_declared_deps() {
-    use fatou::environment::Uuid;
     use fatou::index::harvest_libraries;
-    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
 
     let a = TempDir::new();
     let b = TempDir::new();
     write(&a.path().join("src/PkgA.jl"), "module PkgA\nend\n");
     write(&b.path().join("src/PkgB.jl"), "module PkgB\nend\n");
 
-    let uuid: Uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e".parse().unwrap();
     let mut env_a = package_env(a.path(), "PkgA");
-    env_a.direct_deps = BTreeMap::from([("LinearAlgebra".to_string(), uuid)]);
+    env_a.declared_deps = BTreeSet::from(["LinearAlgebra".to_string()]);
     // A folder with no declared dependencies still gets an (empty) entry: it
     // declares nothing, which is different from "we do not know".
     let env_b = package_env(b.path(), "PkgB");

@@ -151,7 +151,7 @@ fn declared_deps(envs: &[Environment]) -> BTreeMap<String, Arc<DeclaredDeps>> {
             continue;
         };
         out.entry(dev.name)
-            .or_insert_with(|| Arc::new(env.direct_deps.keys().cloned().collect()));
+            .or_insert_with(|| Arc::new(env.declared_deps.clone()));
     }
     out
 }

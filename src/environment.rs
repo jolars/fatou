@@ -13,7 +13,7 @@
 //! This module is intentionally standalone: it is not yet wired into the salsa
 //! layer, the LSP, or the CLI. Later Phase 3/5 work consumes [`Environment`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -133,6 +133,12 @@ pub struct Environment {
     pub name: Option<String>,
     pub uuid: Option<Uuid>,
     pub direct_deps: BTreeMap<String, Uuid>,
+    /// The names in `[deps]`, unfiltered — see
+    /// [`ProjectFile::declared_dep_names`]. Kept beside
+    /// [`direct_deps`](Self::direct_deps), which drops any entry whose UUID does
+    /// not parse, so that "what this package may `using`" has one answer no
+    /// matter which consumer asks.
+    pub declared_deps: BTreeSet<String>,
     pub packages: Vec<Package>,
     pub depots: Vec<PathBuf>,
     pub source: EnvSource,
@@ -291,7 +297,7 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
         .map(Path::to_path_buf)
         .unwrap_or_default();
 
-    let (name, uuid, direct_deps) = parse_project(&project_file)?;
+    let meta = parse_project(&project_file)?;
     let manifest_file = find_manifest(&project_dir);
     let mut packages = match &manifest_file {
         Some(path) => parse_manifest(path, &project_dir, &depots)?,
@@ -307,9 +313,10 @@ pub fn resolve(ctx: &EnvContext) -> Result<Option<Environment>, EnvironmentError
         project_file,
         project_dir,
         manifest_file,
-        name,
-        uuid,
-        direct_deps,
+        name: meta.name,
+        uuid: meta.uuid,
+        direct_deps: meta.direct_deps,
+        declared_deps: meta.declared_deps,
         packages,
         depots,
         source,
@@ -657,16 +664,35 @@ impl ProjectFile {
     /// Drop the spans, yielding what [`resolve`] stores on [`Environment`]. A
     /// `uuid` that does not parse is dropped rather than raised.
     fn into_meta(self) -> ProjectMeta {
+        let declared_deps = self.declared_dep_names();
         let direct_deps = self
             .deps
             .into_iter()
             .filter_map(|(name, uuid)| Some((name.into_inner(), uuid.into_inner().parse().ok()?)))
             .collect();
-        (
-            self.name.map(Spanned::into_inner),
-            self.uuid.and_then(|uuid| uuid.into_inner().parse().ok()),
+        ProjectMeta {
+            name: self.name.map(Spanned::into_inner),
+            uuid: self.uuid.and_then(|uuid| uuid.into_inner().parse().ok()),
             direct_deps,
-        )
+            declared_deps,
+        }
+    }
+
+    /// The names in `[deps]`: what this project's own sources may `using` or
+    /// `import`. Deliberately *not* filtered by whether the paired UUID parses,
+    /// unlike [`ProjectMeta::direct_deps`] — a malformed UUID is a defect in the
+    /// file, not an un-declaration, and `unresolved-import` asks only whether
+    /// the name was declared.
+    ///
+    /// The one definition of "declared", shared by the CLI (through
+    /// [`Environment::declared_deps`], which
+    /// [`HarvestedLibrary`](crate::index::HarvestedLibrary) carries) and the
+    /// language server (through
+    /// [`project_declared_deps`](crate::incremental::project_declared_deps),
+    /// which reads an editor's unsaved buffer). The two must not drift: they
+    /// answer the same lint.
+    pub(crate) fn declared_dep_names(&self) -> BTreeSet<String> {
+        self.deps.keys().map(|name| name.as_ref().clone()).collect()
     }
 
     /// The `[compat].julia` range, if present and parseable.
@@ -675,7 +701,13 @@ impl ProjectFile {
     }
 }
 
-type ProjectMeta = (Option<String>, Option<Uuid>, BTreeMap<String, Uuid>);
+/// A project file's contents with the spans dropped, as [`resolve`] stores them.
+struct ProjectMeta {
+    name: Option<String>,
+    uuid: Option<Uuid>,
+    direct_deps: BTreeMap<String, Uuid>,
+    declared_deps: BTreeSet<String>,
+}
 
 fn parse_project(path: &Path) -> Result<ProjectMeta, EnvironmentError> {
     Ok(parse_project_text(path, &read_text(path)?)?.into_meta())
@@ -1091,6 +1123,25 @@ projects = ["sub"]
             project.julia_compat().map(|range| range.min),
             Some(crate::julia_version::Version::new(1, 10, 0)),
             "the keys fatou does know survive alongside the ones it does not"
+        );
+    }
+
+    /// A dependency whose UUID does not parse is still *declared*: the name is
+    /// what `unresolved-import` asks about, so it must survive the filter that
+    /// `direct_deps` applies.
+    #[test]
+    fn a_malformed_uuid_does_not_undeclare_its_dependency() {
+        let text =
+            "[deps]\nDates = \"ade2ca70-3891-5945-98fb-dc099432e06a\"\nBroken = \"not-a-uuid\"\n";
+        let project = parse_project_text(Path::new("Project.toml"), text).unwrap();
+        assert_eq!(
+            project.declared_dep_names(),
+            BTreeSet::from(["Dates".to_string(), "Broken".to_string()])
+        );
+        let meta = project.into_meta();
+        assert!(
+            !meta.direct_deps.contains_key("Broken"),
+            "the UUID-keyed map still drops it"
         );
     }
 
