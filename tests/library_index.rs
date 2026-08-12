@@ -93,8 +93,13 @@ fn set_library_packages_replaces_whole_map() {
 }
 
 #[test]
-fn declared_deps_round_trip_and_survive_a_reharvest() {
-    use std::collections::{BTreeMap, BTreeSet};
+fn declared_deps_are_read_off_the_project_file_and_survive_a_reharvest() {
+    use std::collections::BTreeMap;
+
+    let project = TempFile::new(
+        "Project.toml",
+        "name = \"Foo\"\n\n[deps]\nLinearAlgebra = \"37e2e46d-f89d-539d-b4ee-838fcccc9c8e\"\nJSON3 = \"0f8b85d8-7281-11e9-16c2-39a750bddbf1\"\n",
+    );
 
     let mut db = IncrementalDatabase::new();
     assert!(
@@ -102,20 +107,55 @@ fn declared_deps_round_trip_and_survive_a_reharvest() {
         "no declared deps before any set"
     );
 
-    let deps: BTreeSet<String> = ["LinearAlgebra".to_string(), "JSON3".to_string()].into();
-    db.set_declared_deps(BTreeMap::from([("Foo".to_string(), Arc::new(deps))]));
+    db.set_project_files(BTreeMap::from([("Foo".to_string(), project.0.clone())]));
 
     let read = db.declared_deps("Foo").expect("Foo declares deps");
     assert!(read.contains("LinearAlgebra") && read.contains("JSON3"));
     // Visible through a read-only snapshot, which is what the linter holds.
     assert!(db.snapshot().declared_deps("Foo").is_some());
-    // A package with no declared set reads back `None`.
+    // A package with no project file reads back `None`.
     assert!(db.declared_deps("Bar").is_none());
 
     // The deps track the project files, not the harvest: re-harvesting a
     // package must not clear them.
     db.set_package_index("Foo", Arc::new(empty_package("Foo")));
     assert!(db.declared_deps("Foo").is_some(), "survives a re-harvest");
+}
+
+/// The project file is tracked text, so an editor's buffer is what the deps are
+/// read from — and registering the file again (a re-resolve) must not clobber
+/// that buffer with the stale disk copy.
+#[test]
+fn a_tracked_project_buffer_wins_over_the_disk_copy() {
+    use std::collections::BTreeMap;
+
+    let project = TempFile::new(
+        "Project.toml",
+        "[deps]\nJSON3 = \"0f8b85d8-7281-11e9-16c2-39a750bddbf1\"\n",
+    );
+    let registration = BTreeMap::from([("Foo".to_string(), project.0.clone())]);
+
+    let mut db = IncrementalDatabase::new();
+    db.upsert_file(
+        &project.0,
+        "[deps]\nJSON3 = \"0f8b85d8-7281-11e9-16c2-39a750bddbf1\"\nLinearAlgebra = \"37e2e46d-f89d-539d-b4ee-838fcccc9c8e\"\n"
+            .to_string(),
+    );
+    db.set_project_files(registration.clone());
+
+    let read = db.declared_deps("Foo").expect("Foo declares deps");
+    assert!(
+        read.contains("LinearAlgebra"),
+        "the unsaved buffer is what declares the dependency"
+    );
+
+    db.set_project_files(registration);
+    assert!(
+        db.declared_deps("Foo")
+            .expect("still declared")
+            .contains("LinearAlgebra"),
+        "re-registering must not revert the buffer to disk"
+    );
 }
 
 #[test]

@@ -68,22 +68,23 @@ pub struct LibraryPackages(pub BTreeMap<String, Arc<PackageIndex>>);
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LibraryRoots(pub BTreeMap<String, PathBuf>);
 
-/// Each workspace package's declared direct dependencies (its project's
-/// `Project.toml` `[deps]`), keyed by package name — see
-/// [`HarvestedLibrary::declared_deps`](crate::index::HarvestedLibrary::declared_deps).
-/// Its own salsa input rather than a [`LibraryIndex`] field: it comes from the
-/// project files, not the harvest, and changes on a `Project.toml` edit rather
-/// than a re-harvest.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LibraryDeclaredDeps(pub BTreeMap<String, Arc<DeclaredDeps>>);
-
-/// The workspace packages' declared dependency sets, as a HIGH-durability
-/// singleton input (see [`LibraryDeclaredDeps`]). Absent until the environment
-/// resolves, which leaves `unresolved-import` silent.
+/// Each workspace package's project file, keyed by package name, as the
+/// ordinary [`SourceFile`] input holding its text. Its own input rather than a
+/// [`LibraryIndex`] field: it comes from the project files, not the harvest, so
+/// a `Project.toml` edit moves it without a re-harvest and a re-harvest leaves
+/// it alone. Absent until the environment resolves, which leaves
+/// `unresolved-import` silent.
+///
+/// HIGH durability covers the *mapping* only — which file belongs to which
+/// package changes on a re-resolve. The file's text stays a LOW-durability
+/// `SourceFile` an editor may rewrite per keystroke, and
+/// [`project_declared_deps`] derives the dependency set from it. That split is
+/// the whole point: `[deps]` follows the unsaved buffer, while a project-file
+/// edit invalidates no `.jl` parse (`tests/salsa_incremental.rs`).
 #[salsa::input(singleton)]
-pub struct ProjectDeps {
+pub struct ProjectFiles {
     #[returns(ref)]
-    pub declared: LibraryDeclaredDeps,
+    pub files: BTreeMap<String, SourceFile>,
 }
 
 /// The whole harvested library, as a single HIGH-durability salsa input. One
@@ -333,6 +334,34 @@ pub fn include_edges(db: &dyn IncrementalDb, file: SourceFile) -> Vec<IncludeEdg
     let root = parsed_tree_root(db, file);
     let base_dir = file.path(db).as_deref().and_then(Path::parent);
     project::include_edges(&root, base_dir)
+}
+
+/// The names in `file`'s `[deps]`, when it parses as a project file — the
+/// derived replacement for a dependency map pushed in on each re-harvest. Read
+/// through [`IncrementalDatabase::declared_deps`], which maps a package name to
+/// its project file via [`ProjectFiles`].
+///
+/// `None` for a file that does not parse. A half-typed `[deps]` table must make
+/// `unresolved-import` go *quiet* rather than report a name as undeclared: the
+/// same failure direction the lint's cold path already takes (`crate::lsp::lint`).
+///
+/// This is the firewall in the project file's direction. An edit anywhere else
+/// in the file — `[compat]`, `version`, a comment — returns an equal set and
+/// backdates, so no consumer re-runs; `tests/salsa_incremental.rs` pins both
+/// that and the converse, that this never reaches a `.jl` parse.
+#[salsa::tracked(returns(clone))]
+pub fn project_declared_deps(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> Option<Arc<DeclaredDeps>> {
+    // The path is carried only for the error this discards; an in-memory
+    // project file (no path) parses just the same.
+    let path = file
+        .path(db)
+        .as_deref()
+        .unwrap_or_else(|| Path::new("Project.toml"));
+    let project = crate::environment::parse_project_text(path, file.text(db)).ok()?;
+    Some(Arc::new(project.declared_dep_names()))
 }
 
 /// One unresolvable static `include("literal")` site: the decoded `path` written
@@ -1072,21 +1101,34 @@ impl IncrementalDatabase {
         self.set_library(packages, roots, workspaces);
     }
 
-    /// Replace the workspace packages' declared dependency sets, at HIGH
-    /// durability. Kept apart from [`set_library`](Self::set_library) because it
-    /// tracks the project files rather than the harvest: a `Project.toml` edit
-    /// changes it without a re-harvest, and a re-harvest leaves it alone.
-    pub fn set_declared_deps(&mut self, declared: BTreeMap<String, Arc<DeclaredDeps>>) {
-        let declared = LibraryDeclaredDeps(declared);
-        match ProjectDeps::try_get(self) {
+    /// Track each workspace package's project file and record the name → input
+    /// mapping at HIGH durability. Kept apart from
+    /// [`set_library`](Self::set_library) because it tracks the project files
+    /// rather than the harvest: a `Project.toml` edit changes what
+    /// [`declared_deps`](Self::declared_deps) answers without a re-harvest, and
+    /// a re-harvest leaves the text alone.
+    ///
+    /// Seeding goes through [`seed_disk_file`](Self::seed_disk_file), which is
+    /// create-or-return: a re-resolve must never clobber an open, unsaved
+    /// `Project.toml` buffer with the disk copy. A path that is neither tracked
+    /// nor readable contributes no entry, exactly as an unresolved environment
+    /// contributes none.
+    pub fn set_project_files(&mut self, paths: BTreeMap<String, PathBuf>) {
+        let mut files: BTreeMap<String, SourceFile> = BTreeMap::new();
+        for (name, path) in paths {
+            if let Some(file) = self.seed_disk_file(&path) {
+                files.insert(name, file);
+            }
+        }
+        match ProjectFiles::try_get(self) {
             Some(input) => {
                 input
-                    .set_declared(self)
+                    .set_files(self)
                     .with_durability(Durability::HIGH)
-                    .to(declared);
+                    .to(files);
             }
             None => {
-                let _ = ProjectDeps::builder(declared)
+                let _ = ProjectFiles::builder(files)
                     .durability(Durability::HIGH)
                     .new(self);
             }
@@ -1095,12 +1137,23 @@ impl IncrementalDatabase {
 
     /// The declared direct dependencies of the workspace package `name`, when
     /// the environment has resolved and that package is one under development.
+    /// Derived from the project file's tracked text (see
+    /// [`project_declared_deps`]), so an editor's unsaved `[deps]` edit counts.
     pub fn declared_deps(&self, name: &str) -> Option<Arc<DeclaredDeps>> {
-        ProjectDeps::try_get(self)?
-            .declared(self)
-            .0
-            .get(name)
-            .cloned()
+        project_declared_deps(self, self.project_file_of(name)?)
+    }
+
+    /// The declared dependencies read off the project file tracked at `path`,
+    /// for a caller holding a path rather than a package name — the language
+    /// server's gate for whether a project-file keystroke changed anything a
+    /// consumer would notice. `None` for an untracked or unparseable file.
+    pub fn declared_deps_of_file(&self, path: &Path) -> Option<Arc<DeclaredDeps>> {
+        project_declared_deps(self, self.lookup_file(path)?)
+    }
+
+    /// The input tracking package `name`'s project file, if one is registered.
+    fn project_file_of(&self, name: &str) -> Option<SourceFile> {
+        ProjectFiles::try_get(self)?.files(self).get(name).copied()
     }
 
     /// Insert or replace a single package's index, keeping the rest (and the
