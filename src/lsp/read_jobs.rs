@@ -8,7 +8,7 @@ use lsp_server::{ErrorCode, Message, RequestId, Response};
 use lsp_types::{
     CallHierarchyItem, CodeActionOrCommand, CompletionItem, CompletionResponse,
     DocumentDiagnosticReport, DocumentDiagnosticReportResult, DocumentSymbolResponse, FileRename,
-    FullDocumentDiagnosticReport, GotoDefinitionResponse, Position, Range,
+    FullDocumentDiagnosticReport, GotoDefinitionResponse, Location, Position, Range,
     RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
     TypeHierarchyItem, UnchangedDocumentDiagnosticReport, Uri, WorkspaceSymbolResponse,
 };
@@ -30,6 +30,7 @@ use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
 use super::lint::ServerRules;
+use super::project_navigation::project_definition_via_db;
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
@@ -190,6 +191,16 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: ReadReply,
     },
+    /// Go-to-definition in an open *project file*: a `[deps]` name resolves to
+    /// its package's entry file. No `path`, unlike its Julia twin — the buffer
+    /// is parsed as TOML rather than looked up in the database, and the answer
+    /// points at another file entirely.
+    ProjectDefinition {
+        id: RequestId,
+        text: Arc<TextBuffer>,
+        position: Position,
+        sender: ReadReply,
+    },
     References {
         id: RequestId,
         uri: Uri,
@@ -295,6 +306,7 @@ impl ReadJob {
             ReadJob::Hover { id, sender, .. } => (id, sender),
             ReadJob::SignatureHelp { id, sender, .. } => (id, sender),
             ReadJob::Definition { id, sender, .. } => (id, sender),
+            ReadJob::ProjectDefinition { id, sender, .. } => (id, sender),
             ReadJob::References { id, sender, .. } => (id, sender),
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
             ReadJob::PrepareRename { id, sender, .. } => (id, sender),
@@ -516,16 +528,23 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             position,
             sender,
         } => {
-            let mut locations =
-                definition_via_db(&snapshot, &uri, &path, &text, position, encoding);
-            // A single site stays scalar (a plain jump); several methods of a
-            // function come back as an array (the client shows a picker).
-            let result = match locations.len() {
-                0 => None,
-                1 => Some(GotoDefinitionResponse::Scalar(locations.remove(0))),
-                _ => Some(GotoDefinitionResponse::Array(locations)),
-            };
-            let _ = sender.send(Message::Response(Response::new_ok(id, result)));
+            let locations = definition_via_db(&snapshot, &uri, &path, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(
+                id,
+                goto_response(locations),
+            )));
+        }
+        ReadJob::ProjectDefinition {
+            id,
+            text,
+            position,
+            sender,
+        } => {
+            let locations = project_definition_via_db(&snapshot, &text, position, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(
+                id,
+                goto_response(locations),
+            )));
         }
         ReadJob::References {
             id,
@@ -633,5 +652,17 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             let items = subtypes_via_db(&snapshot, &item, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, items)));
         }
+    }
+}
+
+/// Collapse definition sites into a `textDocument/definition` result: none is
+/// `null`, one is a plain jump, several are an array the client offers as a
+/// picker (the methods of a function, say). Shared so the Julia and project-file
+/// routes cannot drift on the shape they answer with.
+fn goto_response(mut locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
+    match locations.len() {
+        0 => None,
+        1 => Some(GotoDefinitionResponse::Scalar(locations.remove(0))),
+        _ => Some(GotoDefinitionResponse::Array(locations)),
     }
 }
