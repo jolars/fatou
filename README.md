@@ -102,7 +102,7 @@ and type hierarchy, signature help, code actions, folding and selection ranges,
 document links, and semantic tokens, alongside formatting (whole-document and
 range) and diagnostics (push and pull). It checks your `Project.toml` and
 `Manifest.toml` themselves too, and navigates an open `Project.toml`'s
-dependency names.
+dependency names, with each one's resolved version shown as an inlay hint.
 
 The **Fatou** extension for VS Code and Open VSX
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),

@@ -62,7 +62,9 @@ A language server made by the author of
 type inference through JET.jl, macro-aware navigation through
 [JuliaLowering.jl](https://github.com/c42f/JuliaLowering.jl). It offers what the
 others cannot, including types on hover, inlay type hints, and diagnostics for
-non-existent field access or out-of-bounds indexing.
+non-existent field access or out-of-bounds indexing. Inferred types are the
+dividing line: Fatou does show inlay hints, but only for facts it can read off
+disk, such as a dependency's resolved version in a `Project.toml`.
 
 It is also the furthest from Fatou. As of 2026 its README calls it experimental
 and not production-ready, it needs Julia 1.12 or newer, and it is under heavy
