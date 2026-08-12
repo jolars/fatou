@@ -5533,6 +5533,65 @@ fn serves_navigation_on_a_dependency_name() {
     let resp = recv_response(&client, RequestId::from(620));
     assert_eq!(resp.result(), Some(serde_json::Value::Null));
 
+    // The manifest next door answers one feature of its own: each `path` entry
+    // is a link to the `dev`'d package it pins — that root's project file,
+    // since a client cannot open a directory. It rides no harvest, so unlike
+    // the jump above it needs no polling.
+    let manifest = pkg_dir.join("Manifest.toml");
+    let manifest_uri = file_uri(&manifest);
+    let manifest_text = std::fs::read_to_string(&manifest).unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: manifest_uri.clone(),
+                    language_id: "toml".to_string(),
+                    version: 1,
+                    text: manifest_text.clone(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(622),
+            method: "textDocument/documentLink".to_string(),
+            params: serde_json::to_value(DocumentLinkParams {
+                text_document: TextDocumentIdentifier {
+                    uri: manifest_uri.clone(),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(622));
+    let links: Vec<DocumentLink> = serde_json::from_value(resp.result().unwrap()).unwrap();
+    // The path text, quotes excluded, wherever the fixture put it.
+    let at = manifest_text.find("\"../Greetings\"").unwrap() + 1;
+    let path_line = u32::try_from(manifest_text[..at].matches('\n').count()).unwrap();
+    let column =
+        u32::try_from(at - manifest_text[..at].rfind('\n').map_or(0, |nl| nl + 1)).unwrap();
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| (link.range, link.target.as_ref().map(|uri| uri.as_str())))
+            .collect::<Vec<_>>(),
+        vec![(
+            Range::new(
+                Position::new(path_line, column),
+                Position::new(path_line, column + 12),
+            ),
+            Some(file_uri(&root.path.join("Greetings/Project.toml")).as_str()),
+        )],
+        "the `../Greetings` spelling collapses, and the link lands on a file"
+    );
+
     client
         .sender
         .send(Message::Request(Request {

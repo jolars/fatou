@@ -65,15 +65,16 @@ struct Document {
 /// its own ([`GlobalState::route_document`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocumentKind {
-    /// Julia source: the analysis pipeline's business, and the only kind any
-    /// language feature answers for.
+    /// Julia source: the analysis pipeline's business, and the kind nearly
+    /// every language feature answers for.
     Julia,
     /// A `Project.toml` flavor. Its text reaches the database, because the
     /// linter derives the package's declared dependencies from it; its buffer
     /// also carries the file's own TOML diagnostics.
     Project,
-    /// A `Manifest.toml` flavor. Diagnostics only: nothing reads a manifest
-    /// without an environment resolve, which is the harvester's job.
+    /// A `Manifest.toml` flavor. Diagnostics, plus the document links on its
+    /// `path` entries — the one feature needing no environment resolve, which
+    /// is otherwise the harvester's job and never reads a buffer.
     Manifest,
 }
 
@@ -468,12 +469,23 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        // A project file links each dependency name to its package; a Julia
-        // document links each static `include`. Anything else answers `null`.
+        // A project file links each dependency name to its package, a manifest
+        // each `path` entry to the package it pins, and a Julia document each
+        // static `include`. Anything else answers `null`.
         if let Some(text) = self.project_text(&uri) {
             let reply = self.read_reply(id.clone(), Some(&uri));
             self.dispatch_read(ReadJob::ProjectDocumentLinks {
                 id,
+                text,
+                sender: reply,
+            });
+            return;
+        }
+        if let Some(text) = self.manifest_text(&uri) {
+            let reply = self.read_reply(id.clone(), Some(&uri));
+            self.dispatch_read(ReadJob::ManifestDocumentLinks {
+                id,
+                path: path_for(&uri),
                 text,
                 sender: reply,
             });
@@ -966,14 +978,26 @@ impl GlobalState {
     /// everything Julia-backed keeps asking there, and a handler that calls
     /// neither still answers `null` as before.
     ///
-    /// A `Manifest.toml` deliberately answers nothing. Its text never reaches
-    /// the database (nothing reads a manifest without an environment resolve),
-    /// and its entries carry no spans to anchor on — see
-    /// [`project_navigation`](super::project_navigation).
+    /// A `Manifest.toml` answers nothing here. Its text never reaches the
+    /// database (nothing reads a manifest without an environment resolve), so
+    /// every feature that consults one stops at this door; the single feature
+    /// that does not asks [`manifest_text`](Self::manifest_text).
     fn project_text(&self, uri: &Uri) -> Option<Arc<TextBuffer>> {
         self.documents
             .get(uri)
             .filter(|doc| doc.kind == DocumentKind::Project)
+            .map(|doc| Arc::clone(&doc.text))
+    }
+
+    /// The live buffer for `uri`, but only when the document is a manifest. The
+    /// third and last door into the read pool, and the narrowest: document
+    /// links are all a manifest answers, since a `path` entry is the only thing
+    /// in one that anchors anywhere — see
+    /// [`project_navigation`](super::project_navigation).
+    fn manifest_text(&self, uri: &Uri) -> Option<Arc<TextBuffer>> {
+        self.documents
+            .get(uri)
+            .filter(|doc| doc.kind == DocumentKind::Manifest)
             .map(|doc| Arc::clone(&doc.text))
     }
 
@@ -2488,9 +2512,10 @@ mod tests {
         }
     }
 
-    /// A manifest still answers nothing, for the same features a project file
-    /// now serves: its text never reaches the database, and its entries carry
-    /// no spans to anchor on.
+    /// A manifest still answers nothing for the features that resolve a name
+    /// through the environment: its text never reaches the database, and a
+    /// manifest names no package the way a `[deps]` key does. Document links
+    /// are the one exception — see the test below.
     #[test]
     fn a_manifest_answers_nothing_for_navigation() {
         let (mut state, channels) = test_state_with_channels();
@@ -2506,6 +2531,36 @@ mod tests {
             other => panic!("expected a response, got {other:?}"),
         }
         assert!(channels.read.try_recv().is_err(), "and no read job");
+    }
+
+    /// The exception: a manifest's `path` entries *are* document links, so its
+    /// buffer reaches the read pool for that one request — carrying the path it
+    /// resolves those entries against, which no other project-file job needs.
+    #[test]
+    fn a_manifest_buffer_reaches_the_read_pool_for_document_links() {
+        let (mut state, channels) = test_state_with_channels();
+        let manifest = uri("file:///work/Manifest.toml");
+        did_open(&mut state, &manifest, "[[deps.A]]\npath = \"../A\"\n");
+
+        state.on_request(Request::new(
+            RequestId::from(1),
+            DocumentLinkRequest::METHOD.to_string(),
+            DocumentLinkParams {
+                text_document: lsp_types::TextDocumentIdentifier {
+                    uri: manifest.clone(),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            },
+        ));
+
+        match channels.read.try_recv().expect("a read job") {
+            ReadJob::ManifestDocumentLinks { id, path, .. } => {
+                assert_eq!(id, RequestId::from(1));
+                assert_eq!(path, path_for(&manifest));
+            }
+            _ => panic!("expected a ManifestDocumentLinks read job"),
+        }
     }
 
     /// Inlay hints are a project file's alone, but unlike the other three a

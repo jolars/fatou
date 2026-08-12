@@ -392,7 +392,7 @@ fn walk_up_for_project(anchor: &Path) -> Option<PathBuf> {
 }
 
 /// The project file within `dir`, honoring `JuliaProject.toml` precedence.
-fn project_file_in(dir: &Path) -> Option<PathBuf> {
+pub(crate) fn project_file_in(dir: &Path) -> Option<PathBuf> {
     PROJECT_NAMES
         .iter()
         .map(|name| dir.join(name))
@@ -840,6 +840,59 @@ fn parse_entry(
     })
 }
 
+// --- The manifest, with spans ----------------------------------------------
+
+/// Each package name's entries, of which only `path` is typed: it is the one
+/// field naming something outside the manifest, and so the only one a reader
+/// can be sent to.
+type SpannedEntries = BTreeMap<String, Vec<SpannedEntry>>;
+
+/// A manifest read for its `path` entries alone, *with spans* — format 2.0,
+/// which nests every entry under a top-level `deps` table.
+///
+/// [`parse_manifest`] reads a plain [`toml::Table`] on purpose, and a
+/// `toml::Value` carries no span; a consumer that anchors inside a manifest
+/// therefore needs a typed schema. One schema cannot cover both layouts:
+/// `serde(flatten)` and `untagged` buffer through serde's `Content`, which
+/// drops the deserializer's span hook silently. Hence two attempts, one per
+/// layout (see [`manifest_path_entries`]).
+#[derive(serde::Deserialize)]
+struct SpannedManifest {
+    #[serde(default)]
+    deps: SpannedEntries,
+}
+
+#[derive(serde::Deserialize)]
+struct SpannedEntry {
+    path: Option<Spanned<String>>,
+}
+
+/// Every `path = "..."` a manifest's text pins, as the package name and the
+/// spanned path, in name order. Spans are byte offsets into `text`, exactly as
+/// [`ProjectFile`]'s are.
+///
+/// Empty when the text parses against neither layout: a half-typed manifest
+/// must anchor nothing, and its own `toml-syntax` finding reports the state it
+/// is in.
+pub(crate) fn manifest_path_entries(text: &str) -> Vec<(String, Spanned<String>)> {
+    let deps = toml::from_str::<SpannedManifest>(text)
+        .ok()
+        .map(|manifest| manifest.deps)
+        .filter(|deps| !deps.is_empty())
+        // Format 1.0 puts each package's array at the top level instead. Tried
+        // only once 2.0 has come up empty, since a 2.0 manifest's
+        // `julia_version` is a string where this schema wants an array.
+        .or_else(|| toml::from_str::<SpannedEntries>(text).ok())
+        .unwrap_or_default();
+    deps.into_iter()
+        .flat_map(|(name, entries)| {
+            entries
+                .into_iter()
+                .filter_map(move |entry| Some((name.clone(), entry.path?)))
+        })
+        .collect()
+}
+
 /// A package's `deps` may be an array of names or a table (name -> uuid).
 fn extract_deps(value: Option<&toml::Value>) -> Vec<String> {
     match value {
@@ -853,7 +906,13 @@ fn extract_deps(value: Option<&toml::Value>) -> Vec<String> {
 }
 
 /// Resolve a `dev`'d package's root relative to the project directory.
-fn resolve_dev_path(project_dir: &Path, path: &str) -> PathBuf {
+///
+/// Shared with the manifest's document links ([`crate::lsp`]), which point at
+/// the root this computes: a link that resolved `path` its own way would send a
+/// reader somewhere the environment never looked. The manifest sits beside the
+/// project file, so a caller holding only the manifest's directory holds the
+/// project directory too.
+pub(crate) fn resolve_dev_path(project_dir: &Path, path: &str) -> PathBuf {
     let path = Path::new(path);
     if path.is_absolute() {
         path.to_path_buf()
