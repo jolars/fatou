@@ -384,7 +384,10 @@ impl AnalysisWorker {
     }
 
     /// The declared dependencies `path` contributes, or `None` when it is not a
-    /// project file at all — so a `.jl` sync never pays for a TOML parse.
+    /// project file at all — so a `.jl` sync never pays for a TOML parse — and
+    /// likewise `None` for one no workspace package claims, whose `[deps]` no
+    /// consumer reads (see
+    /// [`declared_deps_of_file`](IncrementalDatabase::declared_deps_of_file)).
     fn declared_deps_of(&self, path: &Path) -> Option<Arc<DeclaredDeps>> {
         is_project_file(path)
             .then(|| self.db.declared_deps_of_file(path))

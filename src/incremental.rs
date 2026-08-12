@@ -1191,9 +1191,24 @@ impl IncrementalDatabase {
     /// The declared dependencies read off the project file tracked at `path`,
     /// for a caller holding a path rather than a package name — the language
     /// server's gate for whether a project-file keystroke changed anything a
-    /// consumer would notice. `None` for an untracked or unparseable file.
+    /// consumer would notice.
+    ///
+    /// `None` unless `path` is a **workspace package's** project file, as
+    /// registered by [`set_project_files`](Self::set_project_files). An editor
+    /// opens project files that belong to no package — a `docs/Project.toml`, a
+    /// depot one followed from a manifest link — and their text is tracked like
+    /// any other buffer, but nothing reads their `[deps]`. Answering with it
+    /// would re-lint the whole workspace on every character typed in a file no
+    /// consumer has ever asked about.
+    ///
+    /// Also `None` for an untracked or unparseable file.
     pub fn declared_deps_of_file(&self, path: &Path) -> Option<Arc<DeclaredDeps>> {
-        project_declared_deps(self, self.lookup_file(path)?)
+        let file = self.lookup_file(path)?;
+        let claimed = ProjectFiles::try_get(self)?
+            .files(self)
+            .values()
+            .any(|tracked| *tracked == file);
+        claimed.then(|| project_declared_deps(self, file))?
     }
 
     /// The input tracking package `name`'s project file, if one is registered.
