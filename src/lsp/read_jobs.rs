@@ -32,6 +32,7 @@ use super::hover::hover_via_db;
 use super::lint::ServerRules;
 use super::project_navigation::{
     project_definition_via_db, project_document_links_via_db, project_hover_via_db,
+    project_inlay_hints_via_db,
 };
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
@@ -220,6 +221,15 @@ pub(crate) enum ReadJob {
         text: Arc<TextBuffer>,
         sender: ReadReply,
     },
+    /// Inlay hints in an open *project file*: each dependency's resolved
+    /// version. `range` is the client's viewport, which it re-sends on every
+    /// scroll, so hints outside it are never built.
+    ProjectInlayHints {
+        id: RequestId,
+        text: Arc<TextBuffer>,
+        range: Range,
+        sender: ReadReply,
+    },
     References {
         id: RequestId,
         uri: Uri,
@@ -328,6 +338,7 @@ impl ReadJob {
             ReadJob::ProjectDefinition { id, sender, .. } => (id, sender),
             ReadJob::ProjectHover { id, sender, .. } => (id, sender),
             ReadJob::ProjectDocumentLinks { id, sender, .. } => (id, sender),
+            ReadJob::ProjectInlayHints { id, sender, .. } => (id, sender),
             ReadJob::References { id, sender, .. } => (id, sender),
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
             ReadJob::PrepareRename { id, sender, .. } => (id, sender),
@@ -579,6 +590,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         ReadJob::ProjectDocumentLinks { id, text, sender } => {
             let links = project_document_links_via_db(&snapshot, &text, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, links)));
+        }
+        ReadJob::ProjectInlayHints {
+            id,
+            text,
+            range,
+            sender,
+        } => {
+            let hints = project_inlay_hints_via_db(&snapshot, &text, range, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, hints)));
         }
         ReadJob::References {
             id,

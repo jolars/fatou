@@ -25,7 +25,8 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 
 use lsp_types::{
-    DocumentLink, Hover, HoverContents, Location, MarkupContent, MarkupKind, Position, Range,
+    DocumentLink, Hover, HoverContents, InlayHint, InlayHintLabel, InlayHintTooltip, Location,
+    MarkupContent, MarkupKind, Position, Range,
 };
 use rowan::TextRange;
 
@@ -210,6 +211,73 @@ pub(crate) fn project_document_links_via_db(
 ) -> Vec<DocumentLink> {
     salsa::Cancelled::catch(AssertUnwindSafe(|| {
         project_document_links(text, encoding, snapshot)
+    }))
+    .unwrap_or_default()
+}
+
+/// Inlay hints in a project file: each dependency's resolved version, after its
+/// UUID.
+///
+/// The `[deps]` table is almost entirely UUID, and the one fact a reader wants
+/// from it — which version am I actually on — lives in the `Manifest.toml` next
+/// door, which nobody opens. Hover answers that one dependency at a time and
+/// only when asked; this answers all of them at once and passively, which is
+/// what the two features are respectively for.
+///
+/// Only the version is shown. The kind belongs to the question "tell me about
+/// *this* dependency", which is hover's, and repeating "Registered package"
+/// down the table is noise. A dependency with no resolved version — an
+/// uninstantiated project — gets no hint rather than an empty one.
+pub(crate) fn project_inlay_hints<L: ProjectLibrary>(
+    text: &TextBuffer,
+    range: Range,
+    encoding: PositionEncoding,
+    library: &L,
+) -> Vec<InlayHint> {
+    let line_index = text.line_index();
+    // The client asks for its viewport and re-asks on scroll and on edit, so a
+    // hint outside it is dropped rather than computed and thrown away.
+    let start = line_index.position_to_byte(range.start, encoding);
+    let end = line_index.position_to_byte(range.end, encoding);
+    dep_entries(text)
+        .into_iter()
+        .filter_map(|dep| {
+            let at = usize::from(dep.uuid_range.end());
+            if at < start || at > end {
+                return None;
+            }
+            let version = library.package_meta(&dep.name)?.version?;
+            Some(InlayHint {
+                position: line_index.byte_to_position(at, encoding),
+                label: InlayHintLabel::String(format!("v{version}")),
+                // No kind: neither `Type` nor `Parameter` describes a version,
+                // and the spec has the client style an absent one sensibly.
+                kind: None,
+                text_edits: None,
+                // The rest of what hover would say, so the hint itself hovers.
+                tooltip: dep_markdown(&dep.name, library).map(|value| {
+                    InlayHintTooltip::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value,
+                    })
+                }),
+                padding_left: Some(true),
+                padding_right: None,
+                data: None,
+            })
+        })
+        .collect()
+}
+
+/// [`project_inlay_hints`] against a database snapshot.
+pub(crate) fn project_inlay_hints_via_db(
+    snapshot: &Analysis,
+    text: &TextBuffer,
+    range: Range,
+    encoding: PositionEncoding,
+) -> Vec<InlayHint> {
+    salsa::Cancelled::catch(AssertUnwindSafe(|| {
+        project_inlay_hints(text, range, encoding, snapshot)
     }))
     .unwrap_or_default()
 }
@@ -487,6 +555,98 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
         let (_tmp, lib, _entry) = greetings();
         let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n".to_string());
         assert!(project_document_links(&text, PositionEncoding::Utf16, &lib).is_empty());
+    }
+
+    // --- Inlay hints --------------------------------------------------------
+
+    /// The whole viewport, for a test that is not about the range filter.
+    const WHOLE_FILE: Range = Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: u32::MAX,
+            character: 0,
+        },
+    };
+
+    /// A hint's label. `InlayHintLabel` implements no `PartialEq`, so a test
+    /// compares the string it carries.
+    fn label(hint: &InlayHint) -> &str {
+        match &hint.label {
+            InlayHintLabel::String(text) => text,
+            other => panic!("expected a plain string label, got {other:?}"),
+        }
+    }
+
+    /// A two-dependency project: `Greetings` resolved to a version, `Silent`
+    /// pinned but never instantiated.
+    fn two_deps() -> (TextBuffer, TestLib) {
+        let text = TextBuffer::new(format!(
+            "{PROJECT}Silent = \"682c06a0-de6a-54ab-a142-c8b1cf79cde6\"\n"
+        ));
+        let mut lib = TestLib::default();
+        lib.deps.insert(
+            "Greetings".to_string(),
+            meta(Some("0.4.5"), PackageKind::Registered),
+        );
+        lib.deps
+            .insert("Silent".to_string(), meta(None, PackageKind::Registered));
+        (text, lib)
+    }
+
+    /// The version lands after the UUID, which is the end of the line — and a
+    /// dependency with no resolved version contributes nothing rather than an
+    /// empty hint.
+    #[test]
+    fn each_resolved_dependency_shows_its_version() {
+        let (text, lib) = two_deps();
+        let hints = project_inlay_hints(&text, WHOLE_FILE, PositionEncoding::Utf16, &lib);
+
+        let [hint] = &hints[..] else {
+            panic!("expected exactly one hint, got {hints:?}");
+        };
+        assert_eq!(label(hint), "v0.4.5");
+        let deps_line = text.lines().nth(3).expect("the Greetings line");
+        assert_eq!(
+            hint.position,
+            Position::new(3, u32::try_from(deps_line.len()).unwrap()),
+        );
+        assert_eq!(hint.padding_left, Some(true));
+        // The hint itself hovers, with the rest of what hover would say.
+        assert!(matches!(
+            &hint.tooltip,
+            Some(InlayHintTooltip::MarkupContent(markup))
+                if markup.value.contains("Registered package"),
+        ));
+    }
+
+    /// The client asks for its viewport and re-asks on every scroll, so a hint
+    /// outside it is never built.
+    #[test]
+    fn hints_outside_the_viewport_are_dropped() {
+        let (text, mut lib) = two_deps();
+        lib.deps.insert(
+            "Silent".to_string(),
+            meta(Some("0.21.4"), PackageKind::Registered),
+        );
+
+        // Only the second dependency's line.
+        let viewport = Range::new(Position::new(4, 0), Position::new(5, 0));
+        let hints = project_inlay_hints(&text, viewport, PositionEncoding::Utf16, &lib);
+        assert_eq!(hints.iter().map(label).collect::<Vec<_>>(), vec!["v0.21.4"],);
+    }
+
+    #[test]
+    fn a_broken_project_file_has_no_hints() {
+        let (_tmp, mut lib, _entry) = greetings();
+        lib.deps.insert(
+            "Greetings".to_string(),
+            meta(Some("0.4.5"), PackageKind::Registered),
+        );
+        let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n".to_string());
+        assert!(project_inlay_hints(&text, WHOLE_FILE, PositionEncoding::Utf16, &lib).is_empty());
     }
 
     #[test]

@@ -21,17 +21,18 @@ use lsp_types::{
     DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbol, DocumentSymbolParams,
     FileChangeType, FileEvent, FileRename, FoldingRange, FoldingRangeKind, FoldingRangeParams,
     FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
-    NumberOrString, PartialResultParams, Position, PositionEncodingKind, ProgressParams,
-    ProgressParamsValue, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
-    RegistrationParams, RenameFilesParams, RenameParams, SelectionRange, SelectionRangeParams,
-    SemanticTokens, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
-    SignatureHelp, SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextEdit,
-    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
-    TypeHierarchySupertypesParams, Uri, VersionedTextDocumentIdentifier, WindowClientCapabilities,
-    WorkDoneProgress, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit,
-    WorkspaceFolder, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, InlayHint,
+    InlayHintLabel, InlayHintParams, Location, NumberOrString, PartialResultParams, Position,
+    PositionEncodingKind, ProgressParams, ProgressParamsValue, PublishDiagnosticsParams, Range,
+    ReferenceContext, ReferenceParams, RegistrationParams, RenameFilesParams, RenameParams,
+    SelectionRange, SelectionRangeParams, SemanticTokens, SemanticTokensDeltaParams,
+    SemanticTokensFullDeltaResult, SemanticTokensParams, SignatureHelp, SignatureHelpParams,
+    SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, TextEdit, TypeHierarchyItem, TypeHierarchyPrepareParams,
+    TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
+    VersionedTextDocumentIdentifier, WindowClientCapabilities, WorkDoneProgress,
+    WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5299,7 +5300,7 @@ fn write_pkg_with_path_dep(prefix: &str) -> TempDir {
         &root.path.join("MyPkg/Manifest.toml"),
         &format!(
             "manifest_format = \"2.0\"\n\n[[deps.Greetings]]\n\
-             uuid = \"{GREETINGS}\"\npath = \"../Greetings\"\n"
+             uuid = \"{GREETINGS}\"\nversion = \"0.4.5\"\npath = \"../Greetings\"\n"
         ),
     );
     write_file(&root.path.join("MyPkg/src/MyPkg.jl"), "module MyPkg\nend\n");
@@ -5438,7 +5439,7 @@ fn serves_navigation_on_a_dependency_name() {
     assert_eq!(
         markup.value,
         format!(
-            "**Greetings**\n\nDevelopment dependency\n\n`{}`",
+            "**Greetings** v0.4.5\n\nDevelopment dependency\n\n`{}`",
             dep_root.display()
         ),
     );
@@ -5472,6 +5473,39 @@ fn serves_navigation_on_a_dependency_name() {
             Some(file_uri(&entry).as_str()),
         )],
         "only the [deps] name links; [compat] names no package to link to"
+    );
+
+    // The resolved version also shows as an inlay hint, after the UUID: the
+    // `[deps]` table is otherwise pure UUID, and the version lives next door in
+    // the manifest.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(617),
+            method: "textDocument/inlayHint".to_string(),
+            params: serde_json::to_value(InlayHintParams {
+                text_document: TextDocumentIdentifier {
+                    uri: project_uri.clone(),
+                },
+                range: Range::new(Position::new(0, 0), Position::new(line + 1, 0)),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(617));
+    let hints: Vec<InlayHint> = serde_json::from_value(resp.result().unwrap()).unwrap();
+    let [hint] = &hints[..] else {
+        panic!("expected exactly one inlay hint, got {hints:?}");
+    };
+    let InlayHintLabel::String(label) = &hint.label else {
+        panic!("expected a plain string label");
+    };
+    assert_eq!(label, "v0.4.5", "the manifest's version, shown inline");
+    let deps_line = text.lines().nth(line as usize).unwrap();
+    assert_eq!(
+        hint.position,
+        Position::new(line, u32::try_from(deps_line.len()).unwrap()),
     );
 
     // Nothing else in the file jumps: a `[compat]` key names a dependency too,

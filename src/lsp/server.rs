@@ -12,12 +12,12 @@ use lsp_types::{
     CodeActionProviderCapability, CompletionOptions, DiagnosticOptions,
     DiagnosticServerCapabilities, DocumentLinkOptions, FileOperationFilter, FileOperationPattern,
     FileOperationPatternKind, FileOperationRegistrationOptions, FoldingRangeProviderCapability,
-    HoverProviderCapability, InitializeParams, OneOf, PositionEncodingKind, RenameOptions,
-    SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
-    ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
-    WorkspaceFileOperationsServerCapabilities, WorkspaceFoldersServerCapabilities,
-    WorkspaceServerCapabilities,
+    HoverProviderCapability, InitializeParams, InlayHintOptions, InlayHintServerCapabilities,
+    OneOf, PositionEncodingKind, RenameOptions, SelectionRangeProviderCapability,
+    SemanticTokensFullOptions, SemanticTokensOptions, ServerCapabilities, SignatureHelpOptions,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Uri, WorkspaceFileOperationsServerCapabilities,
+    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 
 use std::sync::Arc;
@@ -241,6 +241,18 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
             resolve_provider: Some(false),
             work_done_progress_options: Default::default(),
         }),
+        // Project files only: a dependency's resolved version, beside its UUID.
+        // Julia documents answer an empty list — inlay *type* hints would need
+        // inference, and fatou runs no Julia. Advertised globally all the same,
+        // as every other per-kind capability here is.
+        inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
+            InlayHintOptions {
+                // Label and tooltip are both built up front from the library
+                // map already in memory, so there is nothing to defer.
+                resolve_provider: Some(false),
+                work_done_progress_options: Default::default(),
+            },
+        ))),
         selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         semantic_tokens_provider: Some(
             SemanticTokensOptions {
@@ -746,6 +758,18 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    /// Advertised globally, like every other per-kind capability here, and with
+    /// no resolve step: the label and tooltip are both built from the library
+    /// map already in memory.
+    #[test]
+    fn advertises_inlay_hints_without_a_resolve_step() {
+        let caps = capabilities_json(PositionEncoding::Utf16, false);
+        assert_eq!(
+            caps["inlayHintProvider"]["resolveProvider"],
+            serde_json::json!(false)
+        );
     }
 
     #[test]
