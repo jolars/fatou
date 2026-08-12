@@ -79,6 +79,12 @@ re-resolve cannot clobber an open, unsaved file — which means a re-resolve is
 exactly as it does a `.jl` source. Drop that and a `pkg> add` from a terminal
 leaves `unresolved-import` answering to the text the file had at startup.
 
+An editor also opens project files belonging to **no** package — a
+`docs/Project.toml`, a depot one followed from a manifest link. Their text is
+tracked like any other buffer, but `declared_deps_of_file` answers `None` for
+them: nothing reads their `[deps]`, and a keystroke there must not re-lint the
+workspace.
+
 ## Testing
 
 Suites live at the root: `harvest.rs`, `base_index.rs`, `library_index.rs`,

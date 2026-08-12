@@ -158,6 +158,48 @@ fn a_tracked_project_buffer_wins_over_the_disk_copy() {
     );
 }
 
+/// A `Project.toml` no workspace package claims — a `docs/Project.toml`, a
+/// depot one opened through a manifest link — is tracked like any other buffer
+/// once an editor opens it, but nothing reads its `[deps]`. The by-path lookup
+/// must say so: it is the language server's gate for whether a project-file
+/// keystroke changed anything, and an unclaimed file would otherwise re-lint
+/// the whole workspace on every character.
+#[test]
+fn an_unclaimed_project_file_declares_nothing() {
+    use std::collections::BTreeMap;
+
+    let claimed = TempFile::new(
+        "Project.toml",
+        "[deps]\nJSON3 = \"0f8b85d8-7281-11e9-16c2-39a750bddbf1\"\n",
+    );
+    let unclaimed = TempFile::new(
+        "Project.toml",
+        "[deps]\nLinearAlgebra = \"37e2e46d-f89d-539d-b4ee-838fcccc9c8e\"\n",
+    );
+
+    let mut db = IncrementalDatabase::new();
+    // Both are tracked; only one belongs to a workspace package.
+    db.upsert_file(
+        &unclaimed.0,
+        "[deps]\nLinearAlgebra = \"37e2e46d-f89d-539d-b4ee-838fcccc9c8e\"\n".to_string(),
+    );
+    db.set_project_files(BTreeMap::from([("Foo".to_string(), claimed.0.clone())]));
+
+    assert!(
+        db.declared_deps_of_file(&claimed.0).is_some(),
+        "the workspace package's own project file"
+    );
+    assert!(
+        db.declared_deps_of_file(&unclaimed.0).is_none(),
+        "tracked, but claimed by no package"
+    );
+    // An untracked path is not a project file of anyone's either.
+    assert!(
+        db.declared_deps_of_file(std::path::Path::new("/nowhere/Project.toml"))
+            .is_none()
+    );
+}
+
 #[test]
 fn snapshot_reads_the_library() {
     let mut db = IncrementalDatabase::new();
