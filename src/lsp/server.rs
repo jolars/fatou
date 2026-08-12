@@ -29,7 +29,9 @@ use crate::index::{
 };
 use crate::text::PositionEncoding;
 
-use super::analysis_thread::{AnalysisRequest, LibraryMessage, guard, spawn_analysis_thread};
+use super::analysis_thread::{
+    AnalysisRequest, LibraryMessage, SyncMessage, guard, spawn_analysis_thread,
+};
 use super::environment_diagnostics::{
     EnvironmentFindings, environment_diagnostics, resolve_failure_diagnostics,
 };
@@ -332,7 +334,7 @@ fn main_loop(
     // path, whose tracked input is reverted to on-disk text (a closed
     // document's discarded buffer, or a watched file changed outside any open
     // buffer).
-    let (sync_tx, sync_rx) = crossbeam_channel::unbounded::<PathBuf>();
+    let (sync_tx, sync_rx) = crossbeam_channel::unbounded::<SyncMessage>();
 
     // Resolve the environment and harvest its packages off the event loop: it
     // walks the filesystem and parses all of Base, so it must not block the

@@ -39,11 +39,11 @@ use lsp_types::{
 };
 
 use crate::config::CONFIG_FILE_NAME;
-use crate::environment::is_environment_file;
+use crate::environment::{is_environment_file, is_project_file};
 use crate::parser::Edit;
 use crate::text::{PositionEncoding, TextBuffer, apply_content_changes};
 
-use super::analysis_thread::AnalysisRequest;
+use super::analysis_thread::{AnalysisRequest, SyncMessage};
 use super::config::{ConfigStore, ResolvedConfig};
 use super::read_jobs::{ReadJob, ReadReply};
 use super::server::HarvestSignal;
@@ -130,12 +130,13 @@ pub(crate) struct GlobalState {
     /// path (it re-harvests the workspace package owning the file) or an
     /// environment-file change (it re-resolves every workspace environment).
     harvest_tx: Sender<HarvestSignal>,
-    /// Disk-sync signals to the analysis thread: a file's path, whose tracked
-    /// input is reverted to on-disk text. Sent when a document closes (a
-    /// discarded buffer must not linger in the reverse-occurrence index) and
-    /// when a watched file changes outside any open buffer (the stale seeded
-    /// text must catch up with disk).
-    sync_tx: Sender<PathBuf>,
+    /// Text writes to the analysis thread for files the analysis pipeline does
+    /// not own: a revert to on-disk text when a document closes (a discarded
+    /// buffer must not linger in the reverse-occurrence index) or when a
+    /// watched file changes outside any open buffer (the stale seeded text must
+    /// catch up with disk), and an open project file's buffer, which is not
+    /// Julia but whose `[deps]` the linter reads.
+    sync_tx: Sender<SyncMessage>,
     /// The position encoding negotiated at initialize, fixed for the session.
     encoding: PositionEncoding,
     /// Whether the client pulls diagnostics (`textDocument/diagnostic`). When
@@ -180,7 +181,7 @@ impl GlobalState {
         analysis_tx: Sender<AnalysisRequest>,
         read_tx: Sender<ReadJob>,
         harvest_tx: Sender<HarvestSignal>,
-        sync_tx: Sender<PathBuf>,
+        sync_tx: Sender<SyncMessage>,
         encoding: PositionEncoding,
         pull_diagnostics: bool,
         diagnostic_refresh: bool,
@@ -967,7 +968,7 @@ impl GlobalState {
                     // buffer's (possibly unsaved) edits must not linger in the
                     // reverse-occurrence index. A dead channel is a no-op.
                     if let Some(path) = uri::to_path(&uri) {
-                        let _ = self.sync_tx.send(path);
+                        let _ = self.sync_tx.send(SyncMessage::Revert(path));
                     }
                     // Drop the buffer's parse diagnostics, but keep any project-
                     // level include-graph diagnostics (they attach to the file on
@@ -1018,7 +1019,7 @@ impl GlobalState {
                 continue;
             }
             if !self.documents.contains_key(&event.uri) {
-                let _ = self.sync_tx.send(path.clone());
+                let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
             }
             if !environment_changed {
                 let _ = self.harvest_tx.send(HarvestSignal::Source(path));
@@ -1078,7 +1079,7 @@ impl GlobalState {
             // The moved-from path is gone and the moved-to one is not tracked
             // yet; both sync as no-ops until the re-harvest settles membership.
             if uri::from_path(&path).is_none_or(|uri| !self.documents.contains_key(&uri)) {
-                let _ = self.sync_tx.send(path.clone());
+                let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
             }
             if !environment_changed {
                 let _ = self.harvest_tx.send(HarvestSignal::Source(path));
@@ -1272,8 +1273,22 @@ impl GlobalState {
     /// only never analyzed. Guarded here rather than at the `didOpen` call
     /// site so `didChange` and [`on_config_changed`](Self::on_config_changed)
     /// are covered by the same return.
+    ///
+    /// A *project* file takes the other fork instead: its text goes to the db
+    /// as text, because the linter derives the package's declared dependencies
+    /// from it. That is what lets an unsaved `[deps]` edit reach
+    /// `unresolved-import` across the package. A manifest takes neither fork —
+    /// nothing reads it without a resolve, which is the harvester's job.
     fn send_analysis(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
-        if uri::to_path(&uri).is_some_and(|path| is_environment_file(&path)) {
+        if let Some(path) = uri::to_path(&uri).filter(|path| is_environment_file(path)) {
+            if is_project_file(&path)
+                && let Some(doc) = self.documents.get(&uri)
+            {
+                let _ = self.sync_tx.send(SyncMessage::SetText {
+                    path,
+                    text: doc.text.text().to_string(),
+                });
+            }
             return;
         }
         let rules = Arc::clone(&self.config_for(&uri).rules);
@@ -1408,7 +1423,7 @@ mod tests {
         analysis: Receiver<AnalysisRequest>,
         read: Receiver<ReadJob>,
         harvest: Receiver<HarvestSignal>,
-        sync: Receiver<PathBuf>,
+        sync: Receiver<SyncMessage>,
     }
 
     /// [`test_state`], keeping every auxiliary receiver alive.
@@ -1447,6 +1462,18 @@ mod tests {
 
     fn uri(path: &str) -> Uri {
         Uri::from_str(path).unwrap()
+    }
+
+    /// The paths a batch of sync messages reverts to disk, in order.
+    fn reverted(sync: &Receiver<SyncMessage>) -> Vec<PathBuf> {
+        sync.try_iter()
+            .map(|msg| match msg {
+                SyncMessage::Revert(path) => path,
+                SyncMessage::SetText { path, .. } => {
+                    panic!("expected a revert, got a text write for {}", path.display())
+                }
+            })
+            .collect()
     }
 
     fn open(state: &mut GlobalState, uri: &Uri, version: i32) {
@@ -1689,8 +1716,10 @@ mod tests {
             files: vec![lsp_types::FileRename { old_uri, new_uri }],
         });
 
-        let synced: Vec<PathBuf> = channels.sync.try_iter().collect();
-        assert_eq!(synced, vec![old_path.clone(), new_path.clone()]);
+        assert_eq!(
+            reverted(&channels.sync),
+            vec![old_path.clone(), new_path.clone()]
+        );
         let signals: Vec<HarvestSignal> = channels.harvest.try_iter().collect();
         assert_eq!(
             signals,
@@ -1811,6 +1840,65 @@ mod tests {
             channels.analysis.try_recv().is_ok(),
             "a Julia buffer analyzes as before"
         );
+        assert!(
+            channels.sync.try_recv().is_err(),
+            "a Julia buffer reaches the db through the analysis pipeline, not the sync channel"
+        );
+    }
+
+    /// An open project file's buffer reaches the database as *text*: the linter
+    /// derives the package's declared dependencies from it, so an unsaved
+    /// `[deps]` edit must count before any save.
+    #[test]
+    fn a_project_file_buffer_is_written_to_the_database() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+
+        did_open(&mut state, &project, "[deps]\n");
+        let opened = channels
+            .sync
+            .try_recv()
+            .expect("the open buffer is written");
+        assert!(
+            matches!(&opened, SyncMessage::SetText { text, .. } if text == "[deps]\n"),
+            "didOpen sends the buffer text"
+        );
+
+        state.on_notification(Notification::new(
+            DidChangeTextDocument::METHOD.to_string(),
+            DidChangeTextDocumentParams {
+                text_document: lsp_types::VersionedTextDocumentIdentifier {
+                    uri: project,
+                    version: 2,
+                },
+                content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "[deps]\nFoo = \"x\"\n".to_string(),
+                }],
+            },
+        ));
+        let changed = channels.sync.try_recv().expect("the edit is written");
+        assert!(
+            matches!(&changed, SyncMessage::SetText { text, .. } if text.contains("Foo")),
+            "didChange sends the edited buffer text"
+        );
+        assert!(
+            channels.analysis.try_recv().is_err(),
+            "and still never as a Julia analysis"
+        );
+    }
+
+    /// A manifest takes neither fork: nothing reads it without an environment
+    /// resolve, which is the harvester's job and reads disk.
+    #[test]
+    fn a_manifest_buffer_is_not_written_to_the_database() {
+        let (mut state, channels) = test_state_with_channels();
+
+        did_open(&mut state, &uri("file:///work/Manifest.toml"), "[deps]\n");
+
+        assert!(channels.sync.try_recv().is_err());
+        assert!(channels.analysis.try_recv().is_err());
     }
 
     /// The diagnostics published for `uri`, from the next `publishDiagnostics`
