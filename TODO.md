@@ -187,17 +187,28 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   same-named type, `const`, or module anywhere in the file or the package
   withholds the finding. In `RESOLUTION_RULES`.
 
+- [x] The eager-broadcast family (performance, syn, warning, unsafe fixes), the
+  three rules that created `src/linter/rules/performance.rs` and its directory:
+  `eager-broadcast` (`all`/`any`/`count`/`maximum`/`minimum`/`prod`/`sum` over
+  `f.(x)`, rewriting the argument alone to `f, x`), `sorted-extremum`
+  (`sort(x)[1]`/`[begin]`/`[end]` -> `minimum`/`maximum`), and `length-findall`
+  (`length(findall(p, x))` -> `count(p, x)`, both `findall` arities). Every fix
+  is unsafe on one shared ground, which is what the category's module doc
+  records: each rewrite is equivalent for the collection the author plainly had
+  in mind and not for every operand — a broadcast scalar, a `NaN`, a `Dict` —
+  and telling those apart needs types we do not have. Each rule still opens with
+  `resolves_to_base`, and each name a fix splices in (`minimum`, `count`) is
+  gated on `name_resolves_to_base` separately.
+  - Two pieces of shared machinery came with them: `matchers::plain_broadcast` /
+    `CallShape::of_broadcast` (the same argument-list policy, asked of a
+    `DOT_CALL_EXPR`), and `rules/rewrite.rs` for the two questions every
+    splice-the-sub-texts fix asks — would the rewrite drop a comment, and does a
+    piece fit in a one-line message. The three hand-rolled comment guards in
+    `length-zero`, `typeof-comparison`, and `index-from-length` predate it and
+    could move over.
+
 Deferred, and why:
 
-- [ ] The eager-broadcast family (performance) — `any(f.(x))` -> `any(f, x)`,
-  `all(f.(x))` -> `all(f, x)`, `sum(f.(x))` -> `sum(f, x)`, `sort(x)[1]` ->
-  `minimum(x)`, `length(findall(p, x))` -> `count(p, x)` — all of which avoid
-  materializing an intermediate array. This has no StaticLint or arity
-  counterpart (it is the Julia analogue of arity's `performance` category) and
-  is arguably higher-value than anything ported directly. The category question
-  is settled and `matchers` has landed, so what remains is scheduling: whichever
-  of these lands first creates `src/linter/rules/performance.rs` and its
-  directory.
 - [ ] `occursin`-with-a-regex-literal rules: `occursin(r"abc", s)` ->
   `occursin("abc", s)` when the pattern has no metacharacter, and
   `occursin(r"^abc", s)` -> `startswith(s, "abc")`. Blocked on a Julia

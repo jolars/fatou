@@ -25,7 +25,9 @@
 //! [`RuleContext::resolves_to_base`](super::RuleContext::resolves_to_base)'s
 //! job — ask it after matching here.
 
-use crate::ast::{Arg, AstNode, AstToken, CallExpr, Expr, HasArgList, Ident, KeywordArg};
+use crate::ast::{
+    Arg, ArgList, AstNode, AstToken, CallExpr, DotCallExpr, Expr, HasArgList, Ident, KeywordArg,
+};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
 // --- callees ---------------------------------------------------------------
@@ -69,6 +71,24 @@ pub fn plain_call(node: &SyntaxNode, name: &str, arity: usize) -> Option<(CallEx
     Some((call, shape.positional))
 }
 
+/// A broadcast call `f.(x)` passing exactly `arity` positional arguments and
+/// nothing else, together with its callee and those arguments.
+///
+/// The broadcast counterpart of [`plain_call`], for a rule matching the
+/// *argument* of an outer call rather than the outer call itself
+/// (`sum(f.(x))`). The callee is returned rather than matched by name: what a
+/// broadcast rule cares about is that there is one function being mapped, not
+/// which.
+pub fn plain_broadcast(node: &SyntaxNode, arity: usize) -> Option<(DotCallExpr, Expr, Vec<Expr>)> {
+    let call = DotCallExpr::cast(node.clone())?;
+    let callee = call.callee()?;
+    let shape = CallShape::of_broadcast(&call);
+    if !shape.is_plain(arity) {
+        return None;
+    }
+    Some((call, callee, shape.positional))
+}
+
 // --- argument shape --------------------------------------------------------
 
 /// One call site's argument shape: what it passes, and what it leaves unknown.
@@ -110,19 +130,32 @@ pub struct KeywordMatch {
 impl CallShape {
     /// The shape of `call`'s argument list.
     pub fn of(call: &CallExpr) -> Self {
+        Self::of_parts(call.syntax(), call.arg_list())
+    }
+
+    /// The shape of a broadcast call's argument list (`f.(x, y)`). Broadcasting
+    /// decides what the call *does* with its arguments, not how they are
+    /// written, so the same policy applies unchanged.
+    pub fn of_broadcast(call: &DotCallExpr) -> Self {
+        Self::of_parts(call.syntax(), call.arg_list())
+    }
+
+    /// The shared body of the constructors: every caller passes a node whose
+    /// argument list (when it has one) follows the same grammar.
+    fn of_parts(syntax: &SyntaxNode, args: Option<ArgList>) -> Self {
         let mut shape = CallShape {
             positional: Vec::new(),
             keywords: Vec::new(),
             positional_open: false,
             keyword_open: false,
-            do_block: has_do_block(call),
+            do_block: do_block_follows(syntax),
         };
-        let Some(args) = call.arg_list() else {
+        let Some(args) = args else {
             // The lone-generator call `f(x for x in xs)` has no argument list
             // at all: the parser hangs the `GENERATOR` straight off the
             // `CALL_EXPR`, the call's own parentheses serving as its
             // delimiters. Julia passes it as one positional argument.
-            shape.push_positional(lone_generator(call));
+            shape.push_positional(lone_generator(syntax));
             return shape;
         };
         for child in args.syntax().children() {
@@ -206,9 +239,8 @@ impl CallShape {
 /// The `GENERATOR` a lone-generator call (`f(x for x in xs)`) carries in place
 /// of an argument list. The callee is the first child, so the search starts
 /// past it: a generator *callee* (`(x for x in xs)(y)`) is not an argument.
-fn lone_generator(call: &CallExpr) -> Option<Expr> {
-    call.syntax()
-        .children()
+fn lone_generator(call: &SyntaxNode) -> Option<Expr> {
+    call.children()
         .skip(1)
         .find(|child| child.kind() == SyntaxKind::GENERATOR)
         .and_then(Expr::cast)
@@ -265,8 +297,13 @@ pub fn is_short_form_def(node: &SyntaxNode) -> bool {
 /// Whether `call` carries a trailing `do` block (`map(xs) do y ... end`), which
 /// passes a function as a leading argument the argument list does not show.
 pub fn has_do_block(call: &CallExpr) -> bool {
-    call.syntax()
-        .parent()
+    do_block_follows(call.syntax())
+}
+
+/// [`has_do_block`] for any node an argument list hangs off, so
+/// [`CallShape::of_broadcast`] asks the same question.
+fn do_block_follows(node: &SyntaxNode) -> bool {
+    node.parent()
         .is_some_and(|parent| parent.kind() == SyntaxKind::DO_EXPR)
 }
 
@@ -361,6 +398,29 @@ mod tests {
         assert!(plain_call(&call_node("f(x; kw...)\n"), "f", 1).is_none());
         // A `do` block passes a function as a hidden leading argument.
         assert!(plain_call(&call_node("f(x) do y\n    y\nend\n"), "f", 1).is_none());
+    }
+
+    #[test]
+    fn plain_broadcast_matches_a_single_operand_broadcast() {
+        /// The first `DOT_CALL_EXPR` in the parse of `src`.
+        fn dot_call(src: &str) -> SyntaxNode {
+            parse(src)
+                .cst
+                .descendants()
+                .find(|n| n.kind() == SyntaxKind::DOT_CALL_EXPR)
+                .expect("a broadcast call")
+        }
+
+        let (_, callee, args) = plain_broadcast(&dot_call("abs.(xs)\n"), 1).expect("a match");
+        assert_eq!(callee.syntax().text().to_string(), "abs");
+        assert_eq!(texts(&args), ["xs"]);
+        // A fused two-container broadcast is a different call.
+        assert!(plain_broadcast(&dot_call("hypot.(xs, ys)\n"), 1).is_none());
+        // The same policy as `plain_call`: keywords and splats disqualify.
+        assert!(plain_broadcast(&dot_call("f.(xs; by = g)\n"), 1).is_none());
+        assert!(plain_broadcast(&dot_call("f.(xs...)\n"), 1).is_none());
+        // Not a broadcast call at all.
+        assert!(plain_broadcast(&call_node("f(xs)\n"), 1).is_none());
     }
 
     #[test]

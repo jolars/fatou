@@ -5481,6 +5481,270 @@ fn invalid_type_declaration_is_silent_when_the_file_evals() {
     );
 }
 
+// --- eager-broadcast --------------------------------------------------------
+
+#[test]
+fn eager_broadcast_flags_every_reducer_over_a_broadcast() {
+    for src in [
+        "a = any(isodd.(xs))\n",
+        "a = all(isodd.(xs))\n",
+        "a = count(isodd.(xs))\n",
+        "a = sum(abs.(xs))\n",
+        "a = prod(abs.(xs))\n",
+        "a = maximum(abs.(xs))\n",
+        "a = minimum(abs.(xs))\n",
+    ] {
+        assert_eq!(count("eager-broadcast", src), 1, "no finding for {src:?}");
+    }
+}
+
+#[test]
+fn eager_broadcast_names_both_spellings() {
+    assert_eq!(
+        findings("eager-broadcast", "a = sum(abs.(xs))\n"),
+        [
+            "call `sum(abs, xs)` instead of `sum(abs.(xs))`, which materializes \
+             the broadcast result"
+        ]
+    );
+}
+
+#[test]
+fn eager_broadcast_spans_the_whole_call() {
+    let src = "a = sum(abs.(xs))\n";
+    let diag = only_finding("eager-broadcast", &[], src);
+    assert_eq!(&src[diag.range], "sum(abs.(xs))");
+}
+
+#[test]
+fn eager_broadcast_rewrites_only_the_argument() {
+    let src = "a = sum(abs.(xs))\n";
+    let diag = only_finding("eager-broadcast", &[], src);
+    let fix = &diag.fixes[0];
+    // Unsafe: broadcasting treats a scalar as a container, and `any`/`all`
+    // short-circuit, so the two spellings can part ways.
+    assert_eq!(fix.applicability, Applicability::Unsafe);
+    assert_eq!(&src[fix.start..fix.end], "abs.(xs)");
+    assert_eq!(fix.content, "abs, xs");
+}
+
+#[test]
+fn eager_broadcast_ignores_a_reducer_without_a_broadcast() {
+    // No broadcast at all, and a broadcast operator rather than a broadcast
+    // call — neither is the `f.(x)` shape.
+    assert_eq!(count("eager-broadcast", "a = sum(abs(x))\n"), 0);
+    assert_eq!(count("eager-broadcast", "a = any(xs .> 0)\n"), 0);
+    assert_eq!(count("eager-broadcast", "a = sum(xs)\n"), 0);
+}
+
+#[test]
+fn eager_broadcast_ignores_a_multi_operand_broadcast() {
+    // `f.(x, y)` fuses two containers; `sum(f, x, y)` is a different call.
+    assert_eq!(count("eager-broadcast", "a = sum(hypot.(xs, ys))\n"), 0);
+}
+
+#[test]
+fn eager_broadcast_ignores_a_reducer_carrying_more_than_the_broadcast() {
+    // `dims` reduces along an axis, which the two-argument method spells
+    // differently; a second positional argument is another method entirely.
+    assert_eq!(count("eager-broadcast", "a = sum(abs.(xs), dims = 1)\n"), 0);
+    assert_eq!(count("eager-broadcast", "a = sum(abs.(xs); init = 0)\n"), 0);
+    assert_eq!(count("eager-broadcast", "a = maximum(abs.(xs), xs)\n"), 0);
+}
+
+#[test]
+fn eager_broadcast_ignores_a_reducer_that_is_not_base() {
+    // A local definition masks Base's `sum`, and a qualified callee is not the
+    // bare-name shape the gate confirms.
+    assert_eq!(
+        count("eager-broadcast", "sum(v) = 0\na = sum(abs.(xs))\n"),
+        0
+    );
+    assert_eq!(count("eager-broadcast", "a = Base.sum(abs.(xs))\n"), 0);
+    assert_eq!(count("eager-broadcast", "a = MyMod.sum(abs.(xs))\n"), 0);
+}
+
+#[test]
+fn eager_broadcast_ignores_a_function_that_takes_no_function() {
+    // `length`, `sort`, and friends have no `(f, itr)` method to move to.
+    assert_eq!(count("eager-broadcast", "a = length(abs.(xs))\n"), 0);
+    assert_eq!(count("eager-broadcast", "a = sort(abs.(xs))\n"), 0);
+}
+
+#[test]
+fn eager_broadcast_withholds_the_fix_over_a_dropped_comment() {
+    let src = "a = sum(abs.( #= why =# xs))\n";
+    let diag = only_finding("eager-broadcast", &[], src);
+    assert!(diag.fixes.is_empty());
+}
+
+#[test]
+fn eager_broadcast_falls_back_to_a_one_line_message() {
+    // A multi-line operand would wrap the message, so it is left out of it.
+    let src = "a = sum(abs.([\n    1,\n    2,\n]))\n";
+    assert_eq!(
+        findings("eager-broadcast", src),
+        [
+            "pass the function to `sum` instead of broadcasting it, which \
+             materializes the broadcast result"
+        ]
+    );
+}
+
+// --- sorted-extremum --------------------------------------------------------
+
+#[test]
+fn sorted_extremum_flags_both_ends_of_a_sorted_copy() {
+    assert_eq!(
+        findings("sorted-extremum", "a = sort(xs)[1]\n"),
+        ["call `minimum(xs)` instead of `sort(xs)[1]`, which sorts the whole collection"]
+    );
+    assert_eq!(
+        findings("sorted-extremum", "a = sort(xs)[begin]\n"),
+        ["call `minimum(xs)` instead of `sort(xs)[begin]`, which sorts the whole collection"]
+    );
+    assert_eq!(
+        findings("sorted-extremum", "a = sort(xs)[end]\n"),
+        ["call `maximum(xs)` instead of `sort(xs)[end]`, which sorts the whole collection"]
+    );
+}
+
+#[test]
+fn sorted_extremum_rewrites_the_whole_indexing() {
+    let src = "a = sort(xs)[1]\n";
+    let diag = only_finding("sorted-extremum", &[], src);
+    assert_eq!(&src[diag.range], "sort(xs)[1]");
+    let fix = &diag.fixes[0];
+    // Unsafe: `sort` orders `NaN` last, while `minimum` propagates it.
+    assert_eq!(fix.applicability, Applicability::Unsafe);
+    assert_eq!(&src[fix.start..fix.end], "sort(xs)[1]");
+    assert_eq!(fix.content, "minimum(xs)");
+}
+
+#[test]
+fn sorted_extremum_ignores_any_other_index() {
+    assert_eq!(count("sorted-extremum", "a = sort(xs)[2]\n"), 0);
+    assert_eq!(count("sorted-extremum", "a = sort(xs)[i]\n"), 0);
+    assert_eq!(count("sorted-extremum", "a = sort(xs)[end - 1]\n"), 0);
+    assert_eq!(count("sorted-extremum", "a = sort(xs)[1, 1]\n"), 0);
+}
+
+#[test]
+fn sorted_extremum_ignores_a_sort_that_orders_differently() {
+    // `rev`/`by`/`lt` decide which element lands first, so the extremum the
+    // index picks is no longer `minimum`'s.
+    assert_eq!(count("sorted-extremum", "a = sort(xs; rev = true)[1]\n"), 0);
+    assert_eq!(count("sorted-extremum", "a = sort(xs, by = abs)[1]\n"), 0);
+    assert_eq!(count("sorted-extremum", "a = sort(xs, dims = 1)[1]\n"), 0);
+}
+
+#[test]
+fn sorted_extremum_ignores_a_sort_that_is_not_base() {
+    assert_eq!(
+        count("sorted-extremum", "sort(v) = v\na = sort(xs)[1]\n"),
+        0
+    );
+    assert_eq!(count("sorted-extremum", "a = Base.sort(xs)[1]\n"), 0);
+    // A different function, and no call at all.
+    assert_eq!(count("sorted-extremum", "a = sort!(xs)[1]\n"), 0);
+    assert_eq!(count("sorted-extremum", "a = sorted[1]\n"), 0);
+}
+
+#[test]
+fn sorted_extremum_withholds_the_fix_when_the_name_is_taken() {
+    // Splicing `minimum` into a file that defines its own would call that one.
+    let src = "minimum(v) = 0\na = sort(xs)[1]\n";
+    let diag = only_finding("sorted-extremum", &[], src);
+    assert!(diag.fixes.is_empty());
+}
+
+// --- length-findall ---------------------------------------------------------
+
+#[test]
+fn length_findall_flags_both_findall_arities() {
+    assert_eq!(
+        findings("length-findall", "n = length(findall(isodd, xs))\n"),
+        [
+            "call `count(isodd, xs)` instead of `length(findall(isodd, xs))`, \
+             which builds an index vector just to count it"
+        ]
+    );
+    assert_eq!(
+        findings("length-findall", "n = length(findall(mask))\n"),
+        [
+            "call `count(mask)` instead of `length(findall(mask))`, which \
+             builds an index vector just to count it"
+        ]
+    );
+}
+
+#[test]
+fn length_findall_rewrites_the_whole_call() {
+    let src = "n = length(findall(isodd, xs))\n";
+    let diag = only_finding("length-findall", &[], src);
+    assert_eq!(&src[diag.range], "length(findall(isodd, xs))");
+    let fix = &diag.fixes[0];
+    // Unsafe: `findall` walks a collection's keys where `count` iterates its
+    // elements, which part ways for a `Dict`.
+    assert_eq!(fix.applicability, Applicability::Unsafe);
+    assert_eq!(&src[fix.start..fix.end], "length(findall(isodd, xs))");
+    assert_eq!(fix.content, "count(isodd, xs)");
+}
+
+#[test]
+fn length_findall_reuses_the_argument_list_verbatim() {
+    // The argument list is spliced byte for byte, so a comment inside it
+    // survives the rewrite.
+    let src = "n = length(findall(isodd, #= only the odds =# xs))\n";
+    let diag = only_finding("length-findall", &[], src);
+    assert_eq!(
+        diag.fixes[0].content,
+        "count(isodd, #= only the odds =# xs)"
+    );
+}
+
+#[test]
+fn length_findall_ignores_other_shapes() {
+    assert_eq!(count("length-findall", "n = length(xs)\n"), 0);
+    assert_eq!(
+        count("length-findall", "n = length(findfirst(isodd, xs))\n"),
+        0
+    );
+    assert_eq!(count("length-findall", "n = size(findall(isodd, xs))\n"), 0);
+    assert_eq!(
+        count("length-findall", "n = length(findall(isodd, xs, extra))\n"),
+        0
+    );
+    // A splat leaves the argument count unknown.
+    assert_eq!(count("length-findall", "n = length(findall(args...))\n"), 0);
+}
+
+#[test]
+fn length_findall_ignores_names_that_are_not_base() {
+    assert_eq!(
+        count(
+            "length-findall",
+            "findall(p, v) = v\nn = length(findall(isodd, xs))\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("length-findall", "n = length(Base.findall(isodd, xs))\n"),
+        0
+    );
+    assert_eq!(
+        count("length-findall", "n = Base.length(findall(isodd, xs))\n"),
+        0
+    );
+}
+
+#[test]
+fn length_findall_withholds_the_fix_when_count_is_taken() {
+    let src = "count(v) = 0\nn = length(findall(isodd, xs))\n";
+    let diag = only_finding("length-findall", &[], src);
+    assert!(diag.fixes.is_empty());
+}
+
 // --- suppression meta rules -------------------------------------------------
 
 /// Lint `src` with `rule` *and* `also` selected, returning only `rule`'s

@@ -22,9 +22,7 @@
 //! do what it says), `suspicious` (legal Julia, very likely not intended),
 //! `performance` (a rewrite that avoids real work), `readability` (a
 //! behavior-preserving idiom rewrite), and `meta` (a finding about fatou's own
-//! `# fatou-ignore` directives rather than about the Julia around them);
-//! `performance` has no rules yet, so its module is created by the first rule
-//! that needs it.
+//! `# fatou-ignore` directives rather than about the Julia around them).
 //!
 //! New rules:
 //! 1. Create a module under `src/linter/rules/<category>/<id>.rs`.
@@ -40,7 +38,11 @@
 //! than re-deriving Julia's argument grammar: [`matchers::plain_call`] is the
 //! whole "a call to *name* with exactly *n* positional arguments and nothing
 //! else" opening, and [`matchers::CallShape`] the full split when a rule needs
-//! keywords or has to know which set a splat left open.
+//! keywords or has to know which set a splat left open. A rule whose *fix*
+//! respells a construct by splicing the construct's own sub-texts into a new
+//! form goes through [`rewrite`] for the two questions that always follow:
+//! would the rewrite drop a comment, and does a piece fit in a one-line
+//! message.
 //!
 //! A rule that asks what a *name* means goes through [`RuleContext`] rather
 //! than assembling its own machinery: [`RuleContext::resolver`] for the shared
@@ -78,7 +80,9 @@ pub mod correctness;
 mod file_scan;
 pub mod matchers;
 pub mod meta;
+pub mod performance;
 pub mod readability;
+pub mod rewrite;
 pub mod suspicious;
 
 pub(crate) use file_scan::FileScan;
@@ -134,6 +138,9 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::TypeofComparison),
         Box::new(suspicious::ShadowedBaseName),
         Box::new(suspicious::NonPublicAccess),
+        Box::new(performance::EagerBroadcast),
+        Box::new(performance::SortedExtremum),
+        Box::new(performance::LengthFindall),
         Box::new(readability::ComparisonNegation),
         Box::new(readability::LengthZero),
         Box::new(readability::RedundantBoolean),

@@ -39,13 +39,17 @@ roadmap is in `TODO.md` ("Rule roadmap").
 ## Reach for the shared machinery
 
 - Call shape → `rules/matchers.rs`: `plain_call` is the whole "a call to *name*
-  with exactly *n* positional arguments and nothing else" opening; `CallShape`
-  is the full split when a rule needs keywords or has to know which set a splat
-  left open. Never re-derive Julia's argument grammar in a rule.
+  with exactly *n* positional arguments and nothing else" opening
+  (`plain_broadcast` for `f.(x)`); `CallShape` is the full split when a rule
+  needs keywords or has to know which set a splat left open. Never re-derive
+  Julia's argument grammar in a rule.
 - What a name *means* → `RuleContext`: `resolver()`, `trusts_resolution()`,
   `resolves_to_base()`/`read_resolves_to_base()`, `file_scan()`,
   `control_flow()`. Each is computed once per file and memoized, so asking is
   cheap no matter how many rules do.
+- Respelling a construct by splicing its own sub-texts into a new form →
+  `rules/rewrite.rs`: `drops_a_comment` (the withhold-the-fix cue) and
+  `inline_text` (quotable in a one-line message).
 - Cross-file `include()` structure → `include_graph.rs`.
 - Which rules need a project-wide resolution context → `RESOLUTION_RULES` in
   `rules.rs`; the CLI's harvest gate and the server's member rule set read that

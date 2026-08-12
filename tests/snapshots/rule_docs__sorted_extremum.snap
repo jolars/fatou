@@ -1,0 +1,41 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `sorted-extremum`
+
+Flag indexing one end of a freshly sorted collection: `sort(xs)[1]` copies and orders every element to answer what `minimum(xs)` answers in one pass, and `sort(xs)[end]` (like `sort(xs)[begin]` for the other end) does the same for `maximum(xs)`.
+
+Only a plain `sort(x)` at either end is flagged. A `rev`, `by`, or `lt` keyword decides which element lands where, so the index no longer picks the extremum a reducer would return; any other index (`sort(xs)[2]`) genuinely needs the order; and `sort!` is a different function. `sort` must be confirmed to be Base's, so a local shadow or a qualified `Base.sort` reports nothing.
+
+The fix replaces the indexing with the extremum call, but needs `--unsafe-fixes`: sorting orders `NaN` last, so `sort(xs)[1]` returns the smallest real number where `minimum(xs)` propagates the `NaN`. It is withheld — the finding still stands — when the file's `minimum`/`maximum` is not Base's, or when a comment sits in the rewritten span outside the collection.
+
+Sorting to read the smallest element:
+
+```julia
+lowest = sort(scores)[1]
+```
+
+```text
+warning: sorted-extremum
+ --> example.jl:1:10
+  |
+1 | lowest = sort(scores)[1]
+  |          ^^^^^^^^^^^^^^^ call `minimum(scores)` instead of `sort(scores)[1]`, which sorts the whole collection
+  = help: Replace the sorted indexing with `minimum` (unsafe fix, requires `--unsafe-fixes`)
+```
+
+And the largest:
+
+```julia
+highest = sort(scores)[end]
+```
+
+```text
+warning: sorted-extremum
+ --> example.jl:1:11
+  |
+1 | highest = sort(scores)[end]
+  |           ^^^^^^^^^^^^^^^^^ call `maximum(scores)` instead of `sort(scores)[end]`, which sorts the whole collection
+  = help: Replace the sorted indexing with `maximum` (unsafe fix, requires `--unsafe-fixes`)
+```

@@ -1,0 +1,41 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `length-findall`
+
+Flag `length(findall(p, x))`, which allocates a vector of every matching index just to ask how many there are. `count(p, x)` answers with a counter and no allocation, and covers the one-argument form too: `length(findall(mask))` is `count(mask)`.
+
+Both calls must be plain — no keyword arguments, no splats — and both `length` and `findall` must be confirmed to be Base's, so a local shadow, a qualified `Base.findall`, or a file whose imports cannot be resolved reports nothing.
+
+The fix rewrites the pair to a `count` call carrying `findall`'s own argument list, but needs `--unsafe-fixes`: `findall` walks a collection's keys where `count` iterates its elements, which is the same walk for an array and a different one for a `Dict`, whose values `findall` tests and whose `key => value` pairs `count` does. It is withheld — the finding still stands — when the file's `count` is not Base's, or when a comment sits in the rewritten span outside the argument list.
+
+The index vector is built only to be measured:
+
+```julia
+n = length(findall(isodd, xs))
+```
+
+```text
+warning: length-findall
+ --> example.jl:1:5
+  |
+1 | n = length(findall(isodd, xs))
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ call `count(isodd, xs)` instead of `length(findall(isodd, xs))`, which builds an index vector just to count it
+  = help: Count the matches directly with `count` (unsafe fix, requires `--unsafe-fixes`)
+```
+
+The one-argument form counts a mask:
+
+```julia
+hits = length(findall(mask))
+```
+
+```text
+warning: length-findall
+ --> example.jl:1:8
+  |
+1 | hits = length(findall(mask))
+  |        ^^^^^^^^^^^^^^^^^^^^^ call `count(mask)` instead of `length(findall(mask))`, which builds an index vector just to count it
+  = help: Count the matches directly with `count` (unsafe fix, requires `--unsafe-fixes`)
+```

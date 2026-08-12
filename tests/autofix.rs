@@ -278,6 +278,94 @@ fn withholds_redundant_boolean_comparison_fix_by_default() {
     assert_eq!(outcome.remaining.len(), 1);
 }
 
+/// `eager-broadcast` moves the broadcast function into the reducer's first
+/// argument, but only under `--unsafe-fixes`: broadcasting treats a scalar as a
+/// container, and `any`/`all` stop at the first decisive element.
+#[test]
+fn fixes_every_eager_broadcast_under_unsafe() {
+    let src = "\
+a = any(isodd.(xs))
+b = sum(abs.(f(y)))
+c = maximum(sqrt.(xs))
+";
+    let outcome = fix_source(None, src, &select("eager-broadcast"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    a = any(isodd, xs)
+    b = sum(abs, f(y))
+    c = maximum(sqrt, xs)
+    ");
+    assert_eq!(outcome.applied, 3);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, `eager-broadcast` reports but changes nothing.
+#[test]
+fn withholds_eager_broadcast_fix_by_default() {
+    let src = "a = sum(abs.(xs))\n";
+    let outcome = fix_source(None, src, &select("eager-broadcast"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}
+
+/// `sorted-extremum` replaces the whole indexing with the extremum call, but
+/// only under `--unsafe-fixes`: `sort` orders `NaN` last where `minimum`
+/// propagates it.
+#[test]
+fn fixes_every_sorted_extremum_under_unsafe() {
+    let src = "\
+lo = sort(xs)[1]
+hi = sort(f(y))[end]
+first_word = sort(words)[begin]
+";
+    let outcome = fix_source(None, src, &select("sorted-extremum"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    lo = minimum(xs)
+    hi = maximum(f(y))
+    first_word = minimum(words)
+    ");
+    assert_eq!(outcome.applied, 3);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, `sorted-extremum` reports but changes nothing.
+#[test]
+fn withholds_sorted_extremum_fix_by_default() {
+    let src = "lo = sort(xs)[1]\n";
+    let outcome = fix_source(None, src, &select("sorted-extremum"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}
+
+/// `length-findall` replaces the pair with a `count` call carrying `findall`'s
+/// own argument list, but only under `--unsafe-fixes`: `findall` walks a
+/// collection's keys where `count` iterates its elements.
+#[test]
+fn fixes_every_length_findall_under_unsafe() {
+    let src = "\
+n = length(findall(isodd, xs))
+m = length(findall(mask))
+";
+    let outcome = fix_source(None, src, &select("length-findall"), true);
+    insta::assert_snapshot!(outcome.output, @r"
+    n = count(isodd, xs)
+    m = count(mask)
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// Without the opt-in, `length-findall` reports but changes nothing.
+#[test]
+fn withholds_length_findall_fix_by_default() {
+    let src = "n = length(findall(isodd, xs))\n";
+    let outcome = fix_source(None, src, &select("length-findall"), false);
+    assert_eq!(outcome.output, src);
+    assert_eq!(outcome.applied, 0);
+    assert_eq!(outcome.remaining.len(), 1);
+}
+
 /// Several rule sets at once, for the suppression meta rules: they can only
 /// judge a directive when the rule it names is in the run.
 fn select_many(rules: &[&str]) -> LintConfig {

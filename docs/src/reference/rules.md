@@ -977,6 +977,122 @@ warning: non-public-access
   | ^^^^^^^^^^^^^^^^^^ `Base` does not export `@_inline_meta` or declare it `public`
 ```
 
+## `eager-broadcast`
+
+Flag a Base reducer applied to a broadcast that exists only to be reduced: `sum(abs.(xs))` builds a whole mapped array and then sums it away, where `sum(abs, xs)` applies `abs` as it reduces and allocates nothing. The reducers with such an `(f, itr)` method are `all`, `any`, `count`, `maximum`, `minimum`, `prod`, and `sum`.
+
+Only the exact `reducer(f.(x))` shape is flagged. A keyword argument on either call, a second positional argument, and a fused multi-container broadcast (`hypot.(xs, ys)`) all describe a different call and are left alone, as is a broadcast *operator* (`any(xs .> 0)`), which names no function to pass. The reducer must be confirmed to be Base's, so a local shadow, a qualified `Base.sum`, or a file whose imports cannot be resolved reports nothing.
+
+The fix moves the function into the reducer's first argument, but needs `--unsafe-fixes`: broadcasting treats a scalar as a zero-dimensional container of itself where the two-argument method iterates it, and `any`/`all` stop at the first decisive element, so a function that prints, mutates, or throws runs a different number of times. The fix is withheld — the finding still stands — when a comment sits in the rewritten span.
+
+The mapped array is built only to be summed away:
+
+```julia
+total = sum(abs.(residuals))
+```
+
+```text
+warning: eager-broadcast
+ --> example.jl:1:9
+  |
+1 | total = sum(abs.(residuals))
+  |         ^^^^^^^^^^^^^^^^^^^^ call `sum(abs, residuals)` instead of `sum(abs.(residuals))`, which materializes the broadcast result
+  = help: Pass the function as `sum`'s first argument (unsafe fix, requires `--unsafe-fixes`)
+```
+
+`any` need not test every element:
+
+```julia
+if any(isnan.(xs))
+    error("bad data")
+end
+```
+
+```text
+warning: eager-broadcast
+ --> example.jl:1:4
+  |
+1 | if any(isnan.(xs))
+  |    ^^^^^^^^^^^^^^^ call `any(isnan, xs)` instead of `any(isnan.(xs))`, which materializes the broadcast result
+  = help: Pass the function as `any`'s first argument (unsafe fix, requires `--unsafe-fixes`)
+```
+
+## `sorted-extremum`
+
+Flag indexing one end of a freshly sorted collection: `sort(xs)[1]` copies and orders every element to answer what `minimum(xs)` answers in one pass, and `sort(xs)[end]` (like `sort(xs)[begin]` for the other end) does the same for `maximum(xs)`.
+
+Only a plain `sort(x)` at either end is flagged. A `rev`, `by`, or `lt` keyword decides which element lands where, so the index no longer picks the extremum a reducer would return; any other index (`sort(xs)[2]`) genuinely needs the order; and `sort!` is a different function. `sort` must be confirmed to be Base's, so a local shadow or a qualified `Base.sort` reports nothing.
+
+The fix replaces the indexing with the extremum call, but needs `--unsafe-fixes`: sorting orders `NaN` last, so `sort(xs)[1]` returns the smallest real number where `minimum(xs)` propagates the `NaN`. It is withheld — the finding still stands — when the file's `minimum`/`maximum` is not Base's, or when a comment sits in the rewritten span outside the collection.
+
+Sorting to read the smallest element:
+
+```julia
+lowest = sort(scores)[1]
+```
+
+```text
+warning: sorted-extremum
+ --> example.jl:1:10
+  |
+1 | lowest = sort(scores)[1]
+  |          ^^^^^^^^^^^^^^^ call `minimum(scores)` instead of `sort(scores)[1]`, which sorts the whole collection
+  = help: Replace the sorted indexing with `minimum` (unsafe fix, requires `--unsafe-fixes`)
+```
+
+And the largest:
+
+```julia
+highest = sort(scores)[end]
+```
+
+```text
+warning: sorted-extremum
+ --> example.jl:1:11
+  |
+1 | highest = sort(scores)[end]
+  |           ^^^^^^^^^^^^^^^^^ call `maximum(scores)` instead of `sort(scores)[end]`, which sorts the whole collection
+  = help: Replace the sorted indexing with `maximum` (unsafe fix, requires `--unsafe-fixes`)
+```
+
+## `length-findall`
+
+Flag `length(findall(p, x))`, which allocates a vector of every matching index just to ask how many there are. `count(p, x)` answers with a counter and no allocation, and covers the one-argument form too: `length(findall(mask))` is `count(mask)`.
+
+Both calls must be plain — no keyword arguments, no splats — and both `length` and `findall` must be confirmed to be Base's, so a local shadow, a qualified `Base.findall`, or a file whose imports cannot be resolved reports nothing.
+
+The fix rewrites the pair to a `count` call carrying `findall`'s own argument list, but needs `--unsafe-fixes`: `findall` walks a collection's keys where `count` iterates its elements, which is the same walk for an array and a different one for a `Dict`, whose values `findall` tests and whose `key => value` pairs `count` does. It is withheld — the finding still stands — when the file's `count` is not Base's, or when a comment sits in the rewritten span outside the argument list.
+
+The index vector is built only to be measured:
+
+```julia
+n = length(findall(isodd, xs))
+```
+
+```text
+warning: length-findall
+ --> example.jl:1:5
+  |
+1 | n = length(findall(isodd, xs))
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ call `count(isodd, xs)` instead of `length(findall(isodd, xs))`, which builds an index vector just to count it
+  = help: Count the matches directly with `count` (unsafe fix, requires `--unsafe-fixes`)
+```
+
+The one-argument form counts a mask:
+
+```julia
+hits = length(findall(mask))
+```
+
+```text
+warning: length-findall
+ --> example.jl:1:8
+  |
+1 | hits = length(findall(mask))
+  |        ^^^^^^^^^^^^^^^^^^^^^ call `count(mask)` instead of `length(findall(mask))`, which builds an index vector just to count it
+  = help: Count the matches directly with `count` (unsafe fix, requires `--unsafe-fixes`)
+```
+
 ## `comparison-negation`
 
 Flag `!` applied to a parenthesized equality test, which Julia spells with a single operator: `!(a == b)` is `a != b`, `!(a === b)` is `a !== b`, and both read back the other way. The Unicode spellings `≠`, `≡`, and `≢` collapse the same way.
