@@ -3,7 +3,7 @@
 use fatou::incremental::{
     IncrementalDatabase, IncrementalDb, PrevParse, SourceFile, control_flow, file_exports,
     file_free_reads, file_qualified_reads, host_module_of, include_edges, parse_diagnostics,
-    parsed_tree_root, project_graph, semantic_model,
+    parsed_tree_root, project_declared_deps, project_graph, semantic_model,
 };
 use fatou::parser::{Edit, apply_edits, parse};
 
@@ -494,6 +494,176 @@ firewall_backdates_test!(
     "k() = 1\ninclude(\"a.jl\")\n",
     "k() = 111\ninclude(\"a.jl\")\n"
 );
+
+/// The probes for the project-file firewall: a `Project.toml` edit must reach
+/// the declared dependencies and nothing else. `parsed_document` is `no_eq`, so
+/// a parse that re-executed would force `probe_parse` to re-run — a counter
+/// resting at 1 is a sound witness that it did not.
+#[salsa::tracked(returns(copy))]
+fn probe_parse(db: &dyn IncrementalDb, file: SourceFile) -> usize {
+    use std::sync::atomic::Ordering;
+    PARSE_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
+    parse_diagnostics(db, file).len()
+}
+
+static PARSE_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[salsa::tracked(returns(copy))]
+fn probe_graph(db: &dyn IncrementalDb) -> usize {
+    use std::sync::atomic::Ordering;
+    GRAPH_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
+    project_graph(db).nodes.len()
+}
+
+static GRAPH_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A one-member workspace package with its project file tracked as an input,
+/// returned as `(db, entry, project)`.
+fn project_db(project_text: &str) -> (IncrementalDatabase, SourceFile, SourceFile) {
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use fatou::index::model::{DefLocation, Span};
+    use fatou::index::{ModuleIndex, PackageIndex};
+
+    let pkg = PackageIndex {
+        name: "MyPkg".to_string(),
+        root: ModuleIndex {
+            name: "MyPkg".to_string(),
+            bare: false,
+            loc: DefLocation {
+                file: "src/MyPkg.jl".into(),
+                range: Span { start: 0, end: 0 },
+            },
+            exports: Vec::new(),
+            functions: Vec::new(),
+            types: Vec::new(),
+            consts: Vec::new(),
+            macros: Vec::new(),
+            submodules: Vec::new(),
+            usings: Vec::new(),
+            imported_names: Vec::new(),
+        },
+        members: Vec::new(),
+        member_modules: Default::default(),
+        diagnostics: Vec::new(),
+    };
+
+    let mut db = IncrementalDatabase::new();
+    let entry = db.upsert_file(
+        Path::new("/work/MyPkg/src/MyPkg.jl"),
+        "module MyPkg\nk() = 1\nend\n".to_string(),
+    );
+    // Tracked before `set_project_files`, which is create-or-return: the input
+    // stands in for an open editor buffer that never touched disk.
+    let project = db.upsert_file(
+        Path::new("/work/MyPkg/Project.toml"),
+        project_text.to_string(),
+    );
+
+    let mut packages = BTreeMap::new();
+    packages.insert("MyPkg".to_string(), Arc::new(pkg));
+    let mut roots = BTreeMap::new();
+    roots.insert("MyPkg".to_string(), PathBuf::from("/work/MyPkg"));
+    db.set_library(packages, roots, vec!["MyPkg".to_string()]);
+    db.set_workspace_files(vec![entry]);
+    db.set_project_files(BTreeMap::from([(
+        "MyPkg".to_string(),
+        PathBuf::from("/work/MyPkg/Project.toml"),
+    )]));
+    (db, entry, project)
+}
+
+fn declared(db: &IncrementalDatabase) -> Vec<String> {
+    db.declared_deps("MyPkg")
+        .map(|deps| deps.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The mirror of the body-edit firewall, from the other side: a `Project.toml`
+/// edit must reach the resolution layer and leave the parses (and the include
+/// graph they feed) alone. Without this, making the project file a live input
+/// trades a body-edit firewall for a project-edit stampede.
+#[test]
+fn a_project_file_edit_invalidates_deps_but_not_parses() {
+    use std::sync::atomic::Ordering;
+
+    let (mut db, entry, project) =
+        project_db("[deps]\nFoo = \"11111111-2222-3333-4444-555555555555\"\n");
+
+    assert_eq!(probe_parse(&db, entry), 0);
+    let graph_before = probe_graph(&db);
+    assert_eq!(PARSE_PROBE_RUNS.load(Ordering::SeqCst), 1);
+    assert_eq!(GRAPH_PROBE_RUNS.load(Ordering::SeqCst), 1);
+    assert_eq!(declared(&db), ["Foo"]);
+
+    db.set_file_text(
+        project,
+        "[deps]\nFoo = \"11111111-2222-3333-4444-555555555555\"\nBar = \"66666666-7777-8888-9999-aaaaaaaaaaaa\"\n",
+    );
+
+    // Witness: the edit really landed on the resolution layer.
+    assert_eq!(declared(&db), ["Bar", "Foo"]);
+    assert_eq!(probe_parse(&db, entry), 0);
+    assert_eq!(probe_graph(&db), graph_before);
+    assert_eq!(
+        PARSE_PROBE_RUNS.load(Ordering::SeqCst),
+        1,
+        "a project-file edit must not re-parse a single Julia file"
+    );
+    assert_eq!(
+        GRAPH_PROBE_RUNS.load(Ordering::SeqCst),
+        1,
+        "a project-file edit must not re-derive the include graph"
+    );
+}
+
+/// A probe over the project file's own firewall, to observe backdating.
+#[salsa::tracked(returns(copy))]
+fn probe_deps(db: &dyn IncrementalDb, file: SourceFile) -> usize {
+    use std::sync::atomic::Ordering;
+    DEPS_PROBE_RUNS.fetch_add(1, Ordering::SeqCst);
+    project_declared_deps(db, file).map_or(0, |deps| deps.len())
+}
+
+static DEPS_PROBE_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The other half of the firewall: an edit *within* the project file that
+/// leaves `[deps]` alone backdates, so a consumer of the declared set rests.
+#[test]
+fn a_compat_only_project_edit_backdates_declared_deps() {
+    use std::sync::atomic::Ordering;
+
+    let (mut db, _, project) =
+        project_db("[deps]\nFoo = \"11111111-2222-3333-4444-555555555555\"\n");
+
+    assert_eq!(probe_deps(&db, project), 1);
+    assert_eq!(DEPS_PROBE_RUNS.load(Ordering::SeqCst), 1);
+
+    db.set_file_text(
+        project,
+        "[deps]\nFoo = \"11111111-2222-3333-4444-555555555555\"\n\n[compat]\njulia = \"1.10\"\n",
+    );
+
+    // Witness: the file's text really changed, so the query re-ran.
+    assert!(db.file_text(project).contains("[compat]"));
+    assert_eq!(probe_deps(&db, project), 1);
+    assert_eq!(
+        DEPS_PROBE_RUNS.load(Ordering::SeqCst),
+        1,
+        "an edit that leaves `[deps]` alone must backdate rather than re-derive"
+    );
+}
+
+/// A project file that stops parsing takes the declared set with it, rather
+/// than reporting a half-typed `[deps]` table as the truth: `unresolved-import`
+/// goes quiet for a keystroke instead of flashing a false finding.
+#[test]
+fn a_broken_project_file_declares_nothing() {
+    let (db, _, _) = project_db("[deps]\nFoo = \n");
+    assert_eq!(db.declared_deps("MyPkg"), None);
+}
 
 /// A probe over the per-file host-module firewall, to observe backdating.
 #[salsa::tracked(returns(copy))]

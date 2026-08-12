@@ -245,7 +245,7 @@ impl AnalysisWorker {
                     // diagnostic depends on the library yet.
                     guard("library", || match msg {
                         Ok(LibraryMessage::Full(lib)) => {
-                            self.db.set_declared_deps(lib.declared_deps);
+                            self.db.set_project_files(lib.project_files);
                             self.db.set_library(lib.packages, lib.roots, lib.workspaces);
                             // Seed the workspace packages' member files as inputs
                             // so cross-file references/rename can index them.
