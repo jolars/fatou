@@ -138,7 +138,7 @@ matching `.claude/rules/` file.
   project/depot the way Julia's loader does. Falls back to a baked-in Base/Core
   export list when no install is found.
 - **Linter** (`src/linter/`) — **purely semantic**; anything `format --check`
-  catches belongs to the formatter. 46 rules across `correctness`, `suspicious`,
+  catches belongs to the formatter. 48 rules across `correctness`, `suspicious`,
   `performance`, `readability`, and `meta` (which lints the `# fatou-ignore`
   directives themselves), with autofixes, `# fatou-ignore` suppression, and a
   generated rule reference.

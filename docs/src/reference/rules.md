@@ -1093,6 +1093,39 @@ warning: length-findall
   = help: Count the matches directly with `count` (unsafe fix, requires `--unsafe-fixes`)
 ```
 
+## `fixed-regex`
+
+Flag `occursin(r"abc", s)`, whose regex literal carries no metacharacter and so matches one fixed substring. `occursin("abc", s)` asks the same question of the same values and answers it with a substring search instead of the regex engine.
+
+The pattern must be a plain `r"..."` — no flag suffix, since a flag changes what the pattern means, and no interpolation — and it must be non-empty and free of every PCRE metacharacter and backslash escape. `occursin` must be confirmed to be Base's, so a local shadow, a qualified `Base.occursin`, or a file whose imports cannot be resolved reports nothing.
+
+The safe fix deletes the `r` prefix and nothing else. A pattern with no backslash and no `$` reads identically as an ordinary string literal, and the literal keeps its own delimiters, so the string it spells is unchanged.
+
+The pattern is a plain substring, matched through PCRE:
+
+```julia
+if occursin(r"error", line)
+    push!(failures, line)
+end
+```
+
+```text
+warning: fixed-regex
+ --> example.jl:1:13
+  |
+1 | if occursin(r"error", line)
+  |             ^^^^^^^^ search for the substring `"error"` instead of matching the regex `r"error"`, whose pattern has no metacharacter
+  = help: Drop the `r` prefix and match the substring (safe fix)
+```
+
+After applying the fix:
+
+```julia
+if occursin("error", line)
+    push!(failures, line)
+end
+```
+
 ## `comparison-negation`
 
 Flag `!` applied to a parenthesized equality test, which Julia spells with a single operator: `!(a == b)` is `a != b`, `!(a === b)` is `a !== b`, and both read back the other way. The Unicode spellings `≠`, `≡`, and `≢` collapse the same way.
@@ -1255,6 +1288,54 @@ warning: redundant-boolean
 1 | if x.valid == false
   |    ^^^^^^^^^^^^^^^^ comparing to `false` is redundant: write `!x.valid`
   = help: Drop the comparison to `false` (unsafe fix, requires `--unsafe-fixes`)
+```
+
+## `string-boundary`
+
+Flag `occursin(r"^abc", s)` and `occursin(r"abc$", s)`, boundary tests written as anchored regex searches. `startswith(s, "abc")` and `endswith(s, "abc")` name the boundary they test and need no match engine.
+
+The pattern must be a plain `r"..."` — no flag suffix, since `i` and `m` change what an anchor means — anchored at exactly one end with a non-empty, metacharacter-free remainder; `r"^abc$"` is an exact match rather than a boundary test. `occursin` must be confirmed to be Base's.
+
+The `startswith` fix is safe: `^` matches at the start of the subject and nowhere else. The `endswith` fix needs `--unsafe-fixes`, because PCRE's `$` also matches before a final newline — `occursin(r"abc$", "abc\n")` is `true` where `endswith("abc\n", "abc")` is `false`. Either fix is withheld — the finding still stands — when the file's `startswith`/`endswith` is not Base's, or when a comment sits in the rewritten span outside the haystack and the pattern.
+
+A leading anchor is a prefix test:
+
+```julia
+if occursin(r"^Test", name)
+    run(name)
+end
+```
+
+```text
+warning: string-boundary
+ --> example.jl:1:4
+  |
+1 | if occursin(r"^Test", name)
+  |    ^^^^^^^^^^^^^^^^^^^^^^^^ test `startswith(name, "Test")` instead of matching the anchored regex `r"^Test"`
+  = help: Test the prefix with `startswith` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+if startswith(name, "Test")
+    run(name)
+end
+```
+
+A trailing anchor is a suffix test:
+
+```julia
+sources = filter(f -> occursin(r"_test$", f), files)
+```
+
+```text
+warning: string-boundary
+ --> example.jl:1:23
+  |
+1 | sources = filter(f -> occursin(r"_test$", f), files)
+  |                       ^^^^^^^^^^^^^^^^^^^^^^ test `endswith(f, "_test")` instead of matching the anchored regex `r"_test$"`
+  = help: Test the suffix with `endswith`, which does not match before a trailing newline (unsafe fix, requires `--unsafe-fixes`)
 ```
 
 ## `misnamed-suppression`

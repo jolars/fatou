@@ -42,7 +42,8 @@
 //! respells a construct by splicing the construct's own sub-texts into a new
 //! form goes through [`rewrite`] for the two questions that always follow:
 //! would the rewrite drop a comment, and does a piece fit in a one-line
-//! message.
+//! message. A rule that asks what an `r"..."` literal *matches* goes through
+//! [`regex`], which both reads the literal and classifies its text.
 //!
 //! A rule that asks what a *name* means goes through [`RuleContext`] rather
 //! than assembling its own machinery: [`RuleContext::resolver`] for the shared
@@ -82,6 +83,7 @@ pub mod matchers;
 pub mod meta;
 pub mod performance;
 pub mod readability;
+pub mod regex;
 pub mod rewrite;
 pub mod suspicious;
 
@@ -141,9 +143,11 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(performance::EagerBroadcast),
         Box::new(performance::SortedExtremum),
         Box::new(performance::LengthFindall),
+        Box::new(performance::FixedRegex),
         Box::new(readability::ComparisonNegation),
         Box::new(readability::LengthZero),
         Box::new(readability::RedundantBoolean),
+        Box::new(readability::StringBoundary),
         Box::new(meta::MisnamedSuppression),
         Box::new(meta::BlanketSuppression),
         Box::new(meta::UnexplainedSuppression),

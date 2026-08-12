@@ -5745,6 +5745,212 @@ fn length_findall_withholds_the_fix_when_count_is_taken() {
     assert!(diag.fixes.is_empty());
 }
 
+// --- fixed-regex ------------------------------------------------------------
+
+#[test]
+fn fixed_regex_flags_a_metacharacter_free_pattern() {
+    assert_eq!(
+        findings("fixed-regex", "if occursin(r\"abc\", s)\n    1\nend\n"),
+        [
+            "search for the substring `\"abc\"` instead of matching the regex \
+             `r\"abc\"`, whose pattern has no metacharacter"
+        ]
+    );
+}
+
+#[test]
+fn fixed_regex_deletes_only_the_prefix() {
+    let src = "hit = occursin(r\"abc\", s)\n";
+    let diag = only_finding("fixed-regex", &[], src);
+    // The span is the literal, not the whole call.
+    assert_eq!(&src[diag.range], "r\"abc\"");
+    let fix = &diag.fixes[0];
+    // A metacharacter-free pattern carries no escape and no interpolation, so
+    // dropping the `r` leaves the very same string.
+    assert_eq!(fix.applicability, Applicability::Safe);
+    assert_eq!(&src[fix.start..fix.end], "r");
+    assert_eq!(fix.content, "");
+}
+
+#[test]
+fn fixed_regex_handles_a_triple_quoted_literal() {
+    let src = "hit = occursin(r\"\"\"a\"b\"\"\", s)\n";
+    let diag = only_finding("fixed-regex", &[], src);
+    // Reusing the literal's own delimiters is what makes the embedded quote a
+    // non-issue: only the prefix goes.
+    assert_eq!(&src[diag.fixes[0].start..diag.fixes[0].end], "r");
+}
+
+#[test]
+fn fixed_regex_ignores_a_pattern_with_metacharacters() {
+    for pattern in [
+        "r\"a.c\"",
+        "r\"^abc\"",
+        "r\"abc$\"",
+        "r\"a|b\"",
+        "r\"ab+\"",
+        "r\"a\\d\"",
+        "r\"[abc]\"",
+        "r\"(a)\"",
+    ] {
+        assert_eq!(
+            count("fixed-regex", &format!("hit = occursin({pattern}, s)\n")),
+            0,
+            "{pattern} is not a fixed string"
+        );
+    }
+}
+
+#[test]
+fn fixed_regex_ignores_flags_and_an_empty_pattern() {
+    // A flag changes what the pattern means (`i` case-folds, `x` gives `#` and
+    // whitespace a meaning), and an empty pattern is no rewrite candidate.
+    assert_eq!(count("fixed-regex", "hit = occursin(r\"abc\"i, s)\n"), 0);
+    assert_eq!(count("fixed-regex", "hit = occursin(r\"\", s)\n"), 0);
+}
+
+#[test]
+fn fixed_regex_ignores_other_shapes() {
+    // Already a string needle.
+    assert_eq!(count("fixed-regex", "hit = occursin(\"abc\", s)\n"), 0);
+    // The curried one-argument form fixes the *haystack*, not the needle.
+    assert_eq!(count("fixed-regex", "p = occursin(r\"abc\")\n"), 0);
+    // Another regex consumer, and the flipped `contains`, are out of scope.
+    assert_eq!(count("fixed-regex", "m = match(r\"abc\", s)\n"), 0);
+    assert_eq!(count("fixed-regex", "hit = contains(s, r\"abc\")\n"), 0);
+    // Anything but two plain positional arguments.
+    assert_eq!(count("fixed-regex", "hit = occursin(r\"abc\", s, x)\n"), 0);
+    assert_eq!(
+        count("fixed-regex", "hit = occursin(r\"abc\", s; kw = 1)\n"),
+        0
+    );
+    assert_eq!(count("fixed-regex", "hit = occursin(args...)\n"), 0);
+}
+
+#[test]
+fn fixed_regex_ignores_names_that_are_not_base() {
+    assert_eq!(
+        count(
+            "fixed-regex",
+            "occursin(a, b) = true\nhit = occursin(r\"abc\", s)\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("fixed-regex", "hit = Base.occursin(r\"abc\", s)\n"),
+        0
+    );
+}
+
+// --- string-boundary --------------------------------------------------------
+
+#[test]
+fn string_boundary_flags_a_leading_anchor() {
+    let src = "if occursin(r\"^abc\", s)\n    1\nend\n";
+    assert_eq!(
+        findings("string-boundary", src),
+        [
+            "test `startswith(s, \"abc\")` instead of matching the anchored \
+             regex `r\"^abc\"`"
+        ]
+    );
+    let diag = only_finding("string-boundary", &[], src);
+    // The whole call is replaced, so that is the span.
+    assert_eq!(&src[diag.range], "occursin(r\"^abc\", s)");
+    let fix = &diag.fixes[0];
+    // `^` without the `m` flag matches at the start of the subject and nowhere
+    // else, so the prefix test is exact.
+    assert_eq!(fix.applicability, Applicability::Safe);
+    assert_eq!(fix.content, "startswith(s, \"abc\")");
+}
+
+#[test]
+fn string_boundary_flags_a_trailing_anchor_with_an_unsafe_fix() {
+    let src = "hit = occursin(r\"abc$\", s)\n";
+    assert_eq!(
+        findings("string-boundary", src),
+        [
+            "test `endswith(s, \"abc\")` instead of matching the anchored \
+             regex `r\"abc$\"`"
+        ]
+    );
+    let diag = only_finding("string-boundary", &[], src);
+    let fix = &diag.fixes[0];
+    // PCRE's `$` also matches before a final newline, where `endswith` does
+    // not: `occursin(r"abc$", "abc\n")` is true and `endswith("abc\n", "abc")`
+    // is false.
+    assert_eq!(fix.applicability, Applicability::Unsafe);
+    assert_eq!(fix.content, "endswith(s, \"abc\")");
+}
+
+#[test]
+fn string_boundary_ignores_patterns_that_are_not_a_boundary_test() {
+    // Anchored at both ends is an exact match, not a prefix or suffix test.
+    assert_eq!(
+        count("string-boundary", "hit = occursin(r\"^abc$\", s)\n"),
+        0
+    );
+    // Nothing left after the anchor.
+    assert_eq!(count("string-boundary", "hit = occursin(r\"^\", s)\n"), 0);
+    assert_eq!(count("string-boundary", "hit = occursin(r\"$\", s)\n"), 0);
+    // The remainder is a pattern in its own right.
+    assert_eq!(
+        count("string-boundary", "hit = occursin(r\"^a.c\", s)\n"),
+        0
+    );
+    assert_eq!(
+        count("string-boundary", "hit = occursin(r\"^a\\d\", s)\n"),
+        0
+    );
+    // No anchor at all — that is `fixed-regex`'s finding, not this one.
+    assert_eq!(count("string-boundary", "hit = occursin(r\"abc\", s)\n"), 0);
+    // A flag changes what the anchor means (`m` re-anchors it per line).
+    assert_eq!(
+        count("string-boundary", "hit = occursin(r\"^abc\"m, s)\n"),
+        0
+    );
+}
+
+#[test]
+fn string_boundary_ignores_other_shapes() {
+    assert_eq!(count("string-boundary", "hit = occursin(\"^abc\", s)\n"), 0);
+    assert_eq!(count("string-boundary", "p = occursin(r\"^abc\")\n"), 0);
+    assert_eq!(count("string-boundary", "m = match(r\"^abc\", s)\n"), 0);
+    assert_eq!(
+        count("string-boundary", "hit = occursin(r\"^abc\", s; kw = 1)\n"),
+        0
+    );
+}
+
+#[test]
+fn string_boundary_ignores_names_that_are_not_base() {
+    assert_eq!(
+        count(
+            "string-boundary",
+            "occursin(a, b) = true\nhit = occursin(r\"^abc\", s)\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count("string-boundary", "hit = Base.occursin(r\"^abc\", s)\n"),
+        0
+    );
+}
+
+#[test]
+fn string_boundary_withholds_the_fix_when_startswith_is_taken() {
+    let src = "startswith(a, b) = true\nhit = occursin(r\"^abc\", s)\n";
+    let diag = only_finding("string-boundary", &[], src);
+    assert!(diag.fixes.is_empty());
+}
+
+#[test]
+fn string_boundary_withholds_the_fix_when_a_comment_would_be_dropped() {
+    let src = "hit = occursin(r\"^abc\", #= the line =# s)\n";
+    let diag = only_finding("string-boundary", &[], src);
+    assert!(diag.fixes.is_empty());
+}
+
 // --- suppression meta rules -------------------------------------------------
 
 /// Lint `src` with `rule` *and* `also` selected, returning only `rule`'s

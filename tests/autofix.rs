@@ -366,6 +366,52 @@ fn withholds_length_findall_fix_by_default() {
     assert_eq!(outcome.remaining.len(), 1);
 }
 
+/// `fixed-regex` drops the `r` prefix of a metacharacter-free pattern, turning
+/// the regex literal into the string literal it already spells. Safe, so it
+/// applies without the opt-in.
+#[test]
+fn fixes_every_fixed_regex() {
+    let src = "\
+a = occursin(r\"abc\", s)
+b = occursin(r\"\"\"x\"y\"\"\", s)
+";
+    let outcome = fix_source(None, src, &select("fixed-regex"), false);
+    insta::assert_snapshot!(outcome.output, @r#"
+    a = occursin("abc", s)
+    b = occursin("""x"y""", s)
+    "#);
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// `string-boundary` rewrites the leading-anchor form by default — `^` is a
+/// start-of-subject test either way — and holds the trailing-anchor one back,
+/// since PCRE's `$` also matches before a final newline.
+#[test]
+fn fixes_the_leading_anchor_boundary_by_default() {
+    let src = "\
+a = occursin(r\"^abc\", s)
+b = occursin(r\"abc$\", s)
+";
+    let outcome = fix_source(None, src, &select("string-boundary"), false);
+    insta::assert_snapshot!(outcome.output, @r#"
+    a = startswith(s, "abc")
+    b = occursin(r"abc$", s)
+    "#);
+    assert_eq!(outcome.applied, 1);
+    assert_eq!(outcome.remaining.len(), 1);
+}
+
+/// With `--unsafe-fixes` the suffix form is rewritten too.
+#[test]
+fn fixes_the_trailing_anchor_boundary_under_unsafe() {
+    let src = "b = occursin(r\"abc$\", s)\n";
+    let outcome = fix_source(None, src, &select("string-boundary"), true);
+    insta::assert_snapshot!(outcome.output, @r#"b = endswith(s, "abc")"#);
+    assert_eq!(outcome.applied, 1);
+    assert!(outcome.remaining.is_empty());
+}
+
 /// Several rule sets at once, for the suppression meta rules: they can only
 /// judge a directive when the rule it names is in the run.
 fn select_many(rules: &[&str]) -> LintConfig {

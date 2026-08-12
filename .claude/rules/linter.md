@@ -50,6 +50,9 @@ roadmap is in `TODO.md` ("Rule roadmap").
 - Respelling a construct by splicing its own sub-texts into a new form →
   `rules/rewrite.rs`: `drops_a_comment` (the withhold-the-fix cue) and
   `inline_text` (quotable in a one-line message).
+- What an `r"..."` literal *matches* → `rules/regex.rs`: `regex_pattern` reads
+  the literal (and declines a flag suffix or an interpolation), and
+  `is_fixed_string`/`single_anchor` classify its raw text.
 - Cross-file `include()` structure → `include_graph.rs`.
 - Which rules need a project-wide resolution context → `RESOLUTION_RULES` in
   `rules.rs`; the CLI's harvest gate and the server's member rule set read that

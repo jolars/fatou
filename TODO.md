@@ -207,13 +207,29 @@ it. We are behind arity only on the CFG and on rule ergonomics.
     `length-zero`, `typeof-comparison`, and `index-from-length` predate it and
     could move over.
 
+- [x] The `occursin`-with-a-regex-literal pair, which came with the
+  regex-literal analyzer that blocked them (`src/linter/rules/regex.rs`: reads
+  the `r"..."` — `r` prefix, no flag suffix, no interpolation — and classifies
+  its raw text as a fixed string or a single anchor). `fixed-regex`
+  (performance, syn, warning, **safe** fix) rewrites `occursin(r"abc", s)` to
+  `occursin("abc", s)` by deleting the `r` and nothing else: a fixed string
+  carries no `\` and no `$`, the two characters an ordinary literal reads
+  differently, and the literal keeps its own delimiters, so the string is
+  unchanged. `string-boundary` (readability, syn, warning) rewrites
+  `occursin(r"^abc", s)` to `startswith(s, "abc")` — **safe**, since `^` is a
+  start-of-subject test — and `occursin(r"abc$", s)` to `endswith(s, "abc")`
+  **unsafely**, because PCRE's `$` also matches before a final newline
+  (`occursin(r"abc$", "abc\n")` is `true`, `endswith("abc\n", "abc")` is not).
+  Both open with `resolves_to_base` on `occursin`; the boundary fix gates the
+  name it splices in separately.
+  - Scope kept to `occursin`'s two-argument form, as the entry framed it. The
+    obvious follow-up is the other fixed-pattern consumers — `contains(s,
+    r"abc")` (the flipped argument order), `replace`, `split`,
+    `startswith`/`endswith` — which the analyzer already covers and only
+    `fixed-regex`'s matcher would have to grow for.
+
 Deferred, and why:
 
-- [ ] `occursin`-with-a-regex-literal rules: `occursin(r"abc", s)` ->
-  `occursin("abc", s)` when the pattern has no metacharacter, and
-  `occursin(r"^abc", s)` -> `startswith(s, "abc")`. Blocked on a Julia
-  regex-literal analyzer (arity has `src/linter/regex.rs` for exactly this).
-  (arity `fixed-regex`, `string-boundary`)
 - [ ] `unnecessary-nesting` (readability): `if a; if b; body; end; end` -> `if a
   && b; body; end`, when neither `if` has an `else`. Low risk, low urgency.
   (arity `unnecessary-nesting`)

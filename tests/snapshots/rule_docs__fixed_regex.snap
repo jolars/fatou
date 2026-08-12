@@ -1,0 +1,36 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `fixed-regex`
+
+Flag `occursin(r"abc", s)`, whose regex literal carries no metacharacter and so matches one fixed substring. `occursin("abc", s)` asks the same question of the same values and answers it with a substring search instead of the regex engine.
+
+The pattern must be a plain `r"..."` — no flag suffix, since a flag changes what the pattern means, and no interpolation — and it must be non-empty and free of every PCRE metacharacter and backslash escape. `occursin` must be confirmed to be Base's, so a local shadow, a qualified `Base.occursin`, or a file whose imports cannot be resolved reports nothing.
+
+The safe fix deletes the `r` prefix and nothing else. A pattern with no backslash and no `$` reads identically as an ordinary string literal, and the literal keeps its own delimiters, so the string it spells is unchanged.
+
+The pattern is a plain substring, matched through PCRE:
+
+```julia
+if occursin(r"error", line)
+    push!(failures, line)
+end
+```
+
+```text
+warning: fixed-regex
+ --> example.jl:1:13
+  |
+1 | if occursin(r"error", line)
+  |             ^^^^^^^^ search for the substring `"error"` instead of matching the regex `r"error"`, whose pattern has no metacharacter
+  = help: Drop the `r` prefix and match the substring (safe fix)
+```
+
+After applying the fix:
+
+```julia
+if occursin("error", line)
+    push!(failures, line)
+end
+```
