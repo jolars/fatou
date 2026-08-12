@@ -56,10 +56,20 @@ install (dropping gensym names containing `#`); never hand-edit.
 
 ## Declared dependencies
 
-`HarvestedLibrary::declared_deps` is read from each workspace package's
-`Project.toml` `[deps]` and is deliberately **not derived from the harvest**: a
-project that was never instantiated, or one whose Julia install fatou could not
-locate, still declares its dependencies. That is what `unresolved-import` reads.
+A workspace package's declared dependencies are its `Project.toml` `[deps]`
+names, and are deliberately **not derived from the harvest**: a project that was
+never instantiated, or one whose Julia install fatou could not locate, still
+declares its dependencies. That is what `unresolved-import` reads.
+
+`ProjectFile::declared_dep_names` is the **one** definition, unfiltered by
+whether the paired UUID parses. Two consumers share it, and they must not
+drift: the CLI through `Environment::declared_deps` →
+`HarvestedLibrary::declared_deps` (no salsa db, no buffer to be stale against),
+and the language server through the `project_declared_deps` salsa query, keyed
+on the project file's own `SourceFile` input (`HarvestedLibrary::project_files`
+supplies the paths). The server's route is what makes an **unsaved** `[deps]`
+edit count — the `Project.toml` buffer is authoritative there, while everything
+needing a resolved `Environment` stays on the harvester's save cadence.
 
 ## Testing
 
