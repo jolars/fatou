@@ -14,9 +14,16 @@
 //! against `lsp_types` in `crate::lsp::graph_diagnostics` and then had to be
 //! written a *second* time for the CLI in `crate::linter::include_graph`.
 //!
-//! Two entry points, because a syntax failure is precisely the case where there
-//! is no [`Environment`] to check: [`syntax_findings`] reports on one file's
-//! text, and [`semantic_findings`] reports on a resolved environment.
+//! Two entry points for the checks, because a syntax failure is precisely the
+//! case where there is no [`Environment`] to check: [`syntax_findings`] reports
+//! on one file's text, and [`semantic_findings`] reports on a resolved
+//! environment.
+//!
+//! [`dep_entries`] is the same knowledge read the other way: not "what is wrong
+//! with this file" but "what does it name, and where". It is what
+//! go-to-definition, hover, and document links over an open `Project.toml`
+//! resolve against, and it lives here for the same reason the checks do — one
+//! spanned schema, one place that turns a `Spanned` into a [`TextRange`].
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -26,7 +33,7 @@ use toml::Spanned;
 
 use crate::environment::{
     Environment, EnvironmentError, PackageKind, ProjectFile, Uuid, is_project_file,
-    parse_project_text,
+    parse_project_str, parse_project_text,
 };
 use crate::linter::Severity;
 
@@ -292,6 +299,79 @@ fn manifest_findings(env: &Environment, project: &ProjectFile) -> Vec<ProjectFin
     findings
 }
 
+// --- Dependency entries ----------------------------------------------------
+
+/// Which of a project file's dependency-naming tables an entry came from.
+///
+/// All three name a real package, which is why all three are here and
+/// `[compat]` is not: a compat key names a dependency *or* `julia`, and
+/// nothing that navigates by package name can resolve the latter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DepTable {
+    Deps,
+    WeakDeps,
+    Extras,
+}
+
+/// One `Name = "uuid"` entry of a dependency-naming table, with the byte range
+/// of its key and of its value.
+///
+/// The navigation counterpart of a [`ProjectFinding`]: same schema, same
+/// spans, same deliberate independence from `lsp_types`. Go-to-definition,
+/// hover, and document links all anchor on
+/// [`name_range`](Self::name_range) — the name is what resolves to a package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DepEntry {
+    pub name: String,
+    pub table: DepTable,
+    pub name_range: TextRange,
+    /// The value's span, quotes included, exactly as `uuid-mismatch` reports it.
+    pub uuid_range: TextRange,
+}
+
+/// Every dependency entry in a project file's text, in source order.
+///
+/// Empty when the text does not parse: half-typed TOML must not produce a
+/// bogus jump, and the file's own `toml-syntax` finding already reports the
+/// state it is in.
+pub fn dep_entries(text: &str) -> Vec<DepEntry> {
+    let Some(project) = parse_project_str(text) else {
+        return Vec::new();
+    };
+    let tables = [
+        (DepTable::Deps, &project.deps),
+        (DepTable::WeakDeps, &project.weakdeps),
+        (DepTable::Extras, &project.extras),
+    ];
+    let mut entries: Vec<DepEntry> = tables
+        .into_iter()
+        .flat_map(|(table, map)| {
+            map.iter().map(move |(name, uuid)| DepEntry {
+                name: name.as_ref().clone(),
+                table,
+                name_range: span(name),
+                uuid_range: span(uuid),
+            })
+        })
+        .collect();
+    // The schema's maps are name-keyed, so their iteration order is alphabetical
+    // within a table; source order is what a caller enumerating a document wants.
+    entries.sort_by_key(|entry| entry.name_range.start());
+    entries
+}
+
+/// The dependency entry whose *name* covers `offset`, if any.
+///
+/// Both ends of the name are included: an LSP position sits between characters,
+/// so a cursor just past the last one is still on the name. Two entries can
+/// never share an offset — a `= "uuid"` always separates them.
+pub fn dep_at(text: &str, offset: usize) -> Option<DepEntry> {
+    let offset = TextSize::new(u32::try_from(offset).ok()?);
+    dep_entries(text)
+        .into_iter()
+        .find(|entry| entry.name_range.contains_inclusive(offset))
+}
+
 /// A spanned value's byte range.
 fn span<T>(spanned: &Spanned<T>) -> TextRange {
     let span = spanned.span();
@@ -365,6 +445,106 @@ mod tests {
         assert!(syntax_findings(manifest, "name = 42\n").is_empty());
 
         assert_eq!(syntax_findings(manifest, "[[deps\n").len(), 1);
+    }
+
+    // --- Dependency entries -------------------------------------------------
+
+    const TABLES: &str = "\
+name = \"Demo\"
+
+[deps]
+AbstractTrees = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
+JSON = \"682c06a0-de6a-54ab-a142-c8b1cf79cde6\"
+
+[compat]
+julia = \"1.10\"
+
+[weakdeps]
+Plots = \"91a5bcdd-55d7-5caf-9e0b-520d859cae80\"
+
+[extras]
+Test = \"8dfed614-e22c-5e08-85e1-65c5234f0b40\"
+";
+
+    /// The byte offset of `needle`'s first occurrence, so a test names a
+    /// position by what it points at rather than by a hand-counted number.
+    fn at(text: &str, needle: &str) -> usize {
+        text.find(needle).expect("needle in text")
+    }
+
+    /// All three tables name real packages, and all three answer. `[compat]`
+    /// does not: its keys name a dependency *or* `julia`, and nothing here
+    /// resolves the latter.
+    #[test]
+    fn dep_entries_cover_the_three_dependency_tables() {
+        let entries: Vec<(String, DepTable)> = dep_entries(TABLES)
+            .into_iter()
+            .map(|entry| (entry.name, entry.table))
+            .collect();
+        assert_eq!(
+            entries,
+            vec![
+                ("AbstractTrees".to_string(), DepTable::Deps),
+                ("JSON".to_string(), DepTable::Deps),
+                ("Plots".to_string(), DepTable::WeakDeps),
+                ("Test".to_string(), DepTable::Extras),
+            ],
+            "in source order, and no `[compat]` key"
+        );
+    }
+
+    #[test]
+    fn a_dep_entry_spans_its_name_and_its_uuid() {
+        let entries = dep_entries(TABLES);
+        let trees = entries.first().expect("the first entry");
+
+        assert_eq!(&TABLES[trees.name_range], "AbstractTrees");
+        // The value's span covers the quotes, as `uuid-mismatch` already relies on.
+        assert_eq!(
+            &TABLES[trees.uuid_range],
+            "\"1520ce14-60c1-5f80-bbc7-55ef81b5835c\""
+        );
+    }
+
+    /// Half-typed TOML must not produce a bogus jump. The file's own
+    /// `toml-syntax` finding is what reports the state it is in.
+    #[test]
+    fn a_project_file_that_does_not_parse_has_no_dep_entries() {
+        assert!(dep_entries("[deps\nAbstractTrees = \"x\"\n").is_empty());
+        assert_eq!(dep_at("[deps\nAbstractTrees = \"x\"\n", 8), None);
+    }
+
+    /// The name is the anchor every feature uses, so the hit test is the name
+    /// range and nothing else — both ends included, since an LSP position sits
+    /// *between* characters and a cursor just past the last one is still on it.
+    #[test]
+    fn dep_at_matches_the_name_and_nothing_else() {
+        let start = at(TABLES, "AbstractTrees");
+        let end = start + "AbstractTrees".len();
+
+        assert_eq!(
+            dep_at(TABLES, start).map(|d| d.name),
+            Some("AbstractTrees".into())
+        );
+        assert_eq!(
+            dep_at(TABLES, end - 1).map(|d| d.name),
+            Some("AbstractTrees".into())
+        );
+        assert_eq!(
+            dep_at(TABLES, end).map(|d| d.name),
+            Some("AbstractTrees".into())
+        );
+
+        // One past the name is the ` = `, and the UUID is a value, not a name.
+        assert_eq!(dep_at(TABLES, end + 1), None);
+        assert_eq!(dep_at(TABLES, at(TABLES, "1520ce14")), None);
+        // A `[compat]` key names no entry.
+        assert_eq!(dep_at(TABLES, at(TABLES, "julia = ")), None);
+    }
+
+    #[test]
+    fn a_project_file_with_no_dependencies_has_no_entries() {
+        assert!(dep_entries("name = \"Demo\"\n\n[deps]\n").is_empty());
     }
 
     // --- The semantic checks ------------------------------------------------
