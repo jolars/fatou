@@ -251,6 +251,8 @@ function buildMiddleware(): Middleware {
       lf(() => next(document, positions, token)),
     provideDocumentLinks: (document, token, next) =>
       lf(() => next(document, token)),
+    provideInlayHints: (document, viewPort, token, next) =>
+      lf(() => next(document, viewPort, token)),
   };
 }
 
