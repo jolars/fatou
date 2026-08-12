@@ -237,7 +237,18 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        // An environment file is TOML: there is nothing here to lint, and a
+        // Julia parse of it would report nonsense. Its own diagnostics reach
+        // the client by push (see `Outbound::EnvironmentDiagnostics`), which
+        // is the only route open to them — a pull report is served only for an
+        // open document, and these attach to files that need not be open.
+        let is_env = uri::to_path(&uri).is_some_and(|path| is_environment_file(&path));
+        let Some(text) = self
+            .documents
+            .get(&uri)
+            .filter(|_| !is_env)
+            .map(|d| Arc::clone(&d.text))
+        else {
             // The spec wants a report, not null; an unknown document has none.
             let empty = serde_json::to_value(super::read_jobs::full_report(Vec::new()))
                 .expect("empty diagnostic report serializes");
@@ -1214,7 +1225,19 @@ impl GlobalState {
     /// means the transform is unknown — a fresh `didOpen`, a whole-buffer
     /// replacement, or a re-analysis of unchanged text under new rules — and
     /// the reparse falls back to diffing the two texts.
+    ///
+    /// An environment file (`Project.toml` and friends) is TOML, not Julia:
+    /// parsing it here would publish nonsense parse errors that
+    /// [`publish_merged`](Self::publish_merged) would union with the real
+    /// environment diagnostics on the same URI. The buffer stays tracked, so
+    /// `didChange` and `didClose` behave as they do for any document; it is
+    /// only never analyzed. Guarded here rather than at the `didOpen` call
+    /// site so `didChange` and [`on_config_changed`](Self::on_config_changed)
+    /// are covered by the same return.
     fn send_analysis(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
+        if uri::to_path(&uri).is_some_and(|path| is_environment_file(&path)) {
+            return;
+        }
         let rules = Arc::clone(&self.config_for(&uri).rules);
         let Some(doc) = self.documents.get(&uri) else {
             return;
@@ -1344,6 +1367,7 @@ mod tests {
     /// read pool, the harvester, and the disk-sync worker.
     struct TestChannels {
         client: Receiver<Message>,
+        analysis: Receiver<AnalysisRequest>,
         read: Receiver<ReadJob>,
         harvest: Receiver<HarvestSignal>,
         sync: Receiver<PathBuf>,
@@ -1353,7 +1377,7 @@ mod tests {
     fn test_state_with_channels() -> (GlobalState, TestChannels) {
         let (client_tx, client_rx) = unbounded();
         let (out_tx, _out_rx) = unbounded();
-        let (analysis_tx, _analysis_rx) = unbounded();
+        let (analysis_tx, analysis_rx) = unbounded();
         let (read_tx, read_rx) = unbounded();
         let (harvest_tx, harvest_rx) = unbounded();
         let (sync_tx, sync_rx) = unbounded();
@@ -1375,6 +1399,7 @@ mod tests {
             state,
             TestChannels {
                 client: client_rx,
+                analysis: analysis_rx,
                 read: read_rx,
                 harvest: harvest_rx,
                 sync: sync_rx,
@@ -1697,5 +1722,90 @@ mod tests {
             path_for(&uri("file:///work/a.jl"))
         );
         assert_ne!(path_for(&first), path_for(&uri("file:///work/a.jl")));
+    }
+
+    /// Drive a `didOpen` through the notification path, as a client would.
+    fn did_open(state: &mut GlobalState, uri: &Uri, text: &str) {
+        let note = Notification::new(
+            DidOpenTextDocument::METHOD.to_string(),
+            DidOpenTextDocumentParams {
+                text_document: lsp_types::TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            },
+        );
+        state.on_notification(note);
+    }
+
+    /// An environment file is TOML, so it must never reach the Julia analysis.
+    /// The document is still tracked — `didChange`/`didClose` stay consistent —
+    /// but no `AnalysisRequest` is dispatched for it.
+    #[test]
+    fn opening_an_environment_file_dispatches_no_analysis() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+
+        did_open(&mut state, &project, "[deps]\n");
+
+        assert!(
+            state.documents.contains_key(&project),
+            "the buffer is still tracked"
+        );
+        assert!(
+            channels.analysis.try_recv().is_err(),
+            "a TOML buffer must not be parsed as Julia"
+        );
+    }
+
+    /// The guard is keyed on the file name, not on being TOML at all: a Julia
+    /// source in the same directory still analyzes.
+    #[test]
+    fn opening_a_julia_file_still_dispatches_analysis() {
+        let (mut state, channels) = test_state_with_channels();
+        let source = uri("file:///work/src/a.jl");
+
+        did_open(&mut state, &source, "x = 1\n");
+
+        assert!(
+            channels.analysis.try_recv().is_ok(),
+            "a Julia buffer analyzes as before"
+        );
+    }
+
+    /// The pull twin of the guard: a client that opens an environment file and
+    /// then pulls gets an empty report rather than a Julia parse of its TOML.
+    #[test]
+    fn pulling_diagnostics_for_an_environment_file_reports_nothing() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+        open(&mut state, &project, 1);
+
+        let req = Request::new(
+            RequestId::from(1),
+            DocumentDiagnosticRequest::METHOD.to_string(),
+            DocumentDiagnosticParams {
+                text_document: lsp_types::TextDocumentIdentifier {
+                    uri: project.clone(),
+                },
+                identifier: None,
+                previous_result_id: None,
+                partial_result_params: Default::default(),
+                work_done_progress_params: Default::default(),
+            },
+        );
+        state.on_request(req);
+
+        assert_eq!(
+            next_error_code(&channels.client),
+            None,
+            "an empty report, not an error"
+        );
+        assert!(
+            channels.read.try_recv().is_err(),
+            "no read job is dispatched for a TOML buffer"
+        );
     }
 }
