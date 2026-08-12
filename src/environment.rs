@@ -719,6 +719,14 @@ pub(crate) fn parse_project_text(path: &Path, text: &str) -> Result<ProjectFile,
     parse_toml(path, text)
 }
 
+/// [`parse_project_text`] for a caller with no file name to name: a consumer
+/// that discards the failure rather than reporting it. Kept apart so such a
+/// caller does not have to invent a placeholder path that the error would then
+/// carry.
+pub(crate) fn parse_project_str(text: &str) -> Option<ProjectFile> {
+    toml::from_str(text).ok()
+}
+
 // --- Manifest.toml ---------------------------------------------------------
 
 fn parse_manifest(
