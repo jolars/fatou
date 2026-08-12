@@ -70,10 +70,9 @@ impl ProjectLibrary for Analysis {
 fn package_entry<P: PackageSource>(packages: &P, name: &str) -> Option<(PathBuf, Span)> {
     let root = packages.package_root(name)?;
     let package = packages.package(name)?;
-    // Normalized, because a `dev`'d dependency's root is the manifest's `path`
-    // joined to the project directory and keeps its `../` spelling. A URI
-    // carrying one names the right file under a different string, which is
-    // exactly the identity the client keys its open documents on.
+    // Normalized here rather than left to `site_locations`, which does the same
+    // for the same reason: document links build their URI straight from this
+    // path, and the two features must name a file identically.
     let entry = normalize_path(&root.join(&package.root.loc.file));
     Some((entry, package.root.loc.range))
 }

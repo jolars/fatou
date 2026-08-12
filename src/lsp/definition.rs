@@ -34,7 +34,7 @@ use lsp_types::{Location, Position, Range, Uri};
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
 
-use crate::incremental::Analysis;
+use crate::incremental::{Analysis, normalize_path};
 use crate::index::model::{DefLocation, Span};
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::parse;
@@ -491,10 +491,20 @@ fn library_locations<P: PackageSource>(
 /// Materialize on-disk `(path, span)` sites into [`Location`]s, reading each
 /// distinct file once (methods of one group can span the include closure).
 /// Unreadable files are skipped; the result is ordered by path, then offset.
+///
+/// Paths are normalized **first**, before the sort: a `dev`'d dependency's
+/// source root is the manifest's `path` joined to the project directory, so it
+/// keeps that entry's `../` spelling, and the filesystem resolves it while a
+/// URI does not — the client compares URIs textually and would open a second
+/// tab onto a file it already has. Normalizing up front also makes two
+/// spellings of one file collapse into a single chunk, so it is read once.
 pub(super) fn site_locations(
     mut sites: Vec<(PathBuf, Span)>,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
+    for (path, _) in &mut sites {
+        *path = normalize_path(path);
+    }
     sites.sort_by(|a, b| (&a.0, a.1.start).cmp(&(&b.0, b.1.start)));
     sites.dedup();
     let mut out = Vec::new();
@@ -704,6 +714,34 @@ mod tests {
         // The `greet` definition on line 2, column 0 of the depot source.
         assert_eq!(loc.range.start, Position::new(2, 0));
         assert_eq!(loc.range.end, Position::new(2, 5));
+    }
+
+    /// A `dev`'d dependency's source root is the manifest's `path` joined to
+    /// the project directory, so it keeps that entry's `../` spelling. The jump
+    /// must still name the file under the string the client already knows it
+    /// by: a URI is compared textually, and one carrying a `..` opens a second
+    /// editor tab onto the same file.
+    #[test]
+    fn a_root_spelled_with_dot_dot_names_the_real_file() {
+        let tmp = TempDir::new();
+        let entry = tmp.path.join("src").join("Greetings.jl");
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(
+            &entry,
+            "module Greetings\nexport greet\ngreet(name) = name\nend\n",
+        )
+        .unwrap();
+
+        let pkg = harvest_package_named(&tmp.path, "Greetings");
+        let mut lib = TestLib::default();
+        lib.packages.insert("Greetings".to_string(), Arc::new(pkg));
+        // The same root, reached the way a path-pinned manifest entry spells it.
+        lib.roots
+            .insert("Greetings".to_string(), tmp.path.join("src").join(".."));
+
+        let loc = single_def_at("using Greetings\ngreet|(1)", &lib).unwrap();
+        assert_eq!(to_path(&loc.uri), Some(entry));
+        assert_eq!(loc.range.start, Position::new(2, 0));
     }
 
     #[test]

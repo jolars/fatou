@@ -480,11 +480,11 @@ tenet the linter is purely semantic over Julia.
     keyed by what the *manifest pinned*, not by what the harvest indexed — a
     package whose source was never found has an entry in one and not the other,
     and "installed, 0.4.5, source not found" is what a reader wants told.
-  - Landed alongside: the entry target is `normalize_path`ed, since a `dev`'d
-    dependency's root keeps the manifest's `../` spelling. `definition.rs`'s
-    Julia jump into a `dev`'d package has the same seam and is *not* fixed —
-    `site_locations` does not normalize, and changing that is an unrelated
-    feature's behavior.
+  - Landed alongside: `site_locations` now normalizes, which fixes the Julia
+    jump into a `dev`'d package too. Such a package's root is the manifest's
+    `path` joined to the project directory, so it keeps that entry's `../`
+    spelling — the filesystem resolves it and a URI does not, and a client
+    comparing URIs textually opens a second tab onto a file it already has.
 
 - [ ] **Stage 4b: the rest**, deferred with stage 4a's route already in place.
   - Document links on manifest `path` entries. The costly half of that bullet:
