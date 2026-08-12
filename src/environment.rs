@@ -32,6 +32,19 @@ impl Uuid {
     }
 }
 
+impl std::fmt::Display for Uuid {
+    /// The canonical hyphenated `8-4-4-4-12` form.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, byte) in self.0.iter().enumerate() {
+            if matches!(i, 4 | 6 | 8 | 10) {
+                f.write_str("-")?;
+            }
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
+    }
+}
+
 impl std::str::FromStr for Uuid {
     type Err = ();
 
@@ -626,6 +639,18 @@ pub(crate) struct ProjectFile {
     pub deps: SpannedMap,
     #[serde(default)]
     pub compat: SpannedMap,
+    /// Test-only and other non-runtime dependencies, paired with `[targets]`.
+    /// A `[compat]` entry may legitimately name one.
+    #[serde(default)]
+    pub extras: SpannedMap,
+    /// Extension triggers. Likewise nameable from `[compat]`.
+    #[serde(default)]
+    pub weakdeps: SpannedMap,
+    /// `[sources]`: the values are inline tables (`{url = ...}`/`{path = ...}`),
+    /// so only the keys are typed. Present so a consumer can tell a
+    /// registry-resolved dependency from one pinned to a URL or a path.
+    #[serde(default)]
+    pub sources: BTreeMap<Spanned<String>, toml::Value>,
 }
 
 impl ProjectFile {
