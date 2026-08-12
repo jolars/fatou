@@ -71,6 +71,18 @@ pub(crate) enum Outbound {
     /// file's parse diagnostics before publishing (a single `publishDiagnostics`
     /// replaces *all* diagnostics for a URI).
     ProjectDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
+    /// Diagnostics on an *environment file* itself (`Project.toml`,
+    /// `Manifest.toml`): TOML syntax failures and the checks over a resolved
+    /// environment. Produced by the workspace harvester rather than the
+    /// analysis thread — the resolved `Environment`, and the resolve failure,
+    /// exist only there.
+    ///
+    /// Version-free like [`ProjectDiagnostics`](Self::ProjectDiagnostics), and
+    /// an empty list clears. Unlike it, these have **no pull twin**: a pull
+    /// report is served only for an open document, and an open environment
+    /// file has no Julia analysis to carry them. So they always push, and a
+    /// pull client neither suppresses nor re-supplies them.
+    EnvironmentDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
     /// A re-harvest changed the include graph: a pull-model client should
     /// re-pull its open documents (`workspace/diagnostic/refresh`). Sent once
     /// per harvest; the main loop forwards it only when the client supports
@@ -146,6 +158,14 @@ pub(crate) struct GlobalState {
     /// update can republish the union. Set/cleared by the analysis thread on each
     /// re-harvest.
     graph_diags: HashMap<Uri, Vec<Diagnostic>>,
+    /// The latest environment-file diagnostics per file, kept so any other
+    /// update republishes the union. Set/cleared by the workspace harvester on
+    /// each re-resolve.
+    ///
+    /// Deliberately *not* dropped when a document closes (they describe the
+    /// file on disk, open or not) nor cleared for a pull client on `didOpen`,
+    /// as `graph_diags` is: there is no pull report that would re-supply them.
+    env_diags: HashMap<Uri, Vec<Diagnostic>>,
     /// Per-document configuration: discovered `fatou.toml` shadowing
     /// editor-pushed settings (see [`ConfigStore`]). Owned by the main loop
     /// alone; resolved config travels with each dispatched request.
@@ -171,6 +191,7 @@ impl GlobalState {
             documents: HashMap::new(),
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
+            env_diags: HashMap::new(),
             sender,
             out_tx,
             inflight_reads: HashMap::new(),
@@ -1149,6 +1170,19 @@ impl GlobalState {
                 let version = self.documents.get(&uri).map(|d| d.version);
                 self.publish_merged(uri, version);
             }
+            Outbound::EnvironmentDiagnostics { uri, diags } => {
+                if diags.is_empty() {
+                    self.env_diags.remove(&uri);
+                } else {
+                    self.env_diags.insert(uri.clone(), diags);
+                }
+                // No pull suppression, unlike the include-graph arm above: a
+                // pull report is served only for an open document, and an open
+                // environment file has no Julia analysis to carry these, so the
+                // push is their only route to any client.
+                let version = self.documents.get(&uri).map(|d| d.version);
+                self.publish_merged(uri, version);
+            }
             Outbound::DiagnosticsRefresh => self.send_diagnostic_refresh(),
             Outbound::ReadReply { message } => self.on_read_reply(message),
         }
@@ -1206,13 +1240,17 @@ impl GlobalState {
         }
     }
 
-    /// Publish the union of `uri`'s parse and include-graph diagnostics — a
-    /// single `publishDiagnostics` replaces *all* diagnostics for a URI, so the
-    /// two sources must be sent together or each would clobber the other.
+    /// Publish the union of `uri`'s parse, include-graph, and environment-file
+    /// diagnostics — a single `publishDiagnostics` replaces *all* diagnostics
+    /// for a URI, so every source must be sent together or each would clobber
+    /// the others.
     fn publish_merged(&self, uri: Uri, version: Option<i32>) {
         let mut diagnostics = self.parse_diags.get(&uri).cloned().unwrap_or_default();
-        if let Some(graph) = self.graph_diags.get(&uri) {
-            diagnostics.extend(graph.iter().cloned());
+        for source in [self.graph_diags.get(&uri), self.env_diags.get(&uri)]
+            .into_iter()
+            .flatten()
+        {
+            diagnostics.extend(source.iter().cloned());
         }
         self.publish(uri, diagnostics, version);
     }
@@ -1772,6 +1810,98 @@ mod tests {
         assert!(
             channels.analysis.try_recv().is_ok(),
             "a Julia buffer analyzes as before"
+        );
+    }
+
+    /// The diagnostics published for `uri`, from the next `publishDiagnostics`
+    /// notification on the wire.
+    fn next_publish(rx: &Receiver<Message>) -> (Vec<Diagnostic>, Option<i32>) {
+        match rx.try_recv().expect("a publishDiagnostics notification") {
+            Message::Notification(note) => {
+                assert_eq!(note.method, PublishDiagnostics::METHOD);
+                let params: PublishDiagnosticsParams =
+                    serde_json::from_value(note.params).expect("publish params");
+                (params.diagnostics, params.version)
+            }
+            other => panic!("expected a notification, got {other:?}"),
+        }
+    }
+
+    fn diag(message: &str) -> Diagnostic {
+        Diagnostic {
+            message: message.to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// A `publishDiagnostics` replaces *all* diagnostics for a URI, so the
+    /// three sources — parse, include-graph, environment file — must travel
+    /// together. Each arriving alone must republish the union rather than the
+    /// slice that happened to change.
+    #[test]
+    fn every_diagnostic_source_republishes_the_union() {
+        let (mut state, channels) = test_state_with_channels();
+        let doc = uri("file:///work/Project.toml");
+
+        // A closed file: environment diagnostics attach to it regardless.
+        state.on_outbound(Outbound::EnvironmentDiagnostics {
+            uri: doc.clone(),
+            diags: vec![diag("no [compat] bound on julia")],
+        });
+        let (diags, version) = next_publish(&channels.client);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(version, None, "a closed file has no version");
+
+        // The same URI opened and parsed: both sources publish together.
+        open(&mut state, &doc, 7);
+        state.on_outbound(Outbound::Diagnostics {
+            uri: doc.clone(),
+            version: 7,
+            diags: vec![diag("parse error")],
+        });
+        let (diags, version) = next_publish(&channels.client);
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["parse error", "no [compat] bound on julia"],
+        );
+        assert_eq!(version, Some(7));
+
+        // Clearing one source leaves the other standing.
+        state.on_outbound(Outbound::EnvironmentDiagnostics {
+            uri: doc.clone(),
+            diags: Vec::new(),
+        });
+        let (diags, _) = next_publish(&channels.client);
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["parse error"],
+        );
+    }
+
+    /// Environment diagnostics describe the file on disk, so closing a buffer
+    /// drops its parse diagnostics and keeps theirs.
+    #[test]
+    fn environment_diagnostics_survive_a_close() {
+        let (mut state, channels) = test_state_with_channels();
+        let doc = uri("file:///work/Project.toml");
+        open(&mut state, &doc, 1);
+        state.on_outbound(Outbound::EnvironmentDiagnostics {
+            uri: doc.clone(),
+            diags: vec![diag("no [compat] bound on julia")],
+        });
+        let _ = next_publish(&channels.client);
+
+        state.on_notification(Notification::new(
+            DidCloseTextDocument::METHOD.to_string(),
+            DidCloseTextDocumentParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri: doc.clone() },
+            },
+        ));
+
+        let (diags, _) = next_publish(&channels.client);
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["no [compat] bound on julia"],
         );
     }
 

@@ -52,6 +52,7 @@ mod config;
 mod cross_file;
 mod definition;
 mod document_link;
+mod environment_diagnostics;
 mod folding;
 mod format;
 mod graph_diagnostics;

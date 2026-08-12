@@ -1,6 +1,7 @@
 //! Server entry points: the initialize handshake, advertised capabilities, and
 //! the main event loop that wires the channels, pools, and threads together.
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -14,7 +15,7 @@ use lsp_types::{
     HoverProviderCapability, InitializeParams, OneOf, PositionEncodingKind, RenameOptions,
     SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
     ServerCapabilities, SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, Uri,
     WorkspaceFileOperationsServerCapabilities, WorkspaceFoldersServerCapabilities,
     WorkspaceServerCapabilities,
 };
@@ -29,6 +30,9 @@ use crate::index::{
 use crate::text::PositionEncoding;
 
 use super::analysis_thread::{AnalysisRequest, LibraryMessage, guard, spawn_analysis_thread};
+use super::environment_diagnostics::{
+    EnvironmentFindings, environment_diagnostics, resolve_failure_diagnostics,
+};
 use super::progress::HarvestProgress;
 use super::read_jobs::ReadJob;
 use super::semantic_tokens::legend;
@@ -340,7 +344,17 @@ fn main_loop(
     // touches the db, so progress stays off the `Outbound` path). A client
     // without work-done support gets a `None` sender and no progress at all.
     let progress_sender = work_done_progress.then(|| connection.sender.clone());
-    spawn_workspace_harvester(workspace_roots, library_tx, harvest_rx, progress_sender);
+    spawn_workspace_harvester(
+        workspace_roots,
+        library_tx,
+        harvest_rx,
+        progress_sender,
+        // Diagnostics on the environment files, unlike progress, need main-loop
+        // state: `publish_merged` unions them with whatever else holds the same
+        // URI, so they take the `Outbound` path rather than the direct one.
+        out_tx.clone(),
+        encoding,
+    );
 
     // The read pool serves latency-sensitive work (formatting, the analysis
     // read-phase). Its workers must outlive both `state` and the analysis
@@ -462,12 +476,18 @@ pub(crate) enum HarvestSignal {
 /// the machine's default environment would harvest all of Base for no benefit —
 /// notably in the in-memory server tests, which open no folder. Best-effort: an
 /// unresolved environment or harvest failure simply leaves the library empty
-/// (or without that folder's contribution).
+/// (or without that folder's contribution), and the failure is reported as a
+/// diagnostic on the file that caused it.
+///
+/// The root set is fixed for the session (`didChangeWorkspaceFolders` is not
+/// handled), so a folder never leaves and there is no per-folder teardown.
 fn spawn_workspace_harvester(
     workspace_roots: Vec<PathBuf>,
     library_tx: crossbeam_channel::Sender<LibraryMessage>,
     signal_rx: crossbeam_channel::Receiver<HarvestSignal>,
     progress_sender: Option<crossbeam_channel::Sender<Message>>,
+    out_tx: crossbeam_channel::Sender<Outbound>,
+    encoding: PositionEncoding,
 ) {
     if workspace_roots.is_empty() {
         return;
@@ -497,6 +517,11 @@ fn spawn_workspace_harvester(
             if cache.is_none() {
                 log::debug!("index cache disabled: no cache directory resolved");
             }
+            // The environment files that carried a diagnostic on the previous
+            // pass, so a fixed one can be cleared exactly once. Declared outside
+            // the loop: one pass in, one full replacement of the published set
+            // out.
+            let mut published_env_files: HashSet<Uri> = HashSet::new();
             'resolve: loop {
                 // Report the full pass (initial resolve, and every re-resolve a
                 // `continue 'resolve` restarts) as one begin/report/end cycle.
@@ -506,15 +531,33 @@ fn spawn_workspace_harvester(
                 // which wins over every folder's walk-up) collapse to one.
                 let mut envs = Vec::new();
                 let mut projects = std::collections::HashSet::new();
+                let mut findings = EnvironmentFindings::new();
                 for root in &workspace_roots {
                     let ctx = EnvContext::from_process(root.clone());
-                    let Ok(Some(env)) = crate::environment::resolve(&ctx) else {
-                        continue;
+                    let env = match crate::environment::resolve(&ctx) {
+                        Ok(Some(env)) => env,
+                        Ok(None) => continue,
+                        Err(err) => {
+                            // Best-effort is unchanged — this folder still
+                            // contributes nothing to the library. What is new is
+                            // that the user is told why, on the file at fault,
+                            // instead of the failure being swallowed. Two roots
+                            // that walk up to the same broken file name it once.
+                            let (path, diags) = resolve_failure_diagnostics(&err, encoding, |p| {
+                                std::fs::read_to_string(p).ok()
+                            });
+                            findings.entry(path).or_insert(diags);
+                            continue;
+                        }
                     };
                     if projects.insert(normalize_path(&env.project_file)) {
+                        findings.extend(environment_diagnostics(&env, encoding, |path| {
+                            std::fs::read_to_string(path).ok()
+                        }));
                         envs.push(env);
                     }
                 }
+                publish_environment_diagnostics(&out_tx, findings, &mut published_env_files);
                 // An empty resolve still sends: a deleted `Project.toml` must clear
                 // the previously harvested library (and the first send with nothing
                 // resolved is a cheap no-op harvest).
@@ -597,11 +640,101 @@ fn spawn_workspace_harvester(
     drop(spawned);
 }
 
+/// Send one [`Outbound::EnvironmentDiagnostics`] per file with findings, plus an
+/// empty one for every file that carried findings on the previous pass and has
+/// none now — the clear-on-fix half, mirroring the analysis thread's
+/// `published_graph_files`. `published` is replaced with this pass's set, so a
+/// file already cleared is not cleared again on every later re-resolve.
+///
+/// A dead channel is ignored rather than fatal: the harvester is detached, so
+/// after teardown the receiver is simply gone, and unlike a dead library
+/// channel it does not make the remaining harvest pointless.
+fn publish_environment_diagnostics(
+    out_tx: &crossbeam_channel::Sender<Outbound>,
+    findings: EnvironmentFindings,
+    published: &mut HashSet<Uri>,
+) {
+    let mut now = HashSet::new();
+    for (path, diags) in findings {
+        let Some(uri) = super::uri::from_path(&path) else {
+            continue;
+        };
+        now.insert(uri.clone());
+        let _ = out_tx.send(Outbound::EnvironmentDiagnostics { uri, diags });
+    }
+    for uri in published.difference(&now) {
+        let _ = out_tx.send(Outbound::EnvironmentDiagnostics {
+            uri: uri.clone(),
+            diags: Vec::new(),
+        });
+    }
+    *published = now;
+}
+
 #[cfg(test)]
 mod tests {
     use lsp_types::GeneralClientCapabilities;
 
     use super::*;
+
+    /// A file's findings, keyed for [`publish_environment_diagnostics`].
+    fn findings_for(path: &str) -> EnvironmentFindings {
+        let mut findings = EnvironmentFindings::new();
+        findings.insert(
+            PathBuf::from(path),
+            vec![lsp_types::Diagnostic {
+                message: "broken".to_string(),
+                ..Default::default()
+            }],
+        );
+        findings
+    }
+
+    /// The sends of one pass, as `(uri, is_empty)` pairs.
+    fn drain(rx: &crossbeam_channel::Receiver<Outbound>) -> Vec<(String, bool)> {
+        let mut seen = Vec::new();
+        while let Ok(outbound) = rx.try_recv() {
+            match outbound {
+                Outbound::EnvironmentDiagnostics { uri, diags } => {
+                    seen.push((uri.as_str().to_string(), diags.is_empty()));
+                }
+                other => panic!("unexpected outbound: {:?}", std::mem::discriminant(&other)),
+            }
+        }
+        seen
+    }
+
+    /// A fixed problem must clear exactly once. Re-clearing on every later
+    /// re-resolve would publish an empty diagnostic set per harvest forever,
+    /// which is the classic shape of this bug.
+    #[test]
+    fn environment_diagnostics_clear_once_when_fixed() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let mut published = HashSet::new();
+        let path = if cfg!(windows) {
+            r"C:\work\Project.toml"
+        } else {
+            "/work/Project.toml"
+        };
+
+        publish_environment_diagnostics(&tx, findings_for(path), &mut published);
+        let first = drain(&rx);
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert!(!first[0].1, "the finding publishes non-empty");
+        assert_eq!(published.len(), 1);
+
+        // Pass two: the problem is gone, so the file is cleared.
+        publish_environment_diagnostics(&tx, EnvironmentFindings::new(), &mut published);
+        let second = drain(&rx);
+        assert_eq!(second.len(), 1, "{second:?}");
+        assert!(second[0].1, "the clear publishes empty");
+        assert_eq!(second[0].0, first[0].0, "the same URI");
+        assert!(published.is_empty());
+
+        // Pass three: nothing left to clear.
+        publish_environment_diagnostics(&tx, EnvironmentFindings::new(), &mut published);
+        assert!(drain(&rx).is_empty(), "a cleared file is not cleared again");
+    }
 
     fn caps_offering(encodings: Option<Vec<PositionEncodingKind>>) -> ClientCapabilities {
         ClientCapabilities {
