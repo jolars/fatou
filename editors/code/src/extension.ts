@@ -287,6 +287,16 @@ async function startClient(
       { scheme: "file", language: "julia" },
       { scheme: "untitled", language: "julia" },
       { scheme: "file", pattern: "**/*.jl" },
+      // Julia's environment files, so an open one gets its own diagnostics.
+      // Matched by pattern alone, never by `language: "toml"`: that language
+      // id exists only if the user happens to have a TOML extension
+      // installed. The version-specific manifests match the server's
+      // `is_manifest_file` and its watcher globs.
+      {
+        scheme: "file",
+        pattern: "**/{Project,JuliaProject,Manifest,JuliaManifest}.toml",
+      },
+      { scheme: "file", pattern: "**/Manifest-v*.toml" },
     ],
     outputChannel,
     traceOutputChannel: outputChannel,
