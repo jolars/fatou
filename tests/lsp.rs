@@ -22,16 +22,16 @@ use lsp_types::{
     FileChangeType, FileEvent, FileRename, FoldingRange, FoldingRangeKind, FoldingRangeParams,
     FormattingOptions, GeneralClientCapabilities, GlobPattern, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, InitializeParams, Location,
-    PartialResultParams, Position, PositionEncodingKind, ProgressParams, ProgressParamsValue,
-    PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams, RegistrationParams,
-    RenameFilesParams, RenameParams, SelectionRange, SelectionRangeParams, SemanticTokens,
-    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams, SignatureHelp,
-    SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, TextEdit, TypeHierarchyItem,
-    TypeHierarchyPrepareParams, TypeHierarchySubtypesParams, TypeHierarchySupertypesParams, Uri,
-    VersionedTextDocumentIdentifier, WindowClientCapabilities, WorkDoneProgress,
-    WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit, WorkspaceFolder,
-    WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    NumberOrString, PartialResultParams, Position, PositionEncodingKind, ProgressParams,
+    ProgressParamsValue, PublishDiagnosticsParams, Range, ReferenceContext, ReferenceParams,
+    RegistrationParams, RenameFilesParams, RenameParams, SelectionRange, SelectionRangeParams,
+    SemanticTokens, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
+    SignatureHelp, SignatureHelpParams, SymbolKind, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, TextEdit,
+    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Uri, VersionedTextDocumentIdentifier, WindowClientCapabilities,
+    WorkDoneProgress, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit,
+    WorkspaceFolder, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -4804,6 +4804,18 @@ fn poll_publish_diagnostics(
     uri_suffix: &str,
     deadline: Duration,
 ) -> Vec<Diagnostic> {
+    poll_publish_where(client, uri_suffix, deadline, |diags| !diags.is_empty())
+}
+
+/// [`poll_publish_diagnostics`], but for any predicate over the published set —
+/// notably "empty", which is how a cleared file announces itself and which the
+/// non-empty default cannot express.
+fn poll_publish_where(
+    client: &Connection,
+    uri_suffix: &str,
+    deadline: Duration,
+    accept: impl Fn(&[Diagnostic]) -> bool,
+) -> Vec<Diagnostic> {
     let start = Instant::now();
     loop {
         let remaining = deadline
@@ -4813,7 +4825,7 @@ fn poll_publish_diagnostics(
         match client.receiver.recv_timeout(remaining) {
             Ok(Message::Notification(n)) if n.method == "textDocument/publishDiagnostics" => {
                 let params: PublishDiagnosticsParams = serde_json::from_value(n.params).unwrap();
-                if params.uri.as_str().ends_with(uri_suffix) && !params.diagnostics.is_empty() {
+                if params.uri.as_str().ends_with(uri_suffix) && accept(&params.diagnostics) {
                     return params.diagnostics;
                 }
             }
@@ -4884,6 +4896,98 @@ fn publishes_unresolved_include_diagnostic() {
         }))
         .unwrap();
     let _ = recv_response(&client, RequestId::from(300));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
+/// A `Project.toml` that does not parse reports on itself, and the report
+/// clears once the file is fixed. Guards the whole environment-diagnostics
+/// pipeline at the server level: the resolve failure the harvester used to
+/// swallow, `Outbound::EnvironmentDiagnostics`, the three-way merge in
+/// `publish_merged`, and the clear-on-fix set.
+///
+/// The file is never opened — these attach to a file on disk, and the push is
+/// their only route, since a pull report is served only for an open document.
+#[test]
+fn publishes_and_clears_project_file_syntax_diagnostics() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-badproject");
+    // `uuid` with no value: valid TOML up to the newline, then a syntax error.
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \n",
+    );
+    write_file(&pkg.path.join("src/MyPkg.jl"), "module MyPkg\nend\n");
+
+    let depot = TempDir::new("fatou-lsp-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    let root_uri = file_uri(&pkg.path);
+    initialize_with_root(&client, &root_uri);
+
+    let diags = poll_publish_diagnostics(&client, "Project.toml", Duration::from_secs(10));
+    let [diag] = &diags[..] else {
+        panic!("expected exactly one diagnostic, got {diags:?}");
+    };
+    assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(
+        diag.code,
+        Some(NumberOrString::String("toml-syntax".to_string()))
+    );
+    assert_eq!(diag.source.as_deref(), Some("fatou"));
+    // The `uuid = ` line, second in the file.
+    assert_eq!(diag.range.start.line, 1);
+
+    // Fixed on disk and announced as a watched change: the re-resolve succeeds,
+    // so the file is cleared — exactly once, which the unit test in `server.rs`
+    // pins separately.
+    write_file(
+        &pkg.path.join("Project.toml"),
+        "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+    );
+    did_change_watched_files(
+        &client,
+        vec![FileEvent::new(
+            file_uri(&pkg.path.join("Project.toml")),
+            FileChangeType::CHANGED,
+        )],
+    );
+
+    let cleared = poll_publish_where(
+        &client,
+        "Project.toml",
+        Duration::from_secs(10),
+        <[_]>::is_empty,
+    );
+    assert!(cleared.is_empty());
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(310),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(310));
     client
         .sender
         .send(Message::Notification(Notification {
