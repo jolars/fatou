@@ -1097,7 +1097,9 @@ warning: length-findall
 
 Flag `occursin(r"abc", s)`, whose regex literal carries no metacharacter and so matches one fixed substring. `occursin("abc", s)` asks the same question of the same values and answers it with a substring search instead of the regex engine.
 
-The pattern must be a plain `r"..."` — no flag suffix, since a flag changes what the pattern means, and no interpolation — and it must be non-empty and free of every PCRE metacharacter and backslash escape. `occursin` must be confirmed to be Base's, so a local shadow, a qualified `Base.occursin`, or a file whose imports cannot be resolved reports nothing.
+The needle is read wherever Base's spellings of this search put it: `occursin(r"abc", s)`, the flipped `contains(s, r"abc")`, and the curried `contains(r"abc")`, which fixes the needle. The curried `occursin(s)` fixes the *haystack* instead, so its argument is no pattern and is left alone.
+
+The pattern must be a plain `r"..."` — no flag suffix, since a flag changes what the pattern means, and no interpolation — and it must be non-empty and free of every PCRE metacharacter and backslash escape. The callee must be confirmed to be Base's, so a local shadow, a qualified `Base.occursin`, or a file whose imports cannot be resolved reports nothing.
 
 The safe fix deletes the `r` prefix and nothing else. A pattern with no backslash and no `$` reads identically as an ordinary string literal, and the literal keeps its own delimiters, so the string it spells is unchanged.
 
@@ -1124,6 +1126,27 @@ After applying the fix:
 if occursin("error", line)
     push!(failures, line)
 end
+```
+
+The same search written the other way round, curried:
+
+```julia
+failures = filter(contains(r"error"), lines)
+```
+
+```text
+warning: fixed-regex
+ --> example.jl:1:28
+  |
+1 | failures = filter(contains(r"error"), lines)
+  |                            ^^^^^^^^ search for the substring `"error"` instead of matching the regex `r"error"`, whose pattern has no metacharacter
+  = help: Drop the `r` prefix and match the substring (safe fix)
+```
+
+After applying the fix:
+
+```julia
+failures = filter(contains("error"), lines)
 ```
 
 ## `comparison-negation`
@@ -1294,7 +1317,7 @@ warning: redundant-boolean
 
 Flag `occursin(r"^abc", s)` and `occursin(r"abc$", s)`, boundary tests written as anchored regex searches. `startswith(s, "abc")` and `endswith(s, "abc")` name the boundary they test and need no match engine.
 
-The pattern must be a plain `r"..."` — no flag suffix, since `i` and `m` change what an anchor means — anchored at exactly one end with a non-empty, metacharacter-free remainder; `r"^abc$"` is an exact match rather than a boundary test. `occursin` must be confirmed to be Base's.
+The pattern must be a plain `r"..."` — no flag suffix, since `i` and `m` change what an anchor means — anchored at exactly one end with a non-empty, metacharacter-free remainder; `r"^abc$"` is an exact match rather than a boundary test. The callee must be confirmed to be Base's, and the needle is read wherever its spelling puts it: `occursin(r"^abc", s)`, the flipped `contains(s, r"^abc")`, and the curried `contains(r"^abc")`, which rewrites to the curried `startswith("abc")`.
 
 The `startswith` fix is safe: `^` matches at the start of the subject and nowhere else. The `endswith` fix needs `--unsafe-fixes`, because PCRE's `$` also matches before a final newline — `occursin(r"abc$", "abc\n")` is `true` where `endswith("abc\n", "abc")` is `false`. Either fix is withheld — the finding still stands — when the file's `startswith`/`endswith` is not Base's, or when a comment sits in the rewritten span outside the haystack and the pattern.
 
@@ -1336,6 +1359,27 @@ warning: string-boundary
 1 | sources = filter(f -> occursin(r"_test$", f), files)
   |                       ^^^^^^^^^^^^^^^^^^^^^^ test `endswith(f, "_test")` instead of matching the anchored regex `r"_test$"`
   = help: Test the suffix with `endswith`, which does not match before a trailing newline (unsafe fix, requires `--unsafe-fixes`)
+```
+
+A curried `contains` rewrites to a curried predicate:
+
+```julia
+sources = filter(contains(r"^src"), files)
+```
+
+```text
+warning: string-boundary
+ --> example.jl:1:18
+  |
+1 | sources = filter(contains(r"^src"), files)
+  |                  ^^^^^^^^^^^^^^^^^ test `startswith("src")` instead of matching the anchored regex `r"^src"`
+  = help: Test the prefix with `startswith` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+sources = filter(startswith("src"), files)
 ```
 
 ## `misnamed-suppression`

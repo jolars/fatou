@@ -5810,14 +5810,31 @@ fn fixed_regex_ignores_flags_and_an_empty_pattern() {
 }
 
 #[test]
+fn fixed_regex_flags_the_contains_forms() {
+    // `contains` takes the same two values the other way round.
+    assert_eq!(
+        findings("fixed-regex", "hit = contains(s, r\"abc\")\n"),
+        [
+            "search for the substring `\"abc\"` instead of matching the regex \
+             `r\"abc\"`, whose pattern has no metacharacter"
+        ]
+    );
+    // Its curried form fixes the *needle*, so its lone argument is a pattern.
+    let src = "hits = filter(contains(r\"abc\"), lines)\n";
+    let diag = only_finding("fixed-regex", &[], src);
+    assert_eq!(&src[diag.range], "r\"abc\"");
+    assert_eq!(&src[diag.fixes[0].start..diag.fixes[0].end], "r");
+}
+
+#[test]
 fn fixed_regex_ignores_other_shapes() {
     // Already a string needle.
     assert_eq!(count("fixed-regex", "hit = occursin(\"abc\", s)\n"), 0);
-    // The curried one-argument form fixes the *haystack*, not the needle.
+    // `occursin`'s curried form fixes the *haystack*, not the needle, so its
+    // argument is not a pattern.
     assert_eq!(count("fixed-regex", "p = occursin(r\"abc\")\n"), 0);
-    // Another regex consumer, and the flipped `contains`, are out of scope.
+    // Another regex consumer is out of scope.
     assert_eq!(count("fixed-regex", "m = match(r\"abc\", s)\n"), 0);
-    assert_eq!(count("fixed-regex", "hit = contains(s, r\"abc\")\n"), 0);
     // Anything but two plain positional arguments.
     assert_eq!(count("fixed-regex", "hit = occursin(r\"abc\", s, x)\n"), 0);
     assert_eq!(
@@ -5838,6 +5855,13 @@ fn fixed_regex_ignores_names_that_are_not_base() {
     );
     assert_eq!(
         count("fixed-regex", "hit = Base.occursin(r\"abc\", s)\n"),
+        0
+    );
+    assert_eq!(
+        count(
+            "fixed-regex",
+            "contains(a, b) = true\nhit = contains(s, r\"abc\")\n"
+        ),
         0
     );
 }
@@ -5909,6 +5933,49 @@ fn string_boundary_ignores_patterns_that_are_not_a_boundary_test() {
         count("string-boundary", "hit = occursin(r\"^abc\"m, s)\n"),
         0
     );
+}
+
+#[test]
+fn string_boundary_flags_the_contains_forms() {
+    let src = "hit = contains(s, r\"^abc\")\n";
+    assert_eq!(
+        findings("string-boundary", src),
+        [
+            "test `startswith(s, \"abc\")` instead of matching the anchored \
+             regex `r\"^abc\"`"
+        ]
+    );
+    let diag = only_finding("string-boundary", &[], src);
+    assert_eq!(diag.fixes[0].content, "startswith(s, \"abc\")");
+
+    // The curried form has no haystack, so it rewrites to the curried
+    // predicate.
+    let src = "src = filter(contains(r\"^abc\"), files)\n";
+    assert_eq!(
+        findings("string-boundary", src),
+        [
+            "test `startswith(\"abc\")` instead of matching the anchored regex \
+             `r\"^abc\"`"
+        ]
+    );
+    let diag = only_finding("string-boundary", &[], src);
+    assert_eq!(&src[diag.range], "contains(r\"^abc\")");
+    assert_eq!(diag.fixes[0].content, "startswith(\"abc\")");
+    assert_eq!(diag.fixes[0].applicability, Applicability::Safe);
+
+    // The suffix half stays unsafe whichever spelling reaches it.
+    let diag = only_finding("string-boundary", &[], "hit = contains(s, r\"abc$\")\n");
+    assert_eq!(diag.fixes[0].content, "endswith(s, \"abc\")");
+    assert_eq!(diag.fixes[0].applicability, Applicability::Unsafe);
+}
+
+#[test]
+fn string_boundary_withholds_the_contains_fix_over_a_comment() {
+    // `contains` writes the haystack first, so the discarded gap the rewrite
+    // must be clean of sits on the other side of it.
+    let src = "hit = contains(#= the line =# s, r\"^abc\")\n";
+    let diag = only_finding("string-boundary", &[], src);
+    assert!(diag.fixes.is_empty());
 }
 
 #[test]

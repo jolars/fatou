@@ -222,11 +222,14 @@ it. We are behind arity only on the CFG and on rule ergonomics.
   (`occursin(r"abc$", "abc\n")` is `true`, `endswith("abc\n", "abc")` is not).
   Both open with `resolves_to_base` on `occursin`; the boundary fix gates the
   name it splices in separately.
-  - Scope kept to `occursin`'s two-argument form, as the entry framed it. The
-    obvious follow-up is the other fixed-pattern consumers — `contains(s,
-    r"abc")` (the flipped argument order), `replace`, `split`,
-    `startswith`/`endswith` — which the analyzer already covers and only
-    `fixed-regex`'s matcher would have to grow for.
+  - Both read the needle wherever Base's spellings of the search put it, which
+    is `regex::PatternCall`'s whole job: `occursin(r"a", s)`, the flipped
+    `contains(s, r"a")`, and the curried `contains(r"a")` — but not the curried
+    `occursin(s)`, which fixes the *haystack*. `string-boundary` answers the
+    curried form with a curried predicate (`startswith("a")`). The remaining
+    follow-up is the other fixed-pattern consumers (`replace`, `split`,
+    `startswith`/`endswith` with a regex), which the analyzer already covers
+    and only the call matcher would have to grow for.
 
 Deferred, and why:
 

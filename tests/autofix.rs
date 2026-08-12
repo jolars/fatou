@@ -384,6 +384,34 @@ b = occursin(r\"\"\"x\"y\"\"\", s)
     assert!(outcome.remaining.is_empty());
 }
 
+/// Both rules read `contains`'s flipped argument order, and its curried form,
+/// as the same two questions.
+#[test]
+fn fixes_the_contains_forms() {
+    let src = "\
+a = contains(s, r\"abc\")
+b = filter(contains(r\"log\"), lines)
+";
+    let outcome = fix_source(None, src, &select("fixed-regex"), false);
+    insta::assert_snapshot!(outcome.output, @r#"
+    a = contains(s, "abc")
+    b = filter(contains("log"), lines)
+    "#);
+    assert_eq!(outcome.applied, 2);
+
+    let src = "\
+a = contains(s, r\"^abc\")
+b = filter(contains(r\"^log\"), lines)
+";
+    let outcome = fix_source(None, src, &select("string-boundary"), false);
+    insta::assert_snapshot!(outcome.output, @r#"
+    a = startswith(s, "abc")
+    b = filter(startswith("log"), lines)
+    "#);
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
 /// `string-boundary` rewrites the leading-anchor form by default — `^` is a
 /// start-of-subject test either way — and holds the trailing-anchor one back,
 /// since PCRE's `$` also matches before a final newline.

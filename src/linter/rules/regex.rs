@@ -1,5 +1,5 @@
-//! Regex-literal classification, for a rule that asks whether an `r"..."` is
-//! really a pattern at all.
+//! Regex literals: which call positions carry one, and whether it is really a
+//! pattern at all.
 //!
 //! A regex literal that carries no metacharacter matches one fixed substring,
 //! and one anchored at a single end tests a prefix or a suffix. Both are
@@ -10,6 +10,13 @@
 //! literal and judging its text therefore live together here rather than in
 //! each rule.
 //!
+//! [`PatternCall`] answers the other half, which is not about the literal but
+//! about Base's argument order: `occursin(needle, haystack)` and
+//! `contains(haystack, needle)` are the same search written the two ways
+//! round, and only one of their curried forms fixes the *needle*. Getting that
+//! backwards would make a rule rewrite the wrong argument, so both rules ask
+//! once here.
+//!
 //! The metacharacter set is PCRE's, which is what Julia's `Regex` compiles.
 //! Every character that could mean something other than itself is excluded, so
 //! a text this module calls fixed matches literally under any subject —
@@ -17,7 +24,65 @@
 //! flag) included, since a literal admitted here carries neither a class nor a
 //! flag.
 
-use crate::ast::StringLiteral;
+use crate::ast::{CallExpr, Expr, StringLiteral};
+use crate::linter::rules::matchers;
+use crate::syntax::SyntaxNode;
+
+/// A Base substring search whose needle is written as a plain regex literal,
+/// with the haystack it searches.
+///
+/// The three shapes are the same question: `occursin(r"a", s)`,
+/// `contains(s, r"a")`, and the curried `contains(r"a")`, which is
+/// `Base.Fix2(contains, r"a")` and so fixes the *needle*. The curried
+/// `occursin(s)` is deliberately not among them: it fixes the *haystack*, so
+/// its argument is not a pattern at all.
+///
+/// Matching the shape is half the job — the callee still has to be confirmed
+/// Base's with
+/// [`RuleContext::resolves_to_base`](super::RuleContext::resolves_to_base).
+pub struct PatternCall {
+    /// The whole call, for the namespace gate and for a rewrite's span.
+    pub call: CallExpr,
+    /// The needle's literal, whose prefix a fix may drop.
+    pub literal: StringLiteral,
+    /// The needle's raw pattern text (see [`regex_pattern`]).
+    pub pattern: String,
+    /// The searched string, or `None` for the curried form, which has none.
+    pub haystack: Option<Expr>,
+}
+
+impl PatternCall {
+    /// `node` as a search call carrying a plain regex literal, or `None`.
+    pub fn of(node: &SyntaxNode) -> Option<Self> {
+        // `occursin(needle, haystack)`, and `contains` the other way round.
+        if let Some((call, args)) = matchers::plain_call(node, "occursin", 2) {
+            return Self::build(call, &args, 0, Some(1));
+        }
+        if let Some((call, args)) = matchers::plain_call(node, "contains", 2) {
+            return Self::build(call, &args, 1, Some(0));
+        }
+        let (call, args) = matchers::plain_call(node, "contains", 1)?;
+        Self::build(call, &args, 0, None)
+    }
+
+    fn build(
+        call: CallExpr,
+        args: &[Expr],
+        needle: usize,
+        haystack: Option<usize>,
+    ) -> Option<Self> {
+        let Expr::StringLiteral(literal) = args.get(needle)? else {
+            return None;
+        };
+        let pattern = regex_pattern(literal)?;
+        Some(Self {
+            call,
+            literal: literal.clone(),
+            pattern,
+            haystack: haystack.and_then(|at| args.get(at)).cloned(),
+        })
+    }
+}
 
 /// The raw pattern text of `literal` when it is a plain regex literal: the `r`
 /// prefix, no flag suffix, and no interpolation.
@@ -164,6 +229,51 @@ mod tests {
         assert!(pattern_of("replace(s, \"a\" => s\"b\")\n").is_none());
         // A plain string literal has no prefix.
         assert!(pattern_of("occursin(\"abc\", s)\n").is_none());
+    }
+
+    /// The pattern and haystack of the first search call in the parse of
+    /// `src`, as source text.
+    fn search_call(src: &str) -> Option<(String, Option<String>)> {
+        parse(src).cst.descendants().find_map(|node| {
+            let found = PatternCall::of(&node)?;
+            Some((
+                found.pattern,
+                found
+                    .haystack
+                    .map(|haystack| haystack.syntax().text().to_string()),
+            ))
+        })
+    }
+
+    #[test]
+    fn pattern_call_reads_both_argument_orders() {
+        assert_eq!(
+            search_call("occursin(r\"abc\", s)\n"),
+            Some(("abc".to_string(), Some("s".to_string())))
+        );
+        // `contains` writes the haystack first.
+        assert_eq!(
+            search_call("contains(s, r\"abc\")\n"),
+            Some(("abc".to_string(), Some("s".to_string())))
+        );
+        // Its curried form fixes the needle and has no haystack.
+        assert_eq!(
+            search_call("filter(contains(r\"abc\"), lines)\n"),
+            Some(("abc".to_string(), None))
+        );
+    }
+
+    #[test]
+    fn pattern_call_declines_a_needle_that_is_not_one() {
+        // `occursin`'s curried form fixes the haystack, not the needle.
+        assert!(search_call("filter(occursin(r\"abc\"), lines)\n").is_none());
+        // The literal is in the other argument.
+        assert!(search_call("occursin(s, r\"abc\")\n").is_none());
+        assert!(search_call("contains(r\"abc\", s)\n").is_none());
+        // Not a plain regex literal, or not a search call.
+        assert!(search_call("occursin(needle, s)\n").is_none());
+        assert!(search_call("occursin(r\"abc\"i, s)\n").is_none());
+        assert!(search_call("match(r\"abc\", s)\n").is_none());
     }
 
     #[test]
