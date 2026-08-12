@@ -272,10 +272,10 @@ Deferred, and why:
   rule. Would be a fifth category beyond the settled four, which is cheap on
   its own — the taxonomy note above applies — but the bundle is what needs
   designing, not the directory.
-- [ ] Not a lint rule, but noted while reading JuliaWorkspaces: its
-  `layer_diagnostics.jl` publishes **TOML syntax diagnostics** for
-  `Project.toml`/`Manifest.toml`. Cheap LSP diagnostic source; we already parse
-  both.
+- [ ] Not a lint rule, and not a linter task at all: TOML syntax diagnostics for
+  `Project.toml`/`Manifest.toml`, noted while reading JuliaWorkspaces'
+  `layer_diagnostics.jl`. Moved to *Project files* below, stage 1, along with
+  the reason it cannot be a rule.
 
 Rejected after probing (do not revisit without new evidence):
 
@@ -311,8 +311,9 @@ Rejected after probing (do not revisit without new evidence):
 - [ ] Renaming a package's entry file (`src/MyPkg.jl`) rebases its own includes
   but leaves `Project.toml`'s `name` alone, so the package silently stops
   matching its entry. `willRenameFiles` deliberately does not touch
-  `Project.toml` — a `WorkspaceEdit` into a manifest is a bigger promise than
-  the include rewrite — but the pair could at least be diagnosed.
+  `Project.toml` (a `WorkspaceEdit` into a manifest is a bigger promise than the
+  include rewrite), but the pair could at least be diagnosed. The diagnosis is
+  *Project files* stage 1; the edit is stage 4.
 - [ ] Maybe (deferred): a rope (`ropey`) for the live buffer, raised in #76.
   It would make locating a line O(log n) and retire `LineStarts` outright. What
   blocks it is narrower than #76's first reading, and it is *not* the lexer:
@@ -337,5 +338,103 @@ Rejected after probing (do not revisit without new evidence):
   (`benches/line_index.rs`). rust-analyzer keeps documents as a plain `String`
   and applies edits with `replace_range` for the same reasons. Revisit only if
   the reparse guards go chunk-based.
+
+## Project files
+
+`Project.toml`/`Manifest.toml` are read today, but only as *environment inputs*:
+`environment::resolve` walks them the way Julia's loader does,
+`register_file_watchers` covers all five flavors, and `is_environment_file`
+escalates a watched change to `HarvestSignal::Environment`. Nothing is ever
+*reported on* them, and the LSP document selector is `.jl`-only, so they are
+invisible in the editor.
+
+The target is what rust-analyzer gives `Cargo.toml`, which is narrower than it
+is usually remembered as: watch-and-reload, plus a document-selector entry so
+workspace-load failures land on the right file. Dependency name and version
+completion is not rust-analyzer at all, it is Even Better TOML and the crates
+extension. So the reload half is already finished and the language-features half
+is what follows.
+
+Settled up front: **these are not lint rules.** `Rule::interests()` is
+`SyntaxKind`-keyed and dispatch is a single walk over the Julia CST
+(`src/linter/rules.rs`), so a TOML check has no kind to register against, and by
+tenet the linter is purely semantic over Julia. Project diagnostics get their
+own source module and ride the existing `Outbound::ProjectDiagnostics` channel.
+
+- [ ] **Stage 1: spans, then diagnostics.** Ships with no client change and no
+  document-store surgery. `Outbound::ProjectDiagnostics` already pushes to URIs
+  with no open buffer (that is how include-graph problems reach unopened files),
+  and push diagnostics are legal for any URI regardless of the document
+  selector, which gates only *requests*.
+  - The blocker is positions. `parse_project`/`parse_manifest`
+    (`src/environment.rs`) go through untyped `toml::Value`/`Table`, which
+    carries none. `toml::de::Error::span()` gives `Option<Range<usize>>` for
+    syntax errors free, but a *semantic* finding needs the offending key's own
+    span, so the parse wants `serde_spanned::Spanned<T>` fields on a derived
+    struct (already in the tree under `toml`, would become a direct dependency).
+    Typing the schema is worth doing on its own merits; the untyped access is
+    not load-bearing anywhere.
+  - Syntax diagnostics are the JuliaWorkspaces parity item moved down from the
+    linter roadmap.
+  - The semantic set, every input of which already resolves: a `[deps]` entry
+    with no `[compat]` bound, a `[compat]` key naming nothing in `[deps]`, a
+    `[deps]` UUID disagreeing with the manifest's, a `[deps]` entry absent from
+    the manifest (uninstantiated, or stale), a named project with no matching
+    `src/<Name>.jl` entry file, and no `[compat].julia` at all.
+  - Open question: severity policy, and whether any of it is configurable.
+    `fatou.toml` has no `[project]` table and probably should not grow one just
+    for this.
+
+- [ ] **Stage 2: decide buffer versus disk. Design before code.** The project
+  file is a *push* input today: the harvester thread reads disk and calls
+  `set_declared_deps` at HIGH durability (`src/incremental.rs`). The moment an
+  editor holds an unsaved `Project.toml`, reading the disk copy is a bug. Doing
+  it properly makes the project file a salsa input keyed by path, with
+  `declared_deps` *derived* from it rather than pushed, which drops the
+  workspace project file off HIGH durability.
+  - The prize is the thing that makes the feature feel integrated: edit
+    `[deps]`, and `unresolved-import` updates across every `.jl` file in the
+    package without a save.
+  - The guard to write first is the mirror of `tests/salsa_incremental.rs`: a
+    `Project.toml` edit must invalidate the resolution layer and *not* the
+    parses. Without it this trades a body-edit firewall for a project-edit
+    stampede.
+
+- [ ] **Stage 3: make it a real document.** `documents` holds a bare
+  `TextBuffer` with no kind discriminant and `send_analysis` funnels everything
+  into the Julia parse, so a `didOpen` on a TOML file today would parse it as
+  Julia and publish nonsense. Needs a kind tag at the `didOpen` boundary and a
+  second route. `handle_watched_files` already forks on `is_environment_file`,
+  which is where the seam belongs.
+  - Client side, extend the selector in `editors/code/src/extension.ts`. Use a
+    **pattern-only** entry (`{ scheme: "file", pattern:
+    "**/{Project,JuliaProject,Manifest,JuliaManifest}.toml" }`), not `language:
+    "toml"`: that language id exists only if the user happens to have a TOML
+    extension installed.
+
+- [ ] **Stage 4: features**, in rough value-per-effort order.
+  - Go-to-definition on a `[deps]` name, landing on the package's entry file.
+    Nearly free: `LibraryRoots` already maps package name to source root.
+  - Hover on a dep: version, kind (stdlib/registered/dev), and resolved path,
+    straight off `Package`.
+  - Document links on `[deps]` names and on manifest `path` entries.
+  - Completion of dependency names, the expensive one. On a default depot the
+    registry is a `General.tar.gz`, so the full version needs gzip and tar to
+    reach `Registry.toml`. Scope the first pass to packages already installed in
+    the depot: no new dependency, no network.
+  - `name`/`uuid` upkeep on a rename, the edit half of the `willRenameFiles`
+    entry above.
+
+Deferred, and why:
+
+- [ ] An *unused dependency* check (a `[deps]` entry never `using`'d anywhere in
+  the package), the inverse of `unresolved-import`. A different cost class from
+  everything above: it needs a whole-package union of free reads, which is a new
+  cross-file query and the likeliest thing to punch through the range-free
+  projection firewall in `src/project.rs`.
+- A code action that *adds* a missing dependency can only ever be a plain TOML
+  text edit. Resolving a name to its UUID means reading the registry, and
+  shelling out to `Pkg` is off the table: no Julia runtime, at any point in the
+  pipeline.
 
 ## Tooling
