@@ -464,7 +464,13 @@ tenet the linter is purely semantic over Julia.
     would double them up.
   - Client side, the selector gained pattern-only entries (never `language:
     "toml"`, which exists only with a TOML extension installed), including
-    `**/Manifest-v*.toml` to match `is_manifest_file` and the watcher globs.
+    `**/Manifest-v[0-9]*.toml` — the digit is `is_manifest_file`, which wants a
+    version it can parse, where the watcher glob can afford to be looser.
+  - **A `.toml` is never Julia**, which is what keeps that gap from mattering:
+    the recognized flavors get their routes and every other `.toml` is
+    `DocumentKind::Other`, answering nothing. Written that way round rather
+    than carving the flavors out of a Julia default, so the server's behavior
+    stops depending on how wide a client's selector happens to be.
 
 - [x] **Stage 4a: navigation.** Go-to-definition, hover, document links, and
   inlay hints on a dependency name, in `src/lsp/project_navigation.rs`.

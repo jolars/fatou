@@ -76,17 +76,40 @@ enum DocumentKind {
     /// `path` entries — the one feature needing no environment resolve, which
     /// is otherwise the harvester's job and never reads a buffer.
     Manifest,
+    /// A TOML file that is neither: a `fatou.toml`, a `Manifest-vfoo.toml` that
+    /// names no version, a `Project.toml` flavor this server does not know.
+    ///
+    /// It answers **nothing** — no analysis, no diagnostics, no read job, no
+    /// text in the database. The point is that the server's behavior stops
+    /// depending on how wide the client's document selector happens to be: a
+    /// selector matching one `.toml` too many costs a document the server
+    /// ignores, never a TOML file parsed as Julia.
+    Other,
 }
 
 impl DocumentKind {
-    /// A document's kind, from the file its URI names. A URI with no path
-    /// behind it — an editor's untitled buffer — is Julia: it is what the
-    /// editor opened the server for, and it has no file name to say otherwise.
+    /// A document's kind, from the file its URI names.
+    ///
+    /// A URI with no path behind it — an editor's untitled buffer — is Julia:
+    /// it is what the editor opened the server for, and it has no file name to
+    /// say otherwise. Everything else is Julia unless its name says it is not,
+    /// and **a `.toml` always says it is not**: the two environment flavors get
+    /// their own routes and the rest answer nothing, rather than the recognized
+    /// flavors being carved out of a Julia default. The client's selector
+    /// carries `**/Manifest-v*.toml` while [`is_manifest_file`] wants a version
+    /// it can parse, and that gap must not land in the Julia parser.
     fn of(uri: &Uri) -> Self {
-        match uri::to_path(uri) {
-            Some(path) if is_project_file(&path) => Self::Project,
-            Some(path) if is_manifest_file(&path) => Self::Manifest,
-            _ => Self::Julia,
+        let Some(path) = uri::to_path(uri) else {
+            return Self::Julia;
+        };
+        if is_project_file(&path) {
+            Self::Project
+        } else if is_manifest_file(&path) {
+            Self::Manifest
+        } else if path.extension().is_some_and(|ext| ext == "toml") {
+            Self::Other
+        } else {
+            Self::Julia
         }
     }
 }
@@ -1481,13 +1504,14 @@ impl GlobalState {
     /// the package's declared dependencies from it — that is what lets an
     /// unsaved `[deps]` edit reach `unresolved-import` across the package. A
     /// manifest sends no text: nothing reads one without an environment
-    /// resolve, which is the harvester's job.
+    /// resolve, which is the harvester's job. A TOML file that is neither is
+    /// not this server's to describe, and takes no route at all.
     ///
     /// `edits` belong to the Julia route alone (see
     /// [`send_analysis`](Self::send_analysis)).
     fn route_document(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
         match self.documents.get(&uri).map(|doc| doc.kind) {
-            None => {}
+            None | Some(DocumentKind::Other) => {}
             Some(DocumentKind::Julia) => self.send_analysis(uri, edits),
             Some(kind) => {
                 if kind == DocumentKind::Project {
@@ -2778,5 +2802,43 @@ mod tests {
             DocumentKind::of(&uri("file:///work/src/a.jl")),
             DocumentKind::Julia
         );
+    }
+
+    /// A `.toml` is never Julia. The client's selector carries
+    /// `**/Manifest-v*.toml` and `is_manifest_file` wants a version it can
+    /// parse, so the two do not meet exactly — and the gap must land in a
+    /// document that answers nothing, never in the Julia parser.
+    #[test]
+    fn an_unrecognized_toml_is_neither_julia_nor_an_environment_file() {
+        for name in [
+            "Manifest-vfoo.toml",
+            "Manifest-v.toml",
+            "fatou.toml",
+            "Cargo.toml",
+        ] {
+            assert_eq!(
+                DocumentKind::of(&uri(&format!("file:///work/{name}"))),
+                DocumentKind::Other,
+                "for {name}"
+            );
+        }
+    }
+
+    /// And it takes no route: no Julia analysis (which is the bug — a TOML file
+    /// reported as broken Julia), no text into the database, and no diagnostics
+    /// of its own, since the server has nothing to say about the file.
+    #[test]
+    fn an_unrecognized_toml_takes_no_route() {
+        let (mut state, channels) = test_state_with_channels();
+
+        did_open(
+            &mut state,
+            &uri("file:///work/Manifest-vfoo.toml"),
+            "[[deps\n",
+        );
+
+        assert!(channels.analysis.try_recv().is_err(), "no Julia analysis");
+        assert!(channels.sync.try_recv().is_err(), "nothing reaches the db");
+        assert!(channels.client.try_recv().is_err(), "and nothing published");
     }
 }

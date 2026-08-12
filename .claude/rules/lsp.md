@@ -80,7 +80,11 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   (`Project.toml`, `Manifest.toml`, and friends) are in the client's document
   selector, so any request can arrive for one. **Reach a buffer through
   `GlobalState::julia_text`, `project_text`, or `manifest_text`, never
-  `documents` directly** — those three are the only doors into the read pool. A
+  `documents` directly** — those three are the only doors into the read pool.
+  A `.toml` is **never** Julia: the two environment flavors get their routes and
+  every other one is `DocumentKind::Other`, which answers nothing, so a client
+  selector matching one file too many costs an ignored document rather than a
+  TOML file in the Julia parser. A
   Julia-backed feature asks `julia_text` and answers `null` otherwise, because a
   hover or a format served off a TOML buffer parses it as Julia; a feature that
   understands TOML asks `project_text` and lands in `project_navigation.rs`. A
