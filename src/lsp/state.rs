@@ -617,6 +617,19 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        // A project file resolves a dependency name to its package's source; a
+        // Julia document resolves a symbol. Anything else answers `null`.
+        if let Some(text) = self.project_text(&uri) {
+            let reply = self.read_reply(id.clone(), Some(&uri));
+            self.dispatch_read(ReadJob::ProjectDefinition {
+                id,
+                text,
+                position,
+                sender: reply,
+            });
+            return;
+        }
         let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
@@ -625,7 +638,7 @@ impl GlobalState {
         self.dispatch_read(ReadJob::Definition {
             id,
             path: path_for(&uri),
-            position: params.text_document_position_params.position,
+            position,
             uri,
             text,
             sender: reply,
@@ -894,6 +907,23 @@ impl GlobalState {
         self.documents
             .get(uri)
             .filter(|doc| doc.kind == DocumentKind::Julia)
+            .map(|doc| Arc::clone(&doc.text))
+    }
+
+    /// The live buffer for `uri`, but only when the document is a project file.
+    /// The sibling of [`julia_text`](Self::julia_text), and the *only* other
+    /// door into the read pool: a feature that understands TOML asks here,
+    /// everything Julia-backed keeps asking there, and a handler that calls
+    /// neither still answers `null` as before.
+    ///
+    /// A `Manifest.toml` deliberately answers nothing. Its text never reaches
+    /// the database (nothing reads a manifest without an environment resolve),
+    /// and its entries carry no spans to anchor on — see
+    /// [`project_navigation`](super::project_navigation).
+    fn project_text(&self, uri: &Uri) -> Option<Arc<TextBuffer>> {
+        self.documents
+            .get(uri)
+            .filter(|doc| doc.kind == DocumentKind::Project)
             .map(|doc| Arc::clone(&doc.text))
     }
 
@@ -1544,6 +1574,7 @@ fn harvest_signal(path: PathBuf) -> HarvestSignal {
 mod tests {
     use super::*;
     use crossbeam_channel::{Receiver, unbounded};
+    use lsp_types::Position;
     use std::str::FromStr;
 
     /// A `GlobalState` wired to in-memory channels, returned with the client's
@@ -2334,9 +2365,11 @@ mod tests {
     }
 
     /// With the environment files in the client's document selector, every
-    /// request can now arrive for one. Nothing Julia-backed may answer: a
-    /// format or a hover would parse TOML as Julia and hand back nonsense, so
-    /// they answer `null`, as they do for a document the server never saw.
+    /// request can now arrive for one. Nothing **Julia-backed** may answer: a
+    /// format or a document symbol would parse TOML as Julia and hand back
+    /// nonsense, so they answer `null`, as they do for a document the server
+    /// never saw. The TOML-aware features are the exception, and go through
+    /// `project_text` instead — see the two tests below.
     #[test]
     fn language_features_answer_nothing_for_an_environment_document() {
         let (mut state, channels) = test_state_with_channels();
@@ -2381,8 +2414,64 @@ mod tests {
         }
         assert!(
             channels.read.try_recv().is_err(),
-            "and no TOML buffer reaches the read pool"
+            "and no TOML buffer reaches the read pool for a Julia-backed feature"
         );
+    }
+
+    /// The other side of the fork: a project file *does* reach the read pool
+    /// for a feature that understands TOML, so a `[deps]` name can resolve to
+    /// its package.
+    #[test]
+    fn a_project_buffer_reaches_the_read_pool_for_navigation() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+        did_open(&mut state, &project, "[deps]\nA = \"x\"\n");
+
+        state.on_request(definition_request(1, &project));
+
+        match channels.read.try_recv().expect("a read job") {
+            ReadJob::ProjectDefinition { id, position, .. } => {
+                assert_eq!(id, RequestId::from(1));
+                assert_eq!(position, Position::new(1, 0));
+            }
+            _ => panic!("expected a ProjectDefinition read job"),
+        }
+    }
+
+    /// A manifest still answers nothing, for the same features a project file
+    /// now serves: its text never reaches the database, and its entries carry
+    /// no spans to anchor on.
+    #[test]
+    fn a_manifest_answers_nothing_for_navigation() {
+        let (mut state, channels) = test_state_with_channels();
+        let manifest = uri("file:///work/Manifest.toml");
+        did_open(&mut state, &manifest, "manifest_format = \"2.0\"\n");
+
+        state.on_request(definition_request(1, &manifest));
+
+        match channels.client.try_recv().expect("a response") {
+            Message::Response(resp) => {
+                assert_eq!(resp.response_result.ok(), Some(serde_json::Value::Null));
+            }
+            other => panic!("expected a response, got {other:?}"),
+        }
+        assert!(channels.read.try_recv().is_err(), "and no read job");
+    }
+
+    /// A `textDocument/definition` at line 1, column 0 of `uri`.
+    fn definition_request(id: i32, uri: &Uri) -> Request {
+        Request::new(
+            RequestId::from(id),
+            GotoDefinition::METHOD.to_string(),
+            GotoDefinitionParams {
+                text_document_position_params: lsp_types::TextDocumentPositionParams {
+                    text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(1, 0),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            },
+        )
     }
 
     /// A buffer with no file name behind it — an editor's untitled document —

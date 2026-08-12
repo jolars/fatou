@@ -5273,6 +5273,187 @@ fn an_unsaved_project_file_edit_clears_unresolved_import() {
     server_thread.join().unwrap();
 }
 
+/// Write a workspace holding `MyPkg` and a dependency it can resolve with no
+/// depot at all: the manifest pins `Greetings` by `path`, so the harvester
+/// indexes it straight off disk. Returns the temp root; the project directory
+/// is `<root>/MyPkg`.
+fn write_pkg_with_path_dep(prefix: &str) -> TempDir {
+    const GREETINGS: &str = "00000000-0000-0000-0000-0000000000e0";
+    let root = TempDir::new(prefix);
+    write_file(
+        &root.path.join("Greetings/Project.toml"),
+        &format!("name = \"Greetings\"\nuuid = \"{GREETINGS}\"\n"),
+    );
+    write_file(
+        &root.path.join("Greetings/src/Greetings.jl"),
+        "module Greetings\ngreet(a) = a\nend\n",
+    );
+    write_file(
+        &root.path.join("MyPkg/Project.toml"),
+        &format!(
+            "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n\n\
+             [deps]\nGreetings = \"{GREETINGS}\"\n\n[compat]\njulia = \"1.10\"\nGreetings = \"1\"\n"
+        ),
+    );
+    write_file(
+        &root.path.join("MyPkg/Manifest.toml"),
+        &format!(
+            "manifest_format = \"2.0\"\n\n[[deps.Greetings]]\n\
+             uuid = \"{GREETINGS}\"\npath = \"../Greetings\"\n"
+        ),
+    );
+    write_file(&root.path.join("MyPkg/src/MyPkg.jl"), "module MyPkg\nend\n");
+    root
+}
+
+/// Poll `textDocument/definition` at `position` until it answers something, or
+/// the deadline passes. The library index arrives with the harvest, well after
+/// the handshake, so the first request legitimately answers `null`.
+fn poll_definition(
+    client: &Connection,
+    uri: &Uri,
+    position: Position,
+    deadline: Duration,
+) -> Location {
+    static POLL_ID: AtomicU64 = AtomicU64::new(600);
+    let start = Instant::now();
+    loop {
+        let id = i32::try_from(POLL_ID.fetch_add(1, Ordering::Relaxed)).unwrap();
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/definition".to_string(),
+                params: serde_json::to_value(GotoDefinitionParams {
+                    text_document_position_params: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        position,
+                    },
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                    partial_result_params: PartialResultParams::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        let resp = recv_response(client, RequestId::from(id));
+        let result = resp.result().expect("a definition result");
+        if !result.is_null() {
+            return serde_json::from_value(result).expect("a single location");
+        }
+        assert!(
+            start.elapsed() < deadline,
+            "definition never resolved within {deadline:?} — the harvest likely failed"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Go-to-definition on a `[deps]` name in an open `Project.toml` lands on the
+/// dependency's entry file. The whole point of stage 4: the environment files
+/// are in the client's document selector, so a request arrives for one, and a
+/// dependency name is something the server can resolve.
+#[test]
+fn serves_go_to_definition_on_a_dependency_name() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let root = write_pkg_with_path_dep("fatou-lsp-depdef");
+    let pkg_dir = root.path.join("MyPkg");
+    let depot = TempDir::new("fatou-lsp-depdef-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg_dir.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_root(&client, &file_uri(&pkg_dir));
+
+    let project = pkg_dir.join("Project.toml");
+    let project_uri = file_uri(&project);
+    let text = std::fs::read_to_string(&project).unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: project_uri.clone(),
+                    language_id: "toml".to_string(),
+                    version: 1,
+                    text: text.clone(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // The `Greetings` key of `[deps]`, wherever the fixture happens to put it.
+    let offset = text.find("Greetings = ").unwrap();
+    let line = u32::try_from(text[..offset].matches('\n').count()).unwrap();
+    let location = poll_definition(
+        &client,
+        &project_uri,
+        Position::new(line, 2),
+        Duration::from_secs(10),
+    );
+
+    let entry = root.path.join("Greetings/src/Greetings.jl");
+    assert_eq!(location.uri.as_str(), file_uri(&entry).as_str());
+    // The `Greetings` of `module Greetings`, line 0, columns 7..16.
+    assert_eq!(
+        location.range,
+        Range::new(Position::new(0, 7), Position::new(0, 16)),
+    );
+
+    // Nothing else in the file jumps: a `[compat]` key names a dependency too,
+    // but resolving it is not this feature.
+    let compat = text.rfind("Greetings = ").unwrap();
+    let compat_line = u32::try_from(text[..compat].matches('\n').count()).unwrap();
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(620),
+            method: "textDocument/definition".to_string(),
+            params: serde_json::to_value(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: project_uri.clone(),
+                    },
+                    position: Position::new(compat_line, 2),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(620));
+    assert_eq!(resp.result(), Some(serde_json::Value::Null));
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(621),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(621));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
 /// Two workspace folders, each its own package project, driven end-to-end:
 /// both harvest, cross-file references stay inside the folder that owns the
 /// cursor (the other folder defines a same-named `greet`), and workspace

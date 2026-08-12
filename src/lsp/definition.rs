@@ -491,7 +491,10 @@ fn library_locations<P: PackageSource>(
 /// Materialize on-disk `(path, span)` sites into [`Location`]s, reading each
 /// distinct file once (methods of one group can span the include closure).
 /// Unreadable files are skipped; the result is ordered by path, then offset.
-fn site_locations(mut sites: Vec<(PathBuf, Span)>, encoding: PositionEncoding) -> Vec<Location> {
+pub(super) fn site_locations(
+    mut sites: Vec<(PathBuf, Span)>,
+    encoding: PositionEncoding,
+) -> Vec<Location> {
     sites.sort_by(|a, b| (&a.0, a.1.start).cmp(&(&b.0, b.1.start)));
     sites.dedup();
     let mut out = Vec::new();

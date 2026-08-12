@@ -60,6 +60,7 @@ mod hover;
 mod latex_symbols;
 mod lint;
 mod progress;
+mod project_navigation;
 mod pull_diagnostics;
 mod read_jobs;
 mod references;
