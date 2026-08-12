@@ -5031,6 +5031,115 @@ fn publishes_and_clears_project_file_syntax_diagnostics() {
     server_thread.join().unwrap();
 }
 
+/// An open `Project.toml` reports its own TOML errors from the *buffer*, at
+/// edit cadence: the error appears on the keystroke that introduces it and
+/// clears on the one that fixes it, with no save, no watched-file event, and —
+/// no workspace folder here — no harvester at all. The second half is the
+/// other side of making it a real document: a language feature must answer
+/// nothing for it, rather than parsing TOML as Julia.
+#[test]
+fn publishes_project_file_diagnostics_from_the_open_buffer() {
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(InitializeParams::default()).unwrap(),
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(1));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    let project = native_file_uri("/work/Project.toml");
+    open_document(&client, &project, "name = \"MyPkg\"\n");
+    // Broken by an edit that is never saved.
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: project.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "name = \"MyPkg\"\nuuid = \n".to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    let published = recv_publish_for(&client, &project);
+    let [diag] = &published.diagnostics[..] else {
+        panic!("expected one diagnostic, got {published:?}");
+    };
+    assert_eq!(
+        diag.code,
+        Some(NumberOrString::String("toml-syntax".to_string()))
+    );
+    assert_eq!(diag.severity, Some(DiagnosticSeverity::ERROR));
+    assert_eq!(diag.range.start.line, 1, "the `uuid = ` line");
+    assert_eq!(published.version, Some(2));
+
+    // A language feature answers nothing for it: a formatting request would
+    // otherwise reformat TOML as Julia.
+    assert_eq!(format_document(&client, &project, 2), None);
+
+    // Fixed, still unsaved: the file clears.
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: project.clone(),
+                    version: 3,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n"
+                        .to_string(),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let cleared = recv_publish_for(&client, &project);
+    assert!(cleared.diagnostics.is_empty(), "{cleared:?}");
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(3),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(3));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
 /// The prize of making the project file a live input: adding a name to
 /// `[deps]` in an editor buffer clears `unresolved-import` across the package
 /// with **no save and no watched-file event**. Nothing here writes the project

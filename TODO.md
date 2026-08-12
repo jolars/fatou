@@ -429,24 +429,34 @@ tenet the linter is purely semantic over Julia.
     — the same gap meant a re-harvest never refreshed `unresolved-import` for
     such a client either.
 
-- [ ] **Stage 3: make it a real document.** `documents` still holds a bare
-  `TextBuffer` with no kind discriminant; `send_analysis` forks on the file name
-  instead (env files never analyze, project files route to the db as text),
-  which is a seam, not a document kind. A request handler still has nothing to
-  dispatch on. Needs a kind tag at the `didOpen` boundary and a real second
-  route.
-  - The obvious first tenant is *live project-file diagnostics*, the half stage
-    2 deliberately left on disk: `syntax_findings` is text-only and could serve
-    the buffer directly, but the six semantic checks need a resolved
-    `Environment` and so stay with the harvester — meaning two producers writing
-    one file's `env_diags`, and clear-once bookkeeping that has to merge two
-    cadences. That is the design problem to settle, and it is why the split is
-    here rather than in stage 2.
-  - Client side, extend the selector in `editors/code/src/extension.ts`. Use a
-    **pattern-only** entry (`{ scheme: "file", pattern:
-    "**/{Project,JuliaProject,Manifest,JuliaManifest}.toml" }`), not `language:
-    "toml"`: that language id exists only if the user happens to have a TOML
-    extension installed.
+- [x] **Stage 3: make it a real document.** `Document` now carries a
+  `DocumentKind` (`Julia`/`Project`/`Manifest`), tagged once at `didOpen`, and
+  `send_analysis`'s file-name fork became `route_document`: a real two-route
+  dispatch on the tag, with the TOML route re-deriving the file's own findings
+  from the buffer.
+  - **Live project-file diagnostics landed**, the half stage 2 left on disk:
+    `syntax_findings` serves the buffer at edit cadence, so a broken
+    `Project.toml` reports on the keystroke, with no save and no harvester (the
+    end-to-end test opens no workspace folder at all).
+  - **The two cadences.** The buffer's set (`buffer_diags`) **supersedes** the
+    harvester's (`env_diags`) rather than joining it: computed from different
+    texts, their union is a report of neither, and a buffer that does not parse
+    means the harvester's set — its own syntax verdict, or semantic findings
+    whose ranges index the disk text — describes a file the user has moved past.
+    A buffer that parses contributes nothing, which is what keeps the semantic
+    checks visible in an open file. Bookkeeping stayed simple as a result: a
+    publish goes out only when there is something to say or to take back, and
+    the live entry is dropped on close. The one accepted seam is that fixing a
+    syntax error without saving lets the disk verdict reappear until the save.
+  - **The gate the client selector newly needed**: with environment files in the
+    selector, every request can arrive for a `Project.toml`, so language
+    features go through `julia_text` and answer `null` for one — a format or a
+    hover would otherwise parse TOML as Julia. Pull diagnostics still report
+    nothing for these documents: both producers push, so answering the pull too
+    would double them up.
+  - Client side, the selector gained pattern-only entries (never `language:
+    "toml"`, which exists only with a TOML extension installed), including
+    `**/Manifest-v*.toml` to match `is_manifest_file` and the watcher globs.
 
 - [ ] **Stage 4: features**, in rough value-per-effort order.
   - Go-to-definition on a `[deps]` name, landing on the package's entry file.

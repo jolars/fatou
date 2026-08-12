@@ -193,6 +193,13 @@ arguments for `*.jl` files, rooted at `Project.toml`, `JuliaProject.toml`, or
 `.git`. Nothing else is required, because Fatou discovers its own configuration
 from the file's directory upward.
 
+Fatou also checks your `Project.toml` and `Manifest.toml` themselves, and
+publishes those findings on the file at fault whether or not it is open. If you
+additionally attach the server to those files (the VS Code extension does), an
+open one reports its TOML errors as you type, before you save; language
+features such as hover and formatting stay off for them, since they are not
+Julia.
+
 ## Configuration
 
 Fatou reads its settings from a `fatou.toml` next to your project (see the

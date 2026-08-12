@@ -75,6 +75,16 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
 - `latex_symbols.rs` is **generated** by `scripts/generate-latex-symbols.jl`
   from `REPL.REPLCompletions`; regenerate on a Julia bump, do not hand-edit.
   Both tables are sorted by key and `completion.rs` binary-searches them.
+- **An open document is not always Julia.** `Document` carries a
+  `DocumentKind`, tagged once at `didOpen`; the environment files
+  (`Project.toml`, `Manifest.toml`, and friends) are in the client's document
+  selector, so any request can arrive for one. Reach a buffer for a language
+  feature through `GlobalState::julia_text`, never `documents` directly — a
+  hover or a format served off a TOML buffer parses it as Julia. Their own
+  diagnostics have **two producers**: the buffer (text-only checks, edit
+  cadence) and the harvester (a resolved `Environment`, resolve cadence). The
+  buffer's set supersedes rather than joins — `publish_merged` is the one place
+  that merge lives.
 - A setting that is a fact about the **machine** belongs in editor settings
   (`config.rs`), not `fatou.toml`; project facts belong in the config file. The
   LSP resolves `fatou.toml` the same way the CLI does so both walks honor the
