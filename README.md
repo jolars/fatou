@@ -100,7 +100,9 @@ highlights, rename (of symbols, and of files and folders — moving a file
 rewrites the `include` paths that name it), document and workspace symbols, call
 and type hierarchy, signature help, code actions, folding and selection ranges,
 document links, and semantic tokens, alongside formatting (whole-document and
-range) and diagnostics (push and pull).
+range) and diagnostics (push and pull). It checks your `Project.toml` and
+`Manifest.toml` themselves too, and navigates an open `Project.toml`'s
+dependency names.
 
 The **Fatou** extension for VS Code and Open VSX
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
