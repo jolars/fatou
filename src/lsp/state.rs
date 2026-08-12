@@ -1150,12 +1150,21 @@ impl GlobalState {
     /// event escalates to one environment re-resolve for the whole batch (which
     /// subsumes any per-package re-harvest); otherwise each `.jl` event
     /// re-harvests the workspace package owning the file, so created and
-    /// deleted members refresh the membership. A `.jl` file with no open buffer
-    /// is first synced to disk — the seeded text must not go stale when the
-    /// file changes outside the editor — while an open buffer stays
-    /// authoritative until it closes (a create not yet tracked and a delete no
-    /// longer readable both sync as no-ops; the re-harvest itself adds or drops
-    /// the member).
+    /// deleted members refresh the membership. A file with no open buffer is
+    /// first synced to disk — the seeded text must not go stale when the file
+    /// changes outside the editor — while an open buffer stays authoritative
+    /// until it closes (a create not yet tracked and a delete no longer
+    /// readable both sync as no-ops; the re-harvest itself adds or drops the
+    /// member).
+    ///
+    /// The sync covers the **project files too**, not just `.jl` sources: their
+    /// `[deps]` is read off the tracked input now
+    /// ([`project_declared_deps`](crate::incremental::project_declared_deps)),
+    /// and the re-resolve an environment event triggers cannot refresh it —
+    /// `set_project_files` is create-or-return, so as not to clobber an open
+    /// buffer with the disk copy. Without the sync, a `pkg> add` in a terminal
+    /// would leave `unresolved-import` answering to the text the file had when
+    /// the server first harvested it.
     fn on_watched_files(&mut self, params: DidChangeWatchedFilesParams) {
         // A created, changed, or deleted `fatou.toml` reshapes discovery for
         // every cached directory; drop the cache wholesale and re-derive the
@@ -1180,12 +1189,16 @@ impl GlobalState {
             let Some(path) = uri::to_path(&event.uri) else {
                 continue;
             };
-            if is_environment_file(&path) || path.extension().is_none_or(|ext| ext != "jl") {
+            let is_env = is_environment_file(&path);
+            if !is_env && path.extension().is_none_or(|ext| ext != "jl") {
                 continue;
             }
             if !self.documents.contains_key(&event.uri) {
                 let _ = self.sync_tx.send(SyncMessage::Revert(path.clone()));
             }
+            // An environment event sets `environment_changed`, so this arm is
+            // the `.jl` one: a project file re-resolves as a batch below rather
+            // than naming a package to re-harvest on its own.
             if !environment_changed {
                 let _ = self.harvest_tx.send(HarvestSignal::Source(path));
             }
@@ -1978,6 +1991,50 @@ mod tests {
             ],
             "the vacated and the occupied path each re-harvest their package"
         );
+    }
+
+    /// A `Project.toml` changed outside the editor — `pkg> add`, a branch
+    /// switch — must reach the tracked input, exactly as a `.jl` file does. The
+    /// declared dependencies are read off that input now, so without the sync
+    /// the re-resolve this also triggers would leave `unresolved-import`
+    /// answering to the text the file had when the server started.
+    #[test]
+    fn a_watched_project_file_with_no_buffer_syncs_to_disk() {
+        let (mut state, channels) = test_state_with_channels();
+        let (path, _) = native("Project.toml");
+
+        state.on_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![lsp_types::FileEvent {
+                uri: uri::from_path(&path).expect("a file URI"),
+                typ: lsp_types::FileChangeType::CHANGED,
+            }],
+        });
+
+        assert_eq!(reverted(&channels.sync), vec![path]);
+        assert_eq!(
+            channels.harvest.try_iter().collect::<Vec<_>>(),
+            vec![HarvestSignal::Environment],
+            "and it still escalates to a full re-resolve"
+        );
+    }
+
+    /// An open buffer stays authoritative: the editor owns the text until it
+    /// closes, and reverting under it would drop the user's unsaved `[deps]`.
+    #[test]
+    fn a_watched_project_file_with_an_open_buffer_does_not_sync() {
+        let (mut state, channels) = test_state_with_channels();
+        let (path, _) = native("Project.toml");
+        let uri = uri::from_path(&path).expect("a file URI");
+        open(&mut state, &uri, 1);
+
+        state.on_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![lsp_types::FileEvent {
+                uri: uri.clone(),
+                typ: lsp_types::FileChangeType::CHANGED,
+            }],
+        });
+
+        assert!(channels.sync.try_recv().is_err());
     }
 
     #[test]
