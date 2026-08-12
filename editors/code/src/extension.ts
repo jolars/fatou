@@ -293,12 +293,13 @@ async function startClient(
       // Matched by pattern alone, never by `language: "toml"`: that language
       // id exists only if the user happens to have a TOML extension
       // installed. The version-specific manifests match the server's
-      // `is_manifest_file` and its watcher globs.
+      // `is_manifest_file`, which wants a version it can parse — hence the
+      // digit, where the watcher glob can afford to be looser.
       {
         scheme: "file",
         pattern: "**/{Project,JuliaProject,Manifest,JuliaManifest}.toml",
       },
-      { scheme: "file", pattern: "**/Manifest-v*.toml" },
+      { scheme: "file", pattern: "**/Manifest-v[0-9]*.toml" },
     ],
     outputChannel,
     traceOutputChannel: outputChannel,
