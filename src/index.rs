@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::environment::Environment;
+use crate::environment::{Environment, PackageMeta};
 
 pub use base::{build_system_index, build_system_library, build_system_library_cached};
 pub use cache::{CacheKey, IndexCache};
@@ -68,6 +68,16 @@ pub struct HarvestedLibrary {
     /// paths as salsa inputs so an *unsaved* `[deps]` edit reaches
     /// `unresolved-import` without waiting for a save and a re-resolve.
     pub project_files: BTreeMap<String, PathBuf>,
+    /// Every manifest-pinned package's version and kind, keyed by name.
+    ///
+    /// Kept beside [`roots`](Self::roots) rather than folded into it because
+    /// the two have different key sets on purpose: `roots` names what was
+    /// *harvested*, this names what the manifest *pinned*. A standard library
+    /// with no located Julia install, or a registered package whose depot slug
+    /// is missing, has an entry here and none there — and "installed, version
+    /// 0.4.5, source not found" is exactly what a reader of that project file
+    /// wants told.
+    pub deps: BTreeMap<String, PackageMeta>,
 }
 
 /// The module names a package's own source files may `using`/`import`: its
@@ -166,6 +176,23 @@ fn declared_deps(envs: &[Environment]) -> BTreeMap<String, Arc<DeclaredDeps>> {
     out
 }
 
+/// Every manifest-pinned package's version and kind across `envs`, first
+/// environment winning a name — the same claim rule the harvest itself uses,
+/// so the two agree on which environment a name came from.
+///
+/// Unfiltered by whether the package's source was found: an unlocatable
+/// package is still pinned, and saying so is the point.
+fn dep_meta(envs: &[Environment]) -> BTreeMap<String, PackageMeta> {
+    let mut out: BTreeMap<String, PackageMeta> = BTreeMap::new();
+    for env in envs {
+        for package in &env.packages {
+            out.entry(package.name.clone())
+                .or_insert_with(|| package.meta());
+        }
+    }
+    out
+}
+
 /// Each workspace package's project file, deduped by name exactly like
 /// [`declared_deps`] so the two maps name the same environment for a name.
 fn project_files(envs: &[Environment]) -> BTreeMap<String, PathBuf> {
@@ -219,6 +246,7 @@ pub fn harvest_libraries(envs: &[Environment]) -> HarvestedLibrary {
     lib.workspaces.sort();
     lib.declared_deps = declared_deps(envs);
     lib.project_files = project_files(envs);
+    lib.deps = dep_meta(envs);
     lib
 }
 
@@ -283,6 +311,7 @@ pub fn harvest_libraries_parallel(
     lib.workspaces.sort();
     lib.declared_deps = declared_deps(envs);
     lib.project_files = project_files(envs);
+    lib.deps = dep_meta(envs);
     lib
 }
 

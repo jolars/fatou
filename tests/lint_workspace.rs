@@ -75,6 +75,7 @@ fn project(b_contents: &str) -> (TempDir, TempDir, HarvestedLibrary) {
         workspaces: vec!["M".to_string()],
         declared_deps: Default::default(),
         project_files: Default::default(),
+        deps: Default::default(),
     };
     (dep, pkg, library)
 }
@@ -146,6 +147,7 @@ fn project_with_deps() -> (TempDir, HarvestedLibrary) {
             Arc::new(["SparseArrays".to_string()].into_iter().collect()),
         )]),
         project_files: Default::default(),
+        deps: Default::default(),
     };
     (pkg, library)
 }

@@ -574,6 +574,19 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        // A project file reports what a dependency name resolved to; a Julia
+        // document reports a symbol. Anything else answers `null`.
+        if let Some(text) = self.project_text(&uri) {
+            let reply = self.read_reply(id.clone(), Some(&uri));
+            self.dispatch_read(ReadJob::ProjectHover {
+                id,
+                text,
+                position,
+                sender: reply,
+            });
+            return;
+        }
         let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
@@ -583,7 +596,7 @@ impl GlobalState {
             id,
             path: path_for(&uri),
             text,
-            position: params.text_document_position_params.position,
+            position,
             sender: reply,
         });
     }

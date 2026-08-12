@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use salsa::{Durability, Setter};
 
+use crate::environment::PackageMeta;
 use crate::index::{DeclaredDeps, PackageIndex};
 use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits};
 use crate::project::{self, IncludeEdge};
@@ -68,6 +69,13 @@ pub struct LibraryPackages(pub BTreeMap<String, Arc<PackageIndex>>);
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LibraryRoots(pub BTreeMap<String, PathBuf>);
 
+/// Every manifest-pinned package's version and kind, keyed by name — what a
+/// hover over a `[deps]` entry reports. Wrapped for the same reason as
+/// [`LibraryPackages`], and keyed differently from [`LibraryRoots`] on purpose:
+/// see [`HarvestedLibrary::deps`](crate::index::HarvestedLibrary::deps).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LibraryDeps(pub BTreeMap<String, PackageMeta>);
+
 /// Each workspace package's project file, keyed by package name, as the
 /// ordinary [`SourceFile`] input holding its text. Its own input rather than a
 /// [`LibraryIndex`] field: it comes from the project files, not the harvest, so
@@ -107,6 +115,11 @@ pub struct LibraryIndex {
     /// editable, re-harvested-on-save packages from the read-only depot set.
     #[returns(ref)]
     pub workspaces: Vec<String>,
+    /// What the manifest pinned, as opposed to what the harvest found. Written
+    /// by [`IncrementalDatabase::set_library_deps`], separately from the other
+    /// three — see there for why.
+    #[returns(ref)]
+    pub deps: LibraryDeps,
 }
 
 /// The workspace package's member files as salsa input handles, so the
@@ -1084,9 +1097,41 @@ impl IncrementalDatabase {
             None => {
                 // Creating the singleton input registers it in storage; the
                 // handle is refetched via `try_get` on later calls.
-                let _ = LibraryIndex::builder(packages, roots, workspaces)
+                let _ = LibraryIndex::builder(packages, roots, workspaces, LibraryDeps::default())
                     .durability(Durability::HIGH)
                     .new(self);
+            }
+        }
+    }
+
+    /// Replace what the manifest pinned: every package's version and kind,
+    /// keyed by name, at HIGH durability. Creates the singleton input on first
+    /// call, exactly as [`set_library`](Self::set_library) does, so either may
+    /// run first.
+    ///
+    /// Written separately from `set_library`'s three because it is a different
+    /// map of a different thing: those are products of the *harvest*, keyed by
+    /// what was successfully indexed, while this comes from the *manifest* and
+    /// deliberately carries names that were never indexed at all. Both ride the
+    /// same cadence — one `LibraryMessage::Full` sets both.
+    pub fn set_library_deps(&mut self, deps: BTreeMap<String, PackageMeta>) {
+        let deps = LibraryDeps(deps);
+        match LibraryIndex::try_get(self) {
+            Some(index) => {
+                index
+                    .set_deps(self)
+                    .with_durability(Durability::HIGH)
+                    .to(deps);
+            }
+            None => {
+                let _ = LibraryIndex::builder(
+                    LibraryPackages::default(),
+                    LibraryRoots::default(),
+                    Vec::new(),
+                    deps,
+                )
+                .durability(Durability::HIGH)
+                .new(self);
             }
         }
     }
@@ -1284,6 +1329,13 @@ impl IncrementalDatabase {
             .cloned()
     }
 
+    /// The version and kind the manifest pinned for package `name`, if it
+    /// pinned one. Present for packages whose source was never found, and
+    /// absent for the Base/Core/stdlib floor, which no manifest pins.
+    pub fn package_meta(&self, name: &str) -> Option<PackageMeta> {
+        LibraryIndex::try_get(self)?.deps(self).0.get(name).cloned()
+    }
+
     /// The names of the packages under development (one per workspace folder
     /// that is a package project), empty when none.
     pub fn workspace_packages(&self) -> Vec<String> {
@@ -1431,6 +1483,12 @@ impl Analysis {
     /// located the depot and harvested it.
     pub fn package_root(&self, name: &str) -> Option<PathBuf> {
         self.0.package_root(name)
+    }
+
+    /// The version and kind the manifest pinned for package `name`. See
+    /// [`IncrementalDatabase::package_meta`].
+    pub fn package_meta(&self, name: &str) -> Option<PackageMeta> {
+        self.0.package_meta(name)
     }
 
     /// The names of the packages under development, empty when none.

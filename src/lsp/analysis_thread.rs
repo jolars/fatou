@@ -265,6 +265,7 @@ impl AnalysisWorker {
                     guard("library", || match msg {
                         Ok(LibraryMessage::Full(lib)) => {
                             self.db.set_project_files(lib.project_files);
+                            self.db.set_library_deps(lib.deps);
                             self.db.set_library(lib.packages, lib.roots, lib.workspaces);
                             // Seed the workspace packages' member files as inputs
                             // so cross-file references/rename can index them.
