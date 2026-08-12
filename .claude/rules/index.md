@@ -71,6 +71,14 @@ supplies the paths). The server's route is what makes an **unsaved** `[deps]`
 edit count — the `Project.toml` buffer is authoritative there, while everything
 needing a resolved `Environment` stays on the harvester's save cadence.
 
+The buffer is authoritative only **while a buffer exists**. `set_project_files`
+seeds through `seed_disk_file`, which is create-or-return precisely so a
+re-resolve cannot clobber an open, unsaved file — which means a re-resolve is
+*not* what refreshes a closed one. The **watched-file sync** is:
+`on_watched_files` reverts an environment file with no open document to disk,
+exactly as it does a `.jl` source. Drop that and a `pkg> add` from a terminal
+leaves `unresolved-import` answering to the text the file had at startup.
+
 ## Testing
 
 Suites live at the root: `harvest.rs`, `base_index.rs`, `library_index.rs`,

@@ -420,6 +420,13 @@ tenet the linter is purely semantic over Julia.
     map. Live *diagnostics* for the buffer belong with stage 3, where the TOML
     file becomes a real document with a route of its own; a manifest buffer is
     likewise not read, since nothing consumes one without a resolve.
+  - **The other half of that line**: the buffer is authoritative only while a
+    buffer exists. `set_project_files` seeds create-or-return so a re-resolve
+    cannot clobber an open file, which is exactly why a re-resolve does not
+    refresh a *closed* one either — the watched-file sync does, reverting an
+    environment file with no open document just as it does a `.jl` source
+    (`a_watched_project_file_change_clears_unresolved_import`). Without it a
+    `pkg> add` from a terminal never reaches the lint.
   - The guard was written first, the mirror of the body-edit firewall: a
     `Project.toml` edit must reach the declared deps and re-parse no Julia,
     while an edit leaving `[deps]` alone backdates.

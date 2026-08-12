@@ -5274,6 +5274,110 @@ fn an_unsaved_project_file_edit_clears_unresolved_import() {
     server_thread.join().unwrap();
 }
 
+/// The mirror of the test above, and the case the *unsaved* buffer must not
+/// cost: a `Project.toml` changed **on disk with no buffer at all** — `pkg>
+/// add` from a terminal, a branch switch — must reach `unresolved-import` too.
+///
+/// The declared dependencies are read off the file's tracked salsa input, and
+/// the re-resolve a watched environment event triggers cannot refresh it
+/// (`set_project_files` is create-or-return, so an open buffer survives one).
+/// The watched-file sync is what does, and this is its guard: without it the
+/// lint answers to the text the file had when the server first harvested it,
+/// for the rest of the session.
+#[test]
+fn a_watched_project_file_change_clears_unresolved_import() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-watcheddeps");
+    let project = pkg.path.join("Project.toml");
+    let on_disk = "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n\n[compat]\njulia = \"1.10\"\n";
+    write_file(&project, on_disk);
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\nusing Foo\nend\n",
+    );
+
+    let depot = TempDir::new("fatou-lsp-watcheddeps-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_root(&client, &file_uri(&pkg.path));
+
+    let source_uri = file_uri(&pkg.path.join("src/MyPkg.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: source_uri,
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "module MyPkg\nusing Foo\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // `Foo` is neither declared nor installed; the finding needs the harvest.
+    let diags = poll_publish_where(&client, "MyPkg.jl", Duration::from_secs(10), |diags| {
+        diags
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("unresolved-import".to_string())))
+    });
+    assert!(diags.iter().any(|d| d.message.contains("Foo")), "{diags:?}");
+
+    // `pkg> add Foo`, from outside the editor: the file changes on disk and the
+    // watcher reports it. Nothing ever opened it.
+    write_file(
+        &project,
+        &format!("{on_disk}\n[deps]\nFoo = \"00000000-0000-0000-0000-0000000000f0\"\n"),
+    );
+    did_change_watched_files(
+        &client,
+        vec![FileEvent {
+            uri: file_uri(&project),
+            typ: FileChangeType::CHANGED,
+        }],
+    );
+
+    let cleared = poll_publish_where(
+        &client,
+        "MyPkg.jl",
+        Duration::from_secs(10),
+        <[_]>::is_empty,
+    );
+    assert!(cleared.is_empty());
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(313),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(313));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
 /// Write a workspace holding `MyPkg` and a dependency it can resolve with no
 /// depot at all: the manifest pins `Greetings` by `path`, so the harvester
 /// indexes it straight off disk. Returns the temp root; the project directory
