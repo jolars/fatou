@@ -78,13 +78,17 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
 - **An open document is not always Julia.** `Document` carries a
   `DocumentKind`, tagged once at `didOpen`; the environment files
   (`Project.toml`, `Manifest.toml`, and friends) are in the client's document
-  selector, so any request can arrive for one. Reach a buffer for a language
-  feature through `GlobalState::julia_text`, never `documents` directly — a
-  hover or a format served off a TOML buffer parses it as Julia. Their own
-  diagnostics have **two producers**: the buffer (text-only checks, edit
-  cadence) and the harvester (a resolved `Environment`, resolve cadence). The
-  buffer's set supersedes rather than joins — `publish_merged` is the one place
-  that merge lives.
+  selector, so any request can arrive for one. **Reach a buffer through
+  `GlobalState::julia_text` or `project_text`, never `documents` directly** —
+  those two are the only doors into the read pool. A Julia-backed feature asks
+  `julia_text` and answers `null` otherwise, because a hover or a format served
+  off a TOML buffer parses it as Julia; a feature that understands TOML asks
+  `project_text` and lands in `project_navigation.rs`. A `Manifest.toml`
+  answers neither: its text never reaches the database, and it carries no spans
+  to anchor on. Their own diagnostics have **two producers**: the buffer
+  (text-only checks, edit cadence) and the harvester (a resolved `Environment`,
+  resolve cadence). The buffer's set supersedes rather than joins —
+  `publish_merged` is the one place that merge lives.
 - A setting that is a fact about the **machine** belongs in editor settings
   (`config.rs`), not `fatou.toml`; project facts belong in the config file. The
   LSP resolves `fatou.toml` the same way the CLI does so both walks honor the

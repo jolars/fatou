@@ -6,7 +6,8 @@ parse diagnostics with quick fixes, completion, hover, signature help, go-to
 definition, references, rename (of symbols, and of files and folders — moving a
 file rewrites the `include` paths that name it), document and workspace symbols,
 call and type hierarchy, folding ranges, document links, selection ranges, and
-semantic tokens.
+semantic tokens. It also checks your `Project.toml` and `Manifest.toml`
+themselves, and navigates an open `Project.toml`'s dependency names.
 
 ## Prerequisites
 
@@ -196,9 +197,13 @@ from the file's directory upward.
 Fatou also checks your `Project.toml` and `Manifest.toml` themselves, and
 publishes those findings on the file at fault whether or not it is open. If you
 additionally attach the server to those files (the VS Code extension does), an
-open one reports its TOML errors as you type, before you save; language
-features such as hover and formatting stay off for them, since they are not
-Julia.
+open one reports its TOML errors as you type, before you save.
+
+An open `Project.toml` also answers on its dependency names: go-to-definition
+and a document link take you to the package's entry file, and hovering reports
+the version, kind, and resolved path the environment gave it. Everything else
+stays off for these files — formatting a `Project.toml` would mean parsing TOML
+as Julia.
 
 ## Configuration
 

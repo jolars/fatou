@@ -138,7 +138,8 @@ matching `.claude/rules/` file.
   project/depot the way Julia's loader does. Falls back to a baked-in Base/Core
   export list when no install is found.
 - **Project files** (`src/project_files.rs`) — checks over `Project.toml`/
-  `Manifest.toml` *themselves*, published by the LSP on the file at fault.
+  `Manifest.toml` *themselves*, published by the LSP on the file at fault, plus
+  the dependency entries an open one navigates by (`dep_entries`/`dep_at`).
   **Not lint rules** (there is no `SyntaxKind` to dispatch on) and deliberately
   LSP-free, so the mapping to `lsp_types` stays at the edge.
 - **Linter** (`src/linter/`) — **purely semantic**; anything `format --check`

@@ -347,8 +347,9 @@ them the way Julia's loader does, `register_file_watchers` covers all five
 flavors, and `is_environment_file` escalates a watched change to
 `HarvestSignal::Environment`) and, since stage 1, report their own problems.
 Since stage 2 a project file is also a salsa input, so its `[deps]` follow the
-editor's unsaved buffer. The LSP document selector is still `.jl`-only, so they
-carry diagnostics but answer no requests.
+editor's unsaved buffer; since stage 3 an open one is a document with a route of
+its own, and since stage 4a a `Project.toml` answers go-to-definition, hover,
+and document links on a dependency name.
 
 The target is what rust-analyzer gives `Cargo.toml`, which is narrower than it
 is usually remembered as: watch-and-reload, plus a document-selector entry so
@@ -458,16 +459,45 @@ tenet the linter is purely semantic over Julia.
     "toml"`, which exists only with a TOML extension installed), including
     `**/Manifest-v*.toml` to match `is_manifest_file` and the watcher globs.
 
-- [ ] **Stage 4: features**, in rough value-per-effort order.
-  - Go-to-definition on a `[deps]` name, landing on the package's entry file.
-    Nearly free: `LibraryRoots` already maps package name to source root.
-  - Hover on a dep: version, kind (stdlib/registered/dev), and resolved path,
-    straight off `Package`.
-  - Document links on `[deps]` names and on manifest `path` entries.
+- [x] **Stage 4a: navigation.** Go-to-definition, hover, and document links on
+  a dependency name, in `src/lsp/project_navigation.rs`. `project_files.rs`
+  grew `dep_entries`/`dep_at`, the same spanned schema read the other way
+  round: not what is wrong with the file but what it names, and where.
+  - **The door.** `GlobalState::project_text` is the sibling of `julia_text`
+    and the only other way into the read pool; every other handler still
+    answers `null` for an environment file. A `Manifest.toml` answers nothing
+    at all, so the route is per-*kind*, not per-file-is-TOML.
+  - **No `compute_*`/`*_via_db` split**, unlike every Julia feature. Those
+    exist to serve a cached parse tree and fall back when the tracked input
+    lags the buffer; here the parse is a TOML parse of the buffer itself, so
+    there is nothing to be stale against. Only the `salsa::Cancelled` guard
+    remains.
+  - All three tables answer (`[deps]`, `[weakdeps]`, `[extras]`) — each names a
+    real package. `[compat]` does not: its keys may name `julia`.
+  - Hover needed the one piece of new plumbing: `Package` lived only on the
+    harvester thread, so `LibraryDeps` carries version and kind into the
+    database. It is set apart from `set_library`'s three maps because it is
+    keyed by what the *manifest pinned*, not by what the harvest indexed — a
+    package whose source was never found has an entry in one and not the other,
+    and "installed, 0.4.5, source not found" is what a reader wants told.
+  - Landed alongside: the entry target is `normalize_path`ed, since a `dev`'d
+    dependency's root keeps the manifest's `../` spelling. `definition.rs`'s
+    Julia jump into a `dev`'d package has the same seam and is *not* fixed —
+    `site_locations` does not normalize, and changing that is an unrelated
+    feature's behavior.
+
+- [ ] **Stage 4b: the rest**, deferred with stage 4a's route already in place.
+  - Document links on manifest `path` entries. The costly half of that bullet:
+    a manifest is deliberately parsed against a plain table (its 1.0 and 2.0
+    layouts differ), so it carries no spans, and typing it means two parse
+    attempts against two spanned schemas — `serde(flatten)`/`untagged` silently
+    drop the span hook.
   - Completion of dependency names, the expensive one. On a default depot the
     registry is a `General.tar.gz`, so the full version needs gzip and tar to
     reach `Registry.toml`. Scope the first pass to packages already installed in
-    the depot: no new dependency, no network.
+    the depot: no new dependency, no network. Note that *nothing* enumerates
+    `<depot>/packages` today — it is only ever probed by exact slug — so even
+    the cheap pass is new code.
   - `name`/`uuid` upkeep on a rename, the edit half of the `willRenameFiles`
     entry above.
 
