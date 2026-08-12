@@ -91,6 +91,12 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   (text-only checks, edit cadence) and the harvester (a resolved `Environment`,
   resolve cadence). The buffer's set supersedes rather than joins —
   `publish_merged` is the one place that merge lives.
+- **A feature the harvest feeds needs a refresh nudge.** The library lands
+  seconds after `initialize`, and a client re-requests hints only on an edit or
+  a scroll, so a full harvest sends `workspace/inlayHint/refresh` (guarded by
+  the client capability, as `workspace/diagnostic/refresh` is). Anything else
+  reading the library from an already-open document has the same gap and the
+  same fix — bar document links, which the spec gives no refresh request.
 - A setting that is a fact about the **machine** belongs in editor settings
   (`config.rs`), not `fatou.toml`; project facts belong in the config file. The
   LSP resolves `fatou.toml` the same way the CLI does so both walks honor the

@@ -70,6 +70,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
         supports_watched_files_registration(&params.capabilities) && !workspace_roots.is_empty();
     let pull_diagnostics = supports_pull_diagnostics(&params.capabilities);
     let diagnostic_refresh = supports_diagnostic_refresh(&params.capabilities);
+    let inlay_hint_refresh = supports_inlay_hint_refresh(&params.capabilities);
     let work_done_progress = supports_work_done_progress(&params.capabilities);
     let result =
         serde_json::json!({ "capabilities": capabilities_json(encoding, pull_diagnostics) });
@@ -81,6 +82,7 @@ pub fn serve(connection: &Connection) -> Result<(), DynError> {
         register_watchers,
         pull_diagnostics,
         diagnostic_refresh,
+        inlay_hint_refresh,
         work_done_progress,
         params.initialization_options,
     )
@@ -106,6 +108,21 @@ fn supports_diagnostic_refresh(capabilities: &ClientCapabilities) -> bool {
         .as_ref()
         .and_then(|workspace| workspace.diagnostic.as_ref())
         .and_then(|diagnostic| diagnostic.refresh_support)
+        .unwrap_or(false)
+}
+
+/// Whether the client accepts `workspace/inlayHint/refresh`, the server's nudge
+/// to re-request hints once the harvest supplies the versions they report.
+///
+/// Checked rather than assumed because the spec has this request force a
+/// *global* recalculation of every visible hint: a client that never claimed it
+/// should not be handed one.
+fn supports_inlay_hint_refresh(capabilities: &ClientCapabilities) -> bool {
+    capabilities
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.inlay_hint.as_ref())
+        .and_then(|inlay_hint| inlay_hint.refresh_support)
         .unwrap_or(false)
 }
 
@@ -331,6 +348,7 @@ fn main_loop(
     register_watchers: bool,
     pull_diagnostics: bool,
     diagnostic_refresh: bool,
+    inlay_hint_refresh: bool,
     work_done_progress: bool,
     initialization_options: Option<serde_json::Value>,
 ) -> Result<(), DynError> {
@@ -398,6 +416,7 @@ fn main_loop(
         encoding,
         pull_diagnostics,
         diagnostic_refresh,
+        inlay_hint_refresh,
         initialization_options,
     );
 
@@ -954,6 +973,21 @@ mod tests {
             ..Default::default()
         };
         assert!(supports_diagnostic_refresh(&caps));
+    }
+
+    #[test]
+    fn inlay_hint_refresh_requires_the_client_capability() {
+        assert!(!supports_inlay_hint_refresh(&ClientCapabilities::default()));
+        let caps = ClientCapabilities {
+            workspace: Some(lsp_types::WorkspaceClientCapabilities {
+                inlay_hint: Some(lsp_types::InlayHintWorkspaceClientCapabilities {
+                    refresh_support: Some(true),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(supports_inlay_hint_refresh(&caps));
     }
 
     #[test]

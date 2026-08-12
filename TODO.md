@@ -499,6 +499,15 @@ tenet the linter is purely semantic over Julia.
     why the other three needed no client change). A Julia document answers an
     empty list, not `null`: inlay *type* hints would need inference, which is
     out by tenet, but "this file has no hints" is the honest answer.
+  - **And a refresh nudge**, which the feature does not work without: the
+    versions come from the harvest, which lands seconds after `initialize`,
+    while a client re-requests hints only on an edit or a scroll. A full
+    harvest therefore sends `workspace/inlayHint/refresh`, capability-gated the
+    way `workspace/diagnostic/refresh` is, and its own signal rather than a
+    share of `DiagnosticsRefresh` — that one also fires per project-file
+    keystroke, and the spec has this request force a *global* recalculation.
+    Document links have the same staleness and no cure: the spec defines no
+    refresh request for them.
   - Deliberately not hinted: `[compat]`. A declared-range-versus-resolved hint
     there is interesting but overlaps `missing-compat`/`unknown-compat`, and it
     is a second rendering path deserving its own decision.
