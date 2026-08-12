@@ -260,6 +260,7 @@ fn workspace_member_maps_files_to_host_modules() {
         roots: BTreeMap::from([("Pkg".to_string(), tmp.path().to_path_buf())]),
         workspaces: vec!["Pkg".to_string()],
         declared_deps: Default::default(),
+        project_files: Default::default(),
     };
 
     // A root-hosted file: empty host module path.
@@ -565,4 +566,23 @@ fn harvest_libraries_records_each_dev_packages_declared_deps() {
         ["LinearAlgebra"]
     );
     assert!(lib.declared_deps["PkgB"].is_empty());
+}
+
+#[test]
+fn harvest_libraries_records_each_dev_packages_project_file() {
+    use fatou::index::harvest_libraries;
+
+    let a = TempDir::new();
+    let b = TempDir::new();
+    write(&a.path().join("src/PkgA.jl"), "module PkgA\nend\n");
+    write(&b.path().join("src/PkgB.jl"), "module PkgB\nend\n");
+
+    let lib = harvest_libraries(&[package_env(a.path(), "PkgA"), package_env(b.path(), "PkgB")]);
+    assert_eq!(lib.project_files["PkgA"], a.path().join("Project.toml"));
+    assert_eq!(lib.project_files["PkgB"], b.path().join("Project.toml"));
+    assert_eq!(
+        lib.project_files.keys().collect::<Vec<_>>(),
+        lib.declared_deps.keys().collect::<Vec<_>>(),
+        "the two project-file maps must name the same packages"
+    );
 }

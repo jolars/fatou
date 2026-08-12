@@ -74,6 +74,7 @@ fn project(b_contents: &str) -> (TempDir, TempDir, HarvestedLibrary) {
         roots: BTreeMap::from([("M".to_string(), pkg.path().to_path_buf())]),
         workspaces: vec!["M".to_string()],
         declared_deps: Default::default(),
+        project_files: Default::default(),
     };
     (dep, pkg, library)
 }
@@ -144,6 +145,7 @@ fn project_with_deps() -> (TempDir, HarvestedLibrary) {
             "M".to_string(),
             Arc::new(["SparseArrays".to_string()].into_iter().collect()),
         )]),
+        project_files: Default::default(),
     };
     (pkg, library)
 }
