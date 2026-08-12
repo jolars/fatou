@@ -7,7 +7,8 @@ definition, references, rename (of symbols, and of files and folders — moving 
 file rewrites the `include` paths that name it), document and workspace symbols,
 call and type hierarchy, folding ranges, document links, selection ranges, and
 semantic tokens. It also checks your `Project.toml` and `Manifest.toml`
-themselves, and navigates an open `Project.toml`'s dependency names.
+themselves, and navigates an open `Project.toml`'s dependency names, with inlay
+hints for their resolved versions.
 
 ## Prerequisites
 
@@ -200,10 +201,11 @@ additionally attach the server to those files (the VS Code extension does), an
 open one reports its TOML errors as you type, before you save.
 
 An open `Project.toml` also answers on its dependency names: go-to-definition
-and a document link take you to the package's entry file, and hovering reports
-the version, kind, and resolved path the environment gave it. Everything else
-stays off for these files — formatting a `Project.toml` would mean parsing TOML
-as Julia.
+and a document link take you to the package's entry file, hovering reports the
+version, kind, and resolved path the environment gave it, and an inlay hint puts
+each resolved version beside its UUID, so you can read off what you are actually
+on without opening the `Manifest.toml`. Everything else stays off for these
+files — formatting a `Project.toml` would mean parsing TOML as Julia.
 
 ## Configuration
 

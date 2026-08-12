@@ -349,7 +349,7 @@ flavors, and `is_environment_file` escalates a watched change to
 Since stage 2 a project file is also a salsa input, so its `[deps]` follow the
 editor's unsaved buffer; since stage 3 an open one is a document with a route of
 its own, and since stage 4a a `Project.toml` answers go-to-definition, hover,
-and document links on a dependency name.
+document links, and inlay hints on a dependency name.
 
 The target is what rust-analyzer gives `Cargo.toml`, which is narrower than it
 is usually remembered as: watch-and-reload, plus a document-selector entry so
@@ -459,10 +459,11 @@ tenet the linter is purely semantic over Julia.
     "toml"`, which exists only with a TOML extension installed), including
     `**/Manifest-v*.toml` to match `is_manifest_file` and the watcher globs.
 
-- [x] **Stage 4a: navigation.** Go-to-definition, hover, and document links on
-  a dependency name, in `src/lsp/project_navigation.rs`. `project_files.rs`
-  grew `dep_entries`/`dep_at`, the same spanned schema read the other way
-  round: not what is wrong with the file but what it names, and where.
+- [x] **Stage 4a: navigation.** Go-to-definition, hover, document links, and
+  inlay hints on a dependency name, in `src/lsp/project_navigation.rs`.
+  `project_files.rs` grew `dep_entries`/`dep_at`, the same spanned schema read
+  the other way round: not what is wrong with the file but what it names, and
+  where.
   - **The door.** `GlobalState::project_text` is the sibling of `julia_text`
     and the only other way into the read pool; every other handler still
     answers `null` for an environment file. A `Manifest.toml` answers nothing
@@ -480,6 +481,20 @@ tenet the linter is purely semantic over Julia.
     keyed by what the *manifest pinned*, not by what the harvest indexed — a
     package whose source was never found has an entry in one and not the other,
     and "installed, 0.4.5, source not found" is what a reader wants told.
+  - **Inlay hints** show each dependency's resolved version after its UUID.
+    Not a duplicate of hover, which is the on-demand one-at-a-time answer: the
+    `[deps]` table is almost entirely UUID, and the version lives in the
+    `Manifest.toml` next door, which nobody opens. Version only — the kind
+    belongs to "tell me about *this* dependency", and repeating "Registered
+    package" down the table is noise. This is fatou's **first** inlay hint
+    feature, so it took the capability, and a `provideInlayHints` entry in the
+    extension's `languageFeatures` gate (which is keyed by request kind, and is
+    why the other three needed no client change). A Julia document answers an
+    empty list, not `null`: inlay *type* hints would need inference, which is
+    out by tenet, but "this file has no hints" is the honest answer.
+  - Deliberately not hinted: `[compat]`. A declared-range-versus-resolved hint
+    there is interesting but overlaps `missing-compat`/`unknown-compat`, and it
+    is a second rendering path deserving its own decision.
   - Landed alongside: `site_locations` now normalizes, which fixes the Julia
     jump into a `dev`'d package too. Such a package's root is the manifest's
     `path` joined to the project directory, so it keeps that entry's `../`
