@@ -618,6 +618,26 @@ error: kwarg-default-mismatch
   = help: a keyword's `::T` is a dispatch constraint, not a `convert`, so the default raises a `MethodError`
 ```
 
+## `invalid-type-declaration`
+
+Flag a `::` type declaration whose declared type is a function. The right side of a `::` must be a type, and Julia checks it eagerly: `f(x::g)` for a generic function `g` raises a `TypeError` when the method is defined, and a value-position `x::g` raises one as soon as it runs. The rule is deliberately partial, since only a closed answer about a name is trustworthy: it fires for a function defined in this file and for a top-level function of the enclosing workspace package, and stays silent for a Base/Core name (the export snapshot records no kinds), an imported name, and any binding that could hold a type such as a variable or a `const` alias. A same-named type, `const`, or module anywhere in the file or the package withholds the finding, so an outer constructor (`Foo(x::Int) = …`, which binds `Foo` as a function too) is never flagged. The file is skipped entirely when it `eval`s, `include`s outside a known workspace, or `using`s a module the library cannot resolve, and annotations inside a macro call or quoted code are exempt. Off by default: like the other resolution-gated rules it needs project context, so the language server enables it for workspace member files while the CLI leaves it opt-in via `--select`.
+
+`scale` is a function, so declaring `y::scale` is a `TypeError`:
+
+```julia
+scale(x) = 2x
+
+apply(y::scale) = y
+```
+
+```text
+warning: invalid-type-declaration
+ --> example.jl:3:10
+  |
+3 | apply(y::scale) = y
+  |          ^^^^^ `scale` is a function, not a type: `::scale` is not a valid type declaration
+```
+
 ## `assignment-in-condition`
 
 Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. It is valid Julia but almost always a typo for `==`, so it is reported with a safe fix that rewrites `=` to `==`.

@@ -122,6 +122,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UnreachableCode),
         Box::new(correctness::UnresolvedImport),
         Box::new(correctness::KwargDefaultMismatch),
+        Box::new(correctness::InvalidTypeDeclaration),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::MissingComparison),
@@ -157,6 +158,7 @@ pub const RESOLUTION_RULES: &[&str] = &[
     "unresolved-import",
     "function-has-no-methods",
     "non-public-access",
+    "invalid-type-declaration",
 ];
 
 /// Every shipped rule's ID, derived from [`all_rules`] so the two never drift.

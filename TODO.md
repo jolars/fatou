@@ -176,11 +176,16 @@ it. We are behind arity only on the CFG and on rule ergonomics.
 
 ### Rule roadmap
 
-- [ ] `invalid-type-declaration` (correctness, sem + res, warning, no fix):
-  `f(x::g)` where `g` resolves to a function rather than a type. Needs
-  "this binding is a function, not a type", which binding kinds answer for
-  same-file and workspace names but not for arbitrary imports — so it is
-  resolution-gated and partial. (InvalidTypeDeclaration)
+- [x] `invalid-type-declaration` (correctness, sem + res, warning, no fix,
+  default-off): any `TYPE_ANNOTATION` whose type is a bare name resolving to a
+  function — a signature parameter, a struct field, a value-position
+  typeassert alike. Partial exactly as predicted: it fires for a
+  `BindingKind::Function` in this file and for a workspace package's function
+  group, and stays silent for Base/Core (the export snapshot carries no kinds)
+  and for imports. Beyond the shared `trusts_resolution` bail-outs, one guard
+  earns its keep — an outer constructor binds `Foo` as a function too, so a
+  same-named type, `const`, or module anywhere in the file or the package
+  withholds the finding. In `RESOLUTION_RULES`.
 
 Deferred, and why:
 

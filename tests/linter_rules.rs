@@ -5342,6 +5342,145 @@ fn function_has_no_methods_skips_quoted_and_macro_call_sites() {
     );
 }
 
+// --- invalid-type-declaration ------------------------------------------------
+
+#[test]
+fn invalid_type_declaration_flags_a_function_in_a_parameter_annotation() {
+    let msgs = findings("invalid-type-declaration", "g(x) = x\nf(y::g) = y\n");
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
+    assert!(msgs[0].contains("`g`"), "{msgs:?}");
+}
+
+#[test]
+fn invalid_type_declaration_flags_the_unnamed_argument_form() {
+    assert_eq!(
+        count("invalid-type-declaration", "g(x) = x\nf(::g) = 1\n"),
+        1
+    );
+}
+
+#[test]
+fn invalid_type_declaration_flags_a_long_form_signature_and_a_struct_field() {
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "function g(x)\n    x\nend\n\nfunction f(y::g)\n    y\nend\n"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "g(x) = x\n\nstruct S\n    a::g\nend\n"
+        ),
+        1
+    );
+}
+
+#[test]
+fn invalid_type_declaration_flags_a_typeassert() {
+    // `1::g` is the same `::` declaration in value position: a `TypeError` the
+    // moment it runs.
+    assert_eq!(count("invalid-type-declaration", "g(x) = x\ny = 1::g\n"), 1);
+}
+
+#[test]
+fn invalid_type_declaration_ignores_a_real_type() {
+    assert_eq!(
+        count("invalid-type-declaration", "struct T end\nf(x::T) = x\n"),
+        0
+    );
+    assert_eq!(count("invalid-type-declaration", "f(x::Int) = x\n"), 0);
+    assert_eq!(count("invalid-type-declaration", "f(x::Function) = x\n"), 0);
+}
+
+#[test]
+fn invalid_type_declaration_ignores_a_name_bound_to_a_type() {
+    // A `const` alias and a plain variable can both hold a type; only a
+    // binding the model calls a *function* is a declaration error.
+    assert_eq!(
+        count("invalid-type-declaration", "const T = Int\nf(x::T) = x\n"),
+        0
+    );
+    assert_eq!(
+        count("invalid-type-declaration", "T = Int\nf(x::T) = x\n"),
+        0
+    );
+}
+
+#[test]
+fn invalid_type_declaration_ignores_a_where_type_parameter() {
+    assert_eq!(
+        count("invalid-type-declaration", "f(x::T) where {T} = x\n"),
+        0
+    );
+    // The `where` variable masks a same-named global function.
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "g(x) = x\nf(y::g) where {g} = y\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn invalid_type_declaration_ignores_a_constructor_of_a_same_named_type() {
+    // An outer constructor binds `Foo` as a function too, but `Foo` names a
+    // type here, so the annotation is fine.
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "struct Foo end\nFoo(x::Int) = Foo()\nf(y::Foo) = y\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn invalid_type_declaration_ignores_imported_and_library_names() {
+    // An import binds a name whose kind this file cannot see, and a Base name
+    // is only known by its export list — both are deliberate misses.
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "import Foo: Bar\nf(x::Bar) = x\n"
+        ),
+        0
+    );
+    assert_eq!(count("invalid-type-declaration", "f(x::sin) = x\n"), 0);
+}
+
+#[test]
+fn invalid_type_declaration_skips_quoted_and_macro_wrapped_code() {
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "g(x) = x\nex = :(f(y::g) = y)\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "g(x) = x\n@inline f(y::g) = y\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn invalid_type_declaration_is_silent_when_the_file_evals() {
+    // `eval` can rebind `g` to a type, so no verdict about it is sound.
+    assert_eq!(
+        count(
+            "invalid-type-declaration",
+            "g(x) = x\neval(ex)\nf(y::g) = y\n"
+        ),
+        0
+    );
+}
+
 // --- suppression meta rules -------------------------------------------------
 
 /// Lint `src` with `rule` *and* `also` selected, returning only `rule`'s
