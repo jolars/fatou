@@ -39,7 +39,7 @@ use lsp_types::{
 };
 
 use crate::config::CONFIG_FILE_NAME;
-use crate::environment::{is_environment_file, is_project_file};
+use crate::environment::{is_environment_file, is_manifest_file, is_project_file};
 use crate::parser::Edit;
 use crate::text::{PositionEncoding, TextBuffer, apply_content_changes};
 
@@ -49,11 +49,44 @@ use super::read_jobs::{ReadJob, ReadReply};
 use super::server::HarvestSignal;
 use super::uri;
 
-/// An open document's live buffer and client-reported version.
+/// An open document's live buffer, client-reported version, and kind.
 #[derive(Debug, Clone)]
 struct Document {
     text: Arc<TextBuffer>,
     version: i32,
+    kind: DocumentKind,
+}
+
+/// What an open document *is*, decided once at `didOpen` from its path and
+/// carried on the buffer thereafter. Every fork that used to re-derive "is this
+/// an environment file?" from the URI now reads this instead: the two TOML
+/// kinds are not Julia, they never reach the parser, and each has a route of
+/// its own ([`GlobalState::route_document`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentKind {
+    /// Julia source: the analysis pipeline's business, and the only kind any
+    /// language feature answers for.
+    Julia,
+    /// A `Project.toml` flavor. Its text reaches the database, because the
+    /// linter derives the package's declared dependencies from it; its buffer
+    /// also carries the file's own TOML diagnostics.
+    Project,
+    /// A `Manifest.toml` flavor. Diagnostics only: nothing reads a manifest
+    /// without an environment resolve, which is the harvester's job.
+    Manifest,
+}
+
+impl DocumentKind {
+    /// A document's kind, from the file its URI names. A URI with no path
+    /// behind it — an editor's untitled buffer — is Julia: it is what the
+    /// editor opened the server for, and it has no file name to say otherwise.
+    fn of(uri: &Uri) -> Self {
+        match uri::to_path(uri) {
+            Some(path) if is_project_file(&path) => Self::Project,
+            Some(path) if is_manifest_file(&path) => Self::Manifest,
+            _ => Self::Julia,
+        }
+    }
 }
 
 /// Messages from the analysis thread back to the main loop.
@@ -82,6 +115,11 @@ pub(crate) enum Outbound {
     /// report is served only for an open document, and an open environment
     /// file has no Julia analysis to carry them. So they always push, and a
     /// pull client neither suppresses nor re-supplies them.
+    ///
+    /// The harvester is not the only producer for these URIs: an *open*
+    /// environment file also carries the text-only findings of its own buffer
+    /// (`buffer_diags`), which arrive on the main loop rather than through this
+    /// channel. [`GlobalState::publish_merged`] is where the two cadences meet.
     EnvironmentDiagnostics { uri: Uri, diags: Vec<Diagnostic> },
     /// A re-harvest changed the include graph: a pull-model client should
     /// re-pull its open documents (`workspace/diagnostic/refresh`). Sent once
@@ -167,6 +205,13 @@ pub(crate) struct GlobalState {
     /// file on disk, open or not) nor cleared for a pull client on `didOpen`,
     /// as `graph_diags` is: there is no pull report that would re-supply them.
     env_diags: HashMap<Uri, Vec<Diagnostic>>,
+    /// The latest diagnostics an *open* environment file's own buffer produced
+    /// (see [`buffer_diagnostics`](super::environment_diagnostics::buffer_diagnostics)),
+    /// the second producer for the same URIs as `env_diags` — this one at edit
+    /// cadence rather than the harvester's resolve cadence. Non-empty entries
+    /// only, and dropped when the buffer closes: it describes a text only the
+    /// editor has.
+    buffer_diags: HashMap<Uri, Vec<Diagnostic>>,
     /// Per-document configuration: discovered `fatou.toml` shadowing
     /// editor-pushed settings (see [`ConfigStore`]). Owned by the main loop
     /// alone; resolved config travels with each dispatched request.
@@ -193,6 +238,7 @@ impl GlobalState {
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
             env_diags: HashMap::new(),
+            buffer_diags: HashMap::new(),
             sender,
             out_tx,
             inflight_reads: HashMap::new(),
@@ -260,17 +306,12 @@ impl GlobalState {
         };
         let uri = params.text_document.uri;
         // An environment file is TOML: there is nothing here to lint, and a
-        // Julia parse of it would report nonsense. Its own diagnostics reach
-        // the client by push (see `Outbound::EnvironmentDiagnostics`), which
-        // is the only route open to them — a pull report is served only for an
-        // open document, and these attach to files that need not be open.
-        let is_env = uri::to_path(&uri).is_some_and(|path| is_environment_file(&path));
-        let Some(text) = self
-            .documents
-            .get(&uri)
-            .filter(|_| !is_env)
-            .map(|d| Arc::clone(&d.text))
-        else {
+        // Julia parse of it would report nonsense (`julia_text` is what returns
+        // nothing for one). Its own diagnostics reach the client by push (see
+        // `Outbound::EnvironmentDiagnostics`), which stays the single route for
+        // them whether or not the client pulls — its two producers both push,
+        // so answering the pull with them as well would double them up.
+        let Some(text) = self.julia_text(&uri) else {
             // The spec wants a report, not null; an unknown document has none.
             let empty = serde_json::to_value(super::read_jobs::full_report(Vec::new()))
                 .expect("empty diagnostic report serializes");
@@ -296,7 +337,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -320,7 +361,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -343,7 +384,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -367,7 +408,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -405,7 +446,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -425,7 +466,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -446,7 +487,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -469,7 +510,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -491,7 +532,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -512,7 +553,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -533,7 +574,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -555,7 +596,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -576,7 +617,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -598,7 +639,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -623,7 +664,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -646,7 +687,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -667,7 +708,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -695,8 +736,9 @@ impl GlobalState {
         };
         let open_docs = self
             .documents
-            .keys()
-            .filter_map(uri::to_path)
+            .iter()
+            .filter(|(_, doc)| doc.kind == DocumentKind::Julia)
+            .filter_map(|(uri, _)| uri::to_path(uri))
             .collect::<Vec<_>>();
         let reply = self.read_reply(id.clone(), None);
         self.dispatch_read(ReadJob::WillRenameFiles {
@@ -716,7 +758,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -776,7 +818,7 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document_position_params.text_document.uri;
-        let Some(text) = self.documents.get(&uri).map(|d| Arc::clone(&d.text)) else {
+        let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
@@ -841,6 +883,20 @@ impl GlobalState {
         });
     }
 
+    /// The live buffer for `uri`, but only when the document is Julia. Every
+    /// language feature goes through this rather than `documents` directly:
+    /// with the environment files in the client's document selector, any
+    /// request can arrive for a `Project.toml`, and answering a hover or a
+    /// format for one would parse TOML as Julia and hand back nonsense. Such a
+    /// request answers `null`, exactly as it does for a document the server
+    /// never saw.
+    fn julia_text(&self, uri: &Uri) -> Option<Arc<TextBuffer>> {
+        self.documents
+            .get(uri)
+            .filter(|doc| doc.kind == DocumentKind::Julia)
+            .map(|doc| Arc::clone(&doc.text))
+    }
+
     /// Register an in-flight read against the buffer it was dispatched on and
     /// hand back its [`ReadReply`] channel. The recorded `(uri, version)` lets
     /// the reply be version-gated ([`Self::on_read_reply`]) and lets a
@@ -888,6 +944,9 @@ impl GlobalState {
                         Document {
                             text: Arc::new(TextBuffer::new(params.text_document.text)),
                             version: params.text_document.version,
+                            // The one place a document's kind is decided; every
+                            // later fork reads the tag rather than the path.
+                            kind: DocumentKind::of(&uri),
                         },
                     );
                     // A pull client takes over an opened document's
@@ -897,7 +956,7 @@ impl GlobalState {
                     if self.pull_diagnostics && self.graph_diags.contains_key(&uri) {
                         self.publish(uri.clone(), Vec::new(), None);
                     }
-                    self.send_analysis(uri, None);
+                    self.route_document(uri, None);
                 }
             }
             DidChangeTextDocument::METHOD => {
@@ -916,7 +975,7 @@ impl GlobalState {
                         self.encoding,
                     );
                     doc.version = params.text_document.version;
-                    self.send_analysis(uri, edits);
+                    self.route_document(uri, edits);
                 }
             }
             DidSaveTextDocument::METHOD => {
@@ -970,10 +1029,12 @@ impl GlobalState {
                     if let Some(path) = uri::to_path(&uri) {
                         let _ = self.sync_tx.send(SyncMessage::Revert(path));
                     }
-                    // Drop the buffer's parse diagnostics, but keep any project-
-                    // level include-graph diagnostics (they attach to the file on
-                    // disk, open or not): republish just those.
+                    // Drop what the buffer produced — its parse diagnostics, and
+                    // an environment file's live findings — but keep the
+                    // include-graph and harvester diagnostics (they attach to
+                    // the file on disk, open or not): republish just those.
                     self.parse_diags.remove(&uri);
+                    self.buffer_diags.remove(&uri);
                     self.publish_merged(uri, None);
                 }
             }
@@ -1245,15 +1306,101 @@ impl GlobalState {
     /// diagnostics — a single `publishDiagnostics` replaces *all* diagnostics
     /// for a URI, so every source must be sent together or each would clobber
     /// the others.
+    ///
+    /// The environment-file slot has two producers and takes only one of them:
+    /// an open buffer's live findings **supersede** the harvester's set rather
+    /// than joining it. The two are computed from different texts — the buffer
+    /// and the file on disk — so their union is a report of neither, and a
+    /// buffer that does not parse means the harvester's set (its own syntax
+    /// verdict, or semantic findings whose ranges index the disk text)
+    /// describes a file the user has already moved past. A buffer that parses
+    /// contributes nothing and leaves the harvester's set standing, which is
+    /// what keeps the semantic checks visible in an open file. The one seam:
+    /// fixing a syntax error without saving lets the disk verdict reappear
+    /// until the save — truthfully, since that is still the file Julia loads.
     fn publish_merged(&self, uri: Uri, version: Option<i32>) {
         let mut diagnostics = self.parse_diags.get(&uri).cloned().unwrap_or_default();
-        for source in [self.graph_diags.get(&uri), self.env_diags.get(&uri)]
+        let environment = self
+            .buffer_diags
+            .get(&uri)
+            .or_else(|| self.env_diags.get(&uri));
+        for source in [self.graph_diags.get(&uri), environment]
             .into_iter()
             .flatten()
         {
             diagnostics.extend(source.iter().cloned());
         }
         self.publish(uri, diagnostics, version);
+    }
+
+    /// Route a document's new text to whatever owns it, by
+    /// [kind](DocumentKind) — the one fork every `didOpen`/`didChange` takes.
+    ///
+    /// Julia goes to the analysis pipeline. An environment file (`Project.toml`
+    /// and friends) is TOML, and parsing it as Julia would publish nonsense
+    /// parse errors that [`publish_merged`](Self::publish_merged) would union
+    /// with the file's real diagnostics; it takes the TOML route instead, which
+    /// re-derives the file's own findings from the buffer. A *project* file
+    /// additionally writes its text to the database, because the linter derives
+    /// the package's declared dependencies from it — that is what lets an
+    /// unsaved `[deps]` edit reach `unresolved-import` across the package. A
+    /// manifest sends no text: nothing reads one without an environment
+    /// resolve, which is the harvester's job.
+    ///
+    /// `edits` belong to the Julia route alone (see
+    /// [`send_analysis`](Self::send_analysis)).
+    fn route_document(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
+        match self.documents.get(&uri).map(|doc| doc.kind) {
+            None => {}
+            Some(DocumentKind::Julia) => self.send_analysis(uri, edits),
+            Some(kind) => {
+                if kind == DocumentKind::Project {
+                    self.send_project_text(&uri);
+                }
+                self.refresh_buffer_diagnostics(uri);
+            }
+        }
+    }
+
+    /// Write an open project file's buffer to the database as text, so the
+    /// linter's declared dependencies follow the editor rather than the disk.
+    fn send_project_text(&self, uri: &Uri) {
+        let (Some(path), Some(doc)) = (uri::to_path(uri), self.documents.get(uri)) else {
+            return;
+        };
+        let _ = self.sync_tx.send(SyncMessage::SetText {
+            path,
+            text: doc.text.text().to_string(),
+        });
+    }
+
+    /// Re-derive an open environment file's own diagnostics from its buffer and
+    /// republish — the live half of the split stage 2 drew, and the second
+    /// producer for these URIs.
+    ///
+    /// Only the buffer's own set is bookkept here; the merge with the
+    /// harvester's is [`publish_merged`](Self::publish_merged)'s. A publish is
+    /// sent only when there is something to say or something to take back, so a
+    /// keystroke in a file that parses puts nothing on the wire.
+    fn refresh_buffer_diagnostics(&mut self, uri: Uri) {
+        let (Some(path), Some(doc)) = (uri::to_path(&uri), self.documents.get(&uri)) else {
+            return;
+        };
+        let version = doc.version;
+        let diags = super::environment_diagnostics::buffer_diagnostics(
+            &path,
+            doc.text.text(),
+            self.encoding,
+        );
+        let had = self.buffer_diags.remove(&uri).is_some();
+        if diags.is_empty() {
+            if !had {
+                return;
+            }
+        } else {
+            self.buffer_diags.insert(uri.clone(), diags);
+        }
+        self.publish_merged(uri, Some(version));
     }
 
     /// Send an analysis request for `uri`'s current buffer to the analysis
@@ -1264,33 +1411,7 @@ impl GlobalState {
     /// means the transform is unknown — a fresh `didOpen`, a whole-buffer
     /// replacement, or a re-analysis of unchanged text under new rules — and
     /// the reparse falls back to diffing the two texts.
-    ///
-    /// An environment file (`Project.toml` and friends) is TOML, not Julia:
-    /// parsing it here would publish nonsense parse errors that
-    /// [`publish_merged`](Self::publish_merged) would union with the real
-    /// environment diagnostics on the same URI. The buffer stays tracked, so
-    /// `didChange` and `didClose` behave as they do for any document; it is
-    /// only never analyzed. Guarded here rather than at the `didOpen` call
-    /// site so `didChange` and [`on_config_changed`](Self::on_config_changed)
-    /// are covered by the same return.
-    ///
-    /// A *project* file takes the other fork instead: its text goes to the db
-    /// as text, because the linter derives the package's declared dependencies
-    /// from it. That is what lets an unsaved `[deps]` edit reach
-    /// `unresolved-import` across the package. A manifest takes neither fork —
-    /// nothing reads it without a resolve, which is the harvester's job.
     fn send_analysis(&mut self, uri: Uri, edits: Option<Vec<Edit>>) {
-        if let Some(path) = uri::to_path(&uri).filter(|path| is_environment_file(path)) {
-            if is_project_file(&path)
-                && let Some(doc) = self.documents.get(&uri)
-            {
-                let _ = self.sync_tx.send(SyncMessage::SetText {
-                    path,
-                    text: doc.text.text().to_string(),
-                });
-            }
-            return;
-        }
         let rules = Arc::clone(&self.config_for(&uri).rules);
         let Some(doc) = self.documents.get(&uri) else {
             return;
@@ -1334,14 +1455,15 @@ impl GlobalState {
         if self.pull_diagnostics {
             self.send_diagnostic_refresh();
         } else {
-            // Environment files are skipped: they publish no analysis, and
-            // re-sending an unchanged project buffer through `send_analysis`
-            // would only write it back to the db it just came from.
+            // Environment files are skipped: they publish no analysis, their
+            // own findings answer to the buffer rather than to the premises
+            // that moved, and re-routing an unchanged project buffer would only
+            // write it back to the db it just came from.
             let uris: Vec<Uri> = self
                 .documents
-                .keys()
-                .filter(|uri| uri::to_path(uri).is_none_or(|path| !is_environment_file(&path)))
-                .cloned()
+                .iter()
+                .filter(|(_, doc)| doc.kind == DocumentKind::Julia)
+                .map(|(uri, _)| uri.clone())
                 .collect();
             for uri in uris {
                 self.send_analysis(uri, None);
@@ -1502,6 +1624,7 @@ mod tests {
             Document {
                 text: Arc::default(),
                 version,
+                kind: DocumentKind::of(uri),
             },
         );
     }
@@ -1536,6 +1659,7 @@ mod tests {
             Document {
                 text: Arc::new(TextBuffer::from("x = 1\n")),
                 version: 1,
+                kind: DocumentKind::Julia,
             },
         );
         // What the analysis thread and any read job hold onto.
@@ -1827,6 +1951,36 @@ mod tests {
         state.on_notification(note);
     }
 
+    /// Drive a whole-buffer `didChange`, as a client would.
+    fn did_change(state: &mut GlobalState, uri: &Uri, version: i32, text: &str) {
+        let note = Notification::new(
+            DidChangeTextDocument::METHOD.to_string(),
+            DidChangeTextDocumentParams {
+                text_document: lsp_types::VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: text.to_string(),
+                }],
+            },
+        );
+        state.on_notification(note);
+    }
+
+    /// The check IDs a published set carries, in order.
+    fn codes(diags: &[Diagnostic]) -> Vec<&str> {
+        diags
+            .iter()
+            .filter_map(|diag| match &diag.code {
+                Some(NumberOrString::String(code)) => Some(code.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// An environment file is TOML, so it must never reach the Julia analysis.
     /// The document is still tracked — `didChange`/`didClose` stay consistent —
     /// but no `AnalysisRequest` is dispatched for it.
@@ -2068,6 +2222,189 @@ mod tests {
         assert!(
             channels.read.try_recv().is_err(),
             "no read job is dispatched for a TOML buffer"
+        );
+    }
+
+    /// An open environment file's *own* diagnostics come from its buffer, at
+    /// edit cadence: a `Project.toml` that does not parse reports on itself
+    /// with no save and no harvest.
+    #[test]
+    fn a_broken_project_buffer_publishes_its_syntax_error() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+
+        did_open(&mut state, &project, "name = \"Demo\"\nuuid = \n");
+
+        let (diags, version) = next_publish(&channels.client);
+        let [diag] = &diags[..] else {
+            panic!("expected one diagnostic, got {diags:?}");
+        };
+        assert_eq!(codes(&diags), vec!["toml-syntax"]);
+        assert_eq!(diag.range.start.line, 1, "the `uuid = ` line");
+        assert_eq!(version, Some(1), "tagged with the buffer it describes");
+    }
+
+    /// A manifest buffer takes the same route: nothing reads it without a
+    /// resolve, but its syntax is text-only and so is the buffer's to answer.
+    #[test]
+    fn a_broken_manifest_buffer_publishes_its_syntax_error() {
+        let (mut state, channels) = test_state_with_channels();
+        let manifest = uri("file:///work/Manifest.toml");
+
+        did_open(&mut state, &manifest, "[[deps\n");
+
+        assert_eq!(
+            codes(&next_publish(&channels.client).0),
+            vec!["toml-syntax"]
+        );
+        assert!(
+            channels.sync.try_recv().is_err(),
+            "and still never reaches the database"
+        );
+    }
+
+    /// Two producers write one environment file's diagnostics: the harvester,
+    /// off disk at resolve cadence, and the open buffer, at edit cadence. They
+    /// are never unioned — computed from different texts, their union is a
+    /// report of neither. A live syntax error supersedes the harvester's set
+    /// (whose ranges index a text the user has moved past), and a buffer that
+    /// parses hands the file back.
+    #[test]
+    fn a_live_syntax_error_supersedes_the_harvesters_findings() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+        state.on_outbound(Outbound::EnvironmentDiagnostics {
+            uri: project.clone(),
+            diags: vec![diag("no [compat] bound on julia")],
+        });
+        let _ = next_publish(&channels.client);
+
+        // Opened, and it parses: the buffer has nothing to say, so the
+        // harvester's finding stands and nothing is republished.
+        did_open(&mut state, &project, "name = \"Demo\"\n");
+        assert!(
+            channels.client.try_recv().is_err(),
+            "a clean buffer publishes nothing of its own"
+        );
+
+        // Edited into a syntax error: the buffer's verdict is the fresher one.
+        did_change(&mut state, &project, 2, "name = \"Demo\"\nuuid = \n");
+        let (diags, version) = next_publish(&channels.client);
+        assert_eq!(codes(&diags), vec!["toml-syntax"]);
+        assert_eq!(version, Some(2));
+
+        // Fixed, still unsaved: the harvester's set takes the file back.
+        did_change(&mut state, &project, 3, "name = \"Demo\"\n");
+        let (diags, _) = next_publish(&channels.client);
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["no [compat] bound on julia"],
+        );
+    }
+
+    /// The live findings go with the buffer: closing hands the file back to the
+    /// harvester's set, which describes it on disk, open or not.
+    #[test]
+    fn closing_an_environment_buffer_drops_its_live_findings() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+        state.on_outbound(Outbound::EnvironmentDiagnostics {
+            uri: project.clone(),
+            diags: vec![diag("no [compat] bound on julia")],
+        });
+        let _ = next_publish(&channels.client);
+        did_open(&mut state, &project, "uuid = \n");
+        assert_eq!(
+            codes(&next_publish(&channels.client).0),
+            vec!["toml-syntax"]
+        );
+
+        state.on_notification(Notification::new(
+            DidCloseTextDocument::METHOD.to_string(),
+            DidCloseTextDocumentParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri: project },
+            },
+        ));
+
+        let (diags, _) = next_publish(&channels.client);
+        assert_eq!(
+            diags.iter().map(|d| d.message.as_str()).collect::<Vec<_>>(),
+            vec!["no [compat] bound on julia"],
+        );
+    }
+
+    /// With the environment files in the client's document selector, every
+    /// request can now arrive for one. Nothing Julia-backed may answer: a
+    /// format or a hover would parse TOML as Julia and hand back nonsense, so
+    /// they answer `null`, as they do for a document the server never saw.
+    #[test]
+    fn language_features_answer_nothing_for_an_environment_document() {
+        let (mut state, channels) = test_state_with_channels();
+        let project = uri("file:///work/Project.toml");
+        did_open(&mut state, &project, "[deps]\n");
+
+        let document = lsp_types::TextDocumentIdentifier { uri: project };
+        let requests = [
+            Request::new(
+                RequestId::from(1),
+                Formatting::METHOD.to_string(),
+                DocumentFormattingParams {
+                    text_document: document.clone(),
+                    options: Default::default(),
+                    work_done_progress_params: Default::default(),
+                },
+            ),
+            Request::new(
+                RequestId::from(2),
+                DocumentSymbolRequest::METHOD.to_string(),
+                DocumentSymbolParams {
+                    text_document: document.clone(),
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
+                },
+            ),
+        ];
+        for request in requests {
+            let id = request.id.clone();
+            state.on_request(request);
+            match channels.client.try_recv().expect("a response") {
+                Message::Response(resp) => {
+                    assert_eq!(resp.id, id);
+                    assert_eq!(
+                        resp.response_result.ok(),
+                        Some(serde_json::Value::Null),
+                        "for {id}"
+                    );
+                }
+                other => panic!("expected a response, got {other:?}"),
+            }
+        }
+        assert!(
+            channels.read.try_recv().is_err(),
+            "and no TOML buffer reaches the read pool"
+        );
+    }
+
+    /// A buffer with no file name behind it — an editor's untitled document —
+    /// is Julia: it is what the editor opened the server for, and there is no
+    /// file name to say otherwise.
+    #[test]
+    fn an_untitled_buffer_is_julia() {
+        assert_eq!(
+            DocumentKind::of(&uri("untitled:Untitled-1")),
+            DocumentKind::Julia
+        );
+        assert_eq!(
+            DocumentKind::of(&uri("file:///work/Project.toml")),
+            DocumentKind::Project
+        );
+        assert_eq!(
+            DocumentKind::of(&uri("file:///work/Manifest-v1.11.toml")),
+            DocumentKind::Manifest
+        );
+        assert_eq!(
+            DocumentKind::of(&uri("file:///work/src/a.jl")),
+            DocumentKind::Julia
         );
     }
 }

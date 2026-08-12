@@ -43,6 +43,31 @@ pub(crate) fn environment_diagnostics(
     out
 }
 
+/// The diagnostics an open environment-file *buffer* carries on its own: the
+/// text-only checks, which need no resolved [`Environment`] and so run at edit
+/// cadence on the main loop rather than on the harvester's save/watch cadence.
+///
+/// That is the whole of what a buffer can answer. The semantic checks stay with
+/// [`environment_diagnostics`] above, because a resolved environment exists
+/// only on the harvester thread, which reads disk — the line stage 2 drew. The
+/// parse is a TOML parse of a file measured in kilobytes, which is why it can
+/// sit on the main loop at all.
+pub(crate) fn buffer_diagnostics(
+    path: &Path,
+    text: &str,
+    encoding: PositionEncoding,
+) -> Vec<Diagnostic> {
+    let findings = project_files::syntax_findings(path, text);
+    if findings.is_empty() {
+        return Vec::new();
+    }
+    let line_index = LineIndex::new(text);
+    findings
+        .iter()
+        .map(|finding| to_lsp(finding, &line_index, encoding))
+        .collect()
+}
+
 /// The findings for a resolve that failed outright. Placed on the file the
 /// error names, which is the only thing known about a project that could not be
 /// read: no [`Environment`] exists to check.
@@ -139,6 +164,35 @@ mod tests {
         assert!(
             diag.code_description.is_none(),
             "a check ID names no reference section"
+        );
+    }
+
+    /// The buffer route reports what a text alone can decide, and stays silent
+    /// on a file that parses — the semantic checks are the harvester's, since
+    /// only it has a resolved environment.
+    #[test]
+    fn the_buffer_route_reports_syntax_alone() {
+        let path = PathBuf::from("/work/Project.toml");
+        let diags =
+            buffer_diagnostics(&path, "name = \"Demo\"\nuuid = \n", PositionEncoding::Utf16);
+        let [diag] = &diags[..] else {
+            panic!("expected one diagnostic, got {diags:?}");
+        };
+        assert_eq!(diag.range.start.line, 1);
+        assert_eq!(
+            diag.code,
+            Some(NumberOrString::String("toml-syntax".to_string()))
+        );
+
+        // A package with no `[compat]` bound on `julia` is a *semantic*
+        // finding: it needs a resolved environment, so the buffer says nothing.
+        assert!(
+            buffer_diagnostics(
+                &path,
+                "name = \"Demo\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+                PositionEncoding::Utf16,
+            )
+            .is_empty()
         );
     }
 
