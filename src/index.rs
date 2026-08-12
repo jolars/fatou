@@ -57,7 +57,17 @@ pub struct HarvestedLibrary {
     /// fatou could not locate, still declares its dependencies here. The
     /// linter's `unresolved-import` reads it; a folder that is not a package
     /// project contributes no entry.
+    ///
+    /// The CLI's copy of what the language server derives from the project file
+    /// itself ([`project_declared_deps`](crate::incremental::project_declared_deps)):
+    /// `fatou lint` has no salsa database, and no editor buffer to be stale
+    /// against.
     pub declared_deps: BTreeMap<String, Arc<DeclaredDeps>>,
+    /// Each workspace package's project file, keyed the same way as
+    /// [`declared_deps`](Self::declared_deps). The language server tracks these
+    /// paths as salsa inputs so an *unsaved* `[deps]` edit reaches
+    /// `unresolved-import` without waiting for a save and a re-resolve.
+    pub project_files: BTreeMap<String, PathBuf>,
 }
 
 /// The module names a package's own source files may `using`/`import`: its
@@ -156,6 +166,20 @@ fn declared_deps(envs: &[Environment]) -> BTreeMap<String, Arc<DeclaredDeps>> {
     out
 }
 
+/// Each workspace package's project file, deduped by name exactly like
+/// [`declared_deps`] so the two maps name the same environment for a name.
+fn project_files(envs: &[Environment]) -> BTreeMap<String, PathBuf> {
+    let mut out: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for env in envs {
+        let Some(dev) = env.dev_package() else {
+            continue;
+        };
+        out.entry(dev.name)
+            .or_insert_with(|| env.project_file.clone());
+    }
+    out
+}
+
 /// Harvest several resolved environments (one per workspace folder) into one
 /// merged library. The system index is harvested once, from the first
 /// environment with a located installation; depot packages merge by name with
@@ -194,6 +218,7 @@ pub fn harvest_libraries(envs: &[Environment]) -> HarvestedLibrary {
     }
     lib.workspaces.sort();
     lib.declared_deps = declared_deps(envs);
+    lib.project_files = project_files(envs);
     lib
 }
 
@@ -257,6 +282,7 @@ pub fn harvest_libraries_parallel(
     }
     lib.workspaces.sort();
     lib.declared_deps = declared_deps(envs);
+    lib.project_files = project_files(envs);
     lib
 }
 
