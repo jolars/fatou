@@ -5443,6 +5443,37 @@ fn serves_navigation_on_a_dependency_name() {
         ),
     );
 
+    // And the name is a document link to the same file, so a client underlines
+    // it without a cursor ever landing there.
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(618),
+            method: "textDocument/documentLink".to_string(),
+            params: serde_json::to_value(DocumentLinkParams {
+                text_document: TextDocumentIdentifier {
+                    uri: project_uri.clone(),
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    let resp = recv_response(&client, RequestId::from(618));
+    let links: Vec<DocumentLink> = serde_json::from_value(resp.result().unwrap()).unwrap();
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| (link.range, link.target.as_ref().map(|uri| uri.as_str())))
+            .collect::<Vec<_>>(),
+        vec![(
+            Range::new(Position::new(line, 0), Position::new(line, 9)),
+            Some(file_uri(&entry).as_str()),
+        )],
+        "only the [deps] name links; [compat] names no package to link to"
+    );
+
     // Nothing else in the file jumps: a `[compat]` key names a dependency too,
     // but resolving it is not this feature.
     let compat = text.rfind("Greetings = ").unwrap();

@@ -466,6 +466,17 @@ impl GlobalState {
             return;
         };
         let uri = params.text_document.uri;
+        // A project file links each dependency name to its package; a Julia
+        // document links each static `include`. Anything else answers `null`.
+        if let Some(text) = self.project_text(&uri) {
+            let reply = self.read_reply(id.clone(), Some(&uri));
+            self.dispatch_read(ReadJob::ProjectDocumentLinks {
+                id,
+                text,
+                sender: reply,
+            });
+            return;
+        }
         let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;

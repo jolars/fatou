@@ -30,7 +30,9 @@ use super::folding::folding_ranges_via_db;
 use super::format::{format_edits_via_db, format_range_edits_via_db};
 use super::hover::hover_via_db;
 use super::lint::ServerRules;
-use super::project_navigation::{project_definition_via_db, project_hover_via_db};
+use super::project_navigation::{
+    project_definition_via_db, project_document_links_via_db, project_hover_via_db,
+};
 use super::pull_diagnostics::document_diagnostics_via_db;
 use super::references::{document_highlights_via_db, references_via_db};
 use super::rename::{prepare_rename_via_db, rename_via_db};
@@ -210,6 +212,14 @@ pub(crate) enum ReadJob {
         position: Position,
         sender: ReadReply,
     },
+    /// Document links in an open *project file*: each dependency name links to
+    /// its package's entry file, the same target
+    /// [`ProjectDefinition`](Self::ProjectDefinition) jumps to.
+    ProjectDocumentLinks {
+        id: RequestId,
+        text: Arc<TextBuffer>,
+        sender: ReadReply,
+    },
     References {
         id: RequestId,
         uri: Uri,
@@ -317,6 +327,7 @@ impl ReadJob {
             ReadJob::Definition { id, sender, .. } => (id, sender),
             ReadJob::ProjectDefinition { id, sender, .. } => (id, sender),
             ReadJob::ProjectHover { id, sender, .. } => (id, sender),
+            ReadJob::ProjectDocumentLinks { id, sender, .. } => (id, sender),
             ReadJob::References { id, sender, .. } => (id, sender),
             ReadJob::DocumentHighlight { id, sender, .. } => (id, sender),
             ReadJob::PrepareRename { id, sender, .. } => (id, sender),
@@ -564,6 +575,10 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
         } => {
             let hover = project_hover_via_db(&snapshot, &text, position, encoding);
             let _ = sender.send(Message::Response(Response::new_ok(id, hover)));
+        }
+        ReadJob::ProjectDocumentLinks { id, text, sender } => {
+            let links = project_document_links_via_db(&snapshot, &text, encoding);
+            let _ = sender.send(Message::Response(Response::new_ok(id, links)));
         }
         ReadJob::References {
             id,
