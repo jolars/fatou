@@ -1184,7 +1184,7 @@ impl GlobalState {
                 let version = self.documents.get(&uri).map(|d| d.version);
                 self.publish_merged(uri, version);
             }
-            Outbound::DiagnosticsRefresh => self.send_diagnostic_refresh(),
+            Outbound::DiagnosticsRefresh => self.refresh_open_diagnostics(),
             Outbound::ReadReply { message } => self.on_read_reply(message),
         }
     }
@@ -1314,15 +1314,35 @@ impl GlobalState {
     }
 
     /// Re-derive the open documents' diagnostics after a configuration change
-    /// (editor-pushed settings, or a `fatou.toml` event). A pull client is
-    /// nudged to re-pull (each pull resolves config afresh); a push client
-    /// gets a re-analysis per open document — same version, new rules — which
-    /// the analysis thread's coalescing absorbs.
+    /// (editor-pushed settings, or a `fatou.toml` event).
     fn on_config_changed(&mut self) {
+        self.refresh_open_diagnostics();
+    }
+
+    /// Re-derive the open documents' diagnostics, whatever moved underneath
+    /// them: a configuration change, a re-harvest, or a project-file edit that
+    /// changed the package's declared dependencies. A pull client is nudged to
+    /// re-pull (each pull resolves config and reads the db afresh); a push
+    /// client gets a re-analysis per open document — same version, new
+    /// premises — which the analysis thread's coalescing absorbs.
+    ///
+    /// A push client needs the second branch for the same reason a pull client
+    /// needs the first: `unresolved-import` and `undefined-name` answer to the
+    /// library and the declared deps, not to the buffer, so nothing else would
+    /// ever revisit them for a document the user is not typing in.
+    fn refresh_open_diagnostics(&mut self) {
         if self.pull_diagnostics {
             self.send_diagnostic_refresh();
         } else {
-            let uris: Vec<Uri> = self.documents.keys().cloned().collect();
+            // Environment files are skipped: they publish no analysis, and
+            // re-sending an unchanged project buffer through `send_analysis`
+            // would only write it back to the db it just came from.
+            let uris: Vec<Uri> = self
+                .documents
+                .keys()
+                .filter(|uri| uri::to_path(uri).is_none_or(|path| !is_environment_file(&path)))
+                .cloned()
+                .collect();
             for uri in uris {
                 self.send_analysis(uri, None);
             }
@@ -1920,6 +1940,30 @@ mod tests {
             message: message.to_string(),
             ..Default::default()
         }
+    }
+
+    /// A refresh nudge reaches a *push* client too. It has no
+    /// `workspace/diagnostic/refresh` to answer, so the open documents are
+    /// re-analyzed instead — otherwise `unresolved-import` would keep answering
+    /// to premises that have since moved, in every file the user is not typing
+    /// in. The project file itself is skipped: it publishes no analysis.
+    #[test]
+    fn a_refresh_reanalyzes_a_push_clients_open_documents() {
+        let (mut state, channels) = test_state_with_channels();
+        let source = uri("file:///work/src/a.jl");
+        let project = uri("file:///work/Project.toml");
+        assert!(!state.pull_diagnostics, "this client pushes");
+        open(&mut state, &source, 3);
+        open(&mut state, &project, 1);
+
+        state.on_outbound(Outbound::DiagnosticsRefresh);
+
+        let requested: Vec<Uri> = channels.analysis.try_iter().map(|req| req.uri).collect();
+        assert_eq!(requested, vec![source]);
+        assert!(
+            channels.sync.try_recv().is_err(),
+            "and the project buffer is not written back to the db it came from"
+        );
     }
 
     /// A `publishDiagnostics` replaces *all* diagnostics for a URI, so the

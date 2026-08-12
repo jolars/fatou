@@ -5031,6 +5031,139 @@ fn publishes_and_clears_project_file_syntax_diagnostics() {
     server_thread.join().unwrap();
 }
 
+/// The prize of making the project file a live input: adding a name to
+/// `[deps]` in an editor buffer clears `unresolved-import` across the package
+/// with **no save and no watched-file event**. Nothing here writes the project
+/// file back to disk — only `didOpen`/`didChange` carry the new text — so a
+/// pass proves the buffer, not the disk copy, is what the linter reads.
+///
+/// It doubles as the end-to-end check that a push client is refreshed at all:
+/// the finding itself only appears once the harvest lands, which is a moment
+/// no edit of the Julia buffer marks.
+#[test]
+fn an_unsaved_project_file_edit_clears_unresolved_import() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let pkg = TempDir::new("fatou-lsp-livedeps");
+    let project = pkg.path.join("Project.toml");
+    let on_disk = "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n\n[compat]\njulia = \"1.10\"\n";
+    write_file(&project, on_disk);
+    write_file(
+        &pkg.path.join("src/MyPkg.jl"),
+        "module MyPkg\nusing Foo\nend\n",
+    );
+
+    let depot = TempDir::new("fatou-lsp-livedeps-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg.path.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_root(&client, &file_uri(&pkg.path));
+
+    let source_uri = file_uri(&pkg.path.join("src/MyPkg.jl"));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: source_uri.clone(),
+                    language_id: "julia".to_string(),
+                    version: 1,
+                    text: "module MyPkg\nusing Foo\nend\n".to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // `Foo` is neither declared nor installed. The finding needs the harvest,
+    // which lands well after the buffer's own analysis.
+    let diags = poll_publish_where(&client, "MyPkg.jl", Duration::from_secs(10), |diags| {
+        diags
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("unresolved-import".to_string())))
+    });
+    assert!(diags.iter().any(|d| d.message.contains("Foo")), "{diags:?}");
+
+    // The project file opened and edited, never saved.
+    let project_uri = file_uri(&project);
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: project_uri.clone(),
+                    language_id: "toml".to_string(),
+                    version: 1,
+                    text: on_disk.to_string(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didChange".to_string(),
+            params: serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: project_uri,
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: format!(
+                        "{on_disk}\n[deps]\nFoo = \"00000000-0000-0000-0000-0000000000f0\"\n"
+                    ),
+                }],
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    let cleared = poll_publish_where(
+        &client,
+        "MyPkg.jl",
+        Duration::from_secs(10),
+        <[_]>::is_empty,
+    );
+    assert!(cleared.is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&project).unwrap(),
+        on_disk,
+        "witness: the file on disk still declares nothing"
+    );
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(311),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(311));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
 /// Two workspace folders, each its own package project, driven end-to-end:
 /// both harvest, cross-file references stay inside the folder that owns the
 /// cursor (the other folder defines a same-named `greet`), and workspace
