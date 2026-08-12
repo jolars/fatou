@@ -20,8 +20,9 @@ use crossbeam_channel::{Receiver, Sender, select};
 use lsp_types::{Diagnostic, Uri};
 use salsa::Database as _;
 
+use crate::environment::is_project_file;
 use crate::incremental::{IncrementalDatabase, IncrementalDb};
-use crate::index::{HarvestedLibrary, PackageIndex};
+use crate::index::{DeclaredDeps, HarvestedLibrary, PackageIndex};
 use crate::parser::Edit;
 use crate::text::{PositionEncoding, TextBuffer};
 
@@ -72,6 +73,20 @@ pub(crate) struct AnalysisRequest {
     pub(crate) edits: Option<Vec<Edit>>,
 }
 
+/// A write to the tracked text of a file the analysis pipeline does not own —
+/// the route to the sole salsa writer for anything that is not a Julia
+/// analysis.
+pub(crate) enum SyncMessage {
+    /// Revert this path's tracked input to on-disk text: a document closed (its
+    /// discarded buffer must not linger in the reverse-occurrence index) or a
+    /// watched file changed outside any open buffer.
+    Revert(PathBuf),
+    /// Track this text for `path`: an open project-file buffer, which is never
+    /// dispatched as an analysis (it is not Julia) but whose `[deps]` the
+    /// linter reads through `project_declared_deps`.
+    SetText { path: PathBuf, text: String },
+}
+
 /// A library-index update delivered to the analysis thread by the background
 /// harvester. The full harvest lands once at startup; a re-harvest of the
 /// workspace package (on save) lands as a single-package swap.
@@ -96,7 +111,7 @@ pub(crate) fn spawn_analysis_thread(
     analysis_rx: Receiver<AnalysisRequest>,
     read_rx: Receiver<ReadJob>,
     library_rx: Receiver<LibraryMessage>,
-    sync_rx: Receiver<PathBuf>,
+    sync_rx: Receiver<SyncMessage>,
     out_tx: Sender<Outbound>,
     read_spawner: Spawner,
     encoding: PositionEncoding,
@@ -220,22 +235,26 @@ impl AnalysisWorker {
         analysis_rx: &Receiver<AnalysisRequest>,
         read_rx: &Receiver<ReadJob>,
         library_rx: &Receiver<LibraryMessage>,
-        sync_rx: &Receiver<PathBuf>,
+        sync_rx: &Receiver<SyncMessage>,
         done_rx: &Receiver<AnalyzeDone>,
     ) {
         loop {
             select! {
-                recv(sync_rx) -> path => {
-                    // An editor closed a document, or a watched file changed
-                    // outside any open buffer: revert its tracked input to
-                    // on-disk text so a discarded buffer (or stale seeded text)
-                    // stops contributing to the reverse-occurrence index. A
-                    // no-op for a non-member or a buffer already matching disk.
-                    // Guarded so a panic mid-revert can't kill the sole writer.
-                    guard("sync", || {
-                        if let Ok(path) = path {
-                            self.on_sync(&path, analysis_rx);
+                recv(sync_rx) -> msg => {
+                    // A write to a file the analysis pipeline does not own.
+                    // Guarded so a panic mid-write can't kill the sole writer.
+                    guard("sync", || match msg {
+                        // An editor closed a document, or a watched file changed
+                        // outside any open buffer: revert its tracked input to
+                        // on-disk text so a discarded buffer (or stale seeded
+                        // text) stops contributing to the reverse-occurrence
+                        // index. A no-op for a non-member or a buffer already
+                        // matching disk.
+                        Ok(SyncMessage::Revert(path)) => self.on_sync(&path, analysis_rx),
+                        Ok(SyncMessage::SetText { path, text }) => {
+                            self.on_project_text(&path, text);
                         }
+                        Err(_) => {}
                     });
                 }
                 recv(library_rx) -> msg => {
@@ -337,10 +356,47 @@ impl AnalysisWorker {
         {
             self.active = None;
         }
+        let declared_before = self.declared_deps_of(path);
         self.db.revert_file_to_disk(path);
+        // Closing an unsaved `Project.toml` puts the disk copy back in charge,
+        // which can change what the package declares.
+        self.refresh_if_declared_deps_changed(path, declared_before);
         // The drain above swallowed the `analyze` arm's wake-up for whatever
         // else it picked up, so those requests are dispatched from here.
         self.try_dispatch();
+    }
+
+    /// Track an open project file's buffer text. The buffer is authoritative
+    /// over the disk copy from here on, so an unsaved `[deps]` edit reaches
+    /// `unresolved-import` across the package without a save — the harvester's
+    /// own re-resolve reads disk, but never clobbers a tracked input.
+    fn on_project_text(&mut self, path: &Path, text: String) {
+        let declared_before = self.declared_deps_of(path);
+        self.db.upsert_file(path, text);
+        self.refresh_if_declared_deps_changed(path, declared_before);
+    }
+
+    /// The declared dependencies `path` contributes, or `None` when it is not a
+    /// project file at all — so a `.jl` sync never pays for a TOML parse.
+    fn declared_deps_of(&self, path: &Path) -> Option<Arc<DeclaredDeps>> {
+        is_project_file(path)
+            .then(|| self.db.declared_deps_of_file(path))
+            .flatten()
+    }
+
+    /// Nudge the open documents when a write to `path` changed what its package
+    /// declares. Gated on the declared set rather than on the text: typing in
+    /// `[compat]`, or anywhere else in the file, must cost nothing beyond the
+    /// one memoized TOML parse.
+    ///
+    /// Emitted from this thread *after* the write, so a pull client's re-pull
+    /// cannot be served against the older revision — the ordering
+    /// [`refresh_graph_diagnostics`](Self::refresh_graph_diagnostics) already
+    /// relies on.
+    fn refresh_if_declared_deps_changed(&self, path: &Path, before: Option<Arc<DeclaredDeps>>) {
+        if self.declared_deps_of(path) != before {
+            let _ = self.out_tx.send(Outbound::DiagnosticsRefresh);
+        }
     }
 
     /// Add `req` to the pending queue, keeping the highest version per URI
