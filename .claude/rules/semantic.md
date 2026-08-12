@@ -70,6 +70,12 @@ visible name in the same order with shadowed names dropped, for completion.
 - `src/incremental.rs` models file text → CST → semantic model → resolution as
   salsa queries. The parser crate itself stays salsa-free.
 - **Store green nodes in salsa, never red** (`SyntaxNode` is not `Send`/`Eq`).
+- **The firewall runs both ways.** A `Project.toml` is an ordinary `SourceFile`
+  input, so `[deps]` follows an unsaved buffer; `project_declared_deps` is what
+  keeps that from costing anything, and the same test file guards that a
+  project-file edit re-parses no Julia. Only the name → input *mapping*
+  (`ProjectFiles`) is HIGH durability — putting the text there would be the
+  mirror of adding a range to a projection.
 - Whole-value leaves (`LibraryPackages` and friends) wrap their maps so the
   model types stay salsa-free and each value is an `Arc` — replacing one package
   clones only pointers.

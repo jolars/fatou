@@ -345,9 +345,10 @@ Rejected after probing (do not revisit without new evidence):
 `Project.toml`/`Manifest.toml` steer resolution (`environment::resolve` walks
 them the way Julia's loader does, `register_file_watchers` covers all five
 flavors, and `is_environment_file` escalates a watched change to
-`HarvestSignal::Environment`) and, since stage 1, report their own problems. The
-LSP document selector is still `.jl`-only, so they carry diagnostics but answer
-no requests.
+`HarvestSignal::Environment`) and, since stage 1, report their own problems.
+Since stage 2 a project file is also a salsa input, so its `[deps]` follow the
+editor's unsaved buffer. The LSP document selector is still `.jl`-only, so they
+carry diagnostics but answer no requests.
 
 The target is what rust-analyzer gives `Cargo.toml`, which is narrower than it
 is usually remembered as: watch-and-reload, plus a document-selector entry so
@@ -402,27 +403,45 @@ tenet the linter is purely semantic over Julia.
     reachable, and `dev_package` split so `entry_file` names the entry file a
     package *would* have.
 
-- [ ] **Stage 2: decide buffer versus disk. Design before code.** The project
-  file is a *push* input today: the harvester thread reads disk and calls
-  `set_declared_deps` at HIGH durability (`src/incremental.rs`). The moment an
-  editor holds an unsaved `Project.toml`, reading the disk copy is a bug. Doing
-  it properly makes the project file a salsa input keyed by path, with
-  `declared_deps` *derived* from it rather than pushed, which drops the
-  workspace project file off HIGH durability.
-  - The prize is the thing that makes the feature feel integrated: edit
-    `[deps]`, and `unresolved-import` updates across every `.jl` file in the
-    package without a save.
-  - The guard to write first is the mirror of `tests/salsa_incremental.rs`: a
-    `Project.toml` edit must invalidate the resolution layer and *not* the
-    parses. Without it this trades a body-edit firewall for a project-edit
-    stampede.
+- [x] **Stage 2: buffer for `[deps]`, disk for everything else.** The project
+  file was a *push* input: the harvester read disk and called
+  `set_declared_deps` at HIGH durability. It is now an ordinary `SourceFile`
+  keyed by path, with `project_declared_deps` deriving `[deps]` from its text —
+  so only the name → input mapping (`ProjectFiles`) stays HIGH durability, and
+  the file itself sits where every editable buffer sits.
+  - The prize landed: edit `[deps]` with no save, and `unresolved-import`
+    updates across the package (`an_unsaved_project_file_edit_clears_unresolved_import`).
+  - **The line drawn.** The buffer is authoritative for `[deps]` alone.
+    Everything that needs a resolved `Environment` — all six semantic project
+    file checks, `toml-syntax`, the library itself — stays on the harvester's
+    save/watch cadence and reads disk, because `environment::resolve` is
+    disk-coupled throughout and runs on a thread with no view of the document
+    map. Live *diagnostics* for the buffer belong with stage 3, where the TOML
+    file becomes a real document with a route of its own; a manifest buffer is
+    likewise not read, since nothing consumes one without a resolve.
+  - The guard was written first, the mirror of the body-edit firewall: a
+    `Project.toml` edit must reach the declared deps and re-parse no Julia,
+    while an edit leaving `[deps]` alone backdates.
+  - `ProjectFile::declared_dep_names` became the one definition of "declared",
+    shared with the CLI's `HarvestedLibrary::declared_deps`, so a name whose
+    UUID does not parse is declared for both. Landed alongside: a refresh nudge
+    now re-analyzes a *push* client's open documents instead of being pull-only
+    — the same gap meant a re-harvest never refreshed `unresolved-import` for
+    such a client either.
 
-- [ ] **Stage 3: make it a real document.** `documents` holds a bare
-  `TextBuffer` with no kind discriminant and `send_analysis` funnels everything
-  into the Julia parse, so a `didOpen` on a TOML file today would parse it as
-  Julia and publish nonsense. Needs a kind tag at the `didOpen` boundary and a
-  second route. `handle_watched_files` already forks on `is_environment_file`,
-  which is where the seam belongs.
+- [ ] **Stage 3: make it a real document.** `documents` still holds a bare
+  `TextBuffer` with no kind discriminant; `send_analysis` forks on the file name
+  instead (env files never analyze, project files route to the db as text),
+  which is a seam, not a document kind. A request handler still has nothing to
+  dispatch on. Needs a kind tag at the `didOpen` boundary and a real second
+  route.
+  - The obvious first tenant is *live project-file diagnostics*, the half stage
+    2 deliberately left on disk: `syntax_findings` is text-only and could serve
+    the buffer directly, but the six semantic checks need a resolved
+    `Environment` and so stay with the harvester — meaning two producers writing
+    one file's `env_diags`, and clear-once bookkeeping that has to merge two
+    cadences. That is the design problem to settle, and it is why the split is
+    here rather than in stage 2.
   - Client side, extend the selector in `editors/code/src/extension.ts`. Use a
     **pattern-only** entry (`{ scheme: "file", pattern:
     "**/{Project,JuliaProject,Manifest,JuliaManifest}.toml" }`), not `language:
