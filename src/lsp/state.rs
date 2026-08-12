@@ -17,8 +17,8 @@ use lsp_types::request::{
     CallHierarchyIncomingCalls, CallHierarchyOutgoingCalls, CallHierarchyPrepare,
     CodeActionRequest, Completion, DocumentDiagnosticRequest, DocumentHighlightRequest,
     DocumentLinkRequest, DocumentSymbolRequest, FoldingRangeRequest, Formatting, GotoDefinition,
-    HoverRequest, InlayHintRequest, PrepareRenameRequest, RangeFormatting, References,
-    RegisterCapability, Rename, Request as RequestTrait, ResolveCompletionItem,
+    HoverRequest, InlayHintRefreshRequest, InlayHintRequest, PrepareRenameRequest, RangeFormatting,
+    References, RegisterCapability, Rename, Request as RequestTrait, ResolveCompletionItem,
     SelectionRangeRequest, SemanticTokensFullDeltaRequest, SemanticTokensFullRequest,
     SignatureHelpRequest, TypeHierarchyPrepare, TypeHierarchySubtypes, TypeHierarchySupertypes,
     WillRenameFiles, WorkspaceDiagnosticRefresh, WorkspaceSymbolRequest,
@@ -128,6 +128,17 @@ pub(crate) enum Outbound {
     /// per harvest; the main loop forwards it only when the client supports
     /// both pull diagnostics and the refresh request.
     DiagnosticsRefresh,
+    /// The harvested library landed, so what an open `Project.toml`'s inlay
+    /// hints report — each dependency's resolved version — exists for the first
+    /// time. Unlike a diagnostic, a hint has no push channel and a client
+    /// re-requests one only on an edit or a scroll, so a file already open at
+    /// startup would otherwise sit blank until the user touched it.
+    ///
+    /// Its own signal rather than a share of [`DiagnosticsRefresh`]: that one
+    /// also fires on a project-file keystroke, and hints are re-requested on an
+    /// edit anyway. The spec has this request force a *global* recalculation,
+    /// which is worth spending once per harvest and not once per keystroke.
+    InlayHintsRefresh,
     /// A finished read job (hover, format, …). The worker routes its response
     /// here instead of straight to the client so the main loop can version-gate
     /// it against the buffer the read was dispatched on (stale → `ContentModified`)
@@ -188,6 +199,11 @@ pub(crate) struct GlobalState {
     /// Whether the client accepts `workspace/diagnostic/refresh`, the nudge to
     /// re-pull after a re-harvest changes the include graph.
     diagnostic_refresh: bool,
+    /// Whether the client accepts `workspace/inlayHint/refresh`, the nudge to
+    /// re-request hints once the harvest lands. Unlike a diagnostic, a hint has
+    /// no push channel: without this an open `Project.toml` shows no version
+    /// beside a UUID until the user happens to edit or scroll it.
+    inlay_hint_refresh: bool,
     /// Sequence number for server-to-client refresh requests, so each carries
     /// a fresh JSON-RPC id.
     refresh_seq: u64,
@@ -232,6 +248,7 @@ impl GlobalState {
         encoding: PositionEncoding,
         pull_diagnostics: bool,
         diagnostic_refresh: bool,
+        inlay_hint_refresh: bool,
         initialization_options: Option<serde_json::Value>,
     ) -> Self {
         let (config, warnings) = ConfigStore::new(initialization_options);
@@ -251,6 +268,7 @@ impl GlobalState {
             encoding,
             pull_diagnostics,
             diagnostic_refresh,
+            inlay_hint_refresh,
             refresh_seq: 0,
             config,
         };
@@ -1363,6 +1381,7 @@ impl GlobalState {
                 self.publish_merged(uri, version);
             }
             Outbound::DiagnosticsRefresh => self.refresh_open_diagnostics(),
+            Outbound::InlayHintsRefresh => self.send_inlay_hint_refresh(),
             Outbound::ReadReply { message } => self.on_read_reply(message),
         }
     }
@@ -1603,6 +1622,25 @@ impl GlobalState {
         }));
     }
 
+    /// Ask the client to re-request inlay hints (`workspace/inlayHint/refresh`);
+    /// a no-op without the client capability.
+    ///
+    /// Sent once per full harvest, which is when `package_meta` — the whole of
+    /// what a hint reports — comes into existence. Nothing else recomputes a
+    /// hint for a file the user is not typing in, so without this an open
+    /// `Project.toml` shows a bare UUID for the rest of the session.
+    fn send_inlay_hint_refresh(&mut self) {
+        if !self.inlay_hint_refresh {
+            return;
+        }
+        self.refresh_seq += 1;
+        let _ = self.sender.send(Message::Request(Request {
+            id: RequestId::from(format!("fatou-inlay-hint-refresh-{}", self.refresh_seq)),
+            method: InlayHintRefreshRequest::METHOD.to_string(),
+            params: serde_json::Value::Null,
+        }));
+    }
+
     fn log_warnings(&self, warnings: Vec<String>) {
         for warning in warnings {
             self.log_message(MessageType::WARNING, warning);
@@ -1702,6 +1740,7 @@ mod tests {
             harvest_tx,
             sync_tx,
             PositionEncoding::Utf16,
+            false,
             false,
             false,
             None,
@@ -2658,6 +2697,35 @@ mod tests {
             }
             _ => panic!("expected a ProjectInlayHints read job"),
         }
+    }
+
+    /// The library map arrives with the harvest, seconds after `initialize`,
+    /// and it is the whole of what a `[deps]` hint reports. A client
+    /// re-requests hints only on an edit or a scroll, so without the nudge a
+    /// `Project.toml` opened at startup shows a bare UUID for the session.
+    #[test]
+    fn a_landed_harvest_asks_the_client_to_re_request_hints() {
+        let (mut state, channels) = test_state_with_channels();
+        state.inlay_hint_refresh = true;
+
+        state.on_outbound(Outbound::InlayHintsRefresh);
+
+        match channels.client.try_recv().expect("a request") {
+            Message::Request(req) => assert_eq!(req.method, InlayHintRefreshRequest::METHOD),
+            other => panic!("expected a request, got {other:?}"),
+        }
+    }
+
+    /// The spec has the request force a *global* recalculation of every visible
+    /// hint, so a client that never claimed the capability is not handed one.
+    #[test]
+    fn an_inlay_hint_refresh_needs_the_client_capability() {
+        let (mut state, channels) = test_state_with_channels();
+        assert!(!state.inlay_hint_refresh, "the default test client");
+
+        state.on_outbound(Outbound::InlayHintsRefresh);
+
+        assert!(channels.client.try_recv().is_err());
     }
 
     /// A `textDocument/inlayHint` over the first two lines of `uri`.

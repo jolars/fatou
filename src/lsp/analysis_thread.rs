@@ -271,6 +271,12 @@ impl AnalysisWorker {
                             // so cross-file references/rename can index them.
                             self.db.seed_workspace_members();
                             self.refresh_graph_diagnostics();
+                            // `set_library_deps` above is where a `[deps]` inlay
+                            // hint's version comes from, and it lands well after
+                            // any `Project.toml` the user opened at startup. A
+                            // single-package swap leaves that map alone, so this
+                            // rides the full harvest only.
+                            let _ = self.out_tx.send(Outbound::InlayHintsRefresh);
                         }
                         Ok(LibraryMessage::Package { name, index }) => {
                             self.db.set_package_index(name, index);

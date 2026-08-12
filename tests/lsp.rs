@@ -5378,6 +5378,116 @@ fn a_watched_project_file_change_clears_unresolved_import() {
     server_thread.join().unwrap();
 }
 
+/// A `Project.toml` open at startup shows a bare UUID until something tells the
+/// client to ask again: the versions its inlay hints report arrive with the
+/// harvest, seconds after `initialize`, and a client re-requests hints only on
+/// an edit or a scroll. `workspace/inlayHint/refresh` is that something.
+#[test]
+fn a_landed_harvest_refreshes_inlay_hints() {
+    let _env = ENV_LOCK.lock().unwrap();
+
+    let root = write_pkg_with_path_dep("fatou-lsp-hintrefresh");
+    let pkg_dir = root.path.join("MyPkg");
+    let depot = TempDir::new("fatou-lsp-hintrefresh-depot");
+    let _guard = EnvGuard::set(&[
+        ("JULIA_PROJECT", pkg_dir.to_str().unwrap()),
+        ("JULIA_DEPOT_PATH", depot.path.to_str().unwrap()),
+        ("JULIA_BINDIR", ""),
+        ("PATH", ""),
+        ("HOME", depot.path.to_str().unwrap()),
+    ]);
+
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+
+    #[allow(deprecated)]
+    let params = InitializeParams {
+        root_uri: Some(file_uri(&pkg_dir)),
+        capabilities: ClientCapabilities {
+            workspace: Some(WorkspaceClientCapabilities {
+                inlay_hint: Some(lsp_types::InlayHintWorkspaceClientCapabilities {
+                    refresh_support: Some(true),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(1),
+            method: "initialize".to_string(),
+            params: serde_json::to_value(params).unwrap(),
+        }))
+        .unwrap();
+    assert!(matches!(
+        client.receiver.recv().unwrap(),
+        Message::Response(_)
+    ));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "initialized".to_string(),
+            params: serde_json::json!({}),
+        }))
+        .unwrap();
+
+    // Opened before the harvest lands, which is the whole point: at this moment
+    // the server knows no versions and the hints would be empty.
+    let project = pkg_dir.join("Project.toml");
+    let project_uri = file_uri(&project);
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "textDocument/didOpen".to_string(),
+            params: serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: project_uri,
+                    language_id: "toml".to_string(),
+                    version: 1,
+                    text: std::fs::read_to_string(&project).unwrap(),
+                },
+            })
+            .unwrap(),
+        }))
+        .unwrap();
+
+    // Bounded, so a missing nudge fails rather than hangs.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let refresh = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        assert!(!left.is_zero(), "no inlay hint refresh within 10s");
+        match client.receiver.recv_timeout(left) {
+            Ok(Message::Request(req)) if req.method == "workspace/inlayHint/refresh" => break req,
+            Ok(_) => continue,
+            Err(_) => panic!("no inlay hint refresh within 10s"),
+        }
+    };
+    assert_eq!(refresh.params, serde_json::Value::Null);
+
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(631),
+            method: "shutdown".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    let _ = recv_response(&client, RequestId::from(631));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".to_string(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    server_thread.join().unwrap();
+}
+
 /// Write a workspace holding `MyPkg` and a dependency it can resolve with no
 /// depot at all: the manifest pins `Greetings` by `path`, so the harvester
 /// indexes it straight off disk. Returns the temp root; the project directory
