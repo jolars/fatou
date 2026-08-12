@@ -6079,6 +6079,155 @@ fn string_boundary_withholds_the_fix_when_a_comment_would_be_dropped() {
     assert!(diag.fixes.is_empty());
 }
 
+// --- unnecessary-nesting ----------------------------------------------------
+
+#[test]
+fn unnecessary_nesting_flags_an_if_that_only_guards_an_if() {
+    let src = "if a\n    if b\n        body\n    end\nend\n";
+    assert_eq!(
+        findings("unnecessary-nesting", src),
+        ["this `if` only guards another `if`: write `if a && b`"]
+    );
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    // The span is the outer header, the pair's outer half.
+    assert_eq!(&src[diag.range], "if a");
+    let fix = &diag.fixes[0];
+    assert_eq!(fix.applicability, Applicability::Safe);
+    assert_eq!(fix.content, "if a && b\n        body\n    end");
+}
+
+#[test]
+fn unnecessary_nesting_ignores_a_body_with_more_than_the_inner_if() {
+    // A sibling statement before or after the nested `if` means the outer test
+    // guards more than the inner one.
+    assert_eq!(
+        count(
+            "unnecessary-nesting",
+            "if a\n    setup()\n    if b\n        body\n    end\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unnecessary-nesting",
+            "if a\n    if b\n        body\n    end\n    teardown()\nend\n"
+        ),
+        0
+    );
+    // An empty outer body has no inner `if` at all.
+    assert_eq!(count("unnecessary-nesting", "if a\nend\n"), 0);
+}
+
+#[test]
+fn unnecessary_nesting_ignores_an_alternative_on_either_if() {
+    // Merging would send the outer `else` a case it never saw.
+    for src in [
+        "if a\n    if b\n        x\n    end\nelse\n    y\nend\n",
+        "if a\n    if b\n        x\n    end\nelseif c\n    y\nend\n",
+        "if a\n    if b\n        x\n    else\n        y\n    end\nend\n",
+        "if a\n    if b\n        x\n    elseif c\n        y\n    end\nend\n",
+    ] {
+        assert_eq!(count("unnecessary-nesting", src), 0, "flagged {src:?}");
+    }
+}
+
+#[test]
+fn unnecessary_nesting_ignores_a_nested_other_construct() {
+    assert_eq!(
+        count(
+            "unnecessary-nesting",
+            "if a\n    while b\n        body\n    end\nend\n"
+        ),
+        0
+    );
+    assert_eq!(
+        count(
+            "unnecessary-nesting",
+            "while a\n    if b\n        body\n    end\nend\n"
+        ),
+        0
+    );
+}
+
+#[test]
+fn unnecessary_nesting_parenthesizes_a_test_looser_than_and() {
+    // `&&` binds tighter than `||`, so the operand has to keep its grouping.
+    let src = "if a || c\n    if b\n        body\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert_eq!(
+        diag.message.body,
+        "this `if` only guards another `if`: write `if (a || c) && b`"
+    );
+    assert!(diag.fixes[0].content.starts_with("if (a || c) && b\n"));
+
+    let src = "if a\n    if b || c\n        body\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert_eq!(
+        diag.message.body,
+        "this `if` only guards another `if`: write `if a && (b || c)`"
+    );
+
+    // A comparison, a call, and `isa` all bind tighter and are spliced bare.
+    let src = "if x > 0\n    if isvalid(y) isa Bool\n        body\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert_eq!(
+        diag.message.body,
+        "this `if` only guards another `if`: write `if x > 0 && isvalid(y) isa Bool`"
+    );
+}
+
+#[test]
+fn unnecessary_nesting_drops_a_redundant_paren_layer() {
+    // `Condition::expr` unwraps one paren layer, so the merged test is not
+    // doubly parenthesized.
+    let src = "if (a)\n    if (b)\n        body\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert!(diag.fixes[0].content.starts_with("if a && b\n"));
+}
+
+#[test]
+fn unnecessary_nesting_handles_the_one_line_form() {
+    let src = "if a; if b; body; end; end\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert_eq!(diag.fixes[0].content, "if a && b; body; end");
+}
+
+#[test]
+fn unnecessary_nesting_flags_an_empty_inner_body() {
+    let src = "if a\n    if b\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert_eq!(diag.fixes[0].content, "if a && b\n    end");
+}
+
+#[test]
+fn unnecessary_nesting_withholds_the_fix_when_a_comment_would_be_dropped() {
+    // Between the two headers: the rewrite deletes that text.
+    let src = "if a\n    # why\n    if b\n        body\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert!(diag.fixes.is_empty());
+
+    // After the inner `end`, which the rewrite also discards.
+    let src = "if a\n    if b\n        body\n    end # inner\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert!(diag.fixes.is_empty());
+
+    // Inside a kept piece it travels with the text and costs nothing.
+    let src = "if a\n    if b\n        # why\n        body\n    end\nend\n";
+    let diag = only_finding("unnecessary-nesting", &[], src);
+    assert_eq!(diag.fixes.len(), 1);
+}
+
+#[test]
+fn unnecessary_nesting_reports_each_pair_of_a_deeper_nest() {
+    assert_eq!(
+        count(
+            "unnecessary-nesting",
+            "if a\n    if b\n        if c\n            body\n        end\n    end\nend\n"
+        ),
+        2
+    );
+}
+
 // --- suppression meta rules -------------------------------------------------
 
 /// Lint `src` with `rule` *and* `also` selected, returning only `rule`'s

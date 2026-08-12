@@ -1403,6 +1403,43 @@ After applying the fix:
 sources = filter(startswith("src"), files)
 ```
 
+## `unnecessary-nesting`
+
+Flag an `if` whose entire body is another `if`, where neither carries an `elseif` or an `else`. The two tests are one `&&` test spread over two levels of indentation: `if a; if b; body; end; end` is `if a && b; body; end`.
+
+The two spellings agree on every input. `if` demands a `Bool` and `&&` hands its right operand back untouched, so the merged test stops on a false `a` exactly where the nested form skips the inner `if`, and `if` opens no scope in Julia, so merging the blocks rebinds nothing.
+
+An alternative on either `if` breaks that agreement and is not reported: with an outer `else`, the case where `a` holds and `b` does not runs nothing before the merge and the `else` branch after it. A body holding anything besides the inner `if` is left alone for the same reason — the outer test guards more than the inner one.
+
+The fix splices the two tests and the inner block verbatim, parenthesizing a test that binds looser than `&&` (`if a || c` nested in `if b` becomes `(a || c) && b`). It is withheld — the finding still stands — when a comment sits in the discarded headers. The inner body keeps its indentation, which the formatter settles.
+
+An `if` guarding nothing but another `if` is one test:
+
+```julia
+if isopen(io)
+    if !eof(io)
+        read(io)
+    end
+end
+```
+
+```text
+warning: unnecessary-nesting
+ --> example.jl:1:1
+  |
+1 | if isopen(io)
+  | ^^^^^^^^^^^^^ this `if` only guards another `if`: write `if isopen(io) && !eof(io)`
+  = help: Merge the nested `if` into its parent with `&&` (safe fix)
+```
+
+After applying the fix:
+
+```julia
+if isopen(io) && !eof(io)
+        read(io)
+    end
+```
+
 ## `misnamed-suppression`
 
 Flag a `# fatou-ignore` directive that names a rule the linter does not ship. Suppression matches a rule by its exact ID, so a misspelled, renamed, or foreign ID silences nothing while reading as though it does. When exactly one shipped rule is a near match, the finding carries a safe fix that rewrites the ID and leaves the reason untouched.

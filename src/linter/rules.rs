@@ -148,6 +148,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(readability::LengthZero),
         Box::new(readability::RedundantBoolean),
         Box::new(readability::StringBoundary),
+        Box::new(readability::UnnecessaryNesting),
         Box::new(meta::MisnamedSuppression),
         Box::new(meta::BlanketSuppression),
         Box::new(meta::UnexplainedSuppression),

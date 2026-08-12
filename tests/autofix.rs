@@ -535,3 +535,47 @@ y = 2  # fatou-ignore unused-import: likewise
     assert_eq!(outcome.applied, 2);
     assert!(outcome.remaining.is_empty());
 }
+
+/// Merging a nested `if` keeps the body's own text, indentation included: the
+/// fix is not a formatter, and the pipeline is fix-then-format.
+#[test]
+fn fixes_a_nested_if() {
+    let src = "\
+if isopen(io)
+    if !eof(io)
+        read(io)
+    end
+end
+";
+    let outcome = fix_source(None, src, &select("unnecessary-nesting"), false);
+    insta::assert_snapshot!(outcome.output, @"
+    if isopen(io) && !eof(io)
+            read(io)
+        end
+    ");
+    assert_eq!(outcome.applied, 1);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// A deeper nest converges over the re-lint loop: the fixes overlap, so one
+/// lands per pass, and the merged `if` is again a candidate.
+#[test]
+fn fixes_a_nested_if_to_a_fixpoint() {
+    let src = "\
+if a || c
+    if b
+        if d
+            body()
+        end
+    end
+end
+";
+    let outcome = fix_source(None, src, &select("unnecessary-nesting"), false);
+    insta::assert_snapshot!(outcome.output, @"
+    if (a || c) && b && d
+                body()
+            end
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}

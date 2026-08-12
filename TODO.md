@@ -244,11 +244,21 @@ it. We are behind arity only on the CFG and on rule ergonomics.
       wrong for the mismatched `startswith(s, r"abc$")`, which tests that `s`
       *is* `abc`.
 
+- [x] `unnecessary-nesting` (readability, syn, warning, **safe** fix): an `if`
+  whose whole body is another `if` — `if a; if b; body; end; end` -> `if a && b;
+  body; end`. Both halves must be a bare `if`/`end`: an alternative on either
+  breaks the equivalence (an outer `else` would newly see the case where `a`
+  holds and `b` does not), which also rules out an `elseif` *clause* as the
+  outer half, so only a whole `IF_EXPR` is dispatched. The fix splices the two
+  tests and the inner block verbatim, parenthesizing a test looser than `&&`
+  (`(a || c) && b`) off an explicit tight-shape list, since the parser's
+  precedence table is not exposed over the CST; it is withheld when a comment
+  sits in the discarded headers. The inner body keeps its own indentation —
+  fix-then-format settles it. A deeper nest reports per adjacent pair and
+  converges over the re-lint loop.
+
 Deferred, and why:
 
-- [ ] `unnecessary-nesting` (readability): `if a; if b; body; end; end` -> `if a
-  && b; body; end`, when neither `if` has an `else`. Low risk, low urgency.
-  (arity `unnecessary-nesting`)
 - [ ] A `Test`-stdlib rule bundle, as one cohesive change with a shared `@test`
   matcher — the Julia counterpart of arity's planned `testthat` bundle, which it
   rates "high value for test-heavy repos" (equally true here): `@test x == true`
