@@ -137,6 +137,10 @@ matching `.claude/rules/` file.
   package's public API **without a Julia runtime**, and locates the active
   project/depot the way Julia's loader does. Falls back to a baked-in Base/Core
   export list when no install is found.
+- **Project files** (`src/project_files.rs`) — checks over `Project.toml`/
+  `Manifest.toml` *themselves*, published by the LSP on the file at fault.
+  **Not lint rules** (there is no `SyntaxKind` to dispatch on) and deliberately
+  LSP-free, so the mapping to `lsp_types` stays at the edge.
 - **Linter** (`src/linter/`) — **purely semantic**; anything `format --check`
   catches belongs to the formatter. 48 rules across `correctness`, `suspicious`,
   `performance`, `readability`, and `meta` (which lints the `# fatou-ignore`
