@@ -24,17 +24,20 @@
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 
-use lsp_types::{Hover, HoverContents, Location, MarkupContent, MarkupKind, Position, Range};
+use lsp_types::{
+    DocumentLink, Hover, HoverContents, Location, MarkupContent, MarkupKind, Position, Range,
+};
 use rowan::TextRange;
 
 use crate::environment::{PackageKind, PackageMeta};
 use crate::incremental::{Analysis, normalize_path};
 use crate::index::Span;
-use crate::project_files::dep_at;
+use crate::project_files::{dep_at, dep_entries};
 use crate::resolve::PackageSource;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 use super::definition::site_locations;
+use super::uri;
 
 /// What a project file's features need to know about a dependency: where its
 /// source is, and what the manifest pinned for it.
@@ -170,6 +173,46 @@ fn dep_markdown<L: ProjectLibrary>(name: &str, library: &L) -> Option<String> {
         out.push_str(&format!("\n\n`{}`", normalize_path(&root).display()));
     }
     Some(out)
+}
+
+/// Document links in a project file: every dependency name whose package the
+/// server located becomes a link to that package's entry file.
+///
+/// The same target [`project_definition`] jumps to, through the same
+/// [`package_entry`] join — the two must not drift, since a client offers them
+/// on the same ctrl-click. Purely lexical over the buffer and the library map,
+/// with no I/O, so a link is resolved eagerly and there is no
+/// `documentLink/resolve`.
+pub(crate) fn project_document_links<P: PackageSource>(
+    text: &TextBuffer,
+    encoding: PositionEncoding,
+    packages: &P,
+) -> Vec<DocumentLink> {
+    let line_index = text.line_index();
+    dep_entries(text)
+        .into_iter()
+        .filter_map(|dep| {
+            let (entry, _) = package_entry(packages, &dep.name)?;
+            Some(DocumentLink {
+                range: to_range(dep.name_range, &line_index, encoding),
+                target: Some(uri::from_path(&entry)?),
+                tooltip: None,
+                data: None,
+            })
+        })
+        .collect()
+}
+
+/// [`project_document_links`] against a database snapshot.
+pub(crate) fn project_document_links_via_db(
+    snapshot: &Analysis,
+    text: &TextBuffer,
+    encoding: PositionEncoding,
+) -> Vec<DocumentLink> {
+    salsa::Cancelled::catch(AssertUnwindSafe(|| {
+        project_document_links(text, encoding, snapshot)
+    }))
+    .unwrap_or_default()
 }
 
 fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
@@ -396,6 +439,55 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
     fn a_dependency_nothing_is_known_about_has_no_hover() {
         let marked = PROJECT.replace("Greetings =", "Greet|ings =");
         assert_eq!(hover_at(&marked, &TestLib::default()), None);
+    }
+
+    // --- Document links -----------------------------------------------------
+
+    /// One link per located dependency, covering exactly the name and pointing
+    /// where go-to-definition jumps. `[weakdeps]` and `[extras]` name packages
+    /// too, so they link as well.
+    #[test]
+    fn every_located_dependency_becomes_a_link() {
+        let (_tmp, lib, entry) = greetings();
+        let text = TextBuffer::new(format!(
+            "{PROJECT}\n[extras]\nGreetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"\n"
+        ));
+
+        let links = project_document_links(&text, PositionEncoding::Utf16, &lib);
+        let target = uri::from_path(&entry).unwrap();
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (link.range, link.target.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    Range::new(Position::new(3, 0), Position::new(3, 9)),
+                    Some(target.clone())
+                ),
+                (
+                    Range::new(Position::new(6, 0), Position::new(6, 9)),
+                    Some(target)
+                ),
+            ],
+        );
+    }
+
+    /// A dependency the server never located has nothing to link to, and a name
+    /// under the cursor there jumps nowhere either — one join, one answer.
+    #[test]
+    fn an_unlocated_dependency_has_no_link() {
+        let text = TextBuffer::new(PROJECT.to_string());
+        assert!(
+            project_document_links(&text, PositionEncoding::Utf16, &TestLib::default()).is_empty()
+        );
+    }
+
+    #[test]
+    fn a_broken_project_file_has_no_links() {
+        let (_tmp, lib, _entry) = greetings();
+        let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n".to_string());
+        assert!(project_document_links(&text, PositionEncoding::Utf16, &lib).is_empty());
     }
 
     #[test]
