@@ -12,6 +12,7 @@ pub mod julia_version;
 pub mod linter;
 pub mod lsp;
 pub mod project;
+pub mod project_files;
 pub mod resolve;
 pub mod semantic;
 pub mod text;
