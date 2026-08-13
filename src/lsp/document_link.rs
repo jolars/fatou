@@ -18,7 +18,7 @@ use crate::incremental::{Analysis, normalize_path};
 use crate::parser::parse;
 use crate::project::{include_sites, resolve_target};
 use crate::syntax::SyntaxNode;
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::uri;
 
@@ -34,7 +34,8 @@ pub fn compute_document_links(
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
     let root = parse(text).cst;
-    links_for_tree(&root, text, base_dir, encoding)
+    let buffer = TextBuffer::new(text);
+    links_for_tree(&root, &buffer, base_dir, encoding)
 }
 
 /// Compute document links off the snapshot's cached parse when the db's
@@ -63,7 +64,7 @@ pub(crate) fn document_links_via_db(
     match cached {
         Ok(Some(links)) => links,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_document_links(text, base_dir, encoding),
+        Ok(None) | Err(_) => compute_document_links(&text.text(), base_dir, encoding),
     }
 }
 
@@ -71,11 +72,10 @@ pub(crate) fn document_links_via_db(
 /// the parse tree of exactly `text`.
 fn links_for_tree(
     root: &SyntaxNode,
-    text: &str,
+    buffer: &TextBuffer,
     base_dir: Option<&Path>,
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
-    let line_index = LineIndex::new(text);
     include_sites(root)
         .into_iter()
         .filter_map(|site| {
@@ -85,8 +85,8 @@ fn links_for_tree(
             let target = resolve_target(&site.path, base_dir)?;
             let target = uri::from_path(&normalize_path(&target))?;
             let range = Range::new(
-                line_index.byte_to_position(content.start().into(), encoding),
-                line_index.byte_to_position(content.end().into(), encoding),
+                buffer.byte_to_position(content.start().into(), encoding),
+                buffer.byte_to_position(content.end().into(), encoding),
             );
             Some(DocumentLink {
                 range,
@@ -211,7 +211,7 @@ mod tests {
             document_links_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf16
             ),
             expected,
@@ -225,7 +225,7 @@ mod tests {
             document_links_via_db(
                 &stale.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf16
             ),
             expected,
@@ -238,7 +238,7 @@ mod tests {
             document_links_via_db(
                 &empty.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf16
             ),
             expected,
@@ -265,14 +265,14 @@ mod tests {
             document_links_via_db(
                 &db.snapshot(),
                 &path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(&buffer),
                 PositionEncoding::Utf16,
             ),
             // The fallback (untracked) path decides `base_dir` the same way.
             document_links_via_db(
                 &IncrementalDatabase::default().snapshot(),
                 &path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf16,
             ),
         ] {

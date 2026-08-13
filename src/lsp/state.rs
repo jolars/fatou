@@ -1530,7 +1530,7 @@ impl GlobalState {
         };
         let _ = self.sync_tx.send(SyncMessage::SetText {
             path,
-            text: doc.text.text().to_string(),
+            text: doc.text.text(),
         });
     }
 
@@ -1547,11 +1547,8 @@ impl GlobalState {
             return;
         };
         let version = doc.version;
-        let diags = super::environment_diagnostics::buffer_diagnostics(
-            &path,
-            doc.text.text(),
-            self.encoding,
-        );
+        let text = doc.text.text();
+        let diags = super::environment_diagnostics::buffer_diagnostics(&path, &text, self.encoding);
         let had = self.buffer_diags.remove(&uri).is_some();
         if diags.is_empty() {
             if !had {
@@ -1863,14 +1860,6 @@ mod tests {
         let live = Arc::clone(&state.documents[&doc].text);
         assert_eq!(&*inflight, "x = 1\n", "the in-flight read keeps its text");
         assert_eq!(&*live, "x = 1\ny = 2\n", "the document took the edit");
-        for buffer in [&inflight, &live] {
-            assert_eq!(
-                buffer.line_index(),
-                &crate::text::LineIndex::new(buffer),
-                "line table drifted from {:?}",
-                buffer.text()
-            );
-        }
     }
 
     #[test]

@@ -42,7 +42,7 @@ use crate::resolve::{
 };
 use crate::semantic::{BindingKind, LoadKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// The token classes this server emits; the discriminant is the index into
 /// [`legend`]'s `token_types`.
@@ -113,13 +113,18 @@ pub(crate) fn semantic_tokens_via_db(
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
         Some(tokens_for(
-            &root, model, snapshot, workspace, text, encoding,
+            &root,
+            model,
+            snapshot,
+            workspace,
+            &text.text(),
+            encoding,
         ))
     }));
     match cached {
         Ok(Some(tokens)) => tokens,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_semantic_tokens(text, encoding, snapshot),
+        Ok(None) | Err(_) => compute_semantic_tokens(&text.text(), encoding, snapshot),
     }
 }
 
@@ -534,13 +539,13 @@ fn is_trivia(kind: SyntaxKind) -> bool {
 
 /// Fold position-ordered spans into the LSP's relative encoding, splitting
 /// multi-line spans first. `delta_start` and `length` count code units of the
-/// negotiated encoding, which [`LineIndex::byte_to_position`] produces.
+/// negotiated encoding, which [`TextBuffer::byte_to_position`] produces.
 fn delta_encode(
     spans: &[(TextRange, HighlightKind)],
     text: &str,
     encoding: PositionEncoding,
 ) -> Vec<SemanticToken> {
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let mut data = Vec::new();
     let mut prev = Position::new(0, 0);
     for &(range, kind) in spans {
@@ -715,7 +720,7 @@ mod tests {
     /// document order.
     fn painted(src: &str, lib: &BTreeMap<String, Arc<PackageIndex>>) -> Vec<(String, u32)> {
         let tokens = compute_semantic_tokens(src, PositionEncoding::Utf8, lib);
-        let line_index = LineIndex::new(src);
+        let line_index = TextBuffer::new(src);
         let (mut line, mut character) = (0u32, 0u32);
         let mut out = Vec::new();
         for t in &tokens.data {
@@ -989,7 +994,7 @@ mod tests {
             semantic_tokens_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf8
             ),
             expected,
@@ -1004,7 +1009,7 @@ mod tests {
             semantic_tokens_via_db(
                 &stale.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf8
             ),
             expected,
@@ -1018,7 +1023,7 @@ mod tests {
             semantic_tokens_via_db(
                 &empty.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 PositionEncoding::Utf8
             ),
             expected,

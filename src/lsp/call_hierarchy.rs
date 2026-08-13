@@ -46,7 +46,7 @@ use crate::parser::parse;
 use crate::resolve::{Namespace, OccurrenceKey, PackageSource, Resolution, Resolver};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::cross_file;
 use super::definition::{library_def_site, using_def_site};
@@ -219,7 +219,7 @@ fn is_definition_signature(call: &SyntaxNode) -> bool {
     }
 }
 
-fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(range.start().into(), encoding),
         end: line_index.byte_to_position(range.end().into(), encoding),
@@ -231,7 +231,7 @@ fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding
 fn item_for(
     uri: &Uri,
     callable: &Callable,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> CallHierarchyItem {
     CallHierarchyItem {
@@ -253,7 +253,7 @@ fn container_item(
     uri: &Uri,
     path: &Path,
     root: &SyntaxNode,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> CallHierarchyItem {
     match container {
@@ -304,7 +304,7 @@ pub fn compute_prepare_call_hierarchy(
 ) -> Option<Vec<CallHierarchyItem>> {
     let root = parse(text).cst;
     let model = SemanticModel::build(&root);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     prepare_for(&root, &model, uri, text, &line_index, offset, encoding)
 }
@@ -317,7 +317,7 @@ fn prepare_for(
     model: &SemanticModel,
     uri: &Uri,
     text: &str,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
 ) -> Option<Vec<CallHierarchyItem>> {
@@ -364,7 +364,7 @@ pub(crate) fn prepare_call_hierarchy_via_db(
             &root,
             model,
             uri,
-            text,
+            &text.text(),
             line_index,
             offset,
             encoding,
@@ -372,7 +372,7 @@ pub(crate) fn prepare_call_hierarchy_via_db(
     }));
     match cached {
         Ok(Some(items)) => items,
-        Ok(None) | Err(_) => compute_prepare_call_hierarchy(uri, text, position, encoding),
+        Ok(None) | Err(_) => compute_prepare_call_hierarchy(uri, &text.text(), position, encoding),
     }
 }
 
@@ -405,7 +405,7 @@ fn workspace_item(
         let text = snapshot.file_text_of(file);
         let root = snapshot.parsed_tree(file);
         if let Some((_, callable)) = callable_at(&root, range.start(), text) {
-            let line_index = LineIndex::new(text);
+            let line_index = TextBuffer::new(text);
             return Some(item_for(&uri, &callable, &line_index, encoding));
         }
     }
@@ -435,7 +435,7 @@ pub(crate) fn incoming_calls_via_db(
     let calls = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
         let text = snapshot.file_text(file);
-        let line_index = LineIndex::new(text);
+        let line_index = TextBuffer::new(text);
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let model = snapshot.semantic_model(file);
@@ -514,7 +514,7 @@ fn group_incoming(
     sites: &[TextRange],
     encoding: PositionEncoding,
 ) -> Vec<CallHierarchyIncomingCall> {
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     // Keyed by the caller's selection range: same range, same caller. A
     // BTreeMap keeps callers in position order.
     let mut groups: BTreeMap<(u32, u32), CallHierarchyIncomingCall> = BTreeMap::new();
@@ -560,7 +560,7 @@ pub(crate) fn outgoing_calls_via_db(
     let calls = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
         let text = snapshot.file_text(file);
-        let line_index = LineIndex::new(text);
+        let line_index = TextBuffer::new(text);
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let root = snapshot.parsed_tree(file);
@@ -700,7 +700,7 @@ fn library_item(
     });
     let (text, root) = entry.as_ref()?;
     let uri = from_path(abs)?;
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let start = TextSize::new(span.start);
     if let Some((_, callable)) = callable_at(root, start, text) {
         return Some(item_for(&uri, &callable, &line_index, encoding));
@@ -738,7 +738,7 @@ mod tests {
     fn cursor(marked: &str) -> (String, Position) {
         let offset = marked.find('|').expect("a cursor marker");
         let src = marked.replacen('|', "", 1);
-        let line_index = LineIndex::new(&src);
+        let line_index = TextBuffer::new(&src);
         let position = line_index.byte_to_position(offset, Utf16);
         (src, position)
     }
@@ -759,7 +759,7 @@ mod tests {
             &db.snapshot(),
             &doc_uri(),
             path,
-            &TextBuffer::new(src.to_string()),
+            &TextBuffer::new(&src),
             position,
             Utf16,
         )
@@ -829,7 +829,7 @@ mod tests {
                 &db.snapshot(),
                 &doc_uri(),
                 path,
-                &TextBuffer::new(src.to_string()),
+                &TextBuffer::new(&src),
                 position,
                 Utf16
             ),
@@ -844,7 +844,7 @@ mod tests {
                 &stale.snapshot(),
                 &doc_uri(),
                 path,
-                &TextBuffer::new(src.to_string()),
+                &TextBuffer::new(src),
                 position,
                 Utf16
             ),
@@ -997,7 +997,7 @@ mod tests {
             &snapshot,
             &doc_uri(),
             path,
-            &TextBuffer::new(src.to_string()),
+            &TextBuffer::new(src),
             position,
             Utf16,
         )
@@ -1035,7 +1035,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            &TextBuffer::new(b_text.to_string()),
+            &TextBuffer::new(b_text),
             Position::new(0, 11),
             Utf16,
         )
@@ -1062,7 +1062,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            &TextBuffer::new(a_text.to_string()),
+            &TextBuffer::new(a_text),
             Position::new(0, 0),
             Utf16,
         )
@@ -1092,7 +1092,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            &TextBuffer::new(b_text.to_string()),
+            &TextBuffer::new(b_text),
             Position::new(0, 1),
             Utf16,
         )

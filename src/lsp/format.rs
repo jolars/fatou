@@ -10,7 +10,7 @@ use similar::{DiffTag, TextDiff};
 use crate::formatter::{FormatStyle, RangeFormatted, format_node, format_range, format_with_style};
 use crate::incremental::Analysis;
 use crate::parser::{ParseDiagnostic, parse};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
 /// for `path` still matches it; otherwise re-parse. A write racing the read
@@ -38,7 +38,7 @@ pub(crate) fn format_edits_via_db(
     match cached {
         Ok(Some(edits)) => edits,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_format_edits(text, style, encoding),
+        Ok(None) | Err(_) => compute_format_edits(&text.text(), style, encoding),
     }
 }
 
@@ -52,28 +52,29 @@ pub fn compute_format_edits(
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
     let formatted = format_with_style(text, style).ok()?;
-    Some(edits_for_formatted(text, formatted, encoding))
+    let buffer = TextBuffer::new(text);
+    Some(edits_for_formatted(&buffer, formatted, encoding))
 }
 
-/// The edits turning `text` into its formatted form (empty when already
+/// The edits turning `buffer` into its formatted form (empty when already
 /// formatted). The single source of the edit geometry shared by the re-parse
 /// path ([`compute_format_edits`]) and the cached-tree path.
 ///
 /// Line-scoped where the diff is small ([`line_diff_edits`]), one
 /// whole-document replacement otherwise.
 pub(crate) fn edits_for_formatted(
-    text: &str,
+    buffer: &TextBuffer,
     formatted: String,
     encoding: PositionEncoding,
 ) -> Vec<TextEdit> {
-    if formatted == text {
+    if buffer == formatted.as_str() {
         return Vec::new();
     }
-    let line_index = LineIndex::new(text);
-    if let Some(edits) = line_diff_edits(&line_index, 0, text, &formatted, encoding) {
+    let text = buffer.text();
+    if let Some(edits) = line_diff_edits(buffer, 0, &text, &formatted, encoding) {
         return edits;
     }
-    let end = line_index.byte_to_position(text.len(), encoding);
+    let end = buffer.byte_to_position(buffer.len(), encoding);
     vec![TextEdit {
         range: Range {
             start: Position::new(0, 0),
@@ -106,7 +107,7 @@ const MAX_DIFF_COVERAGE: f64 = 0.5;
 /// `textDocument/formatting` requires, and every range indexes the *original*
 /// document.
 fn line_diff_edits(
-    line_index: &LineIndex,
+    buffer: &TextBuffer,
     base: usize,
     old: &str,
     new: &str,
@@ -152,9 +153,8 @@ fn line_diff_edits(
             .into_iter()
             .map(|(old_lines, new_lines)| TextEdit {
                 range: Range {
-                    start: line_index
-                        .byte_to_position(base + old_offsets[old_lines.start], encoding),
-                    end: line_index.byte_to_position(base + old_offsets[old_lines.end], encoding),
+                    start: buffer.byte_to_position(base + old_offsets[old_lines.start], encoding),
+                    end: buffer.byte_to_position(base + old_offsets[old_lines.end], encoding),
                 },
                 new_text: new[new_offsets[new_lines.start]..new_offsets[new_lines.end]].to_string(),
             })
@@ -207,7 +207,7 @@ pub(crate) fn format_range_edits_via_db(
     match cached {
         Ok(Some(edits)) => edits,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_format_range_edits(text, range, style, encoding),
+        Ok(None) | Err(_) => compute_format_range_edits(&text.text(), range, style, encoding),
     }
 }
 
@@ -224,9 +224,10 @@ pub fn compute_format_range_edits(
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
     let root = parse(text).cst;
-    let text_range = lsp_range_to_text_range(text, range, encoding);
+    let buffer = TextBuffer::new(text);
+    let text_range = lsp_range_to_text_range(&buffer, range, encoding);
     match format_range(&root, text_range, style).ok()? {
-        Some(formatted) => Some(edits_for_range_formatted(text, formatted, encoding)),
+        Some(formatted) => Some(edits_for_range_formatted(&buffer, formatted, encoding)),
         None => Some(Vec::new()),
     }
 }
@@ -236,62 +237,60 @@ pub fn compute_format_range_edits(
 /// [`edits_for_formatted`], shared by the re-parse and cached-tree paths, and
 /// line-scoped within the widened span the same way.
 pub(crate) fn edits_for_range_formatted(
-    text: &str,
+    buffer: &TextBuffer,
     formatted: RangeFormatted,
     encoding: PositionEncoding,
 ) -> Vec<TextEdit> {
     let start = usize::from(formatted.range.start());
     let end = usize::from(formatted.range.end());
-    let old = text.get(start..end);
-    if old == Some(formatted.text.as_str()) {
+    let text = buffer.text();
+    if text.get(start..end) == Some(formatted.text.as_str()) {
         return Vec::new();
     }
-    let line_index = LineIndex::new(text);
-    if let Some(edits) =
-        old.and_then(|old| line_diff_edits(&line_index, start, old, &formatted.text, encoding))
+    if let Some(edits) = text
+        .get(start..end)
+        .and_then(|old| line_diff_edits(buffer, start, old, &formatted.text, encoding))
     {
         return edits;
     }
     vec![TextEdit {
         range: Range {
-            start: line_index.byte_to_position(start, encoding),
-            end: line_index.byte_to_position(end, encoding),
+            start: buffer.byte_to_position(start, encoding),
+            end: buffer.byte_to_position(end, encoding),
         },
         new_text: formatted.text,
     }]
 }
 
-/// Convert an LSP selection to the byte range it covers, clamped to `text`
-/// (via [`LineIndex::position_to_byte`]'s clamping) and normalized so an
+/// Convert an LSP selection to the byte range it covers, clamped to `buffer`
+/// (via [`TextBuffer::position_to_byte`]'s clamping) and normalized so an
 /// inverted selection cannot panic `TextRange::new`.
 pub(crate) fn lsp_range_to_text_range(
-    text: &str,
+    buffer: &TextBuffer,
     range: Range,
     encoding: PositionEncoding,
 ) -> TextRange {
-    let line_index = LineIndex::new(text);
-    let start = line_index.position_to_byte(range.start, encoding);
-    let end = line_index.position_to_byte(range.end, encoding);
+    let start = buffer.position_to_byte(range.start, encoding);
+    let end = buffer.position_to_byte(range.end, encoding);
     TextRange::new(
         (start.min(end) as u32).into(),
         (start.max(end) as u32).into(),
     )
 }
 
-/// Convert parse diagnostics into LSP diagnostics against `text` (the source
+/// Convert parse diagnostics into LSP diagnostics against `buffer` (the source
 /// the diagnostics' byte offsets index).
 pub(crate) fn parse_diagnostics_to_lsp(
     diagnostics: &[ParseDiagnostic],
-    text: &str,
+    buffer: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<Diagnostic> {
-    let line_index = LineIndex::new(text);
     diagnostics
         .iter()
         .map(|diag| Diagnostic {
             range: Range::new(
-                line_index.byte_to_position(diag.start, encoding),
-                line_index.byte_to_position(diag.end, encoding),
+                buffer.byte_to_position(diag.start, encoding),
+                buffer.byte_to_position(diag.end, encoding),
             ),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fatou".to_string()),
@@ -438,13 +437,13 @@ mod tests {
     /// document, so splicing from the end keeps the earlier offsets valid.
     /// Asserts the LSP requirement that the edits do not overlap along the way.
     fn apply(text: &str, edits: &[TextEdit], encoding: PositionEncoding) -> String {
-        let line_index = LineIndex::new(text);
+        let buffer = TextBuffer::new(text);
         let mut spans: Vec<(usize, usize, &str)> = edits
             .iter()
             .map(|edit| {
                 (
-                    line_index.position_to_byte(edit.range.start, encoding),
-                    line_index.position_to_byte(edit.range.end, encoding),
+                    buffer.position_to_byte(edit.range.start, encoding),
+                    buffer.position_to_byte(edit.range.end, encoding),
                     edit.new_text.as_str(),
                 )
             })
@@ -596,12 +595,15 @@ mod tests {
         // U+1F600 is 4 bytes in UTF-8, 2 UTF-16 units.
         let text = "x = \"\u{1F600}\"";
         let formatted = "y".to_string();
-        let end_utf16 = edits_for_formatted(text, formatted.clone(), PositionEncoding::Utf16)[0]
-            .range
-            .end;
-        let end_utf8 = edits_for_formatted(text, formatted, PositionEncoding::Utf8)[0]
-            .range
-            .end;
+        let end_utf16 =
+            edits_for_formatted(&TextBuffer::new(text), formatted.clone(), PositionEncoding::Utf16)
+                [0]
+                .range
+                .end;
+        let end_utf8 =
+            edits_for_formatted(&TextBuffer::new(text), formatted, PositionEncoding::Utf8)[0]
+                .range
+                .end;
         assert_eq!(end_utf16, Position::new(0, 8));
         assert_eq!(end_utf8, Position::new(0, 10));
     }

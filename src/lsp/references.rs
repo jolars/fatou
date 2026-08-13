@@ -28,7 +28,7 @@ use rowan::{TextRange, TextSize};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::semantic::{Access, BindingId, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::cross_file;
 
@@ -43,7 +43,7 @@ pub fn compute_references(
     include_declaration: bool,
 ) -> Option<Vec<Location>> {
     let model = SemanticModel::build(&parse(text).cst);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     references_for(
         &model,
@@ -63,7 +63,7 @@ pub fn compute_document_highlights(
     encoding: PositionEncoding,
 ) -> Option<Vec<DocumentHighlight>> {
     let model = SemanticModel::build(&parse(text).cst);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     highlights_for(&model, &line_index, offset, encoding)
 }
@@ -109,7 +109,9 @@ pub(crate) fn references_via_db(
     }));
     match cached {
         Ok(Some(result)) => result,
-        Ok(None) | Err(_) => compute_references(uri, text, position, encoding, include_declaration),
+        Ok(None) | Err(_) => {
+            compute_references(uri, &text.text(), position, encoding, include_declaration)
+        }
     }
 }
 
@@ -154,7 +156,7 @@ pub(crate) fn document_highlights_via_db(
     }));
     match cached {
         Ok(Some(result)) => result,
-        Ok(None) | Err(_) => compute_document_highlights(text, position, encoding),
+        Ok(None) | Err(_) => compute_document_highlights(&text.text(), position, encoding),
     }
 }
 
@@ -172,7 +174,7 @@ pub(crate) fn binding_at_cursor(model: &SemanticModel, offset: TextSize) -> Opti
 fn references_for(
     model: &SemanticModel,
     uri: &Uri,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
     include_declaration: bool,
@@ -192,7 +194,7 @@ fn references_for(
 
 fn highlights_for(
     model: &SemanticModel,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
 ) -> Option<Vec<DocumentHighlight>> {
@@ -218,7 +220,7 @@ fn highlight_kind(access: Access) -> DocumentHighlightKind {
     }
 }
 
-fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(range.start().into(), encoding),
         end: line_index.byte_to_position(range.end().into(), encoding),
@@ -238,7 +240,7 @@ mod tests {
     fn cursor(marked: &str) -> (String, Position) {
         let offset = marked.find('|').expect("a cursor marker");
         let src = marked.replacen('|', "", 1);
-        let line_index = LineIndex::new(&src);
+        let line_index = TextBuffer::new(&src);
         let position = line_index.byte_to_position(offset, PositionEncoding::Utf16);
         (src, position)
     }
@@ -351,7 +353,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            &TextBuffer::new(a_text.to_string()),
+            &TextBuffer::new(a_text),
             Position::new(0, 0),
             Utf16,
             true,
@@ -378,7 +380,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            &TextBuffer::new(a_text.to_string()),
+            &TextBuffer::new(a_text),
             Position::new(0, 0),
             Utf16,
             false,
@@ -407,7 +409,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            &TextBuffer::new(b_text.to_string()),
+            &TextBuffer::new(b_text),
             Position::new(0, 11),
             Utf16,
             true,

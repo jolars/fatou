@@ -30,7 +30,7 @@ use crate::resolve::{
     ModulePath, Namespace, PackageSource, Resolution, Resolver, module_at, resolve_submodule,
 };
 use crate::semantic::{BindingId, BindingKind, LoadKind, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::render::{binding_detail, render_method, render_param, type_detail};
 
@@ -47,7 +47,7 @@ pub fn compute_hover<P: PackageSource>(
     packages: &P,
 ) -> Option<Hover> {
     let model = SemanticModel::build(&parse(text).cst);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     // The pure path has no file path to key workspace membership on; the live
     // server passes the workspace module through `hover_via_db`.
@@ -81,7 +81,7 @@ pub(crate) fn hover_via_db(
             model,
             snapshot,
             workspace,
-            text,
+            &text.text(),
             offset,
             line_index,
             encoding,
@@ -90,7 +90,7 @@ pub(crate) fn hover_via_db(
     match cached {
         Ok(Some(hover)) => hover,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_hover(text, position, encoding, snapshot),
+        Ok(None) | Err(_) => compute_hover(&text.text(), position, encoding, snapshot),
     }
 }
 
@@ -103,7 +103,7 @@ fn hover_for<P: PackageSource>(
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     text: &str,
     offset: TextSize,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Option<Hover> {
     let (value, range) = hover_content(model, packages, workspace, text, offset)?;
@@ -394,7 +394,7 @@ fn markdown(code: &str, doc: Option<&str>) -> String {
     out
 }
 
-fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(range.start().into(), encoding),
         end: line_index.byte_to_position(range.end().into(), encoding),
@@ -492,7 +492,7 @@ mod tests {
         lib: &BTreeMap<String, Arc<PackageIndex>>,
     ) -> Option<String> {
         let offset = src.find(needle).unwrap() + needle.len();
-        let line_index = LineIndex::new(src);
+        let line_index = TextBuffer::new(src);
         let position = line_index.byte_to_position(offset, PositionEncoding::Utf16);
         compute_hover(src, position, PositionEncoding::Utf16, lib).map(|h| match h.contents {
             HoverContents::Markup(m) => m.value,
@@ -726,7 +726,7 @@ mod tests {
         let lib = library(vec![package(base)]);
         let buffer = "map(sin, xs)\n";
         let position = {
-            let li = LineIndex::new(buffer);
+            let li = TextBuffer::new(buffer);
             li.byte_to_position(1, PositionEncoding::Utf8)
         };
         let expected = compute_hover(buffer, position, PositionEncoding::Utf8, &lib);
@@ -741,7 +741,7 @@ mod tests {
             hover_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 position,
                 PositionEncoding::Utf8
             ),
@@ -753,7 +753,7 @@ mod tests {
             hover_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(other.to_string()),
+                &TextBuffer::new(other),
                 position,
                 PositionEncoding::Utf8
             ),

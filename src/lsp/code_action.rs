@@ -19,7 +19,7 @@ use lsp_types::{
 
 use crate::incremental::Analysis;
 use crate::linter::{self, Applicability};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::format::lsp_range_to_text_range;
 use super::lint::{ServerRules, finding_to_lsp, lint_findings_via_db};
@@ -51,12 +51,11 @@ pub(crate) fn code_actions_via_db(
 fn actions_for(
     findings: &[linter::Diagnostic],
     uri: &Uri,
-    text: &str,
+    buffer: &TextBuffer,
     range: Range,
     encoding: PositionEncoding,
 ) -> Vec<CodeActionOrCommand> {
-    let requested = lsp_range_to_text_range(text, range, encoding);
-    let line_index = LineIndex::new(text);
+    let requested = lsp_range_to_text_range(buffer, range, encoding);
     findings
         .iter()
         .filter(|finding| {
@@ -66,7 +65,7 @@ fn actions_for(
             finding
                 .fixes
                 .iter()
-                .map(|fix| action_for_fix(finding, fix, uri, &line_index, encoding))
+                .map(|fix| action_for_fix(finding, fix, uri, buffer, encoding))
         })
         .collect()
 }
@@ -77,7 +76,7 @@ fn action_for_fix(
     finding: &linter::Diagnostic,
     fix: &linter::Fix,
     uri: &Uri,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> CodeActionOrCommand {
     let edit = TextEdit {
@@ -127,7 +126,7 @@ mod tests {
             &db.snapshot(),
             &test_uri(),
             path,
-            &TextBuffer::new(text.to_string()),
+            &TextBuffer::new(text),
             range,
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
@@ -214,7 +213,7 @@ mod tests {
             &finding,
             &finding.fixes[0],
             &test_uri(),
-            &LineIndex::new(text),
+            &TextBuffer::new(text),
             PositionEncoding::Utf16,
         );
         let CodeActionOrCommand::CodeAction(action) = action else {

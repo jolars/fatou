@@ -20,7 +20,7 @@ use rowan::{TextRange, TextSize, TokenAtOffset};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// The selection-range chain for each of `positions` in `text`, re-parsing it.
 /// Pure and unit-testable; single-file by nature.
@@ -33,7 +33,8 @@ pub fn compute_selection_ranges(
     encoding: PositionEncoding,
 ) -> Vec<SelectionRange> {
     let root = parse(text).cst;
-    selections_for_tree(&root, text, positions, encoding)
+    let buffer = TextBuffer::new(text);
+    selections_for_tree(&root, &buffer, positions, encoding)
 }
 
 /// Compute selection ranges off the snapshot's cached parse when the db's
@@ -59,7 +60,7 @@ pub(crate) fn selection_ranges_via_db(
     match cached {
         Ok(Some(ranges)) => ranges,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_selection_ranges(text, positions, encoding),
+        Ok(None) | Err(_) => compute_selection_ranges(&text.text(), positions, encoding),
     }
 }
 
@@ -67,16 +68,15 @@ pub(crate) fn selection_ranges_via_db(
 /// the parse tree of exactly `text`.
 fn selections_for_tree(
     root: &SyntaxNode,
-    text: &str,
+    buffer: &TextBuffer,
     positions: &[Position],
     encoding: PositionEncoding,
 ) -> Vec<SelectionRange> {
-    let line_index = LineIndex::new(text);
     positions
         .iter()
         .map(|&position| {
-            let offset = line_index.position_to_byte(position, encoding);
-            link_chain(&range_chain(root, offset), &line_index, encoding)
+            let offset = buffer.position_to_byte(position, encoding);
+            link_chain(&range_chain(root, offset), buffer, encoding)
         })
         .collect()
 }
@@ -130,7 +130,7 @@ fn pick_boundary_token(left: SyntaxToken, right: SyntaxToken) -> SyntaxToken {
 /// representation, converting each to positions in the negotiated encoding.
 fn link_chain(
     chain: &[TextRange],
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> SelectionRange {
     let mut linked: Option<SelectionRange> = None;
@@ -169,7 +169,7 @@ mod tests {
             selection_ranges_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 &positions,
                 PositionEncoding::Utf8
             ),
@@ -184,7 +184,7 @@ mod tests {
             selection_ranges_via_db(
                 &stale.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 &positions,
                 PositionEncoding::Utf8
             ),
@@ -198,7 +198,7 @@ mod tests {
             selection_ranges_via_db(
                 &empty.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 &positions,
                 PositionEncoding::Utf8
             ),

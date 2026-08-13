@@ -23,7 +23,7 @@ use crate::incremental::Analysis;
 use crate::index::model::Span;
 use crate::index::{DefLocation, ModuleIndex, TypeKind};
 use crate::resolve::PackageSource;
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::uri::from_path;
 
@@ -69,7 +69,7 @@ pub fn compute_workspace_symbols<P: PackageSource>(
                 .entry(abs.clone())
                 .or_insert_with(|| std::fs::read_to_string(&abs).ok())
                 .as_deref()?;
-            let line_index = LineIndex::new(text);
+            let line_index = TextBuffer::new(text);
             Some(WorkspaceSymbol {
                 name: m.name,
                 kind: m.kind,
@@ -231,7 +231,7 @@ fn subsequence_match(query: &str, name: &str) -> bool {
     needle.peek().is_none()
 }
 
-fn span_to_range(span: Span, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn span_to_range(span: Span, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(span.start as usize, encoding),
         end: line_index.byte_to_position(span.end as usize, encoding),

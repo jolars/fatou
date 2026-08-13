@@ -14,7 +14,7 @@ use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use crate::linter::diagnostic::{Applicability, Diagnostic, Severity};
 use crate::linter::docs::rule_doc_url;
 use crate::linter::rules::is_shipped_rule;
-use crate::text::{LineIndex, LineStarts};
+use crate::text::TextBuffer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -77,18 +77,15 @@ fn render_concise(
     // One source fetch and one line-start scan per *file*, not per finding.
     // Cached rather than grouped by path, because the report's order is the
     // diagnostic order and regrouping would change it.
-    let mut sources: HashMap<Option<PathBuf>, Option<(String, LineStarts)>> = HashMap::new();
+    let mut sources: HashMap<Option<PathBuf>, Option<TextBuffer>> = HashMap::new();
     for diag in diagnostics {
         let path = diag.path.as_deref();
         let entry = sources.entry(diag.path.clone()).or_insert_with(|| {
-            source_for(path).map(|text| {
-                let starts = LineStarts::new(&text);
-                (text, starts)
-            })
+            source_for(path).map(|text| TextBuffer::new(&text))
         });
         let (line, column) = match entry {
-            Some((text, starts)) => {
-                let lc = LineIndex::with_starts(text, starts).byte_to_lc(diag.range.start().into());
+            Some(buffer) => {
+                let lc = buffer.byte_to_lc(diag.range.start().into());
                 (lc.line, lc.column)
             }
             None => (0, 0),
@@ -142,7 +139,7 @@ fn render_pretty(
             }
             continue;
         };
-        let index = LineIndex::new(&source);
+        let index = TextBuffer::new(&source);
         for d in &diags {
             // Hand `annotate-snippets` only the span's lines, plus a line of
             // padding each side that its folding drops. It builds a source map

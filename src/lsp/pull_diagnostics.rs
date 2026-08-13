@@ -50,7 +50,11 @@ pub(crate) fn document_diagnostics_via_db(
     let mut diags = match cached {
         Ok(Some(diags)) => diags,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => parse_diagnostics_to_lsp(&parse(text).diagnostics, text, encoding),
+        Ok(None) | Err(_) => {
+            let flat = text.text();
+            let buffer = TextBuffer::new(&flat);
+            parse_diagnostics_to_lsp(&parse(&flat).diagnostics, &buffer, encoding)
+        }
     };
     // Lint findings join the report on a clean tree only, exactly like the
     // push path: rules would misfire on error-recovered shapes.
@@ -101,7 +105,7 @@ mod tests {
         document_diagnostics_via_db(
             &db.snapshot(),
             &path,
-            &TextBuffer::new(text.to_string()),
+            &TextBuffer::new(text),
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
         )
@@ -143,7 +147,7 @@ mod tests {
         let diags = document_diagnostics_via_db(
             &db.snapshot(),
             Path::new("/work/never-seen.jl"),
-            &TextBuffer::new(text.to_string()),
+            &TextBuffer::new(text),
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
         );
