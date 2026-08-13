@@ -44,12 +44,14 @@
   -> `@test x isa T`, `@test x == nothing` -> `@test isnothing(x)`, and a
   `@test` whose argument is not a comparison or predicate at all. Gate on
   `Test` actually being loaded, as arity gates on the package being attached.
+
 - [ ] A `documentation` category over docstrings, structurally mirroring
   arity's five roxygen rules: undocumented exported names, `@doc` argument
   lists that disagree with the signature. Larger design question than a single
   rule. Would be a fifth category beyond the settled four, which is cheap on
   its own — the taxonomy note above applies — but the bundle is what needs
   designing, not the directory.
+
 - [x] Not a lint rule, and not a linter task at all: TOML syntax diagnostics for
   `Project.toml`/`Manifest.toml`, noted while reading JuliaWorkspaces'
   `layer_diagnostics.jl`. Landed as the `toml-syntax` check in *Project files*
@@ -58,14 +60,17 @@
 ## Language server
 
 - [ ] Maybe: a `fatou index` CLI subcommand to warm and inspect the cache.
+
 - [ ] Code actions beyond quick fixes: organize/sort `using` statements,
   qualify a bare name.
+
 - [ ] `workspace/willCreateFiles` and `workspace/willDeleteFiles`, the siblings
   of the rename handlers. The `RenameMap` machinery in `src/lsp/rename_files.rs`
   is most of what a delete needs; the open question is what a delete *should*
   edit, since dropping the `include` call that names a deleted file is a
   destructive default and leaving it dangling is what the include-graph
   diagnostics already report. Create is close to a no-op. Design first.
+
 - [ ] Renaming a package's entry file (`src/MyPkg.jl`) rebases its own includes
   but leaves `Project.toml`'s `name` alone, so the package silently stops
   matching its entry. `willRenameFiles` deliberately does not touch
@@ -73,6 +78,7 @@
   include rewrite). The diagnosis half has landed as *Project files*'
   `missing-entry-file`, so the mismatch is at least reported; the edit is
   *Project files* stage 4.
+
 - [ ] Maybe (deferred): a rope (`ropey`) for the live buffer, raised in #76.
   It would make locating a line O(log n) and retire `LineStarts` outright. What
   blocks it is narrower than #76's first reading, and it is *not* the lexer:
