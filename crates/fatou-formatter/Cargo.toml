@@ -1,6 +1,6 @@
 [package]
 name = "fatou-formatter"
-version = "0.3.1"
+version = "0.3.2"
 edition.workspace = true
 readme = "README.md"
 description = "Deterministic, rule-based formatter for the Julia language"
@@ -14,7 +14,7 @@ keywords = ["julia", "formatter"]
 categories = ["development-tools", "text-processing"]
 
 [dependencies]
-fatou-parser = { path = "../fatou-parser", version = "0.3.0" }
+fatou-parser = { path = "../fatou-parser", version = "0.4.0" }
 rowan = "0.17.0"
 schemars = { version = "1.2.1", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }

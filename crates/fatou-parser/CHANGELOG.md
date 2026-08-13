@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.3.0...fatou-parser-v0.4.0) (2026-08-13)
+
+### Features
+- **parser:** expose `string_value` for literal decoding ([`e4c4529`](https://github.com/jolars/fatou/commit/e4c45299c6cf0cf4829efcefb8163262f19982dd))
+
 ## [0.3.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.2.0...fatou-parser-v0.3.0) (2026-08-09)
 
 ### Features
