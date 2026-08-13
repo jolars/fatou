@@ -100,14 +100,14 @@
 
 ## Project files (`Project.toml`/`Manifest.toml`)
 
-- Completion of dependency names, the expensive one. On a default depot the
+- [ ] Completion of dependency names, the expensive one. On a default depot the
   registry is a `General.tar.gz`, so the full version needs gzip and tar to
   reach `Registry.toml`. Scope the first pass to packages already installed in
   the depot: no new dependency, no network. Note that *nothing* enumerates
   `<depot>/packages` today — it is only ever probed by exact slug — so even the
   cheap pass is new code.
 
-- `name`/`uuid` upkeep on a rename, the edit half of the `willRenameFiles` entry
+- [ ] `name`/`uuid` upkeep on a rename, the edit half of the `willRenameFiles` entry
   above.
 
 - [ ] **`resolve` is all-or-nothing**, found while landing stage 1: a good
@@ -130,7 +130,7 @@
   `[[deps.X]]` entry naming a package absent from every dependency's `deps`
   list would be a real finding if the shape ever earns one.
 
-- A code action that *adds* a missing dependency can only ever be a plain TOML
+- [ ] A code action that *adds* a missing dependency can only ever be a plain TOML
   text edit. Resolving a name to its UUID means reading the registry, and
   shelling out to `Pkg` is off the table: no Julia runtime, at any point in the
   pipeline.
