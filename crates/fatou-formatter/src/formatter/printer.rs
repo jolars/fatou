@@ -10,6 +10,10 @@ enum Mode {
     Break,
 }
 
+/// The work stack a fit probe descends into: `(in_group, mode, node)`. Owned by
+/// [`print_at`] and reused across probes rather than reallocated per group.
+type FitStack<'a> = Vec<(bool, Mode, &'a Ir)>;
+
 /// Render `doc` at the given style.
 pub fn print(doc: &Ir, style: FormatStyle) -> String {
     print_at(doc, style, 0)
@@ -27,6 +31,10 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
     let mut col = indent;
     // Work stack of (indent, mode, node), processed depth-first.
     let mut stack: Vec<(usize, Mode, &Ir)> = vec![(indent, Mode::Break, doc)];
+    // Scratch for the fit probes below, reused across every check so a probe
+    // allocates nothing: `fits` runs once per group and would otherwise churn a
+    // fresh `Vec` per call.
+    let mut scratch: FitStack<'_> = Vec::new();
 
     while let Some((indent, mode, ir)) = stack.pop() {
         match ir {
@@ -68,7 +76,7 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
                 // content already on the current line* stays within the width. The
                 // trailing content is exactly the rest of the work stack up to the
                 // next line break, so `fits` walks `inner` (flat) and then `stack`.
-                let mode = if fits(width.saturating_sub(col), inner, &stack) {
+                let mode = if fits(width.saturating_sub(col), inner, &stack, &mut scratch) {
                     Mode::Flat
                 } else {
                     Mode::Break
@@ -90,7 +98,14 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
                 // to the standard explode group (re-measured by the normal Group
                 // arm — it always breaks here, since the hug measure never
                 // exceeds its flat measure).
-                if hug_fits(width.saturating_sub(col), prefix, body, close, &stack) {
+                if hug_fits(
+                    width.saturating_sub(col),
+                    prefix,
+                    body,
+                    close,
+                    &stack,
+                    &mut scratch,
+                ) {
                     stack.push((indent, mode, close));
                     stack.push((indent, mode, body));
                     stack.push((indent, mode, prefix));
@@ -107,7 +122,7 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
                 // current one, so measure `probe` (flat) from the *base indent*
                 // rather than `col`. It fits exactly when breaking `primary`'s head
                 // leaves the flat bound sitting on that closing line.
-                let chosen = if fits(width.saturating_sub(indent), probe, &stack) {
+                let chosen = if fits(width.saturating_sub(indent), probe, &stack, &mut scratch) {
                     primary
                 } else {
                     fallback
@@ -139,15 +154,15 @@ fn newline(out: &mut String, indent: usize) -> usize {
 /// [`BlankLine`](Ir::BlankLine), or a raw embedded newline in trailing text). A
 /// forced newline *inside* the group's own flat content instead means it cannot sit
 /// flat, so the group must break.
-fn fits(remaining: usize, inner: &Ir, rest: &[(usize, Mode, &Ir)]) -> bool {
-    // Work stack of (in_group, mode, node). Push `rest` bottom-first (it is itself
-    // a pop-from-end stack, so its last element prints next), then `inner` on top.
-    let mut stack: Vec<(bool, Mode, &Ir)> = Vec::with_capacity(rest.len() + 1);
-    for (_, mode, ir) in rest {
-        stack.push((false, *mode, ir));
-    }
-    stack.push((true, Mode::Flat, inner));
-    fits_stack(remaining as isize, stack)
+fn fits<'a>(
+    remaining: usize,
+    inner: &'a Ir,
+    rest: &[(usize, Mode, &'a Ir)],
+    scratch: &mut FitStack<'a>,
+) -> bool {
+    scratch.clear();
+    scratch.push((true, Mode::Flat, inner));
+    fits_stack(remaining as isize, scratch, rest)
 }
 
 /// Whether the hug layout of a [`HugGroup`](Ir::HugGroup) has a fitting first
@@ -155,29 +170,47 @@ fn fits(remaining: usize, inner: &Ir, rest: &[(usize, Mode, &Ir)]) -> bool {
 /// argument forbids hugging), then `body` up to its first break opportunity —
 /// where its own group would end the line — and, only if the body cannot break,
 /// `close` plus the trailing content still pending on the print stack.
-fn hug_fits(
+fn hug_fits<'a>(
     remaining: usize,
-    prefix: &Ir,
-    body: &Ir,
-    close: &Ir,
-    rest: &[(usize, Mode, &Ir)],
+    prefix: &'a Ir,
+    body: &'a Ir,
+    close: &'a Ir,
+    rest: &[(usize, Mode, &'a Ir)],
+    scratch: &mut FitStack<'a>,
 ) -> bool {
-    let mut stack: Vec<(bool, Mode, &Ir)> = Vec::with_capacity(rest.len() + 3);
-    for (_, mode, ir) in rest {
-        stack.push((false, *mode, ir));
-    }
-    stack.push((false, Mode::Flat, close));
+    scratch.clear();
+    scratch.push((false, Mode::Flat, close));
     // Break mode: the body's first `Line`/`SoftLine` ends the measured line, so
     // only the hugged construct's opening bracket counts toward the first line.
-    stack.push((false, Mode::Break, body));
-    stack.push((true, Mode::Flat, prefix));
-    fits_stack(remaining as isize, stack)
+    scratch.push((false, Mode::Break, body));
+    scratch.push((true, Mode::Flat, prefix));
+    fits_stack(remaining as isize, scratch, rest)
 }
 
 /// The shared measurement loop behind [`fits`] and [`hug_fits`], walking a
 /// prepared `(in_group, mode, node)` stack.
-fn fits_stack(mut remaining: isize, mut stack: Vec<(bool, Mode, &Ir)>) -> bool {
-    while let Some((in_group, mode, ir)) = stack.pop() {
+fn fits_stack<'a>(
+    mut remaining: isize,
+    stack: &mut FitStack<'a>,
+    rest: &[(usize, Mode, &'a Ir)],
+) -> bool {
+    // `rest` is walked lazily, from the end (it is itself a pop-from-end stack, so
+    // its last element prints next) and only once `stack` runs dry. Copying it in
+    // up front would cost O(print-stack depth) per probe, and a probe almost always
+    // stops within the first few items — the line ends long before `rest` does.
+    let mut pending = rest.len();
+    loop {
+        let (in_group, mode, ir) = match stack.pop() {
+            Some(item) => item,
+            None => {
+                if pending == 0 {
+                    break;
+                }
+                pending -= 1;
+                let (_, mode, ir) = rest[pending];
+                (false, mode, ir)
+            }
+        };
         if remaining < 0 {
             return false;
         }
