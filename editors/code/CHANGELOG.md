@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/jolars/fatou/compare/fatou-code-v0.13.0...fatou-code-v0.14.0) (2026-08-13)
+
+### Features
+- **code:** gate inlay hints with the other language features ([`ee3bc08`](https://github.com/jolars/fatou/commit/ee3bc08bd0fb2b41bb7b94148a1b390ce746771c))
+- **code:** attach the server to Julia's environment files ([`cc84d78`](https://github.com/jolars/fatou/commit/cc84d780c5a8e36d3a89112bf99684200b8b922e))
+
+### Bug Fixes
+- **code:** require a digit in the versioned manifest glob ([`895ebba`](https://github.com/jolars/fatou/commit/895ebbae5402e60731b394eacd581fd39ff89a89))
+
+### Dependencies
+- updated fatou to v0.14.0
+
 ## [0.13.0](https://github.com/jolars/fatou/compare/fatou-code-v0.12.0...fatou-code-v0.13.0) (2026-08-09)
 
 ### Dependencies

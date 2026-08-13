@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.14.0](https://github.com/jolars/fatou/compare/v0.13.0...v0.14.0) (2026-08-13)
+
+### Features
+- **lsp:** ask the client to re-request inlay hints ([`e909f9f`](https://github.com/jolars/fatou/commit/e909f9ffa1927f2013e5296ef27e4bce09536c91))
+- **lsp:** link a manifest's dev'd path entries ([`be3ec4a`](https://github.com/jolars/fatou/commit/be3ec4a96c4ac4a88d9787c5c27cb83460c46ba9))
+- **lsp:** show a dependency's resolved version inline ([`085e9c6`](https://github.com/jolars/fatou/commit/085e9c60acca9330afc88f8636d45e157520593a))
+- **lsp:** link dependency names to their package ([`8edc445`](https://github.com/jolars/fatou/commit/8edc445734dd87128657e74085f591a3d748ad7a))
+- **lsp:** hover a dependency for its version and path ([`4d77049`](https://github.com/jolars/fatou/commit/4d770497ea1b6b153e3bf6f02355e435352a0ac3))
+- **lsp:** go to a dependency's source from a project file ([`f6fe8a1`](https://github.com/jolars/fatou/commit/f6fe8a1d7a668f32407e390ad3014783a3bdf06d))
+- **index:** locate a project file's dependency entries ([`cdd07e3`](https://github.com/jolars/fatou/commit/cdd07e3ce5ae57f34c9a554bf80acdcdf6807c7d))
+- **lsp:** give an open project file its own route ([`f51a483`](https://github.com/jolars/fatou/commit/f51a483a69f4e26de7881b3fe3c62bac0f67b760))
+- **lsp:** feed an open project file to the database ([`95acc26`](https://github.com/jolars/fatou/commit/95acc264097f7f4a081feec166e4de954d7a9152))
+- **incremental:** derive declared deps from the project file ([`9688be0`](https://github.com/jolars/fatou/commit/9688be0330ae1a2fb43714a8862704db18dceb17))
+- **index:** record each workspace project file's path ([`1b31ae3`](https://github.com/jolars/fatou/commit/1b31ae303c413461366232e0a30c122702035921))
+- **env:** name a project's declared dependencies once ([`abd60d1`](https://github.com/jolars/fatou/commit/abd60d1b404a382e3e6c9bb733e0bb1527149531))
+- **index:** add the six project-file semantic checks ([`687fe63`](https://github.com/jolars/fatou/commit/687fe63c11a7cc2924a5da7ac9f02da23a67f387))
+- **lsp:** publish project-file diagnostics from the harvester ([`dff678f`](https://github.com/jolars/fatou/commit/dff678f665cfe740787385a1d50380d9aba737a5))
+- **index:** add project-file syntax checks ([`244efd3`](https://github.com/jolars/fatou/commit/244efd39e583159b214abd058e3e78ceff4e7ea0))
+- **linter:** add the `unnecessary-nesting` rule ([`17a8008`](https://github.com/jolars/fatou/commit/17a80086f259a5c8724f0d475de9311203c7abc7))
+- **linter:** flag a fixed regex in every pattern position ([`d0b5c93`](https://github.com/jolars/fatou/commit/d0b5c93634df42539c52d841ec8e9f90f3a265c3))
+- **linter:** read `contains` in the regex-literal rules ([`4da0bb6`](https://github.com/jolars/fatou/commit/4da0bb612c1b090c833395ad6364b698b494551c))
+- **linter:** add the occursin regex-literal rules ([`c33ee54`](https://github.com/jolars/fatou/commit/c33ee547e2ae957b7eaa700067fc293ef10d7422))
+- **linter:** add the eager-broadcast rule family ([`9a49535`](https://github.com/jolars/fatou/commit/9a4953573d63841bde6a9dfc8aa5188b458a29d6))
+- **linter:** add `invalid-type-declaration` ([`79c51b8`](https://github.com/jolars/fatou/commit/79c51b8e3d76dbd571f1b20764c8c1b4f782431a))
+- **linter:** add the suppression meta-rule family ([`fb8aa07`](https://github.com/jolars/fatou/commit/fb8aa07ec7fef4c7974d891ac3c4973ba005369b))
+- **cli:** read stdin from `-`, not a bare terminal ([`ffb0982`](https://github.com/jolars/fatou/commit/ffb09825c36e3ad91ebd68b2bfa35a31b7bbb862))
+- **linter:** add `non-public-access` ([`2b5bef6`](https://github.com/jolars/fatou/commit/2b5bef68176e5d97076cb914c5a854dd81c7c123))
+
+### Bug Fixes
+- **lsp:** never route a `.toml` through the Julia parser ([`dfcff18`](https://github.com/jolars/fatou/commit/dfcff18d1390f146c6f896b2238315139b9d2ec0))
+- **lsp:** sync a watched project file to disk ([`b2ffbd4`](https://github.com/jolars/fatou/commit/b2ffbd47cc2f6a4c3915ef22d49d013aa6422b54))
+- **lsp:** normalize a definition target's path ([`ac5ebfa`](https://github.com/jolars/fatou/commit/ac5ebfa813eeebf852392105ad065f76954489b2))
+- **lsp:** refresh open documents for push clients too ([`ee66f81`](https://github.com/jolars/fatou/commit/ee66f815d12091d325b2273af72760d9e3be33a8))
+- **lsp:** never parse an environment file as Julia ([`094e96d`](https://github.com/jolars/fatou/commit/094e96dd7648b8e5b9d71939ea08f8ceecfe2387))
+- **lsp:** repair the windows-gated rename test ([`852b169`](https://github.com/jolars/fatou/commit/852b169271cb6402efcb989b87488b43c0de8892))
+- **project:** decode string escapes in include paths ([`2c0854d`](https://github.com/jolars/fatou/commit/2c0854d851ee57dc1acb1f2e004c8a4d329a7e73))
+
+### Performance Improvements
+- **lsp:** ignore a project file no package claims ([`89b6e97`](https://github.com/jolars/fatou/commit/89b6e970d42f5ba39345ae8d554e3ad0d0c5ac44))
+- **lsp:** share one line table across a document's readers ([`a054ecf`](https://github.com/jolars/fatou/commit/a054ecf6807390764132d98ed829bc892bf683bb)), closes [#76](https://github.com/jolars/fatou/issues/76)
+- **lsp:** patch the line table across edits ([`6f949d5`](https://github.com/jolars/fatou/commit/6f949d5d3c9311a6f44b636fb83b0fa71d3f401b)), refs [#76](https://github.com/jolars/fatou/issues/76)
+
+### Dependencies
+- updated crates/fatou-formatter to v0.3.2
+- updated crates/fatou-parser to v0.4.0
+
 ## [0.13.0](https://github.com/jolars/fatou/compare/v0.12.0...v0.13.0) (2026-08-09)
 
 ### Features

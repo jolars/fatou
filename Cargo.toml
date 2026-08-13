@@ -12,7 +12,7 @@ authors = ["Johan Larsson <johan@jolars.co>"]
 
 [package]
 name = "fatou"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 readme = "README.md"
 description = "A language server, formatter, and linter for Julia"
@@ -49,8 +49,8 @@ clap = { version = "4.6.1", features = ["derive"] }
 crossbeam-channel = "0.5.16"
 dirs = "6.0.0"
 env_logger = "0.11.10"
-fatou-formatter = { path = "crates/fatou-formatter", version = "0.3.1" }
-fatou-parser = { path = "crates/fatou-parser", version = "0.3.0" }
+fatou-formatter = { path = "crates/fatou-formatter", version = "0.3.2" }
+fatou-parser = { path = "crates/fatou-parser", version = "0.4.0" }
 globset = "0.4.18"
 ignore = "0.4.26"
 log = { version = "0.4.32", features = ["release_max_level_info"] }
