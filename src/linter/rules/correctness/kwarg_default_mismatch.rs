@@ -89,11 +89,11 @@ impl LiteralType {
                     && string.interpolations().next().is_none();
                 plain.then_some(Self::String)
             }
-            // `QUOTE_SYM` has no `Expr` variant of its own. Only the bare-name
-            // form is a `Symbol`: `:(x + 1)` is an `Expr`, and a quoted
-            // operator or keyword (`:+`, `:if`) carries no node to check.
-            Expr::Other(node) if node.kind() == SyntaxKind::QUOTE_SYM => {
-                let quoted = QuoteSym::cast(node.clone())?.expr()?;
+            // Only the bare-name form is a `Symbol`: `:(x + 1)` is an `Expr`,
+            // and a quoted operator or keyword (`:+`, `:if`) carries no node to
+            // check.
+            _ if expr.syntax().kind() == SyntaxKind::QUOTE_SYM => {
+                let quoted = QuoteSym::cast(expr.syntax().clone())?.expr()?;
                 matches!(quoted, Expr::Name(_)).then_some(Self::Symbol)
             }
             _ => None,
