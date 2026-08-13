@@ -40,17 +40,16 @@ pub struct LineCol {
     pub column: usize,
 }
 
-/// The line-start byte offsets of a text buffer.
+/// The text of a buffer together with its line-start table.
 ///
-/// The offsets are held implicitly by a [`Rope`], whose line metrics answer
-/// "where does line `i` start" and "which line is byte `b` on" in O(log n)
-/// rather than by binary-searching a `Vec<usize>`.
+/// The text and its line-start offsets both live in a [`Rope`], whose line
+/// metrics answer "where does line `i` start" and "which line is byte `b` on"
+/// in O(log n) rather than by binary-searching a `Vec<usize>`.
 ///
-/// It is a value of its own, separate from the text, so a live buffer can
-/// [patch](Self::patch) it across an edit rather than rescanning. Building it
-/// is linear in the buffer, which on a large file costs several times the
-/// incremental reparse the edit goes on to trigger — see
-/// `benches/line_index.rs`.
+/// It is a value of its own, so a live buffer can [patch](Self::patch) it
+/// across an edit rather than rescanning. Building it is linear in the buffer,
+/// which on a large file costs several times the incremental reparse the edit
+/// goes on to trigger — see `benches/line_index.rs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineStarts {
     rope: Rope,
@@ -87,48 +86,50 @@ impl LineStarts {
     }
 }
 
-/// A text buffer paired with its line-start table.
+/// An index over text, backed by a [`LineStarts`] that owns both the text and
+/// its line-start table.
 ///
 /// The table is either built for the occasion ([`new`](Self::new)) or borrowed
 /// from a buffer that maintains one ([`with_starts`](Self::with_starts)).
 #[derive(Debug, Clone)]
 pub struct LineIndex<'a> {
-    text: &'a str,
     line_starts: Cow<'a, LineStarts>,
 }
 
 impl<'a> LineIndex<'a> {
-    /// Scan `text` for a one-off index. Prefer
+    /// Build a one-off index, copying `text` into a [`Rope`] of its own. Prefer
     /// [`with_starts`](Self::with_starts) wherever a maintained table is at
-    /// hand: this rescans the whole buffer.
+    /// hand: this copies the whole buffer.
     pub fn new(text: &'a str) -> Self {
         Self {
-            text,
             line_starts: Cow::Owned(LineStarts::new(text)),
         }
     }
 
-    /// An index over `text` reusing an already-built table.
-    ///
-    /// `line_starts` must be `text`'s own table, as
-    /// [`crate::text::TextBuffer`] keeps it; pairing it with a different text
-    /// yields wrong positions rather than a panic.
-    pub fn with_starts(text: &'a str, line_starts: &'a LineStarts) -> Self {
+    /// An index borrowing an already-built table, as
+    /// [`crate::text::TextBuffer`] keeps it. The table owns the text, so there
+    /// is no separate text to pair it with.
+    pub fn with_starts(line_starts: &'a LineStarts) -> Self {
         Self {
-            text,
             line_starts: Cow::Borrowed(line_starts),
         }
     }
 
     /// 1-indexed (line, column-in-code-points). Suitable for CLI diagnostics.
     pub fn byte_to_lc(&self, offset: usize) -> LineCol {
-        let clamped = offset.min(self.text.len());
+        let clamped = offset.min(self.line_starts.rope.len());
         let line_idx = self.line_index_for(clamped);
         let line_start = self
             .line_starts
             .rope
             .line_to_byte_idx(line_idx, LineType::LF);
-        let column = self.text[line_start..clamped].chars().count() + 1;
+        let column = self
+            .line_starts
+            .rope
+            .slice(line_start..clamped)
+            .chars()
+            .count()
+            + 1;
         LineCol {
             line: line_idx + 1,
             column,
@@ -138,16 +139,16 @@ impl<'a> LineIndex<'a> {
     /// 0-indexed LSP `Position` with the `character` offset in `encoding`
     /// units.
     pub fn byte_to_position(&self, offset: usize, encoding: PositionEncoding) -> Position {
-        let clamped = offset.min(self.text.len());
+        let clamped = offset.min(self.line_starts.rope.len());
         let line_idx = self.line_index_for(clamped);
         let line_start = self
             .line_starts
             .rope
             .line_to_byte_idx(line_idx, LineType::LF);
-        let prefix = &self.text[line_start..clamped];
+        let prefix = self.line_starts.rope.slice(line_start..clamped);
         let character = match encoding {
             PositionEncoding::Utf8 => prefix.len() as u32,
-            PositionEncoding::Utf16 => prefix.encode_utf16().count() as u32,
+            PositionEncoding::Utf16 => prefix.len_utf16() as u32,
         };
         Position::new(line_idx as u32, character)
     }
@@ -160,24 +161,31 @@ impl<'a> LineIndex<'a> {
     pub fn position_to_byte(&self, position: Position, encoding: PositionEncoding) -> usize {
         let line = position.line as usize;
         if line >= self.line_count() {
-            return self.text.len();
+            return self.line_starts.rope.len();
         }
         let line_start = self.line_starts.rope.line_to_byte_idx(line, LineType::LF);
         let line_end = self
             .line_starts
             .rope
             .line_to_byte_idx(line + 1, LineType::LF);
-        let line_text = self.text[line_start..line_end]
-            .trim_end_matches('\n')
-            .trim_end_matches('\r');
+        // The line slice runs to its `\n`/`\r\n` terminator; drop it so a
+        // character past the end clamps to the content before it.
+        let mut content_end = line_end;
+        if content_end > line_start && self.line_starts.rope.byte(content_end - 1) == b'\n' {
+            content_end -= 1;
+            if content_end > line_start && self.line_starts.rope.byte(content_end - 1) == b'\r' {
+                content_end -= 1;
+            }
+        }
+        let content = self.line_starts.rope.slice(line_start..content_end);
         let mut units = 0u32;
-        for (byte_off, ch) in line_text.char_indices() {
+        for (byte_off, ch) in content.char_indices() {
             if units >= position.character {
                 return line_start + byte_off;
             }
             units += encoding.units_of(ch);
         }
-        line_start + line_text.len()
+        line_start + content.len()
     }
 
     /// Total line count (1 even for empty text).
@@ -238,7 +246,7 @@ mod tests {
     fn a_borrowed_table_indexes_the_same_as_a_scanned_one() {
         let text = "ab\ncd\u{1F600}\nef";
         let starts = LineStarts::new(text);
-        let borrowed = LineIndex::with_starts(text, &starts);
+        let borrowed = LineIndex::with_starts(&starts);
         let scanned = LineIndex::new(text);
         for offset in 0..=text.len() {
             if !text.is_char_boundary(offset) {
