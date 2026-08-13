@@ -5,7 +5,7 @@
 //! stable compact one-liner `path:line:col: severity[rule] message`, and `Json`
 //! serializes the diagnostics directly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,7 @@ use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use crate::linter::diagnostic::{Applicability, Diagnostic, Severity};
 use crate::linter::docs::rule_doc_url;
 use crate::linter::rules::is_shipped_rule;
-use crate::text::LineIndex;
+use crate::text::{LineIndex, LineStarts};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -74,11 +74,21 @@ fn render_concise(
     source_for: &dyn Fn(Option<&Path>) -> Option<String>,
 ) -> String {
     let mut out = String::new();
+    // One source fetch and one line-start scan per *file*, not per finding.
+    // Cached rather than grouped by path, because the report's order is the
+    // diagnostic order and regrouping would change it.
+    let mut sources: HashMap<Option<PathBuf>, Option<(String, LineStarts)>> = HashMap::new();
     for diag in diagnostics {
         let path = diag.path.as_deref();
-        let (line, column) = match source_for(path) {
-            Some(text) => {
-                let lc = LineIndex::new(&text).byte_to_lc(diag.range.start().into());
+        let entry = sources.entry(diag.path.clone()).or_insert_with(|| {
+            source_for(path).map(|text| {
+                let starts = LineStarts::new(&text);
+                (text, starts)
+            })
+        });
+        let (line, column) = match entry {
+            Some((text, starts)) => {
+                let lc = LineIndex::with_starts(text, starts).byte_to_lc(diag.range.start().into());
                 (lc.line, lc.column)
             }
             None => (0, 0),
@@ -132,12 +142,26 @@ fn render_pretty(
             }
             continue;
         };
+        let index = LineIndex::new(&source);
         for d in &diags {
-            let snippet = Snippet::source(&source).path(&origin).annotation(
-                AnnotationKind::Primary
-                    .span(usize::from(d.range.start())..usize::from(d.range.end()))
-                    .label(&d.message.body),
-            );
+            // Hand `annotate-snippets` only the span's lines, plus a line of
+            // padding each side that its folding drops. It builds a source map
+            // of whatever it is given, so passing the whole file made rendering
+            // O(file) per finding — quadratic over a file's worth of them.
+            // `line_start` anchors the gutter back to absolute line numbers, so
+            // the output is unchanged.
+            let (start, end) = (usize::from(d.range.start()), usize::from(d.range.end()));
+            let first = index.byte_to_lc(start).line.saturating_sub(2);
+            let last = index.byte_to_lc(end).line;
+            let (from, to) = (index.line_start(first), index.line_start(last + 1));
+            let snippet = Snippet::source(&source[from..to])
+                .line_start(first + 1)
+                .path(&origin)
+                .annotation(
+                    AnnotationKind::Primary
+                        .span(start.saturating_sub(from)..end.saturating_sub(from))
+                        .label(&d.message.body),
+                );
             let group = severity_level(d.severity)
                 .primary_title(d.rule)
                 .element(snippet);
@@ -212,6 +236,67 @@ mod tests {
         assert!(out.contains("x = 1"), "missing source line:\n{out}");
         assert!(out.contains('^'), "missing caret underline:\n{out}");
         assert!(out.contains("<stdin>"), "missing origin:\n{out}");
+    }
+
+    #[test]
+    fn pretty_window_keeps_absolute_line_numbers() {
+        // The snippet is sliced to the span's lines, so the gutter has to be
+        // anchored back to the file's own numbering — a window that forgot
+        // `line_start` would report line 1 here.
+        let src = "a = 1\nb = 2\nccc = 3\nd = 4\n";
+        let at = src.find("ccc").unwrap() as u32;
+        let diag = warning(at, at + 3, "unused-binding", "`ccc` is never used");
+        let out = render_findings(&[diag], pretty(), &|_| Some(src.to_string()));
+        assert!(out.contains("<stdin>:3:1"), "wrong location:\n{out}");
+        assert!(out.contains("3 | ccc = 3"), "wrong gutter:\n{out}");
+        // Folding drops the padding lines the window carries, so no neighbour
+        // leaks into the output.
+        assert!(!out.contains("b = 2"), "neighbour leaked:\n{out}");
+        assert!(!out.contains("d = 4"), "neighbour leaked:\n{out}");
+    }
+
+    #[test]
+    fn rendering_is_invariant_to_trailing_file_size() {
+        // The property the snippet window and the concise line-table cache both
+        // exist for: rendering a finding must not depend on how much source
+        // sits beyond it. It used to hold by accident, at O(file) per finding.
+        let short = "x = 1\n".to_string();
+        let long = format!("{short}{}", "# padding\n".repeat(2000));
+        let diag = warning(0, 1, "unused-binding", "`x` is never used");
+        for options in [pretty(), RenderOptions::new(OutputMode::Concise, false)] {
+            let a = render_findings(std::slice::from_ref(&diag), options, &|_| {
+                Some(short.clone())
+            });
+            let b = render_findings(std::slice::from_ref(&diag), options, &|_| {
+                Some(long.clone())
+            });
+            assert_eq!(a, b, "{options:?}");
+        }
+    }
+
+    #[test]
+    fn concise_reads_each_file_once_however_many_findings() {
+        // `render_concise` built a fresh `LineIndex` per diagnostic, so a
+        // finding-dense file was quadratic exactly like the pretty path. The
+        // cache is keyed by path, so a repeated path must be fetched once.
+        let src = "a = 1\nb = 2\nc = 3\n";
+        let fetches = std::cell::Cell::new(0);
+        let diags: Vec<Diagnostic> = (0..3)
+            .map(|i| warning(i * 6, i * 6 + 1, "unused-binding", "never used"))
+            .collect();
+        let out = render_findings(
+            &diags,
+            RenderOptions::new(OutputMode::Concise, false),
+            &|_| {
+                fetches.set(fetches.get() + 1);
+                Some(src.to_string())
+            },
+        );
+        assert_eq!(fetches.get(), 1, "one fetch per file, not per finding");
+        // The cache must not disturb the resolved positions.
+        assert!(out.contains("<stdin>:1:1"), "{out}");
+        assert!(out.contains("<stdin>:2:1"), "{out}");
+        assert!(out.contains("<stdin>:3:1"), "{out}");
     }
 
     #[test]

@@ -197,6 +197,17 @@ impl<'a> LineIndex<'a> {
         self.line_starts.len()
     }
 
+    /// Byte offset of the start of the 0-indexed `line`. A line past the end
+    /// clamps to the buffer end, so `line_start(n)..line_start(n + 1)` is always
+    /// a valid slice range covering line `n` *including* its newline. The pretty
+    /// diagnostic renderer slices a snippet window with it.
+    pub fn line_start(&self, line: usize) -> usize {
+        self.line_starts
+            .get(line)
+            .copied()
+            .unwrap_or(self.text.len())
+    }
+
     fn line_index_for(&self, offset: usize) -> usize {
         match self.line_starts.binary_search(&offset) {
             Ok(idx) => idx,
