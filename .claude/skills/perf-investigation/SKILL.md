@@ -92,23 +92,43 @@ hyperfine --warmup 3 -m 20 \
 `taskset` pins one core; without it, scheduler migration adds several percent of
 jitter and small wins vanish into it. Discard warmups, take the median.
 
+**Interleave the A/B when the machine is not quiet.** A quiet run has a ~4-5%
+spread on this bench; a busy one drifts far more than that *between* a before
+and an after measured minutes apart, which is enough to invent or erase a win.
+Build both binaries first, then alternate them round by round so drift hits both
+equally, and report min alongside median — min is the least contaminated
+estimate of the true cost under interference:
+
+```sh
+cargo build --release --bench format_compare        # after
+cp target/release/deps/format_compare-* /tmp/bench_new
+git stash push <the changed file>
+cargo build --release --bench format_compare        # before
+cp target/release/deps/format_compare-* /tmp/bench_old
+git stash pop
+# then alternate old/new for N rounds and compare
+```
+
+Check `uptime` and `ps -eo pcpu,comm --sort=-pcpu | head` before believing any
+number.
+
 ## Read the phase split before the leaf list
 
 The leaf list flatters whatever is at the bottom of the stack — `malloc` and
 rowan internals always look enormous and are almost never where a fix goes. The
-inclusive split tells you which *phase* to open. As of the first profile
-(2026-08-13, JuliaSyntax `parser.jl`, 137 KB):
+inclusive split tells you which *phase* to open. As of 2026-08-13, after the
+`fold_docstrings` fix (JuliaSyntax `parser.jl`, 137 KB):
 
 ```
 format                  99%
-  parse                 55%      <- the parser, not the formatter
-    fold_docstrings     22%      <- a post-parse pass
-    emit_items          16%
-    parse_expr_in       12%
-  format_node           42%
-    lower               21%
-    print_at            13%
-      fits              10%
+  parse                 46%      <- still the parser, not the formatter
+    parse_expr_in       16%
+    parse_function_like 16%
+    run_block_inner     14%
+  format_node           49%
+    lower               28%
+      build_block_body  25%
+    print_at            14%
 ```
 
 Two readings that follow, and that anyone profiling "the formatter" needs to
@@ -137,12 +157,14 @@ ruled out — a lead that was measured and didn't pay belongs in §Don't redo.
   found by following callers, never at the allocator. Don't reach for a
   different global allocator as a first move — it hides the real site and the
   wasm constraint makes the choice non-obvious.
-- **Per-node `Vec` in a recursive pass** — `fold_docstrings`
-  (`crates/fatou-parser/src/parser/core.rs`) allocates a fresh `Vec<Item>` *and*
-  a fresh `Vec<Event>` at every node, and re-scans forward for each `Start`'s
-  matching `Finish`. 22% of total time sits here. The scan is repeated work the
-  event stream could carry directly, and the two Vecs are the allocator traffic
-  above. Highest-value open lead.
+- **Per-node `Vec` in a recursive pass over the event stream** — *confirmed and
+  fixed once* (`fold_docstrings`, 23% → 0.6%, -17% wall). The shape to recognize:
+  a pass that rebuilds the event stream level by level, allocating per node and
+  recopying every event once per level of nesting above it, when the transform
+  only *inserts* events. The fix is the same each time — compute subtree extents
+  once with a stack pass so a subtree can be skipped in O(1), mark the insertion
+  points, splice in one final pass. `parse` still has post-passes; check whether
+  any other one rebuilds rather than marks.
 - **`RawVec::grow_one` / `finish_grow`** — a `Vec` growing element by element
   where the final size is known or boundable. Reserve up front. **Trap:** the
   type parameter in a `RawVec::<T>::grow_one` symbol is not reliable evidence of
