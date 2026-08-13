@@ -8,7 +8,13 @@
 use rowan::Language;
 
 use crate::keywords::keyword_table;
+use crate::tokens::token_table;
 
+/// Generate [`SyntaxKind`] from the shared token table. The node kinds — which
+/// no token materializes as — are written out here; the token kinds come from
+/// the table, so a `TokKind` can never be lexed into a kind that does not exist.
+macro_rules! define_syntax_kind {
+    ($($(#[$meta:meta])* $tok:ident $syn:ident,)*) => {
 #[allow(non_camel_case_types)]
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -107,227 +113,15 @@ pub enum SyntaxKind {
     MACRO_CALL,
     MACRO_NAME,
 
-    // --- Trivia tokens ---
-    WHITESPACE,
-    NEWLINE,
-    COMMENT,
-    BLOCK_COMMENT,
+    // --- Tokens, from the shared token table ---
+    $($(#[$meta])* $syn,)*
 
-    // --- Literal / identifier tokens ---
-    IDENT,
-    INTEGER,
-    BIN_INT,
-    OCT_INT,
-    HEX_INT,
-    FLOAT,
-    FLOAT32,
-    /// A malformed numeric literal Julia keeps as a single error token (a hex
-    /// float with an empty `p`/`P` exponent, or a hex constant with no mantissa
-    /// digits). Projects to `(ErrorInvalidNumericConstant)`.
-    ERROR_INVALID_NUMBER,
-    /// A hex float with a `.` fraction but no `p`/`P` binary exponent. Projects
-    /// to `(ErrorHexFloatMustContainP)`.
-    ERROR_HEX_FLOAT_NO_P,
-    /// A stray character Julia does not recognize (a subscript that cannot start
-    /// an identifier, a lone unknown glyph). Projects to `(ErrorUnknownCharacter)`.
-    ERROR_UNKNOWN_CHAR,
-    CHAR,
-    STRING_DELIM_OPEN,
-    STRING_DELIM_CLOSE,
-    CMD_DELIM_OPEN,
-    CMD_DELIM_CLOSE,
-    STRING_CONTENT,
-    STRING_PREFIX,
-    STRING_SUFFIX,
-
-    // --- Keyword tokens ---
-    FUNCTION_KW,
-    MACRO_KW,
-    END_KW,
-    IF_KW,
-    ELSEIF_KW,
-    ELSE_KW,
-    BEGIN_KW,
-    TRUE_KW,
-    FALSE_KW,
-    WHILE_KW,
-    FOR_KW,
-    LET_KW,
-    QUOTE_KW,
-    TRY_KW,
-    CATCH_KW,
-    FINALLY_KW,
-    STRUCT_KW,
-    MUTABLE_KW,
-    MODULE_KW,
-    BAREMODULE_KW,
-    DO_KW,
-    RETURN_KW,
-    BREAK_KW,
-    CONTINUE_KW,
-    CONST_KW,
-    GLOBAL_KW,
-    LOCAL_KW,
-    IMPORT_KW,
-    USING_KW,
-    EXPORT_KW,
-    WHERE_KW,
-
-    // --- Operator tokens ---
-    EQ,
-    PLUS,
-    MINUS,
-    STAR,
-    SLASH,
-    BACKSLASH,
-    SLASH_SLASH,
-    CARET,
-    PERCENT,
-    /// The wrapping arithmetic operators `+%`, `-%`, `*%` (Julia 1.14). Each
-    /// keeps its own name in an ordinary infix call (`(call-i a +% b)`).
-    PLUS_PERCENT,
-    /// The `+`-tier operator name `++`.
-    PLUS_PLUS,
-    MINUS_PERCENT,
-    STAR_PERCENT,
-    // Invalid doubled operators `**`/`--` (project `(Error**)` /
-    // `(ErrorInvalidOperator)`).
-    STAR_STAR,
-    MINUS_MINUS,
-    EQ_EQ,
-    NOT_EQ,
-    EQ_EQ_EQ,
-    NOT_EQ_EQ,
-    LT,
-    LE,
-    GT,
-    GE,
-    AND_AND,
-    OR_OR,
-    COLON,
-    COLON_COLON,
-    SUBTYPE,
-    SUPERTYPE,
-    ARROW,
-    LONG_ARROW,
-    LEFT_RIGHT_ARROW,
-    LEFT_LONG_ARROW,
-    FAT_ARROW,
-    SHL,
-    SHR,
-    USHR,
-    // Augmented (compound) assignment operators `op=`.
-    PLUS_EQ,
-    MINUS_EQ,
-    STAR_EQ,
-    SLASH_EQ,
-    BACKSLASH_EQ,
-    SLASH_SLASH_EQ,
-    CARET_EQ,
-    PERCENT_EQ,
-    /// Augmented assignment for the wrapping arithmetic operators: `+%=`, `-%=`,
-    /// `*%=`.
-    PLUS_PERCENT_EQ,
-    MINUS_PERCENT_EQ,
-    STAR_PERCENT_EQ,
-    PIPE_EQ,
-    DOLLAR_EQ,
-    AMP_EQ,
-    SHL_EQ,
-    SHR_EQ,
-    USHR_EQ,
-    DIV_EQ,
-    XOR_EQ,
-    DOT,
-    DOT_DOT,
-    DOT_DOT_DOT,
-    PIPE_GT,
-    PIPE_LT,
-    BANG,
-    AMP,
-    PIPE,
-    TILDE,
-    QUESTION,
-    TRANSPOSE,
-
-    // --- Broadcasting (dotted) operator tokens ---
-    DOT_PLUS,
-    DOT_MINUS,
-    DOT_STAR,
-    // Broadcast invalid doubled operators `.**`/`.--`.
-    DOT_STAR_STAR,
-    DOT_MINUS_MINUS,
-    DOT_SLASH,
-    DOT_BACKSLASH,
-    DOT_SLASH_SLASH,
-    DOT_CARET,
-    DOT_PERCENT,
-    DOT_EQ,
-    DOT_EQ_EQ,
-    DOT_NOT_EQ,
-    DOT_EQ_EQ_EQ,
-    DOT_NOT_EQ_EQ,
-    DOT_LT,
-    DOT_LE,
-    DOT_GT,
-    DOT_GE,
-    DOT_SHL,
-    DOT_SHR,
-    DOT_USHR,
-    DOT_SUBTYPE,
-    DOT_SUPERTYPE,
-    DOT_FAT_ARROW,
-    DOT_LONG_ARROW,
-    DOT_LEFT_LONG_ARROW,
-    DOT_LEFT_RIGHT_ARROW,
-    DOT_PIPE_GT,
-    DOT_TILDE,
-    DOT_AND_AND,
-    DOT_OR_OR,
-    DOT_AMP,
-    DOT_PIPE,
-    /// Broadcast unary-not `.!`.
-    DOT_BANG,
-    // Broadcast augmented assignment `.op=`.
-    DOT_PLUS_EQ,
-    DOT_AMP_EQ,
-    DOT_PIPE_EQ,
-    DOT_MINUS_EQ,
-    DOT_STAR_EQ,
-    DOT_SLASH_EQ,
-    DOT_BACKSLASH_EQ,
-    DOT_SLASH_SLASH_EQ,
-    DOT_CARET_EQ,
-    DOT_PERCENT_EQ,
-    DOT_SHL_EQ,
-    DOT_SHR_EQ,
-    DOT_USHR_EQ,
-    DOT_DIV_EQ,
-    DOT_XOR_EQ,
-
-    /// The assignment-tier operator `:=`. Parses like the Unicode `≔`
-    /// (right-associative, loose as `=`) and projects with its own head.
-    COLON_EQ,
-
-    // Single-codepoint Unicode operator tokens. The tier distinctions the parser
-    // needs live in the `TokKind`; here only the projection shape matters, so the
-    // six `call-i` tiers collapse to `UNICODE_OP`, the assignment tier projects
-    // its own head, and the radicals are prefix-only.
+    /// The kind every one of the six `call-i` Unicode operator tiers
+    /// materializes as: the tier distinction the parser binds by is a `TokKind`
+    /// concern, and here only the projection shape matters. (The assignment
+    /// tier and the radicals do project their own heads, so they keep their own
+    /// kinds above.)
     UNICODE_OP,
-    UNICODE_ASSIGN_OP,
-    UNICODE_RADICAL,
-
-    // --- Delimiter / punctuation tokens ---
-    LPAREN,
-    RPAREN,
-    LBRACKET,
-    RBRACKET,
-    LBRACE,
-    RBRACE,
-    COMMA,
-    SEMICOLON,
-    AT,
-    DOLLAR,
 
     /// The error-recovery node kind: unknown tokens and recovered runs. Projected
     /// `(error)`, or `(error-t)` for the byte-bearing recovery runs that the
@@ -338,6 +132,10 @@ pub enum SyntaxKind {
     /// valid discriminant range.
     ERROR,
 }
+    };
+}
+
+token_table!(define_syntax_kind);
 
 impl SyntaxKind {
     /// The number of distinct kinds. The discriminants are contiguous from

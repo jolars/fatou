@@ -12,293 +12,36 @@
 //! here. See `TODO.md`.
 
 use crate::keywords::keyword_table;
+use crate::tokens::token_table;
 
+/// Generate [`TokKind`] from the shared token table. Only the tokens that do
+/// not materialize 1:1 as a `SyntaxKind` are written out here.
+macro_rules! define_tok_kind {
+    ($($(#[$meta:meta])* $tok:ident $syn:ident,)*) => {
 /// A lexed token kind. Maps to a [`crate::syntax::SyntaxKind`] in
 /// [`crate::parser::tree_builder::syntax_kind_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TokKind {
-    // Trivia
-    Whitespace,
-    Newline,
-    Comment,
-    BlockComment,
-
-    // Literals / identifiers
-    Ident,
-    Integer,
-    BinInt,
-    OctInt,
-    HexInt,
-    Float,
-    Float32,
-    Char,
-    /// A malformed numeric literal Julia still lexes as a single (error) token:
-    /// a hex float whose `p`/`P` binary exponent has no digits (`0x1p`, `0x1p+`),
-    /// or a hex constant with no mantissa digits at all (`0x`, `0xp3`). Projects
-    /// to JuliaSyntax's `(ErrorInvalidNumericConstant)`.
-    ErrorInvalidNumber,
-    /// A hex float with a `.` fraction but no `p`/`P` binary exponent (`0x1.8`,
-    /// `0x.8`, `0x1.`). Julia requires the exponent; projects to
-    /// `(ErrorHexFloatMustContainP)`.
-    ErrorHexFloatNoP,
-
-    // String / command literal pieces. A single literal is lexed as a run of
-    // these (plus `Dollar`/`Ident` and, inside `$(...)`, normal-mode tokens),
-    // which the parser reassembles into a `STRING_LITERAL`/`CMD_LITERAL` node.
-    StringDelimOpen,
-    StringDelimClose,
-    CmdDelimOpen,
-    CmdDelimClose,
-    /// A run of literal characters inside a string/command (escapes included).
-    StringContent,
-    /// A non-standard literal prefix immediately before a quote, e.g. `r`, `raw`.
-    StringPrefix,
-    /// Suffix flag letters immediately after a prefixed literal, e.g. `ims`.
-    StringSuffix,
-
-    // Keywords
-    FunctionKw,
-    MacroKw,
-    EndKw,
-    IfKw,
-    ElseifKw,
-    ElseKw,
-    BeginKw,
-    TrueKw,
-    FalseKw,
-    WhileKw,
-    ForKw,
-    DoKw,
-    LetKw,
-    QuoteKw,
-    TryKw,
-    CatchKw,
-    FinallyKw,
-    StructKw,
-    MutableKw,
-    ModuleKw,
-    BaremoduleKw,
-    ReturnKw,
-    BreakKw,
-    ContinueKw,
-    ConstKw,
-    GlobalKw,
-    LocalKw,
-    ImportKw,
-    UsingKw,
-    ExportKw,
-    WhereKw,
-
-    // Operators
-    Eq,
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Backslash,
-    SlashSlash,
-    Caret,
-    Percent,
-    /// The wrapping arithmetic operators `+%`, `-%`, `*%` (Julia 1.14). They
-    /// share the precedence and unary/binary classification of their unwrapped
-    /// counterparts — `+%`/`-%` sit at the `+` tier and are both unary and
-    /// binary, `*%` sits at the `*` tier and is binary-only — and each keeps its
-    /// own name, so `a +% b` projects `(call-i a +% b)`.
-    PlusPercent,
-    /// The concatenation-style operator `++`: a real `+`-tier operator name in
-    /// Julia (binary-only, and variadic like `+`), unlike the invalid doubled
-    /// `--`/`**`.
-    PlusPlus,
-    MinusPercent,
-    StarPercent,
-    /// The invalid doubled operators `**` and `--` (and broadcast `.**`/`.--`).
-    /// Julia has no `**` (power is `^`) nor `--`, so JuliaSyntax lexes each as a
-    /// single error operator at a fixed low precedence tier (between `+` and `:`)
-    /// and projects it as `(Error**)` / `(ErrorInvalidOperator)`. `-->` (the
-    /// arrow) is matched before `--`, so it is unaffected.
-    StarStar,
-    MinusMinus,
-    EqEq,
-    NotEq,
-    /// `===` (identity) and `!==` (its negation): 3-char comparison-tier
-    /// operators that must beat `==`/`!=` in longest match.
-    EqEqEq,
-    NotEqEq,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-    AndAnd,
-    OrOr,
-    Colon,
-    ColonColon,
-    /// The assignment-tier operator `:=`. Right-associative and as loose as `=`,
-    /// but keeps its own head (`(:= a b)`) like the Unicode `≔`, rather than
-    /// lowering to an assignment.
-    ColonEq,
-    Subtype,
-    Supertype,
-    Arrow,
-    /// The arrow operator `-->` (right-associative, own head `(--> a b)`).
-    LongArrow,
-    /// The arrow operator `<-->` (right-associative, ordinary `(call-i a <--> b)`).
-    LeftRightArrow,
-    /// The arrow operator `<--` (right-associative, ordinary `(call-i a <-- b)`).
-    LeftLongArrow,
-    /// The pair operator `=>`.
-    FatArrow,
-    /// Bitshift operators `<<`, `>>`, `>>>` (left-associative).
-    Shl,
-    Shr,
-    UShr,
-    // Augmented (compound) assignment operators `op=`. Right-associative and at
-    // the same precedence as `=`; modeled as `ASSIGNMENT_EXPR`.
-    PlusEq,
-    MinusEq,
-    StarEq,
-    SlashEq,
-    BackslashEq,
-    SlashSlashEq,
-    CaretEq,
-    PercentEq,
-    /// Augmented assignment for the wrapping arithmetic operators: `+%=`, `-%=`,
-    /// `*%=`.
-    PlusPercentEq,
-    MinusPercentEq,
-    StarPercentEq,
-    PipeEq,
-    /// The augmented assignment `$=` (Julia's historical xor-assign, still a
-    /// valid operator name — `base/show.jl` lists it among the infix operators).
-    DollarEq,
-    AmpEq,
-    /// Bitshift augmented assignment `<<=`, `>>=`, `>>>=`.
-    ShlEq,
-    ShrEq,
-    UShrEq,
-    /// The Unicode augmented assignments `÷=` (integer-divide) and `⊻=` (xor).
-    /// These two are the only Unicode operators with an augmented-assign form.
-    DivEq,
-    XorEq,
-    Dot,
-    /// The `..` range/interval operator (infix `a..b`).
-    DotDot,
-    DotDotDot,
-    PipeGt,
-    /// The left-pipe operator `<|` (right-associative).
-    PipeLt,
-    Bang,
-    Amp,
-    Pipe,
-    /// The `~` operator (infix `a ~ b` and prefix `~a`).
-    Tilde,
-    Question,
-    /// Postfix transpose/adjoint `'` (only when it follows a value; otherwise a
-    /// `'` opens a [`TokKind::Char`] literal).
-    Transpose,
-
-    // Broadcasting (dotted) operators: a `.` fused to a following operator.
-    DotPlus,
-    DotMinus,
-    DotStar,
-    /// Broadcast forms of the invalid doubled operators `.**`/`.--` (project
-    /// `(dotcall-i a (Error**) b)` / `(dotcall-i a (ErrorInvalidOperator) b)`).
-    DotStarStar,
-    DotMinusMinus,
-    DotSlash,
-    DotBackslash,
-    DotSlashSlash,
-    DotCaret,
-    DotPercent,
-    DotEq,
-    DotEqEq,
-    DotNotEq,
-    /// The broadcast identity/inequality operators `.===`/`.!==` (project
-    /// `(dotcall-i a === b)`/`(dotcall-i a !== b)`).
-    DotEqEqEq,
-    DotNotEqEq,
-    DotLt,
-    DotLe,
-    DotGt,
-    DotGe,
-    /// The broadcast bitshift operators `.<<`/`.>>`/`.>>>` (project
-    /// `(dotcall-i a << b)` and so on). Their augmented forms `.<<=`/`.>>=`/
-    /// `.>>>=` are `DotShlEq`/`DotShrEq`/`DotUShrEq`.
-    DotShl,
-    DotShr,
-    DotUShr,
-    /// The broadcast type-comparison operators `.<:`/`.>:` (project
-    /// `(dotcall-i a <: b)`/`(dotcall-i a >: b)`).
-    DotSubtype,
-    DotSupertype,
-    /// The broadcast pair operator `.=>`.
-    DotFatArrow,
-    /// The broadcast arrow operator `.-->` (projects `(dotcall-i a --> b)`).
-    DotLongArrow,
-    /// The broadcast arrow operators `.<--`/`.<-->` (project
-    /// `(dotcall-i a <-- b)`/`(dotcall-i a <--> b)`).
-    DotLeftLongArrow,
-    DotLeftRightArrow,
-    /// The broadcast left-pipe-to-right `.|>` (projects `(dotcall-i a |> b)`).
-    DotPipeGt,
-    /// The broadcast `~` operator `.~`.
-    DotTilde,
-    /// The broadcast short-circuit operators `.&&` and `.||`.
-    DotAndAnd,
-    DotOrOr,
-    /// The broadcast bitwise operators `.&` and `.|`.
-    DotAmp,
-    DotPipe,
-    /// The broadcast unary-not operator `.!` (prefix-only, like plain `!`).
-    DotBang,
-    // Broadcast augmented assignment `.op=` (e.g. `.+=`). Same precedence and
-    // modeling as the undotted forms.
-    DotPlusEq,
-    DotMinusEq,
-    DotStarEq,
-    DotSlashEq,
-    DotBackslashEq,
-    DotSlashSlashEq,
-    DotCaretEq,
-    DotPercentEq,
-    DotAmpEq,
-    DotPipeEq,
-    /// Broadcast bitshift augmented assignment `.<<=`, `.>>=`, `.>>>=`.
-    DotShlEq,
-    DotShrEq,
-    DotUShrEq,
-    /// Broadcast forms of the Unicode augmented assignments `.÷=`, `.⊻=`.
-    DotDivEq,
-    DotXorEq,
+    $($(#[$meta])* $tok,)*
 
     // Single-codepoint Unicode operators, grouped by precedence tier. The exact
     // operator text is carried by the token; the parser only needs the tier (for
     // binding power) and the projector reads the text. The lexer classifies each
-    // operator char via the generated `unicode_op_kind` table.
+    // operator char via the generated `unicode_op_kind` table. All six tiers
+    // materialize as one `SyntaxKind::UNICODE_OP`, which is why they are not
+    // rows of the token table (the assignment tier and the radicals, which do
+    // map 1:1, are).
     UniArrow,
     UniComparison,
     UniColon,
     UniPlus,
     UniTimes,
     UniPower,
-    UniAssign,
-    /// Prefix-only Unicode operators `¬ √ ∛ ∜` (the `unicode_ops` tier).
-    UniRadical,
-
-    // Delimiters / punctuation
-    LParen,
-    RParen,
-    LBracket,
-    RBracket,
-    LBrace,
-    RBrace,
-    Comma,
-    Semicolon,
-    At,
-    Dollar,
-
-    /// Any byte we do not recognize. Materialized as `SyntaxKind::ERROR`.
-    Unknown,
 }
+    };
+}
+
+token_table!(define_tok_kind);
 
 impl TokKind {
     /// Whether this token is trivia (whitespace, newline, or a comment) — never

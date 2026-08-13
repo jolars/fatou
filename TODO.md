@@ -29,12 +29,6 @@
 Deferred from the parser-crate refactor that split `expr/{array,macros,
 juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
 
-- [ ] `syntax_kind_for` (`tree_builder.rs`) is a ~165-line mechanical 1:1
-  `TokKind` -> `SyntaxKind` transcription (the keyword arms are generated from
-  `keywords.rs`; the operator and literal ones are not). A macro defining both
-  enums together would remove the "added a `TokKind`, forgot the mapping" bug
-  class.
-
 - [ ] Do not split `lexer.rs` (2144 lines) ahead of the ladder rewrite above.
   Every function is a method on one `Lexer` inside a single `impl`, so a
   `strings.rs`/`operators.rs` cut needs all five struct fields plus
