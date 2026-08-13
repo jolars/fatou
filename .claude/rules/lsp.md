@@ -101,6 +101,14 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   the client capability, as `workspace/diagnostic/refresh` is). Anything else
   reading the library from an already-open document has the same gap and the
   same fix — bar document links, which the spec gives no refresh request.
+- **Formatting answers with line-scoped edits, not a whole-document
+  replacement** (`format.rs::line_diff_edits`): the formatted output is
+  line-diffed against the buffer so an untouched line keeps the client's cursor,
+  folds, and markers. A diff covering more than half the span falls back to the
+  single replacement, which is the only case that should produce one. Both the
+  full-document and the range path go through it, and whatever comes back must
+  reproduce `format` byte for byte — that property is what `format.rs`'s tests
+  assert, and `benches/format_edits.rs` is what measures the cost.
 - A setting that is a fact about the **machine** belongs in editor settings
   (`config.rs`), not `fatou.toml`; project facts belong in the config file. The
   LSP resolves `fatou.toml` the same way the CLI does so both walks honor the

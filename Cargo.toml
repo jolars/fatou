@@ -79,6 +79,10 @@ harness = false
 name = "line_index"
 harness = false
 
+[[bench]]
+name = "format_edits"
+harness = false
+
 [profile.release]
 strip = "symbols"
 

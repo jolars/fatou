@@ -7,7 +7,7 @@ use fatou::lsp::{
     compute_document_symbols, compute_folding_ranges, compute_selection_ranges,
     compute_semantic_tokens,
 };
-use fatou::text::PositionEncoding;
+use fatou::text::{LineIndex, PositionEncoding};
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
@@ -6836,9 +6836,9 @@ fn open_document(client: &Connection, uri: &Uri, text: &str) {
         .unwrap();
 }
 
-/// Request full-document formatting and return the single whole-document
-/// edit's new text (`None` when formatting returns no edits).
-fn format_document(client: &Connection, uri: &Uri, id: i32) -> Option<String> {
+/// Request full-document formatting and return the raw edits (`None` when the
+/// server answers `null`, as it does for a document it will not format).
+fn format_document(client: &Connection, uri: &Uri, id: i32) -> Option<Vec<TextEdit>> {
     client
         .sender
         .send(Message::Request(Request {
@@ -6857,17 +6857,80 @@ fn format_document(client: &Connection, uri: &Uri, id: i32) -> Option<String> {
         }))
         .unwrap();
     let resp = recv_response(client, RequestId::from(id));
-    let edits: Option<Vec<TextEdit>> = serde_json::from_value(resp.result().unwrap()).unwrap();
-    let mut edits = edits.unwrap_or_default();
-    match edits.len() {
-        0 => None,
-        1 => Some(edits.remove(0).new_text),
-        n => panic!("expected a single whole-document edit, got {n}"),
+    serde_json::from_value(resp.result().unwrap()).unwrap()
+}
+
+/// Format `source` through the server and return the document the edits
+/// produce (`None` when there are none). Formatting edits are line-scoped, so
+/// a caller wanting the whole formatted text has to apply them.
+fn format_document_text(client: &Connection, uri: &Uri, id: i32, source: &str) -> Option<String> {
+    let edits = format_document(client, uri, id)?;
+    if edits.is_empty() {
+        return None;
     }
+    Some(apply_edits(source, &edits))
+}
+
+/// Apply `edits` to `source` the way a client does: the ranges all index the
+/// original document, so splicing from the end keeps the earlier ones valid.
+/// Checks the LSP requirement that they do not overlap along the way.
+fn apply_edits(source: &str, edits: &[TextEdit]) -> String {
+    let line_index = LineIndex::new(source);
+    let mut spans: Vec<(usize, usize, &str)> = edits
+        .iter()
+        .map(|edit| {
+            (
+                line_index.position_to_byte(edit.range.start, PositionEncoding::Utf16),
+                line_index.position_to_byte(edit.range.end, PositionEncoding::Utf16),
+                edit.new_text.as_str(),
+            )
+        })
+        .collect();
+    spans.sort_by_key(|&(start, ..)| start);
+    for pair in spans.windows(2) {
+        assert!(pair[0].1 <= pair[1].0, "edits must not overlap: {spans:?}");
+    }
+    let mut out = source.to_string();
+    for &(start, end, new_text) in spans.iter().rev() {
+        out.replace_range(start..end, new_text);
+    }
+    out
 }
 
 const UNUSED_BINDING_SOURCE: &str = "function f(x)\n    tmp = x + 1\n    return x\nend\n";
 const UNFORMATTED_FUNCTION: &str = "function f(x)\nreturn x\nend\n";
+
+/// Formatting a document whose body is already clean sends back edits scoped
+/// to the lines that change, not a replacement of the whole file. That is what
+/// leaves the client's cursor, folds, and markers where the user left them.
+#[test]
+fn formatting_edits_are_scoped_to_the_lines_that_change() {
+    let dir = TempDir::new("fatou-lsp-format-scope");
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || {
+        fatou::lsp::serve(&server).expect("server loop");
+    });
+    initialize_with_options(&client, serde_json::json!({}));
+
+    let source = "function f(x)\n    a = 1\n    b=2\n    c = 3\n    return a + b + c\nend\n";
+    let uri = file_uri(&dir.path.join("a.jl"));
+    open_document(&client, &uri, source);
+    let edits = format_document(&client, &uri, 2).expect("formatting edits");
+    assert_eq!(edits.len(), 1, "one changed line is one edit: {edits:?}");
+    assert_eq!(
+        edits[0].range,
+        Range::new(Position::new(2, 0), Position::new(3, 0)),
+        "the edit must cover only the `b=2` line"
+    );
+    assert_eq!(edits[0].new_text, "    b = 2\n");
+    assert_eq!(
+        apply_edits(source, &edits),
+        "function f(x)\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\nend\n"
+    );
+
+    drop(client);
+    server_thread.join().unwrap();
+}
 
 /// `initializationOptions` reconfigure the formatter: an `indent-width` of 2
 /// shows up in the formatted output.
@@ -6883,7 +6946,7 @@ fn initialization_options_set_format_style() {
     let uri = file_uri(&dir.path.join("a.jl"));
     open_document(&client, &uri, UNFORMATTED_FUNCTION);
     assert_eq!(
-        format_document(&client, &uri, 2).as_deref(),
+        format_document_text(&client, &uri, 2, UNFORMATTED_FUNCTION).as_deref(),
         Some("function f(x)\n  return x\nend\n")
     );
 
@@ -6996,7 +7059,7 @@ fn fatou_toml_wins_over_client_settings() {
     let uri = file_uri(&dir.path.join("a.jl"));
     open_document(&client, &uri, UNFORMATTED_FUNCTION);
     assert_eq!(
-        format_document(&client, &uri, 2).as_deref(),
+        format_document_text(&client, &uri, 2, UNFORMATTED_FUNCTION).as_deref(),
         Some("function f(x)\n  return x\nend\n")
     );
 
