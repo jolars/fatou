@@ -511,7 +511,9 @@ fn classify_in_string(kind: SyntaxKind) -> Option<HighlightKind> {
 
 /// Context-free classification: keywords and non-string literals.
 fn classify_by_kind(kind: SyntaxKind) -> Option<HighlightKind> {
-    if is_keyword(kind) {
+    // `true`/`false` are keywords here too: the standard legend has no boolean
+    // type, so `keyword` — the lexer's own classification — is the closest fit.
+    if kind.is_keyword() {
         return Some(HighlightKind::Keyword);
     }
     match kind {
@@ -524,45 +526,6 @@ fn classify_by_kind(kind: SyntaxKind) -> Option<HighlightKind> {
         | SyntaxKind::FLOAT32 => Some(HighlightKind::Number),
         _ => None,
     }
-}
-
-/// All keyword tokens, `true`/`false` included: the standard legend has no
-/// boolean type, and `keyword` matches the lexer's classification.
-fn is_keyword(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::FUNCTION_KW
-            | SyntaxKind::MACRO_KW
-            | SyntaxKind::END_KW
-            | SyntaxKind::IF_KW
-            | SyntaxKind::ELSEIF_KW
-            | SyntaxKind::ELSE_KW
-            | SyntaxKind::BEGIN_KW
-            | SyntaxKind::TRUE_KW
-            | SyntaxKind::FALSE_KW
-            | SyntaxKind::WHILE_KW
-            | SyntaxKind::FOR_KW
-            | SyntaxKind::LET_KW
-            | SyntaxKind::QUOTE_KW
-            | SyntaxKind::TRY_KW
-            | SyntaxKind::CATCH_KW
-            | SyntaxKind::FINALLY_KW
-            | SyntaxKind::STRUCT_KW
-            | SyntaxKind::MUTABLE_KW
-            | SyntaxKind::MODULE_KW
-            | SyntaxKind::BAREMODULE_KW
-            | SyntaxKind::DO_KW
-            | SyntaxKind::RETURN_KW
-            | SyntaxKind::BREAK_KW
-            | SyntaxKind::CONTINUE_KW
-            | SyntaxKind::CONST_KW
-            | SyntaxKind::GLOBAL_KW
-            | SyntaxKind::LOCAL_KW
-            | SyntaxKind::IMPORT_KW
-            | SyntaxKind::USING_KW
-            | SyntaxKind::EXPORT_KW
-            | SyntaxKind::WHERE_KW
-    )
 }
 
 fn is_trivia(kind: SyntaxKind) -> bool {
