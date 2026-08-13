@@ -13,7 +13,7 @@
 
 use std::ops::{Deref, Range};
 
-use super::line_index::{LineIndex, LineStarts};
+use super::line_index::LineIndex;
 
 /// Text plus the line-start table that indexes it, kept in step.
 ///
@@ -22,7 +22,7 @@ use super::line_index::{LineIndex, LineStarts};
 #[derive(Debug, Clone, Default, Eq)]
 pub struct TextBuffer {
     text: String,
-    line_starts: LineStarts,
+    line_index: LineIndex,
 }
 
 /// Two buffers are equal when their text is. Deriving this would also walk the
@@ -38,24 +38,18 @@ impl PartialEq for TextBuffer {
 impl TextBuffer {
     /// Take ownership of `text`, scanning it once for its line starts.
     pub fn new(text: String) -> Self {
-        let line_starts = LineStarts::new(&text);
-        Self { text, line_starts }
+        let line_index = LineIndex::new(&text);
+        Self { text, line_index }
     }
 
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    /// The maintained table, for a caller building its own [`LineIndex`].
-    pub fn line_starts(&self) -> &LineStarts {
-        &self.line_starts
-    }
-
-    /// An index over this buffer. Unlike [`LineIndex::new`] this reuses the
-    /// maintained table instead of copying, which is the whole point of the
-    /// type: call it freely.
-    pub fn line_index(&self) -> LineIndex<'_> {
-        LineIndex::with_starts(&self.line_starts)
+    /// An index over this buffer. This reuses the maintained table rather than
+    /// copying, which is the whole point of the type: call it freely.
+    pub fn line_index(&self) -> &LineIndex {
+        &self.line_index
     }
 
     /// Replace the bytes in `range` with `insert`, patching the line table
@@ -64,7 +58,7 @@ impl TextBuffer {
     /// Panics on a range that is out of bounds or not on a char boundary, as
     /// [`String::replace_range`] does.
     pub fn replace_range(&mut self, range: Range<usize>, insert: &str) {
-        self.line_starts.patch(range.clone(), insert);
+        self.line_index.patch(range.clone(), insert);
         self.text.replace_range(range, insert);
         self.debug_assert_in_step();
     }
@@ -73,7 +67,7 @@ impl TextBuffer {
     /// range case and the `didOpen` case; there is no edit to patch with.
     pub fn set_text(&mut self, text: String) {
         self.text = text;
-        self.line_starts = LineStarts::new(&self.text);
+        self.line_index = LineIndex::new(&self.text);
     }
 
     pub fn into_string(self) -> String {
@@ -85,7 +79,7 @@ impl TextBuffer {
     /// which is the cost [`replace_range`](Self::replace_range) avoids.
     fn debug_assert_in_step(&self) {
         debug_assert!(
-            self.line_starts == LineStarts::new(&self.text),
+            self.line_index == LineIndex::new(&self.text),
             "line table drifted from the buffer"
         );
     }
@@ -143,11 +137,11 @@ mod tests {
         let mut buffer = TextBuffer::from("ab\ncd\nef");
         buffer.replace_range(2..2, "\nxy");
         assert_eq!(&*buffer, "ab\nxy\ncd\nef");
-        assert_eq!(buffer.line_starts(), &LineStarts::new(&buffer));
+        assert_eq!(buffer.line_index(), &LineIndex::new(&buffer));
         // A deletion spanning the newlines it introduced.
         buffer.replace_range(2..9, "");
         assert_eq!(&*buffer, "abef");
-        assert_eq!(buffer.line_starts(), &LineStarts::new(&buffer));
+        assert_eq!(buffer.line_index(), &LineIndex::new(&buffer));
         assert_eq!(buffer.line_index().line_count(), 1);
     }
 
@@ -156,6 +150,6 @@ mod tests {
         let mut buffer = TextBuffer::from("one line");
         buffer.set_text("two\nlines".to_string());
         assert_eq!(buffer.line_index().line_count(), 2);
-        assert_eq!(buffer.line_starts(), &LineStarts::new(&buffer));
+        assert_eq!(buffer.line_index(), &LineIndex::new(&buffer));
     }
 }

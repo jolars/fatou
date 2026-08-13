@@ -4,7 +4,6 @@
 //! - 1-indexed (line, column) in **code points** for CLI diagnostics.
 //! - 0-indexed (line, character) in **UTF-16 units** for LSP positions.
 
-use std::borrow::Cow;
 use std::ops::Range;
 
 use lsp_types::Position;
@@ -51,25 +50,25 @@ pub struct LineCol {
 /// which on a large file costs several times the incremental reparse the edit
 /// goes on to trigger — see `benches/line_index.rs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LineStarts {
+pub struct LineIndex {
     rope: Rope,
 }
 
-impl Default for LineStarts {
+impl Default for LineIndex {
     fn default() -> Self {
         Self { rope: Rope::new() }
     }
 }
 
-impl LineStarts {
-    /// Build the line table from `text`, copying it into a [`Rope`].
+impl LineIndex {
+    /// Build an index from `text`, copying it into a [`Rope`] of its own.
     pub fn new(text: &str) -> Self {
         Self {
             rope: Rope::from(text),
         }
     }
 
-    /// Patch the table for a replacement of `range` with `insert`, leaving it
+    /// Patch the index for a replacement of `range` with `insert`, leaving it
     /// exactly as [`new`](Self::new) would have scanned the edited text.
     ///
     /// `range` is a byte range in the *pre-edit* text. The rope edits its own
@@ -80,56 +79,12 @@ impl LineStarts {
         self.rope.insert(range.start, insert);
     }
 
-    /// Number of lines, `1` even for empty text.
-    pub fn len_lines(&self) -> usize {
-        self.rope.len_lines(LineType::LF)
-    }
-}
-
-/// An index over text, backed by a [`LineStarts`] that owns both the text and
-/// its line-start table.
-///
-/// The table is either built for the occasion ([`new`](Self::new)) or borrowed
-/// from a buffer that maintains one ([`with_starts`](Self::with_starts)).
-#[derive(Debug, Clone)]
-pub struct LineIndex<'a> {
-    line_starts: Cow<'a, LineStarts>,
-}
-
-impl<'a> LineIndex<'a> {
-    /// Build a one-off index, copying `text` into a [`Rope`] of its own. Prefer
-    /// [`with_starts`](Self::with_starts) wherever a maintained table is at
-    /// hand: this copies the whole buffer.
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            line_starts: Cow::Owned(LineStarts::new(text)),
-        }
-    }
-
-    /// An index borrowing an already-built table, as
-    /// [`crate::text::TextBuffer`] keeps it. The table owns the text, so there
-    /// is no separate text to pair it with.
-    pub fn with_starts(line_starts: &'a LineStarts) -> Self {
-        Self {
-            line_starts: Cow::Borrowed(line_starts),
-        }
-    }
-
     /// 1-indexed (line, column-in-code-points). Suitable for CLI diagnostics.
     pub fn byte_to_lc(&self, offset: usize) -> LineCol {
-        let clamped = offset.min(self.line_starts.rope.len());
+        let clamped = offset.min(self.rope.len());
         let line_idx = self.line_index_for(clamped);
-        let line_start = self
-            .line_starts
-            .rope
-            .line_to_byte_idx(line_idx, LineType::LF);
-        let column = self
-            .line_starts
-            .rope
-            .slice(line_start..clamped)
-            .chars()
-            .count()
-            + 1;
+        let line_start = self.rope.line_to_byte_idx(line_idx, LineType::LF);
+        let column = self.rope.slice(line_start..clamped).chars().count() + 1;
         LineCol {
             line: line_idx + 1,
             column,
@@ -139,13 +94,10 @@ impl<'a> LineIndex<'a> {
     /// 0-indexed LSP `Position` with the `character` offset in `encoding`
     /// units.
     pub fn byte_to_position(&self, offset: usize, encoding: PositionEncoding) -> Position {
-        let clamped = offset.min(self.line_starts.rope.len());
+        let clamped = offset.min(self.rope.len());
         let line_idx = self.line_index_for(clamped);
-        let line_start = self
-            .line_starts
-            .rope
-            .line_to_byte_idx(line_idx, LineType::LF);
-        let prefix = self.line_starts.rope.slice(line_start..clamped);
+        let line_start = self.rope.line_to_byte_idx(line_idx, LineType::LF);
+        let prefix = self.rope.slice(line_start..clamped);
         let character = match encoding {
             PositionEncoding::Utf8 => prefix.len() as u32,
             PositionEncoding::Utf16 => prefix.len_utf16() as u32,
@@ -161,23 +113,20 @@ impl<'a> LineIndex<'a> {
     pub fn position_to_byte(&self, position: Position, encoding: PositionEncoding) -> usize {
         let line = position.line as usize;
         if line >= self.line_count() {
-            return self.line_starts.rope.len();
+            return self.rope.len();
         }
-        let line_start = self.line_starts.rope.line_to_byte_idx(line, LineType::LF);
-        let line_end = self
-            .line_starts
-            .rope
-            .line_to_byte_idx(line + 1, LineType::LF);
+        let line_start = self.rope.line_to_byte_idx(line, LineType::LF);
+        let line_end = self.rope.line_to_byte_idx(line + 1, LineType::LF);
         // The line slice runs to its `\n`/`\r\n` terminator; drop it so a
         // character past the end clamps to the content before it.
         let mut content_end = line_end;
-        if content_end > line_start && self.line_starts.rope.byte(content_end - 1) == b'\n' {
+        if content_end > line_start && self.rope.byte(content_end - 1) == b'\n' {
             content_end -= 1;
-            if content_end > line_start && self.line_starts.rope.byte(content_end - 1) == b'\r' {
+            if content_end > line_start && self.rope.byte(content_end - 1) == b'\r' {
                 content_end -= 1;
             }
         }
-        let content = self.line_starts.rope.slice(line_start..content_end);
+        let content = self.rope.slice(line_start..content_end);
         let mut units = 0u32;
         for (byte_off, ch) in content.char_indices() {
             if units >= position.character {
@@ -190,7 +139,7 @@ impl<'a> LineIndex<'a> {
 
     /// Total line count (1 even for empty text).
     pub fn line_count(&self) -> usize {
-        self.line_starts.rope.len_lines(LineType::LF)
+        self.rope.len_lines(LineType::LF)
     }
 
     /// Byte offset of the start of the 0-indexed `line`. A line past the end
@@ -205,7 +154,7 @@ impl<'a> LineIndex<'a> {
     }
 
     fn line_index_for(&self, offset: usize) -> usize {
-        self.line_starts.rope.byte_to_line_idx(offset, LineType::LF)
+        self.rope.byte_to_line_idx(offset, LineType::LF)
     }
 }
 
@@ -216,7 +165,7 @@ mod tests {
     const UTF8: PositionEncoding = PositionEncoding::Utf8;
     const UTF16: PositionEncoding = PositionEncoding::Utf16;
 
-    /// The whole point of [`LineStarts::patch`]: over every replacement of
+    /// The whole point of [`LineIndex::patch`]: over every replacement of
     /// every char-boundary range of a handful of awkward texts, the patched
     /// table equals the one a rescan of the edited text would produce.
     #[test]
@@ -238,13 +187,13 @@ mod tests {
                         continue;
                     }
                     for insert in inserts {
-                        let mut patched = LineStarts::new(text);
+                        let mut patched = LineIndex::new(text);
                         patched.patch(start..end, insert);
                         let mut edited = text.to_string();
                         edited.replace_range(start..end, insert);
                         assert_eq!(
                             patched,
-                            LineStarts::new(&edited),
+                            LineIndex::new(&edited),
                             "{text:?} [{start}..{end}] -> {insert:?} gives {edited:?}"
                         );
                     }
@@ -254,20 +203,20 @@ mod tests {
     }
 
     #[test]
-    fn a_borrowed_table_indexes_the_same_as_a_scanned_one() {
+    fn a_maintained_table_indexes_the_same_as_a_scanned_one() {
         let text = "ab\ncd\u{1F600}\nef";
-        let starts = LineStarts::new(text);
-        let borrowed = LineIndex::with_starts(&starts);
+        let buffer = crate::text::TextBuffer::from(text);
+        let maintained = buffer.line_index();
         let scanned = LineIndex::new(text);
         for offset in 0..=text.len() {
             if !text.is_char_boundary(offset) {
                 continue;
             }
             assert_eq!(
-                borrowed.byte_to_position(offset, UTF16),
+                maintained.byte_to_position(offset, UTF16),
                 scanned.byte_to_position(offset, UTF16),
             );
-            assert_eq!(borrowed.byte_to_lc(offset), scanned.byte_to_lc(offset));
+            assert_eq!(maintained.byte_to_lc(offset), scanned.byte_to_lc(offset));
         }
     }
 

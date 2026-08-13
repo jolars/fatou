@@ -76,7 +76,7 @@ fn symbols_for_tree(
 
 struct Ctx<'a> {
     text: &'a str,
-    line_index: LineIndex<'a>,
+    line_index: LineIndex,
     encoding: PositionEncoding,
 }
 

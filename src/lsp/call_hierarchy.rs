@@ -365,7 +365,7 @@ pub(crate) fn prepare_call_hierarchy_via_db(
             model,
             uri,
             text,
-            &line_index,
+            line_index,
             offset,
             encoding,
         ))

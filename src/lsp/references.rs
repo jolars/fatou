@@ -101,7 +101,7 @@ pub(crate) fn references_via_db(
         Some(references_for(
             model,
             uri,
-            &line_index,
+            line_index,
             offset,
             encoding,
             include_declaration,
@@ -150,7 +150,7 @@ pub(crate) fn document_highlights_via_db(
             return None;
         }
         let model = snapshot.semantic_model(file);
-        Some(highlights_for(model, &line_index, offset, encoding))
+        Some(highlights_for(model, line_index, offset, encoding))
     }));
     match cached {
         Ok(Some(result)) => result,

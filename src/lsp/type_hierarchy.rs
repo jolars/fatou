@@ -310,7 +310,7 @@ pub(crate) fn prepare_type_hierarchy_via_db(
             model,
             uri,
             text,
-            &line_index,
+            line_index,
             offset,
             encoding,
         ))

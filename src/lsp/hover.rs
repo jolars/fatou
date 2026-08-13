@@ -83,7 +83,7 @@ pub(crate) fn hover_via_db(
             workspace,
             text,
             offset,
-            &line_index,
+            line_index,
             encoding,
         ))
     }));

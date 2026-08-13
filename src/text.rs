@@ -12,4 +12,4 @@ pub mod line_index;
 
 pub use buffer::TextBuffer;
 pub use edit::apply_content_changes;
-pub use line_index::{LineCol, LineIndex, LineStarts, PositionEncoding};
+pub use line_index::{LineCol, LineIndex, PositionEncoding};
