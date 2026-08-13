@@ -104,10 +104,16 @@ pub fn check_paths(
 /// faster on real Julia (136 ms against Patience's 234 ms over 16 000 lines of
 /// the bench corpus) but collapses on highly self-similar input — 430.9 ms
 /// against Patience's 37.1 ms at 500 near-identical small functions. `--check`
-/// runs over whatever is in the tree, generated code included, so the algorithm
-/// that is *never worse than Myers* wins over the one that is usually much
-/// better. Kept in step with badness's `diff_lines`, where the same trade was
-/// measured the other way round.
+/// runs over whatever is in the tree, generated code included, and 2 s is a
+/// different order of harm from the ~100 ms Patience gives up on the corpus.
+///
+/// **The choice is per-language and must never be ported.** The same three
+/// algorithms rank differently in every sibling: badness (LaTeX) wants
+/// Histogram outright (643 ms against Patience's 919 ms and Myers' 2418 ms
+/// summed over its 60 largest real files, where *its* Histogram cliff costs
+/// 76 ms rather than seconds), arity (R) wants Patience (206 vs 897 vs
+/// 1947 ms), and panache (Markdown) is best on plain Myers. Re-measure on this
+/// repo's corpus before changing this line; do not copy a sibling's.
 fn line_diff(original: &str, formatted: &str) -> String {
     let diff = TextDiff::configure()
         .algorithm(Algorithm::Patience)

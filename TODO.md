@@ -92,12 +92,20 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
   for `TextDiffConfig::timeout`: a wall-clock deadline makes `--check` output
   nondeterministic between runs.
 
-  `Algorithm::Histogram` is a trap here and the comment on `line_diff` says so.
-  It is the fastest on real Julia (136 ms against Patience's 234 ms over 16 000
-  corpus lines) but collapses on self-similar input — 430.9 ms against
+  `Algorithm::Histogram` is a trap *here* and the comment on `line_diff` says
+  so. It is the fastest on real Julia (136 ms against Patience's 234 ms over
+  16 000 corpus lines) but collapses on self-similar input — 430.9 ms against
   Patience's 37.1 ms at 500 near-identical functions, i.e. worse than the Myers
   it would replace. `--check` runs over whatever is in the tree, generated code
   included.
+
+  **The algorithm is a per-language choice; do not port a sibling's.** badness
+  (LaTeX) wants Histogram outright — 643 ms against Patience's 919 ms and
+  Myers' 2418 ms summed over its 60 largest real files, and its Histogram cliff
+  costs 76 ms rather than the seconds it costs here. arity (R) wants Patience
+  (206 vs 897 vs 1947 ms); panache (Markdown) is best on plain Myers. Both
+  directions of this were learned by porting a fix verbatim and measuring it
+  worse.
 
 ## Linter
 
