@@ -1,8 +1,10 @@
 # formatter recap
 
-Rolling log. Read top-to-bottom: persistent traps -> progress -> latest session ->
-earlier log. Keep <= ~300 lines; demote the "Latest session" to a one-liner in the
-"Earlier sessions" list each new session.
+Rolling log. Read top-to-bottom: traps -> recorded decisions -> inventory ->
+latest session -> earlier log. Keep <= ~300 lines; when you add a session,
+demote the previous "Latest session" to a one-liner under "Earlier sessions"
+and lift anything that must never be silently reversed into "Recorded
+decisions". Detail lives in `git log`, not here.
 
 ## Persistent traps & invariants
 
@@ -26,110 +28,105 @@ earlier log. Keep <= ~300 lines; demote the "Latest session" to a one-liner in t
   target + `TODO.md`), with JuliaSyntax ground truth. `rules.rs` is the only
   growth surface here; don't paper over parser bugs in the formatter.
 
-## The pivot (start over — Runic target removed)
+## Carried debt
 
-We dropped the Runic.jl differential-parity target entirely and rebuilt the
-machinery on arity's model (hand-authored `input/expected` fixtures). Removed:
-`tests/runic_oracle.rs`, `scripts/update-runic-corpus.{sh,jl}`,
-`crates/fatou-parser/tests/oracle/runic-{allowlist,blocked,report}.txt`, `.runic-source`, the Taskfile
-`runic-*` tasks, the `.gitignore` runic stanza, and `Runic` from `devenv.nix`.
-`crates/fatou-formatter/tests/formatter.rs` is now the gate + stability test. The skill was renamed
-`formatter-parity` -> `formatter`.
+1. **~~Runic-derived rules mirror source line breaks~~ — PAID (2026-07-07 audit).**
+   For many sessions this was framed as the headline future target, "the largest
+   piece of work in the formatter's life." **That framing is stale — don't let it
+   send a session chasing a rewrite that is already done.** `printer.rs` decides
+   every `Ir::Group`'s flat-vs-break purely from `line_width` via the
+   continuation-aware Wadler `fits`; the debt was retired construct by construct.
+   `has_newline_token` (the named mirroring mechanism) is down to **one live call
+   site**, the comment-bearing matrix path — where a comment genuinely can't be
+   reflowed away (moving a trailing `# note` changes which element it annotates),
+   so mirroring there is arguably correct. `lower_matrix_reflow` (the comment-free
+   path) is fully width-driven.
+2. **~50 per-rule Runic-rationale doc comments remain in `rules.rs`.** Accurate
+   history; reworded lazily as each construct is revisited. Minor.
 
-**Corpus reset:** all 65 fixtures kept their `input.jl`; every Runic-minted
-`expected.jl` was deleted (recoverable via git). So the gate starts empty and
-grows one construct at a time as the user hand-authors each `expected.jl`. The six
-`*_divergence` slugs lose their meaning (no Runic to diverge from) — rename/fold
-them when revisited.
+## Recorded decisions — do not silently reverse
 
-**Two debts carried forward:**
+Each was a user call (mostly via AskUserQuestion) and is pinned by a fixture.
+Reversing one is allowed but must be conscious and re-recorded, never drive-by.
 
-1. **~~The existing rules are Runic-derived and mirror source line breaks~~ —
-   ESSENTIALLY PAID (2026-07-07 audit).** This was framed for many sessions as the
-   "headline future target: build the width-driven reflow engine," said to be "the
-   largest piece of work in the formatter's life." That framing is **stale**. The
-   reflow engine already exists and works: `printer.rs:62` decides every
-   `Ir::Group`'s flat-vs-break purely from `line_width` via the continuation-aware
-   Wadler `fits`. The debt was never one monolithic rewrite — it was retired
-   incrementally, rule by rule, as each bracket/collection/matrix/comprehension
-   construct was revisited and re-authored width-driven. `has_newline_token` (the
-   named source-break-mirroring mechanism) now has **exactly one live call site**
-   (`rules.rs:3364`), inside the **comment-bearing matrix** path — and a comment
-   genuinely can't be reflowed away (moving a trailing `# note` changes which
-   element it annotates), so mirroring source position there is arguably *correct*,
-   not debt. The clean comment-free matrix path (`lower_matrix_reflow`) is fully
-   width-driven. Net: no large reflow rewrite remains; do not let this bullet's old
-   framing send the next session chasing a rewrite that's already done.
-2. **~50 per-rule Runic-rationale doc comments remain in `crates/fatou-formatter/src/formatter/rules.rs`.**
-   The file/module-level headers (`src/formatter.rs`, `core.rs`, `rules.rs` top)
-   were de-Runic'd during the pivot; the per-rule comments are accurate history
-   and get reworded lazily as each construct is revisited.
+- **Uniform arrow-tier break.** A chained pair whose innermost value is *grouped
+  but non-huggable* (wide binary, paren, comparison) breaks at **every** `=>`,
+  rather than hugging the spine and breaking the value. `chained_pair_grouped_tail`.
+- **Only a *sole* item hugs** its enclosing bracket (`suppress_multi_item_hug`);
+  positionals and keywords are counted **together**. `pair_list_no_hug`.
+- **A sole nested *call* `f(g(…))` hugs** — a conscious divergence from every
+  JuliaFormatter style, which staircases it. Justified by Base's dominant
+  `throw(ArgumentError(⏎ "msg",⏎ ))` idiom. Don't "fix" it toward JuliaFormatter.
+- **Char escape spelling stays verbatim** (`'\x61'` does *not* become `'a'`): a
+  char is string-content, not a numeric spelling, so rewriting it is content
+  rewriting. `char_literals`.
+- **Selector imports break colon-first** — `:` reads as a bracket-like opener, so
+  `import Mod:` terminates the head line and every name wraps beneath at +4.
+  Bare (colon-less) lists keep their first item on the keyword line.
+  `import_list_break`.
+- **Broken conditions and `for` bindings sit at +8**, one level *deeper* than the
+  body they guard (`lower_control_header`), so the header/body boundary is
+  visible. `condition_break`, `for_binding_break`.
+- **Interpolation content is code, not opaque text**: normalized and forced flat.
+  Only string characters and *nested* string literals stay verbatim.
+  `string_interpolation`.
+- **Quoted `end`-blocks lay out across lines** via the generic `lower_paren`
+  reflow, rather than a `QUOTE_SYM`-specific hug that would hard-code a special
+  case. `block_quote`.
+- **`.^` is tight** (a dotted op inherits its base op's spacing), with a
+  retokenization guard so `2 .^ n` stays spaced.
+- **Let bindings are never moved into the body** — `a = 1, b = 2` in body
+  position parses as `a = ((1, b) = 2)`, a semantic change.
 
-## Rule inventory (already in `rules.rs`, pending re-evaluation)
+**Abandoned, don't re-derive:** a "does the hug earn it?" printer guard (a
+`probe` field on `Ir::HugGroup`, rejecting the hug when the item would fit flat
+at the explode indent). It independently kills the canonical sole-nested case —
+`outer_function(inner_function(…))` explodes because the inner call happens to
+fit. The sole-item rule reaches the same goal without that damage.
 
-These `lower_*` arms exist from the Runic era. They normalize spacing/indent but
-mirror source breaks. Treat them as a starting point, not as correct under
-Tenet 1.
+## Rule inventory (the `lower_*` arms in `rules.rs`)
 
-- Spacing/operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`; `&&`/`||`
-  canonicalized spaced; `rhs_absorbs_break` — assignment *and* a pair arrow whose
-  chain bottoms out in a bracket (`pair_chain_hugs`) bias the break into the RHS
-  instead of breaking at the operator), `lower_arrow`, `lower_comparison`,
-  `lower_ternary`, `lower_range`, `lower_type_annotation`, `lower_where`.
-- Collections/calls: `lower_arg_list` (width-driven, trailing hug — positional or
-  kwarg value, incl. the `;` tail, hug-transparent through a clean `=>`/`.=>` pair
-  — + explode fallback; **only a sole item hugs**, see
-  `suppress_multi_item_hug`),
-  `lower_keyword_arg`/`lower_parameters`, `lower_collection` (width-driven via
-  `collect_collection_items`/`collection_body`, trailing-element hug),
-  `lower_index` (collection/matrix/call/curly/chained-index/name-rooted subject
-  + index share one group via the recursive `index_reflow_body`/`construct_reflow_body`
-  — innermost subject yields first, incl. through hugs (ungrouped `Ir::HugGroup`) and
-  `;`-keyword tails; a name/dotted root's first arg list is the yielding body via
-  `applied_args_body` (shared with `call_reflow_body`); comprehension subjects —
-  plain/generator/braces via `comprehension_reflow_body`, typed via
-  `typed_comprehension_reflow_body` (type joins flat like a callee) — yield the
-  same way; paren subjects bail),
-  `lower_bare_tuple`, curly type-params, named tuples.
-- Brackets/matrices (width-driven — NOT source-break mirroring; the old "prime
-  reflow-engine targets" label is stale, see debt #1): `lower_multiline_bracket`,
-  `lower_matrix`, `lower_paren`/`lower_paren_block`, blank-line preservation via
-  `Ir::BlankLine`, `binary_group_breaks` continuation indent. Only the
-  comment-bearing matrix path still consults source newlines (necessarily — a
-  comment can't be reflowed).
-- Statements: `lower_keyword_stmt` (`return`/`const`/`global`/`local`),
-  `lower_import_stmt`/`lower_export_stmt` (width-driven comma-group break, one per
-  line, selector `Mod:` colon non-breaking, source-broken reflows flat),
+An orientation map, not a spec — read `rules.rs` for behavior and the section
+above for the decisions behind it. Width-driven throughout; the only surviving
+source-break read is the comment-bearing matrix path (debt #1).
+
+- Operators: `lower_binary` (n-ary, tight `^`/`:`/`::`/`.`/`.^`; `rhs_absorbs_break`
+  biases the break into the RHS for assignments and bracket-bottomed pair chains,
+  via `pair_chain_hugs`), `lower_arrow`, `lower_comparison`, `lower_ternary`,
+  `lower_range`, `lower_type_annotation`, `lower_where` (single param atomic, short
+  multi-param via `Ir::CondGroup`), `lower_unary`, `lower_splat`.
+- Calls/collections: `lower_arg_list` (trailing hug + explode fallback, gated by
+  `suppress_multi_item_hug`), `lower_keyword_arg`/`lower_parameters`,
+  `lower_collection` (`collect_collection_items`/`collection_body`),
+  `lower_comma_list` (bare tuples + `LET_BINDINGS`), curly type-params, named tuples.
+- `lower_index` — subject and index share one group via the recursive
+  `index_reflow_body`/`construct_reflow_body`, and the **innermost subject yields
+  first**. Registered there: collection, matrix, call/curly (`call_reflow_body`),
+  chained index, name-rooted (`applied_args_body`), comprehension
+  (`comprehension_reflow_body`/`typed_comprehension_reflow_body`), paren
+  (`paren_reflow_body`) — including through hugs (ungrouped `Ir::HugGroup`) and
+  `;`-keyword tails.
+- Brackets/matrices: `lower_multiline_bracket`, `lower_matrix` (+ `BRACESCAT_EXPR`,
+  structurally identical), `lower_paren`/`lower_paren_block`, `Ir::BlankLine`.
+- Chains: `lower_call`/`try_lower_chain`/`collect_chain` — a `.`-spine with **≥2
+  called links** breaks at the dots; bare field accesses stay glued.
+- Statements: `lower_keyword_stmt`, `lower_import_stmt`/`lower_export_stmt`,
   `lower_for_binding`.
-- Prefix/postfix operators: `lower_unary` (prefix op snug to operand,
-  retokenization guard), `lower_splat` (postfix `...` snug to operand — `x ...` →
-  `x...`; `LITERAL` operand always snugs, verbatim trailing-`.` bails, and a
-  **bracket-closing operand bails to spaced** pending the parser gap for `)...`).
-- Literals (token text, genuinely deterministic): `lower_literal` +
-  `normalize_float` + `normalize_hex`.
-- Strings/commands: `lower_string_literal` (`STRING_LITERAL`/`CMD_LITERAL`) —
-  content + delimiters verbatim; each `$(…)` interpolation's expression normalized
-  and **forced flat** via `render_flat`/`render_flat_into` (a group is always taken
-  flat; a `HardLine`/`BlankLine`/embedded-newline can't flatten → bail); any
-  unflattenable interpolation bails the whole literal to `node.text()` (verbatim).
-- Document root: `lower_root` (top-level blank-line policy — interior runs capped
-  at 1, edges stripped, one final newline; reuses `collect_body_lines`).
-- Blocks (body indentation via `lower_block_body`/`build_block_body`, line model
-  via `collect_body_lines` shared with `lower_root`):
-  `lower_block_expr` (begin/quote), `lower_let`, `lower_loop` (while/for),
-  `lower_if`/`lower_try` (+ `lower_branch_clause`), `lower_struct`,
-  a `CONDITION` header (`if`/`elseif`/`while` predicate) is wrapped by
-  `lower_control_header` in one extra `Ir::indent` so a broken condition sits one
-  level deeper than the body it guards (continuation +8, body +4; `for` bindings and
-  `catch` variables lower unchanged),
-  `lower_function`, `lower_do` (+ `lower_do_params`), `lower_module`
-  (+ `module_should_indent`), `lower_type_decl` (abstract/primitive). Empty
-  single-body blocks (struct/function/macro/loop/let/begin/quote/module) collapse
-  to the canonical inline `… end` via the shared `push_block_body` helper
-  (`block_is_empty` gates it); `if`/`try`/`do` still bail transparent on empty.
-- Comments: own-line + trailing line comments and block comments in block bodies,
-  brackets, and matrices.
-- Trivia: `lower_trivia` (trailing-whitespace trimming in the transparent path).
+- Macros: `lower_macro_call`/`lower_macro_name` — gaps collapse to one space; an
+  attached `ARG_LIST` stays snug and lowers like a call's.
+- Literals: `lower_literal` + `normalize_float`/`normalize_hex`. Chars and string
+  macros (`r"…"`, `raw"…"`, `var"…"`) are verbatim. `lower_string_literal` keeps
+  content and delimiters verbatim while normalizing each `$(…)` interpolation and
+  forcing it flat (`render_flat`); an unflattenable one bails the whole literal.
+- Root and blocks: `lower_root` (blank-line policy, one final newline) and
+  `lower_block_expr`/`lower_let`/`lower_loop`/`lower_if`/`lower_try`/`lower_struct`/
+  `lower_function`/`lower_do`/`lower_module`/`lower_type_decl`, sharing
+  `lower_block_body`/`build_block_body` and `collect_body_lines`. A `CONDITION` or
+  `FOR_BINDING` header goes through `lower_control_header` for the extra indent;
+  empty single-body blocks collapse inline via `push_block_body`/`block_is_empty`,
+  while `if`/`try`/`do` bail transparent on empty.
+- Comments in block bodies, brackets, and matrices; `lower_trivia` trims trailing
+  whitespace on the transparent path.
 
 ## Latest session (only a *sole* item hugs; pair arrows bias into their value)
 
@@ -152,596 +149,26 @@ in `lower_binary` — a pair arrow joins assignment's "bias the break into the R
 tier, so `k => merge(` breaks inside the value instead of dropping it to a
 continuation line. Gated on `pair_chain_hugs(node)`: the chain must bottom out in
 a `huggable_kind` bracket. **A blanket version regressed two fixtures** —
-`chained_pair_grouped_tail` (grouped non-bracket value `k => a + b + c`, whose
-uniform arrow-tier break is a *recorded decision*, see the entry below) and
-`arrow_pair_chain` (mixed `a => b --> c` broke at some arrows but not others).
-`pair_operands` rejects the mixed spine, so both keep the arrow tier.
+`chained_pair_grouped_tail` and `arrow_pair_chain` (mixed `a => b --> c` broke at
+some arrows but not others). `pair_operands` rejects the mixed spine, so both
+keep the arrow tier.
 
-**A "does the hug earn it?" printer guard was tried and abandoned.** It rejected
-the hug when the whole item would fit flat at the explode indent (a `probe` field
-on `Ir::HugGroup`). It independently kills the canonical sole-nested case —
-`outer_function(inner_function(…))` explodes because the inner call happens to fit
-on one exploded line. The sole-item rule reaches the same goal without that
-damage. Don't re-derive it.
-
-**JuliaFormatter cross-check** (available: `julia --project=. -e 'using
-JuliaFormatter'`). Default/Blue agree with the new behavior on all three of
+**Corpus evidence** (all 166 files of Julia Base formatted under both rules):
+lines ending in stacked closers **450 → 302 (−33%)**, total lines +0.23%, lines
+over 92 cols unchanged. A third of the `))` stacks removed for negligible
+vertical cost and no width regression. JuliaFormatter Default/Blue agree on
 multi-item tail (explodes), sole bracket literal (hugs), and pair value (hugs the
-arrow) — the `job_metadata` case now matches Default/Blue character-for-character.
-**Conscious divergence, now explicit:** a sole nested *call* `f(g(…))`. Every
-JuliaFormatter style staircases it (`level_one(⏎ level_two(⏎ level_three(⏎`);
-`arg_hug` deliberately hugs instead. That is the user's standing decision — don't
-"fix" it toward JuliaFormatter. The corpus run below justifies it: the dominant
-surviving hug in Base is `throw(ArgumentError(⏎ "msg",⏎ ))`, a pervasive Julia
-idiom the hug serves well and the staircase serves badly. A three-deep sole-call
-nest is contrived; real code does not write it.
+arrow); the sole-nested-call divergence is the recorded decision above.
 
-**Corpus evidence** (all 166 files of Julia Base, `share/julia/base`, formatted
-under both rules): lines ending in stacked closers **450 → 302 (−33%)**, total
-lines +0.23% (118429 → 118705), lines over 92 cols unchanged (1386 → 1385). A
-third of the `))` stacks removed for negligible vertical cost and no width
-regression. Worst old-rule cases found there: a signature broken as
-`function _typed_stack(…, Aax = _iterator_axes(⏎ A,⏎ )) where {T, S}`, and
-`promote_typejoin(V, typeof(⏎ v,⏎ ))` shredding two characters of payload across
-three lines.
-
-11 `expected.jl` regenerated (user-approved, reviewed as a diff): `arg_hug`,
-`arg_hug_explode`, `chained_pair_hug`, `collection_hug`,
-`comprehension_index_break`, `hug_index_break`, `kwarg_hug`, `name_index_break`,
-`pair_hug`, `pair_list_no_hug`, `params_index_break`. Every diff is the same
-shape — a multi-item list stops hugging its tail and explodes one per line; every
-sole-item hug survives. Gate stays 120; stability + clippy + fmt + full suite
-green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Return-type `where` signatures (the deferred
-follow-up TODO — extend the `CondGroup` probe to the `)::T where ` prefix). (2)
-**Switch to the LSP semantic model** — standing strategic recommendation. (3)
-Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
-
-## Earlier: short multi-param `where` bound breaks the args
-
-`feat(formatter)`. Retired the ranked TODO bullet. A short multi-param bound over
-a call signature (`f(longargs...) where {T, S}`) used to explode the two-element
-bound instead of breaking the signature's argument list — the element-count
-heuristic in `lower_where` treated only a *single* param as atomic, so `{T, S}`
-stayed a width-driven exploding group. But "short" (fits on the closing line) is a
-width judgment the element count can't make, and a genuinely wide bound
-(`where_break`) *must* explode. So the choice is a real two-layout decision that
-only the printer can make (it depends on the base indent + trailing content).
-
-**New primitive `Ir::CondGroup { primary, fallback, probe }`** (`ir.rs` +
-`printer.rs`, ~1 print arm + 1 fits arm). Unlike a plain `Group` (decided at the
-current column), a `CondGroup` measures `probe` **flat from the base indent** — the
-re-indented *closing* line, not the opening one. `lower_where`'s multi-param
-CALL-lhs branch builds `primary` = `head where {flat bound}` (bound atomic → the
-arg-list group breaks around it), `fallback` = `head where {exploding bound}`
-(current behavior), and `probe` = `") where " + {flat bound}`. The printer picks
-`primary` when the probe fits (breaking the args lets the bound sit flat on
-`) where {T, S}`), else `fallback` (bound too wide for any line → explode). In
-`fits_stack`/`render_flat` a `CondGroup` measures through `primary` (its all-flat
-form). Single-param bounds keep the atomic `{T}` path unchanged.
-
-**Scope (user, AskUserQuestion):** confirmed the args-break-with-flat-bound form;
-**deferred** the return-type case (`g(x)::T where {T, S}`) — its lhs is a
-`TYPE_ANNOTATION`, so the closing prefix is `)::T where `, not `) where `; the
-probe is scoped to `CALL_EXPR` lhs, and a non-call lhs (`Tuple{T} where {…}`, no
-args to break) keeps the plain exploding group. Follow-up TODO recorded.
-
-Gated `where_short_multiparam_break/` (3 cases: function-form long args break +
-flat bound, assignment-form long args break + flat bound, short sig stays flat).
-`where_break` (wide bound still explodes) unchanged — locks the fallback. Gate
-118→119; stability + clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Return-type `where` signatures (the deferred
-follow-up TODO — extend the `CondGroup` probe to the `)::T where ` prefix). (2)
-**Switch to the LSP semantic model** — standing strategic recommendation. (3)
-Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
-
-## Earlier: glue a sole brace/bracket macro argument
-
-`feat(formatter)`. Retired the ranked TODO bullet: `lower_macro_call`
-(`rules.rs`) preserved the gap before a macro's argument verbatim, so `@m {a}`
-and `@m{a}` both survived even though they are the same program
-(`(macrocall @m (braces a))`). Now a gap before a **bare** `{…}`/`[…]` opener
-that is the **sole** argument is dropped and glued to the idiomatic form
-(`@m {a}` → `@m{a}`, `@NamedTuple {T}` → `@NamedTuple{T}`).
-
-**The parent-context worry was a false alarm — for the glue direction.** The
-TODO said deciding "no suffix follows" needs parent context the function lacks.
-True only for the *add-a-space* direction: `@m{a}` (no suffix) and `@m{a}[x]`
-(suffix) have byte-identical inner `MACRO_CALL` nodes, so adding a space needs
-`node.parent()`. But **dropping** the space is safe with purely local info — a
-`[…]`/`(…)` suffix on a spaced arg folds *into* the child (`@m {a}[x]` parses the
-arg as `(ref (braces a) x)`, a compound `INDEX_EXPR`), so a bare sole opener can
-never carry one. Guard: `matches!(child.kind(), BRACES | VECT_EXPR) &&
-child.next_sibling().is_none()`. Parens/tuples excluded (`@foo(a, b)` call form
-≠ `@foo (a, b)` tuple). ~1 line + docs; no `ir.rs`/`printer.rs` change.
-
-**Decision (user):** glue direction (idiomatic — nobody writes `@SVector [..]`),
-both `{}` and `[]` openers. Gated `macro_glued_argument/` (7 cases: brace/bracket
-glue targets; `@foo (a, b)` tuple stays spaced; `@m {a}[x]` suffix stays spaced;
-`@m{a}[x]` already glued; `@assert … "msg"` multi-arg stays spaced). Gate 116→117;
-stability + clippy + fmt + full suite green. No parser/lexer blocker. The existing
-ungated `macro_attached_argument/` stays ungated (blocked on array-literal reflow,
-L1-2).
-
-**Ranked next targets:** (1) Extend the where-bound priority to short multi-param
-bounds via a conditional-layout primitive (the follow-up TODO). (2) **Switch to
-the LSP semantic model** — standing strategic recommendation. (3) Minor: the ~50
-per-rule Runic-rationale doc comments (debt #2).
-
-## Earlier: bare-bracket-valued pair tail stops hugging in multi-item lists
-
-`feat(formatter)`. User-reported bug: a homogeneous mapping
-`Dict{String, Any}("dataset" => ["w1a"], "reg" => [0.05], "strategy" => [:g, :n, :e])`
-kept all three pairs flat on the opening line and exploded only the *last*
-array — the trailing-pair hug firing on a `key => [bracket]` tail. This is the
-exact "relocating the asymmetry" antipattern the **collection** path already
-guards against (`item_is_huggable_in_collection` refuses a bare bracket-literal
-element), but that guard only caught *direct* bare literals, not `key => [...]`
-pairs, and didn't cover the call path at all.
-
-**Fix (`rules.rs` only, ~55 lines incl. docs, no engine change).** New
-`suppress_bare_bracket_pair_hug(node, item_count, last_huggable)` downgrades a
-computed `last_huggable` to `false` when the list has **>1 item** and the last
-item is a **bare-bracket-valued pair** (`item_is_bare_bracket_pair_tail`:
-`item_value` → walk the `=>`/`.=>` chain via `pair_operands` → innermost
-`huggable_kind` is a `is_bare_bracket_literal`, i.e. `VECT`/`TUPLE`/`BRACES`).
-Called at the tail of both `collect_arg_list` (calls) and
-`collect_collection_items` (collections), so calls and collections behave
-identically. No `ir.rs`/`printer.rs` change — the explode fallback the printer
-already owns takes over once the hug is withheld.
-
-**Decision (AskUserQuestion, two knobs — both "recommended" chosen).**
-(1) **Single-argument pairs still hug** (`Dict("k" => [big list])`): one entry has
-no sibling to be asymmetric with, so the `item_count > 1` guard leaves `config`,
-`chained_pair_hug`, `fence_high`, `pairs`, `prebroken`, `small` untouched.
-(2) **Apply to collections too** — a conscious divergence, edited the gated
-`mapping` case in `pair_hug/expected.jl` to explode one pair per line. What stays
-hugging: call/curly-valued pair tails (`options`, `register!`), and *direct*
-bare-literal args (`map(cb, [a, b])` — the guard is pair-specific, not a general
-bare-literal ban on calls).
-
-Gated `pair_list_no_hug/` (6 cases: user's multi-pair explode; single-pair still
-hugs; call-tail still hugs; tuple-tail explodes; direct bare-literal arg still
-hugs; chained-pair `k => label => [...]` innermost explodes). Gate 115→116;
-stability + clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Extend the where-bound priority to short
-multi-param bounds via a conditional-layout primitive (the follow-up TODO).
-(2) **Switch to the LSP semantic model** — standing strategic recommendation.
-(3) Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
-
-## Earlier: signature args break before a single-param `where`
-
-`feat(formatter)`. Fixed the ranked TODO bullet: an over-width
-`f(args) where {T}` used to explode the lone bound (`) where {\n    T,\n}`)
-instead of breaking the signature's argument list — even though breaking a
-single `{T}` never helps the width. Root cause: the arg-list group and the
-bound group are independent siblings, and the continuation-aware `fits` check
-for the arg-list group stops at the bound group's leading break (right after
-`{`), so the args are judged to fit and the bound is forced to break.
-
-**Fix (`lower_where` only, ~12 lines, no engine change).** A **single type
-parameter is atomic**: `where {T}` (and bare `where T`) now lowers to flat,
-non-breaking `{T}` — `concat["{", lower_node(param), "}"]` — instead of a
-breakable group. The arg-list `fits` check then measures the whole `{T}` and
-correctly breaks the args, leaving `) where {T}` on the closing line. Single
-vs multi is `rhs.children().count()` on the `BRACES` (elements are `ARG`
-nodes); a multi-parameter bound keeps the old `lower_node(rhs)` exploding group,
-so `where_break` (6 params) is unchanged. Bare bounds are always single, so
-they collapse to the same flat `{T}` — the two spellings stay IR-identical
-(idempotency preserved).
-
-**Decision (AskUserQuestion).** User chose **ship the element-count heuristic**
-over generalizing now. Surfaced the limitation: a *short but multi-param* bound
-with long args (`f(longargs...) where {T, S}`) still explodes the bound, because
-"short" is a width judgment the heuristic can't make — recorded as a follow-up
-`TODO.md` bullet (needs a `HugGroup`-style conditional-layout primitive).
-
-Gated `where_bare_signature_break/` (the previously-ungated fixture, 7 lines).
-Gate 114→115; stability + clippy + fmt + full suite green. No parser/lexer
-blocker.
-
-**Ranked next targets:** (1) Extend the where-bound priority to short
-multi-param bounds via a conditional-layout primitive (the follow-up TODO).
-(2) **Switch to the LSP semantic model** — standing strategic recommendation.
-(3) Minor: the ~50 per-rule Runic-rationale doc comments (debt #2).
-
-## Earlier: selector import breaks colon-first
-
-`feat(formatter)`. User-driven style change to the too-wide **selector** import
-(`import Mod: a, b, c`). Old form kept the first name on the module line
-(`import Intercepts: LogisticLoss,⏎    residual,…`); the ragged first name looked
-off. New form treats the `:` as a **bracket-like opener** — the colon terminates
-the head line (`import Intercepts:`) and the whole name list wraps beneath it, one
-name per +4 line, uniformly aligned. Flat still packs `import Mod: a, b`. **Bare**
-lists (no colon) are unchanged — the keyword is their head, so the first item still
-rides the opening line (`using aaaa,⏎    bbbb`); there's no colon/bracket to open a
-list beneath.
-
-**Decision (AskUserQuestion).** User chose "colon opens, names indented" over
-"keep first name on head line." Surfaced the friction: it's a conscious divergence
-from the bare-list break (which keeps its first item on the head line), justified
-by reading `:` as an opener (a bracket break never leaves an arg on the opener
-line) and the alignment win. Verified the colon-terminated form reparses to the
-same `IMPORT_STMT`/`IMPORT_PATH` tree in both Fatou and JuliaSyntax before
-committing to it (stability-safe).
-
-**Change (~10 lines, `lower_import_stmt` only).** New `colon_seen` flag: the
-selector-position `COLON` now pushes `":"` (not `": "`) to the head and opens the
-indented `rest` with a leading `Ir::Line` (flat = space, break = newline); items
-route to `rest` when `seen_comma || colon_seen`. Same `group(concat[first,
-indent(rest)])` shape. Updated the two selector cases in
-`import_list_break/expected.jl` to Form B (bare + `export` cases unchanged).
-
-Gate 114 (unchanged — updated an existing fixture, no new slug); stability +
+11 `expected.jl` regenerated (user-approved, reviewed as a diff), every diff the
+same shape — a multi-item list stops hugging its tail and explodes one per line,
+every sole-item hug survives. Gate stays 120 (of 149 fixtures); stability +
 clippy + fmt + full suite green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) **Switch to the LSP semantic model** — standing
-strategic recommendation; the construct queue is empty. (2) Minor: the ~50
-per-rule Runic-rationale doc comments (debt #2).
-
-## Earlier: char + string-macro literals locked
-
-`test(formatter)` (fixtures-only, **no code change**). Closed the last
-construct-shaped ranked target. Char literals (`'a'`, `'\n'`, `'\''`, `'\\'`,
-`' '`, `'\x61'`, `'é'`) and string/command macros (`r"…"`, suffixed `r"…"i`,
-`raw"…"`, `b"…"`, `html"…"`, `var"…"` incl. lhs position, ``foo`…` ``, triple-quoted
-``sql```…``` `` and `r"""…"""` with suffix, `$` staying plain content inside
-prefixed strings) are **already canonical via existing machinery**:
-`lower_literal`'s verbatim arm covers `CHAR`, `lower_string_literal`'s verbatim
-token walk covers `STRING_PREFIX`/`STRING_SUFFIX`, and `NONSTANDARD_IDENTIFIER`
-(`var"…"`) is transparent. Spacing normalizes around the literals
-(`s=r"a"` → `s = r"a"`), wide calls break around — never inside — them, and the
-lexer emits no `INTERPOLATION` node inside prefixed strings (verified; no parser
-blocker anywhere).
-
-**Decision (AskUserQuestion).** Char escape spelling stays **verbatim**
-(`'\x61'` does *not* normalize to `'a'`) — user ratified over a
-normalize-escapes variant. Rationale: a char is string-content, not a numeric
-spelling like `FLOAT`/`HEX_INT`; escape choice carries intent (`'\0'`,
-`'é'`) and rewriting it is content rewriting, which the ratified string
-rule already forbids. Both fixtures accepted as proposed (authored to the
-design, confirmed to coincide with current output — not blind-captured).
-
-Gated `char_literals/` (10 lines) + `string_macros/` (16 lines). Gate 112→114;
-stability + clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) **Switch to the LSP semantic model** — the standing
-strategic recommendation; the formatter construct queue is now empty. (2)
-In-formatter, minor only: the ~50 per-rule Runic-rationale doc comments
-(debt #2), reworded lazily as constructs are revisited.
-
-## Earlier: progress audit — reflow debt found already paid; LSP pivot
-
-No code, no fixture. A **strategic review**, not a construct. Prompted by "is it
-time to switch to language-server work?" Findings:
-
-- **The per-construct cadence has saturated.** Four of the last five sessions
-  (block-quote, quoted symbols, transpose/adjoint, chained-pair grouped tail)
-  landed **no code** — "already canonical via the transparent path, just lock a
-  fixture." That's diminishing returns: the loop is now confirming existing
-  machinery is canonical, not extending capability. 112 gated constructs.
-- **The "headline reflow engine" debt is essentially already paid** (see debt #1,
-  rewritten). The RECAP had framed a large width-driven-reflow rewrite as the prime
-  remaining formatter work; the code shows it was retired incrementally and
-  `has_newline_token` is down to one (arguably-correct) comment-path call site. So
-  there is **no large formatter piece left** to justify staying in the loop.
-- **Recommendation: pivot to the LSP semantic model.** `src/lsp.rs` is 203 lines,
-  single-threaded, diagnostics-only; hover/go-to-def/references/symbols/rename all
-  need a per-file semantic model (scopes, bindings, read sites) that **does not
-  exist yet** (`TODO.md` "Language server"). Highest-leverage greenfield: one
-  foundation unblocks a whole feature category. Caveat: it's greenfield with no
-  oracle equivalent to the parser's JuliaSyntax harness — it needs its own
-  scope/binding test scaffolding built from scratch.
-
-**Ranked next targets (revised):** (1) **Switch to the LSP semantic model** — the
-strategic move; formatter is broad and usable, LSP nav is missing entirely.
-(2) If staying in the formatter: minor only — the doc-comment sweep (debt #2) and
-char/string-macro literal variants. The old "re-evaluate source-break-mirroring
-brackets against the reflow engine" #1 target is **retired** (already done).
-
-## Earlier: block-quote reflow locked
-
-`test(formatter)` (fixtures-only, **no code change**). Closed ranked target #1. A
-`QUOTE_SYM` over a `PAREN_EXPR` wrapping an `end`-block (`:(if a; b end)`,
-`:(function f(x) x end)`, `:(let x = 1; x end)`, `:(begin x end)`,
-`:(for i in x; g(i) end)`, `:(quote y end)`) is **already canonical via the
-transparent path**: the `COLON` snugs to the `PAREN_EXPR`, which recurses through
-`lower_paren`'s width-driven group. The inner block lowers to forced HardLines
-(every block body breaks), so the paren group **can't be flat** and frames its own
-lines — the block indents one step inside, `)` returns to column 0. Uniform across
-every `end`-block family; source spelling normalizes on the way (`function  f(x)  x
- end`→clean, `let x=1`→`let x = 1`). Inline `;`-block quotes (`:(a; b; c)`) stay
-flat via `lower_paren_block`, and simple-expr quotes (`:(x = 1)`) stay inline
-(covered by `symbols/`). Verified input-independent (3 spellings → identical),
-idempotent, and the broken form reparses as the same `QUOTE_SYM`/`PAREN_EXPR`.
-
-**Decision (AskUserQuestion).** User chose **accept across-lines as canonical**
-over a **hug form** (`:(if a⏎    b⏎end)`, which would need `QUOTE_SYM`-specific code
-to hug `:(`/`)` to the block and hard-code a special case) and over a bail (the
-current path already *is* transparent, so bailing = the same across-lines output).
-The across-lines form falls straight out of the generic `lower_paren` reflow with
-**no special-casing**, which is why it's the principled choice. `expected.jl`
-authored to that design, confirmed to coincide with current output — not
-blind-captured.
-
-Gated `block_quote/` (8 lines in one file: quoted `if`, quoted `function`, quoted
-`let`, quoted `begin`, quoted `for`, nested quoted `quote`, inline `;`-block
-control, multi-statement `if` body). Gate 111→112; stability + clippy + fmt + full
-suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Re-evaluate the source-break-mirroring bracket/matrix
-rules against the width-driven reflow engine (the largest carried debt — the
-comment-bearing matrix path still mirrors). (2) Sweep remaining Runic-rationale doc
-comments in `rules.rs`. (3) char/string-macro literal variants.
-
-## Earlier: quoted symbols + inline quote exprs locked
-
-`test(formatter)` (fixtures-only, **no code**). A `QUOTE_SYM` (`:foo`, `:+`,
-`:end`, `:(x + 1)`, `:(a + b * c)`, `:(:nested)`, `:(a = 1)`, `:(x[1])`,
-`:(foo(a, b))`) is **already canonical via the transparent path**: the `COLON`
-snugs to its operand (no whitespace token between them) and the operand recurses
-through `lower_node`, so a quoted paren's interior normalizes like a bare paren.
-No decision / no friction. Block-quote forms were deliberately excluded and became
-this session's target. Gated `symbols/` (10 lines). Gate 110→111.
-
-## Earlier: transpose/adjoint postfix `'` locked
-
-`test(formatter)` (fixtures-only, **no code change**). A `POSTFIX_EXPR` (`A'`,
-`A''`, `[1 2]'`, `M' * v`, `(a + b)'`, `f(x)'`, `B'[1]`, `B'[1]'`) is **already
-canonical via the transparent path**: the `TRANSPOSE` token snugs to its operand
-(no whitespace token between them), the operand recurses and normalizes
-(`( a + b )'`→`(a + b)'`, `f( x )'`→`f(x)'`), and `)'` **rides a broken bracket
-closer** via the ratified continuation-`fits` postfix-tail rule. `A '` (space
-before the prime) is a genuine Julia parse error (`'` opens a char literal), not a
-Tenet-1-equivalent spelling, so bailing there is correct and it is **excluded**;
-`x = 'a'` (a real char literal) stays distinct and is the disambiguation case.
-Gated `transpose/` (12 lines). Gate 109→110.
-
-## Earlier: chained-pair grouped tail stays arrow-tier — ranked #1 retired
-
-`test(formatter)` (fixtures-only, **no code change**). Resolved the long-standing
-ranked #1 target — "chained-pair hug through a *non-huggable-but-grouped*
-innermost" — as **already correct**. Investigation: a trailing chained pair
-`a => b => <value>` whose innermost value is a **grouped but non-huggable**
-construct (a wide binary chain, a paren expr, a comparison, ...) currently falls
-to normal `lower_binary` layout, which is the **ratified uniform arrow-tier
-flatten**: it breaks at every `=>`, each operand one indent deeper, byte-identical
-to a standalone `arrow_pair_chain` chain (case `w`/`q`/`s`) scaled into the
-exploded bracket (first operand on the item/prefix line, subsequent `=>` operands
-at +8, value flat at +8 — nesting to +12 only when the value itself overflows).
-So the current output is not buggy; it *is* the tier rule applied consistently.
-
-**Decision (AskUserQuestion).** The alternative — "hug the `=>` spine flat and
-break the value" (`a => b => alpha +⏎ beta +⏎ …`) — would parallel the
-huggable-bracket case but is a **conscious divergence from the uniform arrow-tier
-rule** and content-dependent (a leaf-tailed chain would still break its spine, a
-wide-binary-tailed one would not). I surfaced that a narrowly-scoped version
-wouldn't break `arrow_pair_chain` (all its cases have leaf or flat-fitting tails),
-but flagged the inconsistency. **User chose "keep arrow-tier break"** over the
-hug; ranked #1 is retired. No `rules.rs` change — the pair-hug machinery
-(`pair_hug_chain`/`huggable_kind`) correctly requires a *bracket* innermost, and a
-grouped non-bracket value has nothing to hug.
-
-Gated `chained_pair_grouped_tail/` (6 cases: dict binary tail, vector paren tail,
-kwarg binary tail that breaks, value-also-breaks deep nesting, leaf tail fits flat
-boundary, source-broken reflows to canonical). Gate 107→108; stability + clippy +
-fmt + full suite green. No parser/lexer blocker. `expected.jl` hand-authored to
-the ratified arrow-tier form (derived from the tier rule, then confirmed to
-coincide with current output — not blind-captured).
-
-**Ranked next targets:** (1) Re-evaluate the source-break-mirroring bracket/matrix
-rules against the width-driven reflow engine (the largest carried debt —
-`lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`; note the inventory
-header is stale, these were rewritten width-driven, only the comment-bearing matrix
-path still mirrors). (2) Sweep any remaining Runic-rationale doc comments in
-`rules.rs`.
-
-## Earlier: `for`-binding continuation double-indent
-
-`feat(formatter)`. The direct follow-on to last session's condition rule, which
-deliberately skipped `FOR_BINDING`. A too-wide `for` binding used to break its
-iterable's continuation at +4 — **the same indent as the loop body** — so you
-couldn't tell where the header ended and the body began (`for x in call(⏎    a,⏎    b,⏎)⏎    body`,
-args at +4 = body). The clash hit both breaking shapes: a call iterable that
-breaks inside its parens (args at +4) and an operator-chain iterable (`∪`, `+`,
-continuation at +4). Stable/idempotent but ambiguous.
-
-**Decision (AskUserQuestion).** User chose **uniform +8** (over "keep +4"): a
-broken `for` binding sits one level *deeper* than the body, exactly like the
-ratified condition rule — continuation at +8, close bracket and body at +4,
-regardless of whether it breaks inside a call's parens or after an operator.
-
-**Change (one guard line + doc).** `lower_control_header` — the helper that already
-wraps a `CONDITION` in one extra `Ir::indent` — now also wraps a `FOR_BINDING`
-(`matches!(header.kind(), CONDITION | FOR_BINDING)`). `lower_loop` already routes
-the `for` header through it, so no call-site change. The extra indent is inert while
-the binding fits flat (first operand stays on the header line) and only surfaces
-after a break; base indent propagates (nested in a function → args +12, close +8,
-body +8). The `=`→`in` normalization composes. A **comprehension `for`-clause** is
-lowered by `lower_for_binding` *directly* (not through `lower_control_header`), so it
-keeps the comprehension indent and never double-indents — locked by a fixture case.
-
-Gated `for_binding_break/` (short-flat, wide-call iterable, destructuring+wide-zip,
-operator-chain iterable, `=`→`in` normalize+break, nested-in-function base indent,
-comprehension-for-clause-stays-flat control, source-broken-but-fits reflows flat).
-Gate 106→107; stability + clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
-innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
-bracket/matrix rules against the width-driven reflow engine (the largest carried
-debt — `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`). (3) Sweep
-any remaining Runic-rationale doc comments in `rules.rs`. (Note: the stale inventory
-header still names `lower_multiline_bracket`/`lower_matrix`/`lower_paren` as
-"source-break mirroring" — they were rewritten width-driven in earlier sessions;
-`has_newline_token` now only picks the comment-bearing matrix path.)
-
-## Earlier: control-flow condition continuation double-indent
-
-`feat(formatter)`. A too-wide `if`/`elseif`/`while` `CONDITION` used to break its
-continuation at +4 — the same indent as the body it guards — so you couldn't tell
-where the condition ended and the body began. New `lower_control_header` wraps a
-`CONDITION` node in one extra `Ir::indent`, so a broken condition (`&&`/`||`/
-comparison chain, or bracketed predicate call) sits one level deeper than the body
-(continuation +8, `)` and body +4). Uniform across every condition shape
-(AskUserQuestion, over "operator-chains only" and "leave the clash"); inert while
-flat. Wired into `lower_if`/`lower_loop`/`lower_branch_clause`; `for` bindings and
-`catch` variables were left unchanged (the `for` binding was picked up next session).
-Gated `condition_break/` (8 cases). Gate 105→106. No parser/lexer blocker.
-
-## Earlier: fluent method chains — break at the dots
-
-`feat(formatter)`. Closed ranked #3. A `.`-spine with **≥2 called links**
-(`recv.a(x).b(y)`) is a fluent method chain and now reflows width-first instead of
-flattening tight forever. Two design decisions were ratified via AskUserQuestion:
-(1) **only call links break** — bare field accesses / module qualifiers stay glued
-(`obj.config.` rides the receiver line; `Base.Foo.bar` never splits, even
-overflowing); (2) **receiver on the opening line** (chosen over "receiver on its
-own line" after I raised the friction: own-line needs the assignment/arg gap to
-break, conflicting with the locked `x =⏎ …` avoidance, and degenerates for
-prefix-less standalone chains — opening-line is one self-contained group).
-
-**Reparse constraint (drove the whole design).** Only the **trailing-dot** spelling
-reparses as the same chain — `recv.⏎    a(x)` — in both Fatou and JuliaSyntax
-(`(recv.a(x)).b(y)`); a leading-dot `recv⏎.a(x)` is a **Julia parse error**
-(`unexpected text after parsing statement`). So the broken form is receiver on the
-opening line, each called link on its own +4 line, the `.` trailing the line before
-it, via `Ir::SoftLine` (empty flat, newline broken — *not* `Ir::Line`, which would
-leave a flat `. a` space).
-
-**Change (one dispatch arm + a `lower_binary` guard + 5 helpers).** New `lower_call`
-(`CALL_EXPR` arm) and a `try_lower_chain(node)` guard at the top of `lower_binary`
-(field-*terminated* chains root at a `BINARY_EXPR(DOT)`, not a call).
-`collect_chain` peels the left-nested spine (`call_parts` = clean `callee(args)`;
-`dot_access_parts` = plain `recv.name`, skipping WHITESPACE/**NEWLINE** so a
-source-broken chain reflows) to `(base, links)`; `<2` call links → `None` (a
-qualified name or single call keeps its normal lowering — the arg list, not the
-dot, breaks). Builds `group(concat[base, indent(concat[links…])])`; a called link
-is `concat[".", SoftLine, name, lower_arg_list(args)]`, a field link
-`concat[".", name]` (glued). Any comment / broadcast `f.(x)` dot / unexpected token
-bails to transparent. No IR/printer change; inner arg lists still explode nested
-under a broken chain (`).` rides the closer).
-
-Gated `method_chain_break/` (10 cases in one file: short-flat, wide assignment
-break, field-prefix glue, standalone break, mid-chain field glue, field-terminated
-break, single-call arg-list explode (95c, not a chain), qualified-name stays flat
-(95c overflow), source-broken reflows flat). Gate 104→105; stability + clippy + fmt
-+ full suite green. No parser/lexer blocker. (Note: `expected.jl` conforms to both
-ratified decisions — authored to the design, not merely captured.)
-
-**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
-innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
-bracket/matrix rules against the width-driven reflow engine (the largest carried
-debt — `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`). (3) Sweep
-any remaining Runic-rationale doc comments in `rules.rs`.
-
-## Earlier: string/command interpolation — normalize + force flat
-
-`feat(formatter)`. Fixed a genuine bug (not a carried-debt re-eval): `STRING_LITERAL`
-and `CMD_LITERAL` had **no rule**, so the transparent path recursed into each
-`INTERPOLATION`'s `PAREN_EXPR` and let `lower_paren` break it when the string
-overflowed `line_width` — injecting newlines + indent **inside** the literal
-(`"… plus $(⏎    one_more_variable_here⏎)"`). Idempotent + value-preserving (the
-newlines land inside the interpolation parens, not the string content — verified via
-Julia: `$(x)` ≡ `$( x )` ≡ multiline), but an ugly width-driven break inside a string.
-
-**Decision (user, after clarifying interpolation semantics).** Interpolation content
-is embedded Julia code whose surrounding whitespace/newlines don't affect the string
-value (a single expression; multiple bare-newline statements are a *parse error*), so
-it's treated as code: **normalize + force flat**, not opaque-verbatim. Only genuine
-content — the string characters and any *nested* string literal (`$("a  b")`, whose
-whitespace is significant) — stays verbatim (nested strings hit the same rule and
-emit verbatim, so they're safe).
-
-**Change (one dispatch arm + `lower_string_literal` + `string_literal_body` +
-`render_flat`/`render_flat_into`).** The body walks children: tokens (content,
-delimiters, triple-quote newlines) verbatim; each `INTERPOLATION` lowers normally
-(`$` verbatim, `$(…)` through `lower_paren`) then renders **strictly flat** to a
-`String` (`render_flat`: every `Group` taken flat regardless of width, `Line`→space,
-`SoftLine`→"", `IfBreak`→flat arm; `HardLine`/`BlankLine`/embedded-newline → `None`).
-Any interpolation that can't flatten (a comment/block inside, e.g. `$(f(y) #= c =#)`)
-bails the **whole literal** to `node.text()` — verbatim, lossless, idempotent. Bare
-`$name` (no parens) passes through. No IR/printer change.
-
-Gated `string_interpolation/` (9 cases: fits-flat, wide-stays-flat, `$( y + z )`
-normalize, source-broken collapse, bare `$b`, call-in-interp stays flat, nested-string
-content preserved, wide command literal, comment-bail-to-verbatim). Gate 103→104;
-stability + clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
-innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
-bracket/matrix rules against the width-driven reflow engine (the largest carried debt
-— `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block`). (3) Method/field
-chains (`a.b().c().d()`) currently stay flat past `line_width` — no break rule yet.
-(4) Sweep any remaining Runic-rationale doc comments in `rules.rs`.
-
-## Earlier: bracescat-subject index break `{a; b}[k]`
-
-`feat(formatter)`. Closed the former ranked #3 — the direct follow-on to last
-session's bracescat==matrix routing. A too-wide `{a; b}[k]` now yields
-**subject-first** (the matrix-subject analog: the bracescat frames one element per
-line and `}[k]` rides the closing brace), instead of the transparent bail leaking a
-width break into the tiny `[key,]` index. The design was pre-settled — bracescat
-routes through the matrix machinery (last session's user decision) and
-subject-yields-first was the matrix-subject AskUserQuestion choice — so the layout
-is the matrix analog by construction. User ratified keeping the `;;` (higher-dim)
-bail case in the fixture.
-
-**Change (one match arm + doc).** `construct_reflow_body` (the shared ungrouped
-reflow body used by index subjects + hugs) gained `BRACESCAT_EXPR` next to
-`MATRIX_EXPR`; both route through `matrix_reflow_body`, which already reads
-`{`/`}` from the tokens (last session), so no helper changed. Everything else
-falls out: chained `[i][j]` ride stacked closers, and the `;;` higher-dim form
-bails byte-identically to the matrix `[...;;...][k]` (matrix_reflow_body → None →
-subject can't yield → index arg list explodes). Verified idempotent and that the
-`;;` bail matches the matrix analog exactly.
-
-Gated `bracescat_index_break/` (6 cases: narrow flat, 92/93 fence pair, wide vcat
-subject break, chained `[i][j]`, matrix-row subject, `;;` bail). Gate 102→103;
-stability + clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
-innermost (low value, long-standing). (2) Re-evaluate the source-break-mirroring
-bracket/matrix rules against the width-driven reflow engine (the largest carried
-debt — `lower_multiline_bracket`, `lower_matrix`, `lower_paren_block` still mirror
-source breaks). (3) Sweep any remaining Runic-rationale doc comments in `rules.rs`.
-
-## Earlier: bracescat `{a; b}` reflow
-
-`feat(formatter)`. Closed the former ranked #1. A `BRACESCAT_EXPR` (`{a; b}` — the
-brace-delimited vcat, `{a b; c d}` the matrix-row form) is **structurally identical
-to a `MATRIX_EXPR`**: same `ARG`/`MATRIX_ROW` children, same `;`/newline/space
-separators, same `;;` higher-dim operator, differing only in `{`/`}` vs `[`/`]`. So
-instead of a bespoke `lower_bracescat`, it routes through the existing `lower_matrix`
-machinery (user chose the matrix analog via AskUserQuestion over a `;`-visible-on-break
-variant). Result: source spacing normalizes (`{a ;b}` → `{a; b}`), a source-multiline
-bracescat reflows flat when it fits, and a too-wide one frames one element per
-4-indented line with the `;` **dropped** between broken rows — byte-identical to how
-`[…]` matrices break.
-
-**Change (~6 lines).** (1) Dispatch `BRACESCAT_EXPR` alongside `MATRIX_EXPR` to
-`lower_matrix` in `lower_node`. (2) The two matrix helpers that read the open/close
-tokens — `matrix_reflow_body` and `lower_matrix_multiline` — gained
-`LBRACE`/`RBRACE` arms next to `LBRACKET`/`RBRACKET`; the bracket text flows through
-from the token, so `open`/`close` carry `{`/`}` automatically. `matrix_has_comment`
-already keys on `MATRIX_ROW`/`COMMENT` (bracket-agnostic), so the comment-bearing
-bracescat path works unchanged. The `;;` bail (two adjacent `SEMICOLON`) and empty
-`{}` both fall out for free. Verified the framed brace form reparses as
-`BRACESCAT_EXPR` (stability). No IR/printer change; `construct_reflow_body` (matrix
-index-subject folding) left keyed on `MATRIX_EXPR` only — a bracescat-subject index
-break is a separate future target.
-
-Gated `bracescat_spacing/` (6 cases: spacing normalize, matrix rows, newline reflow,
-wide vcat break, wide row break, `;;` bail). Gate 101→102; stability + clippy + fmt +
-full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Chained-pair hug through a *non-huggable-but-grouped*
-innermost (low value). (2) Re-evaluate the source-break-mirroring bracket/matrix rules
-against the width-driven reflow engine (largest carried debt). (3) A
-bracescat/matrix-subject index break (`{a; b}[k]`) — register `BRACESCAT_EXPR` in
-`construct_reflow_body` (matrix already there via `MATRIX_EXPR`).
+**Ranked next targets:** (1) Return-type `where` signatures (the deferred
+follow-up TODO — extend the `CondGroup` probe to the `)::T where ` prefix). (2)
+Minor: debt #2. The per-construct queue is otherwise empty; four of the five
+sessions before the last landed no code, only fixtures.
 
 ## Parser/lexer gaps
 
@@ -752,444 +179,145 @@ a `LoneOperator`) though JuliaSyntax accepts them; only the spaced spelling pars
 parser-parity RECAP "Queued next targets" + `TODO.md` Parser). Drop the
 `ends_in_bracket` guard and widen `splat_spacing/` when fixed.
 
-### Previously-handed-off gaps now RESOLVED
-
-(a) **RESOLVED (commit `2643498`, `feat(parser): lex left-arrow operator <-- family`):**
-`<--`/`<-->` now tokenize as one arrow-tier operator; the `arrow_pair_chain/`
-fixture can be widened to include them when revisited. (b) **RESOLVED
-(2026-07-05, parser-parity; braces case now widened this session):** the
-newline-broken braces comprehension parses as `BRACES_COMPREHENSION`, so the
-exploded braces form reparses cleanly — `comprehension_index_break/`'s braces
-case is now wide and breaks like the rest. The previously-listed
-newline-after-comma, compound-assign lexer, and
-whitespace-before-arglist gaps were likewise resolved on the parser side
-(`TODO.md` marks them `[x]`; parser-parity RECAP 2026-07-03 found the
-whitespace-before-arglist premise stale). No formatter-surfaced parser gap is
-currently outstanding.
-
-**Note:** stray untracked `crates/fatou-parser/tests/oracle/runic-report.txt` (old Runic report format) is leftover
-from the pivot — safe to delete, not regenerated by anything.
+Everything else handed off has been resolved parser-side: the `<--`/`<-->` arrow
+family, the newline-broken braces comprehension, newline-after-comma, the
+compound-assign lexer, and whitespace-before-arglist (whose premise turned out
+stale). No other formatter-surfaced parser gap is outstanding.
 
 ## Standing traps
 
-- `build_block_body`/`lower_root` use a Rust let-chain (`if j == last && let
-  Some(...)`) — fine on this toolchain.
-- Default **indent width is 4** (commit `c552607`); default **`line_width` is 92**
-  (`style.rs`), not the 80 in `printer.rs`'s own unit tests.
+- Default **indent width is 4**; default **`line_width` is 92** (`style.rs`), not
+  the 80 in `printer.rs`'s own unit tests.
 - `print()` appends **no** trailing newline of its own — the document IR must end
   with one (`lower_root` pushes a final `HardLine`).
 - The transparent path emits raw `\n` as `Ir::Text`; the printer resets `col` after
-  an embedded newline. In `fits`, an embedded newline (or forced break) **inside** the
-  tested group forbids flat, but in **trailing** content it ends the measured line.
-  Prefer `Ir::Line`/`SoftLine`/`HardLine` inside groups.
-- `fits` is **continuation-aware** (2026-07-02b): it measures the group flat plus the
-  trailing stack up to the next taken break. Trailing nested groups are read in their
-  carried (Break) mode, so an earlier small group stays flat while a later one breaks.
-  A group followed by a long tail now breaks by width; don't assume a group's own
-  contents alone decide its mode.
-- Clippy trap: `bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else` —
-  use a plain `if !flag { return ... }`.
+  an embedded newline. Prefer `Ir::Line`/`SoftLine`/`HardLine` inside groups.
+- `fits` is **continuation-aware**: it measures the group flat plus the trailing
+  stack up to the next taken break, so a group followed by a long tail breaks by
+  width — don't assume a group's own contents alone decide its mode. A break
+  **inside** the tested group forbids flat; the same in **trailing** content just
+  ends the measured line. Trailing nested groups are read in their carried (Break)
+  mode, so an earlier small group stays flat while a later one breaks.
+- **Grouped hug sites use the popped lowered item as hug body**, so any future
+  hug-through-`X` must move the `X`-prefix into the hug prefix at *all* sites, not
+  just `item_hug_parts`.
+- Clippy traps: `bool.then_some(x).unwrap_or_else(...)` trips `obfuscated_if_else`
+  (use a plain early return); `!(a && !b)` trips `nonminimal_bool` (bind the
+  condition first).
 
 ## Earlier sessions
 
-- **Broadcast operators + tight `.^`** (committed `015c4a0`+earlier, `feat`): the
-  dotted-operator family was already canonical (spaced `.+`/`.*`/`.==`, unary `.-x`,
-  `.=`, `f.(x, y)`, `.&(x, y)`, width-driven chain break + call explode); the one
-  change was making `.^` **tight** (a dotted op inherits its base op's spacing, so
-  `.^` follows tight `^` — `x .^ 2 .+ y .^ 2`; user-ratified over "keep spaced").
-  Added `DOT_CARET` to `is_tight_binop` with a retokenization guard
-  (`dot_caret_snug_retokenizes`): `.^` after a decimal/hex integer stays spaced
-  (`2 .^ n` — snugging would re-lex `2.` as a float). Gated `broadcasting/` (14).
-  Gate 108→109.
-- **Let binding-list width-driven reflow** (committed `3bbc07d`, `feat`): a too-wide
-  `let a = 1, b = 2, …` header breaks one binding per line (comma trailing, wrapped
-  bindings at one continuation indent, first on the `let ` line); source-broken
-  reflows flat. Generalized `lower_bare_tuple`→`lower_comma_list`, dispatched both
-  `BARE_TUPLE_EXPR` and `LET_BINDINGS` to it (`group(concat[first, indent(rest)])`).
-  **Explicitly rejected** moving bindings into the body (`a = 1, b = 2` in body
-  position parses as `a = ((1, b) = 2)` — a semantic change, out of scope). Gated
-  `let_binding_break/` (6). Gate 99→100. Unblocked by parser `858441c`.
-- **Splat operator snug** (committed `7a286e2`, `feat`): the postfix `...` snugs to
-  its operand (`f(x ...)` → `f(x...)`), the direct postfix analog of `lower_unary`.
-  A `LITERAL` operand always snugs (floats normalize safely); a non-literal verbatim
-  shape ending in a raw `.` bails (avoids `....`); a **bracket-closing operand**
-  (`g(x)...`) bails to verbatim spaced pending the parser gap (handed off to
-  parser-parity — the still-OUTSTANDING gap below). Gated `splat_spacing/` (9).
-  Gate 100→101.
-- **Import/using/export list width-driven reflow** (committed `5b48009`, `feat`): a
-  too-wide `using`/`import`/`export` list breaks one comma-group per line (comma
-  trailing, wrapped groups at one continuation indent, first group on the keyword
-  line); source-broken reflows flat; selector colon (`using Mod: a, b`) non-breaking.
-  Same `group(concat[first, indent(rest)])` shape as the bare tuple. Gated
-  `import_list_break/` (8). Gate 98→99. Surfaced the multi-binding-let parser gap
-  (since RESOLVED, `858441c`), which unblocked this session's let reflow.
-- **Bare tuple width-driven reflow** (committed `44ee81b`, `feat`): a too-wide
-  bracketless tuple (`x = a, b, c`, `return a, b, c`, standalone) breaks one element
-  per line (comma trailing, wrapped elements at one continuation indent, first on the
-  opening line) instead of always-flat; source-broken reflows to the same form.
-  `lower_bare_tuple` builds `group(concat[first, indent(rest)])` with the comma as a
-  trailing separator; interior `NEWLINE` skipped. No broken-only trailing comma
-  (no brackets to frame one). Gated `bare_tuple_break/` (7). Gate 97→98. (The
-  import/export session reused this exact group shape.)
-- **Chained-pair hug through the whole spine** (committed `7409c00`, `feat`): closed
-  ranked #1 — a trailing chained pair `a => b => Dict(...)` now hugs its enclosing
-  bracket like a single pair (whole `a => b => ` joins the flat prefix, only the
-  innermost construct explodes), user-chosen (Option A) over the bail. Split
-  `pair_hug_split` into `pair_operands` + the recursive `pair_hug_chain`; the four
-  hug consumers route through it (no IR/printer change). `-->`/`<-->` links and a
-  non-huggable innermost value still bail. Gated `chained_pair_hug/` (9); updated
-  `pair_hug/`'s now-obsolete chained case. Gate 96→97.
-- **Widen arrow_pair_chain for `<--`/`.<--`** (committed `d399a02`, `test`): closed
-  ranked #3 (fixtures-only, no code) — the resolved `<--` lexer gap let
-  `arrow_pair_chain/` widen with four `<--`/`.<--` cases (same-op chain, mixed
-  `<--`/`.<--`/`=>`, short-stays-flat, source-broken-reflows-flat), all on the same
-  arrow-tier code path `=>`/`-->`/`<-->` already use. Gate unchanged at 96.
-- **Widen braces comprehension index case** (committed `8b6a144`+`e898af5`-era,
-  `test`+`docs`): closed ranked #2 (fixtures-only, no code) — the resolved
-  newline-broken `BRACES_COMPREHENSION`-in-`INDEX_EXPR` parser gap let
-  `comprehension_index_break/`'s braces case widen to overflow and explode
-  (element/`for`/`if` lines, `}[k]` riding the closer) like its `[…]`/`(…)`/typed
-  siblings. Gate unchanged at 96.
-- **Paren-subject index break** (committed `4fea68d`+`3f49422`+`e898af5`,
-  `feat`+`test`+`docs`): closed ranked target #1 — a too-wide `(inner)[index]`
-  yields subject-first (AskUserQuestion **Option B**: the paren breaks at its own
-  parentheses, `)[index]` riding the closer, the single-value analog of the
-  subject-yielding tuple). Extracted `paren_reflow_body` from `lower_paren`
-  (transparent bails → `None`; `lower_paren` now group-or-transparent), registered
-  `PAREN_EXPR` in `construct_reflow_body`. No new IR/printer primitive; plain-paren
-  fixtures byte-identical. Gated `paren_index_break/` (11). Gate 95→96.
-- **Comprehension reflow body** (committed `075e0a8`+`05f54be`+`8f693c8`+`f4f9113`,
-  `feat`+`test`+`docs`): a too-wide indexed comprehension yields subject-first —
-  extracted `comprehension_reflow_body` + `typed_comprehension_reflow_body` (type
-  joins flat like a callee), registered in `construct_reflow_body`
-  (`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`/`TYPED_COMPREHENSION`), so
-  chained/hugged/typed indexed comprehensions fold into the shared group and the
-  index rides the closer. Killed the stray-vector tiny-index explosion. Surfaced +
-  handed off (then RESOLVED 2026-07-05) the newline-broken bracescat parser gap.
-  Gated `comprehension_index_break/` (12). Gate 94→95.
-- **Name-rooted index chains** (committed `32fb24f`+`98be310`+`7c3edf9`,
-  `feat`+`test`+`docs`): a too-wide `NAME`/dotted-root chain (`table[…][k]`) breaks
-  innermost-arg-list-first — extracted `applied_args_body` (the post-callee body of
-  `call_reflow_body`) as `index_reflow_body`'s name-rooted base case; outer indexes ride,
-  re-breaking only on overflow. Single name-rooted index routes through the group
-  byte-identically (locked by the `single` case). Killed the stray-vector middle
-  explosion. Gated `name_index_break/` (11). Gate 93→94.
-- **Pair-value hugging** (committed `f1363da`+`ee0e2b2`+`1cdd9e0`, `feat`+`test`+`docs`):
-  `=>`/`.=>` (the pair idiom only; `-->`/`<-->` explode) are hug-transparent — a trailing
-  `lhs => <bracket construct>` arg/kwarg-value/collection element hugs, the `lhs => `
-  joining the flat prefix. `pair_hug_split`/`value_is_huggable`; two body flavors
-  (`hug_value_parts` ungrouped for index-subject paths, `pair_hug_grouped_parts` at the
-  three grouped hug sites). **Trap:** grouped sites use the popped lowered item as hug
-  body, so any future hug-through-X must move the `X`-prefix into the hug prefix at all
-  four sites, not just `item_hug_parts`. Chained pairs (`a => b => c`) bail → normal
-  layout. Gated `pair_hug/` (16). Gate 92→93.
-- **Arrow/pair tier flatten + Runic doc-comment sweep** (committed `da4e88c`+`01caa11`+
-  `fa9baae`, `feat`+`test`+`docs`): `binary_prec_class` tier 3 (`=>`/`.=>`/`-->`/`.-->`/
-  `<-->`, right-assoc, layout-only flatten) — a mixed arrow/pair-tier chain breaks
-  uniformly; all ~25 residual Runic rationale comments reworded (debt #2 closed).
-  Surfaced the `<--` lexer gap (handed off). Gated `arrow_pair_chain/` (8). Gate 91→92.
-- **Subject-yields through hugs + `;`-params tails** (committed `1b0ea59`+`6956868`,
-  `feat`+`test`): closed the last two `call_reflow_body`/`collection_reflow_body` bails —
-  an **ungrouped** `Ir::HugGroup` hands flat-vs-yield to the owning group (zero printer/IR
-  changes), so a hug-tailed or params-tailed index subject yields via the hug, `;` tail
-  explodes snug, indexes ride stacked closers. New `construct_reflow_body`/`reflow_hug`/
-  `item_hug_parts`/`arg_list_params_body`. Gated `hug_index_break/` (10) +
-  `params_index_break/` (5). Gate 89→91.
-- **Chained-index break** (committed `c7966a2`+`0ac87f7`, `feat`+`test`): subject-yields-first
-  through chained postfix (`[…][i][j]`, `f(x)[i][j]`) — `lower_index`'s body-building moved into
-  the recursive `index_reflow_body` (the `INDEX_EXPR => index_reflow_body(&subject)` arm is the
-  feature); innermost subject yields first (AskUserQuestion), every index rides its closer,
-  bails bubble up. Name-rooted chains (`table[i][j]`) stay transparent. Gated
-  `chained_index_break/` (9 cases). Gate 88→89. (The hug/`;`-tail bails closed this session.)
-- **Kwarg-value + collection-element hugging** (committed `ae30353`+`7aa51be`, `feat`+`test`):
-  trailing `KEYWORD_ARG` bracket values hug the call bracket in both comma position and the
-  `;` keyword tail (hug prefix + params-group explode fallback via `Ir::hug_group`'s fourth
-  arm); a collection literal's last element hugs too (named tuples, braces, one-tuple `),)`).
-  `arg_is_huggable` → `item_is_huggable`/`huggable_kind`; `collect_collection_items`/
-  `collection_body` extracted; explode bodies unified on `bracket_explode_body`;
-  `collection_reflow_body` bails on a huggable last element (single-index transparent
-  composition locked as pleasant in the fixture). Gated `kwarg_hug/` + `collection_hug/`
-  (11 cases each). Gate 86→88.
-- **Call-subject index break** (committed `38ddd40`-follow-up `486c9ca`+`9c01dbf`, `feat`+`test`):
-  extended subject-yields-first to call/curly subjects — `lower_index` accepts the clean
-  `callee ARG_LIST` shape via `call_reflow_body`, folding the arg list's **ungrouped** explode
-  body into the shared outer group (extractions: `collect_arg_list` → `ArgListParts`,
-  `arg_list_explode_body`). Bails (index yields): `;`-params tail, huggable last arg, comments,
-  interleaved token. Gated `call_index_break/` (8 cases incl. 92/93 fence). Gate 85→86.
-- **Collection-subject index break** (committed `38ddd40`, `feat`): user chose (AskUserQuestion)
-  **subject yields first** for `<wide-collection>[index]` — new `lower_index` arm folds
-  `collection_reflow_body`/`matrix_reflow_body` (pure extractions) + `lower_arg_list(args)` into
-  one outer group, so the collection explodes and the index rides the closing bracket (breaking
-  at its own column only if still too wide). Other subjects stayed transparent (index yields).
-  Gated `collection_index_break/` (7 cases incl. the 92/93 fence pair). Gate 84→85. (Extended to
-  call/curly subjects this session.)
-- **Hug explode fallback — `Ir::HugGroup`** (committed `e7c0e41`, `feat`): when even the hug
-  first line (open bracket + flat leading args + the hugged construct's opener) overflows,
-  the call explodes one-item-per-line instead. New `Ir::HugGroup { prefix, body, close,
-  explode }` + printer `hug_fits`, seeding the shared `fits_stack` loop with the body in
-  Break mode so its first break opportunity ends the measured line (arity's stop-at-HardLine
-  trick doesn't transfer — Fatou's hugged item has no forced break). In trailing content a
-  `HugGroup` walks its parts byte-identical to the old bare concat, so zero fixtures moved.
-  Nested hugs measure conservatively (user choice): overflow explodes the outer call, the
-  inner re-decides at its column. `arg_list_explode_group` extracted so hug fallback and
-  non-hug layout are the same doc. Deferred: `hug_excuse_overflow` (overwide unbreakable
-  leading atom shouldn't force explode). Gated `arg_hug_explode/` (7 cases incl. the 92/93
-  fence pair). Gate 83→84.
-- **Argument hugging — trailing bracket construct** (committed `9ea2e38`, `feat`): when the last
-  positional arg of a call/index arg list is bracket-delimited (`arg_is_huggable`), it hugs the
-  enclosing bracket — `outer(inner(\n …\n))`, `map(f, [\n …\n])` — via a bare concat in
-  `lower_arg_list` (no wrapping group, no outer trailing comma); the continuation-aware `fits`
-  glued openers and stacked closers, so no printer change. Gated `arg_hug/`. Gate 82→83.
-  (Superseded this session: the bare concat became `Ir::HugGroup` with the explode fallback.)
-- **Postfix tail on a breaking bracket group** (committed, `test`): gated the non-call breaking group
-  carrying a postfix tail — a wide vector/tuple (one-per-line) or matrix (one-row-per-line) rides
-  `.field` / `::T` / chained `.field.other` on its closing-bracket line. Continuation-aware `fits`
-  already canonical; no code change, pure gating. Deferred `<wide-collection>[index]` (subject-vs-index
-  break). `bracket_postfix_break/`. Gate 81→82.
-- **Chained postfix tail on a breaking call** (committed `c4548b8`, `test`): gated multiple postfix
-  ops riding a wide call's closing bracket — `).field.other`, `)[index_expr][second]`, `).method(z)`,
-  `)[idx].field`. Continuation-aware `fits` already canonical; no code change. User chose
-  chained-postfix-on-call over postfix-on-collection (done this session). `chained_postfix_break/`.
-  Gate 80→81.
-- **Postfix tail on a breaking call** (committed, `test`): gated the single postfix tail riding a
-  wide call's closing bracket — `).field`, `)::SomeLongTypeName`, `)[index_expr]`. Continuation-aware
-  `fits` already canonical; no code change. User chose tail-rides-bracket, three tails bundled in
-  `postfix_tail_break/`. Gate 79→80. (Chained tails followed this session.)
-- **Uniform mixed same-precedence chain break — flatten by tier** (committed `7bff2ad`, `feat`):
-  third `lower_binary` re-evaluation. Generalized `collect_binary_chain`'s descend test from
-  exact-kind equality to **precedence-tier** equality (`binary_prec_class` + `same_break_tier`,
-  mirroring the parser's `infix_binding_power`: plus `+ - |` = 0, times `* / \ % &` = 1, shift
-  `<< >> >>>` = 2), so a too-wide *mixed* same-tier chain (`a + b - c`) breaks at every operator,
-  not just the outermost. Tighter/looser tiers stay their own flat group; unicode ops (one
-  `UNICODE_OP` kind) return `None` from `binary_prec_class` and still flatten only on exact-kind.
-  Disclosed consequence: bitwise `|`/`&` share the plus/times tiers, so `a + b | c` folds too.
-  Gated `mixed_precedence_chain/`. Gate 78→79.
-- **Uniform same-operator chain break** (committed `a6592c`-era, `feat`): flattened the
-  parser-nested same-operator short-circuit / pipe / pair chains (`&&`/`||`/`|>`/`=>`) into one
-  break group via `binary_op_kind` + `collect_binary_chain` (descend on exact-kind match), so a
-  too-wide chain breaks at every operator, not just the outermost. Only same-operator children
-  flattened; mixed/tighter subexprs stayed their own group. Gated `chain_break/`. Gate 77→78.
-  (Superseded this session: the descend test now flattens by precedence *tier*.)
-- **Continuation-aware `fits`** (committed `5baca04`, `feat`): first printer-engine change
-  post-pivot. Fixed `printer::fits` to the Wadler best-fit continuation form — it now walks the
-  group `inner` flat **then the rest of the print stack**, stopping at the first taken break, so a
-  too-wide trailing tail (` = x` after `where {…}`) forces the group to break. Signature
-  `fits(remaining, inner, rest: &[(usize, Mode, &Ir)])`; a break *inside* the tested group forbids
-  flat but the same in *trailing* content ends the line (`in_group` flag); trailing nested groups
-  keep their carried Break mode so an earlier small group stays flat while only the needed one
-  breaks. User chose braces-explode + `} = x` trails. Gated `where_break/`. Gate 76→77. (Detail
-  now lives in Standing traps; the newline-after-comma continuation gaps it surfaced are in the
-  outstanding-gaps block above.)
-- **Paren-block width-driven break + newline reflow** (committed `5905ed2`, `feat`): closed
-  ranked target #1 for `lower_paren_block` (`PAREN_BLOCK`, the `;`-block `(a; b; c)`). One
-  width-driven `Ir::group`: flat when it fits, else one statement per 4-indented line with `;`
-  **snug after each but the last** (user chose via AskUserQuestion), brackets framing their own
-  lines. Both token loops skip interior `NEWLINE`, so a source-multiline block reflows to the
-  same form. `statements.len() < 2` still bails transparent (single-stmt `(a;)`); comment-bearing
-  blocks bail. Gated `paren_block_break/`. Gate 75→76.
-- **`;`-keyword tail width-driven break** (committed `7d33a5b`, `feat`): closed the deferred
-  `;`-`PARAMETERS` hole in `lower_arg_list` — the `; kw = …` tail now folds into the **same**
-  width-driven group as the positional args instead of emitting flat unconditionally. Broken:
-  one arg per line, `;` **snug after the last positional** (`b;`), each kwarg on its own line
-  + broken-only trailing comma; a keyword-only call keeps `;` on the open bracket (`f(;`).
-  New `collect_param_items` helper (skips `WHITESPACE`/`NEWLINE`; a trailing `pending_comma`
-  is a dropped trailing comma, only a missing `;`/empty tail bails → `lower_parameters` flat
-  fallback for comment/unmodeled shapes). User chose "`;` trails last positional". Gated
-  `arg_list_params_break/`. Gate 74→75.
-- **Comprehension/generator reflow** (committed `deb0df3`+`cbeaa25`, `feat`): new
-  `lower_comprehension` arm (`COMPREHENSION`/`GENERATOR`/`BRACES_COMPREHENSION`) +
-  `lower_comprehension_if`, after `lower_collection`. One width-driven group: flat
-  `[elem for b if f]` when it fits, else element + each `for`/`if` clause on its own
-  4-indented line (user chose "explode each clause"). Typed `T[…]` handled via the
-  transparent snug. Comment descendant → bail transparent. Follow-up: `lower_for_binding`
-  + `for_iteration_operands` now skip `NEWLINE` like `WHITESPACE`, so a source-multiline
-  comprehension reflows to the same canonical form (dropped the `has_newline_token` guard;
-  back to 2 call sites). Gated `comprehension_spacing/`, `comprehension_break/`,
-  `comprehension_multiline/`. Gate 71→74.
-- **Unary prefix operators** (committed `d04276d`, `feat`): new `lower_unary` arm +
-  `operand_leads_with_operator` helper (before `lower_arrow`). `UNARY_EXPR` is the prefix
-  `<op> <operand>`; the op snugs to its operand (no space), operand recursed
-  (`x = -  a` → `x = -a`, `-f( x )` → `-f(x)`). **Retokenization trap:** `- -a` snugged to
-  `--a` would retokenize as `--`, so it bails to verbatim when the operand is a nested
-  `UNARY_EXPR` or its first token begins with a symbolic op char (`+-*/\^%!~<>=&|:$?`);
-  `-1` folds into a `LITERAL` upstream. Gated `unary_operators/`. Gate 70→71.
-- **Macro-call spacing** (committed `f0fdd0a`, `feat`): first construct past full-gate.
-  New `lower_macro_call` + `lower_macro_name` (after `lower_collection`) normalize the
-  verbatim macro-name→arg whitespace to one space while preserving the semantic
-  call-form vs space-form split — an attached `ARG_LIST` (`@eval(expr)`) stays snug and
-  lowers like a call's; a spaced arg (`@assert x > 0 "msg"`, `@foo (a, b)` as a
-  `TUPLE_EXPR`) collapses each gap to one space. Keyed on a `had_gap` flag; the space
-  form never breaks; dotted names (`Base.@kwdef`) flatten; comment/newline/unexpected
-  bails. Gate 69→70. Clippy trap: `!(a && !b)` trips `nonminimal_bool` — bind
-  `let call_form = …;` then `if !call_form`.
-- **Gated the last 4 comment fixtures — every fixture then gated** (committed, pure
-  `test(formatter)`, no code): hand-authored `expected.jl` for `block_comments`,
-  `block_comments_in_blocks`, `bracket_block_comments`, `trailing_comments`; the
-  existing `lower_block_body`/`lower_multiline_bracket` comment machinery already
-  emits canonical Tenet-1 form. Verified input-independence (own-line comments
-  re-indent, `#= =#` interiors kept verbatim, comment-bearing brackets explode
-  one-per-line, `;`-joins split). Gate 65→69.
-- **Gated the spacing/padding pile; renamed the `*_divergence` slugs** (committed,
-  pure `test(formatter)`): gated the eight remaining already-canonical fixtures
-  (`paren_padding`, `assignment`, `trailing_whitespace`, `logical_operators`,
-  `paren_blank_lines`, `block_comment_spacing`, `bracket_comment_spacing`,
-  `trailing_comment_spacing`); verified determinism (mangled variants normalize,
-  idempotent). User renamed all five `*_divergence` slugs (Runic gone) and stripped
-  false "preserved by Runic" editorializing from comment fixtures. Gate 57→65.
-- **Gated the module/baremodule body-indentation construct** (committed, pure
-  `test(formatter)`): authored `expected.jl` for the four `module_*` fixtures. Kept
-  Runic's rule — every module body indents *except* the lone file-wrapper module
-  (sole top-level expression; a leading comment is not a sibling), which stays flush;
-  nested `module Inner` always indents. `module_should_indent` already reproduces this
-  (deterministic on AST structure, not whitespace → Tenet-1 compliant); only Fatou
-  divergence is the empty-body collapse (`module E\nend`→`module E end`). Gate 53→57.
-- **Gated the global/local multi-name list construct** (committed, pure
-  `test(formatter)`): authored `expected.jl` for `global_local_names` +
-  `global_local_assignment`. Confirmed the parser wraps every multi-name form in a
-  single `BARE_TUPLE_EXPR`/`ASSIGNMENT_EXPR` operand, so `lower_keyword_stmt` recurses
-  into `lower_bare_tuple`/`lower_binary`/`lower_type_annotation` (all width-driven);
-  the loose-children fallback never fires. Caveat: a bare tuple with an interior
-  *newline* still bails transparent (the reflow debt); no fixture input has one.
-  Gate 51→53.
-- **Gated the already-canonical operator/literal pile** (committed, pure
-  `test(formatter)`): authored the first `expected.jl` for 15 ungated fixtures whose
-  rules already emit canonical Tenet-1 form (`tight_operators`, `assignment_spacing`,
-  `type_annotations`, `range_colon`, `where_clauses`, `dot_access`, `float_literals`,
-  `hex_literals`, `named_tuples`, `curly_type_params`, `bare_tuples`,
-  `import_using_lists`, `export_public_lists`, `comprehension_for_in`, `control_flow`).
-  Re-verified idempotence + input-independence before gating. Gate 36→51.
-- **Tenet-1 whitespace fix for type declarations** (committed): retired the last
-  source-mirror in `lower_type_decl` (`ABSTRACT_DEF`/`PRIMITIVE_DEF`) — the
-  post-signature region (around the bits `LITERAL` and `end`) now normalizes
-  (WHITESPACE→one space, END_KW→text, else bail transparent) instead of passing
-  source spacing through. Dropped the unused `.peekable()`/`while let` for a plain
-  `for`. Gated `abstract_types/` + `primitive_types/`. Gate 34→36.
-- **Empty-body inline fold for `if`/`try`/`do`** (committed): extended the
-  empty-body inline collapse to the last three block families that still bailed
-  transparent on an empty body. New helper `lower_body_allow_empty` (`Some(Some)`
-  non-empty / `Some(None)` empty / `None` bail); `lower_do` routes through
-  `push_block_body` (`map(xs) do x end`); a clause-less empty `if` folds inline
-  (`if x end`) but any clause keeps it vertical (shared `end`); `try` never
-  inline-folds and a clause-less `try` bails (syntax error). Gated `do_blocks/`,
-  extended `if_blocks/`/`try_blocks/`. Gate 33→34. All block families now handle
-  empty bodies deterministically.
-- **Width-driven comparison + arrow** (committed `662331d`): retired the last two
-  source-break-mirroring operator rules. `lower_comparison` (`COMPARISON_EXPR`) now
-  mirrors `lower_binary`'s non-assignment path (one group, `Ir::Line` gaps,
-  operator-trailing; flat when it fits else each op trails, operands indent one
-  step); `lower_arrow` (`ARROW_EXPR`) stays flat `lhs -> rhs` (never breaks at `->`
-  — assignment-style bias) but now ignores `NEWLINE`. Gated `comparison_chains/` +
-  `arrow_functions/`. Gate 31→33. **All operator rules now width-driven Tenet-1.**
-- **Width-driven ternary (`lower_ternary`)** (committed `58e5336`): retired the
-  source-break mirror in `TERNARY_EXPR` for the Air model — one `Ir::group` per
-  ternary node with its own `Ir::indent`, operator-trailing (`?`/`:` can't lead a
-  line), each gap an `Ir::Line`; flat when it fits, else the branch operands wrap
-  one step. Nested `?:`-chains nest deeper (each owns its indent). Dropped the
-  `node.ancestors()` ride check. Gated `ternary_multiline/`, `ternary_spacing/`,
-  `ternary_paren_branch/`. Gate 28→31.
-- **Width-driven binary/assignment (`lower_binary`)** (committed `34c3e16`): retired
-  the source-break mirror in `BINARY_EXPR` + `ASSIGNMENT_EXPR` for Air's model — one
-  `Ir::group` per binary node with its own `Ir::indent`, operator-trailing, each gap
-  an `Ir::Line`; a tighter subexpr stays flat while the looser chain breaks, and an
-  inner subexpr forced to break nests its indent on the parent's. Assignment ops
-  never break (` = ` flat, no group/indent — the RHS's own group absorbs the break:
-  `x = a +⏎ b`, never `x =⏎ a + b`). Tight ops (`^`/`:`/`.`) still pack. Deleted
-  `binary_group_breaks`; unblocked binary-inside-paren. Gated `binary_continuation/`
-  (fit→flat + two too-wide break-pin cases) + `binary_spacing/`. Gate 26→28.
-- **Width-driven paren reflow (`lower_paren`)** (committed `3903b5f`): killed the
-  `has_newline_token` source-break mirror in `PAREN_EXPR` — one width-driven
-  `Ir::group` (flat `(inner)` when it fits, else `(`/+indent/`)`), padding stripped,
-  blanks dropped. Gated `paren_multiline/` + `paren_blocks/`. Gate 24→26.
-- **Top-level `;`-join reflow (`TOPLEVEL_SEMICOLON`)** (committed `a23697c`): closed
-  the last top-level `;`-separator Tenet-1 hole. The parser folds `a; b; c` into one
-  `TOPLEVEL_SEMICOLON` child of `ROOT`; `collect_body_lines` now flattens it via the
-  extracted `collect_body_elements(node, &mut lines, &mut expect_sep)` recursion, so
-  each `;`-joined statement lands on its own line exactly as a block body's do
-  (`a; b` ≡ `a⏎b`). Trailing `;` drops the empty tail, `a;;b` collapses. Block bodies
-  untouched (the branch only fires on `TOPLEVEL_SEMICOLON`). Gated
-  `toplevel_semicolon/`. Gate 23→24.
-- **Top-level blank-line policy (`lower_root`)** (committed `5589f58`): closed the
-  file-level blank Tenet-1 hole — `ROOT` no longer falls through transparent.
-  `lower_root` reflows deterministically: interior blank runs cap at
-  `MAX_BLANK_LINES`=1, leading/trailing file blanks stripped (unlike a block body's
-  framed edges), exactly one final newline. Extracted the shared
-  `collect_body_lines(node) -> Option<Vec<BodyLine>>` from `build_block_body`. Gated
-  `toplevel_blank_lines/`; unblocked `loop_blocks/` + `let_blocks/` (empty-body
-  inline collapse). Gate 20→23.
-- **Empty-body uniformity fold + gate `try_blocks`** (committed `370df78`):
-  generalized the struct empty-body inline collapse to the other single-body
-  blocks via a shared `push_block_body` helper (`function`/`macro`/`while`/`for`/
-  `let`/`begin`/`quote`/`module` empty bodies → inline `… end`, Tenet 1). `if`/
-  `try`/`do` still bail transparent on empty (deferred — multi-clause). Gate 19→20.
-- **Gated `struct_blocks` + empty-body collapse** (committed): `lower_struct`
-  gained the inline empty-body collapse (`struct E end`) plus the reusable
-  `block_is_empty` helper; the follow-up this session generalized it to the other
-  single-body blocks. Gate 18→19.
-- **Gated `keyword_statements`** (committed `a069201`): pure `test(formatter)`, no
-  code — `lower_keyword_stmt` already emits the canonical `return`/`const`/
-  `global`/`local` form (one space after keyword, operand normalized, bare
-  `return` kept). Gate 17→18.
-- **Block-body `;`-separator + 1-blank cap** (committed `d73ac02`): killed the
-  last source-separator mirror in `build_block_body` — `;` now reflows like a
-  newline (each statement its own `HardLine`, so `begin a; b; c end` and the
-  newline form format identically), and `MAX_BLANK_LINES` dropped 2→1 (a blank run
-  in a block body condenses to one). Gated `if_blocks` + `begin_quote_blocks`.
-  Gate 15→17.
-- **Gated six free non-comment bracket/matrix fixtures** (committed `0bf4e6f`):
-  pure `test(formatter)`, no code. All route through the width/reflow paths and
-  collapse to canonical flat form (every case fits the 92-col `line_width`); locked
-  `multiline_brackets`, `bracket_blank_lines`, `bracket_gap_blank_lines`,
-  `multiline_matrices`, `matrix_blank_lines`, `matrix_gap_blank_lines`. Gate 9→15.
-  The collection/bracket/matrix family is now fully Tenet-1.
+Newest first. One line each; the commit is the detail.
 
-- **Comment-bearing matrix reflow** (committed `845c7c4`): rewrote
-  `lower_matrix_multiline` from source-break mirror to the canonical form (direct
-  analog of `lower_multiline_bracket`) — always framed one row per line, new
-  `lower_matrix_row` joins a row's elements with one space, trailing comment rides
-  its row at one leading space, own-line comments keep their line, `[ # header`
-  rides the bracket, blanks dropped (the old `MAX_BLANK_LINES`/`Ir::BlankLine`
-  matrix usage is gone; both still live for block bodies), block comments verbatim.
-  `matrix_comments/` + `matrix_block_comments/` gated. Gate 7→9. Trap:
-  `lower_matrix_reflow` still inlines its own MATRIX_ROW walk (could unify onto
-  `lower_matrix_row`); a comment *inside* a `MATRIX_ROW` bails transparent.
-
-- **Comment-bearing bracket reflow** (committed `dbd0dcd`): rewrote
-  `lower_multiline_bracket` from source-break mirror to canonical fully-exploded
-  form — always one item per line, always a trailing comma, blanks dropped, comment
-  attachment preserved (trailing rides item at one leading space, own-line keeps its
-  line, `[ # header` rides the bracket; `on_line` flag starts true). Killed
-  `adds_trailing_comma`/`Sep`/`GapLine`. `bracket_comments/` gated (also block-comment
-  + multi-space fixtures route here). Gate 6→7.
-- **Width-driven matrix reflow** (committed `8c41393`): made matrices
-  input-independent. `lower_matrix` is now a dispatcher — comment-bearing →
-  `lower_matrix_multiline` (verbatim, source-mirroring), else `lower_matrix_reflow`
-  (one `Ir::group`: flat `[a b; c d]` when it fits, else framed one row per line;
-  rows split at `;` **and** `NEWLINE`, `;;` bails transparent). `matrices/` gated.
-  Trap: default `line_width` is **92** (`style.rs`), not the 80 in `printer.rs`
-  tests. Matrix rows have two CST shapes (bare `ARG` vs `MATRIX_ROW` wrapper).
-- **Function/macro body reflow** (committed `b04bfd6`): dropped the Runic-era
-  `return`-tail guard in `lower_function` so any non-empty body reflows to the
-  canonical 2-space indent (no `return` inserted; layout-only). Gated
-  `function_blocks` with a bare-tail case; fixed `core.rs` unit test. Gate 4→5.
-  Trap: other rules still carry now-historical "never `return`-inserted" comments.
-- **Width-driven collection reflow** (committed `a6fe509`): `lower_collection`
-  rewritten to mirror `lower_arg_list` — one `Ir::group`, flat when it fits else
-  one element per indented line with a broken-only trailing comma; source breaks
-  and trailing commas ignored; the one-tuple `(a,)` keeps its semantic comma in
-  both modes. Gated `collections` + `collection_break`. (RECAP wasn't updated that
-  session; reconciled here.)
-- **Width-driven arg-list reflow** (committed `2d3003d`): made `line_width`
-  actually drive breaking for call/index arg lists — the first reflow construct.
-  New IR primitive `Ir::IfBreak(broken, flat)` (broken-only trailing comma).
-  Printer `col` fix: `Text` now resets `col` after an embedded newline (the
-  transparent path emits raw `\n` as `Text`), and `fits` treats embedded newlines
-  as non-fitting — **watch this** when adding groups. Default indent width 4→2.
-  Gated `call_arg_lists` + `arg_list_break`. Comment-bearing lists and the
-  `;`-`PARAMETERS` tail (`f(a; b=1)`) still stay flat (deferred).
-
-- **The pivot:** removed the Runic target, stood up the hand-authored fixture
-  machinery + the `formatter` skill. Gate started empty; stability green over all
-  65 inputs. (Pre-pivot Runic-parity history lives in git: the `formatter-parity`
-  skill's RECAP through 2026-06-30 logged ~50 constructs landed against the Runic
-  oracle. Those rules survive in `rules.rs` per the inventory above; their parity
-  status is no longer meaningful.)
+- **Short multi-param `where` bound breaks the args** (`feat`): new
+  `Ir::CondGroup { primary, fallback, probe }` measures the re-indented *closing*
+  line, so `f(longargs...) where {T, S}` breaks the args and keeps the bound flat.
+  Return-type case (`)::T where`) deferred. `where_short_multiparam_break`. 118→119.
+- **Glue a sole brace/bracket macro argument** (`feat`): `@m {a}` → `@m{a}`.
+  Dropping the space needs only local info (a suffix folds into the child), unlike
+  adding it. `macro_glued_argument`. 116→117.
+- **Bare-bracket-valued pair tail stops hugging in multi-item lists** (`feat`):
+  `suppress_bare_bracket_pair_hug`, later generalized to the sole-item rule.
+  `pair_list_no_hug`. 115→116.
+- **Signature args break before a single-param `where`** (`feat`): a single type
+  parameter is atomic, so `fits` measures the whole `{T}`. `where_bare_signature_break`. 114→115.
+- **Selector import breaks colon-first** (`feat`): recorded decision above.
+  `import_list_break` updated. Gate unchanged at 114.
+- **The "already canonical, just lock it" run** (`test`, no code, 107→114): chained-pair
+  grouped tail 107→108 and block quotes 111→112 (both recorded decisions above);
+  transpose/adjoint `'` 109→110, where `)'` rides a broken closer via the
+  continuation-`fits` postfix-tail rule and `A '` is excluded as a genuine parse
+  error; quoted symbols 110→111; char + string-macro literals 112→114.
+- **Progress audit — reflow debt found already paid; LSP pivot** (no code): the
+  per-construct cadence had saturated; debt #1 rewritten; recommended the LSP
+  semantic model as the strategic move (since built out — `src/lsp/` is now large).
+- **Broadcast operators + tight `.^`** (`feat`): the dotted family was already
+  canonical; `.^` made tight with a retokenization guard. `broadcasting`. 108→109.
+- **`for`-binding continuation double-indent** (`feat`): `lower_control_header`
+  extended to `FOR_BINDING`; comprehension `for`-clauses go through
+  `lower_for_binding` directly and never double-indent. 106→107.
+- **Control-flow condition continuation double-indent** (`feat`): the original +8
+  rule. `condition_break`. 105→106.
+- **Fluent method chains** (`feat`): `lower_call`/`try_lower_chain`/`collect_chain`;
+  trailing-dot spelling forced by reparse. `method_chain_break`. 104→105.
+- **String/command interpolation** (`feat`): a genuine bug — the transparent path
+  was breaking inside literals. `render_flat` + whole-literal bail. 103→104.
+- **Bracescat `{a; b}`** (`feat`, two sessions, 101→103): routed through `lower_matrix`
+  (structurally identical to a matrix) rather than a bespoke rule, then registered in
+  `construct_reflow_body` for the `{a; b}[k]` subject break.
+- **The comma-list family** (`feat`, three sessions, 97→100): bare tuples 97→98
+  established the `group(concat[first, indent(rest)])` shape; import/using/export
+  lists 98→99 reused it; let bindings 99→100 generalized `lower_bare_tuple` →
+  `lower_comma_list`.
+- **Splat operator snug** (`feat`): postfix analog of `lower_unary`; bracket-closing
+  operand bails pending the outstanding parser gap. `splat_spacing`. 100→101.
+- **Chained-pair hug through the whole spine** (`feat`): `pair_operands` + recursive
+  `pair_hug_chain`. `chained_pair_hug`. 96→97.
+- **Widen `arrow_pair_chain` for `<--`/`.<--`** and **widen the braces comprehension
+  index case** (`test`, no code): both unblocked by resolved parser gaps. Gate 96.
+- **The index-break family — subject yields first** (`feat`, six sessions, 84→96):
+  collection subject 84→85 (the original user decision), call/curly via
+  `call_reflow_body` + `ArgListParts` 85→86, chained postfix via the recursive
+  `index_reflow_body` 88→89, through hugs and `;`-params tails 89→91 (an *ungrouped*
+  `Ir::HugGroup` hands flat-vs-yield to the owning group, zero printer changes),
+  name-rooted via `applied_args_body` 93→94, comprehensions via
+  `comprehension_reflow_body`/`typed_comprehension_reflow_body` 94→95, parens via
+  `paren_reflow_body` 95→96.
+- **The hugging family** (`feat`, three sessions, 82→88): trailing bracket argument as
+  a bare concat 82→83; `Ir::HugGroup` + the explode fallback 83→84 (printer `hug_fits`
+  seeds the shared `fits_stack` loop with the body in Break mode; nested hugs measure
+  conservatively, by user choice); kwarg values and collection elements 86→88
+  (`item_is_huggable`/`huggable_kind`, explode bodies unified on
+  `bracket_explode_body`).
+- **Pair-value hugging** (`feat`): `=>`/`.=>` are hug-transparent; `-->`/`<-->`
+  explode. Source of the four-hug-site trap above. `pair_hug`. 92→93.
+- **Arrow/pair tier flatten + Runic doc-comment sweep** (`feat`): `binary_prec_class`
+  tier 3; ~25 rationale comments reworded. 91→92.
+- **Postfix tails on breaking groups** (three `test`-only sessions): single tail on a
+  call, chained tails on a call, tails on a non-call bracket group. Continuation-aware
+  `fits` already made all three canonical. 79→82.
+- **Uniform mixed same-precedence chain break** (`feat`): `binary_prec_class` +
+  `same_break_tier` mirroring the parser's `infix_binding_power`. Consequence:
+  bitwise `|`/`&` share the plus/times tiers. 78→79.
+- **Uniform same-operator chain break** (`feat`): `collect_binary_chain`. 77→78.
+- **Continuation-aware `fits`** (`feat`): the first post-pivot printer change, and
+  the one the Standing trap above describes. `where_break`. 76→77.
+- **Paren-block break + newline reflow** (`feat`): `;` snug after each but the last. 75→76.
+- **`;`-keyword tail break** (`feat`): the `;`-`PARAMETERS` tail folds into the same
+  group as the positionals; `;` trails the last positional. 74→75.
+- **Comprehension/generator reflow** (`feat`): each `for`/`if` clause on its own line;
+  `NEWLINE` skipping dropped a `has_newline_token` call site. 71→74.
+- **Unary prefix operators** (`feat`): snug, with the `- -a` → `--a` retokenization
+  bail. 70→71.
+- **Macro-call spacing** (`feat`): the call-form vs space-form split. 69→70.
+- **Gating sweeps** (`test`, no code): comments 65→69; spacing/padding pile +
+  `*_divergence` slugs renamed 57→65; module bodies 53→57 (the lone file-wrapper
+  module stays flush, nested always indents); global/local multi-name lists 51→53;
+  the operator/literal pile, 15 fixtures at once, 36→51; keyword statements 17→18;
+  six bracket/matrix fixtures 9→15.
+- **Empty-body folds** (`feat`): struct collapse + `block_is_empty` 18→19,
+  generalized to the single-body blocks via `push_block_body` 19→20, extended to
+  `if`/`do` via `lower_body_allow_empty` 33→34. `try` never inline-folds.
+- **The operator rules going width-driven** (`feat`, four sessions): binary/assignment
+  26→28 — assignment ops never break, the RHS's own group absorbs it (`x = a +⏎ b`,
+  never `x =⏎ a + b`); ternary 28→31 (operator-trailing, nested chains nest deeper);
+  comparison + arrow 31→33 (`lower_arrow` stays flat, assignment-style bias);
+  type-declaration whitespace 34→36, the last `lower_type_decl` source mirror.
+- **Top-level structure** (`feat`): blank-line policy in `lower_root`, which extracted
+  `collect_body_lines`, 20→23; `;`-join reflow via `collect_body_elements` 23→24.
+  Block-body `;`-separator + 1-blank cap (`;` reflows like a newline) 15→17.
+- **Width-driven paren reflow** (`feat`): killed the `has_newline_token` mirror in
+  `PAREN_EXPR`. 24→26.
+- **The bracket/matrix family** (`feat`, four sessions): arg-list reflow — the first
+  reflow construct, introduced `Ir::IfBreak`; collection reflow, where the one-tuple
+  `(a,)` keeps its semantic comma in both modes; matrix reflow, making `lower_matrix`
+  a dispatcher (rows have two CST shapes, bare `ARG` vs `MATRIX_ROW`); then the
+  comment-bearing bracket 6→7 and matrix 7→9 rewrites from source mirror to canonical
+  framed form. A comment *inside* a `MATRIX_ROW` still bails transparent.
+- **Function/macro body reflow** (`feat`): dropped the Runic-era `return`-tail guard.
+- **The pivot:** removed the Runic.jl differential-parity target (`tests/runic_oracle.rs`,
+  the corpus scripts, allowlists, Taskfile tasks, and `Runic` from `devenv.nix`), stood
+  up the hand-authored fixture machinery, renamed the skill `formatter-parity` →
+  `formatter`. All 65 fixtures kept `input.jl`; every Runic-minted `expected.jl` was
+  deleted, so the gate restarted empty. Pre-pivot parity history lives in git (~50
+  constructs landed against the Runic oracle); their parity status is meaningless now.
