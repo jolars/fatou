@@ -18,7 +18,7 @@
 //! `ast_node!`/`ast_token!` entry, its accessors (via `support::`), any relevant
 //! `Has*` impl, re-export it below, and add an accessor test.
 
-pub use rowan::ast::{AstChildren, AstNode, AstPtr, SyntaxNodePtr, support};
+pub use rowan::ast::AstNode;
 
 pub mod nodes;
 pub mod tokens;
@@ -35,5 +35,5 @@ pub use nodes::{
     Root, Signature, SplatExpr, StringLiteral, StructDef, TernaryExpr, TryExpr, TupleExpr,
     TypeAnnotation, UnaryExpr, UsingStmt, VectExpr, WhereExpr, WhileExpr, is_expr_kind,
 };
-pub use tokens::{AstToken, Ident, Operator, child_token};
-pub use traits::{HasArgList, HasBody, HasCondition};
+pub use tokens::{AstToken, Ident, Operator};
+pub use traits::{HasArgList, HasBody, HasCondition, body_of, condition_of};

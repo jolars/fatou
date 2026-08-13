@@ -155,6 +155,11 @@ pub enum Expr {
     ReturnExpr(ReturnExpr),
     BreakExpr(BreakExpr),
     ContinueExpr(ContinueExpr),
+    QuoteSym(QuoteSym),
+    StructDef(StructDef),
+    AbstractDef(AbstractDef),
+    PrimitiveDef(PrimitiveDef),
+    ModuleDef(ModuleDef),
     /// An expression-position node without a dedicated variant (see the type
     /// docs). Guaranteed to satisfy [`is_expr_kind`].
     Other(SyntaxNode),
@@ -274,6 +279,13 @@ impl AstNode for Expr {
             SyntaxKind::RETURN_EXPR => Expr::ReturnExpr(ReturnExpr(syntax)),
             SyntaxKind::BREAK_EXPR => Expr::BreakExpr(BreakExpr(syntax)),
             SyntaxKind::CONTINUE_EXPR => Expr::ContinueExpr(ContinueExpr(syntax)),
+            SyntaxKind::QUOTE_SYM => Expr::QuoteSym(QuoteSym(syntax)),
+            SyntaxKind::STRUCT_DEF => Expr::StructDef(StructDef(syntax)),
+            SyntaxKind::ABSTRACT_DEF => Expr::AbstractDef(AbstractDef(syntax)),
+            SyntaxKind::PRIMITIVE_DEF => Expr::PrimitiveDef(PrimitiveDef(syntax)),
+            SyntaxKind::MODULE_DEF => Expr::ModuleDef(ModuleDef(syntax)),
+            // `TYPEGROUP_DEF` is an expression kind with no wrapper of its own,
+            // so it is the one kind that reaches consumers as `Other` by design.
             kind if is_expr_kind(kind) => Expr::Other(syntax),
             _ => return None,
         };
@@ -320,6 +332,11 @@ impl AstNode for Expr {
             Expr::ReturnExpr(it) => it.syntax(),
             Expr::BreakExpr(it) => it.syntax(),
             Expr::ContinueExpr(it) => it.syntax(),
+            Expr::QuoteSym(it) => it.syntax(),
+            Expr::StructDef(it) => it.syntax(),
+            Expr::AbstractDef(it) => it.syntax(),
+            Expr::PrimitiveDef(it) => it.syntax(),
+            Expr::ModuleDef(it) => it.syntax(),
             Expr::Other(it) => it,
         }
     }
@@ -683,8 +700,10 @@ impl MacroName {
 }
 
 impl TypeAnnotation {
-    /// The `::` operator token.
-    pub fn op(&self) -> Option<SyntaxToken> {
+    /// The `::` operator token. Private: unlike the other `op()` accessors this
+    /// returns a raw token rather than a typed [`Operator`], and it exists only
+    /// to split the children in [`Self::pattern`] and [`Self::ty`].
+    fn op(&self) -> Option<SyntaxToken> {
         support::token(&self.0, SyntaxKind::COLON_COLON)
     }
 
@@ -1078,5 +1097,80 @@ mod tests {
         // A bare `do` block has no `DO_PARAMS`.
         let do_expr: DoExpr = find("f() do\n    1\nend\n");
         assert!(do_expr.params().is_none());
+    }
+
+    /// Every expression kind that has a wrapper must reach [`Expr`] through its
+    /// own variant, never through `Other`. These five were accepted by
+    /// [`is_expr_kind`] while `Expr::cast` had no arm for them, so they arrived
+    /// as `Other` and callers hand-rolled a `SyntaxKind` check to recover them.
+    #[test]
+    fn wrapped_kinds_cast_to_their_own_variant() {
+        /// Cast the first `kind` node in `src`.
+        fn cast_first(src: &str, kind: SyntaxKind) -> Expr {
+            let node = parse(src)
+                .cst
+                .descendants()
+                .find(|n| n.kind() == kind)
+                .unwrap_or_else(|| panic!("{kind:?} present in {src:?}"));
+            Expr::cast(node).unwrap_or_else(|| panic!("{kind:?} casts to Expr"))
+        }
+
+        assert!(matches!(
+            cast_first(":x\n", SyntaxKind::QUOTE_SYM),
+            Expr::QuoteSym(_)
+        ));
+        assert!(matches!(
+            cast_first("struct S\nx\nend\n", SyntaxKind::STRUCT_DEF),
+            Expr::StructDef(_)
+        ));
+        assert!(matches!(
+            cast_first("abstract type T end\n", SyntaxKind::ABSTRACT_DEF),
+            Expr::AbstractDef(_)
+        ));
+        assert!(matches!(
+            cast_first("primitive type P 8 end\n", SyntaxKind::PRIMITIVE_DEF),
+            Expr::PrimitiveDef(_)
+        ));
+        assert!(matches!(
+            cast_first("module M\nend\n", SyntaxKind::MODULE_DEF),
+            Expr::ModuleDef(_)
+        ));
+    }
+
+    /// `TYPEGROUP_DEF` is the one expression kind with no wrapper, so it is the
+    /// only kind that legitimately reaches a consumer as `Expr::Other`.
+    #[test]
+    fn typegroup_def_is_the_only_wrapperless_expr_kind() {
+        let node = parse("abstract type T end\n")
+            .cst
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::TYPEGROUP_DEF);
+        if let Some(node) = node {
+            assert!(matches!(Expr::cast(node), Some(Expr::Other(_))));
+        }
+    }
+
+    #[test]
+    fn body_of_and_condition_of_match_the_traits() {
+        use crate::ast::traits::{body_of, condition_of};
+
+        let func: FunctionDef = find("function f()\n    1\nend\n");
+        assert_eq!(
+            body_of(func.syntax()).map(|b| b.text().to_string()),
+            func.body().map(|b| b.syntax().text().to_string()),
+        );
+
+        let while_expr: WhileExpr = find("while c\n    1\nend\n");
+        assert_eq!(
+            condition_of(while_expr.syntax()).map(|c| c.text().to_string()),
+            while_expr
+                .condition()
+                .map(|c| c.syntax().text().to_string()),
+        );
+
+        // A node with neither shape yields `None` rather than a stray child.
+        let name: Name = find("x\n");
+        assert!(body_of(name.syntax()).is_none());
+        assert!(condition_of(name.syntax()).is_none());
     }
 }
