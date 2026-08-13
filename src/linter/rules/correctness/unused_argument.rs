@@ -22,7 +22,7 @@
 //! from a mistake. The rule is therefore **off by default** ([`default_enabled`]
 //! returns `false`); users opt in with `--select unused-argument`.
 
-use crate::ast::{AstNode, AstToken, CallExpr, Expr, Name};
+use crate::ast::{AstNode, AstToken, CallExpr, Expr, Name, body_of};
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::semantic::BindingKind;
@@ -118,10 +118,7 @@ fn enclosing_body_is_stub(root: &SyntaxNode, def_range: rowan::TextRange) -> boo
 fn sole_body_expr(func: &SyntaxNode) -> Option<SyntaxNode> {
     let mut body = match func.kind() {
         // The `end`-closed block holds the statements.
-        SyntaxKind::FUNCTION_DEF | SyntaxKind::DO_EXPR => func
-            .children()
-            .find(|c| c.kind() == SyntaxKind::BLOCK)?
-            .children(),
+        SyntaxKind::FUNCTION_DEF | SyntaxKind::DO_EXPR => body_of(func)?.children(),
         // Short-form `lhs = rhs` and `params -> rhs`: the body is the rhs.
         SyntaxKind::ASSIGNMENT_EXPR | SyntaxKind::ARROW_EXPR => {
             let mut children = func.children();

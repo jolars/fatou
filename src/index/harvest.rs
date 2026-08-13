@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use rowan::TextRange;
 
-use crate::ast::{AstNode, AstToken, CallExpr, Expr, HasArgList};
+use crate::ast::{AstNode, AstToken, CallExpr, Expr, HasArgList, body_of};
 use crate::project::{include_target, resolve_target};
 use crate::semantic::collect_import_clauses;
 use crate::semantic::signature::{annotation_parts, has_call_core, peel_signature, type_name_of};
@@ -251,7 +251,7 @@ impl Harvester {
             // A `typegroup` block introduces no scope of its own — its types
             // are defined in the enclosing one — so walk its body in place.
             SyntaxKind::TYPEGROUP_DEF => {
-                if let Some(block) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+                if let Some(block) = body_of(node) {
                     for child in block.children() {
                         self.walk_item(&child, file, dest, at_root, None);
                     }
@@ -359,7 +359,7 @@ impl Harvester {
         let Some((name, range)) = module_name(node) else {
             return;
         };
-        let block = node.children().find(|c| c.kind() == SyntaxKind::BLOCK);
+        let block = body_of(node);
 
         // The package's own `module <Name>` absorbs into the synthesized root
         // rather than nesting a module of the same name inside it.
@@ -525,7 +525,7 @@ impl Harvester {
         };
 
         let mut fields = Vec::new();
-        if let Some(block) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+        if let Some(block) = body_of(node) {
             self.collect_struct_body(&block, &name, file, dest, &mut fields);
         }
 

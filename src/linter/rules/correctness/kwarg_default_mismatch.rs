@@ -44,7 +44,7 @@
 //! buy nothing here, since the only annotation shape that survives gate 2 is
 //! the bare name whose *token* the resolution gate needs anyway.
 
-use crate::ast::{Arg, AstNode, AstToken, Expr, Parameters, QuoteSym, TypeAnnotation};
+use crate::ast::{Arg, AstNode, AstToken, Expr, Parameters, TypeAnnotation};
 use crate::linter::diagnostic::{Diagnostic, Severity};
 use crate::linter::rules::matchers;
 use crate::linter::rules::{Example, Rule, RuleContext};
@@ -92,10 +92,7 @@ impl LiteralType {
             // Only the bare-name form is a `Symbol`: `:(x + 1)` is an `Expr`,
             // and a quoted operator or keyword (`:+`, `:if`) carries no node to
             // check.
-            _ if expr.syntax().kind() == SyntaxKind::QUOTE_SYM => {
-                let quoted = QuoteSym::cast(expr.syntax().clone())?.expr()?;
-                matches!(quoted, Expr::Name(_)).then_some(Self::Symbol)
-            }
+            Expr::QuoteSym(sym) => matches!(sym.expr()?, Expr::Name(_)).then_some(Self::Symbol),
             _ => None,
         }
     }

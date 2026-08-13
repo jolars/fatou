@@ -11,7 +11,7 @@
 use rowan::TextRange;
 use smol_str::SmolStr;
 
-use crate::ast::{AstNode, AstToken, Name};
+use crate::ast::{AstNode, AstToken, Name, body_of};
 use crate::parser::{is_ident_continue, is_ident_start};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -1488,7 +1488,7 @@ impl Builder {
         {
             self.walk_type_signature(&start, scope, struct_scope);
         }
-        if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+        if let Some(body) = body_of(node) {
             // Fields bind; anything else (inner constructors, docstrings)
             // declares and walks as usual inside the struct scope. Field forms
             // cover plain, annotated, `@kwdef`-defaulted, and `const` fields —
@@ -1579,7 +1579,7 @@ impl Builder {
             module_name = Some(SmolStr::new(token.text()));
             self.write_name(&token, scope, Access::Write);
         }
-        let body = node.children().find(|c| c.kind() == SyntaxKind::BLOCK);
+        let body = body_of(node);
         let range = body
             .as_ref()
             .map_or_else(|| node.text_range(), |b| b.text_range());
@@ -1621,7 +1621,7 @@ impl Builder {
                 }
             }
         }
-        if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+        if let Some(body) = body_of(node) {
             let body_scope = self.push_scope(ScopeKind::Let, Some(current), body.text_range());
             self.declare_in(&body, body_scope);
             self.walk_children(&body, body_scope);
@@ -1667,7 +1667,7 @@ impl Builder {
             // Recovery: a `for` with no binding still scopes its body.
             current = self.push_scope(ScopeKind::For, Some(scope), node.text_range());
         }
-        if let Some(body) = node.children().find(|c| c.kind() == SyntaxKind::BLOCK) {
+        if let Some(body) = body_of(node) {
             self.declare_in(&body, current);
             self.walk_children(&body, current);
         }
@@ -1761,7 +1761,7 @@ impl Builder {
             .children()
             .find(|c| c.kind() == SyntaxKind::SIGNATURE)
             .and_then(|sig| sig.children().next());
-        let body = node.children().find(|c| c.kind() == SyntaxKind::BLOCK);
+        let body = body_of(node);
         let fn_scope = self.push_scope(ScopeKind::Function, Some(scope), node.text_range());
         if let Some(start) = signature {
             self.walk_signature(start, scope, fn_scope);
@@ -1902,7 +1902,7 @@ impl Builder {
     /// `do` parameters and body form a function scope.
     fn handle_do(&mut self, node: &SyntaxNode, scope: ScopeId) {
         let params = node.children().find(|c| c.kind() == SyntaxKind::DO_PARAMS);
-        let body = node.children().find(|c| c.kind() == SyntaxKind::BLOCK);
+        let body = body_of(node);
         for child in node.children() {
             if !matches!(child.kind(), SyntaxKind::DO_PARAMS | SyntaxKind::BLOCK) {
                 self.walk_node(&child, scope);

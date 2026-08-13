@@ -27,7 +27,7 @@
 use rowan::TextRange;
 use rowan::ast::AstNode as _;
 
-use crate::ast::{AstToken as _, CallExpr};
+use crate::ast::{AstToken as _, CallExpr, body_of};
 use crate::linter::diagnostic::Diagnostic;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::semantic::ControlFlowGraph;
@@ -44,7 +44,7 @@ fn region_body(owner: &SyntaxNode) -> Option<SyntaxNode> {
     if owner.kind() == SyntaxKind::ROOT {
         return Some(owner.clone());
     }
-    owner.children().find(|c| c.kind() == SyntaxKind::BLOCK)
+    body_of(owner)
 }
 
 /// Whether every `throw`/`error`/`rethrow` call in this region resolves to

@@ -46,7 +46,7 @@ use rowan::TextRange;
 use rowan::ast::AstNode as _;
 use smol_str::SmolStr;
 
-use crate::ast::{AstToken as _, CallExpr};
+use crate::ast::{AstToken as _, CallExpr, body_of, condition_of};
 use crate::syntax::{NodePtr, SyntaxElement, SyntaxKind, SyntaxNode};
 
 /// Index of a [`BasicBlock`] within a [`ControlFlowGraph`].
@@ -212,7 +212,7 @@ impl FileControlFlow {
         let regions: Vec<_> = root
             .descendants()
             .filter(|node| is_region_owner(node.kind()))
-            .filter(|node| body_block(node).is_some())
+            .filter(|node| body_of(node).is_some())
             .map(|node| (NodePtr::new(&node), build_region_of(&node)))
             .collect();
         let mut this = Self {
@@ -292,7 +292,7 @@ fn build_region_of(owner: &SyntaxNode) -> ControlFlowGraph {
     let body = if owner.kind() == SyntaxKind::ROOT {
         owner.clone()
     } else {
-        body_block(owner).expect("region owner has a body block")
+        body_of(owner).expect("region owner has a body block")
     };
     let mut labels = HashSet::new();
     collect_labels(&body, &mut labels);
@@ -312,11 +312,6 @@ fn is_region_owner(kind: SyntaxKind) -> bool {
             | SyntaxKind::DO_EXPR
             | SyntaxKind::MODULE_DEF
     )
-}
-
-/// The `BLOCK` child that is a node's body (`None` for a bare `function f end`).
-fn body_block(node: &SyntaxNode) -> Option<SyntaxNode> {
-    node.children().find(|c| c.kind() == SyntaxKind::BLOCK)
 }
 
 /// Builder state: the block arena being filled, plus the region's labels.
@@ -479,7 +474,7 @@ impl Builder {
             // names, not control. Only their statements are recorded — the
             // wrapper is not a step of its own.
             SyntaxKind::BLOCK => self.lower_seq(&region_statements(node), cur, loop_ctx),
-            SyntaxKind::BEGIN_EXPR | SyntaxKind::LET_EXPR => match body_block(node) {
+            SyntaxKind::BEGIN_EXPR | SyntaxKind::LET_EXPR => match body_of(node) {
                 Some(body) => self.lower_seq(&region_statements(&body), cur, loop_ctx),
                 None => Some(cur),
             },
@@ -490,7 +485,7 @@ impl Builder {
             }
             SyntaxKind::FOR_EXPR | SyntaxKind::WHILE_EXPR => {
                 self.push_stmt(cur, node.text_range());
-                let body = body_block(node);
+                let body = body_of(node);
                 // Only a loop with no exit of its own can make its continuation
                 // unreachable, so only there does a `break` hidden in a macro
                 // expansion matter.
@@ -684,7 +679,7 @@ impl Builder {
             (None, None) => self.set_term(cur, Terminator::Goto(try_blk)),
         }
 
-        let try_body = body_block(node)
+        let try_body = body_of(node)
             .map(|b| region_statements(&b))
             .unwrap_or_default();
         let try_exit = self.lower_seq(&try_body, try_blk, loop_ctx);
@@ -771,18 +766,18 @@ fn is_ignorable(kind: SyntaxKind) -> bool {
 fn if_arms(node: &SyntaxNode) -> (Vec<Vec<SyntaxElement>>, Option<Vec<SyntaxElement>>) {
     let mut guarded = Vec::new();
     let mut unguarded = None;
-    if let Some(body) = body_block(node) {
+    if let Some(body) = body_of(node) {
         guarded.push(region_statements(&body));
     }
     for child in node.children() {
         match child.kind() {
             SyntaxKind::ELSEIF_CLAUSE => {
-                if let Some(body) = body_block(&child) {
+                if let Some(body) = body_of(&child) {
                     guarded.push(region_statements(&body));
                 }
             }
             SyntaxKind::ELSE_CLAUSE => {
-                unguarded = body_block(&child).map(|body| region_statements(&body));
+                unguarded = body_of(&child).map(|body| region_statements(&body));
             }
             _ => {}
         }
@@ -794,14 +789,13 @@ fn if_arms(node: &SyntaxNode) -> (Vec<Vec<SyntaxElement>>, Option<Vec<SyntaxElem
 fn clause_body(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
     node.children()
         .find(|c| c.kind() == kind)
-        .and_then(|clause| body_block(&clause))
+        .and_then(|clause| body_of(&clause))
 }
 
 /// Whether a `while`'s test is the literal `true` — Julia's infinite loop, as
 /// it has no dedicated construct for one.
 fn has_literal_true_test(node: &SyntaxNode) -> bool {
-    node.children()
-        .find(|c| c.kind() == SyntaxKind::CONDITION)
+    condition_of(node)
         .and_then(|cond| cond.children().next())
         .is_some_and(|test| {
             test.kind() == SyntaxKind::LITERAL
