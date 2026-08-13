@@ -58,9 +58,16 @@ dependency order — so a member-crate bump ships on the next CLI tag.
 ## Quality gates
 
 Treat CI as the source of truth. `lint.yml` runs clippy `-D warnings` and the
-rustfmt check; `build-and-test.yml` adds the wasm build and supply chain. A
-dependency change must stay clean under `cargo-audit` and `cargo-deny`
-(`deny.toml`, `audit.toml`), both of which gate the release PR. Locally,
+rustfmt check; `build-and-test.yml` adds the wasm build, minimal versions, and
+supply chain. A dependency change must stay clean under `cargo-audit` and
+`cargo-deny` (`deny.toml`, `audit.toml`), both of which gate the release PR.
+
+**Declare honest lower bounds.** A published crate's version requirements are a
+contract: `fatou-parser` and `fatou-formatter` go to crates.io, and the
+committed lockfile hides an understated bound because it resolves to the latest
+patch. The `minimal-versions` job resolves direct dependencies down to their
+declared minimums and compiles, so **raise a requirement when you use an API
+newer than it** — the bump belongs in the same commit as the code that needs it. Locally,
 `devenv.nix` declares the git hooks (clippy, rustfmt, biome).
 
 **The wasm job is a real constraint, not a formality**: it is the only thing

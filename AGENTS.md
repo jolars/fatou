@@ -158,8 +158,9 @@ matching `.claude/rules/` file.
 ## Invariants and conventions
 
 - **Treat CI as the source of truth for quality gates** (`.github/workflows/`):
-  cross-platform build/test, the **wasm build** of both member crates,
-  `cargo-audit` + `cargo-deny`, clippy `-D warnings`, and the rustfmt check.
+  cross-platform build/test, the **wasm build** of both member crates, the
+  **minimal-versions** check on declared dependency bounds, `cargo-audit` +
+  `cargo-deny`, clippy `-D warnings`, and the rustfmt check.
 - **Losslessness:** `reconstruct(text) == text`, byte for byte.
 - **Idempotence:** `format(format(x)) == format(x)`, and the output reparses
   cleanly. Byte-identical output is the bar for a "behavior-preserving" refactor.

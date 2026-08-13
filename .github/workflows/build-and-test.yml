@@ -50,6 +50,32 @@ jobs:
           cargo build -p fatou-formatter --release
           --target wasm32-unknown-unknown --features schema
 
+  minimal-versions:
+    name: minimal versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Nightly resolves the lockfile; the compile itself still runs on the
+      # same stable toolchain as every other job, so nightly rustc churn can
+      # never fail this gate.
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: minimal-versions
+      # The manifests' lower bounds are a promise to downstream crates:
+      # `fatou-parser` and `fatou-formatter` are published, so whatever version
+      # a dependent's resolver picks has to actually compile. The committed
+      # lockfile hides an understated bound because it always picks the latest
+      # patch; resolving every *direct* dependency down to its declared minimum
+      # is what tests the promise. (Plain `-Z minimal-versions` would drag
+      # transitive deps down too, which turns third-party sloppiness into our
+      # CI failures.)
+      - name: Resolve direct dependencies to their declared minimums
+        run: cargo +nightly generate-lockfile -Z direct-minimal-versions
+      - name: Check
+        run: cargo check --workspace --all-targets --all-features --locked
+
   supply-chain:
     name: audit & deny
     runs-on: ubuntu-latest
@@ -66,7 +92,7 @@ jobs:
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, wasm, supply-chain]
+    needs: [test, wasm, minimal-versions, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write
