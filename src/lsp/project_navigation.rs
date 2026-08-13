@@ -35,7 +35,7 @@ use crate::incremental::{Analysis, normalize_path};
 use crate::index::Span;
 use crate::project_files::{dep_at, dep_entries, manifest_paths};
 use crate::resolve::PackageSource;
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::definition::site_locations;
 use super::uri;
@@ -87,7 +87,7 @@ pub(crate) fn project_definition<P: PackageSource>(
     packages: &P,
 ) -> Vec<Location> {
     let offset = text.line_index().position_to_byte(position, encoding);
-    let Some(dep) = dep_at(text, offset) else {
+    let Some(dep) = dep_at(&text.text(), offset) else {
         return Vec::new();
     };
     let Some(site) = package_entry(packages, &dep.name) else {
@@ -121,13 +121,13 @@ pub(crate) fn project_hover<L: ProjectLibrary>(
 ) -> Option<Hover> {
     let line_index = text.line_index();
     let offset = line_index.position_to_byte(position, encoding);
-    let dep = dep_at(text, offset)?;
+    let dep = dep_at(&text.text(), offset)?;
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
             value: dep_markdown(&dep.name, library)?,
         }),
-        range: Some(to_range(dep.name_range, &line_index, encoding)),
+        range: Some(to_range(dep.name_range, line_index, encoding)),
     })
 }
 
@@ -189,12 +189,12 @@ pub(crate) fn project_document_links<P: PackageSource>(
     packages: &P,
 ) -> Vec<DocumentLink> {
     let line_index = text.line_index();
-    dep_entries(text)
+    dep_entries(&text.text())
         .into_iter()
         .filter_map(|dep| {
             let (entry, _) = package_entry(packages, &dep.name)?;
             Some(DocumentLink {
-                range: to_range(dep.name_range, &line_index, encoding),
+                range: to_range(dep.name_range, line_index, encoding),
                 target: Some(uri::from_path(&entry)?),
                 tooltip: None,
                 data: None,
@@ -240,7 +240,7 @@ pub(crate) fn manifest_document_links(
         return Vec::new();
     };
     let line_index = text.line_index();
-    manifest_paths(text)
+    manifest_paths(&text.text())
         .into_iter()
         .filter_map(|entry| {
             // An empty path resolves to the manifest's own directory, which is
@@ -255,7 +255,7 @@ pub(crate) fn manifest_document_links(
             let root = normalize_path(&resolve_dev_path(base_dir, &entry.path));
             let target = project_file_in(&root).unwrap_or(root);
             Some(DocumentLink {
-                range: to_range(entry.range, &line_index, encoding),
+                range: to_range(entry.range, line_index, encoding),
                 target: Some(uri::from_path(&target)?),
                 tooltip: None,
                 data: None,
@@ -288,7 +288,7 @@ pub(crate) fn project_inlay_hints<L: ProjectLibrary>(
     // hint outside it is dropped rather than computed and thrown away.
     let start = line_index.position_to_byte(range.start, encoding);
     let end = line_index.position_to_byte(range.end, encoding);
-    dep_entries(text)
+    dep_entries(&text.text())
         .into_iter()
         .filter_map(|dep| {
             let at = usize::from(dep.uuid_range.end());
@@ -331,7 +331,7 @@ pub(crate) fn project_inlay_hints_via_db(
     .unwrap_or_default()
 }
 
-fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(range.start().into(), encoding),
         end: line_index.byte_to_position(range.end().into(), encoding),
@@ -593,7 +593,7 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
     /// under the cursor there jumps nowhere either — one join, one answer.
     #[test]
     fn an_unlocated_dependency_has_no_link() {
-        let text = TextBuffer::new(PROJECT.to_string());
+        let text = TextBuffer::new(PROJECT);
         assert!(
             project_document_links(&text, PositionEncoding::Utf16, &TestLib::default()).is_empty()
         );
@@ -602,7 +602,7 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
     #[test]
     fn a_broken_project_file_has_no_links() {
         let (_tmp, lib, _entry) = greetings();
-        let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n".to_string());
+        let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n");
         assert!(project_document_links(&text, PositionEncoding::Utf16, &lib).is_empty());
     }
 
@@ -621,14 +621,10 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
     }
 
     fn manifest_links(text: &str, path: &Path) -> Vec<(Range, String)> {
-        manifest_document_links(
-            &TextBuffer::new(text.to_string()),
-            path,
-            PositionEncoding::Utf16,
-        )
-        .into_iter()
-        .map(|link| (link.range, link.target.expect("a link target").to_string()))
-        .collect()
+        manifest_document_links(&TextBuffer::new(text), path, PositionEncoding::Utf16)
+            .into_iter()
+            .map(|link| (link.range, link.target.expect("a link target").to_string()))
+            .collect()
     }
 
     /// The link covers the path text, and lands on the root's project file —
@@ -768,6 +764,7 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
             panic!("expected exactly one hint, got {hints:?}");
         };
         assert_eq!(label(hint), "v0.4.5");
+        let text = text.text();
         let deps_line = text.lines().nth(3).expect("the Greetings line");
         assert_eq!(
             hint.position,
@@ -805,7 +802,7 @@ Greetings = \"1520ce14-60c1-5f80-bbc7-55ef81b5835c\"
             "Greetings".to_string(),
             meta(Some("0.4.5"), PackageKind::Registered),
         );
-        let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n".to_string());
+        let text = TextBuffer::new("[deps\nGreetings = \"1520ce14\"\n");
         assert!(project_inlay_hints(&text, WHOLE_FILE, PositionEncoding::Utf16, &lib).is_empty());
     }
 

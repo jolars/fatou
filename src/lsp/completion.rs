@@ -42,7 +42,7 @@ use crate::resolve::{
 };
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::latex_symbols::{EMOJI_SYMBOLS, LATEX_SYMBOLS};
 use super::render::{binding_detail, function_detail, type_detail};
@@ -67,7 +67,7 @@ pub fn compute_completions<P: PackageSource>(
     encoding: PositionEncoding,
     packages: &P,
 ) -> Vec<CompletionItem> {
-    let offset = LineIndex::new(text).position_to_byte(position, encoding);
+    let offset = TextBuffer::new(text).position_to_byte(position, encoding);
     let root = parse(text).cst;
     let model = SemanticModel::build(&root);
     // The pure path has no file path to key workspace membership on; the live
@@ -105,13 +105,19 @@ pub(crate) fn completion_via_db(
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
         Some(completions_for(
-            model, &root, snapshot, workspace, text, offset, encoding,
+            model,
+            &root,
+            snapshot,
+            workspace,
+            &text.text(),
+            offset,
+            encoding,
         ))
     }));
     match cached {
         Ok(Some(items)) => items,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_completions(text, position, encoding, snapshot),
+        Ok(None) | Err(_) => compute_completions(&text.text(), position, encoding, snapshot),
     }
 }
 
@@ -311,7 +317,7 @@ fn latex_items(
     encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
     let typed = &text[start..offset];
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let range = lsp_types::Range {
         start: line_index.byte_to_position(start, encoding),
         end: line_index.byte_to_position(offset, encoding),
@@ -707,7 +713,7 @@ mod tests {
         lib: &BTreeMap<String, Arc<PackageIndex>>,
     ) -> Vec<CompletionItem> {
         let offset = src.find(needle).unwrap() + needle.len();
-        let line_index = LineIndex::new(src);
+        let line_index = TextBuffer::new(src);
         let position = line_index.byte_to_position(offset, PositionEncoding::Utf16);
         compute_completions(src, position, PositionEncoding::Utf16, lib)
     }

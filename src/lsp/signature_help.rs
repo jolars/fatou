@@ -35,7 +35,7 @@ use crate::parser::parse;
 use crate::resolve::{Namespace, PackageSource, Resolution, Resolver, resolve_submodule};
 use crate::semantic::{BindingKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::render::signature_label;
 
@@ -54,7 +54,7 @@ pub fn compute_signature_help<P: PackageSource>(
 ) -> Option<SignatureHelp> {
     let parsed = parse(text);
     let model = SemanticModel::build(&parsed.cst);
-    let offset = TextSize::new(LineIndex::new(text).position_to_byte(position, encoding) as u32);
+    let offset = TextSize::new(TextBuffer::new(text).position_to_byte(position, encoding) as u32);
     signature_help_for(&model, packages, &parsed.cst, offset)
 }
 
@@ -85,7 +85,7 @@ pub(crate) fn signature_help_via_db(
     match cached {
         Ok(Some(help)) => help,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_signature_help(text, position, encoding, snapshot),
+        Ok(None) | Err(_) => compute_signature_help(&text.text(), position, encoding, snapshot),
     }
 }
 
@@ -498,7 +498,7 @@ mod tests {
     fn help_at(marked: &str, lib: &BTreeMap<String, Arc<PackageIndex>>) -> Option<SignatureHelp> {
         let offset = marked.find('|').expect("a cursor marker");
         let src = marked.replacen('|', "", 1);
-        let line_index = LineIndex::new(&src);
+        let line_index = TextBuffer::new(&src);
         let position = line_index.byte_to_position(offset, PositionEncoding::Utf16);
         compute_signature_help(&src, position, PositionEncoding::Utf16, lib)
     }
@@ -666,7 +666,7 @@ mod tests {
         ));
         let lib = library(vec![package(base)]);
         let buffer = "map(sin, xs)\n";
-        let position = LineIndex::new(buffer).byte_to_position(9, PositionEncoding::Utf8);
+        let position = TextBuffer::new(buffer).byte_to_position(9, PositionEncoding::Utf8);
         let expected = compute_signature_help(buffer, position, PositionEncoding::Utf8, &lib);
         assert!(expected.is_some());
 
@@ -679,7 +679,7 @@ mod tests {
             signature_help_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 position,
                 PositionEncoding::Utf8
             ),
@@ -691,7 +691,7 @@ mod tests {
             signature_help_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(other.to_string()),
+                &TextBuffer::new(other),
                 position,
                 PositionEncoding::Utf8
             ),

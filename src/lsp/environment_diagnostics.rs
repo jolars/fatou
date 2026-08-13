@@ -16,7 +16,7 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 use crate::environment::{Environment, EnvironmentError};
 use crate::linter::Severity;
 use crate::project_files::{self, ProjectFinding};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// Every finding of one resolve pass, grouped by the file it attaches to. A
 /// file with no findings is absent rather than mapped to an empty vector; the
@@ -61,7 +61,7 @@ pub(crate) fn buffer_diagnostics(
     if findings.is_empty() {
         return Vec::new();
     }
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     findings
         .iter()
         .map(|finding| to_lsp(finding, &line_index, encoding))
@@ -81,7 +81,7 @@ pub(crate) fn resolve_failure_diagnostics(
     };
     let text = source(&path).unwrap_or_default();
     let finding = project_files::syntax_finding(&path, &text, error);
-    let line_index = LineIndex::new(&text);
+    let line_index = TextBuffer::new(&text);
     (path, vec![to_lsp(&finding, &line_index, encoding)])
 }
 
@@ -95,7 +95,7 @@ fn insert(
     if findings.is_empty() {
         return;
     }
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     out.entry(path.to_path_buf()).or_default().extend(
         findings
             .iter()
@@ -108,7 +108,7 @@ fn insert(
 /// rule, a project-file check has no reference section to link to.
 fn to_lsp(
     finding: &ProjectFinding,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Diagnostic {
     Diagnostic {

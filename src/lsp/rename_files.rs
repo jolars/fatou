@@ -33,7 +33,7 @@ use lsp_types::{FileRename, Range, TextEdit, Uri, WorkspaceEdit};
 
 use crate::incremental::{Analysis, SourceFile, normalize_path};
 use crate::project::{include_sites, resolve_target};
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::uri;
 
@@ -120,7 +120,7 @@ fn collect_edits(
             continue;
         };
         let text = snapshot.file_text_of(file);
-        let line_index = LineIndex::new(text);
+        let line_index = TextBuffer::new(text);
         let edits: Vec<TextEdit> = include_sites(&snapshot.parsed_tree(file))
             .into_iter()
             .filter_map(|site| {

@@ -14,7 +14,7 @@ use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use crate::linter::diagnostic::{Applicability, Diagnostic, Severity};
 use crate::linter::docs::rule_doc_url;
 use crate::linter::rules::is_shipped_rule;
-use crate::text::LineIndex;
+use crate::text::TextBuffer;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -78,7 +78,7 @@ fn render_concise(
         let path = diag.path.as_deref();
         let (line, column) = match source_for(path) {
             Some(text) => {
-                let lc = LineIndex::new(&text).byte_to_lc(diag.range.start().into());
+                let lc = TextBuffer::new(&text).byte_to_lc(diag.range.start().into());
                 (lc.line, lc.column)
             }
             None => (0, 0),

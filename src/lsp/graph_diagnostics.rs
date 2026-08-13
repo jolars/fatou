@@ -16,7 +16,7 @@ use lsp_types::{Diagnostic, DiagnosticSeverity, Range};
 use crate::incremental::ProjectGraph;
 use crate::project::include_call_sites;
 use crate::syntax::SyntaxNode;
-use crate::text::{LineIndex, PositionEncoding};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// One include-graph problem attached to a `from` file: the decoded `path` whose
 /// `include(...)` call it marks, plus the rendered message and severity.
@@ -69,7 +69,7 @@ pub(crate) fn graph_diagnostics(
         let Some((text, tree)) = source(&from) else {
             continue;
         };
-        let line_index = LineIndex::new(&text);
+        let line_index = TextBuffer::new(&text);
         let sites = include_call_sites(&tree);
         let mut diagnostics = Vec::new();
         for problem in &problems {

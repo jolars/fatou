@@ -30,7 +30,7 @@ use rowan::{TextRange, TextSize};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::semantic::{BindingId, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::cross_file;
 
@@ -44,7 +44,7 @@ pub fn compute_prepare_rename(
     encoding: PositionEncoding,
 ) -> Option<PrepareRenameResponse> {
     let model = SemanticModel::build(&parse(text).cst);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     prepare_for(&model, &line_index, offset, encoding)
 }
@@ -62,7 +62,7 @@ pub fn compute_rename(
 ) -> Result<Option<WorkspaceEdit>, String> {
     validate_new_name(new_name)?;
     let model = SemanticModel::build(&parse(text).cst);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     Ok(rename_for(
         &model,
@@ -99,16 +99,14 @@ pub(crate) fn prepare_rename_via_db(
             && let Some(range) = identifier_range_at(model, offset)
         {
             return Some(Some(PrepareRenameResponse::Range(to_range(
-                range,
-                line_index,
-                encoding,
+                range, line_index, encoding,
             ))));
         }
         Some(prepare_for(model, line_index, offset, encoding))
     }));
     match cached {
         Ok(Some(result)) => result,
-        Ok(None) | Err(_) => compute_prepare_rename(text, position, encoding),
+        Ok(None) | Err(_) => compute_prepare_rename(&text.text(), position, encoding),
     }
 }
 
@@ -147,17 +145,12 @@ pub(crate) fn rename_via_db(
             }
         }
         Some(rename_for(
-            model,
-            uri,
-            line_index,
-            offset,
-            new_name,
-            encoding,
+            model, uri, line_index, offset, new_name, encoding,
         ))
     }));
     match cached {
         Ok(Some(result)) => Ok(result),
-        Ok(None) | Err(_) => compute_rename(uri, text, position, new_name, encoding),
+        Ok(None) | Err(_) => compute_rename(uri, &text.text(), position, new_name, encoding),
     }
 }
 
@@ -214,7 +207,7 @@ fn binding_and_range_at(model: &SemanticModel, offset: TextSize) -> Option<(Bind
 
 fn prepare_for(
     model: &SemanticModel,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
 ) -> Option<PrepareRenameResponse> {
@@ -227,7 +220,7 @@ fn prepare_for(
 fn rename_for(
     model: &SemanticModel,
     uri: &Uri,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     offset: TextSize,
     new_name: &str,
     encoding: PositionEncoding,
@@ -272,7 +265,7 @@ fn validate_new_name(name: &str) -> Result<(), String> {
     }
 }
 
-fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(range.start().into(), encoding),
         end: line_index.byte_to_position(range.end().into(), encoding),
@@ -292,7 +285,7 @@ mod tests {
     fn cursor(marked: &str) -> (String, Position) {
         let offset = marked.find('|').expect("a cursor marker");
         let src = marked.replacen('|', "", 1);
-        let line_index = LineIndex::new(&src);
+        let line_index = TextBuffer::new(&src);
         let position = line_index.byte_to_position(offset, PositionEncoding::Utf16);
         (src, position)
     }
@@ -455,7 +448,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            &TextBuffer::new(a_text.to_string()),
+            &TextBuffer::new(a_text),
             Position::new(0, 0),
             "hello",
             Utf16,
@@ -489,7 +482,7 @@ mod tests {
         let response = prepare_rename_via_db(
             &snapshot,
             &b_path,
-            &TextBuffer::new(b_text.to_string()),
+            &TextBuffer::new(b_text),
             Position::new(0, 11),
             Utf16,
         )

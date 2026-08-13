@@ -17,10 +17,10 @@ use crate::parser::Edit;
 /// describe the transform.
 ///
 /// Changes apply sequentially: each range is interpreted against the text as
-/// it stands after the previous change. That is what makes the buffer's
-/// maintained line table load-bearing rather than a convenience — every change
-/// in the batch needs an up-to-date table, and patching one costs an add per
-/// line after the edit where rescanning costs a pass over the whole document.
+/// it stands after the previous change. That is what makes the buffer's rope
+/// load-bearing rather than a convenience — every change in the batch needs an
+/// up-to-date position index, and patching the rope in place is O(log n) where
+/// rescanning (rebuilding a rope) is a pass over the whole document.
 /// A change without a range replaces the whole buffer (legal from clients even
 /// under incremental sync), so application starts at the last such change and
 /// everything before it is skipped. Out-of-range positions clamp to the end of
@@ -92,10 +92,8 @@ mod tests {
 
     /// Apply `changes` and return the resulting text.
     ///
-    /// Every case below goes through here, so every case also checks the two
-    /// standing invariants: the reported edits reproduce the batch, and the
-    /// buffer's patched line table still matches a rescan (the `debug_assert`
-    /// inside `TextBuffer::replace_range`, live because tests build in debug).
+    /// Every case below goes through here, so every case also checks the
+    /// standing invariant: the reported edits reproduce the batch.
     fn apply(initial: &str, changes: Vec<TextDocumentContentChangeEvent>) -> String {
         let mut buffer = TextBuffer::from(initial);
         let edits = apply_content_changes(&mut buffer, changes, PositionEncoding::Utf16);
@@ -107,11 +105,6 @@ mod tests {
                 "reported edits: {edits:?}"
             );
         }
-        assert_eq!(
-            buffer.line_index(),
-            &crate::text::LineIndex::new(&buffer),
-            "line table drifted"
-        );
         buffer.into_string()
     }
 
@@ -169,7 +162,7 @@ mod tests {
             vec![ranged((0, 4), (0, 5), "y")],
             PositionEncoding::Utf8,
         );
-        assert_eq!(&*buffer, "\u{1F600}y");
+        assert_eq!(buffer.text(), "\u{1F600}y");
     }
 
     #[test]
@@ -188,7 +181,7 @@ mod tests {
         // The second edit's offset is against the post-first-change text, where
         // line 1 starts one byte later than it did in the original buffer.
         assert_eq!(edits, Some(vec![edit(1..1, "x"), edit(5..5, "y")]));
-        assert_eq!(&*buffer, "axb\ncyd");
+        assert_eq!(buffer.text(), "axb\ncyd");
     }
 
     #[test]
@@ -202,7 +195,7 @@ mod tests {
             ),
             None,
         );
-        assert_eq!(&*buffer, "base!\n");
+        assert_eq!(buffer.text(), "base!\n");
     }
 
     #[test]
@@ -212,7 +205,7 @@ mod tests {
             apply_content_changes(&mut buffer, vec![], PositionEncoding::Utf16),
             Some(vec![]),
         );
-        assert_eq!(&*buffer, "x = 1\n");
+        assert_eq!(buffer.text(), "x = 1\n");
     }
 
     #[test]

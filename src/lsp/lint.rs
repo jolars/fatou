@@ -24,7 +24,7 @@ use crate::linter::rules::{RESOLUTION_RULES, ResolutionContext, is_shipped_rule}
 use crate::linter::{self, ResolvedRules, Severity, all_rules, lint_parsed};
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// Lint `text` off the snapshot's cached parse and semantic model when the
 /// db's tracked buffer for `path` still matches it; otherwise re-parse. A
@@ -49,9 +49,10 @@ pub(crate) fn lint_diagnostics_via_db(
 /// it. The pure core of the lint-diagnostic pipeline; empty on a parse-broken
 /// document.
 pub fn compute_lint_diagnostics(text: &str, encoding: PositionEncoding) -> Vec<Diagnostic> {
+    let buffer = TextBuffer::new(text);
     findings_to_lsp(
         lint_findings(text, &ServerRules::defaults()),
-        text,
+        &buffer,
         encoding,
     )
 }
@@ -111,7 +112,7 @@ pub(crate) fn lint_findings_via_db(
     match cached {
         Ok(Some(findings)) => findings,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => lint_findings(text, rules),
+        Ok(None) | Err(_) => lint_findings(&text.text(), rules),
     }
 }
 
@@ -198,13 +199,12 @@ impl ServerRules {
 
 fn findings_to_lsp(
     findings: Vec<linter::Diagnostic>,
-    text: &str,
+    buffer: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<Diagnostic> {
-    let line_index = LineIndex::new(text);
     findings
         .into_iter()
-        .map(|finding| finding_to_lsp(&finding, &line_index, encoding))
+        .map(|finding| finding_to_lsp(&finding, buffer, encoding))
         .collect()
 }
 
@@ -212,7 +212,7 @@ fn findings_to_lsp(
 /// (the source the finding's byte offsets index).
 pub(crate) fn finding_to_lsp(
     finding: &linter::Diagnostic,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Diagnostic {
     // The `unused-` rule family flags dead code; the tag lets clients render
@@ -340,7 +340,7 @@ mod tests {
         let diags = lint_diagnostics_via_db(
             &db.snapshot(),
             &member_path("a.jl"),
-            &TextBuffer::new(src.to_string()),
+            &TextBuffer::new(src),
             PositionEncoding::Utf16,
             &ServerRules::defaults(),
         );
@@ -359,7 +359,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &plain.snapshot(),
                 path,
-                &TextBuffer::new(src.to_string()),
+                &TextBuffer::new(src),
                 PositionEncoding::Utf16,
                 &ServerRules::defaults()
             ),
@@ -384,7 +384,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &db.snapshot(),
                 path,
-                &TextBuffer::new(UNUSED_LOCAL.to_string()),
+                &TextBuffer::new(UNUSED_LOCAL),
                 encoding,
                 &ServerRules::defaults()
             ),
@@ -399,7 +399,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &stale.snapshot(),
                 path,
-                &TextBuffer::new(UNUSED_LOCAL.to_string()),
+                &TextBuffer::new(UNUSED_LOCAL),
                 encoding,
                 &ServerRules::defaults()
             ),
@@ -413,7 +413,7 @@ mod tests {
             lint_diagnostics_via_db(
                 &empty.snapshot(),
                 path,
-                &TextBuffer::new(UNUSED_LOCAL.to_string()),
+                &TextBuffer::new(UNUSED_LOCAL),
                 encoding,
                 &ServerRules::defaults()
             ),

@@ -7,7 +7,7 @@
 
 use fatou::formatter::{FormatStyle, format_with_style};
 use fatou::lsp::compute_format_range_edits;
-use fatou::text::{LineIndex, PositionEncoding};
+use fatou::text::{PositionEncoding, TextBuffer};
 use lsp_types::{Position, Range, TextEdit};
 
 /// Split a `«»`-marked source into the clean text and the marked selection.
@@ -16,7 +16,7 @@ fn extract(marked: &str) -> (String, Range) {
     let without_start = marked.replacen('«', "", 1);
     let end_byte = without_start.find('»').expect("end marker");
     let text = without_start.replacen('»', "", 1);
-    let index = LineIndex::new(&text);
+    let index = TextBuffer::new(&text);
     let range = Range::new(
         index.byte_to_position(start_byte, PositionEncoding::Utf16),
         index.byte_to_position(end_byte, PositionEncoding::Utf16),
@@ -39,7 +39,7 @@ fn edits(marked: &str) -> (String, Vec<TextEdit>) {
 
 /// Apply `edits` (non-overlapping, as the LSP requires) to `text`.
 fn apply(text: &str, edits: &[TextEdit]) -> String {
-    let index = LineIndex::new(text);
+    let index = TextBuffer::new(text);
     let mut spliced: Vec<(usize, usize, &str)> = edits
         .iter()
         .map(|edit| {

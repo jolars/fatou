@@ -480,7 +480,7 @@ impl AnalysisWorker {
     fn start(&mut self, mut req: AnalysisRequest) {
         // Write-phase: push the live buffer into the persistent db. Cheap —
         // the parse is a lazy salsa query deferred to the read-phase.
-        let file = self.db.upsert_file(&req.path, req.text.text().to_string());
+        let file = self.db.upsert_file(&req.path, req.text.text());
         // Hand the precise edits to the incremental reparse. Staged after the
         // text so the chain is never ahead of the buffer it describes, and
         // appended rather than replaced so a chain the previous read never got

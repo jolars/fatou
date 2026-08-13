@@ -18,7 +18,7 @@ use lsp_types::{DocumentSymbol, Range, SymbolKind};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// The document-symbol outline for `text`, re-parsing it. Pure and
 /// unit-testable; single-file, so it never consults the workspace.
@@ -28,7 +28,8 @@ use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 /// symbol of its own but its body is still walked.
 pub fn compute_document_symbols(text: &str, encoding: PositionEncoding) -> Vec<DocumentSymbol> {
     let root = parse(text).cst;
-    symbols_for_tree(&root, text, encoding)
+    let buffer = TextBuffer::new(text);
+    symbols_for_tree(&root, &buffer, encoding)
 }
 
 /// Compute document symbols off the snapshot's cached parse when the db's
@@ -53,7 +54,7 @@ pub(crate) fn document_symbols_via_db(
     match cached {
         Ok(Some(symbols)) => symbols,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_document_symbols(text, encoding),
+        Ok(None) | Err(_) => compute_document_symbols(&text.text(), encoding),
     }
 }
 
@@ -61,12 +62,13 @@ pub(crate) fn document_symbols_via_db(
 /// the parse tree of exactly `text`.
 fn symbols_for_tree(
     root: &SyntaxNode,
-    text: &str,
+    buffer: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<DocumentSymbol> {
+    let text = buffer.text();
     let ctx = Ctx {
-        text,
-        line_index: LineIndex::new(text),
+        text: &text,
+        line_index: buffer,
         encoding,
     };
     let mut out = Vec::new();
@@ -76,7 +78,7 @@ fn symbols_for_tree(
 
 struct Ctx<'a> {
     text: &'a str,
-    line_index: LineIndex,
+    line_index: &'a TextBuffer,
     encoding: PositionEncoding,
 }
 
@@ -466,12 +468,7 @@ mod tests {
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, buffer.to_string());
         assert_eq!(
-            document_symbols_via_db(
-                &db.snapshot(),
-                path,
-                &TextBuffer::new(buffer.to_string()),
-                encoding
-            ),
+            document_symbols_via_db(&db.snapshot(), path, &TextBuffer::new(buffer), encoding),
             expected,
             "cached-tree symbols must match the re-parse path"
         );
@@ -480,12 +477,7 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            document_symbols_via_db(
-                &stale.snapshot(),
-                path,
-                &TextBuffer::new(buffer.to_string()),
-                encoding
-            ),
+            document_symbols_via_db(&stale.snapshot(), path, &TextBuffer::new(buffer), encoding),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -493,12 +485,7 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            document_symbols_via_db(
-                &empty.snapshot(),
-                path,
-                &TextBuffer::new(buffer.to_string()),
-                encoding
-            ),
+            document_symbols_via_db(&empty.snapshot(), path, &TextBuffer::new(buffer), encoding),
             expected,
             "untracked path must fall back to the buffer text"
         );

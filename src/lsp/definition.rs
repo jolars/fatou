@@ -43,7 +43,7 @@ use crate::resolve::{
     resolve_submodule,
 };
 use crate::semantic::{Access, BindingId, BindingKind, LoadKind, QualifiedRead, SemanticModel};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 use super::cross_file;
 use super::uri::from_path;
@@ -61,7 +61,7 @@ pub fn compute_definition<P: PackageSource>(
     packages: &P,
 ) -> Vec<Location> {
     let model = SemanticModel::build(&parse(text).cst);
-    let line_index = LineIndex::new(text);
+    let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     let workspace = super::uri::to_path(uri).and_then(|p| packages.workspace_member(&p));
     definition_for(
@@ -113,19 +113,13 @@ pub(crate) fn definition_via_db(
         // The inner `Vec` is the definition sites (a cursor on nothing definable
         // is legitimately empty); the outer `Option` distinguishes a cache miss.
         Some(definition_for(
-            model,
-            snapshot,
-            workspace,
-            uri,
-            line_index,
-            offset,
-            encoding,
+            model, snapshot, workspace, uri, line_index, offset, encoding,
         ))
     }));
     match cached {
         Ok(Some(locations)) => locations,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_definition(uri, text, position, encoding, snapshot),
+        Ok(None) | Err(_) => compute_definition(uri, &text.text(), position, encoding, snapshot),
     }
 }
 
@@ -178,7 +172,7 @@ fn definition_for<P: PackageSource>(
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
     uri: &Uri,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
@@ -281,7 +275,7 @@ fn binding_locations(
     model: &SemanticModel,
     uri: &Uri,
     bid: BindingId,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
     let binding = model.binding(bid);
@@ -307,7 +301,7 @@ fn binding_locations(
 fn self_location(
     uri: &Uri,
     range: TextRange,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Location {
     Location {
@@ -328,7 +322,7 @@ fn free_read_locations<P: PackageSource>(
     name: &str,
     offset: TextSize,
     ns: Namespace,
-    line_index: &LineIndex,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
     match Resolver::new(model, packages)
@@ -516,7 +510,7 @@ pub(super) fn site_locations(
         let Some(uri) = from_path(abs) else {
             continue;
         };
-        let line_index = LineIndex::new(&text);
+        let line_index = TextBuffer::new(&text);
         for (_, span) in chunk {
             out.push(Location {
                 uri: uri.clone(),
@@ -563,14 +557,14 @@ fn library_def_locations<'m>(module: &'m ModuleIndex, name: &str) -> Vec<&'m Def
     Vec::new()
 }
 
-fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(range.start().into(), encoding),
         end: line_index.byte_to_position(range.end().into(), encoding),
     }
 }
 
-fn span_to_range(span: Span, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
+fn span_to_range(span: Span, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
     Range {
         start: line_index.byte_to_position(span.start as usize, encoding),
         end: line_index.byte_to_position(span.end as usize, encoding),
@@ -645,7 +639,7 @@ mod tests {
     fn def_at(marked: &str, lib: &impl PackageSource) -> Vec<Location> {
         let offset = marked.find('|').expect("a cursor marker");
         let src = marked.replacen('|', "", 1);
-        let line_index = LineIndex::new(&src);
+        let line_index = TextBuffer::new(&src);
         let position = line_index.byte_to_position(offset, PositionEncoding::Utf16);
         compute_definition(&doc_uri(), &src, position, PositionEncoding::Utf16, lib)
     }
@@ -1091,7 +1085,7 @@ mod tests {
             &snapshot,
             &b_uri,
             &b_path,
-            &TextBuffer::new(b_text.to_string()),
+            &TextBuffer::new(b_text),
             Position::new(0, 11),
             Utf16,
         );
@@ -1106,7 +1100,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            &TextBuffer::new(a_text.to_string()),
+            &TextBuffer::new(a_text),
             Position::new(0, 0),
             Utf16,
         );
@@ -1130,7 +1124,7 @@ mod tests {
             &snapshot,
             &a_uri,
             &a_path,
-            &TextBuffer::new(a_text.to_string()),
+            &TextBuffer::new(a_text),
             Position::new(2, 0),
             Utf16,
         );

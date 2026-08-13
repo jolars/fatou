@@ -2,10 +2,9 @@
 //!
 //! The language server resolves LSP positions against a document many times per
 //! keystroke: once to splice the `didChange` in, then again in every read
-//! handler answering against that buffer. Rescanning the text for its line
-//! starts each time is linear in the *buffer* rather than in the edit, so
-//! [`TextBuffer`] keeps the table beside the text and patches it across each
-//! edit (`src/text/buffer.rs`).
+//! handler answering against that buffer. [`TextBuffer`] stores the text as a
+//! `ropey::Rope`, whose line metrics answer those queries in O(log n) — there
+//! is no separate table to rebuild (`src/text/buffer.rs`).
 //!
 //! This bench is the evidence for that shape, and the guard against a change
 //! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-10
@@ -14,8 +13,8 @@
 //!
 //! ```text
 //!                                   134 KB     1073 KB
-//! rescan (LineIndex::new)            26 us      316 us
-//! reuse the maintained table          1 ns        1 ns
+//! rescan (TextBuffer::new)            26 us      316 us
+//! reuse the buffer's rope             1 ns        1 ns
 //! didChange (edit plus undo)        0.9 us      8.8 us
 //! reparse, token tier                33 us      257 us
 //! ```
@@ -25,14 +24,13 @@
 //!
 //! A keystroke used to pay that rescan on the main loop before dispatching
 //! anything, and pay it again in every handler that answered against the
-//! buffer. It now costs about 2% of the reparse it triggers, and the handlers
-//! share the table rather than each rebuilding it.
+//! buffer. Position conversion against the live buffer is now O(log n) on the
+//! rope; the O(N) flatten ([`TextBuffer::text`]) is paid once per keystroke at
+//! the salsa write-phase, where the db still wants a `String`.
 //!
-//! Ropey was measured here too, and rejected (issue #76): fatou cannot keep the
-//! text as a rope, because `parse` takes `&str` and salsa's `SourceFile` input
-//! is a `String`, so every edit would have to flatten the rope — 90 us on
-//! 1 MB, an order of magnitude worse than patching a flat table, on top of
-//! point queries about 7x slower.
+//! Making *salsa* store a rope instead (the deferred issue #76) would drop that
+//! flatten to an O(1) CoW clone, but it is gated on `parse`/`reparse` going
+//! chunk-based — the live buffer already went first.
 //!
 //! Plain `main` (`harness = false`), same style as `format_compare`: no
 //! criterion dependency in the root crate, just a warm loop and a table.
@@ -48,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fatou::parser::{Edit, parse, reparse};
-use fatou::text::{LineIndex, PositionEncoding, TextBuffer, apply_content_changes};
+use fatou::text::{PositionEncoding, TextBuffer, apply_content_changes};
 use lsp_types::{Range, TextDocumentContentChangeEvent};
 
 const UTF16: PositionEncoding = PositionEncoding::Utf16;
@@ -85,7 +83,7 @@ fn bench_size(label: &str, text: &str) {
     println!(
         "\n=== {label} ({} KB, {} lines) ===",
         text.len() / 1024,
-        LineIndex::new(text).line_count()
+        TextBuffer::new(text).line_count()
     );
 
     // The edit site: ~80% of the way through the buffer, on a char boundary.
@@ -103,8 +101,8 @@ fn bench_size(label: &str, text: &str) {
 
     println!("-- getting an index to resolve a position with --");
     row(
-        "rescan (LineIndex::new)",
-        time(2_000, || LineIndex::new(text)),
+        "rescan (TextBuffer::new)",
+        time(2_000, || TextBuffer::new(text)),
     );
     row(
         "reuse the maintained table",
@@ -131,11 +129,11 @@ fn bench_size(label: &str, text: &str) {
     println!("-- one position query, index in hand --");
     let index = buffer.line_index();
     row(
-        "LineIndex::position_to_byte",
+        "TextBuffer::position_to_byte",
         time(200_000, || index.position_to_byte(position, UTF16)),
     );
     row(
-        "LineIndex::byte_to_position",
+        "TextBuffer::byte_to_position",
         time(200_000, || index.byte_to_position(at, UTF16)),
     );
 

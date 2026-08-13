@@ -17,7 +17,7 @@ use lsp_types::{FoldingRange, FoldingRangeKind};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
-use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use crate::text::{PositionEncoding, TextBuffer};
 
 /// The folding ranges for `text`, re-parsing it. Pure and unit-testable;
 /// single-file by nature.
@@ -26,7 +26,8 @@ use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 /// broken buffer are still useful while the user types.
 pub fn compute_folding_ranges(text: &str) -> Vec<FoldingRange> {
     let root = parse(text).cst;
-    folds_for_tree(&root, text)
+    let buffer = TextBuffer::new(text);
+    folds_for_tree(&root, &buffer)
 }
 
 /// Compute folding ranges off the snapshot's cached parse when the db's
@@ -50,16 +51,17 @@ pub(crate) fn folding_ranges_via_db(
     match cached {
         Ok(Some(folds)) => folds,
         // Cache miss (`Ok(None)`) or a racing write (`Err`): re-parse from text.
-        Ok(None) | Err(_) => compute_folding_ranges(text),
+        Ok(None) | Err(_) => compute_folding_ranges(&text.text()),
     }
 }
 
 /// Shared entry point for the fresh-parse and cached-tree paths: `root` must be
 /// the parse tree of exactly `text`.
-fn folds_for_tree(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
+fn folds_for_tree(root: &SyntaxNode, buffer: &TextBuffer) -> Vec<FoldingRange> {
+    let text = buffer.text();
     let ctx = Ctx {
-        text,
-        line_index: LineIndex::new(text),
+        text: &text,
+        line_index: buffer,
     };
     let mut out = Vec::new();
     for node in root.descendants() {
@@ -98,7 +100,7 @@ fn folds_for_tree(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
 
 struct Ctx<'a> {
     text: &'a str,
-    line_index: LineIndex,
+    line_index: &'a TextBuffer,
 }
 
 impl Ctx<'_> {
@@ -268,7 +270,7 @@ mod tests {
         let mut db = IncrementalDatabase::default();
         db.upsert_file(path, buffer.to_string());
         assert_eq!(
-            folding_ranges_via_db(&db.snapshot(), path, &TextBuffer::new(buffer.to_string())),
+            folding_ranges_via_db(&db.snapshot(), path, &TextBuffer::new(buffer)),
             expected,
             "cached-tree folds must match the re-parse path"
         );
@@ -277,11 +279,7 @@ mod tests {
         let mut stale = IncrementalDatabase::default();
         stale.upsert_file(path, "y = 1\n".to_string());
         assert_eq!(
-            folding_ranges_via_db(
-                &stale.snapshot(),
-                path,
-                &TextBuffer::new(buffer.to_string())
-            ),
+            folding_ranges_via_db(&stale.snapshot(), path, &TextBuffer::new(buffer)),
             expected,
             "version skew must fall back to the buffer text"
         );
@@ -289,11 +287,7 @@ mod tests {
         // Untracked path → fall back as well.
         let empty = IncrementalDatabase::default();
         assert_eq!(
-            folding_ranges_via_db(
-                &empty.snapshot(),
-                path,
-                &TextBuffer::new(buffer.to_string())
-            ),
+            folding_ranges_via_db(&empty.snapshot(), path, &TextBuffer::new(buffer)),
             expected,
             "untracked path must fall back to the buffer text"
         );

@@ -52,19 +52,23 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
 
 - Convert URIs only through `src/lsp/uri.rs` (`to_path`/`from_path`). Tests and
   snapshots must not assume `/` versus `\`.
-- Offsets go through `src/text/line_index.rs`; `didChange` conversion is
-  `src/text/edit.rs`. The pure edit machinery lives in `fatou-parser` and is
-  **not** mirrored in `src/text` — `crate::parser` is the one path to `Edit`.
+- Offsets go through `src/text/buffer.rs` (the `TextBuffer` rope); `didChange`
+  conversion is `src/text/edit.rs`. The pure edit machinery lives in
+  `fatou-parser` and is **not** mirrored in `src/text` — `crate::parser` is the
+  one path to `Edit`.
 - **A live buffer is a `TextBuffer` (`src/text/buffer.rs`), never a bare
-  `String`**: it carries the line-start table and patches it per edit. An open
-  document is an `Arc<TextBuffer>` shared with the analysis thread and every
-  read job, so a handler resolving positions against the live buffer takes
-  `&TextBuffer` and calls `text.line_index()`. `LineIndex::new` **rescans the
-  whole document** — reserve it for text with no maintained table, which means
-  text resolved off the db (`snapshot.file_text*`) and the `compute_*` fallback
-  paths, where a full parse dwarfs the scan anyway. Reintroducing a rescan on
-  the live-buffer path is a silent regression: it type-checks, because
-  `&TextBuffer` derefs to `&str`. `benches/line_index.rs` is what measures it.
+  `String`**: it stores the text as a `ropey::Rope`, whose line metrics answer
+  position queries in O(log n) with no separate line table. An open document is
+  an `Arc<TextBuffer>` shared with the analysis thread and every read job, so a
+  handler resolving positions against the live buffer takes `&TextBuffer` and
+  calls `text.line_index()` (or `text.byte_to_position`/`text.position_to_byte`
+  directly) — no rescan. `TextBuffer::new(&str)` **builds a fresh rope** —
+  reserve it for db-resolved text (`snapshot.file_text*`) and the `compute_*`
+  fallback paths, where a full parse dwarfs the build anyway.
+  `TextBuffer::text()` **flattens** (O(N)) and is for the salsa write-phase and
+  any `&str` consumer, never for position conversion. A buffer has **no `Deref`
+  to `str`**, so feeding the live buffer where `&str` is expected is a compile
+  error, not a silent rescan. `benches/line_index.rs` is what measures it.
 
 ## Conventions
 
