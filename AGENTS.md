@@ -211,7 +211,8 @@ reproduces it before touching the fix. **Run `cargo test --workspace`** — a ba
 Skills for the recurring workflows: `formatter` (grow the formatter against
 hand-authored fixtures), `parser-parity` (close a JuliaSyntax gap),
 `add-lint-rule` (the full sequence for a new rule), `linter-investigation`
-(triage against a real Julia codebase), `smoke-test-triage`.
+(triage against a real Julia codebase), `smoke-test-triage`,
+`perf-investigation` (profile a hotspot and recover wall time).
 
 ## Environment
 

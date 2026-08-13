@@ -61,7 +61,13 @@ and never ship to crates.io. Add new tooling there the same way.
   the language server against LanguageServer.jl and JETLS, plus Fatou's one-shot
   CLI runs. `task bench-lsenv` provisions the two pinned Julia servers it needs
   (`bench/lsenv/setup.sh`; JETLS is unregistered, so it is pinned by commit).
-- Each rewrites a **tracked** artifact — `bench/results.json` and
+- `task profile` (`bench/profile.sh`) is the odd one out: it answers "where does
+  the time go", not "how fast are we". It samples the same
+  `benches/format_compare.rs` warm loop with perf under the `profiling` cargo
+  profile (release codegen with symbols kept, since `[profile.release]` sets
+  `strip = "symbols"`), and writes **gitignored** output — a profile is a local
+  observation, not a result. Workflow in the `perf-investigation` skill.
+- The other three rewrite a **tracked** artifact — `bench/results.json` and
   `bench/memory.json` — which is the *sole* source of the published performance
   page; numbers are never re-measured at site-build time. Moving performance and
   wanting the docs to show it means re-running the benchmark and committing the
