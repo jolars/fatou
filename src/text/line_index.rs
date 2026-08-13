@@ -5,9 +5,10 @@
 //! - 0-indexed (line, character) in **UTF-16 units** for LSP positions.
 
 use std::borrow::Cow;
-use std::ops::{Deref, Range};
+use std::ops::Range;
 
 use lsp_types::Position;
+use ropey::{LineType, Rope};
 
 /// The character-offset encoding negotiated for LSP positions.
 ///
@@ -41,8 +42,9 @@ pub struct LineCol {
 
 /// The line-start byte offsets of a text buffer.
 ///
-/// `self[i]` is the byte offset of the first character of line `i` (0-indexed);
-/// the table always starts with `0`.
+/// The offsets are held implicitly by a [`Rope`], whose line metrics answer
+/// "where does line `i` start" and "which line is byte `b` on" in O(log n)
+/// rather than by binary-searching a `Vec<usize>`.
 ///
 /// It is a value of its own, separate from the text, so a live buffer can
 /// [patch](Self::patch) it across an edit rather than rescanning. Building it
@@ -50,58 +52,38 @@ pub struct LineCol {
 /// incremental reparse the edit goes on to trigger — see
 /// `benches/line_index.rs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LineStarts(Vec<usize>);
+pub struct LineStarts {
+    rope: Rope,
+}
 
 impl Default for LineStarts {
-    /// The empty buffer's table: one line, starting at 0. Deriving this would
-    /// give an empty `Vec`, which is not a line table at all.
     fn default() -> Self {
-        Self(vec![0])
+        Self { rope: Rope::new() }
     }
 }
 
 impl LineStarts {
-    /// Scan `text` for its line starts.
+    /// Build the line table from `text`, copying it into a [`Rope`].
     pub fn new(text: &str) -> Self {
-        // 40 bytes per line is a rough fit for Julia source; the scan itself is
-        // `memchr`'s, which is about twice a hand-written byte loop.
-        let mut starts = Vec::with_capacity(text.len() / 40 + 1);
-        starts.push(0);
-        starts.extend(memchr::memchr_iter(b'\n', text.as_bytes()).map(|at| at + 1));
-        Self(starts)
+        Self {
+            rope: Rope::from(text),
+        }
     }
 
     /// Patch the table for a replacement of `range` with `insert`, leaving it
     /// exactly as [`new`](Self::new) would have scanned the edited text.
     ///
-    /// `range` is a byte range in the *pre-edit* text. Three groups of line
-    /// starts fall out of that: those at or before `range.start` are untouched
-    /// (a newline ending such a line sits before the replaced bytes); those in
-    /// `range.start + 1 ..= range.end` sat inside the replaced text and are
-    /// gone; those past `range.end` shift by the edit's byte delta. Only the
-    /// last group costs anything, and it is one add per line rather than a
-    /// scan per byte.
+    /// `range` is a byte range in the *pre-edit* text. The rope edits its own
+    /// copy of the text, so the line metrics stay in step with what
+    /// [`crate::text::TextBuffer`] holds — one rope edit, not a per-line shift.
     pub fn patch(&mut self, range: Range<usize>, insert: &str) {
-        let Range { start, end } = range;
-        debug_assert!(start <= end, "reversed edit range {start}..{end}");
-        let first = self.0.partition_point(|&at| at <= start);
-        let last = self.0.partition_point(|&at| at <= end);
-        let delta = insert.len() as isize - (end - start) as isize;
-        if delta != 0 {
-            for at in &mut self.0[last..] {
-                *at = at.wrapping_add_signed(delta);
-            }
-        }
-        let inserted = memchr::memchr_iter(b'\n', insert.as_bytes()).map(|at| start + at + 1);
-        drop(self.0.splice(first..last, inserted));
+        self.rope.remove(range.clone());
+        self.rope.insert(range.start, insert);
     }
-}
 
-impl Deref for LineStarts {
-    type Target = [usize];
-
-    fn deref(&self) -> &[usize] {
-        &self.0
+    /// Number of lines, `1` even for empty text.
+    pub fn len_lines(&self) -> usize {
+        self.rope.len_lines(LineType::LF)
     }
 }
 
@@ -142,7 +124,10 @@ impl<'a> LineIndex<'a> {
     pub fn byte_to_lc(&self, offset: usize) -> LineCol {
         let clamped = offset.min(self.text.len());
         let line_idx = self.line_index_for(clamped);
-        let line_start = self.line_starts[line_idx];
+        let line_start = self
+            .line_starts
+            .rope
+            .line_to_byte_idx(line_idx, LineType::LF);
         let column = self.text[line_start..clamped].chars().count() + 1;
         LineCol {
             line: line_idx + 1,
@@ -155,7 +140,10 @@ impl<'a> LineIndex<'a> {
     pub fn byte_to_position(&self, offset: usize, encoding: PositionEncoding) -> Position {
         let clamped = offset.min(self.text.len());
         let line_idx = self.line_index_for(clamped);
-        let line_start = self.line_starts[line_idx];
+        let line_start = self
+            .line_starts
+            .rope
+            .line_to_byte_idx(line_idx, LineType::LF);
         let prefix = &self.text[line_start..clamped];
         let character = match encoding {
             PositionEncoding::Utf8 => prefix.len() as u32,
@@ -171,14 +159,14 @@ impl<'a> LineIndex<'a> {
     /// character inside a code point rounds up to its end.
     pub fn position_to_byte(&self, position: Position, encoding: PositionEncoding) -> usize {
         let line = position.line as usize;
-        let Some(&line_start) = self.line_starts.get(line) else {
+        if line >= self.line_count() {
             return self.text.len();
-        };
+        }
+        let line_start = self.line_starts.rope.line_to_byte_idx(line, LineType::LF);
         let line_end = self
             .line_starts
-            .get(line + 1)
-            .copied()
-            .unwrap_or(self.text.len());
+            .rope
+            .line_to_byte_idx(line + 1, LineType::LF);
         let line_text = self.text[line_start..line_end]
             .trim_end_matches('\n')
             .trim_end_matches('\r');
@@ -194,14 +182,11 @@ impl<'a> LineIndex<'a> {
 
     /// Total line count (1 even for empty text).
     pub fn line_count(&self) -> usize {
-        self.line_starts.len()
+        self.line_starts.rope.len_lines(LineType::LF)
     }
 
     fn line_index_for(&self, offset: usize) -> usize {
-        match self.line_starts.binary_search(&offset) {
-            Ok(idx) => idx,
-            Err(idx) => idx.saturating_sub(1),
-        }
+        self.line_starts.rope.byte_to_line_idx(offset, LineType::LF)
     }
 }
 

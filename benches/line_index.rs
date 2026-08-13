@@ -85,7 +85,7 @@ fn bench_size(label: &str, text: &str) {
     println!(
         "\n=== {label} ({} KB, {} lines) ===",
         text.len() / 1024,
-        LineStarts::new(text).len()
+        LineStarts::new(text).len_lines()
     );
 
     // The edit site: ~80% of the way through the buffer, on a char boundary.
