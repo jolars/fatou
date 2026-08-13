@@ -195,7 +195,7 @@ pub fn parse(text: &str) -> ParseOutput {
         }
     }
 
-    let events = fold_docstrings(&events, &tokens, true);
+    let events = fold_docstrings(&events, &tokens);
 
     let cst = build_tree(&tokens, &events);
     // The post-build flag passes. Each walks the finished CST for a shape
@@ -522,13 +522,6 @@ pub(super) fn stmt_is_doc_string(events: &[Event], tokens: &[Token]) -> bool {
     ) && string_is_doc_eligible(&events[1..], tokens)
 }
 
-/// One child of a statement container: either a leaf token or a fully-formed
-/// subtree (its node kind plus the *inner* events between its `Start`/`Finish`).
-enum Item {
-    Leaf(usize),
-    Subtree(SyntaxKind, Vec<Event>),
-}
-
 /// Whether a node of `kind` is a statement container in which the docstring fold
 /// applies (a string literal statement directly followed by another statement).
 fn is_doc_container(kind: SyntaxKind) -> bool {
@@ -546,84 +539,157 @@ fn string_is_doc_eligible(inner: &[Event], tokens: &[Token]) -> bool {
     }
 }
 
-/// Recursively fold docstrings in a statement container's child sequence.
-/// `inner` is the flat event list of one node's children (the whole event
-/// stream, for the implicit `ROOT`). A bare unprefixed `STRING_LITERAL`
-/// statement immediately followed by another statement — at most one newline of
-/// intervening trivia, no `;` — folds into a `DOC` node `(doc str target)`,
-/// mirroring JuliaSyntax's `parse_docstring`. The pass descends into every
-/// subtree so nested blocks (function/module/begin bodies) fold too.
-fn fold_docstrings(inner: &[Event], tokens: &[Token], is_container: bool) -> Vec<Event> {
-    // Split the flat event list into this level's direct children.
-    let mut items: Vec<Item> = Vec::new();
-    let mut k = 0;
-    while k < inner.len() {
-        match inner[k] {
-            Event::Tok(idx) => {
-                items.push(Item::Leaf(idx));
-                k += 1;
-            }
-            Event::Start(kind) => {
-                let mut depth = 1usize;
-                let mut j = k + 1;
-                while j < inner.len() {
-                    match inner[j] {
-                        Event::Start(_) => depth += 1,
-                        Event::Finish => {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                        Event::Tok(_) => {}
-                    }
-                    j += 1;
-                }
-                // Recurse into the subtree's inner events.
-                let child = fold_docstrings(&inner[k + 1..j], tokens, is_doc_container(kind));
-                items.push(Item::Subtree(kind, child));
-                k = j + 1;
-            }
-            Event::Finish => k += 1,
-        }
+/// Fold docstrings across the whole event stream. A bare unprefixed
+/// `STRING_LITERAL` statement immediately followed by another statement — at
+/// most one newline of intervening trivia, no `;` — folds into a `DOC` node
+/// `(doc str target)`, mirroring JuliaSyntax's `parse_docstring`. The pass
+/// descends into every subtree so nested blocks (function/module/begin bodies)
+/// fold too.
+///
+/// The fold only ever *inserts* a `Start(DOC)` before the string's `Start` and a
+/// matching `Finish` after the target's `Finish` — every other event keeps its
+/// order and its meaning. So rather than rebuilding the stream level by level,
+/// this marks the two insertion points per fold and splices them in with one
+/// final pass, which keeps the whole thing linear in the event count.
+fn fold_docstrings(events: &[Event], tokens: &[Token]) -> Vec<Event> {
+    let extents = subtree_extents(events);
+    let mut marks = DocMarks {
+        open: vec![false; events.len()],
+        close: vec![false; events.len()],
+        folds: 0,
+    };
+    mark_doc_folds(events, tokens, &extents, 0, events.len(), true, &mut marks);
+
+    if marks.folds == 0 {
+        return events.to_vec();
     }
 
-    let mut out: Vec<Event> = Vec::new();
-    let mut idx = 0;
-    while idx < items.len() {
-        if is_container
-            && let Item::Subtree(SyntaxKind::STRING_LITERAL, str_inner) = &items[idx]
-            && string_is_doc_eligible(str_inner, tokens)
-            && let Some(target) = doc_target(&items, idx, tokens)
-        {
-            // Wrap the string, the intervening trivia, and the target in a `DOC`.
+    let mut out = Vec::with_capacity(events.len() + 2 * marks.folds);
+    for (i, event) in events.iter().enumerate() {
+        // A fold opens before a `Start` and closes after a `Finish`, so the two
+        // marks can never land on the same event and their order is unambiguous.
+        if marks.open[i] {
             out.push(Event::Start(SyntaxKind::DOC));
-            emit_items(&items[idx..=target], &mut out);
-            out.push(Event::Finish);
-            idx = target + 1;
-            continue;
         }
-        emit_items(&items[idx..=idx], &mut out);
-        idx += 1;
+        out.push(event.clone());
+        if marks.close[i] {
+            out.push(Event::Finish);
+        }
     }
     out
 }
 
-/// Given a string statement at `start`, find the index of the statement it
-/// documents: the next subtree child, reachable across at most one newline of
-/// trivia and no `;`. Returns `None` if no eligible target follows.
-fn doc_target(items: &[Item], start: usize, tokens: &[Token]) -> Option<usize> {
+/// Where each fold inserts its `DOC` wrapper: `open[i]` puts a `Start(DOC)`
+/// before event `i`, `close[i]` puts a `Finish` after it.
+struct DocMarks {
+    open: Vec<bool>,
+    close: Vec<bool>,
+    folds: usize,
+}
+
+/// For every `Start` in `events`, the index of its matching `Finish`; `usize::MAX`
+/// for any unmatched opener. One stack pass, so a later walk can skip a whole
+/// subtree in constant time instead of rescanning it for the matching close.
+fn subtree_extents(events: &[Event]) -> Vec<usize> {
+    let mut extents = vec![usize::MAX; events.len()];
+    let mut open: Vec<usize> = Vec::new();
+    for (i, event) in events.iter().enumerate() {
+        match event {
+            Event::Start(_) => open.push(i),
+            Event::Finish => {
+                if let Some(start) = open.pop() {
+                    extents[start] = i;
+                }
+            }
+            Event::Tok(_) => {}
+        }
+    }
+    extents
+}
+
+/// Walk the direct children of the level spanning `start..end`, recording a fold
+/// for each docstring pair and descending into every subtree. `is_container` says
+/// whether a fold may happen at *this* level.
+fn mark_doc_folds(
+    events: &[Event],
+    tokens: &[Token],
+    extents: &[usize],
+    start: usize,
+    end: usize,
+    is_container: bool,
+    marks: &mut DocMarks,
+) {
+    let mut i = start;
+    while i < end {
+        let Event::Start(kind) = events[i] else {
+            i += 1;
+            continue;
+        };
+        // An unmatched opener runs to the end of this level.
+        let stop = extents[i].min(end);
+        mark_doc_folds(
+            events,
+            tokens,
+            extents,
+            i + 1,
+            stop,
+            is_doc_container(kind),
+            marks,
+        );
+
+        if is_container
+            && kind == SyntaxKind::STRING_LITERAL
+            && string_is_doc_eligible(&events[i + 1..stop], tokens)
+            && let Some(target) = doc_target(events, tokens, stop + 1, end)
+        {
+            let target_end = extents[target].min(end);
+            // The target is consumed by this fold: it is documented *by* the
+            // string, so it never goes on to document what follows it. Descend
+            // into it here, then resume past it.
+            mark_doc_folds(
+                events,
+                tokens,
+                extents,
+                target + 1,
+                target_end,
+                is_doc_container(as_start_kind(&events[target])),
+                marks,
+            );
+            marks.open[i] = true;
+            marks.close[target_end] = true;
+            marks.folds += 1;
+            i = target_end + 1;
+            continue;
+        }
+        i = stop + 1;
+    }
+}
+
+/// The kind of a `Start` event. Only ever called on an event already matched as
+/// one, so the fallback kind is unreachable.
+fn as_start_kind(event: &Event) -> SyntaxKind {
+    match event {
+        Event::Start(kind) => *kind,
+        _ => SyntaxKind::ERROR,
+    }
+}
+
+/// Scanning forward from `from` within a level ending at `end`, the index of the
+/// `Start` of the statement a preceding docstring documents: the next subtree
+/// child, reachable across at most one newline of trivia and no `;`. `None` if no
+/// eligible target follows.
+fn doc_target(events: &[Event], tokens: &[Token], from: usize, end: usize) -> Option<usize> {
     let mut newlines = 0;
-    let mut j = start + 1;
-    while j < items.len() {
-        match &items[j] {
+    let mut j = from;
+    while j < end {
+        match events[j] {
             // An error-recovery node is never a documentable target (`"doc"\n]`
             // ⇒ `(string) (error) (error-t ✘)`, not a `(doc …)`); the string is
             // a plain statement.
-            Item::Subtree(SyntaxKind::ERROR, _) => return None,
-            Item::Subtree(..) => return Some(j),
-            Item::Leaf(t) => {
-                let kind = tokens[*t].kind;
+            Event::Start(SyntaxKind::ERROR) => return None,
+            Event::Start(_) => return Some(j),
+            Event::Tok(t) => {
+                let kind = tokens[t].kind;
                 if kind == TokKind::Newline {
                     newlines += 1;
                     if newlines > 1 {
@@ -634,24 +700,11 @@ fn doc_target(items: &[Item], start: usize, tokens: &[Token]) -> Option<usize> {
                 }
                 j += 1;
             }
+            // Only reachable on an unbalanced stream, where it ends the level.
+            Event::Finish => return None,
         }
     }
     None
-}
-
-/// Append the events for `items` to `out`, rebuilding each subtree from its
-/// recorded kind and inner events.
-fn emit_items(items: &[Item], out: &mut Vec<Event>) {
-    for item in items {
-        match item {
-            Item::Leaf(idx) => out.push(Event::Tok(*idx)),
-            Item::Subtree(kind, inner) => {
-                out.push(Event::Start(*kind));
-                out.extend(inner.iter().cloned());
-                out.push(Event::Finish);
-            }
-        }
-    }
 }
 
 /// Round-trip the input through the parser: concatenating every token in the CST
