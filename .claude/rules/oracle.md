@@ -37,7 +37,8 @@ one task that needs Julia.
 
 - JuliaSyntax is pinned **exactly** (`=0.4.10`) in the root `Project.toml`
   `[compat]`, with a committed `Manifest.toml`. The regen scripts mirror the
-  resolved versions into `tests/fixtures/oracle/.juliasyntax-source`.
+  resolved versions (Julia's and JuliaSyntax's) into
+  `crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source`.
 - Julia packages are **Pkg-managed, not Nix-managed**: `devenv.nix` provides
   only the bare `julia-bin` interpreter and the shell exports `JULIA_PROJECT=@.`.
   This replaced nixpkgs' `withPackages`, which resolved an old registry snapshot

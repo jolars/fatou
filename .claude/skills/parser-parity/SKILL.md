@@ -114,21 +114,36 @@ break a formatter fixture that the parser suite says nothing about. Two rules:
   the loop and `outer` forms for free. Check the fixture's `expected.jl` is still
   the desired output, and confirm idempotency on the new parser fixture.
 
-## The operator recipe (5 files)
+## The operator recipe (4 files)
+
+The token machinery is **table-driven**: a row in `crates/fatou-parser/src/tokens.rs`
+expands into the `TokKind` variant, the `SyntaxKind` variant, *and* the
+`syntax_kind_for` mapping, so a token cannot be lexed but unmapped. Do not
+hand-add arms to `syntax.rs` or `tree_builder.rs` — they are generated from that
+one row. (`ERROR` must stay the last `SyntaxKind` variant; `kind_from_raw` uses
+it as the discriminant upper bound.)
 
 Adding an infix/prefix operator touches exactly these, in order—miss one and it
-won't lex, won't get a kind, or won't project:
+won't lex, won't bind, or won't project:
 
-1. `crates/fatou-parser/src/parser/lexer.rs`: add a `TokKind` variant + lex it (longest-match: the
-   3-char dotted table, then the 2-char table, then 1-char). `=>`/`.=>` is the
-   worked example (commit `c6448f2`).
-2. `crates/fatou-parser/src/syntax.rs`: add the `SyntaxKind` operator token (keep `ERROR` last).
-3. `crates/fatou-parser/src/parser/tree_builder.rs`: map `TokKind::X => SyntaxKind::X`.
-4. `crates/fatou-parser/src/parser/expr.rs`: add to `infix_binding_power` (probe Julia for the tier
-   and associativity first; right-assoc has `r_bp < l_bp`). Default operators
-   build a `BINARY_EXPR`; assignment-like ones need a node-kind arm too.
-5. `crates/fatou-parser/src/parser/sexpr.rs`: add to `infix_head` (`CallI`/`Special`/`DotCallI`/
+1. `crates/fatou-parser/src/tokens.rs`: add the `token_table!` row (`TokKind`
+   variant + `SyntaxKind` variant + mapping, all from that one line).
+2. `crates/fatou-parser/src/parser/lexer.rs`: add an `OPS` row (`OPS`, ~line
+   819) — the single table of fixed ASCII spellings, grouped by first byte and
+   **longest-first within a group**; `build_op_index` const-asserts that
+   ordering, which is what makes longest match a property of the data rather
+   than of an arm. Unicode operators come from the generated code-point table
+   (`unicode_op_at`) instead.
+3. `crates/fatou-parser/src/parser/expr.rs`: add to `infix_binding_power`
+   (~line 3879; probe Julia for the tier and associativity first; right-assoc
+   has `r_bp < l_bp`). Default operators build a `BINARY_EXPR`; assignment-like
+   ones need a node-kind arm too.
+4. `crates/fatou-parser/src/parser/sexpr.rs`: add to `infix_head` (`CallI`/`Special`/`DotCallI`/
    `Dot`) **and** `is_operator`.
+
+Keywords work the same way one level up: a `keywords.rs` row feeds
+`keyword_table!`, whose rows are spliced into `token_table!`, so one row gets the
+keyword its two enum variants, its mapping, and every keyword predicate.
 
 Non-operator features (markers, quotes, literals) are usually just `parse_prefix`
 + a `SyntaxKind` + a projector arm. `BEGIN_MARKER` (`0e0fc0e`) and `QUOTE_SYM`
@@ -252,11 +267,17 @@ precisely so you don't have to.
 - `crates/fatou-parser/src/parser/sexpr.rs`: projector (`to_juliasyntax_sexpr`, `normalize_sexpr`,
   `infix_head`, `is_operator`, per-kind `project_*`). The faithful diagnostic.
 - `crates/fatou-parser/src/parser/expr.rs`: Pratt parser: `parse_prefix`, `infix_binding_power`
-  (the precedence table ~line 1525), `ExprFlags` (threaded context like
+  (the precedence table ~line 3879), `ExprFlags` (threaded context like
   `end_marker`/`begin_marker`), the operator loop.
-- `crates/fatou-parser/src/parser/lexer.rs`: `TokKind` + tokenization (operator tables ~line 757).
-- `crates/fatou-parser/src/syntax.rs`: `SyntaxKind` (`ERROR` must stay last).
-- `crates/fatou-parser/src/parser/tree_builder.rs`: `TokKind` → `SyntaxKind` mapping.
+- `crates/fatou-parser/src/parser/lexer.rs`: tokenization; the `OPS` table
+  (~line 819) and `build_op_index`.
+- `crates/fatou-parser/src/tokens.rs` (+ `keywords.rs`): `token_table!` /
+  `keyword_table!` — one row generates the `TokKind` variant, the `SyntaxKind`
+  variant, and the mapping. The growth surface for a new token.
+- `crates/fatou-parser/src/syntax.rs`: `SyntaxKind`, generated from
+  `token_table!` (`ERROR` must stay last).
+- `crates/fatou-parser/src/parser/tree_builder.rs`: `syntax_kind_for`, also
+  generated from `token_table!`.
 - `crates/fatou-parser/src/parser/diagnostics.rs`: `DiagnosticKind` — the recovery
   side-channel the projector replays as `(error …)`/`(error-t …)`.
 - `crates/fatou-formatter/src/formatter/rules.rs`: consumes the same CST; the

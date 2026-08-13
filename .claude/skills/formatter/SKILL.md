@@ -101,9 +101,13 @@ special cases for specific constructs. (See AGENTS.md.)
 
 - **Not source-break mirroring.** Author `expected.jl` as the canonical
   fully-reflowed form. **Do not** let the current code's output define
-  `expected.jl` — much of today's machinery still mirrors source breaks (a legacy
-  of the old Runic target), which Tenet 1 forbids. That is the trap to avoid; the
-  real reflow engine is the headline future target (see RECAP).
+  `expected.jl`. The width-driven reflow engine already exists and is what
+  decides every group's flat-vs-break (`printer.rs`); the old Runic-derived
+  source-break mirroring was retired rule by rule, and `has_newline_token` now
+  has a single live call site, in the comment-bearing matrix path — where
+  mirroring is arguably correct, since moving a trailing `# note` changes which
+  element it annotates. A *new* rule that reads whether the author broke a line
+  is a Tenet 1 violation (see RECAP for the audit).
 - **Not a pass-rate chase.** Every handled construct stays idempotent and must
   never mangle unhandled syntax — that's what the transparent fallback protects.
 - **Not semantic rewriting.** Layout only; semantic rewrites (e.g. implicit
@@ -131,7 +135,9 @@ and record the gap where the fixer will look:
 - `crates/fatou-formatter/src/formatter/rules.rs`: `lower`/`lower_node`/`lower_transparent`, the
   per-construct rules. The growth surface.
 - `crates/fatou-formatter/src/formatter/ir.rs`: the `Ir` primitives (`Text`/`Concat`/`Line`/`SoftLine`/
-  `HardLine`/`BlankLine`/`Indent`/`Group`).
+  `HardLine`/`BlankLine`/`Indent`/`Group`/`IfBreak`, plus `HugGroup` for a
+  trailing-argument hug with an explode fallback and `CondGroup` for a choice
+  decided by a later re-indented line, as in `f(args) where {T, S}`).
 - `crates/fatou-formatter/src/formatter/printer.rs`: best-fit layout engine (group flat-vs-break).
 - `crates/fatou-formatter/src/formatter/core.rs`: `format`/`format_with_style` entry points.
 - `crates/fatou-formatter/tests/formatter.rs`: the gate + stability invariants.

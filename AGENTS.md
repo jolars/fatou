@@ -107,8 +107,9 @@ cargo run -- debug format <path>          # the smoke test's per-file invariant 
 All commands honor a `fatou.toml` found by an ancestor walk. `task <name>`
 (`Taskfile.yml`, `task --list`) wraps the workflows: `lint`, `format`, `test`,
 `audit`, `deny`, `docs-build`, `docs-preview`, `bench`, `bench-memory`,
-`bench-corpus`, `bench-lsenv`, `bench-reparse`, and the logo/icon generators. `insta` snapshots are reviewed
-with `cargo insta review`; logging honors `RUST_LOG` via `env_logger`.
+`bench-corpus`, `bench-lsenv`, `bench-reparse`, `bench-lex`, `profile`, and the
+logo/icon generators. `insta` snapshots are reviewed with `cargo insta review`;
+logging honors `RUST_LOG` via `env_logger`.
 
 ## Architecture map
 
@@ -143,7 +144,7 @@ matching `.claude/rules/` file.
   **Not lint rules** (there is no `SyntaxKind` to dispatch on) and deliberately
   LSP-free, so the mapping to `lsp_types` stays at the edge.
 - **Linter** (`src/linter/`) — **purely semantic**; anything `format --check`
-  catches belongs to the formatter. 48 rules across `correctness`, `suspicious`,
+  catches belongs to the formatter. 49 rules across `correctness`, `suspicious`,
   `performance`, `readability`, and `meta` (which lints the `# fatou-ignore`
   directives themselves), with autofixes, `# fatou-ignore` suppression, and a
   generated rule reference.

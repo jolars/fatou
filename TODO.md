@@ -122,8 +122,10 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
 - [ ] A `documentation` category over docstrings, structurally mirroring
   arity's five roxygen rules: undocumented exported names, `@doc` argument
   lists that disagree with the signature. Larger design question than a single
-  rule. Would be a fifth category beyond the settled four, which is cheap on
-  its own — the taxonomy note above applies — but the bundle is what needs
+  rule. Would be a sixth category alongside `correctness`/`suspicious`/
+  `performance`/`readability`/`meta`, which is cheap on its own — a category is
+  its directory and nothing else (`.claude/rules/linter.md`), so it appears in
+  no public surface and recategorizing is free — but the bundle is what needs
   designing, not the directory.
 
 - [x] Not a lint rule, and not a linter task at all: TOML syntax diagnostics for

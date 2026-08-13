@@ -8,11 +8,11 @@ description: Add a new built-in lint rule to the fatou linter—implement it
 
 Use this skill when asked to add a new built-in lint rule (correctness,
 suspicious, ...), whether or not it ships an auto-fix. The roadmap of planned
-rules lives in `TODO.md` under "Rule roadmap"—when the request names a
-roadmap item, follow its category/cost/severity annotation and check the item
-off when done. Roadmap items marked "Blocked on future infrastructure" need
-that infrastructure first; don't fake it with a heuristic unless the roadmap
-entry explicitly sanctions one (e.g. `index-from-length`'s name-based match).
+rules lives in `TODO.md` under "Linter" → "Rules"—when the request names a
+roadmap item, follow its annotation and check the item off when done. A roadmap
+item that names blocking infrastructure needs that infrastructure first; don't
+fake it with a heuristic unless the entry explicitly sanctions one (e.g.
+`index-from-length`'s name-based match).
 
 ## Tenets that constrain a rule (from `AGENTS.md`)
 
@@ -36,24 +36,35 @@ entry explicitly sanctions one (e.g. `index-from-length`'s name-based match).
 
 ## Cost model (drives which infra you may touch)
 
-A rule is **cheap (`syn`)** when it only needs the CST plus typed AST wrappers
-and literal inspection; **expensive (`sem`)** when it needs the
-`SemanticModel` (`ctx.model`: scopes, bindings, occurrences, imports, module
-paths). There is no name-resolution tier yet: anything that must know what an
-identifier resolves to (Base/stdlib methods, imported symbols) is **blocked**
-until the index/resolution phases land—see the roadmap's blocked section.
-Prefer the cheapest tier the rule's correctness actually requires.
+Three tiers; prefer the cheapest the rule's correctness actually requires.
+
+- **`syn`** — the CST plus typed AST wrappers and literal inspection.
+- **`sem`** — the `SemanticModel` (`ctx.model`: scopes, bindings, occurrences,
+  imports, module paths).
+- **`res`** — name resolution: what an identifier actually *means*
+  (Base/stdlib methods, imported symbols). Available through `RuleContext`:
+  `resolver()`, `resolves_to_base()`, `read_resolves_to_base()`,
+  `name_resolves_to_base()`, `base_export_module()`, and `trusts_resolution()`
+  as the gate for "is a resolution context even present". Each is memoized per
+  file, so asking is cheap however many rules do.
+
+**A `res`-tier rule carries two extra obligations.** It is sound only with a
+project-wide resolution context, so it must (a) report **nothing** when
+`trusts_resolution()` is false, rather than guessing, and (b) be listed in
+`RESOLUTION_RULES` (`src/linter/rules.rs`) and ship `default_enabled() ->
+false`. That one list is what the CLI's harvest gate, the language server's
+member-file rule set, and `outdated-suppression` all read; adding a resolution
+rule without it means the CLI never harvests for it and it silently misfires.
 
 ## Key files
 
-- `src/linter/rules.rs`—the `Rule` trait, `RuleContext`, and
-  **`all_rules()`, the single source of truth**. `all_rule_ids()` derives from
-  it, so there is no second list to sync. Every new rule is added here exactly
-  once.
-- `src/linter/rules/<category>.rs`—the category module. The settled vocabulary
-  is `correctness`/`suspicious`/`performance`/`readability`; only the first two
-  exist so far, and the directory plus this module are created by the first
-  rule to need them. Holds `mod <id>;` + `pub use <id>::<Name>;`.
+- `src/linter/rules.rs`—the `Rule` trait, `RuleContext`, **`all_rules()`, the
+  single source of truth**, and `RESOLUTION_RULES`. `all_rule_ids()` derives
+  from `all_rules()`, so there is no second list to sync. Every new rule is
+  added here exactly once.
+- `src/linter/rules/<category>.rs`—the category module. The vocabulary is
+  `correctness`/`suspicious`/`performance`/`readability`/`meta`; all five
+  exist. Holds `mod <id>;` + `pub use <id>::<Name>;`.
 - `src/linter/rules/<category>/<id>.rs`—one file per rule: a unit
   `pub struct` implementing `Rule`, with a module doc comment. (File names are
   snake_case; the public id stays kebab-case.)
@@ -73,10 +84,12 @@ Prefer the cheapest tier the rule's correctness actually requires.
   this module instead. Shape matching is only half the job: follow it with
   `ctx.resolves_to_base(&call)` before claiming the callee is Base's.
 - `src/linter/diagnostic.rs`—`Diagnostic`, `Fix`, `Applicability`,
-  `Severity`. Build findings with **`Diagnostic::new(id, start, end, message)`**
-  and push `Fix { description, content, start, end, applicability }` onto
-  `diag.fixes`. **Severity and path are stamped by the engine** after the rule
-  runs—rules never set either; override `default_severity()` instead.
+  `Severity`. Build findings with **`Diagnostic::new(id, range, message)`**
+  (a `TextRange`, not a start/end pair) and push
+  `Fix { description, content, start, end, applicability }` onto `diag.fixes`
+  (`Fix` *does* take byte offsets). **Severity and path are stamped by the
+  engine** after the rule runs—rules never set either; override
+  `default_severity()` instead.
 - `src/semantic.rs`—`SemanticModel` for `sem`-tier rules (`bindings()`,
   `occurrences()`, `scopes()`, `enclosing_module_path()`, `module_loads()`,
   `free_reads()`, ...).
@@ -101,9 +114,12 @@ Prefer the cheapest tier the rule's correctness actually requires.
   Do not hand-edit the page.
 - `docs/src/SUMMARY.md`—no per-rule entries; the reference is one page, so a
   new rule needs no `SUMMARY.md` change.
-- `TODO.md`—the live roadmap ("Rule roadmap" under "Linter"). Check off the
-  rule's item with a one-line scope/severity note mirroring the landed
-  entries above it.
+- `src/config.rs`—`RulesConfig`, one typed field per rule that takes options
+  (`[lint.rules.<id>]`). It is `deny_unknown_fields`, so a mistyped key there is
+  a config **parse error**. Options reach the rule as `ctx.config`.
+- `TODO.md`—the live roadmap ("Rules" under "Linter"). Check off the rule's
+  item with a one-line scope/severity note mirroring the landed entries above
+  it.
 
 ## Workflow
 
@@ -117,7 +133,8 @@ Prefer the cheapest tier the rule's correctness actually requires.
    - **Category** = directory only: `correctness` (the code cannot do what it
      says), `suspicious` (legal Julia, very likely not intended), `performance`
      (a rewrite that avoids real work), `readability` (an idiom rewrite that is
-     behavior-preserving). It appears in no public surface—not the id, not the
+     behavior-preserving), `meta` (a finding about a `# fatou-ignore` directive
+     rather than about the Julia). It appears in no public surface—not the id, not the
      `--select`/`--ignore`/`[lint.severity]`/`# fatou-ignore` key, and not the
      reference, which is one page keyed by id—so it is a free refactor later.
      Pick the fitting one and move on.
@@ -126,7 +143,7 @@ Prefer the cheapest tier the rule's correctness actually requires.
      set severity on the `Diagnostic`—the engine stamps it, honoring the
      user's `[lint.severity]` override.
    - **`default_enabled()`**—default `true`; override to `false` for noisy
-     opt-in rules (the roadmap flags these).
+     opt-in rules and for every `res`-tier rule (see the cost model).
    - **Dispatch shape**—node-shape rules declare `interests()` (a slice of
      `SyntaxKind`) and implement `check(el, ctx, sink)`, called once per
      matching element in the *one* shared `descendants_with_tokens()` walk
@@ -147,8 +164,7 @@ Prefer the cheapest tier the rule's correctness actually requires.
    - If the rule ships a fix: a `fix_source` case in `tests/autofix.rs`
      (snapshot the output, assert `applied` and `remaining.is_empty()`), and
      an `apply_fixes` case if applicability gating matters. Eyeball that the
-     fixed output parses clean—there is no automated parse-clean harness yet
-     (tracked in `TODO.md`).
+     fixed output parses clean—there is no automated parse-clean harness.
    - Run them and watch them fail before implementing.
 
 4. **Implement the rule** in `src/linter/rules/<category>/<id>.rs`:
@@ -172,7 +188,7 @@ Prefer the cheapest tier the rule's correctness actually requires.
          fn interests(&self) -> &'static [SyntaxKind] { &[SyntaxKind::…] }
          fn check(&self, el: &SyntaxElement, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
              // … cast, match shape, then:
-             let mut diag = Diagnostic::new(self.id(), start, end, message);
+             let mut diag = Diagnostic::new(self.id(), range, message);
              diag.fixes.push(Fix { … });   // only if fixable
              sink.push(diag);
          }
@@ -186,6 +202,8 @@ Prefer the cheapest tier the rule's correctness actually requires.
      (`src/linter/rules.rs`), in category order. Nothing else—selection,
      `--select`/`--ignore`/`[lint.severity]` validation, and the docs all
      derive from this list.
+   - **`res`-tier only:** also add the id to `RESOLUTION_RULES` in the same
+     file.
 
 6. **Generate and pin the docs:**
    - `cargo run --example docgen` → regenerates

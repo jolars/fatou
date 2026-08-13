@@ -33,9 +33,8 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   read must never block queued work.
 - `TaskPool` is purpose-built rather than rayon's global pool, which has no
   priority concept. Background package indexing gets its **own single-thread
-  pool** — the one unbounded-duration job must never slot-block a read
-  (`TODO.md`, language server Phase 3). **Never put unbounded work on the read
-  pool.**
+  pool** — the one unbounded-duration job must never slot-block a read.
+  **Never put unbounded work on the read pool.**
 - Requests are **coalesced** (latest version per URI; stale edits dropped) in
   lieu of a debounce. `decide` keeps at most one analysis in flight: a
   strictly-newer edit of the *same* URI cancels the running analysis; a

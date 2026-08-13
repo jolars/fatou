@@ -139,8 +139,8 @@ absorb before touching anything:
    path (`format_node` via the salsa-cached CST, `lsp::format::format_edits_via_db`)
    skips the parse entirely — so profile *that* phase, and don't spend effort on
    parse cost that the LSP never pays.
-2. **Sub-percentages are shares of total, not of the phase.** `lower` at 21% is
-   half the formatter's own work, not a fifth of it.
+2. **Sub-percentages are shares of total, not of the phase.** `lower` at 28% is
+   most of the formatter's own work, not a quarter of it.
 
 Re-measure this table when it goes stale rather than trusting the numbers above;
 they are a starting map, not a fact.

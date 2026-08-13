@@ -11,7 +11,7 @@ paths:
 
 `src/linter/`. **To add a rule, use the `add-lint-rule` skill.** Triaging the
 linter against a real Julia codebase: the `linter-investigation` skill. The rule
-roadmap is in `TODO.md` ("Rule roadmap").
+roadmap is in `TODO.md` (under "Linter" → "Rules").
 
 ## Scope
 
