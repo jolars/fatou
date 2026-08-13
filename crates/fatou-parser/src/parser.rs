@@ -38,6 +38,12 @@ pub use reparse::{
 #[doc(hidden)]
 pub use reparse::fingerprint;
 pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
+// The `lex` bench's entry point. Gated on `bench` so tokenizing on its own —
+// which no consumer has a reason to do — never becomes part of the API.
+#[cfg(feature = "bench")]
+pub fn token_count(input: &str) -> usize {
+    lexer::lex(input).len()
+}
 // A lossless CST hands out a literal's *source*; a consumer reading it as data
 // (the `include` path resolver) needs the value it denotes.
 pub use unescape::{StringDecodeError, string_value};

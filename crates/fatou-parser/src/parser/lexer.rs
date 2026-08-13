@@ -1003,392 +1003,367 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    /// Lex the operator at `start`, or one unknown byte if none matches.
+    /// Lex the operator at `start`, or one unknown char if none matches.
     ///
-    /// **Every arm below is ordered longest-match-first, and reordering them
-    /// changes what the lexer accepts.** A shorter operator placed above a
-    /// longer one that shares its prefix silently truncates it — `.>>` above
-    /// `.>>>=` splits the latter into three tokens. The arm order *is* the
-    /// longest-match rule; individual arms therefore do not restate it.
-    /// `TODO.md` tracks replacing the ladder with a length-descending table,
-    /// which would make that structural instead of positional.
+    /// Two tables answer this: [`OPS`] for every fixed ASCII spelling, and
+    /// [`Self::unicode_op_at`] for the handful whose spelling is not fixed
+    /// bytes. Each returns the longest spelling it can match, and the longer of
+    /// the two wins — so longest match holds across them as well as within
+    /// them, and no ordering here carries it.
     fn lex_operator_or_unknown(&mut self, start: usize) {
-        let b0 = self.peek(0);
-        let b1 = self.peek(1);
-
-        // The `...` splat/vararg.
-        if (b0, b1, self.peek(2)) == (Some(b'.'), Some(b'.'), Some(b'.')) {
-            self.pos += 3;
-            self.push_op(TokKind::DotDotDot, start);
-            return;
-        }
-
-        // The `..` range operator (after `...`, before the broadcast-dot block
-        // so a bare `..` isn't mistaken for a dotted operator or two lone dots).
-        if (b0, b1) == (Some(b'.'), Some(b'.')) {
-            self.pos += 2;
-            self.push_op(TokKind::DotDot, start);
-            return;
-        }
-
-        // Broadcasting (dotted) operators: a `.` immediately followed by an
-        // operator char. We merge only `.`+operator — never `.`+ident (`a.b`),
-        // `.(` (`f.(x)` stays `Dot LParen`), `..`, or `...` (matched above) — so
-        // field access, the `@.` macro, and splat are all untouched.
-        if b0 == Some(b'.') {
-            // `.>>>=`, the broadcast unsigned-shift assignment.
-            if (b1, self.peek(2), self.peek(3), self.peek(4))
-                == (Some(b'>'), Some(b'>'), Some(b'>'), Some(b'='))
-            {
-                self.pos += 5;
-                self.push_op(TokKind::DotUShrEq, start);
-                return;
-            }
-            // `.>>>`, the broadcast unsigned shift (`.>>>=` is matched above, so
-            // a 5th `=` never reaches here).
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'>')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotUShr, start);
-                return;
-            }
-            // `.//=`, the lone 4-char dotted op.
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotSlashSlashEq, start);
-                return;
-            }
-            // The 4-char broadcast bitshift assignments `.<<=`/`.>>=` beat the
-            // dotted 2-char forms.
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'<'), Some(b'=')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotShlEq, start);
-                return;
-            }
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'=')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotShrEq, start);
-                return;
-            }
-            // `.-->`, the broadcast arrow.
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'-'), Some(b'-'), Some(b'>')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotLongArrow, start);
-                return;
-            }
-            // `.<-->` and `.<--`, the broadcast left arrows.
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-')) {
-                if self.peek(4) == Some(b'>') {
-                    self.pos += 5;
-                    self.push_op(TokKind::DotLeftRightArrow, start);
-                } else {
-                    self.pos += 4;
-                    self.push_op(TokKind::DotLeftLongArrow, start);
-                }
-                return;
-            }
-            // `.===`/`.!==`, the broadcast identity ops.
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'='), Some(b'='), Some(b'=')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotEqEqEq, start);
-                return;
-            }
-            if (b1, self.peek(2), self.peek(3)) == (Some(b'!'), Some(b'='), Some(b'=')) {
-                self.pos += 4;
-                self.push_op(TokKind::DotNotEqEq, start);
-                return;
-            }
-            let dotted3 = match (b1, self.peek(2)) {
-                (Some(b'='), Some(b'=')) => Some(TokKind::DotEqEq),
-                (Some(b'!'), Some(b'=')) => Some(TokKind::DotNotEq),
-                (Some(b'<'), Some(b'=')) => Some(TokKind::DotLe),
-                (Some(b'>'), Some(b'=')) => Some(TokKind::DotGe),
-                // Broadcast bitshift `.<<`/`.>>`. The augmented `.<<=`/`.>>=` and
-                // the unsigned `.>>>` are matched above, so a doubled `<`/`>`
-                // here is the plain shift.
-                (Some(b'<'), Some(b'<')) => Some(TokKind::DotShl),
-                (Some(b'>'), Some(b'>')) => Some(TokKind::DotShr),
-                (Some(b'<'), Some(b':')) => Some(TokKind::DotSubtype),
-                (Some(b'>'), Some(b':')) => Some(TokKind::DotSupertype),
-                (Some(b'/'), Some(b'/')) => Some(TokKind::DotSlashSlash),
-                // Broadcast invalid doubled operators `.**`/`.--` (the `.-->`
-                // arrow is matched above, so `.--` here is never the arrow).
-                (Some(b'*'), Some(b'*')) => Some(TokKind::DotStarStar),
-                (Some(b'-'), Some(b'-')) => Some(TokKind::DotMinusMinus),
-                (Some(b'='), Some(b'>')) => Some(TokKind::DotFatArrow),
-                (Some(b'|'), Some(b'>')) => Some(TokKind::DotPipeGt),
-                (Some(b'&'), Some(b'&')) => Some(TokKind::DotAndAnd),
-                (Some(b'|'), Some(b'|')) => Some(TokKind::DotOrOr),
-                // Broadcast augmented assignment `.op=`.
-                (Some(b'+'), Some(b'=')) => Some(TokKind::DotPlusEq),
-                (Some(b'-'), Some(b'=')) => Some(TokKind::DotMinusEq),
-                (Some(b'*'), Some(b'=')) => Some(TokKind::DotStarEq),
-                (Some(b'/'), Some(b'=')) => Some(TokKind::DotSlashEq),
-                (Some(b'\\'), Some(b'=')) => Some(TokKind::DotBackslashEq),
-                (Some(b'^'), Some(b'=')) => Some(TokKind::DotCaretEq),
-                (Some(b'%'), Some(b'=')) => Some(TokKind::DotPercentEq),
-                // Broadcast bitwise augmented assignment `.&=`/`.|=`. The `.&&`/
-                // `.||` short-circuits and `.|>` pipe are matched above, so a
-                // `&`/`|` followed by `=` here is the augmented-assign form.
-                (Some(b'&'), Some(b'=')) => Some(TokKind::DotAmpEq),
-                (Some(b'|'), Some(b'=')) => Some(TokKind::DotPipeEq),
-                _ => None,
-            };
-            if let Some(kind) = dotted3 {
-                self.pos += 3;
-                self.push_op(kind, start);
-                return;
-            }
-            let dotted2 = match b1 {
-                Some(b'+') => Some(TokKind::DotPlus),
-                Some(b'-') => Some(TokKind::DotMinus),
-                Some(b'*') => Some(TokKind::DotStar),
-                Some(b'/') => Some(TokKind::DotSlash),
-                Some(b'\\') => Some(TokKind::DotBackslash),
-                Some(b'^') => Some(TokKind::DotCaret),
-                Some(b'%') => Some(TokKind::DotPercent),
-                Some(b'=') => Some(TokKind::DotEq),
-                Some(b'<') => Some(TokKind::DotLt),
-                Some(b'>') => Some(TokKind::DotGt),
-                Some(b'~') => Some(TokKind::DotTilde),
-                // `.&&`/`.||`/`.|>` were already matched by the 3-char table, so a
-                // lone `&`/`|` after the dot is the broadcast bitwise operator.
-                Some(b'&') => Some(TokKind::DotAmp),
-                Some(b'|') => Some(TokKind::DotPipe),
-                // The broadcast unary-not `.!`. The `.!=`/`.!==` inequality ops
-                // are matched above (they require a trailing `=`), so a lone `!`
-                // after the dot is the prefix broadcast-not.
-                Some(b'!') => Some(TokKind::DotBang),
-                _ => None,
-            };
-            if let Some(kind) = dotted2 {
-                self.pos += 2;
-                self.push_op(kind, start);
-                return;
-            }
-            // The broadcast minus sign `.−` and its augmented form `.−=`. U+2212
-            // lexes as the ASCII `-` (see the undotted case below), so these are
-            // plain `DotMinus`/`DotMinusEq` tokens spanning the sign.
-            if matches!(b1, Some(b) if !b.is_ascii()) {
-                let ch = self.char_at(self.pos + 1);
-                if ch == MINUS_SIGN {
-                    let eq = self.peek(1 + ch.len_utf8()) == Some(b'=');
-                    let kind = if eq {
-                        TokKind::DotMinusEq
-                    } else {
-                        TokKind::DotMinus
-                    };
-                    self.pos += 1 + ch.len_utf8() + usize::from(eq);
-                    self.push_op(kind, start);
-                    return;
-                }
-            }
-            // The broadcast Unicode augmented assignments `.÷=`/`.⊻=` fuse `.` +
-            // the operator + a trailing `=` into one token.
-            if matches!(b1, Some(b) if !b.is_ascii()) {
-                let ch = self.char_at(self.pos + 1);
-                if matches!(ch, '\u{f7}' | '\u{22bb}') && self.peek(1 + ch.len_utf8()) == Some(b'=')
-                {
-                    let kind = if ch == '\u{f7}' {
-                        TokKind::DotDivEq
-                    } else {
-                        TokKind::DotXorEq
-                    };
-                    self.pos += 1 + ch.len_utf8() + 1;
-                    self.push_op(kind, start);
-                    return;
-                }
-            }
-            // A broadcast `.` fused to a single-codepoint Unicode infix operator
-            // (`.…`, `.×`, `.⊕`, …) or to a prefix-only radical (`.√`, `.¬`):
-            // emit the operator's precedence-tier kind on a token spanning `.op`.
-            // The projector strips the leading `.` and heads `dotcall-i` (infix)
-            // or `dotcall-pre` (radical). The assignment tier is not fused here —
-            // it needs its own (currently deferred) projection.
-            if b1.is_some_and(|b| !b.is_ascii()) {
-                let ch = self.char_at(self.pos + 1);
-                if let Some(kind) = unicode_op_kind(ch)
-                    .filter(|&k| is_unicode_infix_tier(k) || k == TokKind::UniRadical)
-                {
-                    self.pos += 1 + ch.len_utf8();
-                    self.push_op(kind, start);
-                    return;
-                }
-            }
-            // A lone `.` (or `..`) falls through to the single-char table below.
-        }
-
-        // `//=`, the lone 3-char ASCII op.
-        if (b0, b1, self.peek(2)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
-            self.pos += 3;
-            self.push_op(TokKind::SlashSlashEq, start);
-            return;
-        }
-
-        // `<-->`, the 4-char arrow.
-        if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-'), Some(b'>'))
-        {
-            self.pos += 4;
-            self.push_op(TokKind::LeftRightArrow, start);
-            return;
-        }
-
-        // `>>>=`, the unsigned-shift assignment.
-        if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'>'), Some(b'='))
-        {
-            self.pos += 4;
-            self.push_op(TokKind::UShrEq, start);
-            return;
-        }
-
-        // Three-char ASCII ops.
-        let three = match (b0, b1, self.peek(2)) {
-            (Some(b'-'), Some(b'-'), Some(b'>')) => Some(TokKind::LongArrow),
-            // The left arrow `<--` (the 4-char `<-->` was matched above; a lone
-            // `<-` stays `Lt` + unary minus).
-            (Some(b'<'), Some(b'-'), Some(b'-')) => Some(TokKind::LeftLongArrow),
-            (Some(b'>'), Some(b'>'), Some(b'>')) => Some(TokKind::UShr),
-            // Identity `===` beats `==`; its negation `!==` beats `!=`.
-            (Some(b'='), Some(b'='), Some(b'=')) => Some(TokKind::EqEqEq),
-            (Some(b'!'), Some(b'='), Some(b'=')) => Some(TokKind::NotEqEq),
-            // Bitshift augmented assignment (`>>>=` was matched above).
-            (Some(b'<'), Some(b'<'), Some(b'=')) => Some(TokKind::ShlEq),
-            (Some(b'>'), Some(b'>'), Some(b'=')) => Some(TokKind::ShrEq),
-            // Augmented assignment for the wrapping operators.
-            (Some(b'+'), Some(b'%'), Some(b'=')) => Some(TokKind::PlusPercentEq),
-            (Some(b'-'), Some(b'%'), Some(b'=')) => Some(TokKind::MinusPercentEq),
-            (Some(b'*'), Some(b'%'), Some(b'=')) => Some(TokKind::StarPercentEq),
+        let rest = &self.bytes[self.pos..];
+        let ascii = try_ascii_op(rest);
+        // A Unicode operator is only reachable where [`OPS`] cannot spell one:
+        // a non-ASCII operator, or a broadcast `.` fused to one (`.×`, `.−=`),
+        // which [`OPS`] can only see as the lone `Dot`.
+        let unicode = match (rest.first(), rest.get(1)) {
+            (Some(b), _) if !b.is_ascii() => self.unicode_op_at(0),
+            (Some(b'.'), Some(b)) if !b.is_ascii() => self.unicode_op_at(1),
             _ => None,
         };
-        if let Some(kind) = three {
-            self.pos += 3;
-            self.push_op(kind, start);
-            return;
-        }
+        let best = [ascii, unicode]
+            .into_iter()
+            .flatten()
+            .max_by_key(|&(_, len)| len);
 
-        // Two-char operators. The invalid doubled operators
-        // `**`/`--` lex as single error tokens (`-->` is matched above as a
-        // 3-char op, so `--` here is never the start of an arrow).
-        let two = match (b0, b1) {
-            (Some(b'*'), Some(b'*')) => Some(TokKind::StarStar),
-            (Some(b'-'), Some(b'-')) => Some(TokKind::MinusMinus),
-            (Some(b'/'), Some(b'/')) => Some(TokKind::SlashSlash),
-            (Some(b'='), Some(b'=')) => Some(TokKind::EqEq),
-            (Some(b'='), Some(b'>')) => Some(TokKind::FatArrow),
-            (Some(b'!'), Some(b'=')) => Some(TokKind::NotEq),
-            (Some(b'<'), Some(b'=')) => Some(TokKind::Le),
-            (Some(b'>'), Some(b'=')) => Some(TokKind::Ge),
-            (Some(b'&'), Some(b'&')) => Some(TokKind::AndAnd),
-            (Some(b'|'), Some(b'|')) => Some(TokKind::OrOr),
-            (Some(b':'), Some(b':')) => Some(TokKind::ColonColon),
-            (Some(b':'), Some(b'=')) => Some(TokKind::ColonEq),
-            (Some(b'<'), Some(b':')) => Some(TokKind::Subtype),
-            (Some(b'>'), Some(b':')) => Some(TokKind::Supertype),
-            (Some(b'-'), Some(b'>')) => Some(TokKind::Arrow),
-            (Some(b'|'), Some(b'>')) => Some(TokKind::PipeGt),
-            (Some(b'<'), Some(b'|')) => Some(TokKind::PipeLt),
-            (Some(b'<'), Some(b'<')) => Some(TokKind::Shl),
-            (Some(b'>'), Some(b'>')) => Some(TokKind::Shr),
-            // Wrapping arithmetic `+%`/`-%`/`*%` (the `+%=` family was matched
-            // by the 3-char table above). `--`/`->`/`**` are matched by earlier
-            // arms, so a `%` after `+`/`-`/`*` is always the wrapping form.
-            (Some(b'+'), Some(b'%')) => Some(TokKind::PlusPercent),
-            // `++`. `+++` falls out as `++` then `+`, and `++=` as `++` then `=`
-            // (there is no augmented `++=` form), both matching JuliaSyntax.
-            (Some(b'+'), Some(b'+')) => Some(TokKind::PlusPlus),
-            (Some(b'-'), Some(b'%')) => Some(TokKind::MinusPercent),
-            (Some(b'*'), Some(b'%')) => Some(TokKind::StarPercent),
-            // Augmented assignment `op=`.
-            (Some(b'+'), Some(b'=')) => Some(TokKind::PlusEq),
-            (Some(b'-'), Some(b'=')) => Some(TokKind::MinusEq),
-            (Some(b'*'), Some(b'=')) => Some(TokKind::StarEq),
-            (Some(b'/'), Some(b'=')) => Some(TokKind::SlashEq),
-            (Some(b'\\'), Some(b'=')) => Some(TokKind::BackslashEq),
-            (Some(b'^'), Some(b'=')) => Some(TokKind::CaretEq),
-            (Some(b'%'), Some(b'=')) => Some(TokKind::PercentEq),
-            (Some(b'|'), Some(b'=')) => Some(TokKind::PipeEq),
-            // `$=`. A `$` elsewhere is the interpolation sigil, which never
-            // precedes an `=`.
-            (Some(b'$'), Some(b'=')) => Some(TokKind::DollarEq),
-            (Some(b'&'), Some(b'=')) => Some(TokKind::AmpEq),
-            _ => None,
-        };
-        if let Some(kind) = two {
-            self.pos += 2;
-            self.push_op(kind, start);
-            return;
-        }
-
-        let one = match b0 {
-            Some(b'=') => Some(TokKind::Eq),
-            Some(b'+') => Some(TokKind::Plus),
-            Some(b'-') => Some(TokKind::Minus),
-            Some(b'*') => Some(TokKind::Star),
-            Some(b'/') => Some(TokKind::Slash),
-            Some(b'\\') => Some(TokKind::Backslash),
-            Some(b'^') => Some(TokKind::Caret),
-            Some(b'%') => Some(TokKind::Percent),
-            Some(b'<') => Some(TokKind::Lt),
-            Some(b'>') => Some(TokKind::Gt),
-            Some(b':') => Some(TokKind::Colon),
-            Some(b'.') => Some(TokKind::Dot),
-            Some(b'!') => Some(TokKind::Bang),
-            Some(b'&') => Some(TokKind::Amp),
-            Some(b'|') => Some(TokKind::Pipe),
-            Some(b'~') => Some(TokKind::Tilde),
-            Some(b'?') => Some(TokKind::Question),
-            Some(b'(') => Some(TokKind::LParen),
-            Some(b')') => Some(TokKind::RParen),
-            Some(b'[') => Some(TokKind::LBracket),
-            Some(b']') => Some(TokKind::RBracket),
-            Some(b'{') => Some(TokKind::LBrace),
-            Some(b'}') => Some(TokKind::RBrace),
-            Some(b',') => Some(TokKind::Comma),
-            Some(b';') => Some(TokKind::Semicolon),
-            Some(b'@') => Some(TokKind::At),
-            Some(b'$') => Some(TokKind::Dollar),
-            _ => None,
-        };
-        match one {
-            Some(kind) => {
-                self.pos += 1;
+        match best {
+            Some((kind, len)) => {
+                self.pos += len;
                 self.push_op(kind, start);
             }
             None => {
-                // A single-codepoint Unicode operator (`→`, `∈`, `√`, …): look
-                // it up by char and emit its precedence-tier kind. The operator
-                // text stays in the token; the parser keys on the tier.
+                // Unknown: consume one full char to stay on a char boundary.
                 let ch = self.char_at(self.pos);
-                // The two Unicode operators with an augmented-assign form: `÷=`
-                // and `⊻=` fuse the trailing `=` into a single assignment token
-                // (longest match, like the ASCII `op=` forms).
-                if matches!(ch, '\u{f7}' | '\u{22bb}') && self.peek(ch.len_utf8()) == Some(b'=') {
-                    let kind = if ch == '\u{f7}' {
-                        TokKind::DivEq
-                    } else {
-                        TokKind::XorEq
-                    };
-                    self.pos += ch.len_utf8() + 1;
-                    self.push_op(kind, start);
-                } else if ch == MINUS_SIGN {
-                    // U+2212 MINUS SIGN is the ASCII `-`: JuliaSyntax's tokenizer
-                    // emits the `-` kind for it, with the augmented `−=` fused
-                    // like `-=`. The multi-char `-> -- -%` forms are ASCII-only,
-                    // so nothing else can follow.
-                    let eq = self.peek(ch.len_utf8()) == Some(b'=');
-                    let kind = if eq { TokKind::MinusEq } else { TokKind::Minus };
-                    self.pos += ch.len_utf8() + usize::from(eq);
-                    self.push_op(kind, start);
-                } else if let Some(kind) = unicode_op_kind(ch) {
-                    self.pos += ch.len_utf8();
-                    self.push_op(kind, start);
-                } else {
-                    // Unknown: consume one full char to stay on a char boundary.
-                    self.pos += ch.len_utf8();
-                    self.push(TokKind::Unknown, start, self.pos);
-                }
+                self.pos += ch.len_utf8();
+                self.push(TokKind::Unknown, start, self.pos);
             }
         }
     }
+
+    /// The Unicode operator `lead` bytes ahead of the cursor, as its kind and
+    /// the length *from the cursor* — so `lead` is 1 for a broadcast `.op` and
+    /// 0 otherwise, and the returned length covers the `.` in the first case.
+    ///
+    /// These are the operators [`OPS`] cannot hold: their spelling is a code
+    /// point looked up in a generated table, not a fixed byte string. The three
+    /// cases below are checked most-specific-first because they overlap on the
+    /// same code point, not because of length.
+    fn unicode_op_at(&self, lead: usize) -> Option<(TokKind, usize)> {
+        let ch = self.char_at(self.pos + lead);
+        let dotted = lead == 1;
+        let eq = self.peek(lead + ch.len_utf8()) == Some(b'=');
+
+        // U+2212 MINUS SIGN *is* the ASCII `-`: JuliaSyntax's tokenizer emits
+        // the `-` kind for it, with `−=` fused like `-=`. It has to precede the
+        // generated table, which would otherwise give it a Unicode tier kind.
+        // The multi-char `-> -- -%` forms are ASCII-only, so nothing else can
+        // follow.
+        if ch == MINUS_SIGN {
+            let kind = match (dotted, eq) {
+                (false, false) => TokKind::Minus,
+                (false, true) => TokKind::MinusEq,
+                (true, false) => TokKind::DotMinus,
+                (true, true) => TokKind::DotMinusEq,
+            };
+            return Some((kind, lead + ch.len_utf8() + usize::from(eq)));
+        }
+
+        // `÷=` and `⊻=`, the two Unicode operators with an augmented-assign
+        // form: the trailing `=` fuses into one assignment token, like the
+        // ASCII `op=` forms. Without the `=` they fall through to the table,
+        // which has them at their arithmetic tier.
+        if eq && matches!(ch, DIVIDE_SIGN | XOR_SIGN) {
+            let kind = match (dotted, ch == DIVIDE_SIGN) {
+                (false, true) => TokKind::DivEq,
+                (false, false) => TokKind::XorEq,
+                (true, true) => TokKind::DotDivEq,
+                (true, false) => TokKind::DotXorEq,
+            };
+            return Some((kind, lead + ch.len_utf8() + 1));
+        }
+
+        // A single-codepoint Unicode operator (`→`, `∈`, `√`, …): emit its
+        // precedence-tier kind. The operator text stays in the token; the
+        // parser keys on the tier. A broadcast `.` fuses only to an infix tier
+        // or a prefix-only radical — the projector heads those `dotcall-i` and
+        // `dotcall-pre`; the assignment tier needs its own (deferred)
+        // projection, so `.` before one stays a lone `Dot`.
+        let kind = unicode_op_kind(ch)?;
+        if dotted && !(is_unicode_infix_tier(kind) || kind == TokKind::UniRadical) {
+            return None;
+        }
+        Some((kind, lead + ch.len_utf8()))
+    }
+}
+
+/// Every operator, delimiter, and punctuator with a fixed ASCII spelling,
+/// paired with the kind it lexes as.
+///
+/// **Longest match is a property of this table, not of the code that scans
+/// it.** Entries are grouped by first byte, and within a group ordered longest
+/// spelling first, so the first entry [`try_ascii_op`] matches is the longest
+/// one that can match. Both invariants are enforced at compile time by
+/// [`build_op_index`], so a `.>>` moved above `.>>>=` — which used to silently
+/// truncate the latter into three tokens — is a build error instead.
+///
+/// Spellings that are not fixed bytes are not here: the Unicode operators come
+/// from a generated code-point table (see [`Lexer::unicode_op_at`]), and the
+/// contextual `'` (transpose vs. char literal) is decided in [`Lexer::next_token`].
+#[rustfmt::skip]
+const OPS: &[(&[u8], TokKind)] = &[
+    // `.` — the broadcast forms, plus `..`/`...` and the lone dot. Every
+    // multi-byte entry fuses `.` to an operator; `.` before an identifier,
+    // a `(`, or a digit is not here, so those stay `Dot` (field access,
+    // `f.(x)`, and the `.5` the number lexer takes first).
+    (b".>>>=", TokKind::DotUShrEq),
+    (b".<-->", TokKind::DotLeftRightArrow),
+    (b".>>>",  TokKind::DotUShr),
+    (b".//=",  TokKind::DotSlashSlashEq),
+    (b".<<=",  TokKind::DotShlEq),
+    (b".>>=",  TokKind::DotShrEq),
+    (b".-->",  TokKind::DotLongArrow),
+    (b".<--",  TokKind::DotLeftLongArrow),
+    (b".===",  TokKind::DotEqEqEq),
+    (b".!==",  TokKind::DotNotEqEq),
+    (b"...",   TokKind::DotDotDot),
+    (b".==",   TokKind::DotEqEq),
+    (b".!=",   TokKind::DotNotEq),
+    (b".<=",   TokKind::DotLe),
+    (b".>=",   TokKind::DotGe),
+    (b".<<",   TokKind::DotShl),
+    (b".>>",   TokKind::DotShr),
+    (b".<:",   TokKind::DotSubtype),
+    (b".>:",   TokKind::DotSupertype),
+    (b".//",   TokKind::DotSlashSlash),
+    // The broadcast invalid doubled operators.
+    (b".**",   TokKind::DotStarStar),
+    (b".--",   TokKind::DotMinusMinus),
+    (b".=>",   TokKind::DotFatArrow),
+    (b".|>",   TokKind::DotPipeGt),
+    (b".&&",   TokKind::DotAndAnd),
+    (b".||",   TokKind::DotOrOr),
+    // Broadcast augmented assignment `.op=`.
+    (b".+=",   TokKind::DotPlusEq),
+    (b".-=",   TokKind::DotMinusEq),
+    (b".*=",   TokKind::DotStarEq),
+    (b"./=",   TokKind::DotSlashEq),
+    (b".\\=",  TokKind::DotBackslashEq),
+    (b".^=",   TokKind::DotCaretEq),
+    (b".%=",   TokKind::DotPercentEq),
+    (b".&=",   TokKind::DotAmpEq),
+    (b".|=",   TokKind::DotPipeEq),
+    (b"..",    TokKind::DotDot),
+    (b".+",    TokKind::DotPlus),
+    (b".-",    TokKind::DotMinus),
+    (b".*",    TokKind::DotStar),
+    (b"./",    TokKind::DotSlash),
+    (b".\\",   TokKind::DotBackslash),
+    (b".^",    TokKind::DotCaret),
+    (b".%",    TokKind::DotPercent),
+    (b".=",    TokKind::DotEq),
+    (b".<",    TokKind::DotLt),
+    (b".>",    TokKind::DotGt),
+    (b".~",    TokKind::DotTilde),
+    (b".&",    TokKind::DotAmp),
+    (b".|",    TokKind::DotPipe),
+    // The prefix broadcast-not. `.!=`/`.!==` are longer, so they win above.
+    (b".!",    TokKind::DotBang),
+    (b".",     TokKind::Dot),
+    // `<` — note a lone `<-` is not an operator: it stays `Lt` + unary minus.
+    (b"<-->",  TokKind::LeftRightArrow),
+    (b"<--",   TokKind::LeftLongArrow),
+    (b"<<=",   TokKind::ShlEq),
+    (b"<=",    TokKind::Le),
+    (b"<:",    TokKind::Subtype),
+    (b"<|",    TokKind::PipeLt),
+    (b"<<",    TokKind::Shl),
+    (b"<",     TokKind::Lt),
+    // `>`
+    (b">>>=",  TokKind::UShrEq),
+    (b">>>",   TokKind::UShr),
+    (b">>=",   TokKind::ShrEq),
+    (b">=",    TokKind::Ge),
+    (b">:",    TokKind::Supertype),
+    (b">>",    TokKind::Shr),
+    (b">",     TokKind::Gt),
+    // `=`
+    (b"===",   TokKind::EqEqEq),
+    (b"==",    TokKind::EqEq),
+    (b"=>",    TokKind::FatArrow),
+    (b"=",     TokKind::Eq),
+    // `!`. The lexer only reaches these where `scan_ident` stopped at a `!`
+    // followed by `=` (`a!=b` is `a` `!=` `b`, `a!!=b` is `a!` `!=` `b`).
+    (b"!==",   TokKind::NotEqEq),
+    (b"!=",    TokKind::NotEq),
+    (b"!",     TokKind::Bang),
+    // `+`. `+++` falls out as `++` then `+`, and `++=` as `++` then `=`
+    // (there is no augmented `++=` form), both matching JuliaSyntax.
+    (b"+%=",   TokKind::PlusPercentEq),
+    (b"+%",    TokKind::PlusPercent),
+    (b"++",    TokKind::PlusPlus),
+    (b"+=",    TokKind::PlusEq),
+    (b"+",     TokKind::Plus),
+    // `-`
+    (b"-->",   TokKind::LongArrow),
+    (b"-%=",   TokKind::MinusPercentEq),
+    (b"--",    TokKind::MinusMinus),
+    (b"->",    TokKind::Arrow),
+    (b"-%",    TokKind::MinusPercent),
+    (b"-=",    TokKind::MinusEq),
+    (b"-",     TokKind::Minus),
+    // `*`
+    (b"*%=",   TokKind::StarPercentEq),
+    (b"**",    TokKind::StarStar),
+    (b"*%",    TokKind::StarPercent),
+    (b"*=",    TokKind::StarEq),
+    (b"*",     TokKind::Star),
+    // `/`
+    (b"//=",   TokKind::SlashSlashEq),
+    (b"//",    TokKind::SlashSlash),
+    (b"/=",    TokKind::SlashEq),
+    (b"/",     TokKind::Slash),
+    // `\`
+    (b"\\=",   TokKind::BackslashEq),
+    (b"\\",    TokKind::Backslash),
+    // `^`
+    (b"^=",    TokKind::CaretEq),
+    (b"^",     TokKind::Caret),
+    // `%`
+    (b"%=",    TokKind::PercentEq),
+    (b"%",     TokKind::Percent),
+    // `&`
+    (b"&&",    TokKind::AndAnd),
+    (b"&=",    TokKind::AmpEq),
+    (b"&",     TokKind::Amp),
+    // `|`
+    (b"||",    TokKind::OrOr),
+    (b"|>",    TokKind::PipeGt),
+    (b"|=",    TokKind::PipeEq),
+    (b"|",     TokKind::Pipe),
+    // `:`
+    (b"::",    TokKind::ColonColon),
+    (b":=",    TokKind::ColonEq),
+    (b":",     TokKind::Colon),
+    // `$`. A `$` elsewhere is the interpolation sigil, which never precedes
+    // an `=`.
+    (b"$=",    TokKind::DollarEq),
+    (b"$",     TokKind::Dollar),
+    // The remaining single bytes: the prefix operators and the delimiters.
+    (b"~",     TokKind::Tilde),
+    (b"?",     TokKind::Question),
+    (b"@",     TokKind::At),
+    (b"(",     TokKind::LParen),
+    (b")",     TokKind::RParen),
+    (b"[",     TokKind::LBracket),
+    (b"]",     TokKind::RBracket),
+    (b"{",     TokKind::LBrace),
+    (b"}",     TokKind::RBrace),
+    (b",",     TokKind::Comma),
+    (b";",     TokKind::Semicolon),
+];
+
+/// The [`OPS`] entries sharing one first byte.
+#[derive(Clone, Copy)]
+struct OpGroup {
+    /// The group's `[start, end)` range in [`OPS`]; empty when the byte begins
+    /// no operator at all.
+    start: u8,
+    end: u8,
+    /// The bytes that continue a multi-byte spelling in this group, as a set
+    /// (all spellings are ASCII, so 128 bits hold it). When the byte after the
+    /// first is not in this set, no multi-byte entry can match and the whole
+    /// group can be skipped for its single-byte spelling — which is what keeps
+    /// `a.b` from walking all 50 broadcast operators to reach the lone `Dot`.
+    seconds: u128,
+}
+
+impl OpGroup {
+    /// Whether `next`, the byte after the group's own, could continue one of
+    /// its multi-byte spellings.
+    fn extends(&self, next: Option<&u8>) -> bool {
+        matches!(next, Some(&b) if b < 128 && self.seconds >> b & 1 == 1)
+    }
+}
+
+/// [`OPS`] indexed by first byte.
+const OP_INDEX: [OpGroup; 256] = build_op_index();
+
+/// Build [`OP_INDEX`], asserting [`OPS`]'s invariants as it goes: spellings are
+/// ASCII, entries sharing a first byte are contiguous, within such a group the
+/// spellings get no longer, and every group ends with its single-byte spelling
+/// (which is what lets [`try_ascii_op`] answer from the group's last entry
+/// alone). All of it is checked at compile time, which is what makes longest
+/// match a property of the table rather than of arm order.
+const fn build_op_index() -> [OpGroup; 256] {
+    assert!(OPS.len() < u8::MAX as usize, "OPS outgrew its u8 index");
+    let mut index = [OpGroup {
+        start: 0,
+        end: 0,
+        seconds: 0,
+    }; 256];
+    let mut i = 0;
+    while i < OPS.len() {
+        let first = OPS[i].0[0];
+        assert!(
+            index[first as usize].start == index[first as usize].end,
+            "OPS entries sharing a first byte must be contiguous"
+        );
+        let start = i;
+        let mut len = usize::MAX;
+        let mut seconds = 0u128;
+        while i < OPS.len() && OPS[i].0[0] == first {
+            let text = OPS[i].0;
+            assert!(
+                text.len() <= len,
+                "OPS entries must run longest-first within a first-byte group"
+            );
+            len = text.len();
+            if len > 1 {
+                assert!(
+                    text[1] < 128,
+                    "OPS holds ASCII spellings only; a Unicode operator belongs in `unicode_op_at`"
+                );
+                seconds |= 1u128 << text[1];
+            }
+            i += 1;
+        }
+        assert!(
+            len == 1,
+            "every OPS group must end with its own single-byte spelling"
+        );
+        index[first as usize] = OpGroup {
+            start: start as u8,
+            end: i as u8,
+            seconds,
+        };
+    }
+    index
+}
+
+/// The longest [`OPS`] spelling that starts `rest`, with its byte length.
+///
+/// Only the entries sharing `rest`'s first byte are scanned, and they are
+/// ordered longest-first, so the first hit is the answer.
+fn try_ascii_op(rest: &[u8]) -> Option<(TokKind, usize)> {
+    let group = &OP_INDEX[*rest.first()? as usize];
+    let entries = &OPS[group.start as usize..group.end as usize];
+    // Nothing longer can match, so take the group's single-byte spelling —
+    // its last entry, which `build_op_index` checks every group has.
+    if !group.extends(rest.get(1)) {
+        let (text, kind) = *entries.last()?;
+        return Some((kind, text.len()));
+    }
+    let next = rest[1]; // `extends` said there is one
+    entries
+        .iter()
+        .find(|(text, _)| match text.get(1) {
+            // Reject on the second byte before comparing the whole spelling.
+            // The single-byte entry is last, so falling through to it means
+            // nothing longer matched (`<-` is `Lt` then a unary minus).
+            Some(&second) => second == next && rest.starts_with(text),
+            None => true,
+        })
+        .map(|&(text, kind)| (kind, text.len()))
 }
 
 /// Every Julia keyword, as written. The single source of truth for the set of
@@ -1578,6 +1553,11 @@ fn op_takes_suffix(kind: TokKind) -> bool {
 
 /// U+2212 MINUS SIGN, which Julia treats as the ASCII `-`.
 const MINUS_SIGN: char = '\u{2212}';
+
+/// U+00F7 `÷` and U+22BB `⊻`, the two Unicode operators with an
+/// augmented-assign form (`÷=`, `⊻=`).
+const DIVIDE_SIGN: char = '\u{f7}';
+const XOR_SIGN: char = '\u{22bb}';
 
 /// [`unicode_ops::unicode_op_kind`], extended with the operator chars Julia
 /// folds onto an existing operator rather than giving a kind of their own: the
@@ -2140,5 +2120,61 @@ mod tests {
     fn where_is_a_keyword() {
         assert_eq!(keyword_kind("where"), Some(TokKind::WhereKw));
         assert_eq!(kinds("where"), vec![TokKind::WhereKw]);
+    }
+
+    #[test]
+    fn every_ops_entry_lexes_as_itself() {
+        // Each spelling must come back as exactly one token of its own kind.
+        // A duplicated or shadowed entry — one whose prefix is claimed by an
+        // earlier, shorter entry — fails here, which is what keeps every row
+        // of the table reachable.
+        for &(text, kind) in OPS {
+            let spelling = std::str::from_utf8(text).expect("OPS spellings are ASCII");
+            let tokens = lex(spelling);
+            assert_eq!(
+                tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
+                vec![kind],
+                "{spelling:?} did not lex as one {kind:?}"
+            );
+            assert_eq!(tokens[0].text, spelling);
+        }
+    }
+
+    #[test]
+    fn longest_match_beats_every_shared_prefix() {
+        // The truncation the table exists to prevent: each of these has a
+        // shorter operator as a prefix, and must still lex as one token.
+        for spelling in [
+            ".>>>=", ".<-->", ".<--", ".//=", ".===", ".!==", "...", "<-->", ">>>=", "-->", "//=",
+            "+%=", "!==", "===",
+        ] {
+            assert_eq!(kinds(spelling).len(), 1, "{spelling:?} was split");
+        }
+        // And the other side of it: a prefix that is *not* an operator falls
+        // back to the shorter spelling rather than being consumed.
+        assert_eq!(kinds("<-"), vec![TokKind::Lt, TokKind::Minus]);
+        assert_eq!(kinds("+++"), vec![TokKind::PlusPlus, TokKind::Plus]);
+        assert_eq!(kinds("++="), vec![TokKind::PlusPlus, TokKind::Eq]);
+        assert_eq!(
+            kinds("a.b"),
+            vec![TokKind::Ident, TokKind::Dot, TokKind::Ident]
+        );
+    }
+
+    #[test]
+    fn unicode_operators_beat_the_ascii_table() {
+        // `.` fused to a non-ASCII operator outranks the lone `Dot` the ASCII
+        // table would otherwise hand back.
+        assert_eq!(kinds(".×"), vec![TokKind::UniTimes]);
+        assert_eq!(kinds(".√"), vec![TokKind::UniRadical]);
+        assert_eq!(kinds(".÷="), vec![TokKind::DotDivEq]);
+        assert_eq!(kinds(".⊻="), vec![TokKind::DotXorEq]);
+        // U+2212 MINUS SIGN is the ASCII `-`, augmented form included.
+        assert_eq!(kinds("−"), vec![TokKind::Minus]);
+        assert_eq!(kinds("−="), vec![TokKind::MinusEq]);
+        assert_eq!(kinds(".−="), vec![TokKind::DotMinusEq]);
+        assert_eq!(kinds("÷="), vec![TokKind::DivEq]);
+        // The assignment tier does not fuse, so its `.` stays a lone `Dot`.
+        assert_eq!(kinds(".⩴"), vec![TokKind::Dot, TokKind::UniAssign]);
     }
 }

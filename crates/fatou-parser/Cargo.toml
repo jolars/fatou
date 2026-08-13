@@ -38,3 +38,8 @@ serde_json = "1.0.145"
 name = "reparse"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "lex"
+harness = false
+required-features = ["bench"]

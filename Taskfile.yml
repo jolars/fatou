@@ -56,6 +56,11 @@ tasks:
     cmds:
       - cargo bench -p fatou-parser --features bench --bench reparse
 
+  bench-lex:
+    desc: Benchmark lexer throughput, including the operator table (needs bench-corpus)
+    cmds:
+      - cargo bench -p fatou-parser --features bench --bench lex
+
   bench-corpus:
     desc: Fetch the pinned JuliaSyntax.jl corpus for the formatter benchmark
     cmds:

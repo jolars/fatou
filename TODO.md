@@ -29,17 +29,6 @@
 Deferred from the parser-crate refactor that split `expr/{array,macros,
 juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
 
-- [ ] Make longest match structural in the operator lexer. The ladder in
-  `lex_operator_or_unknown` (`crates/fatou-parser/src/parser/lexer.rs`) is ~420
-  lines: five lookup tables (`dotted3`, `dotted2`, `three`, `two`, `one`), 27
-  `push_op` sites, and a longest-match rule carried *only* by arm order — a
-  shorter operator moved above a longer one that shares its prefix silently
-  truncates it. One length-descending `const OPS: &[(&[u8], TokKind)]` scanned
-  by a single `try_op` would make that a property of the data. Deferred because
-  it is the lexer's hot path and wants a benchmark alongside; the twelve "must
-  beat" comments that restated the rule per-arm are already gone, replaced by
-  one note on the function.
-
 - [ ] Generate the keyword tables from one list. The ~31 keywords are written
   out five times (~155 lines): `lexer.rs`'s `KEYWORDS` and `keyword_kind`,
   `TokKind::is_keyword`, `tree_builder.rs`'s `syntax_kind_for` arms, and

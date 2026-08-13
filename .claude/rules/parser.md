@@ -42,6 +42,13 @@ it. `syntax.rs` defines `SyntaxKind` (rowan-style `SCREAMING_SNAKE_CASE`) and
 the `JuliaLanguage` binding. Unlike R, Julia has no `[[`/`]]` ambiguity, so
 there is no bracket-rebalancer pass.
 
+**A new operator is a new `OPS` row** (`lexer.rs`), never a new arm: the table
+holds every fixed ASCII spelling, grouped by first byte and longest-first within
+a group, and `build_op_index` const-asserts that ordering — which is what makes
+longest match a property of the data. Only the Unicode operators, whose spelling
+comes from a generated code-point table, sit outside it (`unicode_op_at`).
+Lexer throughput is `task bench-lex`.
+
 `unicode_ident.rs` and `unicode_ops.rs` are **generated** by
 `scripts/generate-unicode-ident.jl` from the running Julia's own tables — never
 hand-edit; regenerate on a Julia bump.
