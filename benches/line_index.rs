@@ -25,12 +25,13 @@
 //! A keystroke used to pay that rescan on the main loop before dispatching
 //! anything, and pay it again in every handler that answered against the
 //! buffer. Position conversion against the live buffer is now O(log n) on the
-//! rope; the O(N) flatten ([`TextBuffer::text`]) is paid once per keystroke at
-//! the salsa write-phase, where the db still wants a `String`.
+//! rope; salsa stores that same rope (`SourceFile.text` is a `TextBuffer`), so
+//! the write-phase clones it O(1), and the one O(N) flatten
+//! ([`TextBuffer::text`]) is paid once per actual parse in `parsed_document`.
 //!
-//! Making *salsa* store a rope instead (the deferred issue #76) would drop that
-//! flatten to an O(1) CoW clone, but it is gated on `parse`/`reparse` going
-//! chunk-based — the live buffer already went first.
+//! Making *the parser* consume that rope (the rest of the deferred issue #76)
+//! would drop even that flatten, but it is gated on `parse`/`reparse` going
+//! chunk-based.
 //!
 //! Plain `main` (`harness = false`), same style as `format_compare`: no
 //! criterion dependency in the root crate, just a warm loop and a table.

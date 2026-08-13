@@ -80,7 +80,7 @@ fn graph_diagnostics_for(
         graph_diagnostics(graph, encoding, |member| {
             let file = snapshot.lookup_file(member)?;
             Some((
-                snapshot.file_text_of(file).to_string(),
+                snapshot.file_text_of(file).text(),
                 snapshot.parsed_tree(file),
             ))
         })

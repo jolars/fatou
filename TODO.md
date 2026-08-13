@@ -155,22 +155,17 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
   `missing-entry-file`, so the mismatch is at least reported; the edit is
   *Project files* stage 4.
 
-- [ ] Maybe (deferred): a rope (`ropey`) for salsa's `SourceFile`, the rest of
-  #76. The live buffer is already a rope (`TextBuffer`, `src/text/buffer.rs`):
-  locating a line is O(log n), `LineStarts` and the separate `LineIndex` are
-  gone, and the text is stored once. What blocks the database half is narrower
-  than #76's first reading, and it is *not* the lexer: `Token` owns its
-  `text: String` (`parser/lexer.rs`), so nothing borrows the input and a
-  chunk-based lexer is a local refactor. The remaining `&str` demands are
-  `parse(text: &str)`, `SourceFile.text: String` (`src/incremental.rs`), and
-  above all `reparse`/`reparse_edits`, whose token- and toplevel-tier guards
-  prove a splice sound by slicing and relexing regions of `prev_text`/
-  `new_text`. That last one is the wall: a rewrite of the most delicate code in
-  the parser crate.
-  A keystroke pays one O(N) flatten at the write-phase (`analysis_thread`'s
-  `upsert_file` feeds a `String`) plus `PrevParse { text: text.clone() }`; a
-  rope in salsa would replace both with an O(1) CoW clone. Revisit only if the
-  reparse guards go chunk-based.
+- [ ] Maybe (deferred): make `parse`/`reparse` chunk-based so the one remaining
+  flatten disappears. Salsa's `SourceFile` now *stores* the rope (`TextBuffer`,
+  `src/incremental.rs`), so the write-phase clones it O(1) instead of
+  flattening; the O(N) flatten moved into `parsed_document`, paid once per
+  actual parse, where it feeds the `&str` the parser still wants. What is left
+  is the parser half: `parse(text: &str)` and above all `reparse`/
+  `reparse_edits`, whose token- and toplevel-tier guards prove a splice sound by
+  slicing and relexing regions of `prev_text`/`new_text` — the wall named in
+  #76, a rewrite of the most delicate code in the parser crate.
+  `PrevParse.text: String` also stays until then: it is what those guards
+  slice. Revisit only if the reparse guards go chunk-based.
 
 ## Project files (`Project.toml`/`Manifest.toml`)
 

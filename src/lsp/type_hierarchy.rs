@@ -347,10 +347,10 @@ fn workspace_type_item(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file);
+        let text = snapshot.file_text_of(file).text();
         let root = snapshot.parsed_tree(file);
-        if let Some((_, decl)) = type_decl_at(&root, range.start(), text) {
-            let line_index = TextBuffer::new(text);
+        if let Some((_, decl)) = type_decl_at(&root, range.start(), &text) {
+            let line_index = TextBuffer::new(&text);
             return Some(item_for(&uri, &decl, &line_index, encoding));
         }
     }
@@ -378,12 +378,12 @@ pub(crate) fn supertypes_via_db(
     let path = to_path(&item.uri)?;
     let supers = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file);
-        let line_index = TextBuffer::new(text);
+        let text = snapshot.file_text(file).text();
+        let line_index = TextBuffer::new(&text);
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let root = snapshot.parsed_tree(file);
-        let (def, _) = type_decl_at(&root, offset, text)?;
+        let (def, _) = type_decl_at(&root, offset, &text)?;
         let Some(sup) = declared_supertype(&def) else {
             // No declared supertype: the implicit `Any`, a hierarchy root.
             return Some(Vec::new());
@@ -404,7 +404,7 @@ pub(crate) fn supertypes_via_db(
                 if binding.kind != BindingKind::Type {
                     None
                 } else {
-                    type_decl_at(&root, binding.def_range.start(), text)
+                    type_decl_at(&root, binding.def_range.start(), &text)
                         .map(|(_, decl)| item_for(&item.uri, &decl, &line_index, encoding))
                 }
             }
@@ -489,8 +489,8 @@ pub(crate) fn subtypes_via_db(
     let path = to_path(&item.uri)?;
     let subs = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file);
-        let line_index = TextBuffer::new(text);
+        let text = snapshot.file_text(file).text();
+        let line_index = TextBuffer::new(&text);
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let model = snapshot.semantic_model(file);
@@ -511,7 +511,7 @@ pub(crate) fn subtypes_via_db(
             model
                 .occurrences(binding)
                 .filter(|o| !o.is_def)
-                .filter_map(|o| supertype_site_decl(&root, o.range, text))
+                .filter_map(|o| supertype_site_decl(&root, o.range, &text))
                 .map(|decl| item_for(&item.uri, &decl, &line_index, encoding))
                 .collect(),
         )
@@ -553,14 +553,14 @@ fn workspace_subtypes(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file);
+        let text = snapshot.file_text_of(file).text();
         let root = snapshot.parsed_tree(file);
-        let line_index = TextBuffer::new(text);
+        let line_index = TextBuffer::new(&text);
         ranges.sort_by_key(|range| range.start());
         out.extend(
             ranges
                 .into_iter()
-                .filter_map(|range| supertype_site_decl(&root, range, text))
+                .filter_map(|range| supertype_site_decl(&root, range, &text))
                 .map(|decl| item_for(&uri, &decl, &line_index, encoding)),
         );
     }

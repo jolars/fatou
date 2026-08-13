@@ -30,8 +30,8 @@ fn upsert_reuses_input_for_equivalent_paths() {
     use std::path::Path;
 
     let mut db = IncrementalDatabase::new();
-    let a = db.upsert_file(Path::new("/work/a.jl"), "f(x)\n".into());
-    let b = db.upsert_file(Path::new("/work/./a.jl"), "g(x)\n".into());
+    let a = db.upsert_file(Path::new("/work/a.jl"), "f(x)\n");
+    let b = db.upsert_file(Path::new("/work/./a.jl"), "g(x)\n");
     assert!(a == b, "equivalent path spellings should reuse one input");
     assert_eq!(parsed_tree_root(&db, a).to_string(), "g(x)\n");
 }
@@ -647,7 +647,7 @@ fn a_compat_only_project_edit_backdates_declared_deps() {
     );
 
     // Witness: the file's text really changed, so the query re-ran.
-    assert!(db.file_text(project).contains("[compat]"));
+    assert!(db.file_text(project).text().contains("[compat]"));
     assert_eq!(probe_deps(&db, project), 1);
     assert_eq!(
         DEPS_PROBE_RUNS.load(Ordering::SeqCst),

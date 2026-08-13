@@ -30,6 +30,7 @@ use crate::resolve::{
 };
 use crate::semantic::{FileControlFlow, SemanticModel};
 use crate::syntax::SyntaxNode;
+use crate::text::TextBuffer;
 
 use rowan::TextSize;
 use smol_str::SmolStr;
@@ -49,7 +50,7 @@ pub struct SourceFile {
     #[returns(ref)]
     pub path: Option<PathBuf>,
     #[returns(ref)]
-    pub text: String,
+    pub text: TextBuffer,
 }
 
 /// The harvested library index: every resolved package's [`PackageIndex`]
@@ -223,7 +224,7 @@ pub trait IncrementalDb: salsa::Database {
 /// side-channel never affects query semantics — salsa only sees text changes.
 #[salsa::tracked(returns(ref), no_eq)]
 pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
-    let text = file.text(db);
+    let text = file.text(db).text();
     let staged = db.reparse_pending_edits(file);
     let prev = db.reparse_prev(file);
 
@@ -234,7 +235,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     // the base has not moved, and the staged chain stays anchored to it (its
     // net effect is a no-op, so a later edit appended to it still describes the
     // transform from the base).
-    if let Some(prev) = prev.as_ref().filter(|prev| prev.text == *text) {
+    if let Some(prev) = prev.as_ref().filter(|prev| prev.text == text) {
         return ParsedDocument {
             green: prev.green.clone(),
             diagnostics: prev.diagnostics.clone(),
@@ -242,9 +243,9 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     }
 
     let reparsed = prev.and_then(|prev| {
-        reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, text).or_else(|| {
-            let edit = diff_edit(&prev.text, text);
-            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, text)
+        reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, &text).or_else(|| {
+            let edit = diff_edit(&prev.text, &text);
+            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, &text)
         })
     });
 
@@ -373,7 +374,7 @@ pub fn project_declared_deps(
         .path(db)
         .as_deref()
         .unwrap_or_else(|| Path::new("Project.toml"));
-    let project = crate::environment::parse_project_text(path, file.text(db)).ok()?;
+    let project = crate::environment::parse_project_text(path, &file.text(db).text()).ok()?;
     Some(Arc::new(project.declared_dep_names()))
 }
 
@@ -1011,14 +1012,15 @@ impl IncrementalDatabase {
 
     /// Track an in-memory document with no on-disk path. Gets a fresh
     /// [`FileId`] and a `None` path, so it never aliases another file.
-    pub fn add_file(&self, text: impl Into<String>) -> SourceFile {
+    pub fn add_file(&self, text: impl Into<TextBuffer>) -> SourceFile {
         let id = self.source_map().alloc_id();
         SourceFile::new(self, id, None, text.into())
     }
 
     /// Track (or reuse) the file at `path`, replacing its text. Equivalent path
     /// spellings map to the same input.
-    pub fn upsert_file(&mut self, path: &Path, text: String) -> SourceFile {
+    pub fn upsert_file(&mut self, path: &Path, text: impl Into<TextBuffer>) -> SourceFile {
+        let text = text.into();
         let key = normalize_path(path);
         let existing = self.source_map().by_path.get(&key).copied();
         match existing {
@@ -1043,13 +1045,13 @@ impl IncrementalDatabase {
         self.source_map().by_path.get(&key).copied()
     }
 
-    pub fn set_file_text(&mut self, file: SourceFile, text: impl Into<String>) {
+    pub fn set_file_text(&mut self, file: SourceFile, text: impl Into<TextBuffer>) {
         file.set_text(self).to(text.into());
     }
 
     /// The text currently tracked for `file`.
-    pub fn file_text(&self, file: SourceFile) -> &str {
-        file.text(self).as_str()
+    pub fn file_text(&self, file: SourceFile) -> &TextBuffer {
+        file.text(self)
     }
 
     /// The on-disk path `file` was tracked under, or `None` for an in-memory
@@ -1243,7 +1245,7 @@ impl IncrementalDatabase {
         }
         let text = std::fs::read_to_string(&key).ok()?;
         let id = self.source_map().alloc_id();
-        let file = SourceFile::new(self, id, Some(key.clone()), text);
+        let file = SourceFile::new(self, id, Some(key.clone()), TextBuffer::from(text));
         self.source_map().by_path.insert(key, file);
         Some(file)
     }
@@ -1282,6 +1284,7 @@ impl IncrementalDatabase {
         let Ok(text) = std::fs::read_to_string(path) else {
             return;
         };
+        let text = TextBuffer::from(text);
         if file.text(self) != &text {
             file.set_text(self).to(text);
         }
@@ -1408,7 +1411,7 @@ impl Analysis {
     }
 
     /// The text currently tracked for `file`.
-    pub fn file_text(&self, file: SourceFile) -> &str {
+    pub fn file_text(&self, file: SourceFile) -> &TextBuffer {
         self.0.file_text(file)
     }
 
@@ -1485,7 +1488,7 @@ impl Analysis {
 
     /// The text currently tracked for `file` (the buffer if open, else the
     /// seeded disk text) — consistent with the reverse index within one snapshot.
-    pub fn file_text_of(&self, file: SourceFile) -> &str {
+    pub fn file_text_of(&self, file: SourceFile) -> &TextBuffer {
         self.0.file_text(file)
     }
 
@@ -1600,8 +1603,8 @@ mod tests {
     #[test]
     fn upsert_dedups_by_normalized_path() {
         let mut db = IncrementalDatabase::new();
-        let a = db.upsert_file(Path::new("/tmp/a.jl"), "x = 1\n".into());
-        let b = db.upsert_file(Path::new("/tmp/./a.jl"), "x = 2\n".into());
+        let a = db.upsert_file(Path::new("/tmp/a.jl"), "x = 1\n");
+        let b = db.upsert_file(Path::new("/tmp/./a.jl"), "x = 2\n");
         assert!(a == b, "equivalent path spellings should reuse one input");
         assert_eq!(parsed_tree_root(&db, a).to_string(), "x = 2\n");
     }
@@ -1620,7 +1623,7 @@ mod tests {
         assert!(db.source_map.is_poisoned(), "the mutex should be poisoned");
 
         // Every path through the recovery helper still works.
-        let file = db.upsert_file(Path::new("/tmp/x.jl"), "x = 1\n".into());
+        let file = db.upsert_file(Path::new("/tmp/x.jl"), "x = 1\n");
         assert!(
             db.lookup_file(Path::new("/tmp/x.jl")) == Some(file),
             "lookup should find the just-upserted file after poison recovery"

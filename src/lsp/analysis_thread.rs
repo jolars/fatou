@@ -480,7 +480,7 @@ impl AnalysisWorker {
     fn start(&mut self, mut req: AnalysisRequest) {
         // Write-phase: push the live buffer into the persistent db. Cheap —
         // the parse is a lazy salsa query deferred to the read-phase.
-        let file = self.db.upsert_file(&req.path, req.text.text());
+        let file = self.db.upsert_file(&req.path, (*req.text).clone());
         // Hand the precise edits to the incremental reparse. Staged after the
         // text so the chain is never ahead of the buffer it describes, and
         // appended rather than replaced so a chain the previous read never got
@@ -498,10 +498,9 @@ impl AnalysisWorker {
         let AnalysisRequest {
             uri,
             path,
-            text,
             version,
             rules,
-            edits: _, // already staged on the db above
+            ..
         } = req;
         self.inflight = Some(InflightAnalyze {
             uri: uri.clone(),
@@ -511,14 +510,21 @@ impl AnalysisWorker {
         self.read_spawner.spawn(move || {
             if push {
                 let result = salsa::Cancelled::catch(AssertUnwindSafe(|| {
-                    let mut diags =
-                        parse_diagnostics_to_lsp(snapshot.parse_diagnostics(file), &text, encoding);
+                    let mut diags = parse_diagnostics_to_lsp(
+                        snapshot.parse_diagnostics(file),
+                        snapshot.file_text(file),
+                        encoding,
+                    );
                     // Lint findings join the same publish, but only on a clean
                     // tree: rules would misfire on error-recovered shapes, and a
                     // broken buffer's parse errors are the actionable signal.
                     if diags.is_empty() {
                         diags.extend(lint_diagnostics_via_db(
-                            &snapshot, &path, &text, encoding, &rules,
+                            &snapshot,
+                            &path,
+                            snapshot.file_text(file),
+                            encoding,
+                            &rules,
                         ));
                     }
                     diags
@@ -552,7 +558,7 @@ impl AnalysisWorker {
             graph_diagnostics(graph, self.encoding, |path| {
                 let file = snapshot.lookup_file(path)?;
                 Some((
-                    snapshot.file_text_of(file).to_string(),
+                    snapshot.file_text_of(file).text(),
                     snapshot.parsed_tree(file),
                 ))
             })

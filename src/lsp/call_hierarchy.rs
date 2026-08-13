@@ -402,10 +402,10 @@ fn workspace_item(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file);
+        let text = snapshot.file_text_of(file).text();
         let root = snapshot.parsed_tree(file);
-        if let Some((_, callable)) = callable_at(&root, range.start(), text) {
-            let line_index = TextBuffer::new(text);
+        if let Some((_, callable)) = callable_at(&root, range.start(), &text) {
+            let line_index = TextBuffer::new(&text);
             return Some(item_for(&uri, &callable, &line_index, encoding));
         }
     }
@@ -434,8 +434,8 @@ pub(crate) fn incoming_calls_via_db(
     let path = to_path(&item.uri)?;
     let calls = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file);
-        let line_index = TextBuffer::new(text);
+        let text = snapshot.file_text(file).text();
+        let line_index = TextBuffer::new(&text);
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let model = snapshot.semantic_model(file);
@@ -456,7 +456,7 @@ pub(crate) fn incoming_calls_via_db(
             .map(|o| o.range)
             .collect();
         Some(group_incoming(
-            &root, text, &item.uri, &path, &sites, encoding,
+            &root, &text, &item.uri, &path, &sites, encoding,
         ))
     }));
     // A racing write (`Err`) answers `None` — there is no request-side text
@@ -494,11 +494,11 @@ fn workspace_incoming(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file);
+        let text = snapshot.file_text_of(file).text();
         let root = snapshot.parsed_tree(file);
         ranges.retain(|&range| is_call_site(&root, range));
         ranges.sort_by_key(|range| range.start());
-        out.extend(group_incoming(&root, text, &uri, &path, &ranges, encoding));
+        out.extend(group_incoming(&root, &text, &uri, &path, &ranges, encoding));
     }
     out
 }
@@ -559,8 +559,8 @@ pub(crate) fn outgoing_calls_via_db(
     let path = to_path(&item.uri)?;
     let calls = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file);
-        let line_index = TextBuffer::new(text);
+        let text = snapshot.file_text(file).text();
+        let line_index = TextBuffer::new(&text);
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let root = snapshot.parsed_tree(file);
@@ -570,10 +570,10 @@ pub(crate) fn outgoing_calls_via_db(
             SymbolKind::MODULE => token_at(&root, offset)?
                 .parent_ancestors()
                 .find(|n| n.kind() == SyntaxKind::MODULE_DEF)?,
-            _ => callable_at(&root, offset, text)?.0,
+            _ => callable_at(&root, offset, &text)?.0,
         };
         let mut sites: Vec<(String, TextRange)> = Vec::new();
-        collect_call_sites(&source, text, &mut sites);
+        collect_call_sites(&source, &text, &mut sites);
 
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(&path);
@@ -594,7 +594,7 @@ pub(crate) fn outgoing_calls_via_db(
                     if binding.kind != BindingKind::Function {
                         None
                     } else {
-                        callable_at(&root, binding.def_range.start(), text).map(|(_, callable)| {
+                        callable_at(&root, binding.def_range.start(), &text).map(|(_, callable)| {
                             item_for(&item.uri, &callable, &line_index, encoding)
                         })
                     }

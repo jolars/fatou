@@ -10,8 +10,8 @@
 //!
 //! [`TextBuffer`] therefore owns the text outright. Getting it back as a
 //! contiguous `&str` is a flatten ([`TextBuffer::text`]), linear in the buffer;
-//! the parser and salsa still take `&str`, so the analysis write-phase flattens
-//! once per keystroke (see `benches/line_index.rs`).
+//! the parser still takes `&str`, so salsa's parse query flattens once per
+//! parse (see `benches/line_index.rs`).
 
 use std::ops::Range;
 

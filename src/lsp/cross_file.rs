@@ -16,7 +16,7 @@ use rowan::TextSize;
 
 use crate::incremental::{Analysis, SourceFile};
 use crate::resolve::{OccurrenceKey, OccurrenceRec, Resolver};
-use crate::text::{PositionEncoding, TextBuffer};
+use crate::text::PositionEncoding;
 
 use super::uri::from_path;
 
@@ -81,7 +81,7 @@ pub(crate) fn gather_sites(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let line_index = TextBuffer::new(snapshot.file_text_of(file));
+        let line_index = snapshot.file_text_of(file).clone();
         for rec in recs {
             out.push(CrossFileSite {
                 uri: uri.clone(),

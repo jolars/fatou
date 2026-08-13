@@ -62,10 +62,12 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   handler resolving positions against the live buffer takes `&TextBuffer` and
   calls `text.line_index()` (or `text.byte_to_position`/`text.position_to_byte`
   directly) — no rescan. `TextBuffer::new(&str)` **builds a fresh rope** —
-  reserve it for db-resolved text (`snapshot.file_text*`) and the `compute_*`
-  fallback paths, where a full parse dwarfs the build anyway.
-  `TextBuffer::text()` **flattens** (O(N)) and is for the salsa write-phase and
-  any `&str` consumer, never for position conversion. A buffer has **no `Deref`
+  reserve it for the `compute_*` fallback paths, where a full parse dwarfs the
+  build anyway; the salsa `snapshot.file_text*` already *is* a rope, so clone it
+  (`snapshot.file_text_of(file).clone()`, O(1)) rather than rebuilding.
+  `TextBuffer::text()` **flattens** (O(N)) and is for `parsed_document`'s parse
+  boundary and any `&str` consumer, never for position conversion — the salsa
+  write-phase clones the rope, it does not flatten. A buffer has **no `Deref`
   to `str`**, so feeding the live buffer where `&str` is expected is a compile
   error, not a silent rescan. `benches/line_index.rs` is what measures it.
 
