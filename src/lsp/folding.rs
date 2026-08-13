@@ -98,7 +98,7 @@ fn folds_for_tree(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
 
 struct Ctx<'a> {
     text: &'a str,
-    line_index: LineIndex<'a>,
+    line_index: LineIndex,
 }
 
 impl Ctx<'_> {

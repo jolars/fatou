@@ -48,7 +48,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fatou::parser::{Edit, parse, reparse};
-use fatou::text::{LineIndex, LineStarts, PositionEncoding, TextBuffer, apply_content_changes};
+use fatou::text::{LineIndex, PositionEncoding, TextBuffer, apply_content_changes};
 use lsp_types::{Range, TextDocumentContentChangeEvent};
 
 const UTF16: PositionEncoding = PositionEncoding::Utf16;
@@ -85,7 +85,7 @@ fn bench_size(label: &str, text: &str) {
     println!(
         "\n=== {label} ({} KB, {} lines) ===",
         text.len() / 1024,
-        LineStarts::new(text).len_lines()
+        LineIndex::new(text).line_count()
     );
 
     // The edit site: ~80% of the way through the buffer, on a char boundary.

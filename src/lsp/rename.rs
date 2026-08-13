@@ -100,11 +100,11 @@ pub(crate) fn prepare_rename_via_db(
         {
             return Some(Some(PrepareRenameResponse::Range(to_range(
                 range,
-                &line_index,
+                line_index,
                 encoding,
             ))));
         }
-        Some(prepare_for(model, &line_index, offset, encoding))
+        Some(prepare_for(model, line_index, offset, encoding))
     }));
     match cached {
         Ok(Some(result)) => result,
@@ -149,7 +149,7 @@ pub(crate) fn rename_via_db(
         Some(rename_for(
             model,
             uri,
-            &line_index,
+            line_index,
             offset,
             new_name,
             encoding,

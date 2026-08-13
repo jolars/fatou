@@ -130,7 +130,7 @@ fn pick_boundary_token(left: SyntaxToken, right: SyntaxToken) -> SyntaxToken {
 /// representation, converting each to positions in the negotiated encoding.
 fn link_chain(
     chain: &[TextRange],
-    line_index: &LineIndex<'_>,
+    line_index: &LineIndex,
     encoding: PositionEncoding,
 ) -> SelectionRange {
     let mut linked: Option<SelectionRange> = None;

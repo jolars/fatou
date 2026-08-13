@@ -108,8 +108,8 @@ mod tests {
             );
         }
         assert_eq!(
-            buffer.line_starts(),
-            &crate::text::LineStarts::new(&buffer),
+            buffer.line_index(),
+            &crate::text::LineIndex::new(&buffer),
             "line table drifted"
         );
         buffer.into_string()

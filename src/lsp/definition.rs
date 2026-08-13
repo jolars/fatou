@@ -117,7 +117,7 @@ pub(crate) fn definition_via_db(
             snapshot,
             workspace,
             uri,
-            &line_index,
+            line_index,
             offset,
             encoding,
         ))

@@ -1865,8 +1865,8 @@ mod tests {
         assert_eq!(&*live, "x = 1\ny = 2\n", "the document took the edit");
         for buffer in [&inflight, &live] {
             assert_eq!(
-                buffer.line_starts(),
-                &crate::text::LineStarts::new(buffer),
+                buffer.line_index(),
+                &crate::text::LineIndex::new(buffer),
                 "line table drifted from {:?}",
                 buffer.text()
             );
