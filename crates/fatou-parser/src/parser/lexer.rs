@@ -1003,11 +1003,20 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex the operator at `start`, or one unknown byte if none matches.
+    ///
+    /// **Every arm below is ordered longest-match-first, and reordering them
+    /// changes what the lexer accepts.** A shorter operator placed above a
+    /// longer one that shares its prefix silently truncates it — `.>>` above
+    /// `.>>>=` splits the latter into three tokens. The arm order *is* the
+    /// longest-match rule; individual arms therefore do not restate it.
+    /// `TODO.md` tracks replacing the ladder with a length-descending table,
+    /// which would make that structural instead of positional.
     fn lex_operator_or_unknown(&mut self, start: usize) {
         let b0 = self.peek(0);
         let b1 = self.peek(1);
 
-        // Three-char operators first (longest match): the `...` splat/vararg.
+        // The `...` splat/vararg.
         if (b0, b1, self.peek(2)) == (Some(b'.'), Some(b'.'), Some(b'.')) {
             self.pos += 3;
             self.push_op(TokKind::DotDotDot, start);
@@ -1025,11 +1034,9 @@ impl<'a> Lexer<'a> {
         // Broadcasting (dotted) operators: a `.` immediately followed by an
         // operator char. We merge only `.`+operator — never `.`+ident (`a.b`),
         // `.(` (`f.(x)` stays `Dot LParen`), `..`, or `...` (matched above) — so
-        // field access, the `@.` macro, and splat are all untouched. Longest
-        // match: try the 3-char dotted comparisons before the 2-char ops.
+        // field access, the `@.` macro, and splat are all untouched.
         if b0 == Some(b'.') {
-            // The 5-char broadcast unsigned-shift assignment `.>>>=` must beat
-            // every shorter dotted shift form.
+            // `.>>>=`, the broadcast unsigned-shift assignment.
             if (b1, self.peek(2), self.peek(3), self.peek(4))
                 == (Some(b'>'), Some(b'>'), Some(b'>'), Some(b'='))
             {
@@ -1037,14 +1044,14 @@ impl<'a> Lexer<'a> {
                 self.push_op(TokKind::DotUShrEq, start);
                 return;
             }
-            // The 4-char broadcast unsigned shift `.>>>` beats the 3-char `.>>`
-            // (`.>>>=` is matched above, so a 5th `=` never reaches here).
+            // `.>>>`, the broadcast unsigned shift (`.>>>=` is matched above, so
+            // a 5th `=` never reaches here).
             if (b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'>')) {
                 self.pos += 4;
                 self.push_op(TokKind::DotUShr, start);
                 return;
             }
-            // The lone 4-char dotted op `.//=` must beat the 3-char `.//`.
+            // `.//=`, the lone 4-char dotted op.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
                 self.pos += 4;
                 self.push_op(TokKind::DotSlashSlashEq, start);
@@ -1062,14 +1069,13 @@ impl<'a> Lexer<'a> {
                 self.push_op(TokKind::DotShrEq, start);
                 return;
             }
-            // The 4-char broadcast arrow `.-->` must beat `.-` (`DotMinus`).
+            // `.-->`, the broadcast arrow.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'-'), Some(b'-'), Some(b'>')) {
                 self.pos += 4;
                 self.push_op(TokKind::DotLongArrow, start);
                 return;
             }
-            // The 5-char broadcast arrow `.<-->` must beat the 4-char `.<--`,
-            // which in turn must beat `.<` (`DotLt`).
+            // `.<-->` and `.<--`, the broadcast left arrows.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-')) {
                 if self.peek(4) == Some(b'>') {
                     self.pos += 5;
@@ -1080,8 +1086,7 @@ impl<'a> Lexer<'a> {
                 }
                 return;
             }
-            // The 4-char broadcast identity ops `.===`/`.!==` must beat the
-            // 3-char `.==`/`.!=`.
+            // `.===`/`.!==`, the broadcast identity ops.
             if (b1, self.peek(2), self.peek(3)) == (Some(b'='), Some(b'='), Some(b'=')) {
                 self.pos += 4;
                 self.push_op(TokKind::DotEqEqEq, start);
@@ -1212,14 +1217,14 @@ impl<'a> Lexer<'a> {
             // A lone `.` (or `..`) falls through to the single-char table below.
         }
 
-        // The lone 3-char ASCII op `//=` must beat the 2-char `//`.
+        // `//=`, the lone 3-char ASCII op.
         if (b0, b1, self.peek(2)) == (Some(b'/'), Some(b'/'), Some(b'=')) {
             self.pos += 3;
             self.push_op(TokKind::SlashSlashEq, start);
             return;
         }
 
-        // The 4-char arrow `<-->` must beat the 2-char `<|`/`<:`/`<=`/`<<`.
+        // `<-->`, the 4-char arrow.
         if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'<'), Some(b'-'), Some(b'-'), Some(b'>'))
         {
             self.pos += 4;
@@ -1227,7 +1232,7 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        // The 4-char unsigned-shift assignment `>>>=` must beat the 3-char `>>>`.
+        // `>>>=`, the unsigned-shift assignment.
         if (b0, b1, self.peek(2), self.peek(3)) == (Some(b'>'), Some(b'>'), Some(b'>'), Some(b'='))
         {
             self.pos += 4;
@@ -1235,8 +1240,7 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        // Three-char ASCII ops (longest match): the arrow `-->` must beat `->`,
-        // and the unsigned shift `>>>` must beat `>>`.
+        // Three-char ASCII ops.
         let three = match (b0, b1, self.peek(2)) {
             (Some(b'-'), Some(b'-'), Some(b'>')) => Some(TokKind::LongArrow),
             // The left arrow `<--` (the 4-char `<-->` was matched above; a lone
@@ -1246,12 +1250,10 @@ impl<'a> Lexer<'a> {
             // Identity `===` beats `==`; its negation `!==` beats `!=`.
             (Some(b'='), Some(b'='), Some(b'=')) => Some(TokKind::EqEqEq),
             (Some(b'!'), Some(b'='), Some(b'=')) => Some(TokKind::NotEqEq),
-            // Bitshift augmented assignment `<<=`/`>>=` beats the 2-char `<<`/`>>`
-            // (the `>>>=` 4-char form was matched above).
+            // Bitshift augmented assignment (`>>>=` was matched above).
             (Some(b'<'), Some(b'<'), Some(b'=')) => Some(TokKind::ShlEq),
             (Some(b'>'), Some(b'>'), Some(b'=')) => Some(TokKind::ShrEq),
-            // Augmented assignment for the wrapping operators; beats the 2-char
-            // `+%`/`-%`/`*%` below, exactly as `+=` beats `+`.
+            // Augmented assignment for the wrapping operators.
             (Some(b'+'), Some(b'%'), Some(b'=')) => Some(TokKind::PlusPercentEq),
             (Some(b'-'), Some(b'%'), Some(b'=')) => Some(TokKind::MinusPercentEq),
             (Some(b'*'), Some(b'%'), Some(b'=')) => Some(TokKind::StarPercentEq),
@@ -1263,7 +1265,7 @@ impl<'a> Lexer<'a> {
             return;
         }
 
-        // Two-char operators next (longest match). The invalid doubled operators
+        // Two-char operators. The invalid doubled operators
         // `**`/`--` lex as single error tokens (`-->` is matched above as a
         // 3-char op, so `--` here is never the start of an arrow).
         let two = match (b0, b1) {

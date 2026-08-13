@@ -957,10 +957,7 @@ fn parse_where_chain(
     }
 }
 
-/// Whether the identifier `public` at `start` opens a `PUBLIC_STMT`. True when
-/// the token is the identifier `public` and the next significant token exists and
-/// is not `(`, `=`, or `[` — those three keep `public` an ordinary identifier (a
-/// call, assignment, or index), matching JuliaSyntax's `parse_public`.
+/// Which contextual `… type` declaration a `TYPE_DECL` opener introduces.
 enum TypeDecl {
     Abstract,
     Primitive,
@@ -1003,6 +1000,10 @@ fn is_typegroup_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
     }
 }
 
+/// Whether the identifier `public` at `start` opens a `PUBLIC_STMT`. True when
+/// the token is the identifier `public` and the next significant token exists and
+/// is not `(`, `=`, or `[` — those three keep `public` an ordinary identifier (a
+/// call, assignment, or index), matching JuliaSyntax's `parse_public`.
 fn is_public_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
     match ctx.token(start) {
         Some(t) if t.kind == TokKind::Ident && t.text == "public" => {}
@@ -4594,8 +4595,6 @@ fn is_operator(kind: TokKind) -> bool {
         || infix_binding_power(kind).is_some()
 }
 
-/// Whether `kind` is a numeric literal token (Julia's `is_number`: not chars or
-/// booleans). Used to recognize a numeric-literal coefficient for juxtaposition.
 /// Whether a `+`/`-` at `op_idx`, glued to an adjacent numeric literal, folds
 /// into a single signed literal rather than a unary prefix call. Mirrors
 /// JuliaSyntax `parse_unary`: the operator must be undotted (`Plus`/`Minus`, not
@@ -4641,6 +4640,8 @@ fn signed_literal_fold(ctx: &ParserCtx<'_>, op_idx: usize) -> bool {
     )
 }
 
+/// Whether `kind` is a numeric literal token (Julia's `is_number`: not chars or
+/// booleans). Used to recognize a numeric-literal coefficient for juxtaposition.
 fn is_number_tok(kind: TokKind) -> bool {
     matches!(
         kind,
@@ -4856,10 +4857,6 @@ fn should_juxtapose_string_error(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u
         && (lhs_is_number(ctx, lhs) || lhs_value_close(lhs))
 }
 
-/// Whether the token directly after `lhs` begins a juxtaposed term — an implicit
-/// multiplication with no operator between (`2x`, `2(x)`, `(x-1)y`, `1√x`).
-/// Mirrors JuliaSyntax's `parse_juxtapose`/`is_juxtapose` (the non-string-literal
-/// branch; string juxtaposition is error recovery and deferred).
 /// Whether `tok` is one of the word operators `in`/`isa`, which the lexer emits
 /// as plain identifiers (they are ordinary names elsewhere) and the operator loop
 /// picks up by text.
@@ -4884,6 +4881,10 @@ fn is_for_separator_tok(tok: &Token) -> bool {
     (tok.kind == TokKind::Ident && tok.text == "in") || is_element_of_tok(tok)
 }
 
+/// Whether the token directly after `lhs` begins a juxtaposed term — an implicit
+/// multiplication with no operator between (`2x`, `2(x)`, `(x-1)y`, `1√x`).
+/// Mirrors JuliaSyntax's `parse_juxtapose`/`is_juxtapose` (the non-string-literal
+/// branch; string juxtaposition is error recovery and deferred).
 fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
     if JUXTAPOSE_L < min_bp {
         return false;
@@ -4908,10 +4909,8 @@ fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
     {
         return false;
     }
-    // A glued `in`/`isa` is the *word operator*, not a juxtaposed value
-    // (`"identity"in c` ⇒ `(call-i (string "identity") in c)`, `1isa Int` ⇒
-    // `(call-i 1 isa Int)`). Both are lexed as identifiers, so `is_keyword`
-    // above does not filter them out.
+    // A glued `in`/`isa` is a word operator, not a juxtaposed value — see
+    // `should_juxtapose_string_error`, which excludes it for the same reason.
     if is_word_operator_tok(next) {
         return false;
     }
@@ -4926,8 +4925,6 @@ fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
     !is_number_tok(k) && lhs_value_close(lhs) && !lhs_is_paren_block(lhs)
 }
 
-/// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,
-/// …): the loosest, right-associative tier, all modeled as `ASSIGNMENT_EXPR`.
 /// Whether an operator token's text is a *dotted* (broadcast) operator — it leads
 /// with a broadcast `.` (`.+`, `.&`, `.=`, `.&&`, `.+=`). The range/splat
 /// operators `..`/`...` lead with a *doubled* dot and are not broadcasts, so they
@@ -4936,6 +4933,8 @@ fn is_dotted_broadcast_text(text: &str) -> bool {
     text.as_bytes().first() == Some(&b'.') && text.len() > 1 && text.as_bytes()[1] != b'.'
 }
 
+/// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,
+/// …): the loosest, right-associative tier, all modeled as `ASSIGNMENT_EXPR`.
 fn is_assignment_op(kind: TokKind) -> bool {
     matches!(
         kind,
@@ -4978,12 +4977,6 @@ fn is_assignment_op(kind: TokKind) -> bool {
     )
 }
 
-/// A binary operator that, glued to a `(`, names a function call: `*(x)`,
-/// `==(a, b)`, `.*(a, b)`. These are the operators that are *not* unary in Julia
-/// (so the parens form an argument list, never a prefix application) and not
-/// syntactic (`&`, `:`, `::`, `&&`, `||`, `->` route elsewhere). The unary
-/// operators (`+`, `-`, `!`, `~`) and type operators (`<:`, `>:`) are excluded;
-/// they keep their prefix-application parse.
 /// Whether a unary operator's adjacent parens form an argument list — making
 /// `+(...)` a call (`(call + …)`) rather than a parenthesized operand (a prefix
 /// application `+(x)` → `(call-pre + x)`). Mirrors JuliaSyntax: the parens are a
@@ -5093,6 +5086,12 @@ fn paren_is_block(ctx: &ParserCtx<'_>, lparen_idx: usize) -> bool {
     !is_tuple && num_semis > 0
 }
 
+/// A binary operator that, glued to a `(`, names a function call: `*(x)`,
+/// `==(a, b)`, `.*(a, b)`. These are the operators that are *not* unary in Julia
+/// (so the parens form an argument list, never a prefix application) and not
+/// syntactic (`&`, `:`, `::`, `&&`, `||`, `->` route elsewhere). The unary
+/// operators (`+`, `-`, `!`, `~`) and type operators (`<:`, `>:`) are excluded;
+/// they keep their prefix-application parse.
 fn is_operator_call_name(kind: TokKind) -> bool {
     use TokKind::*;
     matches!(

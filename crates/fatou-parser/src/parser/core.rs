@@ -198,6 +198,10 @@ pub fn parse(text: &str) -> ParseOutput {
     let events = fold_docstrings(&events, &tokens, true);
 
     let cst = build_tree(&tokens, &events);
+    // The post-build flag passes. Each walks the finished CST for a shape
+    // JuliaSyntax error-wraps and records a *zero-width point* diagnostic at the
+    // offending node's start; the projector reconstructs the error wrapper from
+    // that anchor, so the CST itself stays faithful to the source.
     flag_invalid_const_decls(&cst, &mut diagnostics);
     flag_invalid_function_signatures(&cst, &mut diagnostics);
     flag_invalid_catch_vars(&cst, &mut diagnostics);
@@ -211,8 +215,6 @@ pub fn parse(text: &str) -> ParseOutput {
 /// which JuliaSyntax unwraps to the bare symbol. Any other parenthesized form
 /// (`export (x::T)`, `export (x, y)`, `export ()`, `export ((x))`) is invalid and
 /// JuliaSyntax error-wraps the parsed expression (`(export (error (::-i x T)))`).
-/// The diagnostic is a zero-width point at the parenthesized node's start; the
-/// projector reconstructs the error wrapper from it (the CST stays faithful).
 fn flag_invalid_export_items(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
     for stmt in cst
         .descendants()
@@ -310,8 +312,7 @@ fn export_operator_atom_is_dotted(atom: &SyntaxNode) -> bool {
 /// `=` (`const global x`) is invalid, so JuliaSyntax wraps the whole `const` in
 /// `(error …)` (`const x` ⇒ `(error (const x))`). A valid `const x = 1` — or a
 /// `global`/`local`-wrapped `=` (`const global x = 1`) — is left alone. The
-/// diagnostic is a zero-width point at the `const` keyword start; the projector
-/// reconstructs the error wrapper from it (the CST topology stays faithful).
+/// diagnostic anchors at the `const` keyword start.
 fn flag_invalid_const_decls(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
     for node in cst
         .descendants()
@@ -336,8 +337,7 @@ fn flag_invalid_const_decls(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnos
 /// but once a body is present (`function f body end`) or the body block is
 /// explicitly opened with a `;` (`function f; end`), the bare name is no longer a
 /// valid signature: JuliaSyntax error-wraps it (`(function (error f) (block
-/// body))`). The diagnostic is a zero-width point at the `SIGNATURE` node's start;
-/// the projector reconstructs the error wrapper from it (the CST stays faithful).
+/// body))`). The diagnostic anchors at the `SIGNATURE` node's start.
 fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
     for node in cst
         .descendants()
@@ -383,9 +383,8 @@ pub(super) fn is_bare_signature_name(node: &SyntaxNode) -> bool {
 /// (`catch $e`), or a `var"…"` non-standard identifier (`catch var"e"`); any
 /// other expression (`catch e+3`, `catch e.f`, `catch f(e)`, `catch 3`) is
 /// invalid and JuliaSyntax wraps it in `(error …)` (`catch e+3` ⇒ `(catch
-/// (error (call-i e + 3)) …)`). The diagnostic is a zero-width point at the
-/// catch-variable node's start; the projector reconstructs the error wrapper
-/// from it (the CST topology stays faithful).
+/// (error (call-i e + 3)) …)`). The diagnostic anchors at the catch-variable
+/// node's start.
 fn flag_invalid_catch_vars(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
     for node in cst
         .descendants()

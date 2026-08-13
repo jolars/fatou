@@ -31,6 +31,40 @@
 //! green tree *and* diagnostics byte-identical to a full parse of the edited
 //! text. A reparse is an output-pure performance hint: the salsa layer only
 //! ever sees text changes, and a miss is a full parse, never an error.
+//!
+//! # Why the `STRING_CONTENT` splice is sound
+//!
+//! [`try_splice_string_content`] relexes the whole enclosing string literal
+//! rather than the edited leaf, and the argument that this preserves the tree
+//! is the subtlest one in the module, so it is recorded here in full.
+//!
+//! Nothing outside the lexer reads `StringContent` *text*: the parser only
+//! pushes the token, docstring eligibility tests the first token's kind, and the
+//! flag passes are kind-based — so preserving the node's token-kind sequence
+//! preserves both the tree and the diagnostics. (Nor does triple-quoted
+//! dedenting intrude: that lives in the test-only JuliaSyntax projector, which
+//! rebuilds the string at projection time.) Given that:
+//!
+//! * The bytes before the node are unchanged and the lexer is a deterministic
+//!   left-to-right machine, so its mode stack at the node start is identical.
+//!   That subsumes the backward join probe.
+//! * The relex proves the kinds are unchanged and that only the edited leaf's
+//!   end, and the ends after it, moved by the delta. The bytes after the leaf
+//!   *within* the node are therefore byte-identical — including the close
+//!   delimiter and any suffix — so the mode stack is back to its starting depth
+//!   at the node end and the rest of the file lexes identically, merely shifted.
+//!   That subsumes the forward join probe, which could not have expressed a
+//!   delimiter-plus-suffix tail with its one probe character anyway.
+//!
+//! The second bullet needs the literal to be *terminated*, which gets its own
+//! check rather than leaning on an `UnterminatedLiteral` diagnostic's anchor.
+//!
+//! The faithfulness relex (the unedited node text must reproduce the node's own
+//! tokens) is what makes that bullet an induction rather than an assumption: an
+//! isolated [`lex`] starts from an empty mode stack and no token history, while
+//! in context the node may sit under a `Str`/`Interp` frame and
+//! `prev_ends_value` consults the preceding token. Proving faithfulness for the
+//! old text, plus an identical kind sequence, carries it to the new text.
 
 use rowan::{GreenNode, GreenToken, TextRange, TextSize, TokenAtOffset};
 
@@ -137,9 +171,9 @@ pub fn reparse(
 ///
 /// Validating step by step rather than pre-folding the whole chain with
 /// [`try_apply_edits`] keeps the replay to one application: the fold would have
-/// to redo every `replace_range` the loop below already does, which on a
-/// 131 KB buffer is the same order as the splice it is guarding
-/// (`benches/reparse.rs`, `precise_chain`).
+/// to redo every `replace_range` the loop below already does, which costs the
+/// same order as the splice it is guarding (`benches/reparse.rs`,
+/// `precise_chain`).
 pub fn reparse_edits(
     prev_text: &str,
     prev_green: &GreenNode,
@@ -510,27 +544,9 @@ fn relex_matches(
 /// isolated lexer into the right mode for free, so triple/raw/prefixed need no
 /// hand-written character table.
 ///
-/// Why this is sound. Nothing outside the lexer reads `StringContent` *text*:
-/// the parser only pushes the token, docstring eligibility tests the first
-/// token's kind, and the flag passes are kind-based — so preserving the node's
-/// token-kind sequence preserves both the tree and the diagnostics. (Nor does
-/// triple-quoted dedenting intrude: that lives in the test-only JuliaSyntax
-/// projector, which rebuilds the string at projection time.) Given that:
-///
-/// * The bytes before the node are unchanged and the lexer is a deterministic
-///   left-to-right machine, so its mode stack at the node start is identical.
-///   That subsumes the backward join probe.
-/// * The relex proves the kinds are unchanged and that only the edited leaf's
-///   end, and the ends after it, moved by the delta. The bytes after the leaf
-///   *within* the node are therefore byte-identical — including the close
-///   delimiter and any suffix — so the mode stack is back to its starting
-///   depth at the node end and the rest of the file lexes identically, merely
-///   shifted. That subsumes the forward join probe, which could not have
-///   expressed a delimiter-plus-suffix tail with its one probe character
-///   anyway.
-///
-/// The second bullet needs the literal to be *terminated*, which gets its own
-/// check rather than leaning on an `UnterminatedLiteral` diagnostic's anchor.
+/// The soundness argument — why relexing the literal preserves the tree and the
+/// diagnostics — is in the module docs under *Why the `STRING_CONTENT` splice is
+/// sound*.
 ///
 /// Newlines are allowed here, unlike in [`try_splice_plain_token`]: a content
 /// run spans them freely (a triple-quoted body, and a single-quoted one too —
@@ -538,13 +554,6 @@ fn relex_matches(
 /// and a newline *inside* one emits no `NEWLINE` token, so no statement
 /// boundary moves. Diagnostics are byte offsets and do not care about lines.
 /// That is what puts Enter in a docstring on this tier.
-///
-/// The faithfulness relex (the unedited node text must reproduce the node's own
-/// tokens) is what makes the second bullet an induction rather than an
-/// assumption: an isolated [`lex`] starts from an empty mode stack and no token
-/// history, while in context the node may sit under a `Str`/`Interp` frame and
-/// `prev_ends_value` consults the preceding token. Proving faithfulness for the
-/// old text, plus an identical kind sequence, carries it to the new text.
 fn try_splice_string_content(
     prev_text: &str,
     prev_diags: &[ParseDiagnostic],
@@ -662,18 +671,15 @@ const REGION_ALWAYS_TRY_BYTES: usize = 4 * 1024;
 /// divisor rather than a fraction, so `4` here means a quarter.
 const REGION_MAX_FILE_DIVISOR: usize = 4;
 
-/// Whether a region is too wide to be worth attempting. The tier answers a
-/// region with a fragment parse of it *plus* up to three neighbor-sized
-/// boundary parses, so the attempt scales with the region — and a miss pays
-/// the full parse on top. A collapsed [`diff_edit`] of scattered edits spans
-/// everything between the first and the last, which is exactly how a region
-/// grows to most of the file; on ~131 KB that attempt cost about 12 ms against
-/// a 6.3 ms full parse (`benches/reparse.rs`, `scattered_via_diff_edit`).
-/// Bailing on the cheap evidence — the region's byte span, known before any
-/// parse — caps the loss at the full parse the caller was going to pay anyway.
+/// Whether a region is too wide to be worth attempting, per the two consts
+/// above. The tier answers a region with a fragment parse of it *plus* up to
+/// three neighbor-sized boundary parses, so a miss costs more than the full
+/// parse it was avoiding; bailing on the region's byte span — cheap evidence,
+/// known before any parse — caps the loss (`benches/reparse.rs`,
+/// `scattered_via_diff_edit`).
 ///
-/// This is a performance guard only. Like every other bail here it returns the
-/// caller to a full parse, so it cannot affect what a reparse yields.
+/// A performance guard only: like every other bail here it returns the caller to
+/// a full parse, so it cannot affect what a reparse yields.
 fn region_is_too_wide(region_len: usize, text_len: usize) -> bool {
     region_len > REGION_ALWAYS_TRY_BYTES && region_len > text_len / REGION_MAX_FILE_DIVISOR
 }
