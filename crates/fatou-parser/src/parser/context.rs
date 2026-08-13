@@ -80,6 +80,11 @@ impl<'a> ParserCtx<'a> {
         cursor::skip_ws_and_block_comments(self.tokens, i)
     }
 
+    pub(crate) fn skip_ws_and_comments(&self, i: usize) -> usize {
+        self.step(i);
+        cursor::skip_ws_and_comments(self.tokens, i)
+    }
+
     pub(crate) fn skip_ws_and_newlines(&self, i: usize) -> usize {
         self.step(i);
         cursor::skip_ws_and_newlines(self.tokens, i)

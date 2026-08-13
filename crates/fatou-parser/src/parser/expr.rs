@@ -768,7 +768,18 @@ fn parse_expr_in(
             if l_bp < min_bp {
                 break;
             }
-            lhs = parse_comparison_chain(tokens, &ctx, lhs, op_idx, diagnostics, flags);
+            lhs = parse_operator_chain(
+                &ctx,
+                lhs,
+                op_idx,
+                diagnostics,
+                flags,
+                ChainSpec {
+                    single: operator_node_kind(op_kind),
+                    flat: SyntaxKind::COMPARISON_EXPR,
+                    continues: |kind, _| is_comparison_op(kind),
+                },
+            );
             continue;
         }
 
@@ -783,7 +794,18 @@ fn parse_expr_in(
             if l_bp < min_bp {
                 break;
             }
-            lhs = parse_flat_arith_chain(tokens, &ctx, lhs, op_idx, diagnostics, flags);
+            lhs = parse_operator_chain(
+                &ctx,
+                lhs,
+                op_idx,
+                diagnostics,
+                flags,
+                ChainSpec {
+                    single: SyntaxKind::BINARY_EXPR,
+                    flat: SyntaxKind::BINARY_EXPR,
+                    continues: |kind, idx| kind == op_kind && is_flat_arith_op(&tokens[idx]),
+                },
+            );
             continue;
         }
 
@@ -992,19 +1014,38 @@ fn is_public_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
     }
 }
 
+/// Build a node of `kind` from its operands, capturing each operator (and the
+/// surrounding trivia) in the gap between adjacent operands.
+///
+/// `tail` extends the node past the final operand to `gap_end`, covering a
+/// dangling operator whose right operand is missing. The projector replays
+/// JuliaSyntax's zero-width `(error)` operand from the `MissingOperand`
+/// diagnostic recorded at that operator (`1:2:` ⇒ `(call-i 1 : 2 (error))`,
+/// `a < b <` ⇒ `(comparison a < b < (error))`).
+fn build_operands(kind: SyntaxKind, operands: Vec<ExprParse>, tail: Option<usize>) -> ExprParse {
+    let mut iter = operands.into_iter();
+    let first = iter.next().expect("node needs at least one operand");
+    let start = first.start;
+    let mut end = first.end;
+    let mut events = vec![Event::Start(kind)];
+    events.extend(first.events);
+    for operand in iter {
+        push_range(&mut events, end, operand.start);
+        events.extend(operand.events);
+        end = operand.end;
+    }
+    if let Some(gap_end) = tail {
+        push_range(&mut events, end, gap_end);
+        end = gap_end;
+    }
+    events.push(Event::Finish);
+    ExprParse { start, end, events }
+}
+
 /// Build a binary/assignment node from `lhs`, the gap (whitespace + operator +
 /// trivia) up to `rhs`, and `rhs`.
 fn build_binary(kind: SyntaxKind, lhs: ExprParse, rhs: ExprParse) -> ExprParse {
-    let mut events = vec![Event::Start(kind)];
-    events.extend(lhs.events);
-    push_range(&mut events, lhs.end, rhs.start);
-    events.extend(rhs.events);
-    events.push(Event::Finish);
-    ExprParse {
-        start: lhs.start,
-        end: rhs.end,
-        events,
-    }
+    build_operands(kind, vec![lhs, rhs], None)
 }
 
 /// The CST node kind for an infix operator: an assignment, an anonymous-function
@@ -1019,20 +1060,9 @@ fn operator_node_kind(op_kind: TokKind) -> SyntaxKind {
 }
 
 /// Build an operator node whose right operand is absent: `lhs`, then the gap
-/// (whitespace + operator + trailing trivia) up to `gap_end`, and no RHS. The
-/// projector replays JuliaSyntax's zero-width `(error)` operand from the
-/// `MissingOperand` diagnostic recorded at the operator.
+/// (whitespace + operator + trailing trivia) up to `gap_end`, and no RHS.
 fn build_binary_missing_rhs(kind: SyntaxKind, lhs: ExprParse, gap_end: usize) -> ExprParse {
-    let mut events = vec![Event::Start(kind)];
-    let start = lhs.start;
-    events.extend(lhs.events);
-    push_range(&mut events, lhs.end, gap_end);
-    events.push(Event::Finish);
-    ExprParse {
-        start,
-        end: gap_end,
-        events,
-    }
+    build_operands(kind, vec![lhs], Some(gap_end))
 }
 
 /// Collect a statement-level bare-comma tuple. The first operand `first` is
@@ -1095,42 +1125,6 @@ fn parse_comma_tuple(
     ExprParse { start, end, events }
 }
 
-/// Build a stepped range `(a : b : c)` from its three operands, capturing the two
-/// colon tokens (and surrounding trivia) in the gaps between operands.
-fn build_range3(a: ExprParse, b: ExprParse, c: ExprParse) -> ExprParse {
-    let mut events = vec![Event::Start(SyntaxKind::RANGE_EXPR)];
-    events.extend(a.events);
-    push_range(&mut events, a.end, b.start);
-    events.extend(b.events);
-    push_range(&mut events, b.end, c.start);
-    events.extend(c.events);
-    events.push(Event::Finish);
-    ExprParse {
-        start: a.start,
-        end: c.end,
-        events,
-    }
-}
-
-/// Build a stepped range whose third operand is absent: `a`, `b`, and the gap up
-/// to `gap_end` (the second colon and surrounding trivia), with no third operand.
-/// The projector replays JuliaSyntax's zero-width `(error)` from the
-/// `MissingOperand` diagnostic at the trailing colon (`1:2:` ⇒
-/// `(call-i 1 : 2 (error))`).
-fn build_range3_missing_rhs(a: ExprParse, b: ExprParse, gap_end: usize) -> ExprParse {
-    let mut events = vec![Event::Start(SyntaxKind::RANGE_EXPR)];
-    events.extend(a.events);
-    push_range(&mut events, a.end, b.start);
-    events.extend(b.events);
-    push_range(&mut events, b.end, gap_end);
-    events.push(Event::Finish);
-    ExprParse {
-        start: a.start,
-        end: gap_end,
-        events,
-    }
-}
-
 /// Parse a range `:` chain starting at the colon `first_colon` (the first operand
 /// `lhs` is already parsed and the caller has cleared the binding-power check).
 /// Mirrors JuliaSyntax's `parse_range`: every second colon folds three operands
@@ -1182,12 +1176,14 @@ fn parse_colon_range(
             );
             return match step.take() {
                 None => build_binary_missing_rhs(SyntaxKind::BINARY_EXPR, head, op_idx + 1),
-                Some(mid) => build_range3_missing_rhs(head, mid, op_idx + 1),
+                Some(mid) => {
+                    build_operands(SyntaxKind::RANGE_EXPR, vec![head, mid], Some(op_idx + 1))
+                }
             };
         };
         let last_end = rhs.end;
         match step.take() {
-            Some(mid) => head = build_range3(head, mid, rhs),
+            Some(mid) => head = build_operands(SyntaxKind::RANGE_EXPR, vec![head, mid, rhs], None),
             None => step = Some(rhs),
         }
         // Continue the chain only on another range colon at the same level: not a
@@ -1244,76 +1240,46 @@ fn is_comparison_op(kind: TokKind) -> bool {
     )
 }
 
-/// Build a flat n-ary node of `kind` from its operands, capturing each operator
-/// (and surrounding trivia) in the gap between adjacent operands. Mirrors
-/// `build_range3`, generalized to any arity (`operands.len() >= 2`).
-fn build_flat(kind: SyntaxKind, operands: Vec<ExprParse>) -> ExprParse {
-    let mut iter = operands.into_iter();
-    let first = iter.next().expect("flat node needs at least one operand");
-    let start = first.start;
-    let mut end = first.end;
-    let mut events = vec![Event::Start(kind)];
-    events.extend(first.events);
-    for operand in iter {
-        push_range(&mut events, end, operand.start);
-        events.extend(operand.events);
-        end = operand.end;
-    }
-    events.push(Event::Finish);
-    ExprParse { start, end, events }
+/// How a run of same-tier operators folds: the node kind for a lone operator,
+/// the flat node kind for a run of two or more, and the predicate deciding
+/// whether the operator of kind `k` at index `i` extends the run.
+struct ChainSpec<F: Fn(TokKind, usize) -> bool> {
+    single: SyntaxKind,
+    flat: SyntaxKind,
+    continues: F,
 }
 
-/// Build a flat n-ary node whose final right operand is absent: the operands
-/// collected so far plus the gap up to `gap_end` (the dangling operator and
-/// trivia). The projector replays the zero-width `(error)` from the
-/// `MissingOperand` diagnostic (`a < b <` ⇒ `(comparison a < b < (error))`).
-fn build_flat_missing_rhs(kind: SyntaxKind, operands: Vec<ExprParse>, gap_end: usize) -> ExprParse {
-    let mut iter = operands.into_iter();
-    let first = iter.next().expect("flat node needs at least one operand");
-    let start = first.start;
-    let mut end = first.end;
-    let mut events = vec![Event::Start(kind)];
-    events.extend(first.events);
-    for operand in iter {
-        push_range(&mut events, end, operand.start);
-        events.extend(operand.events);
-        end = operand.end;
-    }
-    push_range(&mut events, end, gap_end);
-    events.push(Event::Finish);
-    ExprParse {
-        start,
-        end: gap_end,
-        events,
-    }
-}
-
-/// Parse a comparison chain starting at the operator `first_op` (the first
-/// operand `lhs` is already parsed and the caller has cleared the binding-power
-/// check). Mirrors JuliaSyntax's `parse_comparison`: each operand parses at the
-/// comparison tier's right power, and the run continues while the next operator
-/// is also comparison-tier. A single operator yields an ordinary two-operand
-/// node (`a < b` ⇒ `(call-i a < b)`, `a <: b` ⇒ `(<: a b)`); two or more fold
-/// into one flat `COMPARISON_EXPR`.
-fn parse_comparison_chain(
-    tokens: &[Token],
+/// Parse a run of same-tier operators starting at `first_op` (the first operand
+/// `lhs` is already parsed and the caller has cleared the binding-power check).
+/// Each operand parses at the operator's right binding power and the run extends
+/// while `spec.continues` holds.
+///
+/// Mirrors two JuliaSyntax foldings that share this shape: `parse_comparison`
+/// (`a < b <= c` ⇒ `(comparison a < b <= c)`) and the variadic `+`/`*` chain
+/// (`a + b + c` ⇒ `(call-i a + b c)`). A single operator yields an ordinary
+/// two-operand `spec.single` node (`a < b` ⇒ `(call-i a < b)`, `a <: b` ⇒
+/// `(<: a b)`); two or more fold into one flat `spec.flat`.
+fn parse_operator_chain(
     ctx: &ParserCtx<'_>,
     lhs: ExprParse,
     first_op: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     flags: ExprFlags,
+    spec: ChainSpec<impl Fn(TokKind, usize) -> bool>,
 ) -> ExprParse {
-    let first_op_kind = tokens[first_op].kind;
+    let tokens = ctx.tokens();
     let mut operands = vec![lhs];
     let mut op_count = 0usize;
     let mut op_idx = first_op;
-    loop {
-        let (_, r_bp) = infix_binding_power(tokens[op_idx].kind).expect("comparison binds");
+    let tail = loop {
+        let (_, r_bp) = infix_binding_power(tokens[op_idx].kind).expect("chain operator binds");
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
         let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
-            // Missing right operand: keep the operator(s) and synthesize a
-            // zero-width `(error)`, replayed by the projector from the
-            // `MissingOperand` diagnostic anchored at the dangling operator.
+            // Missing right operand: keep the operator(s) by ending the node past
+            // them, so the projector replays JuliaSyntax's zero-width `(error)`
+            // from the `MissingOperand` diagnostic anchored at the dangling
+            // operator (`a +` ⇒ `(call-i a + (error))`, `a < b <` ⇒
+            // `(comparison a < b < (error))`).
             let op = &tokens[op_idx];
             push_diagnostic(
                 diagnostics,
@@ -1323,23 +1289,15 @@ fn parse_comparison_chain(
                 op.end,
             );
             op_count += 1;
-            return if op_count == 1 {
-                build_binary_missing_rhs(
-                    operator_node_kind(first_op_kind),
-                    pop_one(operands),
-                    op_idx + 1,
-                )
-            } else {
-                build_flat_missing_rhs(SyntaxKind::COMPARISON_EXPR, operands, op_idx + 1)
-            };
+            break Some(op_idx + 1);
         };
         let last_end = rhs.end;
         operands.push(rhs);
         op_count += 1;
-        // Continue only on another comparison operator at the same level (not an
-        // array-element boundary, e.g. `[a <b]` splitting into elements).
+        // Continue only while the run's own predicate holds and the operator is
+        // not an array-element boundary (`[a <b]`, `[a +b]` split into elements).
         let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
-            Some((idx, kind)) if is_comparison_op(kind) => {
+            Some((idx, kind)) if (spec.continues)(kind, idx) => {
                 let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
                 (!split).then_some(idx)
             }
@@ -1347,23 +1305,15 @@ fn parse_comparison_chain(
         };
         match continues {
             Some(idx) => op_idx = idx,
-            None => break,
+            None => break None,
         }
-    }
-    if op_count == 1 {
-        let mut iter = operands.into_iter();
-        let a = iter.next().expect("lhs present");
-        let b = iter.next().expect("one rhs collected");
-        build_binary(operator_node_kind(first_op_kind), a, b)
+    };
+    let kind = if op_count == 1 {
+        spec.single
     } else {
-        build_flat(SyntaxKind::COMPARISON_EXPR, operands)
-    }
-}
-
-/// Take the sole element of a one-element operand vector (the bare `lhs` of a
-/// comparison whose first operator has no right operand).
-fn pop_one(operands: Vec<ExprParse>) -> ExprParse {
-    operands.into_iter().next().expect("comparison lhs present")
+        spec.flat
+    };
+    build_operands(kind, operands, tail)
 }
 
 /// The plain `+`/`*` operators (and their wrapping forms `+%`/`*%`) that fold a
@@ -1380,76 +1330,6 @@ fn is_flat_arith_op(tok: &Token) -> bool {
             | TokKind::StarPercent
             | TokKind::PlusPlus
     ) && !tok.text.chars().any(is_op_suffix_char)
-}
-
-/// Parse a flat arithmetic chain starting at the operator `first_op` (the first
-/// operand `lhs` is already parsed and the caller has cleared the binding-power
-/// check). Mirrors JuliaSyntax's variadic `+`/`*` folding: each operand parses at
-/// the operator's right power, and the run continues only while the next operator
-/// is the *identical* token kind. A single operator yields an ordinary
-/// two-operand node (`a + b` ⇒ `(call-i a + b)`); two or more fold into one flat
-/// `BINARY_EXPR` projecting as a variadic call (`a + b + c` ⇒ `(call-i a + b c)`).
-fn parse_flat_arith_chain(
-    tokens: &[Token],
-    ctx: &ParserCtx<'_>,
-    lhs: ExprParse,
-    first_op: usize,
-    diagnostics: &mut Vec<ParseDiagnostic>,
-    flags: ExprFlags,
-) -> ExprParse {
-    let first_op_kind = tokens[first_op].kind;
-    let mut operands = vec![lhs];
-    let mut op_count = 0usize;
-    let mut op_idx = first_op;
-    loop {
-        let (_, r_bp) = infix_binding_power(tokens[op_idx].kind).expect("arith binds");
-        let rhs_operand = ctx.skip_trivia(op_idx + 1);
-        let Some(rhs) = parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags) else {
-            // Missing right operand: keep the operator(s) and synthesize a
-            // zero-width `(error)`, replayed by the projector from the
-            // `MissingOperand` diagnostic anchored at the dangling operator
-            // (`a +` ⇒ `(call-i a + (error))`, `a + b +` ⇒ `(call-i a + b
-            // (error))`).
-            let op = &tokens[op_idx];
-            push_diagnostic(
-                diagnostics,
-                DiagnosticKind::MissingOperand,
-                "expected right-hand side for operator",
-                op.start,
-                op.end,
-            );
-            op_count += 1;
-            return if op_count == 1 {
-                build_binary_missing_rhs(SyntaxKind::BINARY_EXPR, pop_one(operands), op_idx + 1)
-            } else {
-                build_flat_missing_rhs(SyntaxKind::BINARY_EXPR, operands, op_idx + 1)
-            };
-        };
-        let last_end = rhs.end;
-        operands.push(rhs);
-        op_count += 1;
-        // Continue only on another instance of the *same* operator at this level
-        // (not an array-element boundary, e.g. `[a +b]` splitting into elements).
-        let continues = match next_operator(ctx, last_end, flags.inside_brackets) {
-            Some((idx, kind)) if kind == first_op_kind && is_flat_arith_op(&tokens[idx]) => {
-                let split = flags.array_mode && array_element_boundary(ctx, last_end, idx);
-                (!split).then_some(idx)
-            }
-            _ => None,
-        };
-        match continues {
-            Some(idx) => op_idx = idx,
-            None => break,
-        }
-    }
-    if op_count == 1 {
-        let mut iter = operands.into_iter();
-        let a = iter.next().expect("lhs present");
-        let b = iter.next().expect("one rhs collected");
-        build_binary(SyntaxKind::BINARY_EXPR, a, b)
-    } else {
-        build_flat(SyntaxKind::BINARY_EXPR, operands)
-    }
 }
 
 fn parse_prefix(
@@ -1797,13 +1677,20 @@ fn parse_prefix(
             flags.array_mode,
         )),
         TokKind::LParen => parse_paren(ctx, start, flags.end_marker, diagnostics),
-        TokKind::LBracket => Some(parse_bracket_literal(
+        TokKind::LBracket => Some(parse_delimited_literal(
             ctx,
             start,
             flags.end_marker,
+            BRACKET_CAT,
             diagnostics,
         )),
-        TokKind::LBrace => parse_braces(ctx, start, flags.end_marker, diagnostics),
+        TokKind::LBrace => Some(parse_delimited_literal(
+            ctx,
+            start,
+            flags.end_marker,
+            BRACE_CAT,
+            diagnostics,
+        )),
         TokKind::Ident => Some(atom(SyntaxKind::NAME, start)),
         // `where` is contextual: it is the type-variable operator only *after* a
         // complete expression, which is the operator loop's business. Where an
@@ -2873,134 +2760,113 @@ fn push_element_arg(events: &mut Vec<Event>, el: ExprParse) -> usize {
     end
 }
 
-/// Whether the trivia run beginning at the newline `look` (newlines, horizontal
-/// whitespace, and comments) is followed by a `,`. Used to decide that a newline
-/// first separator inside `[…]` is insignificant because a comma — the real
-/// separator of a vector — comes next.
-fn newline_run_precedes_comma(ctx: &ParserCtx<'_>, look: usize) -> bool {
-    let mut peek = look;
-    while matches!(
-        ctx.token(peek).map(|t| t.kind),
-        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment | TokKind::Newline)
-    ) {
-        peek += 1;
-    }
-    ctx.token(peek).map(|t| t.kind) == Some(TokKind::Comma)
+/// Whether the trivia run beginning at the newline `look` is followed by `kind`.
+///
+/// Two callers decide that a newline first separator inside `[…]`/`{…}` is
+/// insignificant: a following `,` is the real separator of a vector, and a
+/// following `for` makes a comprehension, so a blank line before it does not
+/// force a `vcat` (`[x \n\n for a in as]` is `(comprehension …)`). A second
+/// element is hit before either, keeping `[1\n2\nfor …]` a matrix.
+fn newline_run_precedes(ctx: &ParserCtx<'_>, look: usize, kind: TokKind) -> bool {
+    ctx.token(ctx.skip_trivia(look)).map(|t| t.kind) == Some(kind)
 }
 
-/// Whether the trivia run beginning at the newline `look` is followed by a
-/// `for`. A blank line (or any newlines) before the comprehension `for` is
-/// insignificant: `[x \n\n for a in as]` is `(comprehension …)`, not a `vcat`.
-/// A second element before the `for` is hit first, keeping `[1\n2\nfor …]` a
-/// matrix.
-fn newline_run_precedes_for(ctx: &ParserCtx<'_>, look: usize) -> bool {
-    let mut peek = look;
-    while matches!(
-        ctx.token(peek).map(|t| t.kind),
-        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment | TokKind::Newline)
-    ) {
-        peek += 1;
-    }
-    ctx.token(peek).map(|t| t.kind) == Some(TokKind::ForKw)
+/// The two delimiter families sharing the concatenation grammar, `[…]` and
+/// `{…}`: the closing token plus the three node kinds a body can take.
+#[derive(Clone, Copy)]
+struct CatShape {
+    close: TokKind,
+    /// A comma-separated layout, and the empty and single-element cases.
+    list: SyntaxKind,
+    /// A space-, `;`-, or newline-separated concatenation.
+    cat: SyntaxKind,
+    /// A `for`-clause comprehension.
+    comprehension: SyntaxKind,
 }
 
-/// Parse a `[...]` literal at prefix position (postfix `[` is indexing). A `,`
-/// after the first element (or an empty/single `[x]`) is a `VECT_EXPR`, reusing
-/// the arg-list machinery; a space-, `;`-, or newline-separated layout is a
-/// `MATRIX_EXPR` of `MATRIX_ROW`s.
-fn parse_bracket_literal(
+const BRACKET_CAT: CatShape = CatShape {
+    close: TokKind::RBracket,
+    list: SyntaxKind::VECT_EXPR,
+    cat: SyntaxKind::MATRIX_EXPR,
+    comprehension: SyntaxKind::COMPREHENSION,
+};
+
+const BRACE_CAT: CatShape = CatShape {
+    close: TokKind::RBrace,
+    list: SyntaxKind::BRACES,
+    cat: SyntaxKind::BRACESCAT_EXPR,
+    comprehension: SyntaxKind::BRACES_COMPREHENSION,
+};
+
+/// Parse a `[…]` or `{…}` literal at prefix position (a postfix `[` is indexing).
+/// The first separator past the opening element decides the shape: a `,`, the
+/// closer, or end gives `shape.list` (reusing the arg-list machinery), a `for`
+/// gives `shape.comprehension`, and anything else — a space, `;`, or newline —
+/// gives `shape.cat`, a concatenation of `MATRIX_ROW`s.
+fn parse_delimited_literal(
     ctx: &ParserCtx<'_>,
-    lbrk: usize,
-    // Inherited index-marker context. A bare `[…]` literal does not enable `end`,
-    // but `a[[…]]` (a literal nested in indexing) inherits it.
+    open: usize,
+    // Inherited index-marker context. A bare `[…]`/`{…}` literal does not enable
+    // `end`, but `a[[…]]` (a literal nested in indexing) inherits it.
     end_marker: bool,
+    shape: CatShape,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
-    let tokens = ctx.tokens();
-    let vect = |diagnostics: &mut Vec<ParseDiagnostic>| {
-        let (events, end) = parse_arg_list(
-            ctx,
-            lbrk,
-            TokKind::RBracket,
-            SyntaxKind::VECT_EXPR,
-            end_marker,
-            diagnostics,
-        );
+    let list = |diagnostics: &mut Vec<ParseDiagnostic>| {
+        let (events, end) =
+            parse_arg_list(ctx, open, shape.close, shape.list, end_marker, diagnostics);
         ExprParse {
-            start: lbrk,
+            start: open,
             end,
             events,
         }
     };
-
-    let first_start = ctx.skip_trivia(lbrk + 1);
-    // Empty `[]`, or a first element we cannot parse: the comma-list parser
-    // handles both losslessly.
-    if ctx.token(first_start).map(|t| t.kind) == Some(TokKind::RBracket) {
-        return vect(diagnostics);
-    }
-    // An element-free `[; …]` is an empty n-dimensional concatenation
-    // (`[;]` → `ncat-1`, `[;;]` → `ncat-2`), not a vector.
-    if let Some(empty) = parse_empty_ncat(
-        ctx,
-        lbrk,
-        first_start,
-        TokKind::RBracket,
-        SyntaxKind::MATRIX_EXPR,
-    ) {
-        return empty;
-    }
-    let Some(first) = parse_element(tokens, first_start, end_marker, diagnostics) else {
-        return vect(diagnostics);
+    let comprehension = |first, diagnostics: &mut Vec<ParseDiagnostic>| {
+        parse_comprehension(
+            ctx,
+            open,
+            first,
+            shape.comprehension,
+            shape.close,
+            diagnostics,
+        )
     };
 
-    // Look at the first separator (past horizontal whitespace and comments, but
-    // not a newline — a newline is a significant row separator). A `,`, `]`, or
-    // end means a vector; anything else (`;`, newline, or another element) means
-    // a matrix.
-    let mut look = first.end;
-    while matches!(
-        ctx.token(look).map(|t| t.kind),
-        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
-    ) {
-        look += 1;
+    let first_start = ctx.skip_trivia(open + 1);
+    // Empty `[]`/`{}`, or a first element we cannot parse: the comma-list parser
+    // handles both losslessly.
+    if ctx.token(first_start).map(|t| t.kind) == Some(shape.close) {
+        return list(diagnostics);
     }
+    // An element-free `[; …]` is an empty n-dimensional concatenation
+    // (`[;]` → `ncat-1`, `[;;]` → `ncat-2`, `{;}` → `(bracescat (nrow-1))`).
+    if let Some(empty) = parse_empty_ncat(ctx, open, first_start, shape) {
+        return empty;
+    }
+    let Some(first) = parse_element(ctx.tokens(), first_start, end_marker, diagnostics) else {
+        return list(diagnostics);
+    };
+
+    let look = ctx.skip_ws_and_comments(first.end);
     match ctx.token(look).map(|t| t.kind) {
-        Some(TokKind::ForKw) => parse_comprehension(
-            ctx,
-            lbrk,
-            first,
-            SyntaxKind::COMPREHENSION,
-            TokKind::RBracket,
-            diagnostics,
-        ),
-        None | Some(TokKind::RBracket | TokKind::Comma) => vect(diagnostics),
+        Some(TokKind::ForKw) => comprehension(first, diagnostics),
+        None | Some(TokKind::Comma) => list(diagnostics),
+        Some(k) if k == shape.close => list(diagnostics),
         // A newline run before the comprehension `for` is insignificant, so
         // `[x \n\n for a in as]` stays a `(comprehension …)`.
-        Some(TokKind::Newline) if newline_run_precedes_for(ctx, look) => parse_comprehension(
-            ctx,
-            lbrk,
-            first,
-            SyntaxKind::COMPREHENSION,
-            TokKind::RBracket,
-            diagnostics,
-        ),
+        Some(TokKind::Newline) if newline_run_precedes(ctx, look, TokKind::ForKw) => {
+            comprehension(first, diagnostics)
+        }
         // A newline run is a row separator only if it separates two *elements*.
         // When the next significant token past the newline(s) is a `,`, the comma
         // is the real separator and the newline is insignificant whitespace, so
-        // `[x\n, y]` is `(vect x y)`, matching Julia (`;` after a newline stays a
-        // matrix row separator, and another element keeps it a matrix).
-        Some(TokKind::Newline) if newline_run_precedes_comma(ctx, look) => vect(diagnostics),
-        _ => parse_matrix(
-            ctx,
-            lbrk,
-            first,
-            TokKind::RBracket,
-            SyntaxKind::VECT_EXPR,
-            SyntaxKind::MATRIX_EXPR,
-            end_marker,
-            diagnostics,
-        ),
+        // `[x\n, y]` is `(vect x y)` and `{x\n, y}` is `(braces x y)`, matching
+        // Julia (`;` after a newline stays a row separator, and another element
+        // keeps it a concatenation).
+        Some(TokKind::Newline) if newline_run_precedes(ctx, look, TokKind::Comma) => {
+            list(diagnostics)
+        }
+        _ => parse_matrix(ctx, open, first, shape, end_marker, diagnostics),
     }
 }
 
@@ -3055,9 +2921,9 @@ fn parse_empty_ncat(
     ctx: &ParserCtx<'_>,
     lbrk: usize,
     first_start: usize,
-    close: TokKind,
-    node_kind: SyntaxKind,
+    shape: CatShape,
 ) -> Option<ExprParse> {
+    let (close, node_kind) = (shape.close, shape.cat);
     let mut q = first_start;
     let mut saw_semi = false;
     while let Some(k) = ctx.token(q).map(|t| t.kind) {
@@ -3090,19 +2956,17 @@ fn parse_empty_ncat(
 /// elements left unwrapped); the projector recovers each group's dimension from
 /// its separator tokens and heads it `hcat`/`vcat`/`ncat-d` (top) or
 /// `row`/`nrow-d` (nested).
-#[allow(clippy::too_many_arguments)]
 fn parse_matrix(
     ctx: &ParserCtx<'_>,
     lbrk: usize,
     first: ExprParse,
-    close: TokKind,
-    comma_kind: SyntaxKind,
-    matrix_kind: SyntaxKind,
+    shape: CatShape,
     // Inherited index-marker context for the matrix elements (see
     // [`parse_element`]).
     end_marker: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
+    let (close, comma_kind, matrix_kind) = (shape.close, shape.list, shape.cat);
     let tokens = ctx.tokens();
     let lead_start = first.start;
     let mut elems = vec![first];
@@ -3964,13 +3828,7 @@ fn parse_typed_concat(
         }
     };
     // An element-free `T[; …]` is an empty n-dimensional concatenation.
-    if let Some(empty) = parse_empty_ncat(
-        ctx,
-        open_idx,
-        first_start,
-        TokKind::RBracket,
-        SyntaxKind::MATRIX_EXPR,
-    ) {
+    if let Some(empty) = parse_empty_ncat(ctx, open_idx, first_start, BRACKET_CAT) {
         return Some(wrap(empty));
     }
     // The first element is parsed in indexing position (a postfix `[`), so `end`
@@ -3981,29 +3839,14 @@ fn parse_typed_concat(
     let first = parse_element(ctx.tokens(), first_start, true, diagnostics)?;
     // Look at the first separator: a `,`, `]`, end, or `for` means this is an
     // index/comprehension, not a concatenation.
-    let mut look = first.end;
-    while matches!(
-        ctx.token(look).map(|t| t.kind),
-        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
-    ) {
-        look += 1;
-    }
+    let look = ctx.skip_ws_and_comments(first.end);
     match ctx.token(look).map(|t| t.kind) {
         None | Some(TokKind::RBracket | TokKind::Comma | TokKind::ForKw) => {
             diagnostics.truncate(diag_mark);
             None
         }
         _ => {
-            let mut body = parse_matrix(
-                ctx,
-                open_idx,
-                first,
-                TokKind::RBracket,
-                SyntaxKind::VECT_EXPR,
-                SyntaxKind::MATRIX_EXPR,
-                end_marker,
-                diagnostics,
-            );
+            let mut body = parse_matrix(ctx, open_idx, first, BRACKET_CAT, end_marker, diagnostics);
             // A misplaced-`end` recovery (`a[1 end]`, `a[:(end)]`) keeps the typed
             // array head even with a single real element (`(typed_hcat a 1
             // (error-t))`), unlike a clean lone element. `parse_matrix` collapses a
@@ -4459,97 +4302,6 @@ fn macro_leaf_is_doc(ctx: &ParserCtx<'_>, name_end: usize) -> bool {
         && ctx
             .token(name_end - 1)
             .is_some_and(|t| t.kind == TokKind::Ident && t.text == "doc")
-}
-
-/// Parse a standalone `{ … }` brace expression. A comma-separated (or single,
-/// empty) layout is a `BRACES` node holding its items directly (no wrapping
-/// `ARG_LIST`), matching `where {T, S}`. A space-, `;`-, or newline-separated
-/// layout is a `BRACESCAT_EXPR` of `MATRIX_ROW`s — the same nesting the
-/// projector reads for `[...]`, but always headed `bracescat`.
-fn parse_braces(
-    ctx: &ParserCtx<'_>,
-    start: usize,
-    // Inherited index-marker context (a `{…}` literal does not enable it).
-    end_marker: bool,
-    diagnostics: &mut Vec<ParseDiagnostic>,
-) -> Option<ExprParse> {
-    let tokens = ctx.tokens();
-    let braces = |diagnostics: &mut Vec<ParseDiagnostic>| {
-        let (events, end) = parse_arg_list(
-            ctx,
-            start,
-            TokKind::RBrace,
-            SyntaxKind::BRACES,
-            end_marker,
-            diagnostics,
-        );
-        ExprParse { start, end, events }
-    };
-
-    let first_start = ctx.skip_trivia(start + 1);
-    if ctx.token(first_start).map(|t| t.kind) == Some(TokKind::RBrace) {
-        return Some(braces(diagnostics));
-    }
-    // An element-free `{; …}` is an empty n-dimensional concatenation
-    // (`{;}` → `(bracescat (nrow-1))`), not a brace list.
-    if let Some(empty) = parse_empty_ncat(
-        ctx,
-        start,
-        first_start,
-        TokKind::RBrace,
-        SyntaxKind::BRACESCAT_EXPR,
-    ) {
-        return Some(empty);
-    }
-    let Some(first) = parse_element(tokens, first_start, end_marker, diagnostics) else {
-        return Some(braces(diagnostics));
-    };
-
-    // The first separator decides comma list vs concatenation, mirroring
-    // `parse_bracket_literal` (a newline is a significant row separator).
-    let mut look = first.end;
-    while matches!(
-        ctx.token(look).map(|t| t.kind),
-        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
-    ) {
-        look += 1;
-    }
-    match ctx.token(look).map(|t| t.kind) {
-        Some(TokKind::ForKw) => Some(parse_comprehension(
-            ctx,
-            start,
-            first,
-            SyntaxKind::BRACES_COMPREHENSION,
-            TokKind::RBrace,
-            diagnostics,
-        )),
-        None | Some(TokKind::RBrace | TokKind::Comma) => Some(braces(diagnostics)),
-        // A newline run before the comprehension `for` is insignificant, so
-        // `{x \n for a in as}` stays a `(braces (generator …))`.
-        Some(TokKind::Newline) if newline_run_precedes_for(ctx, look) => Some(parse_comprehension(
-            ctx,
-            start,
-            first,
-            SyntaxKind::BRACES_COMPREHENSION,
-            TokKind::RBrace,
-            diagnostics,
-        )),
-        // A newline followed by a `,` keeps the comma as the real separator, so
-        // `{x\n, y}` is `(braces x y)`, matching `[x\n, y]` → `(vect x y)`.
-        Some(TokKind::Newline) if newline_run_precedes_comma(ctx, look) => {
-            Some(braces(diagnostics))
-        }
-        _ => Some(parse_matrix(
-            ctx,
-            start,
-            first,
-            TokKind::RBrace,
-            SyntaxKind::BRACES,
-            SyntaxKind::BRACESCAT_EXPR,
-            end_marker,
-            diagnostics,
-        )),
-    }
 }
 
 /// Parse a comma-separated, bracket-delimited argument list into a `list_kind`

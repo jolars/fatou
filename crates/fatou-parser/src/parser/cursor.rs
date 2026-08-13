@@ -23,6 +23,19 @@ pub(crate) fn skip_ws_and_block_comments(tokens: &[Token], mut i: usize) -> usiz
     i
 }
 
+/// Skip horizontal whitespace and both comment forms, but *not* newlines. Used
+/// where a newline is itself significant — an array row separator — so the scan
+/// must stop at one while still seeing past a trailing `# …` or `#= … =#`.
+pub(crate) fn skip_ws_and_comments(tokens: &[Token], mut i: usize) -> usize {
+    while matches!(
+        tokens.get(i).map(|t| t.kind),
+        Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
+    ) {
+        i += 1;
+    }
+    i
+}
+
 /// Skip whitespace and newlines.
 pub(crate) fn skip_ws_and_newlines(tokens: &[Token], mut i: usize) -> usize {
     while matches!(
