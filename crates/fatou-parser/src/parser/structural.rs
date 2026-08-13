@@ -15,7 +15,7 @@
 use crate::parser::context::ParserCtx;
 use crate::parser::core::stmt_is_doc_string;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
-use crate::parser::events::{Event, ExprParse, push_range};
+use crate::parser::events::{Event, ExprParse, finish, push_range};
 use crate::parser::expr::{
     is_var_identifier_start, parse_block_stmt, parse_expr, parse_for_specs, parse_kw_stmt_operand,
     parse_name_signature_expr, parse_paren, parse_prefix_interpolation, parse_quote_sym,
@@ -1252,7 +1252,7 @@ fn parse_import_path(
                 body.push(Event::Tok(i + 1)); // `(`
                 body.extend(quote.events);
                 body.push(Event::Tok(rparen)); // `)`
-                body.push(Event::Finish); // PAREN_EXPR
+                finish(&mut body, SyntaxKind::PAREN_EXPR);
                 i = rparen + 1;
             }
             (Some(TokKind::Dot), Some(TokKind::LParen))

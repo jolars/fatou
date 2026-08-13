@@ -7,7 +7,7 @@
 
 use crate::parser::context::ParserCtx;
 use crate::parser::diagnostics::{DiagnosticKind, ParseDiagnostic, push_diagnostic};
-use crate::parser::events::{Event, ExprParse, push_range};
+use crate::parser::events::{Event, ExprParse, finish, push_range};
 use crate::parser::lexer::{TokKind, Token, is_op_suffix_char};
 use crate::parser::recovery::{error_expr_to_line_end, error_expr_with_range};
 use crate::parser::structural::{
@@ -1600,17 +1600,11 @@ fn parse_prefix(
                     tok.start,
                     tok.end,
                 );
-                let mut events = vec![
-                    Event::Start(SyntaxKind::UNARY_EXPR),
-                    Event::Start(SyntaxKind::ERROR),
-                    Event::Start(SyntaxKind::OPERATOR_ATOM),
-                    Event::Tok(start),
-                    Event::Finish, // OPERATOR_ATOM
-                    Event::Finish, // ERROR
-                ];
+                let mut events = vec![Event::Start(SyntaxKind::UNARY_EXPR)];
+                events.extend(error_wrapped_atom(SyntaxKind::OPERATOR_ATOM, start).events);
                 push_range(&mut events, start + 1, operand.start);
                 events.extend(operand.events);
-                events.push(Event::Finish); // UNARY_EXPR
+                finish(&mut events, SyntaxKind::UNARY_EXPR);
                 return Some(ExprParse {
                     start,
                     end: operand.end,
@@ -1811,17 +1805,11 @@ fn parse_prefix(
                     // broadcast operator still projects to `(. op)`), then the
                     // operand, under a `UNARY_EXPR` the projector renders as a
                     // prefix call with the error-wrapped operator as callee.
-                    let mut events = vec![
-                        Event::Start(SyntaxKind::UNARY_EXPR),
-                        Event::Start(SyntaxKind::ERROR),
-                        Event::Start(SyntaxKind::OPERATOR_ATOM),
-                        Event::Tok(start),
-                        Event::Finish, // OPERATOR_ATOM
-                        Event::Finish, // ERROR
-                    ];
+                    let mut events = vec![Event::Start(SyntaxKind::UNARY_EXPR)];
+                    events.extend(error_wrapped_atom(SyntaxKind::OPERATOR_ATOM, start).events);
                     push_range(&mut events, start + 1, operand.start);
                     events.extend(operand.events);
-                    events.push(Event::Finish); // UNARY_EXPR
+                    finish(&mut events, SyntaxKind::UNARY_EXPR);
                     Some(ExprParse {
                         start,
                         end: operand.end,
@@ -1846,24 +1834,31 @@ fn parse_prefix(
     }
 }
 
-/// An operator token wrapped as `ERROR > OPERATOR_ATOM > op` — JuliaSyntax's
-/// `(error op)` atom for a syntactic operator used where a value is expected. The
-/// `OPERATOR_ATOM` keeps the broadcast projection (`.+=` ⇒ `(. +=)`).
-/// Build the `(error <kw>)` atom for a reserved keyword misused as a signature
-/// name. The keyword token is wrapped in a `NAME` (it is standing in for an
-/// identifier) inside an `ERROR` node; the projector renders it `(error try)`.
-fn keyword_name_error_atom(start: usize) -> ExprParse {
+/// The token at `start` wrapped as `ERROR > inner > tok` — JuliaSyntax's
+/// `(error x)` atom for a token used where a value is expected.
+///
+/// `inner` preserves the token's own projection: `NAME` for a reserved keyword
+/// standing in for an identifier (`(error try)`), `OPERATOR_ATOM` for a
+/// syntactic operator, which also keeps the broadcast projection
+/// (`.+=` ⇒ `(. +=)`).
+fn error_wrapped_atom(inner: SyntaxKind, start: usize) -> ExprParse {
+    let mut events = vec![
+        Event::Start(SyntaxKind::ERROR),
+        Event::Start(inner),
+        Event::Tok(start),
+    ];
+    finish(&mut events, inner);
+    finish(&mut events, SyntaxKind::ERROR);
     ExprParse {
         start,
         end: start + 1,
-        events: vec![
-            Event::Start(SyntaxKind::ERROR),
-            Event::Start(SyntaxKind::NAME),
-            Event::Tok(start),
-            Event::Finish, // NAME
-            Event::Finish, // ERROR
-        ],
+        events,
     }
+}
+
+/// The `(error <kw>)` atom for a reserved keyword misused as a signature name.
+fn keyword_name_error_atom(start: usize) -> ExprParse {
+    error_wrapped_atom(SyntaxKind::NAME, start)
 }
 
 /// Whether `kind` is a hard reserved keyword that JuliaSyntax error-wraps when it
@@ -1886,18 +1881,9 @@ fn char_token_terminated(text: &str) -> bool {
     text.len() >= 2 && text.ends_with('\'')
 }
 
+/// The `(error op)` atom for a syntactic operator used where a value is expected.
 fn error_operator_atom(start: usize) -> ExprParse {
-    ExprParse {
-        start,
-        end: start + 1,
-        events: vec![
-            Event::Start(SyntaxKind::ERROR),
-            Event::Start(SyntaxKind::OPERATOR_ATOM),
-            Event::Tok(start),
-            Event::Finish, // OPERATOR_ATOM
-            Event::Finish, // ERROR
-        ],
-    }
+    error_wrapped_atom(SyntaxKind::OPERATOR_ATOM, start)
 }
 
 /// Whether `kind` is a syntactic operator that has no value meaning and so, where
@@ -2109,10 +2095,10 @@ pub(super) fn parse_quote_sym(
             push_range(&mut events, next, op);
             events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
             events.push(Event::Tok(op));
-            events.push(Event::Finish); // OPERATOR_ATOM
+            finish(&mut events, SyntaxKind::OPERATOR_ATOM);
             push_range(&mut events, op + 1, rparen + 1);
-            events.push(Event::Finish); // PAREN_EXPR
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::PAREN_EXPR);
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             Some(ExprParse {
                 start,
                 end: rparen + 1,
@@ -2132,7 +2118,7 @@ pub(super) fn parse_quote_sym(
                 .is_some_and(|t| is_closing_block_keyword(t.kind)) =>
         {
             events.push(Event::Tok(next)); // `(`
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             let lparen = &ctx.tokens()[next];
             push_diagnostic(
                 diagnostics,
@@ -2162,7 +2148,7 @@ pub(super) fn parse_quote_sym(
         // `var"""…"""` is an ordinary `@var_str` string macro and is excluded.
         TokKind::StringPrefix if is_var_identifier_start(ctx, next) => {
             let end = push_var_macro_name(ctx, &mut events, next, diagnostics)?;
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             Some(ExprParse { start, end, events })
         }
         // `:@m` — a quoted macro call. Julia quotes the whole call, space
@@ -2174,7 +2160,7 @@ pub(super) fn parse_quote_sym(
             let mac = parse_macro(ctx, next, diagnostics, inside_brackets, array_mode);
             let end = mac.end;
             events.extend(mac.events);
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             Some(ExprParse { start, end, events })
         }
         // `:name` — an identifier symbol.
@@ -2205,8 +2191,8 @@ pub(super) fn parse_quote_sym(
         | TokKind::Char => {
             events.push(Event::Start(SyntaxKind::LITERAL));
             events.push(Event::Tok(next));
-            events.push(Event::Finish); // LITERAL
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::LITERAL);
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             Some(ExprParse {
                 start,
                 end: next + 1,
@@ -2218,7 +2204,7 @@ pub(super) fn parse_quote_sym(
             let lit = parse_string_literal(ctx, next, diagnostics);
             let end = lit.end;
             events.extend(lit.events);
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             Some(ExprParse { start, end, events })
         }
         // `:.+`, `:.&`, `:.=`, `:.&&`, `:.+=` — a quoted *dotted* (broadcast)
@@ -2233,8 +2219,8 @@ pub(super) fn parse_quote_sym(
         {
             events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
             events.push(Event::Tok(next));
-            events.push(Event::Finish); // OPERATOR_ATOM
-            events.push(Event::Finish); // QUOTE_SYM
+            finish(&mut events, SyntaxKind::OPERATOR_ATOM);
+            finish(&mut events, SyntaxKind::QUOTE_SYM);
             Some(ExprParse {
                 start,
                 end: next + 1,
@@ -2941,7 +2927,7 @@ fn parse_empty_ncat(
     }
     let mut events = vec![Event::Start(node_kind), Event::Tok(lbrk)];
     push_range(&mut events, lbrk + 1, q + 1);
-    events.push(Event::Finish); // node_kind
+    finish(&mut events, node_kind);
     Some(ExprParse {
         start: lbrk,
         end: q + 1,
@@ -3169,7 +3155,7 @@ fn parse_matrix(
     if let Some(close_idx) = close_idx {
         events.push(Event::Tok(close_idx));
     }
-    events.push(Event::Finish); // node_kind
+    finish(&mut events, node_kind);
     ExprParse {
         start: lbrk,
         end,
@@ -3220,7 +3206,7 @@ fn emit_cat_child(
     let inner_d = (lo..hi - 1).map(|k| seps[k].dim(true)).max().unwrap_or(0);
     events.push(Event::Start(SyntaxKind::MATRIX_ROW));
     emit_cat_groups(events, elems, seps, lo, hi, inner_d);
-    events.push(Event::Finish); // MATRIX_ROW
+    finish(events, SyntaxKind::MATRIX_ROW);
 }
 
 /// Parse the trailing `for <specs> [if <cond>]` clauses of a comprehension or
@@ -3258,7 +3244,7 @@ fn parse_generator_clauses(
         events.push(Event::Start(SyntaxKind::FOR_BINDING));
         events.push(Event::Tok(for_idx)); // `for`
         pos = parse_for_specs(ctx, for_idx + 1, events, true, diagnostics);
-        events.push(Event::Finish); // FOR_BINDING
+        finish(events, SyntaxKind::FOR_BINDING);
 
         // Optional `if <cond>` filter on this clause.
         let if_idx = ctx.skip_trivia(pos);
@@ -3277,7 +3263,7 @@ fn parse_generator_clauses(
             } else {
                 pos = cond_start;
             }
-            events.push(Event::Finish); // COMPREHENSION_IF
+            finish(events, SyntaxKind::COMPREHENSION_IF);
         }
     }
     pos
@@ -3325,7 +3311,7 @@ fn parse_comprehension(
         );
         close_idx
     };
-    events.push(Event::Finish); // node_kind
+    finish(&mut events, node_kind);
     ExprParse {
         start: open,
         end,
@@ -3443,7 +3429,7 @@ pub(crate) fn parse_for_specs(
             pos = pattern_start;
         }
         if outer.is_some() {
-            events.push(Event::Finish); // OUTER_BINDING
+            finish(events, SyntaxKind::OUTER_BINDING);
         }
 
         // `in`/`∈` (and, under `outer`, `=`) separate the variable from the
@@ -3889,7 +3875,7 @@ fn parse_macro(
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
     events.push(Event::Tok(at_idx)); // `@`
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
-    events.push(Event::Finish); // close MACRO_NAME
+    finish(&mut events, SyntaxKind::MACRO_NAME);
 
     let end = parse_macro_args(
         ctx,
@@ -3899,7 +3885,7 @@ fn parse_macro(
         inside_brackets,
         array_mode,
     );
-    events.push(Event::Finish); // close MACRO_CALL
+    finish(&mut events, SyntaxKind::MACRO_CALL);
     ExprParse {
         start: at_idx,
         end,
@@ -3944,7 +3930,7 @@ fn parse_qualified_macro(
         );
     }
     let name_end = parse_macro_name_body(ctx, &mut events, at_idx + 1, diagnostics);
-    events.push(Event::Finish); // close MACRO_NAME
+    finish(&mut events, SyntaxKind::MACRO_NAME);
 
     let end = parse_macro_args(
         ctx,
@@ -3954,7 +3940,7 @@ fn parse_qualified_macro(
         inside_brackets,
         array_mode,
     );
-    events.push(Event::Finish); // close MACRO_CALL
+    finish(&mut events, SyntaxKind::MACRO_CALL);
     ExprParse {
         start: lhs.start,
         end,
@@ -4352,7 +4338,7 @@ fn parse_arg_list(
                 // trailing `(error-t)` (`f(a` → `(call f a (error-t))`, `[x` →
                 // `(vect x (error-t))`).
                 if in_params {
-                    events.push(Event::Finish); // close PARAMETERS first
+                    finish(&mut events, SyntaxKind::PARAMETERS);
                     in_params = false;
                 }
                 let opener = &tokens[open_idx];
@@ -4367,7 +4353,7 @@ fn parse_arg_list(
             }
             Some(k) if k == close => {
                 if in_params {
-                    events.push(Event::Finish); // close PARAMETERS
+                    finish(&mut events, SyntaxKind::PARAMETERS);
                     in_params = false;
                 }
                 events.push(Event::Tok(i));
@@ -4392,7 +4378,7 @@ fn parse_arg_list(
                         j += 1;
                     }
                     if in_params {
-                        events.push(Event::Finish); // close PARAMETERS first
+                        finish(&mut events, SyntaxKind::PARAMETERS);
                         in_params = false;
                     }
                     events.push(Event::Start(SyntaxKind::ERROR));
@@ -4422,7 +4408,7 @@ fn parse_arg_list(
             // opening the next so the groups stay siblings.
             Some(TokKind::Semicolon) => {
                 if in_params {
-                    events.push(Event::Finish); // close previous PARAMETERS
+                    finish(&mut events, SyntaxKind::PARAMETERS);
                 }
                 events.push(Event::Start(SyntaxKind::PARAMETERS));
                 in_params = true;
@@ -4441,7 +4427,7 @@ fn parse_arg_list(
             // a different `(error <kw>)` wrap, left divergent for now.
             Some(TokKind::EndKw) if !end_marker && (parsed_element || close == TokKind::RParen) => {
                 if in_params {
-                    events.push(Event::Finish); // close PARAMETERS first
+                    finish(&mut events, SyntaxKind::PARAMETERS);
                     in_params = false;
                 }
                 let opener = &tokens[open_idx];
@@ -4463,9 +4449,9 @@ fn parse_arg_list(
     }
 
     if in_params {
-        events.push(Event::Finish); // close PARAMETERS on an unterminated list
+        finish(&mut events, SyntaxKind::PARAMETERS);
     }
-    events.push(Event::Finish); // close the list node
+    finish(&mut events, list_kind);
     (events, i)
 }
 
@@ -4512,12 +4498,12 @@ fn parse_one_arg(
             }
             None => val_start,
         };
-        kw.push(Event::Finish); // KEYWORD_ARG
+        finish(&mut kw, SyntaxKind::KEYWORD_ARG);
         if ctx.token(ctx.skip_trivia(end)).map(|t| t.kind) == Some(TokKind::ForKw) {
             events.push(Event::Start(SyntaxKind::GENERATOR));
             events.extend(kw);
             let gen_end = parse_generator_clauses(ctx, end, events, diagnostics);
-            events.push(Event::Finish); // GENERATOR
+            finish(events, SyntaxKind::GENERATOR);
             gen_end
         } else {
             events.extend(kw);
@@ -4533,7 +4519,7 @@ fn parse_one_arg(
             events.push(Event::Start(SyntaxKind::GENERATOR));
             events.extend(arg.events);
             let end = parse_generator_clauses(ctx, arg.end, events, diagnostics);
-            events.push(Event::Finish); // GENERATOR
+            finish(events, SyntaxKind::GENERATOR);
             end
         } else {
             events.push(Event::Start(SyntaxKind::ARG));
