@@ -1,0 +1,87 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..85
+  DOC@0..13
+    STRING_LITERAL@0..6
+      STRING_DELIM_OPEN@0..1 "\""
+      STRING_CONTENT@1..5 "doc1"
+      STRING_DELIM_CLOSE@5..6 "\""
+    NEWLINE@6..7 "\n"
+    STRING_LITERAL@7..13
+      STRING_DELIM_OPEN@7..8 "\""
+      STRING_CONTENT@8..12 "doc2"
+      STRING_DELIM_CLOSE@12..13 "\""
+  NEWLINE@13..14 "\n"
+  ASSIGNMENT_EXPR@14..21
+    CALL_EXPR@14..17
+      NAME@14..15
+        IDENT@14..15 "f"
+      ARG_LIST@15..17
+        LPAREN@15..16 "("
+        RPAREN@16..17 ")"
+    WHITESPACE@17..18 " "
+    EQ@18..19 "="
+    WHITESPACE@19..20 " "
+    LITERAL@20..21
+      INTEGER@20..21 "1"
+  NEWLINE@21..22 "\n"
+  STRING_LITERAL@22..30
+    STRING_DELIM_OPEN@22..23 "\""
+    STRING_CONTENT@23..29 "spaced"
+    STRING_DELIM_CLOSE@29..30 "\""
+  NEWLINE@30..31 "\n"
+  NEWLINE@31..32 "\n"
+  ASSIGNMENT_EXPR@32..39
+    CALL_EXPR@32..35
+      NAME@32..33
+        IDENT@32..33 "g"
+      ARG_LIST@33..35
+        LPAREN@33..34 "("
+        RPAREN@34..35 ")"
+    WHITESPACE@35..36 " "
+    EQ@36..37 "="
+    WHITESPACE@37..38 " "
+    LITERAL@38..39
+      INTEGER@38..39 "2"
+  NEWLINE@39..40 "\n"
+  STRING_LITERAL@40..51
+    STRING_PREFIX@40..41 "r"
+    STRING_DELIM_OPEN@41..42 "\""
+    STRING_CONTENT@42..50 "prefixed"
+    STRING_DELIM_CLOSE@50..51 "\""
+  NEWLINE@51..52 "\n"
+  ASSIGNMENT_EXPR@52..59
+    CALL_EXPR@52..55
+      NAME@52..53
+        IDENT@52..53 "h"
+      ARG_LIST@53..55
+        LPAREN@53..54 "("
+        RPAREN@54..55 ")"
+    WHITESPACE@55..56 " "
+    EQ@56..57 "="
+    WHITESPACE@57..58 " "
+    LITERAL@58..59
+      INTEGER@58..59 "3"
+  NEWLINE@59..60 "\n"
+  TOPLEVEL_SEMICOLON@60..76
+    STRING_LITERAL@60..75
+      STRING_DELIM_OPEN@60..61 "\""
+      STRING_CONTENT@61..74 "trailing semi"
+      STRING_DELIM_CLOSE@74..75 "\""
+    SEMICOLON@75..76 ";"
+  NEWLINE@76..77 "\n"
+  ASSIGNMENT_EXPR@77..84
+    CALL_EXPR@77..80
+      NAME@77..78
+        IDENT@77..78 "k"
+      ARG_LIST@78..80
+        LPAREN@78..79 "("
+        RPAREN@79..80 ")"
+    WHITESPACE@80..81 " "
+    EQ@81..82 "="
+    WHITESPACE@82..83 " "
+    LITERAL@83..84
+      INTEGER@83..84 "4"
+  NEWLINE@84..85 "\n"
