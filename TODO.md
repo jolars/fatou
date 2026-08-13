@@ -65,6 +65,40 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
 
 ## Formatter
 
+- [ ] **`--check`'s line diff is still quadratic in the number of changed
+  lines**, and it dominates the run: 93% of it before the algorithm switch, and
+  still most of it after. `line_diff` (`src/formatter/check.rs`) moved from
+  `similar`'s default Myers to `Algorithm::Patience`, which is ~3.2x cheaper
+  throughout — 42 / 145 / 504 ms becomes 19 / 54 / 171 ms at 4000 / 8000 /
+  16 000 changed lines — but that is a **constant factor, not a complexity
+  fix**. On Julia's line population all three candidates still grow ~4x per
+  doubling on a reindent-everything change (Myers 3.81x, Patience 3.71x,
+  Histogram 4.08x at 500 → 1000 near-identical small functions), which is why
+  `check.rs` carries a reconstruction test but deliberately no growth-rate one:
+  a ratio bound would separate none of them.
+
+  Why Julia is the hard case here: Patience anchors on lines *unique to both
+  sides*, and reindented Julia has few — `end`, `else`, bare `)`, and short
+  assignments repeat heavily, so long stretches fall through to the Myers
+  fallback. badness does not have this problem (its diff measures linear, 2.0x
+  per doubling), so the fix is not portable from there.
+
+  Two directions if it becomes worth it. Trim the common prefix and suffix
+  *before* handing the texts to `similar` — its disjoint fast path exists but
+  never fires, because it runs before trimming and bails as soon as the two
+  sides share a first line, which they always do. Or bound the work
+  deterministically and fall back to a whole-file replace hunk, which is what a
+  16 000-line all-changed diff amounts to for a reader anyway. Do **not** reach
+  for `TextDiffConfig::timeout`: a wall-clock deadline makes `--check` output
+  nondeterministic between runs.
+
+  `Algorithm::Histogram` is a trap here and the comment on `line_diff` says so.
+  It is the fastest on real Julia (136 ms against Patience's 234 ms over 16 000
+  corpus lines) but collapses on self-similar input — 430.9 ms against
+  Patience's 37.1 ms at 500 near-identical functions, i.e. worse than the Myers
+  it would replace. `--check` runs over whatever is in the tree, generated code
+  included.
+
 ## Linter
 
 ### Rules
