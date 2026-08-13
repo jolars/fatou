@@ -3210,9 +3210,7 @@ fn name_text(node: &SyntaxNode) -> String {
         // signature name (`struct try end` ⇒ `(error try)`) or a keyword field
         // name (`x.function` ⇒ `(quote function)`, `x.true` ⇒ `(quote true)`) is
         // wrapped here too, so fall back to its keyword text.
-        .find(|t| {
-            t.kind() == IDENT || is_keyword(t.kind()) || matches!(t.kind(), TRUE_KW | FALSE_KW)
-        })
+        .find(|t| t.kind() == IDENT || t.kind().is_keyword())
         .map(|t| norm_ident(t.text()).into_owned())
         .unwrap_or_default()
 }
@@ -3314,37 +3312,10 @@ fn is_delimiter(kind: SyntaxKind) -> bool {
     )
 }
 
+/// A keyword the projection carries as *syntax*: dropped where JuliaSyntax
+/// encodes it in the head, spelled out where it stands in for a name. The value
+/// keywords `true`/`false` are excluded — they project as literals, so they are
+/// kept like any other operand.
 fn is_keyword(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        FUNCTION_KW
-            | MACRO_KW
-            | END_KW
-            | IF_KW
-            | ELSEIF_KW
-            | ELSE_KW
-            | BEGIN_KW
-            | WHILE_KW
-            | FOR_KW
-            | LET_KW
-            | QUOTE_KW
-            | TRY_KW
-            | CATCH_KW
-            | FINALLY_KW
-            | STRUCT_KW
-            | MUTABLE_KW
-            | MODULE_KW
-            | BAREMODULE_KW
-            | DO_KW
-            | RETURN_KW
-            | BREAK_KW
-            | CONTINUE_KW
-            | CONST_KW
-            | GLOBAL_KW
-            | LOCAL_KW
-            | IMPORT_KW
-            | USING_KW
-            | EXPORT_KW
-            | WHERE_KW
-    )
+    kind.is_keyword() && !matches!(kind, TRUE_KW | FALSE_KW)
 }

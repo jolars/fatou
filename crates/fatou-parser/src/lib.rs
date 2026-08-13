@@ -22,5 +22,6 @@
 //! thread, or clock use.
 
 pub mod ast;
+mod keywords;
 pub mod parser;
 pub mod syntax;

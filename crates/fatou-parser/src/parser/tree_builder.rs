@@ -1,5 +1,6 @@
 use rowan::GreenNodeBuilder;
 
+use crate::keywords::keyword_table;
 use crate::parser::events::Event;
 use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::{SyntaxKind, SyntaxNode};
@@ -58,10 +59,34 @@ fn debug_assert_balanced(events: &[Event]) {
     );
 }
 
+/// Generate the keyword half of [`syntax_kind_for`] from the shared keyword
+/// table: the or-pattern that selects a keyword token, and the 1:1 mapping
+/// behind it. Both come from the same rows, so the arm below can never miss a
+/// keyword — and because it is a pattern, not a guard, `syntax_kind_for` stays
+/// exhaustive over `TokKind`.
+macro_rules! define_keyword_mapping {
+    ($($text:literal $tok:ident $syn:ident,)*) => {
+        macro_rules! keyword_tok_pat {
+            () => { $(TokKind::$tok)|* };
+        }
+
+        fn keyword_syntax_kind(kind: TokKind) -> SyntaxKind {
+            match kind {
+                $(TokKind::$tok => SyntaxKind::$syn,)*
+                _ => unreachable!("not a keyword token: {kind:?}"),
+            }
+        }
+    };
+}
+
+keyword_table!(define_keyword_mapping);
+
 /// The `SyntaxKind` a lexed token of `kind` is materialized as in the CST. The
 /// single source of truth for the token-kind mapping.
 pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
     match kind {
+        // Keywords map 1:1, generated from the shared keyword table.
+        keyword_tok_pat!() => keyword_syntax_kind(kind),
         TokKind::Whitespace => SyntaxKind::WHITESPACE,
         TokKind::Newline => SyntaxKind::NEWLINE,
         TokKind::Comment => SyntaxKind::COMMENT,
@@ -83,37 +108,6 @@ pub(crate) fn syntax_kind_for(kind: TokKind) -> SyntaxKind {
         TokKind::StringContent => SyntaxKind::STRING_CONTENT,
         TokKind::StringPrefix => SyntaxKind::STRING_PREFIX,
         TokKind::StringSuffix => SyntaxKind::STRING_SUFFIX,
-        TokKind::FunctionKw => SyntaxKind::FUNCTION_KW,
-        TokKind::MacroKw => SyntaxKind::MACRO_KW,
-        TokKind::EndKw => SyntaxKind::END_KW,
-        TokKind::IfKw => SyntaxKind::IF_KW,
-        TokKind::ElseifKw => SyntaxKind::ELSEIF_KW,
-        TokKind::ElseKw => SyntaxKind::ELSE_KW,
-        TokKind::BeginKw => SyntaxKind::BEGIN_KW,
-        TokKind::TrueKw => SyntaxKind::TRUE_KW,
-        TokKind::FalseKw => SyntaxKind::FALSE_KW,
-        TokKind::WhileKw => SyntaxKind::WHILE_KW,
-        TokKind::ForKw => SyntaxKind::FOR_KW,
-        TokKind::DoKw => SyntaxKind::DO_KW,
-        TokKind::LetKw => SyntaxKind::LET_KW,
-        TokKind::QuoteKw => SyntaxKind::QUOTE_KW,
-        TokKind::TryKw => SyntaxKind::TRY_KW,
-        TokKind::CatchKw => SyntaxKind::CATCH_KW,
-        TokKind::FinallyKw => SyntaxKind::FINALLY_KW,
-        TokKind::StructKw => SyntaxKind::STRUCT_KW,
-        TokKind::MutableKw => SyntaxKind::MUTABLE_KW,
-        TokKind::ModuleKw => SyntaxKind::MODULE_KW,
-        TokKind::BaremoduleKw => SyntaxKind::BAREMODULE_KW,
-        TokKind::ReturnKw => SyntaxKind::RETURN_KW,
-        TokKind::BreakKw => SyntaxKind::BREAK_KW,
-        TokKind::ContinueKw => SyntaxKind::CONTINUE_KW,
-        TokKind::ConstKw => SyntaxKind::CONST_KW,
-        TokKind::GlobalKw => SyntaxKind::GLOBAL_KW,
-        TokKind::LocalKw => SyntaxKind::LOCAL_KW,
-        TokKind::ImportKw => SyntaxKind::IMPORT_KW,
-        TokKind::UsingKw => SyntaxKind::USING_KW,
-        TokKind::ExportKw => SyntaxKind::EXPORT_KW,
-        TokKind::WhereKw => SyntaxKind::WHERE_KW,
         TokKind::Eq => SyntaxKind::EQ,
         TokKind::Plus => SyntaxKind::PLUS,
         TokKind::Minus => SyntaxKind::MINUS,

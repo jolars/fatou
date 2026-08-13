@@ -7,6 +7,8 @@
 
 use rowan::Language;
 
+use crate::keywords::keyword_table;
+
 #[allow(non_camel_case_types)]
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -472,6 +474,24 @@ impl SyntaxKind {
         )
     }
 }
+
+/// Generate [`SyntaxKind::is_keyword`] from the shared keyword table, so the
+/// kind-side predicate cannot drift from the token-side one in the lexer.
+macro_rules! define_keyword_predicate {
+    ($($text:literal $tok:ident $syn:ident,)*) => {
+        impl SyntaxKind {
+            /// Whether this token kind is one of Julia's reserved words. The
+            /// value keywords `true`/`false` are included: they are keywords to
+            /// the lexer, whatever a consumer then makes of them (the sexpr
+            /// projector, for one, treats them as literals rather than syntax).
+            pub fn is_keyword(self) -> bool {
+                matches!(self, $(SyntaxKind::$syn)|*)
+            }
+        }
+    };
+}
+
+keyword_table!(define_keyword_predicate);
 
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {

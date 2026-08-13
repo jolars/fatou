@@ -11,6 +11,8 @@
 //! the grammar (string interpolation, parametric `{}`, macros, etc.) starts
 //! here. See `TODO.md`.
 
+use crate::keywords::keyword_table;
+
 /// A lexed token kind. Maps to a [`crate::syntax::SyntaxKind`] in
 /// [`crate::parser::tree_builder::syntax_kind_for`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,45 +307,6 @@ impl TokKind {
         matches!(
             self,
             TokKind::Whitespace | TokKind::Newline | TokKind::Comment | TokKind::BlockComment
-        )
-    }
-
-    /// Whether this token is a reserved keyword. Used to recognize a keyword
-    /// quoted as a symbol (`:end`, `:function`).
-    pub(crate) fn is_keyword(self) -> bool {
-        matches!(
-            self,
-            TokKind::FunctionKw
-                | TokKind::MacroKw
-                | TokKind::EndKw
-                | TokKind::IfKw
-                | TokKind::ElseifKw
-                | TokKind::ElseKw
-                | TokKind::BeginKw
-                | TokKind::TrueKw
-                | TokKind::FalseKw
-                | TokKind::WhileKw
-                | TokKind::ForKw
-                | TokKind::DoKw
-                | TokKind::LetKw
-                | TokKind::QuoteKw
-                | TokKind::TryKw
-                | TokKind::CatchKw
-                | TokKind::FinallyKw
-                | TokKind::StructKw
-                | TokKind::MutableKw
-                | TokKind::ModuleKw
-                | TokKind::BaremoduleKw
-                | TokKind::ReturnKw
-                | TokKind::BreakKw
-                | TokKind::ContinueKw
-                | TokKind::ConstKw
-                | TokKind::GlobalKw
-                | TokKind::LocalKw
-                | TokKind::ImportKw
-                | TokKind::UsingKw
-                | TokKind::ExportKw
-                | TokKind::WhereKw
         )
     }
 }
@@ -1366,80 +1329,36 @@ fn try_ascii_op(rest: &[u8]) -> Option<(TokKind, usize)> {
         .map(|&(text, kind)| (kind, text.len()))
 }
 
-/// Every Julia keyword, as written. The single source of truth for the set of
-/// keywords, shared by the lexer's `keyword_kind` classification and the
-/// language server's keyword completion. A test keeps it in step with
-/// `keyword_kind`.
-pub const KEYWORDS: &[&str] = &[
-    "function",
-    "macro",
-    "end",
-    "if",
-    "elseif",
-    "else",
-    "begin",
-    "true",
-    "false",
-    "while",
-    "for",
-    "do",
-    "let",
-    "quote",
-    "try",
-    "catch",
-    "finally",
-    "struct",
-    "mutable",
-    "module",
-    "baremodule",
-    "return",
-    "break",
-    "continue",
-    "const",
-    "global",
-    "local",
-    "import",
-    "using",
-    "export",
-    "where",
-];
+/// Generate the lexer's three keyword tables from the shared keyword table: the
+/// `KEYWORDS` slice, the text -> [`TokKind`] classifier, and the `TokKind`
+/// predicate.
+macro_rules! define_keyword_tables {
+    ($($text:literal $tok:ident $syn:ident,)*) => {
+        /// Every Julia keyword, as written. Shared by the lexer's
+        /// `keyword_kind` classification and the language server's keyword
+        /// completion.
+        pub const KEYWORDS: &[&str] = &[$($text),*];
 
-fn keyword_kind(text: &str) -> Option<TokKind> {
-    Some(match text {
-        "function" => TokKind::FunctionKw,
-        "macro" => TokKind::MacroKw,
-        "end" => TokKind::EndKw,
-        "if" => TokKind::IfKw,
-        "elseif" => TokKind::ElseifKw,
-        "else" => TokKind::ElseKw,
-        "begin" => TokKind::BeginKw,
-        "true" => TokKind::TrueKw,
-        "false" => TokKind::FalseKw,
-        "while" => TokKind::WhileKw,
-        "for" => TokKind::ForKw,
-        "do" => TokKind::DoKw,
-        "let" => TokKind::LetKw,
-        "quote" => TokKind::QuoteKw,
-        "try" => TokKind::TryKw,
-        "catch" => TokKind::CatchKw,
-        "finally" => TokKind::FinallyKw,
-        "struct" => TokKind::StructKw,
-        "mutable" => TokKind::MutableKw,
-        "module" => TokKind::ModuleKw,
-        "baremodule" => TokKind::BaremoduleKw,
-        "return" => TokKind::ReturnKw,
-        "break" => TokKind::BreakKw,
-        "continue" => TokKind::ContinueKw,
-        "const" => TokKind::ConstKw,
-        "global" => TokKind::GlobalKw,
-        "local" => TokKind::LocalKw,
-        "import" => TokKind::ImportKw,
-        "using" => TokKind::UsingKw,
-        "export" => TokKind::ExportKw,
-        "where" => TokKind::WhereKw,
-        _ => return None,
-    })
+        /// The keyword `text` spells, or `None` when it is an ordinary
+        /// identifier.
+        fn keyword_kind(text: &str) -> Option<TokKind> {
+            Some(match text {
+                $($text => TokKind::$tok,)*
+                _ => return None,
+            })
+        }
+
+        impl TokKind {
+            /// Whether this token is a reserved keyword. Used to recognize a
+            /// keyword quoted as a symbol (`:end`, `:function`).
+            pub(crate) fn is_keyword(self) -> bool {
+                matches!(self, $(TokKind::$tok)|*)
+            }
+        }
+    };
 }
+
+keyword_table!(define_keyword_tables);
 
 /// Whether `c` may begin an identifier, mirroring JuliaSyntax's
 /// `is_identifier_start_char` (`Base.is_id_start_char`). ASCII is handled inline;
@@ -1597,14 +1516,19 @@ mod tests {
     }
 
     #[test]
-    fn keywords_slice_agrees_with_keyword_kind() {
-        // Every entry in the shared `KEYWORDS` slice must lex as a keyword, so
-        // completion never offers a word the lexer treats as an identifier.
+    fn every_keyword_lexes_as_one_keyword_token() {
+        // The tables all come from one list, so what is left to check is the
+        // path through it: every keyword must reach the lexer's classification
+        // as a single keyword token, and materialize as a keyword `SyntaxKind`.
+        // Completion offers `KEYWORDS` verbatim, so a word the lexer treats as
+        // an identifier would be offered as one.
         for kw in KEYWORDS {
-            assert_eq!(kinds(kw).len(), 1, "{kw} did not lex to a single token");
+            assert_eq!(kinds(kw), vec![keyword_kind(kw).unwrap()], "lexing {kw}");
+            assert!(keyword_kind(kw).unwrap().is_keyword(), "{kw} is a keyword");
             assert!(
-                keyword_kind(kw).is_some(),
-                "{kw} is in KEYWORDS but not keyword_kind"
+                crate::parser::tree_builder::syntax_kind_for(keyword_kind(kw).unwrap())
+                    .is_keyword(),
+                "{kw} materializes as a keyword kind"
             );
         }
     }
