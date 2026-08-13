@@ -51,6 +51,11 @@ tasks:
     cmds:
       - ./bench/memory_compare.sh
 
+  profile:
+    desc: Profile the formatter with perf, writing bench/profile.svg (needs bench-corpus)
+    cmds:
+      - ./bench/profile.sh {{.CLI_ARGS}}
+
   bench-reparse:
     desc: Benchmark incremental reparse against a full parse (needs bench-corpus)
     cmds:

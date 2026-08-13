@@ -86,6 +86,14 @@ harness = false
 [profile.release]
 strip = "symbols"
 
+# Release codegen with symbols kept, so a profiler can attribute samples.
+# `strip = "symbols"` above is what ships; it would otherwise be inherited here
+# and leave every frame in a flamegraph unresolved.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+
 [build-dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
 clapdown = "0.2.0"
