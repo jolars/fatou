@@ -8,8 +8,8 @@
 //! precedes (`benches/line_index.rs`).
 //!
 //! [`TextBuffer`] is the fix: the table lives beside the text and is patched
-//! across each edit, so a keystroke costs one memmove plus one add per line
-//! after the edit site, and every reader shares the result.
+//! across each edit (one rope edit, not a per-line shift), and every reader
+//! shares the result.
 
 use std::ops::{Deref, Range};
 
@@ -52,10 +52,10 @@ impl TextBuffer {
     }
 
     /// An index over this buffer. Unlike [`LineIndex::new`] this reuses the
-    /// maintained table instead of rescanning, which is the whole point of the
+    /// maintained table instead of copying, which is the whole point of the
     /// type: call it freely.
     pub fn line_index(&self) -> LineIndex<'_> {
-        LineIndex::with_starts(&self.text, &self.line_starts)
+        LineIndex::with_starts(&self.line_starts)
     }
 
     /// Replace the bytes in `range` with `insert`, patching the line table
