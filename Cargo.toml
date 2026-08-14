@@ -56,7 +56,6 @@ ignore = "0.4.26"
 log = { version = "0.4.32", features = ["release_max_level_info"] }
 lsp-server = "0.10.0"
 lsp-types = "0.97.0"
-memchr = "2.8.3"
 postcard = { version = "1.1.3", features = ["use-std"] }
 rayon = "1.12.0"
 ropey = { version = "2.0.0-beta.1", features = ["metric_utf16", "metric_lines_lf"] }
