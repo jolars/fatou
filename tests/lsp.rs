@@ -7,7 +7,7 @@ use fatou::lsp::{
     compute_document_symbols, compute_folding_ranges, compute_selection_ranges,
     compute_semantic_tokens,
 };
-use fatou::text::{LineIndex, PositionEncoding};
+use fatou::text::{PositionEncoding, TextBuffer};
 use lsp_server::{Connection, Message, Notification, Request, RequestId};
 use lsp_types::{
     CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
@@ -6875,13 +6875,13 @@ fn format_document_text(client: &Connection, uri: &Uri, id: i32, source: &str) -
 /// original document, so splicing from the end keeps the earlier ones valid.
 /// Checks the LSP requirement that they do not overlap along the way.
 fn apply_edits(source: &str, edits: &[TextEdit]) -> String {
-    let line_index = LineIndex::new(source);
+    let buffer = TextBuffer::new(source);
     let mut spans: Vec<(usize, usize, &str)> = edits
         .iter()
         .map(|edit| {
             (
-                line_index.position_to_byte(edit.range.start, PositionEncoding::Utf16),
-                line_index.position_to_byte(edit.range.end, PositionEncoding::Utf16),
+                buffer.position_to_byte(edit.range.start, PositionEncoding::Utf16),
+                buffer.position_to_byte(edit.range.end, PositionEncoding::Utf16),
                 edit.new_text.as_str(),
             )
         })
