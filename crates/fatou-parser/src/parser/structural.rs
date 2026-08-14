@@ -35,7 +35,7 @@ const TRY_TERMINATORS: &[TokKind] = &[
 ];
 
 pub(crate) fn parse_if_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -98,7 +98,7 @@ pub(crate) fn parse_if_expr(
 }
 
 pub(crate) fn parse_function_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -109,7 +109,7 @@ pub(crate) fn parse_function_expr(
 /// a `function` definition (a call-shaped signature plus a body block), so it
 /// shares [`parse_function_like`]; only the wrapper node kind differs.
 pub(crate) fn parse_macro_def(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -117,7 +117,7 @@ pub(crate) fn parse_macro_def(
 }
 
 fn parse_function_like(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     node_kind: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -180,7 +180,7 @@ fn parse_function_like(
 }
 
 pub(crate) fn parse_begin_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -188,7 +188,7 @@ pub(crate) fn parse_begin_expr(
 }
 
 pub(crate) fn parse_quote_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -200,7 +200,7 @@ pub(crate) fn parse_quote_expr(
 /// `begin`/`quote`; the caller has already checked the contextual keyword (see
 /// `typegroup_keyword` in `expr.rs`).
 pub(crate) fn parse_typegroup_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -210,7 +210,7 @@ pub(crate) fn parse_typegroup_expr(
 /// A keyword form whose body is a bare statement block: `begin … end` and
 /// `quote … end`. The keyword opens `node_kind`, a block runs to `end`.
 fn parse_block_only(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     node_kind: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -229,7 +229,7 @@ fn parse_block_only(
 }
 
 pub(crate) fn parse_while_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -248,7 +248,7 @@ pub(crate) fn parse_while_expr(
 }
 
 pub(crate) fn parse_for_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -274,7 +274,7 @@ pub(crate) fn parse_for_expr(
 }
 
 pub(crate) fn parse_let_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -300,7 +300,7 @@ pub(crate) fn parse_let_expr(
 }
 
 pub(crate) fn parse_try_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -397,7 +397,7 @@ pub(crate) fn parse_try_expr(
 /// `struct Name … end` and `mutable struct Name … end`. Dispatched on either the
 /// `struct` or the (contextual) `mutable` keyword.
 pub(crate) fn parse_struct_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -461,7 +461,7 @@ fn skip_trivia_and_semis(ctx: &ParserCtx<'_>, events: &mut Vec<Event>, mut i: us
 /// the type expression (`A`, `A <: B`, `A{T}`, …) is parsed into a `SIGNATURE`.
 /// JuliaSyntax models this as `(abstract <spec>)`, so there is no body block.
 pub(crate) fn parse_abstract_type(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -501,7 +501,7 @@ pub(crate) fn parse_abstract_type(
 /// `(primitive <spec> <bits>)`; the spec goes in a `SIGNATURE`, the size is a
 /// sibling expression node.
 pub(crate) fn parse_primitive_type(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -551,7 +551,7 @@ pub(crate) fn parse_primitive_type(
 
 /// `module Name … end` and `baremodule Name … end`.
 pub(crate) fn parse_module_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -603,7 +603,7 @@ pub(crate) enum KwStmt {
 /// line. Losslessness holds: every same-line token is either parsed into a
 /// subtree or carried through verbatim.
 pub(crate) fn parse_keyword_stmt(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     node_kind: SyntaxKind,
     body: KwStmt,
@@ -809,7 +809,7 @@ fn parse_break_label(
 /// token is either parsed into a name subtree or carried through verbatim, so
 /// losslessness holds.
 pub(crate) fn parse_name_list_stmt(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     node_kind: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -918,7 +918,7 @@ pub(crate) fn parse_name_list_stmt(
 /// grammar doesn't recognize (operator names, `@macro`/`$interp` paths) is carried
 /// through verbatim to preserve losslessness; those remain divergences for now.
 pub(crate) fn parse_import_stmt(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     node_kind: SyntaxKind,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -1404,7 +1404,7 @@ pub(super) fn is_op_name(kind: TokKind) -> bool {
 /// (`function (x) end` → `(tuple-p x)`) or a named-function signature in parens
 /// (`function (x*y) end` → `(call-i x * y)`, parens stripped). `events` must be
 /// the balanced event slice of a single node (`events[0]` its `Start`).
-fn signature_eventually_call(events: &[Event], tokens: &[Token]) -> bool {
+fn signature_eventually_call(events: &[Event], tokens: &[Token<'_>]) -> bool {
     use SyntaxKind::*;
     match events.first() {
         Some(Event::Start(CALL_EXPR)) => true,
@@ -1460,7 +1460,7 @@ fn first_child_slice(events: &[Event]) -> Option<&[Event]> {
 
 /// The kind of a binary node's operator: its first significant direct-child
 /// token (depth 1), skipping trivia. Operands are deeper child nodes.
-fn direct_child_operator(events: &[Event], tokens: &[Token]) -> Option<TokKind> {
+fn direct_child_operator(events: &[Event], tokens: &[Token<'_>]) -> Option<TokKind> {
     let mut depth = 0i32;
     for ev in events {
         match ev {

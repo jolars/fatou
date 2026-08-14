@@ -13,6 +13,8 @@
 
 use crate::keywords::keyword_table;
 use crate::tokens::token_table;
+use ropey::RopeSlice;
+use std::cell::Cell;
 
 /// Generate [`TokKind`] from the shared token table. Only the tokens that do
 /// not materialize 1:1 as a `SyntaxKind` are written out here.
@@ -54,16 +56,16 @@ impl TokKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Token {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Token<'a> {
     pub(crate) kind: TokKind,
-    pub(crate) text: String,
+    pub(crate) text: RopeSlice<'a>,
     pub(crate) start: usize,
     pub(crate) end: usize,
 }
 
 /// Tokenize `input` into a lossless token stream.
-pub(crate) fn lex(input: &str) -> Vec<Token> {
+pub(crate) fn lex(input: RopeSlice) -> Vec<Token> {
     Lexer::new(input).run()
 }
 
@@ -92,39 +94,68 @@ enum Mode {
 }
 
 struct Lexer<'a> {
-    input: &'a str,
-    bytes: &'a [u8],
+    slice: RopeSlice<'a>,
+    /// The current contiguous chunk of `slice`, cached so byte/char reads are
+    /// O(1) within a chunk rather than O(log n) per byte. `Cell` lets the
+    /// read-only helpers (`peek`, `char_at`) refresh it on a chunk boundary
+    /// without threading `&mut self` through every lexer method.
+    chunk: Cell<&'a str>,
+    /// Byte offset of `chunk`'s start within `slice`.
+    chunk_start: Cell<usize>,
     pos: usize,
-    tokens: Vec<Token>,
+    tokens: Vec<Token<'a>>,
     mode_stack: Vec<Mode>,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(input: &'a str) -> Self {
+    fn new(slice: RopeSlice<'a>) -> Self {
+        let chunk = slice.chunks().next().unwrap_or("");
         Self {
-            input,
-            bytes: input.as_bytes(),
+            slice,
+            chunk: Cell::new(chunk),
+            chunk_start: Cell::new(0),
             pos: 0,
             tokens: Vec::new(),
             mode_stack: Vec::new(),
         }
     }
 
-    fn run(mut self) -> Vec<Token> {
-        while self.pos < self.bytes.len() {
+    fn run(mut self) -> Vec<Token<'a>> {
+        while self.pos < self.slice.len() {
             self.next_token();
         }
         self.tokens
     }
 
+    /// Refresh the cached chunk so it contains byte offset `at`. A no-op when
+    /// `at` is already within the current chunk or past the end of input.
+    fn ensure_chunk(&self, at: usize) {
+        let start = self.chunk_start.get();
+        if at >= start && at - start < self.chunk.get().len() {
+            return;
+        }
+        if at >= self.slice.len() {
+            return;
+        }
+        let (mut chunks, start) = self.slice.chunks_at(at);
+        self.chunk.set(chunks.next().unwrap_or(""));
+        self.chunk_start.set(start);
+    }
+
     fn peek(&self, ahead: usize) -> Option<u8> {
-        self.bytes.get(self.pos + ahead).copied()
+        let at = self.pos + ahead;
+        self.ensure_chunk(at);
+        self.chunk
+            .get()
+            .as_bytes()
+            .get(at - self.chunk_start.get())
+            .copied()
     }
 
     fn push(&mut self, kind: TokKind, start: usize, end: usize) {
         self.tokens.push(Token {
             kind,
-            text: self.input[start..end].to_string(),
+            text: self.slice.slice(start..end),
             start,
             end,
         });
@@ -137,7 +168,7 @@ impl<'a> Lexer<'a> {
     /// operator text.
     fn push_op(&mut self, kind: TokKind, start: usize) {
         if op_takes_suffix(kind) {
-            while self.pos < self.bytes.len() {
+            while self.pos < self.slice.len() {
                 let c = self.char_at(self.pos);
                 if is_op_suffix_char(c) {
                     self.pos += c.len_utf8();
@@ -161,7 +192,7 @@ impl<'a> Lexer<'a> {
         }
 
         let start = self.pos;
-        let b = self.bytes[self.pos];
+        let b = self.byte_at(self.pos);
 
         // Inside a `$( ... )` interpolation, track paren nesting so the matching
         // `)` returns us to the enclosing string/command body.
@@ -211,7 +242,39 @@ impl<'a> Lexer<'a> {
 
     /// The `char` beginning at byte offset `at` (for unicode identifier checks).
     fn char_at(&self, at: usize) -> char {
-        self.input[at..].chars().next().unwrap_or('\0')
+        if at >= self.slice.len() {
+            return '\0';
+        }
+        self.ensure_chunk(at);
+        self.chunk.get()[at - self.chunk_start.get()..]
+            .chars()
+            .next()
+            .unwrap_or('\0')
+    }
+
+    /// The byte at `at`, which must be a valid byte offset of the input.
+    fn byte_at(&self, at: usize) -> u8 {
+        debug_assert!(at < self.slice.len());
+        self.ensure_chunk(at);
+        self.chunk.get().as_bytes()[at - self.chunk_start.get()]
+    }
+
+    /// The bytes from `self.pos` onward, up to `buf.len()`, crossing chunk
+    /// boundaries. Long enough for the longest operator spelling plus its
+    /// augmented/broadcast lookahead; `try_ascii_op` and the Unicode probe read
+    /// at most this much.
+    fn peek_op_bytes<'b>(&self, buf: &'b mut [u8]) -> &'b [u8] {
+        let mut n = 0;
+        while n < buf.len() {
+            match self.peek(n) {
+                Some(b) => {
+                    buf[n] = b;
+                    n += 1;
+                }
+                None => break,
+            }
+        }
+        &buf[..n]
     }
 
     fn lex_whitespace(&mut self, start: usize) {
@@ -248,7 +311,7 @@ impl<'a> Lexer<'a> {
     fn lex_block_comment(&mut self, start: usize) {
         self.pos += 2; // consume `#=`
         let mut depth = 1usize;
-        while depth > 0 && self.pos < self.bytes.len() {
+        while depth > 0 && self.pos < self.slice.len() {
             match (self.peek(0), self.peek(1)) {
                 (Some(b'#'), Some(b'=')) => {
                     self.pos += 2;
@@ -331,7 +394,7 @@ impl<'a> Lexer<'a> {
         // or EOF. A newline does *not* stop it, single-quoted strings included
         // (`"a\nb"` is one content run), which is why an unterminated literal
         // always runs to the end of the file.
-        while self.pos < self.bytes.len() {
+        while self.pos < self.slice.len() {
             // In a raw (prefixed) string, a backslash run immediately before the
             // closing quote escapes it when the run length is odd (Julia's
             // raw-string rule: `\"` ⇒ literal quote, `\\\"` ⇒ `\` then literal
@@ -425,7 +488,7 @@ impl<'a> Lexer<'a> {
     /// whole `\r\n` is consumed with the backslash — otherwise the trailing
     /// `\n` would leak out and terminate a single-line string.
     fn consume_body_byte(&mut self, raw: bool) {
-        if !raw && self.peek(0) == Some(b'\\') && self.pos + 1 < self.bytes.len() {
+        if !raw && self.peek(0) == Some(b'\\') && self.pos + 1 < self.slice.len() {
             if self.peek(1) == Some(b'\r') && self.peek(2) == Some(b'\n') {
                 self.pos += 3;
             } else {
@@ -507,15 +570,15 @@ impl<'a> Lexer<'a> {
         // over-long content), so the only stop short of `'` is EOF.
         let mut idx = self.pos + 1;
         let mut found = false;
-        while idx < self.bytes.len() {
-            match self.bytes[idx] {
+        while idx < self.slice.len() {
+            match self.byte_at(idx) {
                 b'\'' => {
                     found = true;
                     break;
                 }
                 b'\\' => {
                     idx += 1;
-                    if idx < self.bytes.len() {
+                    if idx < self.slice.len() {
                         idx += self.char_at(idx).len_utf8();
                     }
                 }
@@ -662,7 +725,7 @@ impl<'a> Lexer<'a> {
         // no intervening whitespace is a prefix (`r"..."`, `raw"..."`, `` v`...` ``).
         // Keywords are never prefixes.
         if matches!(self.peek(0), Some(b'"' | b'`'))
-            && keyword_kind(&self.input[start..self.pos]).is_none()
+            && keyword_kind(self.slice.slice(start..self.pos)).is_none()
         {
             self.push(TokKind::StringPrefix, start, self.pos);
             let open = self.pos;
@@ -673,8 +736,7 @@ impl<'a> Lexer<'a> {
             }
             return;
         }
-        let text = &self.input[start..self.pos];
-        let kind = keyword_kind(text).unwrap_or(TokKind::Ident);
+        let kind = keyword_kind(self.slice.slice(start..self.pos)).unwrap_or(TokKind::Ident);
         self.push(kind, start, self.pos);
     }
 
@@ -701,7 +763,7 @@ impl<'a> Lexer<'a> {
             if c == '!' && self.peek(1) == Some(b'=') {
                 break;
             }
-            if self.pos < self.bytes.len() && is_ident_continue(c) {
+            if self.pos < self.slice.len() && is_ident_continue(c) {
                 self.pos += c.len_utf8();
             } else {
                 break;
@@ -717,7 +779,10 @@ impl<'a> Lexer<'a> {
     /// the two wins — so longest match holds across them as well as within
     /// them, and no ordering here carries it.
     fn lex_operator_or_unknown(&mut self, start: usize) {
-        let rest = &self.bytes[self.pos..];
+        // The longest operator spelling is five bytes (`.>>>=`, `.<-->`); a
+        // small stack buffer of the bytes ahead is all either table needs.
+        let mut buf = [0u8; 8];
+        let rest = self.peek_op_bytes(&mut buf);
         let ascii = try_ascii_op(rest);
         // A Unicode operator is only reachable where [`OPS`] cannot spell one:
         // a non-ASCII operator, or a broadcast `.` fused to one (`.×`, `.−=`),
@@ -1083,12 +1148,12 @@ macro_rules! define_keyword_tables {
         pub const KEYWORDS: &[&str] = &[$($text),*];
 
         /// The keyword `text` spells, or `None` when it is an ordinary
-        /// identifier.
-        fn keyword_kind(text: &str) -> Option<TokKind> {
-            Some(match text {
-                $($text => TokKind::$tok,)*
-                _ => return None,
-            })
+        /// identifier. Takes a [`RopeSlice`] so the lexer classifies an
+        /// identifier's text without materializing it; each comparison is a
+        /// zero-copy [`RopeSlice`] `PartialEq<&str>`.
+        fn keyword_kind(text: RopeSlice) -> Option<TokKind> {
+            $(if text == $text { return Some(TokKind::$tok); })*
+            None
         }
 
         impl TokKind {
@@ -1250,11 +1315,17 @@ mod tests {
     use super::*;
 
     fn kinds(input: &str) -> Vec<TokKind> {
-        lex(input).into_iter().map(|t| t.kind).collect()
+        lex(RopeSlice::from(input))
+            .into_iter()
+            .map(|t| t.kind)
+            .collect()
     }
 
     fn roundtrips(input: &str) -> bool {
-        let joined: String = lex(input).into_iter().map(|t| t.text).collect();
+        let joined: String = lex(RopeSlice::from(input))
+            .into_iter()
+            .map(|t| t.text.to_string())
+            .collect();
         joined == input
     }
 
@@ -1266,11 +1337,20 @@ mod tests {
         // Completion offers `KEYWORDS` verbatim, so a word the lexer treats as
         // an identifier would be offered as one.
         for kw in KEYWORDS {
-            assert_eq!(kinds(kw), vec![keyword_kind(kw).unwrap()], "lexing {kw}");
-            assert!(keyword_kind(kw).unwrap().is_keyword(), "{kw} is a keyword");
+            assert_eq!(
+                kinds(kw),
+                vec![keyword_kind(RopeSlice::from(*kw)).unwrap()],
+                "lexing {kw}"
+            );
             assert!(
-                crate::parser::tree_builder::syntax_kind_for(keyword_kind(kw).unwrap())
-                    .is_keyword(),
+                keyword_kind(RopeSlice::from(*kw)).unwrap().is_keyword(),
+                "{kw} is a keyword"
+            );
+            assert!(
+                crate::parser::tree_builder::syntax_kind_for(
+                    keyword_kind(RopeSlice::from(*kw)).unwrap()
+                )
+                .is_keyword(),
                 "{kw} materializes as a keyword kind"
             );
         }
@@ -1462,8 +1542,11 @@ mod tests {
                 TokKind::Ident
             ]
         );
-        assert_eq!(keyword_kind("function"), Some(TokKind::FunctionKw));
-        assert_eq!(keyword_kind("ends"), None);
+        assert_eq!(
+            keyword_kind(RopeSlice::from("function")),
+            Some(TokKind::FunctionKw)
+        );
+        assert_eq!(keyword_kind(RopeSlice::from("ends")), None);
     }
 
     #[test]
@@ -1785,7 +1868,10 @@ mod tests {
 
     #[test]
     fn where_is_a_keyword() {
-        assert_eq!(keyword_kind("where"), Some(TokKind::WhereKw));
+        assert_eq!(
+            keyword_kind(RopeSlice::from("where")),
+            Some(TokKind::WhereKw)
+        );
         assert_eq!(kinds("where"), vec![TokKind::WhereKw]);
     }
 
@@ -1797,7 +1883,7 @@ mod tests {
         // of the table reachable.
         for &(text, kind) in OPS {
             let spelling = std::str::from_utf8(text).expect("OPS spellings are ASCII");
-            let tokens = lex(spelling);
+            let tokens = lex(RopeSlice::from(spelling));
             assert_eq!(
                 tokens.iter().map(|t| t.kind).collect::<Vec<_>>(),
                 vec![kind],

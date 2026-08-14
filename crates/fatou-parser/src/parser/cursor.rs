@@ -1,7 +1,7 @@
 use crate::parser::lexer::{TokKind, Token};
 
 /// Skip horizontal whitespace only.
-pub(crate) fn skip_ws(tokens: &[Token], mut i: usize) -> usize {
+pub(crate) fn skip_ws(tokens: &[Token<'_>], mut i: usize) -> usize {
     while matches!(tokens.get(i).map(|t| t.kind), Some(TokKind::Whitespace)) {
         i += 1;
     }
@@ -13,7 +13,7 @@ pub(crate) fn skip_ws(tokens: &[Token], mut i: usize) -> usize {
 /// a line comment, which runs to the end of the line and so genuinely ends the
 /// header. The comment's own newlines are skipped with it, since a multi-line
 /// `#= … =#` does not terminate the header either.
-pub(crate) fn skip_ws_and_block_comments(tokens: &[Token], mut i: usize) -> usize {
+pub(crate) fn skip_ws_and_block_comments(tokens: &[Token<'_>], mut i: usize) -> usize {
     while matches!(
         tokens.get(i).map(|t| t.kind),
         Some(TokKind::Whitespace | TokKind::BlockComment)
@@ -26,7 +26,7 @@ pub(crate) fn skip_ws_and_block_comments(tokens: &[Token], mut i: usize) -> usiz
 /// Skip horizontal whitespace and both comment forms, but *not* newlines. Used
 /// where a newline is itself significant — an array row separator — so the scan
 /// must stop at one while still seeing past a trailing `# …` or `#= … =#`.
-pub(crate) fn skip_ws_and_comments(tokens: &[Token], mut i: usize) -> usize {
+pub(crate) fn skip_ws_and_comments(tokens: &[Token<'_>], mut i: usize) -> usize {
     while matches!(
         tokens.get(i).map(|t| t.kind),
         Some(TokKind::Whitespace | TokKind::Comment | TokKind::BlockComment)
@@ -37,7 +37,7 @@ pub(crate) fn skip_ws_and_comments(tokens: &[Token], mut i: usize) -> usize {
 }
 
 /// Skip whitespace and newlines.
-pub(crate) fn skip_ws_and_newlines(tokens: &[Token], mut i: usize) -> usize {
+pub(crate) fn skip_ws_and_newlines(tokens: &[Token<'_>], mut i: usize) -> usize {
     while matches!(
         tokens.get(i).map(|t| t.kind),
         Some(TokKind::Whitespace | TokKind::Newline)
@@ -50,7 +50,7 @@ pub(crate) fn skip_ws_and_newlines(tokens: &[Token], mut i: usize) -> usize {
 /// Skip whitespace, newlines, and comments. Used when an operand is pending
 /// (after an infix operator): an intervening comment is trivia before the
 /// operand rather than an operand of its own.
-pub(crate) fn skip_trivia(tokens: &[Token], mut i: usize) -> usize {
+pub(crate) fn skip_trivia(tokens: &[Token<'_>], mut i: usize) -> usize {
     while matches!(tokens.get(i).map(|t| t.kind), Some(k) if k.is_trivia()) {
         i += 1;
     }
@@ -58,7 +58,7 @@ pub(crate) fn skip_trivia(tokens: &[Token], mut i: usize) -> usize {
 }
 
 /// Advance to just past the next newline (or to end of input).
-pub(crate) fn consume_to_line_end(tokens: &[Token], mut i: usize) -> usize {
+pub(crate) fn consume_to_line_end(tokens: &[Token<'_>], mut i: usize) -> usize {
     while i < tokens.len() && !matches!(tokens[i].kind, TokKind::Newline) {
         i += 1;
     }

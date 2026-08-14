@@ -17,6 +17,7 @@ use crate::parser::structural::{
     parse_quote_expr, parse_struct_expr, parse_try_expr, parse_typegroup_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
+use ropey::RopeSlice;
 
 mod array;
 mod juxtapose;
@@ -188,7 +189,7 @@ const SPLAT_BP: u8 = 14;
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -199,7 +200,7 @@ pub(crate) fn parse_expr(
 /// Parse one statement at toplevel or module-block scope, where the contextual
 /// keyword `public` opens a `PUBLIC_STMT`. Identical to [`parse_expr`] otherwise.
 pub(crate) fn parse_stmt(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -211,7 +212,7 @@ pub(crate) fn parse_stmt(
 /// toplevel/module scope (where `public` opens a `PUBLIC_STMT`), false in inner
 /// blocks (where `public` stays an ordinary identifier).
 pub(crate) fn parse_block_stmt(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     public_context: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -229,7 +230,7 @@ pub(crate) fn parse_block_stmt(
 /// `for_ends` propagates the enclosing generator boundary so a nested keyword
 /// statement stops at the same `for` (`[global const x = 1 for i in 1:1]`).
 pub(crate) fn parse_kw_stmt_operand(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     for_ends: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -247,7 +248,7 @@ pub(crate) fn parse_kw_stmt_operand(
 /// *not* enable the `end` index marker — that is specific to square brackets and
 /// is threaded separately (see [`ExprFlags::end_marker`]).
 pub(crate) fn parse_expr_in_brackets(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     min_bp: u8,
     // Inherited index-marker context for the bracketed expression.
@@ -269,7 +270,7 @@ pub(crate) fn parse_expr_in_brackets(
 /// (`function f()::S where T end` ⇒ `(where (::-i (call f) S) T)`), matching
 /// JuliaSyntax's `parse_function_signature`.
 pub(crate) fn parse_signature_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -290,7 +291,7 @@ pub(crate) fn parse_signature_expr(
 /// of chaining — so the spec borrows it. A *glued* `(` still chains, matching
 /// JuliaSyntax.
 pub(crate) fn parse_type_spec_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
@@ -306,7 +307,7 @@ pub(crate) fn parse_type_spec_expr(
 /// `(struct (error try) …)`) rather than dispatched to its block form. See
 /// [`ExprFlags::name_context`].
 pub(crate) fn parse_name_signature_expr(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -319,7 +320,7 @@ pub(crate) fn parse_name_signature_expr(
 }
 
 fn parse_expr_in(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     min_bp: u8,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -935,7 +936,7 @@ fn parse_expr_in(
 /// Mirrors JuliaSyntax's `parse_where_chain` (`while peek == where`, the bound
 /// parsed by `parse_comparison` with `where_enabled=false`).
 fn parse_where_chain(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     ctx: &ParserCtx<'_>,
     mut lhs: ExprParse,
     mut where_idx: usize,
@@ -1009,7 +1010,7 @@ fn is_typegroup_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
     match ctx.token(next) {
         Some(t) => match t.kind {
             TokKind::StructKw | TokKind::MutableKw | TokKind::At | TokKind::StringDelimOpen => true,
-            TokKind::Ident => matches!(t.text.as_ref(), "abstract" | "primitive"),
+            TokKind::Ident => t.text == "abstract" || t.text == "primitive",
             _ => false,
         },
         None => false,
@@ -1090,7 +1091,7 @@ fn build_binary_missing_rhs(kind: SyntaxKind, lhs: ExprParse, gap_end: usize) ->
 /// `(tuple x)`, `x, y, = a`) leaves a tuple with the operands gathered so far,
 /// mirroring JuliaSyntax's `parse_comma`.
 fn parse_comma_tuple(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     ctx: &ParserCtx<'_>,
     first: ExprParse,
     diagnostics: &mut Vec<ParseDiagnostic>,
@@ -1149,7 +1150,7 @@ fn parse_comma_tuple(
 /// the left operand of the next chain (`(a:b:c):d:e`). An odd trailing colon
 /// (`a:b:c:d`) leaves an ordinary two-operand `BINARY_EXPR`.
 fn parse_colon_range(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     ctx: &ParserCtx<'_>,
     lhs: ExprParse,
     first_colon: usize,
@@ -1338,7 +1339,7 @@ fn parse_operator_chain(
 /// (they nest in JuliaSyntax), as is `-`/`-%` (left-associative, not variadic)
 /// and the missing `++` operator. A *suffixed* operator (`+₁`, `*₂`) is
 /// non-syntactic and never folds (`a +₁ b +₁ c` ⇒ `(call-i (call-i a +₁ b) +₁ c)`).
-fn is_flat_arith_op(tok: &Token) -> bool {
+fn is_flat_arith_op(tok: &Token<'_>) -> bool {
     matches!(
         tok.kind,
         TokKind::Plus
@@ -1462,7 +1463,7 @@ fn parse_prefix(
         // prefix-only Unicode radicals `√ ∛ ∜ ¬` (`√x` → `(call-pre √ x)`, with
         // the same precedence as `-`/`+`), and the unary-capable Unicode
         // arithmetic operators `± ∓ ⋆` (`±x` → `(call-pre ± x)`).
-        k if is_unary_prefix_op(k, &tok.text) => {
+        k if is_unary_prefix_op(k, tok.text) => {
             // A unary arithmetic/logical operator glued to a `(` is a call when
             // the parens look like an argument list (`+(x, y)` → `(call + x y)`,
             // `+(a...)` → `(call + (... a))`, `+(a; b, c)` → `(call + a
@@ -1718,7 +1719,7 @@ fn parse_prefix(
         // (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`).
         TokKind::Char => {
             let tok = &ctx.tokens()[start];
-            if !char_token_terminated(&tok.text) {
+            if !char_token_terminated(tok.text) {
                 push_diagnostic(
                     diagnostics,
                     DiagnosticKind::UnterminatedLiteral,
@@ -1894,8 +1895,8 @@ fn is_name_error_keyword(kind: TokKind) -> bool {
 /// A char-literal token is terminated when it carries a closing quote: text of
 /// length ≥ 2 ending in `'` (the empty `''` and a normal `'a'` both qualify). A
 /// bare `'` or content with no closing quote (`'a`) is unterminated.
-fn char_token_terminated(text: &str) -> bool {
-    text.len() >= 2 && text.ends_with('\'')
+fn char_token_terminated(text: RopeSlice) -> bool {
+    text.len() >= 2 && text.byte(text.len() - 1) == b'\''
 }
 
 /// The `(error op)` atom for a syntactic operator used where a value is expected.
@@ -1919,7 +1920,7 @@ fn is_lone_error_operator(kind: TokKind) -> bool {
 /// the only members of their tiers Julia accepts as unary, matched by exact
 /// text (a suffixed `±₁` is not a unary prefix and falls through to the
 /// operator-call-name arm, where glued to `(` it is a plain call).
-fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
+fn is_unary_prefix_op(kind: TokKind, text: RopeSlice) -> bool {
     use TokKind::*;
     matches!(
         kind,
@@ -1937,7 +1938,7 @@ fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
             | Supertype
             | ColonColon
             | UniRadical
-    ) || (matches!(kind, UniPlus | UniTimes) && matches!(text, "±" | "∓" | "⋆"))
+    ) || (matches!(kind, UniPlus | UniTimes) && (text == "±" || text == "∓" || text == "⋆"))
 }
 
 /// Whether `kind` is an operator that, alone in value position, is the operator
@@ -2232,7 +2233,7 @@ pub(super) fn parse_quote_sym(
         // fall through to the bare-operator arm below (`:..` ⇒ `(quote-: ..)`).
         _ if ctx
             .token(next)
-            .is_some_and(|t| is_dotted_broadcast_text(&t.text)) =>
+            .is_some_and(|t| is_dotted_broadcast_text(t.text)) =>
         {
             events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
             events.push(Event::Tok(next));
@@ -2295,7 +2296,7 @@ fn parse_string_literal(
     let mut has_prefix = false;
     if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix) {
         has_prefix = true;
-        var_prefix = ctx.token(i).map(|t| t.text.as_str()) == Some("var");
+        var_prefix = ctx.token(i).is_some_and(|t| t.text == "var");
         i += 1;
     }
 
@@ -3250,7 +3251,7 @@ fn parse_one_arg(
         begin_marker,
         ..ExprFlags::default()
     };
-    let parse_arg_expr = |tokens: &[Token], start, diagnostics: &mut Vec<ParseDiagnostic>| {
+    let parse_arg_expr = |tokens: &[Token<'_>], start, diagnostics: &mut Vec<ParseDiagnostic>| {
         parse_expr_in(tokens, start, 0, diagnostics, flags)
     };
     if let Some(eq_idx) = kwarg_eq(ctx, i) {
@@ -3375,8 +3376,8 @@ fn is_operator(kind: TokKind) -> bool {
 /// with a broadcast `.` (`.+`, `.&`, `.=`, `.&&`, `.+=`). The range/splat
 /// operators `..`/`...` lead with a *doubled* dot and are not broadcasts, so they
 /// are excluded; bare field-access `.` is excluded by the length check.
-fn is_dotted_broadcast_text(text: &str) -> bool {
-    text.as_bytes().first() == Some(&b'.') && text.len() > 1 && text.as_bytes()[1] != b'.'
+fn is_dotted_broadcast_text(text: RopeSlice) -> bool {
+    text.len() > 1 && text.byte(0) == b'.' && text.byte(1) != b'.'
 }
 
 /// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,

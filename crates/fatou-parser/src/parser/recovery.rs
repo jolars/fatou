@@ -14,7 +14,7 @@ pub(crate) fn error_expr_with_range(start: usize, end: usize) -> ExprParse {
 
 /// Recover by consuming the rest of the line into an `ERROR` node.
 pub(crate) fn error_expr_to_line_end(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     recovery_from: usize,
 ) -> ExprParse {

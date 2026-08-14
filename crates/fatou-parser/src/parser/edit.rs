@@ -7,6 +7,7 @@
 //! `didChange` content changes lives host-side (`fatou::text`), keeping this
 //! crate free of protocol dependencies.
 
+use ropey::Rope;
 use std::ops::Range;
 
 /// A single contiguous text edit: replace `range` (a byte range in the *old*
@@ -30,6 +31,16 @@ impl Edit {
         out.push_str(&old[..self.range.start]);
         out.push_str(&self.insert);
         out.push_str(&old[self.range.end..]);
+        out
+    }
+
+    /// Apply the edit to `old` in place on a `Rope`. The rope's copy-on-write
+    /// edit is O(log n + edit size), not a whole-buffer copy — this is the form
+    /// the incremental reparse chain uses so replaying each edit stays cheap.
+    pub fn apply_rope(&self, old: &Rope) -> Rope {
+        let mut out = old.clone();
+        out.remove(self.range.clone());
+        out.insert(self.range.start, &self.insert);
         out
     }
 }
@@ -104,6 +115,43 @@ pub fn diff_edit(old: &str, new: &str) -> Edit {
     }
 }
 
+/// [`diff_edit`] over a pair of [`Rope`]s, comparing bytes chunk-wise so the
+/// common prefix/suffix is found without flattening either rope. Byte-identical
+/// to [`diff_edit`] on the same texts.
+pub fn diff_edit_rope(old: &Rope, new: &Rope) -> Edit {
+    let mut prefix = 0;
+    for (o, n) in old.bytes().zip(new.bytes()) {
+        if o != n {
+            break;
+        }
+        prefix += 1;
+    }
+    while prefix > 0 && !old.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+
+    let max_suffix = (old.len() - prefix).min(new.len() - prefix);
+    let mut suffix = 0;
+    let mut old_back = old.bytes_at(old.len());
+    let mut new_back = new.bytes_at(new.len());
+    while suffix < max_suffix {
+        match (old_back.prev(), new_back.prev()) {
+            (Some(o), Some(n)) if o == n => suffix += 1,
+            _ => break,
+        }
+    }
+    while suffix > 0
+        && (!old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix))
+    {
+        suffix -= 1;
+    }
+
+    Edit {
+        range: prefix..(old.len() - suffix),
+        insert: String::from(new.slice(prefix..(new.len() - suffix))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +160,32 @@ mod tests {
         Edit {
             range,
             insert: insert.to_string(),
+        }
+    }
+
+    /// The rope variants are byte-identical to the `&str` ones: `diff_edit_rope`
+    /// recovers the same edit, and `apply_rope` reproduces the same text. The
+    /// corpus exercises multi-byte chars and the common-prefix/suffix clamp.
+    #[test]
+    fn rope_edits_match_the_string_ones() {
+        let pairs: &[(&str, &str)] = &[
+            ("x = 1\n", "x = 1\n"),
+            ("x = 1\n", "x = 12\n"),
+            ("x = 12\n", "x = 1\n"),
+            ("f(a, b)\n", "f(a, c)\n"),
+            ("", "x = 1\n"),
+            ("x = 1\n", ""),
+            ("abc", "xyz"),
+            ("α = 1\n", "β = 1\n"),
+            ("x\u{3AC}", "x\u{1FB6}"),
+            ("a b c\n", "z b z\n"),
+        ];
+        for &(a, b) in pairs {
+            let e = diff_edit(a, b);
+            let er = diff_edit_rope(&Rope::from(a), &Rope::from(b));
+            assert_eq!(er, e, "diff_edit_rope({a:?}, {b:?})");
+            assert_eq!(er.apply(a), b);
+            assert_eq!(er.apply_rope(&Rope::from(a)), Rope::from(b));
         }
     }
 

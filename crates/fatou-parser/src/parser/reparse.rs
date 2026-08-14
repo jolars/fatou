@@ -66,6 +66,7 @@
 //! `prev_ends_value` consults the preceding token. Proving faithfulness for the
 //! old text, plus an identical kind sequence, carries it to the new text.
 
+use ropey::{Rope, RopeSlice};
 use rowan::{GreenNode, GreenToken, TextRange, TextSize, TokenAtOffset};
 
 use crate::parser::ParseDiagnostic;
@@ -76,7 +77,7 @@ use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 /// The edit currency, defined in the sibling `edit` module and re-exported
 /// here so `parser::Edit` stays the path the parser layer uses.
-pub use super::edit::{Edit, apply_edits, diff_edit, try_apply_edits};
+pub use super::edit::{Edit, apply_edits, diff_edit, diff_edit_rope, try_apply_edits};
 
 /// Structural fingerprint of a tree: one line per descendant element with
 /// `kind@range` plus the token text (empty for nodes). Two trees with equal
@@ -137,12 +138,49 @@ pub fn reparse(
     edit: &Edit,
     new_text: &str,
 ) -> Option<Reparsed> {
-    if !fits(prev_text, edit) {
+    reparse_slice(
+        RopeSlice::from(prev_text),
+        prev_green,
+        prev_diags,
+        edit,
+        RopeSlice::from(new_text),
+    )
+}
+
+/// The rope-backed form of [`reparse`]: the same single-edit splice, but taking
+/// the two texts as [`RopeSlice`]s so no flatten happens. Both the `&str` and
+/// the whole-`Rope` entry points wrap this.
+pub fn reparse_slice(
+    prev: RopeSlice<'_>,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    new: RopeSlice<'_>,
+) -> Option<Reparsed> {
+    if !fits(prev, edit) {
         return None;
     }
-    let result = reparse_impl(prev_text, prev_green, prev_diags, edit, new_text)?;
-    assert_matches_full_parse(&result, new_text);
+    let result = reparse_impl(prev, prev_green, prev_diags, edit, new)?;
+    assert_matches_full_parse(&result, new);
     Some(result)
+}
+
+/// The whole-rope form of [`reparse`], for a caller that holds the two `Rope`s
+/// itself (the salsa layer stores text as a rope).
+pub fn reparse_rope(
+    prev: &Rope,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edit: &Edit,
+    new: &Rope,
+) -> Option<Reparsed> {
+    reparse_slice(
+        RopeSlice::from(prev),
+        prev_green,
+        prev_diags,
+        edit,
+        RopeSlice::from(new),
+    )
 }
 
 /// Attempt an incremental reparse across a *chain* of edits, each expressed
@@ -191,11 +229,17 @@ pub fn reparse_edits(
     let mut tier = ReparseTier::Token;
 
     for edit in edits {
-        if !fits(&text, edit) {
+        if !fits(RopeSlice::from(text.as_str()), edit) {
             return None;
         }
         let next = edit.apply(&text);
-        let step = reparse_impl(&text, &green, &diagnostics, edit, &next)?;
+        let step = reparse_impl(
+            RopeSlice::from(text.as_str()),
+            &green,
+            &diagnostics,
+            edit,
+            RopeSlice::from(next.as_str()),
+        )?;
         tier = tier.max(step.tier);
         text = next;
         green = step.green;
@@ -215,7 +259,52 @@ pub fn reparse_edits(
         diagnostics,
         tier,
     };
-    assert_matches_full_parse(&result, new_text);
+    assert_matches_full_parse(&result, RopeSlice::from(new_text));
+    Some(result)
+}
+
+/// The rope-backed form of [`reparse_edits`]: the same chain replay, but with
+/// each intermediate text kept as a `Rope` (O(1) clone) instead of a full-copy
+/// `String`. The per-step [`reparse_impl`] still sees a [`RopeSlice`], so the
+/// guards never flatten.
+pub fn reparse_edits_rope(
+    prev: &Rope,
+    prev_green: &GreenNode,
+    prev_diags: &[ParseDiagnostic],
+    edits: &[Edit],
+    new: &Rope,
+) -> Option<Reparsed> {
+    if edits.len() < 2 {
+        return None;
+    }
+
+    let mut text = prev.clone();
+    let mut green = prev_green.clone();
+    let mut diagnostics = prev_diags.to_vec();
+    let mut tier = ReparseTier::Token;
+
+    for edit in edits {
+        if !fits(text.slice(..), edit) {
+            return None;
+        }
+        let next = edit.apply_rope(&text);
+        let step = reparse_impl(text.slice(..), &green, &diagnostics, edit, next.slice(..))?;
+        tier = tier.max(step.tier);
+        text = next;
+        green = step.green;
+        diagnostics = step.diagnostics;
+    }
+
+    if text != *new {
+        return None;
+    }
+
+    let result = Reparsed {
+        green,
+        diagnostics,
+        tier,
+    };
+    assert_matches_full_parse(&result, RopeSlice::from(new));
     Some(result)
 }
 
@@ -227,8 +316,8 @@ pub fn reparse_edits(
 /// asserts once on its composed result rather than once per step, which would
 /// otherwise make a debug-build language server unusable on a large file.
 #[cfg(debug_assertions)]
-fn assert_matches_full_parse(result: &Reparsed, new_text: &str) {
-    let full = crate::parser::parse(new_text);
+fn assert_matches_full_parse(result: &Reparsed, new_text: RopeSlice<'_>) {
+    let full = crate::parser::parse_slice(new_text);
     debug_assert_eq!(
         fingerprint(&SyntaxNode::new_root(result.green.clone())),
         fingerprint(&full.cst),
@@ -243,12 +332,12 @@ fn assert_matches_full_parse(result: &Reparsed, new_text: &str) {
 }
 
 #[cfg(not(debug_assertions))]
-fn assert_matches_full_parse(_result: &Reparsed, _new_text: &str) {}
+fn assert_matches_full_parse(_result: &Reparsed, _new_text: RopeSlice<'_>) {}
 
 /// Whether `edit`'s range is a well-formed byte range of `text`. Both tiers
 /// slice `prev_text` at the edit's offsets, so an edit that does not fit is a
 /// panic rather than a miss.
-fn fits(text: &str, edit: &Edit) -> bool {
+fn fits(text: RopeSlice<'_>, edit: &Edit) -> bool {
     edit.range.start <= edit.range.end
         && edit.range.end <= text.len()
         && text.is_char_boundary(edit.range.start)
@@ -257,11 +346,11 @@ fn fits(text: &str, edit: &Edit) -> bool {
 
 /// Tier dispatch: cheapest first.
 fn reparse_impl(
-    prev_text: &str,
+    prev_text: RopeSlice<'_>,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
-    new_text: &str,
+    new_text: RopeSlice<'_>,
 ) -> Option<Reparsed> {
     reparse_token(prev_text, prev_green, prev_diags, edit)
         .or_else(|| reparse_toplevel(prev_text, prev_green, prev_diags, edit, new_text))
@@ -329,7 +418,7 @@ const CONTEXTUAL_IDENTS: &[&str] = &[
 /// oracle arbitrate tree equality. Any guard failure returns `None`, which
 /// the caller answers with a full parse, so every bail here is safe.
 fn reparse_token(
-    prev_text: &str,
+    prev_text: RopeSlice<'_>,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
@@ -357,7 +446,7 @@ fn reparse_token(
 
 /// Dispatch one candidate leaf to the proof its kind takes.
 fn try_splice_token(
-    prev_text: &str,
+    prev_text: RopeSlice<'_>,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
     token: &SyntaxToken,
@@ -373,7 +462,7 @@ fn try_splice_token(
 
 /// Run the stage-2 guards against one candidate leaf and splice on success.
 fn try_splice_plain_token(
-    prev_text: &str,
+    prev_text: RopeSlice<'_>,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
     token: &SyntaxToken,
@@ -384,7 +473,12 @@ fn try_splice_plain_token(
     // catch most of these anyway; this is the cheap early-out. It does not
     // apply to `STRING_CONTENT`, whose run legitimately spans newlines and
     // whose proof does not depend on line structure.
-    if edit.insert.contains(['\n', '\r']) || prev_text[edit.range.clone()].contains(['\n', '\r']) {
+    if edit.insert.contains(['\n', '\r'])
+        || prev_text
+            .slice(edit.range.clone())
+            .chars()
+            .any(|c| c == '\n' || c == '\r')
+    {
         return None;
     }
 
@@ -399,7 +493,7 @@ fn try_splice_plain_token(
     // Isolated relex: still exactly one token, same kind, spanning all of it.
     // This alone rejects kind flips (ident ⇒ keyword, whitespace ⇒ newline)
     // and splits (`=#` typed into a block comment).
-    let relexed = lex(&new_leaf);
+    let relexed = lex(RopeSlice::from(new_leaf.as_str()));
     let [only] = relexed.as_slice() else {
         return None;
     };
@@ -421,10 +515,10 @@ fn try_splice_plain_token(
     // comment swallowing its neighbor). At EOF probe with `\n`, which no
     // eligible kind can absorb, so a leaf left unterminated at EOF (`#=` typed
     // into the last block comment) still fails here.
-    let next_char = prev_text[t1..].chars().next().unwrap_or('\n');
+    let next_char = prev_text.slice(t1..).chars().next().unwrap_or('\n');
     let mut probe = new_leaf.clone();
     probe.push(next_char);
-    let first = lex(&probe).into_iter().next()?;
+    let first = lex(RopeSlice::from(probe.as_str())).into_iter().next()?;
     if first.end != new_leaf.len() || syntax_kind_for(first.kind) != token.kind() {
         return None;
     }
@@ -438,7 +532,7 @@ fn try_splice_plain_token(
         let mut probe = prev.text().to_string();
         let boundary = probe.len();
         probe.push_str(&new_leaf);
-        let relexed = lex(&probe);
+        let relexed = lex(RopeSlice::from(probe.as_str()));
         let [a, b] = relexed.as_slice() else {
             return None;
         };
@@ -480,9 +574,11 @@ fn try_splice_plain_token(
 }
 
 /// `text` — the slice of the previous buffer starting at absolute offset
-/// `base` — with `edit` applied at its relative offset.
-fn edited_slice(text: &str, base: usize, edit: &Edit) -> String {
-    let mut out = text.to_string();
+/// `base` — with `edit` applied at its relative offset. The caller passes a
+/// `RopeSlice`, but the result is a `String`: it is relexed in isolation and is
+/// literal-sized, never a whole-file copy.
+fn edited_slice(text: RopeSlice<'_>, base: usize, edit: &Edit) -> String {
+    let mut out = String::from(&text);
     out.replace_range(
         (edit.range.start - base)..(edit.range.end - base),
         &edit.insert,
@@ -507,7 +603,7 @@ fn literal_token_ends(node: &SyntaxNode) -> Vec<(SyntaxKind, usize)> {
 /// names the index whose end — and every end after it — is expected to have
 /// moved by that delta.
 fn relex_matches(
-    text: &str,
+    text: RopeSlice<'_>,
     expected: &[(SyntaxKind, usize)],
     grown: Option<(usize, isize)>,
 ) -> bool {
@@ -555,7 +651,7 @@ fn relex_matches(
 /// boundary moves. Diagnostics are byte offsets and do not care about lines.
 /// That is what puts Enter in a docstring on this tier.
 fn try_splice_string_content(
-    prev_text: &str,
+    prev_text: RopeSlice<'_>,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
     token: &SyntaxToken,
@@ -603,13 +699,17 @@ fn try_splice_string_content(
         return None;
     }
 
-    let old_node_text = &prev_text[n0..n1];
+    let old_node_text = prev_text.slice(n0..n1);
     if !relex_matches(old_node_text, &expected, None) {
         return None;
     }
     let delta = edit.delta();
     let edited = edited_slice(old_node_text, n0, edit);
-    if !relex_matches(&edited, &expected, Some((leaf, delta))) {
+    if !relex_matches(
+        RopeSlice::from(edited.as_str()),
+        &expected,
+        Some((leaf, delta)),
+    ) {
         return None;
     }
 
@@ -888,11 +988,11 @@ fn splice_diagnostics(
 /// folds, forward absorption by an unterminated block, and lexical fusion.
 /// Diagnostics splice last (see [`splice_diagnostics`]).
 fn reparse_toplevel(
-    prev_text: &str,
+    prev_text: RopeSlice<'_>,
     prev_green: &GreenNode,
     prev_diags: &[ParseDiagnostic],
     edit: &Edit,
-    new_text: &str,
+    new_text: RopeSlice<'_>,
 ) -> Option<Reparsed> {
     let root = SyntaxNode::new_root(prev_green.clone());
     let region = select_region(&root, edit)?;
@@ -901,9 +1001,9 @@ fn reparse_toplevel(
     }
     let delta = edit.delta();
     let frag_end = (region.end as isize + delta) as usize;
-    let fragment = &new_text[region.start..frag_end];
+    let fragment = new_text.slice(region.start..frag_end);
 
-    let frag = crate::parser::parse(fragment);
+    let frag = crate::parser::parse_slice(fragment);
     let (prev_node, next_node) = sibling_nodes(&root, &region);
 
     let positive_nodes = |node: &SyntaxNode| {
@@ -931,7 +1031,11 @@ fn reparse_toplevel(
             .find(is_significant_child)
             .map(|el| usize::from(el.text_range().start()))
             .unwrap_or(fragment.len());
-        if !new_text[from..region.start + anchor].contains('\n') {
+        if !new_text
+            .slice(from..region.start + anchor)
+            .chars()
+            .any(|c| c == '\n')
+        {
             return None;
         }
     }
@@ -952,7 +1056,11 @@ fn reparse_toplevel(
             .map(|el| usize::from(el.text_range().end()))
             .unwrap_or(0);
         let to = (usize::from(next.text_range().start()) as isize + delta) as usize;
-        if !new_text[region.start + anchor..to].contains('\n') {
+        if !new_text
+            .slice(region.start + anchor..to)
+            .chars()
+            .any(|c| c == '\n')
+        {
             return None;
         }
 
@@ -965,7 +1073,11 @@ fn reparse_toplevel(
             .map(|el| usize::from(el.text_range().end()))
             .or(prev_significant_end)
             .unwrap_or(0);
-        if !prev_text[old_anchor..usize::from(next.text_range().start())].contains('\n') {
+        if !prev_text
+            .slice(old_anchor..usize::from(next.text_range().start()))
+            .chars()
+            .any(|c| c == '\n')
+        {
             return None;
         }
     }
@@ -985,8 +1097,8 @@ fn reparse_toplevel(
         .any(|el| is_significant_child(&el))
         && let (Some(prev), Some(next)) = (&prev_node, &next_node)
     {
-        let back_gap = &prev_text[usize::from(prev.text_range().end())..region.start];
-        let fwd_gap = &prev_text[region.end..usize::from(next.text_range().start())];
+        let back_gap = prev_text.slice(usize::from(prev.text_range().end())..region.start);
+        let fwd_gap = prev_text.slice(region.end..usize::from(next.text_range().start()));
         let guard = format!(
             "{}{}{}{}{}",
             prev.text(),
@@ -1023,7 +1135,7 @@ fn reparse_toplevel(
     // parse in context with exactly the diagnostics it produced in
     // isolation.
     if let Some(prev) = &prev_node {
-        let back_gap = &prev_text[usize::from(prev.text_range().end())..region.start];
+        let back_gap = prev_text.slice(usize::from(prev.text_range().end())..region.start);
         let guard = format!("{}{}{}", prev.text(), back_gap, fragment);
         let seam = guard.len() - fragment.len();
         let parsed = crate::parser::parse(&guard);
@@ -1061,10 +1173,10 @@ fn reparse_toplevel(
     // straddling the seam.
     let tail = match &next_node {
         Some(next) => {
-            let gap = &prev_text[region.end..usize::from(next.text_range().start())];
+            let gap = prev_text.slice(region.end..usize::from(next.text_range().start()));
             format!("{}{}", gap, next.text())
         }
-        None => prev_text[region.end..].to_string(),
+        None => String::from(&prev_text.slice(region.end..)),
     };
     if !tail.is_empty() {
         let guard = format!("{fragment}{tail}");
@@ -1165,9 +1277,10 @@ mod tests {
     /// the test fails loudly rather than quietly covering nothing.
     #[test]
     fn every_contextual_ident_is_listed() {
-        // `t.kind == TokKind::Ident && t.text == "word"` and the `matches!`
-        // form `matches!(t.text.as_ref(), "word" | "other")`. Both are keyed on
-        // `t.text`, which is what makes them text-structural.
+        // `t.kind == TokKind::Ident && t.text == "word"`, and the `||`-chained
+        // form the old `matches!` spelling collapsed into (`t.text == "a" ||
+        // t.text == "b"`). Both are keyed on `t.text`, which is what makes them
+        // text-structural.
         fn words_after(haystack: &str, marker: &str) -> Vec<String> {
             let mut out = Vec::new();
             for tail in haystack.split(marker).skip(1) {
@@ -1194,7 +1307,6 @@ mod tests {
             let src = std::fs::read_to_string(dir.join(name))
                 .unwrap_or_else(|e| panic!("read {name}: {e}"));
             found.extend(words_after(&src, "t.text =="));
-            found.extend(words_after(&src, "t.text.as_ref(),"));
             found.extend(words_after(&src, "next.text =="));
         }
         assert!(
@@ -1278,7 +1390,10 @@ mod tests {
 
         let e = edit(12..13, "X");
         let new = e.apply(old);
-        assert!(try_splice_string_content(old, &parsed.diagnostics, &e, &token).is_none());
+        assert!(
+            try_splice_string_content(RopeSlice::from(old), &parsed.diagnostics, &e, &token)
+                .is_none()
+        );
         // The statement tier may still answer it (the in-crate Tenet-4 assert
         // validates that splice); what matters is that the token tier declined.
         let tier = reparse(old, &green, &parsed.diagnostics, &e, &new).map(|r| r.tier);

@@ -26,6 +26,7 @@ bench = ["dep:criterion"]
 criterion = { version = "0.8.2", default-features = false, features = [
   "cargo_bench_support",
 ], optional = true }
+ropey = { version = "2.0.0-beta.1", features = ["metric_utf16", "metric_lines_lf"] }
 rowan = "0.17.0"
 serde = { version = "1.0.228", features = ["derive"] }
 unicode-normalization = "0.1.24"

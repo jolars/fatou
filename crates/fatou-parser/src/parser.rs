@@ -25,12 +25,13 @@ mod unescape;
 mod unicode_ident;
 mod unicode_ops;
 
-pub use core::{ParseDiagnostic, ParseOutput, parse, reconstruct};
+pub use core::{ParseDiagnostic, ParseOutput, parse, parse_rope, parse_slice, reconstruct};
 // Semver-loose: exposed for the fatou CLI's completion and semantic layers,
 // not a stable part of this crate's API.
 pub use lexer::{KEYWORDS, is_ident_continue, is_ident_start};
 pub use reparse::{
-    Edit, ReparseTier, Reparsed, apply_edits, diff_edit, reparse, reparse_edits, try_apply_edits,
+    Edit, ReparseTier, Reparsed, apply_edits, diff_edit, diff_edit_rope, reparse, reparse_edits,
+    reparse_edits_rope, reparse_rope, reparse_slice, try_apply_edits,
 };
 // Test support, not API: the in-crate Tenet-4 assert and the
 // `tests/incremental_reparse.rs` oracle harness share this one definition so
@@ -42,7 +43,7 @@ pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
 // which no consumer has a reason to do — never becomes part of the API.
 #[cfg(feature = "bench")]
 pub fn token_count(input: &str) -> usize {
-    lexer::lex(input).len()
+    lexer::lex(ropey::RopeSlice::from(input)).len()
 }
 // A lossless CST hands out a literal's *source*; a consumer reading it as data
 // (the `include` path resolver) needs the value it denotes.

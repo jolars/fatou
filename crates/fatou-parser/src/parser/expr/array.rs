@@ -45,7 +45,7 @@ pub(super) fn array_element_boundary(
 /// no infix binding power, so they end the element naturally and are not listed
 /// here; the interpolation sigil `$` does have one (Julia's old xor operator),
 /// so it is listed. Mirrors JuliaSyntax's whitespace-sensitive array splitting.
-fn op_can_lead_array_element(op: &Token) -> bool {
+fn op_can_lead_array_element(op: &Token<'_>) -> bool {
     matches!(
         op.kind,
         TokKind::Plus
@@ -59,7 +59,7 @@ fn op_can_lead_array_element(op: &Token) -> bool {
             | TokKind::Amp
             | TokKind::Colon
             | TokKind::Dollar
-    ) && !op.text.chars().next_back().is_some_and(is_op_suffix_char)
+    ) && !op.text.chars().last().is_some_and(is_op_suffix_char)
 }
 
 /// Parse one element of an array literal: a full expression in array mode (a
@@ -67,7 +67,7 @@ fn op_can_lead_array_element(op: &Token) -> bool {
 /// row separator handled by the caller, not part of the element). Array literals
 /// are square-bracketed, so `end` is the index marker here.
 pub(super) fn parse_element(
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     start: usize,
     // Whether `end`/`begin` are index markers in this element, inherited from an
     // enclosing indexing bracket. A bare literal (`[1 2 end]`) is an array

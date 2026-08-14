@@ -18,7 +18,7 @@ pub(super) fn signed_literal_fold(ctx: &ParserCtx<'_>, op_idx: usize) -> bool {
         return false;
     };
     // A suffixed `+₁` is not a unary operator at all, so never folds.
-    if op.text.chars().next_back().is_some_and(is_op_suffix_char) {
+    if op.text.chars().last().is_some_and(is_op_suffix_char) {
         return false;
     }
     let Some(num) = ctx.token(op_idx + 1) else {
@@ -273,7 +273,7 @@ pub(super) fn should_juxtapose_string_error(
 /// Whether `tok` is one of the word operators `in`/`isa`, which the lexer emits
 /// as plain identifiers (they are ordinary names elsewhere) and the operator loop
 /// picks up by text.
-pub(super) fn is_word_operator_tok(tok: &Token) -> bool {
+pub(super) fn is_word_operator_tok(tok: &Token<'_>) -> bool {
     tok.kind == TokKind::Ident && (tok.text == "in" || tok.text == "isa")
 }
 
@@ -281,7 +281,7 @@ pub(super) fn is_word_operator_tok(tok: &Token) -> bool {
 /// spelling of the `in` iteration separator. Only `∈` is accepted there — the
 /// sibling `∉` is an ordinary operator that Julia error-recovers in that position
 /// (`for i ∉ xs` ⇒ `(= i (error ∉ xs))`), so it stays out.
-pub(super) fn is_element_of_tok(tok: &Token) -> bool {
+pub(super) fn is_element_of_tok(tok: &Token<'_>) -> bool {
     tok.kind == TokKind::UniComparison && tok.text == "∈"
 }
 
@@ -290,7 +290,7 @@ pub(super) fn is_element_of_tok(tok: &Token) -> bool {
 /// spelling, `=`, is context-dependent (only the `outer` form leaves it loose,
 /// since a plain `i = xs` spec is parsed whole as an assignment) and is checked at
 /// the call sites.
-pub(super) fn is_for_separator_tok(tok: &Token) -> bool {
+pub(super) fn is_for_separator_tok(tok: &Token<'_>) -> bool {
     (tok.kind == TokKind::Ident && tok.text == "in") || is_element_of_tok(tok)
 }
 

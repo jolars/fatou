@@ -3,6 +3,7 @@ use crate::parser::expr::parse_stmt;
 use crate::parser::lexer::{TokKind, Token, lex};
 use crate::parser::tree_builder::{build_tree, syntax_kind_for};
 use crate::syntax::{SyntaxKind, SyntaxNode};
+use ropey::{Rope, RopeSlice};
 
 pub use crate::parser::diagnostics::ParseDiagnostic;
 use crate::parser::diagnostics::{DiagnosticKind, push_diagnostic};
@@ -22,7 +23,23 @@ pub struct ParseOutput {
 /// unparseable token is consumed as one error token so the loop always makes
 /// progress.
 pub fn parse(text: &str) -> ParseOutput {
-    let tokens = lex(text);
+    parse_slice(RopeSlice::from(text))
+}
+
+/// Parse a [`Rope`] directly. The zero-copy whole-rope entry point: like
+/// [`parse_slice`] but taking the `Rope` the incremental layer already holds,
+/// so no slice is materialized and no flatten happens.
+pub fn parse_rope(rope: &Rope) -> ParseOutput {
+    parse_slice(RopeSlice::from(rope))
+}
+
+/// Parse `slice` directly, without materializing the input as one contiguous
+/// `&str`. The rope-backed entry point the incremental layer reaches: a
+/// multi-chunk rope lexes chunk by chunk (see [`crate::parser::lexer`]) with no
+/// flatten. [`parse`] wraps a `&str` into a single-chunk slice, so both produce
+/// identical output.
+pub fn parse_slice(slice: RopeSlice<'_>) -> ParseOutput {
+    let tokens = lex(slice);
     let mut diagnostics = Vec::new();
     let mut events = Vec::new();
 
@@ -483,7 +500,7 @@ fn is_stray_block_keyword_tok(kind: TokKind) -> bool {
 /// Whether the logical line starting at `start` (up to the next newline or EOF)
 /// carries a top-level `;`. The stray-closer recovery only applies to the clean
 /// separator-less form; `;`-segment lines keep the loose-token fallback.
-fn rest_of_line_has_semicolon(tokens: &[Token], start: usize) -> bool {
+fn rest_of_line_has_semicolon(tokens: &[Token<'_>], start: usize) -> bool {
     tokens[start..]
         .iter()
         .take_while(|t| t.kind != TokKind::Newline)
@@ -492,7 +509,7 @@ fn rest_of_line_has_semicolon(tokens: &[Token], start: usize) -> bool {
 
 /// Whether an event carries significant (non-trivia) content: any node opener,
 /// or a non-trivia leaf token.
-fn is_significant_event(event: &Event, tokens: &[Token]) -> bool {
+fn is_significant_event(event: &Event, tokens: &[Token<'_>]) -> bool {
     match event {
         Event::Start(_) => true,
         Event::Tok(idx) => !tokens[*idx].kind.is_trivia(),
@@ -504,7 +521,7 @@ fn is_significant_event(event: &Event, tokens: &[Token]) -> bool {
 /// subtree). A docstring's trailing leftover defers to `fold_docstrings` only
 /// when it begins with such a subtree (its documentable target); a leftover that
 /// opens with a bare junk token is recovered as trailing junk instead.
-fn leftover_starts_with_subtree(tail: &[Event], tokens: &[Token]) -> bool {
+fn leftover_starts_with_subtree(tail: &[Event], tokens: &[Token<'_>]) -> bool {
     matches!(
         tail.iter().find(|e| is_significant_event(e, tokens)),
         Some(Event::Start(_))
@@ -515,7 +532,7 @@ fn leftover_starts_with_subtree(tail: &[Event], tokens: &[Token]) -> bool {
 /// the first inner token is not a `STRING_PREFIX`. Such a statement starts a
 /// potential docstring, so a trailing statement on the same logical line is left
 /// to `fold_docstrings` rather than wrapped as junk.
-pub(super) fn stmt_is_doc_string(events: &[Event], tokens: &[Token]) -> bool {
+pub(super) fn stmt_is_doc_string(events: &[Event], tokens: &[Token<'_>]) -> bool {
     matches!(
         events.first(),
         Some(Event::Start(SyntaxKind::STRING_LITERAL))
@@ -532,7 +549,7 @@ fn is_doc_container(kind: SyntaxKind) -> bool {
 /// than a prefixed string macro (`r"…"`, `b"…"`), which is a macro call in
 /// JuliaSyntax and never a docstring. Eligible iff its first token is not a
 /// `STRING_PREFIX`.
-fn string_is_doc_eligible(inner: &[Event], tokens: &[Token]) -> bool {
+fn string_is_doc_eligible(inner: &[Event], tokens: &[Token<'_>]) -> bool {
     match inner.first() {
         Some(Event::Tok(idx)) => syntax_kind_for(tokens[*idx].kind) != SyntaxKind::STRING_PREFIX,
         _ => true,
@@ -551,7 +568,7 @@ fn string_is_doc_eligible(inner: &[Event], tokens: &[Token]) -> bool {
 /// order and its meaning. So rather than rebuilding the stream level by level,
 /// this marks the two insertion points per fold and splices them in with one
 /// final pass, which keeps the whole thing linear in the event count.
-fn fold_docstrings(events: &[Event], tokens: &[Token]) -> Vec<Event> {
+fn fold_docstrings(events: &[Event], tokens: &[Token<'_>]) -> Vec<Event> {
     let extents = subtree_extents(events);
     let mut marks = DocMarks {
         open: vec![false; events.len()],
@@ -612,7 +629,7 @@ fn subtree_extents(events: &[Event]) -> Vec<usize> {
 /// whether a fold may happen at *this* level.
 fn mark_doc_folds(
     events: &[Event],
-    tokens: &[Token],
+    tokens: &[Token<'_>],
     extents: &[usize],
     start: usize,
     end: usize,
@@ -678,7 +695,7 @@ fn as_start_kind(event: &Event) -> SyntaxKind {
 /// `Start` of the statement a preceding docstring documents: the next subtree
 /// child, reachable across at most one newline of trivia and no `;`. `None` if no
 /// eligible target follows.
-fn doc_target(events: &[Event], tokens: &[Token], from: usize, end: usize) -> Option<usize> {
+fn doc_target(events: &[Event], tokens: &[Token<'_>], from: usize, end: usize) -> Option<usize> {
     let mut newlines = 0;
     let mut j = from;
     while j < end {
