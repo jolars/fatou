@@ -1990,4 +1990,58 @@ mod tests {
         let joined: String = tokens.iter().map(|t| t.text.to_string()).collect();
         assert_eq!(joined, body);
     }
+
+    /// Lex `input` as a *multi-chunk* rope (so chunk-boundary handling runs) and
+    /// assert it still reassembles losslessly. `&str` fixtures here deliberately
+    /// build a `Rope`, not a `RopeSlice::from(&str)` (which is single-chunk).
+    fn roundtrips_multi_chunk(input: &str) {
+        let rope = ropey::Rope::from_str(input);
+        assert!(
+            rope.chunks().count() > 1,
+            "fixture must be multi-chunk: {input:?}"
+        );
+        let tokens = lex(RopeSlice::from(&rope));
+        let joined: String = tokens.iter().map(|t| t.text.to_string()).collect();
+        assert_eq!(joined, input, "multi-chunk lex not lossless");
+    }
+
+    #[test]
+    fn triple_quote_straddles_a_chunk_boundary() {
+        // First `"` at byte 1023, second at 1024 (first byte of chunk 1): the
+        // `"""` open delimiter's `peek(1)`/`peek(2)` lookahead and the 3-byte
+        // advance both cross the boundary.
+        roundtrips_multi_chunk(&format!("{}\"\"\"x\"\"\"\n", " ".repeat(1023)));
+        // Closing straddle, same shape on the way out.
+        roundtrips_multi_chunk(&format!("x = \"\"\"{}\"\"\"\n", " ".repeat(1023)));
+    }
+
+    #[test]
+    fn char_literal_close_straddles_a_chunk_boundary() {
+        // `'` at 1023, `a` at 1024, closing `'` at 1025: `lex_char_literal`'s
+        // absolute-idx scan plus the jump back to the cursor.
+        roundtrips_multi_chunk(&format!("{}'a'\n", " ".repeat(1023)));
+    }
+
+    #[test]
+    fn crlf_straddles_a_chunk_boundary() {
+        // `\r` at 1023, `\n` at 1024: `lex_newline`'s two-byte advance crosses.
+        roundtrips_multi_chunk(&format!("{}\r\nb\n", "a".repeat(1023)));
+    }
+
+    #[test]
+    fn multibyte_char_at_a_chunk_boundary() {
+        // A 2-byte `α` fills the last two bytes of chunk 0 (1022..1024) and a
+        // second `α` starts chunk 1 (1024..1026), inside a string body.
+        roundtrips_multi_chunk(&format!("s = \"{}αα\"\n", " ".repeat(1022)));
+    }
+
+    #[test]
+    fn multibyte_comment_straddles_a_chunk_boundary() {
+        // Multi-byte chars inside line and block comments near the boundary must
+        // still round-trip (advancing through them byte-by-byte is fine because
+        // UTF-8 continuation bytes are never `\n`/`\r`, so the terminator is not
+        // reached mid-char).
+        roundtrips_multi_chunk(&format!("{} # α\n", "x".repeat(1023)));
+        roundtrips_multi_chunk(&format!("{}#= α =# y\n", "x".repeat(1023)));
+    }
 }
