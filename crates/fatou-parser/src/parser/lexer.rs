@@ -134,6 +134,15 @@ impl<'a> Lexer<'a> {
 
     /// Refresh the cached chunk so it contains byte offset `at`. A no-op when
     /// `at` is already within the current chunk or past the end of input.
+    ///
+    /// `#[inline(always)]` because this is the lexer's per-byte access layer: the
+    /// common case (byte already inside the cached chunk) is two compares that
+    /// must inline into `peek`/`byte_at`/`char_at` rather than pay a call per
+    /// byte. The rare chunk-boundary crossing is a separate [`reload_chunk`]
+    /// (cold), so this function is small enough to inline — without the split the
+    /// `chunks_at` descent kept the whole function out of line and the
+    /// string-body scan paid a call per byte for nothing.
+    #[inline(always)]
     fn ensure_chunk(&mut self, at: usize) {
         let start = self.chunk_start;
         if at >= start && at - start < self.chunk.len() {
@@ -142,11 +151,20 @@ impl<'a> Lexer<'a> {
         if at >= self.slice.len() {
             return;
         }
+        self.reload_chunk(at);
+    }
+
+    /// The cold path of [`ensure_chunk`]: re-seat the cached chunk when `at`
+    /// crosses its boundary. Rare (once per chunk), so keep it out of line.
+    #[cold]
+    #[inline(never)]
+    fn reload_chunk(&mut self, at: usize) {
         let (mut chunks, start) = self.slice.chunks_at(at);
         self.chunk = chunks.next().unwrap_or("");
         self.chunk_start = start;
     }
 
+    #[inline]
     fn peek(&mut self, ahead: usize) -> Option<u8> {
         let at = self.pos + ahead;
         self.ensure_chunk(at);
@@ -158,6 +176,7 @@ impl<'a> Lexer<'a> {
     /// and owned (the O(log n) rope descent + one token-sized `String`) only
     /// when it crosses a chunk boundary. `start`/`end` are char-boundary byte
     /// offsets into `slice`.
+    #[inline]
     fn slice_range(&self, start: usize, end: usize) -> Cow<'a, str> {
         let cs = self.chunk_start;
         let ch = self.chunk;
@@ -257,6 +276,13 @@ impl<'a> Lexer<'a> {
     }
 
     /// The `char` beginning at byte offset `at` (for unicode identifier checks).
+    ///
+    /// `#[inline(always)]`: this is the per-byte character access on the
+    /// string-body and identifier hot paths (`consume_body_byte`,
+    /// `next_token`'s identifier probe). With [`ensure_chunk`] inlined into it
+    /// the body is a bounds check, an offset, and a UTF-8 decode — small enough
+    /// to force inline so a docstring scan pays no call per character.
+    #[inline(always)]
     fn char_at(&mut self, at: usize) -> char {
         if at >= self.slice.len() {
             return '\0';
@@ -269,6 +295,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// The byte at `at`, which must be a valid byte offset of the input.
+    #[inline]
     fn byte_at(&mut self, at: usize) -> u8 {
         debug_assert!(at < self.slice.len());
         self.ensure_chunk(at);
