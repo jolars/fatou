@@ -80,9 +80,9 @@ fn render_concise(
     let mut sources: HashMap<Option<PathBuf>, Option<TextBuffer>> = HashMap::new();
     for diag in diagnostics {
         let path = diag.path.as_deref();
-        let entry = sources.entry(diag.path.clone()).or_insert_with(|| {
-            source_for(path).map(|text| TextBuffer::new(&text))
-        });
+        let entry = sources
+            .entry(diag.path.clone())
+            .or_insert_with(|| source_for(path).map(|text| TextBuffer::new(&text)));
         let (line, column) = match entry {
             Some(buffer) => {
                 let lc = buffer.byte_to_lc(diag.range.start().into());

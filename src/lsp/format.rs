@@ -329,7 +329,7 @@ mod tests {
             format_edits_via_db(
                 &snapshot,
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 style,
                 encoding
             ),
@@ -344,7 +344,7 @@ mod tests {
             format_edits_via_db(
                 &stale.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 style,
                 encoding
             ),
@@ -358,7 +358,7 @@ mod tests {
             format_edits_via_db(
                 &empty.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 style,
                 encoding
             ),
@@ -392,7 +392,7 @@ mod tests {
             format_range_edits_via_db(
                 &snapshot,
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 range,
                 style,
                 encoding
@@ -408,7 +408,7 @@ mod tests {
             format_range_edits_via_db(
                 &stale.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 range,
                 style,
                 encoding
@@ -423,7 +423,7 @@ mod tests {
             format_range_edits_via_db(
                 &empty.snapshot(),
                 path,
-                &TextBuffer::new(buffer.to_string()),
+                &TextBuffer::new(buffer),
                 range,
                 style,
                 encoding
@@ -595,11 +595,13 @@ mod tests {
         // U+1F600 is 4 bytes in UTF-8, 2 UTF-16 units.
         let text = "x = \"\u{1F600}\"";
         let formatted = "y".to_string();
-        let end_utf16 =
-            edits_for_formatted(&TextBuffer::new(text), formatted.clone(), PositionEncoding::Utf16)
-                [0]
-                .range
-                .end;
+        let end_utf16 = edits_for_formatted(
+            &TextBuffer::new(text),
+            formatted.clone(),
+            PositionEncoding::Utf16,
+        )[0]
+        .range
+        .end;
         let end_utf8 =
             edits_for_formatted(&TextBuffer::new(text), formatted, PositionEncoding::Utf8)[0]
                 .range
