@@ -26,12 +26,9 @@
 //! anything, and pay it again in every handler that answered against the
 //! buffer. Position conversion against the live buffer is now O(log n) on the
 //! rope; salsa stores that same rope (`SourceFile.text` is a `TextBuffer`), so
-//! the write-phase clones it O(1), and the one O(N) flatten
-//! ([`TextBuffer::text`]) is paid once per actual parse in `parsed_document`.
-//!
-//! Making *the parser* consume that rope (the rest of the deferred issue #76)
-//! would drop even that flatten, but it is gated on `parse`/`reparse` going
-//! chunk-based.
+//! the write-phase clones it O(1). The parser consumes that rope directly
+//! (`parse_rope`, `reparse_*_rope`, … — issue #76), so `parsed_document` no
+//! longer flattens at all: a keystroke is O(log n + region), not O(N).
 //!
 //! Plain `main` (`harness = false`), same style as `format_compare`: no
 //! criterion dependency in the root crate, just a warm loop and a table.

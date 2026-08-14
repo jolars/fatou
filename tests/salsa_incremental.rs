@@ -6,6 +6,7 @@ use fatou::incremental::{
     parsed_tree_root, project_declared_deps, project_graph, semantic_model,
 };
 use fatou::parser::{Edit, apply_edits, parse};
+use fatou::text::TextBuffer;
 
 fn edit(range: std::ops::Range<usize>, insert: &str) -> Edit {
     Edit {
@@ -328,7 +329,7 @@ fn a_stage_after_a_peek_survives_the_drain() {
     db.reparse_store(
         file,
         PrevParse {
-            text: "alphaX = 1\n".to_string(),
+            text: TextBuffer::from("alphaX = 1\n"),
             green: parse("alphaX = 1\n").cst.green().to_owned(),
             diagnostics: Vec::new(),
         },

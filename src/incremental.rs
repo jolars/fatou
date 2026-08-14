@@ -22,7 +22,10 @@ use salsa::{Durability, Setter};
 
 use crate::environment::PackageMeta;
 use crate::index::{DeclaredDeps, PackageIndex};
-use crate::parser::{Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits};
+use crate::parser::{
+    Edit, ParseDiagnostic, ReparseTier, diff_edit_rope, parse_rope, reparse_edits_rope,
+    reparse_rope,
+};
 use crate::project::{self, IncludeEdge};
 use crate::resolve::{
     Candidate, ModulePath, Namespace, OccurrenceKey, OccurrenceRec, PackageSource, Resolution,
@@ -153,7 +156,7 @@ pub struct ParsedDocument {
 /// tracked query sound.
 #[derive(Debug, Clone)]
 pub struct PrevParse {
-    pub text: String,
+    pub text: TextBuffer,
     pub green: rowan::GreenNode,
     pub diagnostics: Vec<ParseDiagnostic>,
 }
@@ -224,7 +227,10 @@ pub trait IncrementalDb: salsa::Database {
 /// side-channel never affects query semantics — salsa only sees text changes.
 #[salsa::tracked(returns(ref), no_eq)]
 pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocument {
-    let text = file.text(db).text();
+    // The rope itself, not a flatten: `SourceFile.text` is a `TextBuffer`, and
+    // every entry point below (`parse_rope`, `reparse_*_rope`, `diff_edit_rope`)
+    // consumes it directly, so a keystroke never pays the O(N) flatten.
+    let text = file.text(db);
     let staged = db.reparse_pending_edits(file);
     let prev = db.reparse_prev(file);
 
@@ -235,7 +241,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     // the base has not moved, and the staged chain stays anchored to it (its
     // net effect is a no-op, so a later edit appended to it still describes the
     // transform from the base).
-    if let Some(prev) = prev.as_ref().filter(|prev| prev.text == text) {
+    if let Some(prev) = prev.as_ref().filter(|prev| prev.text.rope() == text.rope()) {
         return ParsedDocument {
             green: prev.green.clone(),
             diagnostics: prev.diagnostics.clone(),
@@ -243,9 +249,22 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     }
 
     let reparsed = prev.and_then(|prev| {
-        reparse_edits(&prev.text, &prev.green, &prev.diagnostics, &staged, &text).or_else(|| {
-            let edit = diff_edit(&prev.text, &text);
-            reparse(&prev.text, &prev.green, &prev.diagnostics, &edit, &text)
+        reparse_edits_rope(
+            prev.text.rope(),
+            &prev.green,
+            &prev.diagnostics,
+            &staged,
+            text.rope(),
+        )
+        .or_else(|| {
+            let edit = diff_edit_rope(prev.text.rope(), text.rope());
+            reparse_rope(
+                prev.text.rope(),
+                &prev.green,
+                &prev.diagnostics,
+                &edit,
+                text.rope(),
+            )
         })
     });
 
@@ -253,7 +272,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     let (green, diagnostics) = match reparsed {
         Some(r) => (r.green, r.diagnostics),
         None => {
-            let parsed = parse(text.as_str());
+            let parsed = parse_rope(text.rope());
             (parsed.cst.green().to_owned(), parsed.diagnostics)
         }
     };

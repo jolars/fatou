@@ -155,17 +155,14 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
   `missing-entry-file`, so the mismatch is at least reported; the edit is
   *Project files* stage 4.
 
-- [ ] Maybe (deferred): make `parse`/`reparse` chunk-based so the one remaining
-  flatten disappears. Salsa's `SourceFile` now *stores* the rope (`TextBuffer`,
-  `src/incremental.rs`), so the write-phase clones it O(1) instead of
-  flattening; the O(N) flatten moved into `parsed_document`, paid once per
-  actual parse, where it feeds the `&str` the parser still wants. What is left
-  is the parser half: `parse(text: &str)` and above all `reparse`/
-  `reparse_edits`, whose token- and toplevel-tier guards prove a splice sound by
-  slicing and relexing regions of `prev_text`/`new_text` — the wall named in
-  #76, a rewrite of the most delicate code in the parser crate.
-  `PrevParse.text: String` also stays until then: it is what those guards
-  slice. Revisit only if the reparse guards go chunk-based.
+- [x] make `parse`/`reparse` chunk-based so the one remaining flatten
+  disappears (#76). The parser now consumes the rope directly: the lexer is a
+  chunk-based `RopeSlice` walker (`Token.text` is a zero-copy `RopeSlice`, not a
+  per-token `String`), and `parse_rope`/`reparse_slice`/`reparse_rope`/
+  `reparse_edits_rope`/`diff_edit_rope` feed the `SourceFile` rope straight
+  through, so `parsed_document` no longer flattens at all. `PrevParse.text` is
+  a `TextBuffer` (O(1) clone). The `&str` entry points stay as thin wrappers
+  over single-chunk `RopeSlice`s for the CLI/formatter/tests.
 
 ## Project files (`Project.toml`/`Manifest.toml`)
 

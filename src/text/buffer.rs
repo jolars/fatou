@@ -10,8 +10,9 @@
 //!
 //! [`TextBuffer`] therefore owns the text outright. Getting it back as a
 //! contiguous `&str` is a flatten ([`TextBuffer::text`]), linear in the buffer;
-//! the parser still takes `&str`, so salsa's parse query flattens once per
-//! parse (see `benches/line_index.rs`).
+//! the parser consumes the rope directly (`parse_rope`, `reparse_*_rope`, …), so
+//! the parse path no longer flattens. `text` remains for the few `&str`-only
+//! consumers (the TOML project-file parse, the CLI).
 
 use std::ops::Range;
 
@@ -101,6 +102,13 @@ impl TextBuffer {
     /// stay meaningful; returns a shared reference, not a copy.
     pub fn line_index(&self) -> &Self {
         self
+    }
+
+    /// The backing [`ropey::Rope`], for the parser's rope-native entry points
+    /// (`parse_rope`, `reparse_rope`, …). Reading it is O(1): the rope is the
+    /// buffer, not a derived view, so no flatten is triggered by taking it.
+    pub fn rope(&self) -> &Rope {
+        &self.rope
     }
 
     /// Replace the bytes in `range` with `insert`, editing the rope in place.
@@ -205,6 +213,18 @@ impl PartialEq<str> for TextBuffer {
 }
 
 impl PartialEq<TextBuffer> for str {
+    fn eq(&self, other: &TextBuffer) -> bool {
+        *self == other.rope
+    }
+}
+
+impl PartialEq<&str> for TextBuffer {
+    fn eq(&self, other: &&str) -> bool {
+        self.rope == *other
+    }
+}
+
+impl PartialEq<TextBuffer> for &str {
     fn eq(&self, other: &TextBuffer) -> bool {
         *self == other.rope
     }
