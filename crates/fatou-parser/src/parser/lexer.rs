@@ -67,8 +67,16 @@ pub(crate) struct Token<'a> {
 }
 
 /// Tokenize `input` into a lossless token stream.
+///
+/// A single contiguous slice (the `&str` batch path, or a one-leaf rope) needs
+/// no chunk cache: dispatch to a lexer that indexes the text directly. Only a
+/// genuinely multi-chunk rope pays for the cache.
 pub(crate) fn lex(input: RopeSlice) -> Vec<Token> {
-    Lexer::new(input).run()
+    if let Some(text) = input.as_str() {
+        Lexer::<false>::new(input, text).run()
+    } else {
+        Lexer::<true>::new(input, input.chunks().next().unwrap_or("")).run()
+    }
 }
 
 /// The lexer's context stack. The base context is normal Julia code; opening a
@@ -95,23 +103,23 @@ enum Mode {
     Interp { depth: usize },
 }
 
-struct Lexer<'a> {
+struct Lexer<'a, const MULTI_CHUNK: bool> {
     slice: RopeSlice<'a>,
     /// The current contiguous chunk of `slice`, cached so byte/char reads are
-    /// O(1) within a chunk rather than O(log n) per byte. A plain field, so the
-    /// compiler can keep it in a register; it is refreshed only from `&mut self`
-    /// methods.
+    /// O(1) within a chunk rather than O(log n) per byte. When `MULTI_CHUNK` is
+    /// false the input is one contiguous `&str`, so `chunk` is the whole text
+    /// and never changes; the cache logic is dead and `chunk_start` stays 0.
     chunk: &'a str,
-    /// Byte offset of `chunk`'s start within `slice`.
+    /// Byte offset of `chunk`'s start within `slice`. Always 0 when
+    /// `MULTI_CHUNK == false`, which the compiler folds into the access math.
     chunk_start: usize,
     pos: usize,
     tokens: Vec<Token<'a>>,
     mode_stack: Vec<Mode>,
 }
 
-impl<'a> Lexer<'a> {
-    fn new(slice: RopeSlice<'a>) -> Self {
-        let chunk = slice.chunks().next().unwrap_or("");
+impl<'a, const MULTI_CHUNK: bool> Lexer<'a, MULTI_CHUNK> {
+    fn new(slice: RopeSlice<'a>, chunk: &'a str) -> Self {
         // ~4 bytes/token is the right order for source; the estimate only has
         // to skip the log₂(n) doubling grow from an empty `Vec`, not be exact.
         let tokens = Vec::with_capacity(slice.len() / 4);
@@ -144,14 +152,16 @@ impl<'a> Lexer<'a> {
     /// string-body scan paid a call per byte for nothing.
     #[inline(always)]
     fn ensure_chunk(&mut self, at: usize) {
-        let start = self.chunk_start;
-        if at >= start && at - start < self.chunk.len() {
-            return;
+        if MULTI_CHUNK {
+            let start = self.chunk_start;
+            if at >= start && at - start < self.chunk.len() {
+                return;
+            }
+            if at >= self.slice.len() {
+                return;
+            }
+            self.reload_chunk(at);
         }
-        if at >= self.slice.len() {
-            return;
-        }
-        self.reload_chunk(at);
     }
 
     /// The cold path of [`ensure_chunk`]: re-seat the cached chunk when `at`
@@ -178,12 +188,16 @@ impl<'a> Lexer<'a> {
     /// offsets into `slice`.
     #[inline]
     fn slice_range(&self, start: usize, end: usize) -> Cow<'a, str> {
-        let cs = self.chunk_start;
-        let ch = self.chunk;
-        if start >= cs && end <= cs + ch.len() {
-            Cow::Borrowed(&ch[start - cs..end - cs])
+        if MULTI_CHUNK {
+            let cs = self.chunk_start;
+            let ch = self.chunk;
+            if start >= cs && end <= cs + ch.len() {
+                Cow::Borrowed(&ch[start - cs..end - cs])
+            } else {
+                Cow::Owned(String::from(&self.slice.slice(start..end)))
+            }
         } else {
-            Cow::Owned(String::from(&self.slice.slice(start..end)))
+            Cow::Borrowed(&self.chunk[start..end])
         }
     }
 
