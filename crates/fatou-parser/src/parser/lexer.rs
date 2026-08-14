@@ -14,7 +14,7 @@
 use crate::keywords::keyword_table;
 use crate::tokens::token_table;
 use ropey::RopeSlice;
-use std::cell::Cell;
+use std::borrow::Cow;
 
 /// Generate [`TokKind`] from the shared token table. Only the tokens that do
 /// not materialize 1:1 as a `SyntaxKind` are written out here.
@@ -56,10 +56,12 @@ impl TokKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Token<'a> {
     pub(crate) kind: TokKind,
-    pub(crate) text: RopeSlice<'a>,
+    /// Borrowed within a chunk, owned only across a chunk boundary — so the
+    /// common case carries a 16-byte `&str`, not ropey's 40-byte `RopeSlice`.
+    pub(crate) text: Cow<'a, str>,
     pub(crate) start: usize,
     pub(crate) end: usize,
 }
@@ -96,12 +98,12 @@ enum Mode {
 struct Lexer<'a> {
     slice: RopeSlice<'a>,
     /// The current contiguous chunk of `slice`, cached so byte/char reads are
-    /// O(1) within a chunk rather than O(log n) per byte. `Cell` lets the
-    /// read-only helpers (`peek`, `char_at`) refresh it on a chunk boundary
-    /// without threading `&mut self` through every lexer method.
-    chunk: Cell<&'a str>,
+    /// O(1) within a chunk rather than O(log n) per byte. A plain field, so the
+    /// compiler can keep it in a register; it is refreshed only from `&mut self`
+    /// methods.
+    chunk: &'a str,
     /// Byte offset of `chunk`'s start within `slice`.
-    chunk_start: Cell<usize>,
+    chunk_start: usize,
     pos: usize,
     tokens: Vec<Token<'a>>,
     mode_stack: Vec<Mode>,
@@ -110,12 +112,15 @@ struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     fn new(slice: RopeSlice<'a>) -> Self {
         let chunk = slice.chunks().next().unwrap_or("");
+        // ~4 bytes/token is the right order for source; the estimate only has
+        // to skip the log₂(n) doubling grow from an empty `Vec`, not be exact.
+        let tokens = Vec::with_capacity(slice.len() / 4);
         Self {
             slice,
-            chunk: Cell::new(chunk),
-            chunk_start: Cell::new(0),
+            chunk,
+            chunk_start: 0,
             pos: 0,
-            tokens: Vec::new(),
+            tokens,
             mode_stack: Vec::new(),
         }
     }
@@ -129,33 +134,44 @@ impl<'a> Lexer<'a> {
 
     /// Refresh the cached chunk so it contains byte offset `at`. A no-op when
     /// `at` is already within the current chunk or past the end of input.
-    fn ensure_chunk(&self, at: usize) {
-        let start = self.chunk_start.get();
-        if at >= start && at - start < self.chunk.get().len() {
+    fn ensure_chunk(&mut self, at: usize) {
+        let start = self.chunk_start;
+        if at >= start && at - start < self.chunk.len() {
             return;
         }
         if at >= self.slice.len() {
             return;
         }
         let (mut chunks, start) = self.slice.chunks_at(at);
-        self.chunk.set(chunks.next().unwrap_or(""));
-        self.chunk_start.set(start);
+        self.chunk = chunks.next().unwrap_or("");
+        self.chunk_start = start;
     }
 
-    fn peek(&self, ahead: usize) -> Option<u8> {
+    fn peek(&mut self, ahead: usize) -> Option<u8> {
         let at = self.pos + ahead;
         self.ensure_chunk(at);
-        self.chunk
-            .get()
-            .as_bytes()
-            .get(at - self.chunk_start.get())
-            .copied()
+        self.chunk.as_bytes().get(at - self.chunk_start).copied()
+    }
+
+    /// Build the text of `start..end` as a `Cow`: borrowed (O(1)) when the range
+    /// lies entirely within the cached chunk — the overwhelmingly common case —
+    /// and owned (the O(log n) rope descent + one token-sized `String`) only
+    /// when it crosses a chunk boundary. `start`/`end` are char-boundary byte
+    /// offsets into `slice`.
+    fn slice_range(&self, start: usize, end: usize) -> Cow<'a, str> {
+        let cs = self.chunk_start;
+        let ch = self.chunk;
+        if start >= cs && end <= cs + ch.len() {
+            Cow::Borrowed(&ch[start - cs..end - cs])
+        } else {
+            Cow::Owned(String::from(&self.slice.slice(start..end)))
+        }
     }
 
     fn push(&mut self, kind: TokKind, start: usize, end: usize) {
         self.tokens.push(Token {
             kind,
-            text: self.slice.slice(start..end),
+            text: self.slice_range(start, end),
             start,
             end,
         });
@@ -241,29 +257,29 @@ impl<'a> Lexer<'a> {
     }
 
     /// The `char` beginning at byte offset `at` (for unicode identifier checks).
-    fn char_at(&self, at: usize) -> char {
+    fn char_at(&mut self, at: usize) -> char {
         if at >= self.slice.len() {
             return '\0';
         }
         self.ensure_chunk(at);
-        self.chunk.get()[at - self.chunk_start.get()..]
+        self.chunk[at - self.chunk_start..]
             .chars()
             .next()
             .unwrap_or('\0')
     }
 
     /// The byte at `at`, which must be a valid byte offset of the input.
-    fn byte_at(&self, at: usize) -> u8 {
+    fn byte_at(&mut self, at: usize) -> u8 {
         debug_assert!(at < self.slice.len());
         self.ensure_chunk(at);
-        self.chunk.get().as_bytes()[at - self.chunk_start.get()]
+        self.chunk.as_bytes()[at - self.chunk_start]
     }
 
     /// The bytes from `self.pos` onward, up to `buf.len()`, crossing chunk
     /// boundaries. Long enough for the longest operator spelling plus its
     /// augmented/broadcast lookahead; `try_ascii_op` and the Unicode probe read
     /// at most this much.
-    fn peek_op_bytes<'b>(&self, buf: &'b mut [u8]) -> &'b [u8] {
+    fn peek_op_bytes<'b>(&mut self, buf: &'b mut [u8]) -> &'b [u8] {
         let mut n = 0;
         while n < buf.len() {
             match self.peek(n) {
@@ -443,7 +459,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// Whether a closing delimiter (`triple` → three of `quote`) begins at `pos`.
-    fn at_close_delim(&self, quote: u8, triple: bool) -> bool {
+    fn at_close_delim(&mut self, quote: u8, triple: bool) -> bool {
         if triple {
             self.peek(0) == Some(quote)
                 && self.peek(1) == Some(quote)
@@ -455,7 +471,7 @@ impl<'a> Lexer<'a> {
 
     /// Whether the byte at `self.pos + ahead` begins an interpolation operand
     /// (an identifier-start char or an opening paren).
-    fn is_interp_start(&self, ahead: usize) -> bool {
+    fn is_interp_start(&mut self, ahead: usize) -> bool {
         match self.peek(ahead) {
             Some(b'(') => true,
             Some(_) => is_ident_start(self.char_at(self.pos + ahead)),
@@ -725,7 +741,7 @@ impl<'a> Lexer<'a> {
         // no intervening whitespace is a prefix (`r"..."`, `raw"..."`, `` v`...` ``).
         // Keywords are never prefixes.
         if matches!(self.peek(0), Some(b'"' | b'`'))
-            && keyword_kind(self.slice.slice(start..self.pos)).is_none()
+            && keyword_kind(self.slice_range(start, self.pos).as_ref()).is_none()
         {
             self.push(TokKind::StringPrefix, start, self.pos);
             let open = self.pos;
@@ -736,7 +752,8 @@ impl<'a> Lexer<'a> {
             }
             return;
         }
-        let kind = keyword_kind(self.slice.slice(start..self.pos)).unwrap_or(TokKind::Ident);
+        let kind =
+            keyword_kind(self.slice_range(start, self.pos).as_ref()).unwrap_or(TokKind::Ident);
         self.push(kind, start, self.pos);
     }
 
@@ -819,7 +836,7 @@ impl<'a> Lexer<'a> {
     /// point looked up in a generated table, not a fixed byte string. The three
     /// cases below are checked most-specific-first because they overlap on the
     /// same code point, not because of length.
-    fn unicode_op_at(&self, lead: usize) -> Option<(TokKind, usize)> {
+    fn unicode_op_at(&mut self, lead: usize) -> Option<(TokKind, usize)> {
         let ch = self.char_at(self.pos + lead);
         let dotted = lead == 1;
         let eq = self.peek(lead + ch.len_utf8()) == Some(b'=');
@@ -1148,10 +1165,10 @@ macro_rules! define_keyword_tables {
         pub const KEYWORDS: &[&str] = &[$($text),*];
 
         /// The keyword `text` spells, or `None` when it is an ordinary
-        /// identifier. Takes a [`RopeSlice`] so the lexer classifies an
-        /// identifier's text without materializing it; each comparison is a
-        /// zero-copy [`RopeSlice`] `PartialEq<&str>`.
-        fn keyword_kind(text: RopeSlice) -> Option<TokKind> {
+        /// identifier. Takes the token's `&str` (already borrowed within a
+        /// chunk or owned across one), so each comparison is a plain `str`
+        /// `memcmp`.
+        fn keyword_kind(text: &str) -> Option<TokKind> {
             $(if text == $text { return Some(TokKind::$tok); })*
             None
         }
@@ -1337,20 +1354,11 @@ mod tests {
         // Completion offers `KEYWORDS` verbatim, so a word the lexer treats as
         // an identifier would be offered as one.
         for kw in KEYWORDS {
-            assert_eq!(
-                kinds(kw),
-                vec![keyword_kind(RopeSlice::from(*kw)).unwrap()],
-                "lexing {kw}"
-            );
+            assert_eq!(kinds(kw), vec![keyword_kind(kw).unwrap()], "lexing {kw}");
+            assert!(keyword_kind(kw).unwrap().is_keyword(), "{kw} is a keyword");
             assert!(
-                keyword_kind(RopeSlice::from(*kw)).unwrap().is_keyword(),
-                "{kw} is a keyword"
-            );
-            assert!(
-                crate::parser::tree_builder::syntax_kind_for(
-                    keyword_kind(RopeSlice::from(*kw)).unwrap()
-                )
-                .is_keyword(),
+                crate::parser::tree_builder::syntax_kind_for(keyword_kind(kw).unwrap())
+                    .is_keyword(),
                 "{kw} materializes as a keyword kind"
             );
         }
@@ -1542,11 +1550,8 @@ mod tests {
                 TokKind::Ident
             ]
         );
-        assert_eq!(
-            keyword_kind(RopeSlice::from("function")),
-            Some(TokKind::FunctionKw)
-        );
-        assert_eq!(keyword_kind(RopeSlice::from("ends")), None);
+        assert_eq!(keyword_kind("function"), Some(TokKind::FunctionKw));
+        assert_eq!(keyword_kind("ends"), None);
     }
 
     #[test]
@@ -1868,10 +1873,7 @@ mod tests {
 
     #[test]
     fn where_is_a_keyword() {
-        assert_eq!(
-            keyword_kind(RopeSlice::from("where")),
-            Some(TokKind::WhereKw)
-        );
+        assert_eq!(keyword_kind("where"), Some(TokKind::WhereKw));
         assert_eq!(kinds("where"), vec![TokKind::WhereKw]);
     }
 
@@ -1929,5 +1931,36 @@ mod tests {
         assert_eq!(kinds("÷="), vec![TokKind::DivEq]);
         // The assignment tier does not fuse, so its `.` stays a lone `Dot`.
         assert_eq!(kinds(".⩴"), vec![TokKind::Dot, TokKind::UniAssign]);
+    }
+
+    #[test]
+    fn chunk_cached_text_matches_full_slice() {
+        // A 2048-byte identifier forces a token to straddle the first 1024-byte
+        // chunk boundary; the short tokens around it stay single-chunk. Every
+        // token's text must match the full `slice()` result byte-for-byte, so the
+        // chunk-cached fast path never diverges from the rope descent.
+        let body = format!("{}\nfoo = bar  # comment\nbaz = 1 + 2\n", "z".repeat(2048));
+        let rope = ropey::Rope::from_str(&body);
+        assert!(rope.chunks().count() > 1, "test corpus must be multi-chunk");
+        let slice = RopeSlice::from(&rope);
+        let tokens = lex(slice);
+        assert!(
+            tokens
+                .iter()
+                .any(|t| matches!(&t.text, std::borrow::Cow::Owned(_))),
+            "expected at least one token to span a chunk boundary"
+        );
+        for t in &tokens {
+            assert_eq!(
+                t.text.to_string(),
+                slice.slice(t.start..t.end).to_string(),
+                "chunk-cached text != full slice for [{}, {}) {:?}",
+                t.start,
+                t.end,
+                t.kind,
+            );
+        }
+        let joined: String = tokens.iter().map(|t| t.text.to_string()).collect();
+        assert_eq!(joined, body);
     }
 }

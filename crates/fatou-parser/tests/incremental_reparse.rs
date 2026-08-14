@@ -22,7 +22,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fatou_parser::parser::{
-    Edit, ReparseTier, Reparsed, apply_edits, fingerprint, parse, reparse, reparse_edits,
+    Edit, ReparseTier, Reparsed, apply_edits, fingerprint, parse, parse_rope, reparse,
+    reparse_edits,
 };
 use fatou_parser::syntax::SyntaxNode;
 
@@ -561,4 +562,18 @@ fn oracle_corpus() {
         check_snippet(&src, 1000 + i as u64);
         check_snippet_chains(&src, 1000 + i as u64);
     }
+}
+
+#[test]
+fn parse_rope_matches_parse() {
+    // `parse(&str)` and `parse_rope(&Rope)` share `parse_slice`, so a multi-chunk
+    // rope must produce a byte-identical tree and diagnostics to the flat text —
+    // the invariant the chunk-cached token text in the lexer has to preserve.
+    let body = "function f(x)\n    x + 1\nend\n".repeat(200);
+    let rope = ropey::Rope::from_str(&body);
+    assert!(rope.chunks().count() > 1, "test body must be multi-chunk");
+    let flat = parse(&body);
+    let roped = parse_rope(&rope);
+    assert_eq!(fingerprint(&flat.cst), fingerprint(&roped.cst));
+    assert_eq!(flat.diagnostics, roped.diagnostics);
 }

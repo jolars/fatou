@@ -3,7 +3,6 @@ use crate::parser::lexer::{TokKind, Token};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 use crate::tokens::token_table;
 use rowan::GreenNodeBuilder;
-use std::borrow::Cow;
 
 /// Build a lossless `rowan` CST from the token stream and the event stream.
 pub(crate) fn build_tree(tokens: &[Token<'_>], events: &[Event]) -> SyntaxNode {
@@ -27,15 +26,10 @@ pub(crate) fn build_tree(tokens: &[Token<'_>], events: &[Event]) -> SyntaxNode {
 }
 
 fn push_token(builder: &mut GreenNodeBuilder<'_>, tok: &Token<'_>) {
-    // A token normally lives in one chunk and its text is a zero-copy `&str`;
-    // a token spanning a chunk boundary (only possible in a multi-chunk rope)
-    // is materialized into its own `String` — the rare, token-sized case.
-    let text = tok
-        .text
-        .as_str()
-        .map(Cow::Borrowed)
-        .unwrap_or_else(|| Cow::Owned(String::from(&tok.text)));
-    builder.token(syntax_kind_for(tok.kind).into(), &text);
+    // The lexer already materialized the token text as a `Cow<str>` — borrowed
+    // within a chunk, owned across a boundary — so it hands the builder a plain
+    // `&str` either way.
+    builder.token(syntax_kind_for(tok.kind).into(), tok.text.as_ref());
 }
 
 /// Debug-only guard that the event stream opens and closes in balance: every

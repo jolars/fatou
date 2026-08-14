@@ -41,7 +41,9 @@ pub fn parse_rope(rope: &Rope) -> ParseOutput {
 pub fn parse_slice(slice: RopeSlice<'_>) -> ParseOutput {
     let tokens = lex(slice);
     let mut diagnostics = Vec::new();
-    let mut events = Vec::new();
+    // Roughly two events per token (start/finish plus the token itself); the
+    // exact count is unknowable up front, but this skips the doubling grow.
+    let mut events = Vec::with_capacity(tokens.len() * 2);
 
     let mut i = 0usize;
     while i < tokens.len() {

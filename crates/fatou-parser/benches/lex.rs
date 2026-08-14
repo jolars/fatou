@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use fatou_parser::parser::token_count;
+use fatou_parser::parser::{token_count, token_count_rope};
 
 /// The same target the reparse bench uses, so the two rows are comparable.
 const TARGET_BYTES: usize = 100 * 1024;
@@ -110,6 +110,13 @@ fn bench_lex(c: &mut Criterion) {
             group.throughput(criterion::Throughput::Bytes(src.len() as u64));
             group.bench_function("lex_corpus", |b| {
                 b.iter(|| black_box(token_count(black_box(&src))));
+            });
+            // The same tokenize over a multi-chunk rope (the LSP path), which the
+            // flat `&str` row above cannot see.
+            let rope = ropey::Rope::from_str(&src);
+            assert!(rope.chunks().count() > 1, "corpus must be multi-chunk");
+            group.bench_function("lex_corpus_rope", |b| {
+                b.iter(|| black_box(token_count_rope(black_box(&rope))));
             });
         }
         None => eprintln!(

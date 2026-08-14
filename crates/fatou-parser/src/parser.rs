@@ -45,6 +45,14 @@ pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
 pub fn token_count(input: &str) -> usize {
     lexer::lex(ropey::RopeSlice::from(input)).len()
 }
+
+/// The `lex` bench's rope entry point: tokenize a multi-chunk [`ropey::Rope`]
+/// directly, so the rope path the LSP uses (rather than the flat `&str` fast
+/// path) is measured. Same `bench` gate as [`token_count`].
+#[cfg(feature = "bench")]
+pub fn token_count_rope(rope: &ropey::Rope) -> usize {
+    lexer::lex(ropey::RopeSlice::from(rope)).len()
+}
 // A lossless CST hands out a literal's *source*; a consumer reading it as data
 // (the `include` path resolver) needs the value it denotes.
 pub use unescape::{StringDecodeError, string_value};

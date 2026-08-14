@@ -17,7 +17,6 @@ use crate::parser::structural::{
     parse_quote_expr, parse_struct_expr, parse_try_expr, parse_typegroup_expr, parse_while_expr,
 };
 use crate::syntax::SyntaxKind;
-use ropey::RopeSlice;
 
 mod array;
 mod juxtapose;
@@ -1463,7 +1462,7 @@ fn parse_prefix(
         // prefix-only Unicode radicals `√ ∛ ∜ ¬` (`√x` → `(call-pre √ x)`, with
         // the same precedence as `-`/`+`), and the unary-capable Unicode
         // arithmetic operators `± ∓ ⋆` (`±x` → `(call-pre ± x)`).
-        k if is_unary_prefix_op(k, tok.text) => {
+        k if is_unary_prefix_op(k, tok.text.as_ref()) => {
             // A unary arithmetic/logical operator glued to a `(` is a call when
             // the parens look like an argument list (`+(x, y)` → `(call + x y)`,
             // `+(a...)` → `(call + (... a))`, `+(a; b, c)` → `(call + a
@@ -1719,7 +1718,7 @@ fn parse_prefix(
         // (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`).
         TokKind::Char => {
             let tok = &ctx.tokens()[start];
-            if !char_token_terminated(tok.text) {
+            if !char_token_terminated(tok.text.as_ref()) {
                 push_diagnostic(
                     diagnostics,
                     DiagnosticKind::UnterminatedLiteral,
@@ -1895,8 +1894,8 @@ fn is_name_error_keyword(kind: TokKind) -> bool {
 /// A char-literal token is terminated when it carries a closing quote: text of
 /// length ≥ 2 ending in `'` (the empty `''` and a normal `'a'` both qualify). A
 /// bare `'` or content with no closing quote (`'a`) is unterminated.
-fn char_token_terminated(text: RopeSlice) -> bool {
-    text.len() >= 2 && text.byte(text.len() - 1) == b'\''
+fn char_token_terminated(text: &str) -> bool {
+    text.len() >= 2 && text.as_bytes()[text.len() - 1] == b'\''
 }
 
 /// The `(error op)` atom for a syntactic operator used where a value is expected.
@@ -1920,7 +1919,7 @@ fn is_lone_error_operator(kind: TokKind) -> bool {
 /// the only members of their tiers Julia accepts as unary, matched by exact
 /// text (a suffixed `±₁` is not a unary prefix and falls through to the
 /// operator-call-name arm, where glued to `(` it is a plain call).
-fn is_unary_prefix_op(kind: TokKind, text: RopeSlice) -> bool {
+fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
     use TokKind::*;
     matches!(
         kind,
@@ -2233,7 +2232,7 @@ pub(super) fn parse_quote_sym(
         // fall through to the bare-operator arm below (`:..` ⇒ `(quote-: ..)`).
         _ if ctx
             .token(next)
-            .is_some_and(|t| is_dotted_broadcast_text(t.text)) =>
+            .is_some_and(|t| is_dotted_broadcast_text(t.text.as_ref())) =>
         {
             events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
             events.push(Event::Tok(next));
@@ -3376,8 +3375,8 @@ fn is_operator(kind: TokKind) -> bool {
 /// with a broadcast `.` (`.+`, `.&`, `.=`, `.&&`, `.+=`). The range/splat
 /// operators `..`/`...` lead with a *doubled* dot and are not broadcasts, so they
 /// are excluded; bare field-access `.` is excluded by the length check.
-fn is_dotted_broadcast_text(text: RopeSlice) -> bool {
-    text.len() > 1 && text.byte(0) == b'.' && text.byte(1) != b'.'
+fn is_dotted_broadcast_text(text: &str) -> bool {
+    text.len() > 1 && text.as_bytes()[0] == b'.' && text.as_bytes()[1] != b'.'
 }
 
 /// Plain/broadcast assignment (`=`, `.=`) and augmented assignment (`+=`, `.+=`,

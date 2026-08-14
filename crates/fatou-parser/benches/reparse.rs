@@ -1,11 +1,12 @@
 //! What incremental reparse actually buys, measured against a full parse.
 //!
-//! Seven scenarios over one ~100 KB corpus file, all sharing a single base
+//! Eight scenarios over one ~100 KB corpus file, all sharing a single base
 //! parse done in setup:
 //!
 //! | bench                     | what it costs                                  |
 //! |---------------------------|------------------------------------------------|
 //! | `full_parse`              | the baseline every other row is judged by      |
+//! | `full_parse_rope`         | the same full parse over a multi-chunk rope    |
 //! | `token_keystroke`         | one char typed into an identifier (token tier) |
 //! | `docstring_keystroke`     | one char typed into a docstring (token tier)   |
 //! | `statement_edit`          | a statement added at the end (top-level tier)  |
@@ -17,6 +18,7 @@
 //!
 //! ```text
 //! full_parse                6.41 ms
+//! full_parse_rope            --  ms    --   -- re-measured post rope-merge
 //! token_keystroke          15.7  us     408x
 //! docstring_keystroke      18.3  us     351x
 //! statement_edit          554    us      12x
@@ -74,7 +76,7 @@ use std::path::{Path, PathBuf};
 use criterion::{Criterion, criterion_group, criterion_main};
 
 use fatou_parser::parser::{
-    Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, reparse, reparse_edits,
+    Edit, ParseDiagnostic, ReparseTier, diff_edit, parse, parse_rope, reparse, reparse_edits,
 };
 use rowan::GreenNode;
 
@@ -218,11 +220,25 @@ fn bench_reparse(c: &mut Criterion) {
         return;
     };
     let base = Base::new(src);
+    // The LSP parses a real multi-chunk rope (`parse_rope`), not the flat `&str`
+    // `full_parse` measures. Build one so the rope path is actually exercised.
+    let rope = ropey::Rope::from_str(&base.src);
+    assert!(
+        rope.chunks().count() > 1,
+        "corpus must be multi-chunk (> 1024-byte ropey leaves) to exercise the rope path"
+    );
     let mut group = c.benchmark_group("reparse");
     group.throughput(criterion::Throughput::Bytes(base.src.len() as u64));
 
     group.bench_function("full_parse", |b| {
         b.iter(|| black_box(parse(black_box(&base.src))));
+    });
+
+    // The same cold parse over the multi-chunk rope the LSP holds. This is the
+    // row that regressed when the lexer switched from `&str` to `RopeSlice` and
+    // `full_parse` (above) could no longer see it.
+    group.bench_function("full_parse_rope", |b| {
+        b.iter(|| black_box(parse_rope(black_box(&rope))));
     });
 
     // A char typed into an identifier deep in the file.
