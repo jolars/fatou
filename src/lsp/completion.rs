@@ -23,9 +23,12 @@
 //! (`Base.`, `LinearAlgebra.`, nested `A.B.`); value and type receivers are out
 //! of scope until there is type inference.
 
+use std::borrow::Cow;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
+
+use ropey::LineType;
 
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, MarkupContent,
@@ -67,7 +70,8 @@ pub fn compute_completions<P: PackageSource>(
     encoding: PositionEncoding,
     packages: &P,
 ) -> Vec<CompletionItem> {
-    let offset = TextBuffer::new(text).position_to_byte(position, encoding);
+    let buffer = TextBuffer::new(text);
+    let offset = buffer.position_to_byte(position, encoding);
     let root = parse(text).cst;
     let model = SemanticModel::build(&root);
     // The pure path has no file path to key workspace membership on; the live
@@ -77,7 +81,7 @@ pub fn compute_completions<P: PackageSource>(
         &root,
         packages,
         None,
-        text,
+        &buffer,
         TextSize::new(offset as u32),
         encoding,
     )
@@ -109,7 +113,7 @@ pub(crate) fn completion_via_db(
             &root,
             snapshot,
             workspace,
-            &text.text(),
+            text,
             offset,
             encoding,
         ))
@@ -137,19 +141,33 @@ fn completions_for<P: PackageSource>(
     root: &SyntaxNode,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
-    text: &str,
+    buffer: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
     let offset_bytes: usize = offset.into();
-    match context_at(text, offset_bytes) {
+    let clamped = offset_bytes.min(buffer.len());
+    // Context detection never spans a newline, so bound the prefix to the
+    // cursor's line (O(log n) line-index calls + one line-bounded slice) rather
+    // than flattening the whole document. `context_at`'s offsets are relative
+    // to the line prefix, so rebase the returned `Latex` start by `line_start`.
+    let line = buffer.rope().byte_to_line_idx(clamped, LineType::LF);
+    let line_start = buffer.rope().line_to_byte_idx(line, LineType::LF);
+    let line_prefix = Cow::<str>::from(buffer.rope().slice(line_start..clamped));
+    let context = match context_at(&line_prefix, clamped - line_start) {
+        Context::Latex { start } => Context::Latex {
+            start: start + line_start,
+        },
+        other => other,
+    };
+    match context {
         // A sequence is an input method, not code, so it wins over the
         // identifier run it would otherwise look like. Where the backslash is
         // more likely the literal's own than an input sequence, nothing is
         // offered at all rather than falling back to another context: a popup
         // of names over a regex escape would be just as much in the way.
         Context::Latex { start } => {
-            let typed = &text[start..offset_bytes];
+            let typed = Cow::<str>::from(buffer.rope().slice(start..offset_bytes));
             let suppressed = match string_context_at(root, offset) {
                 StringContext::Verbatim => true,
                 StringContext::Plain => is_lone_escape(&typed[1..]),
@@ -158,7 +176,7 @@ fn completions_for<P: PackageSource>(
             if suppressed {
                 Vec::new()
             } else {
-                latex_items(text, start, offset_bytes, encoding)
+                latex_items(buffer, start, offset_bytes, encoding)
             }
         }
         Context::Member {
@@ -311,16 +329,16 @@ fn is_sequence_char(c: char) -> bool {
 /// The items for the sequence `text[start..offset]`, each replacing the whole
 /// sequence (backslash included) with the character it expands to.
 fn latex_items(
-    text: &str,
+    buffer: &TextBuffer,
     start: usize,
     offset: usize,
     encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
-    let typed = &text[start..offset];
-    let line_index = TextBuffer::new(text);
+    let typed = Cow::<str>::from(buffer.rope().slice(start..offset));
+    let typed = typed.as_ref();
     let range = lsp_types::Range {
-        start: line_index.byte_to_position(start, encoding),
-        end: line_index.byte_to_position(offset, encoding),
+        start: buffer.byte_to_position(start, encoding),
+        end: buffer.byte_to_position(offset, encoding),
     };
     // The REPL only reaches for emoji once the `:` is there, so a bare `\` does
     // not bury 2549 LaTeX sequences under 1242 emoji.
@@ -732,13 +750,14 @@ mod tests {
     ) -> Vec<CompletionItem> {
         let root = parse(src).cst;
         let model = SemanticModel::build(&root);
+        let buffer = TextBuffer::new(src);
         let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
         completions_for(
             &model,
             &root,
             lib,
             Some((workspace, Vec::new())),
-            src,
+            &buffer,
             offset,
             PositionEncoding::Utf16,
         )
