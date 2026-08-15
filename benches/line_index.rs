@@ -7,18 +7,18 @@
 //! is no separate table to rebuild (`src/text/buffer.rs`).
 //!
 //! This bench is the evidence for that shape, and the guard against a change
-//! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-10
+//! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-15
 //! (release, otherwise-idle machine — every row here scales with load, so read
 //! the ratios, not the absolutes):
 //!
 //! ```text
 //!                                   134 KB     1073 KB
-//! rescan (TextBuffer::new)            26 us      316 us
-//! reuse the buffer's rope             1 ns        1 ns
-//! didChange (edit plus undo)        0.9 us      8.8 us
-//! flatten the whole buffer (text())  3.2 us       24 us
-//! slice a 64-byte span                35 ns        28 ns
-//! reparse, token tier                33 us      257 us
+//! rescan (TextBuffer::new)            23 us      185 us
+//! reuse the buffer's rope             0 ns        0 ns
+//! didChange (edit plus undo)        0.75 us     0.77 us
+//! flatten the whole buffer (text())  3.4 us       25 us
+//! slice a 64-byte span                34 ns        28 ns
+//! reparse, token tier                 26 us      214 us
 //! ```
 //!
 //! The `didChange` row applies a keystroke and then undoes it, so one
