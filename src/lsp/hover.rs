@@ -15,9 +15,12 @@
 //! function shows its whole method group (multiple dispatch), capped so a
 //! Base function with dozens of methods stays readable.
 
+use std::borrow::Cow;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
+
+use ropey::LineType;
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 use rowan::{TextRange, TextSize};
@@ -51,7 +54,7 @@ pub fn compute_hover<P: PackageSource>(
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
     // The pure path has no file path to key workspace membership on; the live
     // server passes the workspace module through `hover_via_db`.
-    hover_for(&model, packages, None, text, offset, &line_index, encoding)
+    hover_for(&model, packages, None, offset, &line_index, encoding)
 }
 
 /// Compute the hover off the snapshot's cached parse when the db's tracked buffer
@@ -81,7 +84,6 @@ pub(crate) fn hover_via_db(
             model,
             snapshot,
             workspace,
-            &text.text(),
             offset,
             line_index,
             encoding,
@@ -101,12 +103,11 @@ fn hover_for<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
-    text: &str,
     offset: TextSize,
     line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Option<Hover> {
-    let (value, range) = hover_content(model, packages, workspace, text, offset)?;
+    let (value, range) = hover_content(model, packages, workspace, line_index, offset)?;
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -122,7 +123,7 @@ fn hover_content<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
-    text: &str,
+    line_index: &TextBuffer,
     offset: TextSize,
 ) -> Option<(String, TextRange)> {
     // A qualified name (`Foo.bar`, `Base.@time`) carries its whole module path.
@@ -140,7 +141,7 @@ fn hover_content<P: PackageSource>(
     // An ordinary identifier occurrence: local when it binds, else a free read.
     if let Some(ident) = model.ident_at(offset) {
         if let Some(bid) = ident.binding {
-            return Some((render_local(model, bid, text), ident.range));
+            return Some((render_local(model, bid, line_index), ident.range));
         }
         let ns = if ident.is_macro {
             Namespace::Macro
@@ -148,7 +149,7 @@ fn hover_content<P: PackageSource>(
             Namespace::Value
         };
         return Some((
-            render_free_read(model, packages, workspace, text, &ident.name, offset, ns)?,
+            render_free_read(model, packages, workspace, line_index, &ident.name, offset, ns)?,
             ident.range,
         ));
     }
@@ -156,7 +157,7 @@ fn hover_content<P: PackageSource>(
     // occurrence, so it is found through the binding arena instead.
     if let Some(bid) = model.binding_at(offset) {
         let range = model.binding(bid).def_range;
-        return Some((render_local(model, bid, text), range));
+        return Some((render_local(model, bid, line_index), range));
     }
     None
 }
@@ -167,7 +168,7 @@ fn render_free_read<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
-    text: &str,
+    line_index: &TextBuffer,
     name: &str,
     offset: TextSize,
     ns: Namespace,
@@ -177,7 +178,7 @@ fn render_free_read<P: PackageSource>(
         .resolve(name, offset, ns)
     {
         // A binding the occurrence walk missed but resolution finds: still local.
-        Resolution::Binding(bid) => Some(render_local(model, bid, text)),
+        Resolution::Binding(bid) => Some(render_local(model, bid, line_index)),
         // A same-module sibling: render from the file's host module.
         Resolution::Workspace { module, name } => {
             let pkg = &workspace.as_ref()?.0;
@@ -353,11 +354,11 @@ fn method_group(group: &FunctionGroup) -> String {
 
 /// Render a local binding: its definition line for a function/type/macro (the
 /// signature the user wants), otherwise just its name, tagged with its kind.
-fn render_local(model: &SemanticModel, bid: BindingId, text: &str) -> String {
+fn render_local(model: &SemanticModel, bid: BindingId, line_index: &TextBuffer) -> String {
     let binding = model.binding(bid);
     let code = match binding.kind {
         BindingKind::Function | BindingKind::Type | BindingKind::Macro => {
-            definition_line(text, binding.def_range.start().into())
+            definition_line(line_index, binding.def_range.start().into())
                 .unwrap_or_else(|| binding.name.to_string())
         }
         _ => binding.name.to_string(),
@@ -370,14 +371,13 @@ fn render_local(model: &SemanticModel, bid: BindingId, text: &str) -> String {
 
 /// The trimmed source line containing byte `offset` (the definition's first
 /// line), or `None` when that line is blank.
-fn definition_line(text: &str, offset: usize) -> Option<String> {
-    let offset = offset.min(text.len());
-    let start = text[..offset].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let end = text[offset..]
-        .find('\n')
-        .map(|i| offset + i)
-        .unwrap_or(text.len());
-    let line = text[start..end].trim();
+fn definition_line(buffer: &TextBuffer, offset: usize) -> Option<String> {
+    let offset = offset.min(buffer.len());
+    let line_idx = buffer.rope().byte_to_line_idx(offset, LineType::LF);
+    let start = buffer.rope().line_to_byte_idx(line_idx, LineType::LF);
+    let end = buffer.rope().line_to_byte_idx(line_idx + 1, LineType::LF);
+    let line = Cow::<str>::from(buffer.rope().slice(start..end));
+    let line = line.trim();
     (!line.is_empty()).then(|| line.to_string())
 }
 
@@ -505,8 +505,9 @@ mod tests {
     fn hover_ws(src: &str, needle: &str, workspace: Arc<PackageIndex>) -> Option<String> {
         let model = SemanticModel::build(&parse(src).cst);
         let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
+        let buffer = TextBuffer::new(src);
         let lib: BTreeMap<String, Arc<PackageIndex>> = BTreeMap::new();
-        hover_content(&model, &lib, Some((workspace, Vec::new())), src, offset)
+        hover_content(&model, &lib, Some((workspace, Vec::new())), &buffer, offset)
             .map(|(value, _)| value)
     }
 
@@ -649,7 +650,8 @@ mod tests {
     ) -> Option<String> {
         let model = SemanticModel::build(&parse(src).cst);
         let offset = TextSize::new((src.find(needle).unwrap() + needle.len()) as u32);
-        hover_content(&model, lib, Some((workspace, Vec::new())), src, offset)
+        let buffer = TextBuffer::new(src);
+        hover_content(&model, lib, Some((workspace, Vec::new())), &buffer, offset)
             .map(|(value, _)| value)
     }
 
