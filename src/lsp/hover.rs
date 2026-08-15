@@ -81,12 +81,7 @@ pub(crate) fn hover_via_db(
         // The inner `Option` is the hover result (a cursor on nothing hoverable
         // is a legitimate `None`); the outer distinguishes that from a cache miss.
         Some(hover_for(
-            model,
-            snapshot,
-            workspace,
-            offset,
-            line_index,
-            encoding,
+            model, snapshot, workspace, offset, line_index, encoding,
         ))
     }));
     match cached {
@@ -149,7 +144,15 @@ fn hover_content<P: PackageSource>(
             Namespace::Value
         };
         return Some((
-            render_free_read(model, packages, workspace, line_index, &ident.name, offset, ns)?,
+            render_free_read(
+                model,
+                packages,
+                workspace,
+                line_index,
+                &ident.name,
+                offset,
+                ns,
+            )?,
             ident.range,
         ));
     }

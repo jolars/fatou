@@ -116,7 +116,9 @@ pub(crate) fn semantic_tokens_via_db(
         let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
-        Some(tokens_for(&root, model, snapshot, workspace, text, encoding))
+        Some(tokens_for(
+            &root, model, snapshot, workspace, text, encoding,
+        ))
     }));
     match cached {
         Ok(Some(tokens)) => tokens,
@@ -139,7 +141,12 @@ fn tokens_for<P: PackageSource + ?Sized>(
     encoding: PositionEncoding,
 ) -> SemanticTokens {
     let mut spans = syntax_spans(root);
-    spans.extend(resolved_spans(model, packages, workspace, line_index.rope()));
+    spans.extend(resolved_spans(
+        model,
+        packages,
+        workspace,
+        line_index.rope(),
+    ));
     // Stable, so a resolved span sharing a syntax span's start sorts after it
     // and the overlap drop keeps the syntax paint.
     spans.sort_by_key(|&(range, _)| (range.start(), range.end()));

@@ -109,13 +109,7 @@ pub(crate) fn completion_via_db(
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
         Some(completions_for(
-            model,
-            &root,
-            snapshot,
-            workspace,
-            text,
-            offset,
-            encoding,
+            model, &root, snapshot, workspace, text, offset, encoding,
         ))
     }));
     match cached {

@@ -179,7 +179,11 @@ fn supertype_base(expr: &SyntaxNode) -> Option<(String, TextRange)> {
 /// (cached) CST, like call hierarchy's `is_call_site`. Unlike a call site, a
 /// supertype site sits inside exactly one declaration, so validation and
 /// container extraction fuse into one step.
-fn supertype_site_decl(root: &SyntaxNode, range: TextRange, buffer: &TextBuffer) -> Option<TypeDecl> {
+fn supertype_site_decl(
+    root: &SyntaxNode,
+    range: TextRange,
+    buffer: &TextBuffer,
+) -> Option<TypeDecl> {
     let token = token_at(root, range.start())?;
     // The occurrence covers a NAME (or `var"..."`) node exactly.
     let name = token.parent_ancestors().find(|n| n.text_range() == range)?;

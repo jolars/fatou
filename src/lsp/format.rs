@@ -327,13 +327,7 @@ mod tests {
         db.upsert_file(path, buffer.to_string());
         let snapshot = db.snapshot();
         assert_eq!(
-            format_edits_via_db(
-                &snapshot,
-                path,
-                &TextBuffer::new(buffer),
-                style,
-                encoding
-            ),
+            format_edits_via_db(&snapshot, path, &TextBuffer::new(buffer), style, encoding),
             expected,
             "cached-tree format must match the re-parse path"
         );

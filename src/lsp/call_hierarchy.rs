@@ -450,7 +450,9 @@ pub(crate) fn incoming_calls_via_db(
             .filter(|o| !o.is_def && is_call_site(&root, o.range))
             .map(|o| o.range)
             .collect();
-        Some(group_incoming(&root, &buffer, &item.uri, &path, &sites, encoding))
+        Some(group_incoming(
+            &root, &buffer, &item.uri, &path, &sites, encoding,
+        ))
     }));
     // A racing write (`Err`) answers `None` — there is no request-side text
     // for a pure fallback.
@@ -491,7 +493,9 @@ fn workspace_incoming(
         let root = snapshot.parsed_tree(file);
         ranges.retain(|&range| is_call_site(&root, range));
         ranges.sort_by_key(|range| range.start());
-        out.extend(group_incoming(&root, &buffer, &uri, &path, &ranges, encoding));
+        out.extend(group_incoming(
+            &root, &buffer, &uri, &path, &ranges, encoding,
+        ));
     }
     out
 }
@@ -586,9 +590,9 @@ pub(crate) fn outgoing_calls_via_db(
                     if binding.kind != BindingKind::Function {
                         None
                     } else {
-                        callable_at(&root, binding.def_range.start(), &buffer).map(|(_, callable)| {
-                            item_for(&item.uri, &callable, line_index, encoding)
-                        })
+                        callable_at(&root, binding.def_range.start(), &buffer).map(
+                            |(_, callable)| item_for(&item.uri, &callable, line_index, encoding),
+                        )
                     }
                 }
                 Resolution::Workspace { module, name } => {
@@ -648,11 +652,7 @@ pub(crate) fn outgoing_calls_via_db(
 /// functions and `do` bodies belong to the enclosing item (symmetric with
 /// [`enclosing_container`]). Only plain-name callees are collected — qualified
 /// (`Pkg.foo`), parametric (`Foo{T}`), and bare-operator callees are deferred.
-fn collect_call_sites(
-    node: &SyntaxNode,
-    buffer: &TextBuffer,
-    out: &mut Vec<(String, TextRange)>,
-) {
+fn collect_call_sites(node: &SyntaxNode, buffer: &TextBuffer, out: &mut Vec<(String, TextRange)>) {
     for child in node.children() {
         if callable_def(&child, buffer).is_some() || child.kind() == SyntaxKind::MODULE_DEF {
             continue;
