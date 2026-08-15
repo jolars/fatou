@@ -74,7 +74,7 @@ struct Callable {
 /// [`symbols`](super::symbols)): a `FUNCTION_DEF`/`MACRO_DEF`, or an
 /// `ASSIGNMENT_EXPR` whose LHS (under `where`/`::` wrappers) is a call and
 /// whose operator is a plain `=`.
-fn callable_def(node: &SyntaxNode, text: &str) -> Option<Callable> {
+fn callable_def(node: &SyntaxNode, buffer: &TextBuffer) -> Option<Callable> {
     match node.kind() {
         SyntaxKind::FUNCTION_DEF | SyntaxKind::MACRO_DEF => {
             let sig_expr = signature_expr(node)?;
@@ -88,7 +88,7 @@ fn callable_def(node: &SyntaxNode, text: &str) -> Option<Callable> {
             if node.kind() == SyntaxKind::MACRO_DEF {
                 name.insert(0, '@');
             }
-            let detail = signature_detail(&sig_expr, selection, text);
+            let detail = signature_detail(&sig_expr, selection, buffer);
             Some(Callable {
                 name,
                 detail,
@@ -106,7 +106,7 @@ fn callable_def(node: &SyntaxNode, text: &str) -> Option<Callable> {
                 return None;
             }
             let (name, selection) = callee_name(&head)?;
-            let detail = signature_detail(&lhs, selection, text);
+            let detail = signature_detail(&lhs, selection, buffer);
             Some(Callable {
                 name,
                 detail,
@@ -120,10 +120,14 @@ fn callable_def(node: &SyntaxNode, text: &str) -> Option<Callable> {
 
 /// The callable definition whose *name* spans `offset`, with its node: what
 /// prepare returns and what a returned item's `selection_range` re-derives.
-fn callable_at(root: &SyntaxNode, offset: TextSize, text: &str) -> Option<(SyntaxNode, Callable)> {
+fn callable_at(
+    root: &SyntaxNode,
+    offset: TextSize,
+    buffer: &TextBuffer,
+) -> Option<(SyntaxNode, Callable)> {
     let token = token_at(root, offset)?;
     token.parent_ancestors().find_map(|node| {
-        let callable = callable_def(&node, text)?;
+        let callable = callable_def(&node, buffer)?;
         callable
             .selection
             .contains_inclusive(offset)
@@ -145,12 +149,12 @@ enum Container {
     File,
 }
 
-fn enclosing_container(root: &SyntaxNode, offset: TextSize, text: &str) -> Container {
+fn enclosing_container(root: &SyntaxNode, offset: TextSize, buffer: &TextBuffer) -> Container {
     let Some(token) = token_at(root, offset) else {
         return Container::File;
     };
     for node in token.parent_ancestors() {
-        if let Some(callable) = callable_def(&node, text) {
+        if let Some(callable) = callable_def(&node, buffer) {
             return Container::Callable(callable);
         }
         if node.kind() == SyntaxKind::MODULE_DEF
@@ -306,7 +310,7 @@ pub fn compute_prepare_call_hierarchy(
     let model = SemanticModel::build(&root);
     let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
-    prepare_for(&root, &model, uri, text, &line_index, offset, encoding)
+    prepare_for(&root, &model, uri, &line_index, offset, encoding)
 }
 
 /// The intra-file classification shared by both prepare paths: the cursor
@@ -316,7 +320,6 @@ fn prepare_for(
     root: &SyntaxNode,
     model: &SemanticModel,
     uri: &Uri,
-    text: &str,
     line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
@@ -326,7 +329,7 @@ fn prepare_for(
     if binding.kind != BindingKind::Function {
         return None;
     }
-    let (_, callable) = callable_at(root, binding.def_range.start(), text)?;
+    let (_, callable) = callable_at(root, binding.def_range.start(), line_index)?;
     Some(vec![item_for(uri, &callable, line_index, encoding)])
 }
 
@@ -360,15 +363,7 @@ pub(crate) fn prepare_call_hierarchy_via_db(
             return Some(Some(vec![item]));
         }
         let root = snapshot.parsed_tree(file);
-        Some(prepare_for(
-            &root,
-            model,
-            uri,
-            &text.text(),
-            line_index,
-            offset,
-            encoding,
-        ))
+        Some(prepare_for(&root, model, uri, line_index, offset, encoding))
     }));
     match cached {
         Ok(Some(items)) => items,
@@ -402,11 +397,11 @@ fn workspace_item(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file).text();
+        let buffer = snapshot.file_text_of(file).clone();
         let root = snapshot.parsed_tree(file);
-        if let Some((_, callable)) = callable_at(&root, range.start(), &text) {
-            let line_index = TextBuffer::new(&text);
-            return Some(item_for(&uri, &callable, &line_index, encoding));
+        if let Some((_, callable)) = callable_at(&root, range.start(), &buffer) {
+            let line_index = buffer.line_index();
+            return Some(item_for(&uri, &callable, line_index, encoding));
         }
     }
     None
@@ -434,8 +429,8 @@ pub(crate) fn incoming_calls_via_db(
     let path = to_path(&item.uri)?;
     let calls = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file).text();
-        let line_index = TextBuffer::new(&text);
+        let buffer = snapshot.file_text_of(file).clone();
+        let line_index = buffer.line_index();
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let model = snapshot.semantic_model(file);
@@ -455,9 +450,7 @@ pub(crate) fn incoming_calls_via_db(
             .filter(|o| !o.is_def && is_call_site(&root, o.range))
             .map(|o| o.range)
             .collect();
-        Some(group_incoming(
-            &root, &text, &item.uri, &path, &sites, encoding,
-        ))
+        Some(group_incoming(&root, &buffer, &item.uri, &path, &sites, encoding))
     }));
     // A racing write (`Err`) answers `None` — there is no request-side text
     // for a pure fallback.
@@ -494,11 +487,11 @@ fn workspace_incoming(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file).text();
+        let buffer = snapshot.file_text_of(file).clone();
         let root = snapshot.parsed_tree(file);
         ranges.retain(|&range| is_call_site(&root, range));
         ranges.sort_by_key(|range| range.start());
-        out.extend(group_incoming(&root, &text, &uri, &path, &ranges, encoding));
+        out.extend(group_incoming(&root, &buffer, &uri, &path, &ranges, encoding));
     }
     out
 }
@@ -508,19 +501,18 @@ fn workspace_incoming(
 /// order). `sites` must be sorted by position.
 fn group_incoming(
     root: &SyntaxNode,
-    text: &str,
+    buffer: &TextBuffer,
     uri: &Uri,
     path: &Path,
     sites: &[TextRange],
     encoding: PositionEncoding,
 ) -> Vec<CallHierarchyIncomingCall> {
-    let line_index = TextBuffer::new(text);
     // Keyed by the caller's selection range: same range, same caller. A
     // BTreeMap keeps callers in position order.
     let mut groups: BTreeMap<(u32, u32), CallHierarchyIncomingCall> = BTreeMap::new();
     for &site in sites {
-        let container = enclosing_container(root, site.start(), text);
-        let from = container_item(&container, uri, path, root, &line_index, encoding);
+        let container = enclosing_container(root, site.start(), buffer);
+        let from = container_item(&container, uri, path, root, buffer, encoding);
         let key = match &container {
             Container::Callable(c) => (c.selection.start().into(), c.selection.end().into()),
             Container::Module { selection, .. } => {
@@ -535,7 +527,7 @@ fn group_incoming(
                 from_ranges: Vec::new(),
             })
             .from_ranges
-            .push(to_range(site, &line_index, encoding));
+            .push(to_range(site, buffer, encoding));
     }
     groups.into_values().collect()
 }
@@ -559,8 +551,8 @@ pub(crate) fn outgoing_calls_via_db(
     let path = to_path(&item.uri)?;
     let calls = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file).text();
-        let line_index = TextBuffer::new(&text);
+        let buffer = snapshot.file_text_of(file).clone();
+        let line_index = buffer.line_index();
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let root = snapshot.parsed_tree(file);
@@ -570,10 +562,10 @@ pub(crate) fn outgoing_calls_via_db(
             SymbolKind::MODULE => token_at(&root, offset)?
                 .parent_ancestors()
                 .find(|n| n.kind() == SyntaxKind::MODULE_DEF)?,
-            _ => callable_at(&root, offset, &text)?.0,
+            _ => callable_at(&root, offset, &buffer)?.0,
         };
         let mut sites: Vec<(String, TextRange)> = Vec::new();
-        collect_call_sites(&source, &text, &mut sites);
+        collect_call_sites(&source, &buffer, &mut sites);
 
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(&path);
@@ -594,8 +586,8 @@ pub(crate) fn outgoing_calls_via_db(
                     if binding.kind != BindingKind::Function {
                         None
                     } else {
-                        callable_at(&root, binding.def_range.start(), &text).map(|(_, callable)| {
-                            item_for(&item.uri, &callable, &line_index, encoding)
+                        callable_at(&root, binding.def_range.start(), &buffer).map(|(_, callable)| {
+                            item_for(&item.uri, &callable, line_index, encoding)
                         })
                     }
                 }
@@ -641,7 +633,7 @@ pub(crate) fn outgoing_calls_via_db(
                     from_ranges: Vec::new(),
                 })
                 .from_ranges
-                .push(to_range(range, &line_index, encoding));
+                .push(to_range(range, line_index, encoding));
         }
         Some(groups.into_values().collect())
     }));
@@ -656,9 +648,13 @@ pub(crate) fn outgoing_calls_via_db(
 /// functions and `do` bodies belong to the enclosing item (symmetric with
 /// [`enclosing_container`]). Only plain-name callees are collected — qualified
 /// (`Pkg.foo`), parametric (`Foo{T}`), and bare-operator callees are deferred.
-fn collect_call_sites(node: &SyntaxNode, text: &str, out: &mut Vec<(String, TextRange)>) {
+fn collect_call_sites(
+    node: &SyntaxNode,
+    buffer: &TextBuffer,
+    out: &mut Vec<(String, TextRange)>,
+) {
     for child in node.children() {
-        if callable_def(&child, text).is_some() || child.kind() == SyntaxKind::MODULE_DEF {
+        if callable_def(&child, buffer).is_some() || child.kind() == SyntaxKind::MODULE_DEF {
             continue;
         }
         if matches!(
@@ -676,7 +672,7 @@ fn collect_call_sites(node: &SyntaxNode, text: &str, out: &mut Vec<(String, Text
         }
         // A call's arguments (and a signature's default values) may hold
         // further calls.
-        collect_call_sites(&child, text, out);
+        collect_call_sites(&child, buffer, out);
     }
 }
 
@@ -702,7 +698,7 @@ fn library_item(
     let uri = from_path(abs)?;
     let line_index = TextBuffer::new(text);
     let start = TextSize::new(span.start);
-    if let Some((_, callable)) = callable_at(root, start, text) {
+    if let Some((_, callable)) = callable_at(root, start, &line_index) {
         return Some(item_for(&uri, &callable, &line_index, encoding));
     }
     let range = to_range(

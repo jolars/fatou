@@ -76,7 +76,7 @@ struct TypeDecl {
 /// a `STRUCT_DEF`/`ABSTRACT_DEF`/`PRIMITIVE_DEF` whose signature names a type,
 /// with any `<: Super` clause peeled off the head. A primitive's bit count
 /// sits outside the `SIGNATURE`, so it never leaks into `detail`.
-fn type_decl_def(node: &SyntaxNode, text: &str) -> Option<TypeDecl> {
+fn type_decl_def(node: &SyntaxNode, buffer: &TextBuffer) -> Option<TypeDecl> {
     if !matches!(
         node.kind(),
         SyntaxKind::STRUCT_DEF | SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF
@@ -89,7 +89,7 @@ fn type_decl_def(node: &SyntaxNode, text: &str) -> Option<TypeDecl> {
         None => sig_expr.clone(),
     };
     let (name, selection) = head_name(&name_part)?;
-    let detail = signature_detail(&sig_expr, selection, text);
+    let detail = signature_detail(&sig_expr, selection, buffer);
     let kind = if node.kind() == SyntaxKind::ABSTRACT_DEF {
         SymbolKind::INTERFACE
     } else {
@@ -135,10 +135,14 @@ fn declared_supertype(def: &SyntaxNode) -> Option<SyntaxNode> {
 
 /// The type declaration whose *name* spans `offset`, with its node: what
 /// prepare returns and what a returned item's `selection_range` re-derives.
-fn type_decl_at(root: &SyntaxNode, offset: TextSize, text: &str) -> Option<(SyntaxNode, TypeDecl)> {
+fn type_decl_at(
+    root: &SyntaxNode,
+    offset: TextSize,
+    buffer: &TextBuffer,
+) -> Option<(SyntaxNode, TypeDecl)> {
     let token = token_at(root, offset)?;
     token.parent_ancestors().find_map(|node| {
-        let decl = type_decl_def(&node, text)?;
+        let decl = type_decl_def(&node, buffer)?;
         decl.selection
             .contains_inclusive(offset)
             .then_some((node, decl))
@@ -175,7 +179,7 @@ fn supertype_base(expr: &SyntaxNode) -> Option<(String, TextRange)> {
 /// (cached) CST, like call hierarchy's `is_call_site`. Unlike a call site, a
 /// supertype site sits inside exactly one declaration, so validation and
 /// container extraction fuse into one step.
-fn supertype_site_decl(root: &SyntaxNode, range: TextRange, text: &str) -> Option<TypeDecl> {
+fn supertype_site_decl(root: &SyntaxNode, range: TextRange, buffer: &TextBuffer) -> Option<TypeDecl> {
     let token = token_at(root, range.start())?;
     // The occurrence covers a NAME (or `var"..."`) node exactly.
     let name = token.parent_ancestors().find(|n| n.text_range() == range)?;
@@ -202,7 +206,7 @@ fn supertype_site_decl(root: &SyntaxNode, range: TextRange, text: &str) -> Optio
     if sig.kind() != SyntaxKind::SIGNATURE {
         return None;
     }
-    type_decl_def(&sig.parent()?, text)
+    type_decl_def(&sig.parent()?, buffer)
 }
 
 fn to_range(range: TextRange, line_index: &TextBuffer, encoding: PositionEncoding) -> Range {
@@ -249,7 +253,7 @@ pub fn compute_prepare_type_hierarchy(
     let model = SemanticModel::build(&root);
     let line_index = TextBuffer::new(text);
     let offset = TextSize::new(line_index.position_to_byte(position, encoding) as u32);
-    prepare_for(&root, &model, uri, text, &line_index, offset, encoding)
+    prepare_for(&root, &model, uri, &line_index, offset, encoding)
 }
 
 /// The intra-file classification shared by both prepare paths: the cursor
@@ -260,7 +264,6 @@ fn prepare_for(
     root: &SyntaxNode,
     model: &SemanticModel,
     uri: &Uri,
-    text: &str,
     line_index: &TextBuffer,
     offset: TextSize,
     encoding: PositionEncoding,
@@ -270,7 +273,7 @@ fn prepare_for(
     if binding.kind != BindingKind::Type {
         return None;
     }
-    let (_, decl) = type_decl_at(root, binding.def_range.start(), text)?;
+    let (_, decl) = type_decl_at(root, binding.def_range.start(), line_index)?;
     Some(vec![item_for(uri, &decl, line_index, encoding)])
 }
 
@@ -305,15 +308,7 @@ pub(crate) fn prepare_type_hierarchy_via_db(
             return Some(Some(vec![item]));
         }
         let root = snapshot.parsed_tree(file);
-        Some(prepare_for(
-            &root,
-            model,
-            uri,
-            &text.text(),
-            line_index,
-            offset,
-            encoding,
-        ))
+        Some(prepare_for(&root, model, uri, line_index, offset, encoding))
     }));
     match cached {
         Ok(Some(items)) => items,
@@ -347,11 +342,11 @@ fn workspace_type_item(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file).text();
+        let buffer = snapshot.file_text_of(file).clone();
         let root = snapshot.parsed_tree(file);
-        if let Some((_, decl)) = type_decl_at(&root, range.start(), &text) {
-            let line_index = TextBuffer::new(&text);
-            return Some(item_for(&uri, &decl, &line_index, encoding));
+        if let Some((_, decl)) = type_decl_at(&root, range.start(), &buffer) {
+            let line_index = buffer.line_index();
+            return Some(item_for(&uri, &decl, line_index, encoding));
         }
     }
     None
@@ -378,12 +373,12 @@ pub(crate) fn supertypes_via_db(
     let path = to_path(&item.uri)?;
     let supers = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file).text();
-        let line_index = TextBuffer::new(&text);
+        let buffer = snapshot.file_text_of(file).clone();
+        let line_index = buffer.line_index();
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let root = snapshot.parsed_tree(file);
-        let (def, _) = type_decl_at(&root, offset, &text)?;
+        let (def, _) = type_decl_at(&root, offset, &buffer)?;
         let Some(sup) = declared_supertype(&def) else {
             // No declared supertype: the implicit `Any`, a hierarchy root.
             return Some(Vec::new());
@@ -404,8 +399,8 @@ pub(crate) fn supertypes_via_db(
                 if binding.kind != BindingKind::Type {
                     None
                 } else {
-                    type_decl_at(&root, binding.def_range.start(), &text)
-                        .map(|(_, decl)| item_for(&item.uri, &decl, &line_index, encoding))
+                    type_decl_at(&root, binding.def_range.start(), &buffer)
+                        .map(|(_, decl)| item_for(&item.uri, &decl, line_index, encoding))
                 }
             }
             Resolution::Workspace { module, name } => workspace.as_ref().and_then(|(pkg, _)| {
@@ -451,7 +446,7 @@ fn library_type_item(
     let uri = from_path(abs)?;
     let line_index = TextBuffer::new(&text);
     let start = TextSize::new(span.start);
-    if let Some((_, decl)) = type_decl_at(&root, start, &text) {
+    if let Some((_, decl)) = type_decl_at(&root, start, &line_index) {
         return Some(item_for(&uri, &decl, &line_index, encoding));
     }
     let range = to_range(
@@ -489,8 +484,8 @@ pub(crate) fn subtypes_via_db(
     let path = to_path(&item.uri)?;
     let subs = salsa::Cancelled::catch(AssertUnwindSafe(|| {
         let file = snapshot.lookup_file(&path)?;
-        let text = snapshot.file_text(file).text();
-        let line_index = TextBuffer::new(&text);
+        let buffer = snapshot.file_text_of(file).clone();
+        let line_index = buffer.line_index();
         let offset =
             TextSize::new(line_index.position_to_byte(item.selection_range.start, encoding) as u32);
         let model = snapshot.semantic_model(file);
@@ -511,8 +506,8 @@ pub(crate) fn subtypes_via_db(
             model
                 .occurrences(binding)
                 .filter(|o| !o.is_def)
-                .filter_map(|o| supertype_site_decl(&root, o.range, &text))
-                .map(|decl| item_for(&item.uri, &decl, &line_index, encoding))
+                .filter_map(|o| supertype_site_decl(&root, o.range, &buffer))
+                .map(|decl| item_for(&item.uri, &decl, line_index, encoding))
                 .collect(),
         )
     }));
@@ -553,15 +548,15 @@ fn workspace_subtypes(
         let Some(uri) = from_path(&path) else {
             continue;
         };
-        let text = snapshot.file_text_of(file).text();
+        let buffer = snapshot.file_text_of(file).clone();
         let root = snapshot.parsed_tree(file);
-        let line_index = TextBuffer::new(&text);
+        let line_index = buffer.line_index();
         ranges.sort_by_key(|range| range.start());
         out.extend(
             ranges
                 .into_iter()
-                .filter_map(|range| supertype_site_decl(&root, range, &text))
-                .map(|decl| item_for(&uri, &decl, &line_index, encoding)),
+                .filter_map(|range| supertype_site_decl(&root, range, &buffer))
+                .map(|decl| item_for(&uri, &decl, line_index, encoding)),
         );
     }
     out

@@ -10,6 +10,7 @@
 //! way to tell them apart in the outline); qualified method extensions keep the
 //! full name (`Base.show`).
 
+use std::borrow::Cow;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
@@ -65,9 +66,7 @@ fn symbols_for_tree(
     buffer: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<DocumentSymbol> {
-    let text = buffer.text();
     let ctx = Ctx {
-        text: &text,
         line_index: buffer,
         encoding,
     };
@@ -77,7 +76,6 @@ fn symbols_for_tree(
 }
 
 struct Ctx<'a> {
-    text: &'a str,
     line_index: &'a TextBuffer,
     encoding: PositionEncoding,
 }
@@ -146,7 +144,7 @@ fn def_symbol(def: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbol> {
         name.insert(0, '@');
     }
     let detail = function_like
-        .then(|| signature_detail(&sig_expr, selection, ctx.text))
+        .then(|| signature_detail(&sig_expr, selection, ctx.line_index))
         .flatten();
 
     let kind = match def.kind() {
@@ -189,7 +187,7 @@ fn short_form_symbol(assign: &SyntaxNode, ctx: &Ctx<'_>) -> Option<DocumentSymbo
         return None;
     }
     let (name, selection) = callee_name(&head)?;
-    let detail = signature_detail(&lhs, selection, ctx.text);
+    let detail = signature_detail(&lhs, selection, ctx.line_index);
 
     // Nested definitions live in the value side; the signature binds none.
     let mut children = Vec::new();
@@ -388,11 +386,12 @@ pub(crate) fn head_name(node: &SyntaxNode) -> Option<(String, rowan::TextRange)>
 pub(crate) fn signature_detail(
     sig_expr: &SyntaxNode,
     name_range: rowan::TextRange,
-    text: &str,
+    buffer: &TextBuffer,
 ) -> Option<String> {
     let start = usize::from(name_range.end());
     let end = usize::from(sig_expr.text_range().end());
-    let detail = text.get(start..end)?.trim();
+    let detail = Cow::<str>::from(buffer.rope().slice(start..end));
+    let detail = detail.trim();
     (!detail.is_empty()).then(|| detail.to_string())
 }
 
