@@ -58,11 +58,7 @@ pub(crate) fn folding_ranges_via_db(
 /// Shared entry point for the fresh-parse and cached-tree paths: `root` must be
 /// the parse tree of exactly `text`.
 fn folds_for_tree(root: &SyntaxNode, buffer: &TextBuffer) -> Vec<FoldingRange> {
-    let text = buffer.text();
-    let ctx = Ctx {
-        text: &text,
-        line_index: buffer,
-    };
+    let ctx = Ctx { line_index: buffer };
     let mut out = Vec::new();
     for node in root.descendants() {
         match node.kind() {
@@ -99,7 +95,6 @@ fn folds_for_tree(root: &SyntaxNode, buffer: &TextBuffer) -> Vec<FoldingRange> {
 }
 
 struct Ctx<'a> {
-    text: &'a str,
     line_index: &'a TextBuffer,
 }
 
@@ -154,7 +149,9 @@ impl Ctx<'_> {
             .byte_to_position(start, PositionEncoding::Utf8)
             .character as usize;
         let line_start = start - character;
-        self.text[line_start..start]
+        self.line_index
+            .rope()
+            .slice(line_start..start)
             .chars()
             .all(char::is_whitespace)
     }
