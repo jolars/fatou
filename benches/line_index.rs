@@ -16,6 +16,8 @@
 //! rescan (TextBuffer::new)            26 us      316 us
 //! reuse the buffer's rope             1 ns        1 ns
 //! didChange (edit plus undo)        0.9 us      8.8 us
+//! flatten the whole buffer (text())  3.2 us       24 us
+//! slice a 64-byte span                35 ns        28 ns
 //! reparse, token tier                33 us      257 us
 //! ```
 //!
@@ -30,6 +32,12 @@
 //! (`parse_rope`, `reparse_*_rope`, … — issue #76), so `parsed_document` no
 //! longer flattens at all: a keystroke is O(log n + region), not O(N).
 //!
+//! The two "bounded read" rows are the read-handler path: a warm handler
+//! answers against a small span — a signature, a token, a line. Flattening the
+//! whole buffer per request (`text()`) is O(N); slicing the span off the rope
+//! (`rope().slice(..)`) is O(1) plus the span's bytes. The ratio is the
+//! per-request win, and it is independent of the span size.
+//!
 //! Plain `main` (`harness = false`), same style as `format_compare`: no
 //! criterion dependency in the root crate, just a warm loop and a table.
 //!
@@ -38,6 +46,7 @@
 //! cargo bench --bench line_index
 //! ```
 
+use std::borrow::Cow;
 use std::fs;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
@@ -133,6 +142,23 @@ fn bench_size(label: &str, text: &str) {
     row(
         "TextBuffer::byte_to_position",
         time(200_000, || index.byte_to_position(at, UTF16)),
+    );
+
+    println!("-- one bounded read, the handler path --");
+    // A warm read handler (hover/completion/semantic-tokens/…) answers against
+    // a small span — a signature, a token, a line. It used to flatten the whole
+    // buffer per request (`text()`); it now slices that span off the rope. The
+    // ratio below is the per-request win, and it is independent of the span
+    // size: the flatten is O(N), the slice is O(1) plus the span's bytes.
+    row(
+        "flatten the whole buffer (text())",
+        time(2_000, || buffer.text()),
+    );
+    row(
+        "slice a 64-byte signature span",
+        time(200_000, || {
+            Cow::<str>::from(buffer.rope().slice(at..at + 64))
+        }),
     );
 
     println!("-- for scale: what the keystroke triggers --");
