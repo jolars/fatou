@@ -1,5 +1,6 @@
 //! Formatting and diagnostic conversion for the language server.
 
+use std::borrow::Cow;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
@@ -243,14 +244,14 @@ pub(crate) fn edits_for_range_formatted(
 ) -> Vec<TextEdit> {
     let start = usize::from(formatted.range.start());
     let end = usize::from(formatted.range.end());
-    let text = buffer.text();
-    if text.get(start..end) == Some(formatted.text.as_str()) {
+    // The widened format span is a CST char-boundary range, so the slice is
+    // infallible; read just that span instead of flattening the whole buffer.
+    let span = Cow::<str>::from(buffer.rope().slice(start..end));
+    let span = span.as_ref();
+    if span == formatted.text.as_str() {
         return Vec::new();
     }
-    if let Some(edits) = text
-        .get(start..end)
-        .and_then(|old| line_diff_edits(buffer, start, old, &formatted.text, encoding))
-    {
+    if let Some(edits) = line_diff_edits(buffer, start, span, &formatted.text, encoding) {
         return edits;
     }
     vec![TextEdit {
