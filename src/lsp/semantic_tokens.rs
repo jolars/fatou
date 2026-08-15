@@ -22,9 +22,12 @@
 //! Deferred: `import`ed names are not chased into the library (matching hover
 //! and go-to-definition), and `using`/`import` statement paths stay plain.
 
+use std::borrow::Cow;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
+
+use ropey::Rope;
 
 use lsp_types::{
     Position, SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensDelta,
@@ -88,9 +91,10 @@ pub fn compute_semantic_tokens<P: PackageSource>(
 ) -> SemanticTokens {
     let root = parse(text).cst;
     let model = SemanticModel::build(&root);
+    let buffer = TextBuffer::new(text);
     // The pure path has no file path to key workspace membership on; the live
     // server passes the workspace module through `semantic_tokens_via_db`.
-    tokens_for(&root, &model, packages, None, text, encoding)
+    tokens_for(&root, &model, packages, None, &buffer, encoding)
 }
 
 /// Compute semantic tokens off the snapshot's cached parse when the db's
@@ -112,14 +116,7 @@ pub(crate) fn semantic_tokens_via_db(
         let root = snapshot.parsed_tree(file);
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
-        Some(tokens_for(
-            &root,
-            model,
-            snapshot,
-            workspace,
-            &text.text(),
-            encoding,
-        ))
+        Some(tokens_for(&root, model, snapshot, workspace, text, encoding))
     }));
     match cached {
         Ok(Some(tokens)) => tokens,
@@ -138,16 +135,16 @@ fn tokens_for<P: PackageSource + ?Sized>(
     model: &SemanticModel,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
-    text: &str,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> SemanticTokens {
     let mut spans = syntax_spans(root);
-    spans.extend(resolved_spans(model, packages, workspace, text));
+    spans.extend(resolved_spans(model, packages, workspace, line_index.rope()));
     // Stable, so a resolved span sharing a syntax span's start sorts after it
     // and the overlap drop keeps the syntax paint.
     spans.sort_by_key(|&(range, _)| (range.start(), range.end()));
     let spans = drop_overlaps(spans);
-    let data = delta_encode(&spans, text, encoding);
+    let data = delta_encode(&spans, line_index, encoding);
     SemanticTokens {
         // Content-derived so a `full/delta` re-pull of unchanged highlighting
         // can short-circuit to an empty edit list (see `semantic_tokens_delta`).
@@ -238,7 +235,7 @@ fn resolved_spans<P: PackageSource + ?Sized>(
     model: &SemanticModel,
     packages: &P,
     workspace: Option<(Arc<PackageIndex>, ModulePath)>,
-    text: &str,
+    text: &Rope,
 ) -> Vec<(TextRange, HighlightKind)> {
     let mut spans = Vec::new();
     // Definition sites: the name in `function f`, `macro m`, `struct S`,
@@ -399,7 +396,7 @@ fn library_kind(module: &ModuleIndex, name: &str) -> Option<HighlightKind> {
 fn qualified_spans<P: PackageSource + ?Sized>(
     model: &SemanticModel,
     packages: &P,
-    text: &str,
+    text: &Rope,
 ) -> Vec<(TextRange, HighlightKind)> {
     let mut spans = Vec::new();
     for q in model.qualified_reads() {
@@ -438,9 +435,9 @@ fn qualified_spans<P: PackageSource + ?Sized>(
 /// chain's text left to right (components appear in order, so a plain
 /// substring search cannot land on a later component); `None` when any
 /// component cannot be located.
-fn component_ranges(text: &str, range: TextRange, path: &[SmolStr]) -> Option<Vec<TextRange>> {
+fn component_ranges(text: &Rope, range: TextRange, path: &[SmolStr]) -> Option<Vec<TextRange>> {
     let base = usize::from(range.start());
-    let slice = &text[base..usize::from(range.end())];
+    let slice = Cow::<str>::from(text.slice(base..usize::from(range.end())));
     let mut ranges = Vec::with_capacity(path.len());
     let mut cursor = 0;
     for comp in path {
@@ -542,14 +539,13 @@ fn is_trivia(kind: SyntaxKind) -> bool {
 /// negotiated encoding, which [`TextBuffer::byte_to_position`] produces.
 fn delta_encode(
     spans: &[(TextRange, HighlightKind)],
-    text: &str,
+    line_index: &TextBuffer,
     encoding: PositionEncoding,
 ) -> Vec<SemanticToken> {
-    let line_index = TextBuffer::new(text);
     let mut data = Vec::new();
     let mut prev = Position::new(0, 0);
     for &(range, kind) in spans {
-        for segment in split_at_line_breaks(range, text) {
+        for segment in split_at_line_breaks(range, line_index.rope()) {
             let start = line_index.byte_to_position(segment.start().into(), encoding);
             let end = line_index.byte_to_position(segment.end().into(), encoding);
             debug_assert_eq!(start.line, end.line, "segments never span line breaks");
@@ -574,9 +570,9 @@ fn delta_encode(
 
 /// Split `range` at line breaks into per-line, non-empty segments, excluding
 /// the `\n` (and a preceding `\r`) itself.
-fn split_at_line_breaks(range: TextRange, text: &str) -> Vec<TextRange> {
+fn split_at_line_breaks(range: TextRange, text: &Rope) -> Vec<TextRange> {
     let base = usize::from(range.start());
-    let slice = &text[base..usize::from(range.end())];
+    let slice = Cow::<str>::from(text.slice(base..usize::from(range.end())));
     let mut segments = Vec::new();
     let mut push = |from: usize, to: usize| {
         let to = if slice.as_bytes()[from..to].last() == Some(&b'\r') {
