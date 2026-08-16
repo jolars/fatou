@@ -155,30 +155,38 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
   `missing-entry-file`, so the mismatch is at least reported; the edit is
   *Project files* stage 4.
 
-- [ ] Maybe (deferred): a rope (`ropey`) for the live buffer, raised in #76.
-  It would make locating a line O(log n) and retire `LineStarts` outright. What
-  blocks it is narrower than #76's first reading, and it is *not* the lexer:
-  `Token` owns its `text: String` (`parser/lexer.rs`), so nothing borrows the
-  input and a chunk-based lexer is a local refactor. Nor the tree, formatter, or
-  linter — rowan's green tokens own their text and `SyntaxText` is already
-  chunked, and the warm LSP paths go through the CST (`format_node`,
-  `check_parsed`), never the source. The three real `&str` demands are
-  `parse(text: &str)`, `SourceFile.text: String` (`src/incremental.rs`), and
-  above all `reparse`/`reparse_edits`, whose token- and toplevel-tier guards
-  prove a splice sound by slicing and relexing regions of `prev_text`/
-  `new_text`. That last one is the wall: a rewrite of the most delicate code in
-  the parser crate.
-  Note also that the "a rope pays a `Rope::to_string` per keystroke" objection
-  is weaker than it looks — a keystroke already pays two full `String` copies
-  (`analysis_thread`'s `upsert_file`, and `PrevParse { text: text.clone() }`),
-  which a rope in salsa would replace with an O(1) CoW clone. The case for
-  deferring rests on the size of the prize instead: with the table patched per
-  edit (`src/text/buffer.rs`) a keystroke costs ~2% of the reparse it triggers,
-  so what is left to win is a memmove plus one add per line after the edit site,
-  against point queries the bench measured ~7x slower on a rope
-  (`benches/line_index.rs`). rust-analyzer keeps documents as a plain `String`
-  and applies edits with `replace_range` for the same reasons. Revisit only if
-  the reparse guards go chunk-based.
+- [x] The per-keystroke text copies are gone, and the rope from #76 stays
+  deferred — now on measurement rather than on argument. Two changes: `Token`
+  borrows its text from the input (`Token<'src> { text: &'src str }`), which
+  retired the per-token `String` and cut lexing ~65% and a full parse ~15%;
+  and the document text is one shared `Arc<str>` across the buffer, salsa's
+  `SourceFile`, and `PrevParse`, which turned the write-phase copy and the
+  base clone into refcount bumps and the staleness compare into `Arc::ptr_eq`
+  (a no-op upsert went 39 us -> 150 ns at 1 MB). An edit now rebuilds the
+  string instead of splicing in place, +10-30 us at 1 MB, well under the
+  reparse it precedes.
+
+  Measured against a full ropey conversion of the same paths (PR #85): the
+  rope reproduced none of the lexer win that the borrow alone gives — its
+  chunk machinery costs 10-19% against `&str` tokens, and its multi-chunk LSP
+  path another ~55% — and it cannot match `ptr_eq` on the unchanged-text
+  check, since rope equality walks chunks (27 us at 1 MB). What a rope
+  uniquely buys is the didChange splice: 0.7 us flat at 1 MB against our
+  ~34 us rebuild. That is real and nothing else reproduces it, but it is
+  ~30 us on a path whose reparse costs 150 us+, and the same branch lost
+  ~2.5 ms per keystroke to per-byte rope iteration in `diff_edit`. Revisit
+  only if fatou starts targeting documents where the splice dominates, and
+  only after the `diff_edit` bypass below.
+
+- [ ] Skip `diff_edit` when the staged chain is a single verified edit.
+  `parsed_document` declines a chain below two edits, so the ordinary
+  one-keystroke case always re-derives, by diffing the two whole texts, an
+  edit the language server just handed it. `benches/salsa_keystroke.rs` puts
+  that at ~200 us of a ~500 us keystroke at 1 MB — more than the token-tier
+  reparse it feeds. The chain is already verified against the previous text
+  (`reparse_edits`' fits check), so a single-edit chain can go straight to
+  `reparse` with no new trust; `diff_edit` stays the fallback for a text that
+  changed by a route carrying no edits.
 
 ## Project files (`Project.toml`/`Manifest.toml`)
 
