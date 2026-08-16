@@ -12,38 +12,50 @@
 //! after the edit site, and every reader shares the result.
 
 use std::ops::{Deref, Range};
+use std::sync::Arc;
 
 use super::line_index::{LineIndex, LineStarts};
 
 /// Text plus the line-start table that indexes it, kept in step.
 ///
+/// The text is an immutable `Arc<str>`, so handing it to the salsa layer or a
+/// read job is a refcount bump, never a copy; an edit rebuilds the string once
+/// and that rebuild is the one linear cost a keystroke pays for text.
+///
 /// Derefs to `str`, so anything that just wants the text — `parse`, the
 /// formatter, the linter — takes it unchanged.
 #[derive(Debug, Clone, Default, Eq)]
 pub struct TextBuffer {
-    text: String,
+    text: Arc<str>,
     line_starts: LineStarts,
 }
 
 /// Two buffers are equal when their text is. Deriving this would also walk the
 /// line tables, which the type's whole invariant says are a function of the
 /// text — so that comparison could only ever agree, at a cost linear in the
-/// number of lines.
+/// number of lines. Shared allocations are equal without reading a byte.
 impl PartialEq for TextBuffer {
     fn eq(&self, other: &Self) -> bool {
-        self.text == other.text
+        Arc::ptr_eq(&self.text, &other.text) || self.text == other.text
     }
 }
 
 impl TextBuffer {
     /// Take ownership of `text`, scanning it once for its line starts.
-    pub fn new(text: String) -> Self {
+    pub fn new(text: impl Into<Arc<str>>) -> Self {
+        let text = text.into();
         let line_starts = LineStarts::new(&text);
         Self { text, line_starts }
     }
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// The text as a shared handle: an O(1) clone, for the salsa boundary and
+    /// anything else that stores the document rather than borrowing it.
+    pub fn text_arc(&self) -> Arc<str> {
+        Arc::clone(&self.text)
     }
 
     /// The maintained table, for a caller building its own [`LineIndex`].
@@ -59,25 +71,32 @@ impl TextBuffer {
     }
 
     /// Replace the bytes in `range` with `insert`, patching the line table
-    /// rather than rebuilding it.
+    /// rather than rebuilding it. The immutable text is rebuilt around the
+    /// splice — the deliberate one-linear-pass-per-edit that buys the O(1)
+    /// sharing everywhere else.
     ///
     /// Panics on a range that is out of bounds or not on a char boundary, as
     /// [`String::replace_range`] does.
     pub fn replace_range(&mut self, range: Range<usize>, insert: &str) {
         self.line_starts.patch(range.clone(), insert);
-        self.text.replace_range(range, insert);
+        let old = &self.text;
+        let mut new = String::with_capacity(old.len() - range.len() + insert.len());
+        new.push_str(&old[..range.start]);
+        new.push_str(insert);
+        new.push_str(&old[range.end..]);
+        self.text = Arc::from(new);
         self.debug_assert_in_step();
     }
 
     /// Replace the whole buffer, rescanning. This is the `didChange`-without-a-
     /// range case and the `didOpen` case; there is no edit to patch with.
-    pub fn set_text(&mut self, text: String) {
-        self.text = text;
+    pub fn set_text(&mut self, text: impl Into<Arc<str>>) {
+        self.text = text.into();
         self.line_starts = LineStarts::new(&self.text);
     }
 
     pub fn into_string(self) -> String {
-        self.text
+        self.text.to_string()
     }
 
     /// The invariant the type exists to uphold: the table is always exactly
@@ -105,13 +124,13 @@ impl Deref for TextBuffer {
 /// of it, and [`TextBuffer`] is the thing keeping that true.
 impl PartialEq<str> for TextBuffer {
     fn eq(&self, other: &str) -> bool {
-        self.text == other
+        &*self.text == other
     }
 }
 
 impl PartialEq<TextBuffer> for str {
     fn eq(&self, other: &TextBuffer) -> bool {
-        self == other.text.as_str()
+        self == &*other.text
     }
 }
 
@@ -123,7 +142,13 @@ impl From<String> for TextBuffer {
 
 impl From<&str> for TextBuffer {
     fn from(text: &str) -> Self {
-        Self::new(text.to_string())
+        Self::new(text)
+    }
+}
+
+impl From<Arc<str>> for TextBuffer {
+    fn from(text: Arc<str>) -> Self {
+        Self::new(text)
     }
 }
 

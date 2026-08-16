@@ -30,8 +30,8 @@ fn upsert_reuses_input_for_equivalent_paths() {
     use std::path::Path;
 
     let mut db = IncrementalDatabase::new();
-    let a = db.upsert_file(Path::new("/work/a.jl"), "f(x)\n".into());
-    let b = db.upsert_file(Path::new("/work/./a.jl"), "g(x)\n".into());
+    let a = db.upsert_file(Path::new("/work/a.jl"), "f(x)\n");
+    let b = db.upsert_file(Path::new("/work/./a.jl"), "g(x)\n");
     assert!(a == b, "equivalent path spellings should reuse one input");
     assert_eq!(parsed_tree_root(&db, a).to_string(), "g(x)\n");
 }
@@ -99,7 +99,7 @@ fn parse_populates_and_refreshes_the_reparse_base() {
 
     parsed_tree_root(&db, file);
     let prev = db.reparse_prev(file).expect("first parse stores its base");
-    assert_eq!(prev.text, "x = 1\n");
+    assert_eq!(&*prev.text, "x = 1\n");
     assert_eq!(prev.green.to_string(), "x = 1\n");
     assert!(prev.diagnostics.is_empty());
 
@@ -108,7 +108,7 @@ fn parse_populates_and_refreshes_the_reparse_base() {
     db.set_file_text(file, "x = 1 + 2\n");
     parsed_tree_root(&db, file);
     let prev = db.reparse_prev(file).expect("reparse base survives edits");
-    assert_eq!(prev.text, "x = 1 + 2\n");
+    assert_eq!(&*prev.text, "x = 1 + 2\n");
     assert_eq!(prev.green.to_string(), "x = 1 + 2\n");
 }
 
@@ -328,7 +328,7 @@ fn a_stage_after_a_peek_survives_the_drain() {
     db.reparse_store(
         file,
         PrevParse {
-            text: "alphaX = 1\n".to_string(),
+            text: "alphaX = 1\n".into(),
             green: parse("alphaX = 1\n").cst.green().to_owned(),
             diagnostics: Vec::new(),
         },
