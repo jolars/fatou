@@ -72,15 +72,26 @@ impl TextBuffer {
 
     /// Replace the bytes in `range` with `insert`, patching the line table
     /// rather than rebuilding it. The immutable text is rebuilt around the
-    /// splice — the deliberate one-linear-pass-per-edit that buys the O(1)
-    /// sharing everywhere else.
+    /// splice — the deliberate linear pass per edit that buys the O(1) sharing
+    /// everywhere else. It costs two copies of the buffer, not one, because
+    /// `Arc<str>` cannot adopt the `String`'s allocation; halving that means
+    /// storing `Arc<String>` and splicing through `Arc::make_mut`, which is
+    /// only worth it if this row ever stops being dwarfed by the reparse
+    /// (`benches/salsa_keystroke.rs`).
     ///
-    /// Panics on a range that is out of bounds or not on a char boundary, as
-    /// [`String::replace_range`] does.
+    /// Panics on a reversed range, one that is out of bounds, or one off a char
+    /// boundary, as [`String::replace_range`] does.
     pub fn replace_range(&mut self, range: Range<usize>, insert: &str) {
+        // Slice the removed region up front, which is what reproduces
+        // `String::replace_range`'s panics *and* what keeps a bad range from
+        // leaving a patched table over unpatched text. The length arithmetic
+        // below cannot stand in for it: a reversed range has length zero, so
+        // the splice would silently duplicate `end..start`, and an
+        // out-of-bounds one underflows into a bogus capacity.
+        let removed = self.text[range.clone()].len();
         self.line_starts.patch(range.clone(), insert);
         let old = &self.text;
-        let mut new = String::with_capacity(old.len() - range.len() + insert.len());
+        let mut new = String::with_capacity(old.len() - removed + insert.len());
         new.push_str(&old[..range.start]);
         new.push_str(insert);
         new.push_str(&old[range.end..]);
@@ -203,5 +214,32 @@ mod tests {
         );
         assert_eq!(&*before, "ab\ncd");
         assert_eq!(buffer.text(), "ab\nxy\ncd");
+    }
+
+    /// A malformed range must panic where [`String::replace_range`] would.
+    /// Rebuilding the text around the splice can no longer rely on the string
+    /// machinery to reject one, and the arithmetic that replaced it accepts
+    /// both of the shapes below: a reversed range measures zero and would
+    /// duplicate the region it names, an out-of-bounds one underflows.
+    #[test]
+    #[should_panic(expected = "byte range starts at 4 but ends at 2")]
+    #[expect(
+        clippy::reversed_empty_ranges,
+        reason = "the malformed range is the subject of the test"
+    )]
+    fn a_reversed_edit_range_panics() {
+        TextBuffer::from("abcdefgh").replace_range(4..2, "Z");
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn an_out_of_bounds_edit_range_panics() {
+        TextBuffer::from("abcdefgh").replace_range(0..99, "Z");
+    }
+
+    #[test]
+    #[should_panic(expected = "not a char boundary")]
+    fn an_edit_range_off_a_char_boundary_panics() {
+        TextBuffer::from("\u{1F600}x").replace_range(1..2, "Z");
     }
 }
