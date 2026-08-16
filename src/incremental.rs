@@ -236,7 +236,10 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     // a write that set the text back to what the base holds. Nothing is stored:
     // the base has not moved, and the staged chain stays anchored to it (its
     // net effect is a no-op, so a later edit appended to it still describes the
-    // transform from the base).
+    // transform from the base). The `ptr_eq` is the free half of the check —
+    // the base normally holds the very allocation salsa tracks — and the
+    // compare behind it is what makes the guard correct for a base rebuilt
+    // from equal-but-distinct text.
     if let Some(prev) = prev
         .as_ref()
         .filter(|prev| Arc::ptr_eq(&prev.text, text) || prev.text == *text)
@@ -1030,9 +1033,14 @@ impl IncrementalDatabase {
         let existing = self.source_map().by_path.get(&key).copied();
         match existing {
             Some(file) => {
-                // Salsa's setter never compares, so this guard is what stops a
-                // no-op upsert from invalidating the world. A shared allocation
-                // proves equality without reading a byte.
+                // Salsa's setter never compares, so this guard — the compare,
+                // not the `ptr_eq` — is what stops a no-op upsert from
+                // invalidating the world. The `ptr_eq` in front only makes the
+                // common case free: a shared allocation proves equality
+                // without reading a byte. It is written out rather than left to
+                // `Arc`'s own `PartialEq`, whose identical short-circuit is an
+                // unspecified `std` optimization, and this is a path whose cost
+                // the benches pin.
                 let tracked = file.text(self);
                 if !Arc::ptr_eq(tracked, &text) && *tracked != text {
                     file.set_text(self).to(text);

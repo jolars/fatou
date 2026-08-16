@@ -68,15 +68,18 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   buffer, salsa's `SourceFile.text`, and the reparse base (`PrevParse.text`)
   hold the same allocation, so the write phase passes `text.text_arc()` (O(1))
   and the base stores a refcount bump. Reintroducing a `.text().to_string()`
-  on the dispatch path is the regression to watch for. Because the allocation
-  is shared, the staleness guards (`upsert_file`, `revert_file_to_disk`) put
+  on the dispatch path is the regression to watch for. Where the allocation can
+  be shared, the staleness guards (`upsert_file`, `parsed_document`) put
   `Arc::ptr_eq` **in front of** the content compare — never instead of it:
-  salsa's setter does no equality check at all, so the compare is what keeps a
-  no-op write from invalidating every memo. An edit rebuilds the string once
-  (`TextBuffer::replace_range`), which is the deliberate one linear pass a
-  keystroke pays for text; `benches/salsa_keystroke.rs` measures the whole
-  didChange → upsert → parse path, and is the bench that catches a cost added
-  *between* the pieces the other benches time.
+  salsa's setter does no equality check at all, so the *compare* is what keeps
+  a no-op write from invalidating every memo, and the `ptr_eq` only makes the
+  common case free. `revert_file_to_disk` has no such fast path and wants none:
+  its text comes off disk, so the allocations can never be shared. An edit
+  rebuilds the string once (`TextBuffer::replace_range`), which is the
+  deliberate linear pass a keystroke pays for text and the one place a
+  malformed range must still panic rather than splice. `benches/salsa_keystroke.rs`
+  measures the whole didChange → upsert → parse path, and is the bench that
+  catches a cost added *between* the pieces the other benches time.
 
 ## Conventions
 
