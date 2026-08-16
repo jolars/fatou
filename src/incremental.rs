@@ -48,8 +48,11 @@ pub struct SourceFile {
     /// document. Set once at creation and never mutated.
     #[returns(ref)]
     pub path: Option<PathBuf>,
+    /// The document text as a shared immutable handle: setting it moves an
+    /// `Arc` in, and [`PrevParse`] and the live buffer share the same
+    /// allocation, so text changes hands without being copied.
     #[returns(ref)]
-    pub text: String,
+    pub text: Arc<str>,
 }
 
 /// The harvested library index: every resolved package's [`PackageIndex`]
@@ -152,7 +155,7 @@ pub struct ParsedDocument {
 /// tracked query sound.
 #[derive(Debug, Clone)]
 pub struct PrevParse {
-    pub text: String,
+    pub text: Arc<str>,
     pub green: rowan::GreenNode,
     pub diagnostics: Vec<ParseDiagnostic>,
 }
@@ -234,7 +237,10 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     // the base has not moved, and the staged chain stays anchored to it (its
     // net effect is a no-op, so a later edit appended to it still describes the
     // transform from the base).
-    if let Some(prev) = prev.as_ref().filter(|prev| prev.text == *text) {
+    if let Some(prev) = prev
+        .as_ref()
+        .filter(|prev| Arc::ptr_eq(&prev.text, text) || prev.text == *text)
+    {
         return ParsedDocument {
             green: prev.green.clone(),
             diagnostics: prev.diagnostics.clone(),
@@ -252,7 +258,7 @@ pub fn parsed_document(db: &dyn IncrementalDb, file: SourceFile) -> ParsedDocume
     let (green, diagnostics) = match reparsed {
         Some(r) => (r.green, r.diagnostics),
         None => {
-            let parsed = parse(text.as_str());
+            let parsed = parse(text);
             (parsed.cst.green().to_owned(), parsed.diagnostics)
         }
     };
@@ -1011,19 +1017,24 @@ impl IncrementalDatabase {
 
     /// Track an in-memory document with no on-disk path. Gets a fresh
     /// [`FileId`] and a `None` path, so it never aliases another file.
-    pub fn add_file(&self, text: impl Into<String>) -> SourceFile {
+    pub fn add_file(&self, text: impl Into<Arc<str>>) -> SourceFile {
         let id = self.source_map().alloc_id();
         SourceFile::new(self, id, None, text.into())
     }
 
     /// Track (or reuse) the file at `path`, replacing its text. Equivalent path
     /// spellings map to the same input.
-    pub fn upsert_file(&mut self, path: &Path, text: String) -> SourceFile {
+    pub fn upsert_file(&mut self, path: &Path, text: impl Into<Arc<str>>) -> SourceFile {
         let key = normalize_path(path);
+        let text = text.into();
         let existing = self.source_map().by_path.get(&key).copied();
         match existing {
             Some(file) => {
-                if file.text(self) != &text {
+                // Salsa's setter never compares, so this guard is what stops a
+                // no-op upsert from invalidating the world. A shared allocation
+                // proves equality without reading a byte.
+                let tracked = file.text(self);
+                if !Arc::ptr_eq(tracked, &text) && *tracked != text {
                     file.set_text(self).to(text);
                 }
                 file
@@ -1043,13 +1054,13 @@ impl IncrementalDatabase {
         self.source_map().by_path.get(&key).copied()
     }
 
-    pub fn set_file_text(&mut self, file: SourceFile, text: impl Into<String>) {
+    pub fn set_file_text(&mut self, file: SourceFile, text: impl Into<Arc<str>>) {
         file.set_text(self).to(text.into());
     }
 
     /// The text currently tracked for `file`.
     pub fn file_text(&self, file: SourceFile) -> &str {
-        file.text(self).as_str()
+        file.text(self)
     }
 
     /// The on-disk path `file` was tracked under, or `None` for an in-memory
@@ -1243,7 +1254,7 @@ impl IncrementalDatabase {
         }
         let text = std::fs::read_to_string(&key).ok()?;
         let id = self.source_map().alloc_id();
-        let file = SourceFile::new(self, id, Some(key.clone()), text);
+        let file = SourceFile::new(self, id, Some(key.clone()), Arc::from(text));
         self.source_map().by_path.insert(key, file);
         Some(file)
     }
@@ -1282,8 +1293,8 @@ impl IncrementalDatabase {
         let Ok(text) = std::fs::read_to_string(path) else {
             return;
         };
-        if file.text(self) != &text {
-            file.set_text(self).to(text);
+        if **file.text(self) != *text {
+            file.set_text(self).to(Arc::from(text));
         }
     }
 
@@ -1600,8 +1611,8 @@ mod tests {
     #[test]
     fn upsert_dedups_by_normalized_path() {
         let mut db = IncrementalDatabase::new();
-        let a = db.upsert_file(Path::new("/tmp/a.jl"), "x = 1\n".into());
-        let b = db.upsert_file(Path::new("/tmp/./a.jl"), "x = 2\n".into());
+        let a = db.upsert_file(Path::new("/tmp/a.jl"), "x = 1\n");
+        let b = db.upsert_file(Path::new("/tmp/./a.jl"), "x = 2\n");
         assert!(a == b, "equivalent path spellings should reuse one input");
         assert_eq!(parsed_tree_root(&db, a).to_string(), "x = 2\n");
     }
@@ -1620,7 +1631,7 @@ mod tests {
         assert!(db.source_map.is_poisoned(), "the mutex should be poisoned");
 
         // Every path through the recovery helper still works.
-        let file = db.upsert_file(Path::new("/tmp/x.jl"), "x = 1\n".into());
+        let file = db.upsert_file(Path::new("/tmp/x.jl"), "x = 1\n");
         assert!(
             db.lookup_file(Path::new("/tmp/x.jl")) == Some(file),
             "lookup should find the just-upserted file after poison recovery"
