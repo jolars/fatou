@@ -183,4 +183,25 @@ mod tests {
         assert_eq!(buffer.line_index().line_count(), 2);
         assert_eq!(buffer.line_starts(), &LineStarts::new(&buffer));
     }
+
+    /// The whole point of the `Arc<str>` representation: handing the text out
+    /// shares one allocation, and an edit replaces the allocation without
+    /// disturbing handles taken before it — which is what lets the salsa
+    /// layer, the reparse base, and in-flight read jobs hold the text without
+    /// copying it.
+    #[test]
+    fn text_arc_shares_until_an_edit_and_then_snapshots() {
+        let mut buffer = TextBuffer::from("ab\ncd");
+        let before = buffer.text_arc();
+        assert!(Arc::ptr_eq(&before, &buffer.text_arc()));
+        assert!(Arc::ptr_eq(&before, &buffer.clone().text_arc()));
+
+        buffer.replace_range(2..2, "\nxy");
+        assert!(
+            !Arc::ptr_eq(&before, &buffer.text_arc()),
+            "an edit must not mutate a shared allocation"
+        );
+        assert_eq!(&*before, "ab\ncd");
+        assert_eq!(buffer.text(), "ab\nxy\ncd");
+    }
 }

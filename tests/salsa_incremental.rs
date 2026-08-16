@@ -112,6 +112,49 @@ fn parse_populates_and_refreshes_the_reparse_base() {
     assert_eq!(prev.green.to_string(), "x = 1 + 2\n");
 }
 
+/// An upsert whose text equals the tracked input must not bump the revision:
+/// salsa's setter never compares, so `upsert_file`'s guard is the only thing
+/// keeping a no-op write from invalidating every memo. Both routes must hold —
+/// the same shared allocation (the `Arc::ptr_eq` fast path) and a fresh, equal
+/// allocation (the content compare behind it).
+#[test]
+fn an_unchanged_upsert_keeps_the_memos() {
+    use std::path::Path;
+
+    let mut db = IncrementalDatabase::new();
+    let file = db.upsert_file(Path::new("/work/noop.jl"), "x = 1\n");
+    let before = semantic_model(&db, file) as *const _;
+
+    let shared = file.text(&db).clone();
+    db.upsert_file(Path::new("/work/noop.jl"), shared);
+    assert!(
+        std::ptr::eq(before, semantic_model(&db, file)),
+        "re-upserting the tracked allocation must not invalidate"
+    );
+
+    db.upsert_file(Path::new("/work/noop.jl"), "x = 1\n");
+    assert!(
+        std::ptr::eq(before, semantic_model(&db, file)),
+        "re-upserting equal text from a fresh allocation must not invalidate"
+    );
+}
+
+/// The reparse base stores the very allocation salsa tracks, so writing the
+/// base after a parse costs a refcount bump, never a copy of the text.
+#[test]
+fn the_reparse_base_shares_the_tracked_text() {
+    use std::sync::Arc;
+
+    let db = IncrementalDatabase::new();
+    let file = db.add_file("x = 1\n");
+    parsed_tree_root(&db, file);
+    let prev = db.reparse_prev(file).expect("first parse stores its base");
+    assert!(
+        Arc::ptr_eq(&prev.text, file.text(&db)),
+        "the base must share salsa's allocation, not copy it"
+    );
+}
+
 /// Two identifier edits far apart: `diff_edit` would collapse them into one
 /// span covering both statements, so this is the shape only the staged chain
 /// rescues. Whichever route wins, the tree must equal a full parse.
