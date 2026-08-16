@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0](https://github.com/jolars/fatou/compare/v0.14.0...v0.15.0) (2026-08-16)
+
+### Features
+- **lsp:** send line-scoped formatting edits ([`6855e63`](https://github.com/jolars/fatou/commit/6855e63193a65c9c9ab1fb40ca7e2eae8c09c672))
+
+### Bug Fixes
+- **text:** restore `replace_range`'s panic contract ([`25dc59d`](https://github.com/jolars/fatou/commit/25dc59d97489350182506fb5baae83aae3db7027))
+
+### Performance Improvements
+- **text,lsp:** back document text with Arc<str> ([`6668392`](https://github.com/jolars/fatou/commit/6668392f133db4fb699dfd9219e7eb3e1ab46c93))
+- **check:** line-diff with Patience, not the default Myers ([`624f816`](https://github.com/jolars/fatou/commit/624f8168a251199b914bfcec5f55e26a24955578))
+- **lint:** render findings without rescanning the file each time ([`e3c8afc`](https://github.com/jolars/fatou/commit/e3c8afc5744326cd6499b7cbf446d00c64218e0e))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.3.3
+- updated crates/fatou-parser to v0.4.1
+
 ## [0.14.0](https://github.com/jolars/fatou/compare/v0.13.0...v0.14.0) (2026-08-13)
 
 ### Features

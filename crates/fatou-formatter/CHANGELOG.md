@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3](https://github.com/jolars/fatou/compare/fatou-formatter-v0.3.2...fatou-formatter-v0.3.3) (2026-08-16)
+
+### Performance Improvements
+- **formatter:** stop copying the print stack per fit probe ([`9f317e3`](https://github.com/jolars/fatou/commit/9f317e32e84603fdb8538c7282078d940b93d3f4))
+
+### Dependencies
+- updated crates/fatou-parser to v0.4.1
+
 ## [0.3.2](https://github.com/jolars/fatou/compare/fatou-formatter-v0.3.1...fatou-formatter-v0.3.2) (2026-08-13)
 
 ### Dependencies

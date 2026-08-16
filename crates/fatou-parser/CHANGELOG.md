@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/jolars/fatou/compare/fatou-parser-v0.4.0...fatou-parser-v0.4.1) (2026-08-16)
+
+### Bug Fixes
+- **parser:** cast the five wrapped kinds `Expr` dropped to `Other` ([`1347ed5`](https://github.com/jolars/fatou/commit/1347ed5b2e55410def89505fe1a07640eccde50f))
+
+### Performance Improvements
+- **parser:** borrow token text from the source ([`ac7f2e2`](https://github.com/jolars/fatou/commit/ac7f2e2a7ea6c68f7f24452c78d9b5df9780525c))
+- **parser:** fold docstrings in one linear pass ([`4f55e60`](https://github.com/jolars/fatou/commit/4f55e6028d9ccb4893b770ccf1b2f5419892748a))
+
 ## [0.4.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.3.0...fatou-parser-v0.4.0) (2026-08-13)
 
 ### Features
