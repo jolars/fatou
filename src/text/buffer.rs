@@ -33,7 +33,10 @@ pub struct TextBuffer {
 /// Two buffers are equal when their text is. Deriving this would also walk the
 /// line tables, which the type's whole invariant says are a function of the
 /// text — so that comparison could only ever agree, at a cost linear in the
-/// number of lines. Shared allocations are equal without reading a byte.
+/// number of lines. Shared allocations are equal without reading a byte: the
+/// `ptr_eq` is written out because that is a property this design relies on,
+/// not one to inherit from `Arc`'s own `PartialEq`, whose identical
+/// short-circuit is an unspecified `std` optimization.
 impl PartialEq for TextBuffer {
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.text, &other.text) || self.text == other.text
@@ -101,6 +104,11 @@ impl TextBuffer {
 
     /// Replace the whole buffer, rescanning. This is the `didChange`-without-a-
     /// range case and the `didOpen` case; there is no edit to patch with.
+    ///
+    /// A `String` caller pays a copy here that it did not when the buffer owned
+    /// one, since `Arc<str>` cannot adopt a `String`'s allocation. Accepted:
+    /// both callers already rescan the whole text on the same line, and neither
+    /// is on the keystroke path.
     pub fn set_text(&mut self, text: impl Into<Arc<str>>) {
         self.text = text.into();
         self.line_starts = LineStarts::new(&self.text);

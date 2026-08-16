@@ -46,9 +46,12 @@ const UTF16: PositionEncoding = PositionEncoding::Utf16;
 
 /// The live buffer, as `upsert_file` takes it on this branch.
 ///
+/// Comparing branches means editing this body and the return type to match
+/// what that branch's `upsert_file` takes:
+///
 /// - `main`:               `live.text().to_string()` (an O(N) copy)
 /// - `experiment/arc-str`: `live.text_arc()` (a refcount bump)
-/// - `refactor/rope`:      `live.clone()` (an O(1) rope clone)
+/// - `refactor/rope`:      `live.rope().clone()` (an O(1) CoW rope clone)
 fn handoff(live: &TextBuffer) -> Arc<str> {
     live.text_arc()
 }
