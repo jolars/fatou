@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     fn every_contextual_ident_is_listed() {
         // `t.kind == TokKind::Ident && t.text == "word"` and the `matches!`
-        // form `matches!(t.text.as_ref(), "word" | "other")`. Both are keyed on
+        // form `matches!(t.text, "word" | "other")`. Both are keyed on
         // `t.text`, which is what makes them text-structural.
         fn words_after(haystack: &str, marker: &str) -> Vec<String> {
             let mut out = Vec::new();
@@ -1194,7 +1194,7 @@ mod tests {
             let src = std::fs::read_to_string(dir.join(name))
                 .unwrap_or_else(|e| panic!("read {name}: {e}"));
             found.extend(words_after(&src, "t.text =="));
-            found.extend(words_after(&src, "t.text.as_ref(),"));
+            found.extend(words_after(&src, "matches!(t.text,"));
             found.extend(words_after(&src, "next.text =="));
         }
         assert!(

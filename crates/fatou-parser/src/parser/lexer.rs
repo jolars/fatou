@@ -55,15 +55,17 @@ impl TokKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Token {
+pub(crate) struct Token<'src> {
     pub(crate) kind: TokKind,
-    pub(crate) text: String,
+    pub(crate) text: &'src str,
     pub(crate) start: usize,
     pub(crate) end: usize,
 }
 
-/// Tokenize `input` into a lossless token stream.
-pub(crate) fn lex(input: &str) -> Vec<Token> {
+/// Tokenize `input` into a lossless token stream. Tokens borrow their text
+/// from `input`: the text is always a verbatim slice, so no token needs an
+/// allocation of its own.
+pub(crate) fn lex(input: &str) -> Vec<Token<'_>> {
     Lexer::new(input).run()
 }
 
@@ -95,7 +97,7 @@ struct Lexer<'a> {
     input: &'a str,
     bytes: &'a [u8],
     pos: usize,
-    tokens: Vec<Token>,
+    tokens: Vec<Token<'a>>,
     mode_stack: Vec<Mode>,
 }
 
@@ -110,7 +112,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn run(mut self) -> Vec<Token> {
+    fn run(mut self) -> Vec<Token<'a>> {
         while self.pos < self.bytes.len() {
             self.next_token();
         }
@@ -124,7 +126,7 @@ impl<'a> Lexer<'a> {
     fn push(&mut self, kind: TokKind, start: usize, end: usize) {
         self.tokens.push(Token {
             kind,
-            text: self.input[start..end].to_string(),
+            text: &self.input[start..end],
             start,
             end,
         });
