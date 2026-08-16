@@ -8,16 +8,16 @@
 //! edit (`src/text/buffer.rs`).
 //!
 //! This bench is the evidence for that shape, and the guard against a change
-//! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-10
+//! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-16
 //! (release, otherwise-idle machine — every row here scales with load, so read
 //! the ratios, not the absolutes):
 //!
 //! ```text
 //!                                   134 KB     1073 KB
-//! rescan (LineIndex::new)            26 us      316 us
+//! rescan (LineIndex::new)            14 us      117 us
 //! reuse the maintained table          1 ns        1 ns
-//! didChange (edit plus undo)        0.9 us      8.8 us
-//! reparse, token tier                33 us      257 us
+//! didChange (edit plus undo)        7.0 us       67 us
+//! reparse, token tier                19 us      154 us
 //! ```
 //!
 //! The `didChange` row applies a keystroke and then undoes it, so one
@@ -25,14 +25,20 @@
 //!
 //! A keystroke used to pay that rescan on the main loop before dispatching
 //! anything, and pay it again in every handler that answered against the
-//! buffer. It now costs about 2% of the reparse it triggers, and the handlers
-//! share the table rather than each rebuilding it.
+//! buffer. The handlers now share the table rather than each rebuilding it.
 //!
-//! Ropey was measured here too, and rejected (issue #76): fatou cannot keep the
-//! text as a rope, because `parse` takes `&str` and salsa's `SourceFile` input
-//! is a `String`, so every edit would have to flatten the rope — 90 us on
-//! 1 MB, an order of magnitude worse than patching a flat table, on top of
-//! point queries about 7x slower.
+//! The `didChange` row grew (it was 0.9/8.8 us against a `String` spliced in
+//! place) when the text became a shared `Arc<str>`: an edit rebuilds the
+//! string rather than mutating it, which is what makes every *handoff* of the
+//! text free. That trade is priced in `benches/salsa_keystroke.rs`, which
+//! times the whole keystroke rather than this one step — read the two
+//! together, and prefer the pipeline bench when judging a text-storage
+//! change.
+//!
+//! Ropey was measured against this design twice and deferred both times
+//! (issue #76, then PR #85): it wins this bench's didChange row outright
+//! (~0.7 us flat at 1 MB) and loses the point-query rows ~3-9x, but the
+//! pipeline bench is where that trade is actually settled. See `TODO.md`.
 //!
 //! Plain `main` (`harness = false`), same style as `format_compare`: no
 //! criterion dependency in the root crate, just a warm loop and a table.

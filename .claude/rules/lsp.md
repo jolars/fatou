@@ -64,6 +64,19 @@ model. Capabilities are advertised by `server.rs::server_capabilities`,
   paths, where a full parse dwarfs the scan anyway. Reintroducing a rescan on
   the live-buffer path is a silent regression: it type-checks, because
   `&TextBuffer` derefs to `&str`. `benches/line_index.rs` is what measures it.
+- **The text itself is an `Arc<str>`, shared, never copied to hand over.** The
+  buffer, salsa's `SourceFile.text`, and the reparse base (`PrevParse.text`)
+  hold the same allocation, so the write phase passes `text.text_arc()` (O(1))
+  and the base stores a refcount bump. Reintroducing a `.text().to_string()`
+  on the dispatch path is the regression to watch for. Because the allocation
+  is shared, the staleness guards (`upsert_file`, `revert_file_to_disk`) put
+  `Arc::ptr_eq` **in front of** the content compare — never instead of it:
+  salsa's setter does no equality check at all, so the compare is what keeps a
+  no-op write from invalidating every memo. An edit rebuilds the string once
+  (`TextBuffer::replace_range`), which is the deliberate one linear pass a
+  keystroke pays for text; `benches/salsa_keystroke.rs` measures the whole
+  didChange → upsert → parse path, and is the bench that catches a cost added
+  *between* the pieces the other benches time.
 
 ## Conventions
 
