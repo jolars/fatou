@@ -22,7 +22,7 @@ const PARSER_STEP_LIMIT: u32 = 15_000_000;
 /// A lightweight wrapper over the token slice with cursor helpers, threaded
 /// through the parser so navigation reads the same way everywhere.
 pub(crate) struct ParserCtx<'a> {
-    tokens: &'a [Token],
+    tokens: &'a [Token<'a>],
     /// Consecutive peeks since the last frontier advance (the stuck-loop guard).
     steps: Cell<u32>,
     /// The furthest token index any peek has reached; forward progress resets
@@ -31,7 +31,7 @@ pub(crate) struct ParserCtx<'a> {
 }
 
 impl<'a> ParserCtx<'a> {
-    pub(crate) fn new(tokens: &'a [Token]) -> Self {
+    pub(crate) fn new(tokens: &'a [Token<'a>]) -> Self {
         Self {
             tokens,
             steps: Cell::new(0),
@@ -61,12 +61,12 @@ impl<'a> ParserCtx<'a> {
         self.steps.set(steps + 1);
     }
 
-    pub(crate) fn token(&self, i: usize) -> Option<&'a Token> {
+    pub(crate) fn token(&self, i: usize) -> Option<&'a Token<'a>> {
         self.step(i);
         self.tokens.get(i)
     }
 
-    pub(crate) fn tokens(&self) -> &'a [Token] {
+    pub(crate) fn tokens(&self) -> &'a [Token<'a>] {
         self.tokens
     }
 

@@ -1009,7 +1009,7 @@ fn is_typegroup_keyword(ctx: &ParserCtx<'_>, start: usize) -> bool {
     match ctx.token(next) {
         Some(t) => match t.kind {
             TokKind::StructKw | TokKind::MutableKw | TokKind::At | TokKind::StringDelimOpen => true,
-            TokKind::Ident => matches!(t.text.as_ref(), "abstract" | "primitive"),
+            TokKind::Ident => matches!(t.text, "abstract" | "primitive"),
             _ => false,
         },
         None => false,
@@ -1462,7 +1462,7 @@ fn parse_prefix(
         // prefix-only Unicode radicals `√ ∛ ∜ ¬` (`√x` → `(call-pre √ x)`, with
         // the same precedence as `-`/`+`), and the unary-capable Unicode
         // arithmetic operators `± ∓ ⋆` (`±x` → `(call-pre ± x)`).
-        k if is_unary_prefix_op(k, &tok.text) => {
+        k if is_unary_prefix_op(k, tok.text) => {
             // A unary arithmetic/logical operator glued to a `(` is a call when
             // the parens look like an argument list (`+(x, y)` → `(call + x y)`,
             // `+(a...)` → `(call + (... a))`, `+(a; b, c)` → `(call + a
@@ -1718,7 +1718,7 @@ fn parse_prefix(
         // (`'` ⇒ `(char (error))`, `'a` ⇒ `(char 'a' (error-t))`).
         TokKind::Char => {
             let tok = &ctx.tokens()[start];
-            if !char_token_terminated(&tok.text) {
+            if !char_token_terminated(tok.text) {
                 push_diagnostic(
                     diagnostics,
                     DiagnosticKind::UnterminatedLiteral,
@@ -2232,7 +2232,7 @@ pub(super) fn parse_quote_sym(
         // fall through to the bare-operator arm below (`:..` ⇒ `(quote-: ..)`).
         _ if ctx
             .token(next)
-            .is_some_and(|t| is_dotted_broadcast_text(&t.text)) =>
+            .is_some_and(|t| is_dotted_broadcast_text(t.text)) =>
         {
             events.push(Event::Start(SyntaxKind::OPERATOR_ATOM));
             events.push(Event::Tok(next));
@@ -2295,7 +2295,7 @@ fn parse_string_literal(
     let mut has_prefix = false;
     if ctx.token(i).map(|t| t.kind) == Some(TokKind::StringPrefix) {
         has_prefix = true;
-        var_prefix = ctx.token(i).map(|t| t.text.as_str()) == Some("var");
+        var_prefix = ctx.token(i).map(|t| t.text) == Some("var");
         i += 1;
     }
 

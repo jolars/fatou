@@ -27,7 +27,7 @@ pub(crate) fn build_tree(tokens: &[Token], events: &[Event]) -> SyntaxNode {
 }
 
 fn push_token(builder: &mut GreenNodeBuilder<'_>, tok: &Token) {
-    builder.token(syntax_kind_for(tok.kind).into(), tok.text.as_str());
+    builder.token(syntax_kind_for(tok.kind).into(), tok.text);
 }
 
 /// Debug-only guard that the event stream opens and closes in balance: every
