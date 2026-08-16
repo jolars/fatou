@@ -800,6 +800,49 @@ mod tests {
         assert_eq!(done, 2, "both analyses should have signaled done");
     }
 
+    /// The write phase hands salsa the live buffer's own allocation, never a
+    /// copy of it. A `req.text.text().to_string()` here would still type-check
+    /// and still be correct — it would just copy the whole document on every
+    /// keystroke, which is the one regression no other test or bench notices
+    /// (`.claude/rules/lsp.md`, `benches/salsa_keystroke.rs`).
+    #[test]
+    fn the_write_phase_shares_the_buffers_allocation() {
+        use crate::lsp::lint::ServerRules;
+        use crate::lsp::task_pool::TaskPool;
+
+        // A live pool and live receivers: `start` spawns its read-phase, and a
+        // dead channel would fail the send on the pool thread.
+        let pool = TaskPool::new("test-analysis-share", 1);
+        let (out_tx, _out_rx) = crossbeam_channel::unbounded::<Outbound>();
+        let (done_tx, _done_rx) = crossbeam_channel::unbounded::<AnalyzeDone>();
+        let mut worker = AnalysisWorker {
+            read_spawner: pool.spawner(),
+            out_tx,
+            done_tx,
+            ..AnalysisWorker::for_test()
+        };
+
+        let text = Arc::new(TextBuffer::from("x = 1\n"));
+        let path = PathBuf::from("/work/share.jl");
+        worker.start(AnalysisRequest {
+            uri: uri_named("share.jl"),
+            path: path.clone(),
+            text: Arc::clone(&text),
+            version: 1,
+            rules: ServerRules::defaults(),
+            edits: None,
+        });
+
+        let file = worker
+            .db
+            .lookup_file(&path)
+            .expect("the write phase tracks the file it upserts");
+        assert!(
+            Arc::ptr_eq(&text.text_arc(), file.text(&worker.db)),
+            "the write phase must hand salsa the buffer's allocation, not a copy"
+        );
+    }
+
     /// Coalescing drops the superseded request wholesale, so its edits have to
     /// ride along on the survivor: what reaches the db must describe the
     /// transform from the last *analyzed* text, not from the last enqueued one.
