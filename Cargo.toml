@@ -80,6 +80,10 @@ name = "line_index"
 harness = false
 
 [[bench]]
+name = "salsa_keystroke"
+harness = false
+
+[[bench]]
 name = "format_edits"
 harness = false
 
