@@ -2006,17 +2006,33 @@ mod tests {
     }
 
     /// Lex `input` as a *multi-chunk* rope (so chunk-boundary handling runs) and
-    /// assert it still reassembles losslessly. `&str` fixtures here deliberately
-    /// build a `Rope`, not a `RopeSlice::from(&str)` (which is single-chunk).
+    /// assert both losslessness and path equivalence. `&str` fixtures here
+    /// deliberately build a `Rope`, not a `RopeSlice::from(&str)` (which is
+    /// single-chunk): the multi-chunk lexer's token stream must match the
+    /// single-chunk lexer's exactly — same kinds, same byte spans — not merely
+    /// reassemble to the same text.
     fn roundtrips_multi_chunk(input: &str) {
         let rope = ropey::Rope::from_str(input);
         assert!(
             rope.chunks().count() > 1,
             "fixture must be multi-chunk: {input:?}"
         );
-        let tokens = lex(RopeSlice::from(&rope));
-        let joined: String = tokens.iter().map(|t| t.text.to_string()).collect();
+        let multi = lex(RopeSlice::from(&rope));
+        let single = lex(RopeSlice::from(input));
+
+        // Losslessness: the token texts reassemble to the input byte-for-byte.
+        let joined: String = multi.iter().map(|t| t.text.to_string()).collect();
         assert_eq!(joined, input, "multi-chunk lex not lossless");
+
+        // Path equivalence: the multi-chunk path must produce the same token
+        // stream (kind and byte span) as the single-chunk path, so the chunk
+        // cache never shifts a token boundary.
+        let multi_shapes: Vec<_> = multi.iter().map(|t| (t.kind, t.start, t.end)).collect();
+        let single_shapes: Vec<_> = single.iter().map(|t| (t.kind, t.start, t.end)).collect();
+        assert_eq!(
+            multi_shapes, single_shapes,
+            "multi-chunk lex diverges from single-chunk for {input:?}"
+        );
     }
 
     #[test]
@@ -2025,8 +2041,10 @@ mod tests {
         // `"""` open delimiter's `peek(1)`/`peek(2)` lookahead and the 3-byte
         // advance both cross the boundary.
         roundtrips_multi_chunk(&format!("{}\"\"\"x\"\"\"\n", " ".repeat(1023)));
-        // Closing straddle, same shape on the way out.
-        roundtrips_multi_chunk(&format!("x = \"\"\"{}\"\"\"\n", " ".repeat(1023)));
+        // Closing straddle, same shape on the way out: the 7-byte `x = """`
+        // prefix means 1016 spaces put the closing `"""` at 1023..1026, its
+        // first two quotes on opposite sides of the seam.
+        roundtrips_multi_chunk(&format!("x = \"\"\"{}\"\"\"\n", " ".repeat(1016)));
     }
 
     #[test]
@@ -2037,16 +2055,24 @@ mod tests {
     }
 
     #[test]
-    fn crlf_straddles_a_chunk_boundary() {
-        // `\r` at 1023, `\n` at 1024: `lex_newline`'s two-byte advance crosses.
+    fn crlf_begins_a_chunk() {
+        // ropey never splits a CRLF pair across leaves: the boundary floors from
+        // 1024 back to 1023, so the `\r\n` stays whole and lands as the first two
+        // bytes of chunk 1. The pair itself can never straddle, but the newline
+        // token still abuts the seam, exercising `lex_newline`'s two-byte advance
+        // at the start of a freshly loaded chunk.
         roundtrips_multi_chunk(&format!("{}\r\nb\n", "a".repeat(1023)));
     }
 
     #[test]
     fn multibyte_char_at_a_chunk_boundary() {
-        // A 2-byte `α` fills the last two bytes of chunk 0 (1022..1024) and a
-        // second `α` starts chunk 1 (1024..1026), inside a string body.
-        roundtrips_multi_chunk(&format!("s = \"{}αα\"\n", " ".repeat(1022)));
+        // The 5-byte `s = "` prefix shifts the `α`s five bytes past a naive
+        // 1024-based count, so pad to the seam exactly. 1017 spaces put the first
+        // `α` at 1022..1024 (the last two bytes of chunk 0) and the second at the
+        // start of chunk 1; 1018 spaces make the boundary floor to 1023 (rather
+        // than split an `α`), so the first `α` *is* the first char of chunk 1.
+        roundtrips_multi_chunk(&format!("s = \"{}αα\"\n", " ".repeat(1017)));
+        roundtrips_multi_chunk(&format!("s = \"{}αα\"\n", " ".repeat(1018)));
     }
 
     #[test]
