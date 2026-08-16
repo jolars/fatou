@@ -194,7 +194,12 @@ impl TextBuffer {
     /// a valid slice range covering line `n` *including* its newline. The pretty
     /// diagnostic renderer slices a snippet window with it.
     pub fn line_start(&self, line: usize) -> usize {
-        self.rope.line_to_byte_idx(line, LineType::LF)
+        // `line_to_byte_idx` asserts `line <= line_count`, so clamp the
+        // boundary case: `line == line_count()` is the virtual line after the
+        // last and yields the buffer end, which is what the old `line_starts`
+        // table's `get(...).unwrap_or(len())` returned for a past-the-end line.
+        self.rope
+            .line_to_byte_idx(line.min(self.line_count()), LineType::LF)
     }
 
     fn line_index_for(&self, offset: usize) -> usize {
@@ -397,5 +402,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn line_start_clamps_past_the_end() {
+        // A single-line file with no trailing newline: `line_count()` is 1, so
+        // the renderer's `line_start(last + 1)` window edge is line 1 (or 2 for
+        // a diagnostic on the only line), both past the end. Each must clamp to
+        // the buffer end, never panic.
+        let idx = TextBuffer::new("x == nothing");
+        assert_eq!(idx.line_count(), 1);
+        assert_eq!(idx.line_start(0), 0);
+        assert_eq!(idx.line_start(1), idx.len());
+        assert_eq!(idx.line_start(2), idx.len());
+        assert_eq!(idx.line_start(usize::MAX), idx.len());
+
+        // With a trailing newline the virtual last line is real: line 1 is the
+        // empty line after the `\n`, and anything past it still clamps.
+        let idx = TextBuffer::new("ab\ncd\n");
+        assert_eq!(idx.line_count(), 3);
+        assert_eq!(idx.line_start(0), 0);
+        assert_eq!(idx.line_start(1), 3);
+        assert_eq!(idx.line_start(2), 6);
+        assert_eq!(idx.line_start(3), idx.len());
+        assert_eq!(idx.line_start(4), idx.len());
     }
 }

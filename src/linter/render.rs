@@ -253,6 +253,19 @@ mod tests {
     }
 
     #[test]
+    fn pretty_window_on_a_last_line_without_newline() {
+        // The snippet window's upper edge is `line_start(last + 1)`, where
+        // `last` is the diagnostic's end line. A diagnostic spanning the only
+        // line of a newline-less file pushes that edge one past `line_count()`,
+        // which `line_start` must clamp rather than panic on.
+        let src = "x == nothing";
+        let diag = warning(0, src.len() as u32, "nothing-comparison", "use `===`");
+        let out = render_findings(&[diag], pretty(), &|_| Some(src.to_string()));
+        assert!(out.contains("<stdin>:1:1"), "wrong location:\n{out}");
+        assert!(out.contains("x == nothing"), "missing source line:\n{out}");
+    }
+
+    #[test]
     fn rendering_is_invariant_to_trailing_file_size() {
         // The property the snippet window and the concise line-table cache both
         // exist for: rendering a finding must not depend on how much source
