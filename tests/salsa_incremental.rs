@@ -155,6 +155,32 @@ fn the_reparse_base_shares_the_tracked_text() {
     );
 }
 
+/// The same no-op contract on the disk-revert path — the one staleness guard
+/// that can take no `Arc::ptr_eq` shortcut, because its text is always a fresh
+/// read. Only the content compare stands between closing an unmodified buffer
+/// and throwing away every memo for that file.
+#[test]
+fn reverting_to_identical_disk_text_keeps_the_memos() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("same.jl");
+    std::fs::write(&path, "x = 1\ny = x\n").expect("write the file");
+
+    let mut db = IncrementalDatabase::new();
+    let file = db.upsert_file(&path, "x = 1\ny = x\n");
+    let before = semantic_model(&db, file) as *const _;
+
+    db.revert_file_to_disk(&path);
+    assert!(
+        std::ptr::eq(before, semantic_model(&db, file)),
+        "reverting to text the db already tracks must not invalidate"
+    );
+
+    // The guard must still let a genuine on-disk change through.
+    std::fs::write(&path, "x = 2\n").expect("rewrite the file");
+    db.revert_file_to_disk(&path);
+    assert_eq!(db.file_text(file), "x = 2\n");
+}
+
 /// Two identifier edits far apart: `diff_edit` would collapse them into one
 /// span covering both statements, so this is the shape only the staged chain
 /// rescues. Whichever route wins, the tree must equal a full parse.
