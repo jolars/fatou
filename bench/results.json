@@ -23,7 +23,7 @@
       }
     ],
     "versions": {
-      "fatou": "0.10.0",
+      "fatou": "0.14.0",
       "julia": "1.12.6",
       "runic": "1.5.1",
       "juliaformatter": "2.4.0"
@@ -44,25 +44,25 @@
         "fatou": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 6212723,
-          "min_total_ns": 5014837,
-          "throughput_mbps": 6.75,
+          "median_total_ns": 3558535,
+          "min_total_ns": 3475237,
+          "throughput_mbps": 11.785,
           "skipped": []
         },
         "runic": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 26523648,
-          "min_total_ns": 20329189,
-          "throughput_mbps": 1.581,
+          "median_total_ns": 18808138,
+          "min_total_ns": 17607886,
+          "throughput_mbps": 2.23,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 9345290,
-          "min_total_ns": 6653247,
-          "throughput_mbps": 4.488,
+          "median_total_ns": 6893908,
+          "min_total_ns": 6126937,
+          "throughput_mbps": 6.083,
           "skipped": []
         }
       }
@@ -74,25 +74,25 @@
         "fatou": {
           "files_ok": 1,
           "total_bytes": 24442,
-          "median_total_ns": 2970139,
-          "min_total_ns": 2222715,
-          "throughput_mbps": 8.229,
+          "median_total_ns": 1598686,
+          "min_total_ns": 1573809,
+          "throughput_mbps": 15.289,
           "skipped": []
         },
         "runic": {
           "files_ok": 1,
           "total_bytes": 24442,
-          "median_total_ns": 17722398,
-          "min_total_ns": 13785620,
-          "throughput_mbps": 1.379,
+          "median_total_ns": 12600168,
+          "min_total_ns": 12007316,
+          "throughput_mbps": 1.94,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 1,
           "total_bytes": 24442,
-          "median_total_ns": 3679971,
-          "min_total_ns": 3504120,
-          "throughput_mbps": 6.642,
+          "median_total_ns": 3675497,
+          "min_total_ns": 3443968,
+          "throughput_mbps": 6.65,
           "skipped": []
         }
       }
@@ -104,25 +104,25 @@
         "fatou": {
           "files_ok": 1,
           "total_bytes": 100388,
-          "median_total_ns": 8161671,
-          "min_total_ns": 7407734,
-          "throughput_mbps": 12.3,
+          "median_total_ns": 5662637,
+          "min_total_ns": 5383849,
+          "throughput_mbps": 17.728,
           "skipped": []
         },
         "runic": {
           "files_ok": 1,
           "total_bytes": 100388,
-          "median_total_ns": 31890241,
-          "min_total_ns": 29604357,
-          "throughput_mbps": 3.148,
+          "median_total_ns": 32102549,
+          "min_total_ns": 29286679,
+          "throughput_mbps": 3.127,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 1,
           "total_bytes": 100388,
-          "median_total_ns": 12214829,
-          "min_total_ns": 11096282,
-          "throughput_mbps": 8.219,
+          "median_total_ns": 11182424,
+          "min_total_ns": 10485085,
+          "throughput_mbps": 8.977,
           "skipped": []
         }
       }
@@ -134,17 +134,17 @@
         "fatou": {
           "files_ok": 15,
           "total_bytes": 332783,
-          "median_total_ns": 17647105,
-          "min_total_ns": 16251295,
-          "throughput_mbps": 18.858,
+          "median_total_ns": 13663550,
+          "min_total_ns": 12433342,
+          "throughput_mbps": 24.356,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 14,
           "total_bytes": 332783,
-          "median_total_ns": 23356427,
-          "min_total_ns": 20169959,
-          "throughput_mbps": 14.248,
+          "median_total_ns": 23634743,
+          "min_total_ns": 18778471,
+          "throughput_mbps": 14.08,
           "skipped": [
             {
               "file": "parser.jl",
@@ -161,17 +161,17 @@
         "fatou": {
           "files_ok": 36,
           "total_bytes": 870581,
-          "median_total_ns": 15061524,
-          "min_total_ns": 12651625,
-          "throughput_mbps": 57.802,
+          "median_total_ns": 11701647,
+          "min_total_ns": 10008704,
+          "throughput_mbps": 74.398,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 36,
           "total_bytes": 870581,
-          "median_total_ns": 37231308,
-          "min_total_ns": 32247108,
-          "throughput_mbps": 23.383,
+          "median_total_ns": 36448284,
+          "min_total_ns": 22018213,
+          "throughput_mbps": 23.885,
           "skipped": []
         }
       }
@@ -183,25 +183,25 @@
         "fatou": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 7795008,
-          "min_total_ns": 7027866,
-          "throughput_mbps": 5.38,
+          "median_total_ns": 5470264,
+          "min_total_ns": 5290313,
+          "throughput_mbps": 7.666,
           "skipped": []
         },
         "runic": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 192030129,
-          "min_total_ns": 189247716,
-          "throughput_mbps": 0.218,
+          "median_total_ns": 186228197,
+          "min_total_ns": 176948423,
+          "throughput_mbps": 0.225,
           "skipped": []
         },
         "juliaformatter": {
           "files_ok": 1,
           "total_bytes": 41937,
-          "median_total_ns": 237740959,
-          "min_total_ns": 232693170,
-          "throughput_mbps": 0.176,
+          "median_total_ns": 226140187,
+          "min_total_ns": 220526573,
+          "throughput_mbps": 0.185,
           "skipped": []
         }
       }
