@@ -70,9 +70,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/j
 ## Usage
 
 ```sh
-# Print the CST (`fatou parse -` reads stdin)
-fatou parse file.jl
-
 # Format to stdout (`fatou format -` reads stdin)
 fatou format file.jl
 
@@ -136,8 +133,8 @@ repos:
 
 ## Library Crates
 
-The parser and formatter are published as standalone, wasm-compatible crates
-for embedding in other tools:
+The parser and formatter are published as standalone, wasm-compatible crates for
+embedding in other tools:
 
 - [fatou-parser](https://crates.io/crates/fatou-parser): lossless CST parser,
   typed AST wrappers, and incremental reparser.
