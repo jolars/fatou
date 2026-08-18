@@ -12,7 +12,7 @@ version](https://badge.fury.io/py/fatou.svg?icon=si%3Apython)](https://pypi.org/
 [![npm
 version](https://badge.fury.io/js/@fatou-cli%2Ffatou-cli.svg?icon=si%3Anpm)](https://www.npmjs.com/package/fatou-cli)
 
-**Fatou** is a language server, formatter, and linter for
+Fatou is a language server, formatter, and linter for
 [Julia](https://julialang.org) that never has to run Julia itself.
 
 It parses Julia once and serves three tools from that tree:
@@ -101,7 +101,7 @@ range) and diagnostics (push and pull). It checks your `Project.toml` and
 `Manifest.toml` themselves too, and navigates an open `Project.toml`'s
 dependency names, with each one's resolved version shown as an inlay hint.
 
-The **Fatou** extension for VS Code and Open VSX
+The Fatou\* extension for VS Code and Open VSX
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
 [Open VSX](https://open-vsx.org/extension/jolars/fatou)) bundles the binary and
 starts the server automatically; it also works in Positron. See

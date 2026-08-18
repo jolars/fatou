@@ -21,7 +21,7 @@ This guide covers the common tasks. For the exhaustive list of keys, their
 types, and their defaults, see the [configuration
 reference](../reference/configuration.md).
 
-## Where Fatou looks for a config
+## Where Fatou Looks for a Config
 
 For a given file, Fatou walks up from the file's directory through its
 ancestors, and uses the first `fatou.toml` it finds. The usual layout is a
@@ -33,7 +33,7 @@ a worktree or submodule checkout, whose `.git` is a file rather than a
 directory, bounds the walk the same way. A directory with no `.git` ancestor
 keeps walking to the filesystem root.
 
-### User-wide defaults
+### User-Wide Defaults
 
 If you want the same settings across projects, do not put a `fatou.toml` above
 your repositories; use a global config instead. When no project `fatou.toml` is
@@ -55,13 +55,13 @@ The language server uses the same resolution, so either file is a convenient way
 to set editor-wide defaults. Only project files are watched, so an edit to a
 global or `FATOU_CONFIG` file is picked up when the server restarts.
 
-### Bypassing discovery
+### Bypassing Discovery
 
 On the command line, `--config <PATH>` loads an explicit file and skips
 discovery altogether, and `--no-config` ignores every file (project,
 `FATOU_CONFIG`, and global) and runs with the built-in defaults.
 
-### Resolution order
+### Resolution Order
 
 In full, Fatou uses the first source that applies:
 
@@ -119,8 +119,8 @@ line-ending = "auto"
 
 `line-width` is the width the formatter tries to keep lines within, and
 `indent-width` is the number of spaces per indentation level. Both can be
-overridden per run with the `--line-width` and `--indent-width` flags on `fatou
-format`.
+overridden per run with the `--line-width` and `--indent-width` flags on
+`fatou format`.
 
 `line-ending` decides the newline style. The default, `auto`, mirrors the source
 file's first line ending and falls back to `lf` when the file has none, which
@@ -132,7 +132,7 @@ to follow the platform Fatou runs on.
 > `indent-width` instead; the snake_case forms will be removed in a future
 > release.
 
-## Choosing lint rules
+## Choosing Lint Rules
 
 By default most rules run; the [rule reference](../reference/rules.md) lists the
 few that are opt-in. `ignore` turns individual rules off, and `select`, when
@@ -155,12 +155,13 @@ unused-binding = "warning"
 undefined-name = "error"
 ```
 
-## Tuning a rule
+## Tuning a Rule
 
 A rule with a tunable knob reads it from its own table, named after the rule ID.
-For example, [`discouraged-function`](../reference/rules.md#discouraged-function)
-ships a deny-list of Base functions with process-wide or memory-unsafe effects,
-and you can add your own entries to it:
+For example,
+[`discouraged-function`](../reference/rules.md#discouraged-function) ships a
+deny-list of Base functions with process-wide or memory-unsafe effects, and you
+can add your own entries to it:
 
 ```toml
 [lint.rules.discouraged-function]
