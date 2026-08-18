@@ -70,17 +70,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/j
 ## Usage
 
 ```sh
-# Format to stdout (`fatou format -` reads stdin)
+# Format in place
 fatou format file.jl
 
-# Verify formatting without writing—exits non-zero if anything would change
+# Verify formatting without writing
 fatou format --check src/
 
 # Lint (exits non-zero if there are any findings)
 fatou lint src/
 
-# Run the language server over stdio
-fatou lsp
+# Fix lint findings in place
+fatou lint --fix file.jl
 ```
 
 Configuration lives in `fatou.toml`: `[format]` sets line and indent widths,
