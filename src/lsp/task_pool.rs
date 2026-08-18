@@ -3,9 +3,8 @@
 //!
 //! The LSP keeps latency-sensitive reads (formatting, the analysis read-phase)
 //! on a dedicated [`TaskPool`] sized to the machine's parallelism, instead of
-//! rayon's *global* pool, which has no priority concept — when background
-//! package indexing lands (`TODO.md`, language server Phase 3) it gets its own
-//! single-thread pool so a long harvest can never tie up a worker and starve a
+//! rayon's *global* pool, which has no priority concept. Background package
+//! indexing uses its own single-thread pool so a long harvest cannot starve a
 //! read.
 //!
 //! Jobs are fire-and-forget closures that post their own results through

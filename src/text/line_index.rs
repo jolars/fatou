@@ -223,9 +223,6 @@ mod tests {
     const UTF8: PositionEncoding = PositionEncoding::Utf8;
     const UTF16: PositionEncoding = PositionEncoding::Utf16;
 
-    /// The whole point of [`LineStarts::patch`]: over every replacement of
-    /// every char-boundary range of a handful of awkward texts, the patched
-    /// table equals the one a rescan of the edited text would produce.
     #[test]
     fn patching_matches_a_rescan() {
         let texts = [

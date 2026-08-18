@@ -218,8 +218,6 @@ fn server_capabilities(encoding: PositionEncoding, pull_diagnostics: bool) -> Se
             },
         )),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
-            // Only lint quick fixes for now; organize-imports style actions are
-            // a Phase 6 item.
             code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
             work_done_progress_options: Default::default(),
             resolve_provider: None,

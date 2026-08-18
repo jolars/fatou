@@ -11,13 +11,9 @@
 //! thread returns to its `select!` immediately and a slow read never blocks
 //! queued work.
 //!
-//! Threading uses a purpose-built [`TaskPool`](task_pool::TaskPool) rather than
-//! rayon's global pool (which has no priority concept): the **read pool**,
-//! sized to the machine's parallelism, serves latency-sensitive work
-//! (formatting, the analysis read-phase). A single-thread **index pool** will
-//! join it when background package indexing lands (see `TODO.md`, language
-//! server Phase 3) — the one unbounded-duration job must never slot-block a
-//! read.
+//! A machine-sized [`TaskPool`](task_pool::TaskPool) serves latency-sensitive
+//! reads. Background indexing has a separate single-thread pool so unbounded
+//! work cannot occupy a read worker.
 //!
 //! Edits are *coalesced* (latest version per URI; stale edits dropped) into a
 //! pending queue. A [`decide`](analysis_thread::decide) scheduler keeps at most

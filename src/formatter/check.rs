@@ -94,11 +94,7 @@ pub fn check_paths(
 /// bails as soon as the two texts share a first line. Patience anchors on lines
 /// unique to both sides instead, and is deterministic (no wall-clock deadline).
 ///
-/// **This is a constant factor, not a complexity fix.** On Julia's line
-/// population every algorithm measured is still quadratic on that change —
-/// Myers 3.81x, Patience 3.71x, Histogram 4.08x per doubling. Patience is
-/// simply ~3.2x cheaper throughout (117.9 vs 37.1 ms at 500 functions). The
-/// residual is recorded in TODO.md; do not read this as "the diff is linear".
+/// This improves the constant factor but not the quadratic worst case.
 ///
 /// **Chosen for its worst case, not its best.** `Algorithm::Histogram` is
 /// faster on real Julia (136 ms against Patience's 234 ms over 16 000 lines of
@@ -197,13 +193,6 @@ mod tests {
         assert_reconstructs(&old, &new);
     }
 
-    // There is deliberately **no growth-rate test** for the diff here, unlike
-    // badness's `diff_scales_linearly_when_every_line_changes`. On Julia's line
-    // population every algorithm measured is still quadratic on a
-    // reindent-everything change -- Myers 3.81x, Patience 3.71x, Histogram 4.08x
-    // per doubling -- so a ratio bound would separate none of them. What the
-    // switch bought is a constant factor (117.9 / 37.1 / 430.9 ms at 500
-    // functions), and asserting a wall-clock constant would just be a
-    // machine-dependent flake. The remaining superlinearity is recorded in
-    // TODO.md instead.
+    // A growth-rate test cannot distinguish the available algorithms: all are
+    // quadratic for a full reindent. A wall-clock threshold would be flaky.
 }

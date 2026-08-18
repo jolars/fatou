@@ -257,9 +257,7 @@ mod tests {
 
     #[test]
     fn rendering_is_invariant_to_trailing_file_size() {
-        // The property the snippet window and the concise line-table cache both
-        // exist for: rendering a finding must not depend on how much source
-        // sits beyond it. It used to hold by accident, at O(file) per finding.
+        // Rendering a finding must not depend on how much source follows it.
         let short = "x = 1\n".to_string();
         let long = format!("{short}{}", "# padding\n".repeat(2000));
         let diag = warning(0, 1, "unused-binding", "`x` is never used");

@@ -1,17 +1,11 @@
 //! What line-scoped formatting edits cost, and what they save.
 //!
-//! `textDocument/formatting` used to answer with one `TextEdit` replacing the
-//! whole document. That is always correct, but it makes the client throw away
-//! and rebuild everything anchored to the old text — the cursor, the selection,
-//! folds, and diagnostic markers — even when a single line changed. The server
-//! now line-diffs the formatted output against the buffer and sends a hunk per
-//! changed run (`src/lsp/format.rs`), falling back to the whole-document
-//! replacement when the diff covers more than half the file.
+//! The server line-diffs formatted output and returns one edit per changed run,
+//! falling back to a whole-document edit when more than half the file differs.
 //!
 //! Two questions, and this bench is the evidence for both: what the diff adds
 //! to a format request, and how much smaller the answer gets. `payload` is the
-//! edits' `new_text` as a share of the document, so 100% is what the old
-//! whole-document replacement always sent.
+//! edits' `new_text` as a share of the document.
 //!
 //! Measured on 2026-08-13 (release, otherwise-idle machine). Absolute times
 //! drift with CPU frequency across rows, so **the comparison that means

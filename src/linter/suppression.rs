@@ -12,17 +12,13 @@
 //! suppresses every rule. Directives are recognized in line comments only —
 //! a `#= =#` block comment is never a directive.
 //!
-//! Implementation note: the comment-to-node attachment for a node-level
-//! suppression is "next non-trivia sibling", computed from the CST. That makes
+//! A node-level suppression attaches to the next non-trivia CST sibling. That makes
 //! matching a range-containment check (a directive before a `function` covers
 //! the whole body) and keeps a `#` inside a string literal from parsing as a
-//! directive, which the old line-based text scan could not.
+//! directive.
 //!
-//! Every recognized directive is also recorded in [`SuppressionMap::directives`]
-//! — *including* the ones that suppress nothing (an unknown rule ID, a directive
-//! with no following sibling, one that names no rule at all). Those are exactly
-//! what the future `meta/*-suppression` rules exist to report, and they reach a
-//! rule through `RuleContext::suppressions`.
+//! [`SuppressionMap::directives`] includes directives that suppress nothing, so
+//! meta rules can report them through `RuleContext::suppressions`.
 //!
 //! [`SuppressionMap::filter`] additionally reports which directives actually
 //! fired. That is a *driver* fact — it does not exist until the findings have

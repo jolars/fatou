@@ -89,9 +89,9 @@ pub struct LibraryDeps(pub BTreeMap<String, PackageMeta>);
 /// HIGH durability covers the *mapping* only — which file belongs to which
 /// package changes on a re-resolve. The file's text stays a LOW-durability
 /// `SourceFile` an editor may rewrite per keystroke, and
-/// [`project_declared_deps`] derives the dependency set from it. That split is
-/// the whole point: `[deps]` follows the unsaved buffer, while a project-file
-/// edit invalidates no `.jl` parse (`tests/salsa_incremental.rs`).
+/// [`project_declared_deps`] derives the dependency set from it. Thus `[deps]`
+/// follows the unsaved buffer without a project-file edit invalidating `.jl`
+/// parses.
 #[salsa::input(singleton)]
 pub struct ProjectFiles {
     #[returns(ref)]
@@ -299,9 +299,9 @@ pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode 
 /// cached parse. Unlike [`parsed_document`] this query keeps structural `Eq`:
 /// when an edit leaves the model unchanged (the model carries text ranges, so
 /// this means same-shape edits), salsa backdates it and dependents are not
-/// re-run. The robust invalidation barrier for position-shifting edits is the
-/// range-free firewall projections (`file_exports`, `file_free_reads`; see
-/// `TODO.md` Phase 2), which layer on top of this query.
+/// re-run. Range-free projections such as [`file_exports`] and
+/// [`file_free_reads`] provide the invalidation barrier for position-shifting
+/// edits.
 #[salsa::tracked(returns(ref))]
 pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel {
     SemanticModel::build(&parsed_tree_root(db, file))

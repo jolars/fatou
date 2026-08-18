@@ -10,9 +10,6 @@
 //! package UUID and its `git-tree-sha1` (see [`version_slug`]); we compute the
 //! slug rather than scan because a package may have several versions installed.
 //!
-//! This module is intentionally standalone: it is not yet wired into the salsa
-//! layer, the LSP, or the CLI. Later Phase 3/5 work consumes [`Environment`].
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};

@@ -2,8 +2,7 @@
 //! descent) → events → build_tree → rowan CST`.
 //!
 //! Losslessness is the core invariant: `reconstruct(text) == text` for all
-//! inputs. The grammar is a walking skeleton over a Julia subset and grows
-//! incrementally (see `TODO.md`). Incremental reparse splicing lives in
+//! inputs. Incremental reparse splicing lives in
 //! [`reparse`] (a single edit) and [`reparse_edits`] (a chain of them); both
 //! return `None` when no strategy applies, and the host's salsa layer
 //! (`fatou::incremental`) then does a full parse.

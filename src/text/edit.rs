@@ -27,9 +27,8 @@ use crate::parser::Edit;
 /// the line or buffer.
 ///
 /// The returned edits share that left-to-right convention, so
-/// `apply_edits(old_text, &edits)` reproduces the new buffer exactly — which
-/// is what lets the incremental reparse consume them (`TODO.md`,
-/// `### Incremental`). A batch containing a whole-buffer replacement returns
+/// `apply_edits(old_text, &edits)` reproduces the new buffer exactly. A batch
+/// containing a whole-buffer replacement returns
 /// [`None`]: the transform from the previous buffer is then unknown, and the
 /// reparse layer must fall back to a whole-text diff.
 pub fn apply_content_changes(

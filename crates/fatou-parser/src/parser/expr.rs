@@ -1404,9 +1404,8 @@ fn parse_prefix(
         // `:` by the explicit exclusion, the rest by not being value operators.
         //
         // A bare name is only a *declaration* (`function f end`); with a non-empty
-        // body JuliaSyntax error-wraps the name, which the shared signature path
-        // already does for identifiers (`function f\nx\nend` ⇒
-        // `(function (error f) (block x))`) and now reaches operators unchanged.
+        // body JuliaSyntax error-wraps the name (`function f\nx\nend` ⇒
+        // `(function (error f) (block x))`).
         // The syntactic `&` is the one value operator that keeps its prefix node
         // over an argument list (`function &(x) end` ⇒ `(function (& x))`), so
         // only its *bare* form is a name here; the parenthesized form is left to

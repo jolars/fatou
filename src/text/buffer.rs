@@ -66,9 +66,7 @@ impl TextBuffer {
         &self.line_starts
     }
 
-    /// An index over this buffer. Unlike [`LineIndex::new`] this reuses the
-    /// maintained table instead of rescanning, which is the whole point of the
-    /// type: call it freely.
+    /// An index over this buffer, reusing the maintained line table.
     pub fn line_index(&self) -> LineIndex<'_> {
         LineIndex::with_starts(&self.text, &self.line_starts)
     }
@@ -203,11 +201,6 @@ mod tests {
         assert_eq!(buffer.line_starts(), &LineStarts::new(&buffer));
     }
 
-    /// The whole point of the `Arc<str>` representation: handing the text out
-    /// shares one allocation, and an edit replaces the allocation without
-    /// disturbing handles taken before it — which is what lets the salsa
-    /// layer, the reparse base, and in-flight read jobs hold the text without
-    /// copying it.
     #[test]
     fn text_arc_shares_until_an_edit_and_then_snapshots() {
         let mut buffer = TextBuffer::from("ab\ncd");

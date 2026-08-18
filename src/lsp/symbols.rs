@@ -1,8 +1,8 @@
 //! Document symbols (`textDocument/documentSymbol`): a hierarchical outline of
 //! modules, functions (long and short form), macros, structs (with fields),
 //! abstract/primitive types, and consts. A pure CST walk — Julia definitions
-//! carry explicit keywords, so no semantic model is needed. The same walk later
-//! feeds workspace symbols (see `TODO.md`, language server Phase 5).
+//! carry explicit keywords, so no semantic model is needed. The same walk feeds
+//! workspace symbols.
 //!
 //! Conventions: macros render with their sigil (`@m`, kind `FUNCTION` — LSP has
 //! no macro kind); functions carry the rest of the signature in `detail` (with

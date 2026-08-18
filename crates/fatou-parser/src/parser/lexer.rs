@@ -6,11 +6,6 @@
 //! single-byte tokens rather than being dropped, which keeps losslessness a
 //! property of the lexer alone.
 //!
-//! This is a walking-skeleton lexer: it covers identifiers, numeric/string/char
-//! literals, the common operators, delimiters, and the block keywords. Growing
-//! the grammar (string interpolation, parametric `{}`, macros, etc.) starts
-//! here. See `TODO.md`.
-
 use crate::keywords::keyword_table;
 use crate::tokens::token_table;
 
@@ -807,12 +802,8 @@ impl<'a> Lexer<'a> {
 /// Every operator, delimiter, and punctuator with a fixed ASCII spelling,
 /// paired with the kind it lexes as.
 ///
-/// **Longest match is a property of this table, not of the code that scans
-/// it.** Entries are grouped by first byte, and within a group ordered longest
-/// spelling first, so the first entry [`try_ascii_op`] matches is the longest
-/// one that can match. Both invariants are enforced at compile time by
-/// [`build_op_index`], so a `.>>` moved above `.>>>=` — which used to silently
-/// truncate the latter into three tokens — is a build error instead.
+/// Entries are grouped by first byte and ordered longest-first within each
+/// group. [`build_op_index`] enforces both invariants at compile time.
 ///
 /// Spellings that are not fixed bytes are not here: the Unicode operators come
 /// from a generated code-point table (see [`Lexer::unicode_op_at`]), and the
@@ -1491,9 +1482,7 @@ mod tests {
 
     #[test]
     fn unicode_identifier_chars() {
-        // Combining marks (category Mn) continue an identifier, so `x` + U+0304
-        // is one token, not `x` followed by stray trivia. Regression for Flux's
-        // gradient names like `x̄`, `ŷ`, `h̃` (smoke-test issue #17).
+        // Combining marks (category Mn) continue an identifier.
         assert_eq!(kinds("x\u{304}"), vec![TokKind::Ident]);
         assert_eq!(kinds("x\u{302}r"), vec![TokKind::Ident]);
         // Primes and a math symbol also continue an identifier (`α′`, `ρ∞`).

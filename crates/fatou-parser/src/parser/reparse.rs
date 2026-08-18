@@ -1,10 +1,9 @@
 //! Incremental reparse: turn a text edit plus the previous parse into a new
 //! tree without re-lexing and re-parsing the whole file.
 //!
-//! Modelled on rust-analyzer's `reparsing.rs` and arity's `reparse.rs`: try
-//! the cheapest strategy first and fall back to progressively more work, with
-//! a full [`parse`](crate::parser::parse) as the always-correct last resort.
-//! The staged plan lives in `TODO.md` (`### Incremental`). Two tiers are in:
+//! The cheapest strategy runs first, with a full
+//! [`parse`](crate::parser::parse) as the always-correct fallback. Two tiers are
+//! available:
 //! the token tier ([`reparse_token`]) relexes an edit confined to a single
 //! `Ident`, comment, or whitespace leaf in isolation and splices it into the
 //! previous green tree ([`try_splice_plain_token`]), or — for a `StringContent`

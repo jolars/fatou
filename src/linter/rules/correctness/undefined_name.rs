@@ -284,10 +284,7 @@ mod tests {
 
     #[test]
     fn workspace_package_self_name_resolves() {
-        // A file spliced into the package's root module may qualify a call with
-        // the package's own name (`MyPkg.helper()`); Julia binds a module's own
-        // name inside it, so the qualifier must not raise `undefined-name`.
-        // Regression: SLOPE.jl's `SLOPE.fit_slope_dense(...)` inside module SLOPE.
+        // Julia binds a module's own name inside it.
         let lib = base(&[]);
         let msgs = messages("f() = MyPkg.helper()\n", &lib, Some(workspace(&["helper"])));
         assert_eq!(msgs, Vec::<String>::new(), "{msgs:?}");
@@ -309,9 +306,7 @@ mod tests {
 
     #[test]
     fn sibling_using_export_resolves() {
-        // SLOPE.jl regression: `cv.jl` reads `SparseMatrixCSC`, which a sibling
-        // `models.jl` brings in with `using SparseArrays`. The module-wide
-        // `using` resolves the read, so no false `undefined-name`.
+        // A sibling file's `using` contributes exports module-wide.
         let lib = base_plus("SparseArrays", &["SparseMatrixCSC"]);
         let ws = workspace_with_loads(&[&["SparseArrays"]], &[]);
         assert_eq!(

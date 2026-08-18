@@ -33,10 +33,8 @@ pub(crate) fn push_range(events: &mut Vec<Event>, start: usize, end: usize) {
 ///
 /// `build_tree`'s `debug_assert_balanced` already catches a stream that opens
 /// and closes out of balance. What it cannot see is a *mispaired* close — a
-/// `Finish` that balances but shuts the wrong node, yielding a misshapen tree
-/// from a correct-looking event count. Naming the kind here turns that into a
-/// debug-build assertion at the site that made the mistake, and keeps the name
-/// beside the call where a trailing `// KIND` comment used to sit unchecked.
+/// `Finish` that balances but shuts the wrong node. Naming the kind turns that
+/// into a debug assertion at the call site.
 ///
 /// Reach for this whenever the matching [`Event::Start`] is far enough away that
 /// a reader would have to go looking for it; a bare `push(Event::Finish)` is

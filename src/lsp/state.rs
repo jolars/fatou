@@ -58,11 +58,9 @@ struct Document {
     kind: DocumentKind,
 }
 
-/// What an open document *is*, decided once at `didOpen` from its path and
-/// carried on the buffer thereafter. Every fork that used to re-derive "is this
-/// an environment file?" from the URI now reads this instead: the two TOML
-/// kinds are not Julia, they never reach the parser, and each has a route of
-/// its own ([`GlobalState::route_document`]).
+/// An open document's kind, determined at `didOpen` and carried with its buffer.
+/// TOML documents never reach the Julia parser; each has its own route through
+/// [`GlobalState::route_document`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocumentKind {
     /// Julia source: the analysis pipeline's business, and the kind nearly

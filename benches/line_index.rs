@@ -7,8 +7,7 @@
 //! [`TextBuffer`] keeps the table beside the text and patches it across each
 //! edit (`src/text/buffer.rs`).
 //!
-//! This bench is the evidence for that shape, and the guard against a change
-//! that quietly reintroduces a rescan on the hot path. Measured on 2026-08-16
+//! This bench guards against reintroducing a rescan on the hot path. Measured on 2026-08-16
 //! (release, otherwise-idle machine — every row here scales with load, so read
 //! the ratios, not the absolutes):
 //!
@@ -23,10 +22,6 @@
 //! The `didChange` row applies a keystroke and then undoes it, so one
 //! keystroke is about half of what it prints.
 //!
-//! A keystroke used to pay that rescan on the main loop before dispatching
-//! anything, and pay it again in every handler that answered against the
-//! buffer. The handlers now share the table rather than each rebuilding it.
-//!
 //! The `didChange` row grew (it was 0.9/8.8 us against a `String` spliced in
 //! place) when the text became a shared `Arc<str>`: an edit rebuilds the
 //! string rather than mutating it, which is what makes every *handoff* of the
@@ -35,10 +30,9 @@
 //! together, and prefer the pipeline bench when judging a text-storage
 //! change.
 //!
-//! Ropey was measured against this design twice and deferred both times
-//! (issue #76, then PR #85): it wins this bench's didChange row outright
+//! Ropey wins this bench's didChange row outright
 //! (~0.7 us flat at 1 MB) and loses the point-query rows ~3-9x, but the
-//! pipeline bench is where that trade is actually settled. See `TODO.md`.
+//! pipeline benchmark is authoritative for text-storage changes.
 //!
 //! Plain `main` (`harness = false`), same style as `format_compare`: no
 //! criterion dependency in the root crate, just a warm loop and a table.

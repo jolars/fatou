@@ -6,10 +6,8 @@
 //! while any handled descendant is still normalized. As rules land, nodes move
 //! from the transparent fallback to a dedicated arm.
 //!
-//! The style is Fatou's own (see `AGENTS.md`); the hand-authored fixture gate
-//! lives in `tests/formatter.rs`. NOTE: many rules below still mirror the source's
-//! line breaks (a legacy of the removed Runic target), which Tenet 1 forbids; they
-//! are re-evaluated construct-by-construct as the width-driven reflow engine lands.
+//! The style is Fatou's own; hand-authored fixtures live in
+//! `tests/formatter.rs`.
 
 use rowan::{NodeOrToken, TextRange};
 

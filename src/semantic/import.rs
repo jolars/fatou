@@ -1,8 +1,7 @@
 //! The import model: `using`/`import` statements as a per-file loaded-modules
 //! list, `export`/`public` name lists, and qualified reads (`Foo.bar`) kept
 //! separate from bare free reads. These feed the range-free firewall queries
-//! (`file_exports`, `file_free_reads`, `file_qualified_reads`) and the
-//! package-index resolution order of TODO.md Phase 3.
+//! (`file_exports`, `file_free_reads`, `file_qualified_reads`).
 
 use rowan::TextRange;
 use smol_str::SmolStr;
