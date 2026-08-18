@@ -11,6 +11,8 @@ paths:
 
 # JuliaSyntax oracle rules
 
+Scope: parser oracle projector, oracle harness, and oracle fixtures.
+
 The differential oracle for the parser is **JuliaSyntax.jl**, the official Julia
 parser (itself a lossless green-tree design). The full workflow for closing a
 gap is the `parser-parity` skill.
@@ -41,8 +43,7 @@ one task that needs Julia.
   `crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source`.
 - Julia packages are **Pkg-managed, not Nix-managed**: `devenv.nix` provides
   only the bare `julia-bin` interpreter and the shell exports `JULIA_PROJECT=@.`.
-  This replaced nixpkgs' `withPackages`, which resolved an old registry snapshot
-  and pinned JuliaSyntax by accident, defeating the exact-version contract.
+  Keep version selection in `Project.toml` and the committed `Manifest.toml`.
 - The regen scripts just `using JuliaSyntax` from the *active* environment.
   **They must not force-activate or instantiate the root project**: the
   web-container `SessionStart` hook provisions JuliaSyntax differently (a pinned
@@ -55,4 +56,4 @@ one task that needs Julia.
 
 To bump the oracle: edit the `[compat]` bound in `Project.toml`, re-resolve
 (`julia --project=. -e 'using Pkg; Pkg.update("JuliaSyntax")'`), re-run both
-regen scripts, then re-triage.
+regen scripts, then triage.

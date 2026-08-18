@@ -13,6 +13,8 @@ paths:
 
 # Docs and benchmark rules
 
+Scope: docs site content, docs tooling, and benchmark artifacts.
+
 The site under `docs/` is an mdBook published to <https://fatou.dev/>.
 `docs/book/` is build output and gitignored — never edit or commit it.
 
@@ -43,7 +45,7 @@ Both derive a page's URL through the same `postbuild::collect_pages`, so a
 page's canonical URL and its sitemap `<loc>` can never disagree — keep them on
 that shared path. `docs/doc-utils/` is the mdBook preprocessor that expands the
 benchmark chart and metadata markers. `docs.yml` deploys on `v*` tags with full
-git history, so `<lastmod>` can come from git.
+git history so `<lastmod>` data is available during publish.
 
 **These live in `examples/`, not `[[bin]]`, on purpose**: `examples/` is outside
 the Cargo `include` whitelist, so they keep `fatou` a single publishable crate

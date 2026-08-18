@@ -9,6 +9,8 @@ paths:
 
 # Language server rules
 
+Scope: `src/lsp/`, `src/text/`, and LSP integration tests.
+
 `src/lsp.rs` is a facade over `src/lsp/*`; **its module doc carries the full
 threading rationale — read it before touching the main loop.** CLI entry:
 `fatou lsp`.

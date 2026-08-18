@@ -12,6 +12,8 @@ paths:
 
 # Package index and environment rules
 
+Scope: `src/index/`, `src/environment.rs`, and index/environment tests.
+
 `src/index/` harvests a structured, serializable view of a Julia package's
 public API **with fatou's own parser**; `src/environment.rs` locates the active
 project and resolves each package to an on-disk source directory. Together they

@@ -6,10 +6,12 @@ paths:
 
 # Parser rules
 
-Crate: `crates/fatou-parser` (`syntax`, `ast`, `parser`). Re-exported by the root
-crate (`pub use fatou_parser::{ast, parser, syntax}`), so intra-repo consumers
-keep writing `crate::parser::…`. Growing parity against JuliaSyntax has its own
-rules file (`oracle.md`) and skill (`parser-parity`).
+Scope: `crates/fatou-parser/` and parser incrementality boundary points.
+
+Crate: `crates/fatou-parser` (`syntax`, `ast`, `parser`). Re-exported by the
+root crate (`pub use fatou_parser::{ast, parser, syntax}`), so intra-repo
+consumers keep writing `crate::parser::…`. JuliaSyntax parity policy is in
+`oracle.md` and the `parser-parity` skill.
 
 ## Hard invariants
 

@@ -18,6 +18,8 @@ paths:
 
 # Distribution and release rules
 
+Scope: release workflows, packaged surfaces, and version routing policy.
+
 Releases are fully automated off Conventional Commits; the commit type picks the
 version.
 

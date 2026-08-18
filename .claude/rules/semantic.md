@@ -12,6 +12,8 @@ paths:
 
 # Semantic, resolution, and project rules
 
+Scope: `src/semantic/`, `src/resolve.rs`, `src/project.rs`, and salsa wiring.
+
 Four deliberately separate layers: `src/semantic/` is **strictly single-file**,
 `src/project.rs` is the range-free projection firewall, `src/resolve.rs` is the
 one name-resolution order, and `src/incremental.rs` wires them into salsa. Keep

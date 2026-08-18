@@ -11,10 +11,11 @@ paths:
 
 # Config rules
 
-`src/config.rs`: the `fatou.toml` schema, defaults, and discovery. Discovery
-walks up from an anchor directory, then falls back to `$FATOU_CONFIG`, then the
-global user config. Every command honors it, so **a schema change is a change to
-format, lint, and the LSP at once**.
+Scope: `src/config.rs`, `src/julia_version.rs`, and `src/file_discovery.rs`.
+`src/config.rs` defines the `fatou.toml` schema, defaults, and discovery.
+Discovery walks up from an anchor directory, then falls back to
+`$FATOU_CONFIG`, then the global user config. Every command honors it, so **a
+schema change affects format, lint, and the LSP at once**.
 
 ## The schema today
 

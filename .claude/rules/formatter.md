@@ -9,10 +9,11 @@ paths:
 
 # Formatter rules
 
+Scope: formatter engine and CLI formatter bridge.
+
 Engine: `crates/fatou-formatter/src/formatter/`. The root's `src/formatter.rs`
-is a CLI bridge that re-exports it and hosts the batch `check` API. **To grow
-the formatter, use the `formatter` skill** — it documents the human-in-the-loop
-loop and keeps a rolling `RECAP.md`.
+is a CLI bridge that re-exports it and hosts the batch `check` API.
+**To grow the formatter, use the `formatter` skill**.
 
 ## Hard invariants
 
@@ -54,8 +55,7 @@ walking and rayon stay out of the engine.
 
 ## Testing
 
-Fatou owns its style; there is **no external reference formatter** (Runic.jl was
-tracked as a soft oracle once; that target has been removed).
+Fatou owns its style; there is **no external reference formatter**.
 
 - The gate is **hand-authored fixtures**:
   `crates/fatou-formatter/tests/fixtures/formatter/<slug>/` holds `input.jl` and
