@@ -89,9 +89,9 @@
         args = [ "--no-errors-on-unmatched" ];
       };
 
-      # panache-format = {
-      #   enable = true;
-      # };
+      panache-format = {
+        enable = true;
+      };
     };
   };
 }
