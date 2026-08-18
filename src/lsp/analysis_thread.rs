@@ -804,7 +804,7 @@ mod tests {
     /// copy of it. A `req.text.text().to_string()` here would still type-check
     /// and still be correct — it would just copy the whole document on every
     /// keystroke, which is the one regression no other test or bench notices
-    /// (`.claude/rules/lsp.md`, `benches/salsa_keystroke.rs`).
+    /// (`AGENTS.md`, "LSP", and `benches/salsa_keystroke.rs`).
     #[test]
     fn the_write_phase_shares_the_buffers_allocation() {
         use crate::lsp::lint::ServerRules;

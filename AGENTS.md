@@ -1,57 +1,35 @@
 # Agent Instructions
 
-This file is the repository-wide contract for coding agents.
+This file is the repository-wide contract for coding agents. Keep it terse and
+operational; history belongs in tests, issues, or `git log`. `TODO.md` is the
+live roadmap and priority source of truth.
 
-Put cross-cutting invariants here. Put subsystem details in
-`.claude/rules/*.md` with `paths` frontmatter so they load only when relevant.
+## Project and tenets
 
-Rules files should stay terse and under 200 lines. Keep them as operational
-policy, not history. If context belongs to chronology, store it in tests,
-issues, or `git log`, not in memory instructions.
+Fatou is a Rust CLI for Julia with a lossless incremental parser, canonical
+formatter, semantic linter, LSP, and static package/environment index. It is a
+Cargo workspace (edition 2024): the root `fatou` package plus
+`crates/fatou-parser` and `crates/fatou-formatter`. The root re-exports parser
+modules as `fatou::{ast, parser, syntax}`.
 
-`TODO.md` is the live roadmap and priority source of truth.
-
-## What this project is
-
-Fatou is a Rust CLI for Julia with five main surfaces:
-
-- parser (lossless CST, incremental reparse support)
-- formatter (canonical layout engine)
-- linter (semantic linting and fixes)
-- LSP (editor-facing analysis and code actions)
-- package index/environment (static project and dependency discovery)
-
-It is a Cargo workspace (edition 2024) with:
-
-- root package `fatou` (binary and library)
-- `crates/fatou-parser`
-- `crates/fatou-formatter`
-
-The root crate re-exports parser modules so internal paths remain stable
-(`fatou::parser`, `fatou::formatter`, etc.).
-
-Both member crates must stay `wasm32-unknown-unknown`-clean: no filesystem,
-process, thread, or clock usage.
-
-## Tenets
-
-1. Deterministic canonical formatting.
-   Semantically equivalent inputs format identically.
+1. Formatting is deterministic and canonical: semantically equivalent inputs
+   format identically.
 2. Incremental parsing is first-class.
-   Parser/CST changes must preserve incremental viability.
-3. Parsing belongs in the parser.
-   Do not patch parser mistakes in formatter or linter.
-4. Losslessness belongs in the parser.
-   `reconstruct(text) == text` byte-for-byte.
+3. Parsing belongs in the parser; never patch parser mistakes downstream.
+4. The parser is lossless: `reconstruct(text) == text` byte-for-byte.
 
-Additional global constraints:
+Global constraints:
 
-- Formatter is the sole authority on layout.
-- `lint --fix` is byte-range rewrite only; it never runs the formatter.
-- Pipeline is fix-then-format.
-- No Julia runtime evaluation anywhere in analysis or linting.
+- The formatter alone controls layout. `lint --fix` performs byte-range
+  rewrites and never formats; the pipeline is fix, then format.
+- Analysis, linting, indexing, and environment discovery never evaluate or
+  invoke Julia.
+- Both member crates remain `wasm32-unknown-unknown`-clean: no filesystem,
+  process, thread, or clock APIs.
+- Do not hand-edit generated files. Performance claims require measurements and
+  benchmark artifacts.
 
-## Commands
+## Commands and testing
 
 ```sh
 cargo build --workspace
@@ -63,7 +41,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
 
-Useful command examples:
+Useful flows:
 
 ```sh
 cat file.jl | cargo run -- parse --verify --quiet
@@ -73,94 +51,289 @@ cargo run -- lint --fix <path>
 cargo run -- debug format <path>
 ```
 
-`task <name>` wraps common flows; see `Taskfile.yml` and `task --list`.
+`task <name>` wraps common flows; see `task --list`. Use TDD: first add a failing
+test or fixture, implement the change, run focused tests, then
+`cargo test --workspace`. Parser fixtures live under
+`crates/fatou-parser/tests/`, formatter fixtures under
+`crates/fatou-formatter/tests/`, and root integration suites in `tests/*.rs`.
+Review snapshot changes with `cargo insta review`; never accept an unread
+snapshot. Tests asserting absolute paths or `file:` URIs must use native
+Windows paths rather than Unix-style `/work` paths.
 
-## Architecture map
+CI workflows are authoritative. Use Conventional Commits and semver; keep
+subjects concise and commits atomic by release area (root, each member crate,
+and `editors/`).
 
-Paths are relative to each crate root.
+## Generated and pinned files
 
-- Parse pipeline (`crates/fatou-parser/src/parser/`): event-driven parser,
-  lossless CST, incremental reparse strategy, and oracle s-expression projector.
-- Typed AST (`crates/fatou-parser/src/ast/`): zero-cost read-only wrappers.
-- Formatter engine (`crates/fatou-formatter/src/formatter/`): document IR plus
-  single best-fit layout printer.
-- Root formatter bridge (`src/formatter.rs`, `src/formatter/`): CLI integration
-  and batch checking.
-- Semantic model (`src/semantic/`): single-file scope/binding/import/signature/
-  CFG analysis.
-- Resolution (`src/resolve.rs`): single masking order shared by all consumers.
-- Project projections (`src/project.rs`): range-free projections to preserve
-  cross-file memo stability.
-- Package index and environment (`src/index/`, `src/environment.rs`): static
-  package API harvesting and Julia-like environment discovery.
-- Linter (`src/linter/`): semantic rules, suppressions, autofixes, and docs
-  generation.
-- LSP (`src/lsp.rs`, `src/lsp/`): JSON-RPC server, analysis threading model,
-  and feature handlers.
-- Config (`src/config.rs`): `fatou.toml` schema and discovery.
-- File discovery (`src/file_discovery.rs`): `.jl` walking and explicit path
-  validation.
+Never hand-edit:
 
-## Invariants and conventions
+- `CHANGELOG.md` and all package version fields (managed by `versionary`)
+- `docs/src/reference/cli.md` (generated by `build.rs`)
+- `docs/src/reference/rules.md` (generated by `cargo run --example docgen`)
+- parser Unicode tables and LSP LaTeX tables (Julia generation scripts)
+- `src/index/fallback/{base,core}_exports.txt`
+- pinned JuliaSyntax oracle corpus artifacts
 
-- CI quality gates are authoritative (`.github/workflows/`).
-- Losslessness is mandatory.
-- Formatter idempotence is mandatory.
-- Do not hand-edit generated files.
+## Parser and typed AST
 
-Generated outputs include:
+Scope: `crates/fatou-parser/` and parser boundaries in `src/incremental.rs`.
+The pipeline is lexer → Pratt/recursive-descent parser → events → rowan CST.
 
-- `CHANGELOG.md` and all version fields (`versionary`)
-- `docs/src/reference/cli.md`
-- `docs/src/reference/rules.md`
-- parser/LSP generated unicode and LaTeX symbol tables
-- `src/index/fallback/*.txt`
-- pinned oracle corpus artifacts
+- Every construct must preserve all bytes, including whitespace, comments,
+  nested block comments, and line endings. Errors use a diagnostics side
+  channel and never prevent producing a recoverable tree.
+- The parser recognizes lexical shape only. Keep salsa above the parser crate.
+- Grammar changes must survive reparse tiers. `PrevParse` and staged `Edit`s are
+  hints only: `parsed_document` must always equal a fresh `parse(text)` result.
+- Store green nodes in salsa, never red `SyntaxNode`s (`SyntaxNode` is not
+  `Send`/`Eq`).
+- Add fixed ASCII operators as longest-first `OPS` table rows, tokens as
+  `tokens.rs` `token_table!` rows, and keywords as `keywords.rs`
+  `keyword_table!` rows; do not add parallel match arms.
+- `unicode_ident.rs` and `unicode_ops.rs` are generated from Julia; regenerate
+  them on a Julia bump.
 
-Performance claims require measurement and benchmark artifacts.
+The typed AST is a zero-cost, read-only navigation view, not another model.
+Grow it with the relevant `ast_node!`/`ast_token!` entry, typed accessors,
+`Has*` traits, exports, and accessor tests. Keep `Expr::Other` total over
+unwrapped expression kinds. Linter, semantics, project code, code actions, and
+ordinary LSP handlers use typed AST wrappers. The formatter intentionally uses
+raw CST; polymorphic LSP kind-classification walkers may also do so.
 
-## Commits and versioning
+Parser snapshots must assert CST shape, diagnostics, and losslessness. Use the
+`parser-parity` skill for JuliaSyntax gaps.
 
-- Use Conventional Commits (`type(scope): subject`) and semver.
-- Keep subjects concise.
-- Keep commits atomic by release area (root crate, member crate, `editors/`).
+### JuliaSyntax oracle
 
-## Testing
+The projector in `parser/sexpr.rs` is a diagnostic, never a fix. A divergence
+means the CST or its encoding translation is wrong: fix the parser, never patch
+the projector merely to match expected output. Ratchet newly passing oracle
+cases into the allowlists.
 
-Use TDD:
+JuliaSyntax is exactly pinned in root `Project.toml` with a committed manifest.
+Regeneration uses `using JuliaSyntax` from the active environment and must not
+force-activate or instantiate the root project. A targeted regeneration must
+leave unrelated artifacts byte-identical; other changes indicate a version
+mismatch. To bump the oracle, update the compat bound, resolve the manifest,
+run both regeneration scripts, and triage all changes.
 
-- write a failing test or fixture first
-- implement the fix
-- run relevant tests, then `cargo test --workspace`
+## Formatter
 
-Suite ownership:
+Scope: `crates/fatou-formatter/`, `src/formatter*`, and `src/debug.rs`. Use the
+`formatter` skill when growing formatting behavior.
 
-- parser tests and fixtures: `crates/fatou-parser/tests/`
-- formatter tests and fixtures: `crates/fatou-formatter/tests/`
-- root integration suites (CLI/LSP/linter/semantic/index/config): `tests/*.rs`
+- Fully reflow every handled construct from syntax and `FormatStyle`; source
+  line breaks, whitespace, operator spelling, and literal spelling do not
+  influence output. Reject construct-specific preservation hacks unless they
+  are an explicit recorded policy.
+- Require idempotence, clean reparsing, and byte-identical output from
+  behavior-preserving refactors. Never compensate for a parser bug here.
+- `rules::lower` lowers CST to document IR; `printer.rs` is the single best-fit
+  layout engine and owns all line-break choices.
+- Unhandled syntax lowers transparently by preserving tokens and recursively
+  lowering children. Do not replace this load-bearing fallback with
+  whole-construct verbatim output.
+- Filesystem walking and rayon stay in the root bridge, outside the Wasm-clean
+  engine crate. Config callers pass a fully resolved `FormatStyle`.
 
-Snapshot policy:
+Fatou has no external reference formatter. Fixtures under
+`crates/fatou-formatter/tests/fixtures/formatter/<slug>/` use hand-authored
+`expected.jl`; its presence means the case is gated. Never capture expected
+output from another formatter. Idempotence and clean-reparse tests cover every
+`input.jl`, including ungated cases.
 
-- review all snapshot changes with `cargo insta review`
-- do not accept unread snapshots
+`fatou debug format` output is a CI contract with `smoke-test.yml`: failure
+labels, approximate diff-line syntax, and sanitized dump filenames must change
+together. Use `smoke-test-triage` for regressions.
 
-Cross-platform policy:
+## Linter
 
-- tests must handle Windows path semantics when asserting absolute paths or
-  `file:` URIs
+Scope: `src/linter/` and lint integration tests. Use `add-lint-rule` for new
+rules and `linter-investigation` for corpus triage.
 
-Smoke test policy:
+- Rules are semantic, never formatting checks. Parse diagnostics block linting.
+- Rules join the driver's one CST walk through `Rule::interests` and
+  `Rule::check`; whole-file rules use `check_file`. No rule runs a private tree
+  walk. `rules.rs::all_rules` is the sole rule registry.
+- `ResolvedRules::run` alone applies suppression directives and their post-pass.
+  The engine stamps severity and path; rules only override default severity.
+- Use shared machinery: `rules/matchers.rs` for calls, `RuleContext` for
+  resolution/scans/CFG, `rules/rewrite.rs` for safe text reuse,
+  `rules/regex.rs` for regex literals, and `include_graph.rs` for includes.
+  `RESOLUTION_RULES` is the sole list controlling project-resolution needs.
+- Rule IDs are stable public kebab-case identifiers. Categories are internal
+  directories (`correctness`, `suspicious`, `performance`, `readability`,
+  `meta`) and may change without changing IDs. Every rule supplies a
+  description and executable `examples()`.
 
-- `.github/workflows/smoke-test.yml` runs `fatou debug format` over real Julia
-  repositories and files categorized regressions
+Fixes are byte-range replacements, not mini-formatters. They must preserve
+syntax, losslessness, comments, and local legibility but do not owe line width.
+When correctness cannot be guaranteed for a shape, still diagnose it but
+withhold the fix. Only `Safe` fixes run under ordinary `lint --fix`; other fixes
+require `--unsafe-fixes`.
+
+Add behavior tests to `tests/linter_rules.rs`, plus `tests/autofix.rs` for a
+rule with fixes. Regenerate, never edit, the rule reference.
+
+## Semantics, resolution, and project incrementality
+
+Keep four layers separate: `src/semantic/` is strictly single-file;
+`src/project.rs` holds range-free cross-file projections; `src/resolve.rs` owns
+the one resolution order; `src/incremental.rs` wires them through salsa.
+
+- Build scopes, bindings, free reads, imports, signatures, and CFG in one CST
+  walk, using structurally equal arena models so salsa can backdate unchanged
+  results. Keep cross-file logic out of `semantic/`.
+- Model noninteractive Julia file scoping: module/file globals; function-like,
+  `let`, comprehension, and struct hard scopes; `for`/`while`/`try` soft scopes;
+  locals hoisted across their entire scope. Do not emulate REPL soft scope.
+- Share `collect_import_clauses` with the index harvester.
+- All consumers use the same masking order: local/file bindings and explicit
+  imports, whole-module `using` exports in source order, then implicit Base/Core.
+  Add consumers to `Resolver`, not beside it. Macros use the parallel macro
+  namespace.
+- Per-file project projections remain range-free and order-independent so body
+  edits do not invalidate the graph. Name sets derive from semantics;
+  `include_edges` reads CST because `include` is an ordinary call.
+- Only the `ProjectFiles` name-to-input mapping has HIGH durability; never put
+  text there. `Project.toml` remains a normal `SourceFile` so unsaved `[deps]`
+  edits work without reparsing Julia.
+- Keep whole-value salsa leaves model-free and values `Arc`-wrapped. Salsa is
+  single-writer; all writes obey the LSP analysis-thread ownership.
+
+`tests/salsa_incremental.rs` guards these invalidation boundaries.
+
+## Package index and environment
+
+Scope: `src/index/`, `src/environment.rs`, and their root tests.
+
+- Harvest package APIs with Fatou's parser and mirror Julia environment loading
+  statically. Never invoke Julia. Malformed, truncated, or missing installed
+  files degrade to fewer symbols rather than panicking.
+- The index is a cache: stale or missing entries may reduce precision but never
+  alter formatting or make a lint incorrect. `PackageIndex` stays serializable
+  and depot-independent; source roots live in `HarvestedLibrary`.
+- Discovery precedence is `JULIA_PROJECT`, walk up from the workspace, then the
+  newest default environment. Compute package slugs from UUID and
+  `git-tree-sha1`; do not select an arbitrary installed version by scanning.
+- Harvest Base, Core, and stdlibs from both supported installation layouts.
+  Without Julia, synthesize minimal Base/Core indexes from generated fallback
+  exports; never edit those snapshots manually.
+- `ProjectFile::declared_dep_names` is the sole definition of declared deps and
+  is independent of harvest success and UUID parsing. CLI disk state and LSP
+  live-buffer state use their respective routes without drifting.
+- Never overwrite an open unsaved project buffer during re-resolution. Watched
+  file changes restore closed environment files from disk. Project files not
+  belonging to a workspace package are tracked as buffers but expose no
+  declared dependencies.
+
+Use fixtures for new on-disk layouts; tests must not depend on a locally
+installed Julia depot.
+
+## LSP
+
+Scope: `src/lsp/`, `src/text/`, and `tests/lsp.rs`. Read the module documentation
+in `src/lsp.rs` before changing the main loop.
+
+- Keep the synchronous `lsp-server` architecture. Capabilities, including
+  position encoding, are negotiated with the client.
+- The main loop owns no salsa database. The dedicated analysis thread owns the
+  persistent database and is the sole writer. Each operation has a cheap mutable
+  write phase followed by an expensive immutable read phase on the read pool.
+- Background indexing has its own single-thread pool. Never put unbounded work
+  on the read pool.
+- Preserve same-URI latest-version coalescing and cancellation without
+  cross-canceling work for another URI. Drop results for closed or superseded
+  documents. A canceled/cache-miss read falls back to a correct fresh parse.
+- Keep analysis jobs, read jobs, and request handlers inside panic guards.
+
+URI conversion goes only through `lsp/uri.rs`; offset conversion through
+`text/line_index.rs`; change conversion through `text/edit.rs`. A live document
+is `Arc<TextBuffer>`, not `String`: reuse its maintained line index and shared
+`Arc<str>`. Do not rescan with `LineIndex::new`, clone via `to_string`, or lose
+the `Arc::ptr_eq`-before-content-compare fast path on live dispatch. Pointer
+equality is only a fast path; the content comparison prevents no-op salsa
+invalidations. Disk reverts need no pointer fast path.
+
+- Navigate ordinary features through typed AST. Raw CST is reserved for the
+  polymorphic symbol/folding/semantic-token classifiers.
+- Access documents through `julia_text`, `project_text`, or `manifest_text`,
+  never the document map directly. Julia features return null for TOML. Project
+  features use the project route; manifests only answer their supported path
+  document links. Buffer diagnostics supersede, rather than join, harvested
+  diagnostics in `publish_merged`.
+- Features depending on a completed harvest must send the corresponding
+  capability-guarded workspace refresh where the protocol provides one.
+- Formatting returns line-diff edits and falls back to one replacement only for
+  a diff covering more than half the span. Returned edits must reproduce
+  formatter output byte-for-byte.
+- Machine facts belong in editor settings; project facts in `fatou.toml`. Rename
+  covers symbols, files, and folders.
+- `latex_symbols.rs` is generated and sorted for binary search; regenerate it on
+  a Julia bump.
+
+## Configuration and file discovery
+
+`src/config.rs` owns the `fatou.toml` schema, defaults, and discovery; every CLI
+surface and the LSP must resolve it consistently.
+
+- Config structs use `deny_unknown_fields` and kebab-case keys. Unknown IDs in
+  `select`, `ignore`, and severity maps are user data reported at lint time;
+  unknown `[lint.rules.<id>]` tables or keys are schema parse errors.
+- Pair replacement and extension options (`exclude`/`extend-exclude`, etc.). A
+  non-empty built-in default requires a manual `Default` implementation.
+- Put shared project facts at the appropriate project level; machine facts go
+  in editor settings. The formatter library accepts resolved `FormatStyle` and
+  never reads config itself.
+- Julia compatibility uses Pkg grammar, not Cargo semver: bare `1.6` is caret,
+  hyphen is an inclusive range, and commas form unions. `parse_compat` needs
+  only the union's outer floor and ceiling.
+
+Schema changes require config discovery tests and updates to both hand-written
+configuration documentation pages.
+
+## Documentation, benchmarks, and assets
+
+The mdBook site lives under `docs/`; `docs/book/` is ignored build output. Add
+hand-written pages to `docs/src/SUMMARY.md`. Canonical links and sitemap entries
+must share `postbuild::collect_pages`. Keep publishing utilities in `examples/`
+so they remain outside the packaged crate.
+
+Benchmarks are opt-in local measurements, never test/CI gates. `task bench` and
+`task bench-memory` update tracked JSON artifacts that alone feed published
+performance pages; site builds never remeasure. `task profile` produces local,
+ignored diagnostic output. Commit updated artifacts when making performance
+claims. Compare formatter performance using ratios rather than milliseconds;
+memory reporting may include absolute MB. Use `perf-investigation` for profiling
+work.
+
+`task icons` derives icons from `assets/logo.png`; `task logo` regenerates the
+logo. Both require Julia and are manual operations.
+
+## Distribution and releases
+
+Releases derive from Conventional Commits. `versionary` owns changelogs and all
+version fields; pre-1.0 breaking changes produce minor bumps.
+
+- Root CLI tags are `v*`; parser tags `fatou-parser-v*`; formatter tags
+  `fatou-formatter-v*`; the editor follows the CLI. Only root `v*` releases
+  carry GitHub assets.
+- Paths under `crates/` and `editors/` are excluded from root version
+  calculation, so never mix release areas in one commit.
+- Dependency changes must pass audit, deny, Wasm, and minimal-version CI. Declare
+  honest lower bounds and raise a minimum in the same commit that starts using
+  its newer API.
+- `editors/code` is Biome-gated. Its bundled binary must not be load-bearing;
+  PATH lookup remains necessary for NixOS.
+- npm platform packages derive from `npm/platform-template`; PyPI uses maturin;
+  AUR lives under `packaging/aur`; installer scripts are under `scripts/`.
+- `publish-crates.yml` publishes unpublished workspace crates in dependency
+  order on the next CLI release.
 
 ## Environment
 
-Development uses Nix/devenv (`devenv.nix`, `devenv.yaml`).
-
-Julia packages are Pkg-managed via the repo `Project.toml` and `Manifest.toml`.
-The shell exports `JULIA_PROJECT=@.`. Julia is required for regenerating parser
-oracle corpora and generated tables, not for normal build/test flows.
-
-In remote container sessions, `.claude/hooks/session-start.sh` bootstraps tools
-when available and continues when Julia cannot be provisioned.
+Development uses Nix/devenv. Julia packages are Pkg-managed through the root
+`Project.toml` and `Manifest.toml`, with `JULIA_PROJECT=@.`. Julia is needed for
+oracle/table generation, not normal Rust build and test flows. Remote session
+bootstrap may continue when Julia cannot be provisioned.

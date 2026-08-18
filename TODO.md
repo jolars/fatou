@@ -124,7 +124,7 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
   lists that disagree with the signature. Larger design question than a single
   rule. Would be a sixth category alongside `correctness`/`suspicious`/
   `performance`/`readability`/`meta`, which is cheap on its own — a category is
-  its directory and nothing else (`.claude/rules/linter.md`), so it appears in
+  its directory and nothing else (`AGENTS.md`, "Linter"), so it appears in
   no public surface and recategorizing is free — but the bundle is what needs
   designing, not the directory.
 
