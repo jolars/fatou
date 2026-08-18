@@ -17,16 +17,16 @@ fake it with a heuristic unless the entry explicitly sanctions one (e.g.
 ## Tenets that constrain a rule (from `AGENTS.md`)
 
 - **The linter is purely semantic.** Pure layout (spacing, indentation, line
-  breaks, operator spelling) is the formatter's job—any check `format
-  --check` could perform is **out of scope** for the linter (see the module
-  doc of `src/linter/rules.rs`).
-- **Parsing is the parser's job.** Do not paper over parser mistakes in a
-  rule. If the CST does not expose what you need, extend the typed AST
-  wrappers in `crates/fatou-parser/src/ast/` (see "Typed AST wrappers" in
-  `.claude/rules/parser.md`: `ast_node!`/
-  `ast_token!` entry, `support::*` accessors, `Has*` trait impls, re-export
-  from `crates/fatou-parser/src/ast.rs`, accessor unit test) rather than re-lexing or kind-matching
-  raw CST inside the rule.
+  breaks, operator spelling) is the formatter's job—any check `format   --check`
+  could perform is **out of scope** for the linter (see the module doc of
+  `src/linter/rules.rs`).
+- **Parsing is the parser's job.** Do not paper over parser mistakes in a rule.
+  If the CST does not expose what you need, extend the typed AST wrappers in
+  `crates/fatou-parser/src/ast/` (see "Typed AST wrappers" in
+  `.claude/rules/parser.md`: `ast_node!`/ `ast_token!` entry, `support::*`
+  accessors, `Has*` trait impls, re-export from
+  `crates/fatou-parser/src/ast.rs`, accessor unit test) rather than re-lexing or
+  kind-matching raw CST inside the rule.
 - **A lint fix is a textual edit, never a formatter.** Applying the fix must
   leave code that still **parses** and stays **lossless** (no misbinding, no
   dropped comments). Make the edit correct *by construction* (tight span,
@@ -41,20 +41,21 @@ Three tiers; prefer the cheapest the rule's correctness actually requires.
 - **`syn`** — the CST plus typed AST wrappers and literal inspection.
 - **`sem`** — the `SemanticModel` (`ctx.model`: scopes, bindings, occurrences,
   imports, module paths).
-- **`res`** — name resolution: what an identifier actually *means*
-  (Base/stdlib methods, imported symbols). Available through `RuleContext`:
-  `resolver()`, `resolves_to_base()`, `read_resolves_to_base()`,
-  `name_resolves_to_base()`, `base_export_module()`, and `trusts_resolution()`
-  as the gate for "is a resolution context even present". Each is memoized per
-  file, so asking is cheap however many rules do.
+- **`res`** — name resolution: what an identifier actually *means* (Base/stdlib
+  methods, imported symbols). Available through `RuleContext`: `resolver()`,
+  `resolves_to_base()`, `read_resolves_to_base()`, `name_resolves_to_base()`,
+  `base_export_module()`, and `trusts_resolution()` as the gate for "is a
+  resolution context even present". Each is memoized per file, so asking is
+  cheap however many rules do.
 
 **A `res`-tier rule carries two extra obligations.** It is sound only with a
 project-wide resolution context, so it must (a) report **nothing** when
 `trusts_resolution()` is false, rather than guessing, and (b) be listed in
-`RESOLUTION_RULES` (`src/linter/rules.rs`) and ship `default_enabled() ->
-false`. That one list is what the CLI's harvest gate, the language server's
-member-file rule set, and `outdated-suppression` all read; adding a resolution
-rule without it means the CLI never harvests for it and it silently misfires.
+`RESOLUTION_RULES` (`src/linter/rules.rs`) and ship
+`default_enabled() -> false`. That one list is what the CLI's harvest gate, the
+language server's member-file rule set, and `outdated-suppression` all read;
+adding a resolution rule without it means the CLI never harvests for it and it
+silently misfires.
 
 ## Key files
 
@@ -63,29 +64,29 @@ rule without it means the CLI never harvests for it and it silently misfires.
   from `all_rules()`, so there is no second list to sync. Every new rule is
   added here exactly once.
 - `src/linter/rules/<category>.rs`—the category module. The vocabulary is
-  `correctness`/`suspicious`/`performance`/`readability`/`meta`; all five
-  exist. Holds `mod <id>;` + `pub use <id>::<Name>;`.
-- `src/linter/rules/<category>/<id>.rs`—one file per rule: a unit
-  `pub struct` implementing `Rule`, with a module doc comment. (File names are
-  snake_case; the public id stays kebab-case.)
-- `crates/fatou-parser/src/ast/` (`nodes.rs`, `tokens.rs`, `traits.rs`, re-exported from
-  `crates/fatou-parser/src/ast.rs`)—typed wrappers (`CallExpr`, `IfExpr`, `Condition`,
-  `BinaryExpr`, the `Expr` sum, `Ident`/`Operator` tokens, `Has*` traits).
-  **Prefer these over raw `children()`/`kind()` matching**; grow them when a
-  shape is missing.
+  `correctness`/`suspicious`/`performance`/`readability`/`meta`; all five exist.
+  Holds `mod <id>;` + `pub use <id>::<Name>;`.
+- `src/linter/rules/<category>/<id>.rs`—one file per rule: a unit `pub struct`
+  implementing `Rule`, with a module doc comment. (File names are snake_case;
+  the public id stays kebab-case.)
+- `crates/fatou-parser/src/ast/` (`nodes.rs`, `tokens.rs`, `traits.rs`,
+  re-exported from `crates/fatou-parser/src/ast.rs`)—typed wrappers (`CallExpr`,
+  `IfExpr`, `Condition`, `BinaryExpr`, the `Expr` sum, `Ident`/`Operator`
+  tokens, `Has*` traits). **Prefer these over raw `children()`/`kind()`
+  matching**; grow them when a shape is missing.
 - `src/linter/rules/matchers.rs`—shared **call-shape** matching, one tier above
   the AST wrappers. `plain_call(node, name, arity)` is the whole "a call to
   *name* with exactly *n* positional arguments and nothing else" opening most
-  idiom rules need; `CallShape::of(&call)` is the full split when the rule
-  needs keyword arguments (both sides of the `;`, plus the `f(; verbose)`
-  shorthand) or has to know that a splat left the positional or keyword set
-  *open*. `call_named`/`call_expr` exclude a definition's signature, which is a
+  idiom rules need; `CallShape::of(&call)` is the full split when the rule needs
+  keyword arguments (both sides of the `;`, plus the `f(; verbose)` shorthand)
+  or has to know that a splat left the positional or keyword set *open*.
+  `call_named`/`call_expr` exclude a definition's signature, which is a
   `CALL_EXPR` too. **Do not re-derive Julia's argument grammar in a rule**—grow
   this module instead. Shape matching is only half the job: follow it with
   `ctx.resolves_to_base(&call)` before claiming the callee is Base's.
-- `src/linter/diagnostic.rs`—`Diagnostic`, `Fix`, `Applicability`,
-  `Severity`. Build findings with **`Diagnostic::new(id, range, message)`**
-  (a `TextRange`, not a start/end pair) and push
+- `src/linter/diagnostic.rs`—`Diagnostic`, `Fix`, `Applicability`, `Severity`.
+  Build findings with **`Diagnostic::new(id, range, message)`** (a `TextRange`,
+  not a start/end pair) and push
   `Fix { description, content, start, end, applicability }` onto `diag.fixes`
   (`Fix` *does* take byte offsets). **Severity and path are stamped by the
   engine** after the rule runs—rules never set either; override
@@ -97,10 +98,10 @@ rule without it means the CLI never harvests for it and it silently misfires.
   next non-trivia node) / `# fatou-ignore-file [<rule>][: <reason>]` work for
   any registered rule automatically; nothing to wire per rule.
 - `tests/linter_rules.rs`—behavior tests + helpers `findings(rule, src)` /
-  `count(rule, src)` (lint with only that rule selected). Each rule gets its
-  own `// --- <id> ---` block.
-- `tests/autofix.rs`—fix-engine coverage; fixable rules add a `fix_source`
-  case here (see workflow step 3).
+  `count(rule, src)` (lint with only that rule selected). Each rule gets its own
+  `// --- <id> ---` block.
+- `tests/autofix.rs`—fix-engine coverage; fixable rules add a `fix_source` case
+  here (see workflow step 3).
 - `tests/rule_docs.rs`—pins each rule's rendered section via an **`insta`
   snapshot** (`rule_docs_render`), asserts the committed
   `docs/src/reference/rules.md` matches what docgen would write
@@ -109,76 +110,78 @@ rule without it means the CLI never harvests for it and it silently misfires.
   actually triggers its own rule**. Accept new snapshots with
   `cargo insta accept`.
 - `examples/docgen.rs`—generates the single-page reference
-  `docs/src/reference/rules.md` (one `## \`<id>\`` section per rule, registry
-  order) from `render_reference_page`. Run with `cargo run --example docgen`.
-  Do not hand-edit the page.
-- `docs/src/SUMMARY.md`—no per-rule entries; the reference is one page, so a
-  new rule needs no `SUMMARY.md` change.
+  `docs/src/reference/rules.md` (one
+  `## \`<id>\``section per rule, registry   order) from`render_reference_page`. Run with`cargo
+  run --example docgen\`. Do not hand-edit the page.
+- `docs/src/SUMMARY.md`—no per-rule entries; the reference is one page, so a new
+  rule needs no `SUMMARY.md` change.
 - `src/config.rs`—`RulesConfig`, one typed field per rule that takes options
   (`[lint.rules.<id>]`). It is `deny_unknown_fields`, so a mistyped key there is
   a config **parse error**. Options reach the rule as `ctx.config`.
-- `TODO.md`—the live roadmap ("Rules" under "Linter"). Check off the rule's
-  item with a one-line scope/severity note mirroring the landed entries above
-  it.
+- `TODO.md`—the live roadmap ("Rules" under "Linter"). Check off the rule's item
+  with a one-line scope/severity note mirroring the landed entries above it.
 
 ## Workflow
 
 1. **Pick the rule id (kebab-case).** This is the public `id()`, the
    `--select`/`--ignore`/`[lint.severity]` key, and the docs slug—unique and
-   stable; renaming is a breaking change. Match existing tone
-   (`unused-binding`, `assignment-in-condition`). The roadmap entry usually
-   fixes the id already.
+   stable; renaming is a breaking change. Match existing tone (`unused-binding`,
+   `assignment-in-condition`). The roadmap entry usually fixes the id already.
 
 2. **Decide gating and safety before writing code:**
    - **Category** = directory only: `correctness` (the code cannot do what it
      says), `suspicious` (legal Julia, very likely not intended), `performance`
      (a rewrite that avoids real work), `readability` (an idiom rewrite that is
      behavior-preserving), `meta` (a finding about a `# fatou-ignore` directive
-     rather than about the Julia). It appears in no public surface—not the id, not the
-     `--select`/`--ignore`/`[lint.severity]`/`# fatou-ignore` key, and not the
-     reference, which is one page keyed by id—so it is a free refactor later.
-     Pick the fitting one and move on.
+     rather than about the Julia). It appears in no public surface—not the id,
+     not the `--select`/`--ignore`/`[lint.severity]`/`# fatou-ignore` key, and
+     not the reference, which is one page keyed by id—so it is a free refactor
+     later. Pick the fitting one and move on.
    - **Severity**—override `default_severity()` (the default is `Warning`;
      `Error` only for code that cannot run, e.g. `duplicate-argument`). Never
-     set severity on the `Diagnostic`—the engine stamps it, honoring the
-     user's `[lint.severity]` override.
+     set severity on the `Diagnostic`—the engine stamps it, honoring the user's
+     `[lint.severity]` override.
    - **`default_enabled()`**—default `true`; override to `false` for noisy
      opt-in rules and for every `res`-tier rule (see the cost model).
    - **Dispatch shape**—node-shape rules declare `interests()` (a slice of
      `SyntaxKind`) and implement `check(el, ctx, sink)`, called once per
      matching element in the *one* shared `descendants_with_tokens()` walk
-     (tokens included, so token kinds may be subscribed too). Model-driven
-     rules leave `interests()` empty and override `check_file(ctx, sink)` (a
-     once-per-file pass). **Never walk the whole CST yourself from a
-     node-shape rule**; walking *within* the dispatched subtree is fine.
-   - **Fix safety**—ship `Applicability::Safe` only when the edit is
-     unambiguous and parse-clean by construction; otherwise
-     `Applicability::Unsafe` (applied only under `--unsafe-fixes`), or
-     withhold the fix entirely and still report.
+     (tokens included, so token kinds may be subscribed too). Model-driven rules
+     leave `interests()` empty and override `check_file(ctx, sink)` (a
+     once-per-file pass). **Never walk the whole CST yourself from a node-shape
+     rule**; walking *within* the dispatched subtree is fine.
+   - **Fix safety**—ship `Applicability::Safe` only when the edit is unambiguous
+     and parse-clean by construction; otherwise `Applicability::Unsafe` (applied
+     only under `--unsafe-fixes`), or withhold the fix entirely and still
+     report.
 
 3. **Write the failing tests first** (TDD per `AGENTS.md`) in
    `tests/linter_rules.rs`:
    - Positive case(s) via `count`/`findings` filtered to the rule.
-   - Negative ("should not flag") cases guarding the false positives the
-     roadmap entry calls out.
+   - Negative ("should not flag") cases guarding the false positives the roadmap
+     entry calls out.
    - If the rule ships a fix: a `fix_source` case in `tests/autofix.rs`
-     (snapshot the output, assert `applied` and `remaining.is_empty()`), and
-     an `apply_fixes` case if applicability gating matters. Eyeball that the
-     fixed output parses clean—there is no automated parse-clean harness.
+     (snapshot the output, assert `applied` and `remaining.is_empty()`), and an
+     `apply_fixes` case if applicability gating matters. Eyeball that the fixed
+     output parses clean—there is no automated parse-clean harness.
    - Run them and watch them fail before implementing.
 
 4. **Implement the rule** in `src/linter/rules/<category>/<id>.rs`:
    - Module doc comment explaining what it flags, why, and any
      false-positive/safety reasoning (see
      `suspicious/assignment_in_condition.rs` for the house style).
+
    - Cast the dispatched element with the typed wrappers (`el.as_node()` +
      `Foo::cast`, or `el.as_token()`), then use their accessors for shape
      checks.
-   - Keep the diagnostic **span tight**—point at the offending construct,
-     not the whole statement (it drives the CLI caret and LSP underline).
+
+   - Keep the diagnostic **span tight**—point at the offending construct, not
+     the whole statement (it drives the CLI caret and LSP underline).
+
    - **Required for docs to pass:** implement `description()` (non-empty
-     markdown paragraph) and `examples()` (≥1 `Example` whose `source`
-     actually triggers the rule and ends with a trailing newline).
+     markdown paragraph) and `examples()` (≥1 `Example` whose `source` actually
+     triggers the rule and ends with a trailing newline).
+
    - Trait skeleton:
      ```rust
      impl Rule for MyRule {
@@ -196,18 +199,17 @@ rule without it means the CLI never harvests for it and it silently misfires.
      ```
 
 5. **Register it** in the single source of truth:
-   - `mod <id>;` + `pub use <id>::<Name>;` in
-     `src/linter/rules/<category>.rs`.
+   - `mod <id>;` + `pub use <id>::<Name>;` in `src/linter/rules/<category>.rs`.
    - One `Box::new(<category>::<Name>)` line in `all_rules()`
      (`src/linter/rules.rs`), in category order. Nothing else—selection,
-     `--select`/`--ignore`/`[lint.severity]` validation, and the docs all
-     derive from this list.
+     `--select`/`--ignore`/`[lint.severity]` validation, and the docs all derive
+     from this list.
    - **`res`-tier only:** also add the id to `RESOLUTION_RULES` in the same
      file.
 
 6. **Generate and pin the docs:**
-   - `cargo run --example docgen` → regenerates
-     `docs/src/reference/rules.md` with the new rule's section.
+   - `cargo run --example docgen` → regenerates `docs/src/reference/rules.md`
+     with the new rule's section.
    - `cargo test --test rule_docs` will fail on the new snapshot; eyeball the
      `.snap.new` (the example must show the finding and, if fixable, the
      after-fix block), then `cargo insta accept`.
@@ -216,8 +218,8 @@ rule without it means the CLI never harvests for it and it silently misfires.
    scope/severity note matching the landed entries.
 
 8. **Validate** in order:
-   - Targeted: `cargo test --test linter_rules`, `cargo test --test autofix`
-     (if fixable), `cargo test --test rule_docs`.
+   - Targeted: `cargo test --test linter_rules`, `cargo test --test autofix` (if
+     fixable), `cargo test --test rule_docs`.
    - Full gates (CI parity): `cargo test --workspace`,
      `cargo clippy --workspace --all-targets --all-features -- -D warnings`,
      `cargo fmt --all -- --check`. (`task <name>` wraps these.)
@@ -225,13 +227,14 @@ rule without it means the CLI never harvests for it and it silently misfires.
 ## Dos and don'ts
 
 - **Do** reach for the typed AST wrappers before raw CST walking; grow
-  `crates/fatou-parser/src/ast/` when a shape is missing (with its own accessor test).
+  `crates/fatou-parser/src/ast/` when a shape is missing (with its own accessor
+  test).
 - **Do** keep spans tight and fixes parse-clean/lossless by construction, or
   withhold the fix and still report.
 - **Do** make `examples()` snippets that genuinely trigger the rule—the docs
   tests reject a plausible-but-inert example.
-- **Don't** set `severity` or `path` on a `Diagnostic`—the engine stamps
-  both; override `default_severity()` instead.
+- **Don't** set `severity` or `path` on a `Diagnostic`—the engine stamps both;
+  override `default_severity()` instead.
 - **Don't** add a second registration list or an `if`-guard; `all_rules()` is
   the only list.
 - **Don't** implement a formatting/layout preference as a lint rule.
@@ -245,12 +248,13 @@ rule without it means the CLI never harvests for it and it silently misfires.
 
 When done, report:
 
-1. Rule id, category, default severity, and whether it ships a safe/unsafe
-   fix (or none).
+1. Rule id, category, default severity, and whether it ships a safe/unsafe fix
+   (or none).
 2. Cost tier (`syn`/`sem`) and `default_enabled`.
 3. New files (rule module) and updated files (`<category>.rs`, `rules.rs`
    `all_rules()`, `tests/linter_rules.rs`, `tests/autofix.rs` if fixable, the
    regenerated `docs/src/reference/rules.md` + accepted snapshot, `TODO.md`).
-4. Targeted test names, including the false-positive guards and (if fixable)
-   the `fix_source` case.
-5. Full-gate results: `cargo test --workspace`, clippy `-D warnings`, `cargo fmt --check`.
+4. Targeted test names, including the false-positive guards and (if fixable) the
+   `fix_source` case.
+5. Full-gate results: `cargo test --workspace`, clippy `-D warnings`,
+   `cargo fmt --check`.

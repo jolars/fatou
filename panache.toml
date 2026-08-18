@@ -2,6 +2,7 @@ flavor = "gfm"
 
 extend-exclude = [
   ".claude/**/*",
+  ".agents/**/*",
   "TODO.md",
   "AGENTS.md",
   "CLAUDE.md",

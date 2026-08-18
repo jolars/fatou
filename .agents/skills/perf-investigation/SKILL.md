@@ -33,8 +33,8 @@ gate is what proves it — see §Verify.
 - Incremental reparse is first-class (tenet 2). A parser change that speeds up
   the batch path but breaks or bypasses `reparse.rs` is not a win; check
   `tests/salsa_incremental.rs` and the reparse suite.
-- Don't fix formatter cost by moving work into the parser or vice versa
-  (tenets 3 and 4). The phase split will tempt you here — resist it.
+- Don't fix formatter cost by moving work into the parser or vice versa (tenets
+  3 and 4). The phase split will tempt you here — resist it.
 - Benchmarks and profiles are **measured, never asserted** and never a CI gate
   (`.claude/rules/docs.md`). Do not add a perf assertion to a test.
 
@@ -92,7 +92,7 @@ hyperfine --warmup 3 -m 20 \
 `taskset` pins one core; without it, scheduler migration adds several percent of
 jitter and small wins vanish into it. Discard warmups, take the median.
 
-**Interleave the A/B when the machine is not quiet.** A quiet run has a ~4-5%
+**Interleave the A/B when the machine is not quiet.** A quiet run has a \~4-5%
 spread on this bench; a busy one drifts far more than that *between* a before
 and an after measured minutes apart, which is enough to invent or erase a win.
 Build both binaries first, then alternate them round by round so drift hits both
@@ -136,9 +136,9 @@ absorb before touching anything:
 
 1. **Over half the cost of `format()` is parsing.** `format --check` on a cold
    file cannot beat its parse. If the target is LSP latency instead, the warm
-   path (`format_node` via the salsa-cached CST, `lsp::format::format_edits_via_db`)
-   skips the parse entirely — so profile *that* phase, and don't spend effort on
-   parse cost that the LSP never pays.
+   path (`format_node` via the salsa-cached CST,
+   `lsp::format::format_edits_via_db`) skips the parse entirely — so profile
+   *that* phase, and don't spend effort on parse cost that the LSP never pays.
 2. **Sub-percentages are shares of total, not of the phase.** `lower` at 28% is
    most of the formatter's own work, not a quarter of it.
 
@@ -158,35 +158,35 @@ ruled out — a lead that was measured and didn't pay belongs in §Don't redo.
   different global allocator as a first move — it hides the real site and the
   wasm constraint makes the choice non-obvious.
 - **Per-node `Vec` in a recursive pass over the event stream** — *confirmed and
-  fixed once* (`fold_docstrings`, 23% → 0.6%, -17% wall). The shape to recognize:
-  a pass that rebuilds the event stream level by level, allocating per node and
-  recopying every event once per level of nesting above it, when the transform
-  only *inserts* events. The fix is the same each time — compute subtree extents
-  once with a stack pass so a subtree can be skipped in O(1), mark the insertion
-  points, splice in one final pass. `parse` still has post-passes; check whether
-  any other one rebuilds rather than marks.
+  fixed once* (`fold_docstrings`, 23% → 0.6%, -17% wall). The shape to
+  recognize: a pass that rebuilds the event stream level by level, allocating
+  per node and recopying every event once per level of nesting above it, when
+  the transform only *inserts* events. The fix is the same each time — compute
+  subtree extents once with a stack pass so a subtree can be skipped in O(1),
+  mark the insertion points, splice in one final pass. `parse` still has
+  post-passes; check whether any other one rebuilds rather than marks.
 - **`RawVec::grow_one` / `finish_grow`** — a `Vec` growing element by element
   where the final size is known or boundable. Reserve up front. **Trap:** the
   type parameter in a `RawVec::<T>::grow_one` symbol is not reliable evidence of
   which `Vec` it is; identically-laid-out instantiations get merged. Follow the
   caller chain (`perf report -g graph,caller`), don't read the type off the
   symbol.
-- **Best-fit width probing** — `printer::fits` + `fits_stack` is ~10% of total
+- **Best-fit width probing** — `printer::fits` + `fits_stack` is \~10% of total
   and is the layout engine re-walking IR to decide whether a group fits. The
   fixes that preserve output exactly are memoizing or precomputing flat widths
   on the IR node, and early-exit once the accumulated width exceeds
   `line_width`. Anything that changes *which* groups break is a tenet violation,
   not an optimization.
-- **IR churn** — `Rc<[Ir]>::from_iter_exact`, `to_rc_slice`,
-  `drop_glue::<Ir>`, `Rc<[Ir]>::drop_slow`. The IR is built and thrown away once
-  per format. Look for `Vec<Ir>` built then converted, and for IR nodes cloned
-  where a borrow would do.
-- **CST cursor traversal** — `rowan::cursor::{Preorder::next, next_sibling,
-  first_child, free}` and `SyntaxElementChildren::next`, ~7% combined. This is
-  the formatter walking the red tree; `rowan::cursor::free` means cursor nodes
-  are being allocated and dropped. Proportional to how many times lowering
-  re-walks the same children. Look for a rule that iterates `children()` more
-  than once over the same node.
+- **IR churn** — `Rc<[Ir]>::from_iter_exact`, `to_rc_slice`, `drop_glue::<Ir>`,
+  `Rc<[Ir]>::drop_slow`. The IR is built and thrown away once per format. Look
+  for `Vec<Ir>` built then converted, and for IR nodes cloned where a borrow
+  would do.
+- **CST cursor traversal** —
+  `rowan::cursor::{Preorder::next, next_sibling,   first_child, free}` and
+  `SyntaxElementChildren::next`, \~7% combined. This is the formatter walking
+  the red tree; `rowan::cursor::free` means cursor nodes are being allocated and
+  dropped. Proportional to how many times lowering re-walks the same children.
+  Look for a rule that iterates `children()` more than once over the same node.
 - **rowan green-tree construction** — `NodeCache::{token,node}`,
   `Arc::drop_slow`, `ThinArc::from_header_and_iter`. Proportional to token and
   node count. Reducing it means emitting fewer nodes, which is invasive: it
@@ -265,7 +265,7 @@ Keep commits atomic per area — root crate, `crates/fatou-parser`,
 - `bench/profile.sh` — the harness. `benches/format_compare.rs` is what it
   samples; `Cargo.toml`'s `[profile.profiling]` is what makes symbols resolve.
 - `crates/fatou-formatter/src/formatter/printer.rs` — `fits`, `fits_stack`,
-  `print_at`. The best-fit layout engine; ~10% of total sits in width probing.
+  `print_at`. The best-fit layout engine; \~10% of total sits in width probing.
 - `crates/fatou-formatter/src/formatter/rules.rs` — `lower`, `lower_node`,
   `collect_body_lines`/`collect_body_elements` (the lowering spine, so its
   inclusive share is *all* of lowering, not its own cost). 5300 lines; find the
