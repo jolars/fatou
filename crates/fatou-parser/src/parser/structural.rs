@@ -1057,6 +1057,16 @@ fn parse_import_clause(
             for _ in 0..error_wraps {
                 events.push(Event::Finish);
             }
+            if error_wraps > 0 {
+                let as_token = &ctx.tokens()[as_idx];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::InvalidAsAlias,
+                    "invalid `as` alias",
+                    as_token.start,
+                    as_token.end,
+                );
+            }
             return alias_start + 1;
         }
     }

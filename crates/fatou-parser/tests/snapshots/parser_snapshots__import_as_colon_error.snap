@@ -108,6 +108,9 @@ ROOT@0..102
         IDENT@100..101 "y"
   NEWLINE@101..102 "\n"
 
+diagnostic [9..11]: invalid `as` alias
+diagnostic [28..30]: invalid `as` alias
+diagnostic [44..46]: invalid `as` alias
 diagnostic [68..69]: recovery `:` in import
 diagnostic [83..84]: recovery `:` in import
 diagnostic [100..101]: recovery `:` in import

@@ -31,3 +31,6 @@ ROOT@0..29
         WHITESPACE@26..27 " "
         IDENT@27..28 "C"
   NEWLINE@28..29 "\n"
+
+diagnostic [8..10]: invalid `as` alias
+diagnostic [24..26]: invalid `as` alias

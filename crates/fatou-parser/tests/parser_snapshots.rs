@@ -41,3 +41,26 @@ fn parser_fixtures() {
         insta::assert_snapshot!(name, rendered);
     }
 }
+
+#[test]
+fn using_base_aliases_report_parse_errors() {
+    let output = parse("using A as B\nusing A, B as C\n");
+
+    assert_eq!(
+        output
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.start,
+                    diagnostic.end,
+                    diagnostic.message.as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            (8, 10, "invalid `as` alias"),
+            (24, 26, "invalid `as` alias"),
+        ]
+    );
+}

@@ -35,11 +35,8 @@ juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
   mutually recursive with one dispatch function, and `parser-parity` edits it
   constantly.
 
-- [ ] `DiagnosticKind::InvalidAsAlias` (`parser/diagnostics.rs`) is never
-  constructed — its only two occurrences are its own declaration and its
-  `stream()` arm. Either wire up the `using A as B` diagnostic its doc
-  describes (that path currently emits a bare `ERROR` node with no diagnostic)
-  or drop the variant.
+- [x] Record `InvalidAsAlias` diagnostics for malformed base aliases, including
+  `using A as B`, so consumers do not treat the `ERROR` CST nodes as clean.
 
 ### Incremental
 
