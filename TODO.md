@@ -29,13 +29,6 @@
 Deferred from the parser-crate refactor that split `expr/{array,macros,
 juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
 
-- [ ] `expr.rs` is 4013 lines after the three splits. The remaining candidate is
-  a `prec.rs` for the binding-power constants, `infix_binding_power`,
-  `next_operator`, and the `is_*_op` predicates, but they are scattered across
-  the file rather than contiguous, so extracting them means reordering — which
-  stops it being a pure move and makes the diff unreviewable against the
-  fixtures. Worth doing only alongside a change that touches those tables anyway.
-
 - [ ] `sexpr.rs` is 3350 lines with 122 free functions and 13 existing
   `// --- Section ---` markers that are already viable module boundaries.
   Deferred: it is the test-only oracle projector, its `project_*` helpers are
