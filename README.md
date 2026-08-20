@@ -57,14 +57,13 @@ default. If you prefer, download and inspect the script before running it.
 For macOS and Linux:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf \
-    https://github.com/jolars/fatou/releases/latest/download/fatou-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -sSf https://fatou.dev/install | sh
 ```
 
 For Windows PowerShell:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/jolars/fatou/releases/latest/download/fatou-installer.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://fatou.dev/install.ps1 | iex"
 ```
 
 ## Usage

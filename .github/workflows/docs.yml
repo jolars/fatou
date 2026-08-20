@@ -35,6 +35,13 @@ jobs:
         run: cargo run --quiet --example canonical -- docs/book https://fatou.dev/
       - name: Generate sitemap
         run: cargo run --quiet --example sitemap -- docs/book https://fatou.dev/
+      - name: Publish installers
+        run: |
+          install -m 0644 scripts/fatou-installer.sh docs/book/install
+          install -m 0644 scripts/fatou-installer.ps1 docs/book/install.ps1
+          cmp scripts/fatou-installer.sh docs/book/install
+          cmp scripts/fatou-installer.ps1 docs/book/install.ps1
+          sh -n docs/book/install
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
