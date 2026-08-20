@@ -24,20 +24,6 @@
   release, 1.0.2, still rejects `break lbl`, verified 2026-08-03), so no oracle
   bump can pin these until JuliaSyntax ships the feature.
 
-### Hygiene
-
-Deferred from the parser-crate refactor that split `expr/{array,macros,
-juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
-
-- [ ] `sexpr.rs` is 3350 lines with 122 free functions and 13 existing
-  `// --- Section ---` markers that are already viable module boundaries.
-  Deferred: it is the test-only oracle projector, its `project_*` helpers are
-  mutually recursive with one dispatch function, and `parser-parity` edits it
-  constantly.
-
-- [x] Record `InvalidAsAlias` diagnostics for malformed base aliases, including
-  `using A as B`, so consumers do not treat the `ERROR` CST nodes as clean.
-
 ### Incremental
 
 - [ ] Maybe (deferred): a nested-block tier needs a context-parameterized
