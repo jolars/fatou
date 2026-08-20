@@ -22,8 +22,8 @@ fake it with a heuristic unless the entry explicitly sanctions one (e.g.
   `src/linter/rules.rs`).
 - **Parsing is the parser's job.** Do not paper over parser mistakes in a rule.
   If the CST does not expose what you need, extend the typed AST wrappers in
-  `crates/fatou-parser/src/ast/` (see "Typed AST wrappers" in
-  `.claude/rules/parser.md`: `ast_node!`/ `ast_token!` entry, `support::*`
+  `crates/fatou-parser/src/ast/` (see "Parser and typed AST" in `AGENTS.md`:
+  `ast_node!`/ `ast_token!` entry, `support::*`
   accessors, `Has*` trait impls, re-export from
   `crates/fatou-parser/src/ast.rs`, accessor unit test) rather than re-lexing or
   kind-matching raw CST inside the rule.

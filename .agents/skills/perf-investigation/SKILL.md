@@ -36,16 +36,15 @@ gate is what proves it — see §Verify.
 - Don't fix formatter cost by moving work into the parser or vice versa (tenets
   3 and 4). The phase split will tempt you here — resist it.
 - Benchmarks and profiles are **measured, never asserted** and never a CI gate
-  (`.claude/rules/docs.md`). Do not add a perf assertion to a test.
+  (`AGENTS.md`, "Performance work"). Do not add a perf assertion to a test.
 
 ## Related rules to read first
 
-- `.claude/rules/formatter.md` — the layout engine's contract and the fixture
-  gate.
-- `.claude/rules/parser.md` — losslessness and the incremental-reparse
-  obligation.
-- `.claude/rules/docs.md` — the benchmark artifacts (`bench/results.json`) and
-  when a moved number must be re-measured and committed.
+- `AGENTS.md`, "Formatter" — the layout engine's contract and fixture gate.
+- `AGENTS.md`, "Parser and typed AST" — losslessness and the
+  incremental-reparse obligation.
+- `AGENTS.md`, "Performance work" — benchmark artifacts and when a moved
+  number must be re-measured and committed.
 
 ## Harness
 
@@ -258,7 +257,7 @@ Median `fatou format --check bench/corpus/JuliaSyntax` (20 runs, pinned):
 
 Keep commits atomic per area — root crate, `crates/fatou-parser`,
 `crates/fatou-formatter` — because the release tooling routes versions by path
-(`.claude/rules/release.md`).
+(`AGENTS.md`, "Distribution and releases").
 
 ## Key files
 

@@ -2,15 +2,24 @@
 
 This file is the repository-wide contract for coding agents. Keep it terse and
 operational; history belongs in tests, issues, or `git log`. `TODO.md` is the
-live roadmap and priority source of truth.
+live roadmap and priority source of truth. `CONTRIBUTING.md` is the
+human-readable guide for new contributors.
 
-## Project and tenets
+## Project contract
 
 Fatou is a Rust CLI for Julia with a lossless incremental parser, canonical
-formatter, semantic linter, LSP, and static package/environment index. It is a
-Cargo workspace (edition 2024): the root `fatou` package plus
+formatter, semantic linter, language server, and static package/environment
+index. It is a Cargo workspace (edition 2024): the root `fatou` package plus
 `crates/fatou-parser` and `crates/fatou-formatter`. The root re-exports parser
 modules as `fatou::{ast, parser, syntax}`.
+
+The dependency direction is source text → parser/CST → typed AST → single-file
+semantics → project projections and resolution → linter, index, CLI, and LSP
+consumers. Fix defects at the layer that owns them: never compensate downstream
+for a parser mistake, recreate shared resolution in a consumer, or move
+filesystem/process concerns into a Wasm-clean engine.
+
+### Invariants
 
 1. Formatting is deterministic and canonical: semantically equivalent inputs
    format identically.
@@ -20,16 +29,27 @@ modules as `fatou::{ast, parser, syntax}`.
 
 Global constraints:
 
-- The formatter alone controls layout. `lint --fix` performs byte-range
-  rewrites and never formats; the pipeline is fix, then format.
+- The formatter alone controls layout. `lint --fix` performs byte-range rewrites
+  and never formats; the pipeline is fix, then format.
 - Analysis, linting, indexing, and environment discovery never evaluate or
   invoke Julia.
 - Both member crates remain `wasm32-unknown-unknown`-clean: no filesystem,
   process, thread, or clock APIs.
+- Treat exported parser and formatter APIs as semver-governed public interfaces;
+  accompany intentional API changes with tests and documentation.
 - Do not hand-edit generated files. Performance claims require measurements and
   benchmark artifacts.
 
-## Commands and testing
+## Working in the repository
+
+### Environment
+
+Development uses Nix/devenv. Julia packages are Pkg-managed through the root
+`Project.toml` and `Manifest.toml`, with `JULIA_PROJECT=@.`. Julia is needed for
+oracle/table generation, not normal Rust build and test flows. Remote session
+bootstrap may continue when Julia cannot be provisioned.
+
+### Build and test workflow
 
 ```sh
 cargo build --workspace
@@ -51,82 +71,95 @@ cargo run -- lint --fix <path>
 cargo run -- debug format <path>
 ```
 
-`task <name>` wraps common flows; see `task --list`. Use TDD: first add a failing
-test or fixture, implement the change, run focused tests, then
+`task <name>` wraps common flows; see `task --list`. Use TDD: first add a
+failing test or fixture, implement the change, run focused tests, then
 `cargo test --workspace`. Parser fixtures live under
 `crates/fatou-parser/tests/`, formatter fixtures under
 `crates/fatou-formatter/tests/`, and root integration suites in `tests/*.rs`.
 Review snapshot changes with `cargo insta review`; never accept an unread
-snapshot. Tests asserting absolute paths or `file:` URIs must use native
-Windows paths rather than Unix-style `/work` paths.
+snapshot. Tests asserting absolute paths or `file:` URIs must use native Windows
+paths rather than Unix-style `/work` paths.
+
+Use the smallest focused gate before the workspace suite:
+
+  | Change             | Focused gate                                                                   |
+  | ------------------ | ------------------------------------------------------------------------------ |
+  | Parser shape       | `cargo test -p fatou-parser --test parser_snapshots --test juliasyntax_oracle` |
+  | Formatter          | `cargo test -p fatou-formatter --test formatter`                               |
+  | Semantics or salsa | `cargo test --test salsa_incremental`                                          |
+  | Linter             | `cargo test --test linter_rules`, plus `cargo test --test autofix` for fixes   |
+  | Configuration      | `cargo test --test config_discovery`                                           |
+  | Language server    | `cargo test --test lsp`                                                        |
+
+When a change can affect the Wasm boundary, run:
+
+```sh
+cargo build -p fatou-parser --release --target wasm32-unknown-unknown
+cargo build -p fatou-formatter --release \
+  --target wasm32-unknown-unknown --features schema
+```
 
 CI workflows are authoritative. Use Conventional Commits and semver; keep
 subjects concise and commits atomic by release area (root, each member crate,
 and `editors/`).
 
-## Generated and pinned files
+### Generated and pinned files
 
 Never hand-edit:
 
 - `CHANGELOG.md` and all package version fields (managed by `versionary`)
 - `docs/src/reference/cli.md` (generated by `build.rs`)
 - `docs/src/reference/rules.md` (generated by `cargo run --example docgen`)
-- parser Unicode tables and LSP LaTeX tables (Julia generation scripts)
+- `crates/fatou-parser/src/parser/unicode_ident.rs` (generated by
+  `scripts/generate-unicode-ident.jl`)
+- `crates/fatou-parser/src/parser/unicode_ops.rs` (regenerated from JuliaSyntax
+  through the `parser-parity` workflow)
+- `src/lsp/latex_symbols.rs` (generated by `scripts/generate-latex-symbols.jl`)
 - `src/index/fallback/{base,core}_exports.txt`
 - pinned JuliaSyntax oracle corpus artifacts
 
-## Parser and typed AST
+## Components
 
-Scope: `crates/fatou-parser/` and parser boundaries in `src/incremental.rs`.
-The pipeline is lexer → Pratt/recursive-descent parser → events → rowan CST.
+### Parser and typed AST
 
-- Every construct must preserve all bytes, including whitespace, comments,
-  nested block comments, and line endings. Errors use a diagnostics side
-  channel and never prevent producing a recoverable tree.
-- The parser recognizes lexical shape only. Keep salsa above the parser crate.
+Scope: `crates/fatou-parser/` and parser boundaries in `src/incremental.rs`. The
+pipeline is lexer → Pratt/recursive-descent parser → events → rowan CST.
+
+- Preserve every byte, including whitespace, comments, nested block comments,
+  and line endings. Errors use a diagnostics side channel and never prevent a
+  recoverable tree.
+- Recognize lexical shape only; keep salsa above the parser crate.
 - Grammar changes must survive reparse tiers. `PrevParse` and staged `Edit`s are
-  hints only: `parsed_document` must always equal a fresh `parse(text)` result.
+  hints only: `parsed_document` must equal a fresh `parse(text)` result.
 - Store green nodes in salsa, never red `SyntaxNode`s (`SyntaxNode` is not
   `Send`/`Eq`).
 - Add fixed ASCII operators as longest-first `OPS` table rows, tokens as
   `tokens.rs` `token_table!` rows, and keywords as `keywords.rs`
   `keyword_table!` rows; do not add parallel match arms.
-- `unicode_ident.rs` and `unicode_ops.rs` are generated from Julia; regenerate
-  them on a Julia bump.
+- Regenerate `unicode_ident.rs` and `unicode_ops.rs` from Julia on a Julia bump.
 
-The typed AST is a zero-cost, read-only navigation view, not another model.
-Grow it with the relevant `ast_node!`/`ast_token!` entry, typed accessors,
-`Has*` traits, exports, and accessor tests. Keep `Expr::Other` total over
-unwrapped expression kinds. Linter, semantics, project code, code actions, and
-ordinary LSP handlers use typed AST wrappers. The formatter intentionally uses
-raw CST; polymorphic LSP kind-classification walkers may also do so.
+The typed AST is a zero-cost, read-only navigation view, not another model. Grow
+it with the relevant `ast_node!`/`ast_token!` entry, typed accessors, `Has*`
+traits, exports, and accessor tests. Keep `Expr::Other` total over unwrapped
+expression kinds. Linter, semantics, project code, code actions, and ordinary
+LSP handlers use typed AST wrappers. The formatter intentionally uses raw CST;
+polymorphic LSP kind-classification walkers may also do so.
 
-Parser snapshots must assert CST shape, diagnostics, and losslessness. Use the
-`parser-parity` skill for JuliaSyntax gaps.
+Parser snapshots assert CST shape, diagnostics, and losslessness. JuliaSyntax is
+the differential oracle: its projector exposes parser differences and must never
+conceal them. Use the `parser-parity` skill for grammar changes, corpus
+regeneration, allowlist maintenance, and oracle version bumps.
 
-### JuliaSyntax oracle
-
-The projector in `parser/sexpr.rs` is a diagnostic, never a fix. A divergence
-means the CST or its encoding translation is wrong: fix the parser, never patch
-the projector merely to match expected output. Ratchet newly passing oracle
-cases into the allowlists.
-
-JuliaSyntax is exactly pinned in root `Project.toml` with a committed manifest.
-Regeneration uses `using JuliaSyntax` from the active environment and must not
-force-activate or instantiate the root project. A targeted regeneration must
-leave unrelated artifacts byte-identical; other changes indicate a version
-mismatch. To bump the oracle, update the compat bound, resolve the manifest,
-run both regeneration scripts, and triage all changes.
-
-## Formatter
+### Formatter
 
 Scope: `crates/fatou-formatter/`, `src/formatter*`, and `src/debug.rs`. Use the
-`formatter` skill when growing formatting behavior.
+`formatter` skill when growing formatting behavior and `smoke-test-triage` for
+`debug format` regressions.
 
 - Fully reflow every handled construct from syntax and `FormatStyle`; source
   line breaks, whitespace, operator spelling, and literal spelling do not
-  influence output. Reject construct-specific preservation hacks unless they
-  are an explicit recorded policy.
+  influence output. Reject construct-specific preservation hacks unless they are
+  an explicit recorded policy.
 - Require idempotence, clean reparsing, and byte-identical output from
   behavior-preserving refactors. Never compensate for a parser bug here.
 - `rules::lower` lowers CST to document IR; `printer.rs` is the single best-fit
@@ -137,46 +170,13 @@ Scope: `crates/fatou-formatter/`, `src/formatter*`, and `src/debug.rs`. Use the
 - Filesystem walking and rayon stay in the root bridge, outside the Wasm-clean
   engine crate. Config callers pass a fully resolved `FormatStyle`.
 
-Fatou has no external reference formatter. Fixtures under
-`crates/fatou-formatter/tests/fixtures/formatter/<slug>/` use hand-authored
-`expected.jl`; its presence means the case is gated. Never capture expected
-output from another formatter. Idempotence and clean-reparse tests cover every
-`input.jl`, including ungated cases.
+Fatou has no external reference formatter. Expected output is hand-authored; use
+the `formatter` skill to add or change gated behavior. Every fixture remains
+subject to idempotence and clean-reparse checks. The `fatou debug format` output
+is a CI contract with `smoke-test.yml`; change its failure labels, approximate
+diff-line syntax, and sanitized dump filenames together.
 
-`fatou debug format` output is a CI contract with `smoke-test.yml`: failure
-labels, approximate diff-line syntax, and sanitized dump filenames must change
-together. Use `smoke-test-triage` for regressions.
-
-## Linter
-
-Scope: `src/linter/` and lint integration tests. Use `add-lint-rule` for new
-rules and `linter-investigation` for corpus triage.
-
-- Rules are semantic, never formatting checks. Parse diagnostics block linting.
-- Rules join the driver's one CST walk through `Rule::interests` and
-  `Rule::check`; whole-file rules use `check_file`. No rule runs a private tree
-  walk. `rules.rs::all_rules` is the sole rule registry.
-- `ResolvedRules::run` alone applies suppression directives and their post-pass.
-  The engine stamps severity and path; rules only override default severity.
-- Use shared machinery: `rules/matchers.rs` for calls, `RuleContext` for
-  resolution/scans/CFG, `rules/rewrite.rs` for safe text reuse,
-  `rules/regex.rs` for regex literals, and `include_graph.rs` for includes.
-  `RESOLUTION_RULES` is the sole list controlling project-resolution needs.
-- Rule IDs are stable public kebab-case identifiers. Categories are internal
-  directories (`correctness`, `suspicious`, `performance`, `readability`,
-  `meta`) and may change without changing IDs. Every rule supplies a
-  description and executable `examples()`.
-
-Fixes are byte-range replacements, not mini-formatters. They must preserve
-syntax, losslessness, comments, and local legibility but do not owe line width.
-When correctness cannot be guaranteed for a shape, still diagnose it but
-withhold the fix. Only `Safe` fixes run under ordinary `lint --fix`; other fixes
-require `--unsafe-fixes`.
-
-Add behavior tests to `tests/linter_rules.rs`, plus `tests/autofix.rs` for a
-rule with fixes. Regenerate, never edit, the rule reference.
-
-## Semantics, resolution, and project incrementality
+### Semantic analysis and project model
 
 Keep four layers separate: `src/semantic/` is strictly single-file;
 `src/project.rs` holds range-free cross-file projections; `src/resolve.rs` owns
@@ -190,9 +190,9 @@ the one resolution order; `src/incremental.rs` wires them through salsa.
   locals hoisted across their entire scope. Do not emulate REPL soft scope.
 - Share `collect_import_clauses` with the index harvester.
 - All consumers use the same masking order: local/file bindings and explicit
-  imports, whole-module `using` exports in source order, then implicit Base/Core.
-  Add consumers to `Resolver`, not beside it. Macros use the parallel macro
-  namespace.
+  imports, whole-module `using` exports in source order, then implicit
+  Base/Core. Add consumers to `Resolver`, not beside it. Macros use the parallel
+  macro namespace.
 - Per-file project projections remain range-free and order-independent so body
   edits do not invalidate the graph. Name sets derive from semantics;
   `include_edges` reads CST because `include` is an ordinary call.
@@ -204,7 +204,32 @@ the one resolution order; `src/incremental.rs` wires them through salsa.
 
 `tests/salsa_incremental.rs` guards these invalidation boundaries.
 
-## Package index and environment
+### Linter
+
+Scope: `src/linter/` and lint integration tests. Use `add-lint-rule` for new
+rules and `linter-investigation` for corpus triage.
+
+- Rules are semantic, never formatting checks. Parse diagnostics block linting.
+- Rules join the driver's one CST walk through `Rule::interests` and
+  `Rule::check`; whole-file rules use `check_file`. No rule runs a private tree
+  walk. `rules.rs::all_rules` is the sole rule registry.
+- `ResolvedRules::run` alone applies suppression directives and their post-pass.
+  The engine stamps severity and path; rules only override default severity.
+- Use shared machinery: `rules/matchers.rs` for calls, `RuleContext` for
+  resolution/scans/CFG, `rules/rewrite.rs` for safe text reuse, `rules/regex.rs`
+  for regex literals, and `include_graph.rs` for includes. `RESOLUTION_RULES` is
+  the sole list controlling project-resolution needs.
+- Rule IDs are stable public kebab-case identifiers. Categories are internal and
+  may change without changing IDs. Every rule supplies a description and
+  executable `examples()`.
+
+Fixes are byte-range replacements, not mini-formatters. They preserve syntax,
+losslessness, comments, and local legibility but do not owe line width. When
+correctness cannot be guaranteed for a shape, diagnose it but withhold the fix.
+Only `Safe` fixes run under ordinary `lint --fix`; other fixes require
+`--unsafe-fixes`.
+
+### Package index and Julia environments
 
 Scope: `src/index/`, `src/environment.rs`, and their root tests.
 
@@ -225,16 +250,29 @@ Scope: `src/index/`, `src/environment.rs`, and their root tests.
   live-buffer state use their respective routes without drifting.
 - Never overwrite an open unsaved project buffer during re-resolution. Watched
   file changes restore closed environment files from disk. Project files not
-  belonging to a workspace package are tracked as buffers but expose no
-  declared dependencies.
+  belonging to a workspace package are tracked as buffers but expose no declared
+  dependencies.
 
 Use fixtures for new on-disk layouts; tests must not depend on a locally
 installed Julia depot.
 
-## LSP
+### CLI
 
-Scope: `src/lsp/`, `src/text/`, and `tests/lsp.rs`. Read the module documentation
-in `src/lsp.rs` before changing the main loop.
+Scope: `src/main.rs`, `src/cli.rs`, and command bridges in the root crate.
+
+- Keep argument parsing and filesystem/process orchestration in the root crate;
+  parser and formatter crates accept in-memory inputs and resolved options.
+- Route configuration through `src/config.rs` and file traversal through shared
+  discovery code so commands do not develop separate precedence rules.
+- Test user-visible command behavior in root integration tests. Regenerate,
+  never edit, `docs/src/reference/cli.md` when the CLI surface changes.
+- Preserve exit-code and stdout/stderr contracts; machine-readable output must
+  not acquire human-oriented noise.
+
+### Language server
+
+Scope: `src/lsp/`, `src/text/`, and `tests/lsp.rs`. Read the module
+documentation in `src/lsp.rs` before changing the main loop.
 
 - Keep the synchronous `lsp-server` architecture. Capabilities, including
   position encoding, are negotiated with the client.
@@ -263,77 +301,72 @@ invalidations. Disk reverts need no pointer fast path.
   features use the project route; manifests only answer their supported path
   document links. Buffer diagnostics supersede, rather than join, harvested
   diagnostics in `publish_merged`.
-- Features depending on a completed harvest must send the corresponding
+- Features depending on a completed harvest send the corresponding
   capability-guarded workspace refresh where the protocol provides one.
 - Formatting returns line-diff edits and falls back to one replacement only for
-  a diff covering more than half the span. Returned edits must reproduce
-  formatter output byte-for-byte.
+  a diff covering more than half the span. Returned edits reproduce formatter
+  output byte-for-byte.
 - Machine facts belong in editor settings; project facts in `fatou.toml`. Rename
   covers symbols, files, and folders.
 - `latex_symbols.rs` is generated and sorted for binary search; regenerate it on
   a Julia bump.
 
-## Configuration and file discovery
+### Configuration and file discovery
 
-`src/config.rs` owns the `fatou.toml` schema, defaults, and discovery; every CLI
-surface and the LSP must resolve it consistently.
+`src/config.rs` owns the `fatou.toml` schema, defaults, and config discovery;
+`src/file_discovery.rs` owns Julia source discovery. Every CLI surface and the
+LSP resolves configuration consistently.
 
 - Config structs use `deny_unknown_fields` and kebab-case keys. Unknown IDs in
   `select`, `ignore`, and severity maps are user data reported at lint time;
   unknown `[lint.rules.<id>]` tables or keys are schema parse errors.
 - Pair replacement and extension options (`exclude`/`extend-exclude`, etc.). A
   non-empty built-in default requires a manual `Default` implementation.
-- Put shared project facts at the appropriate project level; machine facts go
-  in editor settings. The formatter library accepts resolved `FormatStyle` and
+- Treat explicit files, directories, and globs as distinct inputs. Directory and
+  glob walks honor `.gitignore`; excludes are rooted at the config directory and
+  affect explicit files only under `--force-exclude`. Keep results sorted and
+  deduplicated.
+- Put shared project facts at the appropriate project level; machine facts go in
+  editor settings. The formatter library accepts resolved `FormatStyle` and
   never reads config itself.
 - Julia compatibility uses Pkg grammar, not Cargo semver: bare `1.6` is caret,
   hyphen is an inclusive range, and commas form unions. `parse_compat` needs
   only the union's outer floor and ceiling.
 
-Schema changes require config discovery tests and updates to both hand-written
-configuration documentation pages.
+Schema changes require config discovery tests and updates to both
+`docs/src/guide/configuration.md` and `docs/src/reference/configuration.md`.
 
-## Documentation, benchmarks, and assets
+## Project maintenance
 
-The mdBook site lives under `docs/`; `docs/book/` is ignored build output. Add
-hand-written pages to `docs/src/SUMMARY.md`. Canonical links and sitemap entries
-must share `postbuild::collect_pages`. Keep publishing utilities in `examples/`
-so they remain outside the packaged crate.
+### Documentation and assets
 
-Benchmarks are opt-in local measurements, never test/CI gates. `task bench` and
-`task bench-memory` update tracked JSON artifacts that alone feed published
-performance pages; site builds never remeasure. `task profile` produces local,
-ignored diagnostic output. Commit updated artifacts when making performance
-claims. Compare formatter performance using ratios rather than milliseconds;
-memory reporting may include absolute MB. Use `perf-investigation` for profiling
-work.
+The mdBook source lives under `docs/`; `docs/book/` is ignored output. Add
+hand-written pages to `docs/src/SUMMARY.md`, route canonical links and sitemap
+entries through `postbuild::collect_pages`, and keep publishing utilities in
+`examples/`. Asset generation is manual through `task icons` and `task logo` and
+requires Julia.
 
-`task icons` derives icons from `assets/logo.png`; `task logo` regenerates the
-logo. Both require Julia and are manual operations.
+### Performance work
 
-## Distribution and releases
+Benchmarks are opt-in local measurements, never test/CI gates. Tracked JSON
+artifacts alone feed published performance pages; site builds never remeasure.
+Commit updated artifacts when making performance claims, compare formatter
+performance using ratios rather than milliseconds, and use `perf-investigation`
+for profiling and measurement procedure.
 
-Releases derive from Conventional Commits. `versionary` owns changelogs and all
-version fields; pre-1.0 breaking changes produce minor bumps.
+### Distribution and releases
 
-- Root CLI tags are `v*`; parser tags `fatou-parser-v*`; formatter tags
-  `fatou-formatter-v*`; the editor follows the CLI. Only root `v*` releases
-  carry GitHub assets.
+Releases derive from Conventional Commits. `versionary` owns changelogs and
+version fields; pre-1.0 breaking changes produce minor bumps. Root, parser, and
+formatter tags are respectively `v*`, `fatou-parser-v*`, and
+`fatou-formatter-v*`; only root releases carry GitHub assets.
+
 - Paths under `crates/` and `editors/` are excluded from root version
   calculation, so never mix release areas in one commit.
-- Dependency changes must pass audit, deny, Wasm, and minimal-version CI. Declare
+- Dependency changes pass audit, deny, Wasm, and minimal-version CI. Declare
   honest lower bounds and raise a minimum in the same commit that starts using
   its newer API.
-- `editors/code` is Biome-gated. Its bundled binary must not be load-bearing;
-  PATH lookup remains necessary for NixOS.
-- npm platform packages derive from `npm/platform-template`; PyPI uses maturin;
-  AUR lives under `packaging/aur`; installer scripts are under `scripts/`.
-- `publish-crates.yml` publishes unpublished workspace crates in dependency
-  order on the next CLI release.
-
-## Environment
-
-Development uses Nix/devenv. Julia packages are Pkg-managed through the root
-`Project.toml` and `Manifest.toml`, with `JULIA_PROJECT=@.`. Julia is needed for
-oracle/table generation, not normal Rust build and test flows. Remote session
-bootstrap may continue when Julia cannot be provisioned.
+- `editors/code` is Biome-gated, and its bundled binary must not be
+  load-bearing—PATH lookup remains necessary for NixOS. Distribution sources
+  live under `npm/`, `packaging/aur`, `scripts/`, and `pyproject.toml`;
+  `publish-crates.yml` publishes workspace crates in dependency order.
