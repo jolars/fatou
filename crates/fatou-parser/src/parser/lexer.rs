@@ -9,6 +9,8 @@
 use crate::keywords::keyword_table;
 use crate::tokens::token_table;
 
+mod operators;
+
 /// Generate [`TokKind`] from the shared token table. Only the tokens that do
 /// not materialize 1:1 as a `SyntaxKind` are written out here.
 macro_rules! define_tok_kind {
@@ -88,10 +90,10 @@ enum Mode {
     Interp { depth: usize },
 }
 
-struct Lexer<'a> {
+pub(super) struct Lexer<'a> {
     input: &'a str,
-    bytes: &'a [u8],
-    pos: usize,
+    pub(super) bytes: &'a [u8],
+    pub(super) pos: usize,
     tokens: Vec<Token<'a>>,
     mode_stack: Vec<Mode>,
 }
@@ -207,7 +209,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// The `char` beginning at byte offset `at` (for unicode identifier checks).
-    fn char_at(&self, at: usize) -> char {
+    pub(super) fn char_at(&self, at: usize) -> char {
         self.input[at..].chars().next().unwrap_or('\0')
     }
 
@@ -704,98 +706,6 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-    }
-
-    /// Lex the operator at `start`, or one unknown char if none matches.
-    ///
-    /// Two tables answer this: [`OPS`] for every fixed ASCII spelling, and
-    /// [`Self::unicode_op_at`] for the handful whose spelling is not fixed
-    /// bytes. Each returns the longest spelling it can match, and the longer of
-    /// the two wins — so longest match holds across them as well as within
-    /// them, and no ordering here carries it.
-    fn lex_operator_or_unknown(&mut self, start: usize) {
-        let rest = &self.bytes[self.pos..];
-        let ascii = try_ascii_op(rest);
-        // A Unicode operator is only reachable where [`OPS`] cannot spell one:
-        // a non-ASCII operator, or a broadcast `.` fused to one (`.×`, `.−=`),
-        // which [`OPS`] can only see as the lone `Dot`.
-        let unicode = match (rest.first(), rest.get(1)) {
-            (Some(b), _) if !b.is_ascii() => self.unicode_op_at(0),
-            (Some(b'.'), Some(b)) if !b.is_ascii() => self.unicode_op_at(1),
-            _ => None,
-        };
-        let best = [ascii, unicode]
-            .into_iter()
-            .flatten()
-            .max_by_key(|&(_, len)| len);
-
-        match best {
-            Some((kind, len)) => {
-                self.pos += len;
-                self.push_op(kind, start);
-            }
-            None => {
-                // Unknown: consume one full char to stay on a char boundary.
-                let ch = self.char_at(self.pos);
-                self.pos += ch.len_utf8();
-                self.push(TokKind::Unknown, start, self.pos);
-            }
-        }
-    }
-
-    /// The Unicode operator `lead` bytes ahead of the cursor, as its kind and
-    /// the length *from the cursor* — so `lead` is 1 for a broadcast `.op` and
-    /// 0 otherwise, and the returned length covers the `.` in the first case.
-    ///
-    /// These are the operators [`OPS`] cannot hold: their spelling is a code
-    /// point looked up in a generated table, not a fixed byte string. The three
-    /// cases below are checked most-specific-first because they overlap on the
-    /// same code point, not because of length.
-    fn unicode_op_at(&self, lead: usize) -> Option<(TokKind, usize)> {
-        let ch = self.char_at(self.pos + lead);
-        let dotted = lead == 1;
-        let eq = self.peek(lead + ch.len_utf8()) == Some(b'=');
-
-        // U+2212 MINUS SIGN *is* the ASCII `-`: JuliaSyntax's tokenizer emits
-        // the `-` kind for it, with `−=` fused like `-=`. It has to precede the
-        // generated table, which would otherwise give it a Unicode tier kind.
-        // The multi-char `-> -- -%` forms are ASCII-only, so nothing else can
-        // follow.
-        if ch == MINUS_SIGN {
-            let kind = match (dotted, eq) {
-                (false, false) => TokKind::Minus,
-                (false, true) => TokKind::MinusEq,
-                (true, false) => TokKind::DotMinus,
-                (true, true) => TokKind::DotMinusEq,
-            };
-            return Some((kind, lead + ch.len_utf8() + usize::from(eq)));
-        }
-
-        // `÷=` and `⊻=`, the two Unicode operators with an augmented-assign
-        // form: the trailing `=` fuses into one assignment token, like the
-        // ASCII `op=` forms. Without the `=` they fall through to the table,
-        // which has them at their arithmetic tier.
-        if eq && matches!(ch, DIVIDE_SIGN | XOR_SIGN) {
-            let kind = match (dotted, ch == DIVIDE_SIGN) {
-                (false, true) => TokKind::DivEq,
-                (false, false) => TokKind::XorEq,
-                (true, true) => TokKind::DotDivEq,
-                (true, false) => TokKind::DotXorEq,
-            };
-            return Some((kind, lead + ch.len_utf8() + 1));
-        }
-
-        // A single-codepoint Unicode operator (`→`, `∈`, `√`, …): emit its
-        // precedence-tier kind. The operator text stays in the token; the
-        // parser keys on the tier. A broadcast `.` fuses only to an infix tier
-        // or a prefix-only radical — the projector heads those `dotcall-i` and
-        // `dotcall-pre`; the assignment tier needs its own (deferred)
-        // projection, so `.` before one stays a lone `Dot`.
-        let kind = unicode_op_kind(ch)?;
-        if dotted && !(is_unicode_infix_tier(kind) || kind == TokKind::UniRadical) {
-            return None;
-        }
-        Some((kind, lead + ch.len_utf8()))
     }
 }
 

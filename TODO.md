@@ -29,14 +29,6 @@
 Deferred from the parser-crate refactor that split `expr/{array,macros,
 juxtapose}.rs` out of `expr.rs` and added the kind-checked `events::finish`.
 
-- [ ] Do not split `lexer.rs` (2144 lines) ahead of the ladder rewrite above.
-  Every function is a method on one `Lexer` inside a single `impl`, so a
-  `strings.rs`/`operators.rs` cut needs all five struct fields plus
-  `peek`/`push`/`push_op`/`char_at` to become `pub(super)` — the whole mutable
-  state exposed to siblings. The file is only ~1600 lines of code (1607+ is
-  tests), and the ladder is the biggest chunk *and* the part slated to change
-  shape. Split it as part of that rewrite, not before.
-
 - [ ] `expr.rs` is 4013 lines after the three splits. The remaining candidate is
   a `prec.rs` for the binding-power constants, `infix_binding_power`,
   `next_operator`, and the `is_*_op` predicates, but they are scattered across
