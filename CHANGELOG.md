@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.15.1](https://github.com/jolars/fatou/compare/v0.15.0...v0.15.1) (2026-08-21)
+
+### Bug Fixes
+- **parser:** report invalid aliases ([`c08174d`](https://github.com/jolars/fatou/commit/c08174dd8fc5bbf9dca27fcb01c4db1f374d417d))
+
+### Performance Improvements
+- bound formatting diffs ([`ff74f68`](https://github.com/jolars/fatou/commit/ff74f681ff193abfd98eabef54557c49544b1428))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.3.4
+- updated crates/fatou-parser to v0.4.2
+
 ## [0.15.0](https://github.com/jolars/fatou/compare/v0.14.0...v0.15.0) (2026-08-16)
 
 ### Features
