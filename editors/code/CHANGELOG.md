@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.15.1](https://github.com/jolars/fatou/compare/fatou-code-v0.15.0...fatou-code-v0.15.1) (2026-08-21)
+
+### Dependencies
+- updated fatou to v0.15.1
+
 ## [0.15.0](https://github.com/jolars/fatou/compare/fatou-code-v0.14.0...fatou-code-v0.15.0) (2026-08-16)
 
 ### Dependencies

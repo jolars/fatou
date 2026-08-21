@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.2](https://github.com/jolars/fatou/compare/fatou-parser-v0.4.1...fatou-parser-v0.4.2) (2026-08-21)
+
+### Bug Fixes
+- **parser:** report invalid aliases ([`c08174d`](https://github.com/jolars/fatou/commit/c08174dd8fc5bbf9dca27fcb01c4db1f374d417d))
+
 ## [0.4.1](https://github.com/jolars/fatou/compare/fatou-parser-v0.4.0...fatou-parser-v0.4.1) (2026-08-16)
 
 ### Bug Fixes
