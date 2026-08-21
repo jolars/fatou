@@ -359,24 +359,31 @@ fn run_format(
 
     if check {
         let result = formatter::check_paths(paths, style, exclude).map_err(|e| e.to_string())?;
-        for changed in &result.changed {
-            println!("would reformat {}", changed.path.display());
-            // `--check` writes nothing, so the diff is normally the only account
-            // of what would change; `--quiet` trades it for the file list plus a
-            // summary, for callers (a CI step over a wholly unformatted project)
-            // that would drown in hunks.
-            if !quiet {
-                print!("{}", changed.diff);
+        let changed_count = result.changed.len();
+        if quiet {
+            for changed in &result.changed {
+                println!("would reformat {}", changed.path.display());
+            }
+            if changed_count > 0 {
+                println!(
+                    "{} of {} file(s) would be reformatted",
+                    changed_count, result.checked
+                );
+            }
+        } else {
+            // Diffing stays at the CLI edge and remains parallel. `collect`
+            // preserves discovery order, so output is deterministic.
+            let rendered: Vec<_> = result
+                .changed
+                .into_par_iter()
+                .map(formatter::ChangedFile::into_diff)
+                .collect();
+            for (path, diff) in rendered {
+                println!("would reformat {}", path.display());
+                print!("{diff}");
             }
         }
-        if quiet && !result.changed.is_empty() {
-            println!(
-                "{} of {} file(s) would be reformatted",
-                result.changed.len(),
-                result.checked
-            );
-        }
-        return Ok(if result.changed.is_empty() {
+        return Ok(if changed_count == 0 {
             ExitCode::SUCCESS
         } else {
             ExitCode::FAILURE

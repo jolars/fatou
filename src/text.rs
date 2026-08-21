@@ -8,6 +8,7 @@
 
 pub mod buffer;
 pub mod edit;
+pub(crate) mod line_diff;
 pub mod line_index;
 
 pub use buffer::TextBuffer;

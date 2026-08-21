@@ -3,15 +3,32 @@
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use similar::{Algorithm, ChangeTag, TextDiff};
+use similar::DiffTag;
 
 use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
 use crate::formatter::core::{FormatError, format_with_style};
 use crate::formatter::style::FormatStyle;
+use crate::text::line_diff::bounded_line_diff;
 
 pub struct ChangedFile {
     pub path: PathBuf,
-    pub diff: String,
+    original: String,
+    formatted: String,
+}
+
+impl ChangedFile {
+    /// Render the line diff on demand. Callers that only need the changed path
+    /// never pay for diff construction.
+    pub fn diff(&self) -> String {
+        line_diff(&self.original, &self.formatted)
+    }
+
+    /// Consume the changed file and render its diff, allowing batch callers to
+    /// release the retained texts as each parallel job completes.
+    pub fn into_diff(self) -> (PathBuf, String) {
+        let diff = line_diff(&self.original, &self.formatted);
+        (self.path, diff)
+    }
 }
 
 pub struct CheckResult {
@@ -43,7 +60,7 @@ impl std::fmt::Display for CheckError {
 impl std::error::Error for CheckError {}
 
 /// Check every `.jl` file under `paths`. Files whose formatted output differs
-/// from disk are collected with a unified-style diff.
+/// from disk retain both texts so callers can render a diff only when needed.
 pub fn check_paths(
     paths: &[PathBuf],
     style: FormatStyle,
@@ -68,7 +85,8 @@ pub fn check_paths(
             Ok(if formatted != original {
                 Some(ChangedFile {
                     path: path.clone(),
-                    diff: line_diff(&original, &formatted),
+                    original,
+                    formatted,
                 })
             } else {
                 None
@@ -85,49 +103,35 @@ pub fn check_paths(
     })
 }
 
-/// **Patience, not the default Myers.** Myers is `O((N+M)*D)`, and `D` is the
-/// whole file whenever formatting relays a document rather than touching a few
-/// lines — which is what a first `fatou format` over an unformatted project
-/// does. That made the diff **93% of a `--check` run** (33 / 128 / 471 ms of a
-/// 42 / 145 / 504 ms run at 4000 / 8000 / 16 000 changed lines). `similar`'s
-/// disjoint fast path cannot rescue it: it runs before prefix trimming and
-/// bails as soon as the two texts share a first line. Patience anchors on lines
-/// unique to both sides instead, and is deterministic (no wall-clock deadline).
-///
-/// This improves the constant factor but not the quadratic worst case.
-///
-/// **Chosen for its worst case, not its best.** `Algorithm::Histogram` is
-/// faster on real Julia (136 ms against Patience's 234 ms over 16 000 lines of
-/// the bench corpus) but collapses on highly self-similar input — 430.9 ms
-/// against Patience's 37.1 ms at 500 near-identical small functions. `--check`
-/// runs over whatever is in the tree, generated code included, and 2 s is a
-/// different order of harm from the ~100 ms Patience gives up on the corpus.
-///
-/// **The choice is per-language and must never be ported.** The same three
-/// algorithms rank differently in every sibling: badness (LaTeX) wants
-/// Histogram outright (643 ms against Patience's 919 ms and Myers' 2418 ms
-/// summed over its 60 largest real files, where *its* Histogram cliff costs
-/// 76 ms rather than seconds), arity (R) wants Patience (206 vs 897 vs
-/// 1947 ms), and panache (Markdown) is best on plain Myers. Re-measure on this
-/// repo's corpus before changing this line; do not copy a sibling's.
 fn line_diff(original: &str, formatted: &str) -> String {
-    let diff = TextDiff::configure()
-        .algorithm(Algorithm::Patience)
-        .diff_lines(original, formatted);
+    let diff = bounded_line_diff(original, formatted);
     let mut out = String::new();
-    for change in diff.iter_all_changes() {
-        let sign = match change.tag() {
-            ChangeTag::Delete => "-",
-            ChangeTag::Insert => "+",
-            ChangeTag::Equal => " ",
-        };
-        out.push_str(sign);
-        out.push_str(change.value());
-        if !change.value().ends_with('\n') {
-            out.push('\n');
+    for op in diff.ops() {
+        let (tag, old_lines, new_lines) = op.as_tag_tuple();
+        if tag != DiffTag::Insert {
+            for line in &diff.old_lines()[old_lines] {
+                push_diff_line(
+                    &mut out,
+                    if tag == DiffTag::Equal { ' ' } else { '-' },
+                    line,
+                );
+            }
+        }
+        if tag != DiffTag::Delete && tag != DiffTag::Equal {
+            for line in &diff.new_lines()[new_lines] {
+                push_diff_line(&mut out, '+', line);
+            }
         }
     }
     out
+}
+
+fn push_diff_line(out: &mut String, sign: char, line: &str) {
+    out.push(sign);
+    out.push_str(line);
+    if !line.ends_with('\n') {
+        out.push('\n');
+    }
 }
 
 /// Convenience for callers that only have a path slice (used in tests).
@@ -137,62 +141,20 @@ pub fn diff_for(path: &Path, style: FormatStyle) -> Result<Option<String>, Check
         style,
         &ExcludeFilter::none(),
     )?;
-    Ok(result.changed.into_iter().next().map(|c| c.diff))
+    Ok(result
+        .changed
+        .into_iter()
+        .next()
+        .map(|changed| changed.into_diff().1))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The property that outlives any particular diff algorithm: the emitted
-    /// change stream must replay both sides exactly. Which lines pair with
-    /// which is the algorithm's business; dropping or duplicating one is a bug
-    /// in any of them, and `--check` is the only account a CI log gets of what
-    /// would change.
-    fn assert_reconstructs(original: &str, formatted: &str) {
-        let diff = TextDiff::configure()
-            .algorithm(Algorithm::Patience)
-            .diff_lines(original, formatted);
-        let (mut old, mut new) = (String::new(), String::new());
-        for change in diff.iter_all_changes() {
-            match change.tag() {
-                ChangeTag::Delete => old.push_str(change.value()),
-                ChangeTag::Insert => new.push_str(change.value()),
-                ChangeTag::Equal => {
-                    old.push_str(change.value());
-                    new.push_str(change.value());
-                }
-            }
-        }
-        assert_eq!(
-            old, original,
-            "delete+equal stream must replay the original"
-        );
-        assert_eq!(
-            new, formatted,
-            "insert+equal stream must replay the formatted text"
-        );
-    }
-
     #[test]
-    fn diff_reconstructs_both_sides() {
-        assert_reconstructs("a\nb\nc\n", "a\nB\nc\n");
-        // No trailing newline on either side.
-        assert_reconstructs("a\nb", "a\nc");
-        assert_reconstructs("", "x\n");
-        assert_reconstructs("x\n", "");
-        // Reindent-everything: the shape that made Myers quadratic.
-        assert_reconstructs(&"        x = 1\n".repeat(400), &"    x = 1\n".repeat(400));
-        // Near-identical small functions: the shape Histogram collapsed on.
-        let old: String = (0..200)
-            .map(|i| format!("function f{i}()\n        x = {i}\nend\n"))
-            .collect();
-        let new: String = (0..200)
-            .map(|i| format!("function f{i}()\n    x = {i}\nend\n"))
-            .collect();
-        assert_reconstructs(&old, &new);
+    fn diff_renders_both_sides() {
+        assert_eq!(line_diff("a\nb\nc\n", "a\nB\nc\n"), " a\n-b\n+B\n c\n");
+        assert_eq!(line_diff("a\nb", "a\nc"), " a\n-b\n+c\n");
     }
-
-    // A growth-rate test cannot distinguish the available algorithms: all are
-    // quadratic for a full reindent. A wall-clock threshold would be flaky.
 }

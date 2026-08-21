@@ -5,11 +5,12 @@ use std::path::Path;
 
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, TextEdit};
 use rowan::TextRange;
-use similar::{DiffTag, TextDiff};
+use similar::DiffTag;
 
 use crate::formatter::{FormatStyle, RangeFormatted, format_node, format_range, format_with_style};
 use crate::incremental::Analysis;
 use crate::parser::{ParseDiagnostic, parse};
+use crate::text::line_diff::bounded_line_diff;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
 /// Format `text` off the snapshot's cached parse when the db's tracked buffer
@@ -112,12 +113,12 @@ fn line_diff_edits(
     new: &str,
     encoding: PositionEncoding,
 ) -> Option<Vec<TextEdit>> {
-    let diff = TextDiff::from_lines(old, new);
+    let diff = bounded_line_diff(old, new);
     // Byte offset of each line start on either side, so a line-index range from
     // the diff becomes a byte range. Built from the diff's own slices, which
     // cannot disagree with the indices its ops carry.
-    let old_offsets = line_offsets(diff.iter_old_slices());
-    let new_offsets = line_offsets(diff.iter_new_slices());
+    let old_offsets = line_offsets(diff.old_lines().iter().copied());
+    let new_offsets = line_offsets(diff.new_lines().iter().copied());
 
     let mut hunks: Vec<(std::ops::Range<usize>, std::ops::Range<usize>)> = Vec::new();
     for op in diff.ops() {
