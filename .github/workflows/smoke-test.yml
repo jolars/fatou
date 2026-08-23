@@ -3,7 +3,7 @@ name: Smoke Test
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 5 * * 1"
+    - cron: "0 4 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
