@@ -72,8 +72,8 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **736 allowlisted**, 20
-divergence, 0 unsupported. Dir corpus (**250 cases**): **249 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **738 allowlisted**, 18
+divergence, 0 unsupported. Dir corpus (**251 cases**): **250 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; the 12 new, correctable divergences are recorded
 below. A green report means "no regression", not "nothing to do".
@@ -96,8 +96,6 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- Generator parameters after `;`: `T{y for x = xs; a}` should attach
-  `(parameters a)`, while `(y for x = xs; a)` recovers the suffix as junk.
 - JuliaSyntax 1.0 error/value shapes: `(a;b=1)->c`; command-macro numeric args
   (``x`s`2``/``x`s`10.0``); bare `:=` and `.`; parenthesized `@f(x)`/`$f` function
   signatures; quoted names in `using :A`/`using A: :b`; and
@@ -130,38 +128,36 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-24 — JuliaSyntax 1.0.2 migration)
+## Latest session (2026-08-24b — generator parameters after `;`)
 
-Finished the in-progress oracle migration. JuliaSyntax 1.0 changed many
-projection encodings and expanded its harvested parser corpus from 685 to 756
-cases. The branch already carried the dependency/corpus refresh and the broad
-projector translation; this session closed every allowlisted regression and
-ratcheted the expanded PASS set.
+Landed the two-case JuliaSyntax 1.0 cluster around generator suffixes. A typed
+curly expression now routes through the same argument-list machinery as a call,
+while plain parens retain the generator and recover the invalid suffix inside
+their delimiters.
 
-- **Parser gaps**: `f.'` now builds a `POSTFIX_EXPR` and records
-  `InvalidPostfixOperator`, projecting `(dotcall-post f (error '))`; leading-dot
-  whitespace and nested postfix use were probed too. Leading identifier
-  continuations now lex as `ERROR_IDENTIFIER_START`. Bare `.op`, `&`, and
-  syntactic-operator forward declarations receive the 1.0 invalid-signature
-  shape. `≔`/`≕`/`⩴` are now valid value atoms as well as infix operators.
-- **Projector gaps**: incomplete delimited forms no longer acquire the 1.0
-  trailing-comma head unless their closer is present; the new identifier-start
-  error token and dotted-postfix recovery project directly.
-- **Fixtures**: widened `dot_prime_recovery`; added parser snapshots
-  `identifier_start_error`, `invalid_operator_forward_declaration`, and
-  `unicode_assignment_value`; added oracle slug `unicode_assignment_value`.
-  Removed invalid `function .+ end` from the formatter's clean-reparse fixture;
-  parser coverage retains it. No blocked entry was added.
-- **Counts**: JS **677/685 → 736/756** allowlisted (20 FAIL, 0 unsupported,
-  zero regressions); dir **248/249 → 249/250** allowlisted (only the existing
+- **Parser gaps**: `T{y for x = xs; a}` now builds `CURLY_EXPR → ARG_LIST →
+  GENERATOR + PARAMETERS`. `(y for x = xs; a)` builds `PAREN_EXPR → GENERATOR
+  + ERROR`, with `TrailingJunk` anchored at `;`, rather than leaking both pieces
+  into a top-level semicolon group.
+- **Projector gap**: the recovered parenthesized topology maps to JuliaSyntax's
+  `(parens …)` encoding, and a recovered semicolon renders as the `✘` error
+  glyph.
+- **Fixtures**: added parser snapshots `generator_parameters_after_semicolon`
+  and `parenthesized_generator_parameters_error`; added the combined oracle slug
+  `generator_parameters_after_semicolon`. No blocked entry was added.
+- **Counts**: JS **736/756 → 738/756** allowlisted (18 FAIL, 0 unsupported,
+  zero regressions); dir **249/250 → 250/251** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: generator parameters after `;`—a two-case 1.0 cluster, with the
-  typed-curly form representing useful real syntax.
+- **Next**: anonymous-function keyword parameters, `(a; b=1) -> c`—one valid,
+  useful JuliaSyntax 1.0 case. Command-macro numeric suffixes are the next
+  two-case cluster after it.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-24** — JuliaSyntax 1.0.2 migration: updated projection encodings,
+  recovery, value operators, and the expanded corpus. 736 / 249.
 - **2026-08-07c** — `∈` as the iteration separator; loop-variable parsing stops
   before Unicode `∈`, and the formatter normalizes the new flat shape. 677 / 249.
 - **2026-08-07b** — `for outer i` iteration spec. New `OUTER_BINDING` node;

@@ -1,0 +1,30 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..18
+  PAREN_EXPR@0..17
+    LPAREN@0..1 "("
+    GENERATOR@1..13
+      NAME@1..2
+        IDENT@1..2 "y"
+      WHITESPACE@2..3 " "
+      FOR_BINDING@3..13
+        FOR_KW@3..6 "for"
+        WHITESPACE@6..7 " "
+        ASSIGNMENT_EXPR@7..13
+          NAME@7..8
+            IDENT@7..8 "x"
+          WHITESPACE@8..9 " "
+          EQ@9..10 "="
+          WHITESPACE@10..11 " "
+          NAME@11..13
+            IDENT@11..13 "xs"
+    ERROR@13..16
+      SEMICOLON@13..14 ";"
+      WHITESPACE@14..15 " "
+      IDENT@15..16 "a"
+    RPAREN@16..17 ")"
+  NEWLINE@17..18 "\n"
+
+diagnostic [13..14]: generator parameters require a call or curly expression

@@ -90,6 +90,7 @@ function_signature_newline
 generator_after_comma
 generator_arguments
 generator_parameters
+generator_parameters_after_semicolon
 generator_whitespace_error
 generators
 global_local_assignment

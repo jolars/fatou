@@ -2403,6 +2403,21 @@ pub(crate) fn parse_paren(
     // `(x for x in xs)` is a generator expression.
     let sep = ctx.skip_trivia(inner.end);
     if ctx.token(sep).map(|t| t.kind) == Some(TokKind::ForKw) {
+        // A semicolon after a parenthesized generator is not a parameter section:
+        // Julia retains the generator, then recovers the suffix as junk inside
+        // the parens. Detect it before the ordinary comprehension path stops at
+        // the semicolon and leaks the suffix to the top-level statement driver.
+        let mut scratch = Vec::new();
+        let mut scratch_diags = Vec::new();
+        let clauses_end = parse_generator_clauses(ctx, inner.end, &mut scratch, &mut scratch_diags);
+        if ctx.token(ctx.skip_trivia(clauses_end)).map(|t| t.kind) == Some(TokKind::Semicolon) {
+            return Some(parse_parenthesized_generator_junk(
+                ctx,
+                start,
+                inner,
+                diagnostics,
+            ));
+        }
         return Some(parse_comprehension(
             ctx,
             start,
@@ -2461,6 +2476,73 @@ pub(crate) fn parse_paren(
             end: close,
             events,
         })
+    }
+}
+
+/// Parse `(body for clauses; junk)` as a parenthesized generator followed by a
+/// recovered suffix. Unlike call and curly argument lists, plain parens cannot
+/// attach keyword parameters to a generator.
+fn parse_parenthesized_generator_junk(
+    ctx: &ParserCtx<'_>,
+    open: usize,
+    body: ExprParse,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let tokens = ctx.tokens();
+    let mut events = vec![Event::Start(SyntaxKind::PAREN_EXPR), Event::Tok(open)];
+    push_range(&mut events, open + 1, body.start);
+    events.push(Event::Start(SyntaxKind::GENERATOR));
+    let mut pos = body.end;
+    events.extend(body.events);
+    pos = parse_generator_clauses(ctx, pos, &mut events, diagnostics);
+    finish(&mut events, SyntaxKind::GENERATOR);
+
+    let junk_start = ctx.skip_trivia(pos);
+    push_range(&mut events, pos, junk_start);
+    let mut close = junk_start;
+    let mut depth = 0usize;
+    while let Some(kind) = ctx.token(close).map(|t| t.kind) {
+        match kind {
+            TokKind::RParen if depth == 0 => break,
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        close += 1;
+    }
+
+    events.push(Event::Start(SyntaxKind::ERROR));
+    push_range(&mut events, junk_start, close);
+    finish(&mut events, SyntaxKind::ERROR);
+    push_diagnostic(
+        diagnostics,
+        DiagnosticKind::TrailingJunk,
+        "generator parameters require a call or curly expression",
+        tokens[junk_start].start,
+        tokens[junk_start].end,
+    );
+
+    let end = if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
+        events.push(Event::Tok(close));
+        close + 1
+    } else {
+        let opener = &tokens[open];
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::UnclosedParen,
+            "unclosed `(`",
+            opener.start,
+            opener.end,
+        );
+        close
+    };
+    finish(&mut events, SyntaxKind::PAREN_EXPR);
+    ExprParse {
+        start: open,
+        end,
+        events,
     }
 }
 
@@ -2704,8 +2786,8 @@ fn parse_postfix(
             // argument-list path, which builds the same delimiter-less
             // `GENERATOR` plus a `PARAMETERS` sibling as the multi-argument form
             // `f(a, x for x in xs; k)`. Bracketed comprehensions never take
-            // parameters, so this only applies to calls (`)` close).
-            if node == SyntaxKind::CALL_EXPR {
+            // parameters, so this only applies to calls and curlies.
+            if matches!(node, SyntaxKind::CALL_EXPR | SyntaxKind::CURLY_EXPR) {
                 let mut scratch = Vec::new();
                 let mut scratch_diags = Vec::new();
                 let clauses_end =

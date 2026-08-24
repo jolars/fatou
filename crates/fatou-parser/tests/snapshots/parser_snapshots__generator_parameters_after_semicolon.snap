@@ -1,0 +1,33 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..19
+  CURLY_EXPR@0..18
+    NAME@0..1
+      IDENT@0..1 "T"
+    ARG_LIST@1..18
+      LBRACE@1..2 "{"
+      GENERATOR@2..14
+        NAME@2..3
+          IDENT@2..3 "y"
+        WHITESPACE@3..4 " "
+        FOR_BINDING@4..14
+          FOR_KW@4..7 "for"
+          WHITESPACE@7..8 " "
+          ASSIGNMENT_EXPR@8..14
+            NAME@8..9
+              IDENT@8..9 "x"
+            WHITESPACE@9..10 " "
+            EQ@10..11 "="
+            WHITESPACE@11..12 " "
+            NAME@12..14
+              IDENT@12..14 "xs"
+      PARAMETERS@14..17
+        SEMICOLON@14..15 ";"
+        WHITESPACE@15..16 " "
+        ARG@16..17
+          NAME@16..17
+            IDENT@16..17 "a"
+      RBRACE@17..18 "}"
+  NEWLINE@18..19 "\n"
