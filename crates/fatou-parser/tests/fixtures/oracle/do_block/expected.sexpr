@@ -1,1 +1,1 @@
-(toplevel (do (call f x) (tuple y) (block body)) (do (call map xs) (tuple x) (block (call-i x + 1))) (do (call f a b) (tuple x y) (block x)) (do (call open (string "f")) (tuple) (block (call read))))
+(toplevel (call f x (do (tuple y) (block body))) (call map xs (do (tuple x) (block (call-i x + 1)))) (call f a b (do (tuple x y) (block x))) (call open (string "f") (do (tuple) (block (call read)))))

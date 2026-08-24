@@ -1,1 +1,1 @@
-(toplevel (= ŷ (call f x)) (= μ 1) (= ε 2) (= ħ 3) (= (. obj (quote á)) 4) (macrocall @μmac x) (= (var ŷ) 5))
+(toplevel (= ŷ (call f x)) (= μ 1) (= ε 2) (= ħ 3) (= (. obj á) 4) (macrocall @μmac x) (= (var ŷ) 5))

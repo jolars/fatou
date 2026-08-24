@@ -1,6 +1,6 @@
 //! Non-ASCII identifier start and continuation code points.
 //!
-//! Generated from `Base.is_id_start_char` / `Base.is_id_char` (julia_version=1.12.6 juliasyntax_version=0.4.10).
+//! Generated from `Base.is_id_start_char` / `Base.is_id_char` (julia_version=1.12.6 juliasyntax_version=1.0.2).
 //! These are the predicates JuliaSyntax's tokenizer uses to scan
 //! identifiers, so the tables track the oracle exactly. ASCII is handled
 //! inline in the lexer; only non-ASCII ranges live here. Each entry is an

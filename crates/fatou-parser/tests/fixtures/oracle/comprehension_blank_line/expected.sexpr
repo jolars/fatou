@@ -1,1 +1,1 @@
-(toplevel (comprehension (generator x (= a as))) (comprehension (generator y (filter (= b bs) p))))
+(toplevel (comprehension (generator x (iteration (in a as)))) (comprehension (generator y (filter (iteration (in b bs)) p))))

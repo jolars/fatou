@@ -1,1 +1,1 @@
-(toplevel ($ x) ($ (call-i x + y)) (. f (inert ($ x))) (. f (inert ($ (call-i x + y)))) (. A (inert ($ B))) ($ ($ a)) ($ (vect 1 2)) (call-i a + ($ x)))
+(toplevel ($ x) ($ (call-i x + y)) (. f ($ x)) (. f ($ (call-i x + y))) (. A ($ B)) ($ ($ a)) ($ (vect 1 2)) (call-i a + ($ x)))

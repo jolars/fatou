@@ -1,1 +1,1 @@
-(toplevel (braces (generator y (= y ys))) (braces (generator x (filter (= x xs) p))) (braces (generator z (= a as) (= b bs))))
+(toplevel (braces (generator y (iteration (in y ys)))) (braces (generator x (filter (iteration (in x xs)) p))) (braces (generator z (iteration (in a as)) (iteration (in b bs)))))

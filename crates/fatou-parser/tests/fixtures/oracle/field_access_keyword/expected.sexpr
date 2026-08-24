@@ -1,1 +1,1 @@
-(toplevel (. x (quote function)) (. x (quote end)) (. x (quote true)) (. (call a) (quote function)) (. (. x (quote if)) (quote while)))
+(toplevel (. x function) (. x end) (. x true) (. (call a) function) (. (. x if) while))

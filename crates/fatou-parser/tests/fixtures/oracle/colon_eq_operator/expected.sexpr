@@ -1,1 +1,1 @@
-(toplevel (:= a b) (:= a (:= b c)) (= x (:= a b)) (:= seriestype (if (call-i method in (tuple-p (quote-: tree))) (block (quote-: curves)) (block (quote-: path)))) (macrocall @debug (:= num_edges (tuple-p (call length a) (call length b)))))
+(toplevel (:= a b) (:= a (:= b c)) (= x (:= a b)) (:= seriestype (if (call-i method in (tuple-p-, (quote-: tree))) (block (quote-: curves)) (block (quote-: path)))) (macrocall @debug (:= num_edges (tuple-p (call length a) (call length b)))))
