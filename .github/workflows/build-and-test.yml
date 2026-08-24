@@ -50,6 +50,38 @@ jobs:
           cargo build -p fatou-formatter --release
           --target wasm32-unknown-unknown --features schema
 
+  zed:
+    name: zed extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editors/zed
+          key: zed
+      # `editors/zed` is its own workspace (a `wasm32-wasip2` cdylib on edition
+      # 2021), so none of the workspace-wide jobs above reach it. Without this
+      # job the extension would only ever be compiled by Zed's registry, long
+      # after the change that broke it landed.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+        working-directory: editors/zed
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+        working-directory: editors/zed
+      - name: Test
+        run: cargo test --locked
+        working-directory: editors/zed
+      # `--locked` is also what catches a `Cargo.lock` left behind by a version
+      # bump, since nothing else regenerates it.
+      - name: Build for wasm
+        run: cargo build --release --target wasm32-wasip2 --locked
+        working-directory: editors/zed
+
   minimal-versions:
     name: minimal versions
     runs-on: ubuntu-latest
@@ -92,7 +124,7 @@ jobs:
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, wasm, minimal-versions, supply-chain]
+    needs: [test, wasm, zed, minimal-versions, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write
