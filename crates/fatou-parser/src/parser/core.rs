@@ -349,7 +349,9 @@ fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<Pars
         let sig_is_bare_name = sig
             .first_child()
             .is_some_and(|inner| is_bare_signature_name(&inner));
-        if sig_is_bare_name && !function_body_is_empty(&node) {
+        if sig_is_bare_name
+            && (!function_body_is_empty(&node) || invalid_forward_operator_name(&sig))
+        {
             let pos = usize::from(sig.text_range().start());
             push_diagnostic(
                 diagnostics,
@@ -360,6 +362,24 @@ fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<Pars
             );
         }
     }
+}
+
+/// JuliaSyntax 1.0 rejects syntactic, broadcast, and bare `&` operators as
+/// forward-declaration names even though ordinary operators remain valid.
+fn invalid_forward_operator_name(signature: &SyntaxNode) -> bool {
+    let Some(inner) = signature.first_child() else {
+        return false;
+    };
+    if inner.kind() == SyntaxKind::ERROR {
+        return true;
+    }
+    if inner.kind() != SyntaxKind::OPERATOR_ATOM {
+        return false;
+    }
+    inner.first_token().is_some_and(|token| {
+        let text = token.text();
+        text == "&" || (text.starts_with('.') && !text.starts_with(".."))
+    })
 }
 
 /// Whether a `function`/`macro` signature's first node is a *bare name* — the

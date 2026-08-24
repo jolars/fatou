@@ -76,10 +76,14 @@ macro_rules! token_table_rows {
             /// (`0x1.8`, `0x.8`, `0x1.`). Julia requires the exponent; projects
             /// to `(ErrorHexFloatMustContainP)`.
             ErrorHexFloatNoP ERROR_HEX_FLOAT_NO_P,
+            /// A character that may continue an identifier but cannot begin one
+            /// (for example, a leading subscript digit). JuliaSyntax distinguishes
+            /// this from an otherwise unknown character.
+            ErrorIdentifierStart ERROR_IDENTIFIER_START,
             /// A stray character Julia does not recognize (a subscript that
-            /// cannot start an identifier, a lone unknown glyph). Never dropped,
-            /// which keeps losslessness a property of the lexer alone. Projects
-            /// to `(ErrorUnknownCharacter)`.
+            /// cannot continue an identifier, or a lone unknown glyph). Never
+            /// dropped, which keeps losslessness a property of the lexer alone.
+            /// Projects to `(ErrorUnknownCharacter)`.
             Unknown ERROR_UNKNOWN_CHAR,
 
             // --- String / command literal pieces ---

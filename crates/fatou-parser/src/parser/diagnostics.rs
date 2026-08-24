@@ -144,6 +144,9 @@ pub enum DiagnosticKind {
     /// A binary-only operator used in prefix position (`/x`, `.*x`) —
     /// JuliaSyntax error-wraps the operator and applies it as a prefix call.
     InvalidPrefixOperator,
+    /// The removed dotted transpose operator (`f.'`). JuliaSyntax retains its
+    /// postfix topology but error-wraps the transpose operator.
+    InvalidPostfixOperator,
     /// A syntactic operator with no value meaning used where an atom is expected
     /// (`=`, `+=`, `&&`, `||`, `->`, `...`, `?`) — JuliaSyntax emits `(error op)`.
     LoneOperator,
@@ -246,6 +249,7 @@ impl DiagnosticKind {
             | ImportRecoveryColon
             | ElseWithoutCatch
             | InvalidPrefixOperator
+            | InvalidPostfixOperator
             | LoneOperator
             | InvalidAsAlias
             | MissingOperand

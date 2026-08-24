@@ -617,18 +617,6 @@ fn parse_expr_in(
             break;
         }
 
-        // A `.` immediately followed by a `'` is the removed `.'` transpose
-        // operator, not a field access: JuliaSyntax ends the value and recovers
-        // `.'` as a trailing-junk run (`f.'` ⇒ `f (error-t ')`). End the chain
-        // here so `.'` falls to the toplevel leftover driver (`core.rs`). The
-        // lexer only emits `Transpose` after `.` when the prime abuts it, so a
-        // spaced `f. '` stays a char literal and is unaffected.
-        if op_kind == TokKind::Dot
-            && ctx.token(op_idx + 1).map(|t| t.kind) == Some(TokKind::Transpose)
-        {
-            break;
-        }
-
         // A `.` whose right-hand side begins with `@` is a qualified macro call
         // (`Base.@time f()`): the whole `Base.@time` is the macro name and the
         // rest are its arguments — not a field access wrapping a macro call.
@@ -1633,6 +1621,7 @@ fn parse_prefix(
         | TokKind::Float32
         | TokKind::ErrorInvalidNumber
         | TokKind::ErrorHexFloatNoP
+        | TokKind::ErrorIdentifierStart
         | TokKind::Unknown
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
@@ -2602,6 +2591,48 @@ fn parse_postfix_chain(
                 lhs = ExprParse {
                     start: lhs.start,
                     end,
+                    events,
+                };
+            }
+            // Julia removed the dotted transpose operator, but still recovers it
+            // with postfix topology: `f.'` is a dotted postfix call whose
+            // operator is error-wrapped. Horizontal whitespace and block comments
+            // may separate the dot and prime.
+            Some(TokKind::Dot)
+                if ctx
+                    .token(ctx.skip_ws_and_block_comments(next + 1))
+                    .map(|t| t.kind)
+                    == Some(TokKind::Transpose) =>
+            {
+                let transpose = ctx.skip_ws_and_block_comments(next + 1);
+                let dot = &ctx.tokens()[next];
+                if next > lhs.end {
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::DotWhitespace,
+                        "whitespace before `.`",
+                        dot.end,
+                        dot.end,
+                    );
+                }
+                let prime = &ctx.tokens()[transpose];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::InvalidPostfixOperator,
+                    "invalid dotted postfix operator",
+                    prime.start,
+                    prime.end,
+                );
+                let mut events = vec![Event::Start(SyntaxKind::POSTFIX_EXPR)];
+                events.extend(lhs.events);
+                push_range(&mut events, lhs.end, next);
+                events.push(Event::Tok(next));
+                push_range(&mut events, next + 1, transpose);
+                events.push(Event::Tok(transpose));
+                events.push(Event::Finish);
+                lhs = ExprParse {
+                    start: lhs.start,
+                    end: transpose + 1,
                     events,
                 };
             }

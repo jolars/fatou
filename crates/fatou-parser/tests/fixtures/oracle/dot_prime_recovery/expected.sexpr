@@ -1,1 +1,1 @@
-(toplevel (dotcall-post f (error ')) (dotcall-post a (error ')))
+(toplevel (dotcall-post f (error ')) (dotcall-post a (error ')) (dotcall-post f (error-t) (error ')) (call-i a + (dotcall-post f (error '))))

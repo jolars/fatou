@@ -1046,7 +1046,8 @@ fn invalid_prefix_is_dotted(err: &SyntaxNode) -> bool {
 }
 
 fn project_postfix(node: &SyntaxNode) -> String {
-    // `A'` → `(call-post A ')`. The postfix token text is the operator (`'`).
+    // `A'` → `(call-post A ')`. The removed dotted form keeps postfix topology
+    // but error-wraps the operator: `A.'` → `(dotcall-post A (error '))`.
     let operand = project_first(node);
     let op = significant(node)
         .into_iter()
@@ -1054,7 +1055,22 @@ fn project_postfix(node: &SyntaxNode) -> String {
         .find(|t| t.kind() == TRANSPOSE)
         .map(|t| t.text().to_string())
         .unwrap_or_else(|| "'".to_string());
-    format!("(call-post {operand} {op})")
+    let Some(dot) = node
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .find(|t| t.kind() == DOT)
+    else {
+        return format!("(call-post {operand} {op})");
+    };
+    let dot_error = if diag_at(
+        usize::from(dot.text_range().end()),
+        DiagnosticKind::DotWhitespace,
+    ) {
+        "(error-t) "
+    } else {
+        ""
+    };
+    format!("(dotcall-post {operand} {dot_error}(error {op}))")
 }
 
 fn project_type_annotation(node: &SyntaxNode) -> String {
@@ -1109,7 +1125,13 @@ fn project_delimited(head: &str, node: &SyntaxNode) -> String {
     let recovered_trailing_comma = matches!(node.kind(), VECT_EXPR | BRACES)
         && node.children().filter(|c| c.kind() == ARG).count() == 1
         && node.children().any(|c| c.kind() == ERROR);
-    let head = if has_trailing_comma(node) || recovered_trailing_comma {
+    let closed = match node.kind() {
+        TUPLE_EXPR => node.children_with_tokens().any(|el| el.kind() == RPAREN),
+        VECT_EXPR => node.children_with_tokens().any(|el| el.kind() == RBRACKET),
+        BRACES => node.children_with_tokens().any(|el| el.kind() == RBRACE),
+        _ => true,
+    };
+    let head = if (has_trailing_comma(node) && closed) || recovered_trailing_comma {
         format!("{head}-,")
     } else {
         head.to_string()
@@ -2393,6 +2415,7 @@ fn literal_token_text(tok: &SyntaxToken) -> String {
         // error token whose value is the error name, not the source text.
         ERROR_INVALID_NUMBER => "(ErrorInvalidNumericConstant)".to_string(),
         ERROR_HEX_FLOAT_NO_P => "(ErrorHexFloatMustContainP)".to_string(),
+        ERROR_IDENTIFIER_START => "(ErrorIdentifierStart)".to_string(),
         ERROR_UNKNOWN_CHAR => "(ErrorUnknownCharacter)".to_string(),
         HEX_INT => normalize_based_int(tok.text(), 16),
         OCT_INT => normalize_based_int(tok.text(), 8),
