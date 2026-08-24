@@ -1,1 +1,1 @@
-(toplevel (call-i x |> (-> y (call-i y + 1))) (call-i 1 + (-> 2 3)) (-> a (= b c)) (-> a (? b c d)) (-> (::-i a b) c) (-> a (|| b c)) (call-i 2 ^ (-> 3 4)))
+(toplevel (call-i x |> (-> (tuple y) (call-i y + 1))) (call-i 1 + (-> (tuple 2) 3)) (-> (tuple a) (= b c)) (-> (tuple a) (? b c d)) (-> (tuple (::-i a b)) c) (-> (tuple a) (|| b c)) (call-i 2 ^ (-> (tuple 3) 4)))

@@ -1,1 +1,1 @@
-(toplevel (comprehension (generator x (error-t) (= x xs))) (comprehension (generator (call f x) (error-t) (= x xs))) (comprehension (generator x (error-t) (filter (= x xs) y))))
+(toplevel (comprehension (generator x (error-t) (iteration (in x xs)))) (comprehension (generator (call f x) (error-t) (iteration (in x xs)))) (comprehension (generator x (error-t) (filter (iteration (in x xs)) y))))

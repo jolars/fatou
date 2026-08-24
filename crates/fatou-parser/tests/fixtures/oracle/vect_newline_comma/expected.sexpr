@@ -1,1 +1,1 @@
-(toplevel (vect x y) (vect x) (vect x y))
+(toplevel (vect x y) (vect-, x) (vect x y))

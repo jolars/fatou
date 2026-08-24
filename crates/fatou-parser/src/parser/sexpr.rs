@@ -253,7 +253,7 @@ fn project(node: &SyntaxNode) -> String {
         SPLAT_EXPR => sexp("...", vec![project_first(node)]),
         TYPE_ANNOTATION => project_type_annotation(node),
         WHERE_EXPR => project_where(node),
-        ARROW_EXPR => sexp("->", project_each(child_nodes(node))),
+        ARROW_EXPR => project_arrow(node),
         JUXTAPOSE_EXPR => project_juxtapose(node),
         TERNARY_EXPR => project_ternary(node),
 
@@ -261,12 +261,12 @@ fn project(node: &SyntaxNode) -> String {
         INDEX_EXPR => project_call("ref", node),
         CURLY_EXPR => project_call("curly", node),
         DOT_CALL_EXPR => project_dot_call(node),
-        BRACES => sexp("braces", project_args(node)),
+        BRACES => project_delimited("braces", node),
 
-        TUPLE_EXPR => sexp("tuple-p", project_args(node)),
+        TUPLE_EXPR => project_delimited("tuple-p", node),
         PAREN_BLOCK => sexp("block-p", project_block_args(node)),
         BARE_TUPLE_EXPR => sexp("tuple", project_each(child_nodes(node))),
-        VECT_EXPR => sexp("vect", project_args(node)),
+        VECT_EXPR => project_delimited("vect", node),
         MATRIX_EXPR => project_matrix(node),
         TYPED_MATRIX_EXPR => project_typed_matrix(node),
         BRACESCAT_EXPR => project_bracescat(node),
@@ -589,7 +589,7 @@ fn operator_func_repr(kind: SyntaxKind) -> String {
 /// the final character is sufficient.
 fn op_has_suffix(text: &str) -> bool {
     text.chars()
-        .next_back()
+        .last()
         .is_some_and(super::lexer::is_op_suffix_char)
 }
 
@@ -761,18 +761,17 @@ fn project_binary(node: &SyntaxNode) -> String {
         return s;
     }
     match infix_head(op.kind()) {
-        // Field access. A plain field name is quoted (`f.x` → `(. f (quote x))`);
-        // an interpolated field name is inert-quoted (`f.$x` →
-        // `(. f (inert ($ x)))`), so the interpolation projects through `($ …)`.
+        // JuliaSyntax 1.0 represents field names directly (`f.x` → `(. f x)`) and
+        // keeps an interpolated field as the `$` node (`f.$x` → `(. f ($ x))`).
         InfixHead::Dot if rhs.kind() == INTERPOLATION => {
-            format!("(. {lhs} {dot_error}(inert {rhs_str}))")
+            format!("(. {lhs} {dot_error}{rhs_str})")
         }
         // A quoted field name (`a.:b`) is already a `(quote-: …)` symbol; emit it
         // directly rather than wrapping it in another `(quote …)`.
         InfixHead::Dot if rhs.kind() == QUOTE_SYM => {
             format!("(. {lhs} {dot_error}{rhs_str})")
         }
-        InfixHead::Dot => format!("(. {lhs} {dot_error}(quote {}))", name_text(rhs)),
+        InfixHead::Dot => format!("(. {lhs} {dot_error}{})", name_text(rhs)),
         // Non-dot heads are handled by `infix_call_string` above.
         _ => unreachable!("non-dot infix head handled by infix_call_string"),
     }
@@ -923,19 +922,70 @@ fn project_comparison(node: &SyntaxNode) -> String {
 }
 
 fn project_assignment(node: &SyntaxNode) -> String {
-    // The operator's own text is its JuliaSyntax head verbatim: `=`, `.=`, `+=`,
-    // `.+=`, … all project as `(<op> lhs rhs)`.
     let op = operator_token(node);
     let head = match &op {
         Some(t) => folded_op_text(t.text()).into_owned(),
         None => "=".to_string(),
     };
     let operands = child_nodes(node);
+    if head == "=" && operands.first().is_some_and(is_short_function_signature) {
+        return sexp("function-=", project_each(operands));
+    }
+    // JuliaSyntax 1.0 gives every updating assignment one structural head and
+    // carries the underlying operator as the middle child.
+    if head != "=" && head != ".=" {
+        let dotted = head.starts_with('.');
+        let base = head
+            .strip_prefix('.')
+            .unwrap_or(&head)
+            .strip_suffix('=')
+            .unwrap_or(&head);
+        let mut parts = Vec::with_capacity(operands.len() + 1);
+        if let Some(lhs) = operands.first() {
+            parts.push(project(lhs));
+        }
+        parts.push(folded_op_text(base).into_owned());
+        parts.extend(operands.iter().skip(1).map(project));
+        if operands.len() == 1 && op.is_some_and(|t| operator_missing_rhs(&t)) {
+            parts.push("(error)".to_string());
+        }
+        return sexp(if dotted { ".op=" } else { "op=" }, parts);
+    }
     // Missing right operand: `<: =` ⇒ `(= <: (error))`, `a +=` ⇒ `(+= a (error))`.
     if operands.len() == 1 && op.is_some_and(|t| operator_missing_rhs(&t)) {
         return format!("({head} {} (error))", project(&operands[0]));
     }
     sexp(&head, project_each(operands))
+}
+
+fn is_short_function_signature(node: &SyntaxNode) -> bool {
+    match node.kind() {
+        CALL_EXPR => true,
+        WHERE_EXPR | PAREN_EXPR => first_node(node)
+            .as_ref()
+            .is_some_and(is_short_function_signature),
+        TYPE_ANNOTATION => {
+            let children = child_nodes(node);
+            children.len() >= 2 && is_short_function_signature(&children[0])
+        }
+        BINARY_EXPR => operator_token(node).is_some_and(|op| op.kind() != DOT),
+        _ => false,
+    }
+}
+
+fn project_arrow(node: &SyntaxNode) -> String {
+    let operands = child_nodes(node);
+    let Some((lhs, rhs)) = operands.split_first() else {
+        return "(->)".to_string();
+    };
+    let lhs = if matches!(lhs.kind(), TUPLE_EXPR | PAREN_EXPR | PAREN_BLOCK) {
+        project(lhs)
+    } else {
+        sexp("tuple", vec![project(lhs)])
+    };
+    let mut parts = vec![lhs];
+    parts.extend(rhs.iter().map(project));
+    sexp("->", parts)
 }
 
 fn project_unary(node: &SyntaxNode) -> String {
@@ -1055,6 +1105,18 @@ fn project_dot_call(node: &SyntaxNode) -> String {
     project_call("dotcall", node)
 }
 
+fn project_delimited(head: &str, node: &SyntaxNode) -> String {
+    let recovered_trailing_comma = matches!(node.kind(), VECT_EXPR | BRACES)
+        && node.children().filter(|c| c.kind() == ARG).count() == 1
+        && node.children().any(|c| c.kind() == ERROR);
+    let head = if has_trailing_comma(node) || recovered_trailing_comma {
+        format!("{head}-,")
+    } else {
+        head.to_string()
+    };
+    sexp(&head, project_args(node))
+}
+
 fn project_call(head: &str, node: &SyntaxNode) -> String {
     let mut parts = Vec::new();
     let mut head = head.to_string();
@@ -1107,6 +1169,9 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
         }
     }
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
+        if head != "ref" && has_trailing_comma(&arg_list) {
+            head.push_str("-,");
+        }
         // Disallowed whitespace before the opener records `OpenerWhitespace` at
         // the opener's start (`f (a)` → `(call f (error-t) a)`); the marker sits
         // between the callee and the arguments.
@@ -1129,8 +1194,24 @@ fn project_call(head: &str, node: &SyntaxNode) -> String {
     } else if let Some(generator) = node.children().find(|c| c.kind() == GENERATOR) {
         // A bare generator argument: `sum(x for x in xs)` → `(call sum (generator …))`.
         parts.push(project_generator(&generator));
+        if let Some(parameters) = node.children().find(|c| c.kind() == PARAMETERS) {
+            parts.push(project_parameters(&parameters));
+        }
     }
     sexp(&head, parts)
+}
+
+fn has_trailing_comma(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .filter(|el| {
+            !is_trivia(el.kind())
+                && !matches!(
+                    el.kind(),
+                    LPAREN | RPAREN | LBRACKET | RBRACKET | LBRACE | RBRACE
+                )
+        })
+        .last()
+        .is_some_and(|el| el.kind() == COMMA)
 }
 
 /// Project a typed comprehension `T[x for x in xs]` →
@@ -1445,8 +1526,8 @@ fn max_semicolon_run(node: &SyntaxNode) -> usize {
 
 fn project_generator(node: &SyntaxNode) -> String {
     // Fatou is flat: `body (FOR_BINDING [COMPREHENSION_IF])…`. JuliaSyntax nests
-    // `(generator body <clause>…)`, where each `for` clause is one `(= v it)` (or
-    // a `(cartesian_iterator …)` for comma-separated specs), and a trailing `if`
+    // `(generator body <clause>…)`, where each `for` clause is an `iteration`
+    // containing one or more `(in pattern iterable)` specs, and a trailing `if`
     // wraps the immediately preceding clause in a `(filter <clause> cond)`.
     let mut body = String::new();
     // `for` glued to the body splices a zero-width `(error-t)` marker between
@@ -1494,8 +1575,8 @@ fn project_for_binding(node: &SyntaxNode) -> String {
 }
 
 fn project_for_binding_node(binding: &SyntaxNode) -> String {
-    // Split the clause's specs on top-level commas (kept as tokens). One spec
-    // projects directly; several become a `(cartesian_iterator …)`.
+    // Split the clause's specs on top-level commas (kept as tokens). JuliaSyntax
+    // 1.0 groups both the single and comma-separated forms in `iteration`.
     let mut specs: Vec<Vec<SyntaxElement>> = vec![Vec::new()];
     for el in binding.children_with_tokens() {
         match &el {
@@ -1505,10 +1586,7 @@ fn project_for_binding_node(binding: &SyntaxNode) -> String {
         }
     }
     let projected: Vec<String> = specs.iter().map(|s| project_for_spec(s)).collect();
-    match projected.as_slice() {
-        [one] => one.clone(),
-        _ => sexp("cartesian_iterator", projected),
-    }
+    sexp("iteration", projected)
 }
 
 fn project_for_spec(elems: &[SyntaxElement]) -> String {
@@ -1517,7 +1595,8 @@ fn project_for_spec(elems: &[SyntaxElement]) -> String {
     if let [NodeOrToken::Node(n)] = elems
         && n.kind() == ASSIGNMENT_EXPR
     {
-        return project(n);
+        let operands = child_nodes(n);
+        return sexp("in", project_each(operands));
     }
     // Otherwise the loose `var in iter` form: split on the `in`/`∈` token. An
     // `outer` spec also reaches here in its `=` form (`for outer i = xs`), where
@@ -1529,7 +1608,7 @@ fn project_for_spec(elems: &[SyntaxElement]) -> String {
         Some(idx) => {
             let var = project_flat(elems[..idx].to_vec());
             let iter = project_flat(elems[idx + 1..].to_vec());
-            format!("(= {var} {iter})")
+            format!("(in {var} {iter})")
         }
         None => project_flat(elems.to_vec()),
     }
@@ -1636,7 +1715,7 @@ fn project_try(node: &SyntaxNode) -> String {
                             projected
                         }
                     })
-                    .unwrap_or_else(|| "false".to_string());
+                    .unwrap_or_else(|| "□".to_string());
                 let block = project_block_child(&clause);
                 parts.push(format!("(catch {var} {block})"));
             }
@@ -1766,9 +1845,22 @@ fn project_do(node: &SyntaxNode) -> String {
         None => "(tuple)".to_string(),
     };
     let block = project_block_child(node);
-    let mut parts = vec![call, params, block];
-    push_trailing_errors(node, &mut parts);
-    sexp("do", parts)
+    let mut do_parts = vec![params, block];
+    push_trailing_errors(node, &mut do_parts);
+    let do_clause = sexp("do", do_parts);
+    append_sexp_arg(call, &do_clause)
+}
+
+fn append_sexp_arg(mut outer: String, arg: &str) -> String {
+    if outer.ends_with(')') {
+        outer.pop();
+        outer.push(' ');
+        outer.push_str(arg);
+        outer.push(')');
+        outer
+    } else {
+        sexp("do", vec![outer, arg.to_string()])
+    }
 }
 
 fn do_param_strings(node: &SyntaxNode) -> Vec<String> {
@@ -2017,7 +2109,12 @@ fn project_macrocall(node: &SyntaxNode) -> String {
     if let Some(arg_list) = node.children().find(|c| c.kind() == ARG_LIST) {
         let mut parts = vec![name];
         parts.extend(project_args(&arg_list));
-        return sexp("macrocall-p", parts);
+        let head = if has_trailing_comma(&arg_list) {
+            "macrocall-p-,"
+        } else {
+            "macrocall-p"
+        };
+        return sexp(head, parts);
     }
     let mut parts = vec![name];
     parts.extend(
@@ -2051,9 +2148,7 @@ fn project_macro_name(node: &SyntaxNode) -> String {
 
     // Trailing form (`A.@x`, `A.B.@x`, `$A.@x`, `A.$B.@x`): the module path is a
     // single leading node (`NAME`, `BINARY_EXPR`, or `INTERPOLATION`) that
-    // `project` already nests correctly, then `. @ name`. Reuse `project` for the
-    // module so dotted access and interpolation splits (`(inert ($ B))`) stay
-    // consistent with plain field access.
+    // `project` already nests correctly, then `. @ name`.
     if let Some(module) = node
         .children()
         .find(|c| matches!(c.kind(), NAME | BINARY_EXPR | INTERPOLATION))
@@ -2087,16 +2182,16 @@ fn project_macro_name(node: &SyntaxNode) -> String {
                     }
                 })
                 .collect();
-            // The first component after the module is the one the sigil named
-            // (plain `(quote B)`); every later step gets an `(error-t)`, and the
-            // final one also carries the relocated `@`.
+            // The first component after the module is the one the sigil named;
+            // every later step gets an `(error-t)`, and the final one also
+            // carries the relocated `@`.
             if let [first, rest @ ..] = comps.as_slice() {
-                let mut path = format!("(. {} (quote {first}))", project(&module));
+                let mut path = format!("(. {} {first})", project(&module));
                 if let Some((last, mids)) = rest.split_last() {
                     for c in mids {
-                        path = format!("(. {path} (error-t) (quote {c}))");
+                        path = format!("(. {path} (error-t) {c})");
                     }
-                    path = format!("(. {path} (error-t) (quote @{last}))");
+                    path = format!("(. {path} (error-t) @{last})");
                 }
                 return path;
             }
@@ -2105,7 +2200,7 @@ fn project_macro_name(node: &SyntaxNode) -> String {
             Some(v) => v.clone(),
             None => format!("@{}", macro_name_after_at(node)),
         };
-        return format!("(. {} (quote {name}))", project(&module));
+        return format!("(. {} {name})", project(&module));
     }
 
     // Prefix form with a `var"…"` name and no module (`@var"#"` ⇒ `(var @#)`).
@@ -2155,14 +2250,14 @@ fn project_macro_name(node: &SyntaxNode) -> String {
         [] => "@.".to_string(),
         // Simple `@m`.
         [one] => format!("@{one}"),
-        // Qualified `@Mod.mac` / `@A.B.x` → `(. <module> (quote @macro))`.
+        // Qualified `@Mod.mac` / `@A.B.x` → `(. <module> @macro)`.
         rest => {
             let (macro_name, module) = rest.split_last().unwrap();
             let mut path = module[0].clone();
             for c in &module[1..] {
-                path = format!("(. {path} (quote {c}))");
+                path = format!("(. {path} {c})");
             }
-            format!("(. {path} (quote @{macro_name}))")
+            format!("(. {path} @{macro_name})")
         }
     }
 }
@@ -2172,11 +2267,11 @@ fn project_macro_name(node: &SyntaxNode) -> String {
 /// of significant tokens `@`, `IDENT`, `.`, `$`/`@`, …). JuliaSyntax builds the
 /// module path left-to-right and relocates the macro sigil onto the final
 /// component:
-/// - a non-final ident is `(quote B)`, the final ident `(quote @x)` (the sigil);
-/// - a non-final `$x` is the valid `(inert ($ x))`, a final `$x` the recovered
-///   `(inert (error x))` (an interpolation cannot take the sigil);
-/// - any `@x` component is a misplaced/extra sigil: inner ⇒ `(quote (error-t) B)`,
-///   final ⇒ `(quote (error-t) @x)`, and an inner `@` also splices a zero-width
+/// - a non-final ident is `B`, the final ident `@x` (the sigil);
+/// - a non-final `$x` is the valid `($ x)`, a final `$x` the recovered
+///   `(error x)` (an interpolation cannot take the sigil);
+/// - any `@x` component is a misplaced/extra sigil: inner ⇒ `(error-t) B`,
+///   final ⇒ `(error-t) @x`, and an inner `@` also splices a zero-width
 ///   `(error-t)` into the final dot step.
 ///
 /// The error pieces are gated on the recorded `MacroSigilLeading` diagnostic; a
@@ -2221,13 +2316,13 @@ fn project_leading_macro_path(sig_toks: &[SyntaxToken]) -> String {
     for (idx, (kind, name)) in steps.iter().enumerate() {
         let is_final = idx == last;
         let step = match (*kind, is_final) {
-            (DOLLAR, true) if invalid => format!("(inert (error {name}))"),
-            (DOLLAR, _) => format!("(inert ($ {name}))"),
-            (AT, true) if invalid => format!("(quote (error-t) @{name})"),
-            (AT, false) if invalid => format!("(quote (error-t) {name})"),
-            (_, true) if invalid && inner_at => format!("(error-t) (quote @{name})"),
-            (_, true) => format!("(quote @{name})"),
-            (_, false) => format!("(quote {name})"),
+            (DOLLAR, true) if invalid => format!("(error {name})"),
+            (DOLLAR, _) => format!("($ {name})"),
+            (AT, true) if invalid => format!("(error-t) @{name}"),
+            (AT, false) if invalid => format!("(error-t) {name}"),
+            (_, true) if invalid && inner_at => format!("(error-t) @{name}"),
+            (_, true) => format!("@{name}"),
+            (_, false) => name.clone(),
         };
         path = format!("(. {path} {step})");
     }
@@ -2790,16 +2885,13 @@ fn unescape_raw_string(s: &str) -> String {
 }
 
 fn project_cmd(node: &SyntaxNode) -> String {
-    // Command literals lower to a macrocall over a raw cmdstring. A bare literal
-    // (`` `cmd` ``) uses the built-in `core_@cmd`; a prefix names a custom command
-    // macro (`` x`str` `` ⇒ `@x_cmd`). Commands are raw: JuliaSyntax keeps
+    // A bare command literal projects directly as a raw cmdstring. A prefixed
+    // literal names a custom command macro (`` x`str` `` ⇒ `@x_cmd`). Commands are
+    // raw: JuliaSyntax keeps
     // `$`-interpolation as literal source (escaped `\$`) and defers expansion to
     // the macro, so reconstruct the raw body from content and interpolation text.
     let triple = matches!(string_token(node, CMD_DELIM_OPEN), Some(d) if d.len() >= 3);
-    let head = match string_token(node, STRING_PREFIX) {
-        Some(prefix) => format!("@{prefix}_cmd"),
-        None => "core_@cmd".to_string(),
-    };
+    let prefix = string_token(node, STRING_PREFIX);
     // A triple-quoted command gets JuliaSyntax's dedent + per-line chunking (raw),
     // matching the triple-string path; a single-quoted one is one raw chunk.
     let body = if triple {
@@ -2813,11 +2905,18 @@ fn project_cmd(node: &SyntaxNode) -> String {
             with_error_trivia(node, vec![quote_raw(&cmd_raw_body(node))]),
         )
     };
-    let mut parts = vec![head, body];
+    let Some(prefix) = prefix else {
+        return body;
+    };
+    let mut parts = vec![format!("@{prefix}_cmd"), body];
     if let Some(suffix) = string_token(node, STRING_SUFFIX) {
         // A flag glued to the closing delimiter (`` x`str`flag ``) is an extra
         // macrocall argument.
-        parts.push(quote_raw(&suffix));
+        parts.push(if suffix.starts_with(|c: char| c.is_ascii_digit()) {
+            suffix
+        } else {
+            quote_raw(&suffix)
+        });
     }
     sexp("macrocall", parts)
 }

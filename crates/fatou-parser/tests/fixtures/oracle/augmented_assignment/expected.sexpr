@@ -1,1 +1,1 @@
-(toplevel (+= a b) (-= a b) (*= a b) (/= a b) (//= a b) (^= a b) (%= a b) (|= a b) (&= a b) (.+= a b) (.*= a b) (.//= a b) (+= a (+= b c)) (= a (+= b c)) (global (+= x 1)) (let (block (+= x 1)) (block)))
+(toplevel (op= a + b) (op= a - b) (op= a * b) (op= a / b) (op= a // b) (op= a ^ b) (op= a % b) (op= a | b) (op= a & b) (.op= a + b) (.op= a * b) (.op= a // b) (op= a + (op= b + c)) (= a (op= b + c)) (global (op= x + 1)) (let (block (op= x + 1)) (block)))

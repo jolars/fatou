@@ -1,1 +1,1 @@
-(toplevel (<<= a b) (>>= a b) (>>>= a b) (÷= a b) (⊻= a b) (.<<= a b) (.>>= a b) (.>>>= a b) (.÷= a b) (.⊻= a b))
+(toplevel (op= a << b) (op= a >> b) (op= a >>> b) (op= a ÷ b) (op= a ⊻ b) (.op= a << b) (.op= a >> b) (.op= a >>> b) (.op= a ÷ b) (.op= a ⊻ b))

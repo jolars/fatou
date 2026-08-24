@@ -1,1 +1,1 @@
-(toplevel (.|= n m) (.&= r a) (.&= res (dotcall-pre ! (dotcall ismissing v))))
+(toplevel (.op= n | m) (.op= r & a) (.op= res & (dotcall-pre ! (dotcall ismissing v))))

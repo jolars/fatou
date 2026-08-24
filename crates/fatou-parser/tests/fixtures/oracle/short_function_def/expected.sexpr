@@ -1,1 +1,1 @@
-(toplevel (= (call f x) (call-i x ^ 2)) (= (call g x y) (call-i x + y)))
+(toplevel (function-= (call f x) (call-i x ^ 2)) (function-= (call g x y) (call-i x + y)))
