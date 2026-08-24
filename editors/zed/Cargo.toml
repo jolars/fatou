@@ -1,0 +1,20 @@
+[package]
+name = "zed_fatou"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Zed's compatibility table (`crates/extension_api/README.md`) still tops out at
+# `0.192.x -> 0.0.1 - 0.6.0`, so 0.6.0 is the newest version documented to work
+# with a released Zed. Revisit once 0.7.0 appears in that table.
+zed_extension_api = "0.6.0"
+
+# Keeping this crate its own workspace root is what stops the repository
+# workspace from adopting it: the extension is a `wasm32-wasip2` cdylib on
+# edition 2021, unrelated to the edition 2024 workspace it lives inside.
+[workspace]

@@ -1,0 +1,11 @@
+id = "fatou-language-server"
+name = "Fatou"
+description = "Language server, formatter, and linter for Julia"
+version = "0.1.0"
+schema_version = 1
+authors = ["Johan Larsson <johan@jolars.co>"]
+repository = "https://github.com/jolars/fatou"
+
+[language_servers.fatou-language-server]
+name = "Fatou Language Server"
+languages = ["Julia"]
