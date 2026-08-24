@@ -229,7 +229,8 @@ fn project(node: &SyntaxNode) -> String {
             }
         }
 
-        PAREN_EXPR | CONDITION => match first_node(node) {
+        PAREN_EXPR => project_paren(node),
+        CONDITION => match first_node(node) {
             Some(inner) => project(&inner),
             // A lone operator in parens is the operator as a value/symbol, e.g.
             // `(+)` → `+` or, quoted, `:(=)` → `(quote-: =)`.
@@ -3234,7 +3235,7 @@ fn project_error(head: &str, node: &SyntaxNode) -> String {
 fn is_error_glyph(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        LPAREN | RPAREN | LBRACKET | RBRACKET | LBRACE | RBRACE | COMMA | AT
+        LPAREN | RPAREN | LBRACKET | RBRACKET | LBRACE | RBRACE | COMMA | SEMICOLON | AT
     )
 }
 
@@ -3319,6 +3320,29 @@ fn project_each(nodes: Vec<SyntaxNode>) -> Vec<String> {
 
 fn first_node(node: &SyntaxNode) -> Option<SyntaxNode> {
     node.children().next()
+}
+
+fn project_paren(node: &SyntaxNode) -> String {
+    let children: Vec<_> = node.children().collect();
+    if matches!(children.first(), Some(first) if first.kind() == GENERATOR)
+        && children.iter().any(|child| child.kind() == ERROR)
+    {
+        return sexp("parens", children.iter().map(project).collect());
+    }
+    match children.first() {
+        Some(inner) => project(inner),
+        // A lone operator in parens is the operator as a value/symbol, e.g.
+        // `(+)` → `+` or, quoted, `:(=)` → `(quote-: =)`.
+        None => significant(node)
+            .iter()
+            .find_map(|el| match el {
+                NodeOrToken::Token(t) if is_operator(t.kind()) => {
+                    Some(folded_op_text(t.text()).into_owned())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| "(block)".to_string()),
+    }
 }
 
 fn project_first(node: &SyntaxNode) -> String {
