@@ -2,7 +2,6 @@ function ⊑ end
 function ⊇ end
 function ∘ end
 function + end
-function .+ end
 function ≤ end
 macro + end
 typename(typeof(function + end)).constprop_heuristic = Core.SAMETYPE_HEURISTIC
