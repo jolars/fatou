@@ -13,17 +13,17 @@ version](https://badge.fury.io/py/fatou.svg?icon=si%3Apython)](https://pypi.org/
 version](https://badge.fury.io/js/@fatou-cli%2Ffatou-cli.svg?icon=si%3Anpm)](https://www.npmjs.com/package/fatou-cli)
 
 Fatou is a language server, formatter, and linter for
-[Julia](https://julialang.org) that never has to run Julia itself.
+[Julia](https://julialang.org) that never has to run Julia itself. It bundles
+three tools in one:
 
-It parses Julia once and serves three tools from that tree:
+- **Formatter** (`fatou format`): fast, deterministic, and opinionated
+- **Linter** (`fatou lint`): configurable, with auto-fix support for many rules
+- **Language server** (`fatou lsp`): both of the above, plus IDE features like
+  completion, hover, go-to-definition, and more
 
-- **Formatter** (`fatou format`): deterministic, rule-based layout.
-- **Linter** (`fatou lint`): diagnostics with source snippets.
-- **Language server** (`fatou lsp`): both, live in your editor.
-
-Written in Rust, Fatou is fast, safe, and easy to embed in editors and tooling.
-The architecture follows [rust-analyzer](https://rust-analyzer.github.io/): a
-lossless [`rowan`](https://crates.io/crates/rowan) CST that reconstructs the
+Fatou is fast, safe, and easy to embed in editors and tooling. The architecture
+follows [rust-analyzer](https://rust-analyzer.github.io/): a lossless
+[`rowan`](https://crates.io/crates/rowan) syntax tree that reconstructs the
 input byte-for-byte, [`salsa`](https://crates.io/crates/salsa) for incremental
 recomputation, and [`lsp-server`](https://crates.io/crates/lsp-server) for the
 language-server transport. It is named after the French mathematician Pierre
@@ -49,10 +49,10 @@ Fatou is available from several sources:
 ### Install Script
 
 If you prefer a one-liner installer that picks the right release artifact for
-your platform, you can use the installer scripts below. These scripts are
-fetched directly from this repository and then download the latest matching
-Fatou release asset for your platform, installing to a user-local directory by
-default. If you prefer, download and inspect the script before running it.
+your platform, you can use the installer scripts below, which download the
+latest matching Fatou release for your platform, installing to a user-local
+directory by default. If you prefer, download and inspect the script before
+running it.
 
 For macOS and Linux:
 
@@ -90,17 +90,23 @@ and to a global user config at `~/.config/fatou/fatou.toml`.
 ## Editor Integration
 
 The language server (`fatou lsp`) runs over stdio and provides a broad set of
-features: completion (including the REPL's LaTeX and emoji input sequences, so
-`\alpha` inserts `α`), hover, go-to-definition, find references and document
-highlights, rename (of symbols, and of files and folders — moving a file
-rewrites the `include` paths that name it), document and workspace symbols, call
-and type hierarchy, signature help, code actions, folding and selection ranges,
-document links, and semantic tokens, alongside formatting (whole-document and
-range) and diagnostics (push and pull). It checks your `Project.toml` and
-`Manifest.toml` themselves too, and navigates an open `Project.toml`'s
-dependency names, with each one's resolved version shown as an inlay hint.
+features:
 
-The Fatou\* extension for VS Code and Open VSX
+- formatting (whole-document and range),
+- linting (push and pull),
+- completion (including the REPL's LaTeX and emoji input sequences), hover,
+- go-to-definition, -find references,
+- document highlights,
+- rename (of symbols, and of files and folders),
+- document and workspace symbols,
+- call and type hierarchy,
+- signature help,
+- code actions,
+- folding and selection ranges,
+- document links, and
+- semantic tokens.
+
+The Fatou extension for VS Code and Open VSX
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
 [Open VSX](https://open-vsx.org/extension/jolars/fatou)) bundles the binary and
 starts the server automatically; it also works in Positron. See
