@@ -31,6 +31,28 @@
       "release-type": "node",
       "package-name": "fatou-code",
       "follows": ["."]
+    },
+    // The Zed extension is submitted to `zed-industries/extensions` by hand, so
+    // it deliberately does not `follow` the CLI: a release here means a registry
+    // pull request, and tying it to every CLI release would leave the registry
+    // permanently stale.
+    "editors/zed": {
+      "package-name": "fatou-zed",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "extension.toml",
+          "field-path": "$.version"
+        },
+        // `Cargo.lock` records the crate's own version, and nothing else keeps
+        // it in step with `Cargo.toml`. The `--locked` build in CI is the
+        // backstop if this rule ever stops matching.
+        {
+          "type": "regex",
+          "path": "Cargo.lock",
+          "pattern": "name = \"zed_fatou\"\\nversion = \"([^\"]+)\""
+        }
+      ]
     }
   }
 }

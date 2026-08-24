@@ -359,7 +359,11 @@ for profiling and measurement procedure.
 Releases derive from Conventional Commits. `versionary` owns changelogs and
 version fields; pre-1.0 breaking changes produce minor bumps. Root, parser, and
 formatter tags are respectively `v*`, `fatou-parser-v*`, and
-`fatou-formatter-v*`; only root releases carry GitHub assets.
+`fatou-formatter-v*`; only root releases carry GitHub assets. The Zed extension
+adds `fatou-zed-v*`. Only the root stream may ever carry assets: the Zed
+extension resolves its download with
+`latest_github_release(require_assets: true)`, which cannot filter by tag
+prefix, so an asset on any sibling stream would shadow the CLI release.
 
 - Paths under `crates/` and `editors/` are excluded from root version
   calculation, so never mix release areas in one commit.
@@ -367,6 +371,12 @@ formatter tags are respectively `v*`, `fatou-parser-v*`, and
   honest lower bounds and raise a minimum in the same commit that starts using
   its newer API.
 - `editors/code` is Biome-gated, and its bundled binary must not be
-  load-bearing—PATH lookup remains necessary for NixOS. Distribution sources
-  live under `npm/`, `packaging/aur`, `scripts/`, and `pyproject.toml`;
-  `publish-crates.yml` publishes workspace crates in dependency order.
+  load-bearing—PATH lookup remains necessary for NixOS. `editors/zed` obeys the
+  same rule by resolving `PATH` before downloading. It is a language-server-only
+  Zed extension, deliberately outside the root workspace (its own `[workspace]`,
+  edition 2021, `wasm32-wasip2`), so the `zed` CI job is the only thing that
+  compiles it; a version bump must also refresh its `Cargo.lock`. Its registry
+  entry in `zed-industries/extensions` is submitted by hand, which is why it
+  does not `follow` the CLI version. Distribution sources live under `npm/`,
+  `packaging/aur`, `scripts/`, and `pyproject.toml`; `publish-crates.yml`
+  publishes workspace crates in dependency order.
