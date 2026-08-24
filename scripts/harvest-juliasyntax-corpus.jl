@@ -31,7 +31,15 @@ using JuliaSyntax
 using SHA
 
 const REPO_ROOT = normpath(joinpath(@__DIR__, ".."))
-const OUT_PATH = joinpath(REPO_ROOT, "tests", "fixtures", "oracle", "juliasyntax.jsonl")
+const OUT_PATH = joinpath(
+    REPO_ROOT,
+    "crates",
+    "fatou-parser",
+    "tests",
+    "fixtures",
+    "oracle",
+    "juliasyntax.jsonl",
+)
 
 "Recursively collect the left-hand input string of every `… => …` pair."
 function collect_inputs!(into::Set{String}, ex)
