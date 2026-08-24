@@ -68,17 +68,15 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
   2026-08-07c); `expected.sexpr` is generated — never hand-edit.
 - **Shell `raw"""…"""` Julia probes break on `"`/`$`** — use a temp file.
 - **Corpus pinned** to JuliaSyntax in `.juliasyntax-source` (currently
-  0.4.10/Julia 1.12.6). Bump ⇒ re-run both `scripts/*.jl`, re-triage.
+  1.0.2/Julia 1.12.6). Bump ⇒ re-run both `scripts/*.jl`, re-triage.
 
 ## Progress
 
-JS corpus (**685 cases**, error shapes included): **677 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**249 cases**): **248 allowlisted**, 1
-blocked (`numeric_literals`; FAIL not skip since `render` is total). Both are
-exhausted of fixable cases — a green report means "no regression", not "nothing
-to do". Grammar bullets through "flat comparison chains" are `[x]` in `TODO.md`;
-its error-shape bullets still describe the pre-2026-06-23i `ERROR_TRIVIA`
-mechanism (historical), though the output shapes they cite remain correct.
+JS corpus (**756 cases**, error shapes included): **736 allowlisted**, 20
+divergence, 0 unsupported. Dir corpus (**250 cases**): **249 allowlisted**, 1
+blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
+1.0.2 added 71 harvested cases; the 12 new, correctable divergences are recorded
+below. A green report means "no regression", not "nothing to do".
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
 fix" list was mostly mislabeled for a linter/LSP. All three correctable items
@@ -90,18 +88,23 @@ display. Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully executed.
 
 Permanent (never "fix"): **float-literal display** (`2.`/`1f0`/hex floats/
 `1.0e-1000`/`x.3` — needs Julia's `show`); **n-ary juxtaposition** `(2)(3)x`;
-**`x 'y`** char lexing (needs bracket-depth-aware `'`). These are the 8
-remaining JS FAILs.
+**`x 'y`** char lexing (needs bracket-depth-aware `'`). These account for 8 of
+the 20 remaining JS FAILs.
 
 Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
 mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
+- Generator parameters after `;`: `T{y for x = xs; a}` should attach
+  `(parameters a)`, while `(y for x = xs; a)` recovers the suffix as junk.
+- JuliaSyntax 1.0 error/value shapes: `(a;b=1)->c`; command-macro numeric args
+  (``x`s`2``/``x`s`10.0``); bare `:=` and `.`; parenthesized `@f(x)`/`$f` function
+  signatures; quoted names in `using :A`/`using A: :b`; and
+  `function var"." end`.
 - `x.function` — a reserved keyword as a field name after `)`.
 - `end` inside a nested `[…]` within an index (`df[[1; 2; end:-1:3], :]`).
 - `primitive type T (18 * 8) end` — the size expr is a spaced group, not a call.
-- `function ⊑ end` — bare method declaration named by a Unicode operator.
 - Spaced non-unary operator: `* (a, b)`/`≠ (a, b)` ⇒ `(call-pre (error *) …)` vs
   Julia's `(call op (error-t) a b)`. Dotted unary `.±`; suffixed `±₁ x`.
 - Suffixed-unary prefix arm still consumes its operand across a newline (the
@@ -127,60 +130,40 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-07c — `∈` as the iteration separator)
+## Latest session (2026-08-24 — JuliaSyntax 1.0.2 migration)
 
-Took the target ranked by the previous session. `for i ∈ xs` projected
-`(for (call-i i ∈ xs) …)` where JuliaSyntax gives `(for (= i xs) …)`: the whole
-spec was swallowed into a `BINARY_EXPR`.
+Finished the in-progress oracle migration. JuliaSyntax 1.0 changed many
+projection encodings and expanded its harvested parser corpus from 685 to 756
+cases. The branch already carried the dependency/corpus refresh and the broad
+projector translation; this session closed every allowlisted regression and
+ratcheted the expanded PASS set.
 
-Root cause: `in` is lexed as an *identifier* and picked up by text in a separate
-`word_operator` branch, which the loop-variable flag suppressed; `∈` is a real
-`UniComparison` operator token, so it went through `next_operator` and the flag
-never applied. The separator checks in `parse_for_specs`
-(`t.kind == Ident && text == "∈"`) could therefore never fire — that condition
-was unsatisfiable.
-
-- **Parser only** (`expr.rs`); **no projector change** — `project_for_spec`
-  already split on a loose `∈` token, i.e. it was written for the shape the
-  parser never produced.
-- Renamed `ExprFlags::no_word_op` → **`for_spec_var`** (set at exactly one site,
-  the `for`/generator loop variable, and now suppressing more than word
-  operators). Added a `break` in the operator loop, right after `next_operator`,
-  when `for_spec_var && is_element_of_tok(op)`.
-- New helpers `is_element_of_tok`/`is_for_separator_tok`; the two separator
-  checks (`is_outer_marker`'s early bail, `parse_for_specs`' consume) share the
-  latter.
-- **Only `∈` joins `in`/`=`.** `∉` is an ordinary operator Julia error-recovers
-  in that position (`for i ∉ xs` ⇒ `(= i (error ∉ xs))`), so it stays out.
-- **Formatter followed the shape change**: `comprehension_for_in` went red
-  because `lower_for_spec` normalized `∈` → `in` only in its wrapped-node arm
-  (`BINARY_EXPR` via `for_iteration_operands`). Moved to the flat arm alongside
-  `in`; `for_iteration_operands` is now `=`/`ASSIGNMENT_EXPR` only.
-  Normalization now covers the loop form and `outer` too, and value-position `∈`
-  is untouched.
-- **Verified**: 28 probe cases byte-identical; the 4 remaining diffs are error
-  shapes, all pre-existing under A/B (`for i ∉ xs`, `for ∈ xs`,
-  `for i isa T ∈ xs`, `for i ∈ a ∈ b` — the last *moved closer* to Julia).
-  Formatter output on the fixture is idempotent.
-- **Fixtures**: parser snapshot + oracle dir slug `for_element_of_binding`.
-- **Counts**: JS 677 (held, same 8 permanent FAILs, zero regressions); dir 248 →
-  **249**.
-- **Follow-up doc pass (separate commit)**: `SKILL.md` was stale in four ways
-  and was rewritten. It called error shapes out of scope — they have been in
-  scope since the June harvest (**110 of the 685** JS cases carry an error node,
-  all passing, none among the 8 FAILs), so error shape is now a normal bucket
-  ranked on cluster size and real-world frequency. It sent each session to the
-  corpus report for a target, a dead end; selection is now built around probing
-  real Julia, RECAP handovers, and direct asks. It said nothing about formatter
-  coupling, which bit this session. And it called the reports gitignored while
-  they were also tracked — resolved by untracking them. Also fixed
-  `harvest-juliasyntax-corpus.jl`'s rationale (it cited in-tree error nodes,
-  replaced by the diagnostics side-channel) and the harness's stale corpus size.
+- **Parser gaps**: `f.'` now builds a `POSTFIX_EXPR` and records
+  `InvalidPostfixOperator`, projecting `(dotcall-post f (error '))`; leading-dot
+  whitespace and nested postfix use were probed too. Leading identifier
+  continuations now lex as `ERROR_IDENTIFIER_START`. Bare `.op`, `&`, and
+  syntactic-operator forward declarations receive the 1.0 invalid-signature
+  shape. `≔`/`≕`/`⩴` are now valid value atoms as well as infix operators.
+- **Projector gaps**: incomplete delimited forms no longer acquire the 1.0
+  trailing-comma head unless their closer is present; the new identifier-start
+  error token and dotted-postfix recovery project directly.
+- **Fixtures**: widened `dot_prime_recovery`; added parser snapshots
+  `identifier_start_error`, `invalid_operator_forward_declaration`, and
+  `unicode_assignment_value`; added oracle slug `unicode_assignment_value`.
+  Removed invalid `function .+ end` from the formatter's clean-reparse fixture;
+  parser coverage retains it. No blocked entry was added.
+- **Counts**: JS **677/685 → 736/756** allowlisted (20 FAIL, 0 unsupported,
+  zero regressions); dir **248/249 → 249/250** allowlisted (only the existing
+  blocked numeric-display case fails).
+- **Next**: generator parameters after `;`—a two-case 1.0 cluster, with the
+  typed-curly form representing useful real syntax.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-07c** — `∈` as the iteration separator; loop-variable parsing stops
+  before Unicode `∈`, and the formatter normalizes the new flat shape. 677 / 249.
 - **2026-08-07b** — `for outer i` iteration spec. New `OUTER_BINDING` node;
   JuliaSyntax nests `outer` around the *variable*, inside the `=`
   (`(= (outer i) …)`), so the pattern parses at `COMMA_ITEM_BP` and the spec `=`

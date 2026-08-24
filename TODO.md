@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Migrate the differential oracle from JuliaSyntax 0.4.10 to 1.0.2. Update
+  the projector for 1.0 node encodings, preserve dotted-transpose recovery,
+  distinguish invalid identifier starts, accept the newly value-capable Unicode
+  assignment operators, and ratchet the expanded harvested corpus to 736/756.
+
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
