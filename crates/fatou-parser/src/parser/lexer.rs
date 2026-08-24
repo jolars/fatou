@@ -478,14 +478,17 @@ impl<'a> Lexer<'a> {
         )
     }
 
-    /// Whether the immediately preceding token is a field-access `.`. A `'`
-    /// directly after a `.` is the removed `.'` transpose operator (`f.'`), not
-    /// the start of a char literal: JuliaSyntax lexes it as a prime token and
-    /// recovers `.'` as trailing junk (`f.'` ⇒ `f (error-t ')`). As with
-    /// [`Self::prev_ends_value`] the check is on the *immediately* preceding
-    /// token, so a space (`f. '`) leaves the `'` a char literal.
+    /// Whether the preceding significant token is a field-access `.`. A `'`
+    /// after a `.` on the same line is the removed `.'` transpose operator,
+    /// not the start of a char literal. Horizontal whitespace and block comments
+    /// after the dot are insignificant, but a newline ends the form.
     fn prev_is_dot(&self) -> bool {
-        self.tokens.last().map(|t| t.kind) == Some(TokKind::Dot)
+        self.tokens
+            .iter()
+            .rev()
+            .find(|t| !matches!(t.kind, TokKind::Whitespace | TokKind::BlockComment))
+            .map(|t| t.kind)
+            == Some(TokKind::Dot)
     }
 
     /// `'` begins a char literal when it is *not* a postfix adjoint/transpose
@@ -1400,6 +1403,9 @@ mod tests {
         assert_eq!(kinds("\u{3c1}\u{221e}"), vec![TokKind::Ident]);
         // `∇` (U+2207) is a valid identifier *start* char (`∇batchnorm`).
         assert_eq!(kinds("\u{2207}batchnorm"), vec![TokKind::Ident]);
+        // A leading identifier-continuation character has a more specific error
+        // token than a wholly unknown character.
+        assert_eq!(kinds("\u{2081}"), vec![TokKind::ErrorIdentifierStart]);
         // Every case lexes losslessly.
         assert!(roundtrips("x\u{304} = 1"));
         assert!(roundtrips("\u{2207}f(x) = x"));

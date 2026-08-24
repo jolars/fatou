@@ -1,0 +1,14 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..12
+  LITERAL@0..3
+    ERROR_IDENTIFIER_START@0..3 "₁"
+  NEWLINE@3..4 "\n"
+  JUXTAPOSE_EXPR@4..11
+    LITERAL@4..8
+      ERROR_INVALID_NUMBER@4..8 "0x1p"
+    LITERAL@8..11
+      ERROR_IDENTIFIER_START@8..11 "₁"
+  NEWLINE@11..12 "\n"

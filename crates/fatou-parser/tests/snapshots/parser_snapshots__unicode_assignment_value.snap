@@ -1,0 +1,23 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..20
+  OPERATOR_ATOM@0..3
+    UNICODE_ASSIGN_OP@0..3 "≔"
+  NEWLINE@3..4 "\n"
+  OPERATOR_ATOM@4..7
+    UNICODE_ASSIGN_OP@4..7 "≕"
+  NEWLINE@7..8 "\n"
+  OPERATOR_ATOM@8..11
+    UNICODE_ASSIGN_OP@8..11 "⩴"
+  NEWLINE@11..12 "\n"
+  BINARY_EXPR@12..19
+    NAME@12..13
+      IDENT@12..13 "a"
+    WHITESPACE@13..14 " "
+    UNICODE_ASSIGN_OP@14..17 "≔"
+    WHITESPACE@17..18 " "
+    NAME@18..19
+      IDENT@18..19 "b"
+  NEWLINE@19..20 "\n"

@@ -152,6 +152,7 @@ pub(super) fn is_value_operator(kind: TokKind) -> bool {
             kind,
             Colon
                 | DotDot
+                | UniAssign
                 | UniRadical
                 | UniArrow
                 | UniComparison

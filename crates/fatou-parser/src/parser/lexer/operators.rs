@@ -30,7 +30,12 @@ impl Lexer<'_> {
             None => {
                 let ch = self.char_at(self.pos);
                 self.pos += ch.len_utf8();
-                self.push(TokKind::Unknown, start, self.pos);
+                let kind = if super::is_ident_continue(ch) {
+                    TokKind::ErrorIdentifierStart
+                } else {
+                    TokKind::Unknown
+                };
+                self.push(kind, start, self.pos);
             }
         }
     }

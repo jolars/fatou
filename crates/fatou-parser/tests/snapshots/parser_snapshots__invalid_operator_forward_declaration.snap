@@ -1,0 +1,61 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..77
+  FUNCTION_DEF@0..15
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..11
+      OPERATOR_ATOM@9..11
+        DOT_PLUS@9..11 ".+"
+    BLOCK@11..12
+      WHITESPACE@11..12 " "
+    END_KW@12..15 "end"
+  NEWLINE@15..16 "\n"
+  FUNCTION_DEF@16..30
+    FUNCTION_KW@16..24 "function"
+    WHITESPACE@24..25 " "
+    SIGNATURE@25..26
+      OPERATOR_ATOM@25..26
+        AMP@25..26 "&"
+    BLOCK@26..27
+      WHITESPACE@26..27 " "
+    END_KW@27..30 "end"
+  NEWLINE@30..31 "\n"
+  FUNCTION_DEF@31..45
+    FUNCTION_KW@31..39 "function"
+    WHITESPACE@39..40 " "
+    SIGNATURE@40..41
+      ERROR@40..41
+        OPERATOR_ATOM@40..41
+          EQ@40..41 "="
+    BLOCK@41..42
+      WHITESPACE@41..42 " "
+    END_KW@42..45 "end"
+  NEWLINE@45..46 "\n"
+  FUNCTION_DEF@46..60
+    FUNCTION_KW@46..54 "function"
+    WHITESPACE@54..55 " "
+    SIGNATURE@55..56
+      OPERATOR_ATOM@55..56
+        PLUS@55..56 "+"
+    BLOCK@56..57
+      WHITESPACE@56..57 " "
+    END_KW@57..60 "end"
+  NEWLINE@60..61 "\n"
+  FUNCTION_DEF@61..76
+    FUNCTION_KW@61..69 "function"
+    WHITESPACE@69..70 " "
+    SIGNATURE@70..72
+      OPERATOR_ATOM@70..72
+        DOT_DOT@70..72 ".."
+    BLOCK@72..73
+      WHITESPACE@72..73 " "
+    END_KW@73..76 "end"
+  NEWLINE@76..77 "\n"
+
+diagnostic [40..41]: operator is not a valid value
+diagnostic [9..9]: invalid function signature: expected a call, not a bare name
+diagnostic [25..25]: invalid function signature: expected a call, not a bare name
+diagnostic [40..40]: invalid function signature: expected a call, not a bare name
