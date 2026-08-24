@@ -13,9 +13,10 @@ to the packages they pin.
 
 ## Prerequisites
 
-Except in the VS Code family, where the extension bundles a binary, install
-Fatou (see [Getting Started](getting-started.md)) and make sure the `fatou`
-binary is on your `PATH`, or note its absolute path.
+Install Fatou (see [Getting Started](getting-started.md)) and make sure the
+`fatou` binary is on your `PATH`, or note its absolute path. The VS Code family
+is an exception, since the extension bundles a binary, and so is Zed, whose
+extension downloads one when it finds nothing on the `PATH`.
 
 ## VS Code
 
@@ -120,6 +121,70 @@ VSX](https://open-vsx.org/extension/jolars/fatou) and install it with
 
 Cursor reads the same `settings.json` keys as VS Code, so the format-on-save and
 binary-selection snippets above apply unchanged.
+
+## Zed
+
+Fatou attaches to Zed's `Julia` language, which the [Julia
+extension](https://github.com/JuliaEditorSupport/zed-julia) provides. Install
+that one first, then install **Fatou** from the extensions view
+(`zed: extensions` in the command palette).
+
+Zed uses the `fatou` on your `PATH` when there is one, and otherwise downloads
+the release binary matching your platform. Keeping Fatou on the `PATH` is the
+better option on distributions that cannot run the generic release build, NixOS
+above all.
+
+The Julia extension also ships JETLS. Zed runs both servers unless you say
+otherwise, so name the ones you want and pick which handles formatting, in
+`settings.json`:
+
+```json
+{
+  "languages": {
+    "Julia": {
+      "language_servers": ["fatou-language-server", "JETLS"],
+      "formatter": "language_server",
+      "format_on_save": "on"
+    }
+  }
+}
+```
+
+To run Fatou alone, drop `"JETLS"` from the list.
+
+Settings go under the server's id, using the schema described in
+[Configuration](#configuration) below:
+
+```json
+{
+  "lsp": {
+    "fatou-language-server": {
+      "settings": {
+        "format": { "line-width": 100 },
+        "lint": { "ignore": ["unused-binding"] }
+      }
+    }
+  }
+}
+```
+
+A `fatou.toml` in the project shadows these entirely, so prefer the file when
+the whole team should share the behavior.
+
+To point Zed at a particular binary, set `binary.path`:
+
+```json
+{
+  "lsp": {
+    "fatou-language-server": {
+      "binary": { "path": "/opt/fatou/bin/fatou", "arguments": ["lsp"] }
+    }
+  }
+}
+```
+
+`arguments` replaces the command line rather than extending it, so it has to
+keep naming a subcommand that speaks LSP.
 
 ## Neovim
 
@@ -245,9 +310,9 @@ Two places stay quiet, so the list does not get in the way:
 
 - inside a string macro or command literal (`r"\d"`, `raw"\n"`, `` `ls \d` ``),
   where every backslash belongs to the literal itself;
-- on a lone escape in a plain string, so typing `"\n` does not offer `\nabla`.
-  A second character brings the sequences back, so `\nu` and `\alpha` still
-  work in strings and docstrings.
+- on a lone escape in a plain string, so typing `"\n` does not offer `\nabla`. A
+  second character brings the sequences back, so `\nu` and `\alpha` still work
+  in strings and docstrings.
 
 ## Check It Works
 
