@@ -3083,15 +3083,13 @@ fn parse_arg_list(
                 break;
             }
             Some(TokKind::Comma) => {
-                // An empty element slot after a real element (a `,` where the
-                // previous slot produced nothing) is invalid: JuliaSyntax bails,
-                // bumping the offending comma and everything after it up to the
-                // closer as one flat trailing-junk run (`[x,,]` ⇒
-                // `(vect x (error-t ✘))`, `[x,,y]` ⇒ `(vect x (error-t ✘ y))`,
-                // `f(x,,y)` ⇒ `(call f x (error-t ✘ y))`). A trailing comma
-                // (`[x,]`, slot empty but the closer follows) stays clean, and a
-                // leading empty slot (`[,x]`, no element yet) is left divergent.
-                if slot_empty && parsed_element {
+                // An empty element slot after an element—or at the front of a
+                // call—is invalid: JuliaSyntax bails, bumping the offending comma
+                // and everything after it up to the closer as one flat
+                // trailing-junk run (`[x,,y]` ⇒ `(vect x (error-t ✘ y))`,
+                // `f(,x)` ⇒ `(call f (error-t ✘ x))`). A trailing comma (`[x,]`,
+                // slot empty but the closer follows) stays clean.
+                if slot_empty && (parsed_element || close == TokKind::RParen) {
                     let mut j = i;
                     while let Some(k) = tokens.get(j).map(|t| t.kind) {
                         if k == close {
@@ -3119,6 +3117,21 @@ fn parse_arg_list(
                         i += 1;
                     }
                     break;
+                }
+                // A bracket- or brace-delimited list may recover a leading empty
+                // slot and continue (`[,x]` ⇒ `(vect (error) x)`). The missing
+                // element is a zero-width diagnostic rather than a CST node. It
+                // counts as an element so a second comma takes the bail-out path
+                // above (`[,,]` ⇒ `(vect-, (error) (error-t ✘))`).
+                if slot_empty {
+                    push_diagnostic(
+                        diagnostics,
+                        DiagnosticKind::EmptyListSlot,
+                        "missing element before comma",
+                        tokens[i].start,
+                        tokens[i].start,
+                    );
+                    parsed_element = true;
                 }
                 events.push(Event::Tok(i));
                 i += 1;

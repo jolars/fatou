@@ -73,7 +73,7 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**257 cases**): **256 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**258 cases**): **257 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -109,9 +109,11 @@ Error shapes, deferred (in scope, just low-value — see `SKILL.md`'s ranking):
 `for i ∈ a ∈ b`/`for i in a in b` (Julia parses the iterable below comparison
 precedence); toplevel `const x = 1 for i in 1:1`; `@m const x = 1 for … end`
 macro space-arg; `else #= c =# if x`; trailing comma at EOF (`x = a,`); `2macro`
-trailing-junk glyph drop; `@M.(x) y` (macro args after a broadcast); leading
-empty comma slot `[,x]`; for/let/module/struct/try/do block junk (sibling
-`ERROR` is in the CST but those projectors don't emit it); `outer x=1`
+trailing-junk glyph drop; `@M.(x) y` (macro args after a broadcast);
+parenthesized leading commas `(,x)`/`(,)`/`(,,)` (JuliaSyntax makes one flat
+`error-t` run, not a tuple);
+for/let/module/struct/try/do block junk (sibling `ERROR` is in the CST but those
+projectors don't emit it); `outer x=1`
 stop-at-`=`; bare `struct` keyword; `begin`/`while` empty body (`while end`
 recovers differently: `(while (error end) (block (error)) (error-t))`);
 truncated `function f` ⇒ `(error f)`; toplevel EOF-terminated incomplete
@@ -121,29 +123,30 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25f — nonstandard identifier forward declarations)
+## Latest session (2026-08-25g — leading empty list slots)
 
-Landed `var"…"` nonstandard identifiers as bare `function` and `macro`
-signature names. Empty bodies now project as forward declarations, while a
-semicolon or body statement records `InvalidFunctionSignature` and retains the
-body block.
+Landed leading empty-slot recovery for bracket- and brace-delimited lists and
+call arguments. `[,x]`, `A[,x]`, and `{,x}` now retain a zero-width `(error)`
+element; `f(,x)` retains the comma and suffix as one trailing-junk run.
 
-- **Parser/error shape**: added `NONSTANDARD_IDENTIFIER` to the shared bare
-  signature-name predicate used by forward-declaration detection and the
-  post-build invalid-signature pass.
-- **Fixtures**: added parser snapshot and oracle slug
-  `nonstandard_identifier_forward_declaration`. No blocked entry was added.
-- **Counts**: JS **747/756 → 748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **255/256 → 256/257** allowlisted (only the existing
+- **Error shape**: added `EmptyListSlot` at a leading comma, counted the missing
+  element for repeated-comma recovery, and taught the projector to replay the
+  recorded diagnostic in argument order. Calls use the existing trailing-junk
+  recovery instead.
+- **Fixtures**: added parser snapshot and oracle slug `leading_empty_list_slot`.
+  No blocked entry was added.
+- **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
+  regressions); dir **256/257 → 257/258** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: leading empty collection slot `[,x]`, which currently drops
-  JuliaSyntax's `(error)` element during recovery. Direct probing also removed
-  five stale deferred targets that already match JuliaSyntax.
+- **Next**: parenthesized leading commas (`(,x)`, `(,)`, `(,,)`), which recover
+  as a flat `(error-t …)` run rather than a tuple in JuliaSyntax.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25f** — `var"…"` names work as empty-body `function`/`macro`
+  forward declarations and invalid body-bearing bare signatures. 748 / 256.
 - **2026-08-25e** — quoted import names stay within `IMPORT_PATH` with
   invalid-name recovery. 747 / 255.
 - **2026-08-25d** — singleton parenthesized macro-call and interpolation

@@ -1124,8 +1124,17 @@ fn project_dot_call(node: &SyntaxNode) -> String {
 
 fn project_delimited(head: &str, node: &SyntaxNode) -> String {
     let recovered_trailing_comma = matches!(node.kind(), VECT_EXPR | BRACES)
-        && node.children().filter(|c| c.kind() == ARG).count() == 1
-        && node.children().any(|c| c.kind() == ERROR);
+        && node.children().any(|c| c.kind() == ERROR)
+        && (node.children().filter(|c| c.kind() == ARG).count() == 1
+            || node.children_with_tokens().any(|el| {
+                el.into_token().is_some_and(|token| {
+                    token.kind() == COMMA
+                        && diag_at(
+                            usize::from(token.text_range().start()),
+                            DiagnosticKind::EmptyListSlot,
+                        )
+                })
+            }));
     let closed = match node.kind() {
         TUPLE_EXPR => node.children_with_tokens().any(|el| el.kind() == RPAREN),
         VECT_EXPR => node.children_with_tokens().any(|el| el.kind() == RBRACKET),
@@ -1257,7 +1266,7 @@ fn project_typed_comprehension(node: &SyntaxNode) -> String {
 /// pass `end` tokens through.
 fn project_args(container: &SyntaxNode) -> Vec<String> {
     let mut out = Vec::new();
-    for el in significant(container) {
+    for el in container.children_with_tokens() {
         match el {
             NodeOrToken::Node(n) => match n.kind() {
                 ARG => {
@@ -1274,11 +1283,18 @@ fn project_args(container: &SyntaxNode) -> Vec<String> {
                 PARAMETERS => out.push(project_parameters(&n)),
                 _ => out.push(project(&n)),
             },
-            NodeOrToken::Token(t) => {
-                if t.kind() == END_KW {
-                    out.push("end".to_string());
+            NodeOrToken::Token(t) => match t.kind() {
+                END_KW => out.push("end".to_string()),
+                COMMA
+                    if diag_at(
+                        usize::from(t.text_range().start()),
+                        DiagnosticKind::EmptyListSlot,
+                    ) =>
+                {
+                    out.push("(error)".to_string());
                 }
-            }
+                _ => {}
+            },
         }
     }
     // An argument list with no closing delimiter (`f(a`) records `UnterminatedArgList`

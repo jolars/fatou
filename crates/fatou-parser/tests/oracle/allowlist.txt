@@ -124,6 +124,7 @@ keyword_header_block_comment
 keyword_name_error
 keyword_statements
 keyword_stmt_generator_body
+leading_empty_list_slot
 left_arrow_operator
 left_division
 let_bindings_newline

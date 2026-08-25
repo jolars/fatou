@@ -155,6 +155,10 @@ pub enum DiagnosticKind {
     /// `importpath` but error-wraps it. Dotted quoted components (`using A.:b`)
     /// remain valid. Anchored at the quote colon.
     InvalidQuotedImportName,
+    /// A bracket- or brace-delimited list begins with a comma (`[,x]`,
+    /// `A[,x]`, `{,x}`). JuliaSyntax retains a zero-width `(error)` element
+    /// before the separator. Anchored at the comma.
+    EmptyListSlot,
     MissingOperand,
     MissingWhereBound,
     MissingStruct,
@@ -256,6 +260,7 @@ impl DiagnosticKind {
             | LoneOperator
             | InvalidAsAlias
             | InvalidQuotedImportName
+            | EmptyListSlot
             | MissingOperand
             | MissingWhereBound
             | MissingStruct
