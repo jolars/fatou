@@ -2,6 +2,7 @@
 name = "fatou-parser"
 version = "0.4.1"
 edition.workspace = true
+rust-version.workspace = true
 readme = "README.md"
 description = "Lossless CST parser, typed AST wrappers, and incremental reparser for the Julia language"
 license.workspace = true
