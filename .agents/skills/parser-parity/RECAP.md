@@ -72,10 +72,10 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **738 allowlisted**, 18
-divergence, 0 unsupported. Dir corpus (**251 cases**): **250 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **739 allowlisted**, 17
+divergence, 0 unsupported. Dir corpus (**252 cases**): **251 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
-1.0.2 added 71 harvested cases; the 12 new, correctable divergences are recorded
+1.0.2 added 71 harvested cases; the 9 remaining correctable divergences are recorded
 below. A green report means "no regression", not "nothing to do".
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
@@ -96,7 +96,7 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- JuliaSyntax 1.0 error/value shapes: `(a;b=1)->c`; command-macro numeric args
+- JuliaSyntax 1.0 error/value shapes: command-macro numeric args
   (``x`s`2``/``x`s`10.0``); bare `:=` and `.`; parenthesized `@f(x)`/`$f` function
   signatures; quoted names in `using :A`/`using A: :b`; and
   `function var"." end`.
@@ -128,34 +128,33 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-24b — generator parameters after `;`)
+## Latest session (2026-08-25 — parenthesized anonymous parameters)
 
-Landed the two-case JuliaSyntax 1.0 cluster around generator suffixes. A typed
-curly expression now routes through the same argument-list machinery as a call,
-while plain parens retain the generator and recover the invalid suffix inside
-their delimiters.
+Landed the direct-parenthesis parameter family for anonymous functions. Before
+`->`, a parenthesized value or semicolon block now becomes the parameter tuple
+that JuliaSyntax models; nested parentheses around a `where` signature remain
+transparent.
 
-- **Parser gaps**: `T{y for x = xs; a}` now builds `CURLY_EXPR → ARG_LIST →
-  GENERATOR + PARAMETERS`. `(y for x = xs; a)` builds `PAREN_EXPR → GENERATOR
-  + ERROR`, with `TrailingJunk` anchored at `;`, rather than leaking both pieces
-  into a top-level semicolon group.
-- **Projector gap**: the recovered parenthesized topology maps to JuliaSyntax's
-  `(parens …)` encoding, and a recovered semicolon renders as the `✘` error
-  glyph.
-- **Fixtures**: added parser snapshots `generator_parameters_after_semicolon`
-  and `parenthesized_generator_parameters_error`; added the combined oracle slug
-  `generator_parameters_after_semicolon`. No blocked entry was added.
-- **Counts**: JS **736/756 → 738/756** allowlisted (18 FAIL, 0 unsupported,
-  zero regressions); dir **249/250 → 250/251** allowlisted (only the existing
+- **Parser gap**: the Pratt loop contextually relabels a direct `PAREN_EXPR` or
+  `PAREN_BLOCK` left operand as `TUPLE_EXPR` when it consumes `->`. It preserves
+  the `PAREN_EXPR` shape when the nested root is `WHERE_EXPR`.
+- **Fixtures**: added parser snapshot and oracle slug
+  `parenthesized_anonymous_function_parameters`, covering `(a; b=1) -> c`, a
+  bare keyword parameter, singleton and typed parameters, and the nested
+  `where` exception. No blocked entry was added.
+- **Counts**: JS **738/756 → 739/756** allowlisted (17 FAIL, 0 unsupported,
+  zero regressions); dir **250/251 → 251/252** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: anonymous-function keyword parameters, `(a; b=1) -> c`—one valid,
-  useful JuliaSyntax 1.0 case. Command-macro numeric suffixes are the next
-  two-case cluster after it.
+- **Next**: command-macro numeric suffixes, ``x`s`2`` and ``x`s`10.0``—the next
+  two-case JuliaSyntax 1.0 cluster. Bare `:=` and `.` are next after it.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-24b** — generator parameters after `;`: typed curlies use the
+  argument-list path, while invalid parenthesized suffixes recover in-place.
+  738 / 250.
 - **2026-08-24** — JuliaSyntax 1.0.2 migration: updated projection encodings,
   recovery, value operators, and the expanded corpus. 736 / 249.
 - **2026-08-07c** — `∈` as the iteration separator; loop-variable parsing stops

@@ -1,0 +1,1 @@
+(toplevel (-> (tuple-p a (parameters (= b 1))) c) (-> (tuple-p a (parameters b)) c) (-> (tuple-p x) c) (-> (tuple-p (::-i x T)) c) (-> (where x T) c))
