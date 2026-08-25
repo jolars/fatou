@@ -1,0 +1,125 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..65
+  ERROR@0..2
+    OPERATOR_ATOM@0..2
+      COLON_EQ@0..2 ":="
+  NEWLINE@2..3 "\n"
+  ERROR@3..5
+    OPERATOR_ATOM@3..5
+      COLON_EQ@3..5 ":="
+  WHITESPACE@5..6 " "
+  ERROR@6..7
+    IDENT@6..7 "x"
+  NEWLINE@7..8 "\n"
+  VECT_EXPR@8..12
+    LBRACKET@8..9 "["
+    ARG@9..11
+      ERROR@9..11
+        OPERATOR_ATOM@9..11
+          COLON_EQ@9..11 ":="
+    RBRACKET@11..12 "]"
+  NEWLINE@12..13 "\n"
+  PAREN_EXPR@13..17
+    LPAREN@13..14 "("
+    ERROR@14..16
+      OPERATOR_ATOM@14..16
+        COLON_EQ@14..16 ":="
+    RPAREN@16..17 ")"
+  NEWLINE@17..18 "\n"
+  ASSIGNMENT_EXPR@18..24
+    ERROR@18..20
+      OPERATOR_ATOM@18..20
+        COLON_EQ@18..20 ":="
+    WHITESPACE@20..21 " "
+    EQ@21..22 "="
+    WHITESPACE@22..23 " "
+    NAME@23..24
+      IDENT@23..24 "x"
+  NEWLINE@24..25 "\n"
+  QUOTE_SYM@25..30
+    COLON@25..26 ":"
+    PAREN_EXPR@26..30
+      LPAREN@26..27 "("
+      OPERATOR_ATOM@27..29
+        COLON_EQ@27..29 ":="
+      RPAREN@29..30 ")"
+  NEWLINE@30..31 "\n"
+  NEWLINE@31..32 "\n"
+  ERROR@32..33
+    OPERATOR_ATOM@32..33
+      DOT@32..33 "."
+  NEWLINE@33..34 "\n"
+  ERROR@34..35
+    OPERATOR_ATOM@34..35
+      DOT@34..35 "."
+  WHITESPACE@35..36 " "
+  ERROR@36..37
+    IDENT@36..37 "x"
+  NEWLINE@37..38 "\n"
+  VECT_EXPR@38..41
+    LBRACKET@38..39 "["
+    ARG@39..40
+      ERROR@39..40
+        OPERATOR_ATOM@39..40
+          DOT@39..40 "."
+    RBRACKET@40..41 "]"
+  NEWLINE@41..42 "\n"
+  PAREN_EXPR@42..45
+    LPAREN@42..43 "("
+    ERROR@43..44
+      OPERATOR_ATOM@43..44
+        DOT@43..44 "."
+    RPAREN@44..45 ")"
+  NEWLINE@45..46 "\n"
+  ASSIGNMENT_EXPR@46..51
+    ERROR@46..47
+      OPERATOR_ATOM@46..47
+        DOT@46..47 "."
+    WHITESPACE@47..48 " "
+    EQ@48..49 "="
+    WHITESPACE@49..50 " "
+    NAME@50..51
+      IDENT@50..51 "x"
+  NEWLINE@51..52 "\n"
+  CALL_EXPR@52..56
+    NAME@52..53
+      IDENT@52..53 "f"
+    ARG_LIST@53..56
+      LPAREN@53..54 "("
+      ARG@54..55
+        ERROR@54..55
+          OPERATOR_ATOM@54..55
+            DOT@54..55 "."
+      RPAREN@55..56 ")"
+  NEWLINE@56..57 "\n"
+  QUOTE_SYM@57..59
+    COLON@57..58 ":"
+    DOT@58..59 "."
+  NEWLINE@59..60 "\n"
+  QUOTE_SYM@60..64
+    COLON@60..61 ":"
+    PAREN_EXPR@61..64
+      LPAREN@61..62 "("
+      OPERATOR_ATOM@62..63
+        DOT@62..63 "."
+      RPAREN@63..64 ")"
+  NEWLINE@64..65 "\n"
+
+diagnostic [0..2]: operator is not a valid value
+diagnostic [3..5]: operator is not a valid value
+diagnostic [6..7]: trailing tokens after statement
+diagnostic [9..11]: operator is not a valid value
+diagnostic [9..11]: operator is not a valid value
+diagnostic [14..16]: operator is not a valid value
+diagnostic [18..20]: operator is not a valid value
+diagnostic [32..33]: operator is not a valid value
+diagnostic [34..35]: operator is not a valid value
+diagnostic [36..37]: trailing tokens after statement
+diagnostic [39..40]: operator is not a valid value
+diagnostic [39..40]: operator is not a valid value
+diagnostic [43..44]: operator is not a valid value
+diagnostic [46..47]: operator is not a valid value
+diagnostic [54..55]: operator is not a valid value

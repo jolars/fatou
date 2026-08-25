@@ -131,6 +131,7 @@ let_multi_binding
 let_quote
 list_empty_comma
 literals
+lone_colon_eq_dot
 lone_operator_error
 loops
 macro_bare_tuple_argument

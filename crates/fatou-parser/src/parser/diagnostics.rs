@@ -148,7 +148,8 @@ pub enum DiagnosticKind {
     /// postfix topology but error-wraps the transpose operator.
     InvalidPostfixOperator,
     /// A syntactic operator with no value meaning used where an atom is expected
-    /// (`=`, `+=`, `&&`, `||`, `->`, `...`, `?`) — JuliaSyntax emits `(error op)`.
+    /// (`=`, `+=`, `:=`, `&&`, `||`, `->`, `.`, `...`, `?`) — JuliaSyntax emits
+    /// `(error op)`.
     LoneOperator,
     /// An `as` rename invalid in this position (`using A as B`).
     InvalidAsAlias,
