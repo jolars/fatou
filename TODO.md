@@ -41,10 +41,11 @@
   labeled `break` with a value expression and occurrences nested in binary and
   ternary expressions. Fixture `labeled_break_continue`.
 
-- [ ] Consume the parser-parity handoff for splats after a closing bracket.
+- [x] Consume the parser-parity handoff for splats after a closing bracket.
   The parser now reparses `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`,
   `f(A{T}...)`, and `f([1, 2]...)` cleanly, so drop `lower_splat`'s stale
-  `ends_in_bracket` fallback and widen `splat_spacing`.
+  `ends_in_bracket` fallback and widen `splat_spacing`. A splat around a sole
+  huggable item is hug-transparent, so `...` rides the inner closing bracket.
 
 - [ ] Gate left-division `\` as a normal spaced binary operator (`A\b` →
   `A \ b`). The generic binary rule should already format it; add a

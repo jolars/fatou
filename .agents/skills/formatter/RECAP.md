@@ -80,6 +80,10 @@ Reversing one is allowed but must be conscious and re-recorded, never drive-by.
   retokenization guard so `2 .^ n` stays spaced.
 - **Let bindings are never moved into the body** — `a = 1, b = 2` in body
   position parses as `a = ((1, b) = 2)`, a semantic change.
+- **A splat is hug-transparent around a bracketed operand.** A sole wide
+  `f(g(…)...)` hugs like `f(g(…))`, with `...` riding the inner close. The same
+  suffix propagation applies at positional, keyword, collection, and indexed
+  collection hug sites. `splat_spacing`.
 
 **Abandoned, don't re-derive:** a "does the hug earn it?" printer guard (a
 `probe` field on `Ir::HugGroup`, rejecting the hug when the item would fit flat
@@ -136,31 +140,26 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (gate labeled `break`/`continue` spacing)
+## Latest session (splat after a closing bracket)
 
-`test(formatter)`. The parser-side labeled-control-flow change had already
-added `lower_break_stmt` and the `labeled_break_continue` stability input, but
-left it ungated. The user approved single spaces between `break`/`continue`, an
-optional label, and a `break` value; the value keeps normal recursive lowering.
+`feat(formatter)`. Removed `lower_splat`'s stale bracket-ending fallback now
+that the parser accepts snug splats after calls, indexes, parens, curly
+applications, and collections. `splat_parts` centralizes the transparent-safe
+shape check for lowering and hug classification.
 
-The input now deliberately uses redundant spaces and `i*2`, so a transparent
-fallback cannot satisfy the hand-authored `expected.jl`. The fixture covers
-bare, labeled, and labeled-with-value forms, both as statements and nested in
-binary/ternary expressions. Gate 120→121 of 149; focused fixture gate,
-stability, clippy, fmt, and full workspace suite green. No parser/lexer blocker.
+The user chose to make a splat around a bracketed operand hug-transparent. The
+shared hug paths now carry an optional postfix suffix after the hugged body's
+close, covering positional and keyword arguments, collections, and the
+ungrouped collection reflow used by indexes. `splat_spacing` covers all five
+newly safe operand families, recursive normalization, a wide sole-call hug, a
+keyword hug, a collection hug, and an indexed collection hug. Gate remains
+121 of 149. Focused fixture gate, stability, full workspace suite, clippy, fmt,
+and the formatter Wasm build are green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) consume the resolved parser handoff for splats
-after closing brackets: drop `lower_splat`'s `ends_in_bracket` guard and widen
-`splat_spacing`; (2) gate left-division `\` as a normal spaced binary operator;
-(3) gate `typegroup` block layout; (4) minor debt #2.
+**Ranked next targets:** (1) gate left-division `\` as a normal spaced binary
+operator; (2) gate `typegroup` block layout; (3) minor debt #2.
 
 ## Parser dependencies and follow-ups
-
-**RESOLVED parser-side; formatter follow-up queued:** splat after a closing
-bracket. `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, and
-`f([1, 2]...)` now parse as `SPLAT_EXPR`; `lower_splat` still withholds snug
-spacing through its stale `ends_in_bracket` guard. `TODO.md` owns the formatter
-follow-up's status.
 
 **RESOLVED parser-side; formatter fixture pending:** left division `\` is a
 normal spaced binary operator (`A\b` → `A \ b`) and needs no
@@ -198,6 +197,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Labeled `break`/`continue` spacing** (`test`): gated single spaces around
+  labels and values, including nested binary/ternary forms. 120→121.
 - **Only a sole trailing item hugs; bracket-valued pairs absorb the arrow-tier
   break** (`feat`): generalized `suppress_multi_item_hug` plus
   `pair_chain_hugs`; Julia Base stacked closers 450→302. Gate stayed 120.
