@@ -1,12 +1,9 @@
 [workspace]
 members = ["crates/fatou-parser", "crates/fatou-formatter"]
-# The mdBook preprocessor builds and runs from its own directory, so it must not
-# be pulled into this workspace.
 exclude = ["docs/doc-utils"]
 
 [workspace.package]
 edition = "2024"
-# The minimum supported Rust version is exercised by the MSRV CI job.
 rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/jolars/fatou"
@@ -93,9 +90,6 @@ harness = false
 [profile.release]
 strip = "symbols"
 
-# Release codegen with symbols kept, so a profiler can attribute samples.
-# `strip = "symbols"` above is what ships; it would otherwise be inherited here
-# and leave every frame in a flamegraph unresolved.
 [profile.profiling]
 inherits = "release"
 debug = true
