@@ -78,6 +78,7 @@ pub(super) fn parse_element(
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         array_mode: true,
+        generator_for_ends: true,
         end_marker,
         begin_marker: end_marker,
         ..ExprFlags::default()

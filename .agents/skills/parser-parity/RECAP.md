@@ -30,10 +30,6 @@ them yet):
 
 **Parser targets**:
 
-- **Nested macro loop argument** — DataFrames' `@inbounds @simd for gix in
-  gd.groups ... end` projects the inner macro as `(macrocall @simd)` and gives
-  the `for` to `@inbounds`; JuliaSyntax gives the loop to `@simd`. Reproduced in
-  `src/groupeddataframe/splitapplycombine.jl:303` on commit `d3a4edc`.
 - **Raw triple-string quote decoding** — `raw"""escaped \"quote\""""` retains
   too many display escapes. Keep this separate from ordinary triple strings;
   Julia's raw-string backslash-before-quote rules need their own treatment.
@@ -80,7 +76,7 @@ them yet):
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**263 cases**): **262 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**264 cases**): **263 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -118,29 +114,31 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25l — triple-string literal quotes)
+## Latest session (2026-08-25m — nested macro loop arguments)
 
-Landed JuliaSyntax projection parity for unescaped double quotes inside
-ordinary triple-quoted strings. A bulk probe over DataFrames' 36 source files
-fell from 15 divergent files to 2; one survivor is permanent float display, and
-the other is the queued nested `@inbounds @simd for` parser target.
+Landed JuliaSyntax parity for nested space-form macros whose innermost macro
+takes a `for` loop argument, including DataFrames' `@inbounds @simd for ... end`.
 
-- **Projector gap**: `escape_display` now display-escapes a triple string's
-  unescaped `"` while preserving source-escaped quotes and handling even runs of
-  preceding backslashes. The CST was already correct.
+- **Parser gap**: `ExprFlags::generator_for_ends` now distinguishes a genuine
+  generator boundary from `array_mode`'s shared space sensitivity. Nested macros
+  inherit the boundary, so statement-scope `@outer @inner for ... end` gives the
+  loop to `@inner`, while nested bracket and call generators still stop before
+  `for`. No projector change.
 - **Fixtures**: added parser snapshot and oracle slug
-  `triple_string_literal_quote`, covering literal quotes, source-escaped quotes,
-  even backslashes, and quotes around interpolation. No blocked entry.
+  `nested_macro_loop_argument`, covering the DataFrames shape, a qualified inner
+  macro with multiple loop specs, and nested macros in array and call generators.
+  No blocked entry.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **261/262 → 262/263** allowlisted (only the existing
+  regressions); dir **262/263 → 263/264** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: fix nested macro loop arguments (`@inbounds @simd for ... end`),
-  then take raw triple-string quote decoding.
+- **Next**: fix raw triple-string quote decoding.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25l** — ordinary triple-string literal quote display, preserving
+  source escapes and even backslash runs. 748 / 262.
 - **2026-08-25k** — outer-group row-major matrix continuation for plain, typed,
   and brace concatenations. 748 / 261.
 - **2026-08-25j** — dotted Unicode unary `.±`/`.∓`/`.⋆`, plus newline stopping

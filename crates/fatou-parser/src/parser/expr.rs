@@ -59,6 +59,11 @@ struct ExprFlags {
     /// whitespace starts a new element rather than chaining as a call/index/curly
     /// (`@foo f (x)` is two arguments). Mirrors JuliaSyntax's `space_sensitive`.
     array_mode: bool,
+    /// A following `for` opens a generator rather than a loop argument for a
+    /// space-form macro. This is explicit because `array_mode` also represents
+    /// macro arguments and type specs, where the same space sensitivity does not
+    /// imply a generator boundary. Nested macros inherit the enclosing boundary.
+    generator_for_ends: bool,
     /// A bare `end` is the index-end marker (an `END_MARKER` atom) rather than a
     /// block terminator. Enabled only inside square brackets (`a[end]`, `[end]`);
     /// parens and braces leave it off, matching Julia's `end`-symbol scope.
@@ -191,6 +196,7 @@ pub(crate) fn parse_expr_in_brackets(
 ) -> Option<ExprParse> {
     let flags = ExprFlags {
         inside_brackets: true,
+        generator_for_ends: true,
         end_marker,
         begin_marker: end_marker,
         ..ExprFlags::default()
@@ -266,6 +272,7 @@ fn parse_expr_in(
         inside_brackets,
         no_range,
         array_mode,
+        generator_for_ends,
         end_marker: _,
         begin_marker,
         public_context,
@@ -623,8 +630,14 @@ fn parse_expr_in(
         if op_kind == TokKind::Dot
             && ctx.token(ctx.skip_trivia(op_idx + 1)).map(|t| t.kind) == Some(TokKind::At)
         {
-            lhs =
-                parse_qualified_macro(&ctx, lhs, op_idx, diagnostics, inside_brackets, array_mode);
+            lhs = parse_qualified_macro(
+                &ctx,
+                lhs,
+                op_idx,
+                diagnostics,
+                inside_brackets,
+                generator_for_ends,
+            );
             continue;
         }
 
@@ -1613,7 +1626,7 @@ fn parse_prefix(
             !flags.field_access_rhs,
             flags.end_marker,
             flags.inside_brackets,
-            flags.array_mode,
+            flags.generator_for_ends,
         )
         .or_else(|| Some(atom(SyntaxKind::OPERATOR_ATOM, start))),
         // A prefix `$` is an interpolation (`$x`, `$(x + y)`). It parses
@@ -1626,7 +1639,7 @@ fn parse_prefix(
             start,
             diagnostics,
             flags.inside_brackets,
-            flags.array_mode,
+            flags.generator_for_ends,
         )),
         TokKind::LParen => parse_paren(ctx, start, flags.end_marker, diagnostics),
         TokKind::LBracket => Some(parse_delimited_literal(
@@ -1909,11 +1922,11 @@ pub(super) fn parse_quote_sym(
     diagnostics: &mut Vec<ParseDiagnostic>,
     value_position: bool,
     end_marker: bool,
-    // Inherited space-sensitivity, forwarded to a quoted macro call so its
-    // space-argument loop ends at a generator's `for` exactly as an unquoted one
-    // does (`[:@m x for x in xs]`).
+    // Inherited generator context, forwarded to a quoted macro call so its
+    // space-argument loop ends at `for` exactly as an unquoted one does
+    // (`[:@m x for x in xs]`).
     inside_brackets: bool,
-    array_mode: bool,
+    generator_for_ends: bool,
 ) -> Option<ExprParse> {
     let next = ctx.skip_trivia(start + 1);
     // A space-separated *closing* block keyword (`end`/`else`/`elseif`/`catch`/
@@ -2031,7 +2044,7 @@ pub(super) fn parse_quote_sym(
         // name. Base writes the argument-less form to attach a docstring to a
         // macro (`"""…"""\n:@MethodTable`).
         TokKind::At => {
-            let mac = parse_macro(ctx, next, diagnostics, inside_brackets, array_mode);
+            let mac = parse_macro(ctx, next, diagnostics, inside_brackets, generator_for_ends);
             let end = mac.end;
             events.extend(mac.events);
             finish(&mut events, SyntaxKind::QUOTE_SYM);
