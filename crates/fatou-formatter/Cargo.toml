@@ -2,6 +2,7 @@
 name = "fatou-formatter"
 version = "0.3.3"
 edition.workspace = true
+rust-version.workspace = true
 readme = "README.md"
 description = "Deterministic, rule-based formatter for the Julia language"
 license.workspace = true
