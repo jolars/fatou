@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.16.0](https://github.com/jolars/fatou/compare/v0.15.0...v0.16.0) (2026-08-25)
+
+### Features
+- **formatter:** hug bracketed splats ([`d5da2eb`](https://github.com/jolars/fatou/commit/d5da2eb121b09747fb87e336bd9cb63938d19989))
+- **parser:** parse nested macro loop arguments ([`1a90dde`](https://github.com/jolars/fatou/commit/1a90dde91544496331d5a5be20b1e998e375a851))
+- **parser:** parse dotted Unicode unary ops ([`406247e`](https://github.com/jolars/fatou/commit/406247e8d66e52df535721870d385fa099e8c999))
+- **parser:** parse spaced operator calls ([`6c3fdf0`](https://github.com/jolars/fatou/commit/6c3fdf066cff69e8d6717384c7d0f95424277820))
+- **parser:** recover parenthesized leading commas ([`1e08166`](https://github.com/jolars/fatou/commit/1e08166c8d00ec3f58d7afa2b8216dbc21a1a194))
+- **parser:** recover leading empty list slots ([`5b5ef49`](https://github.com/jolars/fatou/commit/5b5ef49462952a17b980b3705628e04123153c1e))
+- **parser:** parse var forward declarations ([`9dd14cb`](https://github.com/jolars/fatou/commit/9dd14cbb2af02e16564328c2f4aefff8a8c34558))
+- **parser:** recover quoted import names ([`26ffb4d`](https://github.com/jolars/fatou/commit/26ffb4d9ce421bff93eeb989ad11370acfcf3474))
+- **parser:** recover parenthesized macro signatures ([`3131255`](https://github.com/jolars/fatou/commit/3131255e088ad96407f2bbd5b6ade6cb0515f43c))
+- **parser:** recover bare colon-eq and dot ([`e379a8e`](https://github.com/jolars/fatou/commit/e379a8e1ce5b65641d10915f2ec0ff13c0e7cb07))
+- **parser:** parse command macro numeric args ([`d680355`](https://github.com/jolars/fatou/commit/d680355cf5114435385c1f161d0141b325157eeb))
+- **parser:** parse parenthesized lambda params ([`0809d8c`](https://github.com/jolars/fatou/commit/0809d8c703b1b43c0b6c291c5e199511da4f73b6))
+- **parser:** parse generator parameters ([`e59f76e`](https://github.com/jolars/fatou/commit/e59f76e425a5f2d70d646ee5d8921867676c2b21))
+
+### Bug Fixes
+- **parser:** decode raw triple-string quotes ([`3cac3ae`](https://github.com/jolars/fatou/commit/3cac3ae8643df527c3551680c48422f5e34fe7e8))
+- **parser:** escape triple-string quotes ([`ed55f05`](https://github.com/jolars/fatou/commit/ed55f05effc7a125dd7dace906514d789aa48969))
+- **parser:** preserve nested matrix row order ([`003e88e`](https://github.com/jolars/fatou/commit/003e88e2f8f8b1955a938a6ce4558acfed41ca1d))
+- **parser:** report invalid aliases ([`c08174d`](https://github.com/jolars/fatou/commit/c08174dd8fc5bbf9dca27fcb01c4db1f374d417d))
+
+### Performance Improvements
+- bound formatting diffs ([`ff74f68`](https://github.com/jolars/fatou/commit/ff74f681ff193abfd98eabef54557c49544b1428))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.4.0
+- updated crates/fatou-parser to v0.5.0
+
 ## [0.15.0](https://github.com/jolars/fatou/compare/v0.14.0...v0.15.0) (2026-08-16)
 
 ### Features

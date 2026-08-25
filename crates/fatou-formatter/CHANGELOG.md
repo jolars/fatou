@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.3.3...fatou-formatter-v0.4.0) (2026-08-25)
+
+### Features
+- **formatter:** hug bracketed splats ([`d5da2eb`](https://github.com/jolars/fatou/commit/d5da2eb121b09747fb87e336bd9cb63938d19989))
+
+### Dependencies
+- updated crates/fatou-parser to v0.5.0
+
 ## [0.3.3](https://github.com/jolars/fatou/compare/fatou-formatter-v0.3.2...fatou-formatter-v0.3.3) (2026-08-16)
 
 ### Performance Improvements
