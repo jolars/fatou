@@ -1,0 +1,287 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..176
+  CALL_EXPR@0..8
+    STAR@0..1 "*"
+    WHITESPACE@1..2 " "
+    ARG_LIST@2..8
+      LPAREN@2..3 "("
+      ARG@3..4
+        NAME@3..4
+          IDENT@3..4 "a"
+      COMMA@4..5 ","
+      WHITESPACE@5..6 " "
+      ARG@6..7
+        NAME@6..7
+          IDENT@6..7 "b"
+      RPAREN@7..8 ")"
+  NEWLINE@8..9 "\n"
+  CALL_EXPR@9..19
+    UNICODE_OP@9..12 "≠"
+    WHITESPACE@12..13 " "
+    ARG_LIST@13..19
+      LPAREN@13..14 "("
+      ARG@14..15
+        NAME@14..15
+          IDENT@14..15 "a"
+      COMMA@15..16 ","
+      WHITESPACE@16..17 " "
+      ARG@17..18
+        NAME@17..18
+          IDENT@17..18 "b"
+      RPAREN@18..19 ")"
+  NEWLINE@19..20 "\n"
+  CALL_EXPR@20..29
+    DOT_STAR@20..22 ".*"
+    WHITESPACE@22..23 " "
+    ARG_LIST@23..29
+      LPAREN@23..24 "("
+      ARG@24..25
+        NAME@24..25
+          IDENT@24..25 "a"
+      COMMA@25..26 ","
+      WHITESPACE@26..27 " "
+      ARG@27..28
+        NAME@27..28
+          IDENT@27..28 "b"
+      RPAREN@28..29 ")"
+  NEWLINE@29..30 "\n"
+  CALL_EXPR@30..41
+    STAR@30..34 "*₁"
+    WHITESPACE@34..35 " "
+    ARG_LIST@35..41
+      LPAREN@35..36 "("
+      ARG@36..37
+        NAME@36..37
+          IDENT@36..37 "a"
+      COMMA@37..38 ","
+      WHITESPACE@38..39 " "
+      ARG@39..40
+        NAME@39..40
+          IDENT@39..40 "b"
+      RPAREN@40..41 ")"
+  NEWLINE@41..42 "\n"
+  CALL_EXPR@42..46
+    STAR@42..43 "*"
+    WHITESPACE@43..44 " "
+    ARG_LIST@44..46
+      LPAREN@44..45 "("
+      RPAREN@45..46 ")"
+  NEWLINE@46..47 "\n"
+  CALL_EXPR@47..52
+    STAR@47..48 "*"
+    WHITESPACE@48..49 " "
+    ARG_LIST@49..52
+      LPAREN@49..50 "("
+      ARG@50..51
+        NAME@50..51
+          IDENT@50..51 "a"
+      RPAREN@51..52 ")"
+  NEWLINE@52..53 "\n"
+  CALL_EXPR@53..59
+    STAR@53..54 "*"
+    WHITESPACE@54..55 " "
+    ARG_LIST@55..59
+      LPAREN@55..56 "("
+      ARG@56..57
+        NAME@56..57
+          IDENT@56..57 "a"
+      COMMA@57..58 ","
+      RPAREN@58..59 ")"
+  NEWLINE@59..60 "\n"
+  CALL_EXPR@60..68
+    STAR@60..61 "*"
+    WHITESPACE@61..62 " "
+    ARG_LIST@62..68
+      LPAREN@62..63 "("
+      ARG@63..67
+        SPLAT_EXPR@63..67
+          NAME@63..64
+            IDENT@63..64 "a"
+          DOT_DOT_DOT@64..67 "..."
+      RPAREN@67..68 ")"
+  NEWLINE@68..69 "\n"
+  CALL_EXPR@69..77
+    STAR@69..70 "*"
+    WHITESPACE@70..71 " "
+    ARG_LIST@71..77
+      LPAREN@71..72 "("
+      PARAMETERS@72..76
+        SEMICOLON@72..73 ";"
+        WHITESPACE@73..74 " "
+        ARG@74..76
+          NAME@74..76
+            IDENT@74..76 "kw"
+      RPAREN@76..77 ")"
+  NEWLINE@77..78 "\n"
+  CALL_EXPR@78..87
+    STAR@78..79 "*"
+    WHITESPACE@79..80 " "
+    ARG_LIST@80..87
+      LPAREN@80..81 "("
+      ARG@81..82
+        NAME@81..82
+          IDENT@81..82 "a"
+      PARAMETERS@82..86
+        SEMICOLON@82..83 ";"
+        WHITESPACE@83..84 " "
+        ARG@84..86
+          NAME@84..86
+            IDENT@84..86 "kw"
+      RPAREN@86..87 ")"
+  NEWLINE@87..88 "\n"
+  ASSIGNMENT_EXPR@88..100
+    NAME@88..89
+      IDENT@88..89 "x"
+    WHITESPACE@89..90 " "
+    EQ@90..91 "="
+    WHITESPACE@91..92 " "
+    CALL_EXPR@92..100
+      STAR@92..93 "*"
+      WHITESPACE@93..94 " "
+      ARG_LIST@94..100
+        LPAREN@94..95 "("
+        ARG@95..96
+          NAME@95..96
+            IDENT@95..96 "a"
+        COMMA@96..97 ","
+        WHITESPACE@97..98 " "
+        ARG@98..99
+          NAME@98..99
+            IDENT@98..99 "b"
+        RPAREN@99..100 ")"
+  NEWLINE@100..101 "\n"
+  CALL_EXPR@101..112
+    NAME@101..102
+      IDENT@101..102 "f"
+    ARG_LIST@102..112
+      LPAREN@102..103 "("
+      ARG@103..111
+        CALL_EXPR@103..111
+          STAR@103..104 "*"
+          WHITESPACE@104..105 " "
+          ARG_LIST@105..111
+            LPAREN@105..106 "("
+            ARG@106..107
+              NAME@106..107
+                IDENT@106..107 "a"
+            COMMA@107..108 ","
+            WHITESPACE@108..109 " "
+            ARG@109..110
+              NAME@109..110
+                IDENT@109..110 "b"
+            RPAREN@110..111 ")"
+      RPAREN@111..112 ")"
+  NEWLINE@112..113 "\n"
+  PAREN_EXPR@113..127
+    LPAREN@113..114 "("
+    CALL_EXPR@114..126
+      STAR@114..115 "*"
+      NEWLINE@115..116 "\n"
+      WHITESPACE@116..120 "    "
+      ARG_LIST@120..126
+        LPAREN@120..121 "("
+        ARG@121..122
+          NAME@121..122
+            IDENT@121..122 "a"
+        COMMA@122..123 ","
+        WHITESPACE@123..124 " "
+        ARG@124..125
+          NAME@124..125
+            IDENT@124..125 "b"
+        RPAREN@125..126 ")"
+    RPAREN@126..127 ")"
+  NEWLINE@127..128 "\n"
+  NEWLINE@128..129 "\n"
+  OPERATOR_ATOM@129..130
+    STAR@129..130 "*"
+  NEWLINE@130..131 "\n"
+  TUPLE_EXPR@131..137
+    LPAREN@131..132 "("
+    ARG@132..133
+      NAME@132..133
+        IDENT@132..133 "a"
+    COMMA@133..134 ","
+    WHITESPACE@134..135 " "
+    ARG@135..136
+      NAME@135..136
+        IDENT@135..136 "b"
+    RPAREN@136..137 ")"
+  NEWLINE@137..138 "\n"
+  MATRIX_EXPR@138..148
+    LBRACKET@138..139 "["
+    ARG@139..140
+      OPERATOR_ATOM@139..140
+        STAR@139..140 "*"
+    WHITESPACE@140..141 " "
+    ARG@141..147
+      TUPLE_EXPR@141..147
+        LPAREN@141..142 "("
+        ARG@142..143
+          NAME@142..143
+            IDENT@142..143 "a"
+        COMMA@143..144 ","
+        WHITESPACE@144..145 " "
+        ARG@145..146
+          NAME@145..146
+            IDENT@145..146 "b"
+        RPAREN@146..147 ")"
+    RBRACKET@147..148 "]"
+  NEWLINE@148..149 "\n"
+  MATRIX_EXPR@149..163
+    LBRACKET@149..150 "["
+    ARG@150..151
+      OPERATOR_ATOM@150..151
+        STAR@150..151 "*"
+    NEWLINE@151..152 "\n"
+    WHITESPACE@152..156 "    "
+    ARG@156..162
+      TUPLE_EXPR@156..162
+        LPAREN@156..157 "("
+        ARG@157..158
+          NAME@157..158
+            IDENT@157..158 "a"
+        COMMA@158..159 ","
+        WHITESPACE@159..160 " "
+        ARG@160..161
+          NAME@160..161
+            IDENT@160..161 "b"
+        RPAREN@161..162 ")"
+    RBRACKET@162..163 "]"
+  NEWLINE@163..164 "\n"
+  MACRO_CALL@164..175
+    MACRO_NAME@164..166
+      AT@164..165 "@"
+      IDENT@165..166 "m"
+    WHITESPACE@166..167 " "
+    OPERATOR_ATOM@167..168
+      STAR@167..168 "*"
+    WHITESPACE@168..169 " "
+    TUPLE_EXPR@169..175
+      LPAREN@169..170 "("
+      ARG@170..171
+        NAME@170..171
+          IDENT@170..171 "a"
+      COMMA@171..172 ","
+      WHITESPACE@172..173 " "
+      ARG@173..174
+        NAME@173..174
+          IDENT@173..174 "b"
+      RPAREN@174..175 ")"
+  NEWLINE@175..176 "\n"
+
+diagnostic [2..2]: whitespace before opener
+diagnostic [13..13]: whitespace before opener
+diagnostic [23..23]: whitespace before opener
+diagnostic [35..35]: whitespace before opener
+diagnostic [44..44]: whitespace before opener
+diagnostic [49..49]: whitespace before opener
+diagnostic [55..55]: whitespace before opener
+diagnostic [62..62]: whitespace before opener
+diagnostic [71..71]: whitespace before opener
+diagnostic [80..80]: whitespace before opener
+diagnostic [94..94]: whitespace before opener
+diagnostic [105..105]: whitespace before opener
+diagnostic [120..120]: whitespace before opener

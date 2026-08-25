@@ -206,6 +206,7 @@ return_stray_close
 short_circuit_assoc
 short_function_def
 signed_literals
+spaced_nonunary_operator_call
 splat
 splat_bracket_operand
 splat_precedence

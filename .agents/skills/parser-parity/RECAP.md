@@ -73,7 +73,7 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**258 cases**): **257 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**260 cases**): **259 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -97,8 +97,7 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- Spaced non-unary operator: `* (a, b)`/`≠ (a, b)` ⇒ `(call-pre (error *) …)` vs
-  Julia's `(call op (error-t) a b)`. Dotted unary `.±`.
+- Dotted unary `.±`.
 - Suffixed-unary prefix arm still consumes its operand across a newline (the
   2026-06-26b fix's sibling; rarer, in neither corpus).
 - Matrix continuation whose establishing space lives in an *outer* group
@@ -121,27 +120,30 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25h — parenthesized leading commas)
+## Latest session (2026-08-25i — spaced non-unary operator calls)
 
-Landed flat recovery for parenthesized payloads beginning with a comma. `(,x)`,
-`(,)`, and `(,,)` now project as `(error-t ✘ x)`, `(error-t ✘)`, and
-`(error-t ✘ ✘)` rather than nested tuples followed by a stray closer.
+Landed call recovery for binary-only operators followed by a whitespace-separated
+argument list. `* (a, b)`, `≠ (a, b)`, `.* (a, b)`, and suffixed forms now
+project as calls with a zero-width `(error-t)` before their arguments.
 
-- **Error shape**: `parse_paren` now wraps the comma-led payload in one `ERROR`
-  child of `PAREN_EXPR` and records the existing `TrailingJunk` diagnostic. The
+- **Parser gap**: the operator-callee prefix arm now accepts a separated `(` and
+  records the existing `OpenerWhitespace` diagnostic. Significant newlines and
+  array/macro space-form boundaries still leave the operator as a value. The
   projector needed no change.
 - **Fixtures**: added parser snapshot and oracle slug
-  `parenthesized_leading_comma`. No blocked entry was added.
+  `spaced_nonunary_operator_call`. No blocked entry was added.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **257/258 → 258/259** allowlisted (only the existing
+  regressions); dir **258/259 → 259/260** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: spaced non-unary operators such as `* (a, b)` and `≠ (a, b)`, the
-  highest-ranked unimplemented cluster in the deferred ledger.
+- **Next**: dotted unary `.±`, the remaining sibling from the former top-ranked
+  deferred cluster.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25h** — parenthesized leading commas recover as one flat trailing-junk
+  node. 748 / 258.
 - **2026-08-25g** — leading empty slots in bracket/brace lists and call-argument
   recovery. 748 / 257.
 - **2026-08-25f** — `var"…"` names work as empty-body `function`/`macro`
