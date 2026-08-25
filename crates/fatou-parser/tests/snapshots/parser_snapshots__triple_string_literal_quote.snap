@@ -1,0 +1,20 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..88
+  ASSIGNMENT_EXPR@0..87
+    NAME@0..4
+      IDENT@0..4 "text"
+    WHITESPACE@4..5 " "
+    EQ@5..6 "="
+    WHITESPACE@6..7 " "
+    STRING_LITERAL@7..87
+      STRING_DELIM_OPEN@7..10 "\"\"\""
+      STRING_CONTENT@10..76 "\n[\"Indexing\" section] ..."
+      INTERPOLATION@76..82
+        DOLLAR@76..77 "$"
+        IDENT@77..82 "value"
+      STRING_CONTENT@82..84 "\"\n"
+      STRING_DELIM_CLOSE@84..87 "\"\"\""
+  NEWLINE@87..88 "\n"

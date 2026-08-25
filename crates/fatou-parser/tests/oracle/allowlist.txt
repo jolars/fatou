@@ -238,6 +238,7 @@ triple_command
 triple_command_dedent
 triple_string_dedent
 triple_string_interp
+triple_string_literal_quote
 try_catch
 try_catch_variants
 try_else_without_catch
