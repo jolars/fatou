@@ -2687,8 +2687,8 @@ fn project_string(node: &SyntaxNode) -> String {
     // macrocall rather than an interpolating `(string …)`.
     if let Some(prefix) = string_token(node, STRING_PREFIX) {
         // A triple-quoted raw string still gets JuliaSyntax's dedent + per-line
-        // chunking; only the unescaping differs (raw content's backslashes and
-        // quotes stay literal), so its chunks are display-escaped as raw bytes.
+        // chunking. Backslash runs before quotes follow raw-string decoding;
+        // the resulting chunks are then display-escaped as raw values.
         let body = if matches!(string_token(node, STRING_DELIM_OPEN), Some(d) if d.len() >= 3) {
             sexp(
                 "string-s-r",
@@ -2746,7 +2746,11 @@ fn triple_string_parts(node: &SyntaxNode, raw: bool) -> Vec<String> {
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(t) if t.kind() == STRING_CONTENT => {
-                let text = normalize_newlines(t.text());
+                let text = if raw {
+                    normalize_newlines(&unescape_raw_string(t.text()))
+                } else {
+                    normalize_newlines(t.text())
+                };
                 let mut segs = text.split('\n');
                 if let Some(first) = segs.next() {
                     lines
@@ -2943,7 +2947,7 @@ fn project_var(node: &SyntaxNode) -> String {
 /// the closing delimiter is the implied `"`) yields `n / 2` backslashes, plus a
 /// literal `"` when `n` is odd (`\"` ⇒ `"`, `\\\"` ⇒ `\` then `"`, trailing
 /// `\\` ⇒ `\`); any other backslash run is literal. Used for `var"…"` identifier
-/// content, whose name is the unescaped value rather than the raw source bytes.
+/// content and triple-raw string values, which differ from the raw source bytes.
 fn unescape_raw_string(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());

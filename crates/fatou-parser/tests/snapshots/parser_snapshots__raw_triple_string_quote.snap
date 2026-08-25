@@ -1,0 +1,17 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..91
+  ASSIGNMENT_EXPR@0..90
+    NAME@0..4
+      IDENT@0..4 "text"
+    WHITESPACE@4..5 " "
+    EQ@5..6 "="
+    WHITESPACE@6..7 " "
+    STRING_LITERAL@7..90
+      STRING_PREFIX@7..10 "raw"
+      STRING_DELIM_OPEN@10..13 "\"\"\""
+      STRING_CONTENT@13..87 "\nescaped \\\"quote\\\"\nev ..."
+      STRING_DELIM_CLOSE@87..90 "\"\"\""
+  NEWLINE@90..91 "\n"

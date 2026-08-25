@@ -2,9 +2,9 @@
 
 ## Parser
 
-- [ ] Fix raw triple-string quote decoding. `raw"""escaped \"quote\""""`
-  retains too many display escapes; raw strings need their own
-  backslash-before-quote treatment rather than the ordinary triple-string path.
+- [x] Fix raw triple-string quote decoding. Raw strings now apply their own
+  backslash-before-quote treatment before display escaping; fixture
+  `raw_triple_string_quote` locks the backslash-run siblings.
 
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
