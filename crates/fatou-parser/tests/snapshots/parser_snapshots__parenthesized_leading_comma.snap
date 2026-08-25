@@ -1,0 +1,29 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..14
+  PAREN_EXPR@0..4
+    LPAREN@0..1 "("
+    ERROR@1..3
+      COMMA@1..2 ","
+      IDENT@2..3 "x"
+    RPAREN@3..4 ")"
+  NEWLINE@4..5 "\n"
+  PAREN_EXPR@5..8
+    LPAREN@5..6 "("
+    ERROR@6..7
+      COMMA@6..7 ","
+    RPAREN@7..8 ")"
+  NEWLINE@8..9 "\n"
+  PAREN_EXPR@9..13
+    LPAREN@9..10 "("
+    ERROR@10..12
+      COMMA@10..11 ","
+      COMMA@11..12 ","
+    RPAREN@12..13 ")"
+  NEWLINE@13..14 "\n"
+
+diagnostic [1..2]: unexpected leading comma in parentheses
+diagnostic [6..7]: unexpected leading comma in parentheses
+diagnostic [10..11]: unexpected leading comma in parentheses

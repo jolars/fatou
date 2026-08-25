@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Recover parenthesized forms beginning with a comma as one flat error run.
+  `(,x)`, `(,)`, and `(,,)` now match JuliaSyntax's `(error-t …)` topology
+  instead of becoming nested tuples with the closing paren left as top-level
+  junk.
+
 - [x] Recover leading empty slots in bracket- and brace-delimited lists. Vector,
   index, and braces forms now retain JuliaSyntax's zero-width `(error)` element;
   call arguments retain the leading comma and suffix as trailing junk.

@@ -180,6 +180,7 @@ paren_colon_import
 paren_macro_name
 paren_operator
 parenthesized_anonymous_function_parameters
+parenthesized_leading_comma
 parenthesized_macro_function_signature
 plus_plus_operator
 postfix_space_error

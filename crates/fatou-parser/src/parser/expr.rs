@@ -2397,6 +2397,20 @@ pub(crate) fn parse_paren(
         _ => {}
     }
 
+    // A comma cannot open an ordinary parenthesized tuple. JuliaSyntax recovers
+    // the payload as one flat error run, with the parens serving only as its
+    // boundary (`(,x)` ⇒ `(error-t ✘ x)`). Keep that topology distinct from
+    // bracket lists, where a leading comma synthesizes a missing element and
+    // parsing continues.
+    if ctx.token(inner_start).map(|t| t.kind) == Some(TokKind::Comma) {
+        return Some(parse_parenthesized_leading_comma(
+            ctx,
+            start,
+            inner_start,
+            diagnostics,
+        ));
+    }
+
     // `(op)` — a lone non-syntactic operator in parens is the operator as a
     // value, e.g. `(+)` → `+`, `(:)` → `:`, `(<:)` → `<:`. Build a `PAREN_EXPR`
     // wrapping the bare operator token (the projector reads a lone-operator paren
@@ -2510,6 +2524,46 @@ pub(crate) fn parse_paren(
             end: close,
             events,
         })
+    }
+}
+
+/// Recover a parenthesized payload beginning with a comma as one flat junk run.
+fn parse_parenthesized_leading_comma(
+    ctx: &ParserCtx<'_>,
+    open: usize,
+    junk_start: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> ExprParse {
+    let tokens = ctx.tokens();
+    let mut close = junk_start;
+    while ctx.token(close).map(|t| t.kind) != Some(TokKind::RParen) && ctx.token(close).is_some() {
+        close += 1;
+    }
+
+    let mut events = vec![Event::Start(SyntaxKind::PAREN_EXPR), Event::Tok(open)];
+    push_range(&mut events, open + 1, junk_start);
+    events.push(Event::Start(SyntaxKind::ERROR));
+    push_range(&mut events, junk_start, close);
+    finish(&mut events, SyntaxKind::ERROR);
+    push_diagnostic(
+        diagnostics,
+        DiagnosticKind::TrailingJunk,
+        "unexpected leading comma in parentheses",
+        tokens[junk_start].start,
+        tokens[junk_start].end,
+    );
+
+    let end = if ctx.token(close).map(|t| t.kind) == Some(TokKind::RParen) {
+        events.push(Event::Tok(close));
+        close + 1
+    } else {
+        close
+    };
+    finish(&mut events, SyntaxKind::PAREN_EXPR);
+    ExprParse {
+        start: open,
+        end,
+        events,
     }
 }
 
