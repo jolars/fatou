@@ -3120,16 +3120,15 @@ fn project_function_like(head: &str, node: &SyntaxNode) -> String {
     if is_forward_declaration(node) {
         return sexp(head, vec![project_signature(node)]);
     }
-    // A bare-identifier signature with a non-empty body is invalid (`function f
-    // body end`); JuliaSyntax error-wraps the name (`(function (error f) (block
-    // body))`). The `InvalidFunctionSignature` diagnostic, anchored at the
-    // `SIGNATURE`'s start, marks exactly that case.
+    // JuliaSyntax error-wraps invalid signatures, including a bare name with a
+    // body and a singleton parenthesized macro call/interpolation. The
+    // `InvalidFunctionSignature` diagnostic is anchored at `SIGNATURE`.
     let sig = if !node.children().any(|c| c.kind() == SIGNATURE) {
         // No signature at all (`function`, `function;end`) is JuliaSyntax's
         // empty-signature recovery: an error wrapping an empty error,
         // `(error (error))`. (`struct`/`module` differ — handled elsewhere.)
         "(error (error))".to_string()
-    } else if invalid_bare_signature(node) {
+    } else if invalid_signature(node) {
         format!("(error {})", project_signature(node))
     } else {
         project_signature(node)
@@ -3142,9 +3141,9 @@ fn project_function_like(head: &str, node: &SyntaxNode) -> String {
 /// A `function`/`macro` header is a forward declaration when its signature is a
 /// bare name (`f`, `$f`) rather than a call (`f()`) or other expression — and the
 /// body is empty enough to keep it a declaration. A bare name with a body is
-/// instead an invalid signature (`invalid_bare_signature`), not a declaration.
+/// instead an invalid signature (`invalid_signature`), not a declaration.
 fn is_forward_declaration(node: &SyntaxNode) -> bool {
-    signature_is_bare_name(node) && !invalid_bare_signature(node)
+    signature_is_bare_name(node) && !invalid_signature(node)
 }
 
 /// Whether the signature's first node is a bare name (`f`, `$f`, `+`) rather
@@ -3157,10 +3156,9 @@ fn signature_is_bare_name(node: &SyntaxNode) -> bool {
         .unwrap_or(false)
 }
 
-/// Whether the signature is a bare name marked invalid by the parser (a bare-name
-/// header with a non-empty body — `InvalidFunctionSignature`, anchored at the
-/// `SIGNATURE`'s start).
-fn invalid_bare_signature(node: &SyntaxNode) -> bool {
+/// Whether the parser marked the signature invalid. The diagnostic is anchored
+/// at the `SIGNATURE` node's start.
+fn invalid_signature(node: &SyntaxNode) -> bool {
     node.children()
         .find(|c| c.kind() == SIGNATURE)
         .map(|sig| {

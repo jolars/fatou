@@ -1,0 +1,1 @@
+(toplevel (function (error (tuple-p (macrocall-p @f x))) (block)) (function (error (tuple-p ($ f))) (block)) (function (error (tuple-p (macrocall @f))) (block)) (function (error (tuple-p (macrocall-p @f x))) (block)) (function (error (tuple-p ($ f))) (block)) (function (tuple-p (macrocall-p @f x) (parameters)) (block)) (function (tuple-p (... (macrocall-p @f x))) (block)))

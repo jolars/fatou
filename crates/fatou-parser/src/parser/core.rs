@@ -331,13 +331,10 @@ fn flag_invalid_const_decls(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnos
     }
 }
 
-/// Flag each `function`/`macro` whose signature is a bare identifier name but
-/// which carries a non-empty body. A header like `function f end` (a bare name
-/// with a truly empty body) is the valid forward-declaration form `(function f)`,
-/// but once a body is present (`function f body end`) or the body block is
-/// explicitly opened with a `;` (`function f; end`), the bare name is no longer a
-/// valid signature: JuliaSyntax error-wraps it (`(function (error f) (block
-/// body))`). The diagnostic anchors at the `SIGNATURE` node's start.
+/// Flag each invalid `function`/`macro` signature. A bare name is a valid forward
+/// declaration only with a truly empty body; a direct parenthesized macro call or
+/// interpolation is an invalid anonymous-function parameter tuple. JuliaSyntax
+/// error-wraps either signature, and the diagnostic anchors at `SIGNATURE`.
 fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
     for node in cst
         .descendants()
@@ -349,19 +346,58 @@ fn flag_invalid_function_signatures(cst: &SyntaxNode, diagnostics: &mut Vec<Pars
         let sig_is_bare_name = sig
             .first_child()
             .is_some_and(|inner| is_bare_signature_name(&inner));
-        if sig_is_bare_name
-            && (!function_body_is_empty(&node) || invalid_forward_operator_name(&sig))
-        {
+        let invalid_bare_name = sig_is_bare_name
+            && (!function_body_is_empty(&node) || invalid_forward_operator_name(&sig));
+        let invalid_parenthesized_macro = invalid_parenthesized_macro_signature(&sig);
+        if invalid_bare_name || invalid_parenthesized_macro {
             let pos = usize::from(sig.text_range().start());
             push_diagnostic(
                 diagnostics,
                 DiagnosticKind::InvalidFunctionSignature,
-                "invalid function signature: expected a call, not a bare name",
+                if invalid_bare_name {
+                    "invalid function signature: expected a call, not a bare name"
+                } else {
+                    "invalid function signature: macro call or interpolation cannot bind a parameter"
+                },
                 pos,
                 pos,
             );
         }
     }
+}
+
+/// Whether a singleton anonymous-function parameter list is a macro call or an
+/// interpolation. These expression forms cannot bind a parameter, so JuliaSyntax
+/// wraps the whole tuple in an error. A comma, semicolon, or splat makes the
+/// corresponding tuple shape valid and therefore stays outside this recovery.
+fn invalid_parenthesized_macro_signature(signature: &SyntaxNode) -> bool {
+    let Some(tuple) = signature
+        .first_child()
+        .filter(|node| node.kind() == SyntaxKind::TUPLE_EXPR)
+    else {
+        return false;
+    };
+    if tuple.children().count() != 1
+        || tuple
+            .children_with_tokens()
+            .any(|element| element.kind() == SyntaxKind::COMMA)
+    {
+        return false;
+    }
+
+    let mut child = tuple.first_child();
+    while child
+        .as_ref()
+        .is_some_and(|node| node.kind() == SyntaxKind::PAREN_EXPR)
+    {
+        child = child.and_then(|node| node.first_child());
+    }
+    child.is_some_and(|node| {
+        matches!(
+            node.kind(),
+            SyntaxKind::MACRO_CALL | SyntaxKind::INTERPOLATION
+        )
+    })
 }
 
 /// JuliaSyntax 1.0 rejects syntactic, broadcast, and bare `&` operators as
