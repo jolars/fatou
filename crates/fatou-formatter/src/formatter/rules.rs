@@ -630,35 +630,8 @@ fn operand_leads_with_operator(node: &SyntaxNode) -> bool {
 /// in `.` (an unmodeled shape lowered verbatim) bails to the transparent lowering, as
 /// do an interleaved comment, a missing operand, or an unexpected shape.
 ///
-/// Snugging is also withheld when the operand ends in a closing bracket (`)`/`]`/`}` —
-/// a call, index, paren, curly, or bracket collection): Fatou's parser currently
-/// rejects `g(x)...` (splat directly after a closing bracket) as a lone operator even
-/// though it is valid Julia, so the snug form would fail the stability reparse. Such
-/// operands bail to the verbatim (spaced) lowering until the parser gap is closed
-/// (handed off to `parser-parity`); remove this guard and widen the fixture then.
 fn lower_splat(node: &SyntaxNode) -> Ir {
-    let mut operand: Option<SyntaxNode> = None;
-    let mut dots: Option<String> = None;
-
-    for el in node.children_with_tokens() {
-        match el {
-            NodeOrToken::Token(tok) => match tok.kind() {
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
-                SyntaxKind::DOT_DOT_DOT if operand.is_some() && dots.is_none() => {
-                    dots = Some(tok.text().to_string());
-                }
-                _ => return lower_transparent(node),
-            },
-            NodeOrToken::Node(child) => {
-                if operand.is_some() {
-                    return lower_transparent(node);
-                }
-                operand = Some(child);
-            }
-        }
-    }
-
-    let (Some(operand), Some(dots)) = (operand, dots) else {
+    let Some((operand, dots)) = splat_parts(node) else {
         return lower_transparent(node);
     };
 
@@ -671,19 +644,39 @@ fn lower_splat(node: &SyntaxNode) -> Ir {
         && operand
             .last_token()
             .is_some_and(|t| t.text().ends_with('.'));
-    // The parser can't yet reparse a splat snugged onto a closing bracket (`g(x)...`),
-    // so a bracket-closing operand keeps its verbatim spacing. See the doc comment.
-    let ends_in_bracket = operand.last_token().is_some_and(|t| {
-        matches!(
-            t.kind(),
-            SyntaxKind::RPAREN | SyntaxKind::RBRACKET | SyntaxKind::RBRACE
-        )
-    });
-    if trails_with_dot || ends_in_bracket {
+    if trails_with_dot {
         return lower_transparent(node);
     }
 
     Ir::concat([lower_node(&operand), Ir::text(dots)])
+}
+
+/// Split a clean splat into its operand and postfix token. Comments, missing
+/// pieces, and unexpected shapes return `None` so callers preserve them through
+/// transparent lowering.
+fn splat_parts(node: &SyntaxNode) -> Option<(SyntaxNode, String)> {
+    let mut operand: Option<SyntaxNode> = None;
+    let mut dots: Option<String> = None;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => {}
+                SyntaxKind::DOT_DOT_DOT if operand.is_some() && dots.is_none() => {
+                    dots = Some(tok.text().to_string());
+                }
+                _ => return None,
+            },
+            NodeOrToken::Node(child) => {
+                if operand.is_some() {
+                    return None;
+                }
+                operand = Some(child);
+            }
+        }
+    }
+
+    Some((operand?, dots?))
 }
 
 fn lower_arrow(node: &SyntaxNode) -> Ir {
@@ -1869,6 +1862,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
             let hug = last_param_huggable.then(|| {
                 let mut prefix = params_hug_prefix(&open, &items, &pitems);
                 let mut body = pitems.last().expect("hug requires a last item").clone();
+                let mut suffix: Option<Ir> = None;
                 // A trailing pair value hugs through its `=>`: the keyword's
                 // `name = lhs => ` joins the flat prefix and the value alone
                 // is the body (see [`pair_hug_grouped_parts`]).
@@ -1878,10 +1872,18 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                 {
                     prefix.push(extra);
                     body = value_body;
+                } else if let Some((extra, value_body, value_suffix)) = last_list_item(&pnode)
+                    .as_ref()
+                    .and_then(splat_hug_grouped_parts)
+                {
+                    if let Some(extra) = extra {
+                        prefix.push(extra);
+                    }
+                    body = value_body;
+                    suffix = Some(value_suffix);
                 }
-                (Ir::concat(prefix), body)
+                (Ir::concat(prefix), body, suffix)
             });
-            let close_text = Ir::text(close.clone());
 
             let grouped = Ir::group(arg_list_params_body(
                 &open,
@@ -1890,7 +1892,11 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
                 &close,
                 list_trailing(&pnode, false),
             ));
-            if let Some((prefix, body)) = hug {
+            if let Some((prefix, body, suffix)) = hug {
+                let close_text = match suffix {
+                    Some(suffix) => Ir::concat([suffix, Ir::text(close)]),
+                    None => Ir::text(close),
+                };
                 return Ir::hug_group(prefix, body, close_text, grouped);
             }
             return grouped;
@@ -1927,6 +1933,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     if last_huggable {
         let explode = arg_list_explode_group(&open, &items, &close, list_trailing(node, false));
         let mut body = items.pop().expect("hug requires a last item");
+        let mut close_text = Ir::text(close);
         let mut prefix: Vec<Ir> = vec![Ir::text(open)];
         for item in items {
             prefix.push(item);
@@ -1940,8 +1947,17 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         {
             prefix.push(extra);
             body = value_body;
+        } else if let Some((extra, value_body, suffix)) = last_list_item(node)
+            .as_ref()
+            .and_then(splat_hug_grouped_parts)
+        {
+            if let Some(extra) = extra {
+                prefix.push(extra);
+            }
+            body = value_body;
+            close_text = Ir::concat([suffix, close_text]);
         }
-        return Ir::hug_group(Ir::concat(prefix), body, Ir::text(close), explode);
+        return Ir::hug_group(Ir::concat(prefix), body, close_text, explode);
     }
 
     arg_list_explode_group(&open, &items, &close, list_trailing(node, false))
@@ -2143,12 +2159,13 @@ fn bracket_explode_body(open: &str, items: &[Ir], close: &str, trailing: Ir) -> 
 /// indented line. A positional `ARG` hugs when its sole child is a huggable
 /// construct; a `KEYWORD_ARG` hugs when it has the clean `name = <value>` shape
 /// (the one [`lower_keyword_arg`] reflows) and the value is one — the name and
-/// `=` join the flat prefix (`f(x, kw = [`). A bare token, a splat, a
-/// unary/binary expression, or anything else keeps the normal layout. The pair
-/// operators are hug-transparent (see [`pair_hug_chain`]): a value of the form
-/// `lhs => <huggable construct>` — or the longer chain `a => b => <construct>` —
-/// hugs too, the whole `a => b => ` joining the flat prefix like a keyword's
-/// `name = `.
+/// `=` join the flat prefix (`f(x, kw = [`). A splat around a huggable construct
+/// is hug-transparent, with `...` riding the construct's closing bracket. A bare
+/// token, a unary/binary expression, or anything else keeps the normal layout.
+/// The pair operators are hug-transparent (see [`pair_hug_chain`]): a value of
+/// the form `lhs => <huggable construct>` — or the longer chain
+/// `a => b => <construct>` — hugs too, the whole `a => b => ` joining the flat
+/// prefix like a keyword's `name = `.
 fn item_is_huggable(item: &SyntaxNode) -> bool {
     match item.kind() {
         SyntaxKind::ARG => {
@@ -2190,7 +2207,15 @@ fn item_is_huggable(item: &SyntaxNode) -> bool {
 /// Whether an item's value can hug: a bracket-delimited construct itself, or a
 /// clean pair chain wrapping one (see [`pair_hug_chain`]).
 fn value_is_huggable(value: &SyntaxNode) -> bool {
-    huggable_kind(value.kind()) || pair_hug_chain(value).is_some()
+    huggable_kind(value.kind())
+        || splat_hug_parts(value).is_some()
+        || pair_hug_chain(value).is_some()
+}
+
+/// The bracketed operand and postfix token of a clean hug-transparent splat.
+fn splat_hug_parts(node: &SyntaxNode) -> Option<(SyntaxNode, String)> {
+    let (operand, dots) = splat_parts(node)?;
+    huggable_kind(operand.kind()).then_some((operand, dots))
 }
 
 /// Whether a collection literal's trailing item may hug the closing bracket.
@@ -2391,6 +2416,7 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
             list_trailing(node, singleton_comma),
         ));
         let mut body = items.pop().expect("hug requires a last item");
+        let mut close_ir = Ir::text(close_text);
         let mut prefix: Vec<Ir> = vec![Ir::text(open)];
         for item in items {
             prefix.push(item);
@@ -2404,8 +2430,17 @@ fn lower_collection(node: &SyntaxNode) -> Ir {
         {
             prefix.push(extra);
             body = value_body;
+        } else if let Some((extra, value_body, suffix)) = last_list_item(node)
+            .as_ref()
+            .and_then(splat_hug_grouped_parts)
+        {
+            if let Some(extra) = extra {
+                prefix.push(extra);
+            }
+            body = value_body;
+            close_ir = Ir::concat([suffix, close_ir]);
         }
-        return Ir::hug_group(Ir::concat(prefix), body, Ir::text(close_text), explode);
+        return Ir::hug_group(Ir::concat(prefix), body, close_ir, explode);
     }
 
     Ir::group(collection_body(node, parts))
@@ -2587,24 +2622,24 @@ fn last_list_item(node: &SyntaxNode) -> Option<SyntaxNode> {
 /// the full explode. `None` when the hugged construct has no reflow body (see
 /// [`construct_reflow_body`]).
 fn reflow_hug(mut prefix: Vec<Ir>, last: &SyntaxNode, close: String, explode: Ir) -> Option<Ir> {
-    let (extra_prefix, body) = item_hug_parts(last)?;
+    let (extra_prefix, body, suffix) = item_hug_parts(last)?;
     if let Some(extra) = extra_prefix {
         prefix.push(extra);
     }
-    Some(Ir::hug_group(
-        Ir::concat(prefix),
-        body,
-        Ir::text(close),
-        explode,
-    ))
+    let close = match suffix {
+        Some(suffix) => Ir::concat([suffix, Ir::text(close)]),
+        None => Ir::text(close),
+    };
+    Some(Ir::hug_group(Ir::concat(prefix), body, close, explode))
 }
 
 /// Split a huggable list item into the hug's prefix addition and its ungrouped
-/// body: a positional `ARG` contributes its value's prefix (nothing, or a
-/// pair's `lhs => `) and reflow body; a `KEYWORD_ARG` prepends `name = `.
+/// body and optional closing suffix: a positional `ARG` contributes its value's
+/// prefix (nothing, or a pair's `lhs => `), reflow body, and a splat's trailing
+/// `...`; a `KEYWORD_ARG` prepends `name = `.
 /// `None` when the wrapped construct has no reflow body — the caller bails to
 /// transparent, exactly as the pre-hug bails did.
-fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
+fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir, Option<Ir>)> {
     match item.kind() {
         SyntaxKind::ARG => {
             let mut children = item.children();
@@ -2622,10 +2657,10 @@ fn item_hug_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
             else {
                 return None;
             };
-            let (extra, body) = hug_value_parts(&value)?;
+            let (extra, body, suffix) = hug_value_parts(&value)?;
             let mut prefix = vec![lower_node(&name), Ir::text(" = ")];
             prefix.extend(extra);
-            Some((Some(Ir::concat(prefix)), body))
+            Some((Some(Ir::concat(prefix)), body, suffix))
         }
         _ => None,
     }
@@ -2665,17 +2700,51 @@ fn pair_hug_grouped_parts(item: &SyntaxNode) -> Option<(Ir, Ir)> {
     }
 }
 
+/// Split a hug-transparent splat item into the optional flat prefix contributed
+/// by a keyword, the grouped bracketed operand, and the trailing `...` that must
+/// ride its closing bracket.
+fn splat_hug_grouped_parts(item: &SyntaxNode) -> Option<(Option<Ir>, Ir, Ir)> {
+    match item.kind() {
+        SyntaxKind::ARG => {
+            let mut children = item.children();
+            let (Some(value), None) = (children.next(), children.next()) else {
+                return None;
+            };
+            let (operand, dots) = splat_hug_parts(&value)?;
+            Some((None, lower_node(&operand), Ir::text(dots)))
+        }
+        SyntaxKind::KEYWORD_ARG => {
+            let mut children = item.children();
+            let (Some(name), Some(value), None) =
+                (children.next(), children.next(), children.next())
+            else {
+                return None;
+            };
+            let (operand, dots) = splat_hug_parts(&value)?;
+            Some((
+                Some(Ir::concat([lower_node(&name), Ir::text(" = ")])),
+                lower_node(&operand),
+                Ir::text(dots),
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// The hug prefix contribution and ungrouped reflow body of a huggable item
 /// value: a bracket-delimited construct contributes no prefix; a clean pair
 /// chain (see [`pair_hug_chain`]) contributes the whole `a => b => ` and its
-/// innermost value's body.
-fn hug_value_parts(value: &SyntaxNode) -> Option<(Option<Ir>, Ir)> {
+/// innermost value's body; a splat contributes its `...` as a closing suffix.
+fn hug_value_parts(value: &SyntaxNode) -> Option<(Option<Ir>, Ir, Option<Ir>)> {
     if huggable_kind(value.kind()) {
-        return Some((None, construct_reflow_body(value)?));
+        return Some((None, construct_reflow_body(value)?, None));
+    }
+    if let Some((operand, dots)) = splat_hug_parts(value) {
+        return Some((None, construct_reflow_body(&operand)?, Some(Ir::text(dots))));
     }
     let (prefix, construct) = pair_hug_chain(value)?;
     let body = construct_reflow_body(&construct)?;
-    Some((Some(prefix), body))
+    Some((Some(prefix), body, None))
 }
 
 /// The ungrouped reflow body of a bracket-delimited construct, for folding into
