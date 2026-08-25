@@ -1554,23 +1554,35 @@ fn parse_prefix(
                 events,
             })
         }
-        // A non-unary operator glued to a `(` is a call with the operator as the
-        // callee: `*(x)` → `(call * x)`, `.*(a, b)` → `(call (. *) a b)`. Only the
-        // adjacent form is a call (`* (x)` is an error); a space would leave the
-        // `(` to be parsed separately. Unary operators (`+`, `-`, `!`, `~`) keep
-        // their prefix-application handling above.
-        k if is_operator_call_name(k)
-            && ctx.token(start + 1).map(|t| t.kind) == Some(TokKind::LParen) =>
-        {
+        // A non-unary operator followed by `(` is a call with the operator as the
+        // callee: `*(x)` → `(call * x)`, `.*(a, b)` → `(call (. *) a b)`. A
+        // whitespace-separated opener is recovered as the same call with an
+        // opener diagnostic (`* (x)` → `(call * (error-t) x)`). Array and macro
+        // space-form parsing instead treats the parens as the next element or
+        // argument. Unary operators (`+`, `-`, `!`, `~`) keep their prefix-
+        // application handling above.
+        k if is_operator_call_name(k) && operator_call_lparen(ctx, start, flags).is_some() => {
+            let paren_idx = operator_call_lparen(ctx, start, flags).unwrap();
+            if paren_idx > start + 1 {
+                let opener = &ctx.tokens()[paren_idx];
+                push_diagnostic(
+                    diagnostics,
+                    DiagnosticKind::OpenerWhitespace,
+                    "whitespace before opener",
+                    opener.start,
+                    opener.start,
+                );
+            }
             let (list_events, end) = parse_arg_list(
                 ctx,
-                start + 1,
+                paren_idx,
                 TokKind::RParen,
                 SyntaxKind::ARG_LIST,
                 flags.end_marker,
                 diagnostics,
             );
             let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
+            push_range(&mut events, start + 1, paren_idx);
             events.extend(list_events);
             events.push(Event::Finish);
             Some(ExprParse { start, end, events })
@@ -1685,6 +1697,17 @@ fn parse_prefix(
         // unary value operators (`+ - ! ~ <: >:`) are folded above and never reach
         // here. Lone syntactic operators are handled by the arm above.
         k if is_value_operator(k) || k == TokKind::Question => {
+            // In an array element or macro space argument, horizontal whitespace
+            // before `(` ends the operator value instead of supplying its prefix
+            // operand (`[* (a, b)]` and `@m * (a, b)` each contain two values).
+            // The caller owns the separated parenthesized expression.
+            let separated = ctx.skip_ws(start + 1);
+            if flags.array_mode
+                && separated > start + 1
+                && ctx.token(separated).map(|t| t.kind) == Some(TokKind::LParen)
+            {
+                return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
+            }
             let operand_start = ctx.skip_trivia(start + 1);
             // A value operator directly followed by a bare `=` is its value form
             // with `=` the assignment, not an invalid prefix call (`* =` ⇒
@@ -3544,6 +3567,20 @@ fn is_operator_call_name(kind: TokKind) -> bool {
             | UniTimes
             | UniPower
     )
+}
+
+/// Find the call-form `(` after a binary operator. Newlines are insignificant
+/// inside ordinary delimiters, but array and macro space-form parsing must leave
+/// a separated opener for the next element or argument.
+fn operator_call_lparen(ctx: &ParserCtx<'_>, start: usize, flags: ExprFlags) -> Option<usize> {
+    let paren_idx = if flags.inside_brackets && !flags.array_mode {
+        ctx.skip_trivia(start + 1)
+    } else {
+        ctx.skip_ws(start + 1)
+    };
+    (ctx.token(paren_idx).map(|t| t.kind) == Some(TokKind::LParen)
+        && (paren_idx == start + 1 || !flags.array_mode))
+        .then_some(paren_idx)
 }
 
 /// Whether `kind` is an operator that, glued to `{`, names a parametric callee
