@@ -1,7 +1,7 @@
 # Contributing
 
-Thanks for your interest in contributing to Fatou! Bug reports, fixes, new
-lint rules, parser and formatter work, and documentation improvements are all
+Thanks for your interest in contributing to Fatou! Bug reports, fixes, new lint
+rules, parser and formatter work, and documentation improvements are all
 welcome. For larger changes, please open an
 [issue](https://github.com/jolars/fatou/issues) first so we can discuss the
 approach.
@@ -15,8 +15,8 @@ it with `devenv shell`. Julia packages (JuliaSyntax.jl, the parser oracle, plus
 the formatter-comparison tools) are managed by Julia's own package manager via
 the repo's pinned `Project.toml`/`Manifest.toml`, not by Nix.
 
-Nix is not required, though. A stable Rust toolchain (see
-`rust-toolchain.toml`) is enough to build and run the full test suite:
+Nix is not required, though. Rust 1.89 or newer is enough to build Fatou; the
+development toolchain tracks stable through `rust-toolchain.toml`:
 
 ```sh
 cargo build --workspace
@@ -25,8 +25,8 @@ cargo test --workspace
 
 ## Quality gates
 
-CI is the source of truth for quality gates. Before opening a pull request,
-make sure these pass locally:
+CI is the source of truth for quality gates. Before opening a pull request, make
+sure these pass locally:
 
 ```sh
 cargo test --workspace                                                 # all tests
@@ -44,41 +44,44 @@ a C toolchain. Run it with `task bench-reparse`. The clippy line above passes
 `--all-features`, so the bench is still linted.
 
 Snapshot tests use [insta](https://insta.rs): review changed snapshots with
-`cargo insta review` and accept them with `cargo insta accept`. Logging in
-tests honors `RUST_LOG` (e.g., `RUST_LOG=debug cargo test`).
+`cargo insta review` and accept them with `cargo insta accept`. Logging in tests
+honors `RUST_LOG` (e.g., `RUST_LOG=debug cargo test`).
 
 ## Test-driven development
 
-Fatou is developed test-first: write a failing test, watch it fail, then make
-it pass. For a bug, add a failing fixture or snapshot that reproduces it
-before the fix.
+Fatou is developed test-first: write a failing test, watch it fail, then make it
+pass. For a bug, add a failing fixture or snapshot that reproduces it before the
+fix.
 
-- **Parser fixtures** live in `crates/fatou-parser/tests/fixtures/parser/<case>/` with an
-  `input.jl`; the harness snapshots the CST and diagnostics and asserts
-  losslessness (`reconstruct(text) == text`).
-- **Formatter fixtures** live in `crates/fatou-formatter/tests/fixtures/formatter/<case>/` with an
-  `input.jl` and a hand-authored `expected.jl`. Fatou owns its formatting
-  style; `expected.jl` is written by hand, never captured from a formatter.
-  The suite also checks idempotence (`format(format(x)) == format(x)`) and
-  clean reparse of the output.
-- **Parser parity** is measured against JuliaSyntax.jl via a differential
-  oracle (`crates/fatou-parser/tests/juliasyntax_oracle.rs`) that needs no Julia at test time.
+- **Parser fixtures** live in
+  `crates/fatou-parser/tests/fixtures/parser/<case>/` with an `input.jl`; the
+  harness snapshots the CST and diagnostics and asserts losslessness
+  (`reconstruct(text) == text`).
+- **Formatter fixtures** live in
+  `crates/fatou-formatter/tests/fixtures/formatter/<case>/` with an `input.jl`
+  and a hand-authored `expected.jl`. Fatou owns its formatting style;
+  `expected.jl` is written by hand, never captured from a formatter. The suite
+  also checks idempotence (`format(format(x)) == format(x)`) and clean reparse
+  of the output.
+- **Parser parity** is measured against JuliaSyntax.jl via a differential oracle
+  (`crates/fatou-parser/tests/juliasyntax_oracle.rs`) that needs no Julia at
+  test time.
 
 ## Architecture and roadmap
 
 - [`AGENTS.md`](https://github.com/jolars/fatou/blob/main/AGENTS.md) documents
   the architecture, the design tenets (deterministic full-reflow formatting,
-  first-class incremental parsing, losslessness), and the project conventions
-  in detail.
+  first-class incremental parsing, losslessness), and the project conventions in
+  detail.
 - [`TODO.md`](https://github.com/jolars/fatou/blob/main/TODO.md) is the live
-  roadmap and records known issues and follow-ups. When in doubt about scope
-  or priority, check there.
+  roadmap and records known issues and follow-ups. When in doubt about scope or
+  priority, check there.
 
 ## Documentation
 
 The documentation site ([fatou.dev](https://fatou.dev)) is an
-[mdBook](https://rust-lang.github.io/mdBook/) under `docs/`. Preview it
-locally with:
+[mdBook](https://rust-lang.github.io/mdBook/) under `docs/`. Preview it locally
+with:
 
 ```sh
 task docs-preview        # mdbook serve docs --open
@@ -94,5 +97,5 @@ task docs-preview        # mdbook serve docs --open
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the
-[MIT License](https://github.com/jolars/fatou/blob/main/LICENSE).
+By contributing, you agree that your contributions are licensed under the [MIT
+License](https://github.com/jolars/fatou/blob/main/LICENSE).

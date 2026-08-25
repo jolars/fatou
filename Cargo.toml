@@ -6,6 +6,8 @@ exclude = ["docs/doc-utils"]
 
 [workspace.package]
 edition = "2024"
+# The minimum supported Rust version is exercised by the MSRV CI job.
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/jolars/fatou"
 authors = ["Johan Larsson <johan@jolars.co>"]
@@ -14,6 +16,7 @@ authors = ["Johan Larsson <johan@jolars.co>"]
 name = "fatou"
 version = "0.15.0"
 edition.workspace = true
+rust-version.workspace = true
 readme = "README.md"
 description = "A language server, formatter, and linter for Julia"
 homepage = "https://fatou.dev"

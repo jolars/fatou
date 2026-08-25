@@ -18,21 +18,36 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --workspace --verbose
       - name: Test
         run: cargo test --workspace --verbose
 
+  msrv:
+    name: minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust 1.89
+        run: rustup toolchain install 1.89.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - name: Check
+        run: cargo +1.89.0 check --workspace --all-targets --all-features --locked
+
   wasm:
     name: wasm build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Install Rust
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
           key: wasm
@@ -55,10 +70,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2
-          components: clippy, rustfmt
+      - name: Install Rust
+        run: |
+          rustup toolchain install
+          rustup target add wasm32-wasip2
+          rustup component add clippy rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: editors/zed
@@ -90,8 +106,10 @@ jobs:
       # Nightly resolves the lockfile; the compile itself still runs on the
       # same stable toolchain as every other job, so nightly rustc churn can
       # never fail this gate.
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: |
+          rustup toolchain install nightly
+          rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: minimal-versions
@@ -113,7 +131,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-audit and cargo-deny
         run: cargo install cargo-audit cargo-deny --locked
@@ -124,7 +143,7 @@ jobs:
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, wasm, zed, minimal-versions, supply-chain]
+    needs: [test, msrv, wasm, zed, minimal-versions, supply-chain]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -139,7 +158,8 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.RELEASE_TOKEN }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install
 
       - id: versionary
         uses: jolars/versionary@v1
