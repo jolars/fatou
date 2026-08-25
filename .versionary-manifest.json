@@ -1,48 +1,58 @@
 {
   "manifest-version": 1,
-  "baseline-sha": "706e1d65e13e334ff3c40b9b876e10b5e5ed8c45",
+  "baseline-sha": "635ca3123841d838bab6a547b40163beaf2db336",
   "release-targets": [
     {
       "path": ".",
-      "version": "0.15.0",
-      "tag": "v0.15.0"
+      "version": "0.16.0",
+      "tag": "v0.16.0"
     },
     {
       "path": "crates/fatou-formatter",
-      "version": "0.3.3",
-      "tag": "fatou-formatter-v0.3.3"
+      "version": "0.4.0",
+      "tag": "fatou-formatter-v0.4.0"
     },
     {
       "path": "crates/fatou-parser",
-      "version": "0.4.1",
-      "tag": "fatou-parser-v0.4.1"
+      "version": "0.5.0",
+      "tag": "fatou-parser-v0.5.0"
     },
     {
       "path": "editors/code",
-      "version": "0.15.0",
-      "tag": "fatou-code-v0.15.0"
+      "version": "0.16.0",
+      "tag": "fatou-code-v0.16.0"
+    },
+    {
+      "path": "editors/zed",
+      "version": "0.2.0",
+      "tag": "fatou-zed-v0.2.0"
     }
   ],
   "pending-release-targets": [
     {
       "path": ".",
-      "version": "0.15.0",
-      "tag": "v0.15.0"
+      "version": "0.16.0",
+      "tag": "v0.16.0"
     },
     {
       "path": "crates/fatou-formatter",
-      "version": "0.3.3",
-      "tag": "fatou-formatter-v0.3.3"
+      "version": "0.4.0",
+      "tag": "fatou-formatter-v0.4.0"
     },
     {
       "path": "crates/fatou-parser",
-      "version": "0.4.1",
-      "tag": "fatou-parser-v0.4.1"
+      "version": "0.5.0",
+      "tag": "fatou-parser-v0.5.0"
     },
     {
       "path": "editors/code",
-      "version": "0.15.0",
-      "tag": "fatou-code-v0.15.0"
+      "version": "0.16.0",
+      "tag": "fatou-code-v0.16.0"
+    },
+    {
+      "path": "editors/zed",
+      "version": "0.2.0",
+      "tag": "fatou-zed-v0.2.0"
     }
   ]
 }
