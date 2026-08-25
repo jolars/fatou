@@ -2,6 +2,10 @@
 
 ## Parser
 
+- [x] Recover leading empty slots in bracket- and brace-delimited lists. Vector,
+  index, and braces forms now retain JuliaSyntax's zero-width `(error)` element;
+  call arguments retain the leading comma and suffix as trailing junk.
+
 - [x] Treat `var"…"` nonstandard identifiers as bare `function` and `macro`
   signature names. Empty bodies now form forward declarations, while a
   semicolon or body statement records the same invalid-signature recovery as a
