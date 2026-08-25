@@ -28,8 +28,15 @@ them yet):
 - **2026-06-29** — `global a, b = 1, 2` nests properly, so the existing
   keyword-stmt → `lower_binary` path should format it for free.
 
-**Parser targets**: none queued. Per `SKILL.md`, find one by probing real Julia,
-or take a direct ask. The deferred ledger below is the fallback, not a queue.
+**Parser targets**:
+
+- **Nested macro loop argument** — DataFrames' `@inbounds @simd for gix in
+  gd.groups ... end` projects the inner macro as `(macrocall @simd)` and gives
+  the `for` to `@inbounds`; JuliaSyntax gives the loop to `@simd`. Reproduced in
+  `src/groupeddataframe/splitapplycombine.jl:303` on commit `d3a4edc`.
+- **Raw triple-string quote decoding** — `raw"""escaped \"quote\""""` retains
+  too many display escapes. Keep this separate from ordinary triple strings;
+  Julia's raw-string backslash-before-quote rules need their own treatment.
 
 ## Persistent traps & invariants
 
@@ -73,7 +80,7 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**262 cases**): **261 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**263 cases**): **262 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -95,10 +102,6 @@ the 13 remaining JS FAILs.
 Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
 mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
-Unimplemented, ranked roughly by real-world value:
-
-- One formatter idempotency drift in DataFrames' `src/dataframe/dataframe.jl`.
-
 Error shapes, deferred (in scope, just low-value — see `SKILL.md`'s ranking):
 `for i ∈ a ∈ b`/`for i in a in b` (Julia parses the iterable below comparison
 precedence); toplevel `const x = 1 for i in 1:1`; `@m const x = 1 for … end`
@@ -115,30 +118,31 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25k — outer-group matrix continuation)
+## Latest session (2026-08-25l — triple-string literal quotes)
 
-Landed JuliaSyntax projection parity for row-major matrix continuation whose
-establishing space belongs to an outer dimension group. Plain, typed, and brace
-concatenations now keep `[a b ;;; c ;; \n d]`'s second group horizontal, while
-column-major and single-semicolon siblings retain their distinct shapes.
+Landed JuliaSyntax projection parity for unescaped double quotes inside
+ordinary triple-quoted strings. A bulk probe over DataFrames' 36 source files
+fell from 15 divergent files to 2; one survivor is permanent float display, and
+the other is the queued nested `@inbounds @simd for` parser target.
 
-- **Projector gap**: `matrix_is_row_major` derives matrix order from the first
-  separator between leaf elements. The projector threads that order through
-  nested `MATRIX_ROW` groups when classifying `;;` plus newline continuation.
+- **Projector gap**: `escape_display` now display-escapes a triple string's
+  unescaped `"` while preserving source-escaped quotes and handling even runs of
+  preceding backslashes. The CST was already correct.
 - **Fixtures**: added parser snapshot and oracle slug
-  `outer_matrix_continuation`, covering plain, typed, brace, wider-row, and
-  separator-order siblings. No blocked entry.
+  `triple_string_literal_quote`, covering literal quotes, source-escaped quotes,
+  even backslashes, and quotes around interpolation. No blocked entry.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **260/261 → 261/262** allowlisted (only the existing
+  regressions); dir **261/262 → 262/263** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: reproduce and triage the DataFrames formatter idempotency drift;
-  hand any parser root cause back here, otherwise continue with a real-code
-  parser probe.
+- **Next**: fix nested macro loop arguments (`@inbounds @simd for ... end`),
+  then take raw triple-string quote decoding.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25k** — outer-group row-major matrix continuation for plain, typed,
+  and brace concatenations. 748 / 261.
 - **2026-08-25j** — dotted Unicode unary `.±`/`.∓`/`.⋆`, plus newline stopping
   for suffixed value-form unary operators. 748 / 260.
 - **2026-08-25i** — whitespace-separated calls for binary-only operators recover

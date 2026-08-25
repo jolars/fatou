@@ -1,0 +1,1 @@
+(toplevel (= text (string-s "[\"Indexing\" section]\n" "escaped \"quote\"\n" "slashes \\\"quote\"\n" "\"value: " value "\"\n")))

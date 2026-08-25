@@ -2897,18 +2897,27 @@ fn strip_leading_ws(t: &str, n: usize) -> String {
 /// interpolating string the source escapes (`\n`, `\\`) already display as
 /// themselves, so only literal control chars need escaping; for a `raw` string
 /// the content is literal bytes, so backslashes/quotes/`$` are escaped too.
+/// Triple strings may contain unescaped double quotes, which need a display
+/// escape without doubling quotes that were already escaped in the source.
 fn escape_display(s: &str, raw: bool) -> String {
     let mut out = String::with_capacity(s.len());
+    let mut backslashes = 0usize;
     for c in s.chars() {
         match c {
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
             '\r' => out.push_str("\\r"),
             '\\' if raw => out.push_str("\\\\"),
-            '"' if raw => out.push_str("\\\""),
+            '\\' => {
+                out.push('\\');
+                backslashes += 1;
+                continue;
+            }
+            '"' if raw || backslashes.is_multiple_of(2) => out.push_str("\\\""),
             '$' if raw => out.push_str("\\$"),
             _ => out.push(c),
         }
+        backslashes = 0;
     }
     out
 }
