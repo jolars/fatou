@@ -73,7 +73,7 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**260 cases**): **259 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**261 cases**): **260 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -97,9 +97,6 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- Dotted unary `.±`.
-- Suffixed-unary prefix arm still consumes its operand across a newline (the
-  2026-06-26b fix's sibling; rarer, in neither corpus).
 - Matrix continuation whose establishing space lives in an *outer* group
   (`[a b ;;; c ;; \n d]`) — projection-only, low priority.
 - One formatter idempotency drift in DataFrames' `src/dataframe/dataframe.jl`.
@@ -120,28 +117,32 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25i — spaced non-unary operator calls)
+## Latest session (2026-08-25j — dotted Unicode unary operators)
 
-Landed call recovery for binary-only operators followed by a whitespace-separated
-argument list. `* (a, b)`, `≠ (a, b)`, `.* (a, b)`, and suffixed forms now
-project as calls with a zero-width `(error-t)` before their arguments.
+Landed broadcast unary parsing for `.±`, `.∓`, and `.⋆`. They now build ordinary
+`UNARY_EXPR` nodes and project as `dotcall-pre`, while multi-argument call forms,
+binary use, bare values, and suffixed operators retain their existing shapes.
 
-- **Parser gap**: the operator-callee prefix arm now accepts a separated `(` and
-  records the existing `OpenerWhitespace` diagnostic. Significant newlines and
-  array/macro space-form boundaries still leave the operator as a value. The
-  projector needed no change.
-- **Fixtures**: added parser snapshot and oracle slug
-  `spaced_nonunary_operator_call`. No blocked entry was added.
+- **Parser gap**: `is_unary_prefix_op` now recognizes the three dotted Unicode
+  spellings. The same prefix arm now stops every value-form unary operator at a
+  significant newline, fixing the deferred suffixed-operator sibling too;
+  syntactic `::` deliberately continues across the line break.
+- **Projector gap**: dotted `UNICODE_OP` tokens under `UNARY_EXPR` now emit a
+  stripped operator beneath `dotcall-pre`.
+- **Fixtures**: added parser snapshot and oracle slug `dotted_unicode_unary`,
+  including call, binary, newline, and suffixed siblings. No blocked entry.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **258/259 → 259/260** allowlisted (only the existing
+  regressions); dir **259/260 → 260/261** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: dotted unary `.±`, the remaining sibling from the former top-ranked
-  deferred cluster.
+- **Next**: outer-group matrix continuation (`[a b ;;; c ;; \n d]`), then the
+  DataFrames formatter idempotency drift.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25i** — whitespace-separated calls for binary-only operators recover
+  with an opener diagnostic. 748 / 259.
 - **2026-08-25h** — parenthesized leading commas recover as one flat trailing-junk
   node. 748 / 258.
 - **2026-08-25g** — leading empty slots in bracket/brace lists and call-argument

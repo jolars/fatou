@@ -1028,6 +1028,9 @@ fn project_unary(node: &SyntaxNode) -> String {
         UNICODE_RADICAL if op.text().starts_with('.') => {
             format!("(dotcall-pre {} {operand})", &op.text()[1..])
         }
+        UNICODE_OP if op.text().starts_with('.') => {
+            format!("(dotcall-pre {} {operand})", &op.text()[1..])
+        }
         _ => format!("(call-pre {} {operand})", folded_op_text(op.text())),
     }
 }

@@ -142,7 +142,8 @@ pub(super) fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {
             | Supertype
             | ColonColon
             | UniRadical
-    ) || (matches!(kind, UniPlus | UniTimes) && matches!(text, "±" | "∓" | "⋆"))
+    ) || (matches!(kind, UniPlus | UniTimes)
+        && matches!(text, "±" | "∓" | "⋆" | ".±" | ".∓" | ".⋆"))
 }
 
 pub(super) fn is_value_operator(kind: TokKind) -> bool {

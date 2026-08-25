@@ -1,0 +1,77 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..74
+  UNARY_EXPR@0..4
+    UNICODE_OP@0..3 ".±"
+    NAME@3..4
+      IDENT@3..4 "x"
+  NEWLINE@4..5 "\n"
+  UNARY_EXPR@5..11
+    UNICODE_OP@5..9 ".∓"
+    WHITESPACE@9..10 " "
+    NAME@10..11
+      IDENT@10..11 "y"
+  NEWLINE@11..12 "\n"
+  UNARY_EXPR@12..19
+    UNICODE_OP@12..16 ".⋆"
+    PAREN_EXPR@16..19
+      LPAREN@16..17 "("
+      NAME@17..18
+        IDENT@17..18 "z"
+      RPAREN@18..19 ")"
+  NEWLINE@19..20 "\n"
+  CALL_EXPR@20..29
+    UNICODE_OP@20..23 ".±"
+    ARG_LIST@23..29
+      LPAREN@23..24 "("
+      ARG@24..25
+        NAME@24..25
+          IDENT@24..25 "a"
+      COMMA@25..26 ","
+      WHITESPACE@26..27 " "
+      ARG@27..28
+        NAME@27..28
+          IDENT@27..28 "b"
+      RPAREN@28..29 ")"
+  NEWLINE@29..30 "\n"
+  BINARY_EXPR@30..37
+    NAME@30..31
+      IDENT@30..31 "a"
+    WHITESPACE@31..32 " "
+    UNICODE_OP@32..35 ".±"
+    WHITESPACE@35..36 " "
+    NAME@36..37
+      IDENT@36..37 "b"
+  NEWLINE@37..38 "\n"
+  OPERATOR_ATOM@38..41
+    UNICODE_OP@38..41 ".±"
+  NEWLINE@41..42 "\n"
+  OPERATOR_ATOM@42..45
+    UNICODE_OP@42..45 ".±"
+  NEWLINE@45..46 "\n"
+  NAME@46..47
+    IDENT@46..47 "x"
+  NEWLINE@47..48 "\n"
+  OPERATOR_ATOM@48..52
+    PLUS@48..52 "+₁"
+  NEWLINE@52..53 "\n"
+  NAME@53..54
+    IDENT@53..54 "y"
+  NEWLINE@54..55 "\n"
+  OPERATOR_ATOM@55..61
+    UNICODE_OP@55..61 ".±₁"
+  NEWLINE@61..62 "\n"
+  NAME@62..63
+    IDENT@62..63 "z"
+  NEWLINE@63..64 "\n"
+  CALL_EXPR@64..73
+    UNICODE_OP@64..70 ".±₁"
+    ARG_LIST@70..73
+      LPAREN@70..71 "("
+      ARG@71..72
+        NAME@71..72
+          IDENT@71..72 "x"
+      RPAREN@72..73 ")"
+  NEWLINE@73..74 "\n"
