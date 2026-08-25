@@ -2,6 +2,10 @@
 
 ## Parser
 
+- [ ] Fix raw triple-string quote decoding. `raw"""escaped \"quote\""""`
+  retains too many display escapes; raw strings need their own
+  backslash-before-quote treatment rather than the ordinary triple-string path.
+
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
@@ -41,6 +45,10 @@
   The parser now reparses `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`,
   `f(A{T}...)`, and `f([1, 2]...)` cleanly, so drop `lower_splat`'s stale
   `ends_in_bracket` fallback and widen `splat_spacing`.
+
+- [ ] Gate left-division `\` as a normal spaced binary operator (`A\b` →
+  `A \ b`). The generic binary rule should already format it; add a
+  hand-authored formatter fixture that proves spacing and width behavior.
 
 ## Linter
 
