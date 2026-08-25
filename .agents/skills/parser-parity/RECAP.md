@@ -72,8 +72,8 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **743 allowlisted**, 13
-divergence, 0 unsupported. Dir corpus (**254 cases**): **253 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **745 allowlisted**, 11
+divergence, 0 unsupported. Dir corpus (**255 cases**): **254 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; the 5 remaining correctable divergences are
 recorded below. A green report means "no regression", not "nothing to do".
@@ -96,9 +96,8 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- JuliaSyntax 1.0 error/value shapes: parenthesized `@f(x)`/`$f` function
-  signatures; quoted names in `using :A`/`using A: :b`; and
-  `function var"." end`.
+- JuliaSyntax 1.0 error/value shapes: quoted names in `using :A`/`using A: :b`;
+  and `function var"." end`.
 - `x.function` — a reserved keyword as a field name after `)`.
 - `end` inside a nested `[…]` within an index (`df[[1; 2; end:-1:3], :]`).
 - `primitive type T (18 * 8) end` — the size expr is a spaced group, not a call.
@@ -127,29 +126,31 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25c — bare `:=` and `.` recovery)
+## Latest session (2026-08-25d — parenthesized macro signatures)
 
-Landed bare `:=` and `.` as syntactic operators without value meaning. They now
-recover as `(error op)` in every probed value position while retaining their
-existing quoted-symbol behavior.
+Landed invalid singleton parenthesized macro-call and interpolation function
+signatures. Their existing `TUPLE_EXPR` topology now carries a diagnostic that
+the projector replays as JuliaSyntax's `(error (tuple-p …))` shape.
 
-- **Parser gap**: `is_lone_error_operator` now classifies `ColonEq` and `Dot`,
-  producing the existing `ERROR > OPERATOR_ATOM` shape and `LoneOperator`
-  diagnostic. `parse_macro_args` yields a dot before `(` to the postfix chain so
-  the dedicated `@M.(x)` recovery remains intact.
-- **Fixtures**: added parser snapshot and oracle slug `lone_colon_eq_dot`,
-  covering top-level, parenthesized, collection, call-argument, assignment-left,
-  trailing-junk, and quoted forms. No blocked entry was added.
-- **Counts**: JS **741/756 → 743/756** allowlisted (13 FAIL, 0 unsupported,
-  zero regressions); dir **252/253 → 253/254** allowlisted (only the existing
+- **Error shape**: the post-build signature flag recognizes a separator-free
+  singleton tuple whose operand, through nested parens, is a `MACRO_CALL` or
+  `INTERPOLATION`. Semicolon, comma, multi-parameter, and splat forms remain
+  valid.
+- **Fixtures**: added parser snapshot and oracle slug
+  `parenthesized_macro_function_signature`, covering direct and nested forms,
+  bare `@f`, and the valid semicolon/splat siblings. No blocked entry was added.
+- **Counts**: JS **743/756 → 745/756** allowlisted (11 FAIL, 0 unsupported,
+  zero regressions); dir **253/254 → 254/255** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: parenthesized `@f(x)`/`$f` function signatures—the next two-case
-  JuliaSyntax 1.0 cluster. Quoted import names follow it.
+- **Next**: quoted import names in `using :A`/`using A: :b`—the next two-case
+  JuliaSyntax 1.0 cluster (`js-46e41651`, `js-d5e18c3b`).
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25c** — bare `:=` and `.` recover as lone syntactic operators while
+  remaining valid quoted symbols. 743 / 253.
 - **2026-08-25b** — numeric arguments glued to prefixed command literals now
   stay inside the command-macro node. 741 / 252.
 - **2026-08-25** — parenthesized anonymous-function parameters become tuples

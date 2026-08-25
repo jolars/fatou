@@ -1,0 +1,150 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..147
+  FUNCTION_DEF@0..20
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..16
+      TUPLE_EXPR@9..16
+        LPAREN@9..10 "("
+        MACRO_CALL@10..15
+          MACRO_NAME@10..12
+            AT@10..11 "@"
+            IDENT@11..12 "f"
+          ARG_LIST@12..15
+            LPAREN@12..13 "("
+            ARG@13..14
+              NAME@13..14
+                IDENT@13..14 "x"
+            RPAREN@14..15 ")"
+        RPAREN@15..16 ")"
+    BLOCK@16..17
+      WHITESPACE@16..17 " "
+    END_KW@17..20 "end"
+  NEWLINE@20..21 "\n"
+  FUNCTION_DEF@21..38
+    FUNCTION_KW@21..29 "function"
+    WHITESPACE@29..30 " "
+    SIGNATURE@30..34
+      TUPLE_EXPR@30..34
+        LPAREN@30..31 "("
+        INTERPOLATION@31..33
+          DOLLAR@31..32 "$"
+          IDENT@32..33 "f"
+        RPAREN@33..34 ")"
+    BLOCK@34..35
+      WHITESPACE@34..35 " "
+    END_KW@35..38 "end"
+  NEWLINE@38..39 "\n"
+  FUNCTION_DEF@39..56
+    FUNCTION_KW@39..47 "function"
+    WHITESPACE@47..48 " "
+    SIGNATURE@48..52
+      TUPLE_EXPR@48..52
+        LPAREN@48..49 "("
+        MACRO_CALL@49..51
+          MACRO_NAME@49..51
+            AT@49..50 "@"
+            IDENT@50..51 "f"
+        RPAREN@51..52 ")"
+    BLOCK@52..53
+      WHITESPACE@52..53 " "
+    END_KW@53..56 "end"
+  NEWLINE@56..57 "\n"
+  FUNCTION_DEF@57..79
+    FUNCTION_KW@57..65 "function"
+    WHITESPACE@65..66 " "
+    SIGNATURE@66..75
+      TUPLE_EXPR@66..75
+        LPAREN@66..67 "("
+        PAREN_EXPR@67..74
+          LPAREN@67..68 "("
+          MACRO_CALL@68..73
+            MACRO_NAME@68..70
+              AT@68..69 "@"
+              IDENT@69..70 "f"
+            ARG_LIST@70..73
+              LPAREN@70..71 "("
+              ARG@71..72
+                NAME@71..72
+                  IDENT@71..72 "x"
+              RPAREN@72..73 ")"
+          RPAREN@73..74 ")"
+        RPAREN@74..75 ")"
+    BLOCK@75..76
+      WHITESPACE@75..76 " "
+    END_KW@76..79 "end"
+  NEWLINE@79..80 "\n"
+  FUNCTION_DEF@80..99
+    FUNCTION_KW@80..88 "function"
+    WHITESPACE@88..89 " "
+    SIGNATURE@89..95
+      TUPLE_EXPR@89..95
+        LPAREN@89..90 "("
+        PAREN_EXPR@90..94
+          LPAREN@90..91 "("
+          INTERPOLATION@91..93
+            DOLLAR@91..92 "$"
+            IDENT@92..93 "f"
+          RPAREN@93..94 ")"
+        RPAREN@94..95 ")"
+    BLOCK@95..96
+      WHITESPACE@95..96 " "
+    END_KW@96..99 "end"
+  NEWLINE@99..100 "\n"
+  NEWLINE@100..101 "\n"
+  FUNCTION_DEF@101..122
+    FUNCTION_KW@101..109 "function"
+    WHITESPACE@109..110 " "
+    SIGNATURE@110..118
+      TUPLE_EXPR@110..118
+        LPAREN@110..111 "("
+        ARG@111..116
+          MACRO_CALL@111..116
+            MACRO_NAME@111..113
+              AT@111..112 "@"
+              IDENT@112..113 "f"
+            ARG_LIST@113..116
+              LPAREN@113..114 "("
+              ARG@114..115
+                NAME@114..115
+                  IDENT@114..115 "x"
+              RPAREN@115..116 ")"
+        PARAMETERS@116..117
+          SEMICOLON@116..117 ";"
+        RPAREN@117..118 ")"
+    BLOCK@118..119
+      WHITESPACE@118..119 " "
+    END_KW@119..122 "end"
+  NEWLINE@122..123 "\n"
+  FUNCTION_DEF@123..146
+    FUNCTION_KW@123..131 "function"
+    WHITESPACE@131..132 " "
+    SIGNATURE@132..142
+      TUPLE_EXPR@132..142
+        LPAREN@132..133 "("
+        SPLAT_EXPR@133..141
+          MACRO_CALL@133..138
+            MACRO_NAME@133..135
+              AT@133..134 "@"
+              IDENT@134..135 "f"
+            ARG_LIST@135..138
+              LPAREN@135..136 "("
+              ARG@136..137
+                NAME@136..137
+                  IDENT@136..137 "x"
+              RPAREN@137..138 ")"
+          DOT_DOT_DOT@138..141 "..."
+        RPAREN@141..142 ")"
+    BLOCK@142..143
+      WHITESPACE@142..143 " "
+    END_KW@143..146 "end"
+  NEWLINE@146..147 "\n"
+
+diagnostic [9..9]: invalid function signature: macro call or interpolation cannot bind a parameter
+diagnostic [30..30]: invalid function signature: macro call or interpolation cannot bind a parameter
+diagnostic [48..48]: invalid function signature: macro call or interpolation cannot bind a parameter
+diagnostic [66..66]: invalid function signature: macro call or interpolation cannot bind a parameter
+diagnostic [89..89]: invalid function signature: macro call or interpolation cannot bind a parameter

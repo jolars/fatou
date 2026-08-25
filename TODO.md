@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Recover singleton parenthesized macro-call and interpolation function
+  signatures as invalid parameter tuples. This adds JuliaSyntax's `(error …)`
+  wrapper for `function (@f(x)) end` and `function ($f) end` while preserving
+  the valid semicolon and splat forms.
+
 - [x] Recover bare `:=` and `.` as syntactic operators without value meaning.
   They now produce `(error op)` in top-level, parenthesized, collection, call-
   argument, and assignment-left positions while remaining valid quoted symbols.
