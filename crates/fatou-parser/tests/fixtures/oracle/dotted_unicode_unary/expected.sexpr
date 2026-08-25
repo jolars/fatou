@@ -1,0 +1,1 @@
+(toplevel (dotcall-pre ± x) (dotcall-pre ∓ y) (dotcall-pre ⋆ z) (call (. ±) a b) (dotcall-i a ± b) (. ±) (. ±) x +₁ y (. ±₁) z (call (. ±₁) x))

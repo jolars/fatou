@@ -1377,7 +1377,8 @@ fn parse_prefix(
         // `::` declarations (`::Int` in a method signature `f(::Int)`), the
         // prefix-only Unicode radicals `√ ∛ ∜ ¬` (`√x` → `(call-pre √ x)`, with
         // the same precedence as `-`/`+`), and the unary-capable Unicode
-        // arithmetic operators `± ∓ ⋆` (`±x` → `(call-pre ± x)`).
+        // arithmetic operators `± ∓ ⋆` and their broadcast forms (`±x` →
+        // `(call-pre ± x)`, `.±x` → `(dotcall-pre ± x)`).
         k if is_unary_prefix_op(k, tok.text) => {
             // A unary arithmetic/logical operator glued to a `(` is a call when
             // the parens look like an argument list (`+(x, y)` → `(call + x y)`,
@@ -1411,8 +1412,8 @@ fn parse_prefix(
                     | TokKind::DotTilde
                     | TokKind::Subtype
                     | TokKind::Supertype
-                    // The Unicode radicals and the unary-capable `± ∓ ⋆` (the
-                    // only `UniPlus`/`UniTimes` texts that reach this arm)
+                    // The Unicode radicals and the unary-capable `± ∓ ⋆` forms
+                    // (the only `UniPlus`/`UniTimes` texts that reach this arm)
                     // follow the same paren-call heuristic (`√(a, b)` →
                     // `(call √ a b)`, `±(a)` → `(call-pre ± a)`).
                     | TokKind::UniRadical
@@ -1475,6 +1476,18 @@ fn parse_prefix(
             if ctx.token(operand_start).map(|t| t.kind) == Some(TokKind::Eq)
                 && !matches!(tok.kind, TokKind::Amp | TokKind::ColonColon)
             {
+                return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
+            }
+            // A value-form unary operator does not take an operand across a
+            // significant newline. At statement scope and in matrix rows, the
+            // operator is a value and the next line starts a new expression;
+            // inside parentheses the newline remains insignificant. The
+            // syntactic `::` prefix is the exception and continues across the
+            // line break (`::\nx` → `(::-pre x)`).
+            let newline_significant = !flags.inside_brackets || flags.array_mode;
+            let newline_stop = newline_significant
+                && ctx.token(ctx.skip_ws(start + 1)).map(|t| t.kind) == Some(TokKind::Newline);
+            if newline_stop && tok.kind != TokKind::ColonColon {
                 return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
             }
             // The type operators `<:`/`>:` parse their operand at the `where`
@@ -1851,10 +1864,11 @@ fn error_operator_atom(start: usize) -> ExprParse {
 /// the value-operator arm).
 /// Whether the token can head a unary prefix application: the ASCII unary
 /// operators, the syntactic prefixes `&`/`::`, the prefix-only Unicode radicals
-/// (`√ ∛ ∜ ¬`), and the unary-capable Unicode arithmetic operators `± ∓ ⋆` —
-/// the only members of their tiers Julia accepts as unary, matched by exact
-/// text (a suffixed `±₁` is not a unary prefix and falls through to the
-/// operator-call-name arm, where glued to `(` it is a plain call).
+/// (`√ ∛ ∜ ¬`), and the unary-capable Unicode arithmetic operators `± ∓ ⋆`
+/// (including their broadcast forms) — the only members of their tiers Julia
+/// accepts as unary, matched by exact text. A suffixed `±₁` is not a unary
+/// prefix and falls through to the operator-call-name arm, where glued to `(`
+/// it is a plain call.
 /// Whether `kind` is an operator that, alone in value position, is the operator
 /// used as a value atom (`+` → `+`, `.&` → `(. &)`, `:` → `:`). This is the
 /// non-syntactic operator set: undotted operator names (minus the syntactic
