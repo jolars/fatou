@@ -125,6 +125,23 @@ struct ExprFlags {
     kw_generator_body: bool,
 }
 
+/// Whether a significant newline directly follows the operator at `op_idx`, so
+/// the operator cannot reach across it for a right operand. Newlines are
+/// significant at statement scope and inside array brackets (where a newline
+/// separates rows) but not inside parentheses.
+///
+/// A trailing `# …` comment runs to the end of its line, so it must not hide the
+/// newline behind it (`1: # c⏎2` is still a bare colon then `2`); a `#= … =#`
+/// block comment is ordinary trivia and is skipped the same way.
+fn newline_stops_operand(ctx: &ParserCtx<'_>, op_idx: usize, flags: ExprFlags) -> bool {
+    let newline_significant = !flags.inside_brackets || flags.array_mode;
+    newline_significant
+        && ctx
+            .token(ctx.skip_ws_and_comments(op_idx + 1))
+            .map(|t| t.kind)
+            == Some(TokKind::Newline)
+}
+
 /// Parse one expression at statement scope (a newline after a complete operand
 /// terminates it).
 pub(crate) fn parse_expr(
@@ -1136,9 +1153,7 @@ fn parse_colon_range(
         // range, leaving the colon's right operand absent (`1:\n2` ⇒
         // `(call-i 1 : (error)) 2`, `[1:\n2]` ⇒ `(vcat (call-i 1 : (error)) 2)`),
         // unlike other operators, which continue onto the next line.
-        let newline_significant = !flags.inside_brackets || flags.array_mode;
-        let newline_stop = newline_significant
-            && ctx.token(ctx.skip_ws(op_idx + 1)).map(|t| t.kind) == Some(TokKind::Newline);
+        let newline_stop = newline_stops_operand(ctx, op_idx, flags);
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
         let rhs = if newline_stop {
             None
@@ -1497,9 +1512,7 @@ fn parse_prefix(
             // inside parentheses the newline remains insignificant. The
             // syntactic `::` prefix is the exception and continues across the
             // line break (`::\nx` → `(::-pre x)`).
-            let newline_significant = !flags.inside_brackets || flags.array_mode;
-            let newline_stop = newline_significant
-                && ctx.token(ctx.skip_ws(start + 1)).map(|t| t.kind) == Some(TokKind::Newline);
+            let newline_stop = newline_stops_operand(ctx, start, flags);
             if newline_stop && tok.kind != TokKind::ColonColon {
                 return Some(atom(SyntaxKind::OPERATOR_ATOM, start));
             }
@@ -1760,9 +1773,7 @@ fn parse_prefix(
             // `[/\nx]` ⇒ `(vcat / x)`, `?\nx` ⇒ `(error ?)` then `x`); inside
             // parens the newline is insignificant and the operand is consumed
             // (`(/\nx)` ⇒ `(call-pre (error /) x)`). Mirrors the range colon.
-            let newline_significant = !flags.inside_brackets || flags.array_mode;
-            let newline_stop = newline_significant
-                && ctx.token(ctx.skip_ws(start + 1)).map(|t| t.kind) == Some(TokKind::Newline);
+            let newline_stop = newline_stops_operand(ctx, start, flags);
             let operand = if newline_stop {
                 None
             } else {
