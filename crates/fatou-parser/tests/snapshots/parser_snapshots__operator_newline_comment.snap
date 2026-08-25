@@ -1,0 +1,102 @@
+---
+source: tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..248
+  ASSIGNMENT_EXPR@0..6
+    NAME@0..2
+      IDENT@0..2 "op"
+    WHITESPACE@2..3 " "
+    EQ@3..4 "="
+    WHITESPACE@4..5 " "
+    OPERATOR_ATOM@5..6
+      MINUS@5..6 "-"
+  WHITESPACE@6..8 "  "
+  COMMENT@8..36 "# a value, not a pref ..."
+  NEWLINE@36..37 "\n"
+  ASSIGNMENT_EXPR@37..54
+    NAME@37..43
+      IDENT@37..43 "result"
+    WHITESPACE@43..44 " "
+    EQ@44..45 "="
+    WHITESPACE@45..46 " "
+    CALL_EXPR@46..54
+      NAME@46..48
+        IDENT@46..48 "op"
+      ARG_LIST@48..54
+        LPAREN@48..49 "("
+        ARG@49..50
+          NAME@49..50
+            IDENT@49..50 "a"
+        COMMA@50..51 ","
+        WHITESPACE@51..52 " "
+        ARG@52..53
+          NAME@52..53
+            IDENT@52..53 "b"
+        RPAREN@53..54 ")"
+  NEWLINE@54..55 "\n"
+  BINARY_EXPR@55..57
+    LITERAL@55..56
+      INTEGER@55..56 "1"
+    COLON@56..57 ":"
+  WHITESPACE@57..58 " "
+  COMMENT@58..79 "# the range ends here"
+  NEWLINE@79..80 "\n"
+  LITERAL@80..81
+    INTEGER@80..81 "2"
+  NEWLINE@81..82 "\n"
+  OPERATOR_ATOM@82..83
+    SLASH@82..83 "/"
+  WHITESPACE@83..84 " "
+  COMMENT@84..122 "# a binary-only opera ..."
+  NEWLINE@122..123 "\n"
+  NAME@123..124
+    IDENT@123..124 "z"
+  NEWLINE@124..125 "\n"
+  MATRIX_EXPR@125..163
+    LBRACKET@125..126 "["
+    ARG@126..128
+      BINARY_EXPR@126..128
+        LITERAL@126..127
+          INTEGER@126..127 "1"
+        COLON@127..128 ":"
+    WHITESPACE@128..129 " "
+    COMMENT@129..160 "# a row separator sti ..."
+    NEWLINE@160..161 "\n"
+    ARG@161..162
+      LITERAL@161..162
+        INTEGER@161..162 "2"
+    RBRACKET@162..163 "]"
+  NEWLINE@163..164 "\n"
+  PAREN_EXPR@164..209
+    LPAREN@164..165 "("
+    BINARY_EXPR@165..208
+      LITERAL@165..166
+        INTEGER@165..166 "1"
+      COLON@166..167 ":"
+      WHITESPACE@167..168 " "
+      COMMENT@168..206 "# newlines are insign ..."
+      NEWLINE@206..207 "\n"
+      LITERAL@207..208
+        INTEGER@207..208 "2"
+    RPAREN@208..209 ")"
+  NEWLINE@209..210 "\n"
+  ASSIGNMENT_EXPR@210..247
+    NAME@210..211
+      IDENT@210..211 "x"
+    WHITESPACE@211..212 " "
+    EQ@212..213 "="
+    WHITESPACE@213..214 " "
+    BINARY_EXPR@214..247
+      LITERAL@214..215
+        INTEGER@214..215 "1"
+      COLON@215..216 ":"
+      WHITESPACE@216..217 " "
+      BLOCK_COMMENT@217..245 "#= trivia, not a line ..."
+      WHITESPACE@245..246 " "
+      LITERAL@246..247
+        INTEGER@246..247 "2"
+  NEWLINE@247..248 "\n"
+
+diagnostic [56..57]: expected right-hand side for operator
+diagnostic [127..128]: expected right-hand side for operator
