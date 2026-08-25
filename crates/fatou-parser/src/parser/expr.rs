@@ -2188,14 +2188,15 @@ fn parse_string_literal(
                     }
                     break;
                 }
-                // Optional suffix glued after the close delimiter of a string
-                // macro: a flag run (`r"pat"ims` → `"ims"`) or a numeric literal
-                // (`x"s"2` → an extra `2` macrocall argument). A digit-led suffix
-                // is lexed as an ordinary number, so capture it into the literal
-                // node here; the projector renders it as the trailing argument.
+                // Optional suffix glued after the close delimiter of a string or
+                // command macro: a flag run (`r"pat"ims` → `"ims"`) or a numeric
+                // literal (`x`s`2` → an extra `2` macrocall argument). A digit-led
+                // suffix is lexed as an ordinary number, so capture it into the
+                // literal node here; the projector renders it as the trailing
+                // argument.
                 let is_flag = suffix == Some(TokKind::StringSuffix);
                 let is_numeric = has_prefix
-                    && node == SyntaxKind::STRING_LITERAL
+                    && matches!(node, SyntaxKind::STRING_LITERAL | SyntaxKind::CMD_LITERAL)
                     && matches!(
                         suffix,
                         Some(TokKind::Integer | TokKind::Float | TokKind::Float32)

@@ -52,6 +52,7 @@ colon_stray_close
 colon_value_atom
 command_literal
 command_macro
+command_macro_numeric_suffix
 comments
 comparison_chains
 compound_shift_assignment

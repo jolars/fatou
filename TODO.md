@@ -2,6 +2,10 @@
 
 ## Parser
 
+- [x] Parse integer and floating-point arguments glued to prefixed command
+  literals, matching the existing string-macro behavior. This fixes ``x`s`2``
+  and ``x`s`10.0`` without treating the numeric argument as a flag string.
+
 - [x] Parse direct parenthesized anonymous-function parameters as a tuple before
   `->`, including singleton, typed, and `;` keyword-parameter forms, while
   keeping a parenthesized `where` signature transparent. This fixes

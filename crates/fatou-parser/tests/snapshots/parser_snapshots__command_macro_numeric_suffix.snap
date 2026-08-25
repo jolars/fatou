@@ -1,0 +1,19 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..15
+  CMD_LITERAL@0..5
+    STRING_PREFIX@0..1 "x"
+    CMD_DELIM_OPEN@1..2 "`"
+    STRING_CONTENT@2..3 "s"
+    CMD_DELIM_CLOSE@3..4 "`"
+    INTEGER@4..5 "2"
+  NEWLINE@5..6 "\n"
+  CMD_LITERAL@6..14
+    STRING_PREFIX@6..7 "x"
+    CMD_DELIM_OPEN@7..8 "`"
+    STRING_CONTENT@8..9 "s"
+    CMD_DELIM_CLOSE@9..10 "`"
+    FLOAT@10..14 "10.0"
+  NEWLINE@14..15 "\n"

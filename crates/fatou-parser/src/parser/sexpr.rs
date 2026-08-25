@@ -2941,6 +2941,10 @@ fn project_cmd(node: &SyntaxNode) -> String {
         } else {
             quote_raw(&suffix)
         });
+    } else if let Some(num) = numeric_suffix(node) {
+        // A glued numeric suffix (`` x`s`2 ``) is an extra macrocall argument,
+        // rendered as the numeric literal itself rather than as a flag string.
+        parts.push(num);
     }
     sexp("macrocall", parts)
 }
@@ -3072,9 +3076,9 @@ fn raw_content(node: &SyntaxNode) -> String {
         .collect()
 }
 
-/// A numeric literal token glued after a string macro's close delimiter
-/// (`x"s"2`), captured into the `STRING_LITERAL` node as a trailing macrocall
-/// argument. Returns the token's source text verbatim.
+/// A numeric literal token glued after a string or command macro's close
+/// delimiter (`x"s"2`, `` x`s`2 ``), captured into the literal node as a
+/// trailing macrocall argument. Returns the token's source text verbatim.
 fn numeric_suffix(node: &SyntaxNode) -> Option<String> {
     node.children_with_tokens()
         .filter_map(|el| el.into_token())

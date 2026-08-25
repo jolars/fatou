@@ -72,10 +72,10 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **739 allowlisted**, 17
-divergence, 0 unsupported. Dir corpus (**252 cases**): **251 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **741 allowlisted**, 15
+divergence, 0 unsupported. Dir corpus (**253 cases**): **252 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
-1.0.2 added 71 harvested cases; the 9 remaining correctable divergences are recorded
+1.0.2 added 71 harvested cases; the 7 remaining correctable divergences are recorded
 below. A green report means "no regression", not "nothing to do".
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
@@ -96,10 +96,9 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- JuliaSyntax 1.0 error/value shapes: command-macro numeric args
-  (``x`s`2``/``x`s`10.0``); bare `:=` and `.`; parenthesized `@f(x)`/`$f` function
-  signatures; quoted names in `using :A`/`using A: :b`; and
-  `function var"." end`.
+- JuliaSyntax 1.0 error/value shapes: bare `:=` and `.`; parenthesized
+  `@f(x)`/`$f` function signatures; quoted names in `using :A`/`using A: :b`;
+  and `function var"." end`.
 - `x.function` — a reserved keyword as a field name after `)`.
 - `end` inside a nested `[…]` within an index (`df[[1; 2; end:-1:3], :]`).
 - `primitive type T (18 * 8) end` — the size expr is a spaced group, not a call.
@@ -128,30 +127,31 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25 — parenthesized anonymous parameters)
+## Latest session (2026-08-25b — command-macro numeric arguments)
 
-Landed the direct-parenthesis parameter family for anonymous functions. Before
-`->`, a parenthesized value or semicolon block now becomes the parameter tuple
-that JuliaSyntax models; nested parentheses around a `where` signature remain
-transparent.
+Landed numeric arguments glued to prefixed command literals. ``x`s`2`` and
+``x`s`10.0`` now keep the number inside the command-macro node, matching the
+string-macro path and JuliaSyntax's trailing macrocall argument.
 
-- **Parser gap**: the Pratt loop contextually relabels a direct `PAREN_EXPR` or
-  `PAREN_BLOCK` left operand as `TUPLE_EXPR` when it consumes `->`. It preserves
-  the `PAREN_EXPR` shape when the nested root is `WHERE_EXPR`.
+- **Parser gap**: `parse_string_literal` captured digit-led suffix tokens only
+  for `STRING_LITERAL`; it now applies the same rule to prefixed `CMD_LITERAL`
+  nodes. The projector renders the captured numeric token as a macrocall
+  argument rather than a quoted flag.
 - **Fixtures**: added parser snapshot and oracle slug
-  `parenthesized_anonymous_function_parameters`, covering `(a; b=1) -> c`, a
-  bare keyword parameter, singleton and typed parameters, and the nested
-  `where` exception. No blocked entry was added.
-- **Counts**: JS **738/756 → 739/756** allowlisted (17 FAIL, 0 unsupported,
-  zero regressions); dir **250/251 → 251/252** allowlisted (only the existing
+  `command_macro_numeric_suffix`, covering integer and floating-point arguments.
+  No blocked entry was added.
+- **Counts**: JS **739/756 → 741/756** allowlisted (15 FAIL, 0 unsupported,
+  zero regressions); dir **251/252 → 252/253** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: command-macro numeric suffixes, ``x`s`2`` and ``x`s`10.0``—the next
-  two-case JuliaSyntax 1.0 cluster. Bare `:=` and `.` are next after it.
+- **Next**: bare `:=` and `.`—the next two-case JuliaSyntax 1.0 error/value
+  cluster. Parenthesized macro function signatures follow it.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25** — parenthesized anonymous-function parameters become tuples
+  before `->`, except for transparent `where` signatures. 739 / 251.
 - **2026-08-24b** — generator parameters after `;`: typed curlies use the
   argument-list path, while invalid parenthesized suffixes recover in-place.
   738 / 250.
