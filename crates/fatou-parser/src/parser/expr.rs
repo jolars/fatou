@@ -2596,6 +2596,9 @@ fn parse_parenthesized_leading_comma(
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
     let tokens = ctx.tokens();
+    // The scan is deliberately depth-blind: JuliaSyntax closes this recovery at
+    // the first `)` too, leaking an outer closer to the toplevel junk driver
+    // (`(,f(x))` ⇒ `(error-t ✘ f ✘ x) (error-t ✘)`).
     let mut close = junk_start;
     while ctx.token(close).map(|t| t.kind) != Some(TokKind::RParen) && ctx.token(close).is_some() {
         close += 1;
@@ -2618,6 +2621,14 @@ fn parse_parenthesized_leading_comma(
         events.push(Event::Tok(close));
         close + 1
     } else {
+        let opener = &tokens[open];
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::UnclosedParen,
+            "unclosed `(`",
+            opener.start,
+            opener.end,
+        );
         close
     };
     finish(&mut events, SyntaxKind::PAREN_EXPR);
@@ -2626,6 +2637,26 @@ fn parse_parenthesized_leading_comma(
         end,
         events,
     }
+}
+
+/// Scan from `start` to the `)` that closes the enclosing paren, skipping over
+/// balanced nested brackets so an inner `)` does not close it. Returns the index
+/// of that `)`, or the end of input when there is none.
+fn scan_to_close_paren(ctx: &ParserCtx<'_>, start: usize) -> usize {
+    let mut close = start;
+    let mut depth = 0usize;
+    while let Some(kind) = ctx.token(close).map(|t| t.kind) {
+        match kind {
+            TokKind::RParen if depth == 0 => break,
+            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        close += 1;
+    }
+    close
 }
 
 /// Parse `(body for clauses; junk)` as a parenthesized generator followed by a
@@ -2648,19 +2679,7 @@ fn parse_parenthesized_generator_junk(
 
     let junk_start = ctx.skip_trivia(pos);
     push_range(&mut events, pos, junk_start);
-    let mut close = junk_start;
-    let mut depth = 0usize;
-    while let Some(kind) = ctx.token(close).map(|t| t.kind) {
-        match kind {
-            TokKind::RParen if depth == 0 => break,
-            TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
-            TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
-                depth = depth.saturating_sub(1);
-            }
-            _ => {}
-        }
-        close += 1;
-    }
+    let close = scan_to_close_paren(ctx, junk_start);
 
     events.push(Event::Start(SyntaxKind::ERROR));
     push_range(&mut events, junk_start, close);
