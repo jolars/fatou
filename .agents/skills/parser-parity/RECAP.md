@@ -13,9 +13,8 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-- **Raw triple-string quote decoding** — `raw"""escaped \"quote\""""` retains
-  too many display escapes. Keep this separate from ordinary triple strings;
-  Julia's raw-string backslash-before-quote rules need their own treatment.
+None queued. Per `SKILL.md`, take a direct ask or probe real Julia; the deferred
+ledger below is a fallback, not a queue.
 
 ## Persistent traps & invariants
 
@@ -59,7 +58,7 @@ the parser session log.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**264 cases**): **263 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**265 cases**): **264 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -97,29 +96,29 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25m — nested macro loop arguments)
+## Latest session (2026-08-25n — raw triple-string quotes)
 
-Landed JuliaSyntax parity for nested space-form macros whose innermost macro
-takes a `for` loop argument, including DataFrames' `@inbounds @simd for ... end`.
+Landed JuliaSyntax projection parity for quotes preceded by backslash runs in
+raw triple-quoted strings.
 
-- **Parser gap**: `ExprFlags::generator_for_ends` now distinguishes a genuine
-  generator boundary from `array_mode`'s shared space sensitivity. Nested macros
-  inherit the boundary, so statement-scope `@outer @inner for ... end` gives the
-  loop to `@inner`, while nested bracket and call generators still stop before
-  `for`. No projector change.
+- **Projector gap**: the raw branch of `triple_string_parts` now applies Julia's
+  raw-string backslash-run decoding to the complete content token before
+  newline splitting and dedent, then display-escapes the resulting value. The
+  CST was already correct.
 - **Fixtures**: added parser snapshot and oracle slug
-  `nested_macro_loop_argument`, covering the DataFrames shape, a qualified inner
-  macro with multiple loop specs, and nested macros in array and call generators.
-  No blocked entry.
+  `raw_triple_string_quote`, covering one-, two-, and three-backslash runs and
+  unescaped quote siblings. No blocked entry.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **262/263 → 263/264** allowlisted (only the existing
+  regressions); dir **263/264 → 264/265** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: fix raw triple-string quote decoding.
+- **Next**: no parser-owned target is queued; probe real Julia per `SKILL.md`.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25m** — nested space-form macros give a following `for` loop to the
+  innermost macro without swallowing bracket or call generators. 748 / 263.
 - **2026-08-25l** — ordinary triple-string literal quote display, preserving
   source escapes and even backslash runs. 748 / 262.
 - **2026-08-25k** — outer-group row-major matrix continuation for plain, typed,

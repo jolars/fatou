@@ -1,0 +1,1 @@
+(toplevel (= text (macrocall @raw_str (string-s-r "escaped \"quote\"\n" "even \\\"quote\" tail\n" "odd \\\"quote\"\n" "plain \"quote\" tail\n"))))
