@@ -2,6 +2,12 @@
 
 ## Parser
 
+- [x] Parse direct parenthesized anonymous-function parameters as a tuple before
+  `->`, including singleton, typed, and `;` keyword-parameter forms, while
+  keeping a parenthesized `where` signature transparent. This fixes
+  `(a; b=1) -> c` and its siblings without changing standalone parenthesized
+  blocks.
+
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which

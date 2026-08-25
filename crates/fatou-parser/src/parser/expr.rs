@@ -776,6 +776,10 @@ fn parse_expr_in(
             break;
         }
 
+        if op_kind == TokKind::Arrow {
+            lhs = reclassify_arrow_parameters(lhs);
+        }
+
         let rhs_operand = ctx.skip_trivia(op_idx + 1);
         // Field access `a.b`: the right operand is an atom (the field name), not a
         // postfix-chained expression. A trailing `()`/`[]`/`{}` binds to the whole
@@ -997,6 +1001,34 @@ fn operator_node_kind(op_kind: TokKind) -> SyntaxKind {
         TokKind::ColonColon => SyntaxKind::TYPE_ANNOTATION,
         _ => SyntaxKind::BINARY_EXPR,
     }
+}
+
+/// Relabel a parenthesized anonymous-function signature as its parameter tuple.
+/// Parentheses ordinarily preserve value grouping, including `;` blocks, but
+/// immediately before `->` Julia interprets them as a parameter list. A `where`
+/// signature is the exception: its parentheses remain transparent so the
+/// `WHERE_EXPR` stays the arrow's direct left operand.
+fn reclassify_arrow_parameters(mut lhs: ExprParse) -> ExprParse {
+    let is_parenthesized = matches!(
+        lhs.events.first(),
+        Some(Event::Start(
+            SyntaxKind::PAREN_EXPR | SyntaxKind::PAREN_BLOCK
+        ))
+    );
+    let wraps_where = lhs
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Start(kind) => Some(*kind),
+            Event::Tok(_) | Event::Finish => None,
+        })
+        .skip(1)
+        .find(|kind| *kind != SyntaxKind::PAREN_EXPR)
+        == Some(SyntaxKind::WHERE_EXPR);
+    if is_parenthesized && !wraps_where {
+        lhs.events[0] = Event::Start(SyntaxKind::TUPLE_EXPR);
+    }
+    lhs
 }
 
 /// Build an operator node whose right operand is absent: `lhs`, then the gap
