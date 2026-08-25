@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Recover quoted symbols used as whole import paths or imported names.
+  `using :A` and `using A: :b` now keep an error-wrapped quote inside the
+  `IMPORT_PATH`, including parenthesized and spaced forms, while dotted quoted
+  components remain valid.
+
 - [x] Recover singleton parenthesized macro-call and interpolation function
   signatures as invalid parameter tuples. This adds JuliaSyntax's `(error …)`
   wrapper for `function (@f(x)) end` and `function ($f) end` while preserving

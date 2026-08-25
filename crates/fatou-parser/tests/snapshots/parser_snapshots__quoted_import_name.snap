@@ -1,0 +1,160 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..172
+  USING_STMT@0..8
+    USING_KW@0..5 "using"
+    WHITESPACE@5..6 " "
+    IMPORT_PATH@6..8
+      ERROR@6..8
+        QUOTE_SYM@6..8
+          COLON@6..7 ":"
+          NAME@7..8
+            IDENT@7..8 "A"
+  NEWLINE@8..9 "\n"
+  USING_STMT@9..20
+    USING_KW@9..14 "using"
+    WHITESPACE@14..15 " "
+    IMPORT_PATH@15..16
+      IDENT@15..16 "A"
+    COLON@16..17 ":"
+    WHITESPACE@17..18 " "
+    IMPORT_PATH@18..20
+      ERROR@18..20
+        QUOTE_SYM@18..20
+          COLON@18..19 ":"
+          NAME@19..20
+            IDENT@19..20 "b"
+  NEWLINE@20..21 "\n"
+  IMPORT_STMT@21..30
+    IMPORT_KW@21..27 "import"
+    WHITESPACE@27..28 " "
+    IMPORT_PATH@28..30
+      ERROR@28..30
+        QUOTE_SYM@28..30
+          COLON@28..29 ":"
+          NAME@29..30
+            IDENT@29..30 "A"
+  NEWLINE@30..31 "\n"
+  IMPORT_STMT@31..43
+    IMPORT_KW@31..37 "import"
+    WHITESPACE@37..38 " "
+    IMPORT_PATH@38..39
+      IDENT@38..39 "A"
+    COLON@39..40 ":"
+    WHITESPACE@40..41 " "
+    IMPORT_PATH@41..43
+      ERROR@41..43
+        QUOTE_SYM@41..43
+          COLON@41..42 ":"
+          NAME@42..43
+            IDENT@42..43 "b"
+  NEWLINE@43..44 "\n"
+  USING_STMT@44..54
+    USING_KW@44..49 "using"
+    WHITESPACE@49..50 " "
+    IMPORT_PATH@50..54
+      LPAREN@50..51 "("
+      ERROR@51..53
+        QUOTE_SYM@51..53
+          COLON@51..52 ":"
+          NAME@52..53
+            IDENT@52..53 "C"
+      RPAREN@53..54 ")"
+  NEWLINE@54..55 "\n"
+  USING_STMT@55..68
+    USING_KW@55..60 "using"
+    WHITESPACE@60..61 " "
+    IMPORT_PATH@61..62
+      IDENT@61..62 "A"
+    COLON@62..63 ":"
+    WHITESPACE@63..64 " "
+    IMPORT_PATH@64..68
+      ERROR@64..68
+        QUOTE_SYM@64..68
+          COLON@64..65 ":"
+          PAREN_EXPR@65..68
+            LPAREN@65..66 "("
+            NAME@66..67
+              IDENT@66..67 "d"
+            RPAREN@67..68 ")"
+  NEWLINE@68..69 "\n"
+  USING_STMT@69..82
+    USING_KW@69..74 "using"
+    WHITESPACE@74..75 " "
+    IMPORT_PATH@75..76
+      IDENT@75..76 "A"
+    COLON@76..77 ":"
+    WHITESPACE@77..78 " "
+    IMPORT_PATH@78..82
+      LPAREN@78..79 "("
+      ERROR@79..81
+        QUOTE_SYM@79..81
+          COLON@79..80 ":"
+          NAME@80..81
+            IDENT@80..81 "e"
+      RPAREN@81..82 ")"
+  NEWLINE@82..83 "\n"
+  USING_STMT@83..92
+    USING_KW@83..88 "using"
+    WHITESPACE@88..89 " "
+    IMPORT_PATH@89..92
+      ERROR@89..92
+        QUOTE_SYM@89..92
+          COLON@89..90 ":"
+          WHITESPACE@90..91 " "
+          NAME@91..92
+            IDENT@91..92 "F"
+  NEWLINE@92..93 "\n"
+  NEWLINE@93..94 "\n"
+  COMMENT@94..134 "# Dotted quoted compo ..."
+  NEWLINE@134..135 "\n"
+  USING_STMT@135..146
+    USING_KW@135..140 "using"
+    WHITESPACE@140..141 " "
+    IMPORT_PATH@141..142
+      IDENT@141..142 "A"
+    COLON@142..143 ":"
+    WHITESPACE@143..144 " "
+    IMPORT_PATH@144..146
+      ERROR@144..146
+        QUOTE_SYM@144..146
+          COLON@144..145 ":"
+          PLUS@145..146 "+"
+  NEWLINE@146..147 "\n"
+  IMPORT_STMT@147..158
+    IMPORT_KW@147..153 "import"
+    WHITESPACE@153..154 " "
+    IMPORT_PATH@154..158
+      IDENT@154..155 "A"
+      DOT@155..156 "."
+      QUOTE_SYM@156..158
+        COLON@156..157 ":"
+        PLUS@157..158 "+"
+  NEWLINE@158..159 "\n"
+  USING_STMT@159..171
+    USING_KW@159..164 "using"
+    WHITESPACE@164..165 " "
+    IMPORT_PATH@165..171
+      IDENT@165..166 "A"
+      DOT@166..167 "."
+      PAREN_EXPR@167..171
+        LPAREN@167..168 "("
+        QUOTE_SYM@168..170
+          COLON@168..169 ":"
+          NAME@169..170
+            IDENT@169..170 "f"
+        RPAREN@170..171 ")"
+  NEWLINE@171..172 "\n"
+
+diagnostic [6..7]: quoted symbol is not a valid import name
+diagnostic [18..19]: quoted symbol is not a valid import name
+diagnostic [28..29]: quoted symbol is not a valid import name
+diagnostic [41..42]: quoted symbol is not a valid import name
+diagnostic [51..52]: quoted symbol is not a valid import name
+diagnostic [64..65]: quoted symbol is not a valid import name
+diagnostic [79..80]: quoted symbol is not a valid import name
+diagnostic [90..90]: whitespace after `:`
+diagnostic [89..90]: quoted symbol is not a valid import name
+diagnostic [144..145]: quoted symbol is not a valid import name

@@ -150,6 +150,11 @@ pub enum DiagnosticKind {
     LoneOperator,
     /// An `as` rename invalid in this position (`using A as B`).
     InvalidAsAlias,
+    /// A quoted symbol used as a whole import path or an imported name
+    /// (`using :A`, `using A: :b`). JuliaSyntax keeps the quote inside the
+    /// `importpath` but error-wraps it. Dotted quoted components (`using A.:b`)
+    /// remain valid. Anchored at the quote colon.
+    InvalidQuotedImportName,
     MissingOperand,
     MissingWhereBound,
     MissingStruct,
@@ -250,6 +255,7 @@ impl DiagnosticKind {
             | InvalidPostfixOperator
             | LoneOperator
             | InvalidAsAlias
+            | InvalidQuotedImportName
             | MissingOperand
             | MissingWhereBound
             | MissingStruct

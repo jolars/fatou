@@ -1159,6 +1159,16 @@ fn parse_import_path(
                 None => return start,
             }
         }
+        Some(TokKind::Colon)
+            if parse_quote_sym(ctx, i, &mut Vec::new(), false, false, false, false).is_some() =>
+        {
+            // A quoted symbol may occupy a whole clause (`using :A`) or a name
+            // after the base/list separator (`using A: :b`). JuliaSyntax keeps
+            // it in the path but rejects the quoted name; this also prevents the
+            // quote colon from being mistaken for an import-list separator.
+            i = push_invalid_quoted_import_name(ctx, &mut body, i, diagnostics)
+                .expect("guarded quoted import name");
+        }
         Some(k) if is_op_name(k) || is_unicode_op_name(k) || is_dotted_op_name(k) => {
             // A leading operator name. A fused dotted operator (`import .==`,
             // `import .⋆`) carries a relative-import `.` the projector splits out.
@@ -1179,6 +1189,19 @@ fn parse_import_path(
             body.push(Event::Tok(op));
             body.push(Event::Finish);
             push_range(&mut body, op + 1, rparen);
+            body.push(Event::Tok(rparen)); // `)`
+            i = rparen + 1;
+        }
+        Some(TokKind::LParen) if paren_quoted_import_name(ctx, i).is_some() => {
+            // Parentheses around a quoted import name are punctuation in the
+            // oracle shape (`using (:A)` has the same path as `using :A`).
+            let (colon, rparen) =
+                paren_quoted_import_name(ctx, i).expect("guarded by `paren_quoted_import_name`");
+            body.push(Event::Tok(i)); // `(`
+            push_range(&mut body, i + 1, colon);
+            let end = push_invalid_quoted_import_name(ctx, &mut body, colon, diagnostics)
+                .expect("guarded quoted import name");
+            push_range(&mut body, end, rparen);
             body.push(Event::Tok(rparen)); // `)`
             i = rparen + 1;
         }
@@ -1295,6 +1318,40 @@ fn parse_import_path(
     events.extend(body);
     events.push(Event::Finish);
     i
+}
+
+/// Parse and error-wrap a quoted symbol used as an import-path name.
+fn push_invalid_quoted_import_name(
+    ctx: &ParserCtx<'_>,
+    body: &mut Vec<Event>,
+    colon: usize,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) -> Option<usize> {
+    let quote = parse_quote_sym(ctx, colon, diagnostics, false, false, false, false)?;
+    body.push(Event::Start(SyntaxKind::ERROR));
+    body.extend(quote.events);
+    body.push(Event::Finish);
+
+    let token = &ctx.tokens()[colon];
+    push_diagnostic(
+        diagnostics,
+        DiagnosticKind::InvalidQuotedImportName,
+        "quoted symbol is not a valid import name",
+        token.start,
+        token.end,
+    );
+    Some(quote.end)
+}
+
+/// Find a parenthesized quoted symbol used as one import-path name.
+fn paren_quoted_import_name(ctx: &ParserCtx<'_>, lparen: usize) -> Option<(usize, usize)> {
+    let colon = ctx.skip_ws(lparen + 1);
+    if ctx.token(colon)?.kind != TokKind::Colon {
+        return None;
+    }
+    let quote = parse_quote_sym(ctx, colon, &mut Vec::new(), false, false, false, false)?;
+    let rparen = ctx.skip_ws(quote.end);
+    (ctx.token(rparen)?.kind == TokKind::RParen).then_some((colon, rparen))
 }
 
 /// A `(op)` group at `lparen_idx` naming a single operator, as an import clause
