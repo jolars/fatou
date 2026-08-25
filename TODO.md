@@ -31,6 +31,17 @@
   fragment `parse()` misparses those today. A pure optimization on top of a
   sound stage 2–4.
 
+## Formatter
+
+- [x] Gate canonical spacing for labeled `break`/`continue`, including a
+  labeled `break` with a value expression and occurrences nested in binary and
+  ternary expressions. Fixture `labeled_break_continue`.
+
+- [ ] Consume the parser-parity handoff for splats after a closing bracket.
+  The parser now reparses `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`,
+  `f(A{T}...)`, and `f([1, 2]...)` cleanly, so drop `lower_splat`'s stale
+  `ends_in_bracket` fallback and widen `splat_spacing`.
+
 ## Linter
 
 ### Rules
