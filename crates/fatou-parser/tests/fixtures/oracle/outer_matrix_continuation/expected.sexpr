@@ -1,0 +1,1 @@
+(toplevel (ncat-3 (row a b) (row c d)) (typed_ncat-3 T (row a b) (row c d)) (bracescat (nrow-3 (row a b) (row c d))) (ncat-3 (row a b) (row c d e)) (ncat-3 a (nrow-2 c d)) (ncat-3 (row a b) (nrow-1 c d)))

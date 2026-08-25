@@ -1,0 +1,180 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..108
+  MATRIX_EXPR@0..17
+    LBRACKET@0..1 "["
+    MATRIX_ROW@1..4
+      ARG@1..2
+        NAME@1..2
+          IDENT@1..2 "a"
+      WHITESPACE@2..3 " "
+      ARG@3..4
+        NAME@3..4
+          IDENT@3..4 "b"
+    WHITESPACE@4..5 " "
+    SEMICOLON@5..6 ";"
+    SEMICOLON@6..7 ";"
+    SEMICOLON@7..8 ";"
+    WHITESPACE@8..9 " "
+    MATRIX_ROW@9..16
+      ARG@9..10
+        NAME@9..10
+          IDENT@9..10 "c"
+      WHITESPACE@10..11 " "
+      SEMICOLON@11..12 ";"
+      SEMICOLON@12..13 ";"
+      NEWLINE@13..14 "\n"
+      WHITESPACE@14..15 " "
+      ARG@15..16
+        NAME@15..16
+          IDENT@15..16 "d"
+    RBRACKET@16..17 "]"
+  NEWLINE@17..18 "\n"
+  TYPED_MATRIX_EXPR@18..36
+    NAME@18..19
+      IDENT@18..19 "T"
+    MATRIX_EXPR@19..36
+      LBRACKET@19..20 "["
+      MATRIX_ROW@20..23
+        ARG@20..21
+          NAME@20..21
+            IDENT@20..21 "a"
+        WHITESPACE@21..22 " "
+        ARG@22..23
+          NAME@22..23
+            IDENT@22..23 "b"
+      WHITESPACE@23..24 " "
+      SEMICOLON@24..25 ";"
+      SEMICOLON@25..26 ";"
+      SEMICOLON@26..27 ";"
+      WHITESPACE@27..28 " "
+      MATRIX_ROW@28..35
+        ARG@28..29
+          NAME@28..29
+            IDENT@28..29 "c"
+        WHITESPACE@29..30 " "
+        SEMICOLON@30..31 ";"
+        SEMICOLON@31..32 ";"
+        NEWLINE@32..33 "\n"
+        WHITESPACE@33..34 " "
+        ARG@34..35
+          NAME@34..35
+            IDENT@34..35 "d"
+      RBRACKET@35..36 "]"
+  NEWLINE@36..37 "\n"
+  BRACESCAT_EXPR@37..54
+    LBRACE@37..38 "{"
+    MATRIX_ROW@38..41
+      ARG@38..39
+        NAME@38..39
+          IDENT@38..39 "a"
+      WHITESPACE@39..40 " "
+      ARG@40..41
+        NAME@40..41
+          IDENT@40..41 "b"
+    WHITESPACE@41..42 " "
+    SEMICOLON@42..43 ";"
+    SEMICOLON@43..44 ";"
+    SEMICOLON@44..45 ";"
+    WHITESPACE@45..46 " "
+    MATRIX_ROW@46..53
+      ARG@46..47
+        NAME@46..47
+          IDENT@46..47 "c"
+      WHITESPACE@47..48 " "
+      SEMICOLON@48..49 ";"
+      SEMICOLON@49..50 ";"
+      NEWLINE@50..51 "\n"
+      WHITESPACE@51..52 " "
+      ARG@52..53
+        NAME@52..53
+          IDENT@52..53 "d"
+    RBRACE@53..54 "}"
+  NEWLINE@54..55 "\n"
+  MATRIX_EXPR@55..74
+    LBRACKET@55..56 "["
+    MATRIX_ROW@56..59
+      ARG@56..57
+        NAME@56..57
+          IDENT@56..57 "a"
+      WHITESPACE@57..58 " "
+      ARG@58..59
+        NAME@58..59
+          IDENT@58..59 "b"
+    WHITESPACE@59..60 " "
+    SEMICOLON@60..61 ";"
+    SEMICOLON@61..62 ";"
+    SEMICOLON@62..63 ";"
+    WHITESPACE@63..64 " "
+    MATRIX_ROW@64..73
+      ARG@64..65
+        NAME@64..65
+          IDENT@64..65 "c"
+      WHITESPACE@65..66 " "
+      SEMICOLON@66..67 ";"
+      SEMICOLON@67..68 ";"
+      NEWLINE@68..69 "\n"
+      WHITESPACE@69..70 " "
+      ARG@70..71
+        NAME@70..71
+          IDENT@70..71 "d"
+      WHITESPACE@71..72 " "
+      ARG@72..73
+        NAME@72..73
+          IDENT@72..73 "e"
+    RBRACKET@73..74 "]"
+  NEWLINE@74..75 "\n"
+  MATRIX_EXPR@75..90
+    LBRACKET@75..76 "["
+    ARG@76..77
+      NAME@76..77
+        IDENT@76..77 "a"
+    WHITESPACE@77..78 " "
+    SEMICOLON@78..79 ";"
+    SEMICOLON@79..80 ";"
+    SEMICOLON@80..81 ";"
+    WHITESPACE@81..82 " "
+    MATRIX_ROW@82..89
+      ARG@82..83
+        NAME@82..83
+          IDENT@82..83 "c"
+      WHITESPACE@83..84 " "
+      SEMICOLON@84..85 ";"
+      SEMICOLON@85..86 ";"
+      NEWLINE@86..87 "\n"
+      WHITESPACE@87..88 " "
+      ARG@88..89
+        NAME@88..89
+          IDENT@88..89 "d"
+    RBRACKET@89..90 "]"
+  NEWLINE@90..91 "\n"
+  MATRIX_EXPR@91..107
+    LBRACKET@91..92 "["
+    MATRIX_ROW@92..95
+      ARG@92..93
+        NAME@92..93
+          IDENT@92..93 "a"
+      WHITESPACE@93..94 " "
+      ARG@94..95
+        NAME@94..95
+          IDENT@94..95 "b"
+    WHITESPACE@95..96 " "
+    SEMICOLON@96..97 ";"
+    SEMICOLON@97..98 ";"
+    SEMICOLON@98..99 ";"
+    WHITESPACE@99..100 " "
+    MATRIX_ROW@100..106
+      ARG@100..101
+        NAME@100..101
+          IDENT@100..101 "c"
+      WHITESPACE@101..102 " "
+      SEMICOLON@102..103 ";"
+      NEWLINE@103..104 "\n"
+      WHITESPACE@104..105 " "
+      ARG@105..106
+        NAME@105..106
+          IDENT@105..106 "d"
+    RBRACKET@106..107 "]"
+  NEWLINE@107..108 "\n"
