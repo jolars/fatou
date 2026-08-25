@@ -110,8 +110,6 @@ Error shapes, deferred (in scope, just low-value — see `SKILL.md`'s ranking):
 precedence); toplevel `const x = 1 for i in 1:1`; `@m const x = 1 for … end`
 macro space-arg; `else #= c =# if x`; trailing comma at EOF (`x = a,`); `2macro`
 trailing-junk glyph drop; `@M.(x) y` (macro args after a broadcast);
-parenthesized leading commas `(,x)`/`(,)`/`(,,)` (JuliaSyntax makes one flat
-`error-t` run, not a tuple);
 for/let/module/struct/try/do block junk (sibling `ERROR` is in the CST but those
 projectors don't emit it); `outer x=1`
 stop-at-`=`; bare `struct` keyword; `begin`/`while` empty body (`while end`
@@ -123,28 +121,29 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25g — leading empty list slots)
+## Latest session (2026-08-25h — parenthesized leading commas)
 
-Landed leading empty-slot recovery for bracket- and brace-delimited lists and
-call arguments. `[,x]`, `A[,x]`, and `{,x}` now retain a zero-width `(error)`
-element; `f(,x)` retains the comma and suffix as one trailing-junk run.
+Landed flat recovery for parenthesized payloads beginning with a comma. `(,x)`,
+`(,)`, and `(,,)` now project as `(error-t ✘ x)`, `(error-t ✘)`, and
+`(error-t ✘ ✘)` rather than nested tuples followed by a stray closer.
 
-- **Error shape**: added `EmptyListSlot` at a leading comma, counted the missing
-  element for repeated-comma recovery, and taught the projector to replay the
-  recorded diagnostic in argument order. Calls use the existing trailing-junk
-  recovery instead.
-- **Fixtures**: added parser snapshot and oracle slug `leading_empty_list_slot`.
-  No blocked entry was added.
+- **Error shape**: `parse_paren` now wraps the comma-led payload in one `ERROR`
+  child of `PAREN_EXPR` and records the existing `TrailingJunk` diagnostic. The
+  projector needed no change.
+- **Fixtures**: added parser snapshot and oracle slug
+  `parenthesized_leading_comma`. No blocked entry was added.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **256/257 → 257/258** allowlisted (only the existing
+  regressions); dir **257/258 → 258/259** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: parenthesized leading commas (`(,x)`, `(,)`, `(,,)`), which recover
-  as a flat `(error-t …)` run rather than a tuple in JuliaSyntax.
+- **Next**: spaced non-unary operators such as `* (a, b)` and `≠ (a, b)`, the
+  highest-ranked unimplemented cluster in the deferred ledger.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25g** — leading empty slots in bracket/brace lists and call-argument
+  recovery. 748 / 257.
 - **2026-08-25f** — `var"…"` names work as empty-body `function`/`macro`
   forward declarations and invalid body-bearing bare signatures. 748 / 256.
 - **2026-08-25e** — quoted import names stay within `IMPORT_PATH` with
