@@ -1914,11 +1914,8 @@ fn project_let_bindings(node: &SyntaxNode) -> Vec<String> {
 }
 
 fn project_do(node: &SyntaxNode) -> String {
-    let call = node
-        .children()
-        .next()
-        .map(|c| project(&c))
-        .unwrap_or_default();
+    let head = node.children().next();
+    let call = head.as_ref().map(project).unwrap_or_default();
     let params = match node.children().find(|c| c.kind() == DO_PARAMS) {
         Some(p) => sexp("tuple", do_param_strings(&p)),
         None => "(tuple)".to_string(),
@@ -1926,20 +1923,27 @@ fn project_do(node: &SyntaxNode) -> String {
     let block = project_block_child(node);
     let mut do_parts = vec![params, block];
     push_trailing_errors(node, &mut do_parts);
-    let do_clause = sexp("do", do_parts);
-    append_sexp_arg(call, &do_clause)
+    // Julia accepts `do` only after a call, and splices the clause in as that
+    // call's last argument (`f(x) do y … end` ⇒ `(call f x (do …))`). Any other
+    // head is `invalid "do" syntax`; keep the whole clause as an outer `do` node
+    // there rather than splicing an extra child into a field access or index.
+    if head.is_some_and(|h| matches!(h.kind(), CALL_EXPR | DOT_CALL_EXPR | MACRO_CALL)) {
+        let do_clause = sexp("do", do_parts);
+        return append_sexp_arg(call, &do_clause);
+    }
+    let mut parts = vec![call];
+    parts.append(&mut do_parts);
+    sexp("do", parts)
 }
 
+/// Splice `arg` in as the last child of an already-projected call form.
 fn append_sexp_arg(mut outer: String, arg: &str) -> String {
-    if outer.ends_with(')') {
-        outer.pop();
-        outer.push(' ');
-        outer.push_str(arg);
-        outer.push(')');
-        outer
-    } else {
-        sexp("do", vec![outer, arg.to_string()])
-    }
+    debug_assert!(outer.ends_with(')'), "call projection is a list");
+    outer.pop();
+    outer.push(' ');
+    outer.push_str(arg);
+    outer.push(')');
+    outer
 }
 
 fn do_param_strings(node: &SyntaxNode) -> Vec<String> {
@@ -3542,4 +3546,47 @@ fn is_delimiter(kind: SyntaxKind) -> bool {
 /// kept like any other operand.
 fn is_keyword(kind: SyntaxKind) -> bool {
     kind.is_keyword() && !matches!(kind, TRUE_KW | FALSE_KW)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::parser::{parse, to_juliasyntax_sexpr};
+
+    fn sexpr(src: &str) -> String {
+        let output = parse(src);
+        to_juliasyntax_sexpr(&output.cst, &output.diagnostics)
+    }
+
+    /// Julia accepts `do` only after a parenthesized call, and splices the clause
+    /// in as that call's last argument.
+    #[test]
+    fn do_clause_joins_a_call_head() {
+        assert_eq!(
+            sexpr("f(1) do x\nend\n"),
+            "(toplevel (call f 1 (do (tuple x) (block))))"
+        );
+        assert_eq!(
+            sexpr("@m(x) do y\nend\n"),
+            "(toplevel (macrocall-p @m x (do (tuple y) (block))))"
+        );
+    }
+
+    /// Any other head is `invalid "do" syntax`. Recovery keeps the head as the
+    /// `do` node's first child rather than splicing an extra child into a node
+    /// that is not a call.
+    #[test]
+    fn do_clause_wraps_a_non_call_head() {
+        assert_eq!(
+            sexpr("a.b do x\nend\n"),
+            "(toplevel (do (. a b) (tuple x) (block)))"
+        );
+        assert_eq!(
+            sexpr("f[1] do x\nend\n"),
+            "(toplevel (do (ref f 1) (tuple x) (block)))"
+        );
+        assert_eq!(
+            sexpr("f do x\nend\n"),
+            "(toplevel (do f (tuple x) (block)))"
+        );
+    }
 }
