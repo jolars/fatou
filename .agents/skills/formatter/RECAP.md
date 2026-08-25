@@ -140,31 +140,19 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (splat after a closing bracket)
+## Latest session (left division)
 
-`feat(formatter)`. Removed `lower_splat`'s stale bracket-ending fallback now
-that the parser accepts snug splats after calls, indexes, parens, curly
-applications, and collections. `splat_parts` centralizes the transparent-safe
-shape check for lowering and hug classification.
+`test(formatter)`. Gated `\` as an ordinary spaced binary operator. Fixture
+`left_division` covers unspaced and already spaced input, a wide homogeneous
+chain, and a mixed `*`/`\`/`/` chain; the latter proves uniform width-driven
+breaks across the shared multiplication tier. The generic binary rule already
+produced the approved form, so no formatter code changed. Gate is 122 of 150.
+Focused fixture gate, stability, full workspace suite, clippy, and fmt are
+green. No parser/lexer blocker.
 
-The user chose to make a splat around a bracketed operand hug-transparent. The
-shared hug paths now carry an optional postfix suffix after the hugged body's
-close, covering positional and keyword arguments, collections, and the
-ungrouped collection reflow used by indexes. `splat_spacing` covers all five
-newly safe operand families, recursive normalization, a wide sole-call hug, a
-keyword hug, a collection hug, and an indexed collection hug. Gate remains
-121 of 149. Focused fixture gate, stability, full workspace suite, clippy, fmt,
-and the formatter Wasm build are green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) gate left-division `\` as a normal spaced binary
-operator; (2) gate `typegroup` block layout; (3) minor debt #2.
+**Ranked next targets:** (1) gate `typegroup` block layout; (2) minor debt #2.
 
 ## Parser dependencies and follow-ups
-
-**RESOLVED parser-side; formatter fixture pending:** left division `\` is a
-normal spaced binary operator (`A\b` → `A \ b`) and needs no
-`is_tight_binop` entry. The generic binary rule should handle it; author and
-gate representative spacing and continuation cases.
 
 Everything else handed off has been resolved parser-side: the `<--`/`<-->` arrow
 family, the newline-broken braces comprehension, newline-after-comma, the
@@ -197,6 +185,9 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Splat after a closing bracket** (`feat`): removed the stale parser fallback
+  and made splats hug-transparent around sole bracketed operands. Gate stayed
+  121.
 - **Labeled `break`/`continue` spacing** (`test`): gated single spaces around
   labels and values, including nested binary/ternary forms. 120→121.
 - **Only a sole trailing item hugs; bracket-valued pairs absorb the arrow-tier

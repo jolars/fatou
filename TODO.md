@@ -47,9 +47,9 @@
   `ends_in_bracket` fallback and widen `splat_spacing`. A splat around a sole
   huggable item is hug-transparent, so `...` rides the inner closing bracket.
 
-- [ ] Gate left-division `\` as a normal spaced binary operator (`A\b` →
-  `A \ b`). The generic binary rule should already format it; add a
-  hand-authored formatter fixture that proves spacing and width behavior.
+- [x] Gate left-division `\` as a normal spaced binary operator (`A\b` →
+  `A \ b`). Fixture `left_division` proves canonical spacing, width-driven
+  continuation, and uniform breaks across the shared `*`/`\`/`/` tier.
 
 ## Linter
 
