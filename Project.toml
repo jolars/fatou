@@ -3,7 +3,7 @@
 # the repo activates this project (via `JULIA_PROJECT=@.` in the devenv shell;
 # the oracle regen scripts also activate it explicitly).
 #
-# The differential parser oracle's JuliaSyntax is pinned exactly (`=0.4.10`); its
+# The differential parser oracle's JuliaSyntax is pinned exactly (`=1.0.2`); its
 # resolved version is mirrored into `crates/fatou-parser/tests/fixtures/oracle/.juliasyntax-source`
 # by the regen scripts. The remaining packages are logo/formatter-comparison
 # tooling and float to whatever the resolver picks (locked in `Manifest.toml`).

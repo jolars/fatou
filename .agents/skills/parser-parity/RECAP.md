@@ -74,8 +74,8 @@ display. Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully executed.
 
 Permanent (never "fix"): **float-literal display** (`2.`/`1f0`/hex floats/
 `1.0e-1000`/`x.3` — needs Julia's `show`); **n-ary juxtaposition** `(2)(3)x`;
-**`x 'y`** char lexing (needs bracket-depth-aware `'`). These account for 8 of
-the 13 remaining JS FAILs.
+**`x 'y`** char lexing (needs bracket-depth-aware `'`). These account for all 8
+remaining JS FAILs.
 
 Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
 mixed `a < b isa c` stay nested (separate `word_operator` branch).
