@@ -49,6 +49,11 @@ Development uses Nix/devenv. Julia packages are Pkg-managed through the root
 oracle/table generation, not normal Rust build and test flows. Remote session
 bootstrap may continue when Julia cannot be provisioned.
 
+Noninteractive agent shells may not inherit the Fish/direnv hook. Verify that
+the project environment is active before running repository tools; otherwise,
+invoke them with `devenv shell -- <command>` instead of relying on a global
+toolchain.
+
 ### Build and test workflow
 
 ```sh
