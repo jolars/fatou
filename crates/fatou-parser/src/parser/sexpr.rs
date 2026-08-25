@@ -590,7 +590,7 @@ fn operator_func_repr(kind: SyntaxKind) -> String {
 /// the final character is sufficient.
 fn op_has_suffix(text: &str) -> bool {
     text.chars()
-        .last()
+        .next_back()
         .is_some_and(super::lexer::is_op_suffix_char)
 }
 
