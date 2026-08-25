@@ -762,17 +762,16 @@ fn project_binary(node: &SyntaxNode) -> String {
         return s;
     }
     match infix_head(op.kind()) {
-        // JuliaSyntax 1.0 represents field names directly (`f.x` → `(. f x)`) and
-        // keeps an interpolated field as the `$` node (`f.$x` → `(. f ($ x))`).
-        InfixHead::Dot if rhs.kind() == INTERPOLATION => {
-            format!("(. {lhs} {dot_error}{rhs_str})")
+        // JuliaSyntax 1.0 represents field names directly, without a `(quote …)`
+        // wrapper: a plain field is its bare name (`f.x` → `(. f x)`), and every
+        // other right operand — an interpolation (`f.$x` → `(. f ($ x))`), an
+        // already-quoted symbol (`a.:b` → `(. a (quote-: b))`), a `var"…"` name,
+        // or a recovered error operand — projects as itself. Only a `NAME` goes
+        // through the name path, whose token search would drop anything else.
+        InfixHead::Dot if rhs.kind() == NAME => {
+            format!("(. {lhs} {dot_error}{})", name_text(rhs))
         }
-        // A quoted field name (`a.:b`) is already a `(quote-: …)` symbol; emit it
-        // directly rather than wrapping it in another `(quote …)`.
-        InfixHead::Dot if rhs.kind() == QUOTE_SYM => {
-            format!("(. {lhs} {dot_error}{rhs_str})")
-        }
-        InfixHead::Dot => format!("(. {lhs} {dot_error}{})", name_text(rhs)),
+        InfixHead::Dot => format!("(. {lhs} {dot_error}{rhs_str})"),
         // Non-dot heads are handled by `infix_call_string` above.
         _ => unreachable!("non-dot infix head handled by infix_call_string"),
     }
@@ -3486,7 +3485,9 @@ fn project_flat(elems: Vec<SyntaxElement>) -> String {
                 InfixHead::CallI(text) => format!("(call-i {l} {text} {r})"),
                 InfixHead::Special(text) => format!("({text} {l} {r})"),
                 InfixHead::DotCallI(text) => format!("(dotcall-i {l} {text} {r})"),
-                InfixHead::Dot => format!("(. {l} (quote {r}))"),
+                // JuliaSyntax 1.0 represents field names directly, without the
+                // `(quote …)` wrapper; mirrors the node path in `project_infix`.
+                InfixHead::Dot => format!("(. {l} {r})"),
             }
         }
         _ => elems
@@ -3587,6 +3588,26 @@ mod tests {
         assert_eq!(
             sexpr("f do x\nend\n"),
             "(toplevel (do f (tuple x) (block)))"
+        );
+    }
+
+    /// JuliaSyntax 1.0 drops the `(quote …)` wrapper around a field name, so
+    /// every non-`NAME` right operand has to project as itself rather than being
+    /// squeezed through the name path.
+    #[test]
+    fn field_access_keeps_a_non_name_right_operand() {
+        assert_eq!(sexpr("f.x\n"), "(toplevel (. f x))");
+        assert_eq!(sexpr("f.function\n"), "(toplevel (. f function))");
+        assert_eq!(sexpr("f.:b\n"), "(toplevel (. f (quote-: b)))");
+        assert_eq!(sexpr("f.$x\n"), "(toplevel (. f ($ x)))");
+        assert_eq!(sexpr("x.var\"a b\"\n"), "(toplevel (. x (var a b)))");
+        // A recovered operand still reaches the output well-formed. The shape
+        // itself is a known parser divergence (JuliaSyntax reads a dotted
+        // Unicode assignment as `(.\u{2254} x y)`); this only pins that the
+        // projection stays well-formed and keeps the right operand.
+        assert_eq!(
+            sexpr("x .\u{2254} y\n"),
+            "(toplevel (. x (error-t) (call-pre (error \u{2254}) y)))"
         );
     }
 }
