@@ -1,0 +1,107 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..142
+  FUNCTION_DEF@0..19
+    FUNCTION_KW@0..8 "function"
+    WHITESPACE@8..9 " "
+    SIGNATURE@9..15
+      NONSTANDARD_IDENTIFIER@9..15
+        STRING_PREFIX@9..12 "var"
+        STRING_DELIM_OPEN@12..13 "\""
+        STRING_CONTENT@13..14 "x"
+        STRING_DELIM_CLOSE@14..15 "\""
+    BLOCK@15..16
+      WHITESPACE@15..16 " "
+    END_KW@16..19 "end"
+  NEWLINE@19..20 "\n"
+  FUNCTION_DEF@20..39
+    FUNCTION_KW@20..28 "function"
+    WHITESPACE@28..29 " "
+    SIGNATURE@29..35
+      NONSTANDARD_IDENTIFIER@29..35
+        STRING_PREFIX@29..32 "var"
+        STRING_DELIM_OPEN@32..33 "\""
+        STRING_CONTENT@33..34 "."
+        STRING_DELIM_CLOSE@34..35 "\""
+    BLOCK@35..36
+      WHITESPACE@35..36 " "
+    END_KW@36..39 "end"
+  NEWLINE@39..40 "\n"
+  MACRO_DEF@40..56
+    MACRO_KW@40..45 "macro"
+    WHITESPACE@45..46 " "
+    SIGNATURE@46..52
+      NONSTANDARD_IDENTIFIER@46..52
+        STRING_PREFIX@46..49 "var"
+        STRING_DELIM_OPEN@49..50 "\""
+        STRING_CONTENT@50..51 "x"
+        STRING_DELIM_CLOSE@51..52 "\""
+    BLOCK@52..53
+      WHITESPACE@52..53 " "
+    END_KW@53..56 "end"
+  NEWLINE@56..57 "\n"
+  MACRO_DEF@57..73
+    MACRO_KW@57..62 "macro"
+    WHITESPACE@62..63 " "
+    SIGNATURE@63..69
+      NONSTANDARD_IDENTIFIER@63..69
+        STRING_PREFIX@63..66 "var"
+        STRING_DELIM_OPEN@66..67 "\""
+        STRING_CONTENT@67..68 "."
+        STRING_DELIM_CLOSE@68..69 "\""
+    BLOCK@69..70
+      WHITESPACE@69..70 " "
+    END_KW@70..73 "end"
+  NEWLINE@73..74 "\n"
+  FUNCTION_DEF@74..94
+    FUNCTION_KW@74..82 "function"
+    WHITESPACE@82..83 " "
+    SIGNATURE@83..89
+      NONSTANDARD_IDENTIFIER@83..89
+        STRING_PREFIX@83..86 "var"
+        STRING_DELIM_OPEN@86..87 "\""
+        STRING_CONTENT@87..88 "x"
+        STRING_DELIM_CLOSE@88..89 "\""
+    BLOCK@89..91
+      SEMICOLON@89..90 ";"
+      WHITESPACE@90..91 " "
+    END_KW@91..94 "end"
+  NEWLINE@94..95 "\n"
+  FUNCTION_DEF@95..119
+    FUNCTION_KW@95..103 "function"
+    WHITESPACE@103..104 " "
+    SIGNATURE@104..110
+      NONSTANDARD_IDENTIFIER@104..110
+        STRING_PREFIX@104..107 "var"
+        STRING_DELIM_OPEN@107..108 "\""
+        STRING_CONTENT@108..109 "x"
+        STRING_DELIM_CLOSE@109..110 "\""
+    BLOCK@110..116
+      WHITESPACE@110..111 " "
+      NAME@111..115
+        IDENT@111..115 "body"
+      WHITESPACE@115..116 " "
+    END_KW@116..119 "end"
+  NEWLINE@119..120 "\n"
+  MACRO_DEF@120..141
+    MACRO_KW@120..125 "macro"
+    WHITESPACE@125..126 " "
+    SIGNATURE@126..132
+      NONSTANDARD_IDENTIFIER@126..132
+        STRING_PREFIX@126..129 "var"
+        STRING_DELIM_OPEN@129..130 "\""
+        STRING_CONTENT@130..131 "x"
+        STRING_DELIM_CLOSE@131..132 "\""
+    BLOCK@132..138
+      WHITESPACE@132..133 " "
+      NAME@133..137
+        IDENT@133..137 "body"
+      WHITESPACE@137..138 " "
+    END_KW@138..141 "end"
+  NEWLINE@141..142 "\n"
+
+diagnostic [83..83]: invalid function signature: expected a call, not a bare name
+diagnostic [104..104]: invalid function signature: expected a call, not a bare name
+diagnostic [126..126]: invalid function signature: expected a call, not a bare name

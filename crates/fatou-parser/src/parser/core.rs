@@ -420,13 +420,16 @@ fn invalid_forward_operator_name(signature: &SyntaxNode) -> bool {
 
 /// Whether a `function`/`macro` signature's first node is a *bare name* — the
 /// thing being declared rather than a call or other expression. Besides a plain
-/// identifier and a `$`-interpolation, an operator name counts (`function + end`,
-/// `function .+ end`), including one Julia rejects as a name, which the parser
-/// leaves as an `ERROR`-wrapped operator atom (`function = end` ⇒
-/// `(function (error =))`).
+/// or `var"…"` identifier and a `$`-interpolation, an operator name counts
+/// (`function + end`, `function .+ end`), including one Julia rejects as a name,
+/// which the parser leaves as an `ERROR`-wrapped operator atom (`function = end`
+/// ⇒ `(function (error =))`).
 pub(super) fn is_bare_signature_name(node: &SyntaxNode) -> bool {
     match node.kind() {
-        SyntaxKind::NAME | SyntaxKind::INTERPOLATION | SyntaxKind::OPERATOR_ATOM => true,
+        SyntaxKind::NAME
+        | SyntaxKind::NONSTANDARD_IDENTIFIER
+        | SyntaxKind::INTERPOLATION
+        | SyntaxKind::OPERATOR_ATOM => true,
         SyntaxKind::ERROR => node
             .first_child()
             .is_some_and(|inner| inner.kind() == SyntaxKind::OPERATOR_ATOM),
