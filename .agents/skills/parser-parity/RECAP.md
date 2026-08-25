@@ -73,7 +73,7 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**261 cases**): **260 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**262 cases**): **261 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -97,8 +97,6 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- Matrix continuation whose establishing space lives in an *outer* group
-  (`[a b ;;; c ;; \n d]`) — projection-only, low priority.
 - One formatter idempotency drift in DataFrames' `src/dataframe/dataframe.jl`.
 
 Error shapes, deferred (in scope, just low-value — see `SKILL.md`'s ranking):
@@ -117,30 +115,32 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25j — dotted Unicode unary operators)
+## Latest session (2026-08-25k — outer-group matrix continuation)
 
-Landed broadcast unary parsing for `.±`, `.∓`, and `.⋆`. They now build ordinary
-`UNARY_EXPR` nodes and project as `dotcall-pre`, while multi-argument call forms,
-binary use, bare values, and suffixed operators retain their existing shapes.
+Landed JuliaSyntax projection parity for row-major matrix continuation whose
+establishing space belongs to an outer dimension group. Plain, typed, and brace
+concatenations now keep `[a b ;;; c ;; \n d]`'s second group horizontal, while
+column-major and single-semicolon siblings retain their distinct shapes.
 
-- **Parser gap**: `is_unary_prefix_op` now recognizes the three dotted Unicode
-  spellings. The same prefix arm now stops every value-form unary operator at a
-  significant newline, fixing the deferred suffixed-operator sibling too;
-  syntactic `::` deliberately continues across the line break.
-- **Projector gap**: dotted `UNICODE_OP` tokens under `UNARY_EXPR` now emit a
-  stripped operator beneath `dotcall-pre`.
-- **Fixtures**: added parser snapshot and oracle slug `dotted_unicode_unary`,
-  including call, binary, newline, and suffixed siblings. No blocked entry.
+- **Projector gap**: `matrix_is_row_major` derives matrix order from the first
+  separator between leaf elements. The projector threads that order through
+  nested `MATRIX_ROW` groups when classifying `;;` plus newline continuation.
+- **Fixtures**: added parser snapshot and oracle slug
+  `outer_matrix_continuation`, covering plain, typed, brace, wider-row, and
+  separator-order siblings. No blocked entry.
 - **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **259/260 → 260/261** allowlisted (only the existing
+  regressions); dir **260/261 → 261/262** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: outer-group matrix continuation (`[a b ;;; c ;; \n d]`), then the
-  DataFrames formatter idempotency drift.
+- **Next**: reproduce and triage the DataFrames formatter idempotency drift;
+  hand any parser root cause back here, otherwise continue with a real-code
+  parser probe.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25j** — dotted Unicode unary `.±`/`.∓`/`.⋆`, plus newline stopping
+  for suffixed value-form unary operators. 748 / 260.
 - **2026-08-25i** — whitespace-separated calls for binary-only operators recover
   with an opener diagnostic. 748 / 259.
 - **2026-08-25h** — parenthesized leading commas recover as one flat trailing-junk

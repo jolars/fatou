@@ -1388,13 +1388,14 @@ fn matrix_head_and_children(node: &SyntaxNode) -> (String, Vec<String>) {
     if children.is_empty() {
         return (format!("ncat-{}", max_semicolon_run(node)), Vec::new());
     }
-    let d = group_dimension(node);
+    let row_major = matrix_is_row_major(node);
+    let d = group_dimension(node, row_major);
     let head = match d {
         0 => "hcat".to_string(),
         1 => "vcat".to_string(),
         _ => format!("ncat-{d}"),
     };
-    (head, project_cat_children(&children))
+    (head, project_cat_children(&children, row_major))
 }
 
 /// Project a sequence of concatenation children (`ARG` elements and `MATRIX_ROW`
@@ -1404,10 +1405,10 @@ fn matrix_head_and_children(node: &SyntaxNode) -> (String, Vec<String>) {
 /// appended after `ARG` elements: when the offending element is the last in a
 /// row, the diagnostic's byte anchor also coincides with the enclosing
 /// `MATRIX_ROW`'s end, and the recursion handles it inside that row instead.
-fn project_cat_children(children: &[SyntaxNode]) -> Vec<String> {
+fn project_cat_children(children: &[SyntaxNode], row_major: bool) -> Vec<String> {
     let mut out = Vec::new();
     for child in children {
-        out.push(project_cat_child(child));
+        out.push(project_cat_child(child, row_major));
         if child.kind() == ARG {
             let end = usize::from(child.text_range().end());
             for _ in 0..diag_count_at(end, DiagnosticKind::ArraySeparatorMismatch) {
@@ -1450,8 +1451,9 @@ fn project_bracescat(node: &SyntaxNode) -> String {
         let d = max_semicolon_run(node);
         return sexp("bracescat", vec![sexp(&format!("nrow-{d}"), Vec::new())]);
     }
-    let d = group_dimension(node);
-    let items: Vec<String> = children.iter().map(project_cat_child).collect();
+    let row_major = matrix_is_row_major(node);
+    let d = group_dimension(node, row_major);
+    let items = project_cat_children(&children, row_major);
     match d {
         1 => sexp("bracescat", items),
         0 => sexp("bracescat", vec![sexp("row", items)]),
@@ -1462,11 +1464,11 @@ fn project_bracescat(node: &SyntaxNode) -> String {
 /// Project one direct child of a concatenation group: a bare `ARG` element
 /// unwraps to its inner expression; a `MATRIX_ROW` becomes a `row` (dimension 0)
 /// or `nrow-d` group, recursing on its own children.
-fn project_cat_child(node: &SyntaxNode) -> String {
+fn project_cat_child(node: &SyntaxNode, row_major: bool) -> String {
     match node.kind() {
         ARG => project_first(node),
         MATRIX_ROW => {
-            let d = group_dimension(node);
+            let d = group_dimension(node, row_major);
             let head = if d == 0 {
                 "row".to_string()
             } else {
@@ -1476,7 +1478,7 @@ fn project_cat_child(node: &SyntaxNode) -> String {
                 .children()
                 .filter(|c| matches!(c.kind(), ARG | MATRIX_ROW))
                 .collect();
-            sexp(&head, project_cat_children(&items))
+            sexp(&head, project_cat_children(&items, row_major))
         }
         _ => project(node),
     }
@@ -1490,12 +1492,11 @@ fn project_cat_child(node: &SyntaxNode) -> String {
 /// A `;;` immediately followed by a newline (`;; \n`) inside a row-major group —
 /// one where a plain space separator was already seen — is a *line continuation*
 /// that JuliaSyntax folds into the row, so it counts as dimension 0 rather than
-/// 2 (`[a b ;; \n c]` ⇒ `(hcat a b c)`). We re-derive the row-major order locally
-/// the same way JuliaSyntax does (first space ⇒ row-major).
-fn group_dimension(node: &SyntaxNode) -> usize {
+/// 2 (`[a b ;; \n c]` ⇒ `(hcat a b c)`). The matrix's first separator determines
+/// row-major order, which is threaded through every nested dimension group.
+fn group_dimension(node: &SyntaxNode, row_major: bool) -> usize {
     let mut d = 0;
     let mut seen_node = false;
-    let mut row_major = false;
     let mut semis = 0usize;
     let mut newline = false;
     let mut newline_after_semis = false;
@@ -1503,7 +1504,6 @@ fn group_dimension(node: &SyntaxNode) -> usize {
         match el {
             NodeOrToken::Node(n) if matches!(n.kind(), ARG | MATRIX_ROW) => {
                 if seen_node {
-                    let is_space = semis == 0 && !newline;
                     let continuation = semis == 2 && newline_after_semis && row_major;
                     let run = if continuation {
                         0
@@ -1512,9 +1512,6 @@ fn group_dimension(node: &SyntaxNode) -> usize {
                     } else {
                         usize::from(newline)
                     };
-                    if is_space {
-                        row_major = true;
-                    }
                     d = d.max(run);
                 }
                 seen_node = true;
@@ -1544,6 +1541,46 @@ fn group_dimension(node: &SyntaxNode) -> usize {
         d = d.max(semis);
     }
     d
+}
+
+/// Whether the first separator between matrix elements establishes row-major
+/// order. Julia carries that order into nested dimension groups, so a later
+/// `;;` followed by a newline remains a horizontal continuation even when its
+/// establishing space belongs to an outer `MATRIX_ROW`.
+fn matrix_is_row_major(node: &SyntaxNode) -> bool {
+    fn collect_first_two(node: &SyntaxNode, ranges: &mut Vec<(usize, usize)>) {
+        for child in node
+            .children()
+            .filter(|child| matches!(child.kind(), ARG | MATRIX_ROW))
+        {
+            match child.kind() {
+                ARG => ranges.push((
+                    usize::from(child.text_range().start()),
+                    usize::from(child.text_range().end()),
+                )),
+                MATRIX_ROW => collect_first_two(&child, ranges),
+                _ => unreachable!(),
+            }
+            if ranges.len() == 2 {
+                return;
+            }
+        }
+    }
+
+    let mut ranges = Vec::with_capacity(2);
+    collect_first_two(node, &mut ranges);
+    let [(_, first_end), (second_start, _)] = ranges.as_slice() else {
+        return false;
+    };
+
+    !node.descendants_with_tokens().any(|element| {
+        let Some(token) = element.into_token() else {
+            return false;
+        };
+        let start = usize::from(token.text_range().start());
+        let end = usize::from(token.text_range().end());
+        start >= *first_end && end <= *second_start && matches!(token.kind(), SEMICOLON | NEWLINE)
+    })
 }
 
 /// The length of the longest consecutive `;` run among a node's direct tokens
