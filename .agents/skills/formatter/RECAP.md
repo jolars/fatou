@@ -116,8 +116,8 @@ source-break read is the comment-bearing matrix path (debt #1).
   `Ir::BlankLine`.
 - Chains: `lower_call`/`try_lower_chain`/`collect_chain` — a `.`-spine with **≥2
   called links** breaks at the dots; bare field accesses stay glued.
-- Statements: `lower_keyword_stmt`, `lower_import_stmt`/`lower_export_stmt`,
-  `lower_for_binding`.
+- Statements: `lower_keyword_stmt`, `lower_break_stmt`,
+  `lower_import_stmt`/`lower_export_stmt`, `lower_for_binding`.
 - Macros: `lower_macro_call`/`lower_macro_name` — gaps collapse to one space; an
   attached `ARG_LIST` stays snug and lowers like a call's.
 - Literals: `lower_literal` + `normalize_float`/`normalize_hex`. Chars and
@@ -136,57 +136,30 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (only a *sole* item hugs; pair arrows bias into their value)
+## Latest session (gate labeled `break`/`continue` spacing)
 
-`feat(formatter)`. User-reported: `f(a; kw = g(x))` and a 3-pair `Dict` were
-jamming every leading item flat onto the opening line so the tail could hug,
-stacking `))` on the closing line. Two rules, `rules.rs` only, no engine change.
+`test(formatter)`. The parser-side labeled-control-flow change had already
+added `lower_break_stmt` and the `labeled_break_continue` stability input, but
+left it ungated. The user approved single spaces between `break`/`continue`, an
+optional label, and a `break` value; the value keeps normal recursive lowering.
 
-**1. `suppress_multi_item_hug(item_count, last_huggable)`** — only a *sole* item
-hugs its enclosing bracket. A strict generalization of the
-`suppress_bare_bracket_pair_hug` it replaces (that guard already used
-`item_count > 1`, but only for a bare-bracket-valued pair tail); its two helpers
-`item_value`/`item_is_bare_bracket_pair_tail` are subsumed and deleted. Also
-applied to the `;`-params path, which computes huggability separately via
-`collect_param_items` and was why the reported `basedir =` case survived a first
-pass — positionals + keywords are counted **together** (they explode into one
-shared list).
+The input now deliberately uses redundant spaces and `i*2`, so a transparent
+fallback cannot satisfy the hand-authored `expected.jl`. The fixture covers
+bare, labeled, and labeled-with-value forms, both as statements and nested in
+binary/ternary expressions. Gate 120→121 of 149; focused fixture gate,
+stability, clippy, fmt, and full workspace suite green. No parser/lexer blocker.
 
-**2. `is_pair_op`/`pair_chain_hugs` + `rhs_absorbs_break`** (was
-`is_assignment`) in `lower_binary` — a pair arrow joins assignment's "bias the
-break into the RHS" tier, so `k => merge(` breaks inside the value instead of
-dropping it to a continuation line. Gated on `pair_chain_hugs(node)`: the chain
-must bottom out in a `huggable_kind` bracket. **A blanket version regressed two
-fixtures** — `chained_pair_grouped_tail` and `arrow_pair_chain` (mixed
-`a => b --> c` broke at some arrows but not others). `pair_operands` rejects the
-mixed spine, so both keep the arrow tier.
-
-**Corpus evidence** (all 166 files of Julia Base formatted under both rules):
-lines ending in stacked closers **450 → 302 (−33%)**, total lines +0.23%, lines
-over 92 cols unchanged. A third of the `))` stacks removed for negligible
-vertical cost and no width regression. JuliaFormatter Default/Blue agree on
-multi-item tail (explodes), sole bracket literal (hugs), and pair value (hugs
-the arrow); the sole-nested-call divergence is the recorded decision above.
-
-11 `expected.jl` regenerated (user-approved, reviewed as a diff), every diff the
-same shape — a multi-item list stops hugging its tail and explodes one per line,
-every sole-item hug survives. Gate stays 120 (of 149 fixtures); stability +
-clippy + fmt + full suite green. No parser/lexer blocker.
-
-**Ranked next targets:** (1) Return-type `where` signatures (the deferred
-follow-up TODO — extend the `CondGroup` probe to the `)::T where` prefix). (2)
-Minor: debt #2. The per-construct queue is otherwise empty; four of the five
-sessions before the last landed no code, only fixtures.
+**Ranked next targets:** (1) consume the resolved parser handoff for splats
+after closing brackets: drop `lower_splat`'s `ends_in_bracket` guard and widen
+`splat_spacing`; (2) gate `typegroup` block layout; (3) minor debt #2.
 
 ## Parser/lexer gaps
 
-**OUTSTANDING (handed off 2026-07-06c): splat after a closing bracket.**
-`f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)` fail
-to parse (`...` seen as a `LoneOperator`) though JuliaSyntax accepts them; only
-the spaced spelling parses. `lower_splat` withholds the snug for bracket-closing
-operands until this lands (see parser-parity RECAP "Queued next targets" +
-`TODO.md` Parser). Drop the `ends_in_bracket` guard and widen `splat_spacing/`
-when fixed.
+**RESOLVED parser-side; formatter follow-up queued:** splat after a closing
+bracket. `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, and
+`f([1, 2]...)` now parse as `SPLAT_EXPR`; `lower_splat` still withholds snug
+spacing through its stale `ends_in_bracket` guard. The parser-parity RECAP and
+`TODO.md` point to the formatter follow-up.
 
 Everything else handed off has been resolved parser-side: the `<--`/`<-->` arrow
 family, the newline-broken braces comprehension, newline-after-comma, the
@@ -219,6 +192,12 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Only a sole trailing item hugs; bracket-valued pairs absorb the arrow-tier
+  break** (`feat`): generalized `suppress_multi_item_hug` plus
+  `pair_chain_hugs`; Julia Base stacked closers 450→302. Gate stayed 120.
+- **Return-type `where` signatures inherit the short-bound priority** (`feat`):
+  `where_closing_prefix` extends the `CondGroup` probe across `)::T where`.
+  `where_return_type_multiparam_break`. 119→120.
 - **Short multi-param `where` bound breaks the args** (`feat`): new
   `Ir::CondGroup { primary, fallback, probe }` measures the re-indented
   *closing* line, so `f(longargs...) where {T, S}` breaks the args and keeps the
@@ -311,39 +290,6 @@ Newest first. One line each; the commit is the detail.
 - **Unary prefix operators** (`feat`): snug, with the `- -a` → `--a`
   retokenization bail. 70→71.
 - **Macro-call spacing** (`feat`): the call-form vs space-form split. 69→70.
-- **Gating sweeps** (`test`, no code): comments 65→69; spacing/padding pile +
-  `*_divergence` slugs renamed 57→65; module bodies 53→57 (the lone file-wrapper
-  module stays flush, nested always indents); global/local multi-name lists
-  51→53; the operator/literal pile, 15 fixtures at once, 36→51; keyword
-  statements 17→18; six bracket/matrix fixtures 9→15.
-- **Empty-body folds** (`feat`): struct collapse + `block_is_empty` 18→19,
-  generalized to the single-body blocks via `push_block_body` 19→20, extended to
-  `if`/`do` via `lower_body_allow_empty` 33→34. `try` never inline-folds.
-- **The operator rules going width-driven** (`feat`, four sessions):
-  binary/assignment 26→28 — assignment ops never break, the RHS's own group
-  absorbs it (`x = a +⏎ b`, never `x =⏎ a + b`); ternary 28→31
-  (operator-trailing, nested chains nest deeper); comparison + arrow 31→33
-  (`lower_arrow` stays flat, assignment-style bias); type-declaration whitespace
-  34→36, the last `lower_type_decl` source mirror.
-- **Top-level structure** (`feat`): blank-line policy in `lower_root`, which
-  extracted `collect_body_lines`, 20→23; `;`-join reflow via
-  `collect_body_elements` 23→24. Block-body `;`-separator + 1-blank cap (`;`
-  reflows like a newline) 15→17.
-- **Width-driven paren reflow** (`feat`): killed the `has_newline_token` mirror
-  in `PAREN_EXPR`. 24→26.
-- **The bracket/matrix family** (`feat`, four sessions): arg-list reflow — the
-  first reflow construct, introduced `Ir::IfBreak`; collection reflow, where the
-  one-tuple `(a,)` keeps its semantic comma in both modes; matrix reflow, making
-  `lower_matrix` a dispatcher (rows have two CST shapes, bare `ARG` vs
-  `MATRIX_ROW`); then the comment-bearing bracket 6→7 and matrix 7→9 rewrites
-  from source mirror to canonical framed form. A comment *inside* a `MATRIX_ROW`
-  still bails transparent.
-- **Function/macro body reflow** (`feat`): dropped the Runic-era `return`-tail
-  guard.
-- **The pivot:** removed the Runic.jl differential-parity target
-  (`tests/runic_oracle.rs`, the corpus scripts, allowlists, Taskfile tasks, and
-  `Runic` from `devenv.nix`), stood up the hand-authored fixture machinery,
-  renamed the skill `formatter-parity` → `formatter`. All 65 fixtures kept
-  `input.jl`; every Runic-minted `expected.jl` was deleted, so the gate
-  restarted empty. Pre-pivot parity history lives in git (\~50 constructs landed
-  against the Runic oracle); their parity status is meaningless now.
+- **Earlier reflow foundation:** blocks, operators, top-level structure,
+  parens, brackets, matrices, comments, and the hand-authored fixture gate.
+  Detailed pre-pivot history lives in `git log`; old Runic parity is not a spec.
