@@ -151,15 +151,21 @@ stability, clippy, fmt, and full workspace suite green. No parser/lexer blocker.
 
 **Ranked next targets:** (1) consume the resolved parser handoff for splats
 after closing brackets: drop `lower_splat`'s `ends_in_bracket` guard and widen
-`splat_spacing`; (2) gate `typegroup` block layout; (3) minor debt #2.
+`splat_spacing`; (2) gate left-division `\` as a normal spaced binary operator;
+(3) gate `typegroup` block layout; (4) minor debt #2.
 
-## Parser/lexer gaps
+## Parser dependencies and follow-ups
 
 **RESOLVED parser-side; formatter follow-up queued:** splat after a closing
 bracket. `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, and
 `f([1, 2]...)` now parse as `SPLAT_EXPR`; `lower_splat` still withholds snug
-spacing through its stale `ends_in_bracket` guard. The parser-parity RECAP and
-`TODO.md` point to the formatter follow-up.
+spacing through its stale `ends_in_bracket` guard. `TODO.md` owns the formatter
+follow-up's status.
+
+**RESOLVED parser-side; formatter fixture pending:** left division `\` is a
+normal spaced binary operator (`A\b` → `A \ b`) and needs no
+`is_tight_binop` entry. The generic binary rule should handle it; author and
+gate representative spacing and continuation cases.
 
 Everything else handed off has been resolved parser-side: the `<--`/`<-->` arrow
 family, the newline-broken braces comprehension, newline-after-comma, the

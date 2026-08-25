@@ -14,8 +14,8 @@ description: >-
 ---
 
 Use this skill when asked to advance Fatou's formatter or "take the next
-construct." Read `RECAP.md` first for the latest session, the rule inventory,
-and the traps.
+construct." Read `TODO.md` and `RECAP.md` first for roadmap priority, the latest
+session, the rule inventory, and the traps.
 
 ## The formatter in one paragraph
 
@@ -44,8 +44,10 @@ authored, not yet gated. No allowlist, no blocked list.
 This is a **human-in-the-loop** loop. You do not invent the canonical form
 alone; you propose, the user decides, you implement.
 
-1. **Read `RECAP.md`** (traps, latest session, rule inventory, ranked targets).
-   Prefer a user-named target. Baseline: `cargo test --workspace` is green.
+1. **Read `TODO.md` and `RECAP.md`** (roadmap priority, traps, latest session,
+   rule inventory, ranked targets). Prefer a user-named target; otherwise follow
+   `TODO.md`'s Formatter section before the recap ranking. Baseline:
+   `cargo test --workspace` is green.
 
 2. **Surface candidate inputs and propose a formatting.** Pick a small set of
    representative `input.jl` snippets for the construct. Inspect the CST
@@ -134,14 +136,19 @@ see ERROR nodes, not the real shape). `rules.rs` is the only growth surface
 here. **Stop**, keep the broken shape out of the fixture (use a parser-safe
 variant), and record the gap where the fixer will look:
 
-- a **"Queued next target"** note at the top of
-  `.agents/skills/parser-parity/RECAP.md`, and/or a bullet under `TODO.md`'s
-  **Parser** section;
+- a bullet under `TODO.md`'s **Parser** section, which owns roadmap status, and
+  matching technical context under "Queued parser targets" at the top of
+  `.agents/skills/parser-parity/RECAP.md`;
 - include the **JuliaSyntax ground truth**
   (`julia --startup-file=no -e 'using JuliaSyntax; print(JuliaSyntax.parse(Expr, "CODE"))'`),
   what Fatou does instead, and the crux;
-- cross-reference it from this skill's `RECAP.md` and from the fixture that had
-  to route around it.
+- mention the blocked formatter session historically in this skill's `RECAP.md`
+  and in any fixture that had to route around it, but do not keep a duplicate
+  active parser queue here.
+
+When parser work later unlocks a formatter follow-up, the active task moves to
+`TODO.md`'s Formatter section and this skill's `RECAP.md`. The parser recap may
+retain a historical session note, but it must not keep an active outbound queue.
 
 ## Key files
 

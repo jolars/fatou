@@ -1,34 +1,17 @@
 # parser-parity recap
 
-Rolling log. Read top-to-bottom: handovers → traps → progress → deferred ledger
-→ latest session → earlier sessions. **Cap: \~300 lines.** Each session adds one
+Rolling log. Read top-to-bottom: queue → traps → progress → deferred ledger →
+latest session → earlier sessions. **Cap: \~300 lines.** Each session adds one
 full "Latest session" section, demotes the previous one to a one-liner under
 "Earlier sessions", and trims the tail to stay under the cap. Detail below the
 one-liner level lives in `git log` and `TODO.md`, not here.
 
-## Queued handovers
+## Queued parser targets
 
-**To the formatter skill** (parser side landed; formatter may not have consumed
-them yet):
-
-- **2026-07-07** — splat after a closing bracket works (`f(g(x)...)`,
-  `f(a[i]...)`, `f((a + b)...)`, `f(A{T}...)`, `f([1, 2]...)`, `f(2...)`,
-  `f("a"...)` all `SPLAT_EXPR` ⇒ `(... operand)`). Drop `lower_splat`'s
-  `ends_in_bracket` guard and widen `splat_spacing/`.
-- **2026-07-06b** — multi-binding `let` wraps every binding in its own node, so
-  the width-driven reflow can iterate `LET_BINDINGS.children()` instead of flat
-  tokens.
-- **2026-07-05** — braces comprehension `{a\nfor b in c}` parses, so the
-  exploded too-wide form reparses cleanly; widen the braces case of
-  `comprehension_index_break/`.
-- **2026-07-05b** — `<--`/`.<--`/`.<-->` lex as arrow-tier tokens;
-  `arrow_pair_chain/` may include `<--` (`binary_prec_class` already updated).
-- **2026-06-26** — left-division `\` is a normal spaced binop (`A\b` → `A \ b`,
-  no `is_tight_binop` entry); spacing fixture available.
-- **2026-06-29** — `global a, b = 1, 2` nests properly, so the existing
-  keyword-stmt → `lower_binary` path should format it for free.
-
-**Parser targets**:
+Only parser-owned work belongs in this queue. When parser work unlocks a
+formatter, linter, or other downstream follow-up, put the active task in that
+consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
+the parser session log.
 
 - **Raw triple-string quote decoding** — `raw"""escaped \"quote\""""` retains
   too many display escapes. Keep this separate from ordinary triple strings;

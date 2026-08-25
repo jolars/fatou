@@ -15,8 +15,8 @@ description: >-
 ---
 
 Use this skill when asked to advance Fatou's parser parity, chase a suspected
-parser bug, or take a named construct. Read `RECAP.md` first for the latest
-session, queued handovers, and traps.
+parser bug, or take a named construct. Read `TODO.md` and `RECAP.md` first for
+roadmap priority, the latest session, queued parser targets, and traps.
 
 ## Where targets come from
 
@@ -30,9 +30,9 @@ looking for something to do will come up empty. Real targets arrive three ways:
   code — a vendored tree, a cloned package, a `debug format` smoke-test failure
   — and diff Fatou's projection against the oracle in bulk (the recipe in step
   3). Most recent sessions found their target this way.
-- **A handover in `RECAP.md`.** The "Queued next targets" block at the top holds
-  both parser targets left by an earlier session and items handed over from the
-  formatter or linter skills. Prefer these over a cold probe.
+- **A handover in `RECAP.md`.** The "Queued parser targets" block at the top
+  holds parser targets left by an earlier session or handed over from the
+  formatter, linter, or another consumer. Prefer these over a cold probe.
 - **Named directly.** An issue, a code snippet, a construct the user names, or a
   gap another skill hit and handed off mid-task. A user-named target always
   wins.
@@ -40,6 +40,15 @@ looking for something to do will come up empty. Real targets arrive three ways:
 A target is worth taking when it is a **cluster** (one root cause unlocking
 several shapes) or a **construct real code actually contains**. Both criteria
 apply to error shapes exactly as they do to valid code — see the buckets below.
+
+## Cross-skill handoff ownership
+
+`TODO.md` is the authoritative roadmap and status record. Detailed active work
+belongs in the receiving skill's `RECAP.md`: parser targets stay here, while a
+formatter or linter follow-up unlocked by parser work goes to that consumer's
+recap and `TODO.md` section. The sending recap may retain a historical session
+note, but never a second active outbound queue. When work lands, the receiver
+marks `TODO.md` and removes the item from its own active recap queue.
 
 ## The oracle in one paragraph
 
@@ -160,8 +169,9 @@ Non-operator features (markers, quotes, literals) are usually just
 
 ## Workflow (per session)
 
-1. **Read `RECAP.md`** (traps, latest session, queued handovers). A user-named
-   target wins; otherwise take a queued handover; otherwise probe (step 3).
+1. **Read `TODO.md` and `RECAP.md`** (roadmap priority, traps, latest session,
+   queued parser targets). A user-named target wins; otherwise follow the
+   Parser section of `TODO.md`, then the recap queue, then probe (step 3).
 
 2. **Baseline**: `cargo test --workspace`—note it's green. "No regression" =
    still green at the end.
@@ -253,11 +263,13 @@ Non-operator features (markers, quotes, literals) are usually just
     fixture (see "Formatter coupling"). Also format the new parser fixture and
     re-format the output, confirming idempotency.
 
-11. Update `RECAP.md`: add the new session section, demote the previous
-    "Latest session" heading to "Earlier session", and update the Progress
-    counts. Keep the file to its stated cap by collapsing the oldest full
-    section into a one-liner in "Earlier sessions" — it has drifted well past
-    300 lines because sessions add without trimming.
+11. Update `TODO.md` and the affected recaps. Mark the parser target's status,
+    add the new parser session, demote the previous "Latest session" heading to
+    "Earlier session", and update the Progress counts. If the parser change
+    leaves active work for another component, record it in that receiving
+    skill's recap and `TODO.md` section, not in this recap's queue. Keep this
+    file to its stated cap by collapsing the oldest full section into a
+    one-liner in "Earlier sessions".
 
 12. **Commit.** Conventional Commits; subject ≤ 60 chars. New parsing
     capability/public API = `feat(parser)`; test-infra-only = `test(parser)`.
