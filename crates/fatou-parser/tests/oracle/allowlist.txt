@@ -162,6 +162,7 @@ nested_macro_path
 nested_string_interp
 nonstandard_identifier
 nonstandard_identifier_escape
+nonstandard_identifier_forward_declaration
 number_exponent_marker_identifier
 operator_call
 operator_method_declaration

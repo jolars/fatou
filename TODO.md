@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Treat `var"…"` nonstandard identifiers as bare `function` and `macro`
+  signature names. Empty bodies now form forward declarations, while a
+  semicolon or body statement records the same invalid-signature recovery as a
+  plain bare name.
+
 - [x] Recover quoted symbols used as whole import paths or imported names.
   `using :A` and `using A: :b` now keep an error-wrapped quote inside the
   `IMPORT_PATH`, including parenthesized and spaced forms, while dotted quoted
