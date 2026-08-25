@@ -253,8 +253,7 @@ Non-operator features (markers, quotes, literals) are usually just
     fixture (see "Formatter coupling"). Also format the new parser fixture and
     re-format the output, confirming idempotency.
 
-11. **Update `TODO.md`** (mark a grammar bullet `[x]` mirroring the existing
-    style) and **`RECAP.md`**: add the new session section, demote the previous
+11. Update `RECAP.md`: add the new session section, demote the previous
     "Latest session" heading to "Earlier session", and update the Progress
     counts. Keep the file to its stated cap by collapsing the oldest full
     section into a one-liner in "Earlier sessions" — it has drifted well past

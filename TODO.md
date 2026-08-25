@@ -2,44 +2,6 @@
 
 ## Parser
 
-- [x] Recover parenthesized forms beginning with a comma as one flat error run.
-  `(,x)`, `(,)`, and `(,,)` now match JuliaSyntax's `(error-t …)` topology
-  instead of becoming nested tuples with the closing paren left as top-level
-  junk.
-
-- [x] Recover leading empty slots in bracket- and brace-delimited lists. Vector,
-  index, and braces forms now retain JuliaSyntax's zero-width `(error)` element;
-  call arguments retain the leading comma and suffix as trailing junk.
-
-- [x] Treat `var"…"` nonstandard identifiers as bare `function` and `macro`
-  signature names. Empty bodies now form forward declarations, while a
-  semicolon or body statement records the same invalid-signature recovery as a
-  plain bare name.
-
-- [x] Recover quoted symbols used as whole import paths or imported names.
-  `using :A` and `using A: :b` now keep an error-wrapped quote inside the
-  `IMPORT_PATH`, including parenthesized and spaced forms, while dotted quoted
-  components remain valid.
-
-- [x] Recover singleton parenthesized macro-call and interpolation function
-  signatures as invalid parameter tuples. This adds JuliaSyntax's `(error …)`
-  wrapper for `function (@f(x)) end` and `function ($f) end` while preserving
-  the valid semicolon and splat forms.
-
-- [x] Recover bare `:=` and `.` as syntactic operators without value meaning.
-  They now produce `(error op)` in top-level, parenthesized, collection, call-
-  argument, and assignment-left positions while remaining valid quoted symbols.
-
-- [x] Parse integer and floating-point arguments glued to prefixed command
-  literals, matching the existing string-macro behavior. This fixes ``x`s`2``
-  and ``x`s`10.0`` without treating the numeric argument as a flag string.
-
-- [x] Parse direct parenthesized anonymous-function parameters as a tuple before
-  `->`, including singleton, typed, and `;` keyword-parameter forms, while
-  keeping a parenthesized `where` signature transparent. This fixes
-  `(a; b=1) -> c` and its siblings without changing standalone parenthesized
-  blocks.
-
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
   augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
   `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
