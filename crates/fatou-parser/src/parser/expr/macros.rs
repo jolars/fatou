@@ -12,7 +12,7 @@ pub(super) fn parse_macro(
     at_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
-    array_mode: bool,
+    generator_for_ends: bool,
 ) -> ExprParse {
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
@@ -26,7 +26,7 @@ pub(super) fn parse_macro(
         name_end,
         diagnostics,
         inside_brackets,
-        array_mode,
+        generator_for_ends,
     );
     finish(&mut events, SyntaxKind::MACRO_CALL);
     ExprParse {
@@ -45,7 +45,7 @@ pub(super) fn parse_qualified_macro(
     dot_idx: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
-    array_mode: bool,
+    generator_for_ends: bool,
 ) -> ExprParse {
     let mut events = vec![Event::Start(SyntaxKind::MACRO_CALL)];
     events.push(Event::Start(SyntaxKind::MACRO_NAME));
@@ -81,7 +81,7 @@ pub(super) fn parse_qualified_macro(
         name_end,
         diagnostics,
         inside_brackets,
-        array_mode,
+        generator_for_ends,
     );
     finish(&mut events, SyntaxKind::MACRO_CALL);
     ExprParse {
@@ -272,10 +272,9 @@ fn parse_macro_args(
     name_end: usize,
     diagnostics: &mut Vec<ParseDiagnostic>,
     inside_brackets: bool,
-    // Space-sensitive element position (a comprehension/array body or a call-arg
-    // generator body), where a trailing `for` opens a generator and so ends the
-    // macro's space-args rather than being consumed as a for-loop argument.
-    array_mode: bool,
+    // Whether a following `for` opens a generator in the enclosing expression.
+    // This remains true through nested macro arguments.
+    generator_for_ends: bool,
 ) -> usize {
     // Paren form `@m(a, b)`: the `(` must be adjacent (no whitespace), otherwise
     // `@m (a, b)` is the space form with a single parenthesized argument.
@@ -343,7 +342,7 @@ fn parse_macro_args(
             // it ends the macro's space-args. At statement scope `for` is instead a
             // for-loop argument (`@time for i in xs … end`), so this only fires in a
             // bracket or an array/comprehension-element context.
-            Some(TokKind::ForKw) if inside_brackets || array_mode => break,
+            Some(TokKind::ForKw) if inside_brackets || generator_for_ends => break,
             // A dot followed by `(` belongs to the completed macro call's
             // postfix chain. Let it build the dedicated invalid broadcast-macro
             // recovery (`@M.(x)`), rather than parsing the newly supported lone
@@ -368,6 +367,7 @@ fn parse_macro_args(
                 let arg_flags = ExprFlags {
                     inside_brackets,
                     array_mode: true,
+                    generator_for_ends,
                     stmt_comma: true,
                     ..ExprFlags::default()
                 };
@@ -421,6 +421,7 @@ fn parse_macro_args(
                 let arg_flags = ExprFlags {
                     inside_brackets,
                     array_mode: true,
+                    generator_for_ends,
                     stmt_comma: true,
                     ..ExprFlags::default()
                 };
