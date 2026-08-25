@@ -2,6 +2,10 @@
 
 ## Parser
 
+- [x] Recover bare `:=` and `.` as syntactic operators without value meaning.
+  They now produce `(error op)` in top-level, parenthesized, collection, call-
+  argument, and assignment-left positions while remaining valid quoted symbols.
+
 - [x] Parse integer and floating-point arguments glued to prefixed command
   literals, matching the existing string-macro behavior. This fixes ``x`s`2``
   and ``x`s`10.0`` without treating the numeric argument as a flag string.

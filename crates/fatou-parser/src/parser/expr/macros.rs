@@ -344,6 +344,17 @@ fn parse_macro_args(
             // for-loop argument (`@time for i in xs … end`), so this only fires in a
             // bracket or an array/comprehension-element context.
             Some(TokKind::ForKw) if inside_brackets || array_mode => break,
+            // A dot followed by `(` belongs to the completed macro call's
+            // postfix chain. Let it build the dedicated invalid broadcast-macro
+            // recovery (`@M.(x)`), rather than parsing the newly supported lone
+            // `.` error atom as the macro's first space argument.
+            Some(TokKind::Dot)
+                if ctx
+                    .token(ctx.skip_ws_and_block_comments(next + 1))
+                    .is_some_and(|t| t.kind == TokKind::LParen) =>
+            {
+                break;
+            }
             _ => {
                 // A bare comma after a space-form argument folds it into a
                 // bare-tuple argument rather than separating arguments

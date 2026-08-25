@@ -121,7 +121,7 @@ pub(super) fn is_flat_arith_op(tok: &Token) -> bool {
 
 pub(super) fn is_lone_error_operator(kind: TokKind) -> bool {
     use TokKind::*;
-    is_assignment_op(kind) || matches!(kind, AndAnd | OrOr | Arrow | DotDotDot)
+    is_assignment_op(kind) || matches!(kind, ColonEq | AndAnd | OrOr | Arrow | Dot | DotDotDot)
 }
 
 pub(super) fn is_unary_prefix_op(kind: TokKind, text: &str) -> bool {

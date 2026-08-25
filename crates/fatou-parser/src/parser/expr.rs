@@ -1657,14 +1657,14 @@ fn parse_prefix(
         | TokKind::Unknown
         | TokKind::TrueKw
         | TokKind::FalseKw => Some(atom(SyntaxKind::LITERAL, start)),
-        // A lone syntactic operator (`=`, an assignment op, `&&`/`||`/`->`/`...`)
-        // has no value meaning, so JuliaSyntax emits `(error op)` wherever an atom
-        // is expected (`=` ⇒ `(error =)`, `.+=` ⇒ `(error (. +=))`, `[=]` ⇒
-        // `(vect (error =))`). It consumes only the operator; any following operand
-        // is left to the caller — the toplevel trailing-junk driver
-        // (`= x` ⇒ `(error =) (error-t x)`) or the operator loop's RHS
-        // (`a + =` ⇒ `(call-i a + (error =))`). Unlike `?`/binary-only operators
-        // below, it never applies as a prefix call.
+        // A lone syntactic operator (`=`, an assignment op, `:=`, `&&`/`||`/`->`,
+        // `.`, or `...`) has no value meaning, so JuliaSyntax emits `(error op)`
+        // wherever an atom is expected (`=` ⇒ `(error =)`, `.+=` ⇒
+        // `(error (. +=))`, `[=]` ⇒ `(vect (error =))`). It consumes only the
+        // operator; any following operand is left to the caller — the toplevel
+        // trailing-junk driver (`= x` ⇒ `(error =) (error-t x)`) or the operator
+        // loop's RHS (`a + =` ⇒ `(call-i a + (error =))`). Unlike
+        // `?`/binary-only operators below, it never applies as a prefix call.
         k if is_lone_error_operator(k) => {
             let op = &ctx.tokens()[start];
             push_diagnostic(
@@ -1822,9 +1822,10 @@ fn error_operator_atom(start: usize) -> ExprParse {
 
 /// Whether `kind` is a syntactic operator that has no value meaning and so, where
 /// an atom is expected, is JuliaSyntax's `(error op)` — the assignment operators
-/// (`=`, `+=`, `.+=`, …), the short-circuits `&&`/`||`, the anonymous-function
-/// `->`, and the splat `...`. `?` is *not* here: it applies as a prefix call when
-/// an operand follows (handled in the value-operator arm).
+/// (`=`, `+=`, `.+=`, …), `:=`, the short-circuits `&&`/`||`, the
+/// anonymous-function `->`, the field-access `.`, and the splat `...`. `?` is
+/// *not* here: it applies as a prefix call when an operand follows (handled in
+/// the value-operator arm).
 /// Whether the token can head a unary prefix application: the ASCII unary
 /// operators, the syntactic prefixes `&`/`::`, the prefix-only Unicode radicals
 /// (`√ ∛ ∜ ¬`), and the unary-capable Unicode arithmetic operators `± ∓ ⋆` —

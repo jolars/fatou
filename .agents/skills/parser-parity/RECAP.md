@@ -72,11 +72,11 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **741 allowlisted**, 15
-divergence, 0 unsupported. Dir corpus (**253 cases**): **252 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **743 allowlisted**, 13
+divergence, 0 unsupported. Dir corpus (**254 cases**): **253 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
-1.0.2 added 71 harvested cases; the 7 remaining correctable divergences are recorded
-below. A green report means "no regression", not "nothing to do".
+1.0.2 added 71 harvested cases; the 5 remaining correctable divergences are
+recorded below. A green report means "no regression", not "nothing to do".
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
 fix" list was mostly mislabeled for a linter/LSP. All three correctable items
@@ -89,16 +89,16 @@ display. Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully executed.
 Permanent (never "fix"): **float-literal display** (`2.`/`1f0`/hex floats/
 `1.0e-1000`/`x.3` — needs Julia's `show`); **n-ary juxtaposition** `(2)(3)x`;
 **`x 'y`** char lexing (needs bracket-depth-aware `'`). These account for 8 of
-the 20 remaining JS FAILs.
+the 13 remaining JS FAILs.
 
 Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
 mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- JuliaSyntax 1.0 error/value shapes: bare `:=` and `.`; parenthesized
-  `@f(x)`/`$f` function signatures; quoted names in `using :A`/`using A: :b`;
-  and `function var"." end`.
+- JuliaSyntax 1.0 error/value shapes: parenthesized `@f(x)`/`$f` function
+  signatures; quoted names in `using :A`/`using A: :b`; and
+  `function var"." end`.
 - `x.function` — a reserved keyword as a field name after `)`.
 - `end` inside a nested `[…]` within an index (`df[[1; 2; end:-1:3], :]`).
 - `primitive type T (18 * 8) end` — the size expr is a spaced group, not a call.
@@ -127,29 +127,31 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25b — command-macro numeric arguments)
+## Latest session (2026-08-25c — bare `:=` and `.` recovery)
 
-Landed numeric arguments glued to prefixed command literals. ``x`s`2`` and
-``x`s`10.0`` now keep the number inside the command-macro node, matching the
-string-macro path and JuliaSyntax's trailing macrocall argument.
+Landed bare `:=` and `.` as syntactic operators without value meaning. They now
+recover as `(error op)` in every probed value position while retaining their
+existing quoted-symbol behavior.
 
-- **Parser gap**: `parse_string_literal` captured digit-led suffix tokens only
-  for `STRING_LITERAL`; it now applies the same rule to prefixed `CMD_LITERAL`
-  nodes. The projector renders the captured numeric token as a macrocall
-  argument rather than a quoted flag.
-- **Fixtures**: added parser snapshot and oracle slug
-  `command_macro_numeric_suffix`, covering integer and floating-point arguments.
-  No blocked entry was added.
-- **Counts**: JS **739/756 → 741/756** allowlisted (15 FAIL, 0 unsupported,
-  zero regressions); dir **251/252 → 252/253** allowlisted (only the existing
+- **Parser gap**: `is_lone_error_operator` now classifies `ColonEq` and `Dot`,
+  producing the existing `ERROR > OPERATOR_ATOM` shape and `LoneOperator`
+  diagnostic. `parse_macro_args` yields a dot before `(` to the postfix chain so
+  the dedicated `@M.(x)` recovery remains intact.
+- **Fixtures**: added parser snapshot and oracle slug `lone_colon_eq_dot`,
+  covering top-level, parenthesized, collection, call-argument, assignment-left,
+  trailing-junk, and quoted forms. No blocked entry was added.
+- **Counts**: JS **741/756 → 743/756** allowlisted (13 FAIL, 0 unsupported,
+  zero regressions); dir **252/253 → 253/254** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: bare `:=` and `.`—the next two-case JuliaSyntax 1.0 error/value
-  cluster. Parenthesized macro function signatures follow it.
+- **Next**: parenthesized `@f(x)`/`$f` function signatures—the next two-case
+  JuliaSyntax 1.0 cluster. Quoted import names follow it.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25b** — numeric arguments glued to prefixed command literals now
+  stay inside the command-macro node. 741 / 252.
 - **2026-08-25** — parenthesized anonymous-function parameters become tuples
   before `->`, except for transparent `where` signatures. 739 / 251.
 - **2026-08-24b** — generator parameters after `;`: typed curlies use the
