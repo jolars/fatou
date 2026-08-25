@@ -1,6 +1,6 @@
 //! Single-codepoint Unicode operators and their precedence tiers.
 //!
-//! Generated from JuliaSyntax's operator-kind tables (julia_version=1.12.6 juliasyntax_version=0.4.10 ).
+//! Generated from JuliaSyntax's operator-kind tables (julia_version=1.12.6 juliasyntax_version=1.0.2 ).
 //! Every entry is a length-1 non-ASCII operator string from
 //! `Tokenize._nondot_symbolic_operator_kinds()`, classified by the
 //! `is_prec_*` predicate for its kind. The table is sorted by code point so
@@ -614,4 +614,5 @@ static UNICODE_OPS: &[(char, TokKind)] = &[
     ('\u{ffea}', TokKind::UniPower), // ￪
     ('\u{ffeb}', TokKind::UniArrow), // ￫
     ('\u{ffec}', TokKind::UniPower), // ￬
+    ('\u{1f8b2}', TokKind::UniArrow), // 🢲
 ];

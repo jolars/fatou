@@ -1012,11 +1012,16 @@ keyword_table!(define_keyword_tables);
 /// Whether `c` may begin an identifier, mirroring JuliaSyntax's
 /// `is_identifier_start_char` (`Base.is_id_start_char`). ASCII is handled inline;
 /// non-ASCII code points defer to the generated `unicode_ident` tables.
+///
+/// `🢲` is JuliaSyntax's one hard-coded divergence from `Base.is_id_start_char`:
+/// it became an arrow operator, so it must not start an identifier. The
+/// generated table tracks `Base`, which still admits it, so the carve-out lives
+/// here rather than in the table.
 pub fn is_ident_start(c: char) -> bool {
     if c.is_ascii() {
         c == '_' || c.is_ascii_alphabetic()
     } else {
-        super::unicode_ident::is_unicode_ident_start(c)
+        c != '\u{1f8b2}' && super::unicode_ident::is_unicode_ident_start(c)
     }
 }
 
@@ -1180,6 +1185,26 @@ mod tests {
                 "{kw} materializes as a keyword kind"
             );
         }
+    }
+
+    /// `\u{1f8b2}` is an arrow operator in JuliaSyntax 1.0 even though
+    /// `Base.is_id_start_char` still accepts it as an identifier start, so the
+    /// lexer must prefer the operator reading.
+    #[test]
+    fn the_wide_arrow_operator_is_not_an_identifier_start() {
+        assert_eq!(
+            kinds("x \u{1f8b2} y"),
+            vec![
+                TokKind::Ident,
+                TokKind::Whitespace,
+                TokKind::UniArrow,
+                TokKind::Whitespace,
+                TokKind::Ident,
+            ]
+        );
+        // It still *continues* an identifier: JuliaSyntax's `is_identifier_char`
+        // has no matching carve-out, so `a\u{1f8b2}b` stays one name.
+        assert_eq!(kinds("a\u{1f8b2}b"), vec![TokKind::Ident]);
     }
 
     #[test]
