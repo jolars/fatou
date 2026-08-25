@@ -72,10 +72,10 @@ or take a direct ask. The deferred ledger below is the fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **745 allowlisted**, 11
-divergence, 0 unsupported. Dir corpus (**255 cases**): **254 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **747 allowlisted**, 9
+divergence, 0 unsupported. Dir corpus (**256 cases**): **255 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
-1.0.2 added 71 harvested cases; the 5 remaining correctable divergences are
+1.0.2 added 71 harvested cases; its remaining correctable divergence is
 recorded below. A green report means "no regression", not "nothing to do".
 
 **Divergence-ledger audit (2026-06-24, COMPLETE):** the old "deliberate, do not
@@ -96,8 +96,7 @@ mixed `a < b isa c` stay nested (separate `word_operator` branch).
 
 Unimplemented, ranked roughly by real-world value:
 
-- JuliaSyntax 1.0 error/value shapes: quoted names in `using :A`/`using A: :b`;
-  and `function var"." end`.
+- JuliaSyntax 1.0 error/value shape: `function var"." end`.
 - `x.function` — a reserved keyword as a field name after `)`.
 - `end` inside a nested `[…]` within an index (`df[[1; 2; end:-1:3], :]`).
 - `primitive type T (18 * 8) end` — the size expr is a spaced group, not a call.
@@ -126,29 +125,29 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25d — parenthesized macro signatures)
+## Latest session (2026-08-25e — quoted import names)
 
-Landed invalid singleton parenthesized macro-call and interpolation function
-signatures. Their existing `TUPLE_EXPR` topology now carries a diagnostic that
-the projector replays as JuliaSyntax's `(error (tuple-p …))` shape.
+Landed quoted symbols used as whole import paths and imported names. They now
+stay inside `IMPORT_PATH` as error-wrapped `QUOTE_SYM` nodes instead of being
+mistaken for the base/name separator or a recovery colon.
 
-- **Error shape**: the post-build signature flag recognizes a separator-free
-  singleton tuple whose operand, through nested parens, is a `MACRO_CALL` or
-  `INTERPOLATION`. Semicolon, comma, multi-parameter, and splat forms remain
-  valid.
-- **Fixtures**: added parser snapshot and oracle slug
-  `parenthesized_macro_function_signature`, covering direct and nested forms,
-  bare `@f`, and the valid semicolon/splat siblings. No blocked entry was added.
-- **Counts**: JS **743/756 → 745/756** allowlisted (11 FAIL, 0 unsupported,
-  zero regressions); dir **253/254 → 254/255** allowlisted (only the existing
+- **Error shape**: `using :A`, `using A: :b`, and their `import`, parenthesized,
+  spaced, and operator siblings receive `InvalidQuotedImportName`; dotted quoted
+  components remain valid.
+- **Fixtures**: added parser snapshot and oracle slug `quoted_import_name`. No
+  blocked entry was added.
+- **Counts**: JS **745/756 → 747/756** allowlisted (9 FAIL, 0 unsupported, zero
+  regressions); dir **254/255 → 255/256** allowlisted (only the existing
   blocked numeric-display case fails).
-- **Next**: quoted import names in `using :A`/`using A: :b`—the next two-case
-  JuliaSyntax 1.0 cluster (`js-46e41651`, `js-d5e18c3b`).
+- **Next**: `function var"." end` (`js-bade3d11`), the last correctable
+  JuliaSyntax 1.0 corpus divergence.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25d** — singleton parenthesized macro-call and interpolation
+  function signatures recover as invalid parameter tuples. 745 / 254.
 - **2026-08-25c** — bare `:=` and `.` recover as lone syntactic operators while
   remaining valid quoted symbols. 743 / 253.
 - **2026-08-25b** — numeric arguments glued to prefixed command literals now

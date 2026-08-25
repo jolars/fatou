@@ -2074,6 +2074,13 @@ fn project_import_path(node: &SyntaxNode) -> String {
                 parts.push(project_quote_sym(&n));
                 seen_name = true;
             }
+            // A quoted symbol used as a whole clause or imported name is kept
+            // inside the path but rejected (`using :A` → `(importpath (error
+            // (quote-: A)))`). Dotted quoted components take the valid arm above.
+            NodeOrToken::Node(n) if n.kind() == ERROR => {
+                parts.push(project(&n));
+                seen_name = true;
+            }
             // A parenthesized quoted symbol (`import A.(:+)` → `(quote-: +)`); the
             // paren unwraps to its inner quote.
             NodeOrToken::Node(n) if n.kind() == PAREN_EXPR => {
