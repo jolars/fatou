@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/jolars/fatou/compare/fatou-code-v0.16.0...fatou-code-v0.17.0) (2026-08-26)
+
+### Bug Fixes
+- **code:** align VS Code API types ([`74d0970`](https://github.com/jolars/fatou/commit/74d097088a7fd4bbea91610a2b05c4e7757b5260))
+
+### Dependencies
+- updated fatou to v0.17.0
+
 ## [0.16.0](https://github.com/jolars/fatou/compare/fatou-code-v0.15.0...fatou-code-v0.16.0) (2026-08-25)
 
 ### Dependencies
