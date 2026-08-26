@@ -14,6 +14,18 @@ enum Mode {
 /// [`print_at`] and reused across probes rather than reallocated per group.
 type FitStack<'a> = Vec<(bool, Mode, &'a Ir)>;
 
+/// The rendered position of a structured trailing comment. Byte offsets edit
+/// the output, while columns use the printer's existing character-count metric.
+struct TrailingCommentMark {
+    line: usize,
+    indent: usize,
+    raw_text_epoch: usize,
+    separator_start: usize,
+    separator_end: usize,
+    code_col: usize,
+    comment_width: usize,
+}
+
 /// Render `doc` at the given style.
 pub fn print(doc: &Ir, style: FormatStyle) -> String {
     print_at(doc, style, 0)
@@ -29,6 +41,13 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
     let width = style.line_width as usize;
     let mut out = String::new();
     let mut col = indent;
+    let mut line = 0usize;
+    let mut line_indent = indent;
+    // A raw embedded newline comes only from transparent lowering. It is an
+    // explicit boundary: structured suffixes must never align through source
+    // text whose physical lines the printer does not own.
+    let mut raw_text_epoch = 0usize;
+    let mut trailing_comments: Vec<TrailingCommentMark> = Vec::new();
     // Work stack of (indent, mode, node), processed depth-first.
     let mut stack: Vec<(usize, Mode, &Ir)> = vec![(indent, Mode::Break, doc)];
     // Scratch for the fit probes below, reused across every check so a probe
@@ -44,9 +63,33 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
                 // passes raw source newlines through as `Text`; honor them so the
                 // column tracking stays accurate for later groups' fit checks.
                 match s.rfind('\n') {
-                    Some(i) => col = s[i + 1..].chars().count(),
+                    Some(i) => {
+                        line += s.bytes().filter(|byte| *byte == b'\n').count();
+                        let tail = &s[i + 1..];
+                        col = tail.chars().count();
+                        line_indent = tail.chars().take_while(|ch| *ch == ' ').count();
+                        raw_text_epoch += 1;
+                    }
                     None => col += s.chars().count(),
                 }
+            }
+            Ir::TrailingComment(s) => {
+                let separator_start = out.len();
+                let code_col = col;
+                out.push(' ');
+                let separator_end = out.len();
+                out.push_str(s);
+                let comment_width = s.chars().count();
+                col += 1 + comment_width;
+                trailing_comments.push(TrailingCommentMark {
+                    line,
+                    indent: line_indent,
+                    raw_text_epoch,
+                    separator_start,
+                    separator_end,
+                    code_col,
+                    comment_width,
+                });
             }
             Ir::Concat(items) => {
                 for item in items.iter().rev() {
@@ -59,17 +102,29 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
                     out.push(' ');
                     col += 1;
                 }
-                Mode::Break => col = newline(&mut out, indent),
+                Mode::Break => {
+                    col = newline(&mut out, indent);
+                    line += 1;
+                    line_indent = indent;
+                }
             },
             Ir::SoftLine => {
                 if mode == Mode::Break {
                     col = newline(&mut out, indent);
+                    line += 1;
+                    line_indent = indent;
                 }
             }
-            Ir::HardLine => col = newline(&mut out, indent),
+            Ir::HardLine => {
+                col = newline(&mut out, indent);
+                line += 1;
+                line_indent = indent;
+            }
             Ir::BlankLine => {
                 out.push('\n');
                 col = 0;
+                line += 1;
+                line_indent = 0;
             }
             Ir::Group(inner) => {
                 // A group fits flat only if its flat rendering *plus the trailing
@@ -132,7 +187,66 @@ pub fn print_at(doc: &Ir, style: FormatStyle, indent: usize) -> String {
         }
     }
 
+    align_trailing_comments(&mut out, &trailing_comments, width);
     out
+}
+
+/// Align maximal adjacent runs after layout is fixed. A run is all-or-nothing:
+/// if any padded line would exceed `line_width`, every member keeps one space.
+fn align_trailing_comments(out: &mut String, comments: &[TrailingCommentMark], line_width: usize) {
+    let mut replacements: Vec<(usize, usize, usize)> = Vec::new();
+    let mut start = 0usize;
+    while start < comments.len() {
+        let mut same_line_end = start + 1;
+        while same_line_end < comments.len() && comments[same_line_end].line == comments[start].line
+        {
+            same_line_end += 1;
+        }
+        if same_line_end > start + 1 {
+            // Multiple suffixes on one physical line are not distinct
+            // code/comment pairs, and form a hard boundary on both sides.
+            start = same_line_end;
+            continue;
+        }
+
+        let mut end = start + 1;
+        while end < comments.len()
+            && comments[end].line == comments[end - 1].line + 1
+            && comments[end].indent == comments[start].indent
+            && comments[end].raw_text_epoch == comments[start].raw_text_epoch
+            && (end + 1 == comments.len() || comments[end + 1].line != comments[end].line)
+        {
+            end += 1;
+        }
+
+        let run = &comments[start..end];
+        if run.len() >= 2 {
+            let target = run
+                .iter()
+                .map(|comment| comment.code_col)
+                .max()
+                .expect("non-empty trailing-comment run")
+                + 1;
+            if run
+                .iter()
+                .all(|comment| target + comment.comment_width <= line_width)
+            {
+                for comment in run {
+                    replacements.push((
+                        comment.separator_start,
+                        comment.separator_end,
+                        target - comment.code_col,
+                    ));
+                }
+            }
+        }
+        start = end;
+    }
+
+    // Earlier byte offsets remain valid when replacements run right-to-left.
+    for (start, end, width) in replacements.into_iter().rev() {
+        out.replace_range(start..end, &" ".repeat(width));
+    }
 }
 
 /// Emit a newline followed by `indent` spaces; return the new column.
@@ -224,6 +338,7 @@ fn fits_stack<'a>(
                 }
                 None => remaining -= s.chars().count() as isize,
             },
+            Ir::TrailingComment(s) => remaining -= 1 + s.chars().count() as isize,
             Ir::Concat(items) => {
                 for item in items.iter().rev() {
                     stack.push((in_group, mode, item));
@@ -374,6 +489,110 @@ mod tests {
             ..FormatStyle::default()
         };
         assert_eq!(print(&trailing_comma_doc(), style), "(\n    a,\n    b,\n)");
+    }
+
+    #[test]
+    fn adjacent_trailing_comments_align_to_the_longest_prefix() {
+        let ir = Ir::concat([
+            Ir::text("a"),
+            Ir::trailing_comment("# first"),
+            Ir::HardLine,
+            Ir::text("long"),
+            Ir::trailing_comment("# second"),
+        ]);
+        assert_eq!(
+            print(&ir, FormatStyle::default()),
+            "a    # first\nlong # second"
+        );
+    }
+
+    #[test]
+    fn trailing_comment_alignment_counts_characters_not_bytes() {
+        let ir = Ir::concat([
+            Ir::text("é"),
+            Ir::trailing_comment("# first"),
+            Ir::HardLine,
+            Ir::text("long"),
+            Ir::trailing_comment("# second"),
+        ]);
+        assert_eq!(
+            print(&ir, FormatStyle::default()),
+            "é    # first\nlong # second"
+        );
+    }
+
+    #[test]
+    fn trailing_comment_alignment_stops_at_a_different_indent() {
+        let ir = Ir::concat([
+            Ir::text("a"),
+            Ir::trailing_comment("# first"),
+            Ir::indent(Ir::concat([
+                Ir::HardLine,
+                Ir::text("long"),
+                Ir::trailing_comment("# second"),
+            ])),
+        ]);
+        assert_eq!(
+            print(&ir, FormatStyle::default()),
+            "a # first\n    long # second"
+        );
+    }
+
+    #[test]
+    fn multiple_trailing_comments_on_one_line_break_alignment() {
+        let ir = Ir::concat([
+            Ir::text("a"),
+            Ir::trailing_comment("# first"),
+            Ir::trailing_comment("# second"),
+            Ir::HardLine,
+            Ir::text("long"),
+            Ir::trailing_comment("# third"),
+        ]);
+        assert_eq!(
+            print(&ir, FormatStyle::default()),
+            "a # first # second\nlong # third"
+        );
+    }
+
+    #[test]
+    fn raw_multiline_text_breaks_trailing_comment_alignment() {
+        let ir = Ir::concat([
+            Ir::text("a"),
+            Ir::trailing_comment("# first"),
+            Ir::text("\n"),
+            Ir::text("long"),
+            Ir::trailing_comment("# second"),
+        ]);
+        assert_eq!(
+            print(&ir, FormatStyle::default()),
+            "a # first\nlong # second"
+        );
+    }
+
+    #[test]
+    fn overflowing_trailing_comment_leaves_the_whole_run_unaligned() {
+        let style = FormatStyle {
+            line_width: 14,
+            ..FormatStyle::default()
+        };
+        let ir = Ir::concat([
+            Ir::text("a"),
+            Ir::trailing_comment("# 1234567890"),
+            Ir::HardLine,
+            Ir::text("long"),
+            Ir::trailing_comment("# short"),
+        ]);
+        assert_eq!(print(&ir, style), "a # 1234567890\nlong # short");
+    }
+
+    #[test]
+    fn trailing_comments_still_participate_in_group_fit() {
+        let style = FormatStyle {
+            line_width: 14,
+            ..FormatStyle::default()
+        };
+        let ir = Ir::concat([list_doc(), Ir::trailing_comment("# comment")]);
+        assert_eq!(print(&ir, style), "[\n    a,\n    b,\n    c\n] # comment");
     }
 
     fn hug_doc() -> Ir {

@@ -1406,6 +1406,11 @@ fn render_flat_into(ir: &Ir, out: &mut String) -> bool {
             out.push_str(s);
             true
         }
+        Ir::TrailingComment(s) => {
+            out.push(' ');
+            out.push_str(s);
+            true
+        }
         Ir::Concat(items) => items.iter().all(|item| render_flat_into(item, out)),
         Ir::Indent(inner) | Ir::Group(inner) => render_flat_into(inner, out),
         Ir::Line => {
@@ -3665,7 +3670,7 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     let mut items: Vec<Ir> = Vec::new();
     // A trailing comment riding on item `i` (`item, # …`), rendered after its
     // comma. Aligned with `items`; a `None` slot is pushed for every item.
-    let mut item_comments: Vec<Option<String>> = Vec::new();
+    let mut item_comments: Vec<Option<PreservedComment>> = Vec::new();
     // The own-line comments preceding item `i` (the gap before it). Index `i`
     // holds the comments between item `i-1` and item `i`; the leading gap (before
     // the first item) and the trailing gap (after the last) flank them.
@@ -3674,7 +3679,7 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     // item or the close bracket arrives.
     let mut gap: Vec<String> = Vec::new();
     let mut leading: Vec<String> = Vec::new();
-    let mut header_comment: Option<String> = None;
+    let mut header_comment: Option<PreservedComment> = None;
     // Whether any line content (item or own-line comment) sits on the current
     // source line, so a fresh comment can be classified trailing vs own-line.
     // Starts true: the open bracket is the current line, so a comment before any
@@ -3709,7 +3714,7 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                     // A block-comment token always ends with `=#`, so the trim is a
                     // no-op for it; its multi-line interior is preserved verbatim. A
                     // line comment's own trailing whitespace is trimmed.
-                    let text = tok.text().trim_end_matches([' ', '\t']).to_string();
+                    let comment = PreservedComment::from_token(&tok);
                     if on_line {
                         // Same line as the previous content: a trailing comment on
                         // the last item, or — before any item — on the open bracket.
@@ -3720,10 +3725,10 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
                         if slot.is_some() {
                             return lower_transparent(node);
                         }
-                        *slot = Some(text);
+                        *slot = Some(comment);
                     } else {
                         // An own-line comment: a line of its own inside the gap.
-                        gap.push(text);
+                        gap.push(comment.text);
                         on_line = true;
                     }
                 }
@@ -3781,8 +3786,7 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
         // The trailing comment rides after the comma, canonicalized to one leading
         // space (its same-line attachment is preserved, not its source spacing).
         if let Some(text) = &item_comments[i] {
-            inner.push(Ir::text(" "));
-            inner.push(Ir::text(text.clone()));
+            inner.push(text.trailing_ir());
         }
         if i + 1 < n {
             render_gap(&mut inner, &gaps[i]);
@@ -3794,9 +3798,8 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     // A comment on the open-bracket line rides after it, canonicalized to one
     // leading space (the same attachment-preserving rule as a trailing comment).
     let mut out: Vec<Ir> = vec![Ir::text(open)];
-    if let Some(text) = header_comment {
-        out.push(Ir::text(" "));
-        out.push(Ir::text(text));
+    if let Some(comment) = header_comment {
+        out.push(comment.trailing_ir());
     }
     out.push(Ir::indent(Ir::concat(inner)));
     out.push(Ir::HardLine); // framing break before the close bracket
@@ -3958,13 +3961,13 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     // Each matrix row becomes one framed line; `items[i]` is its space-joined
     // elements. Comments classify exactly as in `lower_multiline_bracket`.
     let mut items: Vec<Ir> = Vec::new();
-    let mut item_comments: Vec<Option<String>> = Vec::new();
+    let mut item_comments: Vec<Option<PreservedComment>> = Vec::new();
     // Own-line comments preceding row `i`; `leading` flanks the first row and
     // `trailing` (the final `gap`) the close bracket.
     let mut gaps: Vec<Vec<String>> = Vec::new();
     let mut gap: Vec<String> = Vec::new();
     let mut leading: Vec<String> = Vec::new();
-    let mut header_comment: Option<String> = None;
+    let mut header_comment: Option<PreservedComment> = None;
     // Whether content sits on the current source line, so a fresh comment can be
     // classified trailing vs own-line. Starts true: the open bracket is the
     // current line, so `[ # header` is a trailing comment on it.
@@ -3987,7 +3990,7 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
                     // A block-comment token always ends with `=#`, so the trim is a
                     // no-op for it; its multi-line interior is preserved verbatim. A
                     // line comment's own trailing whitespace is trimmed.
-                    let text = tok.text().trim_end_matches([' ', '\t']).to_string();
+                    let comment = PreservedComment::from_token(&tok);
                     if on_line {
                         // Same line as the previous content: a trailing comment on
                         // the last row, or — before any row — on the open bracket.
@@ -3998,10 +4001,10 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
                         if slot.is_some() {
                             return lower_transparent(node);
                         }
-                        *slot = Some(text);
+                        *slot = Some(comment);
                     } else {
                         // An own-line comment: a line of its own inside the gap.
-                        gap.push(text);
+                        gap.push(comment.text);
                         on_line = true;
                     }
                 }
@@ -4060,8 +4063,7 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
         // The trailing comment rides the row, canonicalized to one leading space
         // (same-line attachment preserved, source spacing dropped).
         if let Some(text) = &item_comments[i] {
-            inner.push(Ir::text(" "));
-            inner.push(Ir::text(text.clone()));
+            inner.push(text.trailing_ir());
         }
         if i + 1 < n {
             render_gap(&mut inner, &gaps[i]);
@@ -4073,9 +4075,8 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     // A comment on the open-bracket line rides after it, canonicalized to one
     // leading space (the same attachment-preserving rule as a trailing comment).
     let mut out: Vec<Ir> = vec![Ir::text(open)];
-    if let Some(text) = header_comment {
-        out.push(Ir::text(" "));
-        out.push(Ir::text(text));
+    if let Some(comment) = header_comment {
+        out.push(comment.trailing_ir());
     }
     out.push(Ir::indent(Ir::concat(inner)));
     out.push(Ir::HardLine); // framing break before the close bracket
@@ -4935,12 +4936,39 @@ fn lower_branch_clause(clause: &SyntaxNode) -> Option<Ir> {
     Some(Ir::concat(parts))
 }
 
+#[derive(Clone)]
+struct PreservedComment {
+    text: String,
+    is_line: bool,
+}
+
+impl PreservedComment {
+    fn from_token(token: &SyntaxToken) -> Self {
+        Self {
+            text: token.text().trim_end_matches([' ', '\t']).to_string(),
+            is_line: token.kind() == SyntaxKind::COMMENT,
+        }
+    }
+
+    fn own_line_ir(&self) -> Ir {
+        Ir::text(self.text.clone())
+    }
+
+    fn trailing_ir(&self) -> Ir {
+        if self.is_line {
+            Ir::trailing_comment(self.text.clone())
+        } else {
+            Ir::concat([Ir::text(" "), Ir::text(self.text.clone())])
+        }
+    }
+}
+
 /// One source line of a block body: zero or more statements (`; `-joined) plus an
-/// optional trailing line comment.
+/// optional comment.
 #[derive(Default)]
 struct BodyLine {
     stmts: Vec<Ir>,
-    comment: Option<Ir>,
+    comment: Option<PreservedComment>,
     /// Set when a **top-level** statement is written with a trailing `;` output
     /// suppressor (`x = 1;`) — the last `;` of a `TOPLEVEL_SEMICOLON` wrapper,
     /// with no statement following it. Unlike an internal `;` separator (a pure
@@ -4961,6 +4989,11 @@ impl BodyLine {
     /// A line carrying neither a statement nor a comment — a blank line.
     fn is_blank(&self) -> bool {
         self.stmts.is_empty() && self.comment.is_none()
+    }
+
+    /// Whether this source line can join a range-format alignment window.
+    fn has_trailing_line_comment(&self) -> bool {
+        !self.stmts.is_empty() && self.comment.as_ref().is_some_and(|comment| comment.is_line)
     }
 
     /// Grow the line's significant span to cover `range`.
@@ -5066,8 +5099,7 @@ fn collect_body_elements(
                     if line.comment.is_some() {
                         return None;
                     }
-                    let text = tok.text().trim_end_matches([' ', '\t']);
-                    line.comment = Some(Ir::text(text));
+                    line.comment = Some(PreservedComment::from_token(&tok));
                     line.cover(tok.text_range());
                     *expect_sep = true;
                 }
@@ -5084,7 +5116,7 @@ fn collect_body_elements(
                     if line.comment.is_some() {
                         return None;
                     }
-                    line.comment = Some(Ir::text(tok.text()));
+                    line.comment = Some(PreservedComment::from_token(&tok));
                     line.cover(tok.text_range());
                     *expect_sep = true;
                 }
@@ -5133,7 +5165,7 @@ fn lower_root(root: &SyntaxNode) -> Ir {
             // Own-line comment: its own line, flush at column 0.
             inner.push(Ir::HardLine);
             if let Some(comment) = &line.comment {
-                inner.push(comment.clone());
+                inner.push(comment.own_line_ir());
             }
         } else {
             let last_stmt = line.stmts.len() - 1;
@@ -5145,8 +5177,7 @@ fn lower_root(root: &SyntaxNode) -> Ir {
                         inner.push(Ir::text(";"));
                     }
                     if let Some(comment) = &line.comment {
-                        inner.push(Ir::text(" "));
-                        inner.push(comment.clone());
+                        inner.push(comment.trailing_ir());
                     }
                 }
             }
@@ -5229,7 +5260,7 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
             // Own-line comment: its own line, flush at the body indent.
             inner.push(Ir::HardLine);
             if let Some(comment) = &line.comment {
-                inner.push(comment.clone());
+                inner.push(comment.own_line_ir());
             }
         } else {
             let last = line.stmts.len() - 1;
@@ -5245,8 +5276,7 @@ fn build_block_body(block: &SyntaxNode) -> Option<Ir> {
                     // A trailing comment rides the final statement of the source
                     // line, one canonical space after it.
                     if let Some(comment) = &line.comment {
-                        inner.push(Ir::text(" "));
-                        inner.push(comment.clone());
+                        inner.push(comment.trailing_ir());
                     }
                 }
             }
@@ -5289,7 +5319,21 @@ pub(crate) fn lower_body_range(
             window = Some((start, idx));
         }
     }
-    let (first, last) = window?;
+    let (mut first, mut last) = window?;
+
+    // Formatting one member of a canonical alignment run must produce the same
+    // result as formatting the whole file, so include every adjacent source line
+    // that can contribute a structured trailing comment.
+    if lines[first].has_trailing_line_comment() {
+        while first > 0 && lines[first - 1].has_trailing_line_comment() {
+            first -= 1;
+        }
+    }
+    if lines[last].has_trailing_line_comment() {
+        while last + 1 < lines.len() && lines[last + 1].has_trailing_line_comment() {
+            last += 1;
+        }
+    }
 
     let mut inner: Vec<Ir> = Vec::new();
     let mut pending_blanks = 0usize;
@@ -5309,7 +5353,7 @@ pub(crate) fn lower_body_range(
                 inner.push(Ir::HardLine);
             }
             if let Some(comment) = &line.comment {
-                inner.push(comment.clone());
+                inner.push(comment.own_line_ir());
             }
             emitted = true;
         } else {
@@ -5324,8 +5368,7 @@ pub(crate) fn lower_body_range(
                         inner.push(Ir::text(";"));
                     }
                     if let Some(comment) = &line.comment {
-                        inner.push(Ir::text(" "));
-                        inner.push(comment.clone());
+                        inner.push(comment.trailing_ir());
                     }
                 }
                 emitted = true;

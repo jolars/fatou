@@ -84,6 +84,10 @@ Reversing one is allowed but must be conscious and re-recorded, never drive-by.
   `f(g(…)...)` hugs like `f(g(…))`, with `...` riding the inner close. The same
   suffix propagation applies at positional, keyword, collection, and indexed
   collection hug sites. `splat_spacing`.
+- **Trailing `#` comments align by rendered physical line.** A maximal run needs
+  at least two consecutive lines at one indent; blank, uncommented, own-comment,
+  block-comment, and differently indented lines break it. Padding is all-or-none
+  under `line_width`; comments retain their existing influence on group fit.
 
 **Abandoned, don't re-derive:** a "does the hug earn it?" printer guard (a
 `probe` field on `Ir::HugGroup`, rejecting the hug when the item would fit flat
@@ -140,15 +144,13 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (left division)
+## Latest session (trailing-comment alignment)
 
-`test(formatter)`. Gated `\` as an ordinary spaced binary operator. Fixture
-`left_division` covers unspaced and already spaced input, a wide homogeneous
-chain, and a mixed `*`/`\`/`/` chain; the latter proves uniform width-driven
-breaks across the shared multiplication tier. The generic binary rule already
-produced the approved form, so no formatter code changed. Gate is 122 of 150.
-Focused fixture gate, stability, full workspace suite, clippy, and fmt are
-green. No parser/lexer blocker.
+`feat(formatter)`. Added structured trailing `#` comments and a post-layout
+printer pass that aligns adjacent same-indent runs without changing fit
+measurement. Range formatting widens to a complete source run. Fixture
+`comment_trailing_alignment`; gate is 123 of 151. Focused tests, workspace suite,
+clippy, fmt, and formatter Wasm build are green. No parser/lexer blocker.
 
 **Ranked next targets:** (1) gate `typegroup` block layout; (2) minor debt #2.
 
@@ -185,6 +187,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Left division** (`test`): gated `\` as an ordinary spaced binary operator;
+  wide mixed multiplication-tier chains prove uniform breaks. 121→122.
 - **Splat after a closing bracket** (`feat`): removed the stale parser fallback
   and made splats hug-transparent around sole bracketed operands. Gate stayed
   121.

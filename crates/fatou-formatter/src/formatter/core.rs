@@ -149,6 +149,7 @@ fn statement_container(root: &SyntaxNode, range: TextRange) -> SyntaxNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rowan::TextSize;
 
     #[test]
     fn normalizes_operator_spacing() {
@@ -212,6 +213,32 @@ mod tests {
         assert_eq!(
             format_with_style("x=1\r\ny=2\r\n", to_lf).unwrap(),
             "x = 1\ny = 2\n",
+        );
+    }
+
+    #[test]
+    fn range_formatting_widens_to_a_trailing_comment_run() {
+        let source = "a=1 # first\nlong_name=2 # second\nz=3\n";
+        let parsed = parse(source);
+        let cursor = TextSize::from(source.find("long_name").unwrap() as u32);
+        let formatted = format_range(
+            &parsed.cst,
+            TextRange::empty(cursor),
+            FormatStyle::default(),
+        )
+        .unwrap()
+        .expect("range should format");
+
+        let second_newline = source
+            .match_indices('\n')
+            .nth(1)
+            .map(|(offset, _)| offset)
+            .unwrap();
+        assert_eq!(formatted.range.start(), TextSize::from(0));
+        assert_eq!(formatted.range.end(), TextSize::from(second_newline as u32));
+        assert_eq!(
+            formatted.text,
+            "a = 1         # first\nlong_name = 2 # second"
         );
     }
 }

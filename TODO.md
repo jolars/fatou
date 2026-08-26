@@ -37,6 +37,12 @@
 
 ## Formatter
 
+- [x] Align maximal runs of adjacent same-indent trailing `#` comments at the
+  longest rendered code prefix. Blank, uncommented, own-comment, block-comment,
+  and differently indented lines break a run; alignment is declined for the
+  whole run when its padding would exceed `line_width`. Range formatting widens
+  to the complete source run. Fixture `comment_trailing_alignment`.
+
 - [x] Gate canonical spacing for labeled `break`/`continue`, including a
   labeled `break` with a value expression and occurrences nested in binary and
   ternary expressions. Fixture `labeled_break_continue`.

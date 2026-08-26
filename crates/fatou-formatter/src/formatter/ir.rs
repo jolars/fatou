@@ -8,6 +8,13 @@ use std::rc::Rc;
 pub enum Ir {
     /// Literal text. Must not contain newlines (use [`Ir::HardLine`]).
     Text(Rc<str>),
+    /// A trailing `#` comment, rendered after one canonical separating space.
+    ///
+    /// Unlike a zero-width Wadler/Prettier line suffix, this node participates
+    /// in fit measurement exactly as its rendered text does. Its distinct shape
+    /// lets the printer align adjacent comments after every layout decision has
+    /// been made, without rediscovering comment markers in rendered strings.
+    TrailingComment(Rc<str>),
     /// A sequence of documents laid out one after another.
     Concat(Rc<[Ir]>),
     /// A space when its group is flat, a newline (+ indent) when broken.
@@ -65,6 +72,12 @@ pub enum Ir {
 impl Ir {
     pub fn text(s: impl Into<Rc<str>>) -> Ir {
         Ir::Text(s.into())
+    }
+
+    /// Build a trailing `#` comment without its canonical leading separator.
+    /// The text must not contain a newline.
+    pub fn trailing_comment(s: impl Into<Rc<str>>) -> Ir {
+        Ir::TrailingComment(s.into())
     }
 
     pub fn concat(items: impl IntoIterator<Item = Ir>) -> Ir {
