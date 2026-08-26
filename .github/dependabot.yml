@@ -23,6 +23,9 @@ updates:
     directory: "/editors/code"
     schedule:
       interval: "weekly"
+    ignore:
+      # This must match the oldest supported VS Code API in `engines.vscode`.
+      - dependency-name: "@types/vscode"
     groups:
       npm:
         patterns:
