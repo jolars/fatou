@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/jolars/fatou/compare/v0.16.0...v0.17.0) (2026-08-26)
+
+### Features
+- **formatter:** align trailing comments ([`132272b`](https://github.com/jolars/fatou/commit/132272b3ccfe076a8eb8eff261e021e524d9c9b6))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.5.0
+
 ## [0.16.0](https://github.com/jolars/fatou/compare/v0.15.0...v0.16.0) (2026-08-25)
 
 ### Features

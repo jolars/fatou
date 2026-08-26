@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.4.0...fatou-formatter-v0.5.0) (2026-08-26)
+
+### Features
+- **formatter:** align trailing comments ([`132272b`](https://github.com/jolars/fatou/commit/132272b3ccfe076a8eb8eff261e021e524d9c9b6))
+
 ## [0.4.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.3.3...fatou-formatter-v0.4.0) (2026-08-25)
 
 ### Features
