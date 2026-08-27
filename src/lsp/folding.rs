@@ -1,7 +1,7 @@
-//! Folding ranges (`textDocument/foldingRange`): block constructs (definition
-//! and expression blocks, plus their branch clauses so individual arms
-//! collapse), comment runs, and import groups. A pure CST walk — every fold
-//! boundary is a keyword or a token run, so no semantic model is needed.
+//! Folding ranges (`textDocument/foldingRange`): Julia block constructs (plus
+//! branch clauses), comment runs, import groups, and Markdown sections and
+//! containers in static docstrings. Julia-bearing Markdown fences recursively
+//! contribute their own code folds.
 //!
 //! Conventions: folds span the whole construct through its closing `end`
 //! (rust-analyzer's convention — a collapsed function shows only its header
@@ -12,12 +12,16 @@
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
-use lsp_types::{FoldingRange, FoldingRangeKind};
+use lsp_types::{FoldingRange, FoldingRangeKind, Position, Range};
+use rowan::ast::AstNode as _;
 
 use crate::incremental::Analysis;
 use crate::parser::parse;
+use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use fatou_parser::documentation::ast::{CodeBlock, Heading};
+use fatou_parser::documentation::syntax::SyntaxKind as DocSyntaxKind;
 
 /// The folding ranges for `text`, re-parsing it. Pure and unit-testable;
 /// single-file by nature.
@@ -26,7 +30,8 @@ use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 /// broken buffer are still useful while the user types.
 pub fn compute_folding_ranges(text: &str) -> Vec<FoldingRange> {
     let root = parse(text).cst;
-    folds_for_tree(&root, text)
+    let model = SemanticModel::build(&root);
+    folds_for_tree(&root, &model, text)
 }
 
 /// Compute folding ranges off the snapshot's cached parse when the db's
@@ -45,7 +50,8 @@ pub(crate) fn folding_ranges_via_db(
             return None;
         }
         let root = snapshot.parsed_tree(file);
-        Some(folds_for_tree(&root, text))
+        let model = snapshot.semantic_model(file);
+        Some(folds_for_tree(&root, model, text))
     }));
     match cached {
         Ok(Some(folds)) => folds,
@@ -56,7 +62,7 @@ pub(crate) fn folding_ranges_via_db(
 
 /// Shared entry point for the fresh-parse and cached-tree paths: `root` must be
 /// the parse tree of exactly `text`.
-fn folds_for_tree(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
+fn folds_for_tree(root: &SyntaxNode, model: &SemanticModel, text: &str) -> Vec<FoldingRange> {
     let ctx = Ctx {
         text,
         line_index: LineIndex::new(text),
@@ -93,7 +99,84 @@ fn folds_for_tree(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
         collect_import_groups(&node, &ctx, &mut out);
     }
     collect_comment_folds(root, &ctx, &mut out);
+    collect_documentation_folds(model, &ctx, &mut out);
     out
+}
+
+/// Fold Markdown sections and containers in every statically decoded docstring,
+/// then add the ordinary Julia folds nested inside Julia-bearing fences.
+fn collect_documentation_folds(model: &SemanticModel, ctx: &Ctx<'_>, out: &mut Vec<FoldingRange>) {
+    for (_, decoded) in super::documentation::static_documentation(model) {
+        let markdown = fatou_parser::documentation::parse(decoded.as_str());
+        let headings: Vec<Heading> = markdown
+            .cst
+            .descendants()
+            .filter_map(Heading::cast)
+            .collect();
+        let document_end = rowan::TextSize::new(decoded.as_str().len() as u32);
+        for (index, heading) in headings.iter().enumerate() {
+            let end = headings[index + 1..]
+                .iter()
+                .find(|next| next.level() <= heading.level())
+                .map(|next| next.syntax().text_range().start())
+                .unwrap_or(document_end);
+            let range = rowan::TextRange::new(heading.syntax().text_range().start(), end);
+            if let Some(source) = decoded.source_map().source_range(range) {
+                ctx.push_fold(out, source, Some(FoldingRangeKind::Region));
+            }
+        }
+
+        for node in markdown.cst.descendants() {
+            if matches!(
+                node.kind(),
+                DocSyntaxKind::BLOCK_QUOTE
+                    | DocSyntaxKind::ADMONITION
+                    | DocSyntaxKind::LIST
+                    | DocSyntaxKind::INDENTED_CODE_BLOCK
+                    | DocSyntaxKind::FENCED_CODE_BLOCK
+                    | DocSyntaxKind::MATH_BLOCK
+                    | DocSyntaxKind::FOOTNOTE_DEFINITION
+                    | DocSyntaxKind::TABLE
+            ) && let Some(source) = decoded.source_map().source_range(node.text_range())
+            {
+                ctx.push_fold(out, source, Some(FoldingRangeKind::Region));
+            }
+
+            let Some(fence) = CodeBlock::cast(node) else {
+                continue;
+            };
+            if !fence.fence_kind().contains_julia() {
+                continue;
+            }
+            let Some(content_range) = fence.content_range() else {
+                continue;
+            };
+            let start = usize::from(content_range.start());
+            let end = usize::from(content_range.end());
+            let Some(code) = decoded.as_str().get(start..end) else {
+                continue;
+            };
+            let code_index = LineIndex::new(code);
+            for fold in compute_folding_ranges(code) {
+                let relative = Range::new(
+                    Position::new(fold.start_line, 0),
+                    Position::new(fold.end_line.saturating_add(1), 0),
+                );
+                let relative_start =
+                    code_index.position_to_byte(relative.start, PositionEncoding::Utf8);
+                let relative_end =
+                    code_index.position_to_byte(relative.end, PositionEncoding::Utf8);
+                let base = u32::from(content_range.start());
+                let decoded_range = rowan::TextRange::new(
+                    rowan::TextSize::new(base + relative_start as u32),
+                    rowan::TextSize::new(base + relative_end as u32),
+                );
+                if let Some(source) = decoded.source_map().source_range(decoded_range) {
+                    ctx.push_fold(out, source, fold.kind);
+                }
+            }
+        }
+    }
 }
 
 struct Ctx<'a> {
@@ -297,5 +380,34 @@ mod tests {
             expected,
             "untracked path must fall back to the buffer text"
         );
+    }
+
+    #[test]
+    fn folds_markdown_sections_and_embedded_julia() {
+        let source = concat!(
+            "\"\"\"\n",
+            "# Overview\n",
+            "\n",
+            "Intro.\n",
+            "\n",
+            "## Example\n",
+            "\n",
+            "```julia\n",
+            "function example(x)\n",
+            "    x\n",
+            "end\n",
+            "```\n",
+            "\"\"\"\n",
+            "f(x) = x\n",
+        );
+        let folds = compute_folding_ranges(source);
+        let spans: Vec<_> = folds
+            .iter()
+            .map(|fold| (fold.start_line, fold.end_line))
+            .collect();
+        assert!(spans.contains(&(1, 11)), "overview section: {folds:?}");
+        assert!(spans.contains(&(5, 11)), "example section: {folds:?}");
+        assert!(spans.contains(&(7, 11)), "code fence: {folds:?}");
+        assert!(spans.contains(&(8, 10)), "embedded function: {folds:?}");
     }
 }

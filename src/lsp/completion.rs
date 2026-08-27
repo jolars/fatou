@@ -1,6 +1,6 @@
 //! Completion (`textDocument/completion` and `completionItem/resolve`).
 //!
-//! Four contexts, decided by a lexical backward scan from the cursor (robust to
+//! Four Julia contexts, decided by a lexical backward scan from the cursor (robust to
 //! the parser's error recovery on the partial input completion always sees, like
 //! `Foo.` or `@t`):
 //!
@@ -19,6 +19,10 @@
 //! (`completionItem/resolve`) from the [`data`](CompletionItem::data) key each
 //! library item carries, so the initial list stays cheap.
 //!
+//! Static documentation prose offers only input sequences. An explicit `@ref`
+//! completes symbols and Markdown anchors in the documented definition's scope;
+//! a Julia-bearing fence combines its own local names with that outer scope.
+//!
 //! The receiver of a member access resolves to a harvested module only
 //! (`Base.`, `LinearAlgebra.`, nested `A.B.`); value and type receivers are out
 //! of scope until there is type inference.
@@ -28,8 +32,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, MarkupContent,
-    MarkupKind, Position, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, InsertReplaceEdit,
+    MarkupContent, MarkupKind, Position, TextEdit,
 };
 use rowan::TextSize;
 use serde::{Deserialize, Serialize};
@@ -136,7 +140,73 @@ fn completions_for<P: PackageSource>(
     encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
     let offset_bytes: usize = offset.into();
-    match context_at(text, offset_bytes) {
+    if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
+        if let Some(embedded) = context.embedded_julia() {
+            let parsed = parse(embedded.text);
+            let embedded_model = SemanticModel::build(&parsed.cst);
+            let mut items = completions_for(
+                &embedded_model,
+                &parsed.cst,
+                packages,
+                workspace.clone(),
+                embedded.text,
+                embedded.offset,
+                encoding,
+            );
+            let outer = reference_completions(
+                model,
+                packages,
+                workspace,
+                embedded.text,
+                embedded.offset,
+                context.attachment.target_range.start(),
+            );
+            let mut seen: std::collections::HashSet<String> =
+                items.iter().map(|item| item.label.clone()).collect();
+            items.extend(
+                outer
+                    .into_iter()
+                    .filter(|item| seen.insert(item.label.clone())),
+            );
+            return map_embedded_edits(items, &embedded, text, encoding);
+        }
+        if let Some(reference) = context.explicit_ref() {
+            let replacement = context
+                .source_range(reference.range)
+                .map(|range| super::documentation::lsp_range(range, text, encoding));
+            let mut items = reference_completions(
+                model,
+                packages,
+                workspace,
+                reference.target.as_str(),
+                reference.offset,
+                context.attachment.target_range.start(),
+            );
+            if let Some(range) = replacement {
+                for item in &mut items {
+                    if item.kind == Some(CompletionItemKind::REFERENCE) {
+                        item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+                            range,
+                            new_text: item.label.clone(),
+                        }));
+                    }
+                }
+            }
+            return items;
+        }
+        // Documentation prose keeps Julia's input sequences, but ordinary
+        // identifier completion would bury the author in irrelevant code names.
+        if let Context::Latex { start } = context_at(text, offset_bytes) {
+            let typed = &text[start..offset_bytes];
+            if !is_lone_escape(&typed[1..]) {
+                return latex_items(text, start, offset_bytes, encoding);
+            }
+        }
+        return Vec::new();
+    }
+
+    let context = context_at(text, offset_bytes);
+    match context {
         // A sequence is an input method, not code, so it wins over the
         // identifier run it would otherwise look like. Where the backslash is
         // more likely the literal's own than an input sequence, nothing is
@@ -155,10 +225,11 @@ fn completions_for<P: PackageSource>(
                 latex_items(text, start, offset_bytes, encoding)
             }
         }
+        _ if string_context_at(root, offset) != StringContext::Code => Vec::new(),
         Context::Member {
             receiver,
             macro_member,
-        } => member_completions(packages, &receiver, macro_member),
+        } => member_completions(packages, workspace.as_ref(), &receiver, macro_member),
         Context::Macro => Resolver::new(model, packages)
             .with_workspace(workspace)
             .visible(offset, Namespace::Macro)
@@ -176,6 +247,94 @@ fn completions_for<P: PackageSource>(
             items
         }
     }
+}
+
+/// Completion inside an explicit `@ref target`, resolved in the documented
+/// definition's Julia scope rather than in the Markdown string literal.
+fn reference_completions<P: PackageSource>(
+    model: &SemanticModel,
+    packages: &P,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
+    target: &str,
+    offset: TextSize,
+    semantic_offset: TextSize,
+) -> Vec<CompletionItem> {
+    match context_at(target, offset.into()) {
+        Context::Member {
+            receiver,
+            macro_member,
+        } => member_completions(packages, workspace.as_ref(), &receiver, macro_member),
+        Context::Macro => Resolver::new(model, packages)
+            .with_workspace(workspace)
+            .visible(semantic_offset, Namespace::Macro)
+            .into_iter()
+            .map(|candidate| candidate_item(model, candidate, Namespace::Macro))
+            .collect(),
+        Context::Value => {
+            let mut items: Vec<_> = Resolver::new(model, packages)
+                .with_workspace(workspace)
+                .visible(semantic_offset, Namespace::Value)
+                .into_iter()
+                .map(|candidate| candidate_item(model, candidate, Namespace::Value))
+                .collect();
+            for anchor in super::documentation::markdown_anchor_names(model) {
+                if items.iter().any(|item| item.label == anchor) {
+                    continue;
+                }
+                items.push(CompletionItem {
+                    label: anchor,
+                    kind: Some(CompletionItemKind::REFERENCE),
+                    detail: Some("documentation anchor".to_string()),
+                    ..Default::default()
+                });
+            }
+            items
+        }
+        Context::Latex { .. } => Vec::new(),
+    }
+}
+
+/// Move any explicit edits produced for an embedded Julia document into the
+/// outer Julia source. Most symbol items rely on the client's word replacement
+/// and carry no edit; LaTeX input sequences are the important explicit case.
+fn map_embedded_edits(
+    mut items: Vec<CompletionItem>,
+    embedded: &super::documentation::EmbeddedJulia<'_>,
+    source: &str,
+    encoding: PositionEncoding,
+) -> Vec<CompletionItem> {
+    let map = |range| {
+        embedded
+            .source_range_from_lsp(range, encoding)
+            .map(|range| super::documentation::lsp_range(range, source, encoding))
+    };
+    for item in &mut items {
+        item.text_edit = item.text_edit.take().and_then(|edit| match edit {
+            CompletionTextEdit::Edit(mut edit) => {
+                edit.range = map(edit.range)?;
+                Some(CompletionTextEdit::Edit(edit))
+            }
+            CompletionTextEdit::InsertAndReplace(mut edit) => {
+                edit.insert = map(edit.insert)?;
+                edit.replace = map(edit.replace)?;
+                Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                    new_text: edit.new_text,
+                    insert: edit.insert,
+                    replace: edit.replace,
+                }))
+            }
+        });
+        if let Some(edits) = &mut item.additional_text_edits {
+            edits.retain_mut(|edit| match map(edit.range) {
+                Some(range) => {
+                    edit.range = range;
+                    true
+                }
+                None => false,
+            });
+        }
+    }
+    items
 }
 
 // --- context detection -----------------------------------------------------
@@ -389,6 +548,9 @@ fn string_context_at(root: &SyntaxNode, offset: TextSize) -> StringContext {
     token
         .parent_ancestors()
         .find_map(|node| match node.kind() {
+            // An interpolation is Julia code even though a string literal is a
+            // more distant ancestor.
+            SyntaxKind::INTERPOLATION => Some(StringContext::Code),
             SyntaxKind::CMD_LITERAL => Some(StringContext::Verbatim),
             SyntaxKind::STRING_LITERAL => Some(
                 if node
@@ -432,12 +594,20 @@ fn candidate_item(model: &SemanticModel, cand: Candidate, ns: Namespace) -> Comp
     match cand.source {
         Source::Binding(id) => {
             let kind = model.binding(id).kind;
-            CompletionItem {
+            let mut item = CompletionItem {
                 label,
                 kind: Some(binding_kind(kind)),
                 detail: Some(binding_detail(kind).to_string()),
                 ..Default::default()
-            }
+            };
+            let doc = model.documentation_for_binding(id).find_map(|doc| {
+                let crate::ast::DocText::Static(text) = &doc.text else {
+                    return None;
+                };
+                Some(text.as_str())
+            });
+            set_doc(&mut item, doc);
+            item
         }
         // A workspace sibling lives in the library map under its package name,
         // so it resolves lazily through the same key as any library item.
@@ -516,15 +686,19 @@ fn heuristic_kind(name: &str, ns: Namespace) -> CompletionItemKind {
 /// kept.
 fn member_completions<P: PackageSource>(
     packages: &P,
+    workspace: Option<&(Arc<PackageIndex>, ModulePath)>,
     receiver: &[String],
     macro_member: bool,
 ) -> Vec<CompletionItem> {
     let Some((head, tail)) = receiver.split_first() else {
         return Vec::new();
     };
-    let Some(pkg) = packages.package(head) else {
-        return Vec::new();
-    };
+    let pkg = workspace
+        .map(|(package, _)| package)
+        .filter(|package| package.name == *head)
+        .cloned()
+        .or_else(|| packages.package(head));
+    let Some(pkg) = pkg else { return Vec::new() };
     let tail: Vec<&str> = tail.iter().map(String::as_str).collect();
     let Some(module) = resolve_submodule(&pkg.root, &tail) else {
         return Vec::new();
@@ -627,10 +801,10 @@ fn enrich(item: &mut CompletionItem, module: &ModuleIndex, name: &str) {
 }
 
 fn set_doc(item: &mut CompletionItem, doc: Option<&str>) {
-    if let Some(text) = doc {
+    if let Some(text) = doc.and_then(super::documentation::render) {
         item.documentation = Some(Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: text.to_string(),
+            value: text,
         }));
     }
 }
@@ -793,6 +967,128 @@ mod tests {
         // A keyword is a KEYWORD item.
         let kw = items.iter().find(|i| i.label == "function").unwrap();
         assert_eq!(kw.kind, Some(CompletionItemKind::KEYWORD));
+    }
+
+    #[test]
+    fn local_completion_carries_decoded_documentation() {
+        let lib = library(vec![]);
+        let src = "\"A decoded\\n**docstring**.\"\ngreet(name) = name\ngr";
+        let items = completions_at(src, "\ngr", &lib);
+        let greet = item(&items, "greet");
+        match &greet.documentation {
+            Some(Documentation::MarkupContent(markup)) => {
+                assert_eq!(markup.value, "A decoded\n**docstring**.")
+            }
+            other => panic!("expected decoded markdown documentation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_ref_offers_symbols_but_ordinary_prose_does_not() {
+        let lib = library(vec![]);
+        let source = concat!(
+            "\"\"\"\n",
+            "See [`greet`](@ref gre) and ordinary gre prose.\n",
+            "\"\"\"\n",
+            "greet(name) = name\n",
+        );
+        let ref_items = completions_at(source, "@ref gre", &lib);
+        assert!(labels(&ref_items).contains(&"greet".to_string()));
+        let prose_items = completions_at(source, "ordinary gre", &lib);
+        assert!(
+            prose_items.is_empty(),
+            "prose should not offer Julia names: {:?}",
+            labels(&prose_items)
+        );
+    }
+
+    #[test]
+    fn incomplete_explicit_ref_still_offers_completion() {
+        let lib = library(vec![]);
+        let source = concat!(
+            "\"\"\"\n",
+            "See [`greet`](@ref gre\n",
+            "\"\"\"\n",
+            "greet(name) = name\n",
+        );
+        let names = labels(&completions_at(source, "@ref gre", &lib));
+        assert!(names.contains(&"greet".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn embedded_julia_completion_sees_fence_locals() {
+        let lib = library(vec![]);
+        let source = concat!(
+            "\"\"\"\n",
+            "```julia\n",
+            "example_value = 1\n",
+            "example_\n",
+            "```\n",
+            "\"\"\"\n",
+            "f() = 1\n",
+        );
+        let names = labels(&completions_at(source, "\nexample_", &lib));
+        assert!(names.contains(&"example_value".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn embedded_julia_completion_sees_the_documented_file_scope() {
+        let lib = library(vec![]);
+        let source = concat!(
+            "\"\"\"\n",
+            "```julia\n",
+            "gre\n",
+            "```\n",
+            "\"\"\"\n",
+            "greet(name) = name\n",
+        );
+        let names = labels(&completions_at(source, "\ngre", &lib));
+        assert!(names.contains(&"greet".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn explicit_ref_completes_qualified_workspace_members() {
+        let lib = library(vec![]);
+        let workspace = package(ModuleIndex {
+            functions: vec![func("greet")],
+            ..module("MyPkg", &[])
+        });
+        let source = concat!(
+            "\"\"\"\n",
+            "See [`greet`](@ref MyPkg.gre).\n",
+            "\"\"\"\n",
+            "f() = 1\n",
+        );
+        let names = labels(&completions_ws(source, "MyPkg.gre", &lib, workspace));
+        assert!(names.contains(&"greet".to_string()), "{names:?}");
+    }
+
+    #[test]
+    fn explicit_ref_completes_markdown_anchors() {
+        let lib = library(vec![]);
+        let source = concat!(
+            "\"\"\"\n",
+            "# [Overview](@id custom-overview)\n",
+            "\n",
+            "See [above](@ref custom-ov).\n",
+            "\"\"\"\n",
+            "f() = 1\n",
+        );
+        let items = completions_at(source, "@ref custom-ov", &lib);
+        let anchor = item(&items, "custom-overview");
+        assert_eq!(anchor.kind, Some(CompletionItemKind::REFERENCE));
+        let (new_text, range) = edit(anchor);
+        assert_eq!(new_text, "custom-overview");
+        assert_eq!(range.start, Position::new(3, 17));
+        assert_eq!(range.end, Position::new(3, 26));
+    }
+
+    #[test]
+    fn interpolations_keep_julia_completion_inside_strings() {
+        let lib = library(vec![]);
+        let source = "greeting = \"hello\"\nmessage = \"$(gree)\"\n";
+        let names = labels(&completions_at(source, "$(gree", &lib));
+        assert!(names.contains(&"greeting".to_string()), "{names:?}");
     }
 
     #[test]

@@ -6,7 +6,8 @@
 //! shared masking order ([`Resolver::resolve`]) followed by a kind lookup in
 //! the harvested library. Qualified reads (`Base.Threads.@spawn`) paint each
 //! resolvable module component as a namespace and the final member by its
-//! library kind.
+//! library kind. Static docstrings hand Julia-bearing fence bodies back through
+//! the same classifier after decoded ranges are mapped into the outer source.
 //!
 //! Conventions: a macro name paints as one token over the sigil and the final
 //! name component (`@show`; `@time` in `Base.@time`), string delimiters and
@@ -30,6 +31,7 @@ use lsp_types::{
     Position, SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensDelta,
     SemanticTokensFullDeltaResult, SemanticTokensLegend,
 };
+use rowan::ast::AstNode as _;
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
 
@@ -43,6 +45,7 @@ use crate::resolve::{
 use crate::semantic::{BindingKind, LoadKind, SemanticModel};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use fatou_parser::documentation::ast::CodeBlock;
 
 /// The token classes this server emits; the discriminant is the index into
 /// [`legend`]'s `token_types`.
@@ -137,7 +140,79 @@ fn tokens_for<P: PackageSource + ?Sized>(
     encoding: PositionEncoding,
 ) -> SemanticTokens {
     let mut spans = syntax_spans(root);
-    spans.extend(resolved_spans(model, packages, workspace, text));
+    spans.extend(resolved_spans(model, packages, workspace.clone(), text));
+    let static_docs: Vec<_> = super::documentation::static_documentation(model).collect();
+    spans.retain(|(range, kind)| {
+        *kind != HighlightKind::String
+            || !static_docs
+                .iter()
+                .any(|(doc, _)| ranges_overlap(*range, doc.payload_range))
+    });
+    for (doc, decoded) in static_docs {
+        let markdown = fatou_parser::documentation::parse(decoded.as_str());
+        for node in markdown.cst.descendants() {
+            let Some(fence) = CodeBlock::cast(node) else {
+                continue;
+            };
+            if !fence.fence_kind().contains_julia() {
+                continue;
+            }
+            let Some(content_range) = fence.content_range() else {
+                continue;
+            };
+            let start = usize::from(content_range.start());
+            let end = usize::from(content_range.end());
+            let Some(code) = decoded.as_str().get(start..end) else {
+                continue;
+            };
+            let parsed = parse(code);
+            let embedded_model = SemanticModel::build(&parsed.cst);
+            let mut embedded = syntax_spans(&parsed.cst);
+            embedded.extend(resolved_spans(
+                &embedded_model,
+                packages,
+                workspace.clone(),
+                code,
+            ));
+
+            // A sample can call the documented file's unsaved names even when
+            // it does not declare them inside the fence.
+            let resolver = Resolver::new(model, packages).with_workspace(workspace.clone());
+            for ident in embedded_model
+                .idents()
+                .iter()
+                .filter(|ident| ident.binding.is_none() && !ident.is_macro)
+            {
+                if embedded.iter().any(|(range, _)| *range == ident.range) {
+                    continue;
+                }
+                if let Some(kind) = classify_free_read(
+                    model,
+                    packages,
+                    &workspace,
+                    &resolver,
+                    &ident.name,
+                    doc.target_range.start(),
+                ) {
+                    embedded.push((ident.range, kind));
+                }
+            }
+
+            let base = u32::from(content_range.start());
+            for (range, kind) in drop_overlaps({
+                embedded.sort_by_key(|&(range, _)| (range.start(), range.end()));
+                embedded
+            }) {
+                let decoded_range = TextRange::new(
+                    TextSize::new(base + u32::from(range.start())),
+                    TextSize::new(base + u32::from(range.end())),
+                );
+                if let Some(source) = decoded.source_map().source_range(decoded_range) {
+                    spans.push((source, kind));
+                }
+            }
+        }
+    }
     // Stable, so a resolved span sharing a syntax span's start sorts after it
     // and the overlap drop keeps the syntax paint.
     spans.sort_by_key(|&(range, _)| (range.start(), range.end()));
@@ -151,6 +226,10 @@ fn tokens_for<P: PackageSource + ?Sized>(
         result_id: Some(content_hash(&token_fingerprint(&data))),
         data,
     }
+}
+
+fn ranges_overlap(left: TextRange, right: TextRange) -> bool {
+    left.start() < right.end() && right.start() < left.end()
 }
 
 /// The tokens' `u32` fields flattened for hashing: `SemanticToken` itself is
@@ -919,6 +998,35 @@ mod tests {
         assert_eq!(
             painted("1 + 2\n", &lib),
             expect(&[("1", HighlightKind::Number), ("2", HighlightKind::Number),]),
+        );
+    }
+
+    #[test]
+    fn julia_fences_receive_embedded_semantic_tokens() {
+        let source = concat!(
+            "\"\"\"\n",
+            "An example.\n",
+            "\n",
+            "```julia\n",
+            "function example(x)\n",
+            "    x\n",
+            "end\n",
+            "example(1)\n",
+            "```\n",
+            "\"\"\"\n",
+            "documented() = 1\n",
+        );
+        assert_eq!(
+            painted(source, &no_library()),
+            expect(&[
+                ("function", HighlightKind::Keyword),
+                ("example", HighlightKind::Function),
+                ("end", HighlightKind::Keyword),
+                ("example", HighlightKind::Function),
+                ("1", HighlightKind::Number),
+                ("documented", HighlightKind::Function),
+                ("1", HighlightKind::Number),
+            ])
         );
     }
 

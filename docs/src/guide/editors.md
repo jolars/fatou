@@ -11,6 +11,16 @@ themselves, navigates an open `Project.toml`'s dependency names with inlay hints
 for their resolved versions, and links an open `Manifest.toml`'s `path` entries
 to the packages they pin.
 
+Static docstrings are decoded before the server presents them, so unsaved local
+documentation and harvested package documentation render the same way. Their
+Markdown headings appear in the document outline and fold as sections; external
+links, fragments, footnotes, and explicit Documenter `@ref` targets navigate in
+place. An explicit `@ref` also completes Julia symbols and documentation
+anchors. Fences that declare Julia code—including `julia`, `julia-repl`,
+`jldoctest`, and Julia-bearing Documenter directives—receive completion, hover,
+signature help, go-to-definition, selection ranges, nested folding, and semantic
+highlighting. Dynamic or custom `@doc` metadata remains opaque.
+
 ## Prerequisites
 
 Install Fatou (see [Getting Started](getting-started.md)) and make sure the

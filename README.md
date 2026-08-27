@@ -106,6 +106,13 @@ features:
 - document links, and
 - semantic tokens.
 
+Static docstrings participate in those features: decoded local and indexed
+documentation renders as Markdown, headings appear in the outline and fold as
+sections, external and internal Markdown links navigate, explicit Documenter
+`@ref` targets complete and jump to definitions, and Julia-declared fences get
+completion, hover, signature help, definition, selection, folding, and semantic
+highlighting.
+
 The Fatou extension for VS Code and Open VSX
 ([Marketplace](https://marketplace.visualstudio.com/items?itemName=jolars.fatou),
 [Open VSX](https://open-vsx.org/extension/jolars/fatou)) bundles the binary and

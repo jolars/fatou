@@ -106,7 +106,48 @@ fn hover_for<P: PackageSource>(
     line_index: &LineIndex,
     encoding: PositionEncoding,
 ) -> Option<Hover> {
-    let (value, range) = hover_content(model, packages, workspace, text, offset)?;
+    let embedded = super::documentation::DocumentationContext::at(model, offset)
+        .and_then(|context| {
+            let semantic_offset = context.attachment.target_range.start();
+            context
+                .embedded_julia()
+                .map(|embedded| (embedded, semantic_offset))
+        })
+        .and_then(|(embedded, semantic_offset)| {
+            let parsed = parse(embedded.text);
+            let embedded_model = SemanticModel::build(&parsed.cst);
+            let nested = hover_content(
+                &embedded_model,
+                packages,
+                workspace.clone(),
+                embedded.text,
+                embedded.offset,
+            );
+            let (value, range) = nested.or_else(|| {
+                let ident = embedded_model.ident_at(embedded.offset)?;
+                if ident.binding.is_some() {
+                    return None;
+                }
+                let namespace = if ident.is_macro {
+                    Namespace::Macro
+                } else {
+                    Namespace::Value
+                };
+                let value = render_free_read(
+                    model,
+                    packages,
+                    workspace.clone(),
+                    text,
+                    &ident.name,
+                    semantic_offset,
+                    namespace,
+                )?;
+                Some((value, ident.range))
+            })?;
+            Some((value, embedded.source_range(range)?))
+        });
+    let (value, range) =
+        embedded.or_else(|| hover_content(model, packages, workspace, text, offset))?;
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -243,7 +284,13 @@ fn render_qualified_symbol<P: PackageSource>(
     module_path: &[SmolStr],
     name: &str,
 ) -> Option<String> {
-    let pkg = module_path.first().and_then(|h| packages.package(h));
+    let pkg = module_path.first().and_then(|head| {
+        workspace
+            .map(|(package, _)| package)
+            .filter(|package| package.name == head.as_str())
+            .cloned()
+            .or_else(|| packages.package(head))
+    });
     let module = pkg.as_ref().and_then(|pkg| {
         let rest: Vec<&str> = module_path[1..].iter().map(|s| s.as_str()).collect();
         resolve_submodule(&pkg.root, &rest)
@@ -362,10 +409,20 @@ fn render_local(model: &SemanticModel, bid: BindingId, text: &str) -> String {
         }
         _ => binding.name.to_string(),
     };
-    format!(
+    let mut out = format!(
         "```julia\n{code}\n```\n\n*{}*",
         binding_detail(binding.kind)
-    )
+    );
+    if let Some(doc) = model
+        .documentation_for_binding(bid)
+        .find_map(|doc| match &doc.text {
+            crate::ast::DocText::Static(text) => super::documentation::render(text.as_str()),
+            crate::ast::DocText::Opaque(_) | crate::ast::DocText::Invalid(_) => None,
+        })
+    {
+        append_documentation(&mut out, &doc);
+    }
+    out
 }
 
 /// The trimmed source line containing byte `offset` (the definition's first
@@ -384,14 +441,15 @@ fn definition_line(text: &str, offset: usize) -> Option<String> {
 /// A `julia` code block for `code`, with `doc` (already markdown) below a rule.
 fn markdown(code: &str, doc: Option<&str>) -> String {
     let mut out = format!("```julia\n{code}\n```");
-    if let Some(doc) = doc {
-        let doc = doc.trim();
-        if !doc.is_empty() {
-            out.push_str("\n\n---\n\n");
-            out.push_str(doc);
-        }
+    if let Some(doc) = doc.and_then(super::documentation::render) {
+        append_documentation(&mut out, &doc);
     }
     out
+}
+
+fn append_documentation(out: &mut String, doc: &str) {
+    out.push_str("\n\n---\n\n");
+    out.push_str(doc);
 }
 
 fn to_range(range: TextRange, line_index: &LineIndex, encoding: PositionEncoding) -> Range {
@@ -549,6 +607,58 @@ mod tests {
         .unwrap();
         assert!(value.contains("function greet(a, b)"), "{value}");
         assert!(value.contains("*function*"), "{value}");
+    }
+
+    #[test]
+    fn local_function_shows_decoded_documentation() {
+        let lib = library(vec![]);
+        let value = hover_at(
+            "\"A decoded\\n**docstring**.\"\ngreet(name) = name\nresult = greet(\"Ada\")",
+            "result = gre",
+            &lib,
+        )
+        .unwrap();
+        assert!(value.contains("A decoded\n**docstring**."), "{value}");
+    }
+
+    #[test]
+    fn embedded_julia_has_hover() {
+        let lib = library(vec![]);
+        let value = hover_at(
+            concat!(
+                "\"\"\"\n",
+                "```julia\n",
+                "example_value = 1\n",
+                "answer = example_value\n",
+                "```\n",
+                "\"\"\"\n",
+                "f() = 1\n",
+            ),
+            "answer = example_va",
+            &lib,
+        )
+        .unwrap();
+        assert!(value.contains("example_value"), "{value}");
+        assert!(value.contains("*global*"), "{value}");
+    }
+
+    #[test]
+    fn embedded_julia_hover_sees_the_documented_file_scope() {
+        let lib = library(vec![]);
+        let value = hover_at(
+            concat!(
+                "\"\"\"\n",
+                "```julia\n",
+                "answer = greet(\"Ada\")\n",
+                "```\n",
+                "\"\"\"\n",
+                "greet(name) = name\n",
+            ),
+            "answer = gre",
+            &lib,
+        )
+        .unwrap();
+        assert!(value.contains("greet(name) = name"), "{value}");
     }
 
     #[test]

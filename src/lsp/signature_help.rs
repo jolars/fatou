@@ -97,10 +97,28 @@ fn signature_help_for<P: PackageSource>(
     root: &SyntaxNode,
     offset: TextSize,
 ) -> Option<SignatureHelp> {
+    if let Some(embedded) =
+        super::documentation::DocumentationContext::at(model, offset).and_then(|context| {
+            let semantic_offset = context.attachment.target_range.start();
+            context
+                .embedded_julia()
+                .map(|embedded| (embedded, semantic_offset))
+        })
+    {
+        let (embedded, semantic_offset) = embedded;
+        let parsed = parse(embedded.text);
+        let embedded_model = SemanticModel::build(&parsed.cst);
+        let call = enclosing_call(&parsed.cst, embedded.offset)?;
+        let arg_list = call.arg_list()?;
+        let active = active_argument(&arg_list, embedded.offset);
+        let signature = resolve_callee(&embedded_model, packages, &parsed.cst, &call, None)
+            .or_else(|| resolve_callee(model, packages, root, &call, Some(semantic_offset)))?;
+        return build_signature_help(&signature, &active);
+    }
     let call = enclosing_call(root, offset)?;
     let arg_list = call.arg_list()?;
     let active = active_argument(&arg_list, offset);
-    let sig = resolve_callee(model, packages, root, &call)?;
+    let sig = resolve_callee(model, packages, root, &call, None)?;
     build_signature_help(&sig, &active)
 }
 
@@ -178,18 +196,20 @@ struct CalleeSig {
 fn resolve_callee<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
-    root: &SyntaxNode,
+    definition_root: &SyntaxNode,
     call: &CallExpr,
+    resolution_offset: Option<TextSize>,
 ) -> Option<CalleeSig> {
     let callee = call.callee()?;
     let callee_range = callee.syntax().text_range();
 
     // A qualified callee (`Base.map`, `LinearAlgebra.norm`) is recorded whole as
     // a qualified read; resolve its member straight to the harvested module.
-    if let Some(q) = model
-        .qualified_reads()
-        .iter()
-        .find(|q| q.range == callee_range)
+    if resolution_offset.is_none()
+        && let Some(q) = model
+            .qualified_reads()
+            .iter()
+            .find(|q| q.range == callee_range)
     {
         let (name, module_path) = q.path.split_last()?;
         let head = module_path.first()?;
@@ -204,14 +224,22 @@ fn resolve_callee<P: PackageSource>(
         return None;
     };
     let name = name_node.ident()?.text().to_string();
-    let name_offset = name_node.syntax().text_range().start();
+    let name_offset = resolution_offset.unwrap_or_else(|| name_node.syntax().text_range().start());
     match Resolver::new(model, packages).resolve(&name, name_offset, Namespace::Value) {
         Resolution::Binding(bid) => {
             let binding = model.binding(bid);
             if binding.kind != BindingKind::Function {
                 return None;
             }
-            local_callee(root, binding.def_range.start(), &binding.name)
+            let mut callee =
+                local_callee(definition_root, binding.def_range.start(), &binding.name)?;
+            callee.doc = model.documentation_for_binding(bid).find_map(|doc| {
+                let crate::ast::DocText::Static(text) = &doc.text else {
+                    return None;
+                };
+                super::documentation::render(text.as_str())
+            });
+            Some(callee)
         }
         Resolution::System { module, name } => {
             let pkg = packages.package(&module)?;
@@ -308,12 +336,16 @@ fn build_signature_help(sig: &CalleeSig, active: &Active) -> Option<SignatureHel
     if sig.methods.is_empty() {
         return None;
     }
-    let doc = sig.doc.as_ref().map(|text| {
-        Documentation::MarkupContent(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: text.clone(),
-        })
-    });
+    let doc = sig
+        .doc
+        .as_deref()
+        .and_then(super::documentation::render)
+        .map(|text| {
+            Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: text,
+            })
+        });
     let signatures: Vec<SignatureInformation> = sig
         .methods
         .iter()
@@ -606,6 +638,59 @@ mod tests {
         )
         .unwrap();
         assert_eq!(labels(&help), ["greet(a, b::Int; c=1)"]);
+        assert_eq!(help.active_parameter, Some(1));
+    }
+
+    #[test]
+    fn intra_file_signature_carries_decoded_documentation() {
+        let lib = library(vec![]);
+        let help = help_at(
+            "\"A decoded\\n**docstring**.\"\ngreet(a, b) = a\ngreet(1, |2)",
+            &lib,
+        )
+        .unwrap();
+        let Some(Documentation::MarkupContent(markup)) = &help.signatures[0].documentation else {
+            panic!("expected local signature documentation");
+        };
+        assert_eq!(markup.value, "A decoded\n**docstring**.");
+    }
+
+    #[test]
+    fn embedded_julia_has_signature_help() {
+        let lib = library(vec![]);
+        let help = help_at(
+            concat!(
+                "\"\"\"\n",
+                "```julia\n",
+                "greet(a, b) = a\n",
+                "greet(1, |2)\n",
+                "```\n",
+                "\"\"\"\n",
+                "f() = 1\n",
+            ),
+            &lib,
+        )
+        .unwrap();
+        assert_eq!(labels(&help), ["greet(a, b)"]);
+        assert_eq!(help.active_parameter, Some(1));
+    }
+
+    #[test]
+    fn embedded_julia_signature_help_sees_the_documented_file_scope() {
+        let lib = library(vec![]);
+        let help = help_at(
+            concat!(
+                "\"\"\"\n",
+                "```julia\n",
+                "greet(1, |2)\n",
+                "```\n",
+                "\"\"\"\n",
+                "greet(a, b) = a\n",
+            ),
+            &lib,
+        )
+        .unwrap();
+        assert_eq!(labels(&help), ["greet(a, b)"]);
         assert_eq!(help.active_parameter, Some(1));
     }
 

@@ -25,6 +25,11 @@
 //! additionally surfaces workspace methods *extending* the library function
 //! (`Base.show(io, x) = ...`, harvested with `owner`), unioned with the target
 //! package's own sites.
+//!
+//! Inside static documentation, explicit `@ref` targets resolve in the
+//! documented definition's scope, Markdown fragments and footnotes navigate to
+//! their local definitions, and Julia-bearing fences use ordinary Julia
+//! navigation with ranges mapped back into the docstring source.
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -182,6 +187,76 @@ fn definition_for<P: PackageSource>(
     offset: TextSize,
     encoding: PositionEncoding,
 ) -> Vec<Location> {
+    if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
+        if let Some(embedded) = context.embedded_julia() {
+            let parsed = parse(embedded.text);
+            let embedded_model = SemanticModel::build(&parsed.cst);
+            let embedded_index = LineIndex::new(embedded.text);
+            let mut locations = definition_for(
+                &embedded_model,
+                packages,
+                workspace.clone(),
+                uri,
+                &embedded_index,
+                embedded.offset,
+                encoding,
+            );
+            for location in &mut locations {
+                if location.uri != *uri {
+                    continue;
+                }
+                let Some(range) = embedded.source_range_from_lsp(location.range, encoding) else {
+                    continue;
+                };
+                location.range = to_range(range, line_index, encoding);
+            }
+            if locations.is_empty()
+                && let Some(ident) = embedded_model.ident_at(embedded.offset)
+                && ident.binding.is_none()
+            {
+                let namespace = if ident.is_macro {
+                    Namespace::Macro
+                } else {
+                    Namespace::Value
+                };
+                return free_read_locations(
+                    model,
+                    packages,
+                    workspace,
+                    uri,
+                    &ident.name,
+                    context.attachment.target_range.start(),
+                    namespace,
+                    line_index,
+                    encoding,
+                );
+            }
+            return locations;
+        }
+        if let Some(reference) = context.explicit_ref() {
+            let anchor = super::documentation::MarkdownReference::Anchor(reference.target.clone());
+            if let Some(range) = super::documentation::markdown_definition(model, &anchor) {
+                return vec![self_location(uri, range, line_index, encoding)];
+            }
+            return reference_locations(
+                model,
+                packages,
+                workspace,
+                uri,
+                line_index,
+                context.attachment.target_range.start(),
+                &reference.target,
+                encoding,
+            );
+        }
+        if let Some(reference) = context.markdown_reference()
+            && let Some(range) = super::documentation::markdown_definition(model, &reference)
+        {
+            return vec![self_location(uri, range, line_index, encoding)];
+        }
+        return Vec::new();
+    }
+
     // A qualified name (`Foo.bar`, `Base.@time`) carries its whole module path.
     if let Some(q) = model
         .qualified_reads()
@@ -221,6 +296,58 @@ fn definition_for<P: PackageSource>(
     Vec::new()
 }
 
+/// Resolve an explicit Documenter `@ref` target in the documented definition's
+/// Julia scope. Parsing the target recovers qualified paths and macro spelling;
+/// resolution still uses the outer file model, where local imports and unsaved
+/// definitions live.
+#[allow(clippy::too_many_arguments)]
+fn reference_locations<P: PackageSource>(
+    model: &SemanticModel,
+    packages: &P,
+    workspace: Option<(Arc<PackageIndex>, ModulePath)>,
+    uri: &Uri,
+    line_index: &LineIndex,
+    semantic_offset: TextSize,
+    target: &str,
+    encoding: PositionEncoding,
+) -> Vec<Location> {
+    let parsed = parse(target);
+    let reference = SemanticModel::build(&parsed.cst);
+    if let Some(qualified) = reference.qualified_reads().first() {
+        return qualified_locations(qualified, packages, workspace.as_ref(), encoding);
+    }
+    let operator = parsed
+        .cst
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind().is_operator());
+    let (name, namespace) = if let Some(ident) = reference.idents().first() {
+        (
+            ident.name.as_str(),
+            if ident.is_macro {
+                Namespace::Macro
+            } else {
+                Namespace::Value
+            },
+        )
+    } else if let Some(operator) = operator.as_ref() {
+        (operator.text(), Namespace::Value)
+    } else {
+        return Vec::new();
+    };
+    free_read_locations(
+        model,
+        packages,
+        workspace,
+        uri,
+        name,
+        semantic_offset,
+        namespace,
+        line_index,
+        encoding,
+    )
+}
+
 /// Resolve a qualified read (`Foo.bar`) into every definition site of the
 /// symbol: the named package's own sites, unioned with workspace methods
 /// extending it (`Foo.bar(x) = ...` harvested with `owner`). The library walk
@@ -236,9 +363,15 @@ fn qualified_locations<P: PackageSource>(
         return Vec::new();
     };
     let mut sites = workspace_extension_sites(packages, workspace, module_path, name);
-    if let Some(head) = module_path.first()
-        && let Some(pkg) = packages.package(head)
-    {
+    if let Some(head) = module_path.first() {
+        let pkg = workspace
+            .map(|(package, _)| package)
+            .filter(|package| package.name == head.as_str())
+            .cloned()
+            .or_else(|| packages.package(head));
+        let Some(pkg) = pkg else {
+            return site_locations(sites, encoding);
+        };
         let rest: Vec<&str> = module_path[1..].iter().map(|s| s.as_str()).collect();
         if let Some(module) = resolve_submodule(&pkg.root, &rest) {
             sites.extend(library_def_sites(packages, &pkg, module, name));
@@ -677,6 +810,107 @@ mod tests {
         // The `greet` in the definition on line 0, column 0.
         assert_eq!(loc.range.start, Position::new(0, 0));
         assert_eq!(loc.range.end, Position::new(0, 5));
+    }
+
+    #[test]
+    fn explicit_ref_jumps_to_the_local_documented_binding() {
+        let loc = single_def_at(
+            "\"\"\"\nSee [`greet`](@ref gre|et).\n\"\"\"\ngreet(name) = name\n",
+            &TestLib::default(),
+        )
+        .unwrap();
+        assert_eq!(loc.uri, doc_uri());
+        assert_eq!(loc.range.start, Position::new(3, 0));
+        assert_eq!(loc.range.end, Position::new(3, 5));
+    }
+
+    #[test]
+    fn explicit_ref_jumps_to_a_qualified_workspace_binding() {
+        let tmp = TempDir::new();
+        let entry = tmp.path.join("src").join("MyPkg.jl");
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(&entry, "module MyPkg\ngreet(name) = name\nend\n").unwrap();
+        let package = Arc::new(harvest_package_named(&tmp.path, "MyPkg"));
+        let mut lib = TestLib::default();
+        lib.roots.insert("MyPkg".to_string(), tmp.path.clone());
+        lib.workspace = Some((package, Vec::new()));
+
+        let loc = single_def_at(
+            "\"\"\"\nSee [`greet`](@ref MyPkg.gre|et).\n\"\"\"\nf() = 1\n",
+            &lib,
+        )
+        .unwrap();
+        assert_eq!(to_path(&loc.uri), Some(entry));
+        assert_eq!(loc.range.start, Position::new(1, 0));
+        assert_eq!(loc.range.end, Position::new(1, 5));
+    }
+
+    #[test]
+    fn markdown_links_and_refs_navigate_to_local_anchors() {
+        let source = concat!(
+            "\"\"\"\n",
+            "# [Overview](@id overview)\n",
+            "\n",
+            "See [the section](#over|view).\n",
+            "See [the section](@ref overview).\n",
+            "\"\"\"\n",
+            "f() = 1\n",
+        );
+        let fragment = single_def_at(source, &TestLib::default()).unwrap();
+        assert_eq!(fragment.range.start, Position::new(1, 0));
+
+        let source = source.replacen("#over|view", "#overview", 1);
+        let source = source.replacen("@ref over", "@ref over|", 1);
+        let reference = single_def_at(&source, &TestLib::default()).unwrap();
+        assert_eq!(reference.range.start, Position::new(1, 0));
+    }
+
+    #[test]
+    fn footnote_references_navigate_to_their_definition() {
+        let loc = single_def_at(
+            "\"\"\"\nSee this.[^no|te]\n\n[^note]: Explanation.\n\"\"\"\nf() = 1\n",
+            &TestLib::default(),
+        )
+        .unwrap();
+        assert_eq!(loc.range.start, Position::new(3, 0));
+    }
+
+    #[test]
+    fn embedded_julia_definition_maps_back_to_the_docstring() {
+        let loc = single_def_at(
+            concat!(
+                "\"\"\"\n",
+                "```julia\n",
+                "    example_value = 1\n",
+                "    example_va|lue\n",
+                "```\n",
+                "\"\"\"\n",
+                "f() = 1\n",
+            ),
+            &TestLib::default(),
+        )
+        .unwrap();
+        assert_eq!(loc.uri, doc_uri());
+        assert_eq!(loc.range.start, Position::new(2, 4));
+        assert_eq!(loc.range.end, Position::new(2, 17));
+    }
+
+    #[test]
+    fn embedded_julia_definition_sees_the_documented_file_scope() {
+        let loc = single_def_at(
+            concat!(
+                "\"\"\"\n",
+                "```julia\n",
+                "greet|(\"Ada\")\n",
+                "```\n",
+                "\"\"\"\n",
+                "greet(name) = name\n",
+            ),
+            &TestLib::default(),
+        )
+        .unwrap();
+        assert_eq!(loc.range.start, Position::new(5, 0));
+        assert_eq!(loc.range.end, Position::new(5, 5));
     }
 
     #[test]

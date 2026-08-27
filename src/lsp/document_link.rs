@@ -1,5 +1,6 @@
 //! Document links (`textDocument/documentLink`): every static
-//! `include("path")` string becomes a clickable link to the included file.
+//! `include("path")` string becomes a clickable link to the included file, and
+//! absolute Markdown destinations in static docstrings link to their URI.
 //!
 //! Only statically resolvable includes link — the same test as the include
 //! graph's [`include_edges`](crate::project::include_edges): a bare `include`
@@ -11,14 +12,18 @@
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::str::FromStr as _;
 
 use lsp_types::{DocumentLink, Range};
+use rowan::ast::AstNode as _;
 
 use crate::incremental::{Analysis, normalize_path};
 use crate::parser::parse;
 use crate::project::{include_sites, resolve_target};
+use crate::semantic::SemanticModel;
 use crate::syntax::SyntaxNode;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use fatou_parser::documentation::ast::Link;
 
 use super::uri;
 
@@ -34,7 +39,8 @@ pub fn compute_document_links(
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
     let root = parse(text).cst;
-    links_for_tree(&root, text, base_dir, encoding)
+    let model = SemanticModel::build(&root);
+    links_for_tree(&root, &model, text, base_dir, encoding)
 }
 
 /// Compute document links off the snapshot's cached parse when the db's
@@ -58,7 +64,8 @@ pub(crate) fn document_links_via_db(
             return None;
         }
         let root = snapshot.parsed_tree(file);
-        Some(links_for_tree(&root, text, base_dir, encoding))
+        let model = snapshot.semantic_model(file);
+        Some(links_for_tree(&root, model, text, base_dir, encoding))
     }));
     match cached {
         Ok(Some(links)) => links,
@@ -71,12 +78,13 @@ pub(crate) fn document_links_via_db(
 /// the parse tree of exactly `text`.
 fn links_for_tree(
     root: &SyntaxNode,
+    model: &SemanticModel,
     text: &str,
     base_dir: Option<&Path>,
     encoding: PositionEncoding,
 ) -> Vec<DocumentLink> {
     let line_index = LineIndex::new(text);
-    include_sites(root)
+    let mut links: Vec<_> = include_sites(root)
         .into_iter()
         .filter_map(|site| {
             // The link covers the path text between the quotes; an empty
@@ -95,7 +103,34 @@ fn links_for_tree(
                 data: None,
             })
         })
-        .collect()
+        .collect();
+    for (_, decoded) in super::documentation::static_documentation(model) {
+        let markdown = fatou_parser::documentation::parse(decoded.as_str());
+        for link in markdown.cst.descendants().filter_map(Link::cast) {
+            if link.documenter_link().is_some() {
+                continue;
+            }
+            let Ok(target) = lsp_types::Uri::from_str(link.destination().trim()) else {
+                continue;
+            };
+            let Some(range) = link
+                .destination_range()
+                .and_then(|range| decoded.source_map().source_range(range))
+            else {
+                continue;
+            };
+            links.push(DocumentLink {
+                range: Range::new(
+                    line_index.byte_to_position(range.start().into(), encoding),
+                    line_index.byte_to_position(range.end().into(), encoding),
+                ),
+                target: Some(target),
+                tooltip: None,
+                data: None,
+            });
+        }
+    }
+    links
 }
 
 #[cfg(test)]
@@ -190,6 +225,23 @@ mod tests {
         assert_eq!(
             utf8[0].range,
             Range::new(Position::new(0, 19), Position::new(0, 23)),
+        );
+    }
+
+    #[test]
+    fn external_markdown_destinations_in_docstrings_are_links() {
+        let text = concat!(
+            "\"\"\"\n",
+            "Read [the guide](https://example.com/guide) and [`f`](@ref f).\n",
+            "\"\"\"\n",
+            "f() = 1\n",
+        );
+        let links = links(text, Some("/work"));
+        assert_eq!(links.len(), 1, "Documenter refs use definition, not links");
+        assert_eq!(target(&links[0]), "https://example.com/guide");
+        assert_eq!(
+            links[0].range,
+            Range::new(Position::new(1, 17), Position::new(1, 42))
         );
     }
 

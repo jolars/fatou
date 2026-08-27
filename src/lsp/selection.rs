@@ -1,7 +1,7 @@
 //! Selection ranges (`textDocument/selectionRange`): expand the selection
-//! along CST ancestors, powering editors' "expand selection". A pure CST
-//! walk — the chain for a position is the token under the cursor followed by
-//! its ancestor nodes, so no semantic model is needed.
+//! along CST ancestors, powering editors' "expand selection". Static docstrings
+//! compose Julia, decoded Markdown, and fenced-Julia ancestor chains through
+//! their exact source map.
 //!
 //! Conventions: the innermost step is the token itself (skipped for
 //! whitespace, where selecting the run is not a useful step; kept for
@@ -19,6 +19,7 @@ use rowan::{TextRange, TextSize, TokenAtOffset};
 
 use crate::incremental::Analysis;
 use crate::parser::parse;
+use crate::semantic::SemanticModel;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 
@@ -33,7 +34,8 @@ pub fn compute_selection_ranges(
     encoding: PositionEncoding,
 ) -> Vec<SelectionRange> {
     let root = parse(text).cst;
-    selections_for_tree(&root, text, positions, encoding)
+    let model = SemanticModel::build(&root);
+    selections_for_tree(&root, &model, text, positions, encoding)
 }
 
 /// Compute selection ranges off the snapshot's cached parse when the db's
@@ -54,7 +56,8 @@ pub(crate) fn selection_ranges_via_db(
             return None;
         }
         let root = snapshot.parsed_tree(file);
-        Some(selections_for_tree(&root, text, positions, encoding))
+        let model = snapshot.semantic_model(file);
+        Some(selections_for_tree(&root, model, text, positions, encoding))
     }));
     match cached {
         Ok(Some(ranges)) => ranges,
@@ -67,6 +70,7 @@ pub(crate) fn selection_ranges_via_db(
 /// the parse tree of exactly `text`.
 fn selections_for_tree(
     root: &SyntaxNode,
+    model: &SemanticModel,
     text: &str,
     positions: &[Position],
     encoding: PositionEncoding,
@@ -76,9 +80,62 @@ fn selections_for_tree(
         .iter()
         .map(|&position| {
             let offset = line_index.position_to_byte(position, encoding);
-            link_chain(&range_chain(root, offset), &line_index, encoding)
+            let offset = TextSize::new(offset as u32);
+            let mut chain = Vec::new();
+            if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
+                if let Some(embedded) = context.embedded_julia() {
+                    let parsed = parse(embedded.text);
+                    for range in range_chain(&parsed.cst, embedded.offset.into()) {
+                        if let Some(source) = embedded.source_range(range) {
+                            push_widening(&mut chain, source);
+                        }
+                    }
+                }
+                for range in documentation_range_chain(&context.markdown.cst, context.offset) {
+                    if let Some(source) = context.source_range(range) {
+                        push_widening(&mut chain, source);
+                    }
+                }
+            }
+            for range in range_chain(root, offset.into()) {
+                push_widening(&mut chain, range);
+            }
+            link_chain(&chain, &line_index, encoding)
         })
         .collect()
+}
+
+fn push_widening(chain: &mut Vec<TextRange>, range: TextRange) {
+    if chain.last() != Some(&range)
+        && chain
+            .last()
+            .is_none_or(|inner| range.contains_range(*inner))
+    {
+        chain.push(range);
+    }
+}
+
+/// The Markdown token/ancestor chain at a decoded-document offset.
+fn documentation_range_chain(
+    root: &fatou_parser::documentation::syntax::SyntaxNode,
+    offset: TextSize,
+) -> Vec<TextRange> {
+    let token = match root.token_at_offset(offset) {
+        TokenAtOffset::None => None,
+        TokenAtOffset::Single(token) => Some(token),
+        TokenAtOffset::Between(_, right) => Some(right),
+    };
+    let Some(token) = token else {
+        return vec![root.text_range()];
+    };
+    let mut chain = vec![token.text_range()];
+    for node in token.parent_ancestors() {
+        let range = node.text_range();
+        if chain.last() != Some(&range) {
+            chain.push(range);
+        }
+    }
+    chain
 }
 
 /// The widening chain of byte ranges at `offset`, innermost first: the token
@@ -204,6 +261,32 @@ mod tests {
             ),
             expected,
             "untracked path must fall back to the buffer text"
+        );
+    }
+
+    #[test]
+    fn selection_expands_through_embedded_julia_syntax() {
+        let source = concat!(
+            "\"\"\"\n",
+            "```julia\n",
+            "result = f(value)\n",
+            "```\n",
+            "\"\"\"\n",
+            "g() = 1\n",
+        );
+        let position = Position::new(2, 12);
+        let selection = compute_selection_ranges(source, &[position], PositionEncoding::Utf16)
+            .pop()
+            .unwrap();
+        let mut ranges = Vec::new();
+        let mut current = Some(&selection);
+        while let Some(range) = current {
+            ranges.push(range.range);
+            current = range.parent.as_deref();
+        }
+        assert!(
+            ranges.contains(&Range::new(Position::new(2, 9), Position::new(2, 17))),
+            "call expression missing from {ranges:?}"
         );
     }
 }

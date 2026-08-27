@@ -1,8 +1,8 @@
 //! Document symbols (`textDocument/documentSymbol`): a hierarchical outline of
 //! modules, functions (long and short form), macros, structs (with fields),
-//! abstract/primitive types, and consts. A pure CST walk — Julia definitions
-//! carry explicit keywords, so no semantic model is needed. The same walk feeds
-//! workspace symbols.
+//! abstract/primitive types, and consts. Markdown headings in a static docstring
+//! nest below the documented Julia symbol. The same Julia walk feeds workspace
+//! symbols.
 //!
 //! Conventions: macros render with their sigil (`@m`, kind `FUNCTION` — LSP has
 //! no macro kind); functions carry the rest of the signature in `detail` (with
@@ -14,11 +14,14 @@ use std::panic::AssertUnwindSafe;
 use std::path::Path;
 
 use lsp_types::{DocumentSymbol, Range, SymbolKind};
+use rowan::ast::AstNode as _;
 
+use crate::ast::{DocAttachment, DocText};
 use crate::incremental::Analysis;
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
+use fatou_parser::documentation::ast::Heading;
 
 /// The document-symbol outline for `text`, re-parsing it. Pure and
 /// unit-testable; single-file, so it never consults the workspace.
@@ -103,6 +106,10 @@ fn collect_symbols(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbo
 
 /// Emit the symbol(s) for `node` if it is a definition, else recurse into it.
 fn visit(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
+    if let Some(attachment) = DocAttachment::cast(node.clone()) {
+        visit_documentation(&attachment, ctx, out);
+        return;
+    }
     let symbol = match node.kind() {
         SyntaxKind::MODULE_DEF
         | SyntaxKind::FUNCTION_DEF
@@ -124,6 +131,85 @@ fn visit(node: &SyntaxNode, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
         // Not a definition (or its name is unrecoverable): descend so nested
         // definitions still surface.
         None => collect_symbols(node, ctx, out),
+    }
+}
+
+/// Emit the documented Julia target and place its Markdown heading outline
+/// beneath it. Expanding the target symbol's range over the attachment keeps
+/// the LSP parent range honest: it encloses both the heading children and the
+/// definition selected by the symbol.
+fn visit_documentation(attachment: &DocAttachment, ctx: &Ctx<'_>, out: &mut Vec<DocumentSymbol>) {
+    let mut targets = Vec::new();
+    visit(attachment.target(), ctx, &mut targets);
+    let headings = match attachment.text() {
+        DocText::Static(decoded) => markdown_heading_symbols(&decoded, ctx),
+        DocText::Opaque(_) | DocText::Invalid(_) => Vec::new(),
+    };
+    if let Some(target) = targets.first_mut() {
+        target.range = ctx.lsp_range(attachment.syntax().text_range());
+        let mut children = headings;
+        children.extend(target.children.take().unwrap_or_default());
+        target.children = (!children.is_empty()).then_some(children);
+        out.extend(targets);
+    } else {
+        out.extend(headings);
+    }
+}
+
+fn markdown_heading_symbols(
+    decoded: &crate::ast::StaticDocText,
+    ctx: &Ctx<'_>,
+) -> Vec<DocumentSymbol> {
+    let markdown = fatou_parser::documentation::parse(decoded.as_str());
+    let flat: Vec<(u8, DocumentSymbol)> = markdown
+        .cst
+        .descendants()
+        .filter_map(Heading::cast)
+        .filter_map(|heading| {
+            let source = decoded
+                .source_map()
+                .source_range(heading.syntax().text_range())?;
+            Some((
+                heading.level(),
+                markdown_heading_symbol(heading.content(), ctx.lsp_range(source)),
+            ))
+        })
+        .collect();
+    let mut index = 0;
+    heading_level(&flat, &mut index, 0)
+}
+
+fn heading_level(
+    flat: &[(u8, DocumentSymbol)],
+    index: &mut usize,
+    parent_level: u8,
+) -> Vec<DocumentSymbol> {
+    let mut out = Vec::new();
+    while let Some((level, symbol)) = flat.get(*index) {
+        if *level <= parent_level {
+            break;
+        }
+        let level = *level;
+        let mut symbol = symbol.clone();
+        *index += 1;
+        let children = heading_level(flat, index, level);
+        symbol.children = (!children.is_empty()).then_some(children);
+        out.push(symbol);
+    }
+    out
+}
+
+#[expect(deprecated, reason = "DocumentSymbol::deprecated is a required field")]
+fn markdown_heading_symbol(name: String, range: Range) -> DocumentSymbol {
+    DocumentSymbol {
+        name,
+        detail: None,
+        kind: SymbolKind::STRING,
+        tags: None,
+        deprecated: None,
+        range,
+        selection_range: range,
+        children: None,
     }
 }
 
@@ -501,6 +587,32 @@ mod tests {
             ),
             expected,
             "untracked path must fall back to the buffer text"
+        );
+    }
+
+    #[test]
+    fn documentation_headings_nest_under_the_documented_symbol() {
+        let source = concat!(
+            "\"\"\"\n",
+            "# Overview\n",
+            "\n",
+            "## Arguments\n",
+            "\"\"\"\n",
+            "f(x) = x\n",
+        );
+        let symbols = compute_document_symbols(source, PositionEncoding::Utf16);
+        assert_eq!(symbols.len(), 1, "{symbols:?}");
+        let function = &symbols[0];
+        assert_eq!(function.name, "f");
+        assert_eq!(function.range.start, lsp_types::Position::new(0, 0));
+        let headings = function.children.as_ref().expect("Markdown headings");
+        assert_eq!(headings.len(), 1, "{headings:?}");
+        assert_eq!(headings[0].name, "Overview");
+        let nested = headings[0].children.as_ref().expect("nested heading");
+        assert_eq!(nested[0].name, "Arguments");
+        assert_eq!(
+            nested[0].selection_range.start,
+            lsp_types::Position::new(3, 0)
         );
     }
 }

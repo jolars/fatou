@@ -61,7 +61,7 @@ style remains project policy rather than language correctness.
   Markdown stdlib only as a test-time differential oracle, never during
   analysis.
 
-- [ ] **Language features (default-on):** render decoded local and indexed
+- [x] **Language features (default-on):** render decoded local and indexed
   documentation consistently; add Markdown folding and navigation; and offer
   completion and definition for explicit `@ref` plus embedded-Julia support
   where a fence declares Julia code.
