@@ -413,6 +413,7 @@ mod tests {
                 name: "Base".to_string(),
                 bare: false,
                 loc: loc(),
+                doc: None,
                 exports: exports
                     .iter()
                     .map(|n| ExportedName {
@@ -445,6 +446,7 @@ mod tests {
                 name: "MyPkg".to_string(),
                 bare: false,
                 loc: loc(),
+                doc: None,
                 exports: Vec::new(),
                 functions: Vec::new(),
                 types: types

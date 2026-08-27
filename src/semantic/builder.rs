@@ -11,7 +11,7 @@
 use rowan::TextRange;
 use smol_str::SmolStr;
 
-use crate::ast::{AstNode, AstToken, Name, body_of};
+use crate::ast::{AstNode, AstToken, DocAttachment, DocAttachmentKind, Name, body_of};
 use crate::parser::{is_ident_continue, is_ident_start};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -21,7 +21,7 @@ use super::import::{
 };
 use super::scope::{Scope, ScopeId, ScopeKind};
 use super::signature::{annotation_parts, has_call_core, peel_signature, type_name_of};
-use super::{Access, IdentRef, SemanticModel};
+use super::{Access, IdentRef, SemanticDoc, SemanticModel};
 
 pub(crate) fn build(root: &SyntaxNode) -> SemanticModel {
     let mut builder = Builder {
@@ -224,6 +224,15 @@ fn name_ident(node: &SyntaxNode) -> Option<SyntaxToken> {
     Name::cast(node.clone())?
         .ident()
         .map(|ident| ident.syntax().clone())
+}
+
+/// The first binding name inside a declaration target. Julia attaches one
+/// docstring on `const a, b = ...` to `a`, not to every name in the pattern.
+fn first_name_token(node: &SyntaxNode) -> Option<SyntaxToken> {
+    if node.kind() == SyntaxKind::NAME {
+        return name_ident(node);
+    }
+    node.children().find_map(|child| first_name_token(&child))
 }
 
 /// The byte offset ending the identifier that begins at `start` in `text`.
@@ -1150,6 +1159,10 @@ impl Builder {
     }
 
     fn walk_node(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if let Some(attachment) = DocAttachment::cast(node.clone()) {
+            self.handle_doc_attachment(&attachment, scope);
+            return;
+        }
         match node.kind() {
             SyntaxKind::NAME => self.record_name_read(node, scope),
             SyntaxKind::ASSIGNMENT_EXPR => self.handle_assignment(node, scope),
@@ -1224,6 +1237,98 @@ impl Builder {
             SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => self.walk_quoted(node, scope),
             _ => self.walk_children(node, scope),
         }
+    }
+
+    /// Retain a documentation attachment in source order, then walk its payload
+    /// and target with ordinary expression semantics.
+    fn handle_doc_attachment(&mut self, attachment: &DocAttachment, scope: ScopeId) {
+        let binding = self.doc_target_binding(attachment.target(), scope);
+        self.push_documentation(attachment, scope, binding);
+        self.walk_doc_macro_name(attachment, scope);
+        self.walk_node(attachment.payload(), scope);
+        self.walk_node(attachment.target(), scope);
+    }
+
+    fn push_documentation(
+        &mut self,
+        attachment: &DocAttachment,
+        scope: ScopeId,
+        binding: Option<BindingId>,
+    ) {
+        self.model.documentation.push(SemanticDoc {
+            kind: attachment.kind(),
+            payload_range: attachment.payload().text_range(),
+            target_range: attachment.target().text_range(),
+            scope,
+            binding,
+            text: attachment.text(),
+        });
+    }
+
+    /// Preserve the macro-namespace read contributed by an explicit `@doc`.
+    /// Adjacent docstrings have no macro name in their surface syntax.
+    fn walk_doc_macro_name(&mut self, attachment: &DocAttachment, scope: ScopeId) {
+        if attachment.kind() != DocAttachmentKind::Macro {
+            return;
+        }
+        if let Some(name) = attachment
+            .syntax()
+            .children()
+            .find(|child| child.kind() == SyntaxKind::MACRO_NAME)
+        {
+            self.walk_macro_name(&name, scope);
+        }
+    }
+
+    /// Associate a documentation target with the local binding it denotes.
+    /// The syntax remains deliberately permissive because Julia's `@doc` accepts
+    /// arbitrary targets; unsupported shapes simply retain `binding: None`.
+    fn doc_target_binding(&self, target: &SyntaxNode, scope: ScopeId) -> Option<BindingId> {
+        let token = match target.kind() {
+            SyntaxKind::NAME => name_ident(target),
+            SyntaxKind::FUNCTION_DEF | SyntaxKind::MACRO_DEF => target
+                .children()
+                .find(|child| child.kind() == SyntaxKind::SIGNATURE)
+                .and_then(|signature| signature.children().next())
+                .and_then(|start| peel_signature(start).0)
+                .and_then(|core| signature_name_token(&core)),
+            SyntaxKind::ASSIGNMENT_EXPR => target
+                .children()
+                .next()
+                .filter(has_call_core)
+                .and_then(|start| peel_signature(start).0)
+                .and_then(|core| signature_name_token(&core)),
+            SyntaxKind::STRUCT_DEF | SyntaxKind::ABSTRACT_DEF | SyntaxKind::PRIMITIVE_DEF => target
+                .children()
+                .find(|child| child.kind() == SyntaxKind::SIGNATURE)
+                .and_then(|signature| signature.children().next())
+                .and_then(|start| type_name_of(&start))
+                .and_then(|name| name_ident(&name)),
+            SyntaxKind::MODULE_DEF => target
+                .children()
+                .find(|child| child.kind() == SyntaxKind::SIGNATURE)
+                .and_then(|signature| {
+                    signature
+                        .children()
+                        .find(|child| child.kind() == SyntaxKind::NAME)
+                })
+                .and_then(|name| name_ident(&name)),
+            SyntaxKind::CONST_STMT => first_name_token(target),
+            SyntaxKind::CALL_EXPR => target
+                .children()
+                .next()
+                .filter(|callee| callee.kind() == SyntaxKind::NAME)
+                .and_then(|name| name_ident(&name)),
+            SyntaxKind::MACRO_CALL => {
+                return target.children().find_map(|child| {
+                    (child.kind() != SyntaxKind::MACRO_NAME)
+                        .then(|| self.doc_target_binding(&child, scope))
+                        .flatten()
+                });
+            }
+            _ => None,
+        }?;
+        self.resolve_read(token.text(), scope)
     }
 
     fn handle_assignment(&mut self, node: &SyntaxNode, scope: ScopeId) {
@@ -1507,15 +1612,28 @@ impl Builder {
             // cover plain, annotated, `@kwdef`-defaulted, and `const` fields —
             // never a `Local`/`Const` an inner constructor could collide with.
             for stmt in body.children() {
-                if struct_field_form(&stmt).is_none() {
+                let target = DocAttachment::cast(stmt.clone())
+                    .map(|attachment| attachment.target().clone())
+                    .unwrap_or_else(|| stmt.clone());
+                if struct_field_form(&target).is_none() {
                     self.declare_node(&stmt, struct_scope);
                 }
             }
             for stmt in body.children() {
-                if let Some((pattern, extras)) = struct_field_form(&stmt) {
-                    self.bind_field(&pattern, struct_scope);
+                let attachment = DocAttachment::cast(stmt.clone());
+                let target = attachment
+                    .as_ref()
+                    .map(|attachment| attachment.target().clone())
+                    .unwrap_or_else(|| stmt.clone());
+                if let Some((pattern, extras)) = struct_field_form(&target) {
+                    let binding = self.bind_field(&pattern, struct_scope);
                     for extra in extras {
                         self.walk_node(&extra, struct_scope);
+                    }
+                    if let Some(attachment) = attachment {
+                        self.walk_doc_macro_name(&attachment, struct_scope);
+                        self.walk_node(attachment.payload(), struct_scope);
+                        self.push_documentation(&attachment, struct_scope, binding);
                     }
                 } else {
                     self.walk_node(&stmt, struct_scope);
@@ -1524,13 +1642,19 @@ impl Builder {
         }
     }
 
-    fn bind_field(&mut self, node: &SyntaxNode, scope: ScopeId) {
+    fn bind_field(&mut self, node: &SyntaxNode, scope: ScopeId) -> Option<BindingId> {
         if node.kind() == SyntaxKind::NAME
             && let Some(token) = name_ident(node)
             && token.text() != "_"
         {
-            self.push_binding(token.text(), BindingKind::Field, scope, token.text_range());
+            return Some(self.push_binding(
+                token.text(),
+                BindingKind::Field,
+                scope,
+                token.text_range(),
+            ));
         }
+        None
     }
 
     /// The signature of a type definition: `Foo`, `Foo{T<:Real}`, possibly

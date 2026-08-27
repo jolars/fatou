@@ -1,5 +1,6 @@
 //! The per-file semantic model: scope tree, bindings (definition site plus
-//! read and write sites), and free reads, from one walk of the CST.
+//! read and write sites), free reads, and documentation attachments, from one
+//! walk of the CST.
 //!
 //! This is the enabler for everything semantic in the language server
 //! (completion, hover, go-to-definition, references, rename) and for the
@@ -29,6 +30,7 @@ pub mod signature;
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
 
+use crate::ast::{DocAttachmentKind, DocText};
 use crate::syntax::SyntaxNode;
 
 pub use binding::{Binding, BindingId, BindingKind};
@@ -75,6 +77,21 @@ pub struct Occurrence {
     pub is_def: bool,
 }
 
+/// One parser-recognized documentation attachment lowered into the per-file
+/// semantic model. It carries values and byte ranges only—never a red CST
+/// node—so the model remains salsa-safe and structurally comparable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SemanticDoc {
+    pub kind: DocAttachmentKind,
+    pub payload_range: TextRange,
+    pub target_range: TextRange,
+    pub scope: ScopeId,
+    /// The documented local binding when the target names one. Qualified
+    /// extensions and arbitrary `@doc` targets remain available with `None`.
+    pub binding: Option<BindingId>,
+    pub text: DocText,
+}
+
 /// The semantic model of one file. Build with [`SemanticModel::build`]; in
 /// the language server, prefer the cached salsa query.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -85,6 +102,7 @@ pub struct SemanticModel {
     module_loads: Vec<ModuleLoad>,
     exports: Vec<ExportEntry>,
     qualified_reads: Vec<QualifiedRead>,
+    documentation: Vec<SemanticDoc>,
 }
 
 impl SemanticModel {
@@ -235,6 +253,23 @@ impl SemanticModel {
     pub fn qualified_reads(&self) -> &[QualifiedRead] {
         &self.qualified_reads
     }
+
+    /// Documentation attachments in source order, including opaque and invalid
+    /// payloads so later consumers can distinguish them from missing docs.
+    pub fn documentation(&self) -> &[SemanticDoc] {
+        &self.documentation
+    }
+
+    /// Every attachment associated with `binding`, preserving one record per
+    /// documented method of a multiple-dispatch function.
+    pub fn documentation_for_binding(
+        &self,
+        binding: BindingId,
+    ) -> impl Iterator<Item = &SemanticDoc> {
+        self.documentation
+            .iter()
+            .filter(move |doc| doc.binding == Some(binding))
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +278,13 @@ mod tests {
 
     fn model_of(src: &str) -> SemanticModel {
         SemanticModel::build(&crate::parser::parse(src).cst)
+    }
+
+    fn static_doc_text(doc: &SemanticDoc) -> &str {
+        match &doc.text {
+            crate::ast::DocText::Static(text) => text.as_str(),
+            other => panic!("expected static documentation, got {other:?}"),
+        }
     }
 
     fn binding_names(m: &SemanticModel) -> Vec<&str> {
@@ -256,6 +298,102 @@ mod tests {
                 .position(|b| b.name == name)
                 .unwrap_or_else(|| panic!("no binding named {name}")) as u32,
         )
+    }
+
+    #[test]
+    fn documentation_is_lowered_and_associated_with_bindings() {
+        let m = model_of(concat!(
+            "\"first\"\nf(x::Int) = x\n",
+            "\"second\"\nf(x::Float64) = x\n",
+            "@doc raw\"raw\\ntext\" f\n",
+        ));
+        let f = find(&m, "f");
+        let docs: Vec<_> = m.documentation_for_binding(f).collect();
+        assert_eq!(docs.len(), 3);
+        assert_eq!(
+            docs.iter()
+                .map(|doc| static_doc_text(doc))
+                .collect::<Vec<_>>(),
+            ["first", "second", "raw\\ntext",]
+        );
+        assert_ne!(docs[0].target_range, docs[1].target_range);
+    }
+
+    #[test]
+    fn semantic_documentation_retains_static_opaque_and_invalid_payloads() {
+        let m = model_of(concat!(
+            "\"static\"\nf() = 1\n",
+            "\"value = $(x)\"\ng() = 2\n",
+            "\"bad \\q\"\nh() = 3\n",
+        ));
+        assert_eq!(m.documentation().len(), 3);
+        assert!(matches!(
+            m.documentation()[0].text,
+            crate::ast::DocText::Static(_)
+        ));
+        assert!(matches!(
+            m.documentation()[1].text,
+            crate::ast::DocText::Opaque(crate::ast::OpaqueDocReason::Interpolation)
+        ));
+        assert!(matches!(
+            m.documentation()[2].text,
+            crate::ast::DocText::Invalid(crate::parser::StringDecodeError::BadEscape)
+        ));
+    }
+
+    #[test]
+    fn semantic_documentation_keeps_decoded_source_maps() {
+        let source = "\"A\\nβ\"\nf() = 1\n";
+        let m = model_of(source);
+        let crate::ast::DocText::Static(text) = &m.documentation()[0].text else {
+            panic!("expected static documentation");
+        };
+        assert_eq!(text.as_str(), "A\nβ");
+        let newline = text
+            .source_map()
+            .source_range(TextRange::new(1.into(), 2.into()))
+            .unwrap();
+        let start = source.find("\\n").unwrap() as u32;
+        assert_eq!(newline, TextRange::new(start.into(), (start + 2).into()));
+    }
+
+    #[test]
+    fn documentation_associates_supported_targets_and_keeps_qualified_methods() {
+        let m = model_of(concat!(
+            "\"type\"\nstruct T\n    \"field\"\n    x::Int\nend\n",
+            "\"const\"\nconst a, b = 1, 2\n",
+            "\"macro\"\nmacro m(x) x end\n",
+            "\"module\"\nmodule N end\n",
+            "\"extension\"\nBase.show(x::T) = x\n",
+        ));
+        for (name, kind) in [
+            ("T", BindingKind::Type),
+            ("x", BindingKind::Field),
+            ("a", BindingKind::Const),
+            ("m", BindingKind::Macro),
+            ("N", BindingKind::Module),
+        ] {
+            let binding = find(&m, name);
+            assert_eq!(m.binding(binding).kind, kind);
+            assert_eq!(m.documentation_for_binding(binding).count(), 1, "{name}");
+        }
+        assert_eq!(m.documentation_for_binding(find(&m, "b")).count(), 0);
+        let extension = m
+            .documentation()
+            .iter()
+            .find(|doc| static_doc_text(doc) == "extension")
+            .unwrap();
+        assert!(extension.binding.is_none());
+    }
+
+    #[test]
+    fn documented_struct_fields_remain_field_bindings() {
+        let m = model_of("struct T\n    \"field docs\"\n    x::Int\nend\n");
+        let x = find(&m, "x");
+        assert_eq!(m.binding(x).kind, BindingKind::Field);
+        let docs: Vec<_> = m.documentation_for_binding(x).collect();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(static_doc_text(docs[0]), "field docs");
     }
 
     fn free_read_names(m: &SemanticModel) -> Vec<&str> {

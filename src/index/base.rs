@@ -209,6 +209,9 @@ fn harvest_base(base_dir: &Path) -> PackageIndex {
 /// exports/types are harmless for name resolution).
 fn merge_index(acc: &mut PackageIndex, other: PackageIndex) {
     let root = &mut acc.root;
+    if root.doc.is_none() {
+        root.doc = other.root.doc.clone();
+    }
     root.exports.extend(other.root.exports);
     root.types.extend(other.root.types);
     root.consts.extend(other.root.consts);
@@ -220,7 +223,12 @@ fn merge_index(acc: &mut PackageIndex, other: PackageIndex) {
             .iter_mut()
             .find(|g| g.name == group.name && g.owner == group.owner)
         {
-            Some(existing) => existing.methods.extend(group.methods),
+            Some(existing) => {
+                if existing.doc.is_none() {
+                    existing.doc = group.doc.clone();
+                }
+                existing.methods.extend(group.methods);
+            }
             None => root.functions.push(group),
         }
     }
@@ -267,6 +275,7 @@ fn synthetic_index(name: &str, list: &str) -> PackageIndex {
             // Core is a `baremodule`; Base is a normal module.
             bare: name == "Core",
             loc,
+            doc: None,
             exports,
             functions: Vec::new(),
             types: Vec::new(),
@@ -313,5 +322,38 @@ mod tests {
         let index = synthetic_index("Base", "# a comment\n\nfoo\n  bar  \n");
         let names: Vec<&str> = index.root.exports.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn merging_method_groups_promotes_the_first_available_doc() {
+        let parsed = crate::parser::parse("\"docs\"\nf(x) = x\n");
+        let documented = super::super::harvest::harvest_tree(&parsed.cst);
+        let mut first = synthetic_index("Base", "");
+        first
+            .root
+            .functions
+            .push(super::super::model::FunctionGroup {
+                name: "f".to_string(),
+                owner: None,
+                methods: Vec::new(),
+                doc: None,
+            });
+        let second = PackageIndex {
+            name: "Base".to_string(),
+            root: documented,
+            members: Vec::new(),
+            member_modules: Default::default(),
+            diagnostics: Vec::new(),
+        };
+
+        merge_index(&mut first, second);
+        let group = first
+            .root
+            .functions
+            .iter()
+            .find(|group| group.name == "f")
+            .unwrap();
+        assert_eq!(group.doc.as_ref().unwrap().text, "docs");
+        assert_eq!(group.methods[0].doc.as_ref().unwrap().text, "docs");
     }
 }

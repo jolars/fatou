@@ -75,6 +75,8 @@ pub struct ModuleIndex {
     /// `true` for `baremodule` (no implicit `Base`/`Core` import).
     pub bare: bool,
     pub loc: DefLocation,
+    /// Statically recoverable documentation on this module.
+    pub doc: Option<Docstring>,
     /// `export`/`public` names, in source order.
     pub exports: Vec<ExportedName>,
     /// Functions grouped by `(owner, name)`; each group holds every method.
@@ -255,6 +257,8 @@ pub struct Field {
     pub name: String,
     pub type_annotation: Option<TypeExpr>,
     pub default: Option<String>,
+    /// Statically recoverable documentation on this field.
+    pub doc: Option<Docstring>,
 }
 
 /// A `const` binding. `const a, b = 1, 2` yields one [`ConstDef`] per name.
@@ -276,8 +280,9 @@ pub struct MacroDef {
     pub loc: DefLocation,
 }
 
-/// A docstring attached to a definition: the string literal (or `@doc` string)
-/// that immediately precedes it, joined raw (no dedent).
+/// A statically recoverable docstring attached to a definition. `text` is the
+/// Julia string value after escape decoding, newline normalization, and
+/// triple-string dedent; `loc` covers the source payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Docstring {
     pub text: String,

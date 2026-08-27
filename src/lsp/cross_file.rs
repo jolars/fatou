@@ -141,6 +141,7 @@ pub(crate) mod test_support {
             name: "MyPkg".to_string(),
             bare: false,
             loc: loc.clone(),
+            doc: None,
             exports: Vec::new(),
             functions: functions
                 .iter()

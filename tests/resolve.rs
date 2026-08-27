@@ -25,6 +25,7 @@ fn package(name: &str, exports: &[&str]) -> Arc<PackageIndex> {
             name: name.to_string(),
             bare: false,
             loc: loc(),
+            doc: None,
             exports: exports
                 .iter()
                 .map(|n| ExportedName {

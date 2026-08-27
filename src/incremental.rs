@@ -295,8 +295,9 @@ pub fn parsed_tree_root(db: &dyn IncrementalDb, file: SourceFile) -> SyntaxNode 
     SyntaxNode::new_root(parsed_document(db, file).green.clone())
 }
 
-/// The per-file semantic model (scope tree, bindings, reads), built from the
-/// cached parse. Unlike [`parsed_document`] this query keeps structural `Eq`:
+/// The per-file semantic model (scope tree, bindings, reads, and documentation),
+/// built from the cached parse. Unlike [`parsed_document`] this query keeps
+/// structural `Eq`:
 /// when an edit leaves the model unchanged (the model carries text ranges, so
 /// this means same-shape edits), salsa backdates it and dependents are not
 /// re-run. Range-free projections such as [`file_exports`] and

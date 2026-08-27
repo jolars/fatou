@@ -50,7 +50,7 @@ style remains project policy rather than language correctness.
   semantics, retaining an exact decoded-to-source byte map. Classify
   interpolated, custom, and non-string payloads as opaque.
 
-- [ ] **Index and semantics:** replace the index's raw, undedented extraction
+- [x] **Index and semantics:** replace the index's raw, undedented extraction
   with the shared model; preserve documentation per method and for types,
   fields, constants, macros, and modules; and make unsaved local docstrings
   available without waiting for a workspace re-harvest.

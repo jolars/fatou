@@ -159,6 +159,7 @@ mod tests {
                             file: "src/x.jl".into(),
                             range: Span { start: 0, end: 0 },
                         },
+                        doc: None,
                         exports: Vec::<ExportedName>::new(),
                         functions: Vec::new(),
                         types: Vec::new(),

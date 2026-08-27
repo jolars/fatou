@@ -659,6 +659,7 @@ mod tests {
             name: name.to_string(),
             bare: false,
             loc: loc(),
+            doc: None,
             exports: exports
                 .iter()
                 .map(|n| ExportedName {

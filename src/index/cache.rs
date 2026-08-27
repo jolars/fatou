@@ -30,7 +30,7 @@ use super::model::PackageIndex;
 /// entries an older build wrote unreadable or wrong (a new `postcard` layout, a
 /// [`PackageIndex`] field change). Recorded in every entry header and baked into
 /// the cache path, so mismatched entries are ignored rather than mis-decoded.
-const CACHE_FORMAT: u32 = 4;
+const CACHE_FORMAT: u32 = 5;
 
 /// The build identity stamped into every entry: `fatou@<version>`. Two builds at
 /// the same [`CACHE_FORMAT`] can still harvest different shapes (the harvester
@@ -216,7 +216,9 @@ fn cache_dir_from(env_override: Option<PathBuf>, os_cache: Option<PathBuf>) -> O
 mod tests {
     use super::*;
     use crate::environment::Uuid;
-    use crate::index::model::{DefLocation, ExportedName, ModuleIndex, Span, Visibility};
+    use crate::index::model::{
+        DefLocation, Docstring, ExportedName, ModuleIndex, Span, Visibility,
+    };
     use std::sync::Arc;
 
     fn nil_uuid() -> Uuid {
@@ -235,6 +237,10 @@ mod tests {
                 name: name.to_string(),
                 bare: false,
                 loc: loc.clone(),
+                doc: Some(Docstring {
+                    text: "package docs".to_string(),
+                    loc: loc.clone(),
+                }),
                 exports: vec![ExportedName {
                     name: "foo".to_string(),
                     visibility: Visibility::Exported,

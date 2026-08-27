@@ -63,6 +63,26 @@ fn edit_rebuilds_the_semantic_model() {
 }
 
 #[test]
+fn an_unsaved_docstring_edit_reaches_the_semantic_model() {
+    let mut db = IncrementalDatabase::new();
+    let file = db.add_file("\"old docs\"\nf() = 1\n");
+    let old = semantic_model(&db, file);
+    let old_text = match &old.documentation()[0].text {
+        fatou::ast::DocText::Static(text) => text.as_str(),
+        other => panic!("expected static documentation, got {other:?}"),
+    };
+    assert_eq!(old_text, "old docs");
+
+    db.set_file_text(file, "\"new docs\"\nf() = 1\n");
+    let new = semantic_model(&db, file);
+    let new_text = match &new.documentation()[0].text {
+        fatou::ast::DocText::Static(text) => text.as_str(),
+        other => panic!("expected static documentation, got {other:?}"),
+    };
+    assert_eq!(new_text, "new docs");
+}
+
+#[test]
 fn control_flow_is_reused_when_input_is_unchanged() {
     let db = IncrementalDatabase::new();
     let file = db.add_file("function f()\n    return 1\nend\n");
@@ -605,6 +625,7 @@ fn project_db(project_text: &str) -> (IncrementalDatabase, SourceFile, SourceFil
                 file: "src/MyPkg.jl".into(),
                 range: Span { start: 0, end: 0 },
             },
+            doc: None,
             exports: Vec::new(),
             functions: Vec::new(),
             types: Vec::new(),
@@ -765,6 +786,7 @@ fn host_module_of_backdates_across_graph_rederivations() {
                 file: "src/MyPkg.jl".into(),
                 range: Span { start: 0, end: 0 },
             },
+            doc: None,
             exports: Vec::new(),
             functions: Vec::new(),
             types: Vec::new(),

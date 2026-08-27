@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use rowan::TextRange;
 
-use crate::ast::{AstNode, AstToken, CallExpr, Expr, HasArgList, body_of};
+use crate::ast::{AstNode, AstToken, CallExpr, DocAttachment, DocText, Expr, HasArgList, body_of};
 use crate::project::{include_target, resolve_target};
 use crate::semantic::collect_import_clauses;
 use crate::semantic::signature::{annotation_parts, has_call_core, peel_signature, type_name_of};
@@ -63,6 +63,7 @@ pub fn harvest_entry(source_root: &Path, entry: &Path, name: &str) -> PackageInd
             file: harvester.relative(entry),
             range: Span { start: 0, end: 0 },
         },
+        doc: None,
         exports: Vec::new(),
         functions: Vec::new(),
         types: Vec::new(),
@@ -130,6 +131,7 @@ pub fn harvest_tree(cst: &SyntaxNode) -> ModuleIndex {
             file: PathBuf::new(),
             range: Span { start: 0, end: 0 },
         },
+        doc: None,
         exports: Vec::new(),
         functions: Vec::new(),
         types: Vec::new(),
@@ -234,8 +236,11 @@ impl Harvester {
         at_root: bool,
         pending_doc: Option<Docstring>,
     ) {
+        if let Some(attachment) = DocAttachment::cast(node.clone()) {
+            let doc = self.docstring_from_attachment(&attachment, file);
+            return self.walk_item(attachment.target(), file, dest, at_root, doc);
+        }
         match node.kind() {
-            SyntaxKind::DOC => self.walk_doc(node, file, dest, at_root),
             SyntaxKind::MACRO_CALL => self.walk_macro_call(node, file, dest, at_root, pending_doc),
             SyntaxKind::CALL_EXPR => self.walk_call(node, file, dest, at_root),
             SyntaxKind::FUNCTION_DEF => self.handle_function(node, file, dest, false, pending_doc),
@@ -257,26 +262,13 @@ impl Harvester {
                     }
                 }
             }
-            SyntaxKind::MODULE_DEF => self.handle_module(node, file, dest, at_root),
+            SyntaxKind::MODULE_DEF => self.handle_module(node, file, dest, at_root, pending_doc),
             SyntaxKind::EXPORT_STMT | SyntaxKind::PUBLIC_STMT => {
                 self.handle_name_list(node, file, dest);
             }
             SyntaxKind::USING_STMT | SyntaxKind::IMPORT_STMT => self.handle_load(node, dest),
             SyntaxKind::CONST_STMT => self.handle_const(node, file, dest, pending_doc),
             _ => {}
-        }
-    }
-
-    /// A `DOC` node `(doc <string> <target>)`: capture the docstring and walk
-    /// the target as its documented definition.
-    fn walk_doc(&mut self, node: &SyntaxNode, file: &Path, dest: &mut ModuleIndex, at_root: bool) {
-        let mut children = node.children();
-        let Some(string) = children.next() else {
-            return;
-        };
-        let doc = self.docstring_from(&string, file);
-        if let Some(target) = children.next() {
-            self.walk_item(&target, file, dest, at_root, doc);
         }
     }
 
@@ -294,13 +286,9 @@ impl Harvester {
         let name = macro_call_name(node);
         let args = macro_args(node);
         match name.as_deref() {
-            Some("doc") => {
-                // `@doc "str" target`: the doc string then the documented item.
-                let doc = args.first().and_then(|s| self.docstring_from(s, file));
-                if let Some(target) = args.get(1) {
-                    self.walk_item(target, file, dest, at_root, doc);
-                }
-            }
+            // Exact two-argument forms were handled through `DocAttachment`;
+            // retrieval and noncanonical arities carry no indexable attachment.
+            Some("doc") => {}
             Some("kwdef") => {
                 if let Some(target) = args.first() {
                     self.walk_item(target, file, dest, at_root, pending_doc);
@@ -354,6 +342,7 @@ impl Harvester {
         file: &Path,
         dest: &mut ModuleIndex,
         at_root: bool,
+        doc: Option<Docstring>,
     ) {
         let bare = has_token(node, SyntaxKind::BAREMODULE_KW);
         let Some((name, range)) = module_name(node) else {
@@ -367,6 +356,7 @@ impl Harvester {
             self.root_filled = true;
             dest.bare = bare;
             dest.loc = self.loc(file, range);
+            dest.doc = doc;
             if let Some(block) = block {
                 for child in block.children() {
                     self.walk_item(&child, file, dest, false, None);
@@ -379,6 +369,7 @@ impl Harvester {
             name: name.clone(),
             bare,
             loc: self.loc(file, range),
+            doc,
             exports: Vec::new(),
             functions: Vec::new(),
             types: Vec::new(),
@@ -551,7 +542,15 @@ impl Harvester {
         dest: &mut ModuleIndex,
         fields: &mut Vec<Field>,
     ) {
-        for child in block.children() {
+        for original in block.children() {
+            let (child, doc) = if let Some(attachment) = DocAttachment::cast(original.clone()) {
+                (
+                    attachment.target().clone(),
+                    self.docstring_from_attachment(&attachment, file),
+                )
+            } else {
+                (original, None)
+            };
             match child.kind() {
                 SyntaxKind::NAME | SyntaxKind::NONSTANDARD_IDENTIFIER => {
                     if let Some(name) = node_name_text(&child) {
@@ -559,16 +558,19 @@ impl Harvester {
                             name,
                             type_annotation: None,
                             default: None,
+                            doc,
                         });
                     }
                 }
-                SyntaxKind::TYPE_ANNOTATION => push_annotated_field(&child, None, fields),
+                SyntaxKind::TYPE_ANNOTATION => {
+                    push_annotated_field(&child, None, doc, fields);
+                }
                 SyntaxKind::CONST_STMT => {
                     // `const x::T` field marker.
                     if let Some(inner) = child.children().next() {
                         match inner.kind() {
                             SyntaxKind::TYPE_ANNOTATION => {
-                                push_annotated_field(&inner, None, fields);
+                                push_annotated_field(&inner, None, doc, fields);
                             }
                             SyntaxKind::NAME => {
                                 if let Some(name) = node_name_text(&inner) {
@@ -576,6 +578,7 @@ impl Harvester {
                                         name,
                                         type_annotation: None,
                                         default: None,
+                                        doc,
                                     });
                                 }
                             }
@@ -586,13 +589,13 @@ impl Harvester {
                 SyntaxKind::ASSIGNMENT_EXPR => {
                     if is_short_form_def(&child) {
                         // Inner constructor short form.
-                        self.handle_short_form(&child, file, dest, None);
+                        self.handle_short_form(&child, file, dest, doc);
                     } else if let Some(lhs) = child.children().next() {
                         // `@kwdef` field with a default.
                         let default = child.children().nth(1).map(|v| normalized_text(&v));
                         match lhs.kind() {
                             SyntaxKind::TYPE_ANNOTATION => {
-                                push_annotated_field(&lhs, default, fields);
+                                push_annotated_field(&lhs, default, doc, fields);
                             }
                             SyntaxKind::NAME | SyntaxKind::NONSTANDARD_IDENTIFIER => {
                                 if let Some(name) = node_name_text(&lhs) {
@@ -600,6 +603,7 @@ impl Harvester {
                                         name,
                                         type_annotation: None,
                                         default,
+                                        doc,
                                     });
                                 }
                             }
@@ -608,9 +612,9 @@ impl Harvester {
                     }
                 }
                 // Inner constructors and other nested definitions.
-                SyntaxKind::FUNCTION_DEF => self.handle_function(&child, file, dest, false, None),
+                SyntaxKind::FUNCTION_DEF => self.handle_function(&child, file, dest, false, doc),
                 SyntaxKind::MACRO_CALL => {
-                    self.walk_macro_call(&child, file, dest, false, None);
+                    self.walk_macro_call(&child, file, dest, false, doc);
                 }
                 _ => {}
             }
@@ -751,20 +755,20 @@ impl Harvester {
         });
     }
 
-    /// Build a [`Docstring`] from a string-literal node.
-    fn docstring_from(&self, node: &SyntaxNode, file: &Path) -> Option<Docstring> {
-        if node.kind() != SyntaxKind::STRING_LITERAL {
+    /// Lower one parser-recognized attachment into the serializable index.
+    /// Dynamic, custom, and invalid payloads remain visible in the live
+    /// semantic model but have no text value the index can safely persist.
+    fn docstring_from_attachment(
+        &self,
+        attachment: &DocAttachment,
+        file: &Path,
+    ) -> Option<Docstring> {
+        let DocText::Static(text) = attachment.text() else {
             return None;
-        }
-        let text: String = node
-            .children_with_tokens()
-            .filter_map(|el| el.into_token())
-            .filter(|t| t.kind() == SyntaxKind::STRING_CONTENT)
-            .map(|t| t.text().to_string())
-            .collect();
+        };
         Some(Docstring {
-            text,
-            loc: self.loc(file, node.text_range()),
+            text: text.as_str().to_string(),
+            loc: self.loc(file, attachment.payload().text_range()),
         })
     }
 }
@@ -1023,7 +1027,12 @@ fn header_parts(start: &SyntaxNode) -> Header {
     }
 }
 
-fn push_annotated_field(node: &SyntaxNode, default: Option<String>, fields: &mut Vec<Field>) {
+fn push_annotated_field(
+    node: &SyntaxNode,
+    default: Option<String>,
+    doc: Option<Docstring>,
+    fields: &mut Vec<Field>,
+) {
     let (pattern, types) = annotation_parts(node);
     let Some(name) = pattern.as_ref().and_then(node_name_text) else {
         return;
@@ -1032,6 +1041,7 @@ fn push_annotated_field(node: &SyntaxNode, default: Option<String>, fields: &mut
         name,
         type_annotation: types.first().map(lower_type),
         default,
+        doc,
     });
 }
 
@@ -1229,6 +1239,7 @@ mod tests {
                 file: PathBuf::from("src/Pkg.jl"),
                 range: Span { start: 0, end: 0 },
             },
+            doc: None,
             exports: Vec::new(),
             functions: Vec::new(),
             types: Vec::new(),
@@ -1445,6 +1456,83 @@ mod tests {
         let m = harvest_str("@doc \"Docs.\" f(x) = x", "Pkg");
         let group = m.functions.iter().find(|g| g.name == "f").unwrap();
         assert_eq!(group.methods[0].doc.as_ref().unwrap().text, "Docs.");
+    }
+
+    #[test]
+    fn docstrings_use_the_shared_static_text_model() {
+        let m = harvest_str(
+            concat!(
+                "\"\"\"\n    first\\nline\n      indented\n    \"\"\"\nf() = 1\n",
+                "@doc raw\"raw\\ntext\" g() = 2\n",
+                "\"value = $(x)\"\nh() = 3\n",
+                "@doc r\"custom\" k() = 4\n",
+                "\"bad \\q\"\nbroken() = 5\n",
+            ),
+            "Pkg",
+        );
+
+        let method = |name: &str| {
+            &m.functions
+                .iter()
+                .find(|group| group.name == name)
+                .unwrap()
+                .methods[0]
+        };
+        assert_eq!(
+            method("f").doc.as_ref().unwrap().text,
+            "first\nline\n  indented\n"
+        );
+        assert_eq!(method("g").doc.as_ref().unwrap().text, "raw\\ntext");
+        assert!(method("h").doc.is_none(), "interpolated text stays opaque");
+        assert!(method("k").doc.is_none(), "custom strings stay opaque");
+        assert!(
+            method("broken").doc.is_none(),
+            "invalid text is not indexed"
+        );
+    }
+
+    #[test]
+    fn preserves_documentation_for_every_indexed_definition_kind() {
+        let m = harvest_str(
+            concat!(
+                "\"Package docs.\"\nmodule Pkg\n",
+                "\"Integer method.\"\nf(x::Int) = x\n",
+                "\"Float method.\"\nf(x::Float64) = x\n",
+                "\"Type docs.\"\nstruct T\n",
+                "    \"Field docs.\"\n    x::Int\n",
+                "end\n",
+                "\"Constant docs.\"\nconst a, b = 1, 2\n",
+                "\"Macro docs.\"\nmacro m(x) x end\n",
+                "\"Nested module docs.\"\nmodule N end\n",
+                "end\n",
+            ),
+            "Pkg",
+        );
+
+        assert_eq!(m.doc.as_ref().unwrap().text, "Package docs.");
+        let group = m.functions.iter().find(|group| group.name == "f").unwrap();
+        assert_eq!(group.methods.len(), 2);
+        assert_eq!(
+            group.methods[0].doc.as_ref().unwrap().text,
+            "Integer method."
+        );
+        assert_eq!(group.methods[1].doc.as_ref().unwrap().text, "Float method.");
+        assert_eq!(group.doc.as_ref().unwrap().text, "Integer method.");
+        assert_eq!(m.types[0].doc.as_ref().unwrap().text, "Type docs.");
+        assert_eq!(
+            m.types[0].fields[0].doc.as_ref().unwrap().text,
+            "Field docs."
+        );
+        assert_eq!(m.consts[0].doc.as_ref().unwrap().text, "Constant docs.");
+        assert!(
+            m.consts[1].doc.is_none(),
+            "Julia documents only the first name"
+        );
+        assert_eq!(m.macros[0].doc.as_ref().unwrap().text, "Macro docs.");
+        assert_eq!(
+            m.submodules[0].doc.as_ref().unwrap().text,
+            "Nested module docs."
+        );
     }
 
     #[test]
