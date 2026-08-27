@@ -96,24 +96,25 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-27 — imported macro aliases)
+## Latest session (2026-08-27 — list-item indented code)
 
-Landed JuliaSyntax parity for macro names on the right of an import alias, found
-while implementing the Test-stdlib lint bundle.
+Landed Julia Markdown parity for indented code blocks nested below list items.
 
-- **Parser gap**: `parse_import_clause` now accepts `@name` after contextual
-  `as`, wrapping it in a `MACRO_NAME` inside `IMPORT_ALIAS`. The projector and
-  semantic import collector read that typed child as an `@`-prefixed alias.
-- **Fixtures**: `import_macro_alias` covers both `import Test: @test as @check`
-  and the `using` sibling, plus calls through each alias.
-- **Counts**: JS held at **748/756** allowlisted; dir **264/265 → 265/266**
-  allowlisted (only the existing blocked numeric-display case fails).
+- **Parser gap**: after a blank line in a list item, `emit_list_level` now
+  recognizes four-space code indentation relative to the item's consumed list
+  prefix and emits a nested `INDENTED_CODE_BLOCK`.
+- **Fixture**: `list_indented_code` pins the nested `Code` semantic shape, code
+  contents, list looseness, and following-item boundary against Julia's
+  `Markdown.parse`; the Markdown oracle corpus grew **16 → 17** cases.
+- **Counts**: JuliaSyntax corpora held at **748/756** JS and **265/266** dir;
+  there were no new divergences.
 - **Next**: no parser-owned target is queued; probe real Julia per `SKILL.md`.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-27** — imported macro aliases on the right of `as`. 748 / 265.
 - **2026-08-25n** — raw triple-string backslash-run decoding before quote
   display escaping. 748 / 264.
 - **2026-08-25m** — nested space-form macros give a following `for` loop to the

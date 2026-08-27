@@ -75,14 +75,10 @@ style remains project policy rather than language correctness.
   fixes. Documentation coverage and style remain policy rather than default
   lint.
 
-- [ ] An indented code block nested in a list item folds into the item's
-  paragraph instead of becoming its own block: Julia's `Markdown.parse` gives
-  `- item\n\n      code\n` a nested `Code`, Fatou a single paragraph reading
-  `itemcode`. Found by a differential probe while pinning the setext-precedence
-  fixture, and unpinned because no corpus fixture nests a block under a list
-  item. It belongs to `emit_list`'s continuation loop, not `parse_block`'s
-  block ordering; the same probe found that ordering matching Julia on every
-  other shape it tried.
+- [x] Parse an indented code block below a list item as its own nested block.
+  `emit_list_level` now removes the item's prefix before applying the four-space
+  code indent, matching Julia's `Markdown.parse` without changing ordinary
+  continuation lines.
 
 - [ ] `markdown_anchor_names` and `markdown_definition` re-parse every static
   docstring in the file on each call, so an `@ref` completion or a Markdown
