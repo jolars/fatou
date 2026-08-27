@@ -76,7 +76,7 @@ style remains project policy rather than language correctness.
   lint.
 
 - [ ] **Formatting (deferred and opt-in):** only consider docstring reflow after
-  corpus validation. Gate it behind `[format] format-docstrings = true` and
+  corpus validation. Gate it behind `[format] docstrings = true` and
   require static content, a clean documentation parse, preserved documentation
   shape, protected code/table/math regions, idempotence, and clean Julia
   reparsing.
