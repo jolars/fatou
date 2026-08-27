@@ -37,6 +37,45 @@
 
 ## Formatter
 
+## Documentation
+
+Docstrings are arbitrary `@doc` metadata. Tooling interprets only statically
+recoverable textual payloads; dynamic or custom forms stay opaque. Markdown and
+Documenter syntax are recognized from the content itself, while documentation
+style remains project policy rather than language correctness.
+
+- [x] **Foundation:** add typed `DOC` navigation plus one attachment API for
+  ordinary docstrings and the two-argument `@doc` forms. Extract ordinary and
+  `raw` string payloads with Julia's escape, newline, and triple-string dedent
+  semantics, retaining an exact decoded-to-source byte map. Classify
+  interpolated, custom, and non-string payloads as opaque.
+
+- [ ] **Index and semantics:** replace the index's raw, undedented extraction
+  with the shared model; preserve documentation per method and for types,
+  fields, constants, macros, and modules; and make unsaved local docstrings
+  available without waiting for a workspace re-harvest.
+
+- [ ] **Documentation parser:** add a Wasm-clean `fatou-documentation` crate for
+  Julia's Markdown dialect. Recognize explicit Documenter constructs such as
+  `@ref` and `jldoctest` locally; use Julia's Markdown stdlib only as a
+  test-time differential oracle, never during analysis.
+
+- [ ] **Language features (default-on):** render decoded local and indexed
+  documentation consistently; add Markdown folding and navigation; and offer
+  completion and definition for explicit `@ref` plus embedded-Julia support
+  where a fence declares Julia code.
+
+- [ ] **Linting:** add conservative default-on checks for malformed Julia code
+  in explicit fences, argument names that disagree with an existing
+  `# Arguments` section, and `@ref` targets that project resolution can prove
+  missing. Keep documentation-coverage and style policies default-off.
+
+- [ ] **Formatting (deferred and opt-in):** only consider docstring reflow after
+  corpus validation. Gate it behind `[format] format-docstrings = true` and
+  require static content, a clean documentation parse, preserved documentation
+  shape, protected code/table/math regions, idempotence, and clean Julia
+  reparsing.
+
 ## Linter
 
 ### Rules
@@ -46,15 +85,6 @@
   safe fix, default-on) plus `test-bare-expression` (suspicious, sem, warning,
   no fix, default-off). Their shared matcher requires a preceding, visible Test
   load and supports qualified, parenthesized, and aliased `@test` spellings.
-
-- [ ] A `documentation` category over docstrings, structurally mirroring
-  arity's five roxygen rules: undocumented exported names, `@doc` argument
-  lists that disagree with the signature. Larger design question than a single
-  rule. Would be a sixth category alongside `correctness`/`suspicious`/
-  `performance`/`readability`/`meta`, which is cheap on its own — a category is
-  its directory and nothing else (`AGENTS.md`, "Linter"), so it appears in
-  no public surface and recategorizing is free — but the bundle is what needs
-  designing, not the directory.
 
 - [x] Not a lint rule, and not a linter task at all: TOML syntax diagnostics for
   `Project.toml`/`Manifest.toml`, noted while reading JuliaWorkspaces'
