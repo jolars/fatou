@@ -57,14 +57,10 @@
   `A \ b`). Fixture `left_division` proves canonical spacing, width-driven
   continuation, and uniform breaks across the shared `*`/`\`/`/` tier.
 
-- [ ] Stop dropping a trailing `;` inside brackets — it collapses a
-  concatenation into a container literal. `[x;]` (`vcat`) formats to `[x]`
-  (`vect`), `[;]` to `[]`, `{x;}` to `{x}`; for a non-scalar element these are
-  different values (`[1:70;]` is a 70-element `Vector{Int}`, `[1:70]` a
-  1-element `Vector{UnitRange{Int}}`). The typed forms are worse: `T[x;]`
-  (`typed_vcat`) becomes `T[x]`, which projects as `ref` — indexing `T` rather
-  than constructing it. Listed in `tests/ast-equivalence/known-drift.txt` under
-  the bracket-semicolon group; drop those entries with the fix.
+- [x] Preserve a trailing `;` inside bracket and brace concatenations. `[x;]`,
+  `[;]`, `{x;}`, `{;}`, `T[x;]`, and `T[;]` now retain the semantic separator
+  in flat, broken, and comment-bearing layouts. Fixture
+  `trailing_bracket_semicolon`.
 
 - [ ] Stop dropping the trailing comma of an operator call — it turns the call
   into a prefix operator application. `+(a=1,)` (`(call + (= a 1))`, a keyword

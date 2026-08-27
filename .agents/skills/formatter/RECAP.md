@@ -144,18 +144,16 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (`macro_spaced_arguments`)
+## Latest session (`trailing_bracket_semicolon`)
 
-`fix(formatter)`. `lower_macro_call` now glues a trailing brace or bracket only
-when it is genuinely the macro's sole argument. Later bracketed arguments keep
-one semantic space, so `@foo a [1]`, `@foo A {T}`, and `@foo g(x) [1]` retain
-their arity. Fixture `macro_spaced_arguments` locks the three shapes; the
-`macro_space_args` AST-equivalence exception is removed. Gate is 125 of 153.
-Focused tests, workspace suite, clippy, fmt, and the formatter Wasm build are
-green. No parser/lexer blocker.
+`fix(formatter)`. The matrix/brace-concatenation reflow now distinguishes a
+semantic trailing `;` from layout-only empty rows and emits it in flat, broken,
+and comment-bearing layouts. Fixture `trailing_bracket_semicolon` locks plain,
+empty, braced, typed, wide, and commented forms; the eight AST-equivalence
+exceptions are removed. Gate is 126 of 154. Focused tests, workspace suite,
+clippy, fmt, and the formatter Wasm build are green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) preserve trailing bracket semicolons; (2) preserve
-load-bearing trailing commas in operator calls.
+**Ranked next target:** preserve load-bearing trailing commas in operator calls.
 
 ## Parser dependencies and follow-ups
 
@@ -190,6 +188,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Macro argument gaps** (`fix`): restricted sole-bracket gluing to a genuinely
+  sole argument, preserving later bracketed arguments' arity. Gate 125.
 - **Where brace shapes** (`fix`): recognized brace concatenations and
   comprehensions as already delimited, preventing doubled braces. Gate 124.
 - **Hex literal separator padding** (`fix`): counted hexadecimal digits rather

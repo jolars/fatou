@@ -52,22 +52,6 @@ js-9b9946da
 js-acfc6b49
 toplevel_semicolon
 
-# DEFECT: a trailing `;` inside brackets is dropped, collapsing a concatenation
-# into a container literal — `[x;]` (`vcat`) becomes `[x]` (`vect`), `[;]`
-# becomes `[]`, `{x;}` becomes `{x}`. For a non-scalar element these are
-# different values: `[1:70;]` is a 70-element `Vector{Int}`, `[1:70]` a
-# 1-element `Vector{UnitRange{Int}}`. The typed forms are worse still —
-# `T[x;]` (`typed_vcat`) becomes `T[x]`, which projects as `ref`, i.e. indexing
-# `T` rather than constructing it.
-bracescat
-broadcast_bitshift
-js-3bdaee7b
-js-41bffcf8
-js-47310745
-js-939f51f9
-ncat
-typed_concat
-
 # DEFECT: dropping a trailing comma turns an operator *call* into a prefix
 # operator application — `+(a=1,)` (`(call + (= a 1))`, a keyword argument)
 # formats to `+(a = 1)` (`(call-pre + (= a 1))`, unary plus applied to an

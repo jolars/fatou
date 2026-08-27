@@ -31,11 +31,6 @@ use fatou_parser::parser::parse;
 /// this test found; they stay listed only until they are fixed.
 const KNOWN_DRIFT: &[(&str, &str)] = &[
     (
-        "broadcast_bitshift",
-        "DEFECT: `[1:70;]` formats to `[1:70]`, turning a `vcat` into a `vect` \
-         (a 70-element `Vector{Int}` becomes a 1-element `Vector{UnitRange{Int}}`)",
-    ),
-    (
         "float_literals",
         "policy: float canonicalization (`.5` -> `0.5`, `007.50` -> `7.5`). The \
          projector renders a float's source spelling, so every row moves; each \

@@ -3849,9 +3849,10 @@ fn lower_matrix(node: &SyntaxNode) -> Ir {
 /// Width-driven layout for a clean (comment-free) matrix: parse it into rows
 /// (split at `;` and source newlines, which are equivalent row separators), then
 /// emit one `Ir::group` — flat `[a b; c d]` when it fits, else framed one row per
-/// indented line. Empty rows (a framing newline, a blank line, a trailing `;`) are
-/// dropped. A `;;` higher-dimensional separator, or any unexpected token or child,
-/// bails to the verbatim transparent lowering.
+/// indented line. Layout-only empty rows (a framing newline or a blank line) are
+/// dropped, but a sole trailing `;` is emitted in both modes because it changes
+/// the concatenation's meaning. A `;;` higher-dimensional separator, or any
+/// unexpected token or child, bails to the verbatim transparent lowering.
 fn lower_matrix_reflow(node: &SyntaxNode) -> Ir {
     match matrix_reflow_body(node) {
         Some(body) => Ir::group(body),
@@ -3868,6 +3869,7 @@ fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     let mut close: Option<String> = None;
     let mut rows: Vec<Vec<Ir>> = vec![Vec::new()];
     let mut prev_was_semicolon = false;
+    let mut trailing_semicolons = 0;
     for el in node.children_with_tokens() {
         match el {
             NodeOrToken::Token(tok) => match tok.kind() {
@@ -3889,13 +3891,17 @@ fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
                     }
                     rows.push(Vec::new());
                     prev_was_semicolon = true;
+                    trailing_semicolons += 1;
                     continue;
                 }
                 SyntaxKind::NEWLINE => rows.push(Vec::new()),
                 _ => return None,
             },
             NodeOrToken::Node(child) => match child.kind() {
-                SyntaxKind::ARG => rows.last_mut().unwrap().push(lower_node(&child)),
+                SyntaxKind::ARG => {
+                    rows.last_mut().unwrap().push(lower_node(&child));
+                    trailing_semicolons = 0;
+                }
                 // A `MATRIX_ROW` is a whole horizontal row; collect its elements.
                 SyntaxKind::MATRIX_ROW => {
                     let row = rows.last_mut().unwrap();
@@ -3908,6 +3914,7 @@ fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
                             _ => return None,
                         }
                     }
+                    trailing_semicolons = 0;
                 }
                 _ => return None,
             },
@@ -3916,9 +3923,17 @@ fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
     }
 
     let (open, close) = (open?, close?);
+    if trailing_semicolons > 1 {
+        return None;
+    }
+    let trailing_semicolon = trailing_semicolons == 1;
     rows.retain(|row| !row.is_empty());
     if rows.is_empty() {
-        return Some(Ir::concat([Ir::text(open), Ir::text(close)]));
+        return Some(Ir::concat([
+            Ir::text(open),
+            Ir::text(if trailing_semicolon { ";" } else { "" }),
+            Ir::text(close),
+        ]));
     }
 
     let mut inner: Vec<Ir> = vec![Ir::SoftLine];
@@ -3934,6 +3949,9 @@ fn matrix_reflow_body(node: &SyntaxNode) -> Option<Ir> {
             }
             inner.push(elem);
         }
+    }
+    if trailing_semicolon {
+        inner.push(Ir::text(";"));
     }
 
     Some(Ir::concat([
@@ -3971,7 +3989,8 @@ fn matrix_has_comment(node: &SyntaxNode) -> bool {
 /// constructs still normalize because each row element is lowered recursively. Any
 /// shape this does not fully model — a comment inside a `MATRIX_ROW`, a `;;`
 /// higher-dim separator surfacing as an unexpected token, or a missing bracket —
-/// falls back to the verbatim transparent lowering.
+/// falls back to the verbatim transparent lowering. A sole trailing `;` remains
+/// attached to the final row because it is semantic rather than layout.
 fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     let mut open: Option<String> = None;
     let mut close: Option<String> = None;
@@ -3989,6 +4008,8 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     // classified trailing vs own-line. Starts true: the open bracket is the
     // current line, so `[ # header` is a trailing comment on it.
     let mut on_line = true;
+    let mut prev_was_semicolon = false;
+    let mut trailing_semicolons = 0;
 
     for el in node.children_with_tokens() {
         match el {
@@ -3998,11 +4019,21 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
                 SyntaxKind::LBRACKET | SyntaxKind::LBRACE => open = Some(tok.text().to_string()),
                 SyntaxKind::RBRACKET | SyntaxKind::RBRACE => close = Some(tok.text().to_string()),
                 SyntaxKind::WHITESPACE => {}
-                // `;` and a source newline are equivalent row separators; both are
-                // layout-only here (rows are already framed one per line). Only the
+                // Interior `;` and source newlines are equivalent row separators;
+                // rows are already framed one per line. A final `;` is retained
+                // below because it changes the concatenation's meaning. Only a
                 // newline flips `on_line` for comment classification.
-                SyntaxKind::SEMICOLON => {}
-                SyntaxKind::NEWLINE => on_line = false,
+                SyntaxKind::SEMICOLON => {
+                    if prev_was_semicolon {
+                        return lower_transparent(node);
+                    }
+                    prev_was_semicolon = true;
+                    trailing_semicolons += 1;
+                }
+                SyntaxKind::NEWLINE => {
+                    on_line = false;
+                    prev_was_semicolon = false;
+                }
                 SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
                     // A block-comment token always ends with `=#`, so the trim is a
                     // no-op for it; its multi-line interior is preserved verbatim. A
@@ -4047,6 +4078,8 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
                     items.push(row);
                     item_comments.push(None);
                     on_line = true;
+                    prev_was_semicolon = false;
+                    trailing_semicolons = 0;
                 }
                 _ => return lower_transparent(node),
             },
@@ -4062,6 +4095,10 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     if items.is_empty() {
         return lower_transparent(node);
     }
+    if trailing_semicolons > 1 {
+        return lower_transparent(node);
+    }
+    let trailing_semicolon = trailing_semicolons == 1;
 
     // Render a gap's own-line comments, each opening its own indented line.
     fn render_gap(inner: &mut Vec<Ir>, comments: &[String]) {
@@ -4077,6 +4114,9 @@ fn lower_matrix_multiline(node: &SyntaxNode) -> Ir {
     inner.push(Ir::HardLine); // framing break after the open bracket
     for (i, item) in items.into_iter().enumerate() {
         inner.push(item);
+        if trailing_semicolon && i + 1 == n {
+            inner.push(Ir::text(";"));
+        }
         // The trailing comment rides the row, canonicalized to one leading space
         // (same-line attachment preserved, source spacing dropped).
         if let Some(text) = &item_comments[i] {
