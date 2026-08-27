@@ -80,12 +80,6 @@ js-effed8f1
 type_operator_call
 unary_operator_call
 
-# DEFECT: whitespace between a macro's arguments is removed, changing arity —
-# `@foo a [1]` (two arguments, `a` and `[1]`) formats to `@foo a[1]` (one
-# argument, `a[1]`); likewise `@foo A {T}` -> `@foo A{T}` and `@foo g(x) [1]`.
-# For a macro the argument list is the input, so this rewrites the call.
-macro_space_args
-
 # DEFECT: a spaced unary minus is folded into the literal — `- 2` (`(call-pre -
 # 2)`) becomes the literal `-2`. Value-identical except at a type boundary:
 # `- 9223372036854775808` negates an `Int128` literal, while

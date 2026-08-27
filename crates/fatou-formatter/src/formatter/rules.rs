@@ -3211,6 +3211,7 @@ fn lower_comprehension_if(node: &SyntaxNode) -> Option<Ir> {
 fn lower_macro_call(node: &SyntaxNode) -> Ir {
     let mut parts: Vec<Ir> = Vec::new();
     let mut saw_name = false;
+    let mut saw_arg = false;
     // Whether a `WHITESPACE`/`NEWLINE` token has been seen since the last node —
     // distinguishes an attached `ARG_LIST` (call form) from a spaced argument.
     let mut had_gap = false;
@@ -3254,11 +3255,13 @@ fn lower_macro_call(node: &SyntaxNode) -> Ir {
                     // `@foo(a, b)` (call form) differs from `@foo (a, b)` (tuple).
                     let gluable =
                         matches!(child.kind(), SyntaxKind::BRACES | SyntaxKind::VECT_EXPR)
+                            && !saw_arg
                             && child.next_sibling().is_none();
                     if had_gap && !gluable {
                         parts.push(Ir::text(" "));
                     }
                     parts.push(lower_node(&child));
+                    saw_arg = true;
                     had_gap = false;
                 }
                 _ => return lower_transparent(node),

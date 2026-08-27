@@ -73,12 +73,10 @@
   in an ordinary call, this one is load-bearing. Listed in
   `tests/ast-equivalence/known-drift.txt`.
 
-- [ ] Stop removing whitespace between a macro's arguments — it changes arity.
-  `@foo a [1]` (two arguments, `a` and `[1]`) formats to `@foo a[1]` (one
-  argument, `a[1]`); same for `@foo A {T}` and `@foo g(x) [1]`. For a macro the
-  argument list is the input, so this rewrites the call. Fixture
-  `macro_space_args` in the parser oracle corpus; listed in
-  `tests/ast-equivalence/known-drift.txt`.
+- [x] Preserve whitespace between a macro's arguments so adjacent bracketed
+  arguments retain their arity. `@foo a [1]`, `@foo A {T}`, and
+  `@foo g(x) [1]` now keep a single semantic space; the sole-bracket-argument
+  canonicalization remains glued. Fixture `macro_spaced_arguments`.
 
 - [x] Preserve brace-delimited `where` parameter lists whose CST kind is not
   `braces`. `x where {T S}` and `x where {y for y in ys}` now retain one brace

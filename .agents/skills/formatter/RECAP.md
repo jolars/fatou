@@ -144,14 +144,15 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (`where` brace shapes)
+## Latest session (`macro_spaced_arguments`)
 
-`fix(formatter)`. `lower_where` now recognizes brace concatenations and brace
-comprehensions as already delimited, preventing a second brace pair around
-`x where {T S}` and `x where {y for y in ys}`. Fixture `where_brace_shapes`
-locks both CST shapes; their two AST-equivalence exceptions are removed. Gate
-is 124 of 152. Focused tests, workspace suite, clippy, fmt, and the formatter
-Wasm build are green. No parser/lexer blocker.
+`fix(formatter)`. `lower_macro_call` now glues a trailing brace or bracket only
+when it is genuinely the macro's sole argument. Later bracketed arguments keep
+one semantic space, so `@foo a [1]`, `@foo A {T}`, and `@foo g(x) [1]` retain
+their arity. Fixture `macro_spaced_arguments` locks the three shapes; the
+`macro_space_args` AST-equivalence exception is removed. Gate is 125 of 153.
+Focused tests, workspace suite, clippy, fmt, and the formatter Wasm build are
+green. No parser/lexer blocker.
 
 **Ranked next targets:** (1) preserve trailing bracket semicolons; (2) preserve
 load-bearing trailing commas in operator calls.
@@ -189,6 +190,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Where brace shapes** (`fix`): recognized brace concatenations and
+  comprehensions as already delimited, preventing doubled braces. Gate 124.
 - **Hex literal separator padding** (`fix`): counted hexadecimal digits rather
   than bytes when choosing canonical zero-padding. `hex_literals`. Gate 123.
 - **Trailing-comment alignment** (`feat`): aligned adjacent same-indent trailing
