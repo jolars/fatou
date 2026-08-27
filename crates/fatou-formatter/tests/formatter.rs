@@ -42,13 +42,6 @@ const KNOWN_DRIFT: &[(&str, &str)] = &[
          rewrite here is value- and type-preserving",
     ),
     (
-        "hex_literals",
-        "DEFECT: `0x1_2` formats to `0x01_2` — the zero-padder counts the `_` as \
-         a digit and widens a 2-digit `UInt8` literal to a 3-digit `UInt16`. The \
-         projector renders a hex literal at its type's width, so the other rows \
-         passing is proof the padding is otherwise type-preserving",
-    ),
-    (
         "toplevel_semicolon",
         "policy: `a = 1; b = 2` splits onto separate lines, erasing the \
          `(toplevel-; ...)` grouping. Equivalent in a file; `;` only suppresses \

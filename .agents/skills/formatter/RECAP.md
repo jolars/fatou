@@ -144,15 +144,16 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (trailing-comment alignment)
+## Latest session (hex literal separator padding)
 
-`feat(formatter)`. Added structured trailing `#` comments and a post-layout
-printer pass that aligns adjacent same-indent runs without changing fit
-measurement. Range formatting widens to a complete source run. Fixture
-`comment_trailing_alignment`; gate is 123 of 151. Focused tests, workspace suite,
+`fix(formatter)`. Hex zero-padding now counts hexadecimal digits rather than
+bytes, so `_` separators cannot widen Julia's inferred unsigned integer type.
+Fixture `hex_literals` covers canonical grouped widths and a grouped value that
+still needs padding; gate remains 123 of 151. Focused tests, workspace suite,
 clippy, fmt, and formatter Wasm build are green. No parser/lexer blocker.
 
-**Ranked next targets:** (1) gate `typegroup` block layout; (2) minor debt #2.
+**Ranked next targets:** (1) preserve trailing bracket semicolons; (2) preserve
+load-bearing trailing commas in operator calls.
 
 ## Parser dependencies and follow-ups
 
@@ -187,6 +188,9 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Trailing-comment alignment** (`feat`): aligned adjacent same-indent trailing
+  comments without changing fit measurement; range formatting widens to the
+  complete source run. Gate 123.
 - **Left division** (`test`): gated `\` as an ordinary spaced binary operator;
   wide mixed multiplication-tier chains prove uniform breaks. 121→122.
 - **Splat after a closing bracket** (`feat`): removed the stale parser fallback

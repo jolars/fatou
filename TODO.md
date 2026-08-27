@@ -85,11 +85,10 @@
   `x where {{T S}}`, `x where {y for y in ys}` → `x where {{y for y in ys}}`.
   Listed in `tests/ast-equivalence/known-drift.txt`.
 
-- [ ] Fix hex literal zero-padding counting `_` as a digit: `0x1_2` → `0x01_2`
-  widens a 2-digit `UInt8` literal to a 3-digit `UInt16`. Padding is otherwise
-  type-preserving, which `formatter_preserves_ast_shape` proves — the projector
-  renders a hex literal at its type's width, so only this row drifts. Fixture
-  `hex_literals`.
+- [x] Count only hexadecimal digits when zero-padding a hex literal. Separators
+  no longer widen Julia's inferred integer type (`0x1_2` stays `0x1_2`), while
+  a grouped three-digit literal still reaches its canonical four-digit width
+  (`0x1_23` → `0x01_23`). Fixture `hex_literals`.
 
 - [ ] Decide the policy for folding a spaced unary minus into its literal
   (`- 2` → `-2`). Value-identical except at a type boundary:
