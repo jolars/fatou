@@ -13,6 +13,8 @@
 //!   [`fatou_parser::syntax::SyntaxNode`], whole or a byte range of it.
 //! - [`FormatStyle`] — the layout knobs, with [`Default`] matching the fatou
 //!   CLI's defaults.
+//! - [`verify::ast_shape`] — the formatting-invariant shape of a source string,
+//!   for checking that formatting preserved the program (`ast(x) == ast(format(x))`).
 //!
 //! The crate is `wasm32-unknown-unknown`-compatible: no filesystem, process,
 //! thread, or clock use.
@@ -28,6 +30,7 @@ pub mod formatter;
 
 pub mod parser;
 pub mod syntax;
+pub mod verify;
 
 /// The `rowan` version this crate's CST types are built on.
 ///
