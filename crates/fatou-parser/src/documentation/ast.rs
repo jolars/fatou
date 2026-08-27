@@ -181,6 +181,7 @@ impl Heading {
     pub fn inlines(&self) -> impl Iterator<Item = Inline> + '_ {
         inline_children(self.syntax())
     }
+
     /// Return the anchor slug Documenter derives from the heading content.
     ///
     /// Lowercased, with runs of whitespace collapsed to a single hyphen and
@@ -239,7 +240,7 @@ impl List {
 
     /// Return the first ordinal, or `None` for an unordered list.
     pub fn ordered_start(&self) -> Option<u64> {
-        token(self.syntax(), SyntaxKind::LIST_MARKER)?
+        nested_token(self.syntax(), SyntaxKind::LIST_MARKER)?
             .text()
             .trim_end_matches(['.', ')'])
             .parse()
@@ -627,7 +628,19 @@ fn split_at_word(text: &str) -> (&str, &str) {
     }
 }
 
+/// Find a node's own `kind` token.
+///
+/// Direct children only: a link label may itself contain a link or an image,
+/// and a descendant search would then answer with the nested node's
+/// destination rather than this one's.
 fn token(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == kind)
+}
+
+/// Find the first `kind` token anywhere below `node`.
+fn nested_token(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxToken> {
     node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .find(|token| token.kind() == kind)

@@ -307,3 +307,20 @@ fn heading_slugs_come_from_one_definition() {
         heading.slug()
     );
 }
+#[test]
+fn a_nested_image_does_not_capture_its_enclosing_links_destination() {
+    let parsed = parse("[![build](https://img.example/badge.svg)](https://ci.example/job)\n");
+    let links: Vec<Link> = parsed.cst.descendants().filter_map(Link::cast).collect();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].destination(), "https://ci.example/job");
+
+    let referenced = parse("[![icon](icon.svg)](@ref Base.sum)\n");
+    let link = referenced
+        .cst
+        .descendants()
+        .find_map(Link::cast)
+        .expect("link");
+    let documenter = link.documenter_link().expect("Documenter link");
+    assert_eq!(documenter.kind(), DocumenterLinkKind::Ref);
+    assert_eq!(documenter.target(), Some("Base.sum"));
+}
