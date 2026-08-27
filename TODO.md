@@ -75,6 +75,22 @@ style remains project policy rather than language correctness.
   fixes. Documentation coverage and style remain policy rather than default
   lint.
 
+- [ ] An indented code block nested in a list item folds into the item's
+  paragraph instead of becoming its own block: Julia's `Markdown.parse` gives
+  `- item\n\n      code\n` a nested `Code`, Fatou a single paragraph reading
+  `itemcode`. Found by a differential probe while pinning the setext-precedence
+  fixture, and unpinned because no corpus fixture nests a block under a list
+  item. It belongs to `emit_list`'s continuation loop, not `parse_block`'s
+  block ordering; the same probe found that ordering matching Julia on every
+  other shape it tried.
+
+- [ ] `markdown_anchor_names` and `markdown_definition` re-parse every static
+  docstring in the file on each call, so an `@ref` completion or a Markdown
+  go-to-definition pays for the whole file's documentation. Now bounded—the
+  anchor set no longer leaks into embedded-Julia completion, so the scan runs
+  only with the cursor inside an `@ref`—but still uncached. The fix is a salsa
+  query keyed on the file's static payloads; measure before building it.
+
 - [ ] **Formatting (deferred and opt-in):** only consider docstring reflow after
   corpus validation. Gate it behind `[format] docstrings = true` and
   require static content, a clean documentation parse, preserved documentation
