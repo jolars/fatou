@@ -324,3 +324,46 @@ fn a_nested_image_does_not_capture_its_enclosing_links_destination() {
     assert_eq!(documenter.kind(), DocumenterLinkKind::Ref);
     assert_eq!(documenter.target(), Some("Base.sum"));
 }
+
+#[test]
+fn an_underline_only_makes_a_heading_out_of_an_unclaimed_line() {
+    // Julia's flavor tries setext last, so a list or a quote wins the line and
+    // the underline degrades to a thematic break.
+    for (input, first) in [
+        ("- item\n---\n", SyntaxKind::LIST),
+        ("> quoted\n---\n", SyntaxKind::BLOCK_QUOTE),
+        ("!!! note\n    body\n---\n", SyntaxKind::ADMONITION),
+        ("[^a]: note\n---\n", SyntaxKind::FOOTNOTE_DEFINITION),
+    ] {
+        let blocks: Vec<_> = parse(input)
+            .cst
+            .children()
+            .map(|node| node.kind())
+            .collect();
+        assert_eq!(
+            blocks,
+            vec![first, SyntaxKind::THEMATIC_BREAK],
+            "input {input:?}"
+        );
+    }
+
+    let plain: Vec<_> = parse("para\n---\n")
+        .cst
+        .children()
+        .map(|node| node.kind())
+        .collect();
+    assert_eq!(plain, vec![SyntaxKind::SETEXT_HEADING]);
+}
+
+#[test]
+fn an_admonition_title_drops_its_quotes_and_trailing_space() {
+    let input = "!!! note \"Careful\"  \n    body\n";
+    let parsed = parse(input);
+    assert_eq!(reconstruct(&parsed.cst), input);
+    let admonition = parsed
+        .cst
+        .descendants()
+        .find_map(fatou_parser::documentation::ast::Admonition::cast)
+        .expect("admonition");
+    assert_eq!(admonition.title(), "Careful");
+}

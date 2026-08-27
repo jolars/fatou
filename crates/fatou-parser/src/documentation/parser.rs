@@ -117,12 +117,6 @@ impl<'a> Parser<'a> {
             return self.emit_atx_heading(line);
         }
         if line + 1 < self.lines.len()
-            && !self.lines[line].is_blank(self.text)
-            && setext_level(self.lines[line + 1], self.text).is_some()
-        {
-            return self.emit_setext_heading(line);
-        }
-        if line + 1 < self.lines.len()
             && contains_unescaped_pipe(self.lines[line].content(self.text))
             && table_alignment(self.lines[line + 1].content(self.text))
         {
@@ -150,6 +144,16 @@ impl<'a> Parser<'a> {
         }
         if math_block(self.lines[line], self.text).is_some() {
             return self.emit_math_block(line);
+        }
+        // Last before the paragraph fallback, as in Julia's flavor: an
+        // underline only makes a heading out of a line no other block claimed,
+        // so `- item` or `> quoted` above `---` stays a list or a quote
+        // followed by a thematic break.
+        if line + 1 < self.lines.len()
+            && !self.lines[line].is_blank(self.text)
+            && setext_level(self.lines[line + 1], self.text).is_some()
+        {
+            return self.emit_setext_heading(line);
         }
         self.emit_paragraph(line)
     }
@@ -389,6 +393,7 @@ impl<'a> Parser<'a> {
         if let Some(title) = title {
             self.token(SyntaxKind::WHITESPACE, category.end, title.start);
             self.token(SyntaxKind::ADMONITION_TITLE, title.start, title.end);
+            self.token(SyntaxKind::WHITESPACE, title.end, header.content_end);
         } else {
             self.token(SyntaxKind::WHITESPACE, category.end, header.content_end);
         }
@@ -1071,8 +1076,10 @@ fn admonition_header(
     let title = if tail.is_empty() {
         None
     } else if tail.starts_with('"') && tail.ends_with('"') && tail.len() >= 2 {
+        // End at the closing quote: trailing spaces inside the token would
+        // survive `Admonition::title`'s quote trimming.
         let offset = text[category.end..line.content_end].find('"')?;
-        Some(category.end + offset..line.content_end)
+        Some(category.end + offset..category.end + offset + tail.len())
     } else {
         return None;
     };
