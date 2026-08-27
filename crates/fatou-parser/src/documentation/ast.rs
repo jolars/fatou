@@ -181,6 +181,32 @@ impl Heading {
     pub fn inlines(&self) -> impl Iterator<Item = Inline> + '_ {
         inline_children(self.syntax())
     }
+    /// Return the anchor slug Documenter derives from the heading content.
+    ///
+    /// Lowercased, with runs of whitespace collapsed to a single hyphen and
+    /// every other non-word character dropped. Both the linter's exemption set
+    /// and the server's navigation read anchors through this one definition.
+    pub fn slug(&self) -> String {
+        slug(&self.content())
+    }
+}
+
+/// Derive a Documenter anchor slug from heading content.
+pub fn slug(heading: &str) -> String {
+    let mut out = String::new();
+    let mut separator = false;
+    for character in heading.chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() || character == '_' || character == '-' {
+            if separator && !out.is_empty() && !out.ends_with('-') {
+                out.push('-');
+            }
+            out.push(character);
+            separator = false;
+        } else if character.is_whitespace() {
+            separator = true;
+        }
+    }
+    out.trim_end_matches('-').to_string()
 }
 
 impl Admonition {

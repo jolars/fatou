@@ -292,3 +292,18 @@ f() = 1
     let end = u32::from(mapped.end()) as usize;
     assert_eq!(&source[start..end], r#"Main.\u0066"#);
 }
+#[test]
+fn heading_slugs_come_from_one_definition() {
+    let parsed = parse("# The Nelder--Mead *Method*\n");
+    let heading = parsed
+        .cst
+        .descendants()
+        .find_map(Heading::cast)
+        .expect("heading");
+    assert_eq!(heading.content(), "The Nelder–Mead Method");
+    assert_eq!(heading.slug(), "the-neldermead-method");
+    assert_eq!(
+        fatou_parser::documentation::ast::slug(&heading.content()),
+        heading.slug()
+    );
+}
