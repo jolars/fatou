@@ -34,6 +34,7 @@ use juxtapose::{
 };
 pub(crate) use macros::{is_var_identifier_start, push_var_macro_name};
 use macros::{parse_macro, parse_qualified_macro};
+pub(crate) use prec::is_comparison_op as token_is_comparison_op;
 use prec::{
     COMMA_BP, COMMA_ITEM_BP, JUXTAPOSE_L, JUXTAPOSE_R, PREFIX_BP, SPLAT_BP, TERNARY_BRANCH_BP,
     TERNARY_L, WHERE_BOUND_BP, WHERE_BP, WORD_OP_L, WORD_OP_R, infix_binding_power,

@@ -46,3 +46,11 @@ pub fn token_count(input: &str) -> usize {
 // A lossless CST hands out a literal's *source*; a consumer reading it as data
 // (the `include` path resolver) needs the value it denotes.
 pub use unescape::{StringDecodeError, string_value};
+
+/// Whether `text` is exactly one symbolic operator token in Julia's comparison
+/// precedence tier. Kept crate-private so typed AST wrappers can share the
+/// parser's generated Unicode classification without exposing lexer internals.
+pub(crate) fn is_comparison_operator_text(text: &str) -> bool {
+    let tokens = lexer::lex(text);
+    tokens.len() == 1 && expr::token_is_comparison_op(tokens[0].kind)
+}

@@ -465,6 +465,31 @@ impl BinaryExpr {
     pub fn op(&self) -> Option<Operator> {
         child_token(&self.0)
     }
+
+    /// The word operator (`in` or `isa`) between the operands.
+    ///
+    /// Julia lexes these operators as identifiers, so they deliberately do not
+    /// cast to [`Operator`]. Operand identifiers are nested inside their own
+    /// nodes; only the word operator is a direct token of this node.
+    pub fn word_op(&self) -> Option<Ident> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| token.kind() == SyntaxKind::IDENT && matches!(token.text(), "in" | "isa"))
+            .and_then(Ident::cast)
+    }
+
+    /// Whether this binary expression uses Julia's comparison precedence tier.
+    ///
+    /// The answer includes the word operators `in`/`isa` and uses the parser's
+    /// generated classification for Unicode operators, so AST consumers do not
+    /// need to duplicate the precedence table.
+    pub fn is_comparison(&self) -> bool {
+        self.word_op().is_some()
+            || self
+                .op()
+                .is_some_and(|op| crate::parser::is_comparison_operator_text(op.text()))
+    }
 }
 
 impl AssignmentExpr {
@@ -697,6 +722,18 @@ impl MacroName {
             .filter(|t| matches!(t.kind(), SyntaxKind::IDENT | SyntaxKind::DOT))
             .last()
     }
+
+    /// The identifier components of the macro name in source order.
+    ///
+    /// This yields just `m` for `@m`, and `Base`, `time` for both
+    /// `Base.@time` and `@Base.time`. The `@.` broadcast macro has no identifier
+    /// components.
+    pub fn ident_tokens(&self) -> impl Iterator<Item = Ident> + '_ {
+        self.0
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter_map(Ident::cast)
+    }
 }
 
 impl TypeAnnotation {
@@ -870,6 +907,37 @@ mod tests {
         assert_eq!(expr_text(bin.lhs()), "a");
         assert_eq!(expr_text(bin.rhs()), "b");
         assert_eq!(bin.op().unwrap().text(), "+");
+
+        let bin: BinaryExpr = find("x isa T\n");
+        assert_eq!(bin.word_op().unwrap().text(), "isa");
+        assert!(bin.op().is_none());
+        assert!(bin.is_comparison());
+
+        let bin: BinaryExpr = find("x ≈ y\n");
+        assert!(bin.is_comparison());
+        let bin: BinaryExpr = find("x ⊗ y\n");
+        assert!(!bin.is_comparison());
+    }
+
+    #[test]
+    fn macro_name_identifier_components() {
+        let call: MacroCall = find("@Base.time f()\n");
+        let parts: Vec<_> = call
+            .name()
+            .unwrap()
+            .ident_tokens()
+            .map(|ident| ident.text().to_string())
+            .collect();
+        assert_eq!(parts, ["Base", "time"]);
+
+        let call: MacroCall = find("Base.@time f()\n");
+        let parts: Vec<_> = call
+            .name()
+            .unwrap()
+            .ident_tokens()
+            .map(|ident| ident.text().to_string())
+            .collect();
+        assert_eq!(parts, ["Base", "time"]);
     }
 
     #[test]

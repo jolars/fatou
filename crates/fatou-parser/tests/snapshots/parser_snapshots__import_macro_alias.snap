@@ -1,0 +1,60 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+expression: rendered
+---
+ROOT@0..84
+  IMPORT_STMT@0..28
+    IMPORT_KW@0..6 "import"
+    WHITESPACE@6..7 " "
+    IMPORT_PATH@7..11
+      IDENT@7..11 "Test"
+    COLON@11..12 ":"
+    WHITESPACE@12..13 " "
+    IMPORT_ALIAS@13..28
+      IMPORT_PATH@13..18
+        MACRO_NAME@13..18
+          AT@13..14 "@"
+          IDENT@14..18 "test"
+      WHITESPACE@18..19 " "
+      IDENT@19..21 "as"
+      WHITESPACE@21..22 " "
+      MACRO_NAME@22..28
+        AT@22..23 "@"
+        IDENT@23..28 "check"
+  NEWLINE@28..29 "\n"
+  USING_STMT@29..57
+    USING_KW@29..34 "using"
+    WHITESPACE@34..35 " "
+    IMPORT_PATH@35..39
+      IDENT@35..39 "Test"
+    COLON@39..40 ":"
+    WHITESPACE@40..41 " "
+    IMPORT_ALIAS@41..57
+      IMPORT_PATH@41..46
+        MACRO_NAME@41..46
+          AT@41..42 "@"
+          IDENT@42..46 "test"
+      WHITESPACE@46..47 " "
+      IDENT@47..49 "as"
+      WHITESPACE@49..50 " "
+      MACRO_NAME@50..57
+        AT@50..51 "@"
+        IDENT@51..57 "verify"
+  NEWLINE@57..58 "\n"
+  NEWLINE@58..59 "\n"
+  MACRO_CALL@59..70
+    MACRO_NAME@59..65
+      AT@59..60 "@"
+      IDENT@60..65 "check"
+    WHITESPACE@65..66 " "
+    LITERAL@66..70
+      TRUE_KW@66..70 "true"
+  NEWLINE@70..71 "\n"
+  MACRO_CALL@71..83
+    MACRO_NAME@71..78
+      AT@71..72 "@"
+      IDENT@72..78 "verify"
+    WHITESPACE@78..79 " "
+    LITERAL@79..83
+      TRUE_KW@79..83 "true"
+  NEWLINE@83..84 "\n"

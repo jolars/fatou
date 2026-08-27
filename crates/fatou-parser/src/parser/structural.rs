@@ -1040,7 +1040,25 @@ fn parse_import_clause(
     let as_idx = ctx.skip_ws(path_end);
     if is_as_kw(ctx, as_idx) {
         let alias_start = ctx.skip_ws(as_idx + 1);
-        if matches!(ctx.token(alias_start).map(|t| t.kind), Some(TokKind::Ident)) {
+        let mut alias_events = Vec::new();
+        let alias_end = match ctx.token(alias_start).map(|t| t.kind) {
+            Some(TokKind::Ident) => {
+                alias_events.push(Event::Tok(alias_start));
+                Some(alias_start + 1)
+            }
+            Some(TokKind::At)
+                if ctx.token(alias_start + 1).map(|t| t.kind) == Some(TokKind::Ident) =>
+            {
+                Some(push_macro_name(
+                    ctx,
+                    &mut alias_events,
+                    alias_start,
+                    diagnostics,
+                ))
+            }
+            _ => None,
+        };
+        if let Some(alias_end) = alias_end {
             // An invalid alias is wrapped in `(error …)` so the projector emits
             // `(error (as …))`; a `using` base alias that also precedes a valid
             // `:` stacks two wraps (`(error (error (as …)))`).
@@ -1052,7 +1070,7 @@ fn parse_import_clause(
             push_range(events, path_end, as_idx);
             events.push(Event::Tok(as_idx)); // `as`
             push_range(events, as_idx + 1, alias_start);
-            events.push(Event::Tok(alias_start)); // alias name
+            events.extend(alias_events);
             events.push(Event::Finish);
             for _ in 0..error_wraps {
                 events.push(Event::Finish);
@@ -1067,7 +1085,7 @@ fn parse_import_clause(
                     as_token.end,
                 );
             }
-            return alias_start + 1;
+            return alias_end;
         }
     }
 

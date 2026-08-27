@@ -81,7 +81,7 @@ pub(super) const COMMA_ITEM_BP: u8 = 3;
 /// not inside colon's (`14 < 15`).
 pub(super) const SPLAT_BP: u8 = 14;
 
-pub(super) fn is_comparison_op(kind: TokKind) -> bool {
+pub(crate) fn is_comparison_op(kind: TokKind) -> bool {
     matches!(
         kind,
         TokKind::EqEq

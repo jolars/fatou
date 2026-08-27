@@ -1,0 +1,1 @@
+(toplevel (import (: (importpath Test) (as (importpath @test) @check))) (using (: (importpath Test) (as (importpath @test) @verify))) (macrocall @check true) (macrocall @verify true))

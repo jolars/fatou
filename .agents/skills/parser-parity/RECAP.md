@@ -58,7 +58,7 @@ ledger below is a fallback, not a queue.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**265 cases**): **264 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**266 cases**): **265 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -96,27 +96,26 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-25n — raw triple-string quotes)
+## Latest session (2026-08-27 — imported macro aliases)
 
-Landed JuliaSyntax projection parity for quotes preceded by backslash runs in
-raw triple-quoted strings.
+Landed JuliaSyntax parity for macro names on the right of an import alias, found
+while implementing the Test-stdlib lint bundle.
 
-- **Projector gap**: the raw branch of `triple_string_parts` now applies Julia's
-  raw-string backslash-run decoding to the complete content token before
-  newline splitting and dedent, then display-escapes the resulting value. The
-  CST was already correct.
-- **Fixtures**: added parser snapshot and oracle slug
-  `raw_triple_string_quote`, covering one-, two-, and three-backslash runs and
-  unescaped quote siblings. No blocked entry.
-- **Counts**: JS held at **748/756** allowlisted (8 FAIL, 0 unsupported, zero
-  regressions); dir **263/264 → 264/265** allowlisted (only the existing
-  blocked numeric-display case fails).
+- **Parser gap**: `parse_import_clause` now accepts `@name` after contextual
+  `as`, wrapping it in a `MACRO_NAME` inside `IMPORT_ALIAS`. The projector and
+  semantic import collector read that typed child as an `@`-prefixed alias.
+- **Fixtures**: `import_macro_alias` covers both `import Test: @test as @check`
+  and the `using` sibling, plus calls through each alias.
+- **Counts**: JS held at **748/756** allowlisted; dir **264/265 → 265/266**
+  allowlisted (only the existing blocked numeric-display case fails).
 - **Next**: no parser-owned target is queued; probe real Julia per `SKILL.md`.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-25n** — raw triple-string backslash-run decoding before quote
+  display escaping. 748 / 264.
 - **2026-08-25m** — nested space-form macros give a following `for` loop to the
   innermost macro without swallowing bracket or call generators. 748 / 263.
 - **2026-08-25l** — ordinary triple-string literal quote display, preserving

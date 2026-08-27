@@ -104,6 +104,7 @@ hex_literal_unknown_char_juxtapose
 identity_operators
 if_missing_condition
 import_as_colon_error
+import_macro_alias
 import_newline_continuation
 import_operator_names
 import_paren_quote

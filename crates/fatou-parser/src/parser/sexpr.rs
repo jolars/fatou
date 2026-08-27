@@ -2185,14 +2185,19 @@ fn project_import_alias(node: &SyntaxNode) -> String {
     // The alias is the bare identifier after the `as` keyword (the path's own
     // identifiers are nested inside the `IMPORT_PATH` child, not direct tokens).
     let alias = node
-        .children_with_tokens()
-        .filter_map(|el| match el {
-            NodeOrToken::Token(t) if t.kind() == IDENT && t.text() != "as" => {
-                Some(norm_ident(t.text()).into_owned())
-            }
-            _ => None,
+        .children()
+        .find(|child| child.kind() == MACRO_NAME)
+        .map(|name| project_macro_name(&name))
+        .or_else(|| {
+            node.children_with_tokens()
+                .filter_map(|el| match el {
+                    NodeOrToken::Token(t) if t.kind() == IDENT && t.text() != "as" => {
+                        Some(norm_ident(t.text()).into_owned())
+                    }
+                    _ => None,
+                })
+                .last()
         })
-        .last()
         .unwrap_or_default();
     format!("(as {path} {alias})")
 }
