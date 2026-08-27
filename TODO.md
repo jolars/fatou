@@ -62,12 +62,10 @@
   in flat, broken, and comment-bearing layouts. Fixture
   `trailing_bracket_semicolon`.
 
-- [ ] Stop dropping the trailing comma of an operator call — it turns the call
-  into a prefix operator application. `+(a=1,)` (`(call + (= a 1))`, a keyword
-  argument) formats to `+(a = 1)` (`(call-pre + (= a 1))`, unary plus applied to
-  an assignment); same for `<:(a,)`, `>:(a,)`, `.+(a,)`. Unlike a trailing comma
-  in an ordinary call, this one is load-bearing. Listed in
-  `tests/ast-equivalence/known-drift.txt`.
+- [x] Preserve the load-bearing trailing comma of a singleton bare-operator
+  call. `+(a=1,)`, `<:(a,)`, `>:(a,)`, and `.+(a,)` remain calls rather than
+  reparsing as prefix applications; cosmetic commas in ordinary and
+  multi-argument calls are still removed. Fixture `operator_call_trailing_comma`.
 
 - [x] Preserve whitespace between a macro's arguments so adjacent bracketed
   arguments retain their arity. `@foo a [1]`, `@foo A {T}`, and

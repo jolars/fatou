@@ -144,16 +144,18 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (`trailing_bracket_semicolon`)
+## Latest session (`operator_call_trailing_comma`)
 
-`fix(formatter)`. The matrix/brace-concatenation reflow now distinguishes a
-semantic trailing `;` from layout-only empty rows and emits it in flat, broken,
-and comment-bearing layouts. Fixture `trailing_bracket_semicolon` locks plain,
-empty, braced, typed, wide, and commented forms; the eight AST-equivalence
-exceptions are removed. Gate is 126 of 154. Focused tests, workspace suite,
+`fix(formatter)`. A singleton `ARG_LIST` attached directly to a bare operator
+now keeps its source trailing comma in flat, broken, and hugged layouts, so it
+cannot reparse as prefix application. Parenthesized/qualified operators,
+ordinary calls, and multi-argument operator calls keep the existing cosmetic
+comma normalization. Fixture `operator_call_trailing_comma` locks `+`, `<:`,
+`>:`, `.+`, a keyword argument, and a hugged vector; the six AST-equivalence
+exceptions are removed. Gate is 127 of 155. Focused tests, workspace suite,
 clippy, fmt, and the formatter Wasm build are green. No parser/lexer blocker.
 
-**Ranked next target:** preserve load-bearing trailing commas in operator calls.
+**Ranked next target:** decide the spaced unary-minus literal policy.
 
 ## Parser dependencies and follow-ups
 
@@ -188,6 +190,9 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Trailing bracket semicolons** (`fix`): distinguished a semantic final `;`
+  from layout-only empty rows across flat, broken, and commented matrices. Gate
+  126.
 - **Macro argument gaps** (`fix`): restricted sole-bracket gluing to a genuinely
   sole argument, preserving later bracketed arguments' arity. Gate 125.
 - **Where brace shapes** (`fix`): recognized brace concatenations and

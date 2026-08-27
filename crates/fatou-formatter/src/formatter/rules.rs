@@ -1821,13 +1821,15 @@ fn lower_type_annotation(node: &SyntaxNode) -> Ir {
 /// the [`printer`](crate::formatter::printer) collapses it to one line when it
 /// fits `line_width` and explodes it (one item per line, indented, close bracket
 /// flush) when it does not. Per Tenet 1, the layout depends **only** on width:
-/// the source's own line breaks and any source trailing comma are ignored, so
-/// `f(1,\n2)` and `f(1, 2)` both format to `f(1, 2)`.
+/// the source's own line breaks and cosmetic trailing commas are ignored, so
+/// `f(1,\n2)` and `f(1, 2)` both format to `f(1, 2)`. The exception is a
+/// singleton bare-operator call (`+(a,)`): its comma is semantic and remains in
+/// both layouts because `+(a)` parses as prefix application rather than a call.
 ///
 /// Flat punctuation is normalized — no padding inside the brackets, no space
-/// before a comma, one space after it. A trailing comma is added **only in the
-/// broken layout** (via [`Ir::IfBreak`]); the flat form never carries one
-/// (`g(a,)` → `g(a)`).
+/// before a comma, one space after it. Apart from the semantic operator-call
+/// case, a trailing comma is added **only in the broken layout** (via
+/// [`Ir::IfBreak`]); the flat form never carries one (`g(a,)` → `g(a)`).
 ///
 /// Items are `ARG`/`KEYWORD_ARG` nodes separated by commas. Two cases keep their
 /// existing handling rather than the width-driven group:
@@ -1858,6 +1860,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         mut items,
         params: params_node,
         last_huggable,
+        trailing_comma,
     }) = collect_arg_list(node)
     else {
         return lower_transparent(node);
@@ -1939,6 +1942,7 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     if items.is_empty() {
         return Ir::concat([Ir::text(open), Ir::text(close)]);
     }
+    let semantic_comma = operator_call_singleton_comma(node, items.len(), trailing_comma);
 
     // Trailing-argument hug: when the last positional argument is itself a
     // bracket-delimited construct (`f(g(…))`, `f([…])`, `map(f, […])`), it hugs
@@ -1950,9 +1954,14 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
     // hugged construct's opening bracket) overflows `line_width`, the printer
     // falls back to the standard explode group, one item per line.
     if last_huggable {
-        let explode = arg_list_explode_group(&open, &items, &close, list_trailing(node, false));
+        let explode =
+            arg_list_explode_group(&open, &items, &close, list_trailing(node, semantic_comma));
         let mut body = items.pop().expect("hug requires a last item");
-        let mut close_text = Ir::text(close);
+        let mut close_text = if semantic_comma {
+            Ir::text(format!(",{close}"))
+        } else {
+            Ir::text(close)
+        };
         let mut prefix: Vec<Ir> = vec![Ir::text(open)];
         for item in items {
             prefix.push(item);
@@ -1979,18 +1988,47 @@ fn lower_arg_list(node: &SyntaxNode) -> Ir {
         return Ir::hug_group(Ir::concat(prefix), body, close_text, explode);
     }
 
-    arg_list_explode_group(&open, &items, &close, list_trailing(node, false))
+    arg_list_explode_group(&open, &items, &close, list_trailing(node, semantic_comma))
+}
+
+/// Whether a source trailing comma distinguishes a singleton bare-operator call
+/// from prefix application. The ambiguous shape is exactly `CALL_EXPR` with a
+/// direct operator token followed by this `ARG_LIST`; parenthesized and qualified
+/// operator callees remain calls without the comma, as do calls with two or more
+/// arguments.
+fn operator_call_singleton_comma(
+    node: &SyntaxNode,
+    item_count: usize,
+    trailing_comma: bool,
+) -> bool {
+    if item_count != 1 || !trailing_comma {
+        return false;
+    }
+    let Some(parent) = node.parent().filter(|p| p.kind() == SyntaxKind::CALL_EXPR) else {
+        return false;
+    };
+    let mut parts = parent.children_with_tokens();
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (
+            Some(NodeOrToken::Token(op)),
+            Some(NodeOrToken::Node(args)),
+            None
+        ) if op.kind().is_operator() && args == *node
+    )
 }
 
 /// The parsed pieces of a clean argument list: the bracket tokens, the lowered
-/// comma-separated items, the `; …` keyword tail node (if any), and whether the
-/// last positional item can hug the closing bracket (see [`item_is_huggable`]).
+/// comma-separated items, the `; …` keyword tail node (if any), whether the
+/// last positional item can hug the closing bracket (see [`item_is_huggable`]),
+/// and whether the source had a trailing comma.
 struct ArgListParts {
     open: String,
     close: String,
     items: Vec<Ir>,
     params: Option<SyntaxNode>,
     last_huggable: bool,
+    trailing_comma: bool,
 }
 
 /// Walk an `ARG_LIST`'s children into [`ArgListParts`]. `None` on any unmodeled
@@ -2057,6 +2095,7 @@ fn collect_arg_list(node: &SyntaxNode) -> Option<ArgListParts> {
         items,
         params,
         last_huggable,
+        trailing_comma: pending_comma,
     })
 }
 
@@ -2609,12 +2648,12 @@ fn ends_with_closer(node: &SyntaxNode) -> bool {
         })
 }
 
-/// The punctuation a bracketed list emits after its last item: the one-tuple's
-/// semantic comma (both layouts), nothing when a trailing comma would be
-/// absorbed by the last item (see [`last_item_absorbs_comma`]), or the usual
-/// broken-only magic comma.
-fn list_trailing(node: &SyntaxNode, singleton_comma: bool) -> Ir {
-    if singleton_comma {
+/// The punctuation a bracketed list emits after its last item: a semantic comma
+/// (both layouts), nothing when a trailing comma would be absorbed by the last
+/// item (see [`last_item_absorbs_comma`]), or the usual broken-only magic comma.
+/// Semantic commas occur in one-tuples and singleton bare-operator calls.
+fn list_trailing(node: &SyntaxNode, semantic_comma: bool) -> Ir {
+    if semantic_comma {
         Ir::text(",")
     } else if last_item_absorbs_comma(node) {
         Ir::text("")
@@ -2922,6 +2961,7 @@ fn applied_args_body(prefix: Ir, args: &SyntaxNode) -> Option<Ir> {
         items,
         params,
         last_huggable,
+        ..
     } = collect_arg_list(args)?;
 
     if let Some(pnode) = params {

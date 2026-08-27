@@ -52,18 +52,6 @@ js-9b9946da
 js-acfc6b49
 toplevel_semicolon
 
-# DEFECT: dropping a trailing comma turns an operator *call* into a prefix
-# operator application — `+(a=1,)` (`(call + (= a 1))`, a keyword argument)
-# formats to `+(a = 1)` (`(call-pre + (= a 1))`, unary plus applied to an
-# assignment). Same for `<:(a,)`, `>:(a,)` and `.+(a,)`. Unlike the trailing
-# comma inside an ordinary call, this one is load-bearing.
-js-11eada5f
-js-70cde333
-js-729f9f07
-js-effed8f1
-type_operator_call
-unary_operator_call
-
 # DEFECT: a spaced unary minus is folded into the literal — `- 2` (`(call-pre -
 # 2)`) becomes the literal `-2`. Value-identical except at a type boundary:
 # `- 9223372036854775808` negates an `Int128` literal, while
