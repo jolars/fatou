@@ -57,6 +57,46 @@
   `A \ b`). Fixture `left_division` proves canonical spacing, width-driven
   continuation, and uniform breaks across the shared `*`/`\`/`/` tier.
 
+- [ ] Stop dropping a trailing `;` inside brackets — it collapses a
+  concatenation into a container literal. `[x;]` (`vcat`) formats to `[x]`
+  (`vect`), `[;]` to `[]`, `{x;}` to `{x}`; for a non-scalar element these are
+  different values (`[1:70;]` is a 70-element `Vector{Int}`, `[1:70]` a
+  1-element `Vector{UnitRange{Int}}`). The typed forms are worse: `T[x;]`
+  (`typed_vcat`) becomes `T[x]`, which projects as `ref` — indexing `T` rather
+  than constructing it. Listed in `tests/ast-equivalence/known-drift.txt` under
+  the bracket-semicolon group; drop those entries with the fix.
+
+- [ ] Stop dropping the trailing comma of an operator call — it turns the call
+  into a prefix operator application. `+(a=1,)` (`(call + (= a 1))`, a keyword
+  argument) formats to `+(a = 1)` (`(call-pre + (= a 1))`, unary plus applied to
+  an assignment); same for `<:(a,)`, `>:(a,)`, `.+(a,)`. Unlike a trailing comma
+  in an ordinary call, this one is load-bearing. Listed in
+  `tests/ast-equivalence/known-drift.txt`.
+
+- [ ] Stop removing whitespace between a macro's arguments — it changes arity.
+  `@foo a [1]` (two arguments, `a` and `[1]`) formats to `@foo a[1]` (one
+  argument, `a[1]`); same for `@foo A {T}` and `@foo g(x) [1]`. For a macro the
+  argument list is the input, so this rewrites the call. Fixture
+  `macro_space_args` in the parser oracle corpus; listed in
+  `tests/ast-equivalence/known-drift.txt`.
+
+- [ ] Fix the `where` brace canonicalization double-wrapping a parameter list
+  that is already braced but does not project as `braces`: `x where {T S}` →
+  `x where {{T S}}`, `x where {y for y in ys}` → `x where {{y for y in ys}}`.
+  Listed in `tests/ast-equivalence/known-drift.txt`.
+
+- [ ] Fix hex literal zero-padding counting `_` as a digit: `0x1_2` → `0x01_2`
+  widens a 2-digit `UInt8` literal to a 3-digit `UInt16`. Padding is otherwise
+  type-preserving, which `formatter_preserves_ast_shape` proves — the projector
+  renders a hex literal at its type's width, so only this row drifts. Fixture
+  `hex_literals`.
+
+- [ ] Decide the policy for folding a spaced unary minus into its literal
+  (`- 2` → `-2`). Value-identical except at a type boundary:
+  `- 9223372036854775808` negates an `Int128` literal, while
+  `-9223372036854775808` is the `Int64` `typemin`. Listed in
+  `tests/ast-equivalence/known-drift.txt` as `js-84685b8e`.
+
 ## Linter
 
 ### Rules

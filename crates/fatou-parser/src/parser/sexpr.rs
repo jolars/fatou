@@ -152,6 +152,19 @@ fn stray_keyword_text(node: &SyntaxNode) -> Option<String> {
 /// and parentheses (preserving `"…"` string literals as atoms) and rejoins with
 /// single-space separation, so pretty-print spacing no longer affects equality.
 pub fn normalize_sexpr(s: &str) -> String {
+    sexpr_tokens(s).join(" ")
+}
+
+/// The token sequence [`normalize_sexpr`] joins: `(` and `)` each on their own,
+/// `"…"` string literals whole (escapes honored), and every other run of
+/// non-delimiter bytes as one atom.
+///
+/// Callers that inspect structure — head position, a sentinel, a head suffix —
+/// must work from this rather than splitting the joined string on spaces: a
+/// string literal is a single token that may itself contain spaces and
+/// parentheses, so re-splitting can cut one apart and mistake its contents for
+/// syntax.
+pub fn sexpr_tokens(s: &str) -> Vec<String> {
     let mut tokens: Vec<String> = Vec::new();
     let bytes = s.as_bytes();
     let mut i = 0usize;
@@ -192,7 +205,7 @@ pub fn normalize_sexpr(s: &str) -> String {
             }
         }
     }
-    tokens.join(" ")
+    tokens
 }
 
 // --- Core dispatch ---------------------------------------------------------
@@ -3551,11 +3564,26 @@ fn is_keyword(kind: SyntaxKind) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::{parse, to_juliasyntax_sexpr};
+    use crate::parser::{normalize_sexpr, parse, sexpr_tokens, to_juliasyntax_sexpr};
 
     fn sexpr(src: &str) -> String {
         let output = parse(src);
         to_juliasyntax_sexpr(&output.cst, &output.diagnostics)
+    }
+
+    /// A string literal is one token however much syntax its contents mimic,
+    /// which is why structural callers tokenize rather than split on spaces.
+    #[test]
+    fn a_string_literal_is_a_single_token() {
+        assert_eq!(
+            sexpr_tokens(r#"(string "a ( b )")"#),
+            ["(", "string", r#""a ( b )""#, ")"]
+        );
+        assert_eq!(sexpr_tokens(r#""a \" b""#), [r#""a \" b""#]);
+        assert_eq!(
+            normalize_sexpr("(  call\n  f  a )"),
+            sexpr_tokens("(  call\n  f  a )").join(" ")
+        );
     }
 
     /// Julia accepts `do` only after a parenthesized call, and splices the clause

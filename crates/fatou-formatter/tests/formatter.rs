@@ -141,13 +141,15 @@ fn formatter_is_idempotent_and_stable() {
 ///
 /// `KNOWN_DRIFT` is the exemption list, and it is not an allowlist to grow into:
 /// each entry is either a recorded formatter policy that moves the projection or
-/// a defect this test found. Entries are checked for staleness — a slug that
-/// stops drifting fails until it is removed — so a fixed bug cannot leave its
-/// exemption behind.
+/// a defect this test found. Entries are checked for staleness — an entry fails
+/// until it is removed once its slug stops drifting, and equally once its slug
+/// stops naming a fixture — so neither a fixed bug nor a renamed fixture can
+/// leave its exemption behind.
 #[test]
 fn formatter_preserves_ast_shape() {
     let mut drifted = Vec::new();
     let mut stale = Vec::new();
+    let mut exercised = Vec::new();
 
     for case in fixture_dirs() {
         let name = slug(&case);
@@ -161,23 +163,44 @@ fn formatter_preserves_ast_shape() {
             );
             continue; // out of domain: does not parse cleanly, or projects a sentinel
         };
+        exercised.push(name.clone());
         let formatted = format(&input).expect("format input");
+        // The input projected, so a formatted text with no shape is the
+        // formatter's doing — but `ast_shape` folds a failed parse and a
+        // projector sentinel into `None`, and they point at different code.
         let after = ast_shape(&formatted).unwrap_or_else(|| {
-            panic!("formatted output of `{name}` has no comparable shape (it no longer parses)")
+            let diagnostics = parse(&formatted).diagnostics;
+            assert!(
+                !diagnostics.is_empty(),
+                "formatted output of `{name}` parses but no longer projects — the \
+                 formatter produced a construct the projector cannot render"
+            );
+            panic!("formatted output of `{name}` no longer parses cleanly: {diagnostics:?}")
         });
 
         match (before == after, known) {
             (false, None) => drifted.push(format!(
                 "{name}\n     before: {before}\n     after:  {after}"
             )),
-            (true, Some((_, why))) => stale.push(format!("{name} (listed as: {why})")),
+            (true, Some((_, why))) => {
+                stale.push(format!("{name} (no longer drifts; listed as: {why})"))
+            }
             _ => {}
         }
     }
 
+    // An entry no fixture reached is as stale as one that stopped drifting: the
+    // fixture was renamed or deleted, and the exemption now hides nothing.
+    stale.extend(
+        KNOWN_DRIFT
+            .iter()
+            .filter(|(s, _)| !exercised.iter().any(|name| name == s))
+            .map(|(s, why)| format!("{s} (matches no fixture; listed as: {why})")),
+    );
+
     assert!(
         stale.is_empty(),
-        "KNOWN_DRIFT entries no longer drift — remove them: {stale:?}"
+        "KNOWN_DRIFT entries no longer apply — remove them: {stale:?}"
     );
     assert!(
         drifted.is_empty(),
