@@ -55,10 +55,11 @@ style remains project policy rather than language correctness.
   fields, constants, macros, and modules; and make unsaved local docstrings
   available without waiting for a workspace re-harvest.
 
-- [ ] **Documentation parser:** add a Wasm-clean `fatou-documentation` crate for
-  Julia's Markdown dialect. Recognize explicit Documenter constructs such as
-  `@ref` and `jldoctest` locally; use Julia's Markdown stdlib only as a
-  test-time differential oracle, never during analysis.
+- [x] **Documentation parser:** add a Wasm-clean documentation module to
+  `fatou-parser` for Julia's Markdown dialect, with a lossless CST and typed
+  navigation. Recognize core Documenter links and fences locally; use Julia's
+  Markdown stdlib only as a test-time differential oracle, never during
+  analysis.
 
 - [ ] **Language features (default-on):** render decoded local and indexed
   documentation consistently; add Markdown folding and navigation; and offer
