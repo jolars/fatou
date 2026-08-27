@@ -66,10 +66,14 @@ style remains project policy rather than language correctness.
   completion and definition for explicit `@ref` plus embedded-Julia support
   where a fence declares Julia code.
 
-- [ ] **Linting:** add conservative default-on checks for malformed Julia code
+- [x] **Linting:** add conservative default-on checks for malformed Julia code
   in explicit fences, argument names that disagree with an existing
   `# Arguments` section, and `@ref` targets that project resolution can prove
-  missing. Keep documentation-coverage and style policies default-off.
+  missing. Landed as `invalid-docstring-code` (sem),
+  `docstring-argument-mismatch` (sem), and
+  `unresolved-docstring-reference` (res)—all correctness warnings without
+  fixes. Documentation coverage and style remain policy rather than default
+  lint.
 
 - [ ] **Formatting (deferred and opt-in):** only consider docstring reflow after
   corpus validation. Gate it behind `[format] format-docstrings = true` and

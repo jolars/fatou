@@ -1,0 +1,24 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `unresolved-docstring-reference`
+
+Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive.
+
+The explicit target retains the same typo as its code label:
+
+```julia
+"""
+See [`Base.raduis`](@ref Base.raduis).
+"""
+area(radius) = pi * radius^2
+```
+
+```text
+warning: unresolved-docstring-reference
+ --> example.jl:2:26
+  |
+2 | See [`Base.raduis`](@ref Base.raduis).
+  |                          ^^^^^^^^^^^ documentation reference `Base.raduis` does not resolve
+```

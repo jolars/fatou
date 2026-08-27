@@ -367,6 +367,45 @@ impl<'a, P: PackageSource + ?Sized> Resolver<'a, P> {
         Resolution::Unresolved
     }
 
+    /// Whether a fully qualified package path names a harvested symbol.
+    ///
+    /// `None` means the root package is unknown, so absence cannot be proved.
+    /// A known package yields `Some(false)` only after its submodule path and
+    /// final value or macro name have both been checked. This is intentionally
+    /// narrower than ordinary bare-name resolution: local module aliases and
+    /// runtime-created modules remain unknown rather than becoming false
+    /// positives for documentation checks.
+    pub fn qualified_name_exists(&self, path: &[SmolStr], namespace: Namespace) -> Option<bool> {
+        let (name, module_path) = path.split_last()?;
+        let (head, rest) = module_path.split_first()?;
+        let package = self
+            .workspace
+            .as_ref()
+            .filter(|workspace| workspace.pkg.name == head.as_str())
+            .map(|workspace| workspace.pkg.clone())
+            .or_else(|| self.packages.package(head))?;
+        let Some(module) = module_at(&package.root, rest) else {
+            return Some(false);
+        };
+        let wanted = if namespace == Namespace::Macro && name.starts_with('@') {
+            name.clone()
+        } else {
+            wanted_name(name, namespace)
+        };
+        Some(
+            module_defines(module, &wanted, namespace)
+                || module
+                    .exports
+                    .iter()
+                    .any(|export| export.name == wanted.as_str())
+                || (namespace == Namespace::Value
+                    && module
+                        .submodules
+                        .iter()
+                        .any(|submodule| submodule.name == wanted.as_str())),
+        )
+    }
+
     /// Every name visible at `offset`, in the shared masking order with shadowed
     /// names dropped: file bindings innermost-first, then `using`'d exports in
     /// source order, then Base/Core. For completion.
@@ -1167,6 +1206,38 @@ mod tests {
     fn unknown_name_is_unresolved() {
         let lib = library(&[package("Base", &["println"])]);
         assert_eq!(resolve("nope()", "nope", &lib), Resolution::Unresolved);
+    }
+
+    #[test]
+    fn qualified_name_existence_distinguishes_missing_from_unknown_packages() {
+        let lib = library(&[
+            package("Base", &["println", "@time"]),
+            module_package("A", &[], vec![submodule("B", &["item"])]),
+        ]);
+        let model = model_of("");
+        let resolver = Resolver::new(&model, &lib);
+        let path = |parts: &[&str]| parts.iter().map(SmolStr::new).collect::<Vec<_>>();
+
+        assert_eq!(
+            resolver.qualified_name_exists(&path(&["Base", "println"]), Namespace::Value),
+            Some(true)
+        );
+        assert_eq!(
+            resolver.qualified_name_exists(&path(&["Base", "@time"]), Namespace::Macro),
+            Some(true)
+        );
+        assert_eq!(
+            resolver.qualified_name_exists(&path(&["A", "B", "item"]), Namespace::Value),
+            Some(true)
+        );
+        assert_eq!(
+            resolver.qualified_name_exists(&path(&["A", "B", "absent"]), Namespace::Value),
+            Some(false)
+        );
+        assert_eq!(
+            resolver.qualified_name_exists(&path(&["Unknown", "item"]), Namespace::Value),
+            None
+        );
     }
 
     #[test]

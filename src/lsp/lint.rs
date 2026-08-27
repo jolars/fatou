@@ -129,10 +129,10 @@ fn lint_findings(text: &str, rules: &ServerRules) -> Vec<linter::Diagnostic> {
     lint_parsed(None, &parsed.cst, &model, rules.get(false), None, &[])
 }
 
-/// The rules that are sound only with the resolution context a workspace
-/// member file carries: the server adds them to the member rule set, while
-/// the CLI leaves them opt-in via `--select`. Aliases the registry's
-/// [`RESOLUTION_RULES`], which is the single list.
+/// The rules whose full behavior needs the resolution context a workspace
+/// member file carries. The server adds any default-off entries to the member
+/// rule set; default-on entries are already present but stay in this single
+/// authoritative list for resolution gating and suppression handling.
 const WORKSPACE_MEMBER_RULES: &[&str] = RESOLUTION_RULES;
 
 /// The rule sets the server lints with, resolved once per configuration (the

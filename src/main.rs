@@ -440,10 +440,10 @@ fn run_lint(
 
     let use_color = color_enabled(color, std::io::stderr().is_terminal());
 
-    // A resolution-dependent rule (`undefined-name`, `call-arity`) resolves
-    // names across files: harvest the enclosing project so a sibling file's
-    // `using`/`import` and same-module globals resolve exactly as in the
-    // language server. The default lint selects neither, so it pays no harvest.
+    // A resolution-dependent rule resolves names across files: harvest the
+    // enclosing project so a sibling file's `using`/`import`, same-module
+    // globals, and documentation targets resolve exactly as in the language
+    // server.
     let library = if wants_project_resolution(&config.lint) {
         harvest_project(&paths)
     } else {
@@ -482,16 +482,17 @@ fn run_lint(
     }
 }
 
-/// Whether any selected rule needs project-wide name resolution. Every such
-/// rule is default-off (they require project context to be sound), so a plain
-/// `select` check suffices and keeps the harvest off the default `fatou lint`.
+/// Whether any effectively enabled rule needs project-wide name resolution.
 fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
     fatou::linter::rules::RESOLUTION_RULES.iter().any(|id| {
-        config
-            .select
-            .as_deref()
-            .is_some_and(|sel| sel.iter().any(|r| r == id))
-            && !config.ignore.iter().any(|r| r == id)
+        let enabled = match config.select.as_deref() {
+            Some(selected) => selected.iter().any(|rule| rule == id),
+            None => fatou::linter::all_rules()
+                .iter()
+                .find(|rule| rule.id() == *id)
+                .is_some_and(|rule| rule.default_enabled()),
+        };
+        enabled && !config.ignore.iter().any(|rule| rule == id)
     })
 }
 
@@ -701,6 +702,7 @@ fn read_source(path: Option<&Path>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fatou::config::LintConfig;
 
     fn paths(entries: &[&str]) -> Vec<PathBuf> {
         entries.iter().map(PathBuf::from).collect()
@@ -740,5 +742,28 @@ mod tests {
     fn named_paths_are_passed_through() {
         let named = paths(&["a.jl", "src"]);
         assert_eq!(resolve_inputs(&named, true), Ok(Inputs::Paths(&named)));
+    }
+
+    #[test]
+    fn project_harvest_tracks_effectively_enabled_resolution_rules() {
+        assert!(wants_project_resolution(&LintConfig::default()));
+
+        let ignored = LintConfig {
+            ignore: vec!["unresolved-docstring-reference".to_string()],
+            ..Default::default()
+        };
+        assert!(!wants_project_resolution(&ignored));
+
+        let syntax_only = LintConfig {
+            select: Some(vec!["invalid-docstring-code".to_string()]),
+            ..Default::default()
+        };
+        assert!(!wants_project_resolution(&syntax_only));
+
+        let selected = LintConfig {
+            select: Some(vec!["undefined-name".to_string()]),
+            ..Default::default()
+        };
+        assert!(wants_project_resolution(&selected));
     }
 }

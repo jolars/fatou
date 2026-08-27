@@ -78,6 +78,7 @@ use crate::semantic::{BindingKind, FileControlFlow, IdentRef, SemanticModel};
 use crate::syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 
 pub mod correctness;
+mod documentation;
 mod file_scan;
 pub mod matchers;
 pub mod meta;
@@ -130,6 +131,9 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(correctness::UnresolvedImport),
         Box::new(correctness::KwargDefaultMismatch),
         Box::new(correctness::InvalidTypeDeclaration),
+        Box::new(correctness::InvalidDocstringCode),
+        Box::new(correctness::DocstringArgumentMismatch),
+        Box::new(correctness::UnresolvedDocstringReference),
         Box::new(suspicious::AssignmentInCondition),
         Box::new(suspicious::NothingComparison),
         Box::new(suspicious::MissingComparison),
@@ -160,11 +164,11 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
 }
 
 /// The rules that need a project-wide name-resolution context to be sound, and
-/// report nothing without one. All of them are default-off for that reason: the
-/// CLI leaves them to an explicit `select` (and harvests the environment when it
-/// sees one), the language server adds them for workspace member files, where it
-/// carries the context, and `outdated-suppression` declines to call a directive
-/// naming one of them stale when the context is missing.
+/// report nothing when the required context is absent. The CLI harvests the
+/// environment when any one is effectively enabled; the language server adds
+/// the default-off members for workspace files, where it carries the context;
+/// and `outdated-suppression` declines to call a directive naming one of them
+/// stale when the context is missing.
 ///
 /// The single list — every consumer reads it rather than repeating it.
 pub const RESOLUTION_RULES: &[&str] = &[
@@ -174,6 +178,7 @@ pub const RESOLUTION_RULES: &[&str] = &[
     "function-has-no-methods",
     "non-public-access",
     "invalid-type-declaration",
+    "unresolved-docstring-reference",
 ];
 
 /// Every shipped rule's ID, derived from [`all_rules`] so the two never drift.
@@ -261,10 +266,10 @@ static EMPTY_SUPPRESSIONS: LazyLock<SuppressionMap> = LazyLock::new(SuppressionM
 static EMPTY_ENABLED_RULES: EnabledRules = EnabledRules(Vec::new());
 
 /// The per-file work more than one rule needs, computed lazily and at most
-/// once: the name [`Resolver`], the [`FileScan`], the unresolvable-`using`
-/// verdict, and a range index over the model's reads. Every entry is derived
-/// purely from the context's own fields, so caching is invisible to rules —
-/// they just ask.
+/// once: the name [`Resolver`], the [`FileScan`], the documentation scan, the
+/// unresolvable-`using` verdict, and a range index over the model's reads. Every
+/// entry is derived purely from the context's own fields, so caching is
+/// invisible to rules—they just ask.
 ///
 /// A [`RuleContext`] lives on one thread for one file ([`SyntaxNode`] is
 /// `Rc`-based and not `Send`, so the lint driver parallelizes across files
@@ -279,6 +284,7 @@ struct RuleCache<'a> {
     /// the model made of it without a linear scan per token.
     idents_by_range: OnceCell<HashMap<TextRange, usize>>,
     trusts_resolution: OnceCell<bool>,
+    documentation: OnceCell<documentation::DocumentationScan>,
 }
 
 impl<'a> RuleContext<'a> {
@@ -390,6 +396,13 @@ impl<'a> RuleContext<'a> {
     /// The shared per-file soundness scan (see [`FileScan`]).
     pub(crate) fn file_scan(&self) -> &FileScan {
         self.cache.scan.get_or_init(|| FileScan::collect(self.root))
+    }
+
+    /// Static docstrings parsed and classified once for all documentation rules.
+    pub(crate) fn documentation_scan(&self) -> &documentation::DocumentationScan {
+        self.cache
+            .documentation
+            .get_or_init(|| documentation::DocumentationScan::collect(self.model))
     }
 
     /// The file's control-flow graph (see [`FileControlFlow`]), for a rule that

@@ -24,6 +24,398 @@ fn count(rule: &str, src: &str) -> usize {
     findings(rule, src).len()
 }
 
+// --- documentation linting -----------------------------------------------
+
+#[test]
+fn invalid_docstring_code_flags_malformed_julia_fences() {
+    let src = r#""""
+```julia
+f(
+```
+"""
+f() = 1
+"#;
+    assert_eq!(count("invalid-docstring-code", src), 1);
+
+    let src = r#""""
+```@example demo
+if true
+```
+"""
+f() = 1
+"#;
+    assert_eq!(count("invalid-docstring-code", src), 1);
+}
+
+#[test]
+fn invalid_docstring_code_accepts_valid_code_and_ignores_other_fences() {
+    for src in [
+        r#""""
+```julia
+f(x) = x + 1
+```
+"""
+f() = 1
+"#,
+        r#""""
+```python
+f(
+```
+"""
+f() = 1
+"#,
+        r#""""
+```
+f(
+```
+"""
+f() = 1
+"#,
+        r#""""
+```@raw html
+<p>
+```
+"""
+f() = 1
+"#,
+    ] {
+        assert_eq!(
+            count("invalid-docstring-code", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn invalid_docstring_code_parses_only_repl_inputs() {
+    let valid = r#""""
+```jldoctest
+julia> f(1)
+2
+```
+"""
+f(x) = x + 1
+"#;
+    assert_eq!(count("invalid-docstring-code", valid), 0);
+
+    let invalid = r#""""
+```julia-repl
+julia> f(
+ERROR: syntax: incomplete: premature end of input
+```
+"""
+f() = 1
+"#;
+    assert_eq!(count("invalid-docstring-code", invalid), 1);
+}
+
+#[test]
+fn invalid_docstring_code_accepts_multiline_repl_and_script_doctests() {
+    let repl = r#""""
+```julia-repl
+julia> function twice(x)
+           2x
+       end
+twice (generic function with 1 method)
+
+julia> twice(2)
+4
+```
+"""
+twice(x) = 2x
+"#;
+    assert_eq!(count("invalid-docstring-code", repl), 0);
+
+    let script = r#""""
+```jldoctest
+x = 1
+x + 1
+# output
+2
+```
+"""
+f() = 1
+"#;
+    assert_eq!(count("invalid-docstring-code", script), 0);
+}
+
+#[test]
+fn invalid_docstring_code_checks_script_doctest_input() {
+    let src = r#""""
+```jldoctest
+f(
+# output
+ERROR: syntax: incomplete: premature end of input
+```
+"""
+f() = 1
+"#;
+    assert_eq!(count("invalid-docstring-code", src), 1);
+}
+
+#[test]
+fn docstring_argument_mismatch_flags_a_stale_argument_name() {
+    let src = r#""""
+# Arguments
+- `raduis`: The radius.
+- `unit`: The output unit.
+"""
+area(radius; unit = :m) = radius
+"#;
+    let messages = findings("docstring-argument-mismatch", src);
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].contains("raduis"), "{messages:?}");
+}
+
+#[test]
+fn docstring_argument_mismatch_accepts_actual_positional_and_keyword_names() {
+    let src = r#""""
+# Arguments
+- `radius`: The radius.
+- `unit`: The output unit.
+"""
+area(radius; unit = :m) = radius
+"#;
+    assert_eq!(count("docstring-argument-mismatch", src), 0);
+}
+
+#[test]
+fn docstring_argument_mismatch_handles_long_form_and_splat_parameters() {
+    let src = r#""""
+# Arguments
+- `first`: The first value.
+- `rest...`: Remaining values.
+"""
+function combine(first, rest...)
+    (first, rest)
+end
+"#;
+    assert_eq!(count("docstring-argument-mismatch", src), 0);
+}
+
+#[test]
+fn docstring_argument_mismatch_is_not_a_coverage_rule() {
+    let src = r#""""
+# Arguments
+- `x`: The first value.
+"""
+f(x, y; option = true) = x + y
+"#;
+    assert_eq!(count("docstring-argument-mismatch", src), 0);
+}
+
+#[test]
+fn docstring_argument_mismatch_requires_a_function_and_arguments_section() {
+    for src in [
+        r#""""
+- `wrong`: Prose outside an Arguments section.
+"""
+f(right) = right
+"#,
+        r#""""
+# Arguments
+- `field`: Describes the type's field.
+"""
+struct T
+    field
+end
+"#,
+        r#""""
+# Arguments
+- **right**: A non-conventional entry the conservative check does not infer.
+"""
+f(wrong) = wrong
+"#,
+    ] {
+        assert_eq!(
+            count("docstring-argument-mismatch", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn docstring_argument_mismatch_stops_at_the_next_peer_heading() {
+    let src = r#""""
+# Arguments
+- `right`: The real argument.
+
+# Returns
+- `wrong`: A return-value label, not an argument entry.
+"""
+f(right) = right
+"#;
+    assert_eq!(count("docstring-argument-mismatch", src), 0);
+}
+
+#[test]
+fn unresolved_docstring_reference_flags_a_provably_missing_symbol() {
+    let src = r#""""
+See [`Base.raduis`](@ref Base.raduis).
+"""
+area(radius) = pi * radius^2
+"#;
+    let messages = findings("unresolved-docstring-reference", src);
+    assert_eq!(messages.len(), 1);
+    assert!(messages[0].contains("raduis"), "{messages:?}");
+}
+
+#[test]
+fn unresolved_docstring_reference_accepts_local_and_system_symbols() {
+    let src = r#""""
+See [`area`](@ref area), [`length`](@ref length), [`Base.length`](@ref Base.length), and [`Base.@time`](@ref Base.@time).
+"""
+area(radius) = pi * radius^2
+"#;
+    assert_eq!(count("unresolved-docstring-reference", src), 0);
+}
+
+#[test]
+fn unresolved_docstring_reference_accepts_local_markdown_anchors() {
+    let src = r#""""
+# Examples
+
+See [`examples`](@ref examples) and [`custom`](@ref custom).
+
+[anchor](@id custom)
+"""
+f() = 1
+"#;
+    assert_eq!(count("unresolved-docstring-reference", src), 0);
+}
+
+#[test]
+fn unresolved_docstring_reference_ignores_non_symbol_and_unprovable_targets() {
+    for src in [
+        r#""""
+See [the overview](@ref missing-overview).
+"""
+f() = 1
+"#,
+        r#""""
+See [`f`](@ref).
+"""
+f() = 1
+"#,
+        r#""""
+See [`Mystery.f`](@ref Mystery.f).
+"""
+f() = 1
+"#,
+        r#""""
+See [`generated`](@ref generated).
+"""
+f() = 1
+@eval generated() = 1
+"#,
+    ] {
+        assert_eq!(
+            count("unresolved-docstring-reference", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn documentation_correctness_checks_are_default_on() {
+    let src = r#""""
+# Arguments
+- `wrong`: A stale name.
+
+See [`Base.misspelled`](@ref Base.misspelled).
+
+```julia
+f(
+```
+"""
+    f(right) = right
+"#;
+    assert_eq!(count("unresolved-docstring-reference", src), 1);
+    let report = check_source(None, src, &LintConfig::default());
+    for rule in [
+        "invalid-docstring-code",
+        "docstring-argument-mismatch",
+        "unresolved-docstring-reference",
+    ] {
+        assert!(
+            report.diagnostics.iter().any(|diag| diag.rule == rule),
+            "default lint omitted {rule}: {:?}",
+            report.diagnostics
+        );
+    }
+}
+
+#[test]
+fn documentation_findings_map_back_to_exact_julia_source_ranges() {
+    let src = r#""""
+# Arguments
+- `wrong`: A stale name.
+
+See [`Base.misspelled`](@ref Base.misspelled).
+
+```julia
+f(
+```
+"""
+f(right) = right
+"#;
+    let report = check_source(None, src, &LintConfig::default());
+    let diagnostic = |rule| {
+        report
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.rule == rule)
+            .unwrap_or_else(|| panic!("missing {rule}: {:?}", report.diagnostics))
+    };
+
+    let argument = diagnostic("docstring-argument-mismatch").range;
+    assert_eq!(
+        &src[usize::from(argument.start())..usize::from(argument.end())],
+        "`wrong`"
+    );
+
+    let reference = diagnostic("unresolved-docstring-reference").range;
+    assert_eq!(
+        &src[usize::from(reference.start())..usize::from(reference.end())],
+        "Base.misspelled"
+    );
+
+    let code = diagnostic("invalid-docstring-code").range;
+    assert!(code.is_empty());
+    assert_eq!(
+        usize::from(code.start()),
+        src.find("f(\n```").expect("fence input") + 1
+    );
+}
+
+#[test]
+fn documentation_checks_ignore_runtime_computed_docstrings() {
+    let src = r#""""
+# Arguments
+- `wrong`: A stale name.
+
+See [`Base.misspelled`](@ref Base.misspelled).
+
+```julia
+f(
+```
+
+Runtime value: $(value)
+"""
+f(right) = right
+"#;
+    for rule in [
+        "invalid-docstring-code",
+        "docstring-argument-mismatch",
+        "unresolved-docstring-reference",
+    ] {
+        assert_eq!(count(rule, src), 0, "unexpected {rule} finding");
+    }
+}
+
 // --- unused-binding --------------------------------------------------------
 
 #[test]

@@ -1,0 +1,26 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `invalid-docstring-code`
+
+Flag malformed Julia inside a static docstring's explicit Julia-bearing fence. Ordinary `julia` and Documenter directive bodies are parsed directly; `julia-repl` and `jldoctest` transcripts parse only their Julia inputs, not expected output. Plain and foreign-language fences, opaque docstrings, and docstrings whose Markdown does not parse cleanly are left alone.
+
+The declared Julia input is incomplete:
+
+```julia
+"""
+~~~julia
+f(
+~~~
+"""
+f() = 1
+```
+
+```text
+warning: invalid-docstring-code
+ --> example.jl:3:2
+  |
+3 | f(
+  |  ^ invalid Julia in documentation fence: unterminated argument list
+```

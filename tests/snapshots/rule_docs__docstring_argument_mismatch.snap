@@ -1,0 +1,25 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `docstring-argument-mismatch`
+
+Flag a conventional ``- `name`: ...`` entry in a static docstring's `# Arguments` section when `name` is not a positional or keyword parameter of the attached function or macro. Missing entries are not reported: documentation coverage and less structured argument prose remain opt-in policy rather than a default correctness check.
+
+The signature says `radius`, but the argument entry retained a typo:
+
+```julia
+"""
+# Arguments
+- `raduis`: The radius.
+"""
+area(radius) = pi * radius^2
+```
+
+```text
+warning: docstring-argument-mismatch
+ --> example.jl:3:3
+  |
+3 | - `raduis`: The radius.
+  |   ^^^^^^^^ documented argument `raduis` is not in the attached signature
+```

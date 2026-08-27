@@ -638,6 +638,72 @@ warning: invalid-type-declaration
   |          ^^^^^ `scale` is a function, not a type: `::scale` is not a valid type declaration
 ```
 
+## `invalid-docstring-code`
+
+Flag malformed Julia inside a static docstring's explicit Julia-bearing fence. Ordinary `julia` and Documenter directive bodies are parsed directly; `julia-repl` and `jldoctest` transcripts parse only their Julia inputs, not expected output. Plain and foreign-language fences, opaque docstrings, and docstrings whose Markdown does not parse cleanly are left alone.
+
+The declared Julia input is incomplete:
+
+```julia
+"""
+~~~julia
+f(
+~~~
+"""
+f() = 1
+```
+
+```text
+warning: invalid-docstring-code
+ --> example.jl:3:2
+  |
+3 | f(
+  |  ^ invalid Julia in documentation fence: unterminated argument list
+```
+
+## `docstring-argument-mismatch`
+
+Flag a conventional ``- `name`: ...`` entry in a static docstring's `# Arguments` section when `name` is not a positional or keyword parameter of the attached function or macro. Missing entries are not reported: documentation coverage and less structured argument prose remain opt-in policy rather than a default correctness check.
+
+The signature says `radius`, but the argument entry retained a typo:
+
+```julia
+"""
+# Arguments
+- `raduis`: The radius.
+"""
+area(radius) = pi * radius^2
+```
+
+```text
+warning: docstring-argument-mismatch
+ --> example.jl:3:3
+  |
+3 | - `raduis`: The radius.
+  |   ^^^^^^^^ documented argument `raduis` is not in the attached signature
+```
+
+## `unresolved-docstring-reference`
+
+Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive.
+
+The explicit target retains the same typo as its code label:
+
+```julia
+"""
+See [`Base.raduis`](@ref Base.raduis).
+"""
+area(radius) = pi * radius^2
+```
+
+```text
+warning: unresolved-docstring-reference
+ --> example.jl:2:26
+  |
+2 | See [`Base.raduis`](@ref Base.raduis).
+  |                          ^^^^^^^^^^^ documentation reference `Base.raduis` does not resolve
+```
+
 ## `assignment-in-condition`
 
 Flag a bare `=` assignment used as the test of an `if`/`elseif`/`while`. It is valid Julia but almost always a typo for `==`, so it is reported with a safe fix that rewrites `=` to `==`.
