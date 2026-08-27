@@ -37,55 +37,6 @@
 
 ## Formatter
 
-- [x] Align maximal runs of adjacent same-indent trailing `#` comments at the
-  longest rendered code prefix. Blank, uncommented, own-comment, block-comment,
-  and differently indented lines break a run; alignment is declined for the
-  whole run when its padding would exceed `line_width`. Range formatting widens
-  to the complete source run. Fixture `comment_trailing_alignment`.
-
-- [x] Gate canonical spacing for labeled `break`/`continue`, including a
-  labeled `break` with a value expression and occurrences nested in binary and
-  ternary expressions. Fixture `labeled_break_continue`.
-
-- [x] Consume the parser-parity handoff for splats after a closing bracket.
-  The parser now reparses `f(g(x)...)`, `f(a[i]...)`, `f((a + b)...)`,
-  `f(A{T}...)`, and `f([1, 2]...)` cleanly, so drop `lower_splat`'s stale
-  `ends_in_bracket` fallback and widen `splat_spacing`. A splat around a sole
-  huggable item is hug-transparent, so `...` rides the inner closing bracket.
-
-- [x] Gate left-division `\` as a normal spaced binary operator (`A\b` →
-  `A \ b`). Fixture `left_division` proves canonical spacing, width-driven
-  continuation, and uniform breaks across the shared `*`/`\`/`/` tier.
-
-- [x] Preserve a trailing `;` inside bracket and brace concatenations. `[x;]`,
-  `[;]`, `{x;}`, `{;}`, `T[x;]`, and `T[;]` now retain the semantic separator
-  in flat, broken, and comment-bearing layouts. Fixture
-  `trailing_bracket_semicolon`.
-
-- [x] Preserve the load-bearing trailing comma of a singleton bare-operator
-  call. `+(a=1,)`, `<:(a,)`, `>:(a,)`, and `.+(a,)` remain calls rather than
-  reparsing as prefix applications; cosmetic commas in ordinary and
-  multi-argument calls are still removed. Fixture `operator_call_trailing_comma`.
-
-- [x] Preserve whitespace between a macro's arguments so adjacent bracketed
-  arguments retain their arity. `@foo a [1]`, `@foo A {T}`, and
-  `@foo g(x) [1]` now keep a single semantic space; the sole-bracket-argument
-  canonicalization remains glued. Fixture `macro_spaced_arguments`.
-
-- [x] Preserve brace-delimited `where` parameter lists whose CST kind is not
-  `braces`. `x where {T S}` and `x where {y for y in ys}` now retain one brace
-  pair rather than gaining a second. Fixture `where_brace_shapes`.
-
-- [x] Count only hexadecimal digits when zero-padding a hex literal. Separators
-  no longer widen Julia's inferred integer type (`0x1_2` stays `0x1_2`), while
-  a grouped three-digit literal still reaches its canonical four-digit width
-  (`0x1_23` → `0x01_23`). Fixture `hex_literals`.
-
-- [x] Preserve unary `+`/`-` over decimal numeric literals by parenthesizing the
-  operand (`- 2` → `-(2)`). Snugging would turn the unary call into a signed
-  literal and can change the type at an integer boundary. Fixture
-  `unary_operators`; AST-equivalence exception `js-84685b8e` removed.
-
 ## Linter
 
 ### Rules
