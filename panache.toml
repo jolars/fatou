@@ -9,4 +9,5 @@ extend-exclude = [
   "editors/code/CHANGELOG.md",
   "docs/src/reference/cli.md",
   "docs/src/reference/rules.md",
+  "crates/fatou-parser/tests/fixtures/documentation/oracle/**/*",
 ]
