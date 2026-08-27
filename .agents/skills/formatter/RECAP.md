@@ -144,13 +144,14 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (hex literal separator padding)
+## Latest session (`where` brace shapes)
 
-`fix(formatter)`. Hex zero-padding now counts hexadecimal digits rather than
-bytes, so `_` separators cannot widen Julia's inferred unsigned integer type.
-Fixture `hex_literals` covers canonical grouped widths and a grouped value that
-still needs padding; gate remains 123 of 151. Focused tests, workspace suite,
-clippy, fmt, and formatter Wasm build are green. No parser/lexer blocker.
+`fix(formatter)`. `lower_where` now recognizes brace concatenations and brace
+comprehensions as already delimited, preventing a second brace pair around
+`x where {T S}` and `x where {y for y in ys}`. Fixture `where_brace_shapes`
+locks both CST shapes; their two AST-equivalence exceptions are removed. Gate
+is 124 of 152. Focused tests, workspace suite, clippy, fmt, and the formatter
+Wasm build are green. No parser/lexer blocker.
 
 **Ranked next targets:** (1) preserve trailing bracket semicolons; (2) preserve
 load-bearing trailing commas in operator calls.
@@ -188,6 +189,8 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Hex literal separator padding** (`fix`): counted hexadecimal digits rather
+  than bytes when choosing canonical zero-padding. `hex_literals`. Gate 123.
 - **Trailing-comment alignment** (`feat`): aligned adjacent same-indent trailing
   comments without changing fit measurement; range formatting widens to the
   complete source run. Gate 123.

@@ -37,15 +37,6 @@ unicode_operator_call
 where_as_identifier
 where_precedence
 
-# DEFECT: the `where` brace canonicalization double-wraps a parameter list that
-# is already braced but does not project as `braces` — `x where {T S}` formats
-# to `x where {{T S}}` and `x where {y for y in ys}` to `x where {{y for y in
-# ys}}`. Both outputs are different programs (and the first no longer lowers).
-# This is why the `where` policy above is a listed exemption rather than a
-# normalization in `verify::ast_shape`: erasing the braces would hide this.
-js-1c86494f
-js-ee8d7fdd
-
 # policy: a top-level `;` separator is replaced by a line break, erasing the
 # `(toplevel-; ...)` grouping — `a; b` becomes two lines. Equivalent in a file;
 # `;` only suppresses output in the REPL, whose soft scope fatou does not model.

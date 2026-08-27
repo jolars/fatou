@@ -29,10 +29,9 @@
 //! Nothing else is normalized, and that is deliberate. `where T` → `where {T}`,
 //! splitting `a; b` onto two lines, and literal canonicalization (`.5` → `0.5`)
 //! are all recorded formatter policies that *do* move the projection, but each
-//! erasure needed to hide them would also hide a real defect — unwrapping
-//! `where` braces, for instance, would conceal `x where {T S}` formatting to
-//! `x where {{T S}}`. They are recorded as known-drift entries in the tests
-//! instead, where they stay visible and attributable.
+//! erasure needed to hide them could also conceal a real defect. They are
+//! recorded as known-drift entries in the tests instead, where they stay visible
+//! and attributable.
 
 use fatou_parser::parser::{parse, sexpr_tokens, to_juliasyntax_sexpr};
 

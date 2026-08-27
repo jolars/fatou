@@ -80,10 +80,9 @@
   `macro_space_args` in the parser oracle corpus; listed in
   `tests/ast-equivalence/known-drift.txt`.
 
-- [ ] Fix the `where` brace canonicalization double-wrapping a parameter list
-  that is already braced but does not project as `braces`: `x where {T S}` →
-  `x where {{T S}}`, `x where {y for y in ys}` → `x where {{y for y in ys}}`.
-  Listed in `tests/ast-equivalence/known-drift.txt`.
+- [x] Preserve brace-delimited `where` parameter lists whose CST kind is not
+  `braces`. `x where {T S}` and `x where {y for y in ys}` now retain one brace
+  pair rather than gaining a second. Fixture `where_brace_shapes`.
 
 - [x] Count only hexadecimal digits when zero-padding a hex literal. Separators
   no longer widen Julia's inferred integer type (`0x1_2` stays `0x1_2`), while

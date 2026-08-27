@@ -889,13 +889,13 @@ fn paren_block_statement(params: &SyntaxNode) -> Result<Option<Ir>, ()> {
 
 /// Lay out a `where` clause (`f(x) where T`, `Tuple{T} where {T <: Real}`) with a
 /// single space on each side of `where` and the bound **always wrapped in
-/// braces**: `where T` → `where {T}`. A bound that is already a `{...}` brace node
-/// is normalized in place (via [`lower_collection`]), so `where { T , S }` →
-/// `where {T, S}`; any other bound (a bare name, a `<:`/`>:` subtype, a paren or
-/// curly expression) is wrapped: `where T<:Real` → `where {T <: Real}`. Both
-/// operands are lowered recursively, so a nested `where` (`f(x) where T where S`,
-/// itself a left-nested `WHERE_EXPR`) and the bound's own spacing keep
-/// normalizing.
+/// braces**: `where T` → `where {T}`. A bound that is already brace-delimited is
+/// normalized in place, so `where { T , S }` → `where {T, S}` while brace
+/// concatenations and comprehensions retain their single delimiter pair. Any other
+/// bound (a bare name, a `<:`/`>:` subtype, a paren or curly expression) is wrapped:
+/// `where T<:Real` → `where {T <: Real}`. Both operands are lowered recursively,
+/// so a nested `where` (`f(x) where T where S`, itself a left-nested `WHERE_EXPR`)
+/// and the bound's own spacing keep normalizing.
 ///
 /// As with [`lower_arrow`], only the clean single-line shape `<lhs> where <rhs>`
 /// is reshaped: an interleaved comment or newline, error recovery, or a missing
@@ -957,6 +957,13 @@ fn lower_where(node: &SyntaxNode) -> Ir {
             return Ir::cond_group(primary, fallback, probe);
         }
         // No breakable argument list to break around, keep the exploding bound.
+        return Ir::concat([lower_node(lhs), Ir::text(" where "), lower_node(rhs)]);
+    }
+
+    if matches!(
+        rhs.kind(),
+        SyntaxKind::BRACESCAT_EXPR | SyntaxKind::BRACES_COMPREHENSION
+    ) {
         return Ir::concat([lower_node(lhs), Ir::text(" where "), lower_node(rhs)]);
     }
 
