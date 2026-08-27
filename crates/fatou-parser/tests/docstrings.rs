@@ -199,3 +199,73 @@ fn source_offsets_map_back_into_decoded_documentation() {
         "dedented bytes are not part of the decoded document"
     );
 }
+
+#[test]
+fn the_compressed_source_map_answers_every_byte_exactly() {
+    // The map is stored as runs, so every decoding shape that breaks a run —
+    // escapes, multi-byte escapes, CRLF folding, dedenting, continuations, and
+    // `raw` backslash collapsing — has to survive the round trip.
+    let sources = [
+        "\"Plain documentation.\"\nf() = 1\n",
+        "\"Tab\\tand\\nnewline\\n\"\nf() = 1\n",
+        "\"\\u1F600 and \\u00e9\"\nf() = 1\n",
+        "\"\"\"\r\n    First\r\n\r\n    Second\r\n    \"\"\"\nf() = 1\n",
+        "\"\"\"\n    Wrapped \\\n    line\n    \"\"\"\nf() = 1\n",
+        "@doc raw\"C:\\\\path\\\\to\\\\\" f\n",
+        "\"αβγ δε\"\nf() = 1\n",
+    ];
+    for source in sources {
+        let text = static_text(source);
+        let map = text.source_map();
+        let decoded = text.as_str();
+
+        let mut previous_start = None;
+        for index in 0..decoded.len() as u32 {
+            let span = map
+                .source_range(TextRange::new(index.into(), (index + 1).into()))
+                .unwrap_or_else(|| panic!("byte {index} of {source:?} maps"));
+            assert!(span.start() < span.end(), "{source:?} byte {index}");
+            // Bytes of one multi-byte escape share its span, so starts are
+            // non-decreasing rather than strictly increasing.
+            if let Some(start) = previous_start {
+                assert!(span.start() >= start, "{source:?} byte {index} moves back");
+            }
+            previous_start = Some(span.start());
+
+            // Every source byte the span covers resolves back to the first
+            // decoded byte that span produced.
+            let first = (0..=index)
+                .rev()
+                .take_while(|&earlier| {
+                    map.source_range(TextRange::new(earlier.into(), (earlier + 1).into()))
+                        == Some(span)
+                })
+                .last()
+                .unwrap_or(index);
+            for offset in u32::from(span.start())..u32::from(span.end()) {
+                assert_eq!(
+                    map.decoded_offset(offset.into()),
+                    Some(first.into()),
+                    "{source:?}: source offset {offset} (decoded byte {index})"
+                );
+            }
+        }
+
+        // The whole-document range and the past-the-end boundary still answer.
+        assert!(
+            map.source_range(TextRange::new(0.into(), (decoded.len() as u32).into()))
+                .is_some()
+        );
+        assert!(
+            map.source_range(TextRange::new(
+                (decoded.len() as u32).into(),
+                (decoded.len() as u32).into()
+            ))
+            .is_some()
+        );
+        assert_eq!(
+            map.source_range(TextRange::new(0.into(), (decoded.len() as u32 + 1).into())),
+            None
+        );
+    }
+}

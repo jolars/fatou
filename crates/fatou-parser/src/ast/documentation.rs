@@ -154,9 +154,16 @@ impl StaticDocText {
 }
 
 /// An exact byte-span map from decoded documentation to the string literal.
+///
+/// The map is stored as runs rather than one span per decoded byte: a
+/// docstring is overwhelmingly literal text whose spans advance one source
+/// byte at a time, so the common case is a single run. Size matters because a
+/// whole file's maps live in the semantic model, which salsa caches and
+/// compares for backdating.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocSourceMap {
-    bytes: Vec<SourceSpan>,
+    runs: Vec<SourceRun>,
+    len: u32,
     empty_at: TextSize,
 }
 
@@ -164,23 +171,22 @@ impl DocSourceMap {
     /// Map a decoded UTF-8 byte range to its enclosing absolute source range.
     /// Returns `None` for an out-of-bounds range.
     pub fn source_range(&self, range: TextRange) -> Option<TextRange> {
-        let start = u32::from(range.start()) as usize;
-        let end = u32::from(range.end()) as usize;
-        if start > end || end > self.bytes.len() {
+        let start = u32::from(range.start());
+        let end = u32::from(range.end());
+        if start > end || end > self.len {
             return None;
         }
         if start == end {
             let at = self
-                .bytes
-                .get(start)
+                .span(start)
                 .map(|span| span.start)
-                .or_else(|| self.bytes.last().map(|span| span.end))
+                .or_else(|| self.runs.last().map(|run| run.span(run.len - 1).end))
                 .unwrap_or(self.empty_at);
             return Some(TextRange::new(at, at));
         }
         Some(TextRange::new(
-            self.bytes[start].start,
-            self.bytes[end - 1].end,
+            self.span(start)?.start,
+            self.span(end - 1)?.end,
         ))
     }
 
@@ -190,22 +196,90 @@ impl DocSourceMap {
     /// escape produced. Bytes removed by triple-string dedenting or a line
     /// continuation have no decoded position and return `None`.
     pub fn decoded_offset(&self, offset: TextSize) -> Option<TextSize> {
-        if self.bytes.is_empty() {
+        let Some(last) = self.runs.last() else {
             return (offset == self.empty_at).then_some(TextSize::new(0));
+        };
+        if offset == last.span(last.len - 1).end {
+            return Some(TextSize::new(self.len));
         }
-        if offset == self.bytes.last()?.end {
-            return Some(TextSize::new(self.bytes.len() as u32));
-        }
+        // Runs cover the source in increasing order, so the one that could
+        // contain `offset` is the last starting at or before it. Dedented and
+        // continued bytes fall in the gaps between runs.
         let index = self
-            .bytes
-            .iter()
-            .position(|span| span.start <= offset && offset < span.end)?;
-        let span = self.bytes[index];
-        let first = self.bytes[..index]
-            .iter()
-            .rposition(|candidate| *candidate != span)
-            .map_or(0, |previous| previous + 1);
-        Some(TextSize::new(first as u32))
+            .runs
+            .partition_point(|run| run.source_start <= offset)
+            .checked_sub(1)?;
+        let run = &self.runs[index];
+        let step = run.step(offset)?;
+        // Several decoded bytes can share one span (a multi-byte `\u` escape);
+        // the cursor belongs to the first of them.
+        let first = if run.stride == 0 { 0 } else { step };
+        Some(TextSize::new(run.decoded_start + first))
+    }
+
+    /// The span of one decoded byte, or `None` past the end of the map.
+    fn span(&self, decoded: u32) -> Option<SourceSpan> {
+        let index = self
+            .runs
+            .partition_point(|run| run.decoded_start <= decoded)
+            .checked_sub(1)?;
+        let run = &self.runs[index];
+        (decoded - run.decoded_start < run.len).then(|| run.span(decoded - run.decoded_start))
+    }
+}
+
+/// A maximal span sequence advancing by a fixed source stride.
+///
+/// `stride` is zero when every decoded byte in the run shares one source span,
+/// one for ordinary literal text, and larger for a run of same-width escapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SourceRun {
+    decoded_start: u32,
+    len: u32,
+    source_start: TextSize,
+    stride: u32,
+    width: u32,
+}
+
+impl SourceRun {
+    fn span(&self, step: u32) -> SourceSpan {
+        let start = u32::from(self.source_start) + step * self.stride;
+        SourceSpan {
+            start: TextSize::new(start),
+            end: TextSize::new(start + self.width),
+        }
+    }
+
+    /// The step within this run whose span contains `offset`.
+    fn step(&self, offset: TextSize) -> Option<u32> {
+        let relative = u32::from(offset).checked_sub(u32::from(self.source_start))?;
+        let step = relative
+            .checked_div(self.stride)
+            .map_or(0, |step| step.min(self.len - 1));
+        let span = self.span(step);
+        (span.start <= offset && offset < span.end).then_some(step)
+    }
+
+    /// Extend the run with `span` when it continues the same stride and width.
+    fn extend(&mut self, span: SourceSpan) -> bool {
+        if u32::from(span.end) - u32::from(span.start) != self.width {
+            return false;
+        }
+        if self.len == 1 {
+            // A one-byte run has no stride yet, so any successor defines it.
+            let Some(stride) = u32::from(span.start).checked_sub(u32::from(self.source_start))
+            else {
+                return false;
+            };
+            self.stride = stride;
+            self.len += 1;
+            return true;
+        }
+        if span.start != self.span(self.len).start {
+            return false;
+        }
+        self.len += 1;
+        true
     }
 }
 
@@ -213,6 +287,26 @@ impl DocSourceMap {
 struct SourceSpan {
     start: TextSize,
     end: TextSize,
+}
+
+/// Compress a per-decoded-byte span vector into runs.
+fn compress(bytes: &[SourceSpan]) -> Vec<SourceRun> {
+    let mut runs: Vec<SourceRun> = Vec::new();
+    for (index, span) in bytes.iter().enumerate() {
+        if let Some(run) = runs.last_mut()
+            && run.extend(*span)
+        {
+            continue;
+        }
+        runs.push(SourceRun {
+            decoded_start: index as u32,
+            len: 1,
+            source_start: span.start,
+            stride: 1,
+            width: u32::from(span.end) - u32::from(span.start),
+        });
+    }
+    runs
 }
 
 #[derive(Clone)]
@@ -258,7 +352,8 @@ impl MappedText {
         StaticDocText {
             text: self.text,
             source_map: DocSourceMap {
-                bytes: self.bytes,
+                runs: compress(&self.bytes),
+                len: self.bytes.len() as u32,
                 empty_at: self.empty_at,
             },
         }
