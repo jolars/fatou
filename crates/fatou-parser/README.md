@@ -26,6 +26,21 @@ two-argument `@doc` calls. Standard ordinary and `raw` string payloads can be
 decoded without evaluating Julia, with byte ranges mapped back to the source;
 interpolated and custom payloads remain opaque.
 
+Decoded documentation can be parsed as Julia Markdown without invoking Julia:
+
+```rust
+use fatou_parser::documentation::{parse, reconstruct};
+
+let source = "# API\n\nSee [`f`](@ref Main.f).\n";
+let output = parse(source);
+assert!(output.diagnostics.is_empty());
+assert_eq!(reconstruct(&output.cst), source);
+```
+
+`fatou_parser::documentation::ast` provides typed navigation for Julia Markdown
+blocks and inline content. It also classifies core Documenter links, fences, and
+`jldoctest` info strings locally while preserving unknown extension syntax.
+
 ## Status
 
 This crate's API is still early and may change between releases; it is versioned

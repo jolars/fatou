@@ -1,0 +1,1 @@
+Prose with **bold**, *italic*, `code`, ``x + y``, $z$, an [ordinary link](https://julialang.org), ![alt](image.png), an <https://example.com> autolink, a [^note], an escaped \* marker, and an en--dash.

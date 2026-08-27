@@ -19,11 +19,14 @@
 //! - [`ast`] — typed node wrappers over the CST, including
 //!   [`ast::DocAttachment`] for documentation syntax and statically recoverable
 //!   string payloads.
+//! - [`documentation`] — a lossless Julia Markdown parser with typed navigation
+//!   and local classification of core Documenter links and code fences.
 //!
 //! The crate is `wasm32-unknown-unknown`-compatible: no filesystem, process,
 //! thread, or clock use.
 
 pub mod ast;
+pub mod documentation;
 mod keywords;
 pub mod parser;
 pub mod syntax;
