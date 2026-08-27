@@ -10,6 +10,8 @@
 //!   [`Operator`]).
 //! - [`traits`] — the `Has*` shape traits ([`HasArgList`], [`HasBody`],
 //!   [`HasCondition`]) shared across wrappers.
+//! - [`documentation`] — a unified view over ordinary docstrings and explicit
+//!   `@doc` attachments, including conservative static text recovery.
 //!
 //! This is the interface the linter, code actions, semantic builder, and LSP
 //! handlers navigate the tree through. The formatter is deliberately exempt: it
@@ -20,20 +22,25 @@
 
 pub use rowan::ast::AstNode;
 
+pub mod documentation;
 pub mod nodes;
 pub mod tokens;
 pub mod traits;
 
+pub use documentation::{
+    DocAttachment, DocAttachmentKind, DocSourceMap, DocTarget, DocText, OpaqueDocReason,
+    StaticDocText,
+};
 pub use nodes::{
     AbstractDef, Arg, ArgList, ArrowExpr, AssignmentExpr, BeginExpr, BinaryExpr, Block, Braces,
     BreakExpr, CallExpr, CatchClause, CmdLiteral, Comprehension, ComprehensionIf, Condition,
-    ConstStmt, ContinueExpr, CurlyExpr, DoExpr, DoParams, DotCallExpr, ElseClause, ElseifClause,
-    EndMarker, ExportStmt, Expr, FinallyClause, ForBinding, ForExpr, FunctionDef, Generator,
-    GlobalStmt, IfExpr, ImportStmt, IndexExpr, Interpolation, KeywordArg, LetBindings, LetExpr,
-    Literal, LocalStmt, MacroCall, MacroDef, MacroName, MatrixExpr, MatrixRow, ModuleDef, Name,
-    NonstandardIdentifier, Parameters, ParenExpr, PrimitiveDef, QuoteExpr, QuoteSym, ReturnExpr,
-    Root, Signature, SplatExpr, StringLiteral, StructDef, TernaryExpr, TryExpr, TupleExpr,
-    TypeAnnotation, UnaryExpr, UsingStmt, VectExpr, WhereExpr, WhileExpr, is_expr_kind,
+    ConstStmt, ContinueExpr, CurlyExpr, DoExpr, DoParams, Doc, DotCallExpr, ElseClause,
+    ElseifClause, EndMarker, ExportStmt, Expr, FinallyClause, ForBinding, ForExpr, FunctionDef,
+    Generator, GlobalStmt, IfExpr, ImportStmt, IndexExpr, Interpolation, KeywordArg, LetBindings,
+    LetExpr, Literal, LocalStmt, MacroCall, MacroDef, MacroName, MatrixExpr, MatrixRow, ModuleDef,
+    Name, NonstandardIdentifier, Parameters, ParenExpr, PrimitiveDef, QuoteExpr, QuoteSym,
+    ReturnExpr, Root, Signature, SplatExpr, StringLiteral, StructDef, TernaryExpr, TryExpr,
+    TupleExpr, TypeAnnotation, UnaryExpr, UsingStmt, VectExpr, WhereExpr, WhileExpr, is_expr_kind,
 };
 pub use tokens::{AstToken, Ident, Operator};
 pub use traits::{HasArgList, HasBody, HasCondition, body_of, condition_of};

@@ -2823,7 +2823,8 @@ fn chunk_triple_lines(lines: Vec<Vec<TripleItem>>, raw: bool) -> Vec<String> {
         .filter(|(i, line)| *i != 0 && (!line_is_blank(line) || *i == last_idx))
         .map(|(_, line)| line_lead_ws(line))
         .collect();
-    let dedent_len = common_prefix_len(&candidates);
+    let candidate_refs: Vec<&str> = candidates.iter().map(String::as_str).collect();
+    let dedent_len = crate::ast::documentation::common_whitespace_prefix_len(&candidate_refs);
 
     let mut chunks: Vec<TripleItem> = Vec::new();
     for (i, mut line) in lines.into_iter().enumerate() {
@@ -2886,24 +2887,6 @@ fn line_is_blank(line: &[TripleItem]) -> bool {
 fn line_is_empty(line: &[TripleItem]) -> bool {
     line.iter()
         .all(|it| matches!(it, TripleItem::Text(t) if t.is_empty()))
-}
-
-/// Longest common prefix length (in bytes) over the given whitespace strings.
-fn common_prefix_len(strs: &[String]) -> usize {
-    let mut iter = strs.iter();
-    let Some(first) = iter.next() else {
-        return 0;
-    };
-    let mut len = first.len();
-    for s in iter {
-        len = first
-            .bytes()
-            .zip(s.bytes())
-            .take(len)
-            .take_while(|(a, b)| a == b)
-            .count();
-    }
-    len
 }
 
 /// Strip up to `n` leading whitespace bytes (spaces/tabs are single-byte).

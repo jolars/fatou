@@ -38,6 +38,7 @@ macro_rules! ast_node {
 }
 
 ast_node!(Root, SyntaxKind::ROOT);
+ast_node!(Doc, SyntaxKind::DOC);
 ast_node!(Literal, SyntaxKind::LITERAL);
 ast_node!(StringLiteral, SyntaxKind::STRING_LITERAL);
 ast_node!(CmdLiteral, SyntaxKind::CMD_LITERAL);
@@ -418,6 +419,25 @@ impl StringLiteral {
             .children_with_tokens()
             .filter_map(|el| el.into_token())
             .filter(|t| t.kind() == SyntaxKind::STRING_CONTENT)
+    }
+}
+
+impl Doc {
+    /// The ordinary string literal supplying this docstring's content.
+    pub fn literal(&self) -> Option<StringLiteral> {
+        support::child(&self.0)
+    }
+
+    /// The expression or statement documented by this string.
+    ///
+    /// Julia permits several structurally unrelated target kinds, so the
+    /// attachment wrapper keeps the target as a lossless syntax node rather
+    /// than pretending they share an expression shape.
+    pub fn target(&self) -> Option<super::documentation::DocTarget> {
+        self.0
+            .children()
+            .nth(1)
+            .map(super::documentation::DocTarget::new)
     }
 }
 
