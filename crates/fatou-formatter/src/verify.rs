@@ -34,7 +34,10 @@
 //! `x where {{T S}}`. They are recorded as known-drift entries in the tests
 //! instead, where they stay visible and attributable.
 
-use fatou_parser::parser::{normalize_sexpr, parse, to_juliasyntax_sexpr};
+use fatou_parser::parser::{parse, sexpr_tokens, to_juliasyntax_sexpr};
+
+/// The projector's sentinel head for a `SyntaxKind` it cannot render.
+const UNSUPPORTED: &str = "unsupported";
 
 /// The formatting-invariant shape of `text`, or `None` when no comparable shape
 /// exists.
@@ -64,38 +67,49 @@ pub fn ast_shape(text: &str) -> Option<String> {
         return None;
     }
     let raw = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
-    if raw.contains("(unsupported ") {
+    let mut tokens = sexpr_tokens(&raw);
+    if tokens
+        .iter()
+        .enumerate()
+        .any(|(i, t)| is_head(&tokens, i) && t == UNSUPPORTED)
+    {
         return None;
     }
-    Some(drop_surface_flags(&normalize_sexpr(&raw)))
+    drop_surface_flags(&mut tokens);
+    Some(tokens.join(" "))
 }
 
-/// Strip the licensed surface flags from a [`normalize_sexpr`] token stream.
+/// Whether `tokens[i]` is a head — the token directly after a `(`.
+fn is_head(tokens: &[String], i: usize) -> bool {
+    i > 0 && tokens[i - 1] == "("
+}
+
+/// Strip the licensed surface flags from a projection's tokens.
 ///
-/// Operates on head tokens only — the token directly after a `(` — so an atom
-/// that happens to end in the flag's spelling is never touched. `normalize_sexpr`
-/// has already collapsed `"…"` string literals into single atoms, so splitting
-/// on spaces cannot cut one apart.
-fn drop_surface_flags(normalized: &str) -> String {
-    let mut out = String::with_capacity(normalized.len());
-    let mut head = false;
-    for token in normalized.split(' ') {
-        if !out.is_empty() {
-            out.push(' ');
+/// Operates on head tokens only, so an atom that happens to end in the flag's
+/// spelling is never touched. Both this and the sentinel check above work from
+/// [`sexpr_tokens`] rather than from the joined string: a string literal is one
+/// token that may itself contain spaces and parentheses, so re-splitting the
+/// join would cut one apart and read its contents as syntax.
+fn drop_surface_flags(tokens: &mut [String]) {
+    for i in 0..tokens.len() {
+        if is_head(tokens, i)
+            && let Some(stripped) = tokens[i].strip_suffix("-,")
+        {
+            tokens[i] = stripped.to_string();
         }
-        if head && let Some(stripped) = token.strip_suffix("-,") {
-            out.push_str(stripped);
-        } else {
-            out.push_str(token);
-        }
-        head = token == "(";
     }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn strip(normalized: &str) -> String {
+        let mut tokens = sexpr_tokens(normalized);
+        drop_surface_flags(&mut tokens);
+        tokens.join(" ")
+    }
 
     #[test]
     fn layout_does_not_move_the_shape() {
@@ -113,7 +127,16 @@ mod tests {
     fn trailing_comma_flag_is_erased() {
         assert_eq!(ast_shape("f(a,)"), ast_shape("f(a)"));
         assert!(!ast_shape("f(a,)").unwrap().contains("call-,"));
-        assert_eq!(drop_surface_flags("( call-, f a-, )"), "( call f a-, )");
+        assert_eq!(strip("( call-, f a-, )"), "( call f a-, )");
+    }
+
+    /// A string literal's contents are operand text, not syntax: neither the
+    /// erasure nor the sentinel check may read structure out of them.
+    #[test]
+    fn string_contents_are_opaque() {
+        let shape = ast_shape(r#"x = "a ( b-, c""#).expect("string literal has a shape");
+        assert!(shape.contains(r#""a ( b-, c""#), "{shape}");
+        assert!(ast_shape(r#"y = "(unsupported FOO)""#).is_some());
     }
 
     /// A `;` inside brackets is meaning, not layout: `[x;]` is `vcat`.

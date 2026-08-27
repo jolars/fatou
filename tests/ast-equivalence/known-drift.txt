@@ -1,0 +1,107 @@
+# Known AST-shape drift — slugs from the parser's oracle corpora whose program
+# shape the formatter moves, grouped under a rationale, in the style of
+# `crates/fatou-parser/tests/oracle/blocked.txt`. One slug per line.
+#
+# `policy:` groups are recorded formatter behavior that is value- and
+# type-preserving but visible in the JuliaSyntax projection. `DEFECT:` groups
+# are bugs this gate found; they are listed so the gate runs green while they
+# are fixed separately, not because the behavior is accepted. Entries are
+# staleness-checked — an entry fails until it is removed once its slug stops
+# drifting, and equally once its slug stops naming a case in either corpus.
+
+# ---------------------------------------------------------------------------
+# policy: `where T` canonicalizes to `where {T}`. Julia's `Expr` is identical
+# either way; only JuliaSyntax's surface tree records the braces. Asserted by
+# `crates/fatou-formatter/tests/fixtures/formatter/where_clauses/expected.jl`.
+anon_function_signature
+block_form_operand
+js-063e192a
+js-11e2e762
+js-12ef57ec
+js-41e2a5cf
+js-488a8833
+js-4a7ae664
+js-4eeda108
+js-6278bb20
+js-63fa1644
+js-964375a2
+js-bf71b3b1
+js-c4d48e55
+js-cbd92fc9
+js-cd3e3ee0
+js-d0103ba8
+js-e0aa726d
+parametric_types
+parenthesized_anonymous_function_parameters
+unicode_operator_call
+where_as_identifier
+where_precedence
+
+# DEFECT: the `where` brace canonicalization double-wraps a parameter list that
+# is already braced but does not project as `braces` — `x where {T S}` formats
+# to `x where {{T S}}` and `x where {y for y in ys}` to `x where {{y for y in
+# ys}}`. Both outputs are different programs (and the first no longer lowers).
+# This is why the `where` policy above is a listed exemption rather than a
+# normalization in `verify::ast_shape`: erasing the braces would hide this.
+js-1c86494f
+js-ee8d7fdd
+
+# policy: a top-level `;` separator is replaced by a line break, erasing the
+# `(toplevel-; ...)` grouping — `a; b` becomes two lines. Equivalent in a file;
+# `;` only suppresses output in the REPL, whose soft scope fatou does not model.
+# (The trailing `;` of `>:;` and of `a;;;b;;` survives, so the rewrite is not
+# uniform, but no listed case changes meaning.)
+bare_operator
+js-02079ffa
+js-3043c4a2
+js-35c649e9
+js-714d8a96
+js-8d65be34
+js-9b9946da
+js-acfc6b49
+toplevel_semicolon
+
+# DEFECT: a trailing `;` inside brackets is dropped, collapsing a concatenation
+# into a container literal — `[x;]` (`vcat`) becomes `[x]` (`vect`), `[;]`
+# becomes `[]`, `{x;}` becomes `{x}`. For a non-scalar element these are
+# different values: `[1:70;]` is a 70-element `Vector{Int}`, `[1:70]` a
+# 1-element `Vector{UnitRange{Int}}`. The typed forms are worse still —
+# `T[x;]` (`typed_vcat`) becomes `T[x]`, which projects as `ref`, i.e. indexing
+# `T` rather than constructing it.
+bracescat
+broadcast_bitshift
+js-3bdaee7b
+js-41bffcf8
+js-47310745
+js-939f51f9
+ncat
+typed_concat
+
+# DEFECT: dropping a trailing comma turns an operator *call* into a prefix
+# operator application — `+(a=1,)` (`(call + (= a 1))`, a keyword argument)
+# formats to `+(a = 1)` (`(call-pre + (= a 1))`, unary plus applied to an
+# assignment). Same for `<:(a,)`, `>:(a,)` and `.+(a,)`. Unlike the trailing
+# comma inside an ordinary call, this one is load-bearing.
+js-11eada5f
+js-70cde333
+js-729f9f07
+js-effed8f1
+type_operator_call
+unary_operator_call
+
+# DEFECT: whitespace between a macro's arguments is removed, changing arity —
+# `@foo a [1]` (two arguments, `a` and `[1]`) formats to `@foo a[1]` (one
+# argument, `a[1]`); likewise `@foo A {T}` -> `@foo A{T}` and `@foo g(x) [1]`.
+# For a macro the argument list is the input, so this rewrites the call.
+macro_space_args
+
+# DEFECT: a spaced unary minus is folded into the literal — `- 2` (`(call-pre -
+# 2)`) becomes the literal `-2`. Value-identical except at a type boundary:
+# `- 9223372036854775808` negates an `Int128` literal, while
+# `-9223372036854775808` is the `Int64` `typemin`.
+js-84685b8e
+
+# policy: numeric literal canonicalization (`.5` -> `0.5`, `2.` -> `2.0`,
+# `1f0` -> `1.0f0`). The projector renders a float's source spelling, so every
+# such row moves; each rewrite is value- and type-preserving.
+numeric_literals

@@ -36,7 +36,7 @@ pub use reparse::{
 // they can never diverge, which is the only reason it is `pub` at all.
 #[doc(hidden)]
 pub use reparse::fingerprint;
-pub use sexpr::{normalize_sexpr, to_juliasyntax_sexpr};
+pub use sexpr::{normalize_sexpr, sexpr_tokens, to_juliasyntax_sexpr};
 // The `lex` bench's entry point. Gated on `bench` so tokenizing on its own —
 // which no consumer has a reason to do — never becomes part of the API.
 #[cfg(feature = "bench")]
