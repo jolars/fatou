@@ -520,6 +520,8 @@ impl<'a> Parser<'a> {
             self.parse_inlines(content_start, line.content_end);
             self.token(SyntaxKind::NEWLINE, line.content_end, line.end);
             line_index += 1;
+            let item_indent = marker_end - line.start + usize::from(content_start > marker_end);
+            let mut after_blank = false;
 
             while line_index < self.lines.len() {
                 let continuation = self.lines[line_index];
@@ -538,6 +540,7 @@ impl<'a> Parser<'a> {
                     }
                     self.token(SyntaxKind::BLANK_LINE, continuation.start, continuation.end);
                     line_index += 1;
+                    after_blank = true;
                     continue;
                 }
                 if let Some((nested_start, nested_end, _)) =
@@ -550,6 +553,7 @@ impl<'a> Parser<'a> {
                     if nested_indent > base_indent {
                         line_index =
                             self.emit_list_level(line_index, nested_indent, nested_ordered);
+                        after_blank = false;
                         continue;
                     }
                     break;
@@ -557,6 +561,13 @@ impl<'a> Parser<'a> {
                 let indent = indentation(continuation.content(self.text));
                 if indent <= base_indent {
                     break;
+                }
+                if after_blank
+                    && indented_content_start_after(continuation, self.text, item_indent).is_some()
+                {
+                    line_index = self.emit_indented_code_after(line_index, item_indent);
+                    after_blank = false;
+                    continue;
                 }
                 self.token(
                     SyntaxKind::WHITESPACE,
@@ -570,6 +581,7 @@ impl<'a> Parser<'a> {
                     continuation.end,
                 );
                 line_index += 1;
+                after_blank = false;
             }
             self.finish();
         }
@@ -578,6 +590,10 @@ impl<'a> Parser<'a> {
     }
 
     fn emit_indented_code(&mut self, line_index: usize) -> usize {
+        self.emit_indented_code_after(line_index, 0)
+    }
+
+    fn emit_indented_code_after(&mut self, line_index: usize, prefix: usize) -> usize {
         self.start(SyntaxKind::INDENTED_CODE_BLOCK);
         let mut line_index = line_index;
         while line_index < self.lines.len() {
@@ -587,13 +603,7 @@ impl<'a> Parser<'a> {
                 line_index += 1;
                 continue;
             }
-            let raw = line.content(self.text);
-            let indent = indentation(raw);
-            let content_start = if raw.starts_with('\t') {
-                line.start + 1
-            } else if indent >= 4 {
-                line.start + 4
-            } else {
+            let Some(content_start) = indented_content_start_after(line, self.text, prefix) else {
                 break;
             };
             self.token(SyntaxKind::WHITESPACE, line.start, content_start);
@@ -941,11 +951,23 @@ fn indentation(text: &str) -> usize {
 }
 
 fn indented_content_start(line: Line, text: &str) -> Option<usize> {
+    indented_content_start_after(line, text, 0)
+}
+
+fn indented_content_start_after(line: Line, text: &str, prefix: usize) -> Option<usize> {
     let content = line.content(text);
-    if content.starts_with('\t') {
-        Some(line.start + 1)
+    if content.len() < prefix
+        || !content.as_bytes()[..prefix]
+            .iter()
+            .all(|&byte| byte == b' ')
+    {
+        return None;
+    }
+    let tail = &content[prefix..];
+    if tail.starts_with('\t') {
+        Some(line.start + prefix + 1)
     } else {
-        (indentation(content) >= 4).then_some(line.start + 4)
+        (indentation(tail) >= 4).then_some(line.start + prefix + 4)
     }
 }
 

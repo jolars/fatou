@@ -187,8 +187,13 @@ fn render_list(node: &SyntaxNode) -> String {
             let mut contents = vec![format!("(paragraph {})", render_inlines(&item))];
             contents.extend(
                 item.children()
-                    .filter(|child| child.kind() == SyntaxKind::LIST)
-                    .map(|child| render_list(&child)),
+                    .filter(|child| {
+                        matches!(
+                            child.kind(),
+                            SyntaxKind::LIST | SyntaxKind::INDENTED_CODE_BLOCK
+                        )
+                    })
+                    .map(|child| render_block(&child)),
             );
             format!("(item {})", contents.join(" "))
         })
