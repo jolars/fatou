@@ -1,0 +1,30 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `test-isa-call`
+
+Flag `@test isa(value, Type)` and prefer `@test value isa Type`. The rule only matches the real `Test.@test` macro after a visible, file-local Test load. It reports a safe fix that reuses both arguments' source text and adds parentheses when an operand would otherwise rebind. The fix is withheld when it would discard a comment outside the retained arguments.
+
+Use Julia's comparison spelling in a Test assertion:
+
+```julia
+using Test
+@test isa(result, AbstractVector)
+```
+
+```text
+warning: test-isa-call
+ --> example.jl:2:7
+  |
+2 | @test isa(result, AbstractVector)
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^ write `result isa AbstractVector` instead of calling `isa`
+  = help: Rewrite as an `isa` comparison (safe fix)
+```
+
+After applying the fix:
+
+```julia
+using Test
+@test result isa AbstractVector
+```

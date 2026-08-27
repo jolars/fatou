@@ -669,7 +669,7 @@ end
 
 ## `nothing-comparison`
 
-Flag `x == nothing` / `x != nothing`, which compares against `nothing` by value. `nothing` is the singleton instance of `Nothing`, so an identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and cannot be overloaded. The rule reports a safe fix rewriting `==` to `===` and `!=` to `!==`.
+Flag `x == nothing` / `x != nothing`, which compares against `nothing` by value. `nothing` is the singleton instance of `Nothing`, so an identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and cannot be overloaded. The rule reports a safe fix rewriting `==` to `===` and `!=` to `!==`. Inside a real `Test.@test` assertion, it instead prefers `isnothing(x)` or `!isnothing(x)` when that name is confirmed to mean Base's predicate.
 
 Comparing against `nothing` by value:
 
@@ -975,6 +975,25 @@ warning: non-public-access
   |
 1 | Base.@_inline_meta
   | ^^^^^^^^^^^^^^^^^^ `Base` does not export `@_inline_meta` or declare it `public`
+```
+
+## `test-bare-expression`
+
+Flag an `@test` argument that has no syntactic comparison, Boolean connective, or predicate call—for example, `@test ready`. Calls and nested macro calls are treated conservatively as potentially Boolean. The rule only matches the real `Test.@test` macro after a visible, file-local Test load. It is disabled by default because Julia's dynamic types make bare Boolean values valid, and it offers no fix.
+
+A bare value hides what relationship the test asserts:
+
+```julia
+using Test
+@test result
+```
+
+```text
+warning: test-bare-expression
+ --> example.jl:2:7
+  |
+2 | @test result
+  |       ^^^^^^ this assertion has no comparison or predicate
 ```
 
 ## `eager-broadcast`
@@ -1438,6 +1457,33 @@ After applying the fix:
 if isopen(io) && !eof(io)
         read(io)
     end
+```
+
+## `test-isa-call`
+
+Flag `@test isa(value, Type)` and prefer `@test value isa Type`. The rule only matches the real `Test.@test` macro after a visible, file-local Test load. It reports a safe fix that reuses both arguments' source text and adds parentheses when an operand would otherwise rebind. The fix is withheld when it would discard a comment outside the retained arguments.
+
+Use Julia's comparison spelling in a Test assertion:
+
+```julia
+using Test
+@test isa(result, AbstractVector)
+```
+
+```text
+warning: test-isa-call
+ --> example.jl:2:7
+  |
+2 | @test isa(result, AbstractVector)
+  |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^ write `result isa AbstractVector` instead of calling `isa`
+  = help: Rewrite as an `isa` comparison (safe fix)
+```
+
+After applying the fix:
+
+```julia
+using Test
+@test result isa AbstractVector
 ```
 
 ## `misnamed-suppression`

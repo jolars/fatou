@@ -85,6 +85,21 @@ b = y != nothing
     assert!(outcome.remaining.is_empty());
 }
 
+/// A Test assertion prefers the predicate spelling while ordinary comparisons
+/// retain the identity-operator rewrite.
+#[test]
+fn fixes_nothing_comparison_inside_test() {
+    let src = "using Test\n@test x == nothing\n@test nothing != y\n";
+    let outcome = fix_source(None, src, &select("nothing-comparison"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    using Test
+    @test isnothing(x)
+    @test !isnothing(y)
+    ");
+    assert_eq!(outcome.applied, 2);
+    assert!(outcome.remaining.is_empty());
+}
+
 /// `missing-comparison` rewrites `==`/`!=` against `missing` the same way, but
 /// only under `--unsafe-fixes`: the rewrite turns a `missing` result into a
 /// `Bool`.
@@ -197,6 +212,21 @@ d = length(w) < 1
     d = isempty(w)
     ");
     assert_eq!(outcome.applied, 4);
+    assert!(outcome.remaining.is_empty());
+}
+
+/// `test-isa-call` rewrites direct Test assertions without formatting the rest
+/// of the macro invocation.
+#[test]
+fn fixes_test_isa_calls() {
+    let src = "using Test\n@test isa(x, T)\n@test isa(a ? b : c, S) broken=true\n";
+    let outcome = fix_source(None, src, &select("test-isa-call"), false);
+    insta::assert_snapshot!(outcome.output, @r"
+    using Test
+    @test x isa T
+    @test (a ? b : c) isa S broken=true
+    ");
+    assert_eq!(outcome.applied, 2);
     assert!(outcome.remaining.is_empty());
 }
 

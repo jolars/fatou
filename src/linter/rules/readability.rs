@@ -14,10 +14,12 @@ mod comparison_negation;
 mod length_zero;
 mod redundant_boolean;
 mod string_boundary;
+mod test_isa_call;
 mod unnecessary_nesting;
 
 pub use comparison_negation::ComparisonNegation;
 pub use length_zero::LengthZero;
 pub use redundant_boolean::RedundantBoolean;
 pub use string_boundary::StringBoundary;
+pub use test_isa_call::TestIsaCall;
 pub use unnecessary_nesting::UnnecessaryNesting;

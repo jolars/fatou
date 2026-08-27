@@ -86,6 +86,7 @@ pub mod readability;
 pub mod regex;
 pub mod rewrite;
 pub mod suspicious;
+pub(crate) mod test_matchers;
 
 pub(crate) use file_scan::FileScan;
 
@@ -140,6 +141,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(suspicious::TypeofComparison),
         Box::new(suspicious::ShadowedBaseName),
         Box::new(suspicious::NonPublicAccess),
+        Box::new(suspicious::TestBareExpression),
         Box::new(performance::EagerBroadcast),
         Box::new(performance::SortedExtremum),
         Box::new(performance::LengthFindall),
@@ -149,6 +151,7 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(readability::RedundantBoolean),
         Box::new(readability::StringBoundary),
         Box::new(readability::UnnecessaryNesting),
+        Box::new(readability::TestIsaCall),
         Box::new(meta::MisnamedSuppression),
         Box::new(meta::BlanketSuppression),
         Box::new(meta::UnexplainedSuppression),

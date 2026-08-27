@@ -4,7 +4,7 @@ expression: render_rule_doc(rule.as_ref())
 ---
 ## `nothing-comparison`
 
-Flag `x == nothing` / `x != nothing`, which compares against `nothing` by value. `nothing` is the singleton instance of `Nothing`, so an identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and cannot be overloaded. The rule reports a safe fix rewriting `==` to `===` and `!=` to `!==`.
+Flag `x == nothing` / `x != nothing`, which compares against `nothing` by value. `nothing` is the singleton instance of `Nothing`, so an identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and cannot be overloaded. The rule reports a safe fix rewriting `==` to `===` and `!=` to `!==`. Inside a real `Test.@test` assertion, it instead prefers `isnothing(x)` or `!isnothing(x)` when that name is confirmed to mean Base's predicate.
 
 Comparing against `nothing` by value:
 

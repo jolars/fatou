@@ -17,6 +17,7 @@
 use crate::ast::{AstNode, AstToken, BinaryExpr, Expr};
 use crate::linter::diagnostic::{Applicability, Diagnostic, Fix};
 use crate::linter::rules::matchers;
+use crate::linter::rules::test_matchers::is_direct_test_expression;
 use crate::linter::rules::{Example, Rule, RuleContext};
 use crate::syntax::{SyntaxElement, SyntaxKind};
 
@@ -32,7 +33,9 @@ impl Rule for NothingComparison {
          by value. `nothing` is the singleton instance of `Nothing`, so an \
          identity test (`===` / `!==`, or `isnothing`) is meant: it is faster and \
          cannot be overloaded. The rule reports a safe fix rewriting `==` to \
-         `===` and `!=` to `!==`."
+         `===` and `!=` to `!==`. Inside a real `Test.@test` assertion, it \
+         instead prefers `isnothing(x)` or `!isnothing(x)` when that name is \
+         confirmed to mean Base's predicate."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -46,7 +49,7 @@ impl Rule for NothingComparison {
         &[SyntaxKind::BINARY_EXPR]
     }
 
-    fn check(&self, el: &SyntaxElement, _ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
+    fn check(&self, el: &SyntaxElement, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
         let Some(bin) = el.as_node().cloned().and_then(BinaryExpr::cast) else {
             return;
         };
@@ -62,11 +65,18 @@ impl Rule for NothingComparison {
         // Match `nothing` on either operand by identifier text. It is a `Core`
         // constant that is practically never shadowed, so this is sound; the
         // capitalized `Nothing` type is a distinct identifier.
-        let is_nothing =
-            |operand: Option<Expr>| operand.is_some_and(|expr| matchers::is_name(&expr, "nothing"));
-        if !is_nothing(bin.lhs()) && !is_nothing(bin.rhs()) {
+        let (Some(lhs), Some(rhs)) = (bin.lhs(), bin.rhs()) else {
             return;
-        }
+        };
+        let value = match (
+            matchers::is_name(&lhs, "nothing"),
+            matchers::is_name(&rhs, "nothing"),
+        ) {
+            (true, false) => &rhs,
+            (false, true) => &lhs,
+            (true, true) => &rhs,
+            (false, false) => return,
+        };
 
         let op_range = op.syntax().text_range();
         let mut diag = Diagnostic::new(
@@ -74,13 +84,81 @@ impl Rule for NothingComparison {
             bin.syntax().text_range(),
             format!("comparison against `nothing` by value; use `{replacement}` or `isnothing`"),
         );
-        diag.fixes.push(Fix {
-            description: format!("Replace `{}` with `{replacement}`", op.text()),
-            content: replacement.to_string(),
-            start: op_range.start().into(),
-            end: op_range.end().into(),
-            applicability: Applicability::Safe,
-        });
+        if let Some(fix) = test_predicate_fix(ctx, &bin, value, replacement == "!==") {
+            diag.fixes.push(fix);
+        } else {
+            diag.fixes.push(Fix {
+                description: format!("Replace `{}` with `{replacement}`", op.text()),
+                content: replacement.to_string(),
+                start: op_range.start().into(),
+                end: op_range.end().into(),
+                applicability: Applicability::Safe,
+            });
+        }
         sink.push(diag);
     }
+}
+
+fn test_predicate_fix(
+    ctx: &RuleContext<'_>,
+    comparison: &BinaryExpr,
+    value: &Expr,
+    negated: bool,
+) -> Option<Fix> {
+    if !is_direct_test_expression(comparison.syntax(), ctx) {
+        return None;
+    }
+    let range = comparison.syntax().text_range();
+    if !can_write_base_isnothing(ctx, range.start()) {
+        return None;
+    }
+    let outer = comparison.syntax().text_range();
+    let inner = value.syntax().text_range();
+    let text = comparison.syntax().text().to_string();
+    let start = usize::from(inner.start() - outer.start());
+    let end = usize::from(inner.end() - outer.start());
+    if text[..start].contains('#') || text[end..].contains('#') {
+        return None;
+    }
+    let value = value.syntax().text().to_string();
+    Some(Fix {
+        description: "Rewrite as an `isnothing` test".to_string(),
+        content: if negated {
+            format!("!isnothing({value})")
+        } else {
+            format!("isnothing({value})")
+        },
+        start: range.start().into(),
+        end: range.end().into(),
+        applicability: Applicability::Safe,
+    })
+}
+
+/// Confirm that inserting the bare name `isnothing` cannot select a file-local
+/// binding or an unknown whole-module export.
+///
+/// A visible `using Test` intentionally makes project-wide resolution
+/// untrustworthy in the lightweight lint path when the stdlib index is absent.
+/// Base's own export table is still known, so retain the ordinary resolver fast
+/// path and use this stricter semantic fallback for that case.
+fn can_write_base_isnothing(ctx: &RuleContext<'_>, at: rowan::TextSize) -> bool {
+    if ctx.name_resolves_to_base("isnothing", at) {
+        return true;
+    }
+    if ctx
+        .model
+        .names_in_scope_at(at)
+        .into_iter()
+        .any(|id| ctx.model.binding(id).name == "isnothing")
+    {
+        return false;
+    }
+    if ctx.model.module_loads().iter().any(|load| {
+        load.kind == crate::semantic::LoadKind::Using
+            && load.items.is_none()
+            && (load.path.leading_dots != 0 || load.path.components.as_slice() != ["Test"])
+    }) {
+        return false;
+    }
+    ctx.base_export_module("isnothing").is_some()
 }

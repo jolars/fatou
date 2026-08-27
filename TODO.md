@@ -41,13 +41,11 @@
 
 ### Rules
 
-- [ ] A `Test`-stdlib rule bundle, as one cohesive change with a shared `@test`
-  matcher — the Julia counterpart of arity's planned `testthat` bundle, which it
-  rates "high value for test-heavy repos" (equally true here): `@test x == true`
-  -> `@test x`, `@test length(x) == 0` -> `@test isempty(x)`, `@test isa(x, T)`
-  -> `@test x isa T`, `@test x == nothing` -> `@test isnothing(x)`, and a
-  `@test` whose argument is not a comparison or predicate at all. Gate on
-  `Test` actually being loaded, as arity gates on the package being attached.
+- [x] The `Test`-stdlib bundle reuses `redundant-boolean`, `length-zero`, and
+  `nothing-comparison`, and adds `test-isa-call` (readability, sem, warning,
+  safe fix, default-on) plus `test-bare-expression` (suspicious, sem, warning,
+  no fix, default-off). Their shared matcher requires a preceding, visible Test
+  load and supports qualified, parenthesized, and aliased `@test` spellings.
 
 - [ ] A `documentation` category over docstrings, structurally mirroring
   arity's five roxygen rules: undocumented exported names, `@doc` argument

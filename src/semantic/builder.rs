@@ -447,13 +447,26 @@ pub(crate) fn collect_import_clauses(
                 };
                 let path = if n.kind() == SyntaxKind::IMPORT_ALIAS {
                     // `IMPORT_PATH … as alias`: the alias is the last bare
-                    // identifier token (the path's own names are nested).
+                    // identifier token (the path's own names are nested), or
+                    // the direct macro-name child for `@x as @y`.
                     clause.alias = n
-                        .children_with_tokens()
-                        .filter_map(|e| e.into_token())
-                        .filter(|t| t.kind() == SyntaxKind::IDENT && t.text() != "as")
-                        .last()
-                        .map(|t| (SmolStr::new(t.text()), t.text_range()));
+                        .children()
+                        .find(|child| child.kind() == SyntaxKind::MACRO_NAME)
+                        .and_then(|name| {
+                            macro_name_ident(&name).map(|token| {
+                                (
+                                    SmolStr::new(format!("@{}", token.text())),
+                                    name.text_range(),
+                                )
+                            })
+                        })
+                        .or_else(|| {
+                            n.children_with_tokens()
+                                .filter_map(|e| e.into_token())
+                                .filter(|t| t.kind() == SyntaxKind::IDENT && t.text() != "as")
+                                .last()
+                                .map(|t| (SmolStr::new(t.text()), t.text_range()))
+                        });
                     n.children().find(|c| c.kind() == SyntaxKind::IMPORT_PATH)
                 } else {
                     Some(n.clone())

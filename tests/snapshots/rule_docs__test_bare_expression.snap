@@ -1,0 +1,22 @@
+---
+source: tests/rule_docs.rs
+expression: render_rule_doc(rule.as_ref())
+---
+## `test-bare-expression`
+
+Flag an `@test` argument that has no syntactic comparison, Boolean connective, or predicate call—for example, `@test ready`. Calls and nested macro calls are treated conservatively as potentially Boolean. The rule only matches the real `Test.@test` macro after a visible, file-local Test load. It is disabled by default because Julia's dynamic types make bare Boolean values valid, and it offers no fix.
+
+A bare value hides what relationship the test asserts:
+
+```julia
+using Test
+@test result
+```
+
+```text
+warning: test-bare-expression
+ --> example.jl:2:7
+  |
+2 | @test result
+  |       ^^^^^^ this assertion has no comparison or predicate
+```

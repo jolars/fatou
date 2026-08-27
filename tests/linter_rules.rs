@@ -733,6 +733,42 @@ fn nothing_comparison_carries_a_safe_fix() {
     assert_eq!(&src[fix.start..fix.end], "==");
 }
 
+#[test]
+fn nothing_comparison_prefers_isnothing_inside_test() {
+    let config = LintConfig {
+        select: Some(vec!["nothing-comparison".to_string()]),
+        ..Default::default()
+    };
+    for (src, expected) in [
+        ("using Test\n@test x == nothing\n", "isnothing(x)"),
+        ("using Test\n@test nothing != x\n", "!isnothing(x)"),
+    ] {
+        let report = check_source(None, src, &config);
+        let diag = report
+            .diagnostics
+            .iter()
+            .find(|d| d.rule == "nothing-comparison")
+            .expect("expected a finding");
+        assert_eq!(diag.fixes[0].content, expected);
+        assert_eq!(diag.fixes[0].applicability, Applicability::Safe);
+    }
+}
+
+#[test]
+fn nothing_comparison_keeps_the_identity_fix_for_unloaded_test_macro() {
+    let config = LintConfig {
+        select: Some(vec!["nothing-comparison".to_string()]),
+        ..Default::default()
+    };
+    let report = check_source(None, "@test x == nothing\n", &config);
+    let diag = report
+        .diagnostics
+        .iter()
+        .find(|d| d.rule == "nothing-comparison")
+        .expect("expected a finding");
+    assert_eq!(diag.fixes[0].content, "===");
+}
+
 // --- missing-comparison ----------------------------------------------------
 
 #[test]
@@ -4632,6 +4668,150 @@ fn length_zero_honors_suppression() {
         &config,
     );
     assert!(report.diagnostics.is_empty());
+}
+
+// --- test-isa-call ---------------------------------------------------------
+
+fn test_isa_diag(src: &str) -> Option<fatou::linter::Diagnostic> {
+    let config = LintConfig {
+        select: Some(vec!["test-isa-call".to_string()]),
+        ..Default::default()
+    };
+    check_source(None, src, &config)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.rule == "test-isa-call")
+}
+
+#[test]
+fn test_isa_call_matches_loaded_test_spellings() {
+    for src in [
+        "using Test\n@test isa(x, T)\n",
+        "using Test\n@test(isa(x, T))\n",
+        "import Test\nTest.@test isa(x, T)\n",
+        "import Test as Tst\nTst.@test isa(x, T)\n",
+        "using Test: @test\n@test isa(x, T) broken=true\n",
+        "import Test: @test as @check\n@check isa(x, T)\n",
+    ] {
+        assert!(test_isa_diag(src).is_some(), "no finding for {src:?}");
+    }
+}
+
+#[test]
+fn test_isa_call_requires_the_real_loaded_test_macro() {
+    for src in [
+        "@test isa(x, T)\n",
+        "import Test\n@test isa(x, T)\n",
+        "@test isa(x, T)\nusing Test\n",
+        "using .Test\n@test isa(x, T)\n",
+        "using Test\nmacro test(x) x end\n@test isa(x, T)\n",
+        "using Test\nmodule Nested\n@test isa(x, T)\nend\n",
+        "module Nested\nusing Test\nend\n@test isa(x, T)\n",
+    ] {
+        assert!(
+            test_isa_diag(src).is_none(),
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn test_isa_call_requires_a_direct_plain_isa_call() {
+    for src in [
+        "using Test\n@test x isa T\n",
+        "using Test\n@test f(isa(x, T))\n",
+        "using Test\n@test Base.isa(x, T)\n",
+        "using Test\n@test isa(x)\n",
+        "using Test\n@test isa(x, T, extra)\n",
+        "using Test\n@test isa(xs...)\n",
+    ] {
+        assert!(
+            test_isa_diag(src).is_none(),
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn test_isa_call_offers_a_safe_precedence_aware_fix() {
+    let diag = test_isa_diag("using Test\n@test isa(a ? b : c, Union{T, S})\n")
+        .expect("expected a finding");
+    assert_eq!(diag.fixes.len(), 1);
+    assert_eq!(diag.fixes[0].content, "(a ? b : c) isa Union{T, S}");
+    assert_eq!(diag.fixes[0].applicability, Applicability::Safe);
+}
+
+#[test]
+fn test_isa_call_withholds_a_fix_that_would_drop_comments() {
+    let diag =
+        test_isa_diag("using Test\n@test isa(#= value =# x, T)\n").expect("expected a finding");
+    assert!(diag.fixes.is_empty());
+}
+
+// --- test-bare-expression --------------------------------------------------
+
+#[test]
+fn test_bare_expression_flags_non_test_shapes() {
+    for src in [
+        "using Test\n@test ready\n",
+        "using Test\n@test true\n",
+        "using Test\n@test x + y\n",
+        "using Test\n@test flags[i]\n",
+    ] {
+        assert_eq!(
+            count("test-bare-expression", src),
+            1,
+            "no finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn test_bare_expression_accepts_boolean_shaped_expressions() {
+    for src in [
+        "using Test\n@test x == y\n",
+        "using Test\n@test 0 < x <= 1\n",
+        "using Test\n@test x isa T\n",
+        "using Test\n@test x in xs\n",
+        "using Test\n@test isvalid(x)\n",
+        "using Test\n@test !ready\n",
+        "using Test\n@test ready && enabled\n",
+        "using Test\n@test ready || fallback\n",
+        "using Test\n@test (@generated_predicate x)\n",
+    ] {
+        assert_eq!(
+            count("test-bare-expression", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn test_bare_expression_uses_the_shared_test_gate() {
+    for src in [
+        "@test ready\n",
+        "import Test\n@test ready\n",
+        "@test ready\nusing Test\n",
+        "using Test\nmacro test(x) x end\n@test ready\n",
+    ] {
+        assert_eq!(
+            count("test-bare-expression", src),
+            0,
+            "unexpected finding for {src:?}"
+        );
+    }
+}
+
+#[test]
+fn test_bare_expression_is_default_off() {
+    let report = check_source(None, "using Test\n@test ready\n", &LintConfig::default());
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .all(|d| d.rule != "test-bare-expression")
+    );
 }
 
 // --- comparison-negation ---------------------------------------------------

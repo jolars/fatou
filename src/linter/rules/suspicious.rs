@@ -10,6 +10,7 @@ mod module_shadows_parent;
 mod non_public_access;
 mod nothing_comparison;
 mod shadowed_base_name;
+mod test_bare_expression;
 mod typeof_comparison;
 
 pub use assignment_in_condition::AssignmentInCondition;
@@ -22,4 +23,5 @@ pub use module_shadows_parent::ModuleShadowsParent;
 pub use non_public_access::NonPublicAccess;
 pub use nothing_comparison::NothingComparison;
 pub use shadowed_base_name::ShadowedBaseName;
+pub use test_bare_expression::TestBareExpression;
 pub use typeof_comparison::TypeofComparison;
