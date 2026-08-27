@@ -201,15 +201,20 @@ fn definition_for<P: PackageSource>(
                 embedded.offset,
                 encoding,
             );
-            for location in &mut locations {
+            // An intra-file result carries a fence-local range; drop it rather
+            // than return one the client would resolve against the outer file.
+            locations.retain_mut(|location| {
                 if location.uri != *uri {
-                    continue;
+                    return true;
                 }
-                let Some(range) = embedded.source_range_from_lsp(location.range, encoding) else {
-                    continue;
+                let Some(range) =
+                    embedded.source_range_from_lsp(location.range, &embedded_index, encoding)
+                else {
+                    return false;
                 };
                 location.range = to_range(range, line_index, encoding);
-            }
+                true
+            });
             if locations.is_empty()
                 && let Some(ident) = embedded_model.ident_at(embedded.offset)
                 && ident.binding.is_none()

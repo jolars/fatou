@@ -153,6 +153,8 @@ fn completions_for<P: PackageSource>(
                 embedded.offset,
                 encoding,
             );
+            // Anchors name Markdown targets, so they stay out of the Julia
+            // names merged in from the enclosing scope.
             let outer = reference_completions(
                 model,
                 packages,
@@ -160,6 +162,7 @@ fn completions_for<P: PackageSource>(
                 embedded.text,
                 embedded.offset,
                 context.attachment.target_range.start(),
+                false,
             );
             let mut seen: std::collections::HashSet<String> =
                 items.iter().map(|item| item.label.clone()).collect();
@@ -171,9 +174,9 @@ fn completions_for<P: PackageSource>(
             return map_embedded_edits(items, &embedded, text, encoding);
         }
         if let Some(reference) = context.explicit_ref() {
-            let replacement = context
-                .source_range(reference.range)
-                .map(|range| super::documentation::lsp_range(range, text, encoding));
+            let replacement = context.source_range(reference.range).map(|range| {
+                super::documentation::lsp_range(range, &LineIndex::new(text), encoding)
+            });
             let mut items = reference_completions(
                 model,
                 packages,
@@ -181,6 +184,7 @@ fn completions_for<P: PackageSource>(
                 reference.target.as_str(),
                 reference.offset,
                 context.attachment.target_range.start(),
+                true,
             );
             if let Some(range) = replacement {
                 for item in &mut items {
@@ -225,7 +229,15 @@ fn completions_for<P: PackageSource>(
                 latex_items(text, start, offset_bytes, encoding)
             }
         }
-        _ if string_context_at(root, offset) != StringContext::Code => Vec::new(),
+        // Documentation prose keeps Julia's input sequences, handled above, but
+        // ordinary identifier completion would bury the author in irrelevant
+        // code names. Only a payload no static decoding reached gets here (an
+        // interpolated docstring), and only outside its interpolations.
+        _ if string_context_at(root, offset) != StringContext::Code
+            && in_documentation_payload(model, offset) =>
+        {
+            Vec::new()
+        }
         Context::Member {
             receiver,
             macro_member,
@@ -251,6 +263,7 @@ fn completions_for<P: PackageSource>(
 
 /// Completion inside an explicit `@ref target`, resolved in the documented
 /// definition's Julia scope rather than in the Markdown string literal.
+#[allow(clippy::too_many_arguments)]
 fn reference_completions<P: PackageSource>(
     model: &SemanticModel,
     packages: &P,
@@ -258,6 +271,7 @@ fn reference_completions<P: PackageSource>(
     target: &str,
     offset: TextSize,
     semantic_offset: TextSize,
+    anchors: bool,
 ) -> Vec<CompletionItem> {
     match context_at(target, offset.into()) {
         Context::Member {
@@ -277,7 +291,12 @@ fn reference_completions<P: PackageSource>(
                 .into_iter()
                 .map(|candidate| candidate_item(model, candidate, Namespace::Value))
                 .collect();
-            for anchor in super::documentation::markdown_anchor_names(model) {
+            let anchor_names = if anchors {
+                super::documentation::markdown_anchor_names(model)
+            } else {
+                Vec::new()
+            };
+            for anchor in anchor_names {
                 if items.iter().any(|item| item.label == anchor) {
                     continue;
                 }
@@ -303,10 +322,12 @@ fn map_embedded_edits(
     source: &str,
     encoding: PositionEncoding,
 ) -> Vec<CompletionItem> {
+    let embedded_index = LineIndex::new(embedded.text);
+    let source_index = LineIndex::new(source);
     let map = |range| {
         embedded
-            .source_range_from_lsp(range, encoding)
-            .map(|range| super::documentation::lsp_range(range, source, encoding))
+            .source_range_from_lsp(range, &embedded_index, encoding)
+            .map(|range| super::documentation::lsp_range(range, &source_index, encoding))
     };
     for item in &mut items {
         item.text_edit = item.text_edit.take().and_then(|edit| match edit {
@@ -539,6 +560,16 @@ enum StringContext {
     /// every backslash is the literal's own and a popup over each regex escape
     /// would be pure noise.
     Verbatim,
+}
+
+/// Whether `offset` sits inside a documentation payload literal, statically
+/// decodable or not. Ordinary string and command literals are not documentation
+/// and keep their identifier completion.
+fn in_documentation_payload(model: &SemanticModel, offset: TextSize) -> bool {
+    model
+        .documentation()
+        .iter()
+        .any(|doc| doc.payload_range.contains_inclusive(offset))
 }
 
 fn string_context_at(root: &SyntaxNode, offset: TextSize) -> StringContext {
@@ -1081,6 +1112,43 @@ mod tests {
         assert_eq!(new_text, "custom-overview");
         assert_eq!(range.start, Position::new(3, 17));
         assert_eq!(range.end, Position::new(3, 26));
+    }
+
+    #[test]
+    fn markdown_anchors_stay_out_of_embedded_julia_completion() {
+        let lib = library(vec![]);
+        let source = concat!(
+            "\"\"\"\n",
+            "# [Overview](@id custom_overview)\n",
+            "\n",
+            "```julia\n",
+            "custom_\n",
+            "```\n",
+            "\"\"\"\n",
+            "f() = 1\n",
+        );
+        let names = labels(&completions_at(source, "\ncustom_", &lib));
+        assert!(
+            !names.contains(&"custom_overview".to_string()),
+            "an anchor leaked into Julia code completion: {names:?}"
+        );
+    }
+
+    /// Only documentation prose withholds identifier completion; an ordinary
+    /// string or command literal is not documentation.
+    #[test]
+    fn plain_strings_and_commands_keep_identifier_completion() {
+        let lib = library(vec![]);
+        for (source, needle) in [
+            ("greeting = 1\npath = \"gree\"\n", "\"gree"),
+            ("greeting = 1\ncmd = `run gree`\n", "run gree"),
+        ] {
+            let names = labels(&completions_at(source, needle, &lib));
+            assert!(
+                names.contains(&"greeting".to_string()),
+                "{source:?}: {names:?}"
+            );
+        }
     }
 
     #[test]

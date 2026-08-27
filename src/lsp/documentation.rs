@@ -175,12 +175,15 @@ impl EmbeddedJulia<'_> {
     }
 
     /// Map an LSP range in the fenced body into an outer-source byte range.
+    ///
+    /// `index` indexes [`text`](Self::text); a caller mapping many ranges
+    /// builds it once.
     pub(crate) fn source_range_from_lsp(
         &self,
         range: lsp_types::Range,
+        index: &LineIndex<'_>,
         encoding: PositionEncoding,
     ) -> Option<TextRange> {
-        let index = LineIndex::new(self.text);
         let start = index.position_to_byte(range.start, encoding);
         let end = index.position_to_byte(range.end, encoding);
         self.source_range(TextRange::new(
@@ -222,8 +225,7 @@ pub(crate) fn markdown_definition(
                 }
                 let heading = Heading::cast(node)?;
                 let content = heading.content();
-                (content == *id || heading_slug(&content) == *id)
-                    .then(|| heading.syntax().text_range())
+                (content == *id || heading.slug() == *id).then(|| heading.syntax().text_range())
             }),
             MarkdownReference::Footnote(id) => markdown
                 .cst
@@ -260,7 +262,7 @@ pub(crate) fn markdown_anchor_names(model: &SemanticModel) -> Vec<String> {
                 if !content.is_empty() && !names.contains(&content) {
                     names.push(content.clone());
                 }
-                let slug = heading_slug(&content);
+                let slug = heading.slug();
                 if !slug.is_empty() && !names.contains(&slug) {
                     names.push(slug);
                 }
@@ -270,23 +272,6 @@ pub(crate) fn markdown_anchor_names(model: &SemanticModel) -> Vec<String> {
     names
 }
 
-fn heading_slug(heading: &str) -> String {
-    let mut out = String::new();
-    let mut separator = false;
-    for character in heading.chars().flat_map(char::to_lowercase) {
-        if character.is_alphanumeric() || character == '_' || character == '-' {
-            if separator && !out.is_empty() && !out.ends_with('-') {
-                out.push('-');
-            }
-            out.push(character);
-            separator = false;
-        } else if character.is_whitespace() {
-            separator = true;
-        }
-    }
-    out.trim_end_matches('-').to_string()
-}
-
 /// Render a decoded documentation value as Markdown, omitting empty payloads.
 pub(crate) fn render(text: &str) -> Option<String> {
     let text = text.trim();
@@ -294,12 +279,14 @@ pub(crate) fn render(text: &str) -> Option<String> {
 }
 
 /// Convert an outer-source byte range to the negotiated LSP encoding.
+///
+/// Takes the index rather than the text: callers converting many ranges must
+/// not rescan the document once per range.
 pub(crate) fn lsp_range(
     range: TextRange,
-    source: &str,
+    index: &LineIndex<'_>,
     encoding: PositionEncoding,
 ) -> lsp_types::Range {
-    let index = LineIndex::new(source);
     lsp_types::Range::new(
         index.byte_to_position(range.start().into(), encoding),
         index.byte_to_position(range.end().into(), encoding),

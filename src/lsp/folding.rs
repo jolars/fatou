@@ -63,6 +63,15 @@ pub(crate) fn folding_ranges_via_db(
 /// Shared entry point for the fresh-parse and cached-tree paths: `root` must be
 /// the parse tree of exactly `text`.
 fn folds_for_tree(root: &SyntaxNode, model: &SemanticModel, text: &str) -> Vec<FoldingRange> {
+    let mut out = julia_folds(root, text);
+    collect_documentation_folds(model, &Ctx::new(text), &mut out);
+    out
+}
+
+/// The Julia-only folds of `root`, without the documentation pass. A Markdown
+/// fence body reaches this directly: it needs no semantic model, and building
+/// one per fence would re-decode every docstring the fence contains.
+fn julia_folds(root: &SyntaxNode, text: &str) -> Vec<FoldingRange> {
     let ctx = Ctx {
         text,
         line_index: LineIndex::new(text),
@@ -99,7 +108,6 @@ fn folds_for_tree(root: &SyntaxNode, model: &SemanticModel, text: &str) -> Vec<F
         collect_import_groups(&node, &ctx, &mut out);
     }
     collect_comment_folds(root, &ctx, &mut out);
-    collect_documentation_folds(model, &ctx, &mut out);
     out
 }
 
@@ -157,7 +165,7 @@ fn collect_documentation_folds(model: &SemanticModel, ctx: &Ctx<'_>, out: &mut V
                 continue;
             };
             let code_index = LineIndex::new(code);
-            for fold in compute_folding_ranges(code) {
+            for fold in julia_folds(&parse(code).cst, code) {
                 let relative = Range::new(
                     Position::new(fold.start_line, 0),
                     Position::new(fold.end_line.saturating_add(1), 0),
@@ -182,6 +190,15 @@ fn collect_documentation_folds(model: &SemanticModel, ctx: &Ctx<'_>, out: &mut V
 struct Ctx<'a> {
     text: &'a str,
     line_index: LineIndex<'a>,
+}
+
+impl<'a> Ctx<'a> {
+    fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            line_index: LineIndex::new(text),
+        }
+    }
 }
 
 impl Ctx<'_> {

@@ -141,14 +141,17 @@ fn tokens_for<P: PackageSource + ?Sized>(
 ) -> SemanticTokens {
     let mut spans = syntax_spans(root);
     spans.extend(resolved_spans(model, packages, workspace.clone(), text));
-    let static_docs: Vec<_> = super::documentation::static_documentation(model).collect();
+    // A docstring renders as prose, not as a string literal. That holds for
+    // every recognized attachment: painting an interpolated payload but not
+    // its statically decoded neighbor would look like an error in the buffer.
     spans.retain(|(range, kind)| {
         *kind != HighlightKind::String
-            || !static_docs
+            || !model
+                .documentation()
                 .iter()
-                .any(|(doc, _)| ranges_overlap(*range, doc.payload_range))
+                .any(|doc| ranges_overlap(*range, doc.payload_range))
     });
-    for (doc, decoded) in static_docs {
+    for (doc, decoded) in super::documentation::static_documentation(model) {
         let markdown = fatou_parser::documentation::parse(decoded.as_str());
         for node in markdown.cst.descendants() {
             let Some(fence) = CodeBlock::cast(node) else {
@@ -820,6 +823,27 @@ mod tests {
             .iter()
             .map(|&(text, kind)| (text.to_string(), kind as u32))
             .collect()
+    }
+
+    /// Every recognized docstring renders as prose. An interpolated payload
+    /// keeping its string paint while a static neighbor lost it would read as
+    /// an error in the buffer.
+    #[test]
+    fn no_docstring_payload_keeps_its_string_paint() {
+        let src = concat!(
+            "\"plain docs\"\n",
+            "f() = 1\n",
+            "x = 2\n",
+            "\"value = $(x)\"\n",
+            "g() = 2\n",
+            "path = \"an ordinary string\"\n",
+        );
+        let strings: Vec<_> = painted(src, &no_library())
+            .into_iter()
+            .filter(|(_, kind)| *kind == HighlightKind::String as u32)
+            .map(|(text, _)| text)
+            .collect();
+        assert_eq!(strings, vec!["\"an ordinary string\"".to_string()]);
     }
 
     // --- resolved-name classification ----------------------------------------
