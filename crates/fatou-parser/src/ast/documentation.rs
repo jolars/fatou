@@ -183,6 +183,30 @@ impl DocSourceMap {
             self.bytes[end - 1].end,
         ))
     }
+
+    /// Map an absolute Julia source offset into the decoded documentation.
+    ///
+    /// A cursor anywhere inside an escape maps to the first decoded byte that
+    /// escape produced. Bytes removed by triple-string dedenting or a line
+    /// continuation have no decoded position and return `None`.
+    pub fn decoded_offset(&self, offset: TextSize) -> Option<TextSize> {
+        if self.bytes.is_empty() {
+            return (offset == self.empty_at).then_some(TextSize::new(0));
+        }
+        if offset == self.bytes.last()?.end {
+            return Some(TextSize::new(self.bytes.len() as u32));
+        }
+        let index = self
+            .bytes
+            .iter()
+            .position(|span| span.start <= offset && offset < span.end)?;
+        let span = self.bytes[index];
+        let first = self.bytes[..index]
+            .iter()
+            .rposition(|candidate| *candidate != span)
+            .map_or(0, |previous| previous + 1);
+        Some(TextSize::new(first as u32))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

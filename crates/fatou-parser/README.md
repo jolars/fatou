@@ -23,8 +23,9 @@ assert_eq!(output.cst.text().to_string(), "f(x) = x + 1\n");
 Typed AST navigation is available through `fatou_parser::ast`. Its
 `DocAttachment` view recognizes Julia's ordinary docstrings and exact
 two-argument `@doc` calls. Standard ordinary and `raw` string payloads can be
-decoded without evaluating Julia, with byte ranges mapped back to the source;
-interpolated and custom payloads remain opaque.
+decoded without evaluating Julia, with byte ranges mapped in both directions
+between the decoded value and source; interpolated and custom payloads remain
+opaque.
 
 Decoded documentation can be parsed as Julia Markdown without invoking Julia:
 

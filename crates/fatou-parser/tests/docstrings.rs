@@ -173,3 +173,29 @@ fn empty_static_text_maps_an_empty_range_inside_the_literal() {
         TextRange::new(1.into(), 1.into())
     );
 }
+
+#[test]
+fn source_offsets_map_back_into_decoded_documentation() {
+    let source = "\"\"\"\n    See Main.\\u0066.\n    \"\"\"\nf() = 1\n";
+    let text = static_text(source);
+    let escape = source.find("\\u0066").unwrap() as u32;
+    let decoded = text
+        .source_map()
+        .decoded_offset((escape + 3).into())
+        .expect("cursor inside an escape maps to its decoded character");
+    let decoded: usize = decoded.into();
+    assert_eq!(&text.as_str()[decoded..], "f.\n");
+
+    let end = text
+        .source_map()
+        .decoded_offset((source.find(".\n    \"\"\"").unwrap() as u32 + 2).into())
+        .expect("the decoded end boundary maps");
+    assert_eq!(usize::from(end), text.as_str().len());
+
+    let stripped_indent = source.find("    See").unwrap() as u32;
+    assert_eq!(
+        text.source_map().decoded_offset(stripped_indent.into()),
+        None,
+        "dedented bytes are not part of the decoded document"
+    );
+}
