@@ -483,11 +483,19 @@ fn run_lint(
 }
 
 /// Whether any effectively enabled rule needs project-wide name resolution.
+///
+/// With no `select`, this consults each rule's default. The registry boxes
+/// every shipped rule, so it is built at most once rather than per candidate.
 fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
+    let defaults = config
+        .select
+        .is_none()
+        .then(fatou::linter::all_rules)
+        .unwrap_or_default();
     fatou::linter::rules::RESOLUTION_RULES.iter().any(|id| {
         let enabled = match config.select.as_deref() {
             Some(selected) => selected.iter().any(|rule| rule == id),
-            None => fatou::linter::all_rules()
+            None => defaults
                 .iter()
                 .find(|rule| rule.id() == *id)
                 .is_some_and(|rule| rule.default_enabled()),
@@ -746,13 +754,9 @@ mod tests {
 
     #[test]
     fn project_harvest_tracks_effectively_enabled_resolution_rules() {
-        assert!(wants_project_resolution(&LintConfig::default()));
-
-        let ignored = LintConfig {
-            ignore: vec!["unresolved-docstring-reference".to_string()],
-            ..Default::default()
-        };
-        assert!(!wants_project_resolution(&ignored));
+        // Every resolution rule is default-off, so the default lint pays for
+        // no harvest at all.
+        assert!(!wants_project_resolution(&LintConfig::default()));
 
         let syntax_only = LintConfig {
             select: Some(vec!["invalid-docstring-code".to_string()]),
@@ -765,5 +769,12 @@ mod tests {
             ..Default::default()
         };
         assert!(wants_project_resolution(&selected));
+
+        let ignored = LintConfig {
+            select: Some(vec!["undefined-name".to_string()]),
+            ignore: vec!["undefined-name".to_string()],
+            ..Default::default()
+        };
+        assert!(!wants_project_resolution(&ignored));
     }
 }

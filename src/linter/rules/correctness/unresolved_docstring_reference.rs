@@ -26,7 +26,9 @@ impl Rule for UnresolvedDocstringReference {
          anchors are accepted, and inferred references, prose-labeled links, \
          unknown packages, dynamic definitions, unresolved `using`s, opaque \
          docstrings, and unsupported target shapes stay silent rather than \
-         risk a false positive."
+         risk a false positive. Off by default: the rule needs project context \
+         to be sound, so the language server enables it for workspace member \
+         files, while the CLI leaves it opt-in."
     }
 
     fn examples(&self) -> &'static [Example] {
@@ -34,6 +36,15 @@ impl Rule for UnresolvedDocstringReference {
             caption: "The explicit target retains the same typo as its code label:",
             source: "\"\"\"\nSee [`Base.raduis`](@ref Base.raduis).\n\"\"\"\narea(radius) = pi * radius^2\n",
         }]
+    }
+
+    fn default_enabled(&self) -> bool {
+        // Sound only with project context, like every other resolution rule: a
+        // bare file cannot tell a missing binding from one its project defines
+        // elsewhere. The language server turns the rule on for workspace member
+        // files; on the CLI `--select` both enables it and triggers the project
+        // harvest that the default lint deliberately does not pay for.
+        false
     }
 
     fn check_file(&self, ctx: &RuleContext<'_>, sink: &mut Vec<Diagnostic>) {
@@ -173,6 +184,38 @@ mod tests {
         UnresolvedDocstringReference.check_file(&ctx, &mut diagnostics);
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.body.contains("raduis"));
+    }
+
+    /// One unclosed fence keeps a docstring out of the code checks, but its
+    /// anchors are still an exemption for the rest of the file.
+    #[test]
+    fn a_malformed_docstring_still_contributes_its_anchors() {
+        let source = concat!(
+            "\"\"\"\n",
+            "# [Overview](@id raduis)\n",
+            "\n",
+            "```julia\n",
+            "f(\n",
+            "\"\"\"\n",
+            "area(radius) = radius\n",
+            "\n",
+            "\"\"\"See [`raduis`](@ref raduis).\"\"\"\n",
+            "perimeter(radius) = radius\n",
+        );
+        let parsed = parser::parse(source);
+        let model = SemanticModel::build(&parsed.cst);
+        let workspace = package("MyPkg", source);
+        let packages = BTreeMap::from([("MyPkg".to_string(), workspace.clone())]);
+        let ctx =
+            RuleContext::new(None, &parsed.cst, &model).with_resolution(Some(ResolutionContext {
+                packages: &packages,
+                workspace: Some((workspace, Vec::new())),
+                declared_deps: None,
+            }));
+
+        let mut diagnostics = Vec::new();
+        UnresolvedDocstringReference.check_file(&ctx, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

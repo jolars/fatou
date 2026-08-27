@@ -685,7 +685,7 @@ warning: docstring-argument-mismatch
 
 ## `unresolved-docstring-reference`
 
-Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive.
+Flag an explicit, code-labeled Documenter `@ref` target when project resolution can prove that no such Julia symbol exists. Local Markdown anchors are accepted, and inferred references, prose-labeled links, unknown packages, dynamic definitions, unresolved `using`s, opaque docstrings, and unsupported target shapes stay silent rather than risk a false positive. Off by default: the rule needs project context to be sound, so the language server enables it for workspace member files, while the CLI leaves it opt-in.
 
 The explicit target retains the same typo as its code label:
 

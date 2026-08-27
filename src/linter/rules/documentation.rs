@@ -54,13 +54,17 @@ impl DocumentationScan {
                 continue;
             };
             let markdown = fatou_parser::documentation::parse(decoded.as_str());
-            // A malformed Markdown tree is recoverable for editing features,
-            // but not strong enough evidence for a correctness diagnostic.
+            // Anchors are an exemption set, so they are collected even from a
+            // malformed docstring: withholding them would turn one unclosed
+            // fence into false `@ref` diagnostics elsewhere in the file.
+            collect_anchors(&markdown.cst, &mut scan.anchors);
+            // The findings themselves need a clean parse: a malformed Markdown
+            // tree is recoverable for editing features, but not strong enough
+            // evidence for a correctness diagnostic.
             if !markdown.diagnostics.is_empty() {
                 continue;
             }
 
-            collect_anchors(&markdown.cst, &mut scan.anchors);
             collect_code_problems(&markdown.cst, decoded, &mut scan.invalid_code);
             collect_argument_mismatches(
                 &markdown.cst,
@@ -352,30 +356,13 @@ fn collect_anchors(
             let content = heading.content();
             if !content.is_empty() {
                 out.insert(content.clone());
-                let slug = heading_slug(&content);
+                let slug = heading.slug();
                 if !slug.is_empty() {
                     out.insert(slug);
                 }
             }
         }
     }
-}
-
-fn heading_slug(heading: &str) -> String {
-    let mut out = String::new();
-    let mut separator = false;
-    for character in heading.chars().flat_map(char::to_lowercase) {
-        if character.is_alphanumeric() || character == '_' || character == '-' {
-            if separator && !out.is_empty() && !out.ends_with('-') {
-                out.push('-');
-            }
-            out.push(character);
-            separator = false;
-        } else if character.is_whitespace() {
-            separator = true;
-        }
-    }
-    out.trim_end_matches('-').to_string()
 }
 
 #[derive(Debug, Clone, Copy)]

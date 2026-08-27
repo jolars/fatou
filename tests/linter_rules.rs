@@ -320,7 +320,7 @@ f() = 1
 }
 
 #[test]
-fn documentation_correctness_checks_are_default_on() {
+fn documentation_checks_are_default_on_except_the_resolution_rule() {
     let src = r#""""
 # Arguments
 - `wrong`: A stale name.
@@ -333,19 +333,25 @@ f(
 """
     f(right) = right
 "#;
-    assert_eq!(count("unresolved-docstring-reference", src), 1);
     let report = check_source(None, src, &LintConfig::default());
-    for rule in [
-        "invalid-docstring-code",
-        "docstring-argument-mismatch",
-        "unresolved-docstring-reference",
-    ] {
+    for rule in ["invalid-docstring-code", "docstring-argument-mismatch"] {
         assert!(
             report.diagnostics.iter().any(|diag| diag.rule == rule),
             "default lint omitted {rule}: {:?}",
             report.diagnostics
         );
     }
+    // The reference rule needs project resolution, so like every other
+    // resolution rule it is opt-in and the default lint pays for no harvest.
+    assert!(
+        !report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.rule == "unresolved-docstring-reference"),
+        "default lint ran a resolution rule: {:?}",
+        report.diagnostics
+    );
+    assert_eq!(count("unresolved-docstring-reference", src), 1);
 }
 
 #[test]
@@ -362,7 +368,15 @@ f(
 """
 f(right) = right
 "#;
-    let report = check_source(None, src, &LintConfig::default());
+    let config = LintConfig {
+        select: Some(vec![
+            "invalid-docstring-code".to_string(),
+            "docstring-argument-mismatch".to_string(),
+            "unresolved-docstring-reference".to_string(),
+        ]),
+        ..Default::default()
+    };
+    let report = check_source(None, src, &config);
     let diagnostic = |rule| {
         report
             .diagnostics
