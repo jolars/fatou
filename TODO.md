@@ -81,11 +81,10 @@
   a grouped three-digit literal still reaches its canonical four-digit width
   (`0x1_23` → `0x01_23`). Fixture `hex_literals`.
 
-- [ ] Decide the policy for folding a spaced unary minus into its literal
-  (`- 2` → `-2`). Value-identical except at a type boundary:
-  `- 9223372036854775808` negates an `Int128` literal, while
-  `-9223372036854775808` is the `Int64` `typemin`. Listed in
-  `tests/ast-equivalence/known-drift.txt` as `js-84685b8e`.
+- [x] Preserve unary `+`/`-` over decimal numeric literals by parenthesizing the
+  operand (`- 2` → `-(2)`). Snugging would turn the unary call into a signed
+  literal and can change the type at an integer boundary. Fixture
+  `unary_operators`; AST-equivalence exception `js-84685b8e` removed.
 
 ## Linter
 

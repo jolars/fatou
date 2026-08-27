@@ -52,12 +52,6 @@ js-9b9946da
 js-acfc6b49
 toplevel_semicolon
 
-# DEFECT: a spaced unary minus is folded into the literal — `- 2` (`(call-pre -
-# 2)`) becomes the literal `-2`. Value-identical except at a type boundary:
-# `- 9223372036854775808` negates an `Int128` literal, while
-# `-9223372036854775808` is the `Int64` `typemin`.
-js-84685b8e
-
 # policy: numeric literal canonicalization (`.5` -> `0.5`, `2.` -> `2.0`,
 # `1f0` -> `1.0f0`). The projector renders a float's source spelling, so every
 # such row moves; each rewrite is value- and type-preserving.

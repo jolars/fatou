@@ -144,18 +144,19 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (`operator_call_trailing_comma`)
+## Latest session (`unary_operators`)
 
-`fix(formatter)`. A singleton `ARG_LIST` attached directly to a bare operator
-now keeps its source trailing comma in flat, broken, and hugged layouts, so it
-cannot reparse as prefix application. Parenthesized/qualified operators,
-ordinary calls, and multi-argument operator calls keep the existing cosmetic
-comma normalization. Fixture `operator_call_trailing_comma` locks `+`, `<:`,
-`>:`, `.+`, a keyword argument, and a hugged vector; the six AST-equivalence
-exceptions are removed. Gate is 127 of 155. Focused tests, workspace suite,
-clippy, fmt, and the formatter Wasm build are green. No parser/lexer blocker.
+`fix(formatter)`. Unary `+` and `-` over decimal integer and float literals now
+parenthesize the operand (`- 2` → `-(2)`) rather than becoming a signed literal.
+This preserves JuliaSyntax's unary-call shape and the operand's type at integer
+boundaries; hex, octal, and binary operands remain snug because adjacency does
+not change their parse. Fixture `unary_operators` locks ordinary and boundary
+integers, unary plus, a float, an already parenthesized operand, and hex. The
+`js-84685b8e` AST-equivalence exception is removed. Gate remains 127 of 155. No
+parser/lexer blocker. Focused formatter and AST-equivalence tests, the workspace
+suite, clippy, fmt, and the formatter Wasm build are green.
 
-**Ranked next target:** decide the spaced unary-minus literal policy.
+**Ranked next target:** no formatter target is currently queued in `TODO.md`.
 
 ## Parser dependencies and follow-ups
 
@@ -190,6 +191,9 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Operator-call trailing comma** (`fix`): preserved the load-bearing comma on
+  singleton calls to bare operators and removed six AST-equivalence exceptions.
+  `operator_call_trailing_comma`. Gate 127.
 - **Trailing bracket semicolons** (`fix`): distinguished a semantic final `;`
   from layout-only empty rows across flat, broken, and commented matrices. Gate
   126.

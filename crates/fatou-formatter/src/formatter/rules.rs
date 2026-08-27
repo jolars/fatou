@@ -565,7 +565,9 @@ fn lower_call(node: &SyntaxNode) -> Ir {
 /// Lay out a unary prefix expression (`-a`, `!b`, `~x`, `√x`, `¬p`) — the operator
 /// snugs directly to its operand with no space, normalizing whatever whitespace the
 /// parser left between them (Tenet 1). The operand recurses through [`lower_node`], so
-/// it normalizes internally (`-f( x )` → `-f(x)`).
+/// it normalizes internally (`-f( x )` → `-f(x)`). A decimal numeric literal after
+/// unary `+` or `-` is parenthesized: adjacency would turn the unary call into a
+/// signed literal, which changes the type at integer boundaries.
 ///
 /// A `UNARY_EXPR` is always the prefix shape `<op> <operand>` (a postfix `'` is a
 /// separate `POSTFIX_EXPR`). Snugging is unsafe when the operand itself leads with a
@@ -606,7 +608,28 @@ fn lower_unary(node: &SyntaxNode) -> Ir {
         return lower_transparent(node);
     }
 
+    if unary_numeric_operand_needs_parens(&op, &operand) {
+        return Ir::concat([
+            Ir::text(op),
+            Ir::text("("),
+            lower_node(&operand),
+            Ir::text(")"),
+        ]);
+    }
+
     Ir::concat([Ir::text(op), lower_node(&operand)])
+}
+
+/// Whether snugging a unary operator to its operand would create a signed literal.
+fn unary_numeric_operand_needs_parens(op: &str, operand: &SyntaxNode) -> bool {
+    (op == "+" || op == "-")
+        && operand.kind() == SyntaxKind::LITERAL
+        && operand.first_token().is_some_and(|token| {
+            matches!(
+                token.kind(),
+                SyntaxKind::INTEGER | SyntaxKind::FLOAT | SyntaxKind::FLOAT32
+            )
+        })
 }
 
 /// Whether `node`'s first token begins with a symbolic operator character — a
