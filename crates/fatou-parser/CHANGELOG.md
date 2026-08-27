@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.5.0...fatou-parser-v0.6.0) (2026-08-27)
+
+### Features
+- **parser:** expose heading anchor slugs ([`8a36261`](https://github.com/jolars/fatou/commit/8a362615e8785dfcd65927ca1bb481c0489d3953))
+- **parser:** map source offsets into docs ([`8a17a9b`](https://github.com/jolars/fatou/commit/8a17a9bbb201fcf1ac57dcc4796345e52b652193))
+- **parser:** parse Julia documentation ([`3af07ba`](https://github.com/jolars/fatou/commit/3af07ba9a12b8dbbe4542b04f95d5eb32bb9be5a))
+- **parser:** expose static docstrings ([`344cd96`](https://github.com/jolars/fatou/commit/344cd96474912d9eef4bbb0f7bc0ef77b9e0d083))
+- **parser:** parse imported macro aliases ([`ce0eb13`](https://github.com/jolars/fatou/commit/ce0eb13bac8c1705a7afe173610b548e1842ef67))
+
+### Bug Fixes
+- **parser:** parse code blocks in list items ([`2cd1d8f`](https://github.com/jolars/fatou/commit/2cd1d8fe1ef659e655f2d0d4e132657511c0ba97))
+- **parser:** match Julia on setext and admonition titles ([`35ea9d4`](https://github.com/jolars/fatou/commit/35ea9d4a064de76a47a6fdd579cf9de9ca5603d5))
+- **parser:** read a link's own destination ([`f0aab27`](https://github.com/jolars/fatou/commit/f0aab27f0d730955762c7e4c8c91e9e1ca9720e1))
+
+### Performance Improvements
+- **parser:** store docstring source maps as runs ([`7a166b1`](https://github.com/jolars/fatou/commit/7a166b1e2fc24bf2516311f11241bb3ee39ae088))
+
 ## [0.5.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.4.1...fatou-parser-v0.5.0) (2026-08-25)
 
 ### Features

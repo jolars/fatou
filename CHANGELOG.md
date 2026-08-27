@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.18.0](https://github.com/jolars/fatou/compare/v0.17.0...v0.18.0) (2026-08-27)
+
+### Features
+- **lint:** check Julia documentation ([`1baa96a`](https://github.com/jolars/fatou/commit/1baa96a6319d25fb26aa5f0f2789ec02ff4bf8a3))
+- **lsp:** add docstring language features ([`97f9086`](https://github.com/jolars/fatou/commit/97f90860fa7bcc2879b610b3996b93a1411e256e))
+- index documentation semantically ([`5d4ec9c`](https://github.com/jolars/fatou/commit/5d4ec9c5bc451b5a790d92e2292d554b8ca3fffe))
+- **lint:** add Test rule bundle ([`fc0759f`](https://github.com/jolars/fatou/commit/fc0759fdb27b1823874c8f9a4fb981984fd8f204))
+- **parser:** parse imported macro aliases ([`ce0eb13`](https://github.com/jolars/fatou/commit/ce0eb13bac8c1705a7afe173610b548e1842ef67))
+
+### Bug Fixes
+- **lsp:** correct documentation completion, definition, and painting ([`63b429a`](https://github.com/jolars/fatou/commit/63b429ace9953c6bcecbb8adb00458c54a73d9fe))
+- **lint:** make the docstring reference rule opt-in ([`3f1bbe8`](https://github.com/jolars/fatou/commit/3f1bbe8a9a5c5b0f129345a89f2c106e3205db73))
+- **formatter:** preserve unary numeric calls ([`09320a9`](https://github.com/jolars/fatou/commit/09320a9e1b847ce2863031955f0ccb3f5efd36fc))
+- **formatter:** preserve operator call commas ([`cbe6d31`](https://github.com/jolars/fatou/commit/cbe6d31edd16a9411e8741493aaa00e70b0968a7))
+- **formatter:** preserve trailing semicolons ([`3e9a47f`](https://github.com/jolars/fatou/commit/3e9a47f5495848d69b597dcd52e448b00e202f78))
+- **formatter:** preserve macro argument gaps ([`26297a8`](https://github.com/jolars/fatou/commit/26297a8b4d67fe51270467467dbae54af544129a))
+- **formatter:** preserve where brace shapes ([`52d7fbc`](https://github.com/jolars/fatou/commit/52d7fbc3d256fec4e42d3b1da368c87f3460f1a9))
+- **formatter:** preserve grouped hex width ([`05b2f72`](https://github.com/jolars/fatou/commit/05b2f7237dd4f0982028928e9798d9b65db11219)), closes [#92](https://github.com/jolars/fatou/issues/92)
+
+### Dependencies
+- updated crates/fatou-formatter to v0.6.0
+- updated crates/fatou-parser to v0.6.0
+
 ## [0.17.0](https://github.com/jolars/fatou/compare/v0.16.0...v0.17.0) (2026-08-26)
 
 ### Features

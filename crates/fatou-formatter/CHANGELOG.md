@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.5.0...fatou-formatter-v0.6.0) (2026-08-27)
+
+### Features
+- **formatter:** verify formatting preserves the program with ast_shape ([`3f4e9c9`](https://github.com/jolars/fatou/commit/3f4e9c93d671071b529089ed9c9cedc81b44f9a1))
+
+### Bug Fixes
+- **formatter:** preserve unary numeric calls ([`09320a9`](https://github.com/jolars/fatou/commit/09320a9e1b847ce2863031955f0ccb3f5efd36fc))
+- **formatter:** preserve operator call commas ([`cbe6d31`](https://github.com/jolars/fatou/commit/cbe6d31edd16a9411e8741493aaa00e70b0968a7))
+- **formatter:** preserve trailing semicolons ([`3e9a47f`](https://github.com/jolars/fatou/commit/3e9a47f5495848d69b597dcd52e448b00e202f78))
+- **formatter:** preserve macro argument gaps ([`26297a8`](https://github.com/jolars/fatou/commit/26297a8b4d67fe51270467467dbae54af544129a))
+- **formatter:** preserve where brace shapes ([`52d7fbc`](https://github.com/jolars/fatou/commit/52d7fbc3d256fec4e42d3b1da368c87f3460f1a9))
+- **formatter:** preserve grouped hex width ([`05b2f72`](https://github.com/jolars/fatou/commit/05b2f7237dd4f0982028928e9798d9b65db11219)), closes [#92](https://github.com/jolars/fatou/issues/92)
+
+### Dependencies
+- updated crates/fatou-parser to v0.6.0
+
 ## [0.5.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.4.0...fatou-formatter-v0.5.0) (2026-08-26)
 
 ### Features
