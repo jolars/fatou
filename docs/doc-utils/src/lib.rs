@@ -17,7 +17,8 @@
 //! The chart itself is drawn client-side by `docs/theme/bench-charts.js` from an
 //! inline JSON payload; this crate only shapes the data and the fallback.
 //!
-//! The same page's memory markers come from a second artifact and live in
+//! The same page's language-server speed and memory markers come from a second
+//! artifact and live in
 //! [`memory`].
 
 mod memory;

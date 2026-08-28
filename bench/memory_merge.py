@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Merge the two memory harness outputs into memory.json, the artifact the docs
-`doc-utils` mdBook preprocessor reads to render the memory section.
+"""Merge the language-server and CLI outputs into memory.json, the artifact the
+docs `doc-utils` mdBook preprocessor reads to render speed and memory results.
 
-`lsp_memory.py` reports per-server milestones over a scripted editing session;
-`cli_memory.py` reports peak RSS for one-shot runs. This flattens both into the
-shape the docs want, attaches the run metadata, and computes each server's
-settled memory relative to Fatou's -- the ratio is what survives a change of
-machine, even though for memory the absolute megabytes are worth printing too.
+`lsp_memory.py` reports per-server readiness, request latency, returned work,
+and memory milestones over a scripted editing session; `cli_memory.py` reports
+peak RSS for one-shot runs. This flattens both into the shape the docs want,
+attaches the run metadata, and computes each server's settled memory relative
+to Fatou's -- the ratio is what survives a change of machine, even though for
+memory the absolute megabytes are worth printing too.
 
 Display labels are assigned here rather than in the preprocessor so the artifact
 stays self-describing, the same way scenario labels work in results.json.
@@ -16,7 +17,7 @@ import argparse
 import json
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Server key -> display label and a one-line note on what that server is doing
 # for its memory, which is the context the numbers are meaningless without.
@@ -54,7 +55,10 @@ def flatten_servers(lsp):
                 "settled_pss_mb": settled.get("pss_mb"),
                 "peak_rss_mb": peak.get("rss_mb"),
                 "processes_at_settle": settled.get("processes"),
-                "init_seconds": entry.get("init_seconds"),
+                "initialize_seconds": entry.get("initialize_seconds"),
+                "workspace_ready_seconds": entry.get("workspace_ready_seconds"),
+                "documents_ready_seconds": entry.get("documents_ready_seconds"),
+                "request_latencies": entry.get("request_latencies", []),
                 "settled_seconds": entry.get("settled_seconds"),
                 "diagnostics_published": entry.get("diagnostics_published"),
                 "diagnostic_requests": entry.get("diagnostic_requests"),
@@ -67,7 +71,11 @@ def flatten_servers(lsp):
 def add_ratios(records):
     """Settled memory relative to Fatou's, left absent when Fatou has no figure."""
     baseline = next(
-        (r["settled_rss_mb"] for r in records if r["key"] == "fatou" and r["settled_rss_mb"]),
+        (
+            r["settled_rss_mb"]
+            for r in records
+            if r["key"] == "fatou" and r["settled_rss_mb"]
+        ),
         None,
     )
     for record in records:
@@ -97,6 +105,7 @@ def main():
             "files": [Path(f).name for f in lsp["files"]],
             "file_count": len(lsp["files"]),
             "total_bytes": lsp["total_bytes"],
+            "navigation_target": lsp.get("navigation_target"),
         },
         "servers": add_ratios(flatten_servers(lsp)),
         "cli": {

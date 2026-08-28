@@ -46,10 +46,15 @@ tasks:
     cmds:
       - ./bench/compare_format.sh
 
-  bench-memory:
-    desc: Measure language-server and CLI memory vs LanguageServer.jl and JETLS (writes bench/memory.json)
+  bench-lsp:
+    desc: Measure language-server speed and memory vs LanguageServer.jl and JETLS (writes bench/memory.json)
     cmds:
       - ./bench/memory_compare.sh
+
+  bench-memory:
+    desc: Alias for bench-lsp
+    cmds:
+      - task: bench-lsp
 
   profile:
     desc: Profile the formatter with perf, writing bench/profile.svg (needs bench-corpus)
@@ -72,7 +77,7 @@ tasks:
       - ./bench/corpus/download.sh
 
   bench-lsenv:
-    desc: Provision the pinned LanguageServer.jl and JETLS environments the memory benchmark needs
+    desc: Provision the pinned LanguageServer.jl and JETLS environments the LSP benchmark needs
     cmds:
       - ./bench/lsenv/setup.sh
 

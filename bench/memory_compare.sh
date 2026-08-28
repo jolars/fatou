@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Memory benchmark: Fatou against the two Julia language servers, plus Fatou's
-# own one-shot CLI runs. Results land in bench/memory.json, which the docs
-# `doc-utils` mdBook preprocessor reads to render the memory section of the
-# performance page.
+# Language-server speed and memory benchmark: Fatou against the two Julia
+# language servers, plus Fatou's own one-shot CLI memory runs. Results land in
+# bench/memory.json, which the docs `doc-utils` mdBook preprocessor reads to
+# render the language-server section of the performance page.
 #
 # Two scopes, because Fatou is used two ways:
 #
@@ -24,8 +24,9 @@
 # servers see a resolvable environment (this writes a Manifest.toml into the
 # gitignored checkout and populates the shared Julia depot).
 #
-# Env overrides: SETTLE_TIMEOUT, QUIET_SECONDS, CLI_RUNS, OPEN_FILE_COUNT, and
-# GNU_TIME for a GNU `time` outside PATH (the devenv shell provides one).
+# Env overrides: SETTLE_TIMEOUT, QUIET_SECONDS, LSP_LATENCY_RUNS,
+# LSP_LATENCY_WARMUPS, CLI_RUNS, OPEN_FILE_COUNT, and GNU_TIME for a GNU `time`
+# outside PATH (the devenv shell provides one).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,6 +39,8 @@ SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-300}"
 QUIET_SECONDS="${QUIET_SECONDS:-5}"
 CLI_RUNS="${CLI_RUNS:-5}"
 OPEN_FILE_COUNT="${OPEN_FILE_COUNT:-5}"
+LSP_LATENCY_RUNS="${LSP_LATENCY_RUNS:-20}"
+LSP_LATENCY_WARMUPS="${LSP_LATENCY_WARMUPS:-2}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -72,6 +75,10 @@ if [[ ${#OPEN_FILES[@]} -eq 0 ]]; then
   exit 1
 fi
 echo "==> opening ${#OPEN_FILES[@]} files per server"
+LSP_LATENCY_FILES=${#OPEN_FILES[@]}
+if ((LSP_LATENCY_FILES > 3)); then
+  LSP_LATENCY_FILES=3
+fi
 
 # --- language servers ---------------------------------------------------------
 # Every server sees the same JULIA_PROJECT, so they agree on which environment
@@ -89,6 +96,8 @@ JULIA_PROJECT="$WORKSPACE" python3 "$BENCH/lsp_memory.py" \
   --server "jetls=julia --startup-file=no --threads=auto --project=$LSENV/jetls $LSENV/jetls_runner.jl" \
   --settle-timeout "$SETTLE_TIMEOUT" \
   --quiet-seconds "$QUIET_SECONDS" \
+  --latency-runs "$LSP_LATENCY_RUNS" \
+  --latency-warmups "$LSP_LATENCY_WARMUPS" \
   --stderr-dir "$LSENV" \
   --out "$TMP/lsp.json"
 
@@ -118,6 +127,9 @@ cat >"$TMP/meta.json" <<EOF
   "settle_timeout": $SETTLE_TIMEOUT,
   "quiet_seconds": $QUIET_SECONDS,
   "cli_runs": $CLI_RUNS,
+  "lsp_latency_runs": $LSP_LATENCY_RUNS,
+  "lsp_latency_warmups": $LSP_LATENCY_WARMUPS,
+  "lsp_latency_files": $LSP_LATENCY_FILES,
   "corpora": $(cat "$CORPUS/manifest.json"),
   "servers": $(cat "$LSENV/manifest.json"),
   "versions": {"fatou": "$fatou_version", "julia": "$julia_version"}
