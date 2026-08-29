@@ -82,6 +82,12 @@ pub enum Commands {
         #[arg(long)]
         check: bool,
 
+        /// Verify that formatting preserves the parsed program and comments.
+        /// Refuses malformed or unverifiable input; path batches are fully
+        /// checked before any file is written.
+        #[arg(long)]
+        safe: bool,
+
         /// Override the target line width.
         #[arg(long, value_name = "N")]
         line_width: Option<u32>,

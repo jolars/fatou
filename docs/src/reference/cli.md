@@ -68,6 +68,9 @@ Format `.jl` files
 `--check`
 :   Check formatting without writing; prints a diff and exits non-zero if any file would change. Requires path arguments: there is no file on disk to report on when reading stdin
 
+`--safe`
+:   Verify that formatting preserves the parsed program and comments. Refuses malformed or unverifiable input; path batches are fully checked before any file is written
+
 `--line-width <N>`
 :   Override the target line width
 

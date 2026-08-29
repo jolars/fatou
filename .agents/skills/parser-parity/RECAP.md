@@ -57,8 +57,8 @@ ledger below is a fallback, not a queue.
 
 ## Progress
 
-JS corpus (**756 cases**, error shapes included): **748 allowlisted**, 8
-divergence, 0 unsupported. Dir corpus (**266 cases**): **265 allowlisted**, 1
+JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
+divergence, 0 unsupported. Dir corpus (**267 cases**): **266 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -72,9 +72,10 @@ display. Plan `~/.claude/plans/yes-let-s-do-it-ticklish-deer.md` fully executed.
 
 ## Deferred ledger
 
-Permanent (never "fix"): **float-literal display** (`2.`/`1f0`/hex floats/
+Permanent (never "fix"): **float-literal display** (hex floats/
 `1.0e-1000`/`x.3` — needs Julia's `show`); **n-ary juxtaposition** `(2)(3)x`;
-**`x 'y`** char lexing (needs bracket-depth-aware `'`). These account for all 8
+**`x 'y`** char lexing (needs bracket-depth-aware `'`, and also leaves
+`10.0f100'` divergent after its overflow diagnostic). These account for all 7
 remaining JS FAILs.
 
 Modeling divergences, recorded not fixed: word-op chains `a isa b isa c` and
@@ -96,24 +97,27 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-27 — list-item indented code)
+## Latest session (2026-08-29 — decimal float overflow)
 
-Landed Julia Markdown parity for indented code blocks nested below list items.
+Landed JuliaSyntax-compatible diagnostics for decimal floating-point overflow.
 
-- **Parser gap**: after a blank line in a list item, `emit_list_level` now
-  recognizes four-space code indentation relative to the item's consumed list
-  prefix and emits a nested `INDENTED_CODE_BLOCK`.
-- **Fixture**: `list_indented_code` pins the nested `Code` semantic shape, code
-  contents, list looseness, and following-item boundary against Julia's
-  `Markdown.parse`; the Markdown oracle corpus grew **16 → 17** cases.
-- **Counts**: JuliaSyntax corpora held at **748/756** JS and **265/266** dir;
-  there were no new divergences.
+- **Parser gap**: a post-build literal pass now detects Rust `f64`/`f32` parses
+  that produce infinity, records `NumericOverflow` over the complete literal,
+  and leaves finite boundary values and underflow unchanged.
+- **Projector**: the recorded diagnostic renders `(ErrorNumericOverflow)` in
+  ordinary and postfix expression positions.
+- **Fixture**: `decimal_float_overflow` pins `Float64`, `Float32`, boundary, and
+  postfix cases against JuliaSyntax; safe formatting now reports these inputs
+  as syntax errors.
+- **Counts**: JS **748/756 → 749/756** and dir **265/266 → 266/267**; no
+  regression or unsupported case was added.
 - **Next**: no parser-owned target is queued; probe real Julia per `SKILL.md`.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-08-27** — list-item indented code below list items. 748 / 265.
 - **2026-08-27** — imported macro aliases on the right of `as`. 748 / 265.
 - **2026-08-25n** — raw triple-string backslash-run decoding before quote
   display escaping. 748 / 264.

@@ -144,17 +144,20 @@ source-break read is the comment-bearing matrix path (debt #1).
 - Comments in block bodies, brackets, and matrices; `lower_trivia` trims
   trailing whitespace on the transparent path.
 
-## Latest session (`unary_operators`)
+## Latest session (`format --safe` verifier hardening)
 
-`fix(formatter)`. Unary `+` and `-` over decimal integer and float literals now
-parenthesize the operand (`- 2` → `-(2)`) rather than becoming a signed literal.
-This preserves JuliaSyntax's unary-call shape and the operand's type at integer
-boundaries; hex, octal, and binary operands remain snug because adjacency does
-not change their parse. Fixture `unary_operators` locks ordinary and boundary
-integers, unary plus, a float, an already parenthesized operand, and hex. The
-`js-84685b8e` AST-equivalence exception is removed. Gate remains 127 of 155. No
-parser/lexer blocker. Focused formatter and AST-equivalence tests, the workspace
-suite, clippy, fmt, and the formatter Wasm build are green.
+`fix(formatter)`. Closed four fail-open/fail-closed gaps in verified formatting.
+Nonstandard identifiers and character literals now carry an exact, separately
+compared opaque payload, float normalization skips `var`/`char` payloads, and
+single-quoted character projections retain whitespace and parentheses as one
+atom. Non-finite float fingerprints are rejected; the parser now diagnoses
+overflowing decimal `Float64`/`Float32` literals as JuliaSyntax
+`ErrorNumericOverflow`, so safe formatting reports input syntax instead of
+emitting malformed Julia. Block-comment CRLF/LF differences normalize before
+comment comparison, allowing configured line-ending conversion in either
+direction. Gate remains 127 of 155. Focused verifier, formatter, parser-oracle,
+and CLI tests, the full workspace, clippy, fmt, and both Wasm builds are green.
+No parser/lexer blocker remains.
 
 **Ranked next target:** no formatter target is currently queued in `TODO.md`.
 
@@ -191,6 +194,10 @@ stale). No other formatter-surfaced parser gap is outstanding.
 
 Newest first. One line each; the commit is the detail.
 
+- **Verified formatting** (`feat`): added the public `format_verified` API and
+  CLI `format --safe`, with projection/comment comparison and batch preflight.
+- **Unary numeric operators** (`fix`): parenthesized decimal numeric operands
+  to preserve unary-call shape and integer boundary types. `unary_operators`.
 - **Operator-call trailing comma** (`fix`): preserved the load-bearing comma on
   singleton calls to bare operators and removed six AST-equivalence exceptions.
   `operator_call_trailing_comma`. Gate 127.

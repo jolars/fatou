@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Diagnose overflowing decimal `Float64`/`Float32` literals instead of
+  accepting Rust's infinite parse result. The parser now emits JuliaSyntax's
+  `ErrorNumericOverflow` projection while leaving finite boundary values and
+  underflow unchanged.
+
 - [x] Fix raw triple-string quote decoding. Raw strings now apply their own
   backslash-before-quote treatment before display escaping; fixture
   `raw_triple_string_quote` locks the backslash-run siblings.
@@ -36,6 +41,9 @@
   sound stage 2–4.
 
 ## Formatter
+
+- [x] Harden `format --safe` against lossy projected leaves, non-finite float
+  fingerprints, and configured line-ending conversion inside block comments.
 
 ## Documentation
 

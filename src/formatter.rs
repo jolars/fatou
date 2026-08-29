@@ -9,4 +9,4 @@ pub mod check;
 
 pub use fatou_formatter::formatter::*;
 
-pub use check::{ChangedFile, CheckError, CheckResult, check_paths};
+pub use check::{ChangedFile, CheckError, CheckResult, check_paths, check_paths_verified};

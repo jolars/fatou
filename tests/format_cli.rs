@@ -150,6 +150,124 @@ fn piped_stdin_still_needs_no_dash() {
 }
 
 #[test]
+fn safe_formats_verified_stdin() {
+    let dir = sandbox();
+
+    let output = run_stdin(dir.path(), &["format", "--safe", "-"], Some("x=.5\n"));
+
+    assert!(output.status.success(), "safe stdin should format cleanly");
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "x = 0.5\n");
+    assert_eq!(String::from_utf8(output.stderr).unwrap(), "");
+}
+
+#[test]
+fn safe_stdin_fails_closed_without_output() {
+    let dir = sandbox();
+
+    let output = run_stdin(
+        dir.path(),
+        &["format", "--safe", "--quiet", "-"],
+        Some("function f("),
+    );
+
+    assert!(!output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "unverified output must not be emitted"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("safe formatting verification failed")
+            && stderr.contains("input does not parse cleanly"),
+        "unexpected error: {stderr}"
+    );
+}
+
+#[test]
+fn safe_stdin_rejects_overflowing_decimal_literals() {
+    let dir = sandbox();
+
+    let output = run_stdin(
+        dir.path(),
+        &["format", "--safe", "--quiet", "-"],
+        Some("x=1e400\n"),
+    );
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("input does not parse cleanly")
+            && stderr.contains("overflow in floating point literal"),
+        "unexpected error: {stderr}"
+    );
+}
+
+#[test]
+fn ordinary_stdin_formatting_remains_best_effort() {
+    let dir = sandbox();
+
+    let output = run_stdin(dir.path(), &["format", "-"], Some("function f("));
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "function f(\n");
+}
+
+#[test]
+fn safe_batch_preflights_every_file_before_writing() {
+    let dir = sandbox();
+    std::fs::write(dir.path().join("broken.jl"), "function f(").unwrap();
+
+    let output = run(dir.path(), &["format", "--safe", "input.jl", "broken.jl"]);
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("broken.jl"),
+        "the verification error should identify its file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("input.jl")).unwrap(),
+        UNFORMATTED,
+        "a failed safe preflight must leave the whole batch untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("broken.jl")).unwrap(),
+        "function f("
+    );
+}
+
+#[test]
+fn safe_check_preserves_the_existing_diff_contract() {
+    let dir = sandbox();
+
+    let output = run(dir.path(), &["format", "--safe", "--check", "input.jl"]);
+
+    assert!(!output.status.success(), "unformatted file should exit 1");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("would reformat"));
+    assert!(stdout.contains("-y  =  2") && stdout.contains("+y = 2"));
+}
+
+#[test]
+fn safe_check_emits_no_diff_when_verification_fails() {
+    let dir = sandbox();
+    std::fs::write(dir.path().join("broken.jl"), "function f(").unwrap();
+
+    let output = run(
+        dir.path(),
+        &["format", "--safe", "--check", "input.jl", "broken.jl"],
+    );
+
+    assert!(!output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "no diff should be rendered for a batch that was not fully verified"
+    );
+}
+
+#[test]
 fn dash_cannot_be_mixed_with_paths() {
     let dir = sandbox();
 

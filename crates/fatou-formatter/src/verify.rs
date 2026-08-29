@@ -113,9 +113,16 @@ struct Comment {
     text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpaqueLeaf {
+    kind: SyntaxKind,
+    text: String,
+}
+
 pub(crate) struct VerificationBaseline {
     strict_shape: String,
     comparable_shape: Option<Shape>,
+    opaque_leaves: Vec<OpaqueLeaf>,
     comments: Vec<Comment>,
 }
 
@@ -144,6 +151,7 @@ pub(crate) fn verification_baseline(
     Ok(VerificationBaseline {
         strict_shape,
         comparable_shape,
+        opaque_leaves: opaque_leaves(&parsed.cst),
         comments: comments(&parsed.cst),
     })
 }
@@ -160,6 +168,9 @@ pub(crate) fn verify_against(
     }
     let (strict_shape, comparable_shape) =
         projected_shapes(&output).ok_or(VerificationError::UnsupportedOutput)?;
+    if baseline.opaque_leaves != opaque_leaves(&output.cst) {
+        return Err(VerificationError::ChangedProgram);
+    }
     let same_program = baseline.strict_shape == strict_shape
         || baseline
             .comparable_shape
@@ -192,9 +203,10 @@ fn shapes_from_projection(raw: &str) -> Option<(String, Option<Shape>)> {
     drop_surface_flags(&mut tokens);
     let strict = tokens.join(" ");
     let mut cursor = 0;
-    let comparable = parse_shape(&tokens, &mut cursor)
-        .filter(|_| cursor == tokens.len())
-        .map(|shape| normalize_shape(shape, true));
+    let comparable = match parse_shape(&tokens, &mut cursor).filter(|_| cursor == tokens.len()) {
+        Some(shape) => Some(normalize_shape(shape, true).ok()?),
+        None => None,
+    };
     Some((strict, comparable))
 }
 
@@ -229,6 +241,34 @@ fn projection_tokens(projection: &str) -> Vec<String> {
                     match bytes[end] {
                         b'\\' if end + 1 < bytes.len() => end += 2,
                         b'"' => {
+                            end += 1;
+                            closed = true;
+                            break;
+                        }
+                        _ => end += 1,
+                    }
+                }
+                if closed {
+                    tokens.push(projection[start..end].to_string());
+                    i = end;
+                } else {
+                    i = atom_end(bytes, start);
+                    tokens.push(projection[start..i].to_string());
+                }
+            }
+            b'\'' => {
+                let start = i;
+                if !matches!(tokens.last(), Some(previous) if previous == "char") {
+                    i = atom_end(bytes, start);
+                    tokens.push(projection[start..i].to_string());
+                    continue;
+                }
+                let mut end = i + 1;
+                let mut closed = false;
+                while end < bytes.len() {
+                    match bytes[end] {
+                        b'\\' if end + 1 < bytes.len() => end += 2,
+                        b'\'' => {
                             end += 1;
                             closed = true;
                             break;
@@ -282,14 +322,19 @@ fn parse_shape(tokens: &[String], cursor: &mut usize) -> Option<Shape> {
     Some(Shape::List(items))
 }
 
-fn normalize_shape(shape: Shape, is_root: bool) -> Shape {
+fn normalize_shape(shape: Shape, is_root: bool) -> Result<Shape, ()> {
     let Shape::List(items) = shape else {
         return normalize_float_atom(shape);
     };
-    let mut items: Vec<_> = items
-        .into_iter()
-        .map(|shape| normalize_shape(shape, false))
-        .collect();
+    let opaque_payload = head_is(&items, "var") || head_is(&items, "char");
+    let mut items = if opaque_payload {
+        items
+    } else {
+        items
+            .into_iter()
+            .map(|shape| normalize_shape(shape, false))
+            .collect::<Result<Vec<_>, _>>()?
+    };
 
     if head_is(&items, "where") {
         for parameter in items.iter_mut().skip(2) {
@@ -323,32 +368,38 @@ fn normalize_shape(shape: Shape, is_root: bool) -> Shape {
         items = flattened;
     }
 
-    Shape::List(items)
+    Ok(Shape::List(items))
 }
 
 fn head_is(items: &[Shape], expected: &str) -> bool {
     matches!(items.first(), Some(Shape::Atom(head)) if head == expected)
 }
 
-fn normalize_float_atom(shape: Shape) -> Shape {
+fn normalize_float_atom(shape: Shape) -> Result<Shape, ()> {
     let Shape::Atom(atom) = shape else {
-        return shape;
+        return Ok(shape);
     };
     let Some((is_float32, parseable)) = decimal_float(&atom) else {
-        return Shape::Atom(atom);
+        return Ok(Shape::Atom(atom));
     };
     let fingerprint = if is_float32 {
         let Ok(value) = parseable.parse::<f32>() else {
-            return Shape::Atom(atom);
+            return Ok(Shape::Atom(atom));
         };
+        if !value.is_finite() {
+            return Err(());
+        }
         format!("float32:{:08x}", value.to_bits())
     } else {
         let Ok(value) = parseable.parse::<f64>() else {
-            return Shape::Atom(atom);
+            return Ok(Shape::Atom(atom));
         };
+        if !value.is_finite() {
+            return Err(());
+        }
         format!("float64:{:016x}", value.to_bits())
     };
-    Shape::Atom(fingerprint)
+    Ok(Shape::Atom(fingerprint))
 }
 
 /// Recognize a decimal Julia float and return its type plus a Rust-parseable
@@ -420,8 +471,39 @@ fn comments(root: &fatou_parser::syntax::SyntaxNode) -> Vec<Comment> {
             }),
             SyntaxKind::BLOCK_COMMENT => Some(Comment {
                 kind: token.kind(),
-                text: token.text().to_string(),
+                text: normalize_eols(token.text()),
             }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn normalize_eols(text: &str) -> String {
+    if text.contains('\r') {
+        text.replace("\r\n", "\n")
+    } else {
+        text.to_string()
+    }
+}
+
+/// Projector leaves whose payload grammar is not self-delimiting stay exact.
+/// The formatter has no licensed rewrite for either spelling, so comparing the
+/// source text fails closed without interpreting it as s-expression syntax.
+fn opaque_leaves(root: &fatou_parser::syntax::SyntaxNode) -> Vec<OpaqueLeaf> {
+    root.descendants_with_tokens()
+        .filter_map(|element| match element {
+            rowan::NodeOrToken::Node(node) if node.kind() == SyntaxKind::NONSTANDARD_IDENTIFIER => {
+                Some(OpaqueLeaf {
+                    kind: node.kind(),
+                    text: node.text().to_string(),
+                })
+            }
+            rowan::NodeOrToken::Token(token) if token.kind() == SyntaxKind::CHAR => {
+                Some(OpaqueLeaf {
+                    kind: token.kind(),
+                    text: token.text().to_string(),
+                })
+            }
             _ => None,
         })
         .collect()
@@ -552,6 +634,7 @@ mod tests {
             ("a; b", "a\nb"),
             ("x = .5", "x = 0.5"),
             ("x = 1f0", "x = 1.0f0"),
+            ("x = '('; y=.5", "x = '('\ny = 0.5"),
             ("var\"\\\"\"; x=.5", "var\"\\\"\"\nx = 0.5"),
         ] {
             assert_eq!(verify_format(input, formatted), Ok(()), "{input:?}");
@@ -578,8 +661,39 @@ mod tests {
     }
 
     #[test]
+    fn verified_format_keeps_projected_leaf_payloads_opaque() {
+        for (input, formatted) in [
+            (r#"var"1e2""#, r#"var"100.0""#),
+            (r#"var"a  b""#, r#"var"a b""#),
+            ("x = '\\x61'", "x = 'a'"),
+        ] {
+            assert_eq!(
+                verify_format(input, formatted),
+                Err(VerificationError::ChangedProgram),
+                "{input:?} -> {formatted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn overflowing_decimal_literals_fail_as_input_syntax() {
+        assert!(matches!(
+            verify_format("x=1e400", "x=2e400"),
+            Err(VerificationError::InputSyntax { .. })
+        ));
+        assert!(shapes_from_projection("(toplevel (= x 1e400))").is_none());
+    }
+
+    #[test]
     fn verified_format_preserves_comment_payloads() {
         assert_eq!(verify_format("# note  \nx=1", "# note\nx = 1"), Ok(()));
+        assert_eq!(
+            verify_format(
+                "#= first\nsecond =#\nx=.5\n",
+                "#= first\r\nsecond =#\r\nx = 0.5\r\n",
+            ),
+            Ok(())
+        );
         assert_eq!(
             verify_format("# before\nx=1", "# after\nx = 1"),
             Err(VerificationError::ChangedComments)
@@ -598,6 +712,10 @@ mod tests {
         ));
         assert!(matches!(
             verify_format("x = 1", "function f("),
+            Err(VerificationError::OutputSyntax { .. })
+        ));
+        assert!(matches!(
+            verify_format("x = 1", "x = 1e400"),
             Err(VerificationError::OutputSyntax { .. })
         ));
     }

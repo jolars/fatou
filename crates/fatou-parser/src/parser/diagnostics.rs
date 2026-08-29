@@ -200,12 +200,17 @@ pub enum DiagnosticKind {
     /// point at the `?`'s end, pushed once per trailing marker; the projector
     /// keys head and marker count off the multiplicity.
     IncompleteTernaryIf,
+    /// A decimal floating-point literal whose value exceeds its `Float64` or
+    /// `Float32` range. Julia rejects the literal and projects it as
+    /// `(ErrorNumericOverflow)`. Anchored to the complete `LITERAL`, including
+    /// a folded leading sign.
+    NumericOverflow,
 }
 
 /// How many ordered diagnostic streams a [`parse`](crate::parser::parse)
 /// emits: the drive-loop/`parse_stmt` stream, then one per post-build flag
 /// pass. See [`DiagnosticKind::stream`].
-pub(crate) const DIAGNOSTIC_STREAMS: usize = 5;
+pub(crate) const DIAGNOSTIC_STREAMS: usize = 6;
 
 impl DiagnosticKind {
     /// Which of [`parse`](crate::parser::parse)'s ordered diagnostic streams
@@ -221,11 +226,12 @@ impl DiagnosticKind {
     pub(crate) fn stream(self) -> usize {
         use DiagnosticKind::*;
         match self {
-            // The four post-build flag passes, in `core::parse` order.
+            // The five post-build flag passes, in `core::parse` order.
             ConstNotAssignment => 1,
             InvalidFunctionSignature => 2,
             CatchVarNotIdentifier => 3,
             InvalidExportItem => 4,
+            NumericOverflow => 5,
 
             // Everything else is pushed as the drive loop walks the token
             // stream, so it is already in document order.

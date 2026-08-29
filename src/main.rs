@@ -37,6 +37,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
         Commands::Format {
             paths,
             check,
+            safe,
             line_width,
             indent_width,
             exclude,
@@ -45,7 +46,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
             let (config, source) = load_config(&cli.config, cli.no_config)?;
             let style = style_with_overrides(&config, line_width, indent_width);
             let filter = resolve_exclude_filter(&config, &source, &exclude, force_exclude)?;
-            run_format(paths, check, style, &filter, cli.quiet)
+            run_format(paths, check, safe, style, &filter, cli.quiet)
         }
         Commands::Lint {
             paths,
@@ -331,6 +332,7 @@ fn run_parse(
 fn run_format(
     paths: Vec<PathBuf>,
     check: bool,
+    safe: bool,
     style: FormatStyle,
     exclude: &ExcludeFilter,
     quiet: bool,
@@ -349,8 +351,11 @@ fn run_format(
     let paths = match inputs_or_exit(&paths, "format", FORMAT_MISSING_INPUT) {
         Inputs::Stdin => {
             let text = read_source(None)?;
-            let formatted =
-                formatter::format_with_style(&text, style).map_err(|e| e.to_string())?;
+            let formatted = if safe {
+                formatter::format_verified_with_style(&text, style).map_err(|e| e.to_string())?
+            } else {
+                formatter::format_with_style(&text, style).map_err(|e| e.to_string())?
+            };
             print!("{formatted}");
             return Ok(ExitCode::SUCCESS);
         }
@@ -358,7 +363,12 @@ fn run_format(
     };
 
     if check {
-        let result = formatter::check_paths(paths, style, exclude).map_err(|e| e.to_string())?;
+        let result = if safe {
+            formatter::check_paths_verified(paths, style, exclude)
+        } else {
+            formatter::check_paths(paths, style, exclude)
+        }
+        .map_err(|e| e.to_string())?;
         let changed_count = result.changed.len();
         if quiet {
             for changed in &result.changed {
@@ -392,6 +402,28 @@ fn run_format(
 
     let files =
         fatou::file_discovery::collect_julia_files(paths, exclude).map_err(|e| e.to_string())?;
+    if safe {
+        let outcomes: Vec<_> = files
+            .par_iter()
+            .map(|path| {
+                let original = std::fs::read_to_string(path)
+                    .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+                let formatted = formatter::format_verified_with_style(&original, style)
+                    .map_err(|e| format!("failed to format {}: {e}", path.display()))?;
+                Ok::<_, String>((path.clone(), (formatted != original).then_some(formatted)))
+            })
+            .collect();
+        // No writes begin until every read, format, and verification completed.
+        let prepared = outcomes.into_iter().collect::<Result<Vec<_>, String>>()?;
+        prepared.into_par_iter().try_for_each(|(path, formatted)| {
+            if let Some(formatted) = formatted {
+                std::fs::write(&path, formatted)
+                    .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+            }
+            Ok::<(), String>(())
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
     files.par_iter().try_for_each(|path| {
         let original = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         let formatted =

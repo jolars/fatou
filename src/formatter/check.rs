@@ -6,7 +6,9 @@ use rayon::prelude::*;
 use similar::DiffTag;
 
 use crate::file_discovery::{ExcludeFilter, FileDiscoveryError, collect_julia_files};
-use crate::formatter::core::{FormatError, format_with_style};
+use crate::formatter::core::{
+    FormatError, VerifiedFormatError, format_verified_with_style, format_with_style,
+};
 use crate::formatter::style::FormatStyle;
 use crate::text::line_diff::bounded_line_diff;
 
@@ -39,8 +41,18 @@ pub struct CheckResult {
 #[derive(Debug)]
 pub enum CheckError {
     Discovery(FileDiscoveryError),
-    Io { path: PathBuf, message: String },
-    Format { path: PathBuf, error: FormatError },
+    Io {
+        path: PathBuf,
+        message: String,
+    },
+    Format {
+        path: PathBuf,
+        error: FormatError,
+    },
+    VerifiedFormat {
+        path: PathBuf,
+        error: VerifiedFormatError,
+    },
 }
 
 impl std::fmt::Display for CheckError {
@@ -51,6 +63,9 @@ impl std::fmt::Display for CheckError {
                 write!(f, "failed to read {}: {message}", path.display())
             }
             CheckError::Format { path, error } => {
+                write!(f, "failed to format {}: {error}", path.display())
+            }
+            CheckError::VerifiedFormat { path, error } => {
                 write!(f, "failed to format {}: {error}", path.display())
             }
         }
@@ -66,36 +81,73 @@ pub fn check_paths(
     style: FormatStyle,
     exclude: &ExcludeFilter,
 ) -> Result<CheckResult, CheckError> {
+    check_paths_impl(paths, style, exclude, false)
+}
+
+/// The verified counterpart of [`check_paths`]. Every prospective output is
+/// checked before the result exposes any diffs to its caller.
+pub fn check_paths_verified(
+    paths: &[PathBuf],
+    style: FormatStyle,
+    exclude: &ExcludeFilter,
+) -> Result<CheckResult, CheckError> {
+    check_paths_impl(paths, style, exclude, true)
+}
+
+fn check_paths_impl(
+    paths: &[PathBuf],
+    style: FormatStyle,
+    exclude: &ExcludeFilter,
+    verified: bool,
+) -> Result<CheckResult, CheckError> {
     let files = collect_julia_files(paths, exclude).map_err(CheckError::Discovery)?;
 
     // Each file is independent, so check them in parallel; `collect` preserves
     // the sorted discovery order for deterministic output.
-    let changed = files
-        .par_iter()
-        .map(|path| {
-            let original = std::fs::read_to_string(path).map_err(|err| CheckError::Io {
-                path: path.clone(),
-                message: err.to_string(),
-            })?;
-            let formatted =
-                format_with_style(&original, style).map_err(|error| CheckError::Format {
+    let check_file = |path: &PathBuf| {
+        let original = std::fs::read_to_string(path).map_err(|err| CheckError::Io {
+            path: path.clone(),
+            message: err.to_string(),
+        })?;
+        let formatted = if verified {
+            format_verified_with_style(&original, style).map_err(|error| {
+                CheckError::VerifiedFormat {
                     path: path.clone(),
                     error,
-                })?;
-            Ok(if formatted != original {
-                Some(ChangedFile {
-                    path: path.clone(),
-                    original,
-                    formatted,
-                })
-            } else {
-                None
+                }
+            })?
+        } else {
+            format_with_style(&original, style).map_err(|error| CheckError::Format {
+                path: path.clone(),
+                error,
+            })?
+        };
+        Ok(if formatted != original {
+            Some(ChangedFile {
+                path: path.clone(),
+                original,
+                formatted,
             })
+        } else {
+            None
         })
-        .collect::<Result<Vec<_>, CheckError>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    };
+    let checked = if verified {
+        // Materialize every parallel result before returning the first error,
+        // so a safe caller never observes a partially checked batch.
+        files
+            .par_iter()
+            .map(check_file)
+            .collect::<Vec<Result<_, CheckError>>>()
+            .into_iter()
+            .collect::<Result<Vec<_>, CheckError>>()?
+    } else {
+        files
+            .par_iter()
+            .map(check_file)
+            .collect::<Result<Vec<_>, CheckError>>()?
+    };
+    let changed = checked.into_iter().flatten().collect();
 
     Ok(CheckResult {
         checked: files.len(),

@@ -74,6 +74,15 @@ file would change):
 fatou format --check file.jl
 ```
 
+To make formatting fail unless Fatou can verify that the parsed program and
+comments are preserved, opt in with `--safe`. A multi-file safe run checks the
+whole batch before writing any file:
+
+```bash
+fatou format --safe file.jl
+fatou format --safe --check src
+```
+
 Lint a file; exits non-zero if there are any findings:
 
 ```bash
@@ -87,5 +96,5 @@ fatou lsp
 ```
 
 See the [CLI Reference](../reference/cli.md) for the full set of commands and
-options, and [Editor Setup](editors.md) to wire the language server into
-your editor.
+options, and [Editor Setup](editors.md) to wire the language server into your
+editor.

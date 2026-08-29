@@ -250,6 +250,16 @@ mod tests {
     }
 
     #[test]
+    fn verified_format_rejects_overflowing_decimal_literals() {
+        assert!(matches!(
+            format_verified("x=1e400\n"),
+            Err(VerifiedFormatError::Verification(
+                VerificationError::InputSyntax { .. }
+            ))
+        ));
+    }
+
+    #[test]
     fn line_ending_auto_mirrors_source() {
         use crate::formatter::LineEnding;
         let style = FormatStyle {
@@ -285,6 +295,14 @@ mod tests {
         assert_eq!(
             format_with_style("x=1\r\ny=2\r\n", to_lf).unwrap(),
             "x = 1\ny = 2\n",
+        );
+        assert_eq!(
+            format_verified_with_style("#= first\nsecond =#\nx=.5\n", to_crlf).unwrap(),
+            "#= first\r\nsecond =#\r\nx = 0.5\r\n",
+        );
+        assert_eq!(
+            format_verified_with_style("#= first\r\nsecond =#\r\nx=.5\r\n", to_lf).unwrap(),
+            "#= first\nsecond =#\nx = 0.5\n",
         );
     }
 

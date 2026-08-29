@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 
 use fatou::parser::parse;
 use fatou_formatter::format;
-use fatou_formatter::verify::ast_shape;
+use fatou_formatter::verify::{ast_shape, verify_format};
 
 const DIR_CORPUS: &str = "crates/fatou-parser/tests/fixtures/oracle";
 const JS_CORPUS: &str = "crates/fatou-parser/tests/fixtures/oracle/juliasyntax.jsonl";
@@ -96,6 +96,7 @@ fn cases() -> Vec<(String, String)> {
 fn formatting_preserves_ast_shape_over_parser_corpora() {
     let known = known_drift();
     let (mut drifted, mut unparsable, mut unprojectable) = (Vec::new(), Vec::new(), Vec::new());
+    let mut verification_failed = Vec::new();
     let mut stale = Vec::new();
     let mut exercised = BTreeSet::new();
     let (mut checked, mut skipped) = (0usize, 0usize);
@@ -113,6 +114,10 @@ fn formatting_preserves_ast_shape_over_parser_corpora() {
         };
         checked += 1;
         exercised.insert(slug.clone());
+
+        if let Err(error) = verify_format(&source, &formatted) {
+            verification_failed.push(format!("{slug}: {error}"));
+        }
 
         match ast_shape(&formatted) {
             // The source parsed cleanly and projected, so a formatted text with
@@ -170,5 +175,10 @@ fn formatting_preserves_ast_shape_over_parser_corpora() {
         drifted.is_empty(),
         "formatting changed the program shape for:\n  - {}",
         drifted.join("\n  - ")
+    );
+    assert!(
+        verification_failed.is_empty(),
+        "safe formatting rejected comparable corpus cases:\n  - {}",
+        verification_failed.join("\n  - ")
     );
 }

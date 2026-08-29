@@ -2463,6 +2463,13 @@ fn is_macro_name_part_token(kind: SyntaxKind) -> bool {
 // --- Literals / strings ----------------------------------------------------
 
 fn project_literal(node: &SyntaxNode) -> String {
+    if diag_count_from(
+        usize::from(node.text_range().start()),
+        DiagnosticKind::NumericOverflow,
+    ) > 0
+    {
+        return "(ErrorNumericOverflow)".to_string();
+    }
     let toks: Vec<_> = node
         .children_with_tokens()
         .filter_map(|el| el.into_token())

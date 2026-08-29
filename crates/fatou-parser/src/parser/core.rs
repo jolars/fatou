@@ -206,7 +206,58 @@ pub fn parse(text: &str) -> ParseOutput {
     flag_invalid_function_signatures(&cst, &mut diagnostics);
     flag_invalid_catch_vars(&cst, &mut diagnostics);
     flag_invalid_export_items(&cst, &mut diagnostics);
+    flag_numeric_overflow(&cst, &mut diagnostics);
     ParseOutput { cst, diagnostics }
+}
+
+/// Flag decimal floats that Julia rejects instead of accepting as infinity.
+/// Rust's parsers return an infinite value for these spellings, which gives us
+/// the same range check without evaluating Julia code.
+fn flag_numeric_overflow(cst: &SyntaxNode, diagnostics: &mut Vec<ParseDiagnostic>) {
+    for literal in cst
+        .descendants()
+        .filter(|node| node.kind() == SyntaxKind::LITERAL)
+    {
+        let Some(number) = literal
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| matches!(token.kind(), SyntaxKind::FLOAT | SyntaxKind::FLOAT32))
+        else {
+            continue;
+        };
+        if !decimal_float_overflows(number.text(), number.kind()) {
+            continue;
+        }
+        let range = literal.text_range();
+        push_diagnostic(
+            diagnostics,
+            DiagnosticKind::NumericOverflow,
+            "overflow in floating point literal",
+            usize::from(range.start()),
+            usize::from(range.end()),
+        );
+    }
+}
+
+fn decimal_float_overflows(text: &str, kind: SyntaxKind) -> bool {
+    if text.contains("0x") || text.contains("0X") {
+        return false;
+    }
+    let mut parseable = text.replace('_', "");
+    if kind == SyntaxKind::FLOAT32
+        && let Some(marker) = parseable.find(['f', 'F'])
+    {
+        parseable.replace_range(marker..=marker, "e");
+    }
+    match kind {
+        SyntaxKind::FLOAT32 => parseable
+            .parse::<f32>()
+            .is_ok_and(|value| !value.is_finite()),
+        SyntaxKind::FLOAT => parseable
+            .parse::<f64>()
+            .is_ok_and(|value| !value.is_finite()),
+        _ => false,
+    }
 }
 
 /// Flag each parenthesized `export` item that is not a single symbol. An export
@@ -855,5 +906,24 @@ mod tests {
         let kinds: Vec<_> = out.cst.children().map(|n| n.kind()).collect();
         assert_eq!(kinds, vec![crate::syntax::SyntaxKind::ASSIGNMENT_EXPR]);
         assert!(out.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn overflowing_decimal_floats_are_parse_errors() {
+        let out = parse("x=1e400\ny=1f400\nz=1e-4000\n");
+        assert_eq!(
+            out.diagnostics
+                .iter()
+                .map(|diagnostic| (
+                    diagnostic.start,
+                    diagnostic.end,
+                    diagnostic.message.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (2, 7, "overflow in floating point literal"),
+                (10, 15, "overflow in floating point literal"),
+            ]
+        );
     }
 }
