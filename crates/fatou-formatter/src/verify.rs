@@ -33,10 +33,399 @@
 //! recorded as known-drift entries in the tests instead, where they stay visible
 //! and attributable.
 
-use fatou_parser::parser::{parse, sexpr_tokens, to_juliasyntax_sexpr};
+use fatou_parser::parser::{
+    ParseDiagnostic, ParseOutput, parse, sexpr_tokens, to_juliasyntax_sexpr,
+};
+use fatou_parser::syntax::SyntaxKind;
 
 /// The projector's sentinel head for a `SyntaxKind` it cannot render.
 const UNSUPPORTED: &str = "unsupported";
+
+/// Why a prospective formatter result could not be proved equivalent to its
+/// input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerificationError {
+    /// The input is not valid Julia, so there is no program to compare.
+    InputSyntax { diagnostics: Vec<ParseDiagnostic> },
+    /// The parser's JuliaSyntax projection does not cover the input's shape.
+    UnsupportedInput,
+    /// Formatting produced text that no longer parses cleanly.
+    OutputSyntax { diagnostics: Vec<ParseDiagnostic> },
+    /// Formatting produced a shape the JuliaSyntax projection does not cover.
+    UnsupportedOutput,
+    /// The comparable program shapes differ.
+    ChangedProgram,
+    /// A comment was dropped, reordered, or changed.
+    ChangedComments,
+}
+
+impl std::fmt::Display for VerificationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InputSyntax { diagnostics } => {
+                write_diagnostic(f, "input does not parse cleanly", diagnostics)
+            }
+            Self::UnsupportedInput => {
+                f.write_str("input contains syntax the verifier cannot project")
+            }
+            Self::OutputSyntax { diagnostics } => {
+                write_diagnostic(f, "formatted output does not parse cleanly", diagnostics)
+            }
+            Self::UnsupportedOutput => {
+                f.write_str("formatted output contains syntax the verifier cannot project")
+            }
+            Self::ChangedProgram => f.write_str("formatted output changed the parsed program"),
+            Self::ChangedComments => f.write_str("formatted output changed comments"),
+        }
+    }
+}
+
+impl std::error::Error for VerificationError {}
+
+fn write_diagnostic(
+    f: &mut std::fmt::Formatter<'_>,
+    prefix: &str,
+    diagnostics: &[ParseDiagnostic],
+) -> std::fmt::Result {
+    let Some(first) = diagnostics.first() else {
+        return f.write_str(prefix);
+    };
+    write!(
+        f,
+        "{prefix}: [{}..{}]: {}",
+        first.start, first.end, first.message
+    )?;
+    if diagnostics.len() > 1 {
+        write!(f, " (and {} more)", diagnostics.len() - 1)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Shape {
+    Atom(String),
+    List(Vec<Shape>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Comment {
+    kind: SyntaxKind,
+    text: String,
+}
+
+pub(crate) struct VerificationBaseline {
+    strict_shape: String,
+    comparable_shape: Option<Shape>,
+    comments: Vec<Comment>,
+}
+
+/// Verify that `formatted` denotes the same program as `input` and preserves
+/// its comments.
+///
+/// Unlike [`ast_shape`], this comparison admits the formatter's narrowly
+/// defined, meaning-preserving canonicalizations. It fails closed when either
+/// text cannot be compared.
+pub fn verify_format(input: &str, formatted: &str) -> Result<(), VerificationError> {
+    let parsed = parse(input);
+    let baseline = verification_baseline(&parsed)?;
+    verify_against(&baseline, formatted)
+}
+
+pub(crate) fn verification_baseline(
+    parsed: &ParseOutput,
+) -> Result<VerificationBaseline, VerificationError> {
+    if !parsed.diagnostics.is_empty() {
+        return Err(VerificationError::InputSyntax {
+            diagnostics: parsed.diagnostics.clone(),
+        });
+    }
+    let (strict_shape, comparable_shape) =
+        projected_shapes(parsed).ok_or(VerificationError::UnsupportedInput)?;
+    Ok(VerificationBaseline {
+        strict_shape,
+        comparable_shape,
+        comments: comments(&parsed.cst),
+    })
+}
+
+pub(crate) fn verify_against(
+    baseline: &VerificationBaseline,
+    formatted: &str,
+) -> Result<(), VerificationError> {
+    let output = parse(formatted);
+    if !output.diagnostics.is_empty() {
+        return Err(VerificationError::OutputSyntax {
+            diagnostics: output.diagnostics,
+        });
+    }
+    let (strict_shape, comparable_shape) =
+        projected_shapes(&output).ok_or(VerificationError::UnsupportedOutput)?;
+    let same_program = baseline.strict_shape == strict_shape
+        || baseline
+            .comparable_shape
+            .as_ref()
+            .zip(comparable_shape.as_ref())
+            .is_some_and(|(before, after)| before == after);
+    if !same_program {
+        return Err(VerificationError::ChangedProgram);
+    }
+    if baseline.comments != comments(&output.cst) {
+        return Err(VerificationError::ChangedComments);
+    }
+    Ok(())
+}
+
+fn projected_shapes(output: &ParseOutput) -> Option<(String, Option<Shape>)> {
+    let raw = to_juliasyntax_sexpr(&output.cst, &output.diagnostics);
+    shapes_from_projection(&raw)
+}
+
+fn shapes_from_projection(raw: &str) -> Option<(String, Option<Shape>)> {
+    let mut tokens = projection_tokens(raw);
+    if tokens
+        .iter()
+        .enumerate()
+        .any(|(i, t)| is_head(&tokens, i) && t == UNSUPPORTED)
+    {
+        return None;
+    }
+    drop_surface_flags(&mut tokens);
+    let strict = tokens.join(" ");
+    let mut cursor = 0;
+    let comparable = parse_shape(&tokens, &mut cursor)
+        .filter(|_| cursor == tokens.len())
+        .map(|shape| normalize_shape(shape, true));
+    Some((strict, comparable))
+}
+
+/// Tokenize the projector's output for the semantic comparator.
+///
+/// This differs narrowly from [`sexpr_tokens`]: JuliaSyntax displays a
+/// `var"…"` name containing a quote as an unquoted atom (`(var ")`). A quote at
+/// an atom boundary is therefore a string only when a matching unescaped close
+/// exists; otherwise it belongs to the ordinary atom. The strict test projector
+/// keeps using [`sexpr_tokens`], whose representation is already pinned.
+fn projection_tokens(projection: &str) -> Vec<String> {
+    let bytes = projection.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b' ' | b'\t' | b'\n' | b'\r' => i += 1,
+            b'(' | b')' => {
+                tokens.push((bytes[i] as char).to_string());
+                i += 1;
+            }
+            b'"' => {
+                let start = i;
+                if matches!(tokens.last(), Some(previous) if previous == "var") {
+                    i = atom_end(bytes, start);
+                    tokens.push(projection[start..i].to_string());
+                    continue;
+                }
+                let mut end = i + 1;
+                let mut closed = false;
+                while end < bytes.len() {
+                    match bytes[end] {
+                        b'\\' if end + 1 < bytes.len() => end += 2,
+                        b'"' => {
+                            end += 1;
+                            closed = true;
+                            break;
+                        }
+                        _ => end += 1,
+                    }
+                }
+                if closed {
+                    tokens.push(projection[start..end].to_string());
+                    i = end;
+                } else {
+                    i = atom_end(bytes, start);
+                    tokens.push(projection[start..i].to_string());
+                }
+            }
+            _ => {
+                let start = i;
+                i = atom_end(bytes, start);
+                tokens.push(projection[start..i].to_string());
+            }
+        }
+    }
+    tokens
+}
+
+fn atom_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while bytes
+        .get(end)
+        .is_some_and(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'(' | b')'))
+    {
+        end += 1;
+    }
+    end
+}
+
+fn parse_shape(tokens: &[String], cursor: &mut usize) -> Option<Shape> {
+    let token = tokens.get(*cursor)?;
+    *cursor += 1;
+    if token != "(" {
+        return (token != ")").then(|| Shape::Atom(token.clone()));
+    }
+    let mut items = Vec::new();
+    while tokens.get(*cursor).is_some_and(|token| token != ")") {
+        items.push(parse_shape(tokens, cursor)?);
+    }
+    if tokens.get(*cursor)? != ")" {
+        return None;
+    }
+    *cursor += 1;
+    Some(Shape::List(items))
+}
+
+fn normalize_shape(shape: Shape, is_root: bool) -> Shape {
+    let Shape::List(items) = shape else {
+        return normalize_float_atom(shape);
+    };
+    let mut items: Vec<_> = items
+        .into_iter()
+        .map(|shape| normalize_shape(shape, false))
+        .collect();
+
+    if head_is(&items, "where") {
+        for parameter in items.iter_mut().skip(2) {
+            let Shape::List(braces) = parameter else {
+                continue;
+            };
+            let already_delimited = matches!(
+                braces.get(1),
+                Some(Shape::List(child)) if head_is(child, "bracescat")
+            );
+            if braces.len() == 2
+                && !already_delimited
+                && matches!(&braces[0], Shape::Atom(head) if head == "braces")
+            {
+                *parameter = braces[1].clone();
+            }
+        }
+    }
+
+    if is_root && head_is(&items, "toplevel") {
+        let mut flattened = Vec::with_capacity(items.len());
+        flattened.push(items.remove(0));
+        for item in items {
+            match item {
+                Shape::List(mut group) if head_is(&group, "toplevel-;") => {
+                    flattened.extend(group.drain(1..));
+                }
+                other => flattened.push(other),
+            }
+        }
+        items = flattened;
+    }
+
+    Shape::List(items)
+}
+
+fn head_is(items: &[Shape], expected: &str) -> bool {
+    matches!(items.first(), Some(Shape::Atom(head)) if head == expected)
+}
+
+fn normalize_float_atom(shape: Shape) -> Shape {
+    let Shape::Atom(atom) = shape else {
+        return shape;
+    };
+    let Some((is_float32, parseable)) = decimal_float(&atom) else {
+        return Shape::Atom(atom);
+    };
+    let fingerprint = if is_float32 {
+        let Ok(value) = parseable.parse::<f32>() else {
+            return Shape::Atom(atom);
+        };
+        format!("float32:{:08x}", value.to_bits())
+    } else {
+        let Ok(value) = parseable.parse::<f64>() else {
+            return Shape::Atom(atom);
+        };
+        format!("float64:{:016x}", value.to_bits())
+    };
+    Shape::Atom(fingerprint)
+}
+
+/// Recognize a decimal Julia float and return its type plus a Rust-parseable
+/// spelling. Hex and underscored floats are unchanged by the formatter and do
+/// not need a semantic normalization here.
+fn decimal_float(atom: &str) -> Option<(bool, String)> {
+    if atom.contains('_') || atom.contains("0x") || atom.contains("0X") {
+        return None;
+    }
+    let text = atom.replace('\u{2212}', "-");
+    let bytes = text.as_bytes();
+    let mut i = usize::from(matches!(bytes.first(), Some(b'+') | Some(b'-')));
+    let mut digits = 0usize;
+    while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+        i += 1;
+        digits += 1;
+    }
+    let mut has_dot = false;
+    if bytes.get(i) == Some(&b'.') {
+        has_dot = true;
+        i += 1;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+            digits += 1;
+        }
+    }
+    if digits == 0 {
+        return None;
+    }
+
+    let mut is_float32 = false;
+    let mut marker = None;
+    if bytes
+        .get(i)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E' | b'f' | b'F'))
+    {
+        is_float32 = matches!(bytes[i], b'f' | b'F');
+        marker = Some(i);
+        i += 1;
+        if bytes.get(i).is_some_and(|byte| matches!(byte, b'+' | b'-')) {
+            i += 1;
+        }
+        let exponent_start = i;
+        while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+            i += 1;
+        }
+        if i == exponent_start {
+            return None;
+        }
+    }
+    if i != bytes.len() || (!has_dot && marker.is_none()) {
+        return None;
+    }
+
+    let mut parseable = text;
+    if let Some(marker) = marker {
+        parseable.replace_range(marker..=marker, "e");
+    }
+    Some((is_float32, parseable))
+}
+
+fn comments(root: &fatou_parser::syntax::SyntaxNode) -> Vec<Comment> {
+    root.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter_map(|token| match token.kind() {
+            SyntaxKind::COMMENT => Some(Comment {
+                kind: token.kind(),
+                text: token.text().trim_end_matches([' ', '\t']).to_string(),
+            }),
+            SyntaxKind::BLOCK_COMMENT => Some(Comment {
+                kind: token.kind(),
+                text: token.text().to_string(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
 
 /// The formatting-invariant shape of `text`, or `None` when no comparable shape
 /// exists.
@@ -153,5 +542,70 @@ mod tests {
     #[test]
     fn comments_do_not_affect_the_shape() {
         assert_eq!(ast_shape("f(x)"), ast_shape("# c\nf(x) # d"));
+    }
+
+    #[test]
+    fn verified_format_accepts_licensed_canonicalizations() {
+        for (input, formatted) in [
+            ("f(a,b)", "f(\n    a,\n    b,\n)"),
+            ("x where T", "x where {T}"),
+            ("a; b", "a\nb"),
+            ("x = .5", "x = 0.5"),
+            ("x = 1f0", "x = 1.0f0"),
+            ("var\"\\\"\"; x=.5", "var\"\\\"\"\nx = 0.5"),
+        ] {
+            assert_eq!(verify_format(input, formatted), Ok(()), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn verified_format_rejects_program_changes() {
+        for (input, formatted) in [
+            ("x = (1 + 2) * 3", "x = 1 + 2 * 3"),
+            ("x = 1f0", "x = 1.0"),
+            ("x = -0.0", "x = 0.0"),
+            ("x = 0xff_ff", "x = 0x000ff_ff"),
+            ("x where {T S}", "x where {{T S}}"),
+            ("+(a=1,)", "+(a=1)"),
+            ("@foo a [1]", "@foo a[1]"),
+        ] {
+            assert_eq!(
+                verify_format(input, formatted),
+                Err(VerificationError::ChangedProgram),
+                "{input:?} -> {formatted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn verified_format_preserves_comment_payloads() {
+        assert_eq!(verify_format("# note  \nx=1", "# note\nx = 1"), Ok(()));
+        assert_eq!(
+            verify_format("# before\nx=1", "# after\nx = 1"),
+            Err(VerificationError::ChangedComments)
+        );
+        assert_eq!(
+            verify_format("#= block  =#\nx=1", "#= block =#\nx = 1"),
+            Err(VerificationError::ChangedComments)
+        );
+    }
+
+    #[test]
+    fn verified_format_fails_closed_on_parse_errors() {
+        assert!(matches!(
+            verify_format("function f(", "function f("),
+            Err(VerificationError::InputSyntax { .. })
+        ));
+        assert!(matches!(
+            verify_format("x = 1", "function f("),
+            Err(VerificationError::OutputSyntax { .. })
+        ));
+    }
+
+    #[test]
+    fn unsupported_projection_sentinels_fail_closed() {
+        assert!(shapes_from_projection("(toplevel (unsupported FOO))").is_none());
+        assert!(shapes_from_projection(r#"(toplevel (string "(unsupported FOO)"))"#).is_some());
+        assert!(shapes_from_projection("(toplevel (var \" ) (var \"))").is_some());
     }
 }

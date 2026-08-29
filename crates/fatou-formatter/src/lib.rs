@@ -9,10 +9,13 @@
 //! # Main entry points
 //!
 //! - [`format()`] / [`format_with_style`] — format a source string.
+//! - [`format_verified()`] / [`format_verified_with_style`] — format and prove
+//!   that the result preserves the parsed program and comments.
 //! - [`format_node`] / [`format_range`] — format an already-parsed
 //!   [`fatou_parser::syntax::SyntaxNode`], whole or a byte range of it.
 //! - [`FormatStyle`] — the layout knobs, with [`Default`] matching the fatou
 //!   CLI's defaults.
+//! - [`verify::verify_format`] — verify two source strings directly.
 //! - [`verify::ast_shape`] — the formatting-invariant shape of a source string,
 //!   for checking that formatting preserved the program (`ast(x) == ast(format(x))`).
 //!
@@ -41,6 +44,7 @@ pub mod verify;
 pub use rowan;
 
 pub use formatter::{
-    FormatError, FormatStyle, LineEnding, RangeFormatted, format, format_node, format_range,
-    format_with_style, print_document,
+    FormatError, FormatStyle, LineEnding, RangeFormatted, VerifiedFormatError, format, format_node,
+    format_range, format_verified, format_verified_with_style, format_with_style, print_document,
 };
+pub use verify::VerificationError;

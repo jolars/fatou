@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use fatou_formatter::format;
-use fatou_formatter::verify::ast_shape;
+use fatou_formatter::verify::{ast_shape, verify_format};
 use fatou_parser::parser::parse;
 
 /// Fixtures whose shape the formatter is known to move, each with the reason.
@@ -153,6 +153,8 @@ fn formatter_preserves_ast_shape() {
         };
         exercised.push(name.clone());
         let formatted = format(&input).expect("format input");
+        verify_format(&input, &formatted)
+            .unwrap_or_else(|error| panic!("safe formatting rejected `{name}`: {error}"));
         // The input projected, so a formatted text with no shape is the
         // formatter's doing — but `ast_shape` folds a failed parse and a
         // projector sentinel into `None`, and they point at different code.

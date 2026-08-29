@@ -15,6 +15,7 @@ use crate::formatter::rules::{base_indent_level, lower, lower_body_range};
 use crate::formatter::style::{FormatStyle, apply_line_ending};
 use crate::parser::parse;
 use crate::syntax::{SyntaxKind, SyntaxNode};
+use crate::verify::{VerificationError, verification_baseline, verify_against};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormatError {
@@ -33,15 +34,71 @@ impl std::fmt::Display for FormatError {
 
 impl std::error::Error for FormatError {}
 
+/// An error from an explicitly verified formatting operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifiedFormatError {
+    Formatting(FormatError),
+    Verification(VerificationError),
+}
+
+impl std::fmt::Display for VerifiedFormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Formatting(error) => error.fmt(f),
+            Self::Verification(error) => write!(f, "safe formatting verification failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for VerifiedFormatError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Formatting(error) => Some(error),
+            Self::Verification(error) => Some(error),
+        }
+    }
+}
+
+impl From<FormatError> for VerifiedFormatError {
+    fn from(error: FormatError) -> Self {
+        Self::Formatting(error)
+    }
+}
+
+impl From<VerificationError> for VerifiedFormatError {
+    fn from(error: VerificationError) -> Self {
+        Self::Verification(error)
+    }
+}
+
 /// Format `input` with the default style.
 pub fn format(input: &str) -> Result<String, FormatError> {
     format_with_style(input, FormatStyle::default())
+}
+
+/// Format `input` with the default style, refusing a result that cannot be
+/// proved to preserve the parsed program and its comments.
+pub fn format_verified(input: &str) -> Result<String, VerifiedFormatError> {
+    format_verified_with_style(input, FormatStyle::default())
 }
 
 /// Format `input` with the given style: parse to the lossless CST, lower it to
 /// the layout IR, and print (see the module docs).
 pub fn format_with_style(input: &str, style: FormatStyle) -> Result<String, FormatError> {
     format_node(&parse(input).cst, style)
+}
+
+/// Format `input` with `style`, then verify the result against the already
+/// parsed input before returning it.
+pub fn format_verified_with_style(
+    input: &str,
+    style: FormatStyle,
+) -> Result<String, VerifiedFormatError> {
+    let parsed = parse(input);
+    let baseline = verification_baseline(&parsed)?;
+    let formatted = format_node(&parsed.cst, style)?;
+    verify_against(&baseline, &formatted)?;
+    Ok(formatted)
 }
 
 /// Format an already-parsed CST `root` with the given style. The language
@@ -175,6 +232,21 @@ mod tests {
             let once = format(input).unwrap();
             assert_eq!(format(&once).unwrap(), once, "not idempotent for {input:?}");
         }
+    }
+
+    #[test]
+    fn verified_format_uses_the_formatter_canonicalizations() {
+        assert_eq!(format_verified("x=.5\n").unwrap(), "x = 0.5\n");
+    }
+
+    #[test]
+    fn verified_format_fails_closed_before_formatting_invalid_input() {
+        assert!(matches!(
+            format_verified("function f("),
+            Err(VerifiedFormatError::Verification(
+                VerificationError::InputSyntax { .. }
+            ))
+        ));
     }
 
     #[test]
