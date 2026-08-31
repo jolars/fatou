@@ -13,6 +13,8 @@ use std::process::{Command, Output};
 
 use tempfile::TempDir;
 
+const SMOKE_TEST_WORKFLOW: &str = include_str!("../.github/workflows/smoke-test.yml");
+
 fn fatou(dir: &Path, args: &[&str]) -> Output {
     fatou_with_config(dir, &[&["--no-config"], args].concat())
 }
@@ -165,4 +167,10 @@ fn broken_config_errors_mention_fatou_toml_and_no_config_bypasses() {
 
     let output = fatou_with_config(dir.path(), &["--no-config", "debug", "format", "ok.jl"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
+}
+
+#[test]
+fn smoke_artifact_excludes_upstream_clones() {
+    assert!(SMOKE_TEST_WORKFLOW.contains("REPOS_DIR=\"$RUNNER_TEMP/fatou-debug-format-repos\""));
+    assert!(!SMOKE_TEST_WORKFLOW.contains("REPOS_DIR=\"$RESULTS_DIR/repos\""));
 }

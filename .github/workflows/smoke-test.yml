@@ -87,7 +87,8 @@ jobs:
           FATOU_SHA="$(git rev-parse HEAD)"
           FATOU_VERSION="$("$FATOU_BIN" --version | head -n 1 || true)"
           RESULTS_DIR="$RUNNER_TEMP/fatou-debug-format-scan"
-          REPOS_DIR="$RESULTS_DIR/repos"
+          # The artifact carries diagnostics, not full upstream checkouts.
+          REPOS_DIR="$RUNNER_TEMP/fatou-debug-format-repos"
           LOGS_DIR="$RESULTS_DIR/logs"
           mkdir -p "$REPOS_DIR" "$LOGS_DIR"
 

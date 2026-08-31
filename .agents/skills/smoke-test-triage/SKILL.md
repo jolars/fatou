@@ -2,7 +2,8 @@
 name: smoke-test-triage
 description: >-
   Triage and fix fatou smoke-test regressions (idempotency, losslessness,
-  format-error, timeout) from CI debug-format reports and linked issues.
+  format-error, timeout) from CI debug-format reports and linked issues,
+  closing verified stale reports when possible.
 ---
 
 Use this skill when asked to investigate failures reported by the smoke-test
@@ -16,6 +17,8 @@ especially idempotency and losslessness regressions.
 3. Add regression coverage in the right test surface.
 4. Fix root cause (not symptom).
 5. Validate targeted cases, then the full repository checks.
+6. Close a report that no longer reproduces when the verification and GitHub
+   permissions support that conclusion.
 
 ## Triage workflow
 
@@ -26,6 +29,25 @@ especially idempotency and losslessness regressions.
    - upstream repo + commit SHA
    - fatou commit/version used by the scan
    - report excerpt and the approximate diff start line
+
+   **Close verified stale reports.** The issue may have been fixed between the
+   scan and triage. If the exact report command, pinned upstream commit, and
+   matching configuration no longer reproduce the reported failure, scan the
+   whole target repository with the current checkout. If that also passes,
+   close the issue automatically when GitHub authentication permits it. Add a
+   concise closure comment naming the original command, the upstream commit,
+   the whole-repository before/after counts, and the fixing Fatou commit when
+   it can be identified, then run:
+
+   ```bash
+   gh issue close <issue-number> --reason completed --comment "<evidence>"
+   ```
+
+   When practical, reproduce with the scan's Fatou revision as a baseline to
+   establish that a later commit fixed the failure. Do not close an issue when
+   the reproduction setup is uncertain—for example, the target revision or its
+   configuration could not be matched. If GitHub credentials or permissions
+   prevent closing it, leave it open and report the failed closure command.
 
 2. Reproduce in a local clone of the target repository:
    - the issue's `logs/…` paths (sample log, report, and the idempotency
@@ -151,3 +173,7 @@ When done, report:
 3. Fixture(s) added/updated.
 4. Root cause and code path changed.
 5. Validation commands run and outcomes.
+6. What you did **not** fix: remaining failure buckets by root cause, which
+   were allowlisted as out of scope, and which are open modeling gaps worth
+   work. Say plainly whether the issue can be closed or should stay open—and
+   whether you closed it automatically.
