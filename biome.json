@@ -1,7 +1,12 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
   "files": {
-    "includes": ["**", "!bench/results.json", "!docs/theme/vendor"]
+    "includes": [
+      "**",
+      "!bench/results.json",
+      "!docs/theme/vendor",
+      "!fatou.schema.json"
+    ]
   },
   "formatter": {
     "indentStyle": "space",

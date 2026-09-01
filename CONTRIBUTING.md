@@ -38,6 +38,11 @@ Or via `task`: `task test`, `task lint`, `task format-check`. CI additionally
 runs `cargo-audit` and `cargo-deny`, and builds and tests on Linux, macOS, and
 Windows.
 
+`fatou.schema.json` is generated from the configuration types. After changing a
+configuration key, type, enum, or default, regenerate it with
+`UPDATE_EXPECTED=1 cargo test config_schema`, review the diff, and rerun
+`cargo test config_schema`. Do not edit the schema by hand.
+
 The `fatou-parser` reparse benchmark sits behind a `bench` feature, so a plain
 `--all-targets` build never pulls in criterion, whose `alloca` dependency wants
 a C toolchain. Run it with `task bench-reparse`. The clippy line above passes

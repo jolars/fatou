@@ -5,12 +5,18 @@ use std::path::PathBuf;
 use rowan::TextRange;
 use serde::{Deserialize, Serialize};
 
+/// Severity assigned to a lint diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    /// A correctness failure that should stop the workflow.
     Error,
+    /// A likely problem that deserves attention.
     Warning,
+    /// Informational guidance that does not indicate a failure.
     Info,
+    /// A low-priority suggestion.
     Hint,
 }
 

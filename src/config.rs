@@ -16,6 +16,9 @@ use crate::formatter::{FormatStyle, LineEnding};
 use crate::julia_version::{VersionRange, parse_compat};
 use crate::linter::Severity;
 
+#[cfg(test)]
+mod schema;
+
 pub const CONFIG_FILE_NAME: &str = "fatou.toml";
 
 /// Environment variable naming a config file to use when the ancestor walk
@@ -76,42 +79,34 @@ pub struct LintConfig {
     pub rules: RulesConfig,
 }
 
-/// The `[lint.rules]` section: one field per *configurable* rule.
+/// Options for configurable lint rules under `[lint.rules]`.
 ///
-/// `rename_all = "kebab-case"` is what turns the field `discouraged_function`
-/// into the table `[lint.rules.discouraged-function]`, so the TOML spelling
-/// always matches the rule's public ID. A rule with no tunable knob has no
-/// field here.
-///
-/// Strictness is deliberately asymmetric with `select`/`ignore`/`severity`,
-/// where an unrecognized rule ID is only a warning: those are *data* (a list of
-/// IDs the user typed), while this is *schema* (a typed table). So
-/// `deny_unknown_fields` makes both an unknown rule ID under `[lint.rules]` and
-/// an unknown key inside a rule's table a config parse error.
+/// Each table name is the rule's public ID. Rules without tunable options have
+/// no table, and unknown rule tables or option names are rejected.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct RulesConfig {
+    /// Options for the `discouraged-function` lint rule.
     #[serde(default)]
     pub discouraged_function: DiscouragedFunctionConfig,
 }
 
-/// The `[lint.rules.discouraged-function]` table: the deny-list the
-/// `discouraged-function` rule matches call names against.
+/// Options for the `discouraged-function` rule.
 ///
-/// `functions` **replaces** the built-in set and `extend-functions` **adds** to
-/// it, the same idiom as top-level [`exclude`](Config::exclude) /
-/// [`extend-exclude`](Config::extend_exclude). Setting `functions = {}`
-/// silences the rule without having to `ignore` it.
+/// `functions` replaces the built-in deny-list, while `extend-functions` adds
+/// entries or overrides their suggestions. Setting `functions = {}` silences
+/// the rule without adding it to `ignore`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct DiscouragedFunctionConfig {
-    /// Function name -> the suggestion rendered in the diagnostic. Defaults to
-    /// [`default_discouraged_functions`]; setting it replaces that set wholesale.
+    /// Function name to diagnostic suggestion. Defaults to the built-in
+    /// deny-list; setting it replaces that set wholesale.
     #[serde(default = "default_discouraged_functions")]
     pub functions: BTreeMap<String, String>,
-    /// Entries added on top of [`functions`](Self::functions). An entry here
-    /// with the same name wins, so a project can reword a built-in suggestion
-    /// without restating the whole map.
+    /// Entries added on top of `functions`. An entry with the same name wins,
+    /// so a project can reword a built-in suggestion without restating the map.
     #[serde(default)]
     pub extend_functions: BTreeMap<String, String>,
 }
@@ -241,10 +236,9 @@ impl Default for FormatConfig {
     }
 }
 
-/// The `line-ending` key under `[format]`. A thin, serde-named mirror of
-/// [`LineEnding`] (the formatter's own type), kept separate so the TOML spelling
-/// (`kebab-case`) is a config concern, not baked into the formatter API.
+/// Newline style selected by `[format].line-ending`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum LineEndingConfig {
     /// Detect per file from the source; default `\n` when none is present.
@@ -290,30 +284,45 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// The on-disk TOML shape. Every field optional so a partial file falls back to
-/// defaults. The serde derives are format-agnostic, so the LSP reuses this
-/// shape to parse editor-pushed JSON settings (`initializationOptions`,
-/// `workspace/didChangeConfiguration`).
+/// The user-facing `fatou.toml` shape.
+///
+/// Every field is optional so a partial file falls back to defaults. The serde
+/// derives are format-agnostic, so the LSP reuses this shape to parse
+/// editor-pushed JSON settings (`initializationOptions`,
+/// `workspace/didChangeConfiguration`). This type, rather than the resolved
+/// [`Config`], owns the schema because it records optional keys and
+/// compatibility aliases exactly as users write them.
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawConfig {
+    /// Formatter settings. Omitted values use Fatou's built-in defaults.
     #[serde(default)]
     format: RawFormat,
+    /// Linter selection, severity, and per-rule settings.
     #[serde(default)]
     lint: RawLint,
+    /// Julia language compatibility settings.
     #[serde(default)]
     julia: RawJulia,
+    /// Gitignore-style patterns to exclude from file discovery.
     #[serde(default)]
     exclude: Vec<String>,
+    /// Gitignore-style patterns appended to `exclude`.
     #[serde(rename = "extend-exclude", default)]
     extend_exclude: Vec<String>,
 }
 
+/// The `[format]` section.
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[cfg_attr(test, schemars(rename = "FormatConfig"))]
 #[serde(deny_unknown_fields)]
 struct RawFormat {
+    /// Target line width. Defaults to 92.
     #[serde(rename = "line-width")]
     line_width: Option<u32>,
+    /// Spaces per indentation level. Defaults to 4.
     #[serde(rename = "indent-width")]
     indent_width: Option<u32>,
     /// Deprecated snake_case alias for `line-width`, still accepted with a warning.
@@ -322,6 +331,7 @@ struct RawFormat {
     /// Deprecated snake_case alias for `indent-width`, still accepted with a warning.
     #[serde(rename = "indent_width")]
     indent_width_snake: Option<u32>,
+    /// Emitted newline style. Defaults to `auto`.
     #[serde(rename = "line-ending")]
     line_ending: Option<LineEndingConfig>,
 }
@@ -358,23 +368,32 @@ fn deprecated_key(old: &str, new: &str) -> String {
     format!("`{old}` in [format] is deprecated; use `{new}`")
 }
 
+/// The `[lint]` section.
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[cfg_attr(test, schemars(rename = "LintConfig"))]
 #[serde(deny_unknown_fields)]
 struct RawLint {
+    /// When set, run only these rule IDs.
     select: Option<Vec<String>>,
+    /// Rule IDs to disable.
     #[serde(default)]
     ignore: Vec<String>,
+    /// Per-rule severity overrides.
     #[serde(default)]
     severity: BTreeMap<String, Severity>,
-    /// `[lint.rules]`. The on-disk and resolved shapes coincide here, so this
-    /// is [`RulesConfig`] itself rather than a `Raw` twin.
+    /// Per-rule option tables, keyed by configurable rule ID.
     #[serde(default)]
     rules: RulesConfig,
 }
 
+/// The `[julia]` section.
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
+#[cfg_attr(test, schemars(rename = "JuliaConfig"))]
 #[serde(deny_unknown_fields)]
 struct RawJulia {
+    /// Julia compatibility expression used by `julia-version-compat`.
     version: Option<String>,
 }
 

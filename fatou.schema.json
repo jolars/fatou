@@ -1,0 +1,256 @@
+{
+  "$id": "https://fatou.dev/fatou.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "DiscouragedFunctionConfig": {
+      "additionalProperties": false,
+      "description": "Options for the `discouraged-function` rule.\n\n`functions` replaces the built-in deny-list, while `extend-functions` adds\nentries or overrides their suggestions. Setting `functions = {}` silences\nthe rule without adding it to `ignore`.",
+      "properties": {
+        "extend-functions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Entries added on top of `functions`. An entry with the same name wins,\nso a project can reword a built-in suggestion without restating the map.",
+          "type": "object"
+        },
+        "functions": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {
+            "cd": "use the `cd(f, dir)` do-block form so the working directory is restored",
+            "exit": "let the caller decide when the process ends",
+            "pointer_from_objref": "prefer a safe alternative; the caller must guarantee the pointer stays valid",
+            "redirect_stderr": "use the `redirect_stderr(f, io)` do-block form",
+            "redirect_stdout": "use the `redirect_stdout(f, io)` do-block form",
+            "unsafe_load": "prefer a safe alternative; the caller must guarantee the pointer stays valid",
+            "unsafe_pointer_to_objref": "prefer a safe alternative; the caller must guarantee the pointer stays valid",
+            "unsafe_store!": "prefer a safe alternative; the caller must guarantee the pointer stays valid",
+            "unsafe_string": "prefer a safe alternative; the caller must guarantee the pointer stays valid",
+            "unsafe_wrap": "prefer a safe alternative; the caller must guarantee the pointer stays valid"
+          },
+          "description": "Function name to diagnostic suggestion. Defaults to the built-in\ndeny-list; setting it replaces that set wholesale.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "FormatConfig": {
+      "additionalProperties": false,
+      "description": "The `[format]` section.",
+      "properties": {
+        "indent-width": {
+          "description": "Spaces per indentation level. Defaults to 4.",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "indent_width": {
+          "description": "Deprecated snake_case alias for `indent-width`, still accepted with a warning.",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "line-ending": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LineEndingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Emitted newline style. Defaults to `auto`."
+        },
+        "line-width": {
+          "description": "Target line width. Defaults to 92.",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "line_width": {
+          "description": "Deprecated snake_case alias for `line-width`, still accepted with a warning.",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "JuliaConfig": {
+      "additionalProperties": false,
+      "description": "The `[julia]` section.",
+      "properties": {
+        "version": {
+          "description": "Julia compatibility expression used by `julia-version-compat`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LineEndingConfig": {
+      "description": "Newline style selected by `[format].line-ending`.",
+      "oneOf": [
+        {
+          "const": "auto",
+          "description": "Detect per file from the source; default `\\n` when none is present.",
+          "type": "string"
+        },
+        {
+          "const": "lf",
+          "description": "Always `\\n` (Unix).",
+          "type": "string"
+        },
+        {
+          "const": "crlf",
+          "description": "Always `\\r\\n` (Windows).",
+          "type": "string"
+        },
+        {
+          "const": "native",
+          "description": "`\\n` on Unix, `\\r\\n` on Windows.",
+          "type": "string"
+        }
+      ]
+    },
+    "LintConfig": {
+      "additionalProperties": false,
+      "description": "The `[lint]` section.",
+      "properties": {
+        "ignore": {
+          "default": [],
+          "description": "Rule IDs to disable.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RulesConfig"
+            }
+          ],
+          "description": "Per-rule option tables, keyed by configurable rule ID."
+        },
+        "select": {
+          "description": "When set, run only these rule IDs.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "severity": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Severity"
+          },
+          "default": {},
+          "description": "Per-rule severity overrides.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "RulesConfig": {
+      "additionalProperties": false,
+      "description": "Options for configurable lint rules under `[lint.rules]`.\n\nEach table name is the rule's public ID. Rules without tunable options have\nno table, and unknown rule tables or option names are rejected.",
+      "properties": {
+        "discouraged-function": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/DiscouragedFunctionConfig"
+            }
+          ],
+          "description": "Options for the `discouraged-function` lint rule."
+        }
+      },
+      "type": "object"
+    },
+    "Severity": {
+      "description": "Severity assigned to a lint diagnostic.",
+      "oneOf": [
+        {
+          "const": "error",
+          "description": "A correctness failure that should stop the workflow.",
+          "type": "string"
+        },
+        {
+          "const": "warning",
+          "description": "A likely problem that deserves attention.",
+          "type": "string"
+        },
+        {
+          "const": "info",
+          "description": "Informational guidance that does not indicate a failure.",
+          "type": "string"
+        },
+        {
+          "const": "hint",
+          "description": "A low-priority suggestion.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "description": "Schema for fatou.toml. Generated from Fatou's configuration types; do not hand-edit—run `UPDATE_EXPECTED=1 cargo test config_schema` instead.",
+  "properties": {
+    "exclude": {
+      "default": [],
+      "description": "Gitignore-style patterns to exclude from file discovery.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "extend-exclude": {
+      "default": [],
+      "description": "Gitignore-style patterns appended to `exclude`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "format": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/FormatConfig"
+        }
+      ],
+      "description": "Formatter settings. Omitted values use Fatou's built-in defaults."
+    },
+    "julia": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/JuliaConfig"
+        }
+      ],
+      "description": "Julia language compatibility settings."
+    },
+    "lint": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/LintConfig"
+        }
+      ],
+      "description": "Linter selection, severity, and per-rule settings."
+    }
+  },
+  "title": "Fatou configuration",
+  "type": "object"
+}

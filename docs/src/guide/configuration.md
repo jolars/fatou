@@ -21,6 +21,45 @@ This guide covers the common tasks. For the exhaustive list of keys, their
 types, and their defaults, see the [configuration
 reference](../reference/configuration.md).
 
+## Editor Support
+
+Fatou publishes a [JSON Schema](https://json-schema.org/) for `fatou.toml`, so
+editors with TOML support can offer key and value completion, inline
+documentation, and validation while you edit the configuration.
+
+Schema URL : <https://fatou.dev/fatou.schema.json>
+
+The schema is generated from the same configuration types Fatou uses at runtime
+and checked for drift in the test suite.
+
+### VS Code and Even Better TOML
+
+With the [Even Better
+TOML](https://marketplace.visualstudio.com/items?itemName=tamasfe.even-better-toml)
+extension installed, add this association to your user or workspace
+`settings.json`:
+
+```jsonc
+{
+  "evenBetterToml.schema.associations": {
+    "^(.*/)?fatou\\.toml$": "https://fatou.dev/fatou.schema.json"
+  }
+}
+```
+
+### Inline Schema Directive
+
+Editors that recognize Taplo's schema directive can select the schema from the
+configuration file itself:
+
+```toml
+#:schema https://fatou.dev/fatou.schema.json
+```
+
+Other editors and language servers, including Helix, Neovim with `taplo-lsp`,
+Zed, and IntelliJ, can use the same URL through their TOML schema association
+settings.
+
 ## Where Fatou Looks for a Config
 
 For a given file, Fatou walks up from the file's directory through its
