@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.6.0...fatou-parser-v0.7.0) (2026-09-03)
+
+### Features
+- **cli:** add safe formatting mode ([`150ea3d`](https://github.com/jolars/fatou/commit/150ea3df9a3b5847138256b76cef7245445cf984)), closes [#93](https://github.com/jolars/fatou/issues/93)
+
 ## [0.6.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.5.0...fatou-parser-v0.6.0) (2026-08-27)
 
 ### Features

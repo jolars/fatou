@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.6.0...fatou-formatter-v0.7.0) (2026-09-03)
+
+### Features
+- **cli:** add safe formatting mode ([`150ea3d`](https://github.com/jolars/fatou/commit/150ea3df9a3b5847138256b76cef7245445cf984)), closes [#93](https://github.com/jolars/fatou/issues/93)
+- **formatter:** add verified formatting ([`874cf57`](https://github.com/jolars/fatou/commit/874cf57ceb09609670fab5054693cd951c62d3e8)), refs [#93](https://github.com/jolars/fatou/issues/93)
+
+### Dependencies
+- updated crates/fatou-parser to v0.7.0
+
 ## [0.6.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.5.0...fatou-formatter-v0.6.0) (2026-08-27)
 
 ### Features
