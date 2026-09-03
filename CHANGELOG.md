@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.19.0](https://github.com/jolars/fatou/compare/v0.18.0...v0.19.0) (2026-09-03)
+
+### Features
+- **config:** publish JSON schema ([`2c2ed0f`](https://github.com/jolars/fatou/commit/2c2ed0f9e479f3e617a73ac635dcf83c225461dc))
+- **cli:** add safe formatting mode ([`150ea3d`](https://github.com/jolars/fatou/commit/150ea3df9a3b5847138256b76cef7245445cf984)), closes [#93](https://github.com/jolars/fatou/issues/93)
+
+### Dependencies
+- updated crates/fatou-formatter to v0.7.0
+- updated crates/fatou-parser to v0.7.0
+
 ## [0.18.0](https://github.com/jolars/fatou/compare/v0.17.0...v0.18.0) (2026-08-27)
 
 ### Features
