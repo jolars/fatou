@@ -126,6 +126,18 @@ guide](https://fatou.dev/guide/editors.html#zed) for configuration.
 
 ## Integrations
 
+Format Julia files with [dprint](https://dprint.dev) using
+[`dprint-plugin-fatou`](https://github.com/jolars/dprint-plugin-fatou):
+
+```sh
+dprint config add jolars/fatou
+dprint fmt
+```
+
+The plugin bundles the formatter and uses the `fatou` settings in `dprint.json`.
+See the [integrations guide](https://fatou.dev/guide/integrations.html#dprint)
+for setup, configuration, and updates.
+
 Run format and lint checks in GitHub Actions with
 [fatou-action](https://github.com/jolars/fatou-action), which installs a
 prebuilt, checksum- and provenance-verified binary:

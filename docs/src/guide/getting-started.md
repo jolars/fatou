@@ -59,6 +59,16 @@ cargo build --release
 
 The binary is written to `target/release/fatou`.
 
+### dprint
+
+To format Julia files with dprint, add the [Fatou dprint
+plugin](integrations.md#dprint). It bundles the formatter and requires neither
+Julia nor the Fatou CLI:
+
+```bash
+dprint config add jolars/fatou
+```
+
 ## First Run
 
 Format a file in place:

@@ -5,6 +5,9 @@ so a config only needs to mention what you want to change from the defaults.
 Unknown keys are rejected with an error, which means a typo never silently falls
 back to a default.
 
+The [dprint plugin](integrations.md#configuration) uses the `fatou` object in
+`dprint.json` for its settings and does not read `fatou.toml`.
+
 A minimal project config looks like this:
 
 ```toml

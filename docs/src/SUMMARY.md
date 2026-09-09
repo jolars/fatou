@@ -6,6 +6,7 @@
 
 - [Getting Started](guide/getting-started.md)
 - [Editor Setup](guide/editors.md)
+- [Integrations](guide/integrations.md)
 - [Configuration](guide/configuration.md)
 - [Comparison](guide/comparison.md)
 - [Performance](guide/performance.md)
