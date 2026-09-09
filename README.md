@@ -146,18 +146,25 @@ prebuilt, checksum- and provenance-verified binary:
 - uses: jolars/fatou-action@v1
 ```
 
-Or as [pre-commit](https://pre-commit.com) hooks with
+See the [GitHub Actions
+guide](https://fatou.dev/guide/integrations.html#github-actions) for a complete
+workflow and configuration options.
+
+Run Fatou through [pre-commit](https://pre-commit.com) hooks with
 [fatou-pre-commit](https://github.com/jolars/fatou-pre-commit):
 
 ```yaml
 repos:
   - repo: https://github.com/jolars/fatou-pre-commit
     # fatou version
-    rev: v0.7.0
+    rev: v0.18.0
     hooks:
       - id: fatou-lint
       - id: fatou-format
 ```
+
+See the [pre-commit guide](https://fatou.dev/guide/integrations.html#pre-commit)
+for installation, autofixes, and updates.
 
 ## Library Crates
 
