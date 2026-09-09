@@ -144,23 +144,25 @@ the release binary matching your platform. Keeping Fatou on the `PATH` is the
 better option on distributions that cannot run the generic release build, NixOS
 above all.
 
-The Julia extension also ships JETLS. Zed runs both servers unless you say
-otherwise, so name the ones you want and pick which handles formatting, in
-`settings.json`:
+To run Fatou as the only Julia language server and use it for formatting, add
+this to `settings.json`:
 
 ```json
 {
   "languages": {
     "Julia": {
-      "language_servers": ["fatou-language-server", "JETLS"],
-      "formatter": "language_server",
-      "format_on_save": "on"
+      "language_servers": ["fatou-language-server"],
+      "formatter": {
+        "language_server": {
+          "name": "fatou-language-server"
+        }
+      }
     }
   }
 }
 ```
 
-To run Fatou alone, drop `"JETLS"` from the list.
+To format on save, also add `"format_on_save": "on"` under `languages.Julia`.
 
 Settings go under the server's id, using the schema described in
 [Configuration](#configuration) below:
