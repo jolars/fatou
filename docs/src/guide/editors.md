@@ -237,6 +237,38 @@ vim.api.nvim_create_autocmd("FileType", {
 })
 ```
 
+## ALE (Vim and Neovim)
+
+[ALE](https://github.com/dense-analysis/ale) includes a Fatou linter and fixer
+for Julia. Install ALE and make sure `fatou` is on your `PATH`, then add to your
+`.vimrc` or `init.vim`:
+
+```vim
+let g:ale_linters = {'julia': ['fatou']}
+let g:ale_fixers = {'julia': ['fatou']}
+```
+
+If you already configure these dictionaries for other languages, add the `julia`
+entries to them.
+
+The linter starts `fatou lsp` to provide diagnostics and language features. The
+fixer runs `fatou format`; use `:ALEFix` to format the current buffer. To run
+configured fixers automatically on save, add:
+
+```vim
+let g:ale_fix_on_save = 1
+```
+
+To select a particular Fatou binary, set:
+
+```vim
+let g:ale_julia_fatou_executable = '/opt/fatou/bin/fatou'
+```
+
+This applies to both the linter and fixer. Configure project behavior through
+[`fatou.toml`](configuration.md). See `:help ale-julia-fatou` for ALE's
+Fatou-specific options.
+
 ## Helix
 
 Add to `~/.config/helix/languages.toml`:
