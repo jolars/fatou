@@ -120,6 +120,10 @@ starts the server automatically; it also works in Positron. See
 [`editors/code`](editors/code) for the extension, or the [editor setup
 guide](https://fatou.dev/guide/editors.html) for Neovim and other editors.
 
+Fatou is also available from Zed's extension registry. Install **Julia**, then
+**Fatou**, from Zed's extensions view. See the [Zed setup
+guide](https://fatou.dev/guide/editors.html#zed) for configuration.
+
 ## Integrations
 
 Run format and lint checks in GitHub Actions with
