@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0](https://github.com/jolars/fatou/compare/v0.18.0...v0.19.0) (2026-09-10)
+
+### Features
+- **lsp:** show registry versions and dependency upgrades ([`26bc83a`](https://github.com/jolars/fatou/commit/26bc83a6836268e91062efe167ba8b8a1b556ab9))
+- **lsp:** update dependency bounds in `Project.toml` ([`bad32ae`](https://github.com/jolars/fatou/commit/bad32aedd3aec09a3e015f54db021b6f4689358a))
+- **config:** publish JSON schema ([`2c2ed0f`](https://github.com/jolars/fatou/commit/2c2ed0f9e479f3e617a73ac635dcf83c225461dc))
+- **cli:** add safe formatting mode ([`150ea3d`](https://github.com/jolars/fatou/commit/150ea3df9a3b5847138256b76cef7245445cf984)), closes [#93](https://github.com/jolars/fatou/issues/93)
+
+### Dependencies
+- updated crates/fatou-formatter to v0.7.0
+- updated crates/fatou-parser to v0.7.0
+
 ## [0.18.0](https://github.com/jolars/fatou/compare/v0.17.0...v0.18.0) (2026-08-27)
 
 ### Features
