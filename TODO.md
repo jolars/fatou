@@ -173,10 +173,11 @@ style remains project policy rather than language correctness.
 
 ## Project files (`Project.toml`/`Manifest.toml`)
 
-- [x] Dependency update code actions replace existing `[compat]` bounds with
-  the newest stable release in installed registries. `src/registry.rs` reads
-  both directory and compressed registries without Julia or network access;
-  compressed results are cached until the archive changes.
+- [x] Dependency code actions distinguish updates within `[compat]` bounds from
+  upgrades beyond them, preserving precision, operators, and Julia unions.
+  Inlay hints show the newest matching release and available upgrade.
+  `src/registry.rs` reads both directory and compressed registries without Julia
+  or network access; compressed results are cached until the archive changes.
 
 - [ ] Completion of dependency names, the expensive one. On a default depot the
   registry is a `General.tar.gz`, so the full version needs gzip and tar to

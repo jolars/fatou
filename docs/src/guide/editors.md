@@ -316,21 +316,40 @@ version, kind, and resolved path the environment gave it, and an inlay hint puts
 each resolved version beside its UUID, so you can read off what you are actually
 on without opening the `Manifest.toml`. In an open `Manifest.toml`, each `path`
 entry — a package you have `dev`'d — is a link to that package's `Project.toml`.
-On a dependency declaration or its `[compat]` entry, a code action can replace
-the compatibility bound with the newest stable release found in your locally
-installed Julia registries. This works in `Project.toml` and
-`JuliaProject.toml`, including `[weakdeps]` and `[extras]`. Fatou reads unpacked
-and compressed registries in the background and skips yanked releases,
-prereleases, and dependencies overridden in `[sources]`.
 
-The action changes an existing `[compat]` value, preserving surrounding comments
-and whitespace. It replaces the whole bound, including any union of supported
-versions, with a new minimum version and Julia's implicit caret range. It does
-not update `Manifest.toml`, download packages, invoke Julia, or check whether
-the new release resolves with the project's Julia version and other
-dependencies. Registry data can lag published releases; update your registries
-through Pkg when you need fresher suggestions. Formatting remains unavailable
-for TOML files.
+Dependency updates follow the update/upgrade distinction used by
+[crates.nvim](https://github.com/saecki/crates.nvim), adapted to Julia's [Pkg
+compatibility grammar](https://pkgdocs.julialang.org/v1/compatibility/). On a
+dependency declaration or its existing `[compat]` entry, Fatou offers:
+
+- **Update** to adjust the bound to the newest stable release it already allows.
+- **Upgrade** to allow the newest stable release outside the current bound.
+
+Actions appear only when they change the bound. Edits retain version precision,
+operators, quotes, surrounding comments, and whitespace: given releases `1.9.3`
+and `2.3.4`, a bound of `"1.2"` offers Update to `"1.9"` and Upgrade to `"2.3"`.
+A bound of `"1"` offers only Upgrade to `"2"`. Julia's comma-separated ranges
+form a union; updates change the matching arm, and upgrades outside a union
+append a new arm so earlier support ranges survive.
+
+With LSP inlay hints enabled, each `[compat]` value shows the newest matching
+release and any available upgrade, such as `v1.9.3 → v2.3.4`. The matching
+release stays visible when the bound is current. These registry hints complement
+the resolved versions beside `[deps]` UUIDs; their tooltips explain the
+distinction.
+
+This works in `Project.toml` and `JuliaProject.toml`, including `[weakdeps]`,
+`[extras]`, and unsaved edits. Fatou reads installed directory and compressed
+registries in the background, caching compressed results until the archive
+changes. It skips yanked releases, prereleases, and dependencies overridden in
+`[sources]`. Missing or malformed registry data produces fewer suggestions.
+
+Suggestions use local registry data; unlike crates.nvim's crates.io requests,
+Fatou does not fetch published releases over the network. Update your registries
+through Pkg when you need fresher suggestions. Applying an action edits only
+`Project.toml`: it does not resolve the environment, update `Manifest.toml`,
+download packages, invoke Julia, or check compatibility with the project's Julia
+version and other dependencies. Formatting remains unavailable for TOML files.
 
 ## Configuration
 

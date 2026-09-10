@@ -6552,7 +6552,7 @@ fn serves_quick_fix_code_actions() {
 }
 
 #[test]
-fn serves_project_dependency_updates_from_the_live_buffer() {
+fn serves_project_dependency_updates_and_hints_from_the_live_buffer() {
     let _env = ENV_LOCK.lock().unwrap();
     let depot = TempDir::new("fatou-lsp-update-depot");
     let pkg = TempDir::new("fatou-lsp-update-project");
@@ -6565,7 +6565,10 @@ fn serves_project_dependency_updates_from_the_live_buffer() {
         &depot
             .path
             .join("registries/General/E/Example/Versions.toml"),
-        &format!("[\"2.3.4\"]\ngit-tree-sha1 = \"{}\"\n", "1".repeat(40)),
+        &format!(
+            "[\"1.9.3\"]\ngit-tree-sha1 = \"{tree}\"\n[\"2.3.4\"]\ngit-tree-sha1 = \"{tree}\"\n",
+            tree = "1".repeat(40),
+        ),
     );
     let _guard = EnvGuard::set(&[("JULIA_DEPOT_PATH", depot.path.to_str().unwrap())]);
     let (server, client) = Connection::memory();
@@ -6596,6 +6599,27 @@ fn serves_project_dependency_updates_from_the_live_buffer() {
             .result()
             .unwrap()
     };
+    let hints = |uri: &Uri, range: Range| -> Vec<InlayHint> {
+        client
+            .sender
+            .send(Message::Request(Request::new(
+                RequestId::from(80),
+                "textDocument/inlayHint".into(),
+                InlayHintParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    range,
+                    work_done_progress_params: Default::default(),
+                },
+            )))
+            .unwrap();
+        serde_json::from_value(
+            recv_response(&client, RequestId::from(80))
+                .result()
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let full_range = Range::new(Position::new(0, 0), Position::new(100, 0));
     for filename in ["Project.toml", "JuliaProject.toml"] {
         let path = pkg.path.join(filename);
         let uri = file_uri(&path);
@@ -6609,15 +6633,33 @@ fn serves_project_dependency_updates_from_the_live_buffer() {
         );
         let edits: Vec<CodeActionOrCommand> =
             serde_json::from_value(actions(&uri, Some(vec![CodeActionKind::REFACTOR]))).unwrap();
-        assert_eq!(edits.len(), 1);
-        let CodeActionOrCommand::CodeAction(action) = &edits[0] else {
-            panic!("expected edit")
-        };
-        assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_REWRITE));
-        assert_eq!(
-            action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0].new_text,
-            "\"2.3.4\""
+        assert_eq!(edits.len(), 2);
+        for (action, verb, replacement) in [
+            (&edits[0], "Update", "\"1.9\""),
+            (&edits[1], "Upgrade", "\"2.3\""),
+        ] {
+            let CodeActionOrCommand::CodeAction(action) = action else {
+                panic!("expected edit")
+            };
+            assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_REWRITE));
+            assert_eq!(
+                action.title,
+                format!("{verb} `Example` compat to {replacement}")
+            );
+            let edit = &action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0];
+            assert_eq!(edit.new_text, replacement);
+            assert_eq!(
+                edit.range,
+                Range::new(Position::new(3, 10), Position::new(3, 15))
+            );
+        }
+        let inline = hints(&uri, full_range);
+        assert_eq!(inline.len(), 1);
+        assert!(
+            matches!(&inline[0].label, InlayHintLabel::String(label) if label == "v1.9.3 → v2.3.4")
         );
+        assert_eq!(inline[0].position, Position::new(3, 15));
+        assert!(hints(&uri, Range::new(Position::new(0, 0), Position::new(3, 0))).is_empty());
         client
             .sender
             .send(Message::Notification(Notification {
@@ -6637,10 +6679,15 @@ fn serves_project_dependency_updates_from_the_live_buffer() {
             }))
             .unwrap();
         assert_eq!(actions(&uri, None), serde_json::json!([]));
+        let inline = hints(&uri, full_range);
+        assert_eq!(inline.len(), 1);
+        assert!(matches!(&inline[0].label, InlayHintLabel::String(label) if label == "v2.3.4"));
+        assert_eq!(inline[0].position, Position::new(3, 17));
     }
     let manifest = file_uri(&pkg.path.join("Manifest.toml"));
     open_document(&client, &manifest, "manifest_format = \"2.0\"\n");
     assert!(actions(&manifest, None).is_null());
+    assert!(hints(&manifest, full_range).is_empty());
     client
         .sender
         .send(Message::Request(Request {

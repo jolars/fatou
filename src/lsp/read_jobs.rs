@@ -232,9 +232,11 @@ pub(crate) enum ReadJob {
         sender: ReadReply,
     },
     /// Inlay hints in an open *project file*: each dependency's resolved
-    /// version. `range` is the client's viewport, which it re-sends on every
-    /// scroll, so hints outside it are never built.
+    /// version, followed by registry versions beside compat bounds. `range` is
+    /// the client's viewport, which it re-sends on every scroll. The registry
+    /// worker finishes the reply after this job releases its salsa snapshot.
     ProjectInlayHints {
+        updates: super::project_updates::ProjectUpdates,
         id: RequestId,
         text: Arc<TextBuffer>,
         range: Range,
@@ -614,13 +616,15 @@ pub(crate) fn run_read(snapshot: Analysis, job: ReadJob, encoding: PositionEncod
             let _ = sender.send(Message::Response(Response::new_ok(id, links)));
         }
         ReadJob::ProjectInlayHints {
+            updates,
             id,
             text,
             range,
             sender,
         } => {
             let hints = project_inlay_hints_via_db(&snapshot, &text, range, encoding);
-            let _ = sender.send(Message::Response(Response::new_ok(id, hints)));
+            drop(snapshot);
+            updates.inlay_hints(id, text, range, encoding, hints, sender);
         }
         ReadJob::References {
             id,

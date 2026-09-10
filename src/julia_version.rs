@@ -11,9 +11,13 @@
 //!
 //! Julia's `Pkg` compat grammar is *not* Cargo semver: a bare `"1.6"` carries an
 //! implicit caret (`>= 1.6.0, < 2.0.0`), `-` spells an inclusive range, and a
-//! comma spells a union. We only need the overall floor (and, loosely, the
-//! ceiling) for compat checking, so [`parse_compat`] collapses a union to its
-//! lowest floor and highest ceiling rather than modeling disjoint intervals.
+//! comma spells a union. Dependency updates use exact disjoint intervals;
+//! [`parse_compat`] projects their lowest floor and highest ceiling for the
+//! linter's syntax compatibility checks.
+
+mod compat;
+
+pub(crate) use compat::CompatSpec;
 
 use std::fmt;
 use std::str::FromStr;
@@ -126,91 +130,9 @@ impl std::error::Error for ParseError {}
 /// - `~1.6` / `~1.6.2` — tilde: floor at the value, ceiling at the next minor.
 /// - `=1.6` — exact.
 /// - `1.6 - 1.11` — inclusive hyphen range.
+/// - `>= 1.6`, `≥ 1.6`, `< 2` — inequalities.
 pub fn parse_compat(spec: &str) -> Result<VersionRange, ParseError> {
-    let mut overall: Option<VersionRange> = None;
-    for clause in spec.split(',') {
-        let clause = clause.trim();
-        if clause.is_empty() {
-            continue;
-        }
-        let range = parse_clause(clause)?;
-        overall = Some(match overall {
-            None => range,
-            Some(acc) => merge(acc, range),
-        });
-    }
-    overall.ok_or(ParseError)
-}
-
-/// The union of two ranges as a single interval: lowest floor, highest ceiling
-/// (an unbounded ceiling on either side stays unbounded).
-fn merge(a: VersionRange, b: VersionRange) -> VersionRange {
-    let max = match (a.max, b.max) {
-        (Some(x), Some(y)) => Some(x.max(y)),
-        _ => None,
-    };
-    VersionRange {
-        min: a.min.min(b.min),
-        max,
-    }
-}
-
-fn parse_clause(clause: &str) -> Result<VersionRange, ParseError> {
-    // Inclusive hyphen range: `1.6 - 1.11`. Split on a hyphen flanked by spaces
-    // so it is not confused with a version's own separators.
-    if let Some((lo, hi)) = clause.split_once(" - ") {
-        let min: Version = lo.trim().parse()?;
-        let hi: Version = hi.trim().parse()?;
-        // The hyphen bound is inclusive; store the exclusive ceiling one patch up.
-        return Ok(VersionRange {
-            min,
-            max: Some(next_patch(hi)),
-        });
-    }
-
-    if let Some(rest) = clause.strip_prefix('~') {
-        let v: Version = rest.trim().parse()?;
-        return Ok(VersionRange {
-            min: v,
-            max: Some(next_minor(v)),
-        });
-    }
-
-    if let Some(rest) = clause.strip_prefix('=') {
-        let v: Version = rest.trim().parse()?;
-        return Ok(VersionRange {
-            min: v,
-            max: Some(next_patch(v)),
-        });
-    }
-
-    // Bare or caret-prefixed: implicit caret semantics.
-    let rest = clause.strip_prefix('^').unwrap_or(clause);
-    let v: Version = rest.trim().parse()?;
-    Ok(VersionRange {
-        min: v,
-        max: Some(caret_ceiling(v)),
-    })
-}
-
-/// The exclusive ceiling of a caret clause: bump the first nonzero component
-/// (per `Pkg` — `^1.2` -> `2.0.0`, `^0.3` -> `0.4.0`, `^0.0.4` -> `0.0.5`).
-fn caret_ceiling(v: Version) -> Version {
-    if v.major != 0 {
-        Version::new(v.major + 1, 0, 0)
-    } else if v.minor != 0 {
-        Version::new(0, v.minor + 1, 0)
-    } else {
-        Version::new(0, 0, v.patch + 1)
-    }
-}
-
-fn next_minor(v: Version) -> Version {
-    Version::new(v.major, v.minor + 1, 0)
-}
-
-fn next_patch(v: Version) -> Version {
-    Version::new(v.major, v.minor, v.patch + 1)
+    Ok(CompatSpec::parse(spec)?.envelope())
 }
 
 #[cfg(test)]
@@ -278,7 +200,7 @@ mod tests {
     fn hyphen_range_is_inclusive() {
         let r = parse_compat("1.6 - 1.11").unwrap();
         assert_eq!(r.min, v(1, 6, 0));
-        assert_eq!(r.max, Some(v(1, 11, 1)));
+        assert_eq!(r.max, Some(v(1, 12, 0)));
     }
 
     #[test]
@@ -292,6 +214,28 @@ mod tests {
     fn empty_or_all_blank_spec_fails() {
         assert!(parse_compat("").is_err());
         assert!(parse_compat("  ,  ").is_err());
+    }
+
+    #[test]
+    fn compat_respects_partial_upper_bounds_and_inequalities() {
+        assert_eq!(parse_compat("1.6 - 1.11").unwrap().max, Some(v(1, 12, 0)));
+        assert_eq!(parse_compat("0").unwrap().max, Some(v(1, 0, 0)));
+        assert_eq!(parse_compat("0.0").unwrap().max, Some(v(0, 1, 0)));
+        assert_eq!(parse_compat("~1").unwrap().max, Some(v(2, 0, 0)));
+        assert_eq!(
+            parse_compat(">= 1.2").unwrap(),
+            VersionRange {
+                min: v(1, 2, 0),
+                max: None
+            }
+        );
+        assert_eq!(
+            parse_compat("< 2").unwrap(),
+            VersionRange {
+                min: v(0, 0, 0),
+                max: Some(v(2, 0, 0))
+            }
+        );
     }
 
     #[test]

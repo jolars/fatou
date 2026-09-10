@@ -179,7 +179,7 @@ struct ReadMeta {
 }
 
 pub(crate) struct GlobalState {
-    project_actions: Option<super::project_code_action::ProjectActions>,
+    project_updates: Option<super::project_updates::ProjectUpdates>,
     documents: HashMap<Uri, Document>,
     sender: Sender<Message>,
     /// The analysis thread's outbound channel, cloned into every dispatched
@@ -275,7 +275,7 @@ impl GlobalState {
     ) -> Self {
         let (config, warnings) = ConfigStore::new(initialization_options);
         let state = Self {
-            project_actions: None,
+            project_updates: None,
             documents: HashMap::new(),
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
@@ -374,6 +374,13 @@ impl GlobalState {
         });
     }
 
+    fn project_updates(&mut self) -> &super::project_updates::ProjectUpdates {
+        self.project_updates.get_or_insert_with(|| {
+            let ctx = crate::environment::EnvContext::from_process(PathBuf::new());
+            super::project_updates::ProjectUpdates::new(crate::environment::depot_roots(&ctx))
+        })
+    }
+
     fn on_code_action(&mut self, req: Request) {
         let id = req.id.clone();
         let Ok((_, params)) = req.extract::<CodeActionParams>(CodeActionRequest::METHOD) else {
@@ -390,14 +397,9 @@ impl GlobalState {
                 return;
             }
             let reply = self.read_reply(id.clone(), Some(&uri));
-            self.project_actions
-                .get_or_insert_with(|| {
-                    let ctx = crate::environment::EnvContext::from_process(PathBuf::new());
-                    super::project_code_action::ProjectActions::new(
-                        crate::environment::depot_roots(&ctx),
-                    )
-                })
-                .request(id, params, text, self.encoding, reply);
+            let encoding = self.encoding;
+            self.project_updates()
+                .code_actions(id, params, text, encoding, reply);
             return;
         }
         let Some(text) = self.julia_text(&uri) else {
@@ -571,10 +573,10 @@ impl GlobalState {
         });
     }
 
-    /// Inlay hints are a project file's alone: a dependency's resolved version
-    /// beside its UUID. A Julia document answers an empty list rather than
-    /// `null` — the capability is advertised globally, and an empty list is the
-    /// honest answer to "what hints does this file have".
+    /// Project hints show resolved versions beside UUIDs and available registry
+    /// versions beside compat bounds. A Julia document answers an empty list
+    /// rather than `null` — the capability is advertised globally, and an empty
+    /// list is the honest answer to "what hints does this file have".
     fn on_inlay_hints(&mut self, req: Request) {
         let id = req.id.clone();
         let Ok((_, params)) = req.extract::<InlayHintParams>(InlayHintRequest::METHOD) else {
@@ -587,7 +589,9 @@ impl GlobalState {
             return;
         };
         let reply = self.read_reply(id.clone(), Some(&uri));
+        let updates = self.project_updates().clone();
         self.dispatch_read(ReadJob::ProjectInlayHints {
+            updates,
             id,
             text,
             range: params.range,

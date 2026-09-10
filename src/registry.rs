@@ -1,6 +1,6 @@
 //! Read package releases from installed Julia registries without invoking Julia.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -11,7 +11,7 @@ use flate2::read::GzDecoder;
 use crate::environment::Uuid;
 use crate::julia_version::Version;
 
-pub(crate) type Releases = BTreeMap<Uuid, (String, Version)>;
+pub(crate) type Releases = BTreeMap<Uuid, (String, BTreeSet<Version>)>;
 
 #[derive(Default)]
 pub(crate) struct RegistryCache {
@@ -26,7 +26,7 @@ struct CachedArchive {
 impl RegistryCache {
     /// Directory registries read only requested packages. Compressed registries
     /// are scanned once per archive revision, since tar has no random access.
-    pub(crate) fn latest(
+    pub(crate) fn releases(
         &mut self,
         depots: &[PathBuf],
         requested: &BTreeMap<Uuid, String>,
@@ -89,9 +89,12 @@ impl RegistryCache {
                 } else {
                     continue;
                 };
-                for (uuid, (name, version)) in found {
-                    let entry = releases.entry(uuid).or_insert((name, version));
-                    entry.1 = entry.1.max(version);
+                for (uuid, (name, mut versions)) in found {
+                    releases
+                        .entry(uuid)
+                        .or_insert_with(|| (name, BTreeSet::new()))
+                        .1
+                        .append(&mut versions);
                 }
             }
         }
@@ -163,7 +166,7 @@ fn directory_releases(root: &Path, requested: &BTreeMap<Uuid, String>) -> Releas
                 return None;
             }
             let text = read_text(File::open(root.join(path).join("Versions.toml")).ok()?).ok()?;
-            Some((uuid, (name, latest_release(&text)?)))
+            Some((uuid, (name, release_versions(&text))))
         })
         .collect()
 }
@@ -186,24 +189,22 @@ fn archive_releases(path: &Path) -> io::Result<Releases> {
             let Some(parent) = path.parent() else {
                 continue;
             };
-            if let Some(version) = latest_release(&read_text(entry)?) {
-                versions.insert(parent.to_path_buf(), version);
-            }
+            versions.insert(parent.to_path_buf(), release_versions(&read_text(entry)?));
         }
     }
     Ok(packages
         .into_iter()
         .flat_map(|table| {
             registry_packages(&table)
-                .filter_map(|(uuid, name, path)| Some((uuid, (name, *versions.get(&path)?))))
+                .filter_map(|(uuid, name, path)| Some((uuid, (name, versions.get(&path)?.clone()))))
                 .collect::<Vec<_>>()
         })
         .collect())
 }
 
-fn latest_release(text: &str) -> Option<Version> {
+fn release_versions(text: &str) -> BTreeSet<Version> {
     toml::from_str::<toml::Table>(text)
-        .ok()?
+        .unwrap_or_default()
         .into_iter()
         .filter_map(|(raw, value)| {
             let table = value.as_table()?;
@@ -229,7 +230,7 @@ fn latest_release(text: &str) -> Option<Version> {
             }
             base.parse().ok()
         })
-        .max()
+        .collect()
 }
 
 #[cfg(test)]
@@ -299,7 +300,7 @@ mod tests {
             let depots = vec![depot.path().to_path_buf()];
             let requested = BTreeMap::from([(UUID.parse().unwrap(), "Example".into())]);
             let mut cache = RegistryCache::default();
-            assert!(cache.latest(&depots, &requested).is_empty());
+            assert!(cache.releases(&depots, &requested).is_empty());
             let write = if compressed {
                 write_archive
             } else {
@@ -309,20 +310,20 @@ mod tests {
                 write(depot.path(), version);
                 let expected = BTreeMap::from([(
                     UUID.parse().unwrap(),
-                    ("Example".into(), version.parse().unwrap()),
+                    ("Example".into(), BTreeSet::from([version.parse().unwrap()])),
                 )]);
-                assert_eq!(cache.latest(&depots, &requested), expected);
-                assert_eq!(cache.latest(&depots, &requested), expected);
+                assert_eq!(cache.releases(&depots, &requested), expected);
+                assert_eq!(cache.releases(&depots, &requested), expected);
             }
             let wrong_name = BTreeMap::from([(UUID.parse().unwrap(), "Different".into())]);
-            assert!(cache.latest(&depots, &wrong_name).is_empty());
+            assert!(cache.releases(&depots, &wrong_name).is_empty());
             let wrong_uuid = BTreeMap::from([(
                 "00000000-0000-0000-0000-000000000000".parse().unwrap(),
                 "Example".into(),
             )]);
-            assert!(cache.latest(&depots, &wrong_uuid).is_empty());
+            assert!(cache.releases(&depots, &wrong_uuid).is_empty());
             std::fs::remove_dir_all(depot.path().join("registries")).unwrap();
-            assert!(cache.latest(&depots, &requested).is_empty());
+            assert!(cache.releases(&depots, &requested).is_empty());
         }
     }
 
@@ -347,12 +348,16 @@ mod tests {
         let requested = BTreeMap::from([(UUID.parse().unwrap(), "Example".into())]);
         let mut cache = RegistryCache::default();
         assert_eq!(
-            cache.latest(&depots, &requested)[&UUID.parse().unwrap()].1,
-            Version::new(2, 0, 0)
+            cache.releases(&depots, &requested)[&UUID.parse().unwrap()].1,
+            BTreeSet::from([Version::new(1, 0, 0), Version::new(2, 0, 0)])
         );
         std::fs::write(first.path().join("registries/General.tar.gz"), "truncated").unwrap();
         assert_eq!(
-            cache.latest(&depots, &requested)[&UUID.parse().unwrap()].1,
+            cache.releases(&depots, &requested)[&UUID.parse().unwrap()]
+                .1
+                .last()
+                .copied()
+                .unwrap(),
             Version::new(1, 0, 0)
         );
     }
@@ -385,13 +390,16 @@ git-tree-sha1 = "1111111111111111111111111111111111111111"
 ["4.0.0.0"]
 git-tree-sha1 = "1111111111111111111111111111111111111111"
 "#;
-        assert_eq!(latest_release(text), Some(Version::new(1, 10, 2)));
-        assert_eq!(latest_release("broken = ["), None);
         assert_eq!(
-            latest_release(
+            release_versions(text),
+            BTreeSet::from([Version::new(1, 9, 0), Version::new(1, 10, 2)])
+        );
+        assert_eq!(release_versions("broken = ["), BTreeSet::new());
+        assert_eq!(
+            release_versions(
                 "[\"1.0.0\"]\ngit-tree-sha1 = \"1111111111111111111111111111111111111111\"\nyanked = \"false\""
             ),
-            None
+            BTreeSet::new()
         );
     }
 }
