@@ -179,6 +179,7 @@ struct ReadMeta {
 }
 
 pub(crate) struct GlobalState {
+    project_actions: Option<super::project_code_action::ProjectActions>,
     documents: HashMap<Uri, Document>,
     sender: Sender<Message>,
     /// The analysis thread's outbound channel, cloned into every dispatched
@@ -274,6 +275,7 @@ impl GlobalState {
     ) -> Self {
         let (config, warnings) = ConfigStore::new(initialization_options);
         let state = Self {
+            project_actions: None,
             documents: HashMap::new(),
             parse_diags: HashMap::new(),
             graph_diags: HashMap::new(),
@@ -378,11 +380,37 @@ impl GlobalState {
             self.respond_err(id, "invalid codeAction params");
             return;
         };
-        let uri = params.text_document.uri;
+        let uri = params.text_document.uri.clone();
+        if let Some(text) = self.project_text(&uri) {
+            if !super::code_action::allows_kind(
+                params.context.only.as_deref(),
+                lsp_types::CodeActionKind::REFACTOR_REWRITE,
+            ) {
+                self.respond_ok(id, serde_json::json!([]));
+                return;
+            }
+            let reply = self.read_reply(id.clone(), Some(&uri));
+            self.project_actions
+                .get_or_insert_with(|| {
+                    let ctx = crate::environment::EnvContext::from_process(PathBuf::new());
+                    super::project_code_action::ProjectActions::new(
+                        crate::environment::depot_roots(&ctx),
+                    )
+                })
+                .request(id, params, text, self.encoding, reply);
+            return;
+        }
         let Some(text) = self.julia_text(&uri) else {
             self.respond_ok(id, serde_json::Value::Null);
             return;
         };
+        if !super::code_action::allows_kind(
+            params.context.only.as_deref(),
+            lsp_types::CodeActionKind::QUICKFIX,
+        ) {
+            self.respond_ok(id, serde_json::json!([]));
+            return;
+        }
         let rules = Arc::clone(&self.config_for(&uri).rules);
         let reply = self.read_reply(id.clone(), Some(&uri));
         self.dispatch_read(ReadJob::CodeAction {

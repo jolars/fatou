@@ -13,6 +13,7 @@ pub mod linter;
 pub mod lsp;
 pub mod project;
 pub mod project_files;
+mod registry;
 pub mod resolve;
 pub mod semantic;
 pub mod text;

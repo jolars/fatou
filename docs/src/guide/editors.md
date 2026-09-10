@@ -316,8 +316,21 @@ version, kind, and resolved path the environment gave it, and an inlay hint puts
 each resolved version beside its UUID, so you can read off what you are actually
 on without opening the `Manifest.toml`. In an open `Manifest.toml`, each `path`
 entry — a package you have `dev`'d — is a link to that package's `Project.toml`.
-Everything else stays off for these files — formatting a `Project.toml` would
-mean parsing TOML as Julia.
+On a dependency declaration or its `[compat]` entry, a code action can replace
+the compatibility bound with the newest stable release found in your locally
+installed Julia registries. This works in `Project.toml` and
+`JuliaProject.toml`, including `[weakdeps]` and `[extras]`. Fatou reads unpacked
+and compressed registries in the background and skips yanked releases,
+prereleases, and dependencies overridden in `[sources]`.
+
+The action changes an existing `[compat]` value, preserving surrounding comments
+and whitespace. It replaces the whole bound, including any union of supported
+versions, with a new minimum version and Julia's implicit caret range. It does
+not update `Manifest.toml`, download packages, invoke Julia, or check whether
+the new release resolves with the project's Julia version and other
+dependencies. Registry data can lag published releases; update your registries
+through Pkg when you need fresher suggestions. Formatting remains unavailable
+for TOML files.
 
 ## Configuration
 

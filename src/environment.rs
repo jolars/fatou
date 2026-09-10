@@ -451,7 +451,7 @@ fn parse_version(s: &str) -> Option<(u32, u32)> {
 
 /// The ordered depot roots: `JULIA_DEPOT_PATH` (empty entries expand to the
 /// default), falling back to `~/.julia`.
-fn depot_roots(ctx: &EnvContext) -> Vec<PathBuf> {
+pub(crate) fn depot_roots(ctx: &EnvContext) -> Vec<PathBuf> {
     let default = ctx.home.as_ref().map(|home| home.join(".julia"));
     match ctx.julia_depot_path.as_deref() {
         Some(raw) if !raw.trim().is_empty() => raw

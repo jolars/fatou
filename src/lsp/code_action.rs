@@ -24,6 +24,19 @@ use crate::text::{LineIndex, PositionEncoding, TextBuffer};
 use super::format::lsp_range_to_text_range;
 use super::lint::{ServerRules, finding_to_lsp, lint_findings_via_db};
 
+pub(crate) fn allows_kind(only: Option<&[CodeActionKind]>, kind: CodeActionKind) -> bool {
+    only.is_none_or(|only| {
+        only.iter().any(|requested| {
+            requested.as_str().is_empty()
+                || kind == *requested
+                || kind
+                    .as_str()
+                    .strip_prefix(requested.as_str())
+                    .is_some_and(|suffix| suffix.starts_with('.'))
+        })
+    })
+}
+
 /// Compute the quick-fix actions for `range`, linting off the snapshot's
 /// cached parse when the tracked buffer for `path` still matches `text` (the
 /// cache contract of [`lint_findings_via_db`]).

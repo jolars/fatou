@@ -6430,7 +6430,7 @@ fn serves_quick_fix_code_actions() {
     let capabilities = init.result().unwrap()["capabilities"].clone();
     assert_eq!(
         capabilities["codeActionProvider"]["codeActionKinds"],
-        serde_json::json!(["quickfix"]),
+        serde_json::json!(["quickfix", "refactor.rewrite"]),
         "the server must advertise quick-fix code actions"
     );
     client
@@ -6548,6 +6548,115 @@ fn serves_quick_fix_code_actions() {
         }))
         .unwrap();
 
+    server_thread.join().unwrap();
+}
+
+#[test]
+fn serves_project_dependency_updates_from_the_live_buffer() {
+    let _env = ENV_LOCK.lock().unwrap();
+    let depot = TempDir::new("fatou-lsp-update-depot");
+    let pkg = TempDir::new("fatou-lsp-update-project");
+    let uuid = "12345678-1234-1234-1234-123456789abc";
+    write_file(
+        &depot.path.join("registries/General/Registry.toml"),
+        &format!("[packages]\n\"{uuid}\" = {{name = \"Example\", path = \"E/Example\"}}\n"),
+    );
+    write_file(
+        &depot
+            .path
+            .join("registries/General/E/Example/Versions.toml"),
+        &format!("[\"2.3.4\"]\ngit-tree-sha1 = \"{}\"\n", "1".repeat(40)),
+    );
+    let _guard = EnvGuard::set(&[("JULIA_DEPOT_PATH", depot.path.to_str().unwrap())]);
+    let (server, client) = Connection::memory();
+    let server_thread = std::thread::spawn(move || fatou::lsp::serve(&server).unwrap());
+    initialize_with_options(&client, serde_json::json!({}));
+    let mut id = 10;
+    let mut actions = |uri: &Uri, only: Option<Vec<CodeActionKind>>| {
+        id += 1;
+        client
+            .sender
+            .send(Message::Request(Request {
+                id: RequestId::from(id),
+                method: "textDocument/codeAction".into(),
+                params: serde_json::to_value(CodeActionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    range: Range::new(Position::new(3, 12), Position::new(3, 12)),
+                    context: CodeActionContext {
+                        only,
+                        ..Default::default()
+                    },
+                    work_done_progress_params: Default::default(),
+                    partial_result_params: Default::default(),
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        recv_response(&client, RequestId::from(id))
+            .result()
+            .unwrap()
+    };
+    for filename in ["Project.toml", "JuliaProject.toml"] {
+        let path = pkg.path.join(filename);
+        let uri = file_uri(&path);
+        let current =
+            format!("[deps]\nExample = \"{uuid}\"\n[compat]\nExample = \"2.3.4\" # Keep me.\n");
+        write_file(&path, &current);
+        open_document(&client, &uri, &current.replace("2.3.4", "1.0"));
+        assert_eq!(
+            actions(&uri, Some(vec![CodeActionKind::QUICKFIX])),
+            serde_json::json!([])
+        );
+        let edits: Vec<CodeActionOrCommand> =
+            serde_json::from_value(actions(&uri, Some(vec![CodeActionKind::REFACTOR]))).unwrap();
+        assert_eq!(edits.len(), 1);
+        let CodeActionOrCommand::CodeAction(action) = &edits[0] else {
+            panic!("expected edit")
+        };
+        assert_eq!(action.kind, Some(CodeActionKind::REFACTOR_REWRITE));
+        assert_eq!(
+            action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0].new_text,
+            "\"2.3.4\""
+        );
+        client
+            .sender
+            .send(Message::Notification(Notification {
+                method: "textDocument/didChange".into(),
+                params: serde_json::to_value(DidChangeTextDocumentParams {
+                    text_document: VersionedTextDocumentIdentifier {
+                        uri: uri.clone(),
+                        version: 2,
+                    },
+                    content_changes: vec![TextDocumentContentChangeEvent {
+                        range: None,
+                        range_length: None,
+                        text: current,
+                    }],
+                })
+                .unwrap(),
+            }))
+            .unwrap();
+        assert_eq!(actions(&uri, None), serde_json::json!([]));
+    }
+    let manifest = file_uri(&pkg.path.join("Manifest.toml"));
+    open_document(&client, &manifest, "manifest_format = \"2.0\"\n");
+    assert!(actions(&manifest, None).is_null());
+    client
+        .sender
+        .send(Message::Request(Request {
+            id: RequestId::from(99),
+            method: "shutdown".into(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
+    recv_response(&client, RequestId::from(99));
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "exit".into(),
+            params: serde_json::Value::Null,
+        }))
+        .unwrap();
     server_thread.join().unwrap();
 }
 

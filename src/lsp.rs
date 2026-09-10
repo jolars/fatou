@@ -57,6 +57,7 @@ mod hover;
 mod latex_symbols;
 mod lint;
 mod progress;
+mod project_code_action;
 mod project_navigation;
 mod pull_diagnostics;
 mod read_jobs;
