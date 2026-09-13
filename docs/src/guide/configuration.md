@@ -83,15 +83,31 @@ found, Fatou looks for one in your user config directory, typically
 `~/.config/fatou/fatou.toml`.
 
 To keep a config on a synced drive and point every machine at it, set the
-`FATOU_CONFIG` environment variable to its path. A set `FATOU_CONFIG` shadows
-the global config entirely, and a missing or malformed file there is a hard
-error rather than a silent fall-through, so a typo'd path cannot go unnoticed.
+`FATOU_CONFIG` environment variable to its path. A non-empty `FATOU_CONFIG`
+shadows the global config entirely. An unset or empty value uses the normal user
+config location. Relative paths resolve from the process's working directory;
+use an absolute path in editor settings.
 
-Both are whole-file fallbacks, never merged with a project config: as soon as a
-project `fatou.toml` is found, it is the only file that applies. Relative
-`exclude` patterns in a `FATOU_CONFIG` or global file resolve against the
-working directory (on the command line) or the document's directory (in the
-language server) rather than the config file's own directory.
+In VS Code, add this to your user `settings.json`, then run **Fatou: Restart
+Server**:
+
+```json
+{
+  "fatou.serverEnv": {
+    "FATOU_CONFIG": "P:/Softwares/fatou.toml"
+  }
+}
+```
+
+A missing or malformed config file makes the CLI fail. The language server logs
+a configuration warning in the Fatou output channel and uses editor settings or
+built-in defaults. Fix the file and restart the server to apply it.
+
+`FATOU_CONFIG` and global configs are whole-file fallbacks, never merged with a
+project config: as soon as a project `fatou.toml` is found, it is the only file
+that applies. Relative `exclude` patterns in a `FATOU_CONFIG` or global file
+resolve against the working directory (on the command line) or the document's
+directory (in the language server) rather than the config file's own directory.
 
 The language server uses the same resolution, so either file is a convenient way
 to set editor-wide defaults. Only project files are watched, so an edit to a
@@ -113,7 +129,8 @@ In full, Fatou uses the first source that applies:
    walk stops at the repository root (the directory holding `.git`, whether a
    directory or a file), inclusive; a directory with no `.git` ancestor is
    walked to the filesystem root.
-4. `$FATOU_CONFIG`, when set. A missing or malformed file here is an error.
+4. `$FATOU_CONFIG`, when set and non-empty. A missing or malformed file here is
+   a configuration error.
 5. The global user config: the first existing file among
    1. `$XDG_CONFIG_HOME/fatou/fatou.toml`, when that variable is set
    2. `~/.config/fatou/fatou.toml`

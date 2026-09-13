@@ -8,6 +8,13 @@ walkthrough, see the [configuration guide](../guide/configuration.md). A
 machine-readable [JSON Schema](https://fatou.dev/fatou.schema.json) is also
 available for editor completion and validation.
 
+Set `FATOU_CONFIG` to a custom user config path. Fatou uses it when no project
+`fatou.toml` is found, before checking the platform's user config directory. An
+unset or empty value uses the normal user config location. Relative paths
+resolve from the process's working directory. In VS Code, set it through
+`fatou.serverEnv` and run **Fatou: Restart Server**; see [User-Wide
+Defaults](../guide/configuration.md#user-wide-defaults) for an example.
+
 ## Top-level keys
 
   | Key              | Type             | Default | Description                                 |

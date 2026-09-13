@@ -75,6 +75,25 @@ The extension's
 [README](https://github.com/jolars/fatou/blob/main/editors/code/README.md)
 documents the available settings and their defaults.
 
+### Shared User Config
+
+To use a shared `fatou.toml` outside your projects, add this to your user
+`settings.json`:
+
+```json
+{
+  "fatou.serverEnv": {
+    "FATOU_CONFIG": "P:/Softwares/fatou.toml"
+  }
+}
+```
+
+Run **Fatou: Restart Server** after changing this setting or editing the shared
+file. Project configs take precedence, and the files are never merged. Use an
+absolute path; an unset or empty value uses the normal user config location. See
+[User-Wide Defaults](configuration.md#user-wide-defaults) for the full
+resolution order and error behavior.
+
 ### Using Only Some Features
 
 The formatter, linter, and language features share one server but can be turned
