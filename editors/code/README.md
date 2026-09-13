@@ -81,6 +81,25 @@ Use `fatou.releaseTag` only if you need an exact tag override:
 }
 ```
 
+Use a shared user config at a custom path by adding this to your user
+`settings.json`:
+
+```json
+{
+  "fatou.serverEnv": {
+    "FATOU_CONFIG": "P:/Softwares/fatou.toml"
+  }
+}
+```
+
+Run **Fatou: Restart Server** after changing this setting or editing the shared
+file. Fatou uses this file when no project `fatou.toml` is found. An unset or
+empty value uses the normal user config location. Use an absolute path so it
+works regardless of the server's working directory. A missing or invalid file
+logs a configuration warning in the Fatou output channel, and the server uses
+editor settings or built-in defaults until the configuration is fixed and the
+server restarts.
+
 ## Requirements and troubleshooting
 
 - **NixOS**: the bundled binary won't run because of the dynamic loader path.
@@ -137,7 +156,8 @@ Fatou registers itself as the default formatter for `[julia]` files.
   explicitly set).
 - `fatou.githubRepo`: GitHub repo for downloads (default: `"jolars/fatou"`).
 - `fatou.serverArgs`: extra args after `fatou lsp`.
-- `fatou.serverEnv`: extra environment variables.
+- `fatou.serverEnv`: extra environment variables, including `FATOU_CONFIG` for a
+  custom user config path. Requires a server restart.
 - `fatou.extraPath`: extra PATH entries prepended for the language server
   process.
 - `fatou.logLevel`: log level for the language server, mapped to `RUST_LOG`

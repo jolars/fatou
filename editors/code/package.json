@@ -120,7 +120,7 @@
             "type": "string"
           },
           "default": {},
-          "description": "Environment variables merged into the Fatou language server process."
+          "markdownDescription": "Environment variables merged into the Fatou language server process. Set `FATOU_CONFIG` to an absolute config file path to use when no project config is found. Run **Fatou: Restart Server** after changing this setting."
         },
         "fatou.extraPath": {
           "type": "array",
