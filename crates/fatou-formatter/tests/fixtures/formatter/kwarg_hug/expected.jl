@@ -38,7 +38,7 @@ configure_solver(
 )
 small = f(x, kw = [1, 2])
 nested = g(; # comment should not matter, but stay on same line
-    # kwarg=value, # commented out keyword should stay in own line
+    # kwarg = value, # commented out keyword should stay in own line
     options = [
         first => second,
         third => fourth,

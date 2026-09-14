@@ -11,7 +11,7 @@ prebroken = draw_samples(rng_handle,
 configure_solver(extremely_long_first_positional_argument_name, second_positional; tolerances = compute(a, b))
 small = f(x, kw = [1, 2])
 nested = g(;# comment should not matter, but stay on same line
-# kwarg=value, # commented out keyword should stay in own line
+# kwarg = value, # commented out keyword should stay in own line
     options=[first => second, third => fourth, fifth=>sixth, seventh =>  eighth,ninth => tenth, eleventh => twelfth, thirteenth => fourteenth, fifteenth => sixteenth, seventeenth => eighteenth, nineteenth => twentieth],
     f(x,kw=[1,2])
 )

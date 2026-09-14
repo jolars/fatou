@@ -3514,6 +3514,13 @@ fn collect_param_items(node: &SyntaxNode) -> Option<(Vec<Ir>, bool)> {
 /// lowering on a comment/newline, a doubled/orphaned comma, an unexpected child,
 /// or a missing semicolon.
 fn lower_parameters(node: &SyntaxNode) -> Ir {
+    if node
+        .children_with_tokens()
+        .any(|el| matches!(el.kind(), SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT))
+    {
+        return lower_commented_parameters(node);
+    }
+
     let mut parts: Vec<Ir> = Vec::new();
     let mut first_item = true;
     let mut pending_comma = false;
@@ -3559,6 +3566,75 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
     }
 
     Ir::concat(parts)
+}
+
+/// Lay out a parameter tail that contains comments. The semicolon and a comment
+/// before the first newline stay on the opening line; everything after that
+/// newline is a continuation block so own-line comments align with keywords.
+fn lower_commented_parameters(node: &SyntaxNode) -> Ir {
+    let mut head: Vec<Ir> = Vec::new();
+    let mut body: Vec<Ir> = Vec::new();
+    let mut in_body = false;
+    let mut pending_newline = false;
+
+    for el in node.children_with_tokens() {
+        match el {
+            NodeOrToken::Token(tok) => match tok.kind() {
+                SyntaxKind::SEMICOLON if !in_body => head.push(Ir::text(";")),
+                SyntaxKind::WHITESPACE => {}
+                SyntaxKind::NEWLINE => {
+                    if !in_body {
+                        in_body = true;
+                    } else {
+                        body.push(Ir::HardLine);
+                    }
+                    pending_newline = true;
+                }
+                SyntaxKind::COMMENT | SyntaxKind::BLOCK_COMMENT => {
+                    let text = if tok.kind() == SyntaxKind::COMMENT {
+                        tok.text().trim_end_matches([' ', '\t']).to_string()
+                    } else {
+                        tok.text().to_string()
+                    };
+                    let target = if in_body { &mut body } else { &mut head };
+                    if !target.is_empty() && !pending_newline {
+                        target.push(Ir::text(" "));
+                    }
+                    target.push(Ir::text(text));
+                    pending_newline = false;
+                }
+                SyntaxKind::COMMA => {
+                    let target = if in_body { &mut body } else { &mut head };
+                    target.push(Ir::text(","));
+                    pending_newline = false;
+                }
+                _ => return Ir::indent(lower_transparent(node)),
+            },
+            NodeOrToken::Node(child) => {
+                if !matches!(child.kind(), SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG) {
+                    return Ir::indent(lower_transparent(node));
+                }
+                if !in_body {
+                    return Ir::indent(lower_transparent(node));
+                }
+                body.push(lower_node(&child));
+                pending_newline = false;
+            }
+        }
+    }
+
+    if !in_body {
+        return Ir::indent(lower_transparent(node));
+    }
+    if matches!(body.last(), Some(Ir::HardLine)) {
+        body.pop();
+    }
+
+    Ir::concat([
+        Ir::concat(head),
+        Ir::indent(Ir::concat([Ir::HardLine, Ir::concat(body)])),
+        Ir::HardLine,
+    ])
 }
 
 /// Lay out a `for` binding — the iteration clause of a comprehension or generator
