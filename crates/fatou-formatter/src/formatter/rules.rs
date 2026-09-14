@@ -3529,21 +3529,21 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
                 SyntaxKind::WHITESPACE => {}
                 SyntaxKind::COMMA => {
                     if pending_comma {
-                        return lower_transparent(node);
+                        return Ir::indent(lower_transparent(node));
                     }
                     pending_comma = true;
                 }
-                _ => return lower_transparent(node),
+                _ => return Ir::indent(lower_transparent(node)),
             },
             NodeOrToken::Node(child) => {
                 if !matches!(child.kind(), SyntaxKind::ARG | SyntaxKind::KEYWORD_ARG) {
-                    return lower_transparent(node);
+                    return Ir::indent(lower_transparent(node));
                 }
                 if first_item {
                     parts.push(Ir::text(" "));
                 } else {
                     if !pending_comma {
-                        return lower_transparent(node);
+                        return Ir::indent(lower_transparent(node));
                     }
                     parts.push(Ir::text(", "));
                 }
@@ -3555,7 +3555,7 @@ fn lower_parameters(node: &SyntaxNode) -> Ir {
     }
 
     if !seen_semi {
-        return lower_transparent(node);
+        return Ir::indent(lower_transparent(node));
     }
 
     Ir::concat(parts)
