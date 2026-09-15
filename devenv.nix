@@ -1,4 +1,5 @@
 {
+  inputs,
   pkgs,
   ...
 }:
@@ -51,7 +52,10 @@
       # registry snapshot (which pinned JuliaSyntax by accident, defeating the
       # oracle's exact-version contract) and gives no version control. See
       # AGENTS.md.
-      package = pkgs.julia-bin;
+      package =
+        (import inputs.nixpkgs-julia {
+          system = pkgs.stdenv.hostPlatform.system;
+        }).julia_113-bin;
     };
 
     javascript = {

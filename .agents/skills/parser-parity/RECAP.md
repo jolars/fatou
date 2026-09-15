@@ -53,12 +53,12 @@ ledger below is a fallback, not a queue.
   2026-08-07c); `expected.sexpr` is generated — never hand-edit.
 - **Shell `raw"""…"""` Julia probes break on `"`/`$`** — use a temp file.
 - **Corpus pinned** to JuliaSyntax in `.juliasyntax-source` (currently
-  1.0.2/Julia 1.12.6). Bump ⇒ re-run both `scripts/*.jl`, re-triage.
+  1.0.2/Julia 1.13.0). Bump ⇒ re-run the corpus and table generators, re-triage.
 
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
-divergence, 0 unsupported. Dir corpus (**267 cases**): **266 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**268 cases**): **267 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -97,25 +97,32 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-08-29 — decimal float overflow)
+## Latest session (2026-09-15 — Julia 1.13)
 
-Landed JuliaSyntax-compatible diagnostics for decimal floating-point overflow.
+Refreshed the oracle and generated tables with Julia 1.13.0, keeping the
+JuliaSyntax pin at 1.0.2. Devenv temporarily imports `julia_113-bin` from the
+fixed head of nixpkgs PR #561865.
 
-- **Parser gap**: a post-build literal pass now detects Rust `f64`/`f32` parses
-  that produce infinity, records `NumericOverflow` over the complete literal,
-  and leaves finite boundary values and underflow unchanged.
-- **Projector**: the recorded diagnostic renders `(ErrorNumericOverflow)` in
-  ordinary and postfix expression positions.
-- **Fixture**: `decimal_float_overflow` pins `Float64`, `Float32`, boundary, and
-  postfix cases against JuliaSyntax; safe formatting now reports these inputs
-  as syntax errors.
-- **Counts**: JS **748/756 → 749/756** and dir **265/266 → 266/267**; no
-  regression or unsupported case was added.
+- **Lexer**: regenerated Unicode 17 ranges add 4,740 identifier-start and 4,792
+  continuation characters, with no removals. `unicode_17_identifiers` covers new
+  letters and a combining mark. Operator entries are unchanged;
+  `scripts/generate-unicode-ops.jl` now records their regeneration procedure.
+- **Markdown**: Julia 1.13 interprets inline `---` as an em dash. The CST now
+  records `EM_DASH`, typed navigation exposes `Inline::EmDash`, and heading
+  content renders it correctly. These public enum additions require downstream
+  exhaustive matches to handle the new variants. The `inline_dashes` oracle
+  fixture covers longer runs, escapes, code, math, emphasis, links, and
+  headings.
+- **Counts**: JS **749/756 → 749/756**, dir **266/267 → 267/268**, and Markdown
+  **17 → 18** fixtures. Existing Julia parser projections are unchanged.
 - **Next**: no parser-owned target is queued; probe real Julia per `SKILL.md`.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
+
+- **2026-08-29** — decimal float overflow diagnostics and boundary fixtures.
+  749 / 266.
 
 - **2026-08-27** — list-item indented code below list items. 748 / 265.
 - **2026-08-27** — imported macro aliases on the right of `as`. 748 / 265.

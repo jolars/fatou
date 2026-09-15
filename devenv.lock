@@ -73,6 +73,23 @@
         "type": "github"
       }
     },
+    "nixpkgs-julia": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789369337,
+        "narHash": "sha256-if+oR4h84w33sI0xeUGUYh4s5dzcwHYhT9E/OFaz778=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "759db4b3e05ea6290cb614f1766d119183d68134",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "759db4b3e05ea6290cb614f1766d119183d68134",
+        "type": "github"
+      }
+    },
     "nixpkgs-src": {
       "flake": false,
       "locked": {
@@ -95,6 +112,7 @@
         "devenv": "devenv",
         "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs",
+        "nixpkgs-julia": "nixpkgs-julia",
         "rust-overlay": "rust-overlay"
       }
     },

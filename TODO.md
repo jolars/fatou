@@ -2,6 +2,10 @@
 
 ## Parser
 
+- [x] Refresh the parser oracle and generated tables for Julia 1.13 while
+  retaining JuliaSyntax 1.0.2. Unicode 17 identifier starts and combining
+  marks have lexer and differential-fixture coverage.
+
 - [x] Diagnose overflowing decimal `Float64`/`Float32` literals instead of
   accepting Rust's infinite parse result. The parser now emits JuliaSyntax's
   `ErrorNumericOverflow` projection while leaving finite boundary values and
@@ -51,6 +55,10 @@ Docstrings are arbitrary `@doc` metadata. Tooling interprets only statically
 recoverable textual payloads; dynamic or custom forms stay opaque. Markdown and
 Documenter syntax are recognized from the content itself, while documentation
 style remains project policy rather than language correctness.
+
+- [x] Match Julia 1.13's inline em dashes: `---` is one lossless `EM_DASH`
+  token, exposed as `Inline::EmDash`; heading text uses the rendered em
+  dash.
 
 - [x] **Foundation:** add typed `DOC` navigation plus one attachment API for
   ordinary docstrings and the two-argument `@doc` forms. Extract ordinary and
