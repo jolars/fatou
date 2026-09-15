@@ -127,7 +127,10 @@ impl Document {
 pub enum Inline {
     Text(SyntaxToken),
     Escape(SyntaxToken),
+    /// An en dash written as `--` in the source.
     EnDash(SyntaxToken),
+    /// An em dash written as `---`, following Julia 1.13's Markdown dialect.
+    EmDash(SyntaxToken),
     SoftBreak(SyntaxToken),
     Emphasis(Emphasis),
     Strong(Strong),
@@ -658,6 +661,7 @@ fn visible_text(node: &SyntaxNode) -> String {
             }
             SyntaxKind::ESCAPE => out.push_str(token.text().trim_start_matches('\\')),
             SyntaxKind::EN_DASH => out.push('–'),
+            SyntaxKind::EM_DASH => out.push('—'),
             SyntaxKind::SOFT_BREAK => out.push(' '),
             _ => {}
         }
@@ -672,6 +676,7 @@ fn inline_children(node: &SyntaxNode) -> impl Iterator<Item = Inline> + '_ {
                 SyntaxKind::TEXT => Some(Inline::Text(token)),
                 SyntaxKind::ESCAPE => Some(Inline::Escape(token)),
                 SyntaxKind::EN_DASH => Some(Inline::EnDash(token)),
+                SyntaxKind::EM_DASH => Some(Inline::EmDash(token)),
                 SyntaxKind::SOFT_BREAK => Some(Inline::SoftBreak(token)),
                 _ => None,
             },

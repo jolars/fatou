@@ -252,6 +252,7 @@ type_operator_call
 typed_concat
 unary_operator_call
 unclosed_delimiter
+unicode_17_identifiers
 unicode_assignment_value
 unicode_identifiers
 unicode_identifiers_nfc

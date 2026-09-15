@@ -1,0 +1,1 @@
+(toplevel (= ࢏ 1) (function-= (call 𑶰 x) x) (= x𑭠 (call-i ࢏ + (call 𑶰 2))))

@@ -301,6 +301,7 @@ fn render_inline_element(element: SyntaxElement) -> Option<String> {
                 hex(token.text().trim_start_matches('\\'))
             )),
             SyntaxKind::EN_DASH => Some(format!("(text {})", hex("–"))),
+            SyntaxKind::EM_DASH => Some(format!("(text {})", hex("—"))),
             SyntaxKind::SOFT_BREAK => None,
             _ => None,
         },

@@ -731,7 +731,11 @@ impl<'a> Parser<'a> {
                 b'`' => self.emit_backticks(cursor, end),
                 b'$' => self.emit_dollar(cursor, end),
                 b'-' if cursor + 1 < end && self.text.as_bytes()[cursor + 1] == b'-' => {
-                    Some((SyntaxKind::EN_DASH, cursor + 2))
+                    if cursor + 2 < end && self.text.as_bytes()[cursor + 2] == b'-' {
+                        Some((SyntaxKind::EM_DASH, cursor + 3))
+                    } else {
+                        Some((SyntaxKind::EN_DASH, cursor + 2))
+                    }
                 }
                 _ => None,
             };
@@ -740,7 +744,10 @@ impl<'a> Parser<'a> {
                 text_start = opener;
                 continue;
             };
-            if kind == SyntaxKind::ESCAPE || kind == SyntaxKind::EN_DASH {
+            if matches!(
+                kind,
+                SyntaxKind::ESCAPE | SyntaxKind::EN_DASH | SyntaxKind::EM_DASH
+            ) {
                 self.token(kind, cursor, next);
             }
             cursor = next;

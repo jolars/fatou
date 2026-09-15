@@ -294,17 +294,49 @@ f() = 1
 }
 #[test]
 fn heading_slugs_come_from_one_definition() {
-    let parsed = parse("# The Nelder--Mead *Method*\n");
+    let parsed = parse("# The Nelder--Mead *Method*---revisited\n");
     let heading = parsed
         .cst
         .descendants()
         .find_map(Heading::cast)
         .expect("heading");
-    assert_eq!(heading.content(), "The Nelder–Mead Method");
-    assert_eq!(heading.slug(), "the-neldermead-method");
+    assert_eq!(heading.content(), "The Nelder–Mead Method—revisited");
+    assert_eq!(heading.slug(), "the-neldermead-methodrevisited");
     assert_eq!(
         fatou_parser::documentation::ast::slug(&heading.content()),
         heading.slug()
+    );
+}
+
+#[test]
+fn inline_dashes_preserve_spelling_and_prefer_three_hyphens() {
+    let input = "a--b a---b a----b a-----b a------b\n";
+    let parsed = parse(input);
+    assert_eq!(reconstruct(&parsed.cst), input);
+    assert!(parsed.diagnostics.is_empty());
+    let document = Document::cast(parsed.cst).expect("document");
+    let Block::Paragraph(paragraph) = document.blocks().next().expect("paragraph") else {
+        panic!("expected paragraph");
+    };
+    let dashes: Vec<_> = paragraph
+        .inlines()
+        .filter_map(|inline| match inline {
+            Inline::EnDash(token) => Some(("en", token.text().to_string())),
+            Inline::EmDash(token) => Some(("em", token.text().to_string())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        dashes,
+        [
+            ("en", "--".to_string()),
+            ("em", "---".to_string()),
+            ("em", "---".to_string()),
+            ("em", "---".to_string()),
+            ("en", "--".to_string()),
+            ("em", "---".to_string()),
+            ("em", "---".to_string()),
+        ]
     );
 }
 #[test]

@@ -1437,6 +1437,15 @@ mod tests {
     }
 
     #[test]
+    fn unicode_17_identifier_chars() {
+        assert_eq!(kinds("\u{88f}"), vec![TokKind::Ident]);
+        assert_eq!(kinds("\u{11db0}"), vec![TokKind::Ident]);
+        assert_eq!(kinds("x\u{11b60}"), vec![TokKind::Ident]);
+        assert_eq!(kinds("\u{11b60}"), vec![TokKind::ErrorIdentifierStart]);
+        assert!(roundtrips("\u{88f} = \u{11db0} + x\u{11b60}"));
+    }
+
+    #[test]
     fn identity_operators() {
         // `===`/`!==` beat `==`/`!=` in longest match.
         assert_eq!(

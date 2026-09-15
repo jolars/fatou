@@ -1,11 +1,12 @@
 //! Single-codepoint Unicode operators and their precedence tiers.
 //!
-//! Generated from JuliaSyntax's operator-kind tables (julia_version=1.12.6 juliasyntax_version=1.0.2 ).
+//! Generated from JuliaSyntax's operator-kind tables (julia_version=1.13.0 juliasyntax_version=1.0.2).
 //! Every entry is a length-1 non-ASCII operator string from
 //! `Tokenize._nondot_symbolic_operator_kinds()`, classified by the
 //! `is_prec_*` predicate for its kind. The table is sorted by code point so
-//! [`unicode_op_kind`] can binary-search it. Regenerate on a JuliaSyntax bump
-//! (see the parser-parity skill); do not hand-edit.
+//! [`unicode_op_kind`] can binary-search it. Regenerate with
+//! `scripts/generate-unicode-ops.jl` on a Julia or JuliaSyntax bump;
+//! do not hand-edit.
 
 use super::lexer::TokKind;
 

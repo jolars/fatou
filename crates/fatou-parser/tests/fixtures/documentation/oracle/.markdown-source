@@ -1,2 +1,2 @@
-julia_version=1.12.6
+julia_version=1.13.0
 stdlib=Markdown

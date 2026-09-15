@@ -56,6 +56,7 @@ pub enum SyntaxKind {
     ESCAPE,
     SOFT_BREAK,
     EN_DASH,
+    EM_DASH,
     ERROR_TOKEN,
 }
 
