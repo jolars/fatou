@@ -29,6 +29,7 @@ block_trailing_junk
 braces_generator
 braces_newline_comprehension
 bracescat
+break_continue_tuple
 broadcast_bitshift
 broadcast_bitwise_assign
 broadcast_bitwise_operators

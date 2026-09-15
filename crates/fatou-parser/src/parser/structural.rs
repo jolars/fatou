@@ -734,8 +734,18 @@ fn parse_break_label(
     };
     let label_start = ctx.skip_ws_and_block_comments(i);
     if ends(label_start) {
+        if ctx.token(label_start).map(|t| t.kind) == Some(TokKind::Comma) {
+            let keyword = &ctx.tokens()[i - 1];
+            push_diagnostic(
+                diagnostics,
+                DiagnosticKind::UnexpectedComma,
+                &format!("unexpected comma after `{}`", keyword.text),
+                keyword.end,
+                keyword.end,
+            );
+        }
         // A bare `break`/`continue`. The trivia belongs to the enclosing block
-        // loop, so leave the index where it was.
+        // or list, so leave the index where it was.
         return i;
     }
     push_range(events, i, label_start);

@@ -1,5 +1,5 @@
 ---
-source: tests/parser_snapshots.rs
+source: crates/fatou-parser/tests/parser_snapshots.rs
 expression: rendered
 ---
 ROOT@0..37
@@ -66,7 +66,6 @@ diagnostic [5..8]: operator is not a valid value
 diagnostic [9..11]: operator is not a valid value
 diagnostic [12..14]: operator is not a valid value
 diagnostic [15..18]: operator is not a valid value
-diagnostic [20..21]: operator is not a valid value
 diagnostic [20..21]: operator is not a valid value
 diagnostic [25..26]: operator is not a valid value
 diagnostic [28..29]: invalid operator in prefix position

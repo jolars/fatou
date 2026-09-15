@@ -321,8 +321,8 @@ fn project(node: &SyntaxNode) -> String {
         RETURN_EXPR => project_keyword_stmt("return", node),
         // A `break`/`continue` is bare or carries a label, and `break` may add a
         // value after it (`break outer i * 2` ⇒ `(break outer (call-i i * 2))`).
-        BREAK_EXPR => sexp("break", project_each(child_nodes(node))),
-        CONTINUE_EXPR => sexp("continue", project_each(child_nodes(node))),
+        BREAK_EXPR => project_break_continue("break", node),
+        CONTINUE_EXPR => project_break_continue("continue", node),
         CONST_STMT => {
             // A `const` whose declaration is not a plain `=` assignment is wrapped
             // in `(error …)` (`const x` ⇒ `(error (const x))`); the parser records
@@ -1970,6 +1970,21 @@ fn do_param_strings(node: &SyntaxNode) -> Vec<String> {
 }
 
 // --- Statements / declarations ---------------------------------------------
+
+fn project_break_continue(head: &str, node: &SyntaxNode) -> String {
+    let mut rendered = sexp(head, project_each(child_nodes(node)));
+    if node.first_token().is_some_and(|keyword| {
+        diag_at(
+            usize::from(keyword.text_range().end()),
+            DiagnosticKind::UnexpectedComma,
+        )
+    }) {
+        // Recovery belongs after the completed keyword, inside whichever
+        // expression or argument list contains it.
+        rendered.push_str(" (error-t)");
+    }
+    rendered
+}
 
 fn project_keyword_stmt(head: &str, node: &SyntaxNode) -> String {
     match first_node(node) {

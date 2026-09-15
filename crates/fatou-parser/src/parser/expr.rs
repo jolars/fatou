@@ -355,7 +355,7 @@ fn parse_expr_in(
         keyword_name_error_atom(start)
     });
 
-    let block_form = if name_error_atom.is_some() {
+    let mut block_form = if name_error_atom.is_some() {
         None
     } else if let Some(decl_word) = type_decl_keyword(&ctx, start) {
         Some(match decl_word {
@@ -388,8 +388,8 @@ fn parse_expr_in(
     };
 
     // Statement keywords consume their own operand through the expression loop
-    // internally, so they return directly (`return x::T` ⇒ `(return (::-i x T))`,
-    // not `(::-i (return x) T)`).
+    // internally, so they normally return directly (`return x::T` ⇒
+    // `(return (::-i x T))`, not `(::-i (return x) T)`).
     if block_form.is_none() {
         match ctx.token(start).map(|t| t.kind) {
             Some(TokKind::ReturnKw) => {
@@ -404,29 +404,34 @@ fn parse_expr_in(
                     diagnostics,
                 );
             }
-            Some(TokKind::BreakKw) => {
-                return parse_keyword_stmt(
+            Some(kind @ (TokKind::BreakKw | TokKind::ContinueKw)) => {
+                let is_break = kind == TokKind::BreakKw;
+                let parsed = parse_keyword_stmt(
                     tokens,
                     start,
-                    SyntaxKind::BREAK_EXPR,
+                    if is_break {
+                        SyntaxKind::BREAK_EXPR
+                    } else {
+                        SyntaxKind::CONTINUE_EXPR
+                    },
                     KwStmt::Label {
-                        takes_value: true,
+                        takes_value: is_break,
                         colon_ends: no_range,
                     },
                     diagnostics,
-                );
-            }
-            Some(TokKind::ContinueKw) => {
-                return parse_keyword_stmt(
-                    tokens,
-                    start,
-                    SyntaxKind::CONTINUE_EXPR,
-                    KwStmt::Label {
-                        takes_value: false,
-                        colon_ends: no_range,
-                    },
-                    diagnostics,
-                );
+                )?;
+                // A comma after a bare keyword must reach the expression loop
+                // so tuples and assignments retain their usual precedence.
+                if name_error_atom.is_some()
+                    || parsed.end != start + 1
+                    || ctx
+                        .token(ctx.skip_ws_and_block_comments(parsed.end))
+                        .map(|t| t.kind)
+                        != Some(TokKind::Comma)
+                {
+                    return Some(parsed);
+                }
+                block_form = Some(Some(parsed));
             }
             Some(TokKind::ConstKw) => {
                 return parse_keyword_stmt(
@@ -589,7 +594,10 @@ fn parse_expr_in(
         // The `min_bp` guard keeps it inert once we are inside a comma item.
         if stmt_comma
             && min_bp <= COMMA_BP
-            && ctx.token(ctx.skip_ws(lhs.end)).map(|t| t.kind) == Some(TokKind::Comma)
+            && ctx
+                .token(ctx.skip_ws_and_block_comments(lhs.end))
+                .map(|t| t.kind)
+                == Some(TokKind::Comma)
         {
             lhs = parse_comma_tuple(tokens, &ctx, lhs, diagnostics, flags);
             continue;
@@ -1088,7 +1096,7 @@ fn parse_comma_tuple(
     events.extend(first.events);
 
     loop {
-        let comma_idx = ctx.skip_ws(end);
+        let comma_idx = ctx.skip_ws_and_block_comments(end);
         if ctx.token(comma_idx).map(|t| t.kind) != Some(TokKind::Comma) {
             break;
         }
@@ -1101,7 +1109,8 @@ fn parse_comma_tuple(
         // next element may begin on a later line (`x = a,\nb,\nc` ⇒
         // `(= x (tuple a b c))`). Skip newlines and comments — not just
         // horizontal whitespace — to reach it. A newline *before* the comma
-        // still terminates (that gap is only `skip_ws` at the comma probe above).
+        // still terminates (the comma probe skips only horizontal whitespace
+        // and block comments).
         let item_start = ctx.skip_trivia(end);
         // A trailing comma before an assignment-family operator is a 1-tuple the
         // assignment then binds (`x, = xs` ⇒ `(= (tuple x) xs)`): the operator is
@@ -2492,6 +2501,7 @@ pub(crate) fn parse_paren(
         }
     }
 
+    let diag_mark = diagnostics.len();
     let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, end_marker, diagnostics)
     else {
         // Only trivia remains to EOF: the paren can never be closed, so report
@@ -2545,6 +2555,9 @@ pub(crate) fn parse_paren(
         ctx.token(sep).map(|t| t.kind),
         Some(TokKind::Comma | TokKind::Semicolon)
     ) {
+        // Discard the tentative parse's diagnostics along with its events;
+        // the argument-list parse will report the committed recovery once.
+        diagnostics.truncate(diag_mark);
         let (events, end) = parse_arg_list(
             ctx,
             start,

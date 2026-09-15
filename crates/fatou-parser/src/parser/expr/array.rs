@@ -147,7 +147,11 @@ pub(super) fn parse_delimited_literal(
     shape: CatShape,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> ExprParse {
+    let diag_mark = diagnostics.len();
     let list = |diagnostics: &mut Vec<ParseDiagnostic>| {
+        // The list parser reparses the first element, so its tentative
+        // diagnostics must be discarded with the tentative events.
+        diagnostics.truncate(diag_mark);
         let (events, end) =
             parse_arg_list(ctx, open, shape.close, shape.list, end_marker, diagnostics);
         ExprParse {

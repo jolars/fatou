@@ -112,13 +112,11 @@ diagnostic [0..2]: operator is not a valid value
 diagnostic [3..5]: operator is not a valid value
 diagnostic [6..7]: trailing tokens after statement
 diagnostic [9..11]: operator is not a valid value
-diagnostic [9..11]: operator is not a valid value
 diagnostic [14..16]: operator is not a valid value
 diagnostic [18..20]: operator is not a valid value
 diagnostic [32..33]: operator is not a valid value
 diagnostic [34..35]: operator is not a valid value
 diagnostic [36..37]: trailing tokens after statement
-diagnostic [39..40]: operator is not a valid value
 diagnostic [39..40]: operator is not a valid value
 diagnostic [43..44]: operator is not a valid value
 diagnostic [46..47]: operator is not a valid value

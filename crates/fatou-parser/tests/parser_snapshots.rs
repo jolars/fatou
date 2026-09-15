@@ -64,3 +64,31 @@ fn using_base_aliases_report_parse_errors() {
         ]
     );
 }
+
+#[test]
+fn break_continue_commas_report_one_diagnostic_per_keyword() {
+    for keyword in ["break", "continue"] {
+        for (prefix, suffix) in [
+            ("", ", y"),
+            ("(", ", y)"),
+            ("f(", ", y)"),
+            ("[", ", y]"),
+            ("{", ", y}"),
+            ("A[", ", y]"),
+            (":(", ", y)"),
+        ] {
+            let input = format!("{prefix}{keyword}{suffix}");
+            let output = parse(&input);
+            let anchor = prefix.len() + keyword.len();
+            assert_eq!(
+                output
+                    .diagnostics
+                    .iter()
+                    .map(|d| (d.start, d.end))
+                    .collect::<Vec<_>>(),
+                vec![(anchor, anchor)],
+                "{input}",
+            );
+        }
+    }
+}

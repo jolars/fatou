@@ -14,6 +14,10 @@ pub enum DiagnosticKind {
     /// A string literal glued to another term (`"a"x`, `2"b"`). Anchored at the
     /// left operand's end.
     StringJuxtapose,
+    /// A comma after a bare `break`/`continue`. Anchored at the keyword's end;
+    /// JuliaSyntax places a zero-width `(error-t)` after the keyword expression
+    /// and leaves the comma to the enclosing tuple or argument list.
+    UnexpectedComma,
     /// Disallowed whitespace before a field-access dot (`x .y`). Anchored at the
     /// dot's end.
     DotWhitespace,
@@ -238,6 +242,7 @@ impl DiagnosticKind {
             MissingEnd
             | MissingTryHandler
             | StringJuxtapose
+            | UnexpectedComma
             | DotWhitespace
             | QuoteColonWhitespace
             | EmptyQuoteParen
