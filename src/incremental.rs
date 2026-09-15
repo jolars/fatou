@@ -308,6 +308,30 @@ pub fn semantic_model(db: &dyn IncrementalDb, file: SourceFile) -> SemanticModel
     SemanticModel::build(&parsed_tree_root(db, file))
 }
 
+/// Static documentation in source order, with source positions and literal
+/// spelling removed. Equal decoded payloads backdate across Julia body edits,
+/// attachment shifts, and changes to escaping or indentation.
+#[salsa::tracked(returns(ref))]
+pub fn static_docstring_payloads(db: &dyn IncrementalDb, file: SourceFile) -> Arc<[String]> {
+    crate::documentation::static_documentation(semantic_model(db, file))
+        .map(|(_, decoded)| decoded.as_str().to_string())
+        .collect()
+}
+
+/// The demand-only Markdown navigation index. Depend only on decoded payloads
+/// so edits to Julia code do not repeat the file's documentation parses.
+#[salsa::tracked(returns(ref))]
+pub fn documentation_index(
+    db: &dyn IncrementalDb,
+    file: SourceFile,
+) -> Arc<crate::documentation::DocumentationIndex> {
+    Arc::new(crate::documentation::DocumentationIndex::build(
+        static_docstring_payloads(db, file)
+            .iter()
+            .map(String::as_str),
+    ))
+}
+
 /// The per-file control-flow graph: one region per function-like body and
 /// `module` body, plus the file top level (see [`FileControlFlow`]). Built on
 /// the cached parse. Like [`semantic_model`] it keeps structural `Eq`, so an
@@ -1447,6 +1471,14 @@ impl Analysis {
         semantic_model(&self.0, file)
     }
 
+    /// Markdown navigation cached by the file's static documentation payloads.
+    pub fn documentation_index(
+        &self,
+        file: SourceFile,
+    ) -> &Arc<crate::documentation::DocumentationIndex> {
+        documentation_index(&self.0, file)
+    }
+
     /// The cached control-flow graph for `file` (the [`control_flow`] query).
     pub fn control_flow(&self, file: SourceFile) -> &FileControlFlow {
         self.0.control_flow(file)
@@ -1604,6 +1636,74 @@ impl PackageSource for Analysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn documentation_parse_query_runs_only_when_payloads_change() {
+        use salsa::Database as _;
+
+        let executions = Arc::new(Mutex::new(Vec::new()));
+        let recorded = executions.clone();
+        let mut db = IncrementalDatabase {
+            storage: salsa::Storage::new(Some(Box::new(move |event| {
+                if let salsa::EventKind::WillExecute { database_key } = event.kind {
+                    recorded.lock().unwrap().push(database_key);
+                }
+            }))),
+            ..Default::default()
+        };
+        let index_runs = |db: &IncrementalDatabase| {
+            executions
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|key| {
+                    db.ingredient_debug_name(key.ingredient_index()) == "documentation_index"
+                })
+                .count()
+        };
+        let original = "x = 1\n\"# Heading\\n\\nSome prose.\"\nf() = x\n";
+        let file = db.add_file(original);
+        semantic_model(&db, file);
+        assert_eq!(
+            index_runs(&db),
+            0,
+            "ordinary analysis must not demand Markdown navigation"
+        );
+        documentation_index(&db, file);
+        documentation_index(&db, file);
+        assert_eq!(index_runs(&db), 1);
+
+        for text in [
+            original.replace("x = 1", "x = 10000"),
+            original.replace("Heading", "\\u0048eading"),
+        ] {
+            db.set_file_text(file, text);
+            documentation_index(&db, file);
+            assert_eq!(
+                index_runs(&db),
+                1,
+                "equal payloads must prevent reparsing, not just compare equal afterward"
+            );
+        }
+        db.set_file_text(file, original.replace("Some prose", "Other prose"));
+        documentation_index(&db, file);
+        assert_eq!(
+            index_runs(&db),
+            2,
+            "a changed payload must be parsed even when its anchors are unchanged"
+        );
+
+        let other = db.add_file("\"# Other file\"\ng() = 0\n");
+        documentation_index(&db, other);
+        assert_eq!(index_runs(&db), 3);
+        db.set_file_text(other, "g() = 0\n");
+        documentation_index(&db, file);
+        assert_eq!(
+            index_runs(&db),
+            3,
+            "another file's edit must not reparse this file's Markdown"
+        );
+    }
 
     #[test]
     fn parses_and_reparses_on_edit() {

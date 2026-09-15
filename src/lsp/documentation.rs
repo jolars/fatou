@@ -8,13 +8,17 @@
 use fatou_parser::ast::{DocText, StaticDocText};
 use fatou_parser::documentation::ParseOutput;
 use fatou_parser::documentation::ast::{
-    CodeBlock, DocumenterLinkKind, FenceKind, FootnoteDefinition, FootnoteReference, Heading, Link,
+    CodeBlock, DocumenterLinkKind, FenceKind, FootnoteReference, Link,
 };
 use rowan::ast::AstNode as _;
 use rowan::{TextRange, TextSize};
 
+use crate::documentation::DocumentationIndex;
+pub(crate) use crate::documentation::{MarkdownReference, static_documentation};
+use crate::incremental::{Analysis, SourceFile};
 use crate::semantic::{SemanticDoc, SemanticModel};
 use crate::text::{LineIndex, PositionEncoding};
+use std::sync::Arc;
 
 /// A static documentation attachment containing the source cursor.
 pub(crate) struct DocumentationContext<'a> {
@@ -148,11 +152,6 @@ pub(crate) struct ExplicitRef {
     pub(crate) offset: TextSize,
 }
 
-pub(crate) enum MarkdownReference {
-    Anchor(String),
-    Footnote(String),
-}
-
 /// A Julia subdocument declared by a Markdown fence.
 pub(crate) struct EmbeddedJulia<'a> {
     decoded: &'a StaticDocText,
@@ -193,83 +192,18 @@ impl EmbeddedJulia<'_> {
     }
 }
 
-/// Iterate the statically decoded documentation attachments in source order.
-pub(crate) fn static_documentation(
+/// Demand the shared index only after the cursor selects Markdown navigation.
+/// Fresh-parse and embedded-document callers build the same projection locally.
+pub(crate) fn markdown_index(
     model: &SemanticModel,
-) -> impl Iterator<Item = (&SemanticDoc, &StaticDocText)> {
-    model
-        .documentation()
-        .iter()
-        .filter_map(|doc| match &doc.text {
-            DocText::Static(text) => Some((doc, text)),
-            DocText::Opaque(_) | DocText::Invalid(_) => None,
-        })
-}
-
-/// Find the source definition of a Markdown anchor or footnote in any static
-/// docstring in the current Julia file.
-pub(crate) fn markdown_definition(
-    model: &SemanticModel,
-    reference: &MarkdownReference,
-) -> Option<TextRange> {
-    for (_, decoded) in static_documentation(model) {
-        let markdown = fatou_parser::documentation::parse(decoded.as_str());
-        let decoded_range = match reference {
-            MarkdownReference::Anchor(id) => markdown.cst.descendants().find_map(|node| {
-                if let Some(link) = Link::cast(node.clone())
-                    && let Some(documenter) = link.documenter_link()
-                    && documenter.kind() == DocumenterLinkKind::Id
-                    && documenter.target() == Some(id.as_str())
-                {
-                    return documenter.target_range();
-                }
-                let heading = Heading::cast(node)?;
-                let content = heading.content();
-                (content == *id || heading.slug() == *id).then(|| heading.syntax().text_range())
-            }),
-            MarkdownReference::Footnote(id) => markdown
-                .cst
-                .descendants()
-                .filter_map(FootnoteDefinition::cast)
-                .find(|definition| definition.id() == *id)
-                .map(|definition| definition.syntax().text_range()),
-        };
-        if let Some(range) = decoded_range
-            && let Some(source) = decoded.source_map().source_range(range)
-        {
-            return Some(source);
-        }
+    cached: Option<(&Analysis, SourceFile)>,
+) -> Arc<DocumentationIndex> {
+    match cached {
+        Some((snapshot, file)) => snapshot.documentation_index(file).clone(),
+        None => Arc::new(DocumentationIndex::build(
+            static_documentation(model).map(|(_, decoded)| decoded.as_str()),
+        )),
     }
-    None
-}
-
-/// The explicit anchor names completion may offer inside `@ref`.
-pub(crate) fn markdown_anchor_names(model: &SemanticModel) -> Vec<String> {
-    let mut names = Vec::new();
-    for (_, decoded) in static_documentation(model) {
-        let markdown = fatou_parser::documentation::parse(decoded.as_str());
-        for node in markdown.cst.descendants() {
-            if let Some(link) = Link::cast(node.clone())
-                && let Some(documenter) = link.documenter_link()
-                && documenter.kind() == DocumenterLinkKind::Id
-                && let Some(target) = documenter.target()
-                && !names.iter().any(|name| name == target)
-            {
-                names.push(target.to_string());
-            }
-            if let Some(heading) = Heading::cast(node) {
-                let content = heading.content();
-                if !content.is_empty() && !names.contains(&content) {
-                    names.push(content.clone());
-                }
-                let slug = heading.slug();
-                if !slug.is_empty() && !names.contains(&slug) {
-                    names.push(slug);
-                }
-            }
-        }
-    }
-    names
 }
 
 /// Render a decoded documentation value as Markdown, omitting empty payloads.
@@ -291,4 +225,102 @@ pub(crate) fn lsp_range(
         index.byte_to_position(range.start().into(), encoding),
         index.byte_to_position(range.end().into(), encoding),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::incremental::IncrementalDatabase;
+    use crate::text::TextBuffer;
+
+    #[test]
+    fn cached_markdown_requests_follow_live_source_maps_and_fallbacks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("docs.jl");
+        let uri = super::super::uri::from_path(&path).unwrap();
+        let original = concat!(
+            "x = 1\n",
+            "\"\"\"\n    # First title\n\n",
+            "    [Spot](@id chosen-id)\n\n",
+            "    [^note]: First note.\n    \"\"\"\nf() = x\n",
+            "\"\"\"\n# First title\n\n[Spot](@id chosen-id)\n\n",
+            "[^note]: Second note.\n\"\"\"\ng() = 2\n",
+            "\"\"\"\nSee [title](#first-title), [id](@ref chosen-id), and [^note].\n",
+            "See [missing](#missing).\n\"\"\"\nh() = 3\n",
+        );
+        let mut db = IncrementalDatabase::new();
+        for text in [
+            original.to_string(),
+            original.replace("    ", "        "),
+            original.replace("x = 1", "# A new comment.\nx = 10000"),
+            original.replace("First title", "\\u0046irst title"),
+            format!("\"$opaque\"\nopaque() = 0\n{original}"),
+            original.replacen("chosen-id", "changed-id", 1),
+            original.replace("First title", "Other title"),
+        ] {
+            let live = TextBuffer::from(text.as_str());
+            let index = live.line_index();
+            let encoding = PositionEncoding::Utf16;
+            // Exercise the missing/stale-buffer fallback before installing each
+            // new revision, then demand the same answers twice from its cache.
+            for pass in 0..3 {
+                if pass == 1 {
+                    db.upsert_file(&path, live.text_arc());
+                }
+                let snapshot = db.snapshot();
+                for (marker, destination) in [
+                    (
+                        "#first-tit",
+                        text.find("# First").or_else(|| text.find("# \\u0046irst")),
+                    ),
+                    ("@ref chosen-i", text.find("chosen-id)")),
+                    ("and [^no", text.find("[^note]: First")),
+                    ("#miss", None),
+                ] {
+                    let offset = text.rfind(marker).unwrap() + marker.len();
+                    let position = index.byte_to_position(offset, encoding);
+                    let actual = super::super::definition::definition_via_db(
+                        &snapshot, &uri, &path, &live, position, encoding,
+                    );
+                    let fresh = super::super::definition::compute_definition(
+                        &uri, &text, position, encoding, &snapshot,
+                    );
+                    assert_eq!(actual, fresh);
+                    assert_eq!(actual.len(), usize::from(destination.is_some()));
+                    if let Some(destination) = destination {
+                        assert_eq!(
+                            actual[0].range.start,
+                            index.byte_to_position(destination, encoding)
+                        );
+                    }
+                }
+                let position = index.byte_to_position(
+                    text.rfind("@ref chosen-i").unwrap() + "@ref chosen-i".len(),
+                    encoding,
+                );
+                let actual = super::super::completion::completion_via_db(
+                    &snapshot, &path, &live, position, encoding,
+                );
+                assert_eq!(
+                    actual,
+                    super::super::completion::compute_completions(
+                        &text, position, encoding, &snapshot,
+                    )
+                );
+                let anchors: Vec<_> = actual
+                    .iter()
+                    .filter(|item| item.kind == Some(lsp_types::CompletionItemKind::REFERENCE))
+                    .map(|item| item.label.as_str())
+                    .collect();
+                assert_eq!(
+                    anchors.iter().filter(|name| **name == "chosen-id").count(),
+                    1
+                );
+                assert_eq!(
+                    anchors.contains(&"First title"),
+                    !text.contains("Other title")
+                );
+            }
+        }
+    }
 }

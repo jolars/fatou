@@ -83,6 +83,62 @@ fn an_unsaved_docstring_edit_reaches_the_semantic_model() {
 }
 
 #[test]
+fn documentation_index_tracks_payloads_without_source_positions() {
+    use fatou::incremental::{documentation_index, static_docstring_payloads};
+    use std::sync::Arc;
+
+    let mut db = IncrementalDatabase::new();
+    let original = "x = 1\n\"# First\\n\"\nf() = x\n\"# Second\\n\"\ng() = x\n";
+    let file = db.add_file(original);
+    let first = documentation_index(&db, file).clone();
+    assert_eq!(
+        first.anchor_names(),
+        &["First", "first", "Second", "second"]
+    );
+    assert!(Arc::ptr_eq(&first, documentation_index(&db, file)));
+    let model = fatou::semantic::SemanticModel::build(&parsed_tree_root(&db, file));
+    let payloads = static_docstring_payloads(&db, file).clone();
+
+    // Widen a body before both attachments, then change literal spelling
+    // without changing decoded text. Neither edit should reparse Markdown.
+    for text in [
+        original.replace("x = 1", "x = 10000"),
+        original.replace("First", "\\u0046irst"),
+        format!("\"$opaque\"\nopaque() = 0\n{original}"),
+        format!("\"bad \\q\"\ninvalid() = 0\n{original}"),
+    ] {
+        db.set_file_text(file, text);
+        assert_ne!(&model, semantic_model(&db, file));
+        assert_eq!(&payloads, static_docstring_payloads(&db, file));
+        assert!(Arc::ptr_eq(&first, documentation_index(&db, file)));
+    }
+
+    // A decoded edit invalidates the index even when the byte width is equal.
+    db.set_file_text(file, original.replace("First", "Third"));
+    let changed = documentation_index(&db, file);
+    assert!(!Arc::ptr_eq(&first, changed));
+    assert_eq!(
+        changed.anchor_names(),
+        &["Third", "third", "Second", "second"]
+    );
+
+    db.set_file_text(file, "\"# Second\\n\"\ng() = 0\n\"# First\\n\"\nf() = 0\n");
+    assert_eq!(
+        documentation_index(&db, file).anchor_names(),
+        &["Second", "second", "First", "first"]
+    );
+    db.set_file_text(file, "\"$opaque\"\nf() = 0\n");
+    assert!(documentation_index(&db, file).anchor_names().is_empty());
+    db.set_file_text(file, "f() = 0\n");
+    assert!(documentation_index(&db, file).anchor_names().is_empty());
+    db.set_file_text(file, original);
+    assert_eq!(
+        documentation_index(&db, file).anchor_names(),
+        first.anchor_names()
+    );
+}
+
+#[test]
 fn control_flow_is_reused_when_input_is_unchanged() {
     let db = IncrementalDatabase::new();
     let file = db.add_file("function f()\n    return 1\nend\n");

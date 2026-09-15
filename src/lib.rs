@@ -3,6 +3,7 @@ pub use fatou_parser::{ast, parser, syntax};
 pub mod cli;
 pub mod config;
 pub mod debug;
+pub mod documentation;
 pub mod environment;
 pub mod file_discovery;
 pub mod formatter;

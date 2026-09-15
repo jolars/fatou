@@ -38,7 +38,7 @@ use lsp_types::{
 use rowan::TextSize;
 use serde::{Deserialize, Serialize};
 
-use crate::incremental::Analysis;
+use crate::incremental::{Analysis, SourceFile};
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::{KEYWORDS, parse};
 use crate::resolve::{
@@ -84,6 +84,7 @@ pub fn compute_completions<P: PackageSource>(
         text,
         TextSize::new(offset as u32),
         encoding,
+        None,
     )
 }
 
@@ -109,7 +110,14 @@ pub(crate) fn completion_via_db(
         let model = snapshot.semantic_model(file);
         let workspace = snapshot.workspace_member(path);
         Some(completions_for(
-            model, &root, snapshot, workspace, text, offset, encoding,
+            model,
+            &root,
+            snapshot,
+            workspace,
+            text,
+            offset,
+            encoding,
+            Some((snapshot, file)),
         ))
     }));
     match cached {
@@ -130,6 +138,7 @@ pub(crate) fn resolve_completion(snapshot: &Analysis, item: CompletionItem) -> C
 }
 
 /// The masking-order candidate set for `text` at `offset`, mapped to LSP items.
+#[allow(clippy::too_many_arguments)]
 fn completions_for<P: PackageSource>(
     model: &SemanticModel,
     root: &SyntaxNode,
@@ -138,6 +147,7 @@ fn completions_for<P: PackageSource>(
     text: &str,
     offset: TextSize,
     encoding: PositionEncoding,
+    cached_docs: Option<(&Analysis, SourceFile)>,
 ) -> Vec<CompletionItem> {
     let offset_bytes: usize = offset.into();
     if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
@@ -152,6 +162,7 @@ fn completions_for<P: PackageSource>(
                 embedded.text,
                 embedded.offset,
                 encoding,
+                None,
             );
             // Anchors name Markdown targets, so they stay out of the Julia
             // names merged in from the enclosing scope.
@@ -163,6 +174,7 @@ fn completions_for<P: PackageSource>(
                 embedded.offset,
                 context.attachment.target_range.start(),
                 false,
+                None,
             );
             let mut seen: std::collections::HashSet<String> =
                 items.iter().map(|item| item.label.clone()).collect();
@@ -185,6 +197,7 @@ fn completions_for<P: PackageSource>(
                 reference.offset,
                 context.attachment.target_range.start(),
                 true,
+                cached_docs,
             );
             if let Some(range) = replacement {
                 for item in &mut items {
@@ -272,6 +285,7 @@ fn reference_completions<P: PackageSource>(
     offset: TextSize,
     semantic_offset: TextSize,
     anchors: bool,
+    cached_docs: Option<(&Analysis, SourceFile)>,
 ) -> Vec<CompletionItem> {
     match context_at(target, offset.into()) {
         Context::Member {
@@ -292,7 +306,9 @@ fn reference_completions<P: PackageSource>(
                 .map(|candidate| candidate_item(model, candidate, Namespace::Value))
                 .collect();
             let anchor_names = if anchors {
-                super::documentation::markdown_anchor_names(model)
+                super::documentation::markdown_index(model, cached_docs)
+                    .anchor_names()
+                    .to_vec()
             } else {
                 Vec::new()
             };
@@ -941,6 +957,7 @@ mod tests {
             src,
             offset,
             PositionEncoding::Utf16,
+            None,
         )
     }
 

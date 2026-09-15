@@ -49,6 +49,8 @@ mod cross_file;
 mod definition;
 mod document_link;
 mod documentation;
+#[cfg(test)]
+mod documentation_bench;
 mod environment_diagnostics;
 mod folding;
 mod format;

@@ -69,3 +69,6 @@ target
 /bench/lsenv/jetls
 /bench/lsenv/manifest.json
 /bench/lsenv/*.log
+
+# Python benchmark helpers.
+__pycache__/

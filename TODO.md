@@ -88,12 +88,12 @@ style remains project policy rather than language correctness.
   code indent, matching Julia's `Markdown.parse` without changing ordinary
   continuation lines.
 
-- [ ] `markdown_anchor_names` and `markdown_definition` re-parse every static
-  docstring in the file on each call, so an `@ref` completion or a Markdown
-  go-to-definition pays for the whole file's documentation. Now bounded—the
-  anchor set no longer leaks into embedded-Julia completion, so the scan runs
-  only with the cursor inside an `@ref`—but still uncached. The fix is a salsa
-  query keyed on the file's static payloads; measure before building it.
+- [x] Cache Markdown anchors and definitions in a demand-only salsa query over
+  the file's decoded static docstring payloads. Code edits and equivalent
+  literal spellings reuse the index; navigation maps decoded ranges through
+  the live source maps. Embedded-Julia completion keeps its existing boundary.
+  Before/after measurements and reproduction instructions live in
+  `bench/documentation.json` and `bench/documentation.md`.
 
 - [ ] **Formatting (deferred and opt-in):** only consider docstring reflow after
   corpus validation. Gate it behind `[format] docstrings = true` and

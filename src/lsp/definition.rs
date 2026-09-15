@@ -39,7 +39,7 @@ use lsp_types::{Location, Position, Range, Uri};
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
 
-use crate::incremental::{Analysis, normalize_path};
+use crate::incremental::{Analysis, SourceFile, normalize_path};
 use crate::index::model::{DefLocation, Span};
 use crate::index::{ModuleIndex, PackageIndex};
 use crate::parser::parse;
@@ -77,6 +77,7 @@ pub fn compute_definition<P: PackageSource>(
         &line_index,
         offset,
         encoding,
+        None,
     )
 }
 
@@ -125,6 +126,7 @@ pub(crate) fn definition_via_db(
             &line_index,
             offset,
             encoding,
+            Some((snapshot, file)),
         ))
     }));
     match cached {
@@ -186,6 +188,7 @@ fn definition_for<P: PackageSource>(
     line_index: &LineIndex,
     offset: TextSize,
     encoding: PositionEncoding,
+    cached_docs: Option<(&Analysis, SourceFile)>,
 ) -> Vec<Location> {
     if let Some(context) = super::documentation::DocumentationContext::at(model, offset) {
         if let Some(embedded) = context.embedded_julia() {
@@ -200,6 +203,7 @@ fn definition_for<P: PackageSource>(
                 &embedded_index,
                 embedded.offset,
                 encoding,
+                None,
             );
             // An intra-file result carries a fence-local range; drop it rather
             // than return one the client would resolve against the outer file.
@@ -240,7 +244,9 @@ fn definition_for<P: PackageSource>(
         }
         if let Some(reference) = context.explicit_ref() {
             let anchor = super::documentation::MarkdownReference::Anchor(reference.target.clone());
-            if let Some(range) = super::documentation::markdown_definition(model, &anchor) {
+            if let Some(range) =
+                super::documentation::markdown_index(model, cached_docs).definition(model, &anchor)
+            {
                 return vec![self_location(uri, range, line_index, encoding)];
             }
             return reference_locations(
@@ -255,7 +261,8 @@ fn definition_for<P: PackageSource>(
             );
         }
         if let Some(reference) = context.markdown_reference()
-            && let Some(range) = super::documentation::markdown_definition(model, &reference)
+            && let Some(range) = super::documentation::markdown_index(model, cached_docs)
+                .definition(model, &reference)
         {
             return vec![self_location(uri, range, line_index, encoding)];
         }
