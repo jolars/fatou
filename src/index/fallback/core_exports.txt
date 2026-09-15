@@ -1,5 +1,6 @@
 # Core exports snapshot for the no-install fallback (see src/index/base.rs).
 # Regenerate from a real Julia install; one exported name per line.
+# Generated from Julia 1.13.0.
 <:
 ===
 AbstractArray

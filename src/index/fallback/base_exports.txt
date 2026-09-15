@@ -1,5 +1,6 @@
 # Base exports snapshot for the no-install fallback (see src/index/base.rs).
 # Regenerate from a real Julia install; one exported name per line.
+# Generated from Julia 1.13.0.
 !
 !=
 !==
@@ -29,9 +30,11 @@
 @NamedTuple
 @__DIR__
 @__FILE__
+@__FUNCTION__
 @__LINE__
 @__MODULE__
 @__dot__
+@acquire
 @allocated
 @allocations
 @assert
@@ -115,6 +118,7 @@ AbstractIrrational
 AbstractLock
 AbstractMatch
 AbstractMatrix
+AbstractOneTo
 AbstractPattern
 AbstractPipe
 AbstractRange
@@ -226,6 +230,7 @@ IOBuffer
 IOContext
 IOServer
 IOStream
+IR
 IdDict
 IdSet
 ImmutableDict
@@ -400,6 +405,7 @@ acquire
 acsc
 acscd
 acsch
+active_manifest
 active_project
 addenv
 adjoint
@@ -536,6 +542,7 @@ displayable
 displaysize
 div
 divrem
+donotdelete
 download
 dropdims
 dump
@@ -580,6 +587,7 @@ fd
 fdio
 fetch
 fieldcount
+fieldindex
 fieldname
 fieldnames
 fieldoffset
@@ -678,6 +686,7 @@ invokelatest
 invperm
 invpermute!
 isa
+isa_ast_node
 isabspath
 isabstracttype
 isambiguous
@@ -726,6 +735,7 @@ ismount
 ismutable
 ismutabletype
 isnan
+isnegative
 isnothing
 isnumeric
 isodd
@@ -734,6 +744,7 @@ isopen
 isoperator
 ispath
 isperm
+ispositive
 ispow2
 isprimitivetype
 isprint
@@ -800,6 +811,7 @@ lstrip
 ltoh
 ltruncate
 macroexpand
+macroexpand!
 map
 map!
 mapfoldl
@@ -812,6 +824,7 @@ max
 maximum
 maximum!
 maxintfloat
+memoryindex
 memoryref
 merge
 merge!
@@ -836,6 +849,7 @@ modifyglobal!
 modifyproperty!
 moduleroot
 mtime
+mul_hi
 muladd
 mv
 nameof
@@ -918,6 +932,7 @@ pushdisplay
 pushfirst!
 put!
 pwd
+quoted
 rad2deg
 rand
 randn
@@ -1000,6 +1015,7 @@ setdiff!
 setenv
 setfield!
 setfieldonce!
+setgid
 setglobal!
 setglobalonce!
 setindex!
@@ -1007,6 +1023,7 @@ setprecision
 setproperty!
 setpropertyonce!
 setrounding
+setuid
 shell_escape
 shell_escape_csh
 shell_escape_posixly
@@ -1014,6 +1031,7 @@ shell_escape_wincmd
 shell_split
 show
 showable
+showarg
 showerror
 sign
 signbit
@@ -1078,6 +1096,7 @@ symlink
 systemerror
 tail
 take!
+takestring!
 tan
 tand
 tanh
@@ -1112,6 +1131,7 @@ typejoin
 typemax
 typemin
 typeof
+uabs
 undef
 unescape_string
 union

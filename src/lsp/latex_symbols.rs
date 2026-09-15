@@ -1,7 +1,7 @@
 //! The LaTeX and emoji input sequences the Julia REPL substitutes on tab.
 //!
 //! Generated from `REPL.REPLCompletions` by
-//! `scripts/generate-latex-symbols.jl` (Julia 1.12.6); regenerate on a
+//! `scripts/generate-latex-symbols.jl` (Julia 1.13.0); regenerate on a
 //! Julia bump and do not hand-edit. Both tables are sorted by key, which
 //! [`super::completion`] relies on to take a prefix range by binary search.
 
@@ -237,6 +237,7 @@ pub(super) static LATEX_SYMBOLS: &[(&str, &str)] = &[
     ("\\^o", "ᵒ"),
     ("\\^p", "ᵖ"),
     ("\\^phi", "ᵠ"),
+    ("\\^q", "𐞥"),
     ("\\^r", "ʳ"),
     ("\\^s", "ˢ"),
     ("\\^t", "ᵗ"),
