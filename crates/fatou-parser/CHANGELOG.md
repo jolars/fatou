@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.7.0...fatou-parser-v0.8.0) (2026-09-15)
+
+### Breaking changes
+- **parser:** support Julia 1.13 syntax ([`44d2dfe`](https://github.com/jolars/fatou/commit/44d2dfeb91b0b7071047dfc370dc03777f792732))
+
+### Features
+- **parser:** support Julia 1.13 syntax ([`44d2dfe`](https://github.com/jolars/fatou/commit/44d2dfeb91b0b7071047dfc370dc03777f792732))
+
+### Bug Fixes
+- **parser:** recover `break` and `continue` tuples ([`77d1dbc`](https://github.com/jolars/fatou/commit/77d1dbcb84da14cb1daa3d6e5db8eb395270a0e3))
+
 ## [0.7.0](https://github.com/jolars/fatou/compare/fatou-parser-v0.6.0...fatou-parser-v0.7.0) (2026-09-10)
 
 ### Features
