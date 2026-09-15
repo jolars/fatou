@@ -13,8 +13,9 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-None queued. Per `SKILL.md`, take a direct ask or probe real Julia; the deferred
-ledger below is a fallback, not a queue.
+Bare `break, y` / `continue, y` tuple recovery is a low-priority target, separate
+from deferred labeled-keyword recovery. JuliaSyntax 1.0.2 already exposes the
+error shape, so this needs no oracle bump. See the Parser section of `TODO.md`.
 
 ## Persistent traps & invariants
 
@@ -115,7 +116,13 @@ fixed head of nixpkgs PR #561865.
   headings.
 - **Counts**: JS **749/756 → 749/756**, dir **266/267 → 267/268**, and Markdown
   **17 → 18** fixtures. Existing Julia parser projections are unchanged.
-- **Next**: no parser-owned target is queued; probe real Julia per `SKILL.md`.
+- **Deferred-target audit**: Julia 1.13.0 and JuliaSyntax 1.0.2 still reject
+  wrapping operators and labeled `break`/`continue`. Fatou diagnoses dotted
+  wrapping forms; the TODO's claim that they fail silently was stale. Bare
+  `break, y` / `continue, y` recovery is independently pinnable and now has its
+  own TODO item. This audit changed documentation only.
+- **Next**: bare-keyword comma recovery; the labeled and wrapping extensions
+  remain deferred under the current oracle pin.
 
 ## Earlier sessions
 

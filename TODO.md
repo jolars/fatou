@@ -16,26 +16,29 @@
   `raw_triple_string_quote` locks the backslash-run siblings.
 
 - [ ] Lex the *broadcast* wrapping arithmetic operators `.+% .-% .*%` (and their
-  augmented forms `.+%= .-%= .*%=`) in `crates/fatou-parser/src/parser/lexer.rs`. The undotted
-  `+% -% *%` are supported; the dotted forms still split into `.+` + `%`, which
-  mis-parses rather than erroring. No code in the smoke-test corpus uses them
-  (only JuliaSyntax's own tests do). Deferred: the whole wrapping-operator family
-  is unreleased in JuliaSyntax — the latest release (1.0.2) still rejects every
-  form (`lex_plus`/`lex_minus`/`lex_star` have no `%`-suffix handling, verified
-  2026-08-03), so no oracle bump can pin these until JuliaSyntax ships them.
-  Implementing the lexer change now would be validatable only against a
-  hand-authored parser fixture, not the differential oracle.
+  augmented forms `.+%= .-%= .*%=`) in
+  `crates/fatou-parser/src/parser/lexer.rs`. Fatou supports undotted `+% -% *%`;
+  the dotted forms split into existing operators and produce diagnostics.
+  Deferred: Julia 1.13.0 and the latest JuliaSyntax release, 1.0.2, still reject
+  the entire wrapping-operator family (verified 2026-09-15). The Julia upgrade
+  does not unblock the pinned oracle. Implementing these extensions now would
+  require a development-revision oracle or hand-authored parser fixtures.
 
 - [ ] Two error-recovery gaps left over from labeled `break`/`continue`
   (`crates/fatou-parser/src/parser/structural.rs`). Junk after a complete labeled keyword drops
   JuliaSyntax's trailing zero-width marker (`break l x y` ⇒ `(break l x)
   (error-t y)`, not `(error-t y (error-t))`), and a bare comma after one does not
   fold into a tuple (`break l, y` ⇒ `(break l) (error-t ✘ y)`, not
-  `(tuple (break l) y)`) — the latter predates labels, since `break, y` behaved
-  the same way. Both are error/edge shapes no corpus code hits, and neither is
-  pinnable: labeled `break`/`continue` is unreleased in JuliaSyntax (the latest
-  release, 1.0.2, still rejects `break lbl`, verified 2026-08-03), so no oracle
-  bump can pin these until JuliaSyntax ships the feature.
+  `(tuple (break l) y)`). The labeled cases remain deferred: both Julia 1.13.0
+  and JuliaSyntax 1.0.2 reject `break lbl` and `continue lbl` (verified
+  2026-09-15), so the current oracle cannot validate labeled recovery.
+
+- [ ] Fix bare `break, y` / `continue, y` tuple recovery independently of label
+  support. JuliaSyntax 1.0.2 already provides a pinnable error shape:
+  `(tuple (break) (error-t) y)` and `(tuple (continue) (error-t) y)`. Fatou instead
+  emits a separate `(error-t ✘ y)` after the keyword. Verified against Julia
+  1.13.0 / JuliaSyntax 1.0.2 on 2026-09-15. This is a low-priority recovery gap,
+  not blocked on an upstream release.
 
 ### Incremental
 
