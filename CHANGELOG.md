@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.20.1](https://github.com/jolars/fatou/compare/v0.20.0...v0.20.1) (2026-09-15)
+
+### Bug Fixes
+- **lsp:** synchronize package entry renames ([`6eda616`](https://github.com/jolars/fatou/commit/6eda6167a9838a85a2259a541a7ca4a432814497))
+
 ## [0.20.0](https://github.com/jolars/fatou/compare/v0.19.0...v0.20.0) (2026-09-15)
 
 ### Features
