@@ -13,9 +13,8 @@ formatter, linter, or other downstream follow-up, put the active task in that
 consumer's `RECAP.md` and `TODO.md` section; retain at most a historical note in
 the parser session log.
 
-Bare `break, y` / `continue, y` tuple recovery is a low-priority target, separate
-from deferred labeled-keyword recovery. JuliaSyntax 1.0.2 already exposes the
-error shape, so this needs no oracle bump. See the Parser section of `TODO.md`.
+No queued parser targets. See the Parser section of `TODO.md` and the deferred
+ledger below for remaining work.
 
 ## Persistent traps & invariants
 
@@ -59,7 +58,7 @@ error shape, so this needs no oracle bump. See the Parser section of `TODO.md`.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
-divergence, 0 unsupported. Dir corpus (**268 cases**): **267 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**269 cases**): **268 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -98,36 +97,37 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-09-15 — Julia 1.13)
+## Latest session (2026-09-15 — bare keyword tuple recovery)
 
-Refreshed the oracle and generated tables with Julia 1.13.0, keeping the
-JuliaSyntax pin at 1.0.2. Devenv temporarily imports `julia_113-bin` from the
-fixed head of nixpkgs PR #561865.
+Bare `break, y` / `continue, y` now build `BARE_TUPLE_EXPR` nodes and record a
+zero-width diagnostic after the keyword. The projector replays that diagnostic
+as a sibling `(error-t)`, matching Julia 1.13.0 / JuliaSyntax 1.0.2.
 
-- **Lexer**: regenerated Unicode 17 ranges add 4,740 identifier-start and 4,792
-  continuation characters, with no removals. `unicode_17_identifiers` covers new
-  letters and a combining mark. Operator entries are unchanged;
-  `scripts/generate-unicode-ops.jl` now records their regeneration procedure.
-- **Markdown**: Julia 1.13 interprets inline `---` as an em dash. The CST now
-  records `EM_DASH`, typed navigation exposes `Inline::EmDash`, and heading
-  content renders it correctly. These public enum additions require downstream
-  exhaustive matches to handle the new variants. The `inline_dashes` oracle
-  fixture covers longer runs, escapes, code, math, emphasis, links, and
-  headings.
-- **Counts**: JS **749/756 → 749/756**, dir **266/267 → 267/268**, and Markdown
-  **17 → 18** fixtures. Existing Julia parser projections are unchanged.
-- **Deferred-target audit**: Julia 1.13.0 and JuliaSyntax 1.0.2 still reject
-  wrapping operators and labeled `break`/`continue`. Fatou diagnoses dotted
-  wrapping forms; the TODO's claim that they fail silently was stale. Bare
-  `break, y` / `continue, y` recovery is independently pinnable and now has its
-  own TODO item. This audit changed documentation only.
-- **Next**: bare-keyword comma recovery; the labeled and wrapping extensions
-  remain deferred under the current oracle pin.
+- **Parser**: a bare keyword before a comma reaches the expression loop, keeping
+  tuple and assignment precedence. Tuple separator probes skip block comments
+  while preserving significant newlines. Labeled forms keep their existing
+  parsing path and remain deferred.
+- **Recovery**: parenthesized and bracket-literal list fallbacks discard
+  diagnostics from the tentative first-element parse. This prevents duplicate
+  comma diagnostics and removes duplicate operator diagnostics in two existing
+  snapshots, without changing their CSTs or oracle projections.
+- **Fixtures**: `break_continue_tuple` pins statements, assignments, later tuple
+  elements, short-circuits, comments, newline continuation, blocks, and delimited
+  containers. A focused test requires one diagnostic per offending keyword.
+- **Counts**: JS **749/756 → 749/756** (7 divergence, 0 unsupported), dir
+  **267/268 → 268/269**. No new divergences or blocked entries.
+- **Validation**: workspace tests, incremental oracle edits, clippy with all
+  targets and features, rustfmt, and formatter idempotence on the new fixture.
+- **Next**: the nearest deferred recovery target is a trailing comma at EOF
+  (`x = a,`, `break,`). Labeled-keyword recovery and wrapping operators still
+  lack a validating oracle under the current pin.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-09-15** — Julia 1.13 / Unicode 17 tables, Markdown em dashes, and
+  deferred-target audit; JuliaSyntax remains pinned at 1.0.2. 749 / 267.
 - **2026-08-29** — decimal float overflow diagnostics and boundary fixtures.
   749 / 266.
 

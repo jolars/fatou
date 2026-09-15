@@ -33,12 +33,11 @@
   and JuliaSyntax 1.0.2 reject `break lbl` and `continue lbl` (verified
   2026-09-15), so the current oracle cannot validate labeled recovery.
 
-- [ ] Fix bare `break, y` / `continue, y` tuple recovery independently of label
-  support. JuliaSyntax 1.0.2 already provides a pinnable error shape:
-  `(tuple (break) (error-t) y)` and `(tuple (continue) (error-t) y)`. Fatou instead
-  emits a separate `(error-t ✘ y)` after the keyword. Verified against Julia
-  1.13.0 / JuliaSyntax 1.0.2 on 2026-09-15. This is a low-priority recovery gap,
-  not blocked on an upstream release.
+- [x] Recover bare `break, y` / `continue, y` as tuples with a diagnostic after
+  the keyword, matching JuliaSyntax 1.0.2. Fixture `break_continue_tuple` covers
+  assignment precedence, comments, newline continuation, and comma-separated
+  containers. Tentative bracket parses discard their diagnostics before
+  reparsing an argument list, so each invalid comma is reported once.
 
 ### Incremental
 
