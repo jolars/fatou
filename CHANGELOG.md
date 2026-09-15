@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/jolars/fatou/compare/v0.19.0...v0.20.0) (2026-09-15)
+
+### Features
+- refresh Julia 1.13 built-ins and completions ([`edcc5b5`](https://github.com/jolars/fatou/commit/edcc5b568d7460977bf9643045ce1604659e64b7))
+
+### Performance Improvements
+- **lsp:** cache Markdown navigation by docstring ([`3678ca5`](https://github.com/jolars/fatou/commit/3678ca5c13f9bb2706b16e12de3f5b889d696724))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.7.1
+- updated crates/fatou-parser to v0.8.0
+
 ## [0.19.0](https://github.com/jolars/fatou/compare/v0.18.0...v0.19.0) (2026-09-10)
 
 ### Features

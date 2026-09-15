@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.1](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.0...fatou-formatter-v0.7.1) (2026-09-15)
+
+### Bug Fixes
+- **formatter:** Fixes missing indentation on comment in keyword argument list ([`3c3d5f7`](https://github.com/jolars/fatou/commit/3c3d5f72b4667ee161a3205e644ced001c28ed9d))
+- **formatter:** Formats nested kwargs correctly ([`2effe78`](https://github.com/jolars/fatou/commit/2effe784349fefaa8bd96171f7f393eede919d2a))
+
+### Dependencies
+- updated crates/fatou-parser to v0.8.0
+
 ## [0.7.0](https://github.com/jolars/fatou/compare/fatou-formatter-v0.6.0...fatou-formatter-v0.7.0) (2026-09-10)
 
 ### Features
