@@ -11,6 +11,13 @@ themselves, navigates an open `Project.toml`'s dependency names with inlay hints
 for their resolved versions, and links an open `Manifest.toml`'s `path` entries
 to the packages they pin.
 
+Renaming a package entry from `src/MyPkg.jl` to `src/NewPkg.jl` also updates
+`name` in its `Project.toml` or `JuliaProject.toml` and matching top-level
+`module MyPkg` declarations. The project edit uses unsaved buffer text and
+preserves the UUID, comments, and other fields. The destination must remain in
+the package's `src/` directory and have a valid Julia identifier as its name.
+Imports and references to the package name elsewhere require separate updates.
+
 Static docstrings are decoded before the server presents them, so unsaved local
 documentation and harvested package documentation render the same way. Their
 Markdown headings appear in the document outline and fold as sections; external

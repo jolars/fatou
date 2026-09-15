@@ -30,6 +30,8 @@ use super::format::parse_diagnostics_to_lsp;
 use super::graph_diagnostics::graph_diagnostics;
 use super::lint::{ServerRules, lint_diagnostics_via_db};
 use super::read_jobs::{ReadJob, run_read};
+use super::rename_files::renamed_package_projects;
+use super::server::HarvestSignal;
 use super::state::Outbound;
 use super::task_pool::Spawner;
 
@@ -85,6 +87,13 @@ pub(crate) enum SyncMessage {
     /// dispatched as an analysis (it is not Julia) but whose `[deps]` the
     /// linter reads through `project_declared_deps`.
     SetText { path: PathBuf, text: String },
+    /// Refresh project files edited by an entry rename, then request a full
+    /// resolve. The client may have no file watchers to report those TOML edits.
+    RenamedProjects {
+        files: Vec<lsp_types::FileRename>,
+        open_projects: Vec<PathBuf>,
+        harvest: Sender<HarvestSignal>,
+    },
 }
 
 /// A library-index update delivered to the analysis thread by the background
@@ -253,6 +262,17 @@ impl AnalysisWorker {
                         Ok(SyncMessage::Revert(path)) => self.on_sync(&path, analysis_rx),
                         Ok(SyncMessage::SetText { path, text }) => {
                             self.on_project_text(&path, text);
+                        }
+                        Ok(SyncMessage::RenamedProjects { files, open_projects, harvest }) => {
+                            let projects = renamed_package_projects(&self.db.snapshot(), &files);
+                            for path in &projects {
+                                if !open_projects.contains(path) {
+                                    self.on_sync(path, analysis_rx);
+                                }
+                            }
+                            if !projects.is_empty() {
+                                let _ = harvest.send(HarvestSignal::Environment);
+                            }
                         }
                         Err(_) => {}
                     });

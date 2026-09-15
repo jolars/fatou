@@ -20,9 +20,10 @@
 //! *decoded* paths ([`crate::project::IncludeSite::path`]) and the replacement is re-escaped on
 //! the way out, so an escape in the literal is no obstacle.
 //!
-//! Package *identity* is not repaired: renaming a package's entry file
-//! (`src/MyPkg.jl`) rebases its own includes but leaves `Project.toml`'s `name`
-//! alone, and the existing include-graph diagnostics surface the breakage.
+//! Renaming a package entry within its `src/` directory also updates the
+//! tracked project file's `name` and matching top-level module declarations.
+//! Its UUID stays stable. A move outside the package's new `src/` directory
+//! cannot be repaired by changing its name; `missing-entry-file` reports it.
 
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
@@ -31,14 +32,17 @@ use std::str::FromStr;
 
 use lsp_types::{FileRename, Range, TextEdit, Uri, WorkspaceEdit};
 
+use crate::ast::{AstNode, AstToken, DocAttachment, Expr, ModuleDef, Root};
+use crate::environment::{is_project_file, parse_project_str};
 use crate::incremental::{Analysis, SourceFile, normalize_path};
+use crate::parser::parse;
 use crate::project::{include_sites, resolve_target};
 use crate::text::{LineIndex, PositionEncoding};
 
 use super::uri;
 
-/// The edits that keep the workspace's `include` graph intact across the rename
-/// batch `files`, or `None` when nothing needs rewriting (answered as `null`).
+/// The edits that keep includes and package entry names consistent across the
+/// rename batch `files`, or `None` when nothing needs rewriting.
 ///
 /// `open_docs` are the paths of the client's open buffers: the seeded member
 /// set covers only what the harvest reached from each package's entry file, so
@@ -137,7 +141,129 @@ fn collect_edits(
             .collect();
         insert_edits(&mut changes, &old_path, edits);
     }
+    for package in snapshot.workspace_packages() {
+        collect_package_edits(snapshot, &package, map, encoding, &mut changes);
+    }
     changes
+}
+
+/// Use the registered project input, never a guessed filename or a fresh disk
+/// read: `JuliaProject.toml` and an unsaved `name` must follow the same route.
+fn collect_package_edits(
+    snapshot: &Analysis,
+    package: &str,
+    map: &RenameMap,
+    encoding: PositionEncoding,
+    changes: &mut HashMap<Uri, Vec<TextEdit>>,
+) {
+    let Some(file) = snapshot.project_file_of(package) else {
+        return;
+    };
+    let text = snapshot.file_text_of(file);
+    let Some(project) = parse_project_str(text) else {
+        return;
+    };
+    let (Some(name), Some(_uuid)) = (project.name, project.uuid) else {
+        return;
+    };
+    let Some(project_path) = snapshot.file_path_of(file) else {
+        return;
+    };
+    let new_project_path = map.map(&project_path);
+    let (Some(root), Some(new_root)) = (project_path.parent(), new_project_path.parent()) else {
+        return;
+    };
+    if !is_project_file(&new_project_path) || !is_package_name(name.as_ref()) {
+        return;
+    }
+    let entry = root.join("src").join(format!("{}.jl", name.as_ref()));
+    let new_entry = map.map(&entry);
+    let Some(new_name) = new_entry.file_stem().and_then(|stem| stem.to_str()) else {
+        return;
+    };
+    // A renamed folder preserves the package name, while moving an entry away
+    // from `src/` cannot be made loadable by a name edit alone.
+    if new_name == name.as_ref()
+        || new_entry.extension().is_none_or(|ext| ext != "jl")
+        || new_entry.parent() != Some(new_root.join("src").as_path())
+        || !is_package_name(new_name)
+    {
+        return;
+    }
+    let index = LineIndex::new(text);
+    let span = name.span();
+    insert_edits(
+        changes,
+        &project_path,
+        vec![TextEdit {
+            range: Range::new(
+                index.byte_to_position(span.start, encoding),
+                index.byte_to_position(span.end, encoding),
+            ),
+            new_text: format!("\"{new_name}\""),
+        }],
+    );
+
+    let Some(entry_file) = snapshot.lookup_file(&entry) else {
+        return;
+    };
+    if !snapshot.parse_diagnostics(entry_file).is_empty() {
+        return;
+    }
+    let Some(root) = Root::cast(snapshot.parsed_tree(entry_file)) else {
+        return;
+    };
+    let index = LineIndex::new(snapshot.file_text_of(entry_file));
+    let edits = root
+        .syntax()
+        .children()
+        .filter_map(|item| {
+            let target = DocAttachment::cast(item.clone()).map_or(item, |doc| doc.target().clone());
+            ModuleDef::cast(target)?.name()?.ident()
+        })
+        .filter(|ident| ident.text() == name.as_ref())
+        .map(|ident| TextEdit {
+            range: Range::new(
+                index.byte_to_position(ident.syntax().text_range().start().into(), encoding),
+                index.byte_to_position(ident.syntax().text_range().end().into(), encoding),
+            ),
+            new_text: new_name.to_string(),
+        })
+        .collect();
+    insert_edits(changes, &entry, edits);
+}
+
+/// Ask the parser to recognize a plain name so keywords, operators, and
+/// Unicode identifiers obey Julia's lexical rules without a second whitelist.
+fn is_package_name(name: &str) -> bool {
+    let parsed = parse(name);
+    if !parsed.diagnostics.is_empty() || name.chars().all(|ch| ch == '_') {
+        return false;
+    }
+    Root::cast(parsed.cst).is_some_and(|root| {
+        let mut items = root.items();
+        matches!(items.next(), Some(Expr::Name(ident)) if ident.syntax().text() == name)
+            && items.next().is_none()
+    })
+}
+
+/// Project inputs that an entry move may have edited. This uses the harvested
+/// package name because the client's project buffer may already carry the new
+/// name by the time `didRenameFiles` arrives.
+pub(crate) fn renamed_package_projects(snapshot: &Analysis, files: &[FileRename]) -> Vec<PathBuf> {
+    let Some(map) = RenameMap::from_files(files) else {
+        return Vec::new();
+    };
+    snapshot
+        .workspace_packages()
+        .into_iter()
+        .filter_map(|package| {
+            let file = snapshot.project_file_of(&package)?;
+            let path = snapshot.file_path_of(file)?;
+            let entry = path.parent()?.join("src").join(format!("{package}.jl"));
+            (map.map(&entry) != entry).then_some(path)
+        })
+        .collect()
 }
 
 /// A resolved rename batch: normalized old path → normalized new path, sorted
@@ -293,9 +419,10 @@ fn insert_edits(changes: &mut HashMap<Uri, Vec<TextEdit>>, path: &Path, mut edit
     let Some(uri) = uri::from_path(path) else {
         return;
     };
-    edits.sort_by_key(|edit| (edit.range.start.line, edit.range.start.character));
-    edits.dedup_by_key(|edit| (edit.range.start.line, edit.range.start.character));
-    changes.entry(uri).or_default().extend(edits);
+    let combined = changes.entry(uri).or_default();
+    combined.append(&mut edits);
+    combined.sort_by_key(|edit| (edit.range.start.line, edit.range.start.character));
+    combined.dedup_by_key(|edit| (edit.range.start.line, edit.range.start.character));
 }
 
 #[cfg(test)]
@@ -740,6 +867,172 @@ mod db_tests {
             changes[&uri_of(&pkg_path("src/MyPkg.jl"))],
             vec![(0, 9, "../a.jl".to_string())]
         );
+    }
+
+    fn track_project(db: &mut IncrementalDatabase, path: &Path, text: &str) {
+        db.upsert_file(path, text.to_string());
+        db.set_project_files(BTreeMap::from([("MyPkg".to_string(), path.to_path_buf())]));
+    }
+
+    fn apply_file_edit(
+        edit: &WorkspaceEdit,
+        path: &Path,
+        text: &str,
+        encoding: PositionEncoding,
+    ) -> String {
+        let changes = edit.changes.as_ref().expect("changes");
+        let edits = &changes[&uri::from_path(path).unwrap()];
+        let index = LineIndex::new(text);
+        let mut spans: Vec<_> = edits
+            .iter()
+            .map(|edit| {
+                (
+                    index.position_to_byte(edit.range.start, encoding),
+                    index.position_to_byte(edit.range.end, encoding),
+                    &edit.new_text,
+                )
+            })
+            .collect();
+        spans.sort_by_key(|&(start, ..)| start);
+        for pair in spans.windows(2) {
+            assert!(pair[0].1 <= pair[1].0, "overlapping edits: {spans:?}");
+        }
+        let mut result = text.to_string();
+        for (start, end, replacement) in spans.into_iter().rev() {
+            result.replace_range(start..end, replacement);
+        }
+        result
+    }
+
+    #[test]
+    fn entry_rename_updates_the_live_project_name_and_module() {
+        let source = "\"Package documentation.\"\nmodule MyPkg\ninclude(\"a.jl\")\nend\n";
+        for project_name in ["Project.toml", "JuliaProject.toml"] {
+            for encoding in [PositionEncoding::Utf8, PositionEncoding::Utf16] {
+                let (mut db, _) = workspace_db(&[], &[("MyPkg.jl", source)]);
+                let project_path = pkg_path(project_name);
+                track_project(&mut db, &project_path, "name = \"MyPkg\"\n");
+                let text = concat!(
+                    "# Unsaved project edits.\r\n",
+                    "name = 'MyPkg' # Package name. 🐈\r\n",
+                    "uuid = \"00000000-0000-0000-0000-000000000001\"\r\n",
+                    "[deps]\r\n",
+                    "Other = \"00000000-0000-0000-0000-000000000002\"\r\n",
+                );
+                db.upsert_file(&project_path, text.to_string());
+                let edit = will_rename_files_via_db(
+                    &db.snapshot(),
+                    &[moved("src/MyPkg.jl", "src/NewPkg.jl")],
+                    &[],
+                    encoding,
+                )
+                .expect("renaming the entry must keep the package name in sync");
+                let project = apply_file_edit(&edit, &project_path, text, encoding);
+                assert_eq!(project, text.replace("'MyPkg'", "\"NewPkg\""));
+                let renamed = apply_file_edit(&edit, &pkg_path("src/MyPkg.jl"), source, encoding);
+                assert_eq!(renamed, source.replace("module MyPkg", "module NewPkg"));
+                assert_eq!(edit.changes.unwrap().len(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn entry_rename_in_a_folder_batch_edits_the_old_project_uri() {
+        let (mut db, _) = workspace_db(&[], &[("MyPkg.jl", "module MyPkg\nend\n")]);
+        let project_path = pkg_path("Project.toml");
+        track_project(
+            &mut db,
+            &project_path,
+            "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+        );
+        let changes = edits_with(
+            &db,
+            &[
+                moved("", "../MovedPkg"),
+                moved("src/MyPkg.jl", "../MovedPkg/src/NewPkg.jl"),
+            ],
+            &[],
+        );
+        assert_eq!(
+            changes[&uri_of(&project_path)],
+            vec![(0, 7, "\"NewPkg\"".to_string())]
+        );
+        assert_eq!(
+            changes[&uri_of(&pkg_path("src/MyPkg.jl"))],
+            vec![(0, 7, "NewPkg".to_string())]
+        );
+    }
+
+    #[test]
+    fn entry_moves_that_cannot_be_repaired_by_a_name_change_leave_metadata_alone() {
+        let (mut db, _) = workspace_db(&[], &[("MyPkg.jl", "module MyPkg\nend\n")]);
+        track_project(
+            &mut db,
+            &pkg_path("Project.toml"),
+            "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+        );
+        for (old, new) in [
+            ("src/MyPkg.jl", "src/deep/NewPkg.jl"),
+            ("src/MyPkg.jl", "../Other/src/NewPkg.jl"),
+            ("src/MyPkg.jl", "src/NewPkg.txt"),
+            ("src/MyPkg.jl", "src/123.jl"),
+            ("src/MyPkg.jl", "src/end.jl"),
+            ("src/MyPkg.jl", "src/A-B.jl"),
+            ("src/MyPkg.jl", "src/__.jl"),
+            ("src/other.jl", "src/NewPkg.jl"),
+            ("", "../MovedPkg"),
+            ("src", "source"),
+        ] {
+            let changes = edits_with(&db, &[moved(old, new)], &[]);
+            assert!(changes.is_empty(), "{old} -> {new}: {changes:?}");
+        }
+    }
+
+    #[test]
+    fn entry_rename_requires_a_registered_named_project() {
+        let (mut db, _) = workspace_db(&[], &[("MyPkg.jl", "module MyPkg\nend\n")]);
+        let project_path = pkg_path("Project.toml");
+        let project = "name = \"MyPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n";
+        db.upsert_file(&project_path, project.to_string());
+        let rename = [moved("src/MyPkg.jl", "src/NewPkg.jl")];
+        assert!(edits_with(&db, &rename, &[]).is_empty());
+        for text in [
+            "name = \"MyPkg\"\n",
+            "uuid = \"00000000-0000-0000-0000-000000000001\"\n",
+            "name = \"MyPkg\"\nuuid = ",
+            "name = 42\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+            "name = \"AlreadyRenamed\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n",
+        ] {
+            track_project(&mut db, &project_path, text);
+            assert!(edits_with(&db, &rename, &[]).is_empty(), "{text}");
+        }
+    }
+
+    #[test]
+    fn entry_rename_handles_unicode_names_and_multiline_toml_strings() {
+        let source = "baremodule 𝒫kg\nmodule 𝒫kg end\nend\n";
+        let (mut db, _) = workspace_db(&[], &[("𝒫kg.jl", source)]);
+        let project_path = pkg_path("JuliaProject.toml");
+        let project =
+            "name = \"\"\"\n𝒫kg\"\"\" # Keep.\nuuid = \"00000000-0000-0000-0000-000000000001\"\n";
+        track_project(&mut db, &project_path, project);
+        for encoding in [PositionEncoding::Utf8, PositionEncoding::Utf16] {
+            let edit = will_rename_files_via_db(
+                &db.snapshot(),
+                &[moved("src/𝒫kg.jl", "src/ΔPkg.jl")],
+                &[],
+                encoding,
+            )
+            .expect("a Unicode package entry rename");
+            assert_eq!(
+                apply_file_edit(&edit, &project_path, project, encoding),
+                project.replace("\"\"\"\n𝒫kg\"\"\"", "\"ΔPkg\"")
+            );
+            assert_eq!(
+                apply_file_edit(&edit, &pkg_path("src/𝒫kg.jl"), source, encoding),
+                "baremodule ΔPkg\nmodule 𝒫kg end\nend\n"
+            );
+        }
     }
 
     #[test]

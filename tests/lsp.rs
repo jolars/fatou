@@ -3952,6 +3952,52 @@ fn serves_will_rename_files() {
     assert_eq!(new_texts(&edit, &entry), ["deep/sub/c.jl"]);
     assert_eq!(new_texts(&edit, &nested), ["../../a.jl"]);
 
+    // Package identity edits compose with includes in the same document, and
+    // every range still addresses the text at its old URI.
+    let project = pkg.path.join("Project.toml");
+    let renamed_entry = pkg.path.join("src/NewPkg.jl");
+    let renamed_member = pkg.path.join("src/moved.jl");
+    let renames = vec![
+        file_rename(&entry, &renamed_entry),
+        file_rename(&pkg.path.join("src/a.jl"), &renamed_member),
+    ];
+    let edit = poll_will_rename(&client, renames.clone(), 3, Duration::from_secs(10));
+    assert_eq!(new_texts(&edit, &project), ["\"NewPkg\""]);
+    assert_eq!(new_texts(&edit, &entry), ["NewPkg", "moved.jl"]);
+    assert_eq!(new_texts(&edit, &nested), ["../moved.jl"]);
+    for path in [&project, &entry, &nested] {
+        let original = std::fs::read_to_string(path).unwrap();
+        let edits = &edit.changes.as_ref().unwrap()[&file_uri(path)];
+        write_file(path, &apply_edits(&original, edits));
+    }
+    assert_eq!(
+        std::fs::read_to_string(&project).unwrap(),
+        "name = \"NewPkg\"\nuuid = \"00000000-0000-0000-0000-000000000001\"\n"
+    );
+    std::fs::rename(&entry, &renamed_entry).unwrap();
+    std::fs::rename(pkg.path.join("src/a.jl"), &renamed_member).unwrap();
+    client
+        .sender
+        .send(Message::Notification(Notification {
+            method: "workspace/didRenameFiles".to_string(),
+            params: serde_json::to_value(RenameFilesParams { files: renames }).unwrap(),
+        }))
+        .unwrap();
+
+    // A client without file watchers only reports the moved Julia files. The
+    // package must still be re-resolved under its new name for the next rename.
+    let edit = poll_will_rename(
+        &client,
+        vec![file_rename(
+            &renamed_entry,
+            &pkg.path.join("src/FinalPkg.jl"),
+        )],
+        2,
+        Duration::from_secs(10),
+    );
+    assert_eq!(new_texts(&edit, &project), ["\"FinalPkg\""]);
+    assert_eq!(new_texts(&edit, &renamed_entry), ["FinalPkg"]);
+
     client
         .sender
         .send(Message::Request(Request {

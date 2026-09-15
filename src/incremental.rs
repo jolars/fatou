@@ -1563,6 +1563,11 @@ impl Analysis {
         self.0.workspace_packages()
     }
 
+    /// The tracked project file of a workspace package, including unsaved text.
+    pub(crate) fn project_file_of(&self, name: &str) -> Option<SourceFile> {
+        self.0.project_file_of(name)
+    }
+
     /// The declared direct dependencies of the workspace package `name`. See
     /// [`IncrementalDatabase::declared_deps`].
     pub fn declared_deps(&self, name: &str) -> Option<Arc<DeclaredDeps>> {

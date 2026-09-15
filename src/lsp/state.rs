@@ -1324,6 +1324,20 @@ impl GlobalState {
             self.config.invalidate_discovered();
             self.on_config_changed();
         }
+        if !environment_changed && !sources.is_empty() {
+            let open_projects = self
+                .documents
+                .keys()
+                .filter(|uri| self.project_text(uri).is_some())
+                .filter_map(uri::to_path)
+                .map(|path| crate::incremental::normalize_path(&path))
+                .collect();
+            let _ = self.sync_tx.send(SyncMessage::RenamedProjects {
+                files: params.files.clone(),
+                open_projects,
+                harvest: self.harvest_tx.clone(),
+            });
+        }
         for path in sources {
             // The moved-from path is gone and the moved-to one is not tracked
             // yet; both sync as no-ops until the re-harvest settles membership.
@@ -1825,6 +1839,7 @@ mod tests {
                 SyncMessage::SetText { path, .. } => {
                     panic!("expected a revert, got a text write for {}", path.display())
                 }
+                SyncMessage::RenamedProjects { .. } => panic!("expected a revert, got a rename"),
             })
             .collect()
     }
@@ -2071,6 +2086,10 @@ mod tests {
             files: vec![lsp_types::FileRename { old_uri, new_uri }],
         });
 
+        assert!(matches!(
+            channels.sync.try_recv().unwrap(),
+            SyncMessage::RenamedProjects { open_projects, .. } if open_projects.is_empty()
+        ));
         assert_eq!(
             reverted(&channels.sync),
             vec![old_path.clone(), new_path.clone()]
@@ -2084,6 +2103,23 @@ mod tests {
             ],
             "the vacated and the occupied path each re-harvest their package"
         );
+    }
+
+    #[test]
+    fn did_rename_files_keeps_open_project_buffers_authoritative() {
+        let (mut state, channels) = test_state_with_channels();
+        let (project, _) = native("JuliaProject.toml");
+        open(&mut state, &uri::from_path(&project).unwrap(), 1);
+        let (_, old_uri) = native("src/MyPkg.jl");
+        let (_, new_uri) = native("src/NewPkg.jl");
+        state.on_did_rename_files(RenameFilesParams {
+            files: vec![lsp_types::FileRename { old_uri, new_uri }],
+        });
+        let SyncMessage::RenamedProjects { open_projects, .. } = channels.sync.try_recv().unwrap()
+        else {
+            panic!("expected project synchronization before the source refresh");
+        };
+        assert_eq!(open_projects, vec![project]);
     }
 
     /// A `Project.toml` changed outside the editor — `pkg> add`, a branch

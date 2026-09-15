@@ -140,13 +140,12 @@ style remains project policy rather than language correctness.
   destructive default and leaving it dangling is what the include-graph
   diagnostics already report. Create is close to a no-op. Design first.
 
-- [ ] Renaming a package's entry file (`src/MyPkg.jl`) rebases its own includes
-  but leaves `Project.toml`'s `name` alone, so the package silently stops
-  matching its entry. `willRenameFiles` deliberately does not touch
-  `Project.toml` (a `WorkspaceEdit` into a manifest is a bigger promise than the
-  include rewrite). The diagnosis half has landed as *Project files*'
-  `missing-entry-file`, so the mismatch is at least reported; the edit is
-  *Project files* stage 4.
+- [x] Renaming a package's entry file within `src/` updates the tracked
+  `Project.toml` or `JuliaProject.toml` name and matching top-level module
+  declarations, preserving its UUID and combining the edits with include
+  rewrites. Folder batches address the old URIs, and `didRenameFiles`
+  re-resolves the package even without file watchers. Moves outside `src/`
+  still report `missing-entry-file`.
 
 - [x] The per-keystroke text copies are gone, and the rope from #76 stays
   deferred — now on measurement rather than on argument. Two changes: `Token`
@@ -196,8 +195,8 @@ style remains project policy rather than language correctness.
   `<depot>/packages` today — it is only ever probed by exact slug — so even the
   cheap pass is new code.
 
-- [ ] `name`/`uuid` upkeep on a rename, the edit half of the `willRenameFiles` entry
-  above.
+- [x] Entry-file renames update `name` while preserving the package's `uuid`;
+  see `willRenameFiles` above.
 
 - [ ] **`resolve` is all-or-nothing**, found while landing stage 1: a good
   `Project.toml` beside a corrupt `Manifest.toml` loses the *entire*
