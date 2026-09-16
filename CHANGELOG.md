@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/jolars/fatou/compare/v0.20.0...v0.20.1) (2026-09-16)
+
+### Bug Fixes
+- **lsp:** synchronize package entry renames ([`6eda616`](https://github.com/jolars/fatou/commit/6eda6167a9838a85a2259a541a7ca4a432814497))
+
+### Performance Improvements
+- **build:** enable ThinLTO with one codegen unit ([`feed947`](https://github.com/jolars/fatou/commit/feed947203d9312543dec815ca5f6a3a2e865e31))
+
 ## [0.20.0](https://github.com/jolars/fatou/compare/v0.19.0...v0.20.0) (2026-09-15)
 
 ### Features
