@@ -19,10 +19,10 @@ pub struct UnusedBinding;
 
 /// Consuming attribute-DSL macros whose `begin ... end` block binds each
 /// `name = default` as an attribute the macro reads, not a dead local. Matched
-/// on the macro's final name component, so `Makie.@recipe` counts. Scope-
-/// transparent macros (`@testset`, `@inbounds`, `@views`) are deliberately
-/// excluded: they run their body as written, so a dead local there is a
-/// genuine finding. Extend this list as new attribute DSLs surface (it is
+/// on the macro's final name component, so `Makie.@recipe` counts. Macros that
+/// execute their bodies (`@testset`, `@inbounds`, `@views`) are deliberately
+/// excluded: their dead locals are genuine findings. The semantic model
+/// supplies any recognized implicit scopes. Extend this list as new attribute DSLs surface (it is
 /// name-based, so an aliased macro would evade it — an accepted limitation).
 const ATTRIBUTE_DSL_MACROS: &[&str] = &["gen_defaults!", "DocumentedAttributes", "recipe"];
 
@@ -52,8 +52,8 @@ fn in_attribute_dsl_macro(root: &SyntaxNode, range: TextRange) -> bool {
 /// dead local. The walk stops at the first enclosing [`SyntaxKind::BLOCK`]: a
 /// name inside a macro's `begin ... end` body (or any function/`do`/`let` body
 /// spliced in unevaluated) is reached only after crossing that block, so it
-/// stays a genuine local and is still flagged (matching the scope-transparent
-/// `@testset` case). Only a target reached before any block — a direct argument
+/// stays a genuine local and is still flagged (including inside `@testset`).
+/// Only a target reached before any block — a direct argument
 /// expression — is exempt.
 fn is_direct_macro_argument(root: &SyntaxNode, range: TextRange) -> bool {
     let mut node = match root.covering_element(range) {

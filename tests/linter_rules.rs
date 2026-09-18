@@ -499,13 +499,39 @@ fn unused_binding_ignores_macro_keyword_argument() {
 }
 
 #[test]
+fn unused_binding_respects_macro_wrapped_global_declarations() {
+    let source = "function f()\n@inbounds begin global x; nothing end\nx = 1\nend\n";
+    assert_eq!(count("unused-binding", source), 0);
+}
+
+#[test]
+fn unused_binding_testset_loop_assignment_is_read_after_the_loop() {
+    let source = r#"using Test
+
+@testset "Cannot make it right" begin
+    tmp = 0
+    for i in 1:2
+        tmp = 2
+    end
+    println("$tmp")
+end
+"#;
+    assert_eq!(count("unused-binding", source), 0);
+}
+
+#[test]
+fn unused_binding_reports_dead_testset_locals() {
+    let source = "using Test\n@testset begin\n    unused = 1\nend\n";
+    assert_eq!(count("unused-binding", source), 1);
+}
+
+#[test]
 fn unused_binding_flags_dead_local_in_macro_block_argument() {
-    // A real assignment inside a scope-transparent macro's block argument is
-    // still a local: `@testset` (like `@inbounds`) runs its body as written.
+    // A real assignment inside an executed macro block remains a local.
     assert_eq!(
         count(
             "unused-binding",
-            "function f()\n    @testset begin\n        t = 1\n    end\nend\n"
+            "using Test\nfunction f()\n    @testset begin\n        t = 1\n    end\nend\n"
         ),
         1
     );
@@ -533,11 +559,11 @@ fn unused_binding_exempts_direct_macro_argument_assignment() {
     );
     // The exemption is scoped to the direct argument: a dead local nested inside
     // a block the macro splices unevaluated stays a genuine finding (mirrors the
-    // scope-transparent `@testset` case above).
+    // `@testset` case above).
     assert_eq!(
         count(
             "unused-binding",
-            "function f()\n    @testset begin\n        x = compute()\n    end\nend\n"
+            "using Test\nfunction f()\n    @testset begin\n        x = compute()\n    end\nend\n"
         ),
         1
     );
@@ -1366,6 +1392,17 @@ fn undefined_name_flags_an_unknown_macro() {
 #[test]
 fn undefined_name_resolves_base_macros() {
     assert_eq!(count("undefined-name", "@assert true\n"), 0);
+}
+
+#[test]
+fn undefined_name_resolves_imports_in_quote_interpolations() {
+    for source in [
+        "ex = :($(begin using Test; 1 end))\n@test isa(1, Int)\n",
+        "ex = quote $(begin using Test: @test; 1 end) end\n@test isa(1, Int)\n",
+        "ex = :($(begin import Test as Tst; 1 end))\nTst.@test isa(1, Int)\n",
+    ] {
+        assert_eq!(count("undefined-name", source), 0, "{source}");
+    }
 }
 
 #[test]
@@ -5098,6 +5135,9 @@ fn test_isa_call_matches_loaded_test_spellings() {
         "import Test as Tst\nTst.@test isa(x, T)\n",
         "using Test: @test\n@test isa(x, T) broken=true\n",
         "import Test: @test as @check\n@check isa(x, T)\n",
+        "ex = :($(begin using Test; 1 end))\n@test isa(1, Int)\n",
+        "ex = :($(begin import Test as Tst; 1 end))\nTst.@test isa(1, Int)\n",
+        "using Test\nex = :($(@test isa(1, Int)))\n",
     ] {
         assert!(test_isa_diag(src).is_some(), "no finding for {src:?}");
     }
@@ -5113,6 +5153,10 @@ fn test_isa_call_requires_the_real_loaded_test_macro() {
         "using Test\nmacro test(x) x end\n@test isa(x, T)\n",
         "using Test\nmodule Nested\n@test isa(x, T)\nend\n",
         "module Nested\nusing Test\nend\n@test isa(x, T)\n",
+        "using Test\nex = quote @test isa(x, T) end\n",
+        "using Test\nex = :(Test.@test isa(x, T))\n",
+        "import Test: @test as @check\nex = :(@check isa(x, T))\n",
+        "ex = :(using Test)\n@test isa(1, Int)\n",
     ] {
         assert!(
             test_isa_diag(src).is_none(),

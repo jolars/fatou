@@ -63,6 +63,33 @@ fn edit_rebuilds_the_semantic_model() {
 }
 
 #[test]
+fn editing_a_testset_import_rebuilds_its_scope_and_matches_a_fresh_parse() {
+    use fatou::semantic::BindingKind;
+
+    let mut db = IncrementalDatabase::new();
+    let source = "using Test\n@testset begin\nx = 0\nfor i in 1:2\nx = 2\nend\nx\nend\n";
+    let file = db.add_file(source);
+    for (text, expected_count) in [
+        (source.to_string(), 1),
+        (source.replace("using Test", "using Other"), 2),
+        (source.to_string(), 1),
+    ] {
+        db.set_file_text(file, text.clone());
+        let model = semantic_model(&db, file);
+        assert_eq!(
+            model,
+            &fatou::semantic::SemanticModel::build(&parse(&text).cst)
+        );
+        let xs: Vec<_> = model.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(xs.len(), expected_count);
+        if expected_count == 1 {
+            assert_eq!(xs[0].kind, BindingKind::Local);
+            assert!(xs[0].read);
+        }
+    }
+}
+
+#[test]
 fn an_unsaved_docstring_edit_reaches_the_semantic_model() {
     let mut db = IncrementalDatabase::new();
     let file = db.add_file("\"old docs\"\nf() = 1\n");

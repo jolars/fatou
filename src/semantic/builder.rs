@@ -8,10 +8,14 @@
 //! phase first. Reads therefore always resolve against fully populated
 //! enclosing scopes, which makes forward closure captures come out right.
 
+use std::collections::HashSet;
+
 use rowan::TextRange;
 use smol_str::SmolStr;
 
-use crate::ast::{AstNode, AstToken, DocAttachment, DocAttachmentKind, Name, body_of};
+use crate::ast::{
+    AstNode, AstToken, DocAttachment, DocAttachmentKind, Expr, HasArgList, MacroCall, Name, body_of,
+};
 use crate::parser::{is_ident_continue, is_ident_start};
 use crate::syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -27,6 +31,8 @@ pub(crate) fn build(root: &SyntaxNode) -> SemanticModel {
     let mut builder = Builder {
         model: SemanticModel::default(),
         global_decls: Vec::new(),
+        pending_macros: Vec::new(),
+        testsets: HashSet::new(),
     };
     let file = builder.push_scope(ScopeKind::File, None, root.text_range());
     builder.declare_in(root, file);
@@ -35,6 +41,10 @@ pub(crate) fn build(root: &SyntaxNode) -> SemanticModel {
         .model
         .idents
         .sort_by_key(|ident| (ident.range.start(), ident.range.end()));
+    builder
+        .model
+        .module_loads
+        .sort_by_key(|load| load.range.start());
     builder.model
 }
 
@@ -114,6 +124,22 @@ fn is_macro_kwarg(node: &SyntaxNode) -> bool {
             .children()
             .next()
             .is_some_and(|lhs| lhs.kind() == SyntaxKind::NAME)
+}
+
+/// Split the forms for which Test provides a static scope contract. The
+/// headers execute outside a begin/call payload's implicit `let` scope.
+fn testset_arguments(call: &MacroCall) -> Option<(Vec<Expr>, Expr)> {
+    let mut args: Vec<_> = if let Some(list) = call.arg_list() {
+        list.args().filter_map(|arg| arg.expr()).collect()
+    } else {
+        call.syntax().children().filter_map(Expr::cast).collect()
+    };
+    let body = args.pop()?;
+    matches!(
+        body,
+        Expr::BeginExpr(_) | Expr::CallExpr(_) | Expr::ForExpr(_) | Expr::LetExpr(_)
+    )
+    .then_some((args, body))
 }
 
 fn is_augmented_assign(kind: SyntaxKind) -> bool {
@@ -533,6 +559,11 @@ struct Builder {
     /// Names declared `global` per scope (builder-transient, parallel to
     /// `model.scopes`).
     global_decls: Vec<Vec<SmolStr>>,
+    /// Potential Test scope contracts wait until ordinary declarations have
+    /// been hoisted, so a later local can mask a qualified Test call.
+    pending_macros: Vec<(MacroCall, ScopeId)>,
+    /// Keep declaration and read traversal on the same scope contract.
+    testsets: HashSet<TextRange>,
 }
 
 impl Builder {
@@ -660,37 +691,13 @@ impl Builder {
     /// and then terminates the search (module bodies do not see enclosing
     /// globals).
     fn resolve_read(&self, name: &str, scope: ScopeId) -> Option<BindingId> {
-        let mut cursor = Some(scope);
-        while let Some(id) = cursor {
-            if let Some(b) = self.find_in_scope(id, name) {
-                return Some(b);
-            }
-            let s = self.scope(id);
-            cursor = if s.kind.is_global() { None } else { s.parent };
-        }
-        None
+        self.model.resolve_name(name, scope, false)
     }
 
     /// Resolve a `@name` read: the macro namespace sees `macro` definitions
     /// and imported macros (whose bindings keep the `@` sigil in the name).
     fn resolve_macro_read(&self, name: &str, scope: ScopeId) -> Option<BindingId> {
-        let mut cursor = Some(scope);
-        while let Some(id) = cursor {
-            let hit = self.scope(id).bindings.iter().rev().copied().find(|&b| {
-                let binding = &self.model.bindings[b.0 as usize];
-                match binding.kind {
-                    BindingKind::Macro => binding.name == name,
-                    BindingKind::Import => binding.name.strip_prefix('@') == Some(name),
-                    _ => false,
-                }
-            });
-            if hit.is_some() {
-                return hit;
-            }
-            let s = self.scope(id);
-            cursor = if s.kind.is_global() { None } else { s.parent };
-        }
-        None
+        self.model.resolve_name(name, scope, true)
     }
 
     /// Record the macro read implied by a non-standard string/command literal.
@@ -826,8 +833,30 @@ impl Builder {
     /// Introduce the bindings assigned anywhere in `scope`'s own extent,
     /// without descending into nested scopes.
     fn declare_in(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        self.declare_children(node, scope);
+        self.finish_macro_declarations();
+    }
+
+    fn declare_expression(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        self.declare_node(node, scope);
+        self.finish_macro_declarations();
+    }
+
+    fn declare_children(&mut self, node: &SyntaxNode, scope: ScopeId) {
         for child in node.children() {
             self.declare_node(&child, scope);
+        }
+    }
+
+    /// Only interpolations execute in the enclosing scope. Hoist their
+    /// declarations so imports are available when recognizing macro scopes.
+    fn declare_quoted(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        for child in node.children() {
+            if child.kind() == SyntaxKind::INTERPOLATION {
+                self.declare_node(&child, scope);
+            } else {
+                self.declare_quoted(&child, scope);
+            }
         }
     }
 
@@ -849,7 +878,19 @@ impl Builder {
             SyntaxKind::IMPORT_STMT | SyntaxKind::USING_STMT => {
                 self.declare_import(node, scope);
             }
-            SyntaxKind::MACRO_CALL => self.declare_macro_call(node, scope),
+            SyntaxKind::MACRO_CALL => {
+                let call = MacroCall::cast(node.clone()).unwrap();
+                if self.model.is_test_macro(&call, scope, "testset")
+                    && testset_arguments(&call).is_some()
+                {
+                    self.pending_macros.push((call, scope));
+                } else {
+                    // Ordinary wrappers can contain `global`, `local`, or
+                    // imports that govern subsequent declarations.
+                    self.declare_macro_call(node, scope);
+                }
+            }
+            SyntaxKind::QUOTE_EXPR | SyntaxKind::QUOTE_SYM => self.declare_quoted(node, scope),
             kind if creates_scope(kind) => {}
             SyntaxKind::ASSIGNMENT_EXPR => {
                 let mut children = node.children();
@@ -889,7 +930,7 @@ impl Builder {
                     self.declare_node(&rest, scope);
                 }
             }
-            _ => self.declare_in(node, scope),
+            _ => self.declare_children(node, scope),
         }
     }
 
@@ -912,6 +953,7 @@ impl Builder {
                 self.push_binding(name, BindingKind::Import, scope, range);
             }
         }
+        self.record_import(node, scope, before, after);
     }
 
     /// Bind the name of a `function`/`macro` definition in its enclosing
@@ -1016,26 +1058,57 @@ impl Builder {
         }
     }
 
-    /// `local`/`global`/`const` statements, with bare-name and assignment
-    /// payloads. `local` forces a binding in the current scope (shadowing
-    /// any enclosing local); `global` routes the names to the innermost
-    /// global scope and records the declaration so later assignments in
-    /// this scope follow it.
+    fn finish_macro_declarations(&mut self) {
+        while !self.pending_macros.is_empty() {
+            let mut testsets = Vec::new();
+            let mut declared_ordinary = false;
+            for (call, scope) in std::mem::take(&mut self.pending_macros) {
+                if self.model.is_test_macro(&call, scope, "testset")
+                    && testset_arguments(&call).is_some()
+                {
+                    testsets.push((call, scope));
+                } else {
+                    self.declare_macro_call(call.syntax(), scope);
+                    declared_ordinary = true;
+                }
+            }
+            // Ordinary macro arguments can contain a declaration that masks
+            // Test, so settle those before accepting any scope contracts.
+            if declared_ordinary || !self.pending_macros.is_empty() {
+                self.pending_macros.extend(testsets);
+                continue;
+            }
+            for (call, scope) in testsets {
+                self.testsets.insert(call.syntax().text_range());
+                let (headers, _) = testset_arguments(&call).unwrap();
+                for header in headers {
+                    self.declare_macro_argument(header.syntax(), scope);
+                }
+            }
+        }
+    }
+
     /// Declare inside a macro call, but do not bind a `name = value` keyword
     /// argument's name — it is not a variable in the surrounding scope. The
     /// value is still scanned for nested definitions.
     fn declare_macro_call(&mut self, node: &SyntaxNode, scope: ScopeId) {
         for child in node.children() {
-            if is_macro_kwarg(&child) {
-                for value in child.children().skip(1) {
-                    self.declare_node(&value, scope);
-                }
-            } else {
-                self.declare_node(&child, scope);
-            }
+            self.declare_macro_argument(&child, scope);
         }
     }
 
+    fn declare_macro_argument(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if is_macro_kwarg(node) {
+            for value in node.children().skip(1) {
+                self.declare_node(&value, scope);
+            }
+        } else {
+            self.declare_node(node, scope);
+        }
+    }
+
+    /// `local` forces a binding in the current scope; `global` routes it to
+    /// the innermost global scope and records that choice for assignments.
     fn declare_declaration(&mut self, node: &SyntaxNode, scope: ScopeId, decl: DeclKind) {
         for child in node.children() {
             self.declare_decl_pattern(&child, scope, decl);
@@ -1442,17 +1515,20 @@ impl Builder {
 
     // --- imports and exports -------------------------------------------------
 
-    /// Record a `using`/`import` statement into the loaded-modules list: one
-    /// entry per comma clause, or one entry carrying the item list of the
-    /// colon form. The declare phase already introduced the bindings; here
-    /// only interpolations are walked (they splice in enclosing values).
-    fn handle_import(&mut self, node: &SyntaxNode, scope: ScopeId) {
+    /// Record loads during declaration so macro scope recognition can use
+    /// their provenance before walking reads. Matching still checks order.
+    fn record_import(
+        &mut self,
+        node: &SyntaxNode,
+        scope: ScopeId,
+        before: Vec<ImportClause>,
+        after: Option<Vec<ImportClause>>,
+    ) {
         let kind = if node.kind() == SyntaxKind::USING_STMT {
             LoadKind::Using
         } else {
             LoadKind::Import
         };
-        let (before, after) = collect_import_clauses(node);
         if let Some(items) = after {
             if let Some(base) = before.into_iter().next() {
                 self.model.module_loads.push(ModuleLoad {
@@ -1481,6 +1557,10 @@ impl Builder {
                 });
             }
         }
+    }
+
+    /// Import interpolations splice in values from the enclosing scope.
+    fn handle_import(&mut self, node: &SyntaxNode, scope: ScopeId) {
         for child in node.descendants().skip(1) {
             if child.kind() == SyntaxKind::INTERPOLATION {
                 self.walk_node(&child, scope);
@@ -1619,6 +1699,7 @@ impl Builder {
                     self.declare_node(&stmt, struct_scope);
                 }
             }
+            self.finish_macro_declarations();
             for stmt in body.children() {
                 let attachment = DocAttachment::cast(stmt.clone());
                 let target = attachment
@@ -1793,6 +1874,14 @@ impl Builder {
     }
 
     fn handle_for(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        let current = self.for_scope(node, scope);
+        if let Some(body) = body_of(node) {
+            self.declare_in(&body, current);
+            self.walk_children(&body, current);
+        }
+    }
+
+    fn for_scope(&mut self, node: &SyntaxNode, scope: ScopeId) -> ScopeId {
         let end = node.text_range().end();
         let mut current = scope;
         for child in node.children() {
@@ -1804,10 +1893,7 @@ impl Builder {
             // Recovery: a `for` with no binding still scopes its body.
             current = self.push_scope(ScopeKind::For, Some(scope), node.text_range());
         }
-        if let Some(body) = body_of(node) {
-            self.declare_in(&body, current);
-            self.walk_children(&body, current);
-        }
+        current
     }
 
     fn handle_while(&mut self, node: &SyntaxNode, scope: ScopeId) {
@@ -1881,7 +1967,7 @@ impl Builder {
         }
         for child in &rest {
             if child.kind() != SyntaxKind::FOR_BINDING {
-                self.declare_node(child, current);
+                self.declare_expression(child, current);
                 self.walk_node(child, current);
             }
         }
@@ -1915,7 +2001,7 @@ impl Builder {
         let fn_scope = self.push_scope(ScopeKind::Function, Some(scope), node.text_range());
         self.walk_signature(lhs, scope, fn_scope);
         for rhs in node.children().skip(1) {
-            self.declare_node(&rhs, fn_scope);
+            self.declare_expression(&rhs, fn_scope);
             self.walk_node(&rhs, fn_scope);
         }
     }
@@ -1936,7 +2022,7 @@ impl Builder {
             }
         }
         for rhs in node.children().skip(1) {
-            self.declare_node(&rhs, fn_scope);
+            self.declare_expression(&rhs, fn_scope);
             self.walk_node(&rhs, fn_scope);
         }
     }
@@ -2030,7 +2116,7 @@ impl Builder {
             }
         }
         for body in children {
-            self.declare_node(&body, fn_scope);
+            self.declare_expression(&body, fn_scope);
             self.walk_node(&body, fn_scope);
         }
     }
@@ -2189,18 +2275,58 @@ impl Builder {
     /// value and records the whole chain as a qualified read — it must not
     /// resolve to a local macro of the same name.
     fn walk_macro_call(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if self.testsets.contains(&node.text_range()) {
+            self.walk_testset(&MacroCall::cast(node.clone()).unwrap(), scope);
+            return;
+        }
         for child in node.children() {
             if child.kind() == SyntaxKind::MACRO_NAME {
                 self.walk_macro_name(&child, scope);
-            } else if is_macro_kwarg(&child) {
-                // Keyword argument: the name is not a variable; walk only the
-                // value.
-                for value in child.children().skip(1) {
-                    self.walk_node(&value, scope);
-                }
             } else {
-                self.walk_node(&child, scope);
+                self.walk_macro_argument(&child, scope);
             }
+        }
+    }
+
+    fn walk_macro_argument(&mut self, node: &SyntaxNode, scope: ScopeId) {
+        if is_macro_kwarg(node) {
+            for value in node.children().skip(1) {
+                self.walk_node(&value, scope);
+            }
+        } else {
+            self.walk_node(node, scope);
+        }
+    }
+
+    fn walk_testset(&mut self, call: &MacroCall, scope: ScopeId) {
+        if let Some(name) = call.name() {
+            self.walk_macro_name(name.syntax(), scope);
+        }
+        let (headers, body) = testset_arguments(call).unwrap();
+        if let Expr::ForExpr(loop_expr) = body {
+            // Test wraps the loop in `let`, and evaluates its description
+            // inside the loop where the iteration variables are visible.
+            let local =
+                self.push_scope(ScopeKind::Let, Some(scope), loop_expr.syntax().text_range());
+            let inner = self.for_scope(loop_expr.syntax(), local);
+            for header in headers {
+                self.walk_macro_argument(header.syntax(), inner);
+            }
+            if let Some(body) = body_of(loop_expr.syntax()) {
+                self.declare_in(&body, inner);
+                self.walk_children(&body, inner);
+            }
+        } else {
+            for header in headers {
+                self.walk_macro_argument(header.syntax(), scope);
+            }
+            let local = if matches!(body, Expr::LetExpr(_)) {
+                scope
+            } else {
+                self.push_scope(ScopeKind::Let, Some(scope), body.syntax().text_range())
+            };
+            self.declare_expression(body.syntax(), local);
+            self.walk_node(body.syntax(), local);
         }
     }
 

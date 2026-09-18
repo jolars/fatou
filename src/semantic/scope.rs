@@ -26,7 +26,8 @@ pub enum ScopeKind {
     /// A function-like body: `function`, `macro`, short-form `f(x) = ...`,
     /// anonymous forms, `->`, and `do` blocks.
     Function,
-    /// One `let` binding's extent (bindings chain: each sees the previous).
+    /// One `let` binding's extent (bindings chain: each sees the previous),
+    /// or the implicit `let` introduced by a recognized `Test.@testset`.
     Let,
     /// A comprehension or generator clause's extent.
     Comprehension,

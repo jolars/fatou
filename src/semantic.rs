@@ -19,6 +19,11 @@
 //! scope, regardless of textual position. The REPL's soft-scope-at-top-level
 //! behavior (reusing the global) deliberately diverges here, matching what
 //! `julia file.jl` does.
+//!
+//! Recognized `Test.@testset` calls contribute their implicit local scopes.
+//! Recognition requires a preceding, visible file-local Test import and honors
+//! aliases and shadowing. Other macros retain the ordinary argument traversal;
+//! the model never evaluates Julia or expands arbitrary macros.
 
 pub mod binding;
 pub mod builder;
@@ -26,6 +31,7 @@ pub mod cfg;
 pub mod import;
 pub mod scope;
 pub mod signature;
+mod test_macros;
 
 use rowan::{TextRange, TextSize};
 use smol_str::SmolStr;
@@ -152,6 +158,40 @@ impl SemanticModel {
 
     pub fn binding(&self, id: BindingId) -> &Binding {
         &self.bindings[id.0 as usize]
+    }
+
+    /// Resolve a file-local binding, stopping at the first global scope.
+    /// Imported macros retain their `@` sigil; macro definitions do not.
+    pub(crate) fn resolve_name(
+        &self,
+        name: &str,
+        scope: ScopeId,
+        is_macro: bool,
+    ) -> Option<BindingId> {
+        let mut cursor = Some(scope);
+        while let Some(id) = cursor {
+            let scope = self.scope(id);
+            if let Some(binding) = scope.bindings.iter().rev().copied().find(|&id| {
+                let binding = self.binding(id);
+                if is_macro {
+                    match binding.kind {
+                        BindingKind::Macro => binding.name == name,
+                        BindingKind::Import => binding.name.strip_prefix('@') == Some(name),
+                        _ => false,
+                    }
+                } else {
+                    binding.name == name
+                }
+            }) {
+                return Some(binding);
+            }
+            cursor = if scope.kind.is_global() {
+                None
+            } else {
+                scope.parent
+            };
+        }
+        None
     }
 
     /// The innermost scope containing `offset`. Falls back to the file scope
@@ -816,6 +856,123 @@ end",
     }
 
     #[test]
+    fn testset_assignments_and_reads_share_one_local_binding() {
+        let source = "using Test\n@testset begin\ntmp = 0\nfor i in 1:2\ntmp = 2\nend\nprintln(tmp)\nend\ntmp\n";
+        let m = model_of(source);
+        let tmp = find(&m, "tmp");
+        assert_eq!(m.bindings().iter().filter(|b| b.name == "tmp").count(), 1);
+        assert_eq!(m.binding(tmp).kind, BindingKind::Local);
+        assert_eq!(m.scope(m.binding(tmp).scope).kind, ScopeKind::Let);
+        assert!(m.binding(tmp).read);
+        let occurrences: Vec<_> = m.occurrences(tmp).collect();
+        assert_eq!(occurrences.len(), 3);
+        assert_eq!(occurrences[1].access, Access::Write);
+        assert_eq!(occurrences[2].access, Access::Read);
+        assert_eq!(m.idents().last().unwrap().binding, None);
+        assert!(
+            !m.names_in_scope_at(source.rfind("tmp").unwrap().try_into().unwrap())
+                .contains(&tmp)
+        );
+    }
+
+    #[test]
+    fn testset_recognizes_visible_test_imports_and_aliases() {
+        for (load, call) in [
+            ("using Test", "@testset"),
+            ("using Test: @testset", "@testset"),
+            ("import Test: @testset", "@testset"),
+            ("import Test: @testset as @group", "@group"),
+            ("import Test.@testset", "@testset"),
+            ("import Test.@testset as @group", "@group"),
+            ("import Test", "Test.@testset"),
+            ("using Test", "@Test.testset"),
+            ("import Test as Tst", "Tst.@testset"),
+        ] {
+            for scope in ["", "module Tests\n"] {
+                let end = if scope.is_empty() { "" } else { "end\n" };
+                let source = format!("{scope}{load}\n{call} begin\nx = 1\nend\n{end}");
+                let m = model_of(&source);
+                assert_eq!(kind_of(&m, "x"), BindingKind::Local, "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn testset_requires_an_unshadowed_preceding_test_load() {
+        for source in [
+            "@testset begin x = 1 end\n",
+            "import Test\n@testset begin x = 1 end\n",
+            "using .Test\n@testset begin x = 1 end\n",
+            "using Other\n@testset begin x = 1 end\n",
+            "@testset begin x = 1 end\nusing Test\n",
+            "Test.@testset begin x = 1 end\nimport Test\n",
+            "using Test\nmacro testset(x) x end\n@testset begin x = 1 end\n",
+            "using Test\n@testset begin x = 1 end\nmacro testset(x) x end\n",
+            "using Test\nimport Other: @testset\n@testset begin x = 1 end\n",
+            "import Other as Tst\nimport Test\nTst.@testset begin x = 1 end\n",
+            "using Test\nmodule Nested\n@testset begin x = 1 end\nend\n",
+            "module Nested\nusing Test\nend\n@testset begin x = 1 end\n",
+        ] {
+            let m = model_of(source);
+            assert_eq!(kind_of(&m, "x"), BindingKind::Global, "{source}");
+        }
+        for source in [
+            "using Test\nfunction f(Test)\nTest.@testset begin x = 1 end\nend\n",
+            "using Test\nfunction f()\nTest.@testset begin x = 1 end\nTest = other\nend\n",
+        ] {
+            let m = model_of(source);
+            assert_eq!(scope_kind_of(&m, "x"), ScopeKind::Function, "{source}");
+        }
+    }
+
+    #[test]
+    fn testset_preserves_hoisting_captures_and_sibling_isolation() {
+        let source = "using Test\n@testset begin\n@testset begin x = 2 end\nx = 1\nend\n@testset begin x = 3 end\n";
+        let m = model_of(source);
+        let xs: Vec<_> = m.bindings().iter().filter(|b| b.name == "x").collect();
+        assert_eq!(xs.len(), 2);
+        assert_ne!(xs[0].scope, xs[1].scope);
+        assert_eq!(m.occurrences(find(&m, "x")).count(), 2);
+
+        let m = model_of("using Test\nfunction f()\n@testset begin x = 2 end\nx = 1\nx\nend\n");
+        assert_eq!(m.bindings().iter().filter(|b| b.name == "x").count(), 1);
+        assert_eq!(scope_kind_of(&m, "x"), ScopeKind::Function);
+    }
+
+    #[test]
+    fn testset_headers_use_the_enclosing_scope() {
+        let source = "using Test\nlabel = \"outer\"\nflag = true\n@testset \"$label\" verbose=flag begin\nlabel = \"inner\"\nflag = false\nend\n";
+        let m = model_of(source);
+        for name in ["label", "flag"] {
+            let bindings: Vec<_> = m.bindings().iter().filter(|b| b.name == name).collect();
+            assert_eq!(bindings.len(), 2);
+            assert!(bindings[0].read);
+            assert!(!bindings[1].read);
+        }
+    }
+
+    #[test]
+    fn testset_parenthesized_and_call_payloads_have_local_scope() {
+        for source in [
+            "using Test\n@testset(begin x = 1 end)\n",
+            "using Test\n@testset(\"group\", begin x = 1 end)\n",
+            "using Test\n@testset f((x = 1))\n",
+        ] {
+            let m = model_of(source);
+            assert_eq!(kind_of(&m, "x"), BindingKind::Local, "{source}");
+        }
+    }
+
+    #[test]
+    fn testset_loop_description_reads_the_iteration_variable() {
+        let source = "using Test\n@testset \"iteration $i\" for i in 1:2\nx = i\nend\n";
+        let m = model_of(source);
+        let i = find(&m, "i");
+        assert_eq!(m.occurrences(i).count(), 3);
+        assert!(!m.free_reads().any(|read| read.name == "i"));
+    }
+
+    #[test]
     fn top_level_soft_scope_makes_a_new_local() {
         // Non-interactive file semantics: the loop-body assignment does NOT
         // reuse the global (Julia warns and creates a local).
@@ -923,6 +1080,30 @@ end",
             .find(|i| i.name == "x" && i.access == Access::Write)
             .unwrap();
         assert_eq!(write.binding, Some(find(&m, "x")));
+    }
+
+    #[test]
+    fn macro_wrapped_global_declarations_precede_later_assignments() {
+        for prefix in ["", "x = 0\n"] {
+            for wrapper in ["@inbounds", "@inbounds @fastmath"] {
+                let source = format!(
+                    "{prefix}function f()\n{wrapper} begin global x; nothing end\nx = 1\nx\nend\n"
+                );
+                let m = model_of(&source);
+                assert_eq!(
+                    m.bindings().iter().filter(|b| b.name == "x").count(),
+                    1,
+                    "{source}"
+                );
+                let x = find(&m, "x");
+                assert_eq!(m.binding(x).kind, BindingKind::Global);
+                assert_eq!(m.scope(m.binding(x).scope).kind, ScopeKind::File);
+                assert!(m.binding(x).read);
+                for ident in m.idents().iter().filter(|ident| ident.name == "x") {
+                    assert_eq!(ident.binding, Some(x), "{source}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -1139,6 +1320,39 @@ end",
         assert!(binding_names(&m).is_empty());
         assert!(m.module_loads().is_empty());
         assert_eq!(free_read_names(&m), ["A"]);
+    }
+
+    #[test]
+    fn quote_interpolations_declare_imports() {
+        for source in [
+            "ex = :($(begin using Test; 1 end))\nTest\n",
+            "ex = quote $(begin using Test; 1 end) end\nTest\n",
+        ] {
+            let m = model_of(source);
+            assert_eq!(m.module_loads().len(), 1, "{source}");
+            let load = &m.module_loads()[0];
+            assert_eq!(load.path.components, ["Test"]);
+            assert_eq!(load.scope, ScopeId(0));
+            let binding = find(&m, "Test");
+            assert_eq!(m.binding(binding).kind, BindingKind::Import);
+            assert!(m.binding(binding).read);
+        }
+    }
+
+    #[test]
+    fn quoted_imports_remain_opaque() {
+        for source in ["ex = :(using Test)", "ex = quote using Test end"] {
+            let m = model_of(source);
+            assert!(m.module_loads().is_empty(), "{source}");
+            assert_eq!(binding_names(&m), ["ex"]);
+        }
+    }
+
+    #[test]
+    fn testset_recognizes_imports_in_quote_interpolations() {
+        let m = model_of("ex = :($(begin using Test; 1 end))\n@testset begin x = 1 end\n");
+        assert_eq!(kind_of(&m, "x"), BindingKind::Local);
+        assert_eq!(scope_kind_of(&m, "x"), ScopeKind::Let);
     }
 
     #[test]

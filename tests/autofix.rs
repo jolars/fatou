@@ -100,6 +100,19 @@ fn fixes_nothing_comparison_inside_test() {
     assert!(outcome.remaining.is_empty());
 }
 
+#[test]
+fn quoted_test_assertions_keep_the_identity_fix() {
+    for call in ["@test", "Test.@test", "@Test.test"] {
+        let src = format!(
+            "using Test\nex = quote\nisnothing(x) = false\n{call} nothing == nothing\nend\neval(ex)\n"
+        );
+        let outcome = fix_source(None, &src, &select("nothing-comparison"), false);
+        assert_eq!(outcome.output, src.replace("==", "==="), "{src}");
+        assert_eq!(outcome.applied, 1);
+        assert!(outcome.remaining.is_empty());
+    }
+}
+
 /// `missing-comparison` rewrites `==`/`!=` against `missing` the same way, but
 /// only under `--unsafe-fixes`: the rewrite turns a `missing` result into a
 /// `Bool`.
