@@ -12,7 +12,8 @@
 
 **Checklist**
 
-- [ ] Added or updated tests (test-first; a bug fix has a failing fixture that now passes)
+- [ ] Added or updated tests (test-first; a bug fix has a failing fixture that
+  now passes)
 - [ ] `cargo test` passes
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` is clean
 - [ ] `cargo fmt -- --check` is clean
