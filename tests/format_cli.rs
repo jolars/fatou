@@ -7,7 +7,7 @@
 //! (`CARGO_BIN_EXE_fatou`) with the config-discovery environment sandboxed
 //! inside the temp dir, so a developer's own `fatou.toml` cannot leak in.
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -42,13 +42,12 @@ fn run_stdin(dir: &Path, args: &[&str], input: Option<&str>) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = cmd.spawn().expect("run fatou");
-    if let Some(input) = input {
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
+    if let Some(input) = input
+        && let Err(error) = child.stdin.take().unwrap().write_all(input.as_bytes())
+    {
+        // Argument errors can close stdin before the write finishes.
+        // The caller still checks the child's exit status and output.
+        assert_eq!(error.kind(), ErrorKind::BrokenPipe, "write stdin: {error}");
     }
     child.wait_with_output().expect("wait for fatou")
 }
@@ -293,10 +292,13 @@ fn check_rejects_stdin() {
     // `--check` reports on files it leaves on disk; before, a piped `--check`
     // with no paths silently formatted to stdout and exited 0 instead.
     let dir = sandbox();
+    // Exceed the pipe buffer so rejection closes stdin before the write finishes.
+    let input = UNFORMATTED.repeat(128 * 1024);
 
     for args in [&["format", "--check", "-"][..], &["format", "--check"][..]] {
-        let output = run_stdin(dir.path(), args, Some(UNFORMATTED));
+        let output = run_stdin(dir.path(), args, Some(&input));
         assert_eq!(output.status.code(), Some(2), "args: {args:?}");
+        assert!(output.stdout.is_empty(), "args: {args:?}");
         assert!(
             String::from_utf8(output.stderr)
                 .unwrap()
