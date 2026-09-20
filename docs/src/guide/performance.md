@@ -145,10 +145,11 @@ The speed results split an editor session into cold readiness and warm requests:
   `WorkspaceEdit` but does not apply it.
 
 Each target gets two unmeasured warmup rounds, then 20 measured rounds. The
-tables report the median and p95. They also report the median serialized result
-size and how many symbols, locations, or edits each server returns across how
-many files. Those counts matter: two servers are not doing comparable work when
-one returns fewer destinations or edits.
+warm-request plot shows the median and p95. Its tooltips and collapsed detail
+table also report the median serialized result size and how many symbols,
+locations, or edits each server returns across how many files. Those counts
+matter: two servers are not doing comparable work when one returns fewer
+destinations or edits.
 
 Sampling covers the **whole process tree** every 150 ms, so a server that fans
 work out to a helper process is charged for it — which is exactly what
@@ -162,7 +163,7 @@ LanguageServer.jl's SymbolServer pass is. Three milestones come out of each run:
   helper this is the only milestone that ever sees it, which is why
   LanguageServer.jl peaks well above where it settles.
 
-Resident set size is what the tables report. The harness also records
+Resident set size is what the memory plot shows. The harness also records
 proportional set size, which splits shared pages between the processes mapping
 them; at settle the two agree within a few megabytes for all three servers, so
 nothing here is an artifact of double-counted shared memory.
@@ -172,6 +173,12 @@ nothing here is an artifact of double-counted shared memory.
 {{ memory-meta }}
 
 ### Speed
+
+Readiness and warm requests get separate plots, in seconds and milliseconds
+respectively. Both use a logarithmic time axis so the fastest and slowest
+responses remain visible; farther left is faster. Server colors stay the same
+across these plots and the memory plot below. Expand the detail tables for the
+underlying measurements and returned work.
 
 {{ lsp-speed }}
 
@@ -184,7 +191,7 @@ first analysis of a newly opened file.
 
 {{ memory-servers }}
 
-Two caveats worth carrying away from that table. Julia's resident memory
+Two caveats worth carrying away from that figure. Julia's resident memory
 includes garbage the collector has not returned yet, and there is no way to ask
 a server to collect through the protocol — these are the numbers the operating
 system sees, which is also the number your laptop feels, but a forced collection

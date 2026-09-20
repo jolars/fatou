@@ -6,17 +6,17 @@
 // is vendored under theme/vendor/ and loaded before this file via book.toml's
 // `additional-js`, so nothing is fetched at view time.
 //
-// Two chart kinds, selected by the container's `data-kind`. Both are dot plots,
-// not bar charts: a log y-axis has no zero baseline for bars to grow from, but
-// points sit cleanly at their value regardless of scale. Both plot time relative
-// to Fatou (Fatou = 1) on a log axis, with a single dashed reference line at 1 in
-// place of gridlines; lower is faster.
+// Chart kinds are selected by the container's `data-kind`. Formatter plots show
+// time relative to Fatou (Fatou = 1) on a log axis, with a dashed baseline at 1;
+// lower is faster. Server plots show absolute time or memory on horizontal axes.
 //   default ("throughput"): x = tool, one dot per scenario dodged within the
 //                           tool's group (colored by scenario). The page draws
 //                           two of these, one for single files and one for
 //                           projects; the container's `data-legend` names what a
 //                           dot is ("File", "Project").
 //   "cold": x = tool, one dot per tool.
+//   "lsp-readiness", "lsp-requests", "lsp-memory": y = phase, request, or
+//   milestone, with one dot per server. Warm requests join medians to p95s.
 (() => {
   // mdBook keeps the active theme as a class on <html>; these three are dark.
   function isDark() {
@@ -28,48 +28,58 @@
     return dark ? "#3b3f5c" : "#dddddd";
   }
 
-  // A padded log-scale domain for `field`, so the baseline at 1 (the data
-  // minimum, since Fatou is always 1) doesn't sit flush against the axis floor
-  // and the slowest tool doesn't touch the top. Padding is multiplicative
-  // (a constant margin in log space) rather than additive.
+  // Whole decades keep the log scale easy to read; a small margin keeps dots
+  // at the domain boundaries clear of the plot edges.
   function logDomain(points, field) {
-    var vals = points
+    const values = points
       .map((p) => p[field])
-      .filter((v) => typeof v === "number" && v > 0);
-    var lo = Math.min.apply(null, vals);
-    var hi = Math.max.apply(null, vals);
-    var pad = 1.6;
-    return [lo / pad, hi * pad];
+      .filter((value) => Number.isFinite(value) && value > 0);
+    let lo = Math.floor(Math.log10(Math.min.apply(null, values.concat([1]))));
+    let hi = Math.ceil(Math.log10(Math.max.apply(null, values.concat([1]))));
+    if (lo === hi) {
+      lo--;
+      hi++;
+    }
+    return [10 ** lo / 1.1, 10 ** hi * 1.1];
   }
 
-  // Tick values for the log axis, in decreasing order of preference: exact
-  // powers of ten, then a 1-2-5 ladder. The first ladder placing at least three
-  // ticks inside `domain` wins, so a wide chart reads 1, 10, 100 and a narrow
-  // one 1, 2, 5 rather than the dozen-plus intermediate values the scale would
-  // otherwise pick under two decades. Returns undefined when even the finer
-  // ladder is too sparse; the scale then picks its own ticks, which "~f" still
-  // renders as plain decimals.
-  function logTicks(domain) {
-    const [lo, hi] = domain;
-    for (const ladder of [[1], [1, 2, 5]]) {
-      const ticks = [];
-      for (
-        let e = Math.floor(Math.log10(lo));
-        e <= Math.ceil(Math.log10(hi));
-        e++
-      ) {
-        for (const m of ladder) {
-          const v = m * 10 ** e;
-          if (v >= lo && v <= hi) {
-            ticks.push(v);
-          }
+  // Match ggplot2's log ticks: long at powers of ten, medium at five, and
+  // short at the other subdivisions. Only powers of ten receive labels.
+  function logAxis(domain, color) {
+    const ticks = [];
+    const major = [];
+    const middle = [];
+    for (
+      let e = Math.floor(Math.log10(domain[0]));
+      e <= Math.ceil(Math.log10(domain[1]));
+      e++
+    ) {
+      for (let m = 1; m < 10; m++) {
+        const value = m * 10 ** e;
+        if (value >= domain[0] && value <= domain[1]) {
+          ticks.push(value);
+          if (m === 1) major.push(value);
+          if (m === 5) middle.push(value);
         }
       }
-      if (ticks.length >= 3) {
-        return ticks;
-      }
     }
-    return undefined;
+    const isMajor = `indexof(${JSON.stringify(major)}, datum.value) >= 0`;
+    const isMiddle = `indexof(${JSON.stringify(middle)}, datum.value) >= 0`;
+    return {
+      values: ticks,
+      labelExpr: `${isMajor} ? format(datum.value, ',~g') : ''`,
+      labelOverlap: false,
+      labelPadding: 4,
+      tickColor: color,
+      tickSize: {
+        condition: [
+          { test: isMajor, value: 9 },
+          { test: isMiddle, value: 6 },
+        ],
+        value: 3,
+      },
+      grid: false,
+    };
   }
 
   // A single dashed reference line at y = 1: the Fatou baseline every dot is
@@ -81,7 +91,7 @@
     };
   }
 
-  // Shared axis/legend theming so both chart kinds track the light/dark toggle.
+  // Shared axis/legend theming so every chart tracks the light/dark toggle.
   function themeConfig(dark) {
     var fg = dark ? "#c8c9db" : "#333333";
     var grid = gridColor(dark);
@@ -160,15 +170,8 @@
               field: "relative_time",
               type: "quantitative",
               title: "Time relative to Fatou",
-              scale: { type: "log", domain: domain },
-              // Plain-decimal tick labels: the default "~s" formatting turns
-              // sub-1 ratios into SI-prefixed labels ("500m", "200m"), which
-              // read as units rather than ratios. "~f" trims trailing zeros.
-              axis: {
-                values: logTicks(domain),
-                format: "~f",
-                grid: false,
-              },
+              scale: { type: "log", domain: domain, nice: false },
+              axis: logAxis(domain, dark ? "#c8c9db" : "#333333"),
             },
             color: {
               field: "scenario",
@@ -228,15 +231,8 @@
               field: "relative_time",
               type: "quantitative",
               title: "Cold-start time relative to Fatou",
-              scale: { type: "log", domain: domain },
-              // Plain-decimal tick labels: the default "~s" formatting turns
-              // sub-1 ratios into SI-prefixed labels ("500m", "200m"), which
-              // read as units rather than ratios. "~f" trims trailing zeros.
-              axis: {
-                values: logTicks(domain),
-                format: "~f",
-                grid: false,
-              },
+              scale: { type: "log", domain: domain, nice: false },
+              axis: logAxis(domain, dark ? "#c8c9db" : "#333333"),
             },
             color: {
               field: "tool",
@@ -261,12 +257,153 @@
     };
   }
 
+  function serverSpec(points, kind) {
+    const dark = isDark();
+    const config = themeConfig(dark);
+    config.axis.labelFontSize = 12;
+    config.legend.labelFontSize = 12;
+    const memory = kind === "lsp-memory";
+    const requests = kind === "lsp-requests";
+    const servers = orderedUnique(points, "server");
+    const metrics = orderedUnique(points, "metric");
+    // Include p95 in the domain so the tail of a request never gets clipped.
+    const domain = logDomain(
+      points.flatMap((p) => [{ value: p.value }, { value: p.p95 }]),
+      "value",
+    );
+    const colors = dark
+      ? ["#56b4e9", "#e69f00", "#009e73"]
+      : ["#0072b2", "#d55e00", "#009e73"];
+    const serverOrder = ["Fatou", "LanguageServer.jl", "JETLS"];
+    const tooltip = [
+      { field: "server", title: "Server" },
+      { field: "metric", title: requests ? "Request" : "Milestone" },
+      {
+        field: "value",
+        title: memory ? "RSS (MB)" : requests ? "Median (ms)" : "Time (s)",
+        format: memory ? ".1f" : ".3f",
+      },
+    ];
+    if (requests) {
+      tooltip.push(
+        { field: "p95", title: "p95 (ms)", format: ".3f" },
+        { field: "returned_work", title: "Returned work" },
+      );
+    }
+    const layers = [];
+    if (requests) {
+      // This is the observed median-to-p95 span, not uncertainty in the median.
+      layers.push({
+        transform: [{ filter: "isValid(datum.p95) && datum.p95 > 0" }],
+        mark: { type: "rule", strokeWidth: 2, opacity: 0.6 },
+        encoding: { x2: { field: "p95" } },
+      });
+    }
+    layers.push({
+      mark: { type: "point", filled: true, size: 85, opacity: 1 },
+    });
+    if (requests) {
+      layers.push({
+        transform: [{ filter: "isValid(datum.p95) && datum.p95 > 0" }],
+        mark: {
+          type: "point",
+          filled: false,
+          size: 85,
+          strokeWidth: 2,
+          opacity: 1,
+        },
+        encoding: { x: { field: "p95", type: "quantitative" } },
+      });
+    }
+    return {
+      $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+      description: memory
+        ? "Resident memory in MB for each server at baseline, settled, and peak, " +
+          "on a linear scale. Left uses less memory. Expand Memory data for values."
+        : requests
+          ? "Warm request latency in milliseconds on a log scale, grouped by " +
+            "request and colored by server. Filled dots are medians, hollow dots " +
+            "are p95. Left is faster. Expand the table for timings and returned work."
+          : "Readiness time in seconds on a log scale, grouped by phase and " +
+            "colored by server. Left is faster. Expand Readiness data for values.",
+      width: "container",
+      autosize: { type: "fit-x", contains: "padding" },
+      height: metrics.length * 75,
+      data: { values: points },
+      // A missing or zero timing cannot be placed on a log axis; it remains in
+      // the detail table rather than being presented as a measured positive time.
+      transform: [
+        {
+          filter: memory
+            ? "isValid(datum.value) && datum.value >= 0"
+            : "isValid(datum.value) && datum.value > 0",
+        },
+      ],
+      encoding: {
+        y: {
+          field: "metric",
+          type: "nominal",
+          sort: metrics,
+          title: null,
+          axis: {
+            labelLimit: 130,
+            ticks: false,
+            domain: false,
+            labelPadding: 10,
+          },
+        },
+        yOffset: { field: "server", type: "nominal", sort: servers },
+        x: {
+          field: "value",
+          type: "quantitative",
+          title: memory
+            ? "Resident memory (MB)"
+            : requests
+              ? "Request latency (ms, log scale)"
+              : "Readiness time (s, log scale)",
+          scale: memory
+            ? { zero: true }
+            : { type: "log", domain: domain, nice: false },
+          axis: memory
+            ? { tickCount: 5, format: ",.0f", grid: false }
+            : {
+                ...logAxis(domain, dark ? "#c8c9db" : "#333333"),
+                labelOverlap: "greedy",
+              },
+        },
+        color: {
+          field: "server",
+          type: "nominal",
+          sort: servers,
+          scale: {
+            domain: servers,
+            range: servers.map((server, i) => {
+              const index = serverOrder.indexOf(server);
+              return colors[(index < 0 ? i : index) % colors.length];
+            }),
+          },
+          legend: {
+            title: null,
+            orient: "bottom",
+            columns: 1,
+            symbolOpacity: 1,
+          },
+        },
+        tooltip: tooltip,
+      },
+      layer: layers,
+      config: config,
+    };
+  }
+
   function renderInto(container, points) {
     if (!window.vegaEmbed) {
       return;
     }
-    var vlSpec =
-      container.dataset.kind === "cold"
+    const kind = container.dataset.kind || "throughput";
+    const vlSpec = kind.startsWith("lsp-")
+      ? serverSpec(points, kind)
+      : kind === "cold"
         ? coldSpec(points)
         : spec(points, container.dataset.legend || "Scenario");
     // Alt text on the container, mirroring the spec description Vega puts on the

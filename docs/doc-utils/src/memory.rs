@@ -4,16 +4,16 @@
 //! throughput artifact next door):
 //!
 //!   `{{ memory-meta }}`    -> a bullet list of workspace, session, and versions
-//!   `{{ lsp-speed }}`      -> the language-server readiness and request timings
-//!   `{{ memory-servers }}` -> the language-server table, Fatou first
+//!   `{{ lsp-speed }}`      -> readiness and warm-request plots with detail tables
+//!   `{{ memory-servers }}` -> the language-server memory plot and detail table
 //!   `{{ memory-cli }}`     -> the one-shot CLI table
 //!
-//! These are plain Markdown tables rather than the charts the formatter
-//! scenarios get. Readiness and request latency have different units and
-//! shapes, so each gets its own compact table.
+//! Readiness, request latency, and memory have different units and shapes, so
+//! each gets its own plot. The inline data uses the same vendored Vega runtime
+//! as the formatter plots; the underlying tables remain in collapsed details.
 
 use mdbook_preprocessor::book::Book;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const META_MARKER: &str = "{{ memory-meta }}";
@@ -185,6 +185,61 @@ struct Case {
 
 // --- rendering ---------------------------------------------------------------
 
+#[derive(Serialize)]
+struct ServerPoint<'a> {
+    server: &'a str,
+    metric: &'a str,
+    value: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    p95: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    returned_work: Option<String>,
+}
+
+fn milestone_points<'a>(
+    server: &'a Server,
+    milestones: &[(&'a str, Option<f64>)],
+) -> Vec<ServerPoint<'a>> {
+    milestones
+        .iter()
+        .filter_map(|&(metric, value)| {
+            value.map(|value| ServerPoint {
+                server: &server.label,
+                metric,
+                value,
+                p95: None,
+                returned_work: None,
+            })
+        })
+        .collect()
+}
+
+fn render_chart(
+    kind: &str,
+    points: &[ServerPoint<'_>],
+    caption: &str,
+    summary: &str,
+    table: &str,
+) -> String {
+    // Escaping '<' keeps artifact labels from terminating the JSON script tag.
+    let data = serde_json::to_string(points)
+        .unwrap()
+        .replace('<', "\\u003c");
+    format!(
+        "<div class=\"bench-chart-block\">\n\
+         <figure class=\"bench-figure\">\n\
+         <div class=\"bench-chart\" data-kind=\"{kind}\"></div>\n\
+         <script type=\"application/json\" class=\"bench-data\">{data}</script>\n\
+         <figcaption>{caption}</figcaption>\n\
+         </figure>\n\
+         <noscript>Enable JavaScript for the interactive chart; \
+         the data table below has the same numbers.</noscript>\n\
+         <details class=\"bench-table\">\n<summary>{summary}</summary>\n\n\
+         {table}\n\
+         </details>\n</div>\n\n"
+    )
+}
+
 /// Substitute the memory markers, if the page uses any.
 pub fn insert(book: &mut Book, project_root: PathBuf) {
     let mut needed = false;
@@ -291,7 +346,21 @@ fn render_servers(m: &Memory) -> String {
         return "_No servers in the benchmark artifact (run `task bench-lsp`)._".to_string();
     }
 
-    let mut out = String::from(
+    let points: Vec<_> = m
+        .servers
+        .iter()
+        .flat_map(|s| {
+            milestone_points(
+                s,
+                &[
+                    ("Baseline", s.baseline_rss_mb),
+                    ("Settled", s.settled_rss_mb),
+                    ("Peak", s.peak_rss_mb),
+                ],
+            )
+        })
+        .collect();
+    let mut table = String::from(
         "| Server | Baseline | Settled | Peak | vs Fatou | Settled after | Doing |\n\
          | --- | ---: | ---: | ---: | ---: | ---: | --- |\n",
     );
@@ -307,7 +376,7 @@ fn render_servers(m: &Memory) -> String {
             Some(n) if n > 1 => format!("{} ({n} processes)", s.doing),
             _ => s.doing.clone(),
         };
-        out.push_str(&format!(
+        table.push_str(&format!(
             "| {} | {} | {} | {} | {} | {} | {} |\n",
             s.label,
             megabytes(s.baseline_rss_mb),
@@ -321,6 +390,15 @@ fn render_servers(m: &Memory) -> String {
         ));
     }
 
+    let mut out = render_chart(
+        "lsp-memory",
+        &points,
+        "Resident memory across the whole process tree, in MB on a linear scale \
+         (left uses less memory). Each dot is one server at one milestone. \
+         Hover a dot for the exact figure.",
+        "Memory data",
+        &table,
+    );
     let notes: Vec<String> = m
         .servers
         .iter()
@@ -337,13 +415,26 @@ fn render_speed(m: &Memory) -> String {
         return "_No servers in the benchmark artifact (run `task bench-lsp`)._".to_string();
     }
 
-    let mut out = String::from(
-        "#### Readiness\n\n\
-         | Server | Initialize | Workspace ready | Open files ready |\n\
+    let readiness: Vec<_> = m
+        .servers
+        .iter()
+        .flat_map(|s| {
+            milestone_points(
+                s,
+                &[
+                    ("Initialize", s.initialize_seconds),
+                    ("Workspace ready", s.workspace_ready_seconds),
+                    ("Open files ready", s.documents_ready_seconds),
+                ],
+            )
+        })
+        .collect();
+    let mut table = String::from(
+        "| Server | Initialize | Workspace ready | Open files ready |\n\
          | --- | ---: | ---: | ---: |\n",
     );
     for server in &m.servers {
-        out.push_str(&format!(
+        table.push_str(&format!(
             "| {} | {} | {} | {} |\n",
             server.label,
             duration(server.initialize_seconds),
@@ -352,14 +443,34 @@ fn render_speed(m: &Memory) -> String {
         ));
     }
 
-    out.push_str(
-        "\n#### Warm requests\n\n\
-         | Server | Request | Median | p95 | Returned work |\n\
+    let mut out = String::from("#### Readiness\n\n");
+    out.push_str(&render_chart(
+        "lsp-readiness",
+        &readiness,
+        "Readiness time in seconds on a log scale (left is faster). Each dot is \
+         one measurement of a phase for one server; the phases have different \
+         starting points and are not additive. Hover a dot for the exact figure.",
+        "Readiness data",
+        &table,
+    ));
+
+    let mut requests = Vec::new();
+    let mut table = String::from(
+        "| Server | Request | Median | p95 | Returned work |\n\
          | --- | --- | ---: | ---: | --- |\n",
     );
     for server in &m.servers {
         for latency in &server.request_latencies {
-            out.push_str(&format!(
+            if let Some(value) = latency.median_ms {
+                requests.push(ServerPoint {
+                    server: &server.label,
+                    metric: &latency.label,
+                    value,
+                    p95: latency.p95_ms,
+                    returned_work: Some(returned_work(latency)),
+                });
+            }
+            table.push_str(&format!(
                 "| {} | {} | {} | {} | {} |\n",
                 server.label,
                 latency.label,
@@ -369,6 +480,19 @@ fn render_speed(m: &Memory) -> String {
             ));
         }
     }
+
+    out.push_str("#### Warm requests\n\n");
+    out.push_str(&render_chart(
+        "lsp-requests",
+        &requests,
+        "Warm request latency in milliseconds on a log scale (left is faster). \
+         Filled dots show medians; hollow dots show p95, joined to the median \
+         for the same server and request. These spans are not confidence intervals. \
+         Hover for timings and returned work, or expand the table below. \
+         Servers can return different amounts of work for the same request.",
+        "Request timings and returned work",
+        &table,
+    ));
 
     let runs = m
         .meta
@@ -638,6 +762,18 @@ mod tests {
         serde_json::from_str(ARTIFACT).expect("artifact schema drifted from the renderer")
     }
 
+    fn chart_data(out: &str, kind: &str) -> serde_json::Value {
+        let chart = out.split(&format!("data-kind=\"{kind}\"")).nth(1).unwrap();
+        let data = chart
+            .split("<script type=\"application/json\" class=\"bench-data\">")
+            .nth(1)
+            .unwrap()
+            .split("</script>")
+            .next()
+            .unwrap();
+        serde_json::from_str(data).unwrap()
+    }
+
     #[test]
     fn meta_names_the_workspace_and_every_measured_tool() {
         let out = render_meta(&artifact());
@@ -653,8 +789,15 @@ mod tests {
     }
 
     #[test]
-    fn server_table_carries_the_milestones_and_the_ratio() {
+    fn server_chart_carries_milestones_with_a_collapsed_table() {
         let out = render_servers(&artifact());
+        let data = chart_data(&out, "lsp-memory");
+        assert_eq!(data.as_array().unwrap().len(), 6);
+        assert_eq!(data[0]["server"], "Fatou");
+        assert_eq!(data[0]["metric"], "Baseline");
+        assert_eq!(data[0]["value"], 96.1);
+        assert!(out.contains("<summary>Memory data</summary>"), "{out}");
+        assert!(!out.contains("<details open"), "{out}");
         assert!(
             out.contains("| Fatou | 96 MB | 100 MB | 100 MB | baseline |"),
             "{out}"
@@ -667,8 +810,21 @@ mod tests {
     }
 
     #[test]
-    fn speed_table_carries_readiness_and_latency_distributions() {
+    fn speed_charts_carry_readiness_and_latency_with_returned_work_in_details() {
         let out = render_speed(&artifact());
+        let readiness = chart_data(&out, "lsp-readiness");
+        assert_eq!(readiness.as_array().unwrap().len(), 6);
+        assert_eq!(readiness[0]["value"], 0.02);
+        let requests = chart_data(&out, "lsp-requests");
+        assert_eq!(requests.as_array().unwrap().len(), 10);
+        assert_eq!(requests[2]["metric"], "Go to definition");
+        assert_eq!(requests[2]["value"], 0.30);
+        assert_eq!(requests[2]["p95"], 0.45);
+        assert_eq!(requests[2]["returned_work"], "1 location in 1 file, 180 B");
+        assert!(
+            out.contains("<summary>Request timings and returned work</summary>"),
+            "{out}"
+        );
         assert!(out.contains("| Fatou | 20 ms | 80 ms | 120 ms |"), "{out}");
         assert!(
             out.contains("| JETLS | 5.93 s | 17.40 s | 9.80 s |"),
@@ -715,6 +871,8 @@ mod tests {
         m.servers[1].settled_rss_mb = None;
         m.servers[1].relative_to_fatou = None;
         let out = render_servers(&m);
+        let data = chart_data(&out, "lsp-memory");
+        assert_eq!(data.as_array().unwrap().len(), 5);
         assert!(
             out.contains("| JETLS | 795 MB | - | 2045 MB | - |"),
             "{out}"
