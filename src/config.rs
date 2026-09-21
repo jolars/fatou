@@ -68,8 +68,10 @@ impl From<&FormatConfig> for FormatStyle {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LintConfig {
-    /// If `Some`, only these rule IDs run; otherwise every default-on rule runs.
+    /// Base rule IDs to enable; `None` uses every default-on rule.
     pub select: Option<Vec<String>>,
+    /// Additional rule IDs to enable alongside `select` or the defaults.
+    pub extend_select: Vec<String>,
     /// Rule IDs to disable.
     pub ignore: Vec<String>,
     /// Per-rule severity overrides (`[lint.severity]`); rules not listed keep
@@ -374,8 +376,11 @@ fn deprecated_key(old: &str, new: &str) -> String {
 #[cfg_attr(test, schemars(rename = "LintConfig"))]
 #[serde(deny_unknown_fields)]
 struct RawLint {
-    /// When set, run only these rule IDs.
+    /// Base rule IDs to enable, replacing the defaults when set.
     select: Option<Vec<String>>,
+    /// Additional rule IDs to enable alongside `select` or the defaults.
+    #[serde(rename = "extend-select", default)]
+    extend_select: Vec<String>,
     /// Rule IDs to disable.
     #[serde(default)]
     ignore: Vec<String>,
@@ -517,6 +522,7 @@ impl RawConfig {
             format: self.format.resolve(&defaults, &mut warnings),
             lint: LintConfig {
                 select: self.lint.select,
+                extend_select: self.lint.extend_select,
                 ignore: self.lint.ignore,
                 severity: self.lint.severity,
                 rules: self.lint.rules,

@@ -43,7 +43,7 @@ impl ResolvedConfig {
         warnings.extend(
             unknown
                 .into_iter()
-                .map(|id| format!("unknown rule `{id}` in select/ignore/severity")),
+                .map(|id| format!("unknown rule `{id}` in select/extend-select/ignore/severity")),
         );
         Arc::new(Self {
             style: FormatStyle::from(&config.format),

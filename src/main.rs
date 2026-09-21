@@ -516,8 +516,9 @@ fn run_lint(
 
 /// Whether any effectively enabled rule needs project-wide name resolution.
 ///
-/// With no `select`, this consults each rule's default. The registry boxes
-/// every shipped rule, so it is built at most once rather than per candidate.
+/// With no `select`, this consults each rule's default before adding
+/// `extend-select`. The registry boxes every shipped rule, so it is built at
+/// most once rather than per candidate.
 fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
     let defaults = config
         .select
@@ -531,7 +532,7 @@ fn wants_project_resolution(config: &fatou::config::LintConfig) -> bool {
                 .iter()
                 .find(|rule| rule.id() == *id)
                 .is_some_and(|rule| rule.default_enabled()),
-        };
+        } || config.extend_select.iter().any(|rule| rule == id);
         enabled && !config.ignore.iter().any(|rule| rule == id)
     })
 }
@@ -625,11 +626,10 @@ fn run_lint_fix(
     }
 }
 
-/// Warn (once, to stderr) about any `select`/`ignore` entry that names no
-/// shipped rule, so a typo'd `--select` doesn't silently select nothing.
+/// Warn once per unknown rule ID so misspelled selections are not silent.
 fn warn_unknown_rules(unknown: &[String]) {
     for id in unknown {
-        eprintln!("warning: unknown rule `{id}` in select/ignore/severity");
+        eprintln!("warning: unknown rule `{id}` in select/extend-select/ignore/severity");
     }
 }
 
@@ -808,5 +808,29 @@ mod tests {
             ..Default::default()
         };
         assert!(!wants_project_resolution(&ignored));
+    }
+
+    #[test]
+    fn project_harvest_tracks_extend_select_and_ignore() {
+        for select in [
+            None,
+            Some(vec![]),
+            Some(vec!["invalid-docstring-code".to_string()]),
+        ] {
+            let mut config = LintConfig {
+                select,
+                extend_select: vec!["undefined-name".to_string()],
+                ..Default::default()
+            };
+            assert!(wants_project_resolution(&config));
+            config.ignore.push("undefined-name".to_string());
+            assert!(!wants_project_resolution(&config));
+        }
+
+        let syntax_only = LintConfig {
+            extend_select: vec!["unused-argument".to_string()],
+            ..Default::default()
+        };
+        assert!(!wants_project_resolution(&syntax_only));
     }
 }

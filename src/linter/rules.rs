@@ -696,7 +696,7 @@ struct ConfiguredRule {
     severity: Severity,
 }
 
-/// The set of rules enabled for a run, after applying `select`/`ignore`,
+/// The set of rules enabled after applying `select`, `extend-select`, and `ignore`,
 /// each carrying its resolved severity.
 pub struct ResolvedRules {
     rules: Vec<ConfiguredRule>,
@@ -720,17 +720,17 @@ pub struct ResolvedRules {
 }
 
 impl ResolvedRules {
-    /// Build the rule set honoring `config`, alongside any `select`/`ignore`/
-    /// `severity` entries that name no shipped rule.
+    /// Build the rule set honoring `config`, alongside any `select`,
+    /// `extend-select`, `ignore`, or `severity` entries that name no shipped rule.
     ///
     /// Resolution order: start with every default-enabled rule (or, when
-    /// `select` is set, the listed rules), then subtract anything in `ignore`.
+    /// `select` is set, the listed rules), add `extend-select`, then subtract
+    /// anything in `ignore`.
     /// Each surviving rule gets the `[lint.severity]` override for its ID, or
     /// its own default severity.
     ///
     /// The returned `Vec<String>` holds the unrecognized IDs (first-seen order,
-    /// deduplicated) so callers can warn on a typo'd `--select`/`--ignore` or
-    /// `[lint.severity]` key.
+    /// deduplicated) so callers can warn about misspelled rule IDs.
     pub fn resolve(config: &LintConfig) -> (Self, Vec<String>) {
         let all = all_rules();
         let select = config.select.as_deref();
@@ -739,6 +739,7 @@ impl ResolvedRules {
         for id in select
             .into_iter()
             .flatten()
+            .chain(&config.extend_select)
             .chain(&config.ignore)
             .chain(config.severity.keys())
         {
@@ -754,7 +755,7 @@ impl ResolvedRules {
                 let enabled = match select {
                     Some(selected) => selected.iter().any(|id| id == rule.id()),
                     None => rule.default_enabled(),
-                };
+                } || config.extend_select.iter().any(|id| id == rule.id());
                 enabled && !config.ignore.iter().any(|id| id == rule.id())
             })
             .map(|rule| {
@@ -1224,14 +1225,18 @@ mod tests {
     }
 
     #[test]
-    fn resolve_flags_unknown_select_and_ignore_ids() {
+    fn resolve_flags_unknown_select_extend_select_and_ignore_ids() {
         let config = LintConfig {
             select: Some(ids(&["unused-binding", "made-up-rule"])),
+            extend_select: ids(&["another-made-up-rule"]),
             ignore: ids(&["also-bogus"]),
             ..Default::default()
         };
         let (_rules, unknown) = ResolvedRules::resolve(&config);
-        assert_eq!(unknown, ids(&["made-up-rule", "also-bogus"]));
+        assert_eq!(
+            unknown,
+            ids(&["made-up-rule", "another-made-up-rule", "also-bogus"])
+        );
     }
 
     #[test]
@@ -1266,6 +1271,7 @@ mod tests {
     fn resolve_dedupes_repeated_unknown_ids() {
         let config = LintConfig {
             select: Some(ids(&["typo", "typo"])),
+            extend_select: ids(&["typo"]),
             ignore: ids(&["typo"]),
             ..Default::default()
         };

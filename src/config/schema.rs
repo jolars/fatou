@@ -132,6 +132,7 @@ line-ending = "native"
 
 [lint]
 select = ["future-rule"]
+extend-select = ["undefined-name", "another-future-rule"]
 ignore = ["unused-binding"]
 
 [lint.severity]
@@ -166,6 +167,9 @@ fn config_schema_rejects_invalid_configuration() {
         "[format]\nline-width = \"wide\"\n",
         "[format]\nline-ending = \"mac\"\n",
         "[lint]\nunknown = true\n",
+        "[lint]\nextend-select = \"undefined-name\"\n",
+        "[lint]\nextend-select = [1]\n",
+        "[lint]\nextend_select = []\n",
         "[lint.severity]\nunused-binding = \"fatal\"\n",
         "[lint.rules.unknown-rule]\n",
         "[lint.rules.discouraged-function]\nfuncs = {}\n",

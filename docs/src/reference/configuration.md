@@ -68,15 +68,23 @@ line-ending = "auto"
 
 ## `[lint]`
 
-  | Key        | Type             | Default | Description                      |
-  | ---------- | ---------------- | ------- | -------------------------------- |
-  | `select`   | array of strings | unset   | If set, only these rule IDs run. |
-  | `ignore`   | array of strings | `[]`    | Rule IDs to disable.             |
-  | `severity` | table            | `{}`    | Per-rule severity overrides.     |
-  | `rules`    | table            | `{}`    | Per-rule option tables.          |
+  | Key             | Type             | Default | Description                                                   |
+  | --------------- | ---------------- | ------- | ------------------------------------------------------------- |
+  | `select`        | array of strings | unset   | Base rule IDs to enable, replacing the defaults when set.     |
+  | `extend-select` | array of strings | `[]`    | Additional rule IDs to enable alongside `select` or defaults. |
+  | `ignore`        | array of strings | `[]`    | Rule IDs to disable, including those in `extend-select`.      |
+  | `severity`      | table            | `{}`    | Per-rule severity overrides.                                  |
+  | `rules`         | table            | `{}`    | Per-rule option tables.                                       |
 
 See the [rule reference](rules.md) for the available rule IDs. An unrecognized
-ID in `select`, `ignore`, or `severity` is a warning, not an error.
+ID in `select`, `extend-select`, `ignore`, or `severity` is a warning, not an
+error.
+
+Fatou starts with the defaults, or `select` when set, adds `extend-select`, and
+then removes rules in `ignore`. Repeated IDs do not run a rule more than once.
+An empty `select = []` disables the defaults; `extend-select` can still add
+rules. For workspace package files, the language server also enables rules that
+need project resolution, unless they are ignored.
 
 `[lint.severity]` maps a rule ID to the severity its findings report, one of
 `"error"`, `"warning"`, `"info"`, or `"hint"`. Rules not listed keep their
@@ -84,11 +92,11 @@ default severity.
 
 ```toml
 [lint]
-select = ["some-rule"]
-ignore = ["another-rule"]
+extend-select = ["undefined-name"]
+ignore = ["unused-binding"]
 
 [lint.severity]
-some-rule = "error"
+undefined-name = "error"
 ```
 
 ## `[lint.rules.<id>]`
@@ -97,9 +105,9 @@ A rule with a tunable knob reads it from its own table, named after the rule ID.
 Rules without options have no table. Keys are kebab-case, matching the rest of
 the file.
 
-Unlike `select`, `ignore`, and `severity`, these tables are a *schema*: a
-misspelled rule ID, or a misspelled key inside one, is a configuration parse
-error and the run stops.
+Unlike `select`, `extend-select`, `ignore`, and `severity`, these tables are a
+*schema*: a misspelled rule ID, or a misspelled key inside one, is a
+configuration parse error and the run stops.
 
 Per-rule *severity* is not set here; use [`[lint.severity]`](#lint) for that.
 

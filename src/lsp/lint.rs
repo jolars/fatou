@@ -21,7 +21,7 @@ use crate::config::LintConfig;
 use crate::incremental::Analysis;
 use crate::linter::docs::rule_doc_url;
 use crate::linter::rules::{RESOLUTION_RULES, ResolutionContext, is_shipped_rule};
-use crate::linter::{self, ResolvedRules, Severity, all_rules, lint_parsed};
+use crate::linter::{self, ResolvedRules, Severity, lint_parsed};
 use crate::parser::parse;
 use crate::semantic::SemanticModel;
 use crate::text::{LineIndex, PositionEncoding, TextBuffer};
@@ -79,10 +79,10 @@ pub(crate) fn lint_findings_via_db(
         let model = snapshot.semantic_model(file);
         // The server resolves free reads against its harvested library, with
         // the workspace tier when the file belongs to the package under
-        // development. `undefined-name` joins the rule set only then: for a
-        // workspace member the include graph pins the host module, so sibling
-        // and host globals resolve; a loose file may be an `include`d fragment
-        // whose host we cannot know.
+        // development. `undefined-name` joins the default rule set only then:
+        // for a workspace member the include graph pins the host module, so
+        // sibling and host globals resolve; loose files require an explicit
+        // opt-in because they may be fragments whose host we cannot know.
         let workspace = snapshot.workspace_member(path);
         let rules = rules.get(workspace.is_some());
         // Only a member file loads against the package's own project, so the
@@ -154,25 +154,10 @@ impl ServerRules {
     /// carry through.
     pub(crate) fn from_config(lint: &LintConfig) -> (Self, Vec<String>) {
         let (plain, unknown) = ResolvedRules::resolve(lint);
-        let mut select = match &lint.select {
-            Some(select) => select.clone(),
-            None => all_rules()
-                .iter()
-                .filter(|rule| rule.default_enabled())
-                .map(|rule| rule.id().to_string())
-                .collect(),
-        };
-        for rule in WORKSPACE_MEMBER_RULES {
-            if !select.iter().any(|id| id == rule) {
-                select.push(rule.to_string());
-            }
-        }
-        let member_config = LintConfig {
-            select: Some(select),
-            ignore: lint.ignore.clone(),
-            severity: lint.severity.clone(),
-            rules: lint.rules.clone(),
-        };
+        let mut member_config = lint.clone();
+        member_config
+            .extend_select
+            .extend(WORKSPACE_MEMBER_RULES.iter().map(|id| id.to_string()));
         // Unknown IDs are reported off the plain resolve only: the member
         // config repeats the user's IDs, so its unknowns are duplicates.
         let (member, _) = ResolvedRules::resolve(&member_config);
@@ -365,6 +350,77 @@ mod tests {
             ),
             Vec::new()
         );
+    }
+
+    #[test]
+    fn extend_select_preserves_default_diagnostics_for_loose_and_member_files() {
+        use super::super::cross_file::test_support::{member_path, workspace_db};
+
+        let src = "function f(x, spare)\n    unused = x\n    return missing_name\nend\n";
+        let config = LintConfig {
+            extend_select: vec!["undefined-name".to_string(), "unused-argument".to_string()],
+            severity: [("undefined-name".to_string(), Severity::Hint)].into(),
+            ..Default::default()
+        };
+        let (rules, unknown) = ServerRules::from_config(&config);
+        assert!(unknown.is_empty());
+        let (member_db, _) = workspace_db(&[], &[("a.jl", src)]);
+        let dir = tempfile::tempdir().unwrap();
+        let plain_path = dir.path().join("loose.jl");
+        let mut plain_db = IncrementalDatabase::default();
+        plain_db.upsert_file(&plain_path, src.to_string());
+
+        for (db, path) in [(plain_db, plain_path), (member_db, member_path("a.jl"))] {
+            let diags = lint_diagnostics_via_db(
+                &db.snapshot(),
+                &path,
+                &TextBuffer::new(src.to_string()),
+                PositionEncoding::Utf16,
+                &rules,
+            );
+            let mut codes: Vec<_> = diags
+                .iter()
+                .map(|diag| match diag.code.as_ref().unwrap() {
+                    NumberOrString::String(id) => id.as_str(),
+                    NumberOrString::Number(_) => panic!("expected a rule ID"),
+                })
+                .collect();
+            codes.sort_unstable();
+            assert_eq!(
+                codes,
+                ["undefined-name", "unused-argument", "unused-binding"]
+            );
+            assert_eq!(
+                diags
+                    .iter()
+                    .find(|diag| diag.code == Some(NumberOrString::String("undefined-name".into())))
+                    .unwrap()
+                    .severity,
+                Some(DiagnosticSeverity::HINT)
+            );
+        }
+    }
+
+    #[test]
+    fn extend_select_honors_ignore_in_both_server_rule_sets() {
+        let config = LintConfig {
+            select: Some(vec![]),
+            extend_select: vec![
+                "undefined-name".to_string(),
+                "unused-argument".to_string(),
+                "future-rule".to_string(),
+            ],
+            ignore: vec!["undefined-name".to_string()],
+            ..Default::default()
+        };
+        let (rules, unknown) = ServerRules::from_config(&config);
+        assert_eq!(unknown, ["future-rule"]);
+        for member in [false, true] {
+            let enabled = rules.get(member).enabled();
+            assert!(enabled.contains("unused-argument"));
+            assert!(!enabled.contains("undefined-name"));
+            assert!(!enabled.contains("unused-binding"));
+        }
     }
 
     /// The cached-tree lint path matches the re-parse path when the db's

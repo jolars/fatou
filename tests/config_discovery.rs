@@ -549,7 +549,7 @@ fn lsp_invalid_env_config_warns_and_uses_client_settings() {
     }
 }
 
-// --- per-rule config (`[lint.rules.<id>]`) ----------------------------------
+// --- lint configuration --------------------------------------------------
 
 /// Write `fatou.toml` and a Julia file at the sandbox root, then
 /// `fatou lint` that file.
@@ -557,6 +557,74 @@ fn lint_with_config(sandbox: &Sandbox, config: &str, source: &str) -> Output {
     std::fs::write(sandbox.path().join("fatou.toml"), config).unwrap();
     std::fs::write(sandbox.path().join("lint.jl"), source).unwrap();
     sandbox.run(sandbox.path(), &[], &["lint", "lint.jl"])
+}
+
+#[test]
+fn cli_extend_select_adds_rules_and_ignore_takes_precedence() {
+    let sandbox = Sandbox::new();
+    let source = "function f(x)\n    unused = x\n    return missing_name\nend\n";
+    for (settings, expected) in [
+        ("", vec!["unused-binding"]),
+        ("extend-select = []", vec!["unused-binding"]),
+        (
+            "extend-select = [\"undefined-name\"]",
+            vec!["undefined-name", "unused-binding"],
+        ),
+        (
+            "select = [\"unused-binding\"]\nextend-select = [\"undefined-name\", \"unused-binding\", \"undefined-name\"]",
+            vec!["undefined-name", "unused-binding"],
+        ),
+        (
+            "select = []\nextend-select = [\"undefined-name\"]",
+            vec!["undefined-name"],
+        ),
+        (
+            "extend-select = [\"undefined-name\"]\nignore = [\"undefined-name\"]",
+            vec!["unused-binding"],
+        ),
+        (
+            "extend-select = [\"undefined-name\"]\nignore = [\"unused-binding\"]",
+            vec!["undefined-name"],
+        ),
+    ] {
+        std::fs::write(
+            sandbox.path().join("fatou.toml"),
+            format!("[lint]\n{settings}\n"),
+        )
+        .unwrap();
+        std::fs::write(sandbox.path().join("lint.jl"), source).unwrap();
+        let output = sandbox.run(
+            sandbox.path(),
+            &[],
+            &["lint", "--output", "json", "lint.jl"],
+        );
+        assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+        let diagnostics: Vec<Value> = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|error| panic!("{settings}: {error}: {}", stderr(&output)));
+        let mut rules: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic["rule"].as_str().unwrap())
+            .collect();
+        rules.sort_unstable();
+        assert_eq!(rules, expected, "{settings}");
+    }
+}
+
+#[test]
+fn cli_extend_select_warns_once_for_unknown_rules() {
+    let sandbox = Sandbox::new();
+    let output = lint_with_config(
+        &sandbox,
+        "[lint]\nextend-select = [\"future-rule\", \"future-rule\"]\nignore = [\"future-rule\"]\n",
+        "f(x) = x\n",
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stderr(&output)
+            .matches("unknown rule `future-rule`")
+            .count(),
+        1
+    );
 }
 
 const EXITS: &str = "function cleanup()\n    exit(1)\nend\n";

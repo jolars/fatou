@@ -194,14 +194,30 @@ to follow the platform Fatou runs on.
 ## Choosing Lint Rules
 
 By default most rules run; the [rule reference](../reference/rules.md) lists the
-few that are opt-in. `ignore` turns individual rules off, and `select`, when
-set, restricts the run to exactly the rules you list:
+few that are opt-in. Use `extend-select` to enable additional rules while
+keeping the defaults. For example, to report undefined names in standalone
+scripts without losing unused-variable warnings:
 
 ```toml
 [lint]
-select = ["unused-binding", "undefined-name"]
+extend-select = ["undefined-name"]
+```
+
+`select`, when set, replaces the default rule set. `extend-select` then adds to
+that selection, and `ignore` turns individual rules off, including rules named
+in `extend-select`:
+
+```toml
+[lint]
+select = ["unused-binding", "unused-argument"]
+extend-select = ["undefined-name"]
 ignore = ["unused-argument"]
 ```
+
+On the CLI, this configuration runs `unused-binding` and `undefined-name`. An
+empty `select = []` disables the defaults, leaving only rules in `extend-select`
+that are not ignored. For workspace package files, the language server also
+enables rules that need project resolution, unless they are ignored.
 
 See the [rule reference](../reference/rules.md) for the available rule IDs.
 

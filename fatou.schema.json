@@ -130,6 +130,14 @@
       "additionalProperties": false,
       "description": "The `[lint]` section.",
       "properties": {
+        "extend-select": {
+          "default": [],
+          "description": "Additional rule IDs to enable alongside `select` or the defaults.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "ignore": {
           "default": [],
           "description": "Rule IDs to disable.",
@@ -147,7 +155,7 @@
           "description": "Per-rule option tables, keyed by configurable rule ID."
         },
         "select": {
-          "description": "When set, run only these rule IDs.",
+          "description": "Base rule IDs to enable, replacing the defaults when set.",
           "items": {
             "type": "string"
           },
