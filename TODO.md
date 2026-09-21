@@ -113,7 +113,24 @@ style remains project policy rather than language correctness.
 
 ## Linter
 
+- [ ] Support explicit, opt-in script entry points for `undefined-name` (#109).
+  Follow static includes through the shared project model and resolver so
+  standalone scripts can resolve globals from included files. Keep each entry
+  point and module context separate: another caller may supply different
+  globals, and merging callers' names can hide errors. Do not assume arbitrary
+  open files are entry points. Retain conservative handling of dynamic
+  includes, `eval`, and unresolved imports. Currently, `extend-select` enables
+  the rule but does not override the guard that skips standalone files with
+  includes.
+
 ### Rules
+
+- [ ] Add an opt-in rule for functions that read known nonconstant, untyped
+  globals (#109). Use the shared resolver to distinguish global bindings from
+  locals and captured variables. Exempt constants, functions, types, and typed
+  globals. Keep this separate from `undefined-name`: the name resolves, but
+  passing its value as an argument would make the dependency explicit and
+  avoid the performance cost of an untyped global.
 
 - [x] The `Test`-stdlib bundle reuses `redundant-boolean`, `length-zero`, and
   `nothing-comparison`, and adds `test-isa-call` (readability, sem, warning,
