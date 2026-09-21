@@ -2566,7 +2566,7 @@ fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
 /// reparses as `(call f a (return (tuple nothing)))`, and `f(a, x for x in xs,)`
 /// grows a `cartesian_iterator` clause. Those lists keep their exploded layout
 /// but drop the trailing comma — omitting it is always meaning-preserving, while
-/// adding it is not.
+/// adding it is not. Bare `break` and `continue` reject a following comma outright.
 ///
 /// The construct need not be the item itself — only the item's *tail*, since
 /// that is where the comma lands. So the walk descends the rightmost-child spine
@@ -2574,12 +2574,13 @@ fn collection_reflow_body(node: &SyntaxNode) -> Option<Ir> {
 /// stopping at any construct that closes with its own `)`/`]`/`}`/`end`, which
 /// fences the comma off from whatever it contains (`f(a, g(return x))` is fine).
 ///
-/// The check is deliberately coarse (any `return`/`const`/`global`/`local` or
-/// generator on that spine, not just the shapes that provably absorb):
+/// The check is deliberately coarse (any `return`/`break`/`continue`/`const`/
+/// `global`/`local` or generator on that spine, not just the shapes that provably
+/// absorb or reject a comma):
 /// suppressing the comma costs nothing but a cosmetic separator, so erring toward
 /// suppression is the safe direction. A one-tuple's comma is semantic and is
 /// decided earlier by [`collection_singleton_comma`], which wins over this.
-fn last_item_absorbs_comma(node: &SyntaxNode) -> bool {
+fn last_item_blocks_trailing_comma(node: &SyntaxNode) -> bool {
     let Some(mut cur) = last_list_item(node) else {
         return false;
     };
@@ -2587,6 +2588,8 @@ fn last_item_absorbs_comma(node: &SyntaxNode) -> bool {
         if matches!(
             cur.kind(),
             SyntaxKind::RETURN_EXPR
+                | SyntaxKind::BREAK_EXPR
+                | SyntaxKind::CONTINUE_EXPR
                 | SyntaxKind::CONST_STMT
                 | SyntaxKind::GLOBAL_STMT
                 | SyntaxKind::LOCAL_STMT
@@ -2672,13 +2675,14 @@ fn ends_with_closer(node: &SyntaxNode) -> bool {
 }
 
 /// The punctuation a bracketed list emits after its last item: a semantic comma
-/// (both layouts), nothing when a trailing comma would be absorbed by the last
-/// item (see [`last_item_absorbs_comma`]), or the usual broken-only magic comma.
+/// (both layouts), nothing when a trailing comma would be absorbed or rejected by
+/// the last item (see [`last_item_blocks_trailing_comma`]), or the usual
+/// broken-only magic comma.
 /// Semantic commas occur in one-tuples and singleton bare-operator calls.
 fn list_trailing(node: &SyntaxNode, semantic_comma: bool) -> Ir {
     if semantic_comma {
         Ir::text(",")
-    } else if last_item_absorbs_comma(node) {
+    } else if last_item_blocks_trailing_comma(node) {
         Ir::text("")
     } else {
         Ir::if_break(",", "")
@@ -3807,8 +3811,8 @@ const MAX_BLANK_LINES: usize = 1;
 ///   the open bracket and before the close bracket (indented one step, close
 ///   bracket flush), and every item lands on its own line — items that shared a
 ///   source line (`a, b`) are split apart.
-/// - **A trailing comma is always added** (the list is always broken), matching
-///   the width-driven path's broken layout.
+/// - **A trailing comma is added when safe**, matching the width-driven path's
+///   broken layout and its exceptions for tails that absorb or reject commas.
 /// - **Comments keep their attachment.** A trailing comment (`item, # …`) rides
 ///   after its item's comma, canonicalized to one leading space; an own-line
 ///   comment occupies its own line in place; a comment on the open-bracket line
@@ -3932,15 +3936,18 @@ fn lower_multiline_bracket(node: &SyntaxNode) -> Ir {
     }
 
     let n = items.len();
+    let semantic_comma =
+        collection_singleton_comma(node, &items) || operator_call_singleton_comma(node, n, comma);
+    let trailing_comma = semantic_comma || !last_item_blocks_trailing_comma(node);
     let mut inner: Vec<Ir> = Vec::new();
     render_gap(&mut inner, &leading);
     inner.push(Ir::HardLine); // framing break after the open bracket
     for (i, item) in items.into_iter().enumerate() {
         inner.push(item);
-        // Always broken, so every item — including the last — grows a comma.
-        inner.push(Ir::text(","));
-        // The trailing comment rides after the comma, canonicalized to one leading
-        // space (its same-line attachment is preserved, not its source spacing).
+        if i + 1 < n || trailing_comma {
+            inner.push(Ir::text(","));
+        }
+        // Keep the comment attached to its item, after any separating comma.
         if let Some(text) = &item_comments[i] {
             inner.push(text.trailing_ir());
         }
