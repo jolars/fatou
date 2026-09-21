@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.21.0](https://github.com/jolars/fatou/compare/v0.20.0...v0.21.0) (2026-09-21)
+
+### Features
+- add `extend-select` for lint rules ([`4e4cd75`](https://github.com/jolars/fatou/commit/4e4cd75d65bce40c89cfbbd583d1b64626ccaf88)), refs [#109](https://github.com/jolars/fatou/issues/109)
+
+### Bug Fixes
+- **deps:** raise Salsa minimum to 0.28.4 ([`811e682`](https://github.com/jolars/fatou/commit/811e682bb0d5264d2203e0a2c5bc3b9d3f3d1637))
+- **semantic:** model `Test.@testset` local scopes ([`b7e0533`](https://github.com/jolars/fatou/commit/b7e0533e396505706aa227c1b4c4fdb565146b96)), fixes [#108](https://github.com/jolars/fatou/issues/108)
+- **lsp:** synchronize package entry renames ([`6eda616`](https://github.com/jolars/fatou/commit/6eda6167a9838a85a2259a541a7ca4a432814497))
+
+### Performance Improvements
+- **build:** enable ThinLTO with one codegen unit ([`feed947`](https://github.com/jolars/fatou/commit/feed947203d9312543dec815ca5f6a3a2e865e31))
+
+### Dependencies
+- updated crates/fatou-formatter to v0.7.2
+
 ## [0.20.0](https://github.com/jolars/fatou/compare/v0.19.0...v0.20.0) (2026-09-15)
 
 ### Features

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.2](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.1...fatou-formatter-v0.7.2) (2026-09-21)
+
+### Bug Fixes
+- **formatter:** avoid commas after loop control ([`77fbc31`](https://github.com/jolars/fatou/commit/77fbc31abc18bb9ae7293d34259b27637b239489)), fixes [#110](https://github.com/jolars/fatou/issues/110)
+
 ## [0.7.1](https://github.com/jolars/fatou/compare/fatou-formatter-v0.7.0...fatou-formatter-v0.7.1) (2026-09-15)
 
 ### Bug Fixes
