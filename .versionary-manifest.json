@@ -6,9 +6,7 @@
       "path": ".",
       "version": "0.21.0",
       "tag": "v0.21.0",
-      "dependencies": [
-        "crates/fatou-formatter"
-      ]
+      "dependencies": ["crates/fatou-formatter"]
     },
     {
       "path": "crates/fatou-formatter",
@@ -24,9 +22,7 @@
       "path": "editors/code",
       "version": "0.21.0",
       "tag": "fatou-code-v0.21.0",
-      "dependencies": [
-        "."
-      ]
+      "dependencies": ["."]
     },
     {
       "path": "editors/zed",
@@ -39,9 +35,7 @@
       "path": ".",
       "version": "0.21.0",
       "tag": "v0.21.0",
-      "dependencies": [
-        "crates/fatou-formatter"
-      ]
+      "dependencies": ["crates/fatou-formatter"]
     },
     {
       "path": "crates/fatou-formatter",
@@ -52,9 +46,7 @@
       "path": "editors/code",
       "version": "0.21.0",
       "tag": "fatou-code-v0.21.0",
-      "dependencies": [
-        "."
-      ]
+      "dependencies": ["."]
     }
   ]
 }
