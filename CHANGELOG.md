@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.21.1](https://github.com/jolars/fatou/compare/v0.21.0...v0.21.1) (2026-09-25)
+
+### Bug Fixes
+- **deps:** bump salsa to 0.28.5 ([`d6543dc`](https://github.com/jolars/fatou/commit/d6543dc4eaba2611932b6c05283558ab67081595))
+
 ## [0.21.0](https://github.com/jolars/fatou/compare/v0.20.0...v0.21.0) (2026-09-21)
 
 ### Features
