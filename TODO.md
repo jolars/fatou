@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Fix issue #113: parenthesized macro calls accept `for … end` arguments,
+  and `const`, `global`, and `local` declarations continue across newlines and
+  comments before their operands. Parentheses inherit the enclosing generator
+  context, preserving comprehensions and call-argument generators.
+
 - [x] Refresh the parser oracle and generated tables for Julia 1.13 while
   retaining JuliaSyntax 1.0.2. Unicode 17 identifier starts and combining
   marks have lexer and differential-fixture coverage.

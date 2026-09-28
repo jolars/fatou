@@ -46,6 +46,9 @@ ledger below for remaining work.
   (`for outer $ i = 1:3`).
 - **Probe whitespace-sensitive siblings** before scoping (`a[begin]` vs
   `[begin x end]`; `:foo` vs `a[:]`; `A'` vs `A '`; `[1 +2]` vs `[1 + 2]`).
+- **Parentheses inherit macro generator context.** `inside_brackets` controls
+  newline sensitivity, not whether `for` ends macro arguments. `(@m for … end)`
+  takes a loop; `f((@m for i in xs))` inherits the call's generator boundary.
 - **A/B before calling a diff a regression.** Stash and re-run: most surprising
   diffs on real code are pre-existing error shapes.
 - **Reseed allowlists with the `grep -E '^#|^$'` header-preserving recipe.**
@@ -58,7 +61,7 @@ ledger below for remaining work.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
-divergence, 0 unsupported. Dir corpus (**269 cases**): **268 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**271 cases**): **270 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -97,35 +100,37 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-09-15 — bare keyword tuple recovery)
+## Latest session (2026-09-28 — issue #113)
 
-Bare `break, y` / `continue, y` now build `BARE_TUPLE_EXPR` nodes and record a
-zero-width diagnostic after the keyword. The projector replays that diagnostic
-as a sibling `(error-t)`, matching Julia 1.13.0 / JuliaSyntax 1.0.2.
+Confirmed both reported forms against Julia 1.13.0 / JuliaSyntax 1.0.2 and
+`Meta.parseall`: parenthesized macro loop arguments and line-split `const`
+declarations are valid Julia. Both failures reproduced on the clean baseline.
 
-- **Parser**: a bare keyword before a comma reaches the expression loop, keeping
-  tuple and assignment precedence. Tuple separator probes skip block comments
-  while preserving significant newlines. Labeled forms keep their existing
-  parsing path and remain deferred.
-- **Recovery**: parenthesized and bracket-literal list fallbacks discard
-  diagnostics from the tentative first-element parse. This prevents duplicate
-  comma diagnostics and removes duplicate operator diagnostics in two existing
-  snapshots, without changing their CSTs or oracle projections.
-- **Fixtures**: `break_continue_tuple` pins statements, assignments, later tuple
-  elements, short-circuits, comments, newline continuation, blocks, and delimited
-  containers. A focused test requires one diagnostic per offending keyword.
+- **Parser**: macro arguments use the explicit generator boundary independently
+  of newline sensitivity. Parentheses, tuples, and quoted parentheses inherit
+  that boundary; call arguments and array elements enable it. Required keyword
+  operands skip newlines and comments, covering `const`, `global`, and `local`.
+  `return` retains its significant newline. No projector changes.
+- **Fixtures**: `parenthesized_macro_loop_argument` covers the exact report,
+  qualified and nested macros, tuples, quotes, and inherited generators.
+  `declaration_newline_continuation` covers blank lines, line and block comments,
+  declaration modifiers, tuple bindings, struct fields, and statement boundaries.
+  Both have reviewed lossless CST snapshots and generated oracle projections.
 - **Counts**: JS **749/756 → 749/756** (7 divergence, 0 unsupported), dir
-  **267/268 → 268/269**. No new divergences or blocked entries.
-- **Validation**: workspace tests, incremental oracle edits, clippy with all
-  targets and features, rustfmt, and formatter idempotence on the new fixture.
-- **Next**: the nearest deferred recovery target is a trailing comma at EOF
-  (`x = a,`, `break,`). Labeled-keyword recovery and wrapping operators still
-  lack a validating oracle under the current pin.
+  **268/269 → 270/271**. Zero regressions and no new blocked entries.
+- **Validation**: workspace tests (including incremental oracle edits), clippy
+  with all targets and features, rustfmt, safe formatting and idempotence on both
+  fixtures, and clean CLI lint results for the reporter's two examples.
+- **Next**: trailing comma at EOF (`x = a,`, `break,`) remains the nearest
+  deferred recovery target. Labeled keywords and wrapping operators remain
+  blocked by the current oracle pin.
 
 ## Earlier sessions
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-09-15** — bare keyword tuple recovery and removal of duplicate
+  diagnostics from tentative bracket parses. 749 / 268.
 - **2026-09-15** — Julia 1.13 / Unicode 17 tables, Markdown em dashes, and
   deferred-target audit; JuliaSyntax remains pinned at 1.0.2. 749 / 267.
 - **2026-08-29** — decimal float overflow diagnostics and boundary fixtures.
