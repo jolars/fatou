@@ -569,8 +569,7 @@ pub(crate) fn parse_module_expr(
     })
 }
 
-/// The shape of a simple keyword statement's body — the part (if any) that
-/// follows the keyword on its line.
+/// The shape of a simple keyword statement's body after its keyword.
 pub(crate) enum KwStmt {
     /// An optional leading expression parsed at statement level, so a top-level
     /// bare comma folds into a tuple (`return x, y` ⇒ `(return (tuple x y))`,
@@ -599,9 +598,10 @@ pub(crate) enum KwStmt {
 }
 
 /// Parse a simple keyword-led statement that is not a `… end` block form. The
-/// keyword at `start` opens `node_kind`; `body` selects what follows it on the
-/// line. Losslessness holds: every same-line token is either parsed into a
-/// subtree or carried through verbatim.
+/// keyword at `start` opens `node_kind`; `body` selects its operand form.
+/// Declarations continue across newlines before their required operand.
+/// Losslessness holds: every token is parsed into a subtree or carried through
+/// verbatim.
 pub(crate) fn parse_keyword_stmt(
     tokens: &[Token],
     start: usize,
@@ -641,7 +641,13 @@ pub(crate) fn parse_keyword_stmt(
                     .token(ctx.skip_ws(i))
                     .is_some_and(|t| t.kind == TokKind::ForKw))
     };
-    let operand_start = ctx.skip_ws_and_block_comments(i);
+    // Declarations require an operand, so newlines and comments before it do
+    // not end the statement. `return` may stand alone and keeps its newline.
+    let operand_start = if optional_value {
+        ctx.skip_ws_and_block_comments(i)
+    } else {
+        ctx.skip_trivia(i)
+    };
     // A keyword whose value is optional (`return`) ends right after the
     // keyword when its operand position is a stray closing delimiter
     // (`return)`, `return ]`): the empty form `(return)` is emitted and the
@@ -871,7 +877,7 @@ pub(crate) fn parse_name_list_stmt(
             // paren or error-wrap any other parenthesized expression. `public`
             // has no paren form (`public (x)` is a call), so this is export-only.
             Some(TokKind::LParen) if !is_public => {
-                if let Some(item) = parse_paren(&ctx, i, false, diagnostics) {
+                if let Some(item) = parse_paren(&ctx, i, false, false, diagnostics) {
                     events.extend(item.events);
                     i = item.end;
                     consumed_name = true;

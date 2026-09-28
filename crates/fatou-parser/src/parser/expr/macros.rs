@@ -286,6 +286,7 @@ fn parse_macro_args(
             TokKind::RParen,
             SyntaxKind::ARG_LIST,
             false,
+            true,
             diagnostics,
         );
         events.extend(list_events);
@@ -340,9 +341,9 @@ fn parse_macro_args(
             // In a generator-bearing position, a `for` after the arguments opens a
             // generator (`[@inbounds f(x) for x in xs]`, `g(@m a for a in as)`), so
             // it ends the macro's space-args. At statement scope `for` is instead a
-            // for-loop argument (`@time for i in xs … end`), so this only fires in a
-            // bracket or an array/comprehension-element context.
-            Some(TokKind::ForKw) if inside_brackets || generator_for_ends => break,
+            // for-loop argument (`@time for i in xs … end`). Plain parentheses
+            // inherit that distinction independently of newline sensitivity.
+            Some(TokKind::ForKw) if generator_for_ends => break,
             // A dot followed by `(` belongs to the completed macro call's
             // postfix chain. Let it build the dedicated invalid broadcast-macro
             // recovery (`@M.(x)`), rather than parsing the newly supported lone

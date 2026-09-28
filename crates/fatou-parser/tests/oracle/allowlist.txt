@@ -63,6 +63,7 @@ const_not_assignment
 control_flow
 curly_operator_call
 decimal_float_overflow
+declaration_newline_continuation
 do_block
 do_blocks
 doc_macro
@@ -188,6 +189,7 @@ paren_operator
 parenthesized_anonymous_function_parameters
 parenthesized_leading_comma
 parenthesized_macro_function_signature
+parenthesized_macro_loop_argument
 plus_plus_operator
 postfix_space_error
 prefix_operator_error

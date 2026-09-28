@@ -43,6 +43,18 @@ fn parser_fixtures() {
 }
 
 #[test]
+fn parenthesized_macro_loop_arguments_parse_cleanly() {
+    let input = include_str!("fixtures/parser/parenthesized_macro_loop_argument/input.jl");
+    assert!(parse(input).diagnostics.is_empty());
+}
+
+#[test]
+fn declarations_continue_after_newlines() {
+    let input = include_str!("fixtures/parser/declaration_newline_continuation/input.jl");
+    assert!(parse(input).diagnostics.is_empty());
+}
+
+#[test]
 fn using_base_aliases_report_parse_errors() {
     let output = parse("using A as B\nusing A, B as C\n");
 

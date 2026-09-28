@@ -1,0 +1,1 @@
+(toplevel (const (= x 1)) (const (= c 2)) (const (= (::-i d Int) 3)) (const (global (= g 4))) (global (const (= h 5))) (global x y) (local (= z 6)) (function (call f) (block (local (= (tuple a b) (tuple 1 2))) (return) (= a 3))) (struct-mut S (block (const (::-i field Int)))) (const (= last 7)) (= next 8))

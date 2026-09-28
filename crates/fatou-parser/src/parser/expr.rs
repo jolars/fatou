@@ -1382,6 +1382,7 @@ fn parse_prefix(
                     TokKind::RParen,
                     SyntaxKind::ARG_LIST,
                     flags.end_marker,
+                    true,
                     diagnostics,
                 );
                 let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
@@ -1489,6 +1490,7 @@ fn parse_prefix(
                     TokKind::RParen,
                     SyntaxKind::ARG_LIST,
                     flags.end_marker,
+                    true,
                     diagnostics,
                 );
                 let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
@@ -1628,6 +1630,7 @@ fn parse_prefix(
                 TokKind::RParen,
                 SyntaxKind::ARG_LIST,
                 flags.end_marker,
+                true,
                 diagnostics,
             );
             let mut events = vec![Event::Start(SyntaxKind::CALL_EXPR), Event::Tok(start)];
@@ -1664,7 +1667,13 @@ fn parse_prefix(
             flags.inside_brackets,
             flags.generator_for_ends,
         )),
-        TokKind::LParen => parse_paren(ctx, start, flags.end_marker, diagnostics),
+        TokKind::LParen => parse_paren(
+            ctx,
+            start,
+            flags.end_marker,
+            flags.generator_for_ends,
+            diagnostics,
+        ),
         TokKind::LBracket => Some(parse_delimited_literal(
             ctx,
             start,
@@ -2043,7 +2052,7 @@ pub(super) fn parse_quote_sym(
         }
         // `:(expr)` — the parenthesized expression is the quoted form.
         TokKind::LParen => {
-            let paren = parse_paren(ctx, next, false, diagnostics)?;
+            let paren = parse_paren(ctx, next, false, generator_for_ends, diagnostics)?;
             let end = paren.end;
             events.extend(paren.events);
             events.push(Event::Finish);
@@ -2382,7 +2391,7 @@ fn parse_interpolation(
             // (`GENERATOR`), and the empty `$()` (`TUPLE_EXPR`) are what
             // JuliaSyntax rejects as a `(error …)` interpolation — but only
             // inside a string, where the value has to be stringified.
-            let Some(inner) = parse_paren(ctx, next, false, diagnostics) else {
+            let Some(inner) = parse_paren(ctx, next, false, true, diagnostics) else {
                 events.push(Event::Finish);
                 return next + 1;
             };
@@ -2437,6 +2446,9 @@ pub(crate) fn parse_paren(
     // Inherited index-marker context. A paren is not itself indexing, but
     // `a[(end)]` inherits the marker into the parenthesized expression.
     end_marker: bool,
+    // Parentheses inherit generator context: `(@m for … end)` takes a loop,
+    // while `f((@m for i in xs))` keeps the call argument's generator boundary.
+    generator_for_ends: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> Option<ExprParse> {
     let inner_start = ctx.skip_trivia(start + 1);
@@ -2461,6 +2473,7 @@ pub(crate) fn parse_paren(
                 TokKind::RParen,
                 paren_list_kind(ctx, start),
                 end_marker,
+                generator_for_ends,
                 diagnostics,
             );
             return Some(ExprParse { start, end, events });
@@ -2502,8 +2515,14 @@ pub(crate) fn parse_paren(
     }
 
     let diag_mark = diagnostics.len();
-    let Some(inner) = parse_expr_in_brackets(ctx.tokens(), inner_start, 0, end_marker, diagnostics)
-    else {
+    let flags = ExprFlags {
+        inside_brackets: true,
+        generator_for_ends,
+        end_marker,
+        begin_marker: end_marker,
+        ..ExprFlags::default()
+    };
+    let Some(inner) = parse_expr_in(ctx.tokens(), inner_start, 0, diagnostics, flags) else {
         // Only trivia remains to EOF: the paren can never be closed, so report
         // it like the non-empty case below. A non-EOF failure (`(,1)`, `[(]`)
         // may still have its `)` ahead, so it stays with outer recovery.
@@ -2564,6 +2583,7 @@ pub(crate) fn parse_paren(
             TokKind::RParen,
             paren_list_kind(ctx, start),
             end_marker,
+            generator_for_ends,
             diagnostics,
         );
         return Some(ExprParse { start, end, events });
@@ -2813,6 +2833,7 @@ fn parse_postfix_chain(
                     TokKind::RParen,
                     SyntaxKind::ARG_LIST,
                     end_marker,
+                    true,
                     diagnostics,
                 );
                 // A broadcast call on a macro name (`@M.(x)`) is invalid — a macro
@@ -2954,6 +2975,7 @@ fn parse_postfix(
         let gen_end_marker = end_marker || close == TokKind::RBracket;
         let flags = ExprFlags {
             inside_brackets: true,
+            generator_for_ends: true,
             end_marker: gen_end_marker,
             begin_marker: gen_end_marker,
             ..ExprFlags::default()
@@ -3049,6 +3071,7 @@ fn parse_postfix_arg_list(
         close,
         SyntaxKind::ARG_LIST,
         end_marker,
+        true,
         diagnostics,
     );
     let mut events = vec![Event::Start(node)];
@@ -3177,6 +3200,7 @@ fn parse_arg_list(
     // propagates the enclosing context, so `[1, end]` errors at toplevel but the
     // inner vect of `a[[1, end]]` inherits the marker.
     inherited_end_marker: bool,
+    generator_for_ends: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> (Vec<Event>, usize) {
     let tokens = ctx.tokens();
@@ -3324,7 +3348,15 @@ fn parse_arg_list(
                 break;
             }
             Some(_) => {
-                i = parse_one_arg(ctx, &mut events, i, end_marker, begin_marker, diagnostics);
+                i = parse_one_arg(
+                    ctx,
+                    &mut events,
+                    i,
+                    end_marker,
+                    begin_marker,
+                    generator_for_ends,
+                    diagnostics,
+                );
                 slot_empty = false;
                 parsed_element = true;
             }
@@ -3347,11 +3379,13 @@ fn parse_one_arg(
     i: usize,
     end_marker: bool,
     begin_marker: bool,
+    generator_for_ends: bool,
     diagnostics: &mut Vec<ParseDiagnostic>,
 ) -> usize {
     let tokens = ctx.tokens();
     let flags = ExprFlags {
         inside_brackets: true,
+        generator_for_ends,
         end_marker,
         begin_marker,
         ..ExprFlags::default()

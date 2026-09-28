@@ -152,8 +152,15 @@ pub(super) fn parse_delimited_literal(
         // The list parser reparses the first element, so its tentative
         // diagnostics must be discarded with the tentative events.
         diagnostics.truncate(diag_mark);
-        let (events, end) =
-            parse_arg_list(ctx, open, shape.close, shape.list, end_marker, diagnostics);
+        let (events, end) = parse_arg_list(
+            ctx,
+            open,
+            shape.close,
+            shape.list,
+            end_marker,
+            true,
+            diagnostics,
+        );
         ExprParse {
             start: open,
             end,
