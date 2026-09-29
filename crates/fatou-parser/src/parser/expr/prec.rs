@@ -10,8 +10,9 @@ use crate::parser::structural::is_op_name;
 use super::juxtapose::is_word_operator_tok;
 
 /// Binding power for prefix unary operators (`+x`, `-x`, `!x`). Higher than the
-/// binary arithmetic operators so `-a + b` parses as `(-a) + b`.
-pub(super) const PREFIX_BP: u8 = 28;
+/// binary arithmetic and shift operators but below powers, so `√a//b` parses
+/// as `(√a)//b`, while `√a^b` parses as `√(a^b)`.
+pub(super) const PREFIX_BP: u8 = 32;
 
 /// Fire gate for the ternary `? :`. Just above assignment (`Eq` at `(2, 1)`), so
 /// a whole ternary can be an assignment's right-hand side (`w = a ? b : c`) while
@@ -29,13 +30,13 @@ pub(super) const TERNARY_L: u8 = 3;
 /// errors on the missing `:`, as in Julia).
 pub(super) const TERNARY_BRANCH_BP: u8 = COMMA_BP;
 
-/// Binding powers for numeric-literal-coefficient juxtaposition (`2x`, `(x-1)y`,
-/// `1√x`). Julia binds juxtaposition tighter than `*`/`//`/`<<` but looser than
+/// Binding powers for juxtaposition (`2x`, `(x-1)y`, `a√x`).
+/// Julia binds juxtaposition tighter than `*`/`//`/`<<` but looser than
 /// `^`: `2x^2` ⇒ `(juxtapose 2 (x^2))` (left binds into a following `^`), while
 /// `2^2x` ⇒ `2^(2x)` (it binds into `^`'s right operand). So the left power must
 /// out-bind `^`'s right (`33`), and the right operand captures only `^` (`34`)
 /// and tighter — keeping `*` (`24`), `//` (`28`), and `where` (`31`) out.
-/// Right-associative (`L > R`), like `^`.
+/// Factors suppress further juxtaposition so consecutive terms form one product.
 pub(super) const JUXTAPOSE_L: u8 = 34;
 pub(super) const JUXTAPOSE_R: u8 = 33;
 

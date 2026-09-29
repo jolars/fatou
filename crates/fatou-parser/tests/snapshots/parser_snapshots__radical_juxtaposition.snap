@@ -1,0 +1,431 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 41
+expression: rendered
+---
+ROOT@0..323
+  ASSIGNMENT_EXPR@0..5
+    NAME@0..1
+      IDENT@0..1 "a"
+    WHITESPACE@1..2 " "
+    EQ@2..3 "="
+    WHITESPACE@3..4 " "
+    LITERAL@4..5
+      INTEGER@4..5 "1"
+  NEWLINE@5..6 "\n"
+  JUXTAPOSE_EXPR@6..11
+    NAME@6..7
+      IDENT@6..7 "a"
+    UNARY_EXPR@7..11
+      UNICODE_RADICAL@7..10 "√"
+      LITERAL@10..11
+        INTEGER@10..11 "4"
+  NEWLINE@11..12 "\n"
+  JUXTAPOSE_EXPR@12..17
+    NAME@12..13
+      IDENT@12..13 "a"
+    UNARY_EXPR@13..17
+      UNICODE_RADICAL@13..16 "∛"
+      LITERAL@16..17
+        INTEGER@16..17 "8"
+  NEWLINE@17..18 "\n"
+  JUXTAPOSE_EXPR@18..24
+    NAME@18..19
+      IDENT@18..19 "a"
+    UNARY_EXPR@19..24
+      UNICODE_RADICAL@19..22 "∜"
+      LITERAL@22..24
+        INTEGER@22..24 "16"
+  NEWLINE@24..25 "\n"
+  JUXTAPOSE_EXPR@25..31
+    NAME@25..26
+      IDENT@25..26 "a"
+    UNARY_EXPR@26..31
+      UNICODE_RADICAL@26..30 ".√"
+      LITERAL@30..31
+        INTEGER@30..31 "4"
+  NEWLINE@31..32 "\n"
+  JUXTAPOSE_EXPR@32..38
+    NAME@32..33
+      IDENT@32..33 "a"
+    UNARY_EXPR@33..38
+      UNICODE_RADICAL@33..37 ".∛"
+      LITERAL@37..38
+        INTEGER@37..38 "8"
+  NEWLINE@38..39 "\n"
+  JUXTAPOSE_EXPR@39..46
+    NAME@39..40
+      IDENT@39..40 "a"
+    UNARY_EXPR@40..46
+      UNICODE_RADICAL@40..44 ".∜"
+      LITERAL@44..46
+        INTEGER@44..46 "16"
+  NEWLINE@46..47 "\n"
+  JUXTAPOSE_EXPR@47..52
+    LITERAL@47..48
+      INTEGER@47..48 "2"
+    UNARY_EXPR@48..52
+      UNICODE_RADICAL@48..51 "√"
+      LITERAL@51..52
+        INTEGER@51..52 "4"
+  NEWLINE@52..53 "\n"
+  JUXTAPOSE_EXPR@53..61
+    LITERAL@53..57
+      TRUE_KW@53..57 "true"
+    UNARY_EXPR@57..61
+      UNICODE_RADICAL@57..60 "√"
+      LITERAL@60..61
+        INTEGER@60..61 "4"
+  NEWLINE@61..62 "\n"
+  JUXTAPOSE_EXPR@62..69
+    NAME@62..64
+      IDENT@62..64 "α"
+    UNARY_EXPR@64..69
+      UNICODE_RADICAL@64..67 "√"
+      NAME@67..69
+        IDENT@67..69 "β"
+  NEWLINE@69..70 "\n"
+  JUXTAPOSE_EXPR@70..77
+    BINARY_EXPR@70..73
+      NAME@70..71
+        IDENT@70..71 "a"
+      DOT@71..72 "."
+      NAME@72..73
+        IDENT@72..73 "b"
+    UNARY_EXPR@73..77
+      UNICODE_RADICAL@73..76 "√"
+      NAME@76..77
+        IDENT@76..77 "c"
+  NEWLINE@77..78 "\n"
+  JUXTAPOSE_EXPR@78..86
+    CALL_EXPR@78..82
+      NAME@78..79
+        IDENT@78..79 "f"
+      ARG_LIST@79..82
+        LPAREN@79..80 "("
+        ARG@80..81
+          NAME@80..81
+            IDENT@80..81 "a"
+        RPAREN@81..82 ")"
+    UNARY_EXPR@82..86
+      UNICODE_RADICAL@82..85 "√"
+      NAME@85..86
+        IDENT@85..86 "b"
+  NEWLINE@86..87 "\n"
+  JUXTAPOSE_EXPR@87..95
+    INDEX_EXPR@87..91
+      NAME@87..88
+        IDENT@87..88 "a"
+      ARG_LIST@88..91
+        LBRACKET@88..89 "["
+        ARG@89..90
+          LITERAL@89..90
+            INTEGER@89..90 "1"
+        RBRACKET@90..91 "]"
+    UNARY_EXPR@91..95
+      UNICODE_RADICAL@91..94 "√"
+      NAME@94..95
+        IDENT@94..95 "b"
+  NEWLINE@95..96 "\n"
+  JUXTAPOSE_EXPR@96..107
+    PAREN_EXPR@96..103
+      LPAREN@96..97 "("
+      BINARY_EXPR@97..102
+        NAME@97..98
+          IDENT@97..98 "a"
+        WHITESPACE@98..99 " "
+        PLUS@99..100 "+"
+        WHITESPACE@100..101 " "
+        NAME@101..102
+          IDENT@101..102 "b"
+      RPAREN@102..103 ")"
+    UNARY_EXPR@103..107
+      UNICODE_RADICAL@103..106 "√"
+      NAME@106..107
+        IDENT@106..107 "c"
+  NEWLINE@107..108 "\n"
+  JUXTAPOSE_EXPR@108..114
+    NAME@108..109
+      IDENT@108..109 "a"
+    UNARY_EXPR@109..114
+      UNICODE_RADICAL@109..112 "√"
+      WHITESPACE@112..113 " "
+      NAME@113..114
+        IDENT@113..114 "b"
+  NEWLINE@114..115 "\n"
+  JUXTAPOSE_EXPR@115..133
+    NAME@115..116
+      IDENT@115..116 "a"
+    UNARY_EXPR@116..133
+      UNICODE_RADICAL@116..119 "√"
+      BLOCK_COMMENT@119..132 "#= comment =#"
+      NAME@132..133
+        IDENT@132..133 "b"
+  NEWLINE@133..134 "\n"
+  JUXTAPOSE_EXPR@134..141
+    NAME@134..135
+      IDENT@134..135 "a"
+    UNARY_EXPR@135..141
+      UNICODE_RADICAL@135..138 "√"
+      BINARY_EXPR@138..141
+        NAME@138..139
+          IDENT@138..139 "b"
+        CARET@139..140 "^"
+        NAME@140..141
+          IDENT@140..141 "c"
+  NEWLINE@141..142 "\n"
+  BINARY_EXPR@142..149
+    NAME@142..143
+      IDENT@142..143 "a"
+    CARET@143..144 "^"
+    JUXTAPOSE_EXPR@144..149
+      NAME@144..145
+        IDENT@144..145 "b"
+      UNARY_EXPR@145..149
+        UNICODE_RADICAL@145..148 "√"
+        NAME@148..149
+          IDENT@148..149 "c"
+  NEWLINE@149..150 "\n"
+  BINARY_EXPR@150..157
+    JUXTAPOSE_EXPR@150..155
+      NAME@150..151
+        IDENT@150..151 "a"
+      UNARY_EXPR@151..155
+        UNICODE_RADICAL@151..154 "√"
+        NAME@154..155
+          IDENT@154..155 "b"
+    STAR@155..156 "*"
+    NAME@156..157
+      IDENT@156..157 "c"
+  NEWLINE@157..158 "\n"
+  BINARY_EXPR@158..165
+    NAME@158..159
+      IDENT@158..159 "a"
+    STAR@159..160 "*"
+    JUXTAPOSE_EXPR@160..165
+      NAME@160..161
+        IDENT@160..161 "b"
+      UNARY_EXPR@161..165
+        UNICODE_RADICAL@161..164 "√"
+        NAME@164..165
+          IDENT@164..165 "c"
+  NEWLINE@165..166 "\n"
+  BINARY_EXPR@166..173
+    JUXTAPOSE_EXPR@166..171
+      NAME@166..167
+        IDENT@166..167 "a"
+      UNARY_EXPR@167..171
+        UNICODE_RADICAL@167..170 "√"
+        NAME@170..171
+          IDENT@170..171 "b"
+    SLASH@171..172 "/"
+    NAME@172..173
+      IDENT@172..173 "c"
+  NEWLINE@173..174 "\n"
+  BINARY_EXPR@174..181
+    NAME@174..175
+      IDENT@174..175 "a"
+    SLASH@175..176 "/"
+    JUXTAPOSE_EXPR@176..181
+      NAME@176..177
+        IDENT@176..177 "b"
+      UNARY_EXPR@177..181
+        UNICODE_RADICAL@177..180 "√"
+        NAME@180..181
+          IDENT@180..181 "c"
+  NEWLINE@181..182 "\n"
+  JUXTAPOSE_EXPR@182..188
+    UNARY_EXPR@182..184
+      MINUS@182..183 "-"
+      NAME@183..184
+        IDENT@183..184 "a"
+    UNARY_EXPR@184..188
+      UNICODE_RADICAL@184..187 "√"
+      NAME@187..188
+        IDENT@187..188 "b"
+  NEWLINE@188..189 "\n"
+  JUXTAPOSE_EXPR@189..197
+    UNARY_EXPR@189..193
+      UNICODE_RADICAL@189..192 "√"
+      NAME@192..193
+        IDENT@192..193 "a"
+    UNARY_EXPR@193..197
+      UNICODE_RADICAL@193..196 "√"
+      NAME@196..197
+        IDENT@196..197 "b"
+  NEWLINE@197..198 "\n"
+  JUXTAPOSE_EXPR@198..207
+    NAME@198..199
+      IDENT@198..199 "a"
+    UNARY_EXPR@199..203
+      UNICODE_RADICAL@199..202 "√"
+      NAME@202..203
+        IDENT@202..203 "b"
+    UNARY_EXPR@203..207
+      UNICODE_RADICAL@203..206 "√"
+      NAME@206..207
+        IDENT@206..207 "c"
+  NEWLINE@207..208 "\n"
+  JUXTAPOSE_EXPR@208..214
+    NAME@208..209
+      IDENT@208..209 "a"
+    UNARY_EXPR@209..213
+      UNICODE_RADICAL@209..212 "√"
+      LITERAL@212..213
+        INTEGER@212..213 "2"
+    NAME@213..214
+      IDENT@213..214 "b"
+  NEWLINE@214..215 "\n"
+  JUXTAPOSE_EXPR@215..220
+    UNARY_EXPR@215..219
+      UNICODE_RADICAL@215..218 "√"
+      LITERAL@218..219
+        INTEGER@218..219 "2"
+    NAME@219..220
+      IDENT@219..220 "a"
+  NEWLINE@220..221 "\n"
+  JUXTAPOSE_EXPR@221..232
+    NAME@221..222
+      IDENT@221..222 "a"
+    UNARY_EXPR@222..232
+      UNICODE_RADICAL@222..225 "√"
+      PAREN_EXPR@225..232
+        LPAREN@225..226 "("
+        JUXTAPOSE_EXPR@226..231
+          NAME@226..227
+            IDENT@226..227 "b"
+          UNARY_EXPR@227..231
+            UNICODE_RADICAL@227..230 "√"
+            NAME@230..231
+              IDENT@230..231 "c"
+        RPAREN@231..232 ")"
+  NEWLINE@232..233 "\n"
+  JUXTAPOSE_EXPR@233..244
+    PAREN_EXPR@233..240
+      LPAREN@233..234 "("
+      JUXTAPOSE_EXPR@234..239
+        NAME@234..235
+          IDENT@234..235 "a"
+        UNARY_EXPR@235..239
+          UNICODE_RADICAL@235..238 "√"
+          NAME@238..239
+            IDENT@238..239 "b"
+      RPAREN@239..240 ")"
+    UNARY_EXPR@240..244
+      UNICODE_RADICAL@240..243 "√"
+      NAME@243..244
+        IDENT@243..244 "c"
+  NEWLINE@244..245 "\n"
+  JUXTAPOSE_EXPR@245..256
+    NAME@245..246
+      IDENT@245..246 "a"
+    UNARY_EXPR@246..256
+      UNICODE_RADICAL@246..249 "√"
+      BINARY_EXPR@249..256
+        NAME@249..250
+          IDENT@249..250 "b"
+        CARET@250..251 "^"
+        JUXTAPOSE_EXPR@251..256
+          NAME@251..252
+            IDENT@251..252 "c"
+          UNARY_EXPR@252..256
+            UNICODE_RADICAL@252..255 "√"
+            NAME@255..256
+              IDENT@255..256 "d"
+  NEWLINE@256..257 "\n"
+  JUXTAPOSE_EXPR@257..265
+    NAME@257..258
+      IDENT@257..258 "a"
+    UNARY_EXPR@258..265
+      UNICODE_RADICAL@258..261 "√"
+      TYPE_ANNOTATION@261..265
+        NAME@261..262
+          IDENT@261..262 "b"
+        COLON_COLON@262..264 "::"
+        NAME@264..265
+          IDENT@264..265 "T"
+  NEWLINE@265..266 "\n"
+  BINARY_EXPR@266..274
+    JUXTAPOSE_EXPR@266..271
+      NAME@266..267
+        IDENT@266..267 "a"
+      UNARY_EXPR@267..271
+        UNICODE_RADICAL@267..270 "√"
+        NAME@270..271
+          IDENT@270..271 "b"
+    SLASH_SLASH@271..273 "//"
+    NAME@273..274
+      IDENT@273..274 "c"
+  NEWLINE@274..275 "\n"
+  MATRIX_EXPR@275..284
+    LBRACKET@275..276 "["
+    ARG@276..281
+      JUXTAPOSE_EXPR@276..281
+        NAME@276..277
+          IDENT@276..277 "a"
+        UNARY_EXPR@277..281
+          UNICODE_RADICAL@277..280 "√"
+          NAME@280..281
+            IDENT@280..281 "b"
+    WHITESPACE@281..282 " "
+    ARG@282..283
+      NAME@282..283
+        IDENT@282..283 "c"
+    RBRACKET@283..284 "]"
+  NEWLINE@284..285 "\n"
+  MATRIX_EXPR@285..293
+    LBRACKET@285..286 "["
+    ARG@286..287
+      NAME@286..287
+        IDENT@286..287 "a"
+    WHITESPACE@287..288 " "
+    ARG@288..292
+      UNARY_EXPR@288..292
+        UNICODE_RADICAL@288..291 "√"
+        NAME@291..292
+          IDENT@291..292 "b"
+    RBRACKET@292..293 "]"
+  NEWLINE@293..294 "\n"
+  CALL_EXPR@294..302
+    NAME@294..295
+      IDENT@294..295 "f"
+    ARG_LIST@295..302
+      LPAREN@295..296 "("
+      ARG@296..301
+        JUXTAPOSE_EXPR@296..301
+          NAME@296..297
+            IDENT@296..297 "a"
+          UNARY_EXPR@297..301
+            UNICODE_RADICAL@297..300 "√"
+            NAME@300..301
+              IDENT@300..301 "b"
+      RPAREN@301..302 ")"
+  NEWLINE@302..303 "\n"
+  MACRO_CALL@303..313
+    MACRO_NAME@303..305
+      AT@303..304 "@"
+      IDENT@304..305 "m"
+    WHITESPACE@305..306 " "
+    JUXTAPOSE_EXPR@306..311
+      NAME@306..307
+        IDENT@306..307 "a"
+      UNARY_EXPR@307..311
+        UNICODE_RADICAL@307..310 "√"
+        NAME@310..311
+          IDENT@310..311 "b"
+    WHITESPACE@311..312 " "
+    NAME@312..313
+      IDENT@312..313 "c"
+  NEWLINE@313..314 "\n"
+  BINARY_EXPR@314..322
+    JUXTAPOSE_EXPR@314..319
+      NAME@314..315
+        IDENT@314..315 "a"
+      UNARY_EXPR@315..319
+        UNICODE_RADICAL@315..318 "√"
+        NAME@318..319
+          IDENT@318..319 "b"
+    SHL@319..321 "<<"
+    NAME@321..322
+      IDENT@321..322 "c"
+  NEWLINE@322..323 "\n"

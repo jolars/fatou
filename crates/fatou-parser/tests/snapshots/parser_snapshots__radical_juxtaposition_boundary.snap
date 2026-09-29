@@ -1,0 +1,169 @@
+---
+source: crates/fatou-parser/tests/parser_snapshots.rs
+assertion_line: 41
+expression: rendered
+---
+ROOT@0..154
+  NAME@0..1
+    IDENT@0..1 "a"
+  WHITESPACE@1..2 " "
+  ERROR@2..6
+    UNICODE_RADICAL@2..5 "√"
+    IDENT@5..6 "b"
+  NEWLINE@6..7 "\n"
+  NAME@7..8
+    IDENT@7..8 "a"
+  BLOCK_COMMENT@8..21 "#= comment =#"
+  ERROR@21..25
+    UNICODE_RADICAL@21..24 "√"
+    IDENT@24..25 "b"
+  NEWLINE@25..26 "\n"
+  NAME@26..27
+    IDENT@26..27 "a"
+  NEWLINE@27..28 "\n"
+  UNARY_EXPR@28..32
+    UNICODE_RADICAL@28..31 "√"
+    NAME@31..32
+      IDENT@31..32 "b"
+  NEWLINE@32..33 "\n"
+  NAME@33..34
+    IDENT@33..34 "a"
+  ERROR@34..37
+    UNICODE_RADICAL@34..36 "¬"
+    IDENT@36..37 "b"
+  NEWLINE@37..38 "\n"
+  NAME@38..39
+    IDENT@38..39 "a"
+  ERROR@39..43
+    UNICODE_RADICAL@39..42 ".¬"
+    IDENT@42..43 "b"
+  NEWLINE@43..44 "\n"
+  LITERAL@44..45
+    INTEGER@44..45 "2"
+  ERROR@45..48
+    UNICODE_RADICAL@45..47 "¬"
+    IDENT@47..48 "b"
+  NEWLINE@48..49 "\n"
+  PAREN_EXPR@49..52
+    LPAREN@49..50 "("
+    NAME@50..51
+      IDENT@50..51 "a"
+    RPAREN@51..52 ")"
+  ERROR@52..55
+    UNICODE_RADICAL@52..54 "¬"
+    IDENT@54..55 "b"
+  NEWLINE@55..56 "\n"
+  PAREN_EXPR@56..67
+    LPAREN@56..57 "("
+    BEGIN_EXPR@57..66
+      BEGIN_KW@57..62 "begin"
+      BLOCK@62..63
+        WHITESPACE@62..63 " "
+      END_KW@63..66 "end"
+    RPAREN@66..67 ")"
+  ERROR@67..71
+    UNICODE_RADICAL@67..70 "√"
+    IDENT@70..71 "b"
+  NEWLINE@71..72 "\n"
+  BEGIN_EXPR@72..81
+    BEGIN_KW@72..77 "begin"
+    BLOCK@77..78
+      WHITESPACE@77..78 " "
+    END_KW@78..81 "end"
+  ERROR@81..85
+    UNICODE_RADICAL@81..84 "√"
+    IDENT@84..85 "b"
+  NEWLINE@85..86 "\n"
+  UNARY_EXPR@86..88
+    AMP@86..87 "&"
+    NAME@87..88
+      IDENT@87..88 "a"
+  ERROR@88..92
+    UNICODE_RADICAL@88..91 "√"
+    IDENT@91..92 "b"
+  NEWLINE@92..93 "\n"
+  TYPE_ANNOTATION@93..96
+    COLON_COLON@93..95 "::"
+    NAME@95..96
+      IDENT@95..96 "a"
+  ERROR@96..100
+    UNICODE_RADICAL@96..99 "√"
+    IDENT@99..100 "b"
+  NEWLINE@100..101 "\n"
+  TYPE_ANNOTATION@101..105
+    NAME@101..102
+      IDENT@101..102 "a"
+    COLON_COLON@102..104 "::"
+    NAME@104..105
+      IDENT@104..105 "T"
+  ERROR@105..109
+    UNICODE_RADICAL@105..108 "√"
+    IDENT@108..109 "b"
+  NEWLINE@109..110 "\n"
+  PAREN_EXPR@110..114
+    LPAREN@110..111 "("
+    UNARY_EXPR@111..113
+      AMP@111..112 "&"
+      NAME@112..113
+        IDENT@112..113 "a"
+    RPAREN@113..114 ")"
+  ERROR@114..118
+    UNICODE_RADICAL@114..117 "√"
+    IDENT@117..118 "b"
+  NEWLINE@118..119 "\n"
+  PAREN_EXPR@119..124
+    LPAREN@119..120 "("
+    TYPE_ANNOTATION@120..123
+      COLON_COLON@120..122 "::"
+      NAME@122..123
+        IDENT@122..123 "a"
+    RPAREN@123..124 ")"
+  ERROR@124..128
+    UNICODE_RADICAL@124..127 "√"
+    IDENT@127..128 "b"
+  NEWLINE@128..129 "\n"
+  PAREN_EXPR@129..135
+    LPAREN@129..130 "("
+    TYPE_ANNOTATION@130..134
+      NAME@130..131
+        IDENT@130..131 "a"
+      COLON_COLON@131..133 "::"
+      NAME@133..134
+        IDENT@133..134 "T"
+    RPAREN@134..135 ")"
+  ERROR@135..139
+    UNICODE_RADICAL@135..138 "√"
+    IDENT@138..139 "b"
+  NEWLINE@139..140 "\n"
+  QUOTE_SYM@140..142
+    COLON@140..141 ":"
+    NAME@141..142
+      IDENT@141..142 "a"
+  ERROR@142..146
+    UNICODE_RADICAL@142..145 "√"
+    IDENT@145..146 "b"
+  NEWLINE@146..147 "\n"
+  INTERPOLATION@147..149
+    DOLLAR@147..148 "$"
+    IDENT@148..149 "a"
+  ERROR@149..153
+    UNICODE_RADICAL@149..152 "√"
+    IDENT@152..153 "b"
+  NEWLINE@153..154 "\n"
+
+diagnostic [2..5]: trailing tokens after statement
+diagnostic [21..24]: trailing tokens after statement
+diagnostic [34..36]: trailing tokens after statement
+diagnostic [39..42]: trailing tokens after statement
+diagnostic [45..47]: trailing tokens after statement
+diagnostic [52..54]: trailing tokens after statement
+diagnostic [67..70]: trailing tokens after statement
+diagnostic [81..84]: trailing tokens after statement
+diagnostic [88..91]: trailing tokens after statement
+diagnostic [96..99]: trailing tokens after statement
+diagnostic [105..108]: trailing tokens after statement
+diagnostic [114..117]: trailing tokens after statement
+diagnostic [124..127]: trailing tokens after statement
+diagnostic [135..138]: trailing tokens after statement
+diagnostic [142..145]: trailing tokens after statement
+diagnostic [149..152]: trailing tokens after statement

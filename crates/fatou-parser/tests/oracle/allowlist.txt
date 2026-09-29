@@ -205,6 +205,8 @@ quoted_import_name
 quoted_literal
 quoted_macro_name
 quoted_var_identifier
+radical_juxtaposition
+radical_juxtaposition_boundary
 range_operator
 range_operator_name
 raw_string

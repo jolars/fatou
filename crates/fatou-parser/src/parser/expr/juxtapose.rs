@@ -99,8 +99,7 @@ pub(super) fn lhs_is_number(ctx: &ParserCtx<'_>, lhs: &ExprParse) -> bool {
 
 /// Whether `lhs` is a closed value that may carry a non-numeric juxtaposed term
 /// (`(x-1)y`, `f(x)y`, `[1,2]x`, `x'y`) — a parenthesized/bracketed expression,
-/// a call/index/curly suffix, or a transpose. Other left operands (bare names,
-/// block forms, prefixed terms) never start a juxtaposition.
+/// a call/index/curly suffix, a transpose, or a completed product.
 fn lhs_value_close(lhs: &ExprParse) -> bool {
     matches!(
         lhs.events.first(),
@@ -114,6 +113,7 @@ fn lhs_value_close(lhs: &ExprParse) -> bool {
                 | SyntaxKind::TYPED_MATRIX_EXPR
                 | SyntaxKind::BRACESCAT_EXPR
                 | SyntaxKind::POSTFIX_EXPR
+                | SyntaxKind::JUXTAPOSE_EXPR
         ))
     )
 }
@@ -294,8 +294,28 @@ pub(super) fn is_for_separator_tok(tok: &Token) -> bool {
     (tok.kind == TokKind::Ident && tok.text == "in") || is_element_of_tok(tok)
 }
 
+/// Parentheses do not make block forms or syntactic prefixes into coefficients.
+fn lhs_allows_radical(ctx: &ParserCtx<'_>, lhs: &ExprParse) -> bool {
+    let mut events = lhs.events.iter();
+    let kind = events.find_map(|event| match event {
+        Event::Start(kind) if *kind != SyntaxKind::PAREN_EXPR => Some(*kind),
+        _ => None,
+    });
+    match kind {
+        Some(SyntaxKind::TYPE_ANNOTATION | SyntaxKind::INTERPOLATION | SyntaxKind::QUOTE_SYM) => {
+            false
+        }
+        Some(SyntaxKind::UNARY_EXPR) => !matches!(
+            events.next(),
+            Some(Event::Tok(idx)) if ctx.token(*idx).is_some_and(|t| t.kind == TokKind::Amp)
+        ),
+        Some(kind) => !is_block_form_kind(kind),
+        None => false,
+    }
+}
+
 /// Whether the token directly after `lhs` begins a juxtaposed term — an implicit
-/// multiplication with no operator between (`2x`, `2(x)`, `(x-1)y`, `1√x`).
+/// multiplication with no operator between (`2x`, `2(x)`, `(x-1)y`, `a√x`).
 /// Mirrors JuliaSyntax's `parse_juxtapose`/`is_juxtapose` (the non-string-literal
 /// branch; string juxtaposition is error recovery and deferred).
 pub(super) fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8) -> bool {
@@ -310,9 +330,15 @@ pub(super) fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8)
     if k.is_trivia() {
         return false;
     }
-    // It must start a value: not an operator (radicals are not `is_operator`, so
-    // they pass), not a closing delimiter, keyword, or macro `@`. Splat `...` is
-    // kept out of `is_operator` (the operator loop's splat arm owns it) but
+    // The lexer groups `¬` with radicals because all are prefix-only, but only
+    // the three root operators can start an implicitly multiplied factor.
+    if k == TokKind::UniRadical {
+        return matches!(next.text, "√" | "∛" | "∜" | ".√" | ".∛" | ".∜")
+            && lhs_allows_radical(ctx, lhs);
+    }
+    // It must start a value: not an operator, closing delimiter, keyword, or
+    // macro `@`. Splat `...` is kept out of `is_operator` (the operator loop's
+    // splat arm owns it) but
     // cannot start a value either (`g(x)...` splats the call result).
     if is_operator(k)
         || k == TokKind::DotDotDot
@@ -332,8 +358,12 @@ pub(super) fn should_juxtapose(ctx: &ParserCtx<'_>, lhs: &ExprParse, min_bp: u8)
         return true;
     }
     // A non-numeric value juxtaposes only with a non-numeric term (`f(2)2` is a
-    // call, not juxtaposition) and only when the left operand is a closed value.
-    // A parenthesized block form (`(begin end)x`) is excluded: it does not
+    // call, not juxtaposition) and only when the left operand is a closed or
+    // unary value. A parenthesized block form (`(begin end)x`) is excluded: it does not
     // juxtapose, leaving the glued term as a leftover `(error-t …)`.
-    !is_number_tok(k) && lhs_value_close(lhs) && !lhs_is_paren_block(lhs)
+    let unary_value = matches!(
+        lhs.events.first(),
+        Some(Event::Start(SyntaxKind::UNARY_EXPR))
+    ) && ctx.token(lhs.start).is_some_and(|t| t.kind != TokKind::Amp);
+    !is_number_tok(k) && (lhs_value_close(lhs) || unary_value) && !lhs_is_paren_block(lhs)
 }

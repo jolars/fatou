@@ -96,6 +96,9 @@ struct ExprFlags {
     /// not right-nested) and the bound captures only comparison-and-tighter
     /// (mirrors JuliaSyntax's `where_enabled=false` inside `parse_where_chain`).
     no_where: bool,
+    /// A unary operand or one juxtaposed factor stops before the next factor.
+    /// Power operands and explicit delimiters start a fresh juxtaposition.
+    no_juxtapose: bool,
     /// Suppress the `::` annotation pulling a trailing `where` into its right
     /// operand. Set only for the top level of a long-form `function`/`macro`
     /// signature, where the return type is a bare call-level type and a trailing
@@ -297,6 +300,7 @@ fn parse_expr_in(
         stmt_comma,
         for_spec_var,
         no_where,
+        no_juxtapose,
         no_decl_where,
         name_context,
         field_access_rhs: _,
@@ -512,6 +516,7 @@ fn parse_expr_in(
         // the numeric case so a string operand takes the error-bearing shape; the
         // right operand is parsed identically (at `JUXTAPOSE_R`).
         if !lhs_is_block_keyword
+            && !no_juxtapose
             && should_juxtapose_string_error(&ctx, &lhs, min_bp)
             && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
         {
@@ -527,17 +532,40 @@ fn parse_expr_in(
             continue;
         }
 
-        // Numeric-literal-coefficient juxtaposition (`2x`, `2(x)`, `(x-1)y`,
-        // `1√x`): an adjacent value with no operator between is an implicit
-        // multiplication binding tighter than `*` and looser than `^`. The right
+        // Juxtaposition (`2x`, `2(x)`, `(x-1)y`, `a√x`): an adjacent value with
+        // no operator between is implicit multiplication, binding tighter than
+        // `*` and looser than `^`. The right
         // operand is parsed at `JUXTAPOSE_R` (capturing a trailing `^` but not a
         // `*`), and the whole thing re-enters the loop so a following operator
         // (`2x*y` ⇒ `(2x)*y`) attaches outside.
         if !lhs_is_block_keyword
+            && !no_juxtapose
             && should_juxtapose(&ctx, &lhs, min_bp)
-            && let Some(rhs) = parse_expr_in(tokens, lhs.end, JUXTAPOSE_R, diagnostics, flags)
+            && let Some(rhs) = parse_expr_in(
+                tokens,
+                lhs.end,
+                JUXTAPOSE_R,
+                diagnostics,
+                ExprFlags {
+                    no_juxtapose: true,
+                    ..flags
+                },
+            )
         {
-            lhs = build_binary(SyntaxKind::JUXTAPOSE_EXPR, lhs, rhs);
+            // Consecutive factors share one product. Parentheses retain their
+            // wrapper, so an explicitly grouped product stays nested.
+            if matches!(
+                lhs.events.first(),
+                Some(Event::Start(SyntaxKind::JUXTAPOSE_EXPR))
+            ) {
+                lhs.events.pop();
+                push_range(&mut lhs.events, lhs.end, rhs.start);
+                lhs.events.extend(rhs.events);
+                lhs.events.push(Event::Finish);
+                lhs.end = rhs.end;
+            } else {
+                lhs = build_binary(SyntaxKind::JUXTAPOSE_EXPR, lhs, rhs);
+            }
             continue;
         }
 
@@ -836,7 +864,16 @@ fn parse_expr_in(
                 },
             )
         } else {
-            parse_expr_in(tokens, rhs_operand, r_bp, diagnostics, flags)
+            parse_expr_in(
+                tokens,
+                rhs_operand,
+                r_bp,
+                diagnostics,
+                ExprFlags {
+                    no_juxtapose: false,
+                    ..flags
+                },
+            )
         };
         let Some(mut rhs) = rhs_result else {
             let op = &tokens[op_idx];
@@ -1549,6 +1586,7 @@ fn parse_prefix(
                 no_range: false,
                 array_mode: flags.array_mode,
                 no_where: !is_subtype || flags.no_where,
+                no_juxtapose: !is_subtype,
                 ..flags
             };
             let operand_bp = if is_subtype { WHERE_BP } else { PREFIX_BP };
@@ -1783,6 +1821,7 @@ fn parse_prefix(
             let operand_flags = ExprFlags {
                 no_range: false,
                 array_mode: false,
+                no_juxtapose: true,
                 ..flags
             };
             // A binary-only operator does not reach across a significant newline

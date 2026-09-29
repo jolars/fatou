@@ -43,6 +43,13 @@ fn parser_fixtures() {
 }
 
 #[test]
+fn radical_juxtaposition_parses_cleanly() {
+    let input = include_str!("fixtures/parser/radical_juxtaposition/input.jl");
+    let output = parse(input);
+    assert!(output.diagnostics.is_empty(), "{:?}", output.diagnostics);
+}
+
+#[test]
 fn parenthesized_macro_loop_arguments_parse_cleanly() {
     let input = include_str!("fixtures/parser/parenthesized_macro_loop_argument/input.jl");
     assert!(parse(input).diagnostics.is_empty());

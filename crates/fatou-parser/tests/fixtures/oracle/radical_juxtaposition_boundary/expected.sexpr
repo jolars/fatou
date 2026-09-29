@@ -1,0 +1,1 @@
+(toplevel a (error-t √ b) a (error-t √ b) a (call-pre √ b) a (error-t ¬ b) a (error-t .¬ b) 2 (error-t ¬ b) a (error-t ¬ b) (block) (error-t √ b) (block) (error-t √ b) (& a) (error-t √ b) (::-pre a) (error-t √ b) (::-i a T) (error-t √ b) (& a) (error-t √ b) (::-pre a) (error-t √ b) (::-i a T) (error-t √ b) (quote-: a) (error-t √ b) ($ a) (error-t √ b))
