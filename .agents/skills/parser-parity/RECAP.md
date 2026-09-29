@@ -61,7 +61,7 @@ ledger below for remaining work.
 ## Progress
 
 JS corpus (**756 cases**, error shapes included): **749 allowlisted**, 7
-divergence, 0 unsupported. Dir corpus (**271 cases**): **270 allowlisted**, 1
+divergence, 0 unsupported. Dir corpus (**273 cases**): **272 allowlisted**, 1
 blocked (`numeric_literals`; FAIL not skip since `render` is total). JuliaSyntax
 1.0.2 added 71 harvested cases; all remaining harvested divergences are the
 permanent cases recorded below. A green report means "no regression", not
@@ -100,27 +100,30 @@ nested brackets inside a junk run; `try x finally z else y end` (else after
 finally); `;`-segment double-`✘`; prefix `**a`/`--a` (`call-pre`, in neither
 corpus); trailing block-body junk (`function f g h end`).
 
-## Latest session (2026-09-28 — issue #113)
+## Latest session (2026-09-29 — radical juxtaposition)
 
-Confirmed both reported forms against Julia 1.13.0 / JuliaSyntax 1.0.2 and
-`Meta.parseall`: parenthesized macro loop arguments and line-split `const`
-declarations are valid Julia. Both failures reproduced on the clean baseline.
+Confirmed `a√4` against Julia 1.13.0 / JuliaSyntax 1.0.2 and `Meta.parseall`:
+it is implicit multiplication, and the trailing-token diagnostic reproduced
+before the change.
 
-- **Parser**: macro arguments use the explicit generator boundary independently
-  of newline sensitivity. Parentheses, tuples, and quoted parentheses inherit
-  that boundary; call arguments and array elements enable it. Required keyword
-  operands skip newlines and comments, covering `const`, `global`, and `local`.
-  `return` retains its significant newline. No projector changes.
-- **Fixtures**: `parenthesized_macro_loop_argument` covers the exact report,
-  qualified and nested macros, tuples, quotes, and inherited generators.
-  `declaration_newline_continuation` covers blank lines, line and block comments,
-  declaration modifiers, tuple bindings, struct fields, and statement boundaries.
-  Both have reviewed lossless CST snapshots and generated oracle projections.
+- **Parser**: radical factors accept nonnumeric coefficients, including dotted
+  radicals. Unary operands stop before adjacent factors; power operands admit
+  their own products. Consecutive factors share a CST node, preserving explicit
+  parentheses. Unary precedence now exceeds rational and shift operators.
+  Whitespace, `¬`, blocks, and syntactic prefixes retain their boundaries.
+  No lexer or projector changes.
+- **Fixtures**: `radical_juxtaposition` covers the report, root variants, chains,
+  precedence, comments, containers, and macros. `radical_juxtaposition_boundary`
+  guards spacing and invalid coefficients. Both have reviewed lossless CST
+  snapshots and generated oracle projections.
 - **Counts**: JS **749/756 → 749/756** (7 divergence, 0 unsupported), dir
-  **268/269 → 270/271**. Zero regressions and no new blocked entries.
-- **Validation**: workspace tests (including incremental oracle edits), clippy
-  with all targets and features, rustfmt, safe formatting and idempotence on both
-  fixtures, and clean CLI lint results for the reporter's two examples.
+  **270/271 → 272/273**. Zero oracle regressions and no new blocked entries.
+- **Validation**: workspace tests, clippy with all targets and features, and
+  rustfmt pass, including incremental oracle edits and doctests. Safe formatting
+  and idempotence pass for the valid fixture, and the
+  reported file lints cleanly. The baseline root doctest run hit a transient
+  rustdoc 1.98.1 internal compiler error resolving `toml::Spanned`; the final
+  workspace run completed successfully.
 - **Next**: trailing comma at EOF (`x = a,`, `break,`) remains the nearest
   deferred recovery target. Labeled keywords and wrapping operators remain
   blocked by the current oracle pin.
@@ -129,6 +132,8 @@ declarations are valid Julia. Both failures reproduced on the clean baseline.
 
 Newest first; one line each. Counts are `JS allowlist` / `dir allowlist` after.
 
+- **2026-09-28** — issue #113: parenthesized macro loop arguments and
+  newline-split declarations. 749 / 270.
 - **2026-09-15** — bare keyword tuple recovery and removal of duplicate
   diagnostics from tentative bracket parses. 749 / 268.
 - **2026-09-15** — Julia 1.13 / Unicode 17 tables, Markdown em dashes, and

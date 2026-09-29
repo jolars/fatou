@@ -2,6 +2,11 @@
 
 ## Parser
 
+- [x] Parse implicit multiplication before radicals (`a√4`, `a∛8`, and
+  `a∜16`), including broadcast forms. Unary operands and consecutive factors
+  preserve Julia's precedence and grouping; whitespace and syntactic prefixes
+  retain their diagnostic boundaries.
+
 - [x] Fix issue #113: parenthesized macro calls accept `for … end` arguments,
   and `const`, `global`, and `local` declarations continue across newlines and
   comments before their operands. Parentheses inherit the enclosing generator
